@@ -51,7 +51,8 @@ def test_the_section_is_off_by_default_and_says_docker_is_not_needed(qapp, gui):
     from PySide6.QtCore import Qt
     assert intro.textFormat() == Qt.PlainText, "plain text, never rich text"
     assert "Docker is not needed" in intro.text() and "second computer" in intro.text()
-    assert "this computer" in intro.text()
+    assert "this computer" in intro.text() and "always works with" in intro.text()
+    assert dlg.cb_tool_source.itemText(1) == "This computer and the framework on another computer", "an addition"
 
     texts = section_texts(dlg)
     assert not [t for t in texts if OLD_WORDING.search(t)], "no old wording and no published image"
@@ -70,7 +71,10 @@ def test_switching_on_says_honestly_what_changes(qapp, gui):
     dlg = open_dialog(gui)
     dlg.cb_tool_source.setCurrentIndex(dlg.cb_tool_source.findData("mcp"))
     note = dlg.lbl_mcp.text()
-    assert "instead of this computer's" in note and "stay as they are" in note and "new conversation" in note
+    # The hybrid (design 6.1, WP5): this computer's tools stay, the other computer's join them, nothing is reset.
+    assert "this computer's tools, files, targets and settings stay" in note and "join them" in note
+    assert "where its object lives" in note and "conversation goes on" in note
+    assert "instead of" not in note and "new conversation" not in note
 
 
 def test_a_missing_command_names_ssh_first(qapp, gui):

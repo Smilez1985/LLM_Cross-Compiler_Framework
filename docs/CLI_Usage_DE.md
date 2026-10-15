@@ -584,8 +584,10 @@ llm-cli ditto ask FRAGE [--no-tools] [--provider TEXT] [--model TEXT]
 
 Stellt Ditto eine Frage. Ditto darf die Tools des Frameworks im Rahmen deiner Berechtigungen nutzen; Tools, die auf
 „ask“ stehen, zeigen das Tool und jedes Argument und brauchen deine Bestätigung im Terminal (ohne Terminal werden sie
-abgelehnt). Die Antwort geht nach stdout, Tool-Hinweise und Fehler nach stderr. Nichts wird im Chatverlauf
-gespeichert.
+abgelehnt). Ohne Terminal sagt Ditto auch dem Framework auf einem anderen Computer, dass hier niemand seine
+Rückfragen beantworten kann, sodass jenes Framework sie für sein eigenes Freigabefenster behält; nichts wird je als
+dein „Nein“ dorthin geschickt. Die Antwort geht nach stdout, Tool-Hinweise und Fehler nach stderr. Nichts wird im
+Chatverlauf gespeichert.
 
 | Option | Bedeutung |
 |---|---|
@@ -609,14 +611,16 @@ llm-cli ditto remote set --transport stdio|http [--command "..."] [--url URL] [-
 llm-cli ditto remote show | test | off
 ```
 
-Ditto und das Framework auf einem anderen Computer (optional): Ditto nutzt statt der Tools dieses Computers das
-Framework, das auf einem zweiten Computer installiert ist (ein stärkerer Build-PC, ein Server), über den MCP-Server
-jener Installation. Es ist dasselbe Programm, kein anderes, und Docker ist nicht nötig: Verbinde dich über SSH,
+Ditto und das Framework auf einem anderen Computer (optional): Ditto nutzt zusätzlich das Framework, das auf einem
+zweiten Computer installiert ist (ein stärkerer Build-PC, ein Server), über den MCP-Server jener Installation, neben
+den Tools dieses Computers, die immer bleiben; jeder Aufruf geht zu dem Computer, auf dem sein Objekt liegt. Es ist
+dasselbe Programm, kein anderes, und Docker ist nicht nötig: Verbinde dich über SSH,
 entweder mit einem Tunnel zur Adresse des Servers oder mit `ssh` als Befehl
 ([Einzelheiten](Features_DE.md#ditto-und-ein-framework-auf-einem-anderen-computer)). Es gelten Registry,
-Berechtigungen, Rückfragen und Audit-Log jenes Frameworks. Lege zuerst auf dem anderen Computer das Token mit
-`llm-cli mcp token add NAME --link ditto` an: Das Token nutzt dort Dittos eigene Berechtigungen (eine Änderung daran
-gilt für beide Modi zugleich), und das Audit-Log dort zeigt `mcp:NAME`. `set` speichert das Token im Tresor für
+Berechtigungen, Rückfragen und Audit-Log jenes Frameworks für die Aufrufe, die dort laufen, und das Audit-Log dieses
+Computers hält jeden davon ebenfalls fest (`started` und sein Abschluss, mit `place remote:<Name>`). Lege zuerst auf
+dem anderen Computer das Token mit `llm-cli mcp token add NAME --link ditto` an: Das Token nutzt dort Dittos eigene
+Berechtigungen, und das Audit-Log dort zeigt `mcp:NAME`. `set` speichert das Token im Tresor für
 Zugangsdaten dieses Computers (ohne Echo abgefragt oder mit `--with-token` von stdin gelesen) und die Verbindung in
 Dittos KI-Einstellungen; das Token läuft nie durch ein Tool, ein Ergebnis oder eine Befehlszeile. Über stdio startet
 Ditto `--command` (zum Beispiel `ssh -T -o BatchMode=yes -o SendEnv=LCF_MCP_TOKEN benutzer@build-box llm-cli mcp
@@ -628,13 +632,14 @@ Ditto bei einem solchen Befehl `-e LCF_MCP_TOKEN` (nur den Namen, nie den Wert);
 des Tokens den gemeinsamen lokalen Aufrufer `mcp` (zum Beispiel über `ssh` ohne `SendEnv`, das die Umgebung
 verwirft), nutzt Ditto ihn nicht und sagt, wie die Variable weitergegeben wird. Über HTTP sendet es das Token als
 Bearer-Header an `--url`, das https oder eine Loopback-Adresse sein muss, etwa das lokale Ende eines SSH-Tunnels
-(`ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box`, dann `http://127.0.0.1:8765/mcp`). Ohne Token startet der Modus
-nicht. Eine Tool-Quelle pro Unterhaltung (in dieser Version): Ein Wechsel beginnt eine neue Unterhaltung, und
-solange der andere Computer genutzt wird, wird kein Tool dieses Frameworks angeboten; Dateien und Einstellungen
-dieses Computers bleiben, wie sie sind. Jedes Ergebnis, jeder Fehler und jede Rückfrage des anderen Frameworks
-erreicht Dittos Modell als nicht vertrauenswürdige Daten, und Dittos Bestätigung nennt den Server. `test` verbindet
-sich und listet die Tools und Aufgaben-Prompts, die der Server Ditto anbietet; `show` zeigt die Einstellungen (nie
-das Token); `off` schaltet zurück auf das Framework dieses Computers. Die KI-Einstellungen der GUI („Another computer
+(`ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box`, dann `http://127.0.0.1:8765/mcp`). Ohne Token wird der andere
+Computer nicht genutzt. Ein- oder Ausschalten beginnt nie eine neue Unterhaltung; ein nicht erreichbarer Computer
+hält nie eine Frage an (Ditto macht mit den Tools dieses Computers weiter, und `ditto ask` gibt einen Hinweis auf
+stderr aus). Jedes Ergebnis, jeder Fehler und jede Rückfrage des anderen Frameworks erreicht Dittos Modell als nicht
+vertrauenswürdige Daten, seine Tool-Beschreibungen nie, und Dittos Bestätigung nennt den Server. `test` verbindet
+sich, listet die Tools und Aufgaben-Prompts, die der Server Ditto anbietet, und sagt, wie sie zu denen dieses
+Computers kommen (einmal angeboten, nur dort, getrennt); `show` zeigt die Einstellungen (nie das Token); `off` lässt
+Ditto wieder mit diesem Computer allein arbeiten. Die KI-Einstellungen der GUI („Another computer
 (optional)“) setzen dieselben Werte; auch dort landet das Token im Tresor und wird nie wieder angezeigt.
 
 ```bash

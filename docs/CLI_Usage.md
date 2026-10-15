@@ -565,8 +565,10 @@ llm-cli ditto ask QUESTION [--no-tools] [--provider TEXT] [--model TEXT]
 ```
 
 Asks Ditto one question. Ditto may use the framework tools within your permissions; tools set to "ask" show the
-tool and every argument and need your confirmation in the terminal (without a terminal they are denied). The
-answer goes to stdout, tool notes and errors to stderr. Nothing is saved to the chat history.
+tool and every argument and need your confirmation in the terminal (without a terminal they are denied). Without a
+terminal Ditto also tells the framework on another computer that nobody can answer its questions here, so that
+framework keeps them for its own approval window; nothing is ever sent there as your "no". The answer goes to stdout,
+tool notes and errors to stderr. Nothing is saved to the chat history.
 
 | Option | Meaning |
 |---|---|
@@ -590,13 +592,14 @@ llm-cli ditto remote set --transport stdio|http [--command "..."] [--url URL] [-
 llm-cli ditto remote show | test | off
 ```
 
-Ditto and the framework on another computer (optional): Ditto uses the framework installed on a second computer
-(a stronger build PC, a server) through that installation's MCP server, instead of this computer's tools. It is the
-same program, not a different one, and Docker is not needed: connect over SSH, either with a tunnel to the server's
+Ditto and the framework on another computer (optional): Ditto also uses the framework installed on a second
+computer (a stronger build PC, a server) through that installation's MCP server, next to this computer's tools, which
+always stay; each call goes to the computer where its object lives. It is the same program, not a different one, and Docker is not needed: connect over SSH, either with a tunnel to the server's
 address or with `ssh` as the command ([details](Features.md#ditto-and-a-framework-on-another-computer)). That
-framework's registry, permissions, questions and audit log apply. Create the token on the other computer first with
-`llm-cli mcp token add NAME --link ditto`: the token then uses Ditto's own permissions there (a change to them applies
-to both modes at once), and the audit log there shows `mcp:NAME`. `set` stores the token in this computer's
+framework's registry, permissions, questions and audit log apply to the calls that run there, and this computer's
+audit log records each of them too (`started` and its end, with `place remote:<name>`). Create the token on the other
+computer first with `llm-cli mcp token add NAME --link ditto`: the token then uses Ditto's own permissions there, and
+the audit log there shows `mcp:NAME`. `set` stores the token in this computer's
 credential vault (asked without echo, or read from stdin with `--with-token`) and the connection in Ditto's AI
 settings; the token never passes through a tool, a result or a command line. Over stdio Ditto starts `--command`
 (for example `ssh -T -o BatchMode=yes -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve`, which needs
@@ -607,13 +610,13 @@ pass their environment into the container, so Ditto adds `-e LCF_MCP_TOKEN` (the
 a command; and when the server it reached names the shared local caller `mcp` instead of the token (for example over
 `ssh` without `SendEnv`, which drops the environment), Ditto does not use it and says how to pass the variable on.
 Over HTTP it sends the token as bearer header to `--url`, which must be https or a loopback address, such as the
-local end of an SSH tunnel (`ssh -N -L 8765:127.0.0.1:8765 user@build-box`, then `http://127.0.0.1:8765/mcp`). The
-mode does not start without a token. One tool source per conversation (in this version): switching starts a new
-conversation, and while the other computer is used no tool of this framework is listed; this computer's files and
-settings stay as they are. Every result, error and question of the other framework is shown to Ditto's model as
-untrusted data, and Ditto's confirmation names the server. `test` connects and lists the tools and task prompts the
-server offers Ditto; `show` prints the settings (never the token); `off` switches back to the framework on this
-computer. The GUI's AI settings ("Another computer (optional)") set the same values; there too the token goes into
+local end of an SSH tunnel (`ssh -N -L 8765:127.0.0.1:8765 user@build-box`, then `http://127.0.0.1:8765/mcp`).
+Without a token the other computer is not used. Switching on or off never starts a new conversation; a computer that
+cannot be reached never stops a question (Ditto goes on with this computer's tools, and `ditto ask` prints a note on
+stderr). Every result, error and question of the other framework is shown to Ditto's model as untrusted data, its
+tool descriptions never, and Ditto's confirmation names the server. `test` connects, lists the tools and task prompts
+the server offers Ditto and says how they join this computer's (offered once, only there, separately); `show` prints
+the settings (never the token); `off` lets Ditto work with this computer alone again. The GUI's AI settings ("Another computer (optional)") set the same values; there too the token goes into
 the vault and is never shown again.
 
 ```bash

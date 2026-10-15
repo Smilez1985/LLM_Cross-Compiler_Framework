@@ -11,6 +11,10 @@ tool, reason code and field as the failure before it) or a `repeat_refused`, one
 model to stop calling tools and answer the user with what it tried, what failed and why; tool calls after it are
 answered without running, and the loop ends at most two turns later. A model that fixes one input error after another makes progress and is not stopped, and
 while the last result is an input error it is fixing, the step budget grows by up to `extra_steps`.
+
+A call that waits for a decision (reason code waiting_for_approval or question_changed, delegation design 3.5) has not
+failed: its result goes back as a plain result (not an error) and never counts toward the failure streak. A call sent
+to the wrong computer (wrong_place, hybrid design 6.3) is an input error the model fixes by changing the place.
 """
 
 from dataclasses import dataclass, field
@@ -18,6 +22,7 @@ from typing import Any, Callable, List, Optional
 
 from orchestrator.llm.errors import Refused
 from orchestrator.llm.types import ChatRequest, ChatResult, Message, ToolSpecLLM, Usage, tool_result_text
+from orchestrator.tools.normalize import PENDING_CODES as _PENDING
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.untrusted import wrap_untrusted
 
@@ -26,8 +31,10 @@ ExecuteTool = Callable[[str, dict], Any]
 STOP_TEXT = ("Several tool calls failed. Do not call more tools. Answer the user now: what you tried, what failed and "
              "why, and what they can do.")
 NOT_RUN_TEXT = "Not run: several tool calls failed before. Answer the user now without calling more tools."
-# Errors the model removes by changing its call (a missing, unknown or invalid argument).
-INPUT_ERROR_CODES = frozenset({"unknown_argument", "missing_argument", "invalid_value"})
+# Errors the model removes by changing its call (a missing, unknown or invalid argument, or the wrong computer).
+INPUT_ERROR_CODES = frozenset({"unknown_argument", "missing_argument", "invalid_value", "wrong_place"})
+# A call that waits for a decision: not a failure (normalize.PENDING_CODES, the one list of them).
+PENDING_CODES = frozenset(_PENDING)
 
 
 @dataclass
@@ -82,11 +89,20 @@ def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, 
                                               is_error=True)
                 failure = (call.name, "invalid_value", "")
             else:
+                waiting = False
                 try:
                     outcome = Message.tool_result(call.id, tool_result_text(execute_tool(call.name, call.arguments)))
                 except Exception as e:  # the model sees the failure and can adapt
-                    outcome = Message.tool_result(call.id, redact_secrets(str(e)) or type(e).__name__, is_error=True)
-                    failure = (call.name, str(getattr(e, "code", "") or "failed"), str(getattr(e, "field", "") or ""))
+                    code = str(getattr(e, "code", "") or "failed")
+                    waiting = code in PENDING_CODES
+                    outcome = Message.tool_result(call.id, redact_secrets(str(e)) or type(e).__name__,
+                                                  is_error=not waiting)
+                    if not waiting:
+                        failure = (call.name, code, str(getattr(e, "field", "") or ""))
+                if waiting:  # waits for a decision: neither a failure nor progress for the streak
+                    history.append(outcome)
+                    new.append(outcome)
+                    continue
             history.append(outcome)
             new.append(outcome)
             if stopped:

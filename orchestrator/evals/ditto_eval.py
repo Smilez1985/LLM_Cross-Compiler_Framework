@@ -610,11 +610,16 @@ class DittoEval:
 
     def _isolated(self, registry: Optional[ToolRegistry]) -> DittoCoder:
         """Ditto with the user's provider settings, no knowledge base (answers must come from the case) and the
-        given tool registry."""
+        given tool registry. Never the framework on another computer: a case measures the stand-in registry and
+        answers questions with its fixed answer, which must never reach that computer's tools or questions (hybrid
+        design 6.7: only the person answers those)."""
+        from orchestrator.llm.remote_tools import SOURCE_SETTING
         base = self.ditto.config
 
         class Settings:
             def get(self, key, default=None):
+                if key == SOURCE_SETTING:
+                    return "local"
                 return False if key == "enable_rag_knowledge" else base.get(key, default)
 
             def set(self, key, value):
