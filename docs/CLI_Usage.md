@@ -42,7 +42,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 |---|---|
 | Linux installer (`install.sh`) | `cd /opt/llm-conversion-framework` and then `.venv/bin/python -m orchestrator.cli ...` |
 | Windows installer (`install.bat`) | `cd /d "C:\Program Files\LLM-Conversion-Framework"` and then `.venv\Scripts\python.exe -m orchestrator.cli ...` |
-| Development setup (`poetry install`) | `llm-cli ...` |
+| Development setup (`uv sync`) | `llm-cli ...` |
 
 `python -m orchestrator.cli` needs the installation folder on Python's search path. Either run it from that
 folder, or set `PYTHONPATH`. On Linux this alias works from any folder:

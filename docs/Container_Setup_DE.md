@@ -217,4 +217,3 @@ führe `make up` erneut aus und installiere die Packs wieder.
 | [`Docker Setup/Dockerfile.dockerignore`](../Docker%20Setup/Dockerfile.dockerignore) | Hält große und persönliche Ordner aus einem Build-Kontext heraus, der aus dem Repository-Ordner selbst entsteht |
 | [`Docker Setup/docker-compose.yml`](../Docker%20Setup/docker-compose.yml) | Die Dienste `framework` und `gui` (Profil `gui`), das Volume `lcf-data`, `pull_policy: never` |
 | [`Makefile`](../Makefile) | `make build`, `build-gui`, `up`, `gui`, `down`, `kept-files`, `doctor`, `shell`, `clean`, `audit` (Trivy prüft ein Archiv des Images; der Scanner bekommt nie den Docker-Socket) |
-| `Docker Setup/pyproject.toml` | Eine alte Kopie der Projektdatei (Version 1.6.0), die nichts nutzt; die Projektdatei ist [`pyproject.toml`](../pyproject.toml) oben im Repository |

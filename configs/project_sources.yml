@@ -47,11 +47,10 @@ metadata:
 # ============================================================================
 # Tools used by framework build system
 build_tools:
-  poetry:
-    url: "https://install.python-poetry.org"
-    sha256: "3b5842cd6318176812455429c6c109909d21b184579720f154506f6734828455"
-    docs_workflow: "https://python-poetry.org/docs/"
-    note: "Python dependency management"
+  uv:
+    url: "https://github.com/astral-sh/uv"
+    docs_workflow: "https://docs.astral.sh/uv/"
+    note: "Python dependency lock (uv.lock) and the hash-pinned requirements export the installers use"
   
   cmake:
     url: "https://cmake.org/download/"

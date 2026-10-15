@@ -181,7 +181,7 @@ Unter Linux kannst du dir eine Abkürzung anlegen, die aus jedem Ordner funktion
 alias llm-cli='PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv/bin/python -m orchestrator.cli'
 ```
 
-In einer Entwicklungsumgebung (siehe [CONTRIBUTING_DE.md](CONTRIBUTING_DE.md)) gibt es nach `poetry install` den
+In einer Entwicklungsumgebung (siehe [CONTRIBUTING_DE.md](CONTRIBUTING_DE.md)) gibt es nach `uv sync` den
 Befehl `llm-cli`. Die Beispiele in dieser README verwenden `llm-cli`.
 
 ### Wo deine Dateien liegen
@@ -789,7 +789,7 @@ ausführst und Änderungen einreichst: [CONTRIBUTING_DE.md](CONTRIBUTING_DE.md).
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))
 - **[Radxa Community](https://forum.radxa.com/)**: Unterstützung bei der Integration des RK3566
 - **[Docker](https://www.docker.com/)**, **[PySide6](https://doc.qt.io/qtforpython-6/)**,
-  **[Poetry](https://python-poetry.org/)**
+  **[uv](https://docs.astral.sh/uv/)**
 
 ## Lizenz
 

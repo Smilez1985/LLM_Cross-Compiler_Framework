@@ -868,6 +868,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   beschädigte Datei ergibt die Vorgaben.
 
 ### Geändert
+- **uv ersetzt Poetry für die Festlegung der Abhängigkeiten** (sechste Runde, Entscheidung 14): `pyproject.toml`
+  nutzt die Standardtabelle `[project]` (die Entwicklungswerkzeuge in `[dependency-groups]`), `uv.lock` ersetzt
+  `poetry.lock`, und `requirements.txt` und `requirements-dev.txt` sind mit Hashes festgelegte Ausgaben von
+  `uv export`, deren erste Zeilen den Befehl nennen. Keine Version hat sich geändert: Alle 121 Festlegungen sind die
+  der bisherigen `poetry.lock`; die Exporte lassen nur die Hashes von Wheels für Python-Versionen außerhalb von 3.11
+  bis 3.14 weg. Die Installer installieren weiter die mit Hashes festgelegte `requirements.txt` des ausgecheckten
+  Frameworks und bestehen jetzt auf den Hashes (`--require-hashes`, kein Ausweichen auf nicht festgelegte Pakete);
+  `install.bat` bricht ab, wenn pip scheitert, statt weiterzumachen. Dependabot aktualisiert `uv.lock`, der neue
+  CI-Job "Lock files" prüft, dass `uv.lock` und beide Exporte zusammenpassen, und `make test` und die
+  Entwicklungsumgebung nutzen uv (`uv sync`).
 - **Rückfragen zeigen eine Kurzfassung und die Arten der Hinweise** (Delegationsentwurf 4.5, LAY-L2): Eine Rückfrage
   im eigenen Fenster des Frameworks (Dittos Dialog, die CLI-Abfrage, das Freigabefenster) beginnt nach ihrer ersten
   Zeile mit 3 bis 6 Zeilen in der Sprache der Person (Englisch oder Deutsch): was passiert, mit sprechenden Namen, wie
@@ -1128,6 +1138,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Rockchip-Target die Option nicht auswertet.
 
 ### Entfernt
+- Die veraltete Kopie `Docker Setup/pyproject.toml` (Version 1.6.0, von nichts gelesen): Das Container-Image entsteht
+  aus der `pyproject.toml` und der `requirements.txt` des Repositorys selbst.
 - Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen
   eigenen Datensatz).
 - `litellm` und `tiktoken` und mit ihnen 19 indirekte Pakete (aiohttp, boto3, jinja2 und andere).

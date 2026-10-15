@@ -176,7 +176,7 @@ alias llm-cli='PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-fram
 ```
 
 In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm-cli` exists after
-`poetry install`. The examples in this README use `llm-cli`.
+`uv sync`. The examples in this README use `llm-cli`.
 
 ### Where your files are
 
@@ -750,7 +750,7 @@ tests and submit changes: [CONTRIBUTING.md](CONTRIBUTING.md).
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))
 - **[Radxa Community](https://forum.radxa.com/)**: support with the RK3566 integration
 - **[Docker](https://www.docker.com/)**, **[PySide6](https://doc.qt.io/qtforpython-6/)**,
-  **[Poetry](https://python-poetry.org/)**
+  **[uv](https://docs.astral.sh/uv/)**
 
 ## License
 
