@@ -300,7 +300,7 @@ class CallFacts:
 # --- deletions (design 3.10, round 5 f) ------------------------------------------------------------------------------
 
 DELETION_KINDS = ("artifact", "model_file", "download", "knowledge_snapshot", "trash_entry", "docker_image",
-                  "build_cache", "pack", "module", "deploy_package", "exported_pack")
+                  "build_cache", "pack", "module", "deploy_package", "exported_pack", "runtime_build")
 # Docker's own objects have no host path; every other item is listed with its full path.
 NO_PATH_KINDS = ("docker_image", "build_cache")
 DeletionKind = Literal[DELETION_KINDS]  # type: ignore[valid-type]

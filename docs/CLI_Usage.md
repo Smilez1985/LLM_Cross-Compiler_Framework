@@ -851,12 +851,16 @@ for `ditto runtime import` on another machine of the same kind. The prebuilt arc
 #### ditto runtime prune
 
 ```
-llm-cli ditto runtime prune [--keep N]
+llm-cli ditto runtime prune
 ```
 
-Removes old self-built builds of Ditto's server. The active build, the CPU fallback and the build a running server
-was started from are always kept, plus the `N` newest others (default 2). `runtime install` does the same after every
-build. The builds of your boards (`llm-cli device runtime build`) share the build store and are never removed here.
+Lists the old builds of Ditto's server with a number each (unreleased): older self-built builds and installations of
+the prebuilt archive of another llama.cpp version, each with its full path, size and what it is. Nothing is picked.
+You type the numbers to delete, choose the trash (the default) or deleting for good, and confirm exactly those
+(default no). It needs a terminal; without one it only lists them. The active build, the CPU fallback, the build a
+running server was started from and the builds of your boards (`llm-cli device runtime build`, same build store) are
+never listed, and a build that became one of them after the list was shown is kept. `runtime install` deletes
+nothing: it says how many older builds it kept (before, it kept only the two newest).
 
 #### ditto runtime start
 
@@ -1416,6 +1420,7 @@ llm-cli device runtime build DEVICE [--jobs N] [--mirror URL] [--yes]
 llm-cli device runtime deploy DEVICE [--user NAME] [--password TEXT] [--bench-model PATH] [--allow-untrusted-model]
 llm-cli device runtime verify DEVICE [--user NAME] [--bench-model PATH] [--allow-untrusted-model]
 llm-cli device runtime status DEVICE [--json]
+llm-cli device runtime prune DEVICE
 ```
 
 ### device list
@@ -1454,7 +1459,9 @@ from a mirror, `ditto runtime import-source` brings it to a machine without inte
 builder container without network (`--jobs` sets the parallel jobs; by default they follow the memory), checks the
 format of the programs on your PC and packs the tarball into
 `~/.llm-framework/runtime/llama.cpp/device/<ID>/llama-runtime-<arch>-<build ID>.tar.gz`. A build that is already
-stored is only packed again. Exit code 1 when Docker does not answer, the build fails or its checks fail.
+stored is only packed again. Exit code 1 when Docker does not answer, the build fails or its checks fail. Older
+packages of the device are kept (unreleased; before, a build or a deployment removed them); the output says how many,
+and `device runtime prune` lists them for you to delete.
 
 ### device runtime deploy
 
@@ -1505,6 +1512,13 @@ Runs the checks of step 4 again on the active build, `current` (also with `--ben
 
 What is deployed (build, time, start script or systemd, result of the checks) and whether it is still the build the
 board's profile, the pin and the recipe call for; if not, build and deploy again.
+
+### device runtime prune
+
+Lists the device's older runtime packages on your PC with a number each (each tarball and its `.sha256` file, with
+full path and size). The package of the build deployed last is never listed. Nothing is picked: you type the numbers
+to delete, choose the trash (the default) or deleting for good, and confirm exactly those (default no). It needs a
+terminal; without one it only lists them. It changes nothing on the board.
 
 For a [trusted device](#deploy-devices), the optional MCP tools `probe_remote_device`, `deploy_device_runtime` and
 `run_device_benchmark` run `scan --device`, `device runtime build` with `deploy`, and `device runtime verify

@@ -203,6 +203,21 @@ def test_an_image_that_appeared_after_the_list_is_never_deleted():
     assert [i.id for i in client.images.images] == ["sha256:" + c * 64 for c in "cdf"]
 
 
+def test_a_named_image_kept_half_way_says_which_names_went():
+    """A named image is deleted name by name; when Docker keeps it at its last name (a container still uses it), the
+    report says which names were removed and that the image stays, never only "kept"."""
+    image = FakeImage("f", 9, tags=["llm-framework/aarch64:b7", "llm-framework/aarch64:last-build"])
+    client = FakeClient([image])
+    framework = fake_framework(client)
+    plan = framework_image_plan(framework)
+    client.images.refuse = "llm-framework/aarch64:last-build"
+    result = delete_framework_images(framework, plan, actor="cli")
+    assert result.deleted == [] and len(result.failed) == 1
+    reason = result.failed[0][1]
+    assert "conflict" in reason and "llm-framework/aarch64:b7" in reason and "image itself stays" in reason
+    assert image.tags == ["llm-framework/aarch64:last-build"]
+
+
 @pytest.mark.parametrize("actor", ["mcp", "mcp:laptop", "ditto", "grant:g_0123456789abcdef",
                                    "delegation:d_0123456789abcdef", ""])
 def test_only_the_person_deletes_images(actor):

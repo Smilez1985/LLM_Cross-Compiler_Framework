@@ -184,9 +184,20 @@ class ArtifactStore:
             if trash is None:
                 raise ArtifactRefused("The trash is not available; nothing was deleted.", code="failed",
                                       next="Tell the person; they check 'llm-cli doctor'.")
+            from orchestrator.Core.trash import TrashError
             root = self.output_dir.resolve()
             for item, path in zip(current.items, (target.folder, *target.zips)):
-                entry = trash.move("artifact", path, root, "output", item.speaking_name, accepted, deleted_by)
+                try:
+                    entry = trash.move("artifact", path, root, "output", item.speaking_name, accepted, deleted_by)
+                except TrashError as e:
+                    if not result.trash_ids:
+                        raise
+                    # Stopped half way: what went to the trash stays there, the rest where it was; both say so.
+                    raise ArtifactRefused(f"{len(result.trash_ids)} of {len(current.items)} items of {target.label} "
+                                          f"were moved to the trash, then this stopped: {e} The rest stays where it "
+                                          "was.", code="failed",
+                                          next="Tell the person; File > Trash... shows what was moved, and they can "
+                                               "restore it there.") from None
                 result.trash_ids.append(entry.id)
             return result
         shutil.rmtree(target.folder)

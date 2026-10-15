@@ -331,8 +331,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   environment without `LLAMA_*` variables.
   Builds are stored under `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` with `build.json` and
   `manifest.json` (sha256 of every file, duration, verification) and reused, never stamped again; only a build
-  verified on this machine can become active, and retention never removes the active build, the CPU fallback, the
-  build a running server uses or a board's build (Ditto's builds and the boards' builds share this store). A build from another of your machines can be imported: its files are checked against
+  verified on this machine can become active. The framework deletes no build by itself: an install keeps the older
+  builds and says how many (Ditto's builds and the boards' builds share this store). A build from another of your
+  machines can be imported: its files are checked against
   the manifest, its build ID against its plan and its commit against the pin, and you confirm before any of its
   programs runs; then every program in it must report the pin's version, not the one the archive expects. Ditto's
   `runtime install` builds through it. A CPU build of `llama-server` and `llama-bench` at the pin took 189 s on a
@@ -344,8 +345,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   made with `-march=native` is refused, before anything runs, on a CPU of another vendor or without one of the CPU
   features of the CPU that built it (it would stop with SIGILL at the first computation); `runtime start` and the
   perplexity check skip such a build too, for example in a home folder shared between machines.
-  `llm-cli ditto runtime prune` removes old builds and always keeps the active build, the CPU fallback and the build a
-  running server uses.
+  `llm-cli ditto runtime prune` lists the old builds and the installations of the prebuilt archive of another
+  llama.cpp version, each with its full path and size, nothing ticked, and deletes only the ones you pick and confirm
+  at a terminal (into the trash by default). It never lists the active build, the CPU fallback, the build a running
+  server uses or a board's build. `llm-cli device runtime prune DEVICE` does the same for a board's older runtime
+  packages on your PC; a new build or deployment keeps them.
 - `llm-cli doctor` checks the local llama.cpp runtime: a self-built build in use that was changed (error) or is older
   than the pin (warning), the prebuilt archive in use (information: not self-built), and whether this machine has the
   compiler, CMake and Ninja for a native build (information, with the builder container as the alternative).
@@ -1325,8 +1329,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 
 ### Security
 - **No deletion without your confirmation in the framework** (round 5 f; WP7): every code path that deletes a built
-  model, a knowledge snapshot, a trash entry or a framework image takes only the plan you accepted in the GUI or at a
-  terminal, builds it again from what is on disk right before, and deletes nothing when it changed or when the audit
+  model, a knowledge snapshot, a trash entry, a framework image, an old llama.cpp runtime build or a board's runtime
+  package takes only the plan you accepted in the GUI or at a terminal, builds it again from what is on disk right before, and deletes nothing when it changed or when the audit
   log cannot record it first. An AI's `delete_artifact` only moves to the trash; emptying the trash and deleting for
   good stay with you. A source sweep lists every place in the code that deletes, with how it is covered; a new one
   fails it until it is decided.

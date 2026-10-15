@@ -1125,8 +1125,10 @@ self-built“.
 - **Ablage:** `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` enthält die Programme mit `build.json` (der
   Bauplan) und `manifest.json` (sha256 jeder Datei, Dauer, Bau-Rechner, Prüfergebnisse). Die Build-ID ist der Hash
   von allem, was die Programme verändert, also wird ein abgelegter Build wiederverwendet und nie neu gestempelt. Nur
-  ein auf diesem Rechner geprüfter Build kann der aktive werden; die Aufbewahrung behält den aktiven Build, den
-  CPU-Ersatz, den Build, aus dem ein laufender Server gestartet wurde, und die zwei neuesten anderen. Ein Build von
+  ein auf diesem Rechner geprüfter Build kann der aktive werden. Das Framework löscht keinen Build von selbst
+  (unveröffentlicht; vorher behielt es nur die zwei neuesten anderen): `llm-cli ditto runtime prune` listet die alten
+  zum Ankreuzen, nie den aktiven Build, den CPU-Ersatz oder den Build, aus dem ein laufender Server gestartet wurde.
+  Ein Build von
   einem deiner anderen Rechner kann importiert werden: Jede Datei wird gegen sein Manifest geprüft, die Build-ID
   gegen seinen Bauplan und der Commit gegen den Pin, du bestätigst, bevor eines seiner Programme läuft, und danach
   wird er wie ein lokaler Build geprüft. Die Version, die er melden muss, kommt aus dem Pin, nicht aus dem Archiv,
@@ -2204,6 +2206,14 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
 - **Wissens-Snapshots** lassen sich auch exportieren: in einen Ordner deiner Wahl kopieren (auf diesem Computer, auf
   einen USB-Stick oder eine Netzwerkfreigabe). Jede Kopie wird per sha256 mit dem Original verglichen; ein Export
   löscht nie einen Snapshot.
+- **Alte llama.cpp-Laufzeit-Builds und Geräte-Pakete** bleiben, wenn ein neuer gebaut oder deployt wird (vorher
+  blieben nur die neuesten, ohne Liste). `llm-cli ditto runtime prune` und `llm-cli device runtime prune GERÄT`
+  listen sie; der Build oder das Paket in Gebrauch steht nie in der Liste.
+- **Was das Framework von selbst löscht**, ist nur seine eigene Buchführung, die du nie als Objekt siehst: temporäre
+  und unfertige Dateien seiner eigenen Schreibvorgänge und Downloads, seine Staging-, Quarantäne- und Arbeitsordner
+  eines Builds oder einer Installation, die Container, die es für einen Build gestartet hat, alte Einträge bis zu
+  einer festen Anzahl (Build-Einträge, Anfragen, Jobs) und die Zustands- und Logdateien seines eigenen lokalen
+  Modellservers. Ein Test listet jede Stelle im Code, die löscht.
 - **Die Docker-Images des Frameworks** löscht das Framework nie von selbst. Der Builder behält das neueste Image jedes
   Targets als `llm-framework/<Target>:last-build` und entfernt nur den Namen des einzelnen Builds; ältere Images
   bleiben ohne Namen. **Tools > Framework Build Images...** in der GUI und `llm-cli doctor --fix --tier 2` listen

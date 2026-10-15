@@ -379,10 +379,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `LLAMA_*`-Variablen. Builds liegen unter
   `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` mit `build.json` und `manifest.json` (sha256 jeder Datei,
   Dauer, Prüfung) und werden wiederverwendet, nie neu gestempelt; nur ein auf diesem Rechner geprüfter Build kann
-  aktiv werden, und die Aufbewahrung entfernt nie den aktiven Build, den CPU-Ersatz, den Build, aus dem ein
-  laufender Server gestartet wurde, oder den Build eines Boards (Dittos Builds und die Builds der Boards liegen in
-  diesem einen Speicher). Ein Build von einem deiner anderen Rechner kann importiert werden: Seine Dateien
-  werden gegen das Manifest geprüft, seine Build-ID gegen seinen Bauplan und sein Commit gegen den Pin, und du
+  aktiv werden. Das Framework löscht keinen Build von selbst: Eine Installation behält die älteren Builds und sagt,
+  wie viele (Dittos Builds und die Builds der Boards liegen in diesem einen Speicher). Ein Build von einem deiner
+  anderen Rechner kann importiert werden: Seine Dateien werden gegen das Manifest geprüft, seine Build-ID gegen seinen Bauplan und sein Commit gegen den Pin, und du
   bestätigst, bevor eines seiner Programme läuft; danach muss jedes seiner Programme die Version des Pins melden,
   nicht die, die das Archiv erwartet. `runtime install` von Ditto baut darüber. Ein CPU-Build von `llama-server` und
   `llama-bench` am Pin dauerte auf einer virtuellen Maschine mit 4 Kernen 189 s und ergab 28 MB Programme; Dittos
@@ -393,8 +392,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Build. Ein mit `-march=native` gemachter Build wird abgelehnt, bevor irgendetwas läuft, auf einer CPU eines anderen
   Herstellers oder ohne eine der CPU-Funktionen der CPU, die ihn gebaut hat (er bräche bei der ersten Rechnung mit
   SIGILL ab); `runtime start` und die Perplexity-Prüfung überspringen einen solchen Build ebenso, etwa in einem
-  Benutzerordner, den sich mehrere Rechner teilen. `llm-cli ditto runtime prune` entfernt alte Builds und behält immer
-  den aktiven Build, den CPU-Ersatz und den Build, aus dem ein laufender Server gestartet wurde.
+  Benutzerordner, den sich mehrere Rechner teilen. `llm-cli ditto runtime prune` listet die alten
+  Builds und die Installationen des vorgebauten Archivs einer anderen llama.cpp-Version, jeweils mit vollem Pfad und
+  Größe, nichts angehakt, und löscht nur die, die du am Terminal auswählst und bestätigst (standardmäßig in den
+  Papierkorb). Den aktiven Build, den CPU-Ersatz, den Build, aus dem ein laufender Server gestartet wurde, und die
+  Builds der Boards listet es nie. `llm-cli device runtime prune GERÄT` tut dasselbe für die älteren Laufzeit-Pakete
+  eines Boards auf deinem PC; ein neuer Build oder ein Deployment behält sie.
 - `llm-cli doctor` prüft die lokale llama.cpp-Laufzeit: einen genutzten selbst gebauten Build, der verändert wurde
   (Fehler) oder älter als der Pin ist (Warnung), das genutzte vorgefertigte Archiv (Information: nicht selbst gebaut)
   und ob dieser Rechner Compiler, CMake und Ninja für einen nativen Build hat (Information, mit dem Builder-Container
@@ -1507,8 +1510,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 
 ### Sicherheit
 - **Kein Löschen ohne deine Bestätigung im Framework** (Runde 5 f; WP7): Jeder Codepfad, der ein gebautes Modell, einen
-  Wissens-Snapshot, einen Papierkorb-Eintrag oder ein Image des Frameworks löscht, nimmt nur den Plan, den du in der GUI
-  oder im Terminal bestätigt hast, baut ihn unmittelbar vorher aus dem neu, was auf der Platte liegt, und löscht nichts,
+  Wissens-Snapshot, einen Papierkorb-Eintrag, ein Image des Frameworks, einen alten llama.cpp-Laufzeit-Build oder ein
+  Laufzeit-Paket eines Boards löscht, nimmt nur den Plan, den du in der GUI oder im Terminal bestätigt hast, baut ihn unmittelbar vorher aus dem neu, was auf der Platte liegt, und löscht nichts,
   wenn er sich geändert hat oder das Audit-Log ihn nicht vorher festhalten kann. `delete_artifact` einer KI verschiebt
   nur in den Papierkorb; den Papierkorb leeren und endgültig löschen bleibt bei dir. Eine Prüfung des Quelltexts listet
   jede Stelle im Code, die löscht, mit ihrer Absicherung; eine neue Stelle lässt sie scheitern, bis über sie entschieden
