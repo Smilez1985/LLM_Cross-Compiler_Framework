@@ -108,8 +108,8 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
    Das Image wird als Archiv in einem privaten Ordner des Builds gespeichert, Trivy liest nur diese Datei
    (schreibgeschützt, ohne Capabilities), und das Log sagt, wann das Archiv gespeichert und wieder entfernt wird.
    Ist auf der Cache-Platte kein Platz für das Archiv, wird der Scan mit einer Warnung übersprungen, die die
-   Größen nennt. Funde erscheinen als Warnung im Log, nicht als Fehler. Ein Scan, der nicht innerhalb des Zeitlimits des Builds (`build_timeout`) fertig wird, wird mit
-   einer Warnung gestoppt.
+   Größen nennt. Funde erscheinen als Warnung im Log, nicht als Fehler. Ein Scan, der nicht innerhalb des
+   Zeitlimits des Builds (`build_timeout`) fertig wird, wird mit einer Warnung gestoppt.
 6. **Importance Matrix** (nur GGUF, wenn gewählt).
 7. **Konvertieren und quantisieren** in Containern mit Sandbox ([Build-Sandbox](#build-sandbox)).
 8. **Ergebnisse:** Die Modelldatei wird eingesammelt, `build_info.json` wird um die Modelldateien und ihre
@@ -271,9 +271,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   per Digest festgelegt ist (`image_inference_runtime: name@sha256:...`) oder auf diesem Rechner gebaut wurde (es
   liegt hier und wurde nie gezogen); ein gezogenes Image, das nur über ein Tag benannt ist, und das voreingestellte
   `llm-framework/inference:local` (ein lokaler Name; das Framework veröffentlicht keine Images), solange du es
-  hier nicht gebaut hast, werden mit Grund abgelehnt, bevor etwas kopiert wird. Ein per Digest festgelegtes Image, das hier fehlt,
-  wird über seinen Digest gezogen, nie über ein Tag, und ein fehlgeschlagener Export bricht das Paket ab, statt das
-  Image wegzulassen. Ein per Digest festgelegtes Image wird unter dem lokalen Namen
+  hier nicht gebaut hast, werden mit Grund abgelehnt, bevor etwas kopiert wird. Ein per Digest festgelegtes
+  Image, das hier fehlt, wird über seinen Digest gezogen, nie über ein Tag, und ein fehlgeschlagener Export bricht
+  das Paket ab, statt das Image wegzulassen. Ein per Digest festgelegtes Image wird unter dem lokalen Namen
   `<Repository>:lcf-<erste 12 Hex-Zeichen des Digests>` eingepackt (`docker load` stellt Registry-Digests nicht
   wieder her), und `deploy.sh` startet jedes eingepackte Image mit `--pull never`: Das Board führt genau das
   eingepackte Image aus, und ein Board, auf dem es fehlt, bricht ab, statt eines aus einer Registry zu ziehen.

@@ -1330,7 +1330,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   socket, which gives root rights on this computer even when mounted read-only. The builder now saves the image to an
   archive in a private folder (0700) of the build, and Trivy reads only that file, read-only, without capabilities and
   with `no-new-privileges`. The log says when the archive is saved and removed again; without room for it on the cache
-  disk the scan is skipped with a warning that names the sizes.
+  disk the scan is skipped with a warning that names the sizes. When Docker refuses the scan, the warning names the
+  archive by the label of the cache folder (`cache:...`), never by its path on this computer.
 - **The loopback MCP HTTP listener ignores proxy headers and writes no access log:** uvicorn trusted
   `X-Forwarded-For` and `X-Forwarded-Proto` from 127.0.0.1, so every local program could claim another address.
   `mcp serve --transport http` now runs with `proxy_headers=False` and `access_log=False`.

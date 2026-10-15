@@ -153,7 +153,8 @@ def paramiko_quiet():
     global _quiet_users, _quiet_saved
     with _quiet_lock:
         if _quiet_users == 0:
-            names = ["paramiko"] + sorted(n for n in logging.Logger.manager.loggerDict if n.startswith("paramiko."))
+            known = list(logging.Logger.manager.loggerDict)  # a copy: another thread may add a logger meanwhile
+            names = ["paramiko"] + sorted(n for n in known if n.startswith("paramiko."))
             for name in names:
                 logger = logging.getLogger(name)
                 # A child without its own level follows "paramiko"; only explicit levels below INFO are raised.

@@ -111,6 +111,49 @@ def test_password_value_option_warns(scanned):
     assert "--password-stdin" in result.out
 
 
+def test_deploy_run_takes_the_password_from_the_prompt_stdin_or_a_warned_value(keep_logger_levels, tmp_path):
+    """deploy run on fakes: what reaches the login is the password, never the 'ask' marker of a bare --password."""
+    from test_cli_builds import invoke_plain
+    from test_hardware_probe import FakeHostKey
+    package = tmp_path / "package.zip"
+    package.write_bytes(b"zip")
+    logins = []
+
+    class Deployments:
+        def host_key_status(self, ip, port):
+            return "known", FakeHostKey()
+
+        def deploy_artifact(self, artifact_path, target_ip, user, password, port):
+            logins.append(password)
+            return False  # stops before the device is remembered
+
+    def deploy(*options, input=None):
+        ctx = cli_module.FrameworkContext()
+        ctx._initialized, ctx.framework_manager, ctx.deployment_manager = True, SimpleNamespace(), Deployments()
+        return invoke_plain("deploy", "run", str(package), "--ip", "192.0.2.10", "--user", "dietpi", *options,
+                            input=input, ctx=ctx)
+
+    asked = deploy("--password", input=PASSWORD + "\n")
+    piped = deploy("--password-stdin", input=PASSWORD + "\n")
+    value = deploy("--password", PASSWORD)
+    assert logins == [PASSWORD, PASSWORD, PASSWORD], [asked.out, piped.out, value.out]
+    assert PASSWORD not in asked.out + piped.out
+    assert "visible in the process list" not in asked.out + piped.out
+    assert "visible in the process list" in value.out
+
+
+def test_device_runtime_deploy_asks_or_warns_before_anything_else(keep_logger_levels):
+    from test_cli_builds import invoke_plain
+    asked = invoke_plain("device", "runtime", "deploy", "no-such-board", "--password", input=PASSWORD + "\n")
+    assert "Password:" in asked.out and PASSWORD not in asked.out
+    assert "visible in the process list" not in asked.out
+    value = invoke_plain("device", "runtime", "deploy", "no-such-board", "--password", PASSWORD)
+    assert "The password is visible in the process list and your shell history" in value.out
+    both = invoke_plain("device", "runtime", "deploy", "no-such-board", "--password", "x", "--password-stdin",
+                        input=PASSWORD + "\n")
+    assert both.code == 2 and "either --password or --password-stdin" in both.out
+
+
 def test_paramiko_never_logs_the_password(tmp_path, caplog, monkeypatch):
     """paramiko is held at INFO while a login authenticates, also when everything else logs at DEBUG. The trap logs
     the password at DEBUG through paramiko's own logger in the middle of the password authentication."""
