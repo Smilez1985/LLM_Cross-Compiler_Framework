@@ -1021,7 +1021,8 @@ class TestReviewFindings:
                 return False
 
         monkeypatch.setattr(main_window, "FrameworkManager", FailingFramework)
-        monkeypatch.setattr(main_window.QMessageBox, "critical", lambda parent, title, text: shown.append(text))
+        from orchestrator.gui import plain   # the fatal error is a plain-text box (design 5.2 R1, SEC-M2)
+        monkeypatch.setattr(plain, "_exec", lambda box: shown.append(box.text()) or 0)
         with pytest.raises(SystemExit):
             main_window.MainOrchestrator(REPO_ROOT)
         assert shown and "secret_storage" in shown[0] and "passphrase" in shown[0]

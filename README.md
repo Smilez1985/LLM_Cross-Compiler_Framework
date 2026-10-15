@@ -230,8 +230,9 @@ Nothing changes until you agree. The framework only applies a few fixed steps it
 jobs after an out-of-memory error, removing its own images and the build cache when the disk is full, one retry
 after a network error). Suggestions from an AI are only shown as advice.
 
-**AI Chat tab:** talk to Ditto (see [Ditto](#ditto-the-built-in-assistant)). **Deployment tab:** copy a finished
-build to a board. The **Auto-Tuning** and **Models** tabs are placeholders.
+**AI chat panel on the right:** talk to Ditto (see [Ditto](#ditto-the-built-in-assistant)); questions that wait for
+you and what AI apps did for you arrive there too. F9 or **View > AI Chat Panel** shows or hides it. **Deployment
+tab:** copy a finished build to a board. The **Auto-Tuning** and **Models** tabs are placeholders.
 
 Menus: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (wizard for a new target, including "Deep Ingest" to add documentation to the knowledge base),
@@ -437,9 +438,11 @@ Console organization).
 Ditto answers questions, suggests build settings, analyzes failed builds and proposes new hardware modules. It
 uses the framework's tools within your tool permissions:
 
-- **GUI:** the **AI Chat** tab. Tools that need a confirmation open a dialog that shows the tool and every
-  argument. The conversation is saved per user (`~/.llm-framework/chat_history.json`); a long conversation is
-  summarized into a new one. **Clear History** deletes it.
+- **GUI:** the **chat panel on the right** of the main window (F9 shows or hides it, Ctrl+Shift+C writes in it;
+  see [The chat panel](docs/Features.md#the-chat-panel)). Tools that need a confirmation open a dialog that shows the
+  tool and every argument. The conversation is saved per user (`~/.llm-framework/chat_history.json`); a long
+  conversation is summarized into a new one. **Clear chat…** first lists what it deletes (full path, file name, size,
+  what it is), with "No" as the default.
 - **CLI:** `llm-cli ditto ask "Which boards can run RKLLM?"` asks one question (no saved history).
   Confirmations are asked in the terminal and denied when there is no terminal. `--no-tools` answers without
   tools.
