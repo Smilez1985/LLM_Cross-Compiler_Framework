@@ -28,10 +28,10 @@ from orchestrator.schemas.build import (ArtifactDetails, ArtifactFile, ArtifactL
 from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.local_files import (LocalFileError, LocalFiles, LocalInputs, is_path, labels_hint,
                                             looks_like_reference, split_reference)
+from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
-AUTOMATIC_STRATEGIES = {"config_adjustment", "docker_prune", "retry_build"}
 MODEL_NEXT = ("Give a Hugging Face repo id (owner/name), or a local model file or a folder with config.json as "
               "<label>:<relative path>.")
 BUILD_FINISHED = frozenset({"completed", "error", "cancelled"})

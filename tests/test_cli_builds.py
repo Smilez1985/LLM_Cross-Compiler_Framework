@@ -919,7 +919,10 @@ def test_doctor_tier_help_names_only_existing_fixes():
     result = invoke_plain("doctor", "--help")
     text = " ".join(result.out.split())
     assert "folders" not in text
-    assert "makes your personal folder private" in text and "Docker build cache" in text
+    assert "makes your personal folder private" in text
+    # Tier 2 lists and deletes only what the person confirms; it never clears Docker's build cache (round 5 f).
+    assert "lists the dangling framework images" in text and "confirm in a terminal" in text
+    assert "Docker build cache is never cleared" in text and "removes" not in text
     from orchestrator.Core import doctor
     assert "create a folder" not in doctor.__doc__  # the module's description of the tiers is true as well
 

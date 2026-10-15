@@ -20,7 +20,8 @@ GUI = REPO_ROOT / "orchestrator" / "gui"
 # The new and touched windows (design 5.2: "scan extended to every new and touched window"); a package that touches
 # another window adds it here.
 SCANNED = sorted((GUI / "chat_panel").glob("*.py")) + [GUI / n for n in ("plain.py", "gui_state.py", "chat_window.py",
-                                                                         "main_window.py")]
+                                                                         "main_window.py",
+                                                                         "knowledge_snapshots_window.py")]
 STATIC_BOXES = {"question", "information", "warning", "critical", "about"}
 TRANSLATION_CALLS = {"t", "ui_text", "tr", "text", "feed_text"}
 MARKUP = '<b>bold</b> & <a href="https://evil.example">link</a><img src=x>'

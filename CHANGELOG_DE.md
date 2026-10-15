@@ -17,7 +17,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   lehnen vor jeder Rückfrage ab, mit ihrem Grund-Code, einem nächsten Schritt für die KI und, getrennt davon, dem,
   was die Person tun kann; ein Hindernis, das eine KI beheben kann, nennt das Tool, das es behebt.
   Situationshinweise (knapper Speicherplatz, ein großer Download, knapper oder zu kleiner Arbeitsspeicher, viele
-  Seiten, ein ungetestetes Modul, eine ersetzte Board-Laufzeit) bringen eine Regel für eine KI mit; Sicherheits- und
+  Seiten, ein ungetestetes Modul, eine ersetzte Board-Laufzeit; nie die Zahl der Wissens-Snapshots, die keine Grenze
+  haben) bringen eine Regel für eine KI mit; Sicherheits- und
   Rechtshinweise (Pickle-Gewichte, ein Basis-Image außerhalb der Docker Official Images oder nicht gepinnt,
   Hersteller-Downloads über der weichen Grenze, ein ungeprüftes oder Community-Target, der erste Build von KI-Build-
   Code, ein nicht vertrauenswürdiges Modell nativ oder in der Sandbox, die die Person nicht für KIs erlaubt hat
@@ -82,7 +83,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   außerhalb des Ausgabeordners, solange ein Build irgendeines Programms des Frameworks in den Ordner schreibt oder
   dafür wartet, nachdem sich der Build geändert hat und wenn der Ordner nicht der ist, den die Frage nannte. Eine
   Wiederherstellung sichert immer zuerst die aktuelle Wissensbasis (`pre_restore_<Zeit>`), auch außerhalb von MCP,
-  und räumt den wiederherzustellenden Snapshot nie auf.
+  und löscht keinen Snapshot; sie bleibt außerhalb jeder Dauerfreigabe und Vollmacht, bis es den Papierkorb und den
+  Lösch-Dialog des Frameworks gibt.
 - **Ditto kann zusätzlich das Framework auf einem anderen Computer nutzen** (MCP-Entwurf T12; ENTSCHEIDUNGEN Runde 5 d;
   Hybrid-Entwurf 6.1-6.8): Die Tools dieses Computers bleiben immer, und das Framework, das auf einem zweiten Computer
   installiert ist (ein Build-PC, ein Server; dasselbe Programm, kein anderes), bringt seine Tools in denselben Chat.
@@ -176,7 +178,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   werden.
 - **Lokale Wissensbasis** auf lokalen Embeddings (FastEmbed, ONNX auf der CPU) und einem eingebetteten
   Qdrant-Speicher: kein Vektordatenbank-Server und keine Cloud-Embeddings nötig, und sie funktioniert offline,
-  sobald ihre Modelle heruntergeladen sind.
+  sobald ihre Modelle heruntergeladen sind. Vor jeder Aufnahme und jeder Wiederherstellung sichert sie einen
+  Snapshot in `knowledge_snapshots/` des persönlichen Ordners. Es gibt keine Grenze: Sie behält so viele, wie die
+  Platte fasst, löscht keinen von selbst, auf keinem Weg (Runde 5 f), und keine Anzahl bringt eine Erinnerung oder
+  eine Warnung. `llm-cli knowledge snapshots` (in der GUI: Tools > Knowledge Snapshots...) listet jeden mit vollem
+  Pfad, Namen, Größe und was er ist, damit du die, die du auswählst, löschst oder exportierst (woandershin kopierst).
 - **Die Wissensbasis, die Ditto nutzt, für KI-Clients** (MCP-Tools `list_knowledge_sources` und
   `read_knowledge_source`, Ressource `lcf://knowledge/sources/<Quellen-ID>`): Ein Client, der Dittos Aufgabe
   übernimmt, sieht, was die Wissensbasis enthält, und liest die Auszüge einer Quelle der Reihe nach.
@@ -624,9 +630,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Text als "not checked" gekennzeichnet), und jedes Argument mit dem sprechenden Namen einer ID (Modell und Ziel eines
   Builds, das Label einer lokalen Datei). Ein Tool kann Fakten vor der Rückfrage nachschlagen, und der Aufruf ist an
   sie gebunden: `resolve_healing` zeigt den offenen Vorschlag aus dem eigenen Zustand des Frameworks, lehnt einen
-  Vorschlag ab, der sich nach der Rückfrage geändert hat, und fragt vor einem zerstörenden Fix (`docker_prune`) immer,
-  auch wenn das Tool erlaubt ist. Dittos GUI-Dialog und CLI-Abfrage zeigen Rückfragen bis zu 16.000 Zeichen (ein
-  scrollbarer Dialog, der Pager); ein MCP-Formular bleibt bei 4.000.
+  Vorschlag ab, der sich nach der Rückfrage geändert hat, und lehnt die Freigabe eines manuellen Schritts ab, bevor
+  etwas gefragt wird (auch einer vollen Docker-Platte, `docker_prune`: keine Selbstheilungs-Strategie löscht etwas).
+  Dittos GUI-Dialog und CLI-Abfrage zeigen Rückfragen bis zu 16.000 Zeichen (ein scrollbarer Dialog, der Pager); ein
+  MCP-Formular bleibt bei 4.000.
 - **Grenzen je Client für Tool-Aufrufe** (Ditto und MCP-Clients): lesende Tools 20 Aufrufe in 10 Sekunden,
   `start_build` 3 unfertige Builds und 20 Starts am Tag, 30 Rückfragen pro Stunde und eine Build-Warteschlange von
   höchstens 20 unfertigen Anfragen je Framework-Prozess für KI-Aufrufer (die eigenen GUI- und CLI-Builds des
@@ -1016,9 +1023,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   sind und dass der Client eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
 - **MCP-Clients sehen nur die Tools, die sie nutzen dürfen**: Tools, die deine Berechtigungen verweigern, fehlen in
   der Tool-Liste (dieselben Tools, die Ditto bei denselben Berechtigungen bekommt); ein Aufruf eines solchen Tools
-  wird trotzdem abgelehnt und festgehalten. `destructiveHint` folgt der eigenen Angabe jedes Tools statt seiner
-  Stufe (`resolve_healing` ist zerstörend, weil eine seiner Korrekturen den Docker-Build-Cache löscht), und Tools,
-  die andere Geräte erreichen, bitten den Client, bei jedem Aufruf seine eigene Rückfrage zu zeigen
+  wird trotzdem abgelehnt und festgehalten. `destructiveHint` folgt der eigenen Angabe jedes Tools statt seiner Stufe
+  (`resolve_healing` bleibt als zerstörend markiert: es ändert eine Einstellung und wiederholt einen Build), und
+  Tools, die andere Geräte erreichen, bitten den Client, bei jedem Aufruf seine eigene Rückfrage zu zeigen
   (`anthropic/requiresUserInteraction`).
 - Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nicht mehr zusammen mit dem Ordner, in
   dem sie liegt (ein Modell, das Dateien daneben braucht, etwa externe ONNX-Daten, wird als Ordner angegeben). Eine
@@ -1151,6 +1158,23 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- **Das „Docker-Aufräumen“ der Selbstheilung löscht nichts mehr** (veröffentlicht in 3.0.0; Runde 5 f): Wer den
+  Vorschlag für eine volle Docker-Platte freigab (`docker_prune`, im GUI-Dialog, an der CLI-Abfrage oder über
+  `resolve_healing`), ließ die verwaisten Images des Frameworks löschen, ohne dass sie gezeigt wurden, und den ganzen
+  Build-Cache des Docker-Daemons leeren, auch den anderer Projekte. Jetzt ist es ein manueller Schritt: Der Vorschlag
+  verweist auf `llm-cli doctor --fix --tier 2`, das die verwaisten Build-Images des Frameworks listet und nur die
+  löscht, die du bestätigst, und eine Freigabe wird abgelehnt, bevor etwas gefragt wird. Kein Code des Frameworks
+  leert den Docker-Build-Cache mehr.
+- **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte den
+  ganzen Build-Cache des Docker-Daemons, auch den anderer Projekte, und löschte die verwaisten Images des Frameworks,
+  ohne sie zu zeigen. Der Build-Cache wird nicht mehr angerührt (er lässt sich nicht auf das Framework beschränken).
+  Stufe 2 listet jetzt die verwaisten Build-Images des Frameworks, jedes mit Namen, Image-ID, Größe und was es ist,
+  und löscht genau diese Liste, per Image-ID und ohne Prune, erst nach deinem Ja im Terminal (die Vorgabe ist Nein).
+  Ohne Terminal und mit `--json` listet es sie nur; das Löschen wird zuerst auditiert und abgelehnt, wenn sich die
+  Liste inzwischen geändert hat, und ein Image, das inzwischen einen Namen bekommen hat (ein Build eines anderen
+  Framework-Programms), bleibt erhalten. Kein Tool, keine Ressource und kein Prompt erreicht es, eine KI-App oder
+  Ditto kann es also weder ausführen noch unter einer Vollmacht bekommen. Die Befunde zum Speicherplatz sagen, was
+  Stufe 2 listet, statt ein Aufräumen zu versprechen.
 - **Eine Reparatur wird genannt, wie auch immer der Aufruf endet** (Befund eines echten Laufs mit Claude Code 2.1.296
   über stdio, Protokoll 2026-07-28): ein erklärter Alias, den der Aufruf benutzte (`quant` gelesen als
   `quantization`), wurde im Audit-Log festgehalten, aber ein Aufruf, der vor oder statt der Frage abgelehnt wurde (zu
@@ -1454,6 +1478,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   private.
 
 ### Sicherheit
+- **`run_doctor` gibt KI-Clients keinen Pfad des Rechners** (veröffentlicht in 3.0.0): die Befunde, die eine KI las,
+  nannten den persönlichen Ordner, das Audit-Log, Pack-Ordner, die Ordner der Speicherplatz-Prüfung und jeden Pfad,
+  den der Fehler einer abgestürzten Prüfung zitierte, samt Benutzernamen. Was eine KI liest, nennt die Ordner des
+  Frameworks jetzt unter ihrer Bezeichnung (`state:audit.db`, "the state folder", `targets:<Pack>`) und jeden anderen
+  Pfad nur mit seinem Dateinamen, Geheimnisse geschwärzt; `llm-cli doctor` (auch `--json`) behält die vollen Pfade
+  für dich.
 - **`run_benchmark` startet genau die Datei, die es gehasht hat**: das Modell wird einmal geöffnet, über die offene
   Datei gehasht und llama-bench als genau diese offene Datei übergeben (nativ ein geerbter Deskriptor, in der
   Sandbox ein privater Hardlink), so dass ein Katalogmodell zwischen Prüfung und einem nativen Lauf ohne Zustimmung

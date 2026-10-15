@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
+from orchestrator.Core.knowledge_snapshots import SUFFIX, list_snapshots, snapshot_files
 from orchestrator.rag.chunking import PREAMBLE_RESERVE_TOKENS, chunk_document, passage_text, point_id
 from orchestrator.rag.embeddings import (DenseEmbedder, EmbeddingModelSpec, FastEmbedDenseEmbedder,
                                          FastEmbedSparseEmbedder, SparseEmbedder, check_vectors, recommend_model,
@@ -49,7 +50,6 @@ MIN_SPARSE_QUERY_TOKENS = 3  # shorter queries use the dense ranking only, unles
 _IDENTIFIER = re.compile(r"\d|_|[A-Z]{2,}|\w[.-]\w")  # E2041, GGML_CUDA, RKNN, librkllmrt.so
 RERANK_POOL = 20  # most candidates a search reranks (about 1-2.5 s on one free CPU core)
 RERANK_INPUT_CHARS = 1500  # of each candidate; about what fits next to the query into 512 tokens
-MAX_SNAPSHOTS = 5
 # Longest idle time before the models are released (7 days); threading.Timer overflows on huge timeouts (on
 # Windows above about 49 days).
 MAX_MODEL_IDLE_SECONDS = 7 * 24 * 3600.0
@@ -652,11 +652,12 @@ class RAGManager:
 
     # --- SNAPSHOT & ROLLBACK ---
 
-    def create_snapshot(self, name: Optional[str] = None, keep: Optional[Path] = None) -> Optional[str]:
+    def create_snapshot(self, name: Optional[str] = None) -> Optional[str]:
         """Saves the active collection (vectors included) to a file; returns its name, None if empty or failed.
-        `keep`: a snapshot file the pruning of old snapshots must not remove (the one about to be restored)."""
+        No snapshot is ever deleted here, on any channel, and there is no limit (DECISIONS, sixth round: as many as
+        the disk holds); the person deletes or exports them, with the full list (`llm-cli knowledge snapshots`)."""
         name = sanitize_filename(name or f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}") or "snapshot"
-        path = self.snapshot_dir / f"{name}.jsonl.gz"
+        path = self.snapshot_dir / f"{name}{SUFFIX}"
         try:
             count = self._with_store(lambda store: store.export_file(path) if store.count() else 0)
         except KnowledgeBaseError as e:
@@ -664,17 +665,23 @@ class RAGManager:
             return None
         if not count:
             return None
-        self._prune_snapshots(keep)
         self.logger.info(f"Knowledge base snapshot {name}: {count} chunks.")
         return name
 
     def _snapshot_files(self) -> List[Path]:
-        if not self.snapshot_dir.is_dir():
-            return []
-        return sorted(self.snapshot_dir.glob("*.jsonl.gz"), key=lambda p: p.stat().st_mtime)
+        return snapshot_files(self.snapshot_dir)
 
-    def _prune_snapshots(self, keep: Optional[Path] = None) -> None:
-        for old in self._snapshot_files()[:-MAX_SNAPSHOTS]:
+    def snapshot_listing(self):
+        """Every snapshot with its full path, size and time, oldest first (knowledge_snapshots.SnapshotFile)."""
+        return list_snapshots(self.snapshot_dir)
+
+    def _prune_snapshots(self, keep_newest: int, keep: Optional[Path] = None) -> None:
+        """Deletes the oldest snapshots beyond the newest `keep_newest`. Nothing in the framework calls it: there is no
+        limit of its own (DECISIONS, sixth round), and deleting snapshots waits for the person's confirmed cleanup
+        with the full list (the trash and the deletion dialog, design WP7), the only place that may call it, with
+        the choice the person made."""
+        files = self._snapshot_files()
+        for old in files[:max(0, len(files) - max(0, int(keep_newest)))]:
             if keep is not None and old == keep:
                 continue
             try:
@@ -706,7 +713,7 @@ class RAGManager:
             return False
         if current:
             name = backup or f"pre_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            self.last_backup = self.create_snapshot(name, keep=path)
+            self.last_backup = self.create_snapshot(name)
             if not self.last_backup:
                 self.last_restore_problem = "the backup of the current knowledge base could not be written"
                 self.logger.error(f"Snapshot {snapshot_name} not restored: {self.last_restore_problem}.")

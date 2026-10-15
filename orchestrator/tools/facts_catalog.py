@@ -157,9 +157,6 @@ WARNINGS: Dict[str, WarningSpec] = {
         "yes when the person asked for Deep Ingest"),
     "many_pages": WarningSpec(
         "situation", "Up to {max_pages} pages from {sites} sites.", "yes when the person named these sites"),
-    "snapshots_over_cap": WarningSpec(
-        "situation", "The knowledge base keeps {n} snapshots ({size_gb} GB); the person cleans them up.",
-        "yes (nothing is deleted)"),
     "device_runtime_replaced": WarningSpec(
         "situation", "Replaces the runtime on the board; the previous one stays as fallback.",
         "yes when the person asked for this board"),
@@ -292,7 +289,8 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
     "crawl_docs_site": ToolFacts(
         _FS({"ingest_notice_unread", "offline_mode", "knowledge_off", "url_not_public", "crawl_caps", "crawl_quota",
              "crawl_running"}),
-        _FS({"embedding_model_download", "many_pages", "snapshots_over_cap"}), _FS(), "knowledge",
+        # no warning counts knowledge snapshots: they have no limit and none is deleted by itself (sixth round)
+        _FS({"embedding_model_download", "many_pages"}), _FS(), "knowledge",
         "running: stop; done: restore the snapshot taken before (backup first)"),
     "restore_knowledge_snapshot": ToolFacts(_FS({"snapshot_unknown", "knowledge_off", "disk_full"}), _FS(), _FS(),
                                             "knowledge", "restore the backup snapshot"),
@@ -308,7 +306,9 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                                            "vendor_soft_cap_exceeded"}), "hardware",
                                       "move the module to the trash"),
     "propose_healing_fix": ToolFacts(delegable="builds"),
-    "resolve_healing": ToolFacts(_FS({"proposal_missing"}), delegable="builds", deletes=True,
+    # no healing strategy deletes anything: a full Docker disk (docker_prune) is a manual step that points to the
+    # person's list in 'llm-cli doctor --fix --tier 2' (framework_tools.DESTRUCTIVE_STRATEGIES is empty)
+    "resolve_healing": ToolFacts(_FS({"proposal_missing"}), delegable="builds",
                                  undo="config_adjustment: set the setting back"),
     "cancel_build": ToolFacts(delegable="own_work"),
     "cancel_job": ToolFacts(delegable="own_work"),

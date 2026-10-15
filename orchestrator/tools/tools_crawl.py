@@ -94,9 +94,10 @@ def _plan_facts(plan: CrawlPlan) -> CallFacts:
               Fact("Embedding model", "downloaded once (about a GB) if it is not on this computer yet")]
     bound = {"start_urls": list(plan.start_urls), "max_pages": plan.max_pages, "max_depth": plan.max_depth,
              "delay": plan.delay, "languages": list(plan.languages), "include_pdfs": plan.include_pdfs}
-    # A situation warning when the crawl may store many pages; the embedding model's first download and the
-    # snapshots above the cap are not warned about yet (whether the model is on this computer is not known before
-    # the crawl, and snapshots are still pruned by themselves until the person's cleanup exists).
+    # A situation warning when the crawl may store many pages; the embedding model's first download is not warned
+    # about yet (whether the model is on this computer is not known before the crawl). The snapshot taken first is
+    # never a warning of its own: snapshots have no limit, none is deleted by itself, and the person deletes or
+    # exports them with the full list (sixth round).
     warnings = ()
     if plan.max_pages * sites >= MANY_PAGES:
         warnings = (warn("many_pages", max_pages=plan.max_pages * sites, sites=sites),)

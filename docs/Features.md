@@ -205,11 +205,14 @@ built-in fixes itself:
 | Problem | What the framework does after your "yes" |
 |---|---|
 | Out of memory while compiling the image | Sets `build_jobs` to 1 and retries |
-| Disk full | Removes dangling framework images and the Docker build cache, then retries |
 | Network problem | Retries once |
 
-Everything else, including every AI suggestion, is shown as a manual step and never executed. A retry gets its own
-build ID (`<job>_r1`), and both logs are kept.
+Everything else, including every AI suggestion, is shown as a manual step and never executed. A full disk is such a
+manual step too, because the framework deletes nothing without your list (unreleased; before, a "yes" removed the
+framework's dangling images and cleared the whole Docker build cache, other projects' too): when Docker's disk is
+full, run `llm-cli doctor --fix --tier 2` in a terminal, which lists the framework's dangling build images and
+deletes only those you confirm, then start the build again. Docker's build cache is never cleared by the
+framework. A retry gets its own build ID (`<job>_r1`), and both logs are kept.
 
 **Proposals from AI clients.** An MCP client that does Ditto's job (prompt `diagnose_build_failure`) can hand its own
 analysis of a failed build to the framework with the tool `propose_healing_fix`: a summary (up to 300 characters),
@@ -620,8 +623,9 @@ what it is; the AI sees labels and sizes only. `delete_artifact` takes the id an
 it is refused for a folder outside the output folder (also through a link), while a build of any framework program
 writes into it or is queued for it, when the model file's sha256 changed since, and when the folder is no longer the
 one the question named. `restore_knowledge_snapshot` saves the current knowledge base as a snapshot
-`pre_restore_<time>` first and does not restore without that backup; the same backup rule now holds for every restore of a snapshot, and the
-snapshot being restored is never pruned by it.
+`pre_restore_<time>` first and does not restore without that backup; the same backup rule now holds for every restore of a snapshot, and no
+snapshot is deleted by it (the framework deletes no snapshot by itself, see [Knowledge base](#knowledge-base-rag)).
+It stays outside every standing approval and delegation until the trash and the framework's deletion dialog exist.
 
 How a question with tools runs:
 
@@ -1122,8 +1126,12 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   stay whole unless they are larger than the model's context ([Large code blocks and
   tables](#large-code-blocks-and-tables)).
 - **Snapshots:** before every crawl the knowledge base is saved as a snapshot in
-  `~/.llm-framework/knowledge_snapshots` (the newest 5 are kept). Restoring a snapshot is not available from the GUI
-  or the CLI yet.
+  `~/.llm-framework/knowledge_snapshots`. There is no limit (unreleased; before, only the newest 5 were kept, on
+  every channel): the framework keeps as many as the disk holds, deletes none by itself, and no number of them brings
+  a reminder or a warning. **Tools > Knowledge Snapshots...** in the GUI or `llm-cli knowledge snapshots` lists each
+  one with its full path, name, size and what it is; to free space you copy the ones to keep elsewhere (export) or
+  delete the ones you choose yourself. A trash and a deletion dialog in the framework follow. Restoring a snapshot is
+  not available from the GUI or the CLI yet.
 - **Search:** hybrid. Dense vectors find meaning, BM25 finds exact terms such as error codes and compiler flags; both
   rankings are fused with Reciprocal Rank Fusion. The same text from several sources is returned once. A
   cross-encoder can then rerank the results ([Reranking](#reranking)).
@@ -1774,16 +1782,16 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
 
 **What a question shows** (Ditto's GUI dialog and CLI prompt, an MCP client's form), in this order: the
 consequence in plain words, from what the framework looked up, with ids followed by their speaking names (for example
-"Deletes the Docker build cache and the dangling framework images on this computer, then retries build request
-req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); who asks (Ditto, or the
+"Sets the framework setting build_jobs to 1 (fewer parallel compile jobs for image builds), then retries build
+request req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); who asks (Ditto, or the
 MCP client with the name, version and transport it reports, and whose permissions apply: all local stdio clients or
 a named token); the facts the framework checked, where text from outside the framework (a build log, an AI's
 proposal) is labelled "not checked" and escaped; then every argument, complete, repaired values marked, and an id
 followed by its speaking name (a build request's model and target, a local file's `<label>:<relative path>`, a
 target's name). Some tools look facts up before the question (two-phase confirmation), and the call is then bound
 to exactly what you were shown: approving a self-healing proposal applies the proposal in the question, and one that
-changed meanwhile is refused with nothing applied; a destructive fix (`docker_prune`, which deletes the Docker build
-cache) is asked even when `resolve_healing` is allowed; a lookup that fails (no pending proposal) refuses the call
+changed meanwhile is refused with nothing applied; approving a manual step (a full Docker disk, `docker_prune`,
+included: no healing strategy deletes anything) is refused before anything is asked; a lookup that fails (no pending proposal) refuses the call
 before anything is asked; without the looked-up facts a decision on a proposal is not made at all. A 2026-07-28
 client that answers in a second round gets the facts of the question it answered. A round counts as an answer only
 to a question the framework asked that client and that is still open: an answer a client sends along with a new call
@@ -1861,7 +1869,8 @@ AI:
 - **Situation warnings** are worth weighing but not dangerous: the disk gets tight but there is enough, a large
   download, memory that is tight for the conversion or too small on the board, many pages for Deep Ingest, a
   hardware module nobody has tried on the board yet, the runtime on a board being replaced. Later, an AI you give a
-  delegation may decide these itself.
+  delegation may decide these itself. The number of knowledge snapshots is never a warning: they have no limit, and
+  none is deleted by itself.
 - **Security and legal warnings** are always yours: model files in an old format that can run hidden code (pickle),
   a build environment from outside Docker's checked collection or not fixed to one exact version, more vendor
   downloads than usual, an unreviewed or community hardware module, an untrusted model run directly on your
@@ -2058,11 +2067,19 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key); the chat feed can be written and its newest entries verify (changed or foreign entries, no key; unreleased) |
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
+| Knowledge | how many knowledge snapshots there are, their size and folder (no limit: their number is never a warning; nothing is deleted; unreleased) |
 | Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
 
-`--fix` applies the automatic fixes up to `--tier` (1: makes the personal folder private; 2: also removes dangling
-framework images and the Docker build cache) and checks again. Exit codes: 0 OK, 1 warnings, 2 errors; `--json`
-for scripts.
+`--fix` applies the automatic fixes up to `--tier` and checks again. Tier 1 makes the personal folder private. Tier 2
+deletes nothing by itself: it lists the framework's dangling build images (name, image id, size and what each is),
+and only your yes at a terminal deletes exactly that list (default no; without a terminal, and with `--json`, it
+only lists them). The Docker build cache is never cleared, because it cannot be limited to the framework: before,
+tier 2 cleared the whole build cache of the Docker daemon, other projects' too. Nothing an AI app or Ditto can call
+reaches this deletion. Exit codes: 0 OK, 1 warnings, 2 errors; `--json` for scripts.
+
+What an AI reads (`run_doctor`): the same findings, with the framework's folders named by label (`state:audit.db`,
+"the state folder", `targets:<pack>`) and any other path by its file name only, also in the message of a check that
+crashed; your own output (`llm-cli doctor`, also `--json`) keeps the full paths.
 
 ---
 
