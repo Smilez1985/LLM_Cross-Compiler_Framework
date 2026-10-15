@@ -191,9 +191,9 @@ def free_framework_images(parent: Optional[QWidget], framework, lang: Optional[s
     """Tools > Framework Build Images... (and the healing dialog's "Free Docker space..."): the one deletion path for
     the framework's Docker images, the same as 'llm-cli doctor --fix --tier 2'. Lists every framework build image
     (name, id, size, what it is) with nothing ticked and deletes exactly the ticked ones after the person's yes.
-    Returns what was deleted (doctor.ImageDeletion), or None."""
-    from orchestrator.Core.doctor import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
-                                          docker_storage, framework_image_plan)
+    Returns what was deleted (mojo.docker_objects.ImageDeletion), or None."""
+    from orchestrator.Core.mojo.docker_objects import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
+                                                       docker_storage, framework_image_plan)
     from orchestrator.gui.plain import plain_box
     lang = lang or current_language()
     title = ui_text("images.title", lang)

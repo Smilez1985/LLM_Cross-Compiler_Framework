@@ -3117,7 +3117,7 @@ def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
 
 def _doctor_image_listing(framework) -> dict:
     """Tier 2 for `--json`: the list only (nothing is deleted without the person's yes at a terminal)."""
-    from orchestrator.Core.doctor import DockerUnavailable, docker_storage, framework_image_plan
+    from orchestrator.Core.mojo.docker_objects import DockerUnavailable, docker_storage, framework_image_plan
     try:
         plan = framework_image_plan(framework)
     except DockerUnavailable as e:
@@ -3136,9 +3136,9 @@ def _doctor_free_space(framework) -> None:
     exactly the images the person picks and then confirms at a terminal (default no). Docker's build cache is never
     cleared: it cannot be limited to the framework. The same list and deletion as Tools > Framework Build Images...
     in the GUI: the one deletion path for the framework's Docker images."""
-    from orchestrator.Core.doctor import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
-                                          docker_storage, framework_image_plan)
     from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.mojo.docker_objects import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
+                                                       docker_storage, framework_image_plan)
     cache_note = ("Docker's build cache is not touched: it cannot be limited to the framework ('docker system df' "
                   "shows its size; 'docker builder prune' would clear it for every project on this computer).")
     console.print("\n[bold]Tier 2: the framework's build images[/bold]")

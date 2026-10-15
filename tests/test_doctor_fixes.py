@@ -16,6 +16,7 @@ import io
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -125,7 +126,10 @@ def test_the_doctor_never_prunes_docker():
     limited to the framework's own data, or to the list the person saw."""
     from orchestrator import cli
     import inspect
+    # the compatibility module and the Mojo package it re-exports (the Doctor's code moved there unchanged)
+    mojo = Path(doctor_module.__file__).parent / "mojo"
     sources = [Path(doctor_module.__file__).read_text(encoding="utf-8"),
+               *(p.read_text(encoding="utf-8") for p in sorted(mojo.rglob("*.py"))),
                inspect.getsource(cli.doctor.callback), inspect.getsource(cli._doctor_free_space),
                inspect.getsource(cli._doctor_image_listing)]
     for source in sources:
@@ -136,7 +140,7 @@ def test_fix_tier_2_deletes_nothing_by_itself_and_says_what_it_lists(tmp_path, m
     client = FakeClient(images())
     framework = fake_framework(client)
     framework.orchestrator = SimpleNamespace(build_engine=SimpleNamespace(cache_dir=tmp_path, output_dir=None))
-    monkeypatch.setattr(doctor_module.shutil, "disk_usage", lambda p: SimpleNamespace(free=1 * 1024 ** 3))
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: SimpleNamespace(free=1 * 1024 ** 3))
     report = Doctor(framework, [check_disk]).fix(tier_max=2)
     assert deletions(client) == [], "tier 2 is a listing; nothing is deleted without the person's yes"
     finding = next(f for f in report.findings if f.code == "disk.cache")
