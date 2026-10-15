@@ -133,7 +133,7 @@ class HealingConfirmDialog(QDialog):
     """
     AUTOMATIC = AUTOMATIC_STRATEGIES  # none of them deletes anything; a full Docker disk is a manual step
 
-    def __init__(self, proposal, parent=None):
+    def __init__(self, proposal, parent=None, free_docker_space=None):
         super().__init__(parent)
         self.proposal = proposal
         self.setWindowTitle("Self-Healing Proposal")
@@ -174,6 +174,14 @@ class HealingConfirmDialog(QDialog):
             buttons.addButton("Dismiss", QDialogButtonBox.RejectRole)
         else:
             buttons.addButton("Close", QDialogButtonBox.RejectRole)
+        # A full Docker disk: the one deletion path for the framework's images (the person ticks what goes).
+        self.btn_free_docker = None
+        if strategy == "docker_prune" and callable(free_docker_space):
+            from orchestrator.utils.localization import ui_text
+            self.btn_free_docker = buttons.addButton(ui_text("healing.free_docker").replace("&", "&&"),
+                                                     QDialogButtonBox.ActionRole)
+            self.btn_free_docker.setAutoDefault(False)
+            self.btn_free_docker.clicked.connect(lambda: free_docker_space())
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

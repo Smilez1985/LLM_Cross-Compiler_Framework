@@ -79,10 +79,13 @@ class TestDeleteArtifact:
         enable(env, "delete_artifact")
         folder, aid, digest = make_artifact(env)
         out, shown = ask(env, "delete_artifact", {"artifact_id": aid, "expect_sha256": digest})
-        assert out.deleted and out.freed_bytes >= 1334 and not folder.exists()
-        assert not (folder.parent / "Q4_K_M.zip").exists(), "its golden ZIP goes too"
+        # An AI's request moves the built model to the trash (the person restores it or empties the trash).
+        assert out.deleted and out.moved_to_trash and len(out.trash_ids) == 2 and out.freed_bytes == 0
+        assert not folder.exists() and not (folder.parent / "Q4_K_M.zip").exists(), "its golden ZIP goes too"
+        trash = Path(env.framework.config.values["output_dir"]).resolve() / ".trash"
+        assert sorted(p.name for p in trash.glob("tr_*/*")) == ["Q4_K_M", "Q4_K_M.zip"], "in the output folder's trash"
         text = shown[0]
-        assert "output:Rockchip/my-model/Q4_K_M" in text and digest in text and "cannot be undone" in text
+        assert "output:Rockchip/my-model/Q4_K_M" in text and digest in text and "to the trash" in text
         # Round 5 f: Ditto's dialog is the framework's own window, so the person sees each item's full path there
         # (what an AI can read never holds it: test_the_delete_question_lists_full_path_name_size_and_kind_...).
         assert str(folder.resolve()) in text
@@ -107,7 +110,7 @@ class TestDeleteArtifact:
         assert [(i.kind, i.full_path, i.file_name) for i in plan.items] == [
             ("artifact", str(folder), "Q4_K_M"), ("artifact", str(zip_path), "Q4_K_M.zip")]
         assert [i.size_bytes for i in plan.items] == [1234 + len((folder / "build_info.json").read_bytes()), 100]
-        assert plan.total_bytes == sum(i.size_bytes for i in plan.items) and plan.mode_offered == ("permanent",)
+        assert plan.total_bytes == sum(i.size_bytes for i in plan.items) and plan.mode_offered == ("trash",)
         assert all(i.speaking_name.startswith("output:Rockchip/my-model/Q4_K_M") and i.what for i in plan.items)
         assert str(env.tmp) not in json.dumps(plan.ai_view())
 
@@ -115,7 +118,7 @@ class TestDeleteArtifact:
         for item in plan.items:
             assert f"    {item.full_path}" in person and f"{item.file_name}, {item.size_bytes} bytes" in person
         ai_side = env.registry.question_text(spec, args, ToolContext("mcp"), facts, MAX_ELICITATION)
-        assert "Would be deleted:" in ai_side and str(env.tmp) not in ai_side
+        assert "Would be moved to the trash" in ai_side and str(env.tmp) not in ai_side
 
         # An MCP client: a pending approval the person decides in the framework; the client learns no path.
         env.registry.attach_approvals(ApprovalService(ApprovalStore(env.tmp / "approvals"), JobService(), poll=3600.0))

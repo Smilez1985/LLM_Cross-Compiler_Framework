@@ -357,7 +357,7 @@ holst du in der GUI mit **Scan / Import... > Import from File (USB/Disk)...** in
 ```bash
 llm-cli --version
 llm-cli doctor                 # Gesundheitscheck; Exit-Code 0 = OK, 1 = Warnungen, 2 = Fehler
-llm-cli doctor --fix           # harmlose automatische Korrekturen (macht den persönlichen Ordner privat); --tier 2 listet auch die verwaisten Framework-Images und löscht nur die, die du bestätigst
+llm-cli doctor --fix           # harmlose automatische Korrekturen (macht den persönlichen Ordner privat); --tier 2 listet auch die Build-Images des Frameworks und löscht nur die, die du auswählst und bestätigst
 llm-cli targets list           # verfügbare Targets mit Boards und Formaten; der Wert für --target ist die ID (Rockchip)
 ```
 

@@ -15,6 +15,10 @@ reservation of a process that has ended is dropped. The check runs again when a 
 
 The hardware estimate (can this computer convert it, can the board run it) is shown in the question and in
 check_build_request; it is never a refusal by itself. Every number here is an estimate and labelled as one.
+
+What lies in the trash (orchestrator/Core/trash.py) is never counted as free: it still uses its disk until the person
+empties the trash. A check says how much of a disk the trash holds, and a refusal names the trash when emptying it
+would make the call fit.
 """
 
 import json
@@ -107,6 +111,7 @@ class DiskCheck:
     reserved_by_others: int
     device: str
     what: List[str] = field(default_factory=list)
+    trash_bytes: int = 0      # in the trash on this disk: used, never counted as free
 
     @property
     def after(self) -> int:
@@ -127,8 +132,13 @@ class DiskCheck:
         others = f", {gb(self.reserved_by_others)} reserved by other calls" if self.reserved_by_others else ""
         verdict = {"enough": "enough", "tight": "enough, but tight",
                    "does_not_fit": "not enough"}[self.verdict]
-        return (f"needs about {gb(self.needed)} on the {where} disk (estimate); {gb(self.free)} free{others}, "
+        trash = f" ({gb(self.trash_bytes)} more after emptying the trash)" if self.trash_bytes else ""
+        return (f"needs about {gb(self.needed)} on the {where} disk (estimate); {gb(self.free)} free{trash}{others}, "
                 f"{gb(self.reserve)} kept free: {verdict}")
+
+    @property
+    def fits_after_emptying_the_trash(self) -> bool:
+        return not self.fits and self.trash_bytes > 0 and self.after + self.trash_bytes >= self.reserve
 
 
 def build_needs(download: int, fmt: str, quantization: Optional[str], cache_dir: Path, output_dir: Path,
@@ -181,6 +191,9 @@ def check_disk(needs: Iterable[DiskNeed], ledger: Optional["ReservationLedger"] 
                 free, total = 0, 0
             others = ledger.outstanding(device, exclude=exclude) if ledger is not None else 0
             check = groups[device] = DiskCheck([], 0, free, total, reserve_for(total, standing), others, device)
+            if ledger is not None:
+                from orchestrator.Core.trash import trash_bytes_by_device
+                check.trash_bytes = trash_bytes_by_device(ledger.state_dir).get(device, 0)
         if need.label not in check.labels:
             check.labels.append(need.label)
         check.needed += need.bytes
@@ -195,6 +208,12 @@ def require(checks: List[DiskCheck]) -> None:
         detail = "; ".join(f"{' and '.join(c.labels)} disk: {gb(c.needed)} needed (estimate), {gb(c.free)} free"
                            + (f", {gb(c.reserved_by_others)} reserved by other calls" if c.reserved_by_others else "")
                            + f", {gb(c.reserve)} must stay free" for c in short)
+        trash = [c for c in short if c.trash_bytes]
+        if trash:
+            fits = all(c.fits_after_emptying_the_trash for c in short)
+            detail += (f". The trash holds {gb(sum(c.trash_bytes for c in trash))} there"
+                       + (": emptying it would make room" if fits else "")
+                       + " (only the person empties it: File > Trash... or 'llm-cli trash empty')")
         raise InsufficientSpace(f"Not enough disk space for this build: {detail}.", checks)
 
 

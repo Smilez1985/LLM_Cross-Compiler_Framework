@@ -191,6 +191,48 @@ class FakeBuildx:
         self.done.set()
 
 
+class _FakeImage:
+    def __init__(self, store, image_id):
+        self.store, self.id = store, image_id
+
+    @property
+    def tags(self):
+        return sorted(name for name, image_id in self.store.names.items() if image_id == self.id)
+
+    def tag(self, repository, tag=None):
+        self.store.names[f"{repository}:{tag}"] = self.id
+        return True
+
+
+class FakeImageStore:
+    """Docker's image names as the builder sees them. Removing a name that is an image's last one would delete the
+    image, and the builder never deletes an image (round 7 item 12): the fake fails then, and on any prune."""
+
+    def __init__(self, events):
+        self.events = events
+        self.names = {}          # name -> image id
+        self.removed = []
+        self.on_remove = None    # called when a name is removed (the build's final cleanup)
+
+    def get(self, ref):
+        if ref not in self.names:
+            if ref.endswith(":last-build"):
+                raise RuntimeError(f"No such image: {ref}")
+            self.names[ref] = f"sha256:{ref}"   # the image the build made
+        return _FakeImage(self, self.names[ref])
+
+    def remove(self, image=None, force=False, noprune=False, **kwargs):
+        image_id = self.names.pop(image)
+        assert image_id in self.names.values(), "the builder removed an image's last name: that deletes the image"
+        self.events.append((image, "image-remove"))
+        self.removed.append(image)
+        if self.on_remove is not None:
+            self.on_remove(image)
+
+    def prune(self, *args, **kwargs):
+        raise AssertionError("the builder never prunes images")
+
+
 class FakeDockerClient:
     MODEL_FILE = "SmolLM2-Q4_K_M.gguf"
 
@@ -205,9 +247,7 @@ class FakeDockerClient:
         self.on_scan_run = None  # called while containers.run is still in flight
         self.buildx_factory = FakeBuildx
         self.containers = SimpleNamespace(run=self._run, create=self._create)
-        self.images = SimpleNamespace(get=lambda tag: SimpleNamespace(id=f"sha256:{tag}", tags=[tag]),
-                                      remove=lambda tag, **kw: self.events.append((tag, "image-remove")),
-                                      prune=lambda filters=None: None)
+        self.images = FakeImageStore(self.events)
 
     def ping(self):
         return True
@@ -785,7 +825,7 @@ class TestCancelIsNeverUndone:
 
     def test_a_cancel_during_the_final_cleanup_is_refused_or_complete(self, engine, client, tmp_path):
         answers = []
-        client.images.prune = lambda filters=None: answers.append(engine.cancel_build("b1"))
+        client.images.on_remove = lambda name: answers.append(engine.cancel_build("b1"))
         engine.build_model(config_for(tmp_path))
         progress = finish(engine, "b1")
         listed = bool(list_builds(tmp_path / "out"))
@@ -795,7 +835,7 @@ class TestCancelIsNeverUndone:
     def test_a_cancel_during_the_cleanup_after_a_failure_is_consistent(self, engine, client, tmp_path):
         client.stage_options["llm-build-"] = dict(exit_code=1, lines=["Killed"])
         answers = []
-        client.images.prune = lambda filters=None: answers.append(engine.cancel_build("b1"))
+        client.images.on_remove = lambda name: answers.append(engine.cancel_build("b1"))
         engine.build_model(config_for(tmp_path))
         progress = finish(engine, "b1")
         assert answers and (answers[0], progress.status) in [(False, BuildStatus.FAILED),
@@ -1079,7 +1119,7 @@ class TestConcurrencySlots:
         so the orchestrator does not submit its next job into a slot that is still taken."""
         client.stage_options["llm-build-"] = dict(exit_code=1, lines=["Killed"])
         seen = []
-        client.images.prune = lambda filters=None: seen.append((engine.get_build_status("b1").status,
+        client.images.on_remove = lambda name: seen.append((engine.get_build_status("b1").status,
                                                                 "b1" in engine._running))
         engine.build_model(config_for(tmp_path))
         assert finish(engine, "b1").status == BuildStatus.FAILED
@@ -1344,11 +1384,11 @@ class TestOrchestratorCancel:
         orch = LLMOrchestrator(engine.config, build_engine=engine)
         in_cleanup, release = threading.Event(), threading.Event()
 
-        def slow_prune(filters=None):  # removing the build's image layers can take a while
+        def slow_cleanup(name=None):  # the final cleanup can take a while
             in_cleanup.set()
             release.wait(SAFETY)
 
-        client.images.prune = slow_prune
+        client.images.on_remove = slow_cleanup
 
         async def scenario():
             rid = await orch.submit_build_request(make_request(tmp_path))

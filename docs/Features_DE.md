@@ -30,6 +30,7 @@ Zurück zur [README](../README_DE.md) · Alle Befehle: [CLI_Usage_DE.md](CLI_Usa
 - [Tool-Berechtigungen und Audit-Log](#tool-berechtigungen-und-audit-log)
 - [Geheimnisse und persönlicher Zustand](#geheimnisse-und-persönlicher-zustand)
 - [Eingabeverlauf](#eingabeverlauf)
+- [Löschen und der Papierkorb](#löschen-und-der-papierkorb)
 - [Hardware-Probe und neue Targets](#hardware-probe-und-neue-targets)
 - [Gesundheitscheck (doctor)](#gesundheitscheck-doctor)
 - [Community-Zoo](#community-zoo)
@@ -220,9 +221,10 @@ das Framework nur feste, eingebaute Korrekturen an:
 Alles andere, auch jeder KI-Vorschlag, wird als manueller Schritt angezeigt und nie ausgeführt. Eine volle Platte ist
 ebenfalls ein solcher manueller Schritt, weil das Framework nichts ohne deine Liste löscht (unveröffentlicht; bisher
 entfernte ein „Ja“ die verwaisten Images des Frameworks und leerte den ganzen Docker-Build-Cache, auch den anderer
-Projekte): Ist Dockers Platte voll, führst du `llm-cli doctor --fix --tier 2` im Terminal aus, das die verwaisten
-Build-Images des Frameworks listet und nur die löscht, die du bestätigst, und startest den Build dann neu. Den
-Docker-Build-Cache leert das Framework nie. Ein erneuter Versuch bekommt eine eigene Build-ID (`<job>_r1`), und beide
+Projekte): Ist Dockers Platte voll, listet die Schaltfläche **Free Docker space...** im Dialog (auch **Tools >
+Framework Build Images...**) oder `llm-cli doctor --fix --tier 2` im Terminal die Build-Images des Frameworks mit
+Name, ID, Größe und was jedes ist; nichts ist angehakt, und nur die, die du anhakst und bestätigst, werden gelöscht.
+Danach startest du den Build neu. Den Docker-Build-Cache leert das Framework nie. Ein erneuter Versuch bekommt eine eigene Build-ID (`<job>_r1`), und beide
 Logs bleiben erhalten.
 
 **Vorschläge von KI-Clients.** Ein MCP-Client, der Dittos Aufgabe übernimmt (Prompt `diagnose_build_failure`), kann
@@ -662,7 +664,8 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `start_local_runtime` / `stop_local_runtime` | lokal schreiben | Optional, verborgen bis zur Freigabe: Dittos lokalen Server starten (ein Job) oder stoppen; nie seine Adresse oder sein Schlüssel |
 | `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf einem Katalogmodell oder einem gebauten GGUF-Modell; ein nicht vertrauenswürdiges Modell nativ nur nach Zustimmung im Framework, oder in der Sandbox |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
-| `delete_artifact` | extern, optional | Ein gebautes Modell löschen (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP); verborgen, bis du es freigibst, immer mit Frage |
+| `delete_artifact` | extern, optional | Ein gebautes Modell (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP) in den Papierkorb verschieben; verborgen, bis du es freigibst, immer mit Frage |
+| `list_trash` / `restore_from_trash` | lesen / lokal schreiben, optional | Den Papierkorb mit Name, Art und Größe sehen; wiederherstellen, was diese KI selbst löschen wollte (immer mit Frage); verborgen, bis du sie freigibst. Kein Tool leert den Papierkorb |
 | `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |
 
 `delete_artifact` und `restore_knowledge_snapshot` zerstören etwas, darum sind sie standardmäßig verboten und werden nicht angeboten, bis
@@ -671,15 +674,17 @@ Aufruf wird erfragt, und sie bekommen nie einen Dauerauftrag. Über ein Löschen
 Fenster des Frameworks: Dittos Dialog oder Eingabeaufforderung, bei einem MCP-Client eine wartende Freigabe in der GUI
 oder in `llm-cli tools approvals`; das Formular des Clients wird dafür nie benutzt. Die Frage dort nennt jedes Teil
 (den Modellordner und sein Golden-ZIP) mit vollem Pfad, Dateinamen, Größe und was es ist; die KI sieht nur
-Bezeichnungen und Größen. `delete_artifact` nimmt die ID und das sha256, das `list_artifacts` zeigt; abgelehnt wird
+Bezeichnungen und Größen. Das Modell kommt in den Papierkorb, wo du es wiederherstellen kannst (siehe [Löschen und
+der Papierkorb](#löschen-und-der-papierkorb)). `delete_artifact` nimmt die ID und das sha256, das `list_artifacts`
+zeigt; abgelehnt wird
 ein Ordner außerhalb des Ausgabeordners (auch über einen Link), solange ein Build irgendeines Programms des Frameworks
 hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256 der Modelldatei seither geändert hat und
 wenn der Ordner nicht mehr der ist, den die Frage nannte.
 `restore_knowledge_snapshot` sichert die aktuelle Wissensbasis zuerst als Snapshot `pre_restore_<Zeit>` und stellt
 ohne diese Sicherung nichts wieder her; dieselbe Regel gilt jetzt für jede Wiederherstellung eines Snapshots, und
 dabei wird kein Snapshot gelöscht (das Framework löscht keinen Snapshot von selbst, siehe
-[Wissensbasis](#wissensbasis-rag)). Es bleibt außerhalb jeder Dauerfreigabe und Vollmacht, bis es den Papierkorb und
-den Lösch-Dialog des Frameworks gibt.
+[Wissensbasis](#wissensbasis-rag)). Es bleibt außerhalb jeder Dauerfreigabe; ob eine Vollmacht es abdecken darf,
+wird mit den Vollmachten entschieden.
 
 So läuft eine Frage mit Tools ab:
 
@@ -1233,9 +1238,11 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   `~/.llm-framework/knowledge_snapshots` gesichert. Es gibt keine Grenze (unveröffentlicht; bisher blieben auf jedem
   Weg nur die neuesten 5): Das Framework behält so viele, wie die Platte fasst, löscht keinen von selbst, und keine
   Anzahl bringt eine Erinnerung oder eine Warnung. **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli
-  knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe und was er ist; um Platz zu schaffen, kopierst du
-  die, die du behalten willst, woandershin (Export) oder löschst die, die du auswählst, selbst. Ein Papierkorb und ein
-  Lösch-Dialog im Framework folgen. Einen Schnappschuss wiederherstellen kann man über GUI oder CLI noch nicht.
+  knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe und was er ist, nichts angehakt. Um Platz zu
+  schaffen, hakst du die an, die gelöscht werden sollen (sie kommen zuerst in den Papierkorb; `llm-cli knowledge
+  snapshots prune` oder `delete NAME...`), oder kopierst sie woandershin (Export; `llm-cli knowledge snapshots export
+  NAME... --to ORDNER`, jede Kopie per sha256 geprüft). Siehe [Löschen und der Papierkorb](#löschen-und-der-papierkorb).
+  Einen Schnappschuss wiederherstellen kann man über GUI oder CLI noch nicht.
 - **Suche:** hybrid. Dichte Vektoren finden die Bedeutung, BM25 findet exakte Begriffe wie Fehlercodes und
   Compiler-Flags; beide Ranglisten werden mit Reciprocal Rank Fusion verbunden. Derselbe Text aus mehreren Quellen
   kommt nur einmal. Danach kann ein Cross-Encoder die Ergebnisse neu bewerten ([Reranking](#reranking)).
@@ -2167,6 +2174,42 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 
 ---
 
+## Löschen und der Papierkorb
+
+Nichts, was das Framework für dich löscht, wird ohne deine Frage gelöscht (unveröffentlicht). Die Frage zählt genau
+auf, was weggeht: zu jedem Teil den Namen, den vollen Pfad (bei einem Image die Docker-ID), den Dateinamen, die Größe
+und was es ist. „Nein“ ist die Vorgabe. Eine KI-App oder Ditto sieht nie die Pfade, nur Namen, Arten und Größen, und
+entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauerfreigabe oder eine Vollmacht.
+
+- **Mehrfachauswahl.** Wo du aus einer Liste wählst (Wissens-Snapshots, Papierkorb, Build-Images des Frameworks), ist
+  nichts angehakt. Das Framework baut die Liste aus genau den angehakten Teilen neu; die Schaltfläche nennt Anzahl und
+  Größe. Hat sich eines davon geändert, während du die Liste gelesen hast, wird nichts gelöscht, und du siehst die
+  neue Liste.
+- **Der Papierkorb.** Ein Löschen verschiebt Dateien und Ordner zunächst in den Papierkorb: `.trash` im Datenordner,
+  in dem sie liegen (der Ausgabeordner für gebaute Modelle, der persönliche Ordner für Snapshots). Du kannst sie
+  wiederherstellen; ihr Platz bleibt belegt, bis du den Papierkorb leerst. Ein Verschieben auf eine andere Platte wird
+  abgelehnt, nie kopiert. Wähle „Endgültig löschen“, um den Platz sofort freizugeben.
+- **Nichts verlässt den Papierkorb von selbst.** Nach `trash_retention_days` (Vorgabe 14; eine KI kann es nicht
+  ändern) erinnert der Papierkorb nur. **File > Trash...** in der GUI und `llm-cli trash` zeigen jeden Eintrag mit
+  Art, Größe, Zeitpunkt, wer ihn angefordert hat und woher er kam. Dort stellst du Einträge wieder her oder löschst
+  die angehakten endgültig. Kein Tool leert den Papierkorb.
+- **KI-Apps.** `delete_artifact` verschiebt ein gebautes Modell nach deinem Ja im eigenen Fenster des Frameworks in
+  den Papierkorb. Die optionalen Tools `list_trash` und `restore_from_trash` (verborgen, bis du sie freigibst) zeigen
+  einer KI den Papierkorb mit Namen und stellen nur wieder her, was sie selbst löschen wollte; was du gelöscht hast,
+  stellst du wieder her.
+- **Keine KI erreicht die Papierkorb-Ordner.** Sie sind Ordner, die keine KI lesen oder einbinden darf, auch nicht
+  über einen Link, und die Listen gebauter Modelle überspringen sie.
+- **Das Audit-Log** hält jedes Löschen, Leeren und Wiederherstellen mit dem Hash der Liste fest, die du bestätigt hast
+  (`deletion_sha256`), bevor etwas gelöscht wird; ohne Audit-Log wird nichts gelöscht.
+- **Wissens-Snapshots** lassen sich auch exportieren: in einen Ordner deiner Wahl kopieren (auf diesem Computer, auf
+  einen USB-Stick oder eine Netzwerkfreigabe). Jede Kopie wird per sha256 mit dem Original verglichen; ein Export
+  löscht nie einen Snapshot.
+- **Die Docker-Images des Frameworks** löscht das Framework nie von selbst. Der Builder behält das neueste Image jedes
+  Targets als `llm-framework/<Target>:last-build` und entfernt nur den Namen des einzelnen Builds; ältere Images
+  bleiben ohne Namen. **Tools > Framework Build Images...** in der GUI und `llm-cli doctor --fix --tier 2` listen
+  jedes Image des Frameworks (Name, ID, Größe, was es ist) und löschen nur die angehakten. Nur auf diesem Weg löscht
+  das Framework Docker-Images.
+
 ## Hardware-Probe und neue Targets
 
 - **Probe:** Eine Hardware-Probe in drei Umsetzungen schreibt dieselbe Datei, `target_hardware_config.txt`
@@ -2269,7 +2312,7 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 | Bereich | Prüfungen |
 |---|---|
 | Python | unterstützte Version (3.11 bis 3.14) |
-| Docker | Daemon erreichbar, buildx vorhanden |
+| Docker | Daemon erreichbar, buildx vorhanden; wo Docker seine Images ablegt (`DockerRootDir`, mit dem freien Platz dieser Platte) und wie viel die Build-Images des Frameworks belegen (Information) |
 | Speicherplatz | freier Platz für den Cache- und den Ausgabeordner (Warnung unter 20 GB, Fehler unter 5 GB) |
 | Targets | Targets gefunden, Capabilities lesbar |
 | Sicherheit | persönlicher Ordner privat, Secrets-Speicher nutzbar, Schlüsselbund schützt Geheimnisse |
@@ -2280,12 +2323,16 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 | Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
 
 `--fix` wendet die automatischen Korrekturen bis `--tier` an und prüft danach erneut. Stufe 1 macht den
-persönlichen Ordner privat. Stufe 2 löscht nichts von selbst: Sie listet die verwaisten Build-Images des Frameworks
-(Name, Image-ID, Größe und was jedes ist), und nur dein Ja im Terminal löscht genau diese Liste (Vorgabe Nein; ohne
-Terminal und mit `--json` listet sie sie nur). Der Docker-Build-Cache wird nie geleert, weil er sich nicht auf das
+persönlichen Ordner privat. Stufe 2 löscht nichts von selbst: Sie listet jedes Build-Image des Frameworks (die ohne
+Namen aus früheren Builds, die benannten Images `llm-framework/<Target>:last-build` und die Builder-Images der
+Laufzeit; Name, Image-ID, Größe und was jedes ist), nichts angehakt. Du gibst die Nummern der zu löschenden ein und
+bestätigst dann genau diese im Terminal (Vorgabe Nein; ohne Terminal und mit `--json` listet sie sie nur). **Tools >
+Framework Build Images...** in der GUI ist dieselbe Liste. Der Docker-Build-Cache wird nie geleert, weil er sich nicht auf das
 Framework beschränken lässt: Bisher leerte Stufe 2 den ganzen Build-Cache des Docker-Daemons, auch den anderer
-Projekte. Nichts, was eine KI-App oder Ditto aufrufen kann, erreicht dieses Löschen. Exit-Codes: 0 OK, 1 Warnungen,
-2 Fehler; `--json` für Skripte.
+Projekte. Nichts, was eine KI-App oder Ditto aufrufen kann, erreicht dieses Löschen. Den Speicherort der Docker-Images
+auf eine andere Platte zu verlegen ist ein Schritt für Administratoren (siehe
+[Container-Einrichtung](Container_Setup_DE.md#10-wo-docker-images-ablegt)); der Doctor zeigt nur, wo er liegt.
+Exit-Codes: 0 OK, 1 Warnungen, 2 Fehler; `--json` für Skripte.
 
 Was eine KI liest (`run_doctor`): dieselben Befunde, mit den Ordnern des Frameworks unter ihrer Bezeichnung
 (`state:audit.db`, "the state folder", `targets:<Pack>`) und jedem anderen Pfad nur mit seinem Dateinamen, auch in

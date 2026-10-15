@@ -6,10 +6,13 @@ Deterministic health checks, like `flutter doctor` (the idea comes from "Mojo" i
 every check returns findings with a stable code and a fix hint; nothing asks a model what is wrong.
 Fixes are tiered and run only when the user asks for that tier. Tier 1 is harmless (make the personal folder
 private) and runs by itself; after fixing, everything is checked again, and a finding that is still there is
-reported as not fixable automatically. Tier 2 deletes nothing by itself: it lists the framework's dangling build
-images (name or id, size, what each is), and the person's command line deletes exactly that list after the person
-confirmed it (round 5 f), never over MCP and never under a delegation. Docker's build cache is never cleared: it
-cannot be limited to the framework, so clearing it would delete other projects' cache too.
+reported as not fixable automatically. Tier 2 deletes nothing by itself: it lists the framework's build images
+(name, id, size, what each is; nothing ticked), and the person's command line or the GUI's deletion dialog deletes
+exactly the images the person ticked and confirmed (round 5 f, round 6 10.4), never over MCP and never under a
+delegation. It is the one deletion path for the framework's Docker images (the self-healing proposal for a full
+Docker disk points to it). Docker's build cache is never cleared: it cannot be limited to the framework, so clearing
+it would delete other projects' cache too. The doctor also says where Docker keeps its images (DockerRootDir) and how
+much the framework's images use; it never changes a setting of the Docker daemon.
 
 What an AI reads of the findings (`ai_findings`, used by the run_doctor tool) names the framework's folders by
 label and any other path by its file name only; the person's own output keeps the full paths.
@@ -24,7 +27,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 class Severity(str, Enum):
@@ -92,7 +95,26 @@ def check_docker(framework) -> List[Finding]:
                                         "Install the Docker buildx plugin."))
         except (OSError, subprocess.SubprocessError):
             pass
+    findings.extend(_storage_findings(framework))
     return findings
+
+
+def _storage_findings(framework) -> List[Finding]:
+    """Where Docker keeps its images and how much the framework's images use (round 7 item 12): for the person's
+    overview; moving Docker's data folder is an administrator's step the framework never takes."""
+    storage = docker_storage(framework)
+    if not storage or not storage.get("root"):
+        return []
+    from orchestrator.Core.deletion import size_text
+    free = storage.get("free_bytes")
+    where = storage["root"] + (f" ({size_text(free)} free on that disk)" if isinstance(free, int) else "")
+    return [Finding("docker", "docker.storage", Severity.INFO,
+                    f"Docker keeps its images in {where}; the framework's {storage['images']} build images use about "
+                    f"{size_text(storage['image_bytes'])} (layers shared between images are counted for each). "
+                    "The framework never deletes an image by itself.",
+                    "Tools > Framework Build Images... or 'llm-cli doctor --fix --tier 2' lists them for you to "
+                    "delete the ones you choose. To keep Docker's images on another disk, an administrator moves "
+                    "Docker's data folder (see docs/Container_Setup.md); the framework does not change it.")]
 
 
 def check_disk(framework) -> List[Finding]:
@@ -131,22 +153,23 @@ def check_disk(framework) -> List[Finding]:
 
 
 # What `doctor --fix --tier 2` does, as every disk finding says it.
-FREE_SPACE_HINT = ("'llm-cli doctor --fix --tier 2' lists the framework's dangling build images (name or id, size "
-                   "and what each is) and deletes exactly those you then confirm in a terminal. Docker's build cache "
-                   "is not touched: it cannot be limited to the framework.")
+FREE_SPACE_HINT = ("'llm-cli doctor --fix --tier 2' (in a terminal) or Tools > Framework Build Images... in the GUI "
+                   "lists the framework's build images (those left over from earlier builds and the named ones, each "
+                   "with name, id, size and what it is) and deletes exactly those you tick and confirm; nothing is "
+                   "ticked by default. Docker's build cache is not touched: it cannot be limited to the framework.")
 
 
-# --- tier 2: the framework's dangling build images, deleted only as the person confirmed them ----------------------
+# --- tier 2: the framework's build images, deleted only as the person ticked and confirmed them ---------------------
 
 class DockerUnavailable(RuntimeError):
     """No Docker client, or the daemon did not answer: nothing can be listed or deleted."""
 
 
 class ImagePlanChanged(RuntimeError):
-    """The framework's dangling images changed since the person saw the list: nothing was deleted."""
+    """The framework's images changed since the person saw the list: nothing was deleted."""
 
     def __init__(self):
-        super().__init__("The framework's dangling images changed since the list was shown; nothing was deleted. "
+        super().__init__("The framework's build images changed since the list was shown; nothing was deleted. "
                          "Look at the new list and confirm it.")
 
 
@@ -161,93 +184,157 @@ class ImageDeletion:
 
 _TARGET_WORD = re.compile(r"^[\w.+-]{1,64}$")
 _IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+# A name the framework gives its images (llm-framework/<target>:<build id or last-build>, llm-framework/llama-builder:
+# <base>-<hash>); an image another program named is never listed.
+_FRAMEWORK_TAG = re.compile(r"^llm-framework/[a-z0-9][a-z0-9._-]{0,63}:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 
 
 def _docker_client(framework):
     return framework.get_component("docker_client") if hasattr(framework, "get_component") else None
 
 
-def framework_image_plan(framework):
-    """The dry run of tier 2: the framework's dangling build images - labelled by the framework's builder
-    (builder.IMAGE_LABEL) and without a name - as a deletion plan for the person, each with its name (the short id),
-    the full image id, its size and what it is. Docker's build cache is never part of it. Returns None when there is
-    nothing to delete; DockerUnavailable without a reachable Docker daemon. Reads only."""
+def _framework_labels() -> Tuple[str, str]:
     from orchestrator.Core.builder import IMAGE_LABEL
-    from orchestrator.tools.spec import DeletionItem, DeletionPlan
+    from orchestrator.runtime.build.executor import BUILDER_LABEL
+    return IMAGE_LABEL, BUILDER_LABEL
+
+
+def _image_item(image):
+    """The deletion item of one image, or None when it is not the framework's: it carries the framework's label and
+    either no name or only names the framework gives. Name (speaking), full id, size, and what it is."""
+    from orchestrator.tools.spec import DeletionItem
+    target_label, builder_label = _framework_labels()
+    labels = getattr(image, "labels", None) or {}
+    image_id = str(getattr(image, "id", "") or "")
+    tags = sorted(str(t) for t in (getattr(image, "tags", None) or []))
+    if not _IMAGE_ID.match(image_id) or (target_label not in labels and builder_label not in labels):
+        return None
+    if any(not _FRAMEWORK_TAG.match(t) for t in tags):
+        return None   # another program named it: never listed
+    attrs = getattr(image, "attrs", None) or {}
+    created = str(attrs.get("Created") or "")[:10]
+    built = f" (built {created})" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", created) else ""
+    try:
+        size = max(0, int(attrs.get("Size") or 0))
+    except (TypeError, ValueError):
+        size = 0
+    short = image_id[7:19]
+    if target_label in labels:
+        target = str(labels.get(target_label) or "")
+        target = target if _TARGET_WORD.match(target) else "an unknown target"
+        if not tags:
+            name = f"Framework build image {short} ({target})"
+            what = (f"unused build image of the framework for {target}, without a name{built}; left over from an "
+                    "earlier build")
+        else:
+            name = f"Framework build image {', '.join(tags)}"
+            what = (f"build image of the framework for {target}{built}; the next build for {target} reuses it and "
+                    "is faster while it is kept")
+    else:
+        name = f"Runtime builder image {', '.join(tags) or short}"
+        what = (f"image that compiles the llama.cpp runtime (Ditto's server, board runtimes){built}"
+                + ("; the next runtime build reuses it" if tags else "; without a name, left over from an earlier "
+                                                                     "runtime build"))
+    return DeletionItem(kind="docker_image", speaking_name=name[:300], file_name=image_id, size_bytes=size,
+                        what=what[:300])
+
+
+def framework_images(framework) -> List[Any]:
+    """The framework's own images (target build images and runtime builder images) as Docker lists them now.
+    DockerUnavailable without a reachable Docker daemon. Reads only."""
     client = _docker_client(framework)
     if client is None:
         raise DockerUnavailable("Docker is not available, so no framework images can be listed.")
+    found: Dict[str, Any] = {}
     try:
-        images = list(client.images.list(filters={"dangling": True, "label": IMAGE_LABEL}))
+        for label in _framework_labels():
+            for image in client.images.list(filters={"label": label}):
+                found.setdefault(str(getattr(image, "id", "")), image)
     except Exception:  # noqa: BLE001 - the daemon's own words stay out (they can name a socket path)
         raise DockerUnavailable("The Docker daemon did not answer, so no framework images can be listed.") from None
-    items = []
-    for image in images:
-        labels = getattr(image, "labels", None) or {}
-        image_id = str(getattr(image, "id", "") or "")
-        if IMAGE_LABEL not in labels or getattr(image, "tags", None) or not _IMAGE_ID.match(image_id):
-            continue  # only what the framework built and nobody named: never another project's image
-        attrs = getattr(image, "attrs", None) or {}
-        target = str(labels.get(IMAGE_LABEL) or "")
-        target = target if _TARGET_WORD.match(target) else "an unknown target"
-        created = str(attrs.get("Created") or "")[:10]
-        try:
-            size = max(0, int(attrs.get("Size") or 0))
-        except (TypeError, ValueError):
-            size = 0
-        items.append(DeletionItem(
-            kind="docker_image", speaking_name=f"Framework build image {image_id[7:19]} ({target})",
-            file_name=image_id, size_bytes=size,
-            what=f"unused build image of the framework for {target}, without a name"
-                 + (f" (built {created})" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", created) else "")
-                 + "; left over from an earlier build"))
-    if not items:
+    return list(found.values())
+
+
+def framework_image_plan(framework):
+    """The list of tier 2 and of Tools > Framework Build Images...: every build image of the framework (those left
+    over from earlier builds without a name, the named ones such as llm-framework/<target>:last-build, and the
+    runtime builder images) as a deletion plan for the person's multiple choice, each with its name, full id, size
+    and what it is; images left over come first. Docker's build cache is never part of it, nor any image another
+    program named. Returns None when there is nothing to list; DockerUnavailable without a reachable Docker daemon.
+    Reads only."""
+    from orchestrator.Core.deletion import plan_of
+    listed = [(bool(getattr(image, "tags", None)), item) for image in framework_images(framework)
+              for item in [_image_item(image)] if item is not None]
+    return plan_of([item for _, item in sorted(listed, key=lambda pair: (pair[0], pair[1].file_name))],
+                   ("permanent",))
+
+
+def docker_storage(framework) -> Optional[Dict[str, Any]]:
+    """Where Docker keeps its images (DockerRootDir) with the free space of that disk when it is visible from here, and
+    how many images of the framework there are and their size (layers shared between images counted for each).
+    None when Docker cannot be asked. Reads only; changes no daemon setting."""
+    client = _docker_client(framework)
+    if client is None:
         return None
-    items.sort(key=lambda i: i.file_name)
-    return DeletionPlan(items=items, total_bytes=sum(i.size_bytes for i in items), mode_offered=("permanent",))
+    try:
+        info = client.info() or {}
+        root = str(info.get("DockerRootDir") or "")
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        images = [i for i in (_image_item(img) for img in framework_images(framework)) if i is not None]
+    except DockerUnavailable:
+        images = []
+    free = None
+    if root and os.path.isabs(root):
+        try:
+            free = shutil.disk_usage(root).free
+        except OSError:
+            free = None   # Docker Desktop keeps it inside its own virtual machine
+    return {"root": root, "free_bytes": free, "images": len(images), "image_bytes": sum(i.size_bytes for i in images)}
 
 
 def delete_framework_images(framework, plan, actor: str) -> ImageDeletion:
-    """Deletes exactly the images of `plan`, which the person accepted in the framework's own window (actor "cli" or
-    "gui"; never an AI, never under a delegation). The list is looked up again first: if it changed, nothing is
-    deleted (ImagePlanChanged). The deletion is audited before anything is deleted (nothing is deleted when the
-    audit cannot be written); each image is looked at again right before and removed by its id only while it is
-    still unnamed and the framework's, without force and without its untagged parents, and never by a prune, which
-    could catch images that became dangling after the list was shown."""
+    """Deletes exactly the images of `plan` (the ones the person ticked, or the whole list), which the person accepted
+    in the framework's own window (actor "cli" or "gui"; never an AI, never under a delegation). The list is looked up
+    again first: if one of the chosen images changed (another name, gone), nothing is deleted (ImagePlanChanged). The
+    deletion is audited before anything is deleted (nothing is deleted when the audit cannot be written); each image
+    is looked at again right before and removed only while it is still exactly as listed: an image without a name by
+    its id, a named one name by name (Docker deletes it with its last name), without force and without its untagged
+    parents, and never by a prune, which could catch images that changed after the list was shown."""
+    from orchestrator.Core.deletion import AcceptedDeletion, same_items
     if actor not in ("cli", "gui"):
         raise PermissionError("Only the person deletes the framework's images, in the GUI or at a terminal.")
-    current = framework_image_plan(framework)
+    current = same_items(framework_image_plan(framework), plan)
     if current is None or current.sha256() != plan.sha256():
         raise ImagePlanChanged()
     audit = getattr(getattr(framework, "tool_registry", None), "audit", None)
     if audit is None or not callable(getattr(audit, "record", None)):
         raise RuntimeError("The audit log is not available, so no image was deleted.")
-    extra = {"answered_by": "person", "confirm_channel": f"framework-{actor}", "deletion_sha256": plan.sha256()}
+    extra = AcceptedDeletion(plan, "permanent", actor).audit_extra()
     try:
         audit.record(actor, "doctor", "framework", "person", "started", approved=True,
                      arguments={"images": len(plan.items), "bytes": plan.total_bytes},
-                     detail=f"deleting {len(plan.items)} dangling framework images (doctor --fix --tier 2)",
-                     extra=extra)
+                     detail=f"deleting {len(plan.items)} framework build images the person chose", extra=extra)
     except Exception:  # noqa: BLE001
         raise RuntimeError("The audit log cannot record the deletion; no image was deleted.") from None
-    from orchestrator.Core.builder import IMAGE_LABEL
     from orchestrator.utils.helpers import redact_secrets
     client = _docker_client(framework)
     result = ImageDeletion()
     for item in plan.items:
-        # Docker deletes an image with one name when it is addressed by its id: a build of another framework process
-        # may have named a listed image again (the same layers) since the list was looked up. Each image is looked at
-        # right before its removal and kept unless it is still unnamed and the framework's.
+        # A build of another framework process may name a listed image again (the same layers) after the list was
+        # looked up: each image is looked at right before its removal and kept unless it is still exactly as listed.
         try:
             now = client.images.get(item.file_name)
         except Exception:  # noqa: BLE001 - gone meanwhile (or the daemon did not answer): nothing to delete
             result.failed.append((item.speaking_name, "kept: it could not be found again, so it was not deleted"))
             continue
-        if getattr(now, "tags", None) or IMAGE_LABEL not in (getattr(now, "labels", None) or {}):
+        if _image_item(now) != item:
             result.failed.append((item.speaking_name, "kept: it got a name or changed after the list was shown"))
             continue
         try:
-            client.images.remove(image=item.file_name, noprune=True)
+            for name in sorted(getattr(now, "tags", None) or []) or [item.file_name]:
+                client.images.remove(image=name, noprune=True)
         except Exception as e:  # noqa: BLE001 - e.g. a container still uses it: kept and reported
             reason = str(getattr(e, "explanation", "") or e)
             result.failed.append((item.speaking_name, redact_secrets(reason)[:300]))

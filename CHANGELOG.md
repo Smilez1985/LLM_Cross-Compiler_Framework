@@ -10,6 +10,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Deleting with the full list, and the trash** (delegation design 3.10, round 5 f; round 6 10.4): every deletion of
+  something you can see asks first in the framework's own window (the GUI's deletion dialog, or a table and a question
+  at a terminal) and lists each item with its name, full path or Docker id, file name, size and what it is; "No" is
+  the default. Where you pick from a list, nothing is ticked, the list is built again from exactly what you ticked
+  (its hash is audited as `deletion_sha256`), and the button names how many and how much. Deleting moves files and
+  folders to the trash by default (`.trash` in their data folder; a move to another disk is refused, never copied).
+  Nothing leaves the trash by itself: after `trash_retention_days` (default 14, not changeable by an AI) it only
+  reminds you. **File > Trash...** and `llm-cli trash list|restore|empty` restore entries or delete the ones you tick
+  for good; no tool empties the trash, and no AI reaches the trash folders. The optional tools `list_trash` and
+  `restore_from_trash` (hidden until you enable them) let an AI see the trash by name and restore only what it asked
+  to delete itself. Knowledge snapshots are deleted with `llm-cli knowledge snapshots prune|delete` or **Tools >
+  Knowledge Snapshots...** (tick boxes), or exported with `knowledge snapshots export NAME... --to FOLDER` (each copy
+  checked by sha256; an export never deletes). **Tools > Framework Build Images...** lists the framework's Docker
+  images for you to tick, as `llm-cli doctor --fix --tier 2` does; the self-healing dialog for a full Docker disk opens
+  it. `llm-cli doctor` says where Docker keeps its images and how much the framework's images use; moving that folder
+  is an administrator's step ([Container setup](docs/Container_Setup.md#10-where-docker-keeps-images)).
 - **The facts catalogue and the per-tool classification** (delegation design 4.1-4.6, `orchestrator/tools/
   facts_catalog.py`, texts in `orchestrator/utils/l10n_facts.py`): every finding before a question has a fixed kind.
   Hard blockers (disk full, offline mode, an unpaired board or a changed host key, a gated model without access, the
@@ -72,8 +88,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and its arguments. A deletion is refused outside the output folder, while a build of any
   framework program writes into the folder or is queued for it, after the build changed, and when the folder is not
   the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
-  outside MCP, and deletes no snapshot; it stays outside every standing approval and delegation until the trash and
-  the framework's deletion dialog exist.
+  outside MCP, and deletes no snapshot; it stays outside every standing approval. `delete_artifact` moves the model
+  and its golden ZIP to the trash, where you can restore them (see "Deleting with the full list, and the trash").
 - **Ditto can also use the framework on another computer** (MCP design T12; DECISIONS round 5 d; hybrid design
   6.1-6.8): this computer's tools always stay, and the framework installed on a second computer (a build PC, a
   server; the same program, not a different one) adds its tools in the same chat. `llm-cli ditto remote set` or the
@@ -156,8 +172,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Before every ingest and every restore it saves a snapshot in `knowledge_snapshots/` of the per-user folder. There
   is no limit: it keeps as many as the disk holds, deletes none by itself, on any channel (round 5 f), and no number
   of them brings a reminder or a warning. `llm-cli knowledge snapshots` (in the GUI: Tools > Knowledge Snapshots...)
-  lists each one with its full path, name, size and what it is, so you delete or export (copy elsewhere) the ones
-  you choose.
+  lists each one with its full path, name, size and what it is, so you delete (to the trash first) or export (copy
+  elsewhere, checked by sha256) the ones you tick.
 - **The knowledge base Ditto uses, for AI clients** (MCP tools `list_knowledge_sources` and
   `read_knowledge_source`, resource `lcf://knowledge/sources/<source id>`): a client that does Ditto's job sees what
   the knowledge base holds and reads one source's excerpts in order. `search_knowledge` now gives every excerpt its
@@ -756,6 +772,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   saw are kept in `gui_state.json` in the per-user folder (never in QSettings); a damaged file gives the defaults.
 
 ### Changed
+- **The builder no longer deletes images** (released in 3.0.0; round 7 item 12): every build ended by removing its
+  image and pruning the framework's dangling images. Now the build's image is named
+  `llm-framework/<target>:last-build` (the next build of that target reuses it) and only its per-build name is
+  dropped, after the new name is seen on the image. The image that had that name before stays without a name and is
+  listed for you to delete (Tools > Framework Build Images..., `llm-cli doctor --fix --tier 2`). Nothing in the
+  framework prunes Docker objects; Docker images are deleted only when you tick them.
 - **Questions show a short summary and the warning classes** (delegation design 4.5, LAY-L2): a question in the
   framework's own window (Ditto's dialog, the CLI prompt, the approval window) starts, after its first line, with 3 to 6
   lines in the person's language (English or German): what happens with speaking names, how much it downloads and how
@@ -1016,14 +1038,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **The self-healing "Docker cleanup" deletes nothing any more** (released in 3.0.0; round 5 f): approving the
   proposal for a full Docker disk (`docker_prune`, in the GUI dialog, at the CLI prompt or through `resolve_healing`)
   removed the framework's dangling images without showing them and cleared the whole build cache of the Docker
-  daemon, other projects' too. It is now a manual step: the proposal points to `llm-cli doctor --fix --tier 2`, which
-  lists the framework's dangling build images and deletes only those you confirm, and an approval is refused before
-  anything is asked. No code of the framework clears Docker's build cache any more.
+  daemon, other projects' too. It is now a manual step: the proposal points to the framework's list of its build
+  images (the dialog's **Free Docker space...**, **Tools > Framework Build Images...**, `llm-cli doctor --fix --tier
+  2`), which deletes only the images you tick and confirm, and an approval is refused before anything is asked. No code of the framework clears Docker's build cache any more.
 - **`llm-cli doctor --fix --tier 2` no longer deletes without a list** (released in 3.0.0; round 5 f): it cleared the
   whole build cache of the Docker daemon, other projects' too, and deleted the framework's dangling images without
-  showing them. The build cache is no longer touched (it cannot be limited to the framework). Tier 2 now lists the
-  framework's dangling build images, each with its name, image id, size and what it is, and deletes exactly that list,
-  by image id and without a prune, only after your yes at a terminal (the default answer is no). Without a terminal
+  showing them. The build cache is no longer touched (it cannot be limited to the framework). Tier 2 now lists every
+  build image of the framework (without a name, named `llm-framework/<target>:last-build`, runtime builders), each with
+  its name, image id, size and what it is, nothing picked, and deletes exactly the ones you pick, by image id or name
+  and without a prune, only after your yes at a terminal (the default answer is no). Without a terminal
   and with `--json` it only lists them; the deletion is audited first and refused when the list changed in between,
   and an image that got a name meanwhile (a build of another framework process) is kept. No tool, resource or prompt
   reaches it, so an AI app or Ditto can neither run it nor get it under a delegation. The disk findings say what tier
@@ -1301,6 +1324,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   method.
 
 ### Security
+- **No deletion without your confirmation in the framework** (round 5 f; WP7): every code path that deletes a built
+  model, a knowledge snapshot, a trash entry or a framework image takes only the plan you accepted in the GUI or at a
+  terminal, builds it again from what is on disk right before, and deletes nothing when it changed or when the audit
+  log cannot record it first. An AI's `delete_artifact` only moves to the trash; emptying the trash and deleting for
+  good stay with you. A source sweep lists every place in the code that deletes, with how it is covered; a new one
+  fails it until it is decided.
 - **`run_doctor` gives AI clients no host path** (released in 3.0.0): the findings an AI read named the per-user
   folder, the audit log, pack folders, the disk folders and whatever path a crashed check's error quoted, user name
   included. What an AI reads now names the framework's folders by label (`state:audit.db`, "the state folder",
