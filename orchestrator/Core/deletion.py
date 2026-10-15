@@ -18,8 +18,8 @@ Multiple choice (round 6 10.4): the person ticks a subset of a listed plan; `cho
 the ticked items, so its sha256 covers them and nothing else. Nothing is ticked by default.
 """
 
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from orchestrator.tools.spec import DeletionItem, DeletionPlan
 
@@ -71,6 +71,17 @@ class AcceptedDeletion:
     def audit_extra(self) -> Dict[str, str]:
         """The fields every deletion's audit entries carry (design 3.11): the plan's hash, who answered and where."""
         return {"deletion_sha256": self.sha256, "answered_by": "person", "confirm_channel": self.channel}
+
+
+@dataclass
+class DeletionResult:
+    """What a deletion did, for the person's report: the items moved to the trash or deleted for good (by speaking
+    name), the bytes freed now (0 for the trash: the space stays used until the person empties it), the trash entries
+    made, and the items kept with the reason."""
+    done: List[str] = field(default_factory=list)
+    freed_bytes: int = 0
+    trash_ids: List[str] = field(default_factory=list)
+    failed: List[Tuple[str, str]] = field(default_factory=list)
 
 
 def accept(plan: DeletionPlan, actor: str, mode: Optional[str] = None) -> AcceptedDeletion:
@@ -154,6 +165,6 @@ def rows(plan: DeletionPlan) -> List[Dict[str, Any]]:
              "size": size_text(i.size_bytes), "what": i.what, "kind": i.kind} for i in plan.items]
 
 
-__all__ = ["AcceptedDeletion", "MODES", "PERSON_ACTORS", "PlanChanged", "accept", "accepted_through_registry",
-           "choose", "item_key", "person_actor", "plan_of", "require_person", "require_same", "rows", "same_items",
-           "size_text"]
+__all__ = ["AcceptedDeletion", "DeletionResult", "MODES", "PERSON_ACTORS", "PlanChanged", "accept",
+           "accepted_through_registry", "choose", "item_key", "person_actor", "plan_of", "require_person",
+           "require_same", "rows", "same_items", "size_text"]

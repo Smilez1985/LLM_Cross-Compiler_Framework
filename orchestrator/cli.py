@@ -2000,8 +2000,9 @@ def runtime_install(ctx: FrameworkContext, backend: str, placement: str, jobs: O
                   (f", CPU fallback {escape(fallback.build_id[:16])}" if fallback.build_id != active.build_id else ""))
     for problem in result.problems:
         console.print(f"[yellow]{escape(problem)}[/yellow]")
-    if result.removed:
-        console.print(f"[dim]Removed {len(result.removed)} old build(s).[/dim]")
+    if result.older:
+        console.print(f"[dim]{len(result.older)} older build(s) kept; the framework deletes none by itself. "
+                      "'llm-cli ditto runtime prune' lists them for you to delete.[/dim]")
     if rt.endpoint() is not None:
         console.print("The running server keeps running; the next start uses the new build "
                       "(llm-cli ditto runtime start).")
@@ -2053,17 +2054,28 @@ def runtime_export(ctx: FrameworkContext, file: Path):
 
 
 @ditto_runtime.command('prune')
-@click.option('--keep', type=click.IntRange(0, 50), default=2, show_default=True,
-              help='Other builds to keep besides the active build, the CPU fallback and the running one')
 @pass_context
-def runtime_prune(ctx: FrameworkContext, keep: int):
-    """Remove old self-built builds (never the active build, the CPU fallback or the running one)"""
-    from orchestrator.runtime.llama_server import LocalRuntimeError
+def runtime_prune(ctx: FrameworkContext):
+    """List old runtime builds and delete the ones you pick, after you confirm them in a terminal (nothing preselected;
+    never the active build, the CPU fallback or the running one)"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    rt = _local_runtime(ctx)
+    plan = rt.cleanup_plan()
+    if plan is None:
+        console.print("No old runtime builds: the active build, the CPU fallback and the running one are never "
+                      "listed.")
+        return
+    accepted = confirm_deletion(plan, title=f"Old runtime builds ({len(plan.items)}, {size_text(plan.total_bytes)})",
+                                multiple=True, again="llm-cli ditto runtime prune")
+    if accepted is None:
+        return
+    trash, audit = _person_trash(ctx, Path(rt.data_dir))
     try:
-        removed = _local_runtime(ctx).prune(keep_last=keep)
-    except LocalRuntimeError as e:
-        _runtime_failure(e)
-    console.print(f"Removed {len(removed)} build(s)." if removed else "Nothing to remove.")
+        result = rt.delete_old_builds(accepted, trash=trash, audit=audit)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    _print_deletion_result(result, accepted)
 
 
 @ditto_runtime.command('start')
@@ -3234,6 +3246,42 @@ def _cli_audit(ctx: FrameworkContext):
     return audit if callable(getattr(audit, "record", None)) else None
 
 
+def _person_trash(ctx: FrameworkContext, state_dir: Path):
+    """(trash, audit log) for the person's deletion at a terminal, also when the framework is not booted (the runtime
+    commands need neither the secrets store nor Docker): the trash index is signed with the audit key, as the
+    framework's own trash."""
+    from orchestrator.Core.trash import DEFAULT_RETENTION_DAYS, Trash
+    fm = ctx.framework_manager if getattr(ctx, "_initialized", False) else None
+    if fm is not None:
+        return Trash.for_framework(fm), _cli_audit(ctx)
+    audit = _device_audit(ctx, state_dir)
+    try:
+        from orchestrator.tools.framework_tools import _audit_key
+        key = _audit_key(None, state_dir)
+    except Exception:  # noqa: BLE001 - without a keyring the trash index is unkeyed, like the permission file
+        key = None
+    config, _ = _settings(ctx)
+    try:
+        days = int(config.get("trash_retention_days", DEFAULT_RETENTION_DAYS) or DEFAULT_RETENTION_DAYS)
+    except (TypeError, ValueError):
+        days = DEFAULT_RETENTION_DAYS
+    refuse = None if key else getattr(audit, "kept_with_key", None)
+    return Trash(state_dir, key=key, refuse_unkeyed=refuse, audit=audit, retention_days=days), audit
+
+
+def _print_deletion_result(result, accepted) -> None:
+    """What a deletion did (deletion.DeletionResult): every item moved or deleted, every item kept and why."""
+    from orchestrator.Core.deletion import size_text
+    for name in result.done:
+        console.print(f"[green]{'Moved to the trash' if accepted.mode == 'trash' else 'Deleted'}: "
+                      f"{escape(name)}[/green]")
+    for name, reason in result.failed:
+        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    if accepted.mode == "trash" and result.done:
+        console.print("They can be restored with 'llm-cli trash restore ID' ('llm-cli trash' lists them); their space "
+                      "stays used until you empty the trash.")
+    elif result.done:
+        console.print(f"{size_text(result.freed_bytes)} freed.")
 
 
 # ============================================================================
@@ -4627,12 +4675,22 @@ def device_runtime_build(ctx: FrameworkContext, device_name: str, jobs: Optional
     except PackageError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    deployed = devices.record().get("build_id")
-    devices.prune(keep=tuple(b for b in (build.build_id, deployed) if b))
     console.print(f"[bold green]Device runtime ready:[/bold green] {escape(str(packaged.path))}")
+    _say_older_packages(devices, build)
     console.print(f"sha256 {packaged.sha256}; format checked here (ELF, glibc symbol versions, no shared C++ runtime); "
                   "the programs run their checks on the device during the deployment.")
     console.print(f"Next: llm-cli device runtime deploy {device_id}")
+
+
+def _say_older_packages(devices, build) -> None:
+    """Says how many older runtime packages of the device are kept (the framework deletes none by itself)."""
+    plan = devices.cleanup_plan()
+    older = [i for i in (plan.items if plan is not None else []) if i.file_name.endswith(".tar.gz")
+             and build.build_id[:16] not in i.file_name]
+    if older:
+        console.print(f"[dim]{len(older)} older runtime package(s) of this device kept; the framework deletes none "
+                      f"by itself. 'llm-cli device runtime prune {devices.device_id}' lists them for you to delete."
+                      "[/dim]")
 
 
 def _ensure_package(state_dir: Path, device_id: str, builds, build):
@@ -4652,6 +4710,35 @@ def _ensure_package(state_dir: Path, device_id: str, builds, build):
     except PackageError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
+
+
+@device_runtime.command('prune')
+@click.argument('device_name', metavar='DEVICE')
+@pass_context
+def device_runtime_prune(ctx: FrameworkContext, device_name: str):
+    """List the device's older runtime packages and delete the ones you pick, after you confirm them in a terminal
+    (nothing preselected; never the package of the build deployed last)"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    state_dir, _store, device_id, _profile = _device_context(ctx, device_name)
+    devices = DeviceRuntimeStore(state_dir, device_id)
+    plan = devices.cleanup_plan()
+    if plan is None:
+        console.print(f"No older runtime packages of device {device_id}: the one of the build deployed last is never "
+                      "listed.")
+        return
+    accepted = confirm_deletion(plan, title=f"Runtime packages of device {device_id} ({len(plan.items)} files, "
+                                            f"{size_text(plan.total_bytes)})",
+                                multiple=True, again=f"llm-cli device runtime prune {device_id}")
+    if accepted is None:
+        return
+    trash, audit = _person_trash(ctx, state_dir)
+    try:
+        result = devices.delete_packages(accepted, state_dir, trash=trash, audit=audit)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    _print_deletion_result(result, accepted)
 
 
 @device_runtime.command('deploy')
@@ -4744,12 +4831,12 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
                          "ssh_user": settings.ssh_user, "previous": result.previous, "perf_key": profile.perf_key(),
                          "verification": report.as_dict(), "verified_at": now,
                          "unit_started": result.unit_started})
-    devices.prune(keep=(build.build_id,))
     console.print(f"[bold green]Deployed[/bold green] build {build.build_id[:16]} to {escape(result.root)}"
                   + (f" (previous {result.previous} kept)" if result.previous else ""))
     _print_report(report)
     for note in result.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
+    _say_older_packages(devices, build)
     script = start_script_path(result.home)
     if settings.install == "systemd":
         console.print(f"systemd unit: {'started' if result.unit_started else 'enabled'}; the server listens on "

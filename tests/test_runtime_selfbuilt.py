@@ -382,11 +382,13 @@ class TestServerFromTheStore:
             other.install(backend="cpu")
             assert other.installed().build_id != running.build_id
             assert rt.store.running_build_ids() == {running.build_id}
-            assert running.build_id not in rt.prune(keep_last=0)
+            plan = rt.cleanup_plan()
+            assert plan is None or str(running.path) not in [i.full_path for i in plan.items]
             assert running.path.is_dir() and running.server.is_file(), "the running server's build stays"
         finally:
             rt.stop(timeout=5)
-        assert running.build_id in rt.prune(keep_last=0), "once it stopped, retention may remove it"
+        assert str(running.path) in [i.full_path for i in rt.cleanup_plan().items], \
+            "once it stopped, the person's list offers it"
 
 
 class TestTheStoreIsSharedWithTheDevices:
@@ -412,11 +414,11 @@ class TestTheStoreIsSharedWithTheDevices:
     def test_installing_dittos_runtime_keeps_every_device_build(self, tmp_path, no_source):
         rt = runtime(tmp_path)
         devices = self._device_builds(rt.store, tmp_path)
-        result = rt.install()  # two host builds (CPU and Vulkan), then retention with its default of 2 others
-        assert result.removed == []
+        result = rt.install()  # two host builds (CPU and Vulkan); nothing is deleted
+        assert result.older == []
         assert all(rt.store.get(b.build_id) is not None for b in devices), "a device's build stays for its deployment"
 
-    def test_dittos_prune_removes_only_dittos_builds(self, tmp_path, no_source):
+    def test_dittos_prune_lists_only_dittos_builds(self, tmp_path, no_source):
         rt = runtime(tmp_path)
         devices = self._device_builds(rt.store, tmp_path)
         first = rt.install(backend="cpu").active
@@ -424,8 +426,8 @@ class TestTheStoreIsSharedWithTheDevices:
         other._toolchain = toolchain(info=replace(GCC, cmake="3.31.0"))
         second = other.install(backend="cpu").active
         assert first.build_id != second.build_id
-        removed = rt.prune(keep_last=0)
-        assert removed == [first.build_id], "the old host build goes; the active one and the device builds stay"
+        plan = rt.cleanup_plan()
+        assert [i.full_path for i in plan.items] == [str(first.path)], "only the old host build is listed"
         assert all(rt.store.get(b.build_id) is not None for b in devices)
 
 
@@ -562,7 +564,7 @@ class TestStatusAndCli:
         assert declined.exit_code == 1 and laptop.installed() is None
         result = self.invoke(monkeypatch, laptop, "runtime", "import", str(out), input="y\n")
         assert result.exit_code == 0 and "Imported and verified" in result.output, result.output
-        assert self.invoke(monkeypatch, laptop, "runtime", "prune").output.strip() == "Nothing to remove."
+        assert "No old runtime builds" in self.invoke(monkeypatch, laptop, "runtime", "prune").output
 
     def test_doctor_says_whether_the_prebuilt_archive_is_in_use(self, tmp_path, monkeypatch, no_source):
         from orchestrator.Core import doctor

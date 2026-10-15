@@ -28,8 +28,6 @@ STAGING = "bookkeeping: staging, quarantine or working folders the framework mad
 CONTAINERS = "bookkeeping: the containers the framework started for one build, removed when it ended"
 OWN_SERVER = "bookkeeping: state, key and log files of the framework's own local model server"
 NAME_ONLY = "never deletes an image: drops the per-build name once the image carries its last-build name"
-RUNTIME_RETENTION = ("OPEN (reported): keeps only the newest self-built llama.cpp runtimes or device packages of the "
-                     "framework, without a list; a decision for the maintainer")
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
 
 DELETION_SITES = {
@@ -38,6 +36,11 @@ DELETION_SITES = {
     ("orchestrator/Core/knowledge_snapshots.py", "delete_snapshots"): PERSON,
     ("orchestrator/Core/trash.py", "Trash.empty"): PERSON,
     ("orchestrator/Core/doctor.py", "delete_framework_images"): PERSON,
+    # old runtime builds and device packages: the person's list (`ditto runtime prune`, `device runtime prune`); a
+    # build or a deployment deletes none of them any more (they were kept to a count without a list)
+    ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.delete_old_builds.take"): PERSON,
+    ("orchestrator/runtime/build/store.py", "BuildStore.remove"): PERSON,
+    ("orchestrator/runtime/device/package.py", "DeviceRuntimeStore.delete_packages"): PERSON,
     ("orchestrator/utils/input_history.py", "InputHistory.clear"): PERSON_LIST,
     # (the chat: FeedStore.clear_conversation and ChatHistory.clear delete rows and messages, not files; see below)
     ("orchestrator/Core/builder.py", "BuildEngine._keep_as_last_build"): NAME_ONLY,
@@ -117,6 +120,14 @@ DELETION_SITES = {
     ("orchestrator/runtime/build/source.py", "remove_tree.retry"): STAGING,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._unpack"): STAGING,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.install_prebuilt"): STAGING,
+    # the pinned source and the build store: staging folders, and a damaged copy replaced by a complete one
+    ("orchestrator/runtime/build/source.py", "_install"): STAGING,
+    ("orchestrator/runtime/build/source.py", "fetch_source"): STAGING,
+    ("orchestrator/runtime/build/source.py", "import_source"): STAGING,
+    ("orchestrator/runtime/build/store.py", "BuildStore.build"): STAGING,
+    ("orchestrator/runtime/build/store.py", "BuildStore._commit"): STAGING,
+    ("orchestrator/runtime/build/store.py", "BuildStore.import_build"): STAGING,
+    ("orchestrator/runtime/build/store.py", "BuildStore.sweep_leftovers"): STAGING,
     # containers the framework started
     ("orchestrator/Core/builder.py", "BuildEngine._run_container"): CONTAINERS,
     ("orchestrator/Core/builder.py", "BuildEngine._scan_image_security"): CONTAINERS,
@@ -127,23 +138,20 @@ DELETION_SITES = {
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._stop_locked"): OWN_SERVER,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._cleanup_stale_locked"): OWN_SERVER,
     # open, reported
-    ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._prune_old_builds"): RUNTIME_RETENTION,
-    ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.prune"): RUNTIME_RETENTION,
-    ("orchestrator/runtime/build/host.py", "install_host_runtime"): RUNTIME_RETENTION,
-    ("orchestrator/runtime/device/package.py", "DeviceRuntimeStore.prune"): RUNTIME_RETENTION,
-    ("orchestrator/runtime/device/service.py", "deploy"): RUNTIME_RETENTION,
-    ("orchestrator/cli.py", "runtime_prune"): RUNTIME_RETENTION,
-    ("orchestrator/cli.py", "device_runtime_build"): RUNTIME_RETENTION,
-    ("orchestrator/cli.py", "device_runtime_deploy"): RUNTIME_RETENTION,
     ("orchestrator/runtime/profile.py", "ProfileStore.remove_device"): UNUSED,
 }
 
 _DELETING = {"rmtree", "unlink", "rmdir", "removedirs", "prune", "prune_builds", "prune_containers", "prune_volumes",
              "prune_networks", "prune_images"}
+# Helpers that delete a folder, called by name (runtime/build/source.py remove_tree; shutil.rmtree imported by name):
+# their callers delete as much as the helper does.
+_DELETING_HELPERS = {"remove_tree", "rmtree"}
 
 
 def _deletes(call: ast.Call) -> bool:
     f = call.func
+    if isinstance(f, ast.Name):
+        return f.id in _DELETING_HELPERS
     if not isinstance(f, ast.Attribute):
         return False
     if f.attr in _DELETING:

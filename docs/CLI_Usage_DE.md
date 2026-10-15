@@ -887,13 +887,17 @@ Archiv wird nie exportiert.
 #### ditto runtime prune
 
 ```
-llm-cli ditto runtime prune [--keep N]
+llm-cli ditto runtime prune
 ```
 
-Entfernt alte selbst gebaute Builds von Dittos Server. Der aktive Build, der CPU-Ersatz und der Build, aus dem ein
-laufender Server gestartet wurde, bleiben immer erhalten, dazu die `N` neuesten anderen (Standard 2).
-`runtime install` tut dasselbe nach jedem Build. Die Builds deiner Boards (`llm-cli device runtime build`) liegen im
-selben Build-Speicher und werden hier nie entfernt.
+Listet die alten Builds von Dittos Server mit je einer Nummer (unveröffentlicht): ältere selbst gebaute Builds und
+Installationen des vorgebauten Archivs einer anderen llama.cpp-Version, jeweils mit vollem Pfad, Größe und was es
+ist. Nichts ist ausgewählt. Du gibst die Nummern der zu löschenden ein, wählst den Papierkorb (Standard) oder
+endgültiges Löschen und bestätigst genau diese (Standard: nein). Das braucht ein Terminal; ohne eines wird nur
+gelistet. Der aktive Build, der CPU-Ersatz, der Build, aus dem ein laufender Server gestartet wurde, und die Builds
+deiner Boards (`llm-cli device runtime build`, derselbe Build-Speicher) stehen nie in der Liste, und ein Build, der
+nach dem Anzeigen der Liste einer davon wurde, bleibt. `runtime install` löscht nichts: es sagt, wie viele ältere
+Builds es behalten hat (vorher behielt es nur die zwei neuesten).
 
 #### ditto runtime start
 
@@ -1471,6 +1475,7 @@ llm-cli device runtime build GERÄT [--jobs N] [--mirror URL] [--yes]
 llm-cli device runtime deploy GERÄT [--user NAME] [--password TEXT] [--bench-model PFAD] [--allow-untrusted-model]
 llm-cli device runtime verify GERÄT [--user NAME] [--bench-model PFAD] [--allow-untrusted-model]
 llm-cli device runtime status GERÄT [--json]
+llm-cli device runtime prune GERÄT
 ```
 
 ### device list
@@ -1511,6 +1516,8 @@ den Bauplan im Builder-Container ohne Netz (`--jobs` setzt die parallelen Jobs; 
 Speicher), prüft das Format der Programme auf deinem PC und packt den Tarball nach
 `~/.llm-framework/runtime/llama.cpp/device/<ID>/llama-runtime-<Arch>-<Build-ID>.tar.gz`. Ein schon abgelegter Build
 wird nur neu gepackt. Exit-Code 1, wenn Docker nicht antwortet, der Build scheitert oder seine Prüfungen scheitern.
+Ältere Pakete des Geräts bleiben (unveröffentlicht; vorher entfernte ein Build oder ein Deployment sie); die Ausgabe
+sagt, wie viele, und `device runtime prune` listet sie, damit du sie löschst.
 
 ### device runtime deploy
 
@@ -1566,6 +1573,14 @@ aktualisiert den Eintrag.
 
 Was deployt ist (Build, Zeit, Startskript oder systemd, Ergebnis der Prüfungen) und ob es noch der Build ist, den
 das Profil des Boards, der Pin und das Rezept verlangen; wenn nicht, erneut bauen und deployen.
+
+### device runtime prune
+
+Listet die älteren Laufzeit-Pakete des Geräts auf deinem PC mit je einer Nummer (jeder Tarball und seine
+`.sha256`-Datei, mit vollem Pfad und Größe). Das Paket des zuletzt deployten Builds steht nie in der Liste. Nichts ist
+ausgewählt: Du gibst die Nummern der zu löschenden ein, wählst den Papierkorb (Standard) oder endgültiges Löschen und
+bestätigst genau diese (Standard: nein). Das braucht ein Terminal; ohne eines wird nur gelistet. Auf dem Board ändert
+sich nichts.
 
 Für ein [vertrautes Gerät](#deploy-devices) führen die optionalen MCP-Tools `probe_remote_device`,
 `deploy_device_runtime` und `run_device_benchmark` für einen KI-Client `scan --device`, `device runtime build` mit

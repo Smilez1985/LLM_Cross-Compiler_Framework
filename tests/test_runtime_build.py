@@ -945,7 +945,7 @@ class TestStore:
         with pytest.raises(StoreError, match="no stored build"):
             store.activate("0" * 64)
 
-    def test_retention_never_deletes_active_fallback_running_or_referenced_builds(self, tmp_path, monkeypatch):
+    def test_the_list_never_offers_active_fallback_running_or_referenced_builds(self, tmp_path, monkeypatch):
         store = BuildStore(tmp_path / "state")
         builds = []
         for n in range(7):
@@ -960,10 +960,14 @@ class TestStore:
         store.activate(old2, role="fallback")
         monkeypatch.setattr(BuildStore, "running_build_ids", lambda self: {old3})
         (store.builds_dir / ".staging-0123456789abcdef-dead").mkdir()
-        removed = store.prune(keep_last=2, keep=[old4])
-        assert set(removed) == {mid}
+        # The framework deletes no build by itself (round 5 f): the person picks from this list.
+        assert [b.build_id for b in store.removable(keep=[old4])] == [newest, newer, mid]
+        done, kept = store.remove([mid, oldest, old3])
+        assert done == [mid] and [b for b, _ in kept] == [oldest, old3], "in use: kept, and said why"
         left = {b.build_id for b in store.list_builds()}
         assert left == {oldest, old2, old3, old4, newer, newest}
+        assert list(store.builds_dir.glob(".staging-*")) != [], "removing builds never sweeps anything else"
+        store.sweep_leftovers()
         assert list(store.builds_dir.glob(".staging-*")) == [], "leftovers of interrupted builds go"
 
     def test_running_server_protects_its_build(self, tmp_path, monkeypatch):
@@ -975,7 +979,8 @@ class TestStore:
         monkeypatch.setattr(llama_server.LocalLLMRuntime, "_uses",
                             staticmethod(lambda p, folder: p is proc and folder == build.path))
         assert store.running_build_ids() == {build.build_id}
-        assert store.prune(keep_last=0) == []
+        assert store.removable() == [] and store.remove([build.build_id])[0] == []
+        assert build.path.is_dir()
 
     def test_export_and_import_round_trip_with_confirmation(self, tmp_path):
         source_store = BuildStore(tmp_path / "pc")

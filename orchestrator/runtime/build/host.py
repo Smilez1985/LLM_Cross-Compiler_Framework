@@ -28,7 +28,7 @@ from typing import Any, Callable, List, Mapping, Optional, Tuple
 from orchestrator.runtime.build.executor import BuildExecutor, ContainerEngine
 from orchestrator.runtime.build.recipe import (ARM_FEATURES, BACKENDS, X86_FEATURES, BuildPlan, PlanError,
                                                ToolchainInfo, choose_backend, plan_build)
-from orchestrator.runtime.build.store import DEFAULT_KEEP, BuildFailed, BuildStore, StoredBuild, StoreError
+from orchestrator.runtime.build.store import BuildFailed, BuildStore, StoredBuild, StoreError
 from orchestrator.runtime.build.toolchain import DetectedToolchain
 from orchestrator.runtime.build.verify import SmokeModelFile, Verifier
 from orchestrator.runtime.catalog import LlamaCppSource, RuntimeCatalog
@@ -117,7 +117,7 @@ class HostInstallResult:
     built: List[str] = field(default_factory=list)      # build IDs built now
     reused: List[str] = field(default_factory=list)     # build IDs taken from the store
     problems: List[str] = field(default_factory=list)   # GPU builds not built or failed (the CPU build is active)
-    removed: List[str] = field(default_factory=list)    # old builds removed by retention
+    older: List[str] = field(default_factory=list)      # older builds kept: the person deletes them from a list
     requested_missing: bool = False                     # an explicitly requested GPU backend is not active
 
 
@@ -220,14 +220,15 @@ def _planned(role: str, plan: BuildPlan, store: BuildStore) -> PlannedBuild:
 
 def install_host_runtime(plan: HostPlan, *, store: BuildStore, source: Optional[Path], executor: BuildExecutor,
                          verifier: Verifier, smoke_model: Optional[SmokeModelFile] = None, jobs: Optional[int] = None,
-                         keep_last: int = DEFAULT_KEEP, log: Optional[Callable[[str], None]] = None,
+                         log: Optional[Callable[[str], None]] = None,
                          cancelled: Optional[Callable[[], bool]] = None) -> HostInstallResult:
     """Builds (or reuses) the CPU build, verifies it and makes it the fallback and the active build; then the GPU build,
-    which becomes the active build once it is verified. Old builds are removed by retention (never the active build,
-    the fallback or the build a running server uses). Raises HostBuildError when the CPU build fails; nothing is
-    activated then and the previous builds stay as they were. `cancelled()` is checked before every build and every
-    activation: once it says yes, nothing more is activated (a cancelled build is never activated, runtime design P6);
-    before the CPU build is active that raises HostBuildError, after it the GPU build is left out."""
+    which becomes the active build once it is verified. Older builds are kept: the framework deletes no build by itself
+    (round 5 f); the result names them, and `llm-cli ditto runtime prune` lists them for the person. Raises
+    HostBuildError when the CPU build fails; nothing is activated then and the previous builds stay as they were.
+    `cancelled()` is checked before every build and every activation: once it says yes, nothing more is activated (a
+    cancelled build is never activated, runtime design P6); before the CPU build is active that raises HostBuildError,
+    after it the GPU build is left out."""
     say = log or (lambda _msg: None)
     stopped = cancelled or (lambda: False)
     host = (plan.toolchain.info.host_os, plan.toolchain.info.host_arch)
@@ -285,10 +286,11 @@ def install_host_runtime(plan: HostPlan, *, store: BuildStore, source: Optional[
                 problems.append(f"{e}{where}; the CPU build stays active")
             except StoreError as e:
                 problems.append(f"{gpu.backend}: {e}; the CPU build stays active")
-    removed = store.prune(keep_last=keep_last, purpose=PURPOSE)  # never a device's build (same store)
+    store.sweep_leftovers()   # only the staging folders of interrupted builds
+    older = [b.build_id for b in store.removable(purpose=PURPOSE)]   # never a device's build (same store)
     missing = plan.requested not in ("auto", "cpu") and active.backend != plan.requested
     return HostInstallResult(active=active, fallback=fallback, built=built, reused=reused, problems=problems,
-                             removed=removed, requested_missing=missing)
+                             older=older, requested_missing=missing)
 
 
 def rebuild_advice(build: StoredBuild, plan: Optional[HostPlan], pin: Optional[LlamaCppSource]) -> Optional[str]:

@@ -107,3 +107,16 @@ def test_no_docker_prune_in_the_framework():
     assert hits == []
     text = (REPO / "orchestrator" / "Core" / "builder.py").read_text(encoding="utf-8")
     assert "images.prune" not in text
+
+
+def test_no_text_says_the_framework_clears_the_build_cache():
+    """Ditto's evaluation corpus said tier 2 clears Docker's build cache (round 6 7.7): every document there that names
+    tier 2 says that the framework never clears it."""
+    named = 0
+    for path in (REPO / "evals" / "retrieval" / "corpus").glob("*.md"):
+        text = " ".join(path.read_text(encoding="utf-8").split())
+        if "--tier 2" in text:
+            named += 1
+            assert "leert nie den Build-Cache" in text or "never clears" in text, path.name
+            assert "erledigt den ersten Schritt" not in text, path.name
+    assert named, "the corpus still explains the framework's list of its build images"

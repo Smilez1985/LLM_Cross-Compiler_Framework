@@ -512,13 +512,14 @@ class TestOneStoreForDittoAndTheDevices:
     """Ditto's builds and the devices' builds live in the same build store (one recipe, one executor, one store):
     Ditto's retention must keep to its own builds."""
 
-    def test_dittos_prune_never_removes_a_device_build(self, tmp_path, source):
+    def test_dittos_prune_never_lists_a_device_build(self, tmp_path, source):
         from orchestrator.runtime.llama_server import LocalLLMRuntime
         store, build = stored_build(tmp_path / "state", source)
         rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models", catalog=CATALOG)
-        assert rt.prune(keep_last=0) == []
+        assert rt.cleanup_plan() is None
+        assert store.remove([build.build_id], purpose="host-runtime")[0] == []
         assert store.get(build.build_id) is not None, "the device's build stays for its next deployment"
-        assert store.prune(keep_last=0) == [build.build_id], "a prune without a purpose still sees every build"
+        assert [b.build_id for b in store.removable()] == [build.build_id], "without a purpose every build is listed"
 
 
 class TestPackage:
@@ -573,7 +574,7 @@ class TestPackage:
             package_runtime(store, build, licence=source / "LICENSE", out_dir=tmp_path / "out")
         assert not list((tmp_path / "out").glob("*.tar.gz")) if (tmp_path / "out").exists() else True
 
-    def test_the_device_store_finds_and_prunes_tarballs(self, tmp_path, source):
+    def test_the_device_store_finds_and_lists_tarballs(self, tmp_path, source):
         store, build = stored_build(tmp_path / "state", source)
         devices = DeviceRuntimeStore(tmp_path / "state", "0123456789abcdef")
         assert devices.tarball(build) is None
@@ -581,7 +582,10 @@ class TestPackage:
         assert devices.tarball(build).sha256 == packaged.sha256
         old = devices.root / "llama-runtime-arm64-ffffffffffffffff.tar.gz"
         old.write_bytes(b"old")
-        assert devices.prune(keep=(build.build_id,)) == [old.name] and devices.tarballs() == [packaged.path]
+        devices.save_record({"build_id": build.build_id})
+        plan = devices.cleanup_plan()   # the person's list: never the package of the build deployed last
+        assert [i.full_path for i in plan.items] == [str(old)] and plan.items[0].kind == "deploy_package"
+        assert sorted(devices.tarballs()) == sorted([old, packaged.path]), "listing deletes nothing"
         packaged.path.write_bytes(b"damaged")
         assert devices.tarball(build) is None
         with pytest.raises(PackageError):

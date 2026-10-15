@@ -15,8 +15,9 @@ The store of self-built (and imported) llama.cpp builds (design 3.7, 3.9).
       active.json                    shared with llama_server.py: build_id and fallback_build_id (the CPU build)
 
 A build ID that is already stored is reused and never stamped again. Only a build whose verification passed on this
-machine can be activated, and retention never deletes the active build, the CPU fallback, a build another caller
-references, or the build a running server was started from.
+machine can be activated. The framework deletes no build by itself (round 5 f): the person picks old builds from a list
+(removable(), `llm-cli ditto runtime prune`), which never offers the active build, the CPU fallback, a build another
+caller references, or the build a running server was started from.
 
 Imported builds (built on another machine of the user) come as a tar.gz of build.json, manifest.json and bin/. They
 carry no signature, so the import extracts them safely, checks every file against the manifest, the build ID against
@@ -50,7 +51,6 @@ STORE_FORMAT = 1
 MAX_STAMP_BYTES = 1024 * 1024
 MAX_IMPORT_BYTES = 4 * 1024 ** 3   # packed and unpacked
 MAX_IMPORT_MEMBERS = 1024
-DEFAULT_KEEP = 2
 
 _RE_ID = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 _RE_ID16 = re.compile(r"^[0-9a-f]{16}$", re.ASCII)
@@ -327,27 +327,47 @@ class BuildStore:
             return set()
         return {b.build_id for b in self.list_builds() if LocalLLMRuntime._uses(proc, b.path)}
 
-    def prune(self, keep_last: int = DEFAULT_KEEP, keep: Iterable[str] = (), *,
-              purpose: Optional[str] = None) -> List[str]:
-        """Removes old builds: keeps the active build, the CPU fallback, the builds in `keep`, the build a running
-        server uses, and the `keep_last` newest others. With `purpose`, only builds of that purpose are candidates:
-        Ditto's retention ("host-runtime") never touches the cross builds of the device runtime, which share this
-        store. Also removes leftovers of interrupted builds. Returns the removed IDs."""
-        removed: List[str] = []
+    def removable(self, keep: Iterable[str] = (), *, purpose: Optional[str] = None) -> List[StoredBuild]:
+        """The builds the person may delete, newest first: every stored build but the active build, the CPU fallback,
+        the builds in `keep` and the build a running server uses. With `purpose`, only builds of that purpose:
+        Ditto's list ("host-runtime") never offers the cross builds of the device runtime, which share this store.
+        Reads only: the framework deletes no build by itself (round 5 f); the person picks from this list."""
+        protected = set(self.references().values()) | set(keep) | self.running_build_ids()
+        return [b for b in self.list_builds()
+                if b.build_id not in protected and (purpose is None or b.purpose == purpose)]
+
+    def remove(self, build_ids: Iterable[str], *, purpose: Optional[str] = None,
+               move: Optional[Callable[[StoredBuild], Any]] = None) -> Tuple[List[str], List[Tuple[str, str]]]:
+        """Deletes exactly the builds `build_ids` the person chose from removable() and confirmed (callers hold the
+        person's accepted deletion plan), or hands each to `move` (the trash) instead. Each is checked again under the
+        store's lock: one that became the active build, the fallback or the running one meanwhile, or is gone, is
+        kept. Returns the IDs done and those kept with the reason."""
+        done: List[str] = []
+        kept: List[Tuple[str, str]] = []
         with self._lock(".lock", timeout=60):
-            protected = set(self.references().values()) | set(keep) | self.running_build_ids()
-            others = [b for b in self.list_builds()
-                      if b.build_id not in protected and (purpose is None or b.purpose == purpose)]
-            for build in others[max(0, int(keep_last)):]:
-                remove_tree(build.path)
-                removed.append(build.build_id)
+            allowed = {b.build_id: b for b in self.removable(purpose=purpose)}
+            for build_id in build_ids:
+                build = allowed.get(build_id)
+                if build is None:
+                    kept.append((build_id, "it is in use now or no longer there, so it was kept"))
+                    continue
+                try:
+                    move(build) if move is not None else remove_tree(build.path)
+                except Exception as e:  # noqa: BLE001 - a refused move (TrashError) or an OSError: kept and reported
+                    kept.append((build_id, type(e).__name__ if isinstance(e, OSError) else str(e)))
+                    continue
+                done.append(build_id)
+        return done, kept
+
+    def sweep_leftovers(self) -> None:
+        """Removes the staging folders of interrupted builds (the framework's own half-written folders, never a
+        build), only while no build runs."""
         try:
             with self._lock(timeout=0):  # no build is running: its staging folders are leftovers
                 for leftover in self.builds_dir.glob(".staging-*"):
                     remove_tree(leftover)
         except StoreError:
             pass
-        return removed
 
     # --- moving builds between machines ---
     def export_build(self, build_id: str, out: Path) -> Path:

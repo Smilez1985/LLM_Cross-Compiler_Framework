@@ -332,12 +332,17 @@ def delete_framework_images(framework, plan, actor: str) -> ImageDeletion:
         if _image_item(now) != item:
             result.failed.append((item.speaking_name, "kept: it got a name or changed after the list was shown"))
             continue
+        names = sorted(getattr(now, "tags", None) or [])
+        removed: List[str] = []
         try:
-            for name in sorted(getattr(now, "tags", None) or []) or [item.file_name]:
+            for name in names or [item.file_name]:
                 client.images.remove(image=name, noprune=True)
+                removed.append(name)
         except Exception as e:  # noqa: BLE001 - e.g. a container still uses it: kept and reported
-            reason = str(getattr(e, "explanation", "") or e)
-            result.failed.append((item.speaking_name, redact_secrets(reason)[:300]))
+            reason = redact_secrets(str(getattr(e, "explanation", "") or e))[:300]
+            if removed and names:   # Docker dropped these names before it kept the image at its last one
+                reason += f"; its names {', '.join(removed)} were removed, the image itself stays"
+            result.failed.append((item.speaking_name, reason))
             continue
         result.deleted.append(item.speaking_name)
         result.freed_bytes += item.size_bytes

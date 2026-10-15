@@ -90,6 +90,29 @@ class TestDeleteArtifact:
         # (what an AI can read never holds it: test_the_delete_question_lists_full_path_name_size_and_kind_...).
         assert str(folder.resolve()) in text
 
+    def test_a_move_stopped_half_way_says_what_went_to_the_trash(self, env, monkeypatch):
+        """The folder went to the trash, then its golden ZIP could not: the answer says so and where to look, never
+        "nothing was deleted" (TRANSPARENCY); nothing is copied or deleted for good."""
+        from orchestrator.Core import trash as trash_module
+        enable(env, "delete_artifact")
+        folder, aid, digest = make_artifact(env)
+        real_move, calls = trash_module.Trash.move, []
+
+        def move(self, kind, path, *args, **kwargs):
+            calls.append(Path(path).name)
+            if len(calls) == 2:
+                raise trash_module.TrashError("Q4_K_M (golden ZIP) could not be moved to the trash (OSError).")
+            return real_move(self, kind, path, *args, **kwargs)
+
+        monkeypatch.setattr(trash_module.Trash, "move", move)
+        with pytest.raises(ToolError) as info:
+            ask(env, "delete_artifact", {"artifact_id": aid, "expect_sha256": digest})
+        message = f"{info.value} {info.value.next}"
+        assert "1 of 2" in message and "moved to the trash" in message and "File > Trash..." in message
+        assert "nothing was deleted" not in message.lower()
+        assert not folder.exists() and (folder.parent / "Q4_K_M.zip").is_file(), "both stay visible"
+        assert str(env.tmp) not in message, "no host path in what an AI reads"
+
     def test_the_delete_question_lists_full_path_name_size_and_kind_for_the_person_only(self, env, monkeypatch,
                                                                                        capsys):
         """Round 5 f: the person confirms a deletion in the framework's own window, which lists every item with its

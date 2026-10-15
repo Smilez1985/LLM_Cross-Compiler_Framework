@@ -266,7 +266,6 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
                              "ssh_user": settings.ssh_user, "previous": result.previous,
                              "perf_key": profile.perf_key(), "verification": report.as_dict(), "verified_at": now,
                              "unit_started": result.unit_started})
-        devices.prune(keep=(build.build_id,))
     return {"activated": ok, "build_id": build.build_id, "install": settings.install, "previous": result.previous,
             "checks": [c.as_dict() for c in (report.checks if report is not None else [])],
             "notes": list(result.notes)}

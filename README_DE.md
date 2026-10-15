@@ -570,9 +570,10 @@ wird (Version und Commit der Festlegung, die gefundenen Geräte, und dass der Se
   als „prebuilt, not self-built“ (vorgebaut, nicht selbst gebaut) angezeigt. Unter Linux braucht es die glibc, für
   die es gebaut wurde (2.35 oder 2.39); auf musl-Systemen wie Alpine läuft nur der selbst gebaute Server. Bis die
   Windows- und macOS-Builds kommen, ist das dort der Weg zum lokalen Modell.
-- `llm-cli ditto runtime prune` entfernt alte Builds; der aktive Build, sein CPU-Ersatz und der Build, aus dem ein
-  laufender Server gestartet wurde, bleiben immer erhalten, ebenso die Builds deiner Boards. `runtime status` sagt, wann ein neuer Build nötig (die
-  Festlegung hat sich geändert) oder empfohlen ist (der Bauplan dieses Rechners hat sich geändert).
+- `llm-cli ditto runtime prune` listet alte Builds, damit du die löschst, die du auswählst (nichts ist angehakt; das
+  Framework löscht keinen Build von selbst); der aktive Build, sein CPU-Ersatz, der Build, aus dem ein laufender
+  Server gestartet wurde, und die Builds deiner Boards stehen nie in der Liste. `runtime status` sagt, wann ein neuer
+  Build nötig (die Festlegung hat sich geändert) oder empfohlen ist (der Bauplan dieses Rechners hat sich geändert).
 
 Wähle danach in den KI-Einstellungen **Local model (managed llama-server)** (Anbieter `local`). Schalte zusätzlich
 den **Offline Mode** ein, wenn Ditto nie einen Cloud-Anbieter nutzen soll. Ditto findet den laufenden Server von

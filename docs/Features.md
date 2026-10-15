@@ -1034,8 +1034,9 @@ official prebuilt download stays only as the explicit choice `--prebuilt`, shown
 - **Store:** `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` holds the binaries with `build.json` (the plan)
   and `manifest.json` (sha256 of every file, duration, build host, verification results). The build ID is the hash of
   everything that changes the binaries, so a stored build is reused and never stamped again. Only a build verified on
-  this machine can become the active one; retention keeps the active build, the CPU fallback, the build a running
-  server uses and the two newest others. A build made on another of your machines can be imported: every file is
+  this machine can become the active one. The framework deletes no build by itself (unreleased; before, it kept only
+  the two newest others): `llm-cli ditto runtime prune` lists the old ones for you to tick, never the active build,
+  the CPU fallback or the build a running server uses. A build made on another of your machines can be imported: every file is
   checked against its manifest, the build ID against its plan and the commit against the pin, you confirm before any
   of its programs runs, and then it is verified like a local build. The version it must report comes from the pin,
   not from the archive, and every program in it is checked, also one the archive does not list. Ditto's import
@@ -1999,6 +2000,13 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   (`deletion_sha256`), before anything is deleted; without the audit log nothing is deleted.
 - **Knowledge snapshots** can also be exported: copied to a folder you pick (on this computer, a USB stick or a
   network share). Each copy is checked against the original by sha256; an export never deletes a snapshot.
+- **Old llama.cpp runtime builds and device packages** are kept when a new one is built or deployed (before, only
+  the newest were kept, without a list). `llm-cli ditto runtime prune` and `llm-cli device runtime prune DEVICE` list
+  them; the build or package in use is never listed.
+- **What the framework deletes by itself** is only its own bookkeeping, which you never see as an object: temporary
+  and unfinished files of its own writes and downloads, its staging, quarantine and working folders of one build or
+  install, the containers it started for one build, old records kept to a count (build records, requests, jobs) and
+  the state and log files of its own local model server. A test lists every place in the code that deletes.
 - **The framework's Docker images** are never deleted by the framework itself. The builder keeps the newest image of
   each target as `llm-framework/<target>:last-build` and drops only the per-build name; older images stay without a
   name. **Tools > Framework Build Images...** in the GUI and `llm-cli doctor --fix --tier 2` list every framework
