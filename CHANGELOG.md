@@ -10,6 +10,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **The facts catalogue and the per-tool classification** (delegation design 4.1-4.6, `orchestrator/tools/
+  facts_catalog.py`, texts in `orchestrator/utils/l10n_facts.py`): every finding before a question has a fixed kind.
+  Hard blockers (disk full, offline mode, an unpaired board or a changed host key, a gated model without access, the
+  Deep Ingest notice not read, a withdrawn pack, ...) refuse before any question with their reason code, a next step
+  for the AI and, apart from it, what the person can do; a blocker an AI can clear names the tool that clears it.
+  Situation warnings (a tight disk, a large download, memory that is tight or too small, many pages, an untested
+  module, a replaced board runtime) come with a rule for an AI; security and legal warnings (pickle weights, a base
+  image outside the Docker Official Images or not pinned, vendor downloads above the soft cap, an unreviewed or
+  community target, the first build of AI-made build code, an untrusted model run natively or in the sandbox the
+  person has not allowed for AIs (`bench_untrusted_sandbox_ok`), signing as the person, gated models, licences)
+  always stay with the person, a base image outside the Docker Official Images also after a confirmed build with it,
+  and facts that could not be checked are the security warning `facts_unknown`, never "no problem" (the person reads
+  in plain words what could not be checked, never an internal code). Builds, recipe builds, downloads, pack imports and exports, Deep Ingest,
+  deploy packages and deploys, board tools, the local runtime, benchmarks, module creation and settings raise them.
+  A decision is bound to the facts' decision digest, which leaves out free space and byte counts; a build or download
+  under a standing approval (and later a delegation) uses only the commit its look-up resolved (blocker
+  `commit_required` when Hugging Face could not be asked). The AI's view of the facts (`delegation.ai_view`) never
+  carries a fact only the person sees. Warning codes are stable identifiers, ready for a later "do not ask again for
+  this model version" choice (design question Q3), which is not built yet.
 - **A real-client smoke test** (`scripts/mcp_client_smoke.sh`, checker `scripts/mcp_smoke_check.py`): runs Claude Code
   (`claude -p`, four scripted prompts) against the framework's stdio server in a throw-away environment (home, Hugging
   Face home, XDG folders, per-user folder, secrets in memory only, the null keyring backend, no window system; the
@@ -35,7 +54,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   hand edit, another key or a missing signature counts as no confirmation) and the build standing approval
   covers the next builds. A digest-pinned base image outside the Docker Official Images counts once a build with
   exactly that image was confirmed; a tag never does. The build standing approval's rule version is now 2, so
-  standing approvals made under the narrower rule lapse.
+  standing approvals made under the narrower rule lapse. Until that first confirmed build the question carries the
+  security warning "first build" (the person sees AI-made or AI-installed build code once, design question Q1), also
+  for a hardware module an AI created without the person's yes (bound to its definition's sha256: one recreated under
+  the same name is shown again) and a target from another computer.
 - **Ditto and the framework on another computer, in the GUI** (MCP design T12, design 6.1): Configure AI Agent
   (Ditto) has an "Another computer (optional)" section, off by default, which says in plain text that the other
   framework is the same program installed on a second computer and that Docker is not needed (SSH or a server
@@ -563,9 +585,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   while the form was open): a notice in the GUI status bar opens **Tools > Pending Approvals...**, and
   `llm-cli tools approvals` (`list`, `show`, `approve`, `decline`; needs a terminal) works on a headless machine. The
   client gets `waiting_for_approval` with a job id; once you approve, the framework runs the call itself under the
-  client's caller, unless its question would read differently by then (then you are asked again), and the client
-  reads the result with `get_job_status`. An approval is bound to the caller, tool, argument hash and question hash,
-  runs once, expires after 15 minutes and ends with the client's session, `cancel_job` or the framework's shutdown;
+  client's caller, unless a fact the decision depends on changed by then (a new commit, a new warning such as a disk
+  that is now tight: then you are asked again; free space, byte counts or the time a backup snapshot is named after
+  that only moved never ask again, the call then runs with the facts of now), and the client reads the result with `get_job_status`. An approval is bound to
+  the caller, tool, argument hash and question hash, runs once, expires after 15 minutes and ends with the client's
+  session, `cancel_job` or the framework's shutdown;
   a client has at most 5 open; the question shows the caller class first and the client's name as self-reported, up
   to 16,000 characters. The window never puts another call in place of the one you are reading, and after that
   call's question changed, approving waits a moment. Decisions are audited before they are stored, and the approval
@@ -648,7 +672,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   refuses when the package or the key differs afterwards. It is always asked, never covered by a standing approval,
   one per device at a time; `cancel_job` closes the SSH session and reports the device state as unknown. The device's
   output comes back marked as external text (`get_job_status` field `external_text`). No input names an address, user,
-  port, password, fingerprint or path.
+  port, password, fingerprint or path. The account the framework logs in with and paths on the device never reach an
+  AI: `list_devices` says "device account", the login (account and address) is shown only in the framework's own
+  window (never in a form a client may read, nor as a device's speaking name), and the device's output, its errors
+  and the deploy's reason reach an AI with the account's name, its home folder and device paths removed, also when
+  the deploy worked.
 - **Trusted devices** (`~/.llm-framework/devices.json`, `llm-cli deploy devices list|add|remove`, `deploy run
   --label`): `deploy run`, `scan --device`, `device runtime deploy` and the GUI's Deployment window record a device
   after you confirmed its host key and the framework logged in (written to the audit log); `devices add` takes over a
@@ -664,7 +692,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   or key; a cancelled install is never activated and a cancelled model download keeps its `.part`. An untrusted model
   is benchmarked natively only after your consent in the framework's own window, written to the audit log first, or in
   the Docker sandbox. The board tools reach only trusted devices with the trusted host key, are always asked and never
-  covered by a standing approval.
+  covered by a standing approval; their facts, consequences, progress, check results and errors (also on success)
+  never name the device account (the paired login nor the account the deploy settings name) or a path on the board
+  (the person's window shows the login and the model's path).
+  Ditto's server that is not built yet, or a tier model not downloaded yet, is refused with `missing_information` and
+  names `build_local_runtime`, which the AI can call itself.
 - **Benchmark runs of this computer** (`~/.llm-framework/benchmarks/`): `llama-bench` results of the self-built build
   (prompt and generation speed, peak memory) with the model's sha256 and the build id; `get_status` shows the newest.
 - **The chat feed store with signed rows** (`chat_feed.sqlite` in the per-user folder, mode 0600; delegation design
@@ -689,9 +721,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   feed can be written and its newest rows verify. Nothing removes rows by itself yet.
 
 ### Changed
-- **Refused MCP calls carry their reason code as structured content** (`{"error": {"code", "field"}}`, framework
-  facts only, the text unchanged). Ditto in MCP-client mode reads the code and field from it instead of guessing
-  them from the remote server's words; an unknown code is `failed`, a field outside the tool's schema is dropped.
+- **Questions show a short summary and the warning classes** (delegation design 4.5, LAY-L2): a question in the
+  framework's own window (Ditto's dialog, the CLI prompt, the approval window) starts, after its first line, with 3 to 6
+  lines in the person's language (English or German): what happens with speaking names, how much it downloads and how
+  much disk it needs, "Needs your decision because: ..." with every security or legal warning, the situation warnings
+  to weigh, a safer option and who may decide. The summary is built only from computed numbers, the warnings and
+  speaking names, never from repository, log or AI text. Every question, an MCP form included, lists "Situation:" and
+  "Needs you (security / legal):" after the facts it checked.
+- **Refused MCP calls carry their reason code as structured content** (`{"error": {"code", "field", "blocker"}}`,
+  framework facts only, the text unchanged; `blocker` names the facts catalogue's hard fact that refused the call
+  before any question, such as `disk_full`). Ditto in MCP-client mode reads the code and field from it instead of
+  guessing them from the remote server's words; an unknown code is `failed`, a field outside the tool's schema is
+  dropped.
 - **`ArtifactStore` (`delete_artifact`) uses only public `BuildService` methods** (`output_folder`,
   `artifact_entries`, `busy_output_folders`, `ArtifactStore.for_service`).
 - **The Deep Ingest notice records who read it again**: its state file stores where it was acknowledged (`via`:
@@ -1159,8 +1200,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   home's key, token, keyring or framework folders changed (it compares their listings and never opens a file).
 - **Pending approvals show the two-phase question and run bound to it.** A call that waits for you in the
   framework shows the same question as any other window: the facts the framework looked up, the speaking names of
-  its ids, who asks. When you approve it, the facts are looked up again; if the question would read differently (a new
-  upstream commit, for example), you are asked again, otherwise the call runs with exactly the facts you saw. An MCP
+  its ids, who asks. When you approve it, the facts are looked up again; if a fact the decision depends on changed (a
+  new upstream commit, for example; free space alone never counts), you are asked again, otherwise the call runs bound
+  to the facts you saw. An MCP
   question between 4,000 and 16,000 characters now becomes a pending approval instead of a refusal, a standing
   approval is matched on the looked-up facts on the MCP path too (a client that could ask is not asked when one covers
   the call), Ditto's scrollable dialog for long questions also offers "do not ask again", and an approved call's

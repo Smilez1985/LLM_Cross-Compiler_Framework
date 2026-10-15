@@ -537,10 +537,12 @@ def with_repair_notes(result, notes: List[str]):
 _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
-def _coded(error: Exception, code: Optional[str], field: str = "") -> Exception:
-    """Remembers why a call was refused or failed (a reason code of normalize.CODES, the argument it is about), so the
-    result carries it as structured content {"error": {"code", "field"}} next to the text: a client such as Ditto in
-    MCP-client mode reads the code instead of guessing it from the words. Framework facts only, never external text."""
+def _coded(error: Exception, code: Optional[str], field: str = "", blocker: str = "") -> Exception:
+    """Remembers why a call was refused or failed (a reason code of normalize.CODES, the argument it is about, and the
+    facts catalogue's blocker that refused it before any question), so the result carries it as structured content
+    {"error": {"code", "field", "blocker"}} next to the text: a client such as Ditto in MCP-client mode reads the code
+    instead of guessing it from the words. Framework facts only, never external text."""
+    from orchestrator.tools.facts_catalog import BLOCKERS
     from orchestrator.tools.normalize import CODES
     box = _ERROR_FACTS.get()
     if box is not None:
@@ -548,6 +550,8 @@ def _coded(error: Exception, code: Optional[str], field: str = "") -> Exception:
         box["code"] = code if code in CODES else "failed"
         if field and _FIELD_NAME.match(str(field)):
             box["field"] = str(field)
+        if blocker and blocker in BLOCKERS:  # only a code the catalogue knows, never free text
+            box["blocker"] = str(blocker)
     return error
 
 
@@ -949,7 +953,8 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             if isinstance(e, ToolDenied) and tool_ctx.actor.startswith(ACTOR_PREFIX) and not (asked and not approved):
                 message += (f" This client uses the MCP token '{tool_ctx.actor[len(ACTOR_PREFIX):]}'; its "
                             f"permissions are set with '{_permissions_command(tool_ctx.actor)}'.")
-            raise _coded(_audited(MCPToolError(message)), code, e.field) from None
+            raise _coded(_audited(MCPToolError(message)), code, e.field,
+                         e.blocker if code == e.code else "") from None
 
     approval_param = inspect.Parameter("approval", inspect.Parameter.KEYWORD_ONLY,
                                        annotation=Annotated[ElicitationResult[Confirmation], Resolve(confirm)])

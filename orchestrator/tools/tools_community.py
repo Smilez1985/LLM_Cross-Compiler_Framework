@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.tools.facts_catalog import blocked, gb_number, size_class, warn, with_blocker
 from orchestrator.tools.grants import PACK_RULE
 from orchestrator.tools.output import ToolOutput, count, fact, untrusted_text
 from orchestrator.tools.policy import Decision, ToolTier
@@ -130,6 +131,25 @@ def pack_base_images(folder: Path) -> List[Tuple[str, str]]:
         rel = path.relative_to(folder).as_posix()
         found += [(rel, image) for image in dockerfile_bases(text)]
     return found
+
+
+def pack_warnings(kind: str, trust: str, images: List[str], disk: Any) -> tuple:
+    """The warnings before a pack import (design 4.3): a tight disk (situation); for a target pack its community
+    trust and every base image outside the Docker Official Images or not pinned by digest (security)."""
+    from orchestrator.Core.build_plan import _official, _registry_word
+    from orchestrator.Core.confirmed_builds import pinned
+    found = []
+    if disk is not None and disk.verdict == "tight":
+        found.append(warn("disk_tight", free_after_gb=gb_number(disk.after), reserve_gb=gb_number(disk.reserve)))
+    if kind == "target":
+        if trust == "community":
+            found.append(warn("target_pack_community"))
+        outside = [i for i in images if not _official(i)]
+        if outside:
+            found.append(warn("base_image_unofficial", registry=_registry_word(outside[0])))
+            if any(not pinned(i) for i in outside):
+                found.append(warn("base_image_unpinned"))
+    return tuple(found)
 
 
 def base_image_line(image: str) -> str:
@@ -523,40 +543,41 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
     def prepare_add(inp: AddPackIn, ctx: ToolContext) -> CallFacts:
         cm = community()
         if offline():
-            raise ToolError("Offline mode is on: no pack can be downloaded.", code="not_supported",
-                            next="Only the person can switch offline mode off (in the GUI or with llm-cli).")
+            raise blocked("offline_mode", "Offline mode is on: no pack can be downloaded.",
+                          "Only the person can switch offline mode off (in the GUI or with llm-cli).",
+                          reason="not_supported")
         try:
             state = cm.load_index(refresh=True)
         except PackError as e:
             raise pack_error(e, next="Tell the person: the signed community index could not be loaded.") from None
         if state.source != "fetched":
-            raise ToolError(f"The signed community index could not be updated ({_no_paths(state.note)}); nothing is "
-                            "installed without the current revocations.", code="failed",
-                            next="Try again later; tell the person if it keeps failing.")
+            raise blocked("index_stale", f"The signed community index could not be updated "
+                          f"({_no_paths(state.note)}); nothing is installed without the current revocations.",
+                          "Try again later; tell the person if it keeps failing.")
         entry = state.index.latest(inp.kind, inp.pack_id)
         if entry is None:
-            raise ToolError(f"There is no {inp.kind} pack '{inp.pack_id}' in the signed index.", code="unknown_id",
-                            next="Call list_packs (refresh=true for the newest index) for the pack ids.")
+            raise blocked("pack_unknown", f"There is no {inp.kind} pack '{inp.pack_id}' in the signed index.",
+                          "Call list_packs (refresh=true for the newest index) for the pack ids.")
         revoked = state.index.revocation(inp.kind, entry.id, entry.version, entry.sha256)
         if revoked is not None:
-            raise ToolError(f"The {inp.kind} pack {entry.id} {entry.version} was revoked by the signed index.",
-                            code="not_supported", next="Choose another pack; a revoked pack is never installed.")
+            raise blocked("pack_revoked", f"The {inp.kind} pack {entry.id} {entry.version} was revoked by the signed "
+                          "index.", "Choose another pack; a revoked pack is never installed.")
         disk = pack_disk(inp.kind, entry.size)
         if disk is not None and not disk.fits:
-            raise ToolError(f"Not enough disk space for the pack: {2 * entry.size} bytes needed (quarantine and "
-                            f"installed copy) plus a reserve of {disk.reserve} bytes, {disk.free} bytes free"
-                            + (f", {disk.reserved_by_others} bytes reserved by other calls" if disk.reserved_by_others
-                               else "") + ".", code="insufficient_resources",
-                            next="Tell the person how much space is needed.")
+            raise blocked("disk_full", f"Not enough disk space for the pack: {2 * entry.size} bytes needed "
+                          f"(quarantine and installed copy) plus a reserve of {disk.reserve} bytes, {disk.free} bytes "
+                          "free" + (f", {disk.reserved_by_others} bytes reserved by other calls"
+                                    if disk.reserved_by_others else "") + ".",
+                          "Tell the person how much space is needed.")
         key = Quarantine.key(inp.kind, entry.id, entry.sha256)
         prepared = quarantine.get(key)
         if prepared is None:
             try:
                 prepared = cm.prepare_install(inp.kind, entry.id)
             except PackError as e:
-                raise pack_error(e, code="not_supported" if "rejected" in str(e) or "exists" in str(e) else "failed",
-                                 next="Tell the person why the pack cannot be installed; nothing was installed.") \
-                    from None
+                error = pack_error(e, code="not_supported" if "rejected" in str(e) or "exists" in str(e) else "failed",
+                                   next="Tell the person why the pack cannot be installed; nothing was installed.")
+                raise (with_blocker(error, "pack_rejected") if "rejected" in str(e) else error) from None
             if prepared.provenance.pack_sha256 != entry.sha256 or prepared.trust.value not in ("verified", "community"):
                 cm.discard(prepared)
                 raise ToolError("The signed index changed while the pack was checked; nothing was installed.",
@@ -593,6 +614,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                 facts.append(Fact(f"Base image ({file})", base_image_line(image), PACK_TEXT))
         bound = {"kind": m.kind, "pack_id": m.id, "version": m.version, "sha256": prepared.provenance.pack_sha256,
                  "trust": prepared.trust.value, "base_images": [i for _, i in images], "size": int(entry.size),
+                 "signing_key": getattr(state, "signer", "") or "",
                  # the facts a standing approval is matched against (grants.PACK_RULE), never the AI's words
                  "grant": {"source": "index", "kind": m.kind, "trust": prepared.trust.value,
                            "signing_key": getattr(state, "signer", "") or ""}}
@@ -600,7 +622,17 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         if standing is None or not standing.fits:
             # design 6.5: under a standing approval the larger reserve (20 GiB or 10 %) must stay free, else it asks
             bound["grant"] = None
-        return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound)
+        numbers = {"size_class": size_class(int(entry.size)), "size_bytes": int(entry.size)}
+        if disk is not None:
+            numbers.update(free_after_bytes=int(disk.after), reserve_bytes=int(disk.reserve))
+        return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound,
+                         warnings=pack_warnings(m.kind, prepared.trust.value, [i for _, i in images], disk),
+                         numbers=numbers, scope={"size_bytes": int(entry.size), "pack_kind": m.kind,
+                                                 "pack_trust": prepared.trust.value},
+                         consequence_template=consequence, names={"pack": m.id},
+                         # the free space decides only whether a standing approval may cover it: never in the digest
+                         digest_keys=("kind", "pack_id", "version", "sha256", "trust", "base_images", "size",
+                                      "signing_key"))
 
     def add_pack_from_index(inp: AddPackIn, ctx: ToolContext) -> AddPackStartedOut:
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
@@ -697,10 +729,9 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         except Exception:  # noqa: BLE001 - an unreadable store is no key
             stored = None
         if not stored:
-            raise ToolError("No community signing key exists on this computer yet, so no pack can be signed.",
-                            code="needs_person",
-                            next="Ask the person to create their keys with 'llm-cli zoo keys' (a key is created only "
-                                 "by them), then call export_pack again.")
+            raise blocked("no_signing_key", "No community signing key exists on this computer yet, so no pack can be "
+                          "signed.", "Ask the person to create their keys with 'llm-cli zoo keys' (a key is created "
+                          "only by them), then call export_pack again.")
         try:
             return key_id(UserKeys(secrets).signing_key().public_key())
         except PackError as e:
@@ -771,7 +802,9 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                                        "every page keeps its source address"))
         bound = {"kind": inp.kind, "source": source, "author": author, "license": licence,
                  "model_license": inp.model_license, "pack_id": inp.pack_id, "signer": key}
-        return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound)
+        # always the person: the pack goes out under their name (design 4.3)
+        return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, warnings=(warn("signs_as_you"),),
+                         consequence_template=consequence)
 
     def run_export(cm, bound: Dict[str, Any]) -> Dict[str, Any]:
         try:

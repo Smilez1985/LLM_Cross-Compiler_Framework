@@ -528,3 +528,68 @@ def test_ditto_sessions_never_share_an_approval(env):
     assert request(ToolContext("mcp", session="b", connection="c1")) == client
     assert request(ToolContext("mcp", session="a", connection="c2")) != client
     assert len(env.store.pending()) == 4
+
+
+def _reserve_note(env, state, ran):
+    """A tool whose question shows the free disk space (a volatile fact) and, when the disk got tight, a warning."""
+    from orchestrator.tools import facts_catalog as catalog
+    from orchestrator.tools.spec import CallFacts, Fact
+
+    def prepare(inp, ctx):
+        warnings = ((catalog.warn("disk_tight", free_after_gb=state["free"] / 10, reserve_gb=2.0),)
+                    if state["tight"] else ())
+        return CallFacts(consequence=f"Writes the note {inp.text}; {state['free']} GB are free now.",
+                         consequence_template=f"Writes the note {inp.text}; {{free}} are free now.",
+                         facts=(Fact("Note", inp.text), Fact("Disk", f"{state['free']} GB free", volatile=True)),
+                         bound={"text": inp.text}, warnings=warnings)
+
+    def handler(inp, ctx):
+        ran.append(ctx.facts.facts[1].value)
+        return NoteOut(written=inp.text)
+    env.registry.register(ToolSpec("reserve_note", "Reserve a note", "Reserves a note", ToolTier.LOCAL_WRITE, NoteIn,
+                                   NoteOut, handler, takes_context=True, prepare=prepare))
+    env.registry.policy_store.replace(ToolPolicy(configured=True, reviewed=[s.name for s in env.registry.list()]))
+    return mcp_server.build_mcp_server(env.fm)
+
+
+def _approve_after(env, server, change):
+    """A client that cannot ask calls reserve_note; `change` happens while the person reads; they approve in the
+    CLI. Returns the record as it was first shown and as it is afterwards (seen while the session still lives)."""
+    async def go():
+        async with Client(server) as client:
+            await client.call_tool("reserve_note", {"text": "hello"})
+            record = env.store.pending()[0]
+            change()
+            decided = await asyncio.to_thread(cli, env.registry, "tools", "approvals", "approve", record.id,
+                                              input="y\n")
+            assert decided.exit_code == 0, decided.output
+            deadline = time.monotonic() + 10
+            while env.store.get(record.id).state in ("pending", "approved", "running") and \
+                    env.store.get(record.id).question_sha256 == record.question_sha256 and \
+                    time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            return record, env.store.get(record.id)
+    return run(go())
+
+
+def test_free_space_change_does_not_ask_again(env):
+    """F3 ([A5], delegation design 4.4): the question of a pending approval shows the free disk space; the space moved
+    while the person read it, so the question text changed and the person was asked again, every time. The decision
+    is bound to the facts' digest: free space alone (a volatile fact) never makes the question new, and the call runs
+    once with the facts of now."""
+    state, ran = {"free": 500, "tight": False}, []
+    server = _reserve_note(env, state, ran)
+    record, after = _approve_after(env, server, lambda: state.update(free=480))
+    assert after.state == "done", after
+    assert ran == ["480 GB free"], "it ran once, bound to the current facts, without asking again"
+    assert env.store.get(record.id).question_sha256 == record.question_sha256
+
+
+def test_a_new_warning_asks_again(env):
+    """A change the decision depends on (the disk is now tight: a new warning) puts the new question to the person;
+    nothing runs on the answer to the old one."""
+    state, ran = {"free": 500, "tight": False}, []
+    server = _reserve_note(env, state, ran)
+    record, asked_again = _approve_after(env, server, lambda: state.update(free=30, tight=True))
+    assert asked_again.state == "pending" and asked_again.question_sha256 != record.question_sha256
+    assert "tight" in asked_again.question and ran == []

@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator.Core.crawl_jobs import (DEPTH_CAP, MAX_START_URLS, MAX_URL_CHARS, PAGE_CAP, CrawlJobService,
                                           CrawlPlan, CrawlRefused)
+from orchestrator.tools.facts_catalog import MANY_PAGES, warn, with_blocker
 from orchestrator.tools.output import ToolOutput, fact, untrusted_text
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
@@ -93,7 +94,21 @@ def _plan_facts(plan: CrawlPlan) -> CallFacts:
               Fact("Embedding model", "downloaded once (about a GB) if it is not on this computer yet")]
     bound = {"start_urls": list(plan.start_urls), "max_pages": plan.max_pages, "max_depth": plan.max_depth,
              "delay": plan.delay, "languages": list(plan.languages), "include_pdfs": plan.include_pdfs}
-    return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound)
+    # A situation warning when the crawl may store many pages; the embedding model's first download and the
+    # snapshots above the cap are not warned about yet (whether the model is on this computer is not known before
+    # the crawl, and snapshots are still pruned by themselves until the person's cleanup exists).
+    warnings = ()
+    if plan.max_pages * sites >= MANY_PAGES:
+        warnings = (warn("many_pages", max_pages=plan.max_pages * sites, sites=sites),)
+    return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, warnings=warnings,
+                     numbers={"start_urls": sites, "max_pages": plan.max_pages, "max_depth": plan.max_depth},
+                     consequence_template=consequence)
+
+
+def refusal(e: CrawlRefused) -> ToolError:
+    """A refused crawl as the tool's error, marked with its blocker (the person's action goes with it)."""
+    error = ToolError(str(e), code=e.code, next=e.next)
+    return with_blocker(error, e.blocker) if getattr(e, "blocker", "") else error
 
 
 def register_crawl_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
@@ -104,7 +119,7 @@ def register_crawl_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistr
             plan = service.plan(inp.start_urls, inp.max_pages, inp.max_depth, inp.languages, inp.include_pdfs,
                                 ctx.actor)
         except CrawlRefused as e:
-            raise ToolError(str(e), code=e.code, next=e.next) from None
+            raise refusal(e) from None
         return _plan_facts(plan)
 
     def crawl_docs_site(inp: CrawlIn, ctx: ToolContext) -> CrawlStartedOut:
@@ -117,7 +132,7 @@ def register_crawl_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistr
         try:
             job = service.start(plan, ctx.owner, ctx.actor)
         except CrawlRefused as e:
-            raise ToolError(str(e), code=e.code, next=e.next) from None
+            raise refusal(e) from None
         return CrawlStartedOut(job_id=job.job_id, state=job.state, start_urls=list(plan.start_urls),
                                max_pages=plan.max_pages, max_depth=plan.max_depth)
 

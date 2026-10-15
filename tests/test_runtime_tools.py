@@ -224,7 +224,10 @@ class TestStartStop:
         confirm = asking(True)
         with pytest.raises(ToolError) as e:
             call(fw, "start_local_runtime", {}, confirm=confirm)
-        assert e.value.code == "needs_person" and "build_local_runtime" in str(e.value) and confirm.asked == []
+        # never started and nobody asked; the AI can clear it itself (facts catalogue: runtime_not_built is resolved
+        # by build_local_runtime, so its reason code is missing_information, not needs_person)
+        assert e.value.code == "missing_information" and e.value.blocker == "runtime_not_built"
+        assert "build_local_runtime" in str(e.value) and confirm.asked == []
 
     def test_no_result_holds_the_address_or_the_key(self, fw, fake_rt, monkeypatch):
         rt = fake_rt["rt"]

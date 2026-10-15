@@ -12,9 +12,14 @@ expires after 15 minutes, and ends with the session that asked or when the clien
 question would read differently when the person approves (a fact behind it changed), nothing runs and the new question
 is shown instead; otherwise the handler gets exactly the facts that were shown. A pending approval is a question to
 the person, so the limits on questions apply to it (a recent "no" to the same call, a paused tool, 30 questions per
-hour, 5 open ones per client), and a "no" here counts like a "no" in any other window. The approvals are kept in the
-per-user folder (`tool_approvals.json`, mode 0600), signed like the tool permissions; only framework code writes the
-file, and no tool, resource or prompt can create, list, approve or decline an approval.
+hour, 5 open ones per client), and a "no" here counts like a "no" in any other window.
+
+What "would read differently" means is the facts' decision digest (delegation design 4.4, finding F3): free space or
+a byte count that changes while the question waits (a volatile fact) never asks the person again; a changed warning,
+size class, commit, image digest or any other fact does, and so does a question that changed outside the facts.
+
+The approvals are kept in the per-user folder (`tool_approvals.json`, mode 0600), signed like the tool permissions;
+only framework code writes the file, and no tool, resource or prompt can create, list, approve or decline an approval.
 """
 
 import hashlib
@@ -310,6 +315,22 @@ class ApprovalStore:
         return self._change(change)
 
 
+def stable_facts(facts: Any) -> Any:
+    """The facts as far as a decision depends on them (design 4.4): the consequence template instead of the rendered
+    consequence, no volatile fact, no volatile number, warnings by code only (their numbers, such as the free space
+    left, change while a question waits). Used to tell a question that only shows other free space from one that
+    asks something new."""
+    import dataclasses
+
+    from orchestrator.tools.spec import CallWarning, volatile_numbers
+    volatile = set(volatile_numbers(getattr(facts, "tool", "") or ""))
+    return dataclasses.replace(
+        facts, consequence=facts.consequence_template or facts.consequence,  # no template: all of it counts
+        facts=tuple(f for f in facts.facts if not f.volatile),
+        numbers={k: v for k, v in facts.numbers.items() if k not in volatile},
+        warnings=tuple(CallWarning(w.code) for w in facts.warnings))
+
+
 def apply_decision(registry: Any, record: ApprovalRecord, actor: str) -> None:
     """Everything a person's decision does before it is stored: the audit entry, and for "approve and do not ask
     again" the standing approval itself, saved with the policy (`actor`: cli or gui). Raises when either cannot be
@@ -360,6 +381,8 @@ class _Waiting:
     expires: datetime
     running: bool = False
     facts: Any = None        # what the tool looked up for the question shown (CallFacts), None for a tool without
+    facts_sha256: str = ""   # the facts' decision digest when the question was shown ("" without facts)
+    stable_sha256: str = ""  # the question with its volatile values left out, when it was shown
 
 
 @dataclass
@@ -421,6 +444,7 @@ class ApprovalService:
         facts = getattr(ctx, "facts", None)
         question = self.question(spec, inp, ctx, facts)
         digest = question_sha256(question)
+        decision_digest, stable = self._decision_of(spec, inp, ctx, facts)
         offer = self.registry.grant_offer(spec, inp, ctx) if spec.grant is not None else None
         approval_id = f"ap_{secrets.token_hex(8)}"
         job = self.jobs.create("approval", ctx.owner, state="waiting_for_approval",
@@ -446,10 +470,31 @@ class ApprovalService:
         self.jobs.update(job.job_id, note=f"Waiting for the person to approve '{spec.title}' in the framework.")
         with self._lock:
             self._waiting[approval_id] = _Waiting(approval_id, spec.name, dict(arguments), ctx, job.job_id, key,
-                                                  digest, expires, facts=facts)
+                                                  digest, expires, facts=facts, facts_sha256=decision_digest,
+                                                  stable_sha256=stable)
         self._emit("approval", approval_id, spec.name, ctx, "pending", job.job_id)
         self._start()
         return job
+
+    def _decision_of(self, spec: Any, inp: Any, ctx: Any, facts: Any) -> Tuple[str, str]:
+        """(the facts' decision digest, the hash of the question without its volatile values) for a call with looked-up
+        facts; ("", "") without facts (then only the question text itself counts)."""
+        if facts is None or not hasattr(facts, "decision_digest"):
+            return "", ""
+        try:
+            return facts.decision_digest(), question_sha256(self.question(spec, inp, ctx, stable_facts(facts)))
+        except Exception as e:  # noqa: BLE001 - without the digest the question text decides, as before
+            logger.info(f"No decision digest for {spec.name}: {redact_secrets(str(e))}")
+            return "", ""
+
+    def _same_decision(self, item: "_Waiting", record: Any, spec: Any, inp: Any, facts: Any) -> bool:
+        """Whether only volatile values changed since the person was shown the question (free space, exact byte
+        counts): the same decision digest and the same question once those values are left out, for the question
+        this process put into the store. Then the person is not asked again (F3)."""
+        if not item.facts_sha256 or record.question_sha256 != item.question_sha256:
+            return False
+        digest, stable = self._decision_of(spec, inp, item.ctx, facts)
+        return bool(digest) and digest == item.facts_sha256 and stable == item.stable_sha256
 
     def _emit(self, kind: str, approval_id: str, tool: str, ctx: Any, state: str, job_id: str = "") -> None:
         """Tells the registry's observers (the chat feed) that an approval was created or ended: ids and states only."""
@@ -618,7 +663,15 @@ class ApprovalService:
                        f"The approved call can no longer be checked ({redact_secrets(str(e))}).", error=e)
             return
         digest = question_sha256(question)
-        if digest != record.question_sha256 or digest != item.question_sha256:
+        changed = digest != record.question_sha256 or digest != item.question_sha256
+        if changed and self._same_decision(item, record, spec, inp, facts):
+            # only free space or byte counts moved: the person's yes stands, and the handler gets the current facts
+            # (its disk reservation is taken for what is true now)
+            changed = False
+            with self._lock:
+                if self._waiting.get(item.approval_id) is item:
+                    item.facts = facts
+        if changed:
             try:
                 self.registry._audit(item.ctx, spec, self.registry.decide(spec, inp, item.ctx),
                                      "confirmation_requested", item.arguments, required=spec.tier.value != "read",
@@ -629,10 +682,12 @@ class ApprovalService:
             expires = _now() + timedelta(seconds=self.ttl)
             # What "do not ask again" may cover is computed again from the facts behind the new question.
             offer = self.registry.grant_offer(spec, inp, item.ctx) if spec.grant is not None else None
+            decision_digest, stable = self._decision_of(spec, inp, item.ctx, facts)
             with self._lock:
                 if self._waiting.get(item.approval_id) is not item:  # withdrawn meanwhile: nothing is asked
                     return
                 item.question_sha256, item.expires, item.facts = digest, expires, facts
+                item.facts_sha256, item.stable_sha256 = decision_digest, stable
             self.store.update(item.approval_id, state="pending", question=question, question_sha256=digest,
                               decided_by=None, decided_at=None, expires=_iso(expires), grant=offer, choice=None,
                               note="The question changed after it was approved; it is asked again.")
