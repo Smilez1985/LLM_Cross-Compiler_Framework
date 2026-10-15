@@ -697,14 +697,15 @@ class LocalLLMRuntime:
     def install(self, plan: Any = None, *, backend: str = "auto", placement: str = "auto",
                 jobs: Optional[int] = None, log: Optional[Callable[[str], None]] = None,
                 fetch_source: Optional[Callable[[], bool]] = None,
-                cancelled: Optional[Callable[[], bool]] = None):
+                cancelled: Optional[Callable[[], bool]] = None, prune: bool = True):
         """Builds llama-server on this machine from the pinned commit (the plan of plan_install): the CPU build first,
         verified and made active, then the GPU build, active once it is verified. A running server keeps running; the
         next start uses the new build. fetch_source() is asked before the pinned source (about 215 MB) is fetched;
         without it the source is fetched. `cancelled()` is checked before every build and before every activation: a
         cancelled install activates nothing more (the step running at that moment finishes, its result is kept in the
-        store but not made active). Returns the HostInstallResult; raises LocalRuntimeError when the CPU build cannot be
-        built or the install was cancelled before it was activated (nothing is activated then)."""
+        store but not made active). prune=False keeps every old build and every installation of another llama.cpp
+        build (retention removes them otherwise). Returns the HostInstallResult; raises LocalRuntimeError when the CPU
+        build cannot be built or the install was cancelled before it was activated (nothing is activated then)."""
         from orchestrator.runtime.build.host import HostBuildError, install_host_runtime
         from orchestrator.runtime.build.store import smoke_model_file
         plan = plan or self.plan_install(backend=backend, placement=placement)
@@ -715,13 +716,14 @@ class LocalLLMRuntime:
         try:
             result = install_host_runtime(plan, store=self.store, source=source, executor=executor,
                                           verifier=verifier, smoke_model=smoke, jobs=jobs, log=log,
-                                          cancelled=cancelled)
+                                          cancelled=cancelled, prune=prune)
         except HostBuildError as e:
             where = f" (log: {e.log})" if e.log else ""
             raise LocalRuntimeError(f"{e}{where}") from None
         with self._lock():
             self._update_active(use="self-built")
-            self._prune_old_builds()
+            if prune:
+                self._prune_old_builds()
         self.logger.info(f"Self-built llama.cpp {self.build}: active build {result.active.build_id[:16]} "
                          f"({result.active.backend}), CPU fallback {result.fallback.build_id[:16]}")
         return result

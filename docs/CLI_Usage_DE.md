@@ -847,8 +847,10 @@ zweiter Aufruf tut nichts: Er sagt, was er gefunden hat, und hört auf. Der Ditt
 Befehl aus.
 
 - **Was er findet:** einen direkten Build, der seine Prüfungen auf diesem Rechner bestanden hat (oder das offizielle
-  Archiv, das du mit `install --prebuilt` gewählt hast), und Dittos Image des festgelegten llama.cpp-Commits, geprüft
-  in einem Container aus ihm selbst.
+  Archiv, das du mit `install --prebuilt` gewählt hast), und Dittos Image des festgelegten llama.cpp-Commits, hier
+  gebaut (nie eines aus einer Registry) und in einem Container aus ihm selbst geprüft. Solange Docker nicht
+  erreichbar ist, bleibt der Docker-Modus, wie du ihn gewählt hast. Der Befehl entfernt unterwegs nichts: Kein alter
+  Build wird durch Aufräumen entfernt.
 - **Wenn nichts installiert ist:** `--mode auto` installiert direkt (ohne den Aufwand von Docker); geht das hier
   nicht, nimmt er Docker und sagt warum. Mit `--mode bare-metal` oder `--mode docker` wählst du selbst.
 - **Docker-Modus:** Dittos Image wird auf diesem Rechner aus demselben festgelegten Rezept gebaut, auf einem Docker
@@ -884,7 +886,7 @@ Befehl aus.
 | `--backend [...]` | GPU-Backend, wie bei `install`. |
 | `--jobs INTEGER RANGE` | Parallele Compiler-Jobs eines Builds. |
 | `--no-model` | Den Download des Modells nicht anbieten. |
-| `-y, --yes` | Vor dem Bauen, dem Holen des Quellcodes oder dem Download eines Modells unter freier Lizenz nicht fragen (Größe und Lizenz werden trotzdem angezeigt). Entfernt nie etwas. |
+| `-y, --yes` | Vor dem Holen des Quellcodes oder dem Download eines Modells unter freier Lizenz nicht fragen (Größe und Lizenz werden trotzdem angezeigt). Der Build selbst startet ohne Frage, wie die Installer es brauchen. Entfernt nie etwas. |
 
 ```bash
 llm-cli ditto runtime ensure                              # installiert ihn, wenn er fehlt

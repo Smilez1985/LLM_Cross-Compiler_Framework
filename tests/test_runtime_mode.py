@@ -355,6 +355,24 @@ class TestImages:
         cs.build_runtime_image(rt.docker(), build, BASES["debian-13"], "repackaged", tmp_path / "log")
         assert [b["target"] for b in client.builds[2:]] == ["ditto"], "the runtime base is reused"
 
+    def test_the_programs_in_the_image_are_runnable_by_the_containers_user(self, tmp_path):
+        client = FakeClient()
+        rt = runtime(tmp_path, client)
+        build = _stored_native(rt)
+        for program in build.bin_dir.iterdir():
+            program.chmod(0o700)  # built under a strict umask: only its owner may run it
+        modes = {}
+        build_stage = client.api.build
+
+        def recording(path, **kw):
+            for program in (Path(path) / "bin").iterdir():
+                modes[program.name] = program.stat().st_mode & 0o777
+            return build_stage(path, **kw)
+        client.api.build = recording
+        cs.build_runtime_image(rt.docker(), build, BASES["debian-13"], "repackaged", tmp_path / "log")
+        assert modes and set(modes.values()) == {0o755}, "COPY keeps the mode; the container runs as another owner"
+        assert {p.stat().st_mode & 0o777 for p in build.bin_dir.iterdir()} == {0o700}, "the build store is unchanged"
+
     def test_a_changed_program_is_never_put_into_an_image(self, tmp_path):
         client = FakeClient()
         rt = runtime(tmp_path, client)
@@ -565,6 +583,56 @@ class TestEnsure:
         rt._platform = ("windows", "x86_64")
         assert "Linux" in runtime_mode.docker_problem(rt)
 
+    def test_a_pulled_image_with_dittos_labels_is_never_used(self, tmp_path, no_source, dri):
+        client = FakeClient()
+        rt = runtime(tmp_path, client)
+        image = cs.build_runtime_image(rt.docker(), _stored_native(rt), BASES["debian-13"], "repackaged",
+                                       tmp_path / "log")
+        # the same labels on an image that came from a registry (anyone can put labels on an image)
+        client.images.items[image.image_id].attrs["RepoDigests"] = [f"{cs.IMAGE_REPO}@sha256:{'a' * 64}"]
+        det = runtime_mode.detect(rt)
+        assert det.docker is None and any("pulled from a registry" in note for note in det.notes), det.notes
+        pulled = rt.docker().image(image.image_id)
+        report = cs.verify_image(rt.docker(), pulled, PIN, cs.gpu_passthrough(rt.docker(), rt.hardware(), "cpu"))
+        assert not report.ok and not [c for c in client.created if c.labels.get(cs.LABEL) == "check"], \
+            "refused before anything of it runs"
+
+    def test_ensure_removes_no_old_build_by_itself(self, tmp_path, no_source, dri, monkeypatch):
+        from orchestrator.runtime.build.store import BuildStore
+        pruned = []
+        monkeypatch.setattr(BuildStore, "prune", lambda self, *a, **k: pruned.append(k) or [])
+        rt = runtime(tmp_path)
+        other = rt.root / "b1000-cpu-x64"  # the official archive of another llama.cpp build
+        other.mkdir(parents=True)
+        (other / "runtime.json").write_text("{}")
+        result = ensure(rt)
+        assert result.action == "installed" and rt.installed() is not None
+        assert pruned == [] and other.is_dir(), "a deletion is the person's, from a list (round 5 f)"
+
+    def test_docker_mode_stays_while_docker_cannot_be_asked(self, tmp_path, no_source, dri):
+        client = FakeClient()
+        rt = runtime(tmp_path, client)
+        rt.install()
+        ensure(runtime(tmp_path, client, executor=Refuses()), mode="docker", force=True)
+        client.reachable = False  # Docker is not started (yet), the bare-metal build is still there
+        again = runtime(tmp_path, client, executor=Refuses())
+        result = ensure(again)
+        assert result.action == "skipped" and result.mode == "docker" and again.mode() == "docker"
+        assert any("Docker cannot be used now" in line and "nothing was changed" in line
+                   and "--mode bare-metal --force" in line for line in result.lines)
+
+    def test_a_recorded_mode_that_is_gone_is_named_when_the_mode_changes(self, tmp_path, no_source, dri):
+        client = FakeClient()
+        rt = runtime(tmp_path, client)
+        rt.install()
+        ensure(runtime(tmp_path, client, executor=Refuses()), mode="docker", force=True)
+        client.images.items.clear()  # the person removed Ditto's image with docker rmi
+        again = runtime(tmp_path, client, executor=Refuses())
+        result = ensure(again)
+        assert result.action == "skipped" and again.mode() == "bare-metal"
+        assert any("Docker: the recorded image" in line and "is no longer there" in line for line in result.lines)
+        assert any("was Docker" in line and "now bare metal" in line for line in result.lines)
+
 
 class TestSwitch:
 
@@ -638,6 +706,16 @@ class TestSwitch:
         assert {i.file_name for i in images} == {i.id for i in client.images.items.values()}
         assert all(i.full_path == "" and i.file_name.startswith("sha256:") and i.size_bytes > 0 for i in images)
         assert client.removed_images == []
+
+    def test_docker_objects_that_cannot_be_listed_are_named(self, tmp_path, no_source, dri, verify_in_container):
+        client = FakeClient()
+        ensure(runtime(tmp_path, client, native=False), mode="docker")
+        client.reachable = False
+        back = runtime(tmp_path, client, native=False, executor=Refuses())
+        result = ensure(back, mode="bare-metal", force=True)
+        assert back.mode() == "bare-metal" and client.removed_images == []
+        assert any("Ditto's images and containers could not be listed" in line and "Docker" in line
+                   for line in result.lines), result.lines
 
     def test_force_to_the_mode_that_is_there_only_records_it(self, tmp_path, no_source, dri):
         client = FakeClient()
@@ -778,6 +856,9 @@ class TestStoreAndSwitchDetails:
         assert job.state == "done", job.error
         assert str(tmp_path) not in json.dumps(job.result) and job.result["running"]
         assert [c for c in client.created if c.labels.get(cs.LABEL) == "server"]
+        # the result names what runs: the image's build, not a bare-metal build (there is none here)
+        assert job.result["build_id"] == rt.mode_record()["docker"]["build_id"]
+        assert "Docker" in job.result["origin"] and "repackaged" in job.result["origin"]
 
 
 class TestForAnAI:
@@ -982,6 +1063,13 @@ class TestInstaller:
         run, calls = self._run(tmp_path, "setup_ditto", env={"LCF_CONTAINER_BUILD": "1"})
         assert run.returncode == 0 and calls == ""
         assert "Docker-Modus ist im Framework-Container nicht verfügbar" in run.stdout
+        # docs/Container_Setup: inside the container ensure cannot work either, so it is not suggested there
+        assert "docker exec" not in run.stdout and "Cloud-Anbieter" in run.stdout
+
+    def test_without_any_user_variable_the_step_never_fails_the_installation(self, tmp_path):
+        run, calls = self._run(tmp_path, "setup_ditto; echo AFTER", env={"SUDO_USER": ""})  # USER is not set either
+        assert run.returncode == 0 and "AFTER" in run.stdout and calls == "", run.stdout + run.stderr
+        assert "nicht für root" in run.stdout
 
     def test_without_sudo_runuser_is_used(self, tmp_path):
         run, calls = self._run(tmp_path, "setup_ditto", sudo=False)

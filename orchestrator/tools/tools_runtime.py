@@ -541,7 +541,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                      "the pin changed); nothing was built. Next: call build_local_runtime again.")
                 cancelled = lambda: stop.is_set() or handle.cancelled  # noqa: E731
                 try:
-                    result = rt.install(plan, fetch_source=lambda: True, cancelled=cancelled,
+                    # prune=False: an AI never reaches a deletion (round 5 f); old builds stay for the person
+                    result = rt.install(plan, fetch_source=lambda: True, cancelled=cancelled, prune=False,
                                         log=lambda msg: handle.progress(None, None, scrub(msg)[:200]))
                 except LocalRuntimeError as e:
                     if cancelled():
@@ -635,11 +636,14 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     raise job_error(e) from None
                 status = rt.status()
                 inst = status.installed
+                origin, build_id = (inst.label, inst.build_id) if inst is not None else (None, None)
+                if status.mode == "docker":  # what runs is Ditto's image, not a bare-metal build
+                    image = status.docker or {}
+                    origin = f"Ditto's image ({image.get('made_by') or 'made here'}), Docker mode"
+                    build_id = image.get("build_id")
                 # The server's address and its per-start key are never part of a result.
                 return {"running": status.running, "healthy": status.healthy, "model": status.model,
-                        "tier": status.tier, "ctx": status.ctx,
-                        "origin": inst.label if inst is not None else None,
-                        "build_id": inst.build_id if inst is not None else None}
+                        "tier": status.tier, "ctx": status.ctx, "origin": origin, "build_id": build_id}
 
             def started(out: Dict[str, Any]):
                 ok = bool(out.get("running"))

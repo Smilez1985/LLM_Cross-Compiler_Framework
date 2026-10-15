@@ -815,7 +815,9 @@ Installs Ditto's local model server when it is not there, bare metal or in Docke
 it says what it found and stops. The installers' Ditto step runs this command.
 
 - **What it finds:** a bare-metal build that passed its checks on this computer (or the official archive you chose
-  with `install --prebuilt`), and Ditto's image of the pinned llama.cpp commit, checked in a container of itself.
+  with `install --prebuilt`), and Ditto's image of the pinned llama.cpp commit, built here (never one from a
+  registry) and checked in a container of itself. While Docker cannot be asked, Docker mode stays as you chose it.
+  The command removes nothing on its way: no old build is removed by retention.
 - **When nothing is installed:** `--mode auto` installs bare metal (no Docker overhead); when bare metal is not
   possible here, it uses Docker and says why. `--mode bare-metal` or `--mode docker` choose the mode yourself.
 - **Docker mode:** Ditto's image is built on this computer from the same pinned recipe, on a Docker Official base
@@ -849,7 +851,7 @@ it says what it found and stops. The installers' Ditto step runs this command.
 | `--backend [...]` | GPU backend, as for `install`. |
 | `--jobs INTEGER RANGE` | Parallel compile jobs of a build. |
 | `--no-model` | Do not offer the model download. |
-| `-y, --yes` | Do not ask before building, fetching the source or downloading a model under a permissive licence (size and licence are still shown). Never removes anything. |
+| `-y, --yes` | Do not ask before fetching the source or downloading a model under a permissive licence (size and licence are still shown). The build itself starts without a question, as the installers need it. Never removes anything. |
 
 ```bash
 llm-cli ditto runtime ensure                              # installs it if it is not there

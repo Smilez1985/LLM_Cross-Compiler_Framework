@@ -272,10 +272,11 @@ setup_ditto() {
         return 0
     fi
     if [ "$CONTAINER_BUILD" = "1" ]; then
-        log_info "Container-Build: Ditto wird hier nicht eingerichtet. Der Docker-Modus ist im Framework-Container nicht verfügbar (darin gibt es keine Docker-Engine), und eine im Image gebaute Laufzeit passte nicht zur Hardware, auf der der Container später läuft. Im laufenden Container: docker exec -it lcf-framework llm-cli ditto runtime ensure"
+        log_info "Container-Build: Ditto wird hier nicht eingerichtet. Der Docker-Modus ist im Framework-Container nicht verfügbar (darin gibt es keine Docker-Engine), und eine im Image gebaute Laufzeit passte nicht zur Hardware, auf der der Container später läuft. Nutze im Container einen Cloud-Anbieter oder einen lokalen Server in deinem Netz, oder installiere das Framework direkt auf dem Rechner, der Dittos Modell ausführen soll (docs/Container_Setup_DE.md)."
         return 0
     fi
-    local real_user="${SUDO_USER:-$USER}"
+    # Ohne SUDO_USER und USER (etwa als root in einem Container) bricht 'set -u' nicht ab: Der Schritt meldet nur.
+    local real_user="${SUDO_USER:-${USER:-}}"
     if [ "$real_user" = "root" ] || [ -z "$real_user" ]; then
         log_warn "Ditto wird für deinen Benutzer eingerichtet, nicht für root: Starte das Skript mit sudo als dein Benutzer, oder führe später als dein Benutzer aus: llm-cli ditto runtime ensure"
         return 0

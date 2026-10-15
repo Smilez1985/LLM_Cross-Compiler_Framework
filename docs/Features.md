@@ -1051,7 +1051,10 @@ run). The mode is recorded in `~/.llm-framework/runtime/llama.cpp/mode.json`.
 
 - **Idempotent:** if Ditto is there in either mode, nothing is done and the command says what it found. When nothing
   is installed, `auto` installs bare metal; when bare metal is not possible here (no compiler and no builder base for
-  this computer's C library, for example), it uses Docker and says why. Without either it names both reasons.
+  this computer's C library, for example), it uses Docker and says why. Without either it names both reasons. While
+  Docker cannot be asked (not started yet, for example), Docker mode stays as you chose it and nothing is changed.
+  When the recorded mode is gone and the other one is there, the command says that the mode changed. `ensure` removes
+  nothing on its way: no old build is removed by retention.
 - **Ditto's image** is built on this computer from `orchestrator/runtime/build/ditto-runtime.Dockerfile` in two
   stages on a Docker Official base image of the catalog (`build_bases`: Debian, Ubuntu or Alpine, pinned by digest):
   `runtime-base` adds only the runtime libraries (OpenMP and C++ runtime; for a Vulkan build the Vulkan loader and
@@ -1062,7 +1065,9 @@ run). The mode is recorded in `~/.llm-framework/runtime/llama.cpp/mode.json`.
   "rebuilt". The image is labelled as Ditto's runtime (`org.llm-framework.ditto-runtime`), never pulled as a finished
   image and never pushed, and checked in containers of itself before it is used: `llama-server` and `llama-bench`
   report the pinned build and commit, the server refuses `--tools`, and a GPU build sees its device when the GPU is
-  passed through. Docker mode needs Linux in this version.
+  passed through. An image with Ditto's labels that came from a registry (it has a repository digest) is never used.
+  The programs in the image get mode 0755, so they run for your user also when they were built under a strict umask.
+  Docker mode needs Linux in this version.
 - **The container** keeps the launch policy of every server: the command line of `server_policy.py` (no forbidden
   option, the key file, no web UI, no slots, offline); inside its own network namespace it listens on every interface
   of the container, and its port is published on 127.0.0.1 only, so nothing outside this computer reaches it (the
@@ -1085,13 +1090,15 @@ run). The mode is recorded in `~/.llm-framework/runtime/llama.cpp/mode.json`.
   the exact list you confirm is removed ("No" is the default), in the terminal or the AI settings; the list is looked
   up again first and nothing is removed if it changed, and the removal is written to the audit log before anything is
   removed. Without a terminal nothing is removed and the list is shown. Ditto's images are never deleted otherwise,
-  and a board's builds in the same store are never listed.
+  and a board's builds in the same store are never listed. When Docker cannot be asked after a switch to bare metal,
+  the command says that Ditto's images and containers are not in the list, and how to list them later.
 - **The model:** `ensure` offers the model of the chosen or recommended tier when it is missing, with its source,
   size and licence first; with `-y` it downloads only a model under a permissive licence. Any other licence is yours
   to accept.
 - **For AI clients:** `get_status` (`local_runtime`) shows the mode, the image's name and whether it was repackaged
-  or rebuilt; `start_local_runtime` starts the server of the recorded mode. Switching the mode and removing the old
-  mode are the person's alone: no tool does either.
+  or rebuilt; `start_local_runtime` starts the server of the recorded mode, and its result names what runs (the
+  image's build in Docker mode). Switching the mode and removing the old mode are the person's alone: no tool does
+  either, and `build_local_runtime` removes no old build.
 - **The AI settings** show where the server runs and offer the switch through the same code path as the command,
   with the same list of leftovers afterwards.
 
