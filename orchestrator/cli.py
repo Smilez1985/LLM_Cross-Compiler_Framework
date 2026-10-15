@@ -737,9 +737,11 @@ def _cancel_interrupted_build(ctx: FrameworkContext, request_id: str) -> None:
 
 
 def _resolve_healing_interactively(orchestrator, request_id, proposal):
-    """Asks on the terminal whether an automatic fix may be applied (manual steps are only shown)."""
+    """Asks on the terminal whether an automatic fix may be applied (manual steps are only shown; no automatic fix
+    deletes anything)."""
+    from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
     automatic = (not getattr(proposal, "is_ai_generated", False)
-                 and getattr(getattr(proposal, "strategy", None), "value", "") in ("config_adjustment", "docker_prune", "retry_build"))
+                 and getattr(getattr(proposal, "strategy", None), "value", "") in AUTOMATIC_STRATEGIES)
     origin = "AI suggestion" if getattr(proposal, "is_ai_generated", False) else "Known issue"
     console.print(f"[bold magenta]Self-Healing ({origin}): {escape(str(proposal.summary))}[/bold magenta]")
     console.print(f"Cause: {escape(str(proposal.root_cause))}")
@@ -3140,7 +3142,7 @@ def knowledge_snapshots(click_ctx):
 @pass_context
 def knowledge_snapshots_list(ctx: FrameworkContext):
     """Every snapshot with its full path, file name, size and what it is; nothing is deleted"""
-    from orchestrator.Core.knowledge_snapshots import MAX_SNAPSHOTS, list_snapshots, size_text, snapshot_folder
+    from orchestrator.Core.knowledge_snapshots import KEEPING_NOTE, list_snapshots, size_text, snapshot_folder
     ctx.require_framework()
     folder = snapshot_folder(ctx.framework_manager.config.user_state_dir)
     snapshots = list_snapshots(folder)
@@ -3154,10 +3156,7 @@ def knowledge_snapshots_list(ctx: FrameworkContext):
     for s in snapshots:
         table.add_row(escape(s.name), s.taken, size_text(s.size_bytes), escape(s.what), escape(str(s.path)))
     console.print(table)
-    if len(snapshots) > MAX_SNAPSHOTS:
-        console.print(f"[yellow]More than the usual {MAX_SNAPSHOTS}. The framework deletes none by itself: delete the "
-                      "files you no longer need yourself, for example in your file manager (a trash and a deletion "
-                      "dialog in the framework follow).[/yellow]")
+    console.print(escape(KEEPING_NOTE))
 
 
 # ============================================================================

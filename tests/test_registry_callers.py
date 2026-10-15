@@ -212,8 +212,9 @@ REVIEWED_DESTRUCTIVE = {
     # destructive, but nothing on this computer the person can see is deleted:
     "deploy_to_device": "replaces files on a board the person trusts; nothing on this computer is deleted",
     "deploy_device_runtime": "the previous runtime on the board stays as the fallback",
-    # deletes only with one strategy: that call carries a deletion plan in its facts (WP7), then the rule applies
-    "resolve_healing": "only its docker_prune strategy deletes (the Docker build cache)",
+    # deletes nothing: it changes a setting or retries a build; a full Docker disk (docker_prune) is a manual step
+    # that points to the person's 'llm-cli doctor --fix --tier 2' and its list, and approving it is refused
+    "resolve_healing": "changes build_jobs or retries a build; no strategy deletes (docker_prune is a manual step)",
 }
 
 

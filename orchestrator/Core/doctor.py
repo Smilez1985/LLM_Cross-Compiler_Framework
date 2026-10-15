@@ -211,8 +211,9 @@ def delete_framework_images(framework, plan, actor: str) -> ImageDeletion:
     """Deletes exactly the images of `plan`, which the person accepted in the framework's own window (actor "cli" or
     "gui"; never an AI, never under a delegation). The list is looked up again first: if it changed, nothing is
     deleted (ImagePlanChanged). The deletion is audited before anything is deleted (nothing is deleted when the
-    audit cannot be written); each image is removed by its id, without force and without its untagged parents, and
-    never by a prune, which could catch images that became dangling after the list was shown."""
+    audit cannot be written); each image is looked at again right before and removed by its id only while it is
+    still unnamed and the framework's, without force and without its untagged parents, and never by a prune, which
+    could catch images that became dangling after the list was shown."""
     if actor not in ("cli", "gui"):
         raise PermissionError("Only the person deletes the framework's images, in the GUI or at a terminal.")
     current = framework_image_plan(framework)
@@ -229,10 +230,22 @@ def delete_framework_images(framework, plan, actor: str) -> ImageDeletion:
                      extra=extra)
     except Exception:  # noqa: BLE001
         raise RuntimeError("The audit log cannot record the deletion; no image was deleted.") from None
+    from orchestrator.Core.builder import IMAGE_LABEL
     from orchestrator.utils.helpers import redact_secrets
     client = _docker_client(framework)
     result = ImageDeletion()
     for item in plan.items:
+        # Docker deletes an image with one name when it is addressed by its id: a build of another framework process
+        # may have named a listed image again (the same layers) since the list was looked up. Each image is looked at
+        # right before its removal and kept unless it is still unnamed and the framework's.
+        try:
+            now = client.images.get(item.file_name)
+        except Exception:  # noqa: BLE001 - gone meanwhile (or the daemon did not answer): nothing to delete
+            result.failed.append((item.speaking_name, "kept: it could not be found again, so it was not deleted"))
+            continue
+        if getattr(now, "tags", None) or IMAGE_LABEL not in (getattr(now, "labels", None) or {}):
+            result.failed.append((item.speaking_name, "kept: it got a name or changed after the list was shown"))
+            continue
         try:
             client.images.remove(image=item.file_name, noprune=True)
         except Exception as e:  # noqa: BLE001 - e.g. a container still uses it: kept and reported
@@ -464,9 +477,10 @@ def check_community(framework) -> List[Finding]:
 
 
 def check_knowledge(framework) -> List[Finding]:
-    """Knowledge-base snapshots: more than the usual number is a reminder for the person, never a deletion (the
-    framework deletes no snapshot by itself; round 5 f). Reads the folder only, never opens the knowledge base."""
-    from orchestrator.Core.knowledge_snapshots import MAX_SNAPSHOTS, list_snapshots, size_text, snapshot_folder
+    """Knowledge-base snapshots: how many there are, their size and where, for the person's overview. There is no limit
+    (DECISIONS, sixth round: as many as the disk holds), so no count of them is a finding, a reminder or a warning, and
+    none is deleted by itself (round 5 f). Reads the folder only, never opens the knowledge base."""
+    from orchestrator.Core.knowledge_snapshots import list_snapshots, size_text, snapshot_folder
     config = getattr(framework, "config", None)
     state_dir = getattr(config, "user_state_dir", None)
     if state_dir is None:
@@ -476,14 +490,9 @@ def check_knowledge(framework) -> List[Finding]:
     if not snapshots:
         return []
     total = size_text(sum(s.size_bytes for s in snapshots))
-    if len(snapshots) > MAX_SNAPSHOTS:
-        return [Finding("knowledge", "knowledge.snapshots", Severity.INFO,
-                        f"The knowledge base keeps {len(snapshots)} snapshots ({total}) in {folder}, more than the "
-                        f"usual {MAX_SNAPSHOTS}. None is deleted by itself.",
-                        "'llm-cli knowledge snapshots' (in the GUI: Tools > Knowledge Snapshots...) lists each one with "
-                        "its full path, name, size and what it is; delete the ones you no longer need yourself (a "
-                        "trash and a deletion dialog in the framework follow).")]
-    return [_ok("knowledge", "knowledge.snapshots", f"{len(snapshots)} knowledge snapshots ({total})")]
+    return [_ok("knowledge", "knowledge.snapshots",
+                f"{len(snapshots)} knowledge snapshots ({total}) in {folder}; no limit, none is deleted by itself "
+                "('llm-cli knowledge snapshots' lists them)")]
 
 
 def check_runtime(framework) -> List[Finding]:

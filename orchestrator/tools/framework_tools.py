@@ -246,13 +246,14 @@ JOB_EXAMPLE = {"job_id": "job_0123456789abcdef"}
 
 # What approving a healing strategy does, in plain words (the question's first line).
 HEALING_CONSEQUENCES = {
-    "docker_prune": "Deletes the Docker build cache and the dangling framework images on this computer, then retries "
-                    "build request {rid} once.",
     "config_adjustment": "Sets the framework setting build_jobs to 1 (fewer parallel compile jobs for image builds), "
                          "then retries build request {rid} once.",
     "retry_build": "Retries build request {rid} once, without changes.",
 }
-DESTRUCTIVE_STRATEGIES = frozenset({"docker_prune"})  # always asked, even when the tool is allowed
+# Strategies asked even when the tool is allowed. None is left: no automatic strategy deletes anything (round 5 f); a
+# full Docker disk (docker_prune) is a manual step that points to the person's 'llm-cli doctor --fix --tier 2', and
+# approving a manual step is refused before anything is asked.
+DESTRUCTIVE_STRATEGIES: frozenset = frozenset()
 
 
 def healing_facts(service, request_id: str, approve: bool) -> CallFacts:
@@ -484,7 +485,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  ToolTier.LOCAL_WRITE, ResolveHealingIn, BuildStatusResult, resolve_healing,
                  takes_context=True, summary=_status_summary,
                  prepare=lambda i, ctx: healing_facts(service, i.request_id, i.approve),
-                 # destructive: the docker_prune strategy deletes the Docker build cache
+                 # kept destructive: it changes a setting (build_jobs) and retries a build; no strategy deletes
+                 # anything (docker_prune is a manual step that points to the doctor's list)
                  destructive=True, fields={**request_id, "approve": FieldMeta(kind="trust")}),
         ToolSpec("get_status", "Framework status",
                  "The framework's state in sections: framework (version, Docker, targets, offline mode, active "

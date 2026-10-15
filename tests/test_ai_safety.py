@@ -124,12 +124,17 @@ class TestSelfHealing:
         monkeypatch.setattr(self_healing_manager.shutil, "disk_usage", usage)
         monkeypatch.setattr(disk_plan, "device_of", lambda path: disks.get(str(path), "other"))
 
-    def test_prune_is_limited_to_framework_images(self, healer, monkeypatch, tmp_path):
+    def test_a_full_docker_disk_is_a_manual_step_that_deletes_nothing(self, healer, monkeypatch, tmp_path):
+        """Approving the Docker cleanup deleted the framework's dangling images without a list and cleared every
+        project's build cache (released in 3.0.0). Now it is a manual step: the person frees space with the doctor's
+        list ('llm-cli doctor --fix --tier 2'), which deletes only what they confirm there (round 5 f)."""
         self.full_disks(monkeypatch, tmp_path, healer, full={"docker"})
         proposal = healer._analyze_heuristics("No space left on device")
         assert proposal.strategy == HealingStrategy.DOCKER_PRUNE
-        assert healer.apply_fix(proposal) is True
-        assert healer.images.pruned[0] == {"dangling": True, "label": "org.llm-framework.target"}
+        assert "llm-cli doctor --fix --tier 2" in proposal.fix_command
+        assert "build cache is not touched" in proposal.fix_command
+        assert healer.apply_fix(proposal) is False
+        assert healer.images.pruned == [], "neither framework images nor the build cache"
 
     def test_a_full_model_cache_is_a_manual_step_never_a_docker_prune(self, healer, monkeypatch, tmp_path):
         """G40: 'No space left on device' proposed docker_prune whatever disk was full; pruning Docker never frees
@@ -298,10 +303,14 @@ class TestHealingGui:
 
     def test_healing_dialog_shows_proposals(self):
         from orchestrator.gui.dialogs import HealingConfirmDialog
-        auto = HealingProposal("Disk full", "cause", "prune", 1.0, HealingStrategy.DOCKER_PRUNE, "HOST")
+        auto = HealingProposal("Out of memory", "cause", "build_jobs 1", 1.0, HealingStrategy.CONFIG_ADJUSTMENT,
+                               "HOST")
         manual = HealingProposal("AI", "cause", "rm -rf /tmp/x", 0.4, HealingStrategy.MANUAL_INTERVENTION, "HOST",
                                  is_ai_generated=True)
+        docker = HealingProposal("Disk full", "cause", "llm-cli doctor --fix --tier 2", 1.0,
+                                 HealingStrategy.DOCKER_PRUNE, "HOST")
         assert HealingConfirmDialog(auto).automatic is True
+        assert HealingConfirmDialog(docker).automatic is False, "a full Docker disk is a manual step"
         dialog = HealingConfirmDialog(manual)
         assert dialog.automatic is False and dialog.txt_command.isReadOnly()
 
@@ -313,7 +322,7 @@ class TestCliHealingPrompt:
         decisions = []
         orchestrator = SimpleNamespace(resolve_healing=lambda rid, ok: decisions.append((rid, ok)))
         proposal = HealingProposal("Linker cannot find libfoo [/usr/lib/aarch64-linux-gnu]", "cause [x]",
-                                   'sed -i "s/[/]usr//" f', 1.0, HealingStrategy.DOCKER_PRUNE, "HOST")
+                                   'sed -i "s/[/]usr//" f', 1.0, HealingStrategy.CONFIG_ADJUSTMENT, "HOST")
         cli._resolve_healing_interactively(orchestrator, "r1", proposal)  # pytest's stdin is not a tty
         out = capsys.readouterr().out
         assert "[/usr/lib/aarch64-linux-gnu]" in out and 's/[/]usr//' in out

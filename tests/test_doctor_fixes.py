@@ -3,11 +3,13 @@
 1. `doctor --fix --tier 2` (released in 3.0.0) cleared Docker's whole build cache - other projects' too - and the
    framework's dangling images without a list. Now the build cache is never touched, tier 2 lists the framework's
    dangling images (name or id, size, what each is), and only the person's yes at a terminal deletes exactly that
-   list; never over MCP, never under a delegation.
+   list; never over MCP, never under a delegation. The self-healing "Docker cleanup" (docker_prune, also released in
+   3.0.0) did the same after a plain yes; it is now a manual step that points to that list.
 2. `run_doctor` gave AI clients absolute host paths (the per-user folder, the audit log, pack folders, a crashed
    check's message). An AI now reads folder labels and file names; the person's own output keeps the full paths.
-3. A new knowledge snapshot deleted the oldest ones beyond five, on every channel. Now no snapshot is deleted by
-   itself: the doctor and the chat remind the person, and `llm-cli knowledge snapshots` lists them for the person.
+3. A new knowledge snapshot deleted the oldest ones beyond five, on every channel. Now there is no limit at all
+   (DECISIONS, sixth round): no snapshot is deleted by itself, no count reminds or warns, and `llm-cli knowledge
+   snapshots` (GUI: Tools > Knowledge Snapshots...) lists them for the person, who deletes or exports them.
 """
 
 import io
@@ -49,12 +51,21 @@ class FakeImages:
         self.filters.append(filters)
         return list(self.images)  # every image, whatever the filter: the framework checks on its own
 
+    def get(self, name):
+        found = next((i for i in self.images if i.id == name), None)
+        if found is None:
+            raise RuntimeError(f"No such image: {name}")
+        return found
+
     def remove(self, image=None, force=False, noprune=False, **kwargs):
         self.events.append(("remove", image, force, noprune))
         if image == getattr(self, "refuse", None):
             raise RuntimeError("conflict: image is being used by stopped container 1234")
         self.removed.append(image)
         self.images = [i for i in self.images if i.id != image]
+        hook = getattr(self, "after_remove", None)
+        if hook is not None:
+            hook(image)
 
     def prune(self, *args, **kwargs):
         self.events.append(("prune", args, kwargs))
@@ -188,6 +199,28 @@ def test_without_an_audit_entry_nothing_is_deleted():
     assert deletions(client) == []
 
 
+def test_an_image_named_while_the_list_is_deleted_is_kept():
+    """Docker removes an image with one name when it is addressed by its id. A build of another framework process can
+    name a listed image again (the same layers) after the list was looked up again: each image is looked at right
+    before its removal and kept when it has a name or is no longer the framework's."""
+    client = FakeClient(images())
+    framework = fake_framework(client)
+    plan = framework_image_plan(framework)
+    by_id = {i.id: i for i in client.images.images}
+
+    def a_build_names_b(removed):
+        if removed == "sha256:" + "a" * 64:
+            by_id["sha256:" + "b" * 64].tags = ["lcf-build:43"]
+            by_id["sha256:" + "e" * 64].labels = {}
+    client.images.after_remove = a_build_names_b
+    result = delete_framework_images(framework, plan, actor="cli")
+    assert client.images.removed == ["sha256:" + "a" * 64], "only the image that was still unnamed and the framework's"
+    assert [name for name, _ in result.failed] == ["Framework build image bbbbbbbbbbbb (x86_64)",
+                                                    "Framework build image eeeeeeeeeeee (an unknown target)"]
+    assert all("kept" in reason for _, reason in result.failed)
+    assert result.freed_bytes == 2_000_000_000
+
+
 def test_an_image_docker_refuses_is_kept_and_reported():
     client = FakeClient(images())
     client.images.refuse = "sha256:" + "b" * 64
@@ -271,6 +304,54 @@ def test_the_tool_never_deletes_images(docker_framework):
     assert deletions(client) == []
 
 
+# --- 1b. the self-healing "Docker cleanup" had the same flaw (released in 3.0.0) -----------------------------------
+
+def test_no_code_of_the_framework_clears_dockers_build_cache():
+    """Docker's build cache belongs to every project on the computer and cannot be limited to the framework: nothing
+    in the framework clears it (doctor tier 2 and the self-healing strategy docker_prune both did)."""
+    hits = [p.relative_to(REPO).as_posix() for p in (REPO / "orchestrator").rglob("*.py")
+            if "prune_builds" in p.read_text(encoding="utf-8")]
+    assert hits == []
+
+
+def test_the_docker_cleanup_proposal_deletes_nothing_and_points_to_the_list():
+    """A full Docker disk is a manual step: approving it can delete nothing, on any channel. The person frees space
+    with the doctor's list (`doctor --fix --tier 2`), which deletes only what they confirmed there."""
+    from orchestrator.Core import build_service
+    from orchestrator.Core.self_healing_manager import (AUTOMATIC_STRATEGIES, HealingProposal, HealingStrategy,
+                                                        SelfHealingManager)
+    client = FakeClient(images())
+    healer = SelfHealingManager(SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None: default),
+                                                get_component=lambda name: client))
+    proposal = HealingProposal("Disk full", "cause", "anything", 1.0, HealingStrategy.DOCKER_PRUNE, "HOST")
+    assert healer.apply_fix(proposal) is False
+    assert deletions(client) == []
+    assert "docker_prune" not in AUTOMATIC_STRATEGIES and "docker_prune" not in build_service.AUTOMATIC_STRATEGIES
+    texts = " ".join(text for _, _, text, strategy, _ in healer.known_issues if strategy == HealingStrategy.DOCKER_PRUNE)
+    assert "llm-cli doctor --fix --tier 2" in texts and "build cache is not touched" in texts
+    assert "Remove dangling" not in texts
+
+
+def test_the_cli_and_the_gui_show_the_docker_cleanup_as_a_manual_step(monkeypatch, capsys, qapp):
+    from orchestrator import cli
+    from orchestrator.Core.self_healing_manager import HealingProposal, HealingStrategy
+    from orchestrator.gui.dialogs import HealingConfirmDialog
+    proposal = HealingProposal("Disk full", "cause", "llm-cli doctor --fix --tier 2", 1.0,
+                               HealingStrategy.DOCKER_PRUNE, "HOST")
+    decisions, asked = [], []
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(cli.click, "confirm", lambda *a, **k: asked.append(a) or True)
+    cli._resolve_healing_interactively(SimpleNamespace(resolve_healing=lambda rid, ok: decisions.append(ok)), "r1",
+                                       proposal)
+    assert asked == [] and decisions == [False], "a person at a terminal is not asked to apply it"
+    assert "Manual step" in capsys.readouterr().out
+    dialog = HealingConfirmDialog(proposal)
+    try:
+        assert dialog.automatic is False
+    finally:
+        dialog.close()
+
+
 # --- 2. an AI reads labels, the person reads paths ------------------------------------------------------------------
 
 ABSOLUTE = re.compile(r"(?:^|[\s('\"=])(?:/|~/|[A-Za-z]:\\)[^\s'\")]+")
@@ -297,6 +378,7 @@ def test_run_doctor_gives_an_ai_no_host_path_and_the_person_keeps_it(booted_fram
         raise RuntimeError(f"cannot read {Path.home() / 'notes' / 'private.txt'}")
     checks = [check_user_state if c is doctor_module.check_user_state else c for c in doctor_module.DEFAULT_CHECKS]
     monkeypatch.setattr(doctor_module, "DEFAULT_CHECKS", [*checks, check_broken])
+    snapshot(state / "knowledge_snapshots", "pre_ingest_1")  # the knowledge line names its folder
 
     out = framework.tool_registry.call("run_doctor", {}, ToolContext("mcp"))
     found = {f.code: f for f in out.findings}
@@ -309,6 +391,7 @@ def test_run_doctor_gives_an_ai_no_host_path_and_the_person_keeps_it(booted_fram
     assert "state:audit.db" in found["tools.audit"].message and "state:audit.db" in found["tools.audit"].fix_hint
     assert "targets:Revoked Pack" in found["community.revoked-pack.revoked"].fix_hint
     assert "private.txt" in found["broken.check_crashed"].message
+    assert "state:knowledge_snapshots" in found["knowledge.snapshots"].message
 
     # The person's own output keeps every full path.
     from click.testing import CliRunner
@@ -324,6 +407,7 @@ def test_run_doctor_gives_an_ai_no_host_path_and_the_person_keeps_it(booted_fram
     assert str(state) in person["state.permissions"]["message"]
     assert str(audit.path) in person["tools.audit"]["message"]
     assert str(pack) in person["community.revoked-pack.revoked"]["fix_hint"]
+    assert str(state / "knowledge_snapshots") in person["knowledge.snapshots"]["message"]
 
 
 # --- 3. no snapshot is deleted by itself ------------------------------------------------------------------------------
@@ -338,25 +422,45 @@ def snapshot(folder, name, size=10, when=1_000_000):
     return path
 
 
-def test_new_snapshots_never_delete_older_ones_and_remind_the_person(tmp_path, monkeypatch):
-    """create_snapshot (every ingest, every restore's backup, on every channel) keeps every snapshot; over the cap
-    each new one posts the reminder."""
+def test_new_snapshots_never_delete_older_ones_and_post_no_reminder(tmp_path, monkeypatch):
+    """create_snapshot (every ingest, every restore's backup, on every channel) keeps every snapshot, however many
+    there are: no limit, no count that deletes, reminds or warns (sixth round: as many as the disk holds)."""
     from test_optional_tools import Store, rag_with
     from orchestrator.Core import request_store
     from orchestrator.Core.chat_feed import FeedStore
-    from orchestrator.Core.knowledge_snapshots import MAX_SNAPSHOTS, REMINDER_KEY
     rag = rag_with(tmp_path, Store())
     feed = FeedStore(tmp_path / "feed", key=b"k" * 32)
     rag.framework = SimpleNamespace(chat_feed=feed)
     monkeypatch.setitem(request_store._PROGRAM, "kind", "gui")
-    for i in range(MAX_SNAPSHOTS + 2):
+    for i in range(40):
         snapshot(rag.snapshot_dir, f"pre_ingest_{i}", when=1_000_000 + i)
     assert rag.create_snapshot("pre_ingest_new")
     assert rag.restore_snapshot("pre_ingest_0")
     names = rag.list_snapshots()
-    assert len(names) == MAX_SNAPSHOTS + 4 and "pre_ingest_0" in names and "pre_ingest_new" in names
-    notices = [s.entry for s in feed.after(0).entries]
-    assert [(e.text_key, e.params["n"]) for e in notices] == [(REMINDER_KEY, "8"), (REMINDER_KEY, "9")]
+    assert len(names) == 42 and "pre_ingest_0" in names and "pre_ingest_new" in names
+    assert feed.after(0).entries == [], "no reminder pushes the person to delete"
+
+
+def test_there_is_no_snapshot_limit():
+    """No constant caps the snapshots and no text speaks of a usual number (sixth round: no limit at all); the
+    person deletes with the full list, or exports, when they want to free space."""
+    import inspect
+
+    from orchestrator import cli
+    from orchestrator.Core import chat_feed, knowledge_snapshots, rag_manager
+    from orchestrator.gui import knowledge_snapshots_window
+    for module in (knowledge_snapshots, rag_manager, knowledge_snapshots_window):
+        assert not hasattr(module, "MAX_SNAPSHOTS"), module.__name__
+    assert not hasattr(knowledge_snapshots, "remind_over_cap")
+    assert not any("snapshot" in key for texts in chat_feed.TEXTS.values() for key in texts)
+    sources = [inspect.getsource(knowledge_snapshots), inspect.getsource(knowledge_snapshots_window),
+               inspect.getsource(doctor_module.check_knowledge), inspect.getsource(cli.knowledge_snapshots_list.callback),
+               inspect.getsource(rag_manager.RAGManager.create_snapshot)]
+    for source in sources:
+        assert "usual" not in source and "over_cap" not in source and "MAX_SNAPSHOTS" not in source
+    # the old pruning (kept for the person's confirmed clean-up, design WP7) has no count of its own any more
+    keep = inspect.signature(rag_manager.RAGManager._prune_snapshots).parameters["keep_newest"]
+    assert keep.default is inspect.Parameter.empty
 
 
 def test_nothing_calls_the_snapshot_pruning():
@@ -366,58 +470,34 @@ def test_nothing_calls_the_snapshot_pruning():
     assert callers == []
 
 
-def test_over_the_cap_the_chat_reminds_the_person(tmp_path, monkeypatch):
-    from orchestrator.Core import request_store
-    from orchestrator.Core.chat_feed import FeedStore
-    from orchestrator.Core.knowledge_snapshots import (MAX_SNAPSHOTS, REMINDER_KEY, list_snapshots,
-                                                       remind_over_cap)
-    folder = tmp_path / "state" / "knowledge_snapshots"
-    store = FeedStore(tmp_path / "state", key=b"k" * 32)
-    framework = SimpleNamespace(chat_feed=store)
-    monkeypatch.setitem(request_store._PROGRAM, "kind", "mcp")
-    for i in range(MAX_SNAPSHOTS):
-        snapshot(folder, f"pre_ingest_{i}", size=400_000_000, when=1_000_000 + i)
-    assert remind_over_cap(framework, list_snapshots(folder)) is None and store.after(0).entries == []
-    snapshot(folder, "pre_ingest_5", size=400_000_000, when=1_000_010)
-    stored = remind_over_cap(framework, list_snapshots(folder))
-    entry = stored.entry
-    assert entry.kind == "notice" and entry.text_key == REMINDER_KEY and entry.sender.role == "framework"
-    assert entry.params == {"n": "6", "size": "2.4 GB", "cap": "5"} and entry.program == "mcp"
-    assert entry.facts_ai == [] and entry.facts_person[0].value == str(folder)
-    assert len(list_snapshots(folder)) == MAX_SNAPSHOTS + 1, "a reminder, never a deletion"
-    monkeypatch.setitem(request_store._PROGRAM, "kind", "framework")  # a process nobody named writes no reminder
-    assert remind_over_cap(framework, list_snapshots(folder)) is None
-
-
-def test_the_doctor_reminds_and_deletes_nothing(tmp_path):
-    from orchestrator.Core.knowledge_snapshots import MAX_SNAPSHOTS
+def test_the_doctor_lists_the_snapshots_and_never_asks_to_delete_them(tmp_path):
     framework = SimpleNamespace(config=SimpleNamespace(user_state_dir=tmp_path))
     folder = tmp_path / "knowledge_snapshots"
     assert check_knowledge(framework) == []
-    for i in range(MAX_SNAPSHOTS):
-        snapshot(folder, f"pre_ingest_{i}", when=1_000_000 + i)
-    assert check_knowledge(framework)[0].severity.value == "ok"
-    snapshot(folder, "pre_restore_x", when=1_000_100)
+    for i in range(40):
+        snapshot(folder, f"pre_ingest_{i}", size=1_500_000, when=1_000_000 + i)
     finding = check_knowledge(framework)[0]
-    assert finding.code == "knowledge.snapshots" and finding.severity.value == "info" and finding.fix is None
-    assert "6 snapshots" in finding.message and str(folder) in finding.message
-    assert "llm-cli knowledge snapshots" in finding.fix_hint
-    assert len(list(folder.iterdir())) == MAX_SNAPSHOTS + 1
+    assert finding.code == "knowledge.snapshots" and finding.severity.value == "ok" and finding.fix is None
+    assert "40 knowledge snapshots (60.0 MB)" in finding.message and str(folder) in finding.message
+    assert "no limit" in finding.message and "llm-cli knowledge snapshots" in finding.message
+    assert "more than" not in finding.message.lower() and "delete" not in finding.fix_hint
+    assert len(list(folder.iterdir())) == 40
 
 
 def test_cli_lists_every_snapshot_with_full_path_name_size_and_what(booted_framework, monkeypatch):
     folder = Path(booted_framework.config.user_state_dir) / "knowledge_snapshots"
-    for i in range(6):
+    for i in range(12):
         snapshot(folder, f"pre_ingest_{i}", size=1_500_000, when=1_000_000 + i)
     snapshot(folder, "pre_codebase_1", size=2_000_000, when=1_000_100)
     _, out = run_cli(booted_framework, monkeypatch, "knowledge", "snapshots")
-    for name in [f"pre_ingest_{i}" for i in range(6)] + ["pre_codebase_1"]:
+    for name in [f"pre_ingest_{i}" for i in range(12)] + ["pre_codebase_1"]:
         assert name in out and str(folder / f"{name}.jsonl.gz") in out
     assert "1.5 MB" in out and "taken before a Deep Ingest" in out and "own code was indexed" in out
-    assert "More than the usual 5" in out and "deletes none by itself" in out
+    assert "no limit" in out and "deletes no snapshot by itself" in out and "(export)" in out
+    assert "More than" not in out and "usual" not in out
     _, listed = run_cli(booted_framework, monkeypatch, "knowledge", "snapshots", "list")
     assert str(folder / "pre_codebase_1.jsonl.gz") in listed
-    assert len(list(folder.iterdir())) == 7
+    assert len(list(folder.iterdir())) == 13
 
 
 def test_the_gui_lists_every_snapshot_as_plain_text_and_deletes_nothing(qapp, tmp_path):
@@ -426,20 +506,21 @@ def test_the_gui_lists_every_snapshot_as_plain_text_and_deletes_nothing(qapp, tm
 
     from orchestrator.gui.knowledge_snapshots_window import COLUMNS, KnowledgeSnapshotsDialog
     folder = tmp_path / "knowledge_snapshots"
-    for i in range(6):
+    for i in range(12):
         snapshot(folder, f"pre_ingest_{i}", size=1_500_000, when=1_000_000 + i)
     snapshot(folder, "<b>pre_restore_x", size=10, when=1_000_100)  # a name is shown as written, never as markup
     dialog = KnowledgeSnapshotsDialog(tmp_path)
     try:
         rows = [[dialog.table.item(r, c).text() for c in range(len(COLUMNS))] for r in range(dialog.table.rowCount())]
-        assert [r[0] for r in rows] == [f"pre_ingest_{i}" for i in range(6)] + ["<b>pre_restore_x"]
+        assert [r[0] for r in rows] == [f"pre_ingest_{i}" for i in range(12)] + ["<b>pre_restore_x"]
         assert rows[0][2] == "1.5 MB" and "before a Deep Ingest" in rows[0][3]
         assert rows[0][4] == str(folder / "pre_ingest_0.jsonl.gz")
-        assert "More than the usual 5" in dialog.note.text()
+        note = dialog.note.text()
+        assert "no limit" in note and "deletes no snapshot by itself" in note and "More than" not in note
         assert all(label.textFormat() == Qt.PlainText for label in dialog.findChildren(QLabel))
     finally:
         dialog.close()
-    assert len(list(folder.iterdir())) == 7
+    assert len(list(folder.iterdir())) == 13
 
 
 def test_restoring_a_snapshot_stays_with_the_person_until_the_trash_exists():
