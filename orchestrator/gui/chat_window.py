@@ -229,13 +229,16 @@ class ChatWindow(QWidget):
         self.worker.start()
 
     def _on_tool_used(self, use):
-        self._add_note(f"Used tool: {use.title}" if use.ok else f"Tool not run: {use.title} ({use.detail})")
+        from orchestrator.Core.ditto_manager import tool_note  # names the other computer when the tool ran there
+        self._add_note(tool_note(use))
 
     def _on_ai_response(self, reply):
         self._set_thinking(False)
         self._pending_question = None
         if reply.new_conversation:
             self._add_note("The conversation got long: Ditto summarized it and continues in a new conversation.")
+        for notice in getattr(reply, "notices", None) or []:  # e.g. the other computer is not reachable now
+            self._add_note(notice)
         self._add_message(reply.text, False)
         self.history.apply(reply)
         self.history.save()

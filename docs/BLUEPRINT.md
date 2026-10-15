@@ -399,14 +399,23 @@ cloud provider, personal details are replaced by placeholders.
    answer.
 6. **History.** The finished turn is appended to `chat_history.json`. A long conversation is summarized and
    continued as a new conversation; earlier turns are never edited.
-7. **MCP-client mode** (`llm-cli ditto remote set`). Instead of the in-process registry, the tools come from the MCP
-   server of the framework installed on another computer (the same program; Docker is not needed, SSH or a server
-   address is enough), with a named token linked to Ditto's permissions there (`--link ditto`):
-   that server decides, asks and audits (actor `mcp:<token name>`). One tool source per conversation; every remote
-   result, error and question is untrusted data; Ditto's dialog names the server. Without a token the mode does not
-   start. Ditto's tasks (build advice, module proposal, analysis of a remote build) take their context from that
-   server's task prompts under Ditto's own task text, and a refused call's reason code comes from the server's
-   structured error, never from its words.
+7. **This computer and another computer** (`llm-cli ditto remote set`; `orchestrator/llm/hybrid_tools.py`). This
+   computer's tools always stay. When the framework installed on another computer is set up (the same program;
+   Docker is not needed, SSH or a server address is enough, with a named token linked to Ditto's permissions there,
+   `--link ditto`), its tools join the same list: a tool both offer with the same input schema once, with an optional
+   `place`; a catalogue tool only there with `place` required; another framework version's tool as
+   `remote_<name>`. Only catalogue names come from there, always with this computer's titles and descriptions; the
+   remote's own texts never reach the model. A router sends each call where its object lives (ids learned from
+   structured results, kept in the signed `ditto_places.json`): a contradicting place is `wrong_place`, objects on
+   both computers `needs_transfer`, since nothing is copied by itself. A remote call gets this computer's
+   write-ahead `started` entry (tier `remote`, `place remote:<name>`) and a linked end entry, and a change is not
+   sent when that entry cannot be written; that server then decides, asks and audits (actor `mcp:<token name>`).
+   Every remote result starts with a framework line before its untrusted block, and the turn is marked as tainted;
+   Ditto's dialog alone answers that server's questions, and a turn without a dialog connects without the ability to
+   ask. A computer that cannot be reached never stops a turn or resets the conversation (the turn goes on with this
+   computer's tools and a notice for the person). Ditto's tasks (build advice, module proposal, analysis of a remote
+   build) still take their context from that server's task prompts under Ditto's own task text, and a refused
+   call's reason code comes from the server's structured error, never from its words.
 
 ### Self-healing approval
 

@@ -433,21 +433,24 @@ class ConfigManager:
             ConfigSchema("ai_fallback_chain", list, False, [],
                          "Providers tried when the model declines or the provider is unavailable, as provider or "
                          "provider:model, e.g. local, ollama:qwen3.5:4b"),
-            # Ditto's tool source (MCP design T12): its own tools in this process, or the MCP server of a framework
-            # running elsewhere (the named token is in the credential vault as ditto_mcp_token, never here)
+            # Ditto and the framework on another computer (MCP design T12, hybrid design 6.7): this computer's tools
+            # always stay; "mcp" adds the MCP server of the framework installed on a second computer (the named token
+            # is in the credential vault as ditto_mcp_token, never here)
             ConfigSchema("ai_ditto_tool_source", str, False, "local",
-                         "Where Ditto's tools come from: local (this framework) or mcp (another framework's MCP "
-                         "server)", ["regex:^(local|mcp)$"]),
+                         "Ditto's tools: local (this computer only) or mcp (this computer and the framework on "
+                         "another computer, through its MCP server)", ["regex:^(local|mcp)$"]),
             ConfigSchema("ai_ditto_mcp_transport", str, False, "stdio",
-                         "MCP-client mode: stdio (Ditto starts the server command) or http", ["regex:^(stdio|http)$"]),
+                         "Another computer: stdio (Ditto starts the server command, for example over SSH) or http",
+                         ["regex:^(stdio|http)$"]),
             ConfigSchema("ai_ditto_mcp_command", list, False, [],
-                         "MCP-client mode over stdio: the command that starts the server, e.g. docker exec -i "
-                         "<container> llm-cli mcp serve"),
+                         "Another computer over stdio: the command that starts the server there, e.g. ssh -T -o "
+                         "SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve"),
             ConfigSchema("ai_ditto_mcp_url", str, False, "",
-                         "MCP-client mode over HTTP: the server address (https, or http on a loopback address)",
+                         "Another computer over HTTP: the server address (https, or http on a loopback address)",
                          ["regex:^(https?://\\S+)?$"]),
             ConfigSchema("ai_ditto_mcp_name", str, False, "",
-                         "MCP-client mode: your name for that framework, shown in Ditto's dialogs"),
+                         "Another computer: your name for it, shown in Ditto's dialogs and given to the AI as its place "
+                         "(a plain short name; anything else is shown as 'the other computer')"),
 
             # v2.0.0: Chat & Brain Settings
             ConfigSchema("chat_context_limit", int, False, 4096, "Max tokens for chat context history"),

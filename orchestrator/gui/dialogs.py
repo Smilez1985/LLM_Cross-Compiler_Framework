@@ -357,14 +357,16 @@ class AIConfigurationDialog(QDialog):
         self._load_current_config()
 
     # --- Ditto and the framework on another computer (design 6.1; MCP design T12) ---
-    REMOTE_INTRO = ("Ditto works with the framework on this computer. Choose another computer only if the framework "
-                    "is installed on a second computer too (for example a stronger build PC or a server): Ditto then "
-                    "reaches that installation through its MCP server, the way Claude Code does. Docker is not "
+    REMOTE_INTRO = ("Ditto always works with the framework on this computer. If the framework is installed on a "
+                    "second computer too (for example a stronger build PC or a server), Ditto can also use that one: "
+                    "its tools join this computer's in the same chat, and each task goes to the computer where its "
+                    "object lives. Ditto reaches it through its MCP server, the way Claude Code does. Docker is not "
                     "needed for this; SSH or a server address is enough.")
 
     def _remote_section(self) -> QGroupBox:
-        """Optional: Ditto uses the framework installed on a second computer (a stronger build PC, a server) through
-        that installation's MCP server, with a named token stored in the credential vault and never shown again.
+        """Optional: Ditto also uses the framework installed on a second computer (a stronger build PC, a server)
+        through that installation's MCP server, next to this computer's tools (which always stay), with a named token
+        stored in the credential vault and never shown again.
         Docker is not needed: SSH (as the command, or a tunnel to the server address) is enough. The texts are plain
         text; the section is off (this computer) by default."""
         box = QGroupBox("Another computer (optional)")
@@ -375,9 +377,10 @@ class AIConfigurationDialog(QDialog):
         form.addRow(self.lbl_remote_intro)
         self.cb_tool_source = QComboBox()
         self.cb_tool_source.addItem("This computer (default)", "local")
-        self.cb_tool_source.addItem("The framework on another computer", "mcp")
-        self.cb_tool_source.setToolTip("With another computer, Ditto uses the tools, task prompts, permissions and "
-                                       "audit log of the framework installed there.")
+        self.cb_tool_source.addItem("This computer and the framework on another computer", "mcp")
+        self.cb_tool_source.setToolTip("With another computer, Ditto also uses the tools of the framework installed "
+                                       "there; its permissions and audit log decide those calls, and this computer "
+                                       "records them too. This computer's tools always stay.")
         form.addRow("Ditto works with:", self.cb_tool_source)
         self.cb_mcp_transport = QComboBox()
         self.cb_mcp_transport.addItem("Command (stdio), for example over SSH", "stdio")
@@ -433,11 +436,13 @@ class AIConfigurationDialog(QDialog):
         self.txt_mcp_token.setPlaceholderText("******** (stored in the vault; type a new one to replace it)" if stored
                                               else "Paste the named token (llm-cli mcp token add NAME --link ditto)")
         self.lbl_mcp.setText("" if not remote else
-                             "While this is on, Ditto uses the tools and task prompts of the framework on that "
-                             "computer instead of this computer's; its permissions for this token apply there, and "
-                             "its questions are answered here. This computer's files, targets and settings stay as "
-                             "they are; switching starts a new conversation, and choosing this computer again brings "
-                             "its own tools back." if stored else
+                             "While this is on, Ditto works with this computer and the framework on that computer "
+                             "together: this computer's tools, files, targets and settings stay, that computer's "
+                             "tools join them, and each call goes to the computer where its object lives (nothing is "
+                             "copied between them by itself). Its permissions for this token apply there, and its "
+                             "questions are answered here. The conversation goes on when you switch, and a computer "
+                             "that cannot be reached never stops a task here. Build advice and module proposals still "
+                             "take their task context from that computer while this is on." if stored else
                              "Ditto does not use another computer without a named token.")
 
     def _load_remote_settings(self) -> None:
