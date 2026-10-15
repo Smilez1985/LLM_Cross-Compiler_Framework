@@ -1,7 +1,7 @@
 """Security quick fixes of the sixth-round design (package S0, section 4.3 and 10.2): device passwords never need the
 command line, paramiko never logs them, the loopback MCP listener ignores proxy headers and writes no access log, and
 the installer says plainly what the docker group means. The Trivy scan without the Docker socket is tested with the
-build engine's fakes in tests/test_review_build_engine.py."""
+build engine's fakes in tests/test_review_build_engine.py. Package S1 (a): no default names a registry image."""
 
 import http.client
 import logging
@@ -274,3 +274,57 @@ def test_installer_says_what_the_docker_group_means(tmp_path):
     assert "usermod -aG docker lcf" in (stubs / "calls.log").read_text()
     said = run.stdout + run.stderr
     assert "Gruppe docker" in said and "Root-Rechte" in said and "gpasswd -d lcf docker" in said
+
+
+# --- config defaults: local image names, no registry (package S1 a) -------------------------------------------------
+
+def registry_of(image: str) -> str:
+    """The registry part of an image reference ('' for a local name or a Docker Hub name such as aquasec/trivy)."""
+    first, _, rest = image.partition("/")
+    return first if rest and ("." in first or ":" in first or first == "localhost") else ""
+
+
+def test_no_default_names_a_registry_image(tmp_path):
+    """No framework image is published or pulled (round 5 h, round 6): no default names an image in a registry. The
+    images of others (Trivy, Qdrant, Debian) stay Docker Hub names; prebuilt_llama.KNOWN_PREBUILT_IMAGES stays a
+    detection list of the former images, so it is the one place that still names ghcr.io."""
+    import yaml
+    from orchestrator.Core.config_manager import ConfigManager
+    from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE
+    from orchestrator.utils.prebuilt_llama import KNOWN_PREBUILT_IMAGES
+    schemas = ConfigManager(tmp_path / "configs").config_schemas
+    images = {key: schema.default_value for key, schema in schemas.items() if key.startswith("image_")}
+    assert images and all(not registry_of(image) for image in images.values()), images
+    assert schemas["docker_registry"].default_value == ""
+    assert DEFAULT_INFERENCE_IMAGE == images["image_inference_runtime"] == "llm-framework/inference:local"
+
+    allowed = REPO_ROOT / "orchestrator" / "utils" / "prebuilt_llama.py"
+    named = [str(path.relative_to(REPO_ROOT)) for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py"))
+             if path != allowed and "ghcr.io" in path.read_text(encoding="utf-8")]
+    assert named == [], f"a framework default names a registry image: {named}"
+    assert "ghcr.io/smilez1985/llm-runtime" in KNOWN_PREBUILT_IMAGES, "the detection list stays"
+
+    for target in sorted((REPO_ROOT / "targets").glob("*/target.yml")):
+        docker = (yaml.safe_load(target.read_text(encoding="utf-8")) or {}).get("docker") or {}
+        assert not docker.get("registry"), target
+        assert not registry_of(str(docker.get("image_name", ""))), target
+
+
+def test_the_benchmark_window_never_pulls_its_image():
+    """containers.run pulls a missing image by itself; the benchmark asks first and stops when it is not here."""
+    pytest.importorskip("PySide6")
+    import docker
+    from orchestrator.gui.benchmark_window import BENCHMARK_IMAGE, BenchmarkWorker
+    calls, errors = [], []
+
+    def missing(name):
+        calls.append(("get", name))
+        raise docker.errors.ImageNotFound(name)
+
+    client = SimpleNamespace(images=SimpleNamespace(get=missing),
+                             containers=SimpleNamespace(run=lambda *a, **k: calls.append(("run", a, k))))
+    worker = BenchmarkWorker(SimpleNamespace(client=client), {})
+    worker.error.connect(errors.append)
+    worker.run()
+    assert calls == [("get", BENCHMARK_IMAGE)] and not registry_of(BENCHMARK_IMAGE)
+    assert errors and "not on this computer" in errors[0]

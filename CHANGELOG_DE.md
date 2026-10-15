@@ -868,6 +868,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   beschädigte Datei ergibt die Vorgaben.
 
 ### Geändert
+- **Keine Vorgabe nennt mehr ein Image aus einer Registry** (Runde 5 h, sechste Runde): Das Framework veröffentlicht
+  keine Images, daher nennen die Vorgaben lokale Images. `image_inference_runtime` ist `llm-framework/inference:local`;
+  ein Deployment-Paket nimmt es erst, wenn du es auf diesem Rechner gebaut hast, wie jedes Image ohne Digest.
+  `docker_registry` ist leer (nichts liest es). Das experimentelle Benchmark-Fenster nutzt
+  `llm-framework/builder:local` und hält mit einer Meldung an, wenn dieses Image hier fehlt, statt Docker es ziehen zu
+  lassen. Der Block `docker` in `targets/_template/target.yml` und `targets/Rockchip/target.yml` nennt ein lokales
+  Image ohne Registry (`registry: ""`); Kommentare sagen, dass nichts `registry` oder `tags` liest.
+  `prebuilt_llama.KNOWN_PREBUILT_IMAGES` behält die früheren `ghcr.io`-Namen als Liste zum Erkennen.
 - **uv ersetzt Poetry für die Festlegung der Abhängigkeiten** (sechste Runde, Entscheidung 14): `pyproject.toml`
   nutzt die Standardtabelle `[project]` (die Entwicklungswerkzeuge in `[dependency-groups]`), `uv.lock` ersetzt
   `poetry.lock`, und `requirements.txt` und `requirements-dev.txt` sind mit Hashes festgelegte Ausgaben von

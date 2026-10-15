@@ -756,6 +756,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   saw are kept in `gui_state.json` in the per-user folder (never in QSettings); a damaged file gives the defaults.
 
 ### Changed
+- **No default names a registry image any more** (round 5 h, sixth round): no framework image is published, so the
+  defaults name local images. `image_inference_runtime` is `llm-framework/inference:local`; a deployment package
+  takes it only once you built it on this computer, as for every image without a digest. `docker_registry` is empty
+  (nothing reads it). The experimental benchmark window uses `llm-framework/builder:local` and stops with a message
+  when that image is not here, instead of letting Docker pull it. The `docker` block of `targets/_template/target.yml`
+  and `targets/Rockchip/target.yml` names a local image without a registry (`registry: ""`); comments say that nothing
+  reads `registry` or `tags`. `prebuilt_llama.KNOWN_PREBUILT_IMAGES` keeps the former `ghcr.io` names as a detection
+  list.
 - **uv replaces Poetry for the dependency lock** (sixth round, decision 14): `pyproject.toml` uses the standard
   `[project]` table (the dev tools in `[dependency-groups]`), `uv.lock` replaces `poetry.lock`, and `requirements.txt`
   and `requirements-dev.txt` are hash-pinned `uv export` outputs whose first lines name the command. No version

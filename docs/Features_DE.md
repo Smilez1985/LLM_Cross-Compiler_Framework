@@ -269,8 +269,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
 - **Docker-Modus** (`--docker`, Option in der GUI): packt zusätzlich Container-Images ein und startet sie auf dem
   Board. Dieser Modus ist experimentell und in dieser Version nicht geprüft. Ein Image kommt nur ins Paket, wenn es
   per Digest festgelegt ist (`image_inference_runtime: name@sha256:...`) oder auf diesem Rechner gebaut wurde (es
-  liegt hier und wurde nie gezogen); ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte
-  `...:latest`, wird mit Grund abgelehnt, bevor etwas kopiert wird. Ein per Digest festgelegtes Image, das hier fehlt,
+  liegt hier und wurde nie gezogen); ein gezogenes Image, das nur über ein Tag benannt ist, und das voreingestellte
+  `llm-framework/inference:local` (ein lokaler Name; das Framework veröffentlicht keine Images), solange du es
+  hier nicht gebaut hast, werden mit Grund abgelehnt, bevor etwas kopiert wird. Ein per Digest festgelegtes Image, das hier fehlt,
   wird über seinen Digest gezogen, nie über ein Tag, und ein fehlgeschlagener Export bricht das Paket ab, statt das
   Image wegzulassen. Ein per Digest festgelegtes Image wird unter dem lokalen Namen
   `<Repository>:lcf-<erste 12 Hex-Zeichen des Digests>` eingepackt (`docker load` stellt Registry-Digests nicht

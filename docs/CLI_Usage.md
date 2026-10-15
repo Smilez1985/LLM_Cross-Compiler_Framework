@@ -362,7 +362,7 @@ Creates a ZIP file for the board: the model file, the build's manifest and model
 |---|---|
 | `ARTIFACT_NAME` | A build folder as shown by `list-artifacts` (relative to the output folder), or any existing path to a build folder or model file. |
 | `--profile TEXT` | **Required.** The target, e.g. `Rockchip` (used for device options in Docker mode). |
-| `--docker / --no-docker` | Also pack container images (default off). Experimental and not verified in this version; leave it off for a model file. Each image (`image_inference_runtime`, and `image_qdrant` with the knowledge base) must be pinned by its digest (`name@sha256:...`) or built on this computer; an image named only by a tag, such as the default `...:latest`, is refused with the reason, and a failed image export stops the package. |
+| `--docker / --no-docker` | Also pack container images (default off). Experimental and not verified in this version; leave it off for a model file. Each image (`image_inference_runtime`, and `image_qdrant` with the knowledge base) must be pinned by its digest (`name@sha256:...`) or built on this computer; an image named only by a tag that was pulled is refused with the reason, and so is the default `llm-framework/inference:local` (a local name) until you have built it here. A failed image export stops the package. |
 
 Only model files are deployed without Docker; builds that produced several weight files are refused. A package that
 cannot be made prints the reason and exits with 1; the ZIP is written under a temporary name and renamed when it is

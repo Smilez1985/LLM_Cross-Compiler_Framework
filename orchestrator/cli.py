@@ -3554,8 +3554,9 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
     
     docker_config = {"use_docker": docker}
     if docker:
-        # TODO: Get real image name from config/profile logic
-        docker_config["image_name"] = "ghcr.io/llm-framework/inference-node:latest"
+        # TODO: Get real image name from config/profile logic (the package itself takes image_inference_runtime)
+        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE
+        docker_config["image_name"] = DEFAULT_INFERENCE_IMAGE
     
     from orchestrator.Core.deployment_manager import DeployError
     try:

@@ -371,7 +371,7 @@ geschrieben.
 |---|---|
 | `ARTIFACT_NAME` | Ein Build-Ordner, wie ihn `list-artifacts` zeigt (relativ zum Ausgabeordner), oder ein beliebiger vorhandener Pfad zu einem Build-Ordner oder einer Modelldatei. |
 | `--profile TEXT` | **Pflicht.** Das Target, z. B. `Rockchip` (für Geräteoptionen im Docker-Modus). |
-| `--docker / --no-docker` | Zusätzlich Container-Images einpacken (Standard aus). Experimentell und in dieser Version nicht geprüft; für eine Modelldatei aus lassen. Jedes Image (`image_inference_runtime` und mit Wissensdatenbank `image_qdrant`) muss per Digest festgelegt sein (`name@sha256:...`) oder auf diesem Rechner gebaut worden sein; ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte `...:latest`, wird mit Grund abgelehnt, und ein fehlgeschlagener Image-Export bricht das Paket ab. |
+| `--docker / --no-docker` | Zusätzlich Container-Images einpacken (Standard aus). Experimentell und in dieser Version nicht geprüft; für eine Modelldatei aus lassen. Jedes Image (`image_inference_runtime` und mit Wissensdatenbank `image_qdrant`) muss per Digest festgelegt sein (`name@sha256:...`) oder auf diesem Rechner gebaut worden sein; ein gezogenes Image, das nur über ein Tag benannt ist, wird mit Grund abgelehnt, und ebenso das voreingestellte `llm-framework/inference:local` (ein lokaler Name), bis du es hier gebaut hast. Ein fehlgeschlagener Image-Export bricht das Paket ab. |
 
 Ohne Docker werden nur Modelldateien übertragen; Builds mit mehreren Gewichtsdateien werden abgelehnt. Ein Paket,
 das nicht erstellt werden kann, gibt den Grund aus und endet mit 1; das ZIP wird unter einem vorläufigen Namen

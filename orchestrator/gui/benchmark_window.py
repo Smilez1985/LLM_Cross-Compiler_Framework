@@ -10,7 +10,6 @@ Updates v2.3.0:
 - Safe Config access.
 """
 
-import json
 import re
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -24,6 +23,10 @@ try:
     from orchestrator.utils.localization import tr
 except ImportError:
     def tr(key, default=None): return default or key
+
+# A local image name (built on this computer); no framework image is published or pulled.
+BENCHMARK_IMAGE = "llm-framework/builder:local"
+
 
 class BenchmarkWorker(QThread):
     """Führt den Benchmark im Docker-Container aus."""
@@ -50,7 +53,14 @@ class BenchmarkWorker(QThread):
             
             # Image aus Config holen (v2.3)
             # Hier vereinfacht: Wir nehmen das Standard-Builder-Image oder ein spezialisiertes Benchmark-Image
-            img = "ghcr.io/llm-framework/builder:latest" 
+            img = BENCHMARK_IMAGE
+            # containers.run would pull a missing image from a registry: the framework pulls no image of its own.
+            try:
+                client.images.get(img)
+            except Exception:
+                self.error.emit(f"The image {img} is not on this computer. Build it here first; the framework "
+                                "does not download it.")
+                return
             
             # Command bauen
             # llama-bench ist typischerweise im Image vorinstalliert
