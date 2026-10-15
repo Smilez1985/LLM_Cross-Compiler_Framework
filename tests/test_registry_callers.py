@@ -204,15 +204,17 @@ def test_an_elicitation_answer_never_confirms_a_call_the_framework_window_must_a
 # --- the deletion rule (round 5 f) ---------------------------------------------------------------------------------
 
 REVIEWED_DESTRUCTIVE = {
-    # NOT yet free of deletions (open, design WP7 and [A15]): the backup snapshot it takes first goes through
-    # RAGManager.create_snapshot, which still prunes the oldest knowledge snapshots beyond five (every ingest does the
-    # same). WP7 stops that automatic pruning; only then may a delegation cover this tool.
-    "restore_knowledge_snapshot": "takes a backup snapshot first; automatic snapshot pruning is removed in WP7",
+    # Deletes no snapshot: the backup it takes first goes through RAGManager.create_snapshot, which no longer prunes
+    # old snapshots (above five the person is reminded and decides). It still stays with the person, outside every
+    # delegation and standing approval, until the trash and the deletion dialog exist (design WP7 and [A15]).
+    "restore_knowledge_snapshot": "takes a backup snapshot first and deletes no snapshot; stays with the person "
+                                  "until WP7",
     # destructive, but nothing on this computer the person can see is deleted:
     "deploy_to_device": "replaces files on a board the person trusts; nothing on this computer is deleted",
     "deploy_device_runtime": "the previous runtime on the board stays as the fallback",
-    # deletes only with one strategy: that call carries a deletion plan in its facts (WP7), then the rule applies
-    "resolve_healing": "only its docker_prune strategy deletes (the Docker build cache)",
+    # deletes nothing: it changes a setting or retries a build; a full Docker disk (docker_prune) is a manual step
+    # that points to the person's 'llm-cli doctor --fix --tier 2' and its list, and approving it is refused
+    "resolve_healing": "changes build_jobs or retries a build; no strategy deletes (docker_prune is a manual step)",
 }
 
 

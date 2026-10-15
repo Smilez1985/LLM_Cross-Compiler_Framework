@@ -31,8 +31,6 @@ TEXTS = {
         "warning.long_build": "Takes about {minutes} minutes (from {n} earlier builds).",
         "warning.embedding_model_download": "The search model (about {size_gb} GB) is downloaded once.",
         "warning.many_pages": "Up to {max_pages} pages from {sites} websites.",
-        "warning.snapshots_over_cap": "The knowledge base keeps {n} backups ({size_gb} GB); you decide when to clean "
-                                      "them up.",
         "warning.device_runtime_replaced": "Replaces the model server on the board; the previous one stays as a "
                                            "fallback.",
         "warning.device_model_replaced": "Replaces the model on the board.",
@@ -197,8 +195,6 @@ TEXTS = {
         "warning.long_build": "Dauert etwa {minutes} Minuten (aus {n} früheren Builds).",
         "warning.embedding_model_download": "Das Suchmodell (etwa {size_gb} GB) wird einmal heruntergeladen.",
         "warning.many_pages": "Bis zu {max_pages} Seiten von {sites} Websites.",
-        "warning.snapshots_over_cap": "Die Wissensbasis hat {n} Sicherungen ({size_gb} GB); du entscheidest, wann "
-                                      "sie aufgeräumt werden.",
         "warning.device_runtime_replaced": "Ersetzt den Modellserver auf dem Board; der bisherige bleibt als Reserve.",
         "warning.device_model_replaced": "Ersetzt das Modell auf dem Board.",
         "warning.untested_module": "Niemand hat dieses Hardware-Modul schon auf dem Board ausprobiert.",

@@ -33,10 +33,24 @@ DISK_FULL_PATTERN = r"No space left on device|Disk quota exceeded"
 class HealingStrategy(Enum):
     """Definiert die Art der Reparaturmaßnahme."""
     CONFIG_ADJUSTMENT = "config_adjustment"
-    DOCKER_PRUNE = "docker_prune"
+    DOCKER_PRUNE = "docker_prune"  # a full Docker disk: a manual step (the doctor's list), never a deletion here
     RETRY_BUILD = "retry_build"
     MANUAL_INTERVENTION = "manual_intervention"
     PATCH_CODE = "patch_code"
+
+
+# The strategies the framework applies itself after the person's yes (GUI dialog, CLI prompt, MCP resolve_healing).
+# None of them deletes anything: deleting needs the person's question with the full list (round 5 f), so a full
+# Docker disk (docker_prune) is a manual step that points to 'llm-cli doctor --fix --tier 2', which lists the
+# framework's dangling build images and deletes only those the person confirms there. Docker's build cache is never
+# cleared: it belongs to every project on the computer.
+AUTOMATIC_STRATEGIES = frozenset({HealingStrategy.CONFIG_ADJUSTMENT.value, HealingStrategy.RETRY_BUILD.value})
+
+# What the person does about a full Docker disk (the proposal's manual step).
+DOCKER_DISK_STEP = ("Free space on Docker's disk yourself, then start the build again: 'llm-cli doctor --fix --tier 2' "
+                    "(in a terminal) lists the framework's dangling build images with name, id, size and what each "
+                    "is, and deletes exactly those you confirm. Docker's build cache is not touched by the framework: "
+                    "it belongs to every project on this computer ('docker system df' shows its size).")
 
 @dataclass
 class HealingProposal:
@@ -86,7 +100,7 @@ class SelfHealingManager:
                 # data root, never the model cache or the output folder (G40).
                 DISK_FULL_PATTERN,
                 "Disk full.",
-                "Remove dangling framework images and the Docker build cache, then retry.",
+                DOCKER_DISK_STEP,
                 HealingStrategy.DOCKER_PRUNE,
                 "HOST"
             ),
@@ -249,8 +263,8 @@ class SelfHealingManager:
             return HealingProposal(
                 summary="Detected known issue: Disk full (Docker's data root).",
                 root_cause=f"The disk with Docker's data root is full ({gb(docker[1])} free).",
-                fix_command="Remove dangling framework images and the Docker build cache, then retry.",
-                confidence=1.0, strategy=HealingStrategy.DOCKER_PRUNE, target_scope="HOST")
+                fix_command=DOCKER_DISK_STEP, confidence=1.0, strategy=HealingStrategy.DOCKER_PRUNE,
+                target_scope="HOST")
         where = "; ".join(rows) if rows else "the full disk could not be determined"
         return HealingProposal(
             summary="Detected known issue: Disk full.",
@@ -313,26 +327,11 @@ class SelfHealingManager:
             self.logger.info("✅ build_jobs set to 1 for the next image build.")
             return True
                 
-        # 2. Docker cleanup, limited to what the framework created (dangling labeled images) plus build cache
-        if proposal.strategy == HealingStrategy.DOCKER_PRUNE:
-            client = self.framework.get_component("docker_client") if self.framework else None
-            if client is None:
-                self.logger.error("Docker cleanup not possible: no Docker client.")
-                return False
-            try:
-                from orchestrator.Core.builder import IMAGE_LABEL
-                client.images.prune(filters={"dangling": True, "label": IMAGE_LABEL})
-                client.api.prune_builds()
-                self.logger.info("✅ Dangling framework images and the build cache were removed.")
-                return True
-            except Exception as e:
-                self.logger.error(f"Docker cleanup failed: {e}")
-                return False
-
-        # 3. A transient problem: nothing to change, the build is simply retried
+        # 2. A transient problem: nothing to change, the build is simply retried
         if proposal.strategy == HealingStrategy.RETRY_BUILD:
             return True
 
-        # 4. Everything else (AI proposals, code patches, host changes) is a manual step for the user.
+        # 3. Everything else (a full Docker disk, AI proposals, code patches, host changes) is a manual step for the
+        #    user. Nothing here deletes: freeing Docker's disk is the person's 'doctor --fix --tier 2' with its list.
         self.logger.warning(f"⚠️ Manual step required: '{proposal.fix_command}'")
         return False

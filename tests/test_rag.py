@@ -376,19 +376,23 @@ class TestCollections:
         assert rag.search("what does E2041 mean")[0].source == "https://docs.example/e2041"
 
     def test_only_the_newest_snapshots_are_kept(self, make_rag):
+        """The clean-up the person chooses (design WP7): nothing calls it by itself, and it has no count of its own
+        (there is no snapshot limit); creating snapshots never deletes one."""
         import os
-        import orchestrator.Core.rag_manager as rm
 
         rag = make_rag()
         ingest_all(rag)
-        for i in range(rm.MAX_SNAPSHOTS + 2):
+        for i in range(7):
             assert rag.create_snapshot(f"snap_{i}")
             path = rag.snapshot_dir / f"snap_{i}.jsonl.gz"
             os.utime(path, (1_000_000 + i, 1_000_000 + i))  # mtime order without sleeping
+        assert len(rag.list_snapshots()) == 7
 
-        rag._prune_snapshots()
+        rag._prune_snapshots(keep_newest=5)
 
-        assert rag.list_snapshots() == [f"snap_{i}" for i in range(2, rm.MAX_SNAPSHOTS + 2)]
+        assert rag.list_snapshots() == [f"snap_{i}" for i in range(2, 7)]
+        rag._prune_snapshots(keep_newest=0, keep=rag.snapshot_dir / "snap_6.jsonl.gz")
+        assert rag.list_snapshots() == ["snap_6"]
 
     def test_snapshot_of_another_model_is_refused(self, make_rag):
         rag = make_rag(embedder=FakeEmbedder("fake/model-a"))

@@ -215,11 +215,15 @@ das Framework nur feste, eingebaute Korrekturen an:
 | Problem | Was das Framework nach deinem „Ja“ tut |
 |---|---|
 | Speichermangel beim Kompilieren des Images | Setzt `build_jobs` auf 1 und versucht es erneut |
-| Platte voll | Entfernt verwaiste Framework-Images und den Docker-Build-Cache, dann neuer Versuch |
 | Netzwerkproblem | Versucht es einmal erneut |
 
-Alles andere, auch jeder KI-Vorschlag, wird als manueller Schritt angezeigt und nie ausgeführt. Ein erneuter Versuch
-bekommt eine eigene Build-ID (`<job>_r1`), und beide Logs bleiben erhalten.
+Alles andere, auch jeder KI-Vorschlag, wird als manueller Schritt angezeigt und nie ausgeführt. Eine volle Platte ist
+ebenfalls ein solcher manueller Schritt, weil das Framework nichts ohne deine Liste löscht (unveröffentlicht; bisher
+entfernte ein „Ja“ die verwaisten Images des Frameworks und leerte den ganzen Docker-Build-Cache, auch den anderer
+Projekte): Ist Dockers Platte voll, führst du `llm-cli doctor --fix --tier 2` im Terminal aus, das die verwaisten
+Build-Images des Frameworks listet und nur die löscht, die du bestätigst, und startest den Build dann neu. Den
+Docker-Build-Cache leert das Framework nie. Ein erneuter Versuch bekommt eine eigene Build-ID (`<job>_r1`), und beide
+Logs bleiben erhalten.
 
 **Vorschläge von KI-Clients.** Ein MCP-Client, der Dittos Aufgabe übernimmt (Prompt `diagnose_build_failure`), kann
 dem Framework mit dem Tool `propose_healing_fix` seine eigene Analyse eines gescheiterten Builds übergeben: eine
@@ -673,7 +677,9 @@ hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256 der 
 wenn der Ordner nicht mehr der ist, den die Frage nannte.
 `restore_knowledge_snapshot` sichert die aktuelle Wissensbasis zuerst als Snapshot `pre_restore_<Zeit>` und stellt
 ohne diese Sicherung nichts wieder her; dieselbe Regel gilt jetzt für jede Wiederherstellung eines Snapshots, und
-der wiederherzustellende Snapshot wird dabei nie aufgeräumt.
+dabei wird kein Snapshot gelöscht (das Framework löscht keinen Snapshot von selbst, siehe
+[Wissensbasis](#wissensbasis-rag)). Es bleibt außerhalb jeder Dauerfreigabe und Vollmacht, bis es den Papierkorb und
+den Lösch-Dialog des Frameworks gibt.
 
 So läuft eine Frage mit Tools ab:
 
@@ -1224,8 +1230,12 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   neue Fassung nicht mehr hat, werden entfernt. Codeblöcke und Tabellen bleiben ganz, außer sie sind größer als der
   Kontext des Modells ([Große Codeblöcke und Tabellen](#große-codeblöcke-und-tabellen)).
 - **Schnappschüsse:** Vor jedem Crawl wird die Wissensbasis als Schnappschuss in
-  `~/.llm-framework/knowledge_snapshots` gesichert (die neuesten 5 bleiben). Einen Schnappschuss wiederherstellen
-  kann man über GUI oder CLI noch nicht.
+  `~/.llm-framework/knowledge_snapshots` gesichert. Es gibt keine Grenze (unveröffentlicht; bisher blieben auf jedem
+  Weg nur die neuesten 5): Das Framework behält so viele, wie die Platte fasst, löscht keinen von selbst, und keine
+  Anzahl bringt eine Erinnerung oder eine Warnung. **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli
+  knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe und was er ist; um Platz zu schaffen, kopierst du
+  die, die du behalten willst, woandershin (Export) oder löschst die, die du auswählst, selbst. Ein Papierkorb und ein
+  Lösch-Dialog im Framework folgen. Einen Schnappschuss wiederherstellen kann man über GUI oder CLI noch nicht.
 - **Suche:** hybrid. Dichte Vektoren finden die Bedeutung, BM25 findet exakte Begriffe wie Fehlercodes und
   Compiler-Flags; beide Ranglisten werden mit Reciprocal Rank Fusion verbunden. Derselbe Text aus mehreren Quellen
   kommt nur einmal. Danach kann ein Cross-Encoder die Ergebnisse neu bewerten ([Reranking](#reranking)).
@@ -1949,8 +1959,8 @@ Verfügung.
 
 **Was eine Rückfrage zeigt** (Dittos GUI-Dialog und CLI-Abfrage, das Formular eines MCP-Clients), in dieser
 Reihenfolge: die Folge in einfachen Worten, aus dem, was das Framework nachgeschlagen hat, mit IDs, denen ihr
-sprechender Name folgt (zum Beispiel "Deletes the Docker build cache and the dangling framework images on this
-computer, then retries build request req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); wer
+sprechender Name folgt (zum Beispiel "Sets the framework setting build_jobs to 1 (fewer parallel compile jobs for
+image builds), then retries build request req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); wer
 fragt (Ditto oder der MCP-Client mit dem Namen, der Version und dem Transport, die er angibt, und wessen
 Berechtigungen gelten: alle lokalen stdio-Clients oder ein benanntes Token); die Fakten, die das Framework geprüft
 hat, wobei Text von außerhalb des Frameworks (ein Build-Log, der Vorschlag einer KI) als "not checked" gekennzeichnet
@@ -1958,9 +1968,9 @@ und maskiert ist; dann jedes Argument vollständig, reparierte Werte markiert un
 dahinter (Modell und Ziel einer Build-Anfrage, `<label>:<relativer Pfad>` einer lokalen Datei, der Name eines
 Ziels). Manche Tools schlagen Fakten vor der Rückfrage nach (zweistufige Bestätigung), und der Aufruf ist dann
 genau an das gebunden, was dir gezeigt wurde: Wer einen Selbstheilungs-Vorschlag genehmigt, wendet den Vorschlag aus
-der Rückfrage an, und einer, der sich inzwischen geändert hat, wird abgelehnt, ohne dass etwas angewendet wird; ein
-zerstörender Fix (`docker_prune`, der den Docker-Build-Cache löscht) wird auch dann erfragt, wenn `resolve_healing`
-erlaubt ist; ein Nachschlagen, das scheitert (kein offener Vorschlag), lehnt den Aufruf ab, bevor etwas gefragt
+der Rückfrage an, und einer, der sich inzwischen geändert hat, wird abgelehnt, ohne dass etwas angewendet wird; die
+Freigabe eines manuellen Schritts (auch einer vollen Docker-Platte, `docker_prune`: keine Selbstheilungs-Strategie
+löscht etwas) wird abgelehnt, bevor etwas gefragt wird; ein Nachschlagen, das scheitert (kein offener Vorschlag), lehnt den Aufruf ab, bevor etwas gefragt
 wird; ohne die nachgeschlagenen Fakten wird über einen Vorschlag gar nicht entschieden. Ein 2026-07-28-Client, der in
 einer zweiten Runde antwortet, bekommt die Fakten der Rückfrage, die er beantwortet hat. Eine Runde zählt nur als
 Antwort auf eine Rückfrage, die das Framework genau diesem Client gestellt hat und die noch offen ist: Eine Antwort,
@@ -2048,7 +2058,8 @@ sie:
 - **Situationshinweise** sind abzuwägen, aber nicht gefährlich: Der Speicherplatz wird knapp, reicht aber, ein großer
   Download, knapper Arbeitsspeicher für die Umwandlung oder zu wenig auf dem Board, viele Seiten für Deep Ingest, ein
   Hardware-Modul, das noch niemand auf dem Board ausprobiert hat, die Laufzeit auf einem Board wird ersetzt. Später
-  darf eine KI, der du eine Vollmacht gibst, solche Hinweise selbst entscheiden.
+  darf eine KI, der du eine Vollmacht gibst, solche Hinweise selbst entscheiden. Die Zahl der Wissens-Snapshots ist
+  nie ein Hinweis: Sie haben keine Grenze, und keiner wird von selbst gelöscht.
 - **Sicherheits- und Rechtshinweise** bleiben immer bei dir: Modelldateien in einem alten Format, das versteckten Code
   ausführen kann (pickle), eine Build-Umgebung von außerhalb der geprüften Docker-Sammlung oder nicht auf eine genaue
   Version festgelegt, mehr Hersteller-Downloads als üblich, ein ungeprüftes oder ein Community-Hardware-Modul, ein
@@ -2265,11 +2276,21 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 | KI | Tool-Berechtigungen eingerichtet und lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel; unveröffentlicht) |
 | Daten | mitgelieferte Kalibrierungsdaten intakt (Prüfsummen) |
 | Community | installierte Community-Packs gegen den zwischengespeicherten Index: gesperrt (Fehler), seit der Installation verändert (Warnung), Vertrauensstufe `local` (Information) |
+| Wissen | wie viele Snapshots der Wissensbasis es gibt, ihre Größe und ihr Ordner (keine Grenze: ihre Zahl ist nie eine Warnung; nichts wird gelöscht; unveröffentlicht) |
 | Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
 
-`--fix` wendet die automatischen Korrekturen bis `--tier` an (1: macht den persönlichen Ordner privat; 2: entfernt
-zusätzlich verwaiste Framework-Images und den Docker-Build-Cache) und prüft danach erneut. Exit-Codes: 0 OK,
-1 Warnungen, 2 Fehler; `--json` für Skripte.
+`--fix` wendet die automatischen Korrekturen bis `--tier` an und prüft danach erneut. Stufe 1 macht den
+persönlichen Ordner privat. Stufe 2 löscht nichts von selbst: Sie listet die verwaisten Build-Images des Frameworks
+(Name, Image-ID, Größe und was jedes ist), und nur dein Ja im Terminal löscht genau diese Liste (Vorgabe Nein; ohne
+Terminal und mit `--json` listet sie sie nur). Der Docker-Build-Cache wird nie geleert, weil er sich nicht auf das
+Framework beschränken lässt: Bisher leerte Stufe 2 den ganzen Build-Cache des Docker-Daemons, auch den anderer
+Projekte. Nichts, was eine KI-App oder Ditto aufrufen kann, erreicht dieses Löschen. Exit-Codes: 0 OK, 1 Warnungen,
+2 Fehler; `--json` für Skripte.
+
+Was eine KI liest (`run_doctor`): dieselben Befunde, mit den Ordnern des Frameworks unter ihrer Bezeichnung
+(`state:audit.db`, "the state folder", `targets:<Pack>`) und jedem anderen Pfad nur mit seinem Dateinamen, auch in
+der Meldung einer abgestürzten Prüfung; deine eigene Ausgabe (`llm-cli doctor`, auch `--json`) behält die vollen
+Pfade.
 
 ---
 

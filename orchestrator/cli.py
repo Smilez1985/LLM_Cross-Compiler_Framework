@@ -759,9 +759,11 @@ def _cancel_interrupted_build(ctx: FrameworkContext, request_id: str) -> None:
 
 
 def _resolve_healing_interactively(orchestrator, request_id, proposal):
-    """Asks on the terminal whether an automatic fix may be applied (manual steps are only shown)."""
+    """Asks on the terminal whether an automatic fix may be applied (manual steps are only shown; no automatic fix
+    deletes anything)."""
+    from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
     automatic = (not getattr(proposal, "is_ai_generated", False)
-                 and getattr(getattr(proposal, "strategy", None), "value", "") in ("config_adjustment", "docker_prune", "retry_build"))
+                 and getattr(getattr(proposal, "strategy", None), "value", "") in AUTOMATIC_STRATEGIES)
     origin = "AI suggestion" if getattr(proposal, "is_ai_generated", False) else "Known issue"
     console.print(f"[bold magenta]Self-Healing ({origin}): {escape(str(proposal.summary))}[/bold magenta]")
     console.print(f"Cause: {escape(str(proposal.root_cause))}")
@@ -3069,8 +3071,9 @@ def auth_rotate_key(ctx: FrameworkContext):
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @click.option('--fix', is_flag=True, help='Apply automatic fixes up to --tier, then check again')
 @click.option('--tier', default=1, show_default=True, type=click.IntRange(1, 2),
-              help='1: harmless fixes (makes your personal folder private); 2: also removes caches (dangling '
-                   'framework images, Docker build cache)')
+              help='1: harmless fixes (makes your personal folder private); 2: also lists the dangling framework '
+                   'images (id, size, what each is) and deletes exactly those you confirm in a terminal; the Docker '
+                   'build cache is never cleared')
 @pass_context
 def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
     """Check the installation and explain how to fix problems (exit code 0 ok, 1 warnings, 2 errors)"""
@@ -3079,7 +3082,10 @@ def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
     doc = Doctor(ctx.framework_manager)
     report = doc.fix(tier) if fix else doc.run()
     if as_json:
-        click.echo(json.dumps(report.to_dict(), indent=2))
+        data = report.to_dict()
+        if fix and tier >= 2:  # listed only: a deletion needs the person's yes at a terminal
+            data["framework_images"] = _doctor_image_listing(ctx.framework_manager)
+        click.echo(json.dumps(data, indent=2))
         sys.exit(report.exit_code)
     icons = {Severity.OK: "[green]✔[/green]", Severity.INFO: "[blue]ℹ[/blue]",
              Severity.WARN: "[yellow]![/yellow]", Severity.ERROR: "[red]✘[/red]"}
@@ -3092,7 +3098,107 @@ def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
         console.print(f"[green]Fixed: {escape(code)}[/green]")
     for code in report.still_present:
         console.print(f"[yellow]Still present after the fix: {escape(code)}[/yellow]")
+    if fix and tier >= 2:
+        _doctor_free_space(ctx.framework_manager)
     sys.exit(report.exit_code)
+
+
+def _doctor_image_listing(framework) -> dict:
+    """Tier 2 for `--json`: the list only (nothing is deleted without the person's yes at a terminal)."""
+    from orchestrator.Core.doctor import DockerUnavailable, framework_image_plan
+    try:
+        plan = framework_image_plan(framework)
+    except DockerUnavailable as e:
+        return {"available": False, "problem": str(e), "images": [], "deleted": False}
+    items = plan.items if plan is not None else []
+    return {"available": True, "deleted": False,
+            "note": "Nothing is deleted with --json: run 'llm-cli doctor --fix --tier 2' in a terminal and confirm "
+                    "the list.",
+            "images": [{"name": i.speaking_name, "id": i.file_name, "size_bytes": i.size_bytes, "what": i.what}
+                       for i in items]}
+
+
+def _doctor_free_space(framework) -> None:
+    """Tier 2: lists the framework's dangling build images (name, id, size, what each is) and deletes exactly that
+    list after the person's yes at a terminal (default no). Docker's build cache is never cleared: it cannot be
+    limited to the framework."""
+    from orchestrator.Core.doctor import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
+                                          framework_image_plan)
+    from orchestrator.Core.knowledge_snapshots import size_text
+    cache_note = ("Docker's build cache is not touched: it cannot be limited to the framework ('docker system df' "
+                  "shows its size; 'docker builder prune' would clear it for every project on this computer).")
+    console.print("\n[bold]Tier 2: the framework's dangling build images[/bold]")
+    try:
+        plan = framework_image_plan(framework)
+    except DockerUnavailable as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow] {escape(cache_note)}")
+        return
+    if plan is None:
+        console.print(f"No dangling framework images to delete. {escape(cache_note)}")
+        return
+    table = Table(title=f"{len(plan.items)} dangling framework images, {size_text(plan.total_bytes)}")
+    for column in ("Image", "Id", "Size", "What it is"):
+        table.add_column(column, overflow="fold")
+    for item in plan.items:
+        table.add_row(escape(item.speaking_name), escape(item.file_name), size_text(item.size_bytes), escape(item.what))
+    console.print(table)
+    console.print("Sizes include layers other images may share, so less space can be freed. " + escape(cache_note))
+    if not _interactive():
+        console.print("[yellow]Nothing was deleted: run 'llm-cli doctor --fix --tier 2' yourself in a terminal to "
+                      "confirm this list.[/yellow]")
+        return
+    if not click.confirm(f"Delete exactly these {len(plan.items)} images?", default=False):
+        console.print("Nothing was deleted.")
+        return
+    try:
+        result = delete_framework_images(framework, plan, actor="cli")
+    except (ImagePlanChanged, DockerUnavailable, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    for name in result.deleted:
+        console.print(f"[green]Deleted: {escape(name)}[/green]")
+    for name, reason in result.failed:
+        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    console.print(f"{len(result.deleted)} images deleted, about {size_text(result.freed_bytes)}.")
+
+
+# ============================================================================
+# KNOWLEDGE BASE (what the person sees of it on the command line)
+# ============================================================================
+
+@cli.group()
+def knowledge():
+    """The knowledge base's files on this computer"""
+    pass
+
+
+@knowledge.group('snapshots', invoke_without_command=True)
+@click.pass_context
+def knowledge_snapshots(click_ctx):
+    """The knowledge base's snapshots (same as 'snapshots list')"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(knowledge_snapshots_list)
+
+
+@knowledge_snapshots.command('list')
+@pass_context
+def knowledge_snapshots_list(ctx: FrameworkContext):
+    """Every snapshot with its full path, file name, size and what it is; nothing is deleted"""
+    from orchestrator.Core.knowledge_snapshots import KEEPING_NOTE, list_snapshots, size_text, snapshot_folder
+    ctx.require_framework()
+    folder = snapshot_folder(ctx.framework_manager.config.user_state_dir)
+    snapshots = list_snapshots(folder)
+    if not snapshots:
+        console.print(f"No knowledge snapshots in {escape(str(folder))}.")
+        return
+    total = sum(s.size_bytes for s in snapshots)
+    table = Table(title=f"Knowledge snapshots ({len(snapshots)}, {size_text(total)}), oldest first")
+    for column in ("Snapshot", "Taken", "Size", "What it is", "Full path"):
+        table.add_column(column, overflow="fold")
+    for s in snapshots:
+        table.add_row(escape(s.name), s.taken, size_text(s.size_bytes), escape(s.what), escape(str(s.path)))
+    console.print(table)
+    console.print(escape(KEEPING_NOTE))
 
 
 # ============================================================================

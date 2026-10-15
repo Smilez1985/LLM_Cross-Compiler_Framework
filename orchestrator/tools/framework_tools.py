@@ -267,13 +267,14 @@ JOB_EXAMPLE = {"job_id": "job_0123456789abcdef"}
 
 # What approving a healing strategy does, in plain words (the question's first line).
 HEALING_CONSEQUENCES = {
-    "docker_prune": "Deletes the Docker build cache and the dangling framework images on this computer, then retries "
-                    "build request {rid} once.",
     "config_adjustment": "Sets the framework setting build_jobs to 1 (fewer parallel compile jobs for image builds), "
                          "then retries build request {rid} once.",
     "retry_build": "Retries build request {rid} once, without changes.",
 }
-DESTRUCTIVE_STRATEGIES = frozenset({"docker_prune"})  # always asked, even when the tool is allowed
+# Strategies asked even when the tool is allowed. None is left: no automatic strategy deletes anything (round 5 f); a
+# full Docker disk (docker_prune) is a manual step that points to the person's 'llm-cli doctor --fix --tier 2', and
+# approving a manual step is refused before anything is asked.
+DESTRUCTIVE_STRATEGIES: frozenset = frozenset()
 
 
 def healing_facts(service, request_id: str, approve: bool) -> CallFacts:
@@ -456,11 +457,11 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                      if listed > MAX_LISTED_TOOLS else ""))
 
     def run_doctor(_inp: NoInput) -> DoctorOut:
-        from orchestrator.Core.doctor import Doctor
+        from orchestrator.Core.doctor import Doctor, ai_findings
         report = Doctor(framework).run()  # diagnosis only: fixes stay a human decision (llm-cli doctor --fix)
-        return DoctorOut(exit_code=report.exit_code, findings=[
-            DoctorFinding(subsystem=f.subsystem, code=f.code, severity=f.severity.value, message=f.message,
-                          fix_hint=f.fix_hint) for f in report.findings])
+        # Folders by label, other paths by file name: an AI never reads a host path (the person's CLI keeps them).
+        return DoctorOut(exit_code=report.exit_code,
+                         findings=[DoctorFinding(**row) for row in ai_findings(framework, report)])
 
     specs = [
         ToolSpec("get_build_status", "Build status",
@@ -505,7 +506,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  ToolTier.LOCAL_WRITE, ResolveHealingIn, BuildStatusResult, resolve_healing,
                  takes_context=True, summary=_status_summary,
                  prepare=lambda i, ctx: healing_facts(service, i.request_id, i.approve),
-                 # destructive: the docker_prune strategy deletes the Docker build cache
+                 # kept destructive: it changes a setting (build_jobs) and retries a build; no strategy deletes
+                 # anything (docker_prune is a manual step that points to the doctor's list)
                  destructive=True, fields={**request_id, "approve": FieldMeta(kind="trust")}),
         ToolSpec("get_status", "Framework status",
                  "The framework's state in sections: framework (version, Docker, targets, offline mode, active "

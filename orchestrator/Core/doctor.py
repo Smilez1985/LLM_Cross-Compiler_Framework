@@ -4,20 +4,27 @@ LLM Cross-Compiler Framework - Doctor
 
 Deterministic health checks, like `flutter doctor` (the idea comes from "Mojo" in the rag4ll project):
 every check returns findings with a stable code and a fix hint; nothing asks a model what is wrong.
-Fixes are tiered - 1: harmless (make the personal folder private), 2: removes data (caches) - and
-run only when the user asks for that tier. After fixing, everything is checked again; a finding that is
-still there is reported as not fixable automatically.
+Fixes are tiered and run only when the user asks for that tier. Tier 1 is harmless (make the personal folder
+private) and runs by itself; after fixing, everything is checked again, and a finding that is still there is
+reported as not fixable automatically. Tier 2 deletes nothing by itself: it lists the framework's dangling build
+images (name or id, size, what each is), and the person's command line deletes exactly that list after the person
+confirmed it (round 5 f), never over MCP and never under a delegation. Docker's build cache is never cleared: it
+cannot be limited to the framework, so clearing it would delete other projects' cache too.
+
+What an AI reads of the findings (`ai_findings`, used by the run_doctor tool) names the framework's folders by
+label and any other path by its file name only; the person's own output keeps the full paths.
 """
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 class Severity(str, Enum):
@@ -107,32 +114,153 @@ def check_disk(framework) -> List[Finding]:
             continue
         seen.add(key)
         free = usage.free / GB
+        # Tier 2 is a listing, not a fix (fix=None): nothing is deleted before the person confirmed the list.
         if free < 5:
             findings.append(Finding("disk", f"disk.{label}", Severity.ERROR,
                                     f"Only {free:.1f} GB free for the {label} folder ({path}).",
-                                    "Free disk space: 'llm-cli doctor --fix --tier 2' removes dangling framework images "
-                                    "and the Docker build cache; large models need 2-3x their size during conversion.",
-                                    fix_tier=2, fix=_prune_docker(framework)))
+                                    "Free disk space; large models need 2-3x their size during conversion. "
+                                    + FREE_SPACE_HINT, fix_tier=2))
         elif free < 20:
             findings.append(Finding("disk", f"disk.{label}", Severity.WARN,
                                     f"{free:.1f} GB free for the {label} folder; large models need more.",
-                                    "Free disk space before converting models larger than a few GB.",
-                                    fix_tier=2, fix=_prune_docker(framework)))
+                                    "Free disk space before converting models larger than a few GB. "
+                                    + FREE_SPACE_HINT, fix_tier=2))
         else:
             findings.append(_ok("disk", f"disk.{label}", f"{free:.0f} GB free for {label}"))
     return findings
 
 
-def _prune_docker(framework) -> Optional[Callable[[], None]]:
-    client = framework.get_component("docker_client") if hasattr(framework, "get_component") else None
-    if client is None:
-        return None
+# What `doctor --fix --tier 2` does, as every disk finding says it.
+FREE_SPACE_HINT = ("'llm-cli doctor --fix --tier 2' lists the framework's dangling build images (name or id, size "
+                   "and what each is) and deletes exactly those you then confirm in a terminal. Docker's build cache "
+                   "is not touched: it cannot be limited to the framework.")
 
-    def prune():
-        from orchestrator.Core.builder import IMAGE_LABEL
-        client.images.prune(filters={"dangling": True, "label": IMAGE_LABEL})
-        client.api.prune_builds()
-    return prune
+
+# --- tier 2: the framework's dangling build images, deleted only as the person confirmed them ----------------------
+
+class DockerUnavailable(RuntimeError):
+    """No Docker client, or the daemon did not answer: nothing can be listed or deleted."""
+
+
+class ImagePlanChanged(RuntimeError):
+    """The framework's dangling images changed since the person saw the list: nothing was deleted."""
+
+    def __init__(self):
+        super().__init__("The framework's dangling images changed since the list was shown; nothing was deleted. "
+                         "Look at the new list and confirm it.")
+
+
+@dataclass
+class ImageDeletion:
+    """What happened to a confirmed list: the images deleted (by speaking name) with their listed size, and the ones
+    Docker refused (speaking name and Docker's reason, e.g. a container still uses it)."""
+    deleted: List[str] = field(default_factory=list)
+    freed_bytes: int = 0
+    failed: List[tuple] = field(default_factory=list)
+
+
+_TARGET_WORD = re.compile(r"^[\w.+-]{1,64}$")
+_IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _docker_client(framework):
+    return framework.get_component("docker_client") if hasattr(framework, "get_component") else None
+
+
+def framework_image_plan(framework):
+    """The dry run of tier 2: the framework's dangling build images - labelled by the framework's builder
+    (builder.IMAGE_LABEL) and without a name - as a deletion plan for the person, each with its name (the short id),
+    the full image id, its size and what it is. Docker's build cache is never part of it. Returns None when there is
+    nothing to delete; DockerUnavailable without a reachable Docker daemon. Reads only."""
+    from orchestrator.Core.builder import IMAGE_LABEL
+    from orchestrator.tools.spec import DeletionItem, DeletionPlan
+    client = _docker_client(framework)
+    if client is None:
+        raise DockerUnavailable("Docker is not available, so no framework images can be listed.")
+    try:
+        images = list(client.images.list(filters={"dangling": True, "label": IMAGE_LABEL}))
+    except Exception:  # noqa: BLE001 - the daemon's own words stay out (they can name a socket path)
+        raise DockerUnavailable("The Docker daemon did not answer, so no framework images can be listed.") from None
+    items = []
+    for image in images:
+        labels = getattr(image, "labels", None) or {}
+        image_id = str(getattr(image, "id", "") or "")
+        if IMAGE_LABEL not in labels or getattr(image, "tags", None) or not _IMAGE_ID.match(image_id):
+            continue  # only what the framework built and nobody named: never another project's image
+        attrs = getattr(image, "attrs", None) or {}
+        target = str(labels.get(IMAGE_LABEL) or "")
+        target = target if _TARGET_WORD.match(target) else "an unknown target"
+        created = str(attrs.get("Created") or "")[:10]
+        try:
+            size = max(0, int(attrs.get("Size") or 0))
+        except (TypeError, ValueError):
+            size = 0
+        items.append(DeletionItem(
+            kind="docker_image", speaking_name=f"Framework build image {image_id[7:19]} ({target})",
+            file_name=image_id, size_bytes=size,
+            what=f"unused build image of the framework for {target}, without a name"
+                 + (f" (built {created})" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", created) else "")
+                 + "; left over from an earlier build"))
+    if not items:
+        return None
+    items.sort(key=lambda i: i.file_name)
+    return DeletionPlan(items=items, total_bytes=sum(i.size_bytes for i in items), mode_offered=("permanent",))
+
+
+def delete_framework_images(framework, plan, actor: str) -> ImageDeletion:
+    """Deletes exactly the images of `plan`, which the person accepted in the framework's own window (actor "cli" or
+    "gui"; never an AI, never under a delegation). The list is looked up again first: if it changed, nothing is
+    deleted (ImagePlanChanged). The deletion is audited before anything is deleted (nothing is deleted when the
+    audit cannot be written); each image is looked at again right before and removed by its id only while it is
+    still unnamed and the framework's, without force and without its untagged parents, and never by a prune, which
+    could catch images that became dangling after the list was shown."""
+    if actor not in ("cli", "gui"):
+        raise PermissionError("Only the person deletes the framework's images, in the GUI or at a terminal.")
+    current = framework_image_plan(framework)
+    if current is None or current.sha256() != plan.sha256():
+        raise ImagePlanChanged()
+    audit = getattr(getattr(framework, "tool_registry", None), "audit", None)
+    if audit is None or not callable(getattr(audit, "record", None)):
+        raise RuntimeError("The audit log is not available, so no image was deleted.")
+    extra = {"answered_by": "person", "confirm_channel": f"framework-{actor}", "deletion_sha256": plan.sha256()}
+    try:
+        audit.record(actor, "doctor", "framework", "person", "started", approved=True,
+                     arguments={"images": len(plan.items), "bytes": plan.total_bytes},
+                     detail=f"deleting {len(plan.items)} dangling framework images (doctor --fix --tier 2)",
+                     extra=extra)
+    except Exception:  # noqa: BLE001
+        raise RuntimeError("The audit log cannot record the deletion; no image was deleted.") from None
+    from orchestrator.Core.builder import IMAGE_LABEL
+    from orchestrator.utils.helpers import redact_secrets
+    client = _docker_client(framework)
+    result = ImageDeletion()
+    for item in plan.items:
+        # Docker deletes an image with one name when it is addressed by its id: a build of another framework process
+        # may have named a listed image again (the same layers) since the list was looked up. Each image is looked at
+        # right before its removal and kept unless it is still unnamed and the framework's.
+        try:
+            now = client.images.get(item.file_name)
+        except Exception:  # noqa: BLE001 - gone meanwhile (or the daemon did not answer): nothing to delete
+            result.failed.append((item.speaking_name, "kept: it could not be found again, so it was not deleted"))
+            continue
+        if getattr(now, "tags", None) or IMAGE_LABEL not in (getattr(now, "labels", None) or {}):
+            result.failed.append((item.speaking_name, "kept: it got a name or changed after the list was shown"))
+            continue
+        try:
+            client.images.remove(image=item.file_name, noprune=True)
+        except Exception as e:  # noqa: BLE001 - e.g. a container still uses it: kept and reported
+            reason = str(getattr(e, "explanation", "") or e)
+            result.failed.append((item.speaking_name, redact_secrets(reason)[:300]))
+            continue
+        result.deleted.append(item.speaking_name)
+        result.freed_bytes += item.size_bytes
+    try:
+        audit.record(actor, "doctor", "framework", "person", "error" if result.failed else "ok", approved=True,
+                     arguments={"deleted": len(result.deleted), "kept": len(result.failed)},
+                     detail=f"{len(result.deleted)} framework images deleted, {len(result.failed)} kept", extra=extra)
+    except Exception:  # noqa: BLE001 - the deletion happened and is shown to the person; its start is recorded
+        pass
+    return result
 
 
 def check_targets(framework) -> List[Finding]:
@@ -348,6 +476,25 @@ def check_community(framework) -> List[Finding]:
     return findings
 
 
+def check_knowledge(framework) -> List[Finding]:
+    """Knowledge-base snapshots: how many there are, their size and where, for the person's overview. There is no limit
+    (DECISIONS, sixth round: as many as the disk holds), so no count of them is a finding, a reminder or a warning, and
+    none is deleted by itself (round 5 f). Reads the folder only, never opens the knowledge base."""
+    from orchestrator.Core.knowledge_snapshots import list_snapshots, size_text, snapshot_folder
+    config = getattr(framework, "config", None)
+    state_dir = getattr(config, "user_state_dir", None)
+    if state_dir is None:
+        return []
+    folder = snapshot_folder(state_dir)
+    snapshots = list_snapshots(folder)
+    if not snapshots:
+        return []
+    total = size_text(sum(s.size_bytes for s in snapshots))
+    return [_ok("knowledge", "knowledge.snapshots",
+                f"{len(snapshots)} knowledge snapshots ({total}) in {folder}; no limit, none is deleted by itself "
+                "('llm-cli knowledge snapshots' lists them)")]
+
+
 def check_runtime(framework) -> List[Finding]:
     """The local llama.cpp runtime: the self-built build in use (intact, of the pinned commit), a prebuilt download
     in use (not self-built), and whether this machine has the toolchain for a native build. Reads files and asks the
@@ -427,7 +574,7 @@ def check_runtime(framework) -> List[Finding]:
 
 DEFAULT_CHECKS: List[Check] = [check_python, check_docker, check_disk, check_targets, check_user_state,
                                check_secrets, check_tool_policy, check_chat_feed, check_calibration, check_community,
-                               check_runtime]
+                               check_knowledge, check_runtime]
 
 
 @dataclass
@@ -479,3 +626,56 @@ class Doctor:
         after.fixed = [code for code in fixed if code not in problems]
         after.still_present = [code for code in fixed if code in problems]
         return after
+
+
+# --- what an AI reads of the findings --------------------------------------------------------------------------------
+
+def ai_folder_labels(framework) -> Dict[str, str]:
+    """The framework's own folders by the label an AI may read: state (the per-user folder), cache, output, models,
+    targets, community and framework (the installation)."""
+    roots: Dict[str, str] = {}
+
+    def add(path: Any, label: str) -> None:
+        try:
+            if path:
+                roots.setdefault(str(Path(path)), label)
+        except (TypeError, ValueError):
+            pass
+
+    config = getattr(framework, "config", None)
+    try:
+        add(getattr(config, "user_state_dir", None), "state")
+    except Exception:  # noqa: BLE001 - a config that cannot name it: no label, the file name rule still applies
+        pass
+    engine = getattr(getattr(framework, "orchestrator", None), "build_engine", None)
+    add(getattr(engine, "cache_dir", None), "cache")
+    add(getattr(engine, "output_dir", None), "output")
+    resolve = getattr(framework, "resolve_path", None)
+    for key, label in (("cache_dir", "cache"), ("output_dir", "output"), ("models_dir", "models")):
+        try:
+            value = config.get(key, None) if config is not None else None
+            if value:
+                add(resolve(value) if callable(resolve) else value, label)
+        except Exception:  # noqa: BLE001
+            continue
+    add(getattr(getattr(framework, "target_manager", None), "targets_dir", None), "targets")
+    add(getattr(getattr(framework, "community_manager", None), "community_dir", None), "community")
+    add(getattr(getattr(framework, "info", None), "installation_path", None), "framework")
+    add(getattr(framework, "app_root", None), "framework")
+    return roots
+
+
+def ai_findings(framework, report: DoctorReport) -> List[Dict[str, Any]]:
+    """The findings as an AI may read them (the run_doctor tool): every message and fix hint, a crashed check's
+    included, with the framework's folders named by label ('the state folder', 'state:audit.db') and any other path
+    by its file name only - no host path, no user name - and secrets redacted. The person's own output (the CLI,
+    `--json` included) keeps the full paths."""
+    from orchestrator.tools.tools_runtime import label_paths
+    from orchestrator.utils.helpers import redact_secrets
+    roots = ai_folder_labels(framework)
+
+    def label(text: str) -> str:
+        return label_paths(redact_secrets(str(text or "")), roots)
+
+    return [{"subsystem": f.subsystem, "code": f.code, "severity": f.severity.value, "message": label(f.message),
+             "fix_hint": label(f.fix_hint)} for f in report.findings]

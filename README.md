@@ -341,7 +341,7 @@ Import... > Import from File (USB/Disk)...** in the GUI, or pass it to `llm-cli 
 ```bash
 llm-cli --version
 llm-cli doctor                 # health check; exit code 0 = OK, 1 = warnings, 2 = errors
-llm-cli doctor --fix           # harmless automatic fixes (makes the personal folder private); --tier 2 also clears the Docker build cache
+llm-cli doctor --fix           # harmless automatic fixes (makes the personal folder private); --tier 2 also lists the dangling framework images and deletes only those you confirm
 llm-cli targets list           # available targets with boards and formats; the --target value is the id (Rockchip)
 ```
 

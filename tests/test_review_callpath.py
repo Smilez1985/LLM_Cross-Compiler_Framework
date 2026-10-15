@@ -181,15 +181,15 @@ def test_resolve_healing_decides_nothing_without_the_facts_it_was_shown(tmp_path
 
 
 @pytest.mark.parametrize("approve, first", [
-    (True, "Deletes the Docker build cache and the dangling framework images on this computer, then retries build "
-           "request req_1 (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."),
+    (True, "Sets the framework setting build_jobs to 1 (fewer parallel compile jobs for image builds), then retries "
+           "build request req_1 (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."),
     (False, "Dismisses the self-healing proposal of build request req_1 (models:qwen/model.gguf for Rockchip (gguf "
             "Q4_K_M)); the failed build is not retried."),
 ])
 def test_the_healing_questions_first_line_names_the_build_not_only_its_id(approve, first):
     """DECISIONS round 4 item 1: what the person reads first names the build, not only a raw id."""
     from orchestrator.tools.framework_tools import healing_facts
-    proposal = {"strategy": "docker_prune", "summary": "Disk full", "root_cause": "No space", "fix": "prune",
+    proposal = {"strategy": "config_adjustment", "summary": "Out of memory", "root_cause": "Killed", "fix": "jobs",
                 "automatic": True, "ai_generated": False, "fingerprint": "f",
                 "request": "models:qwen/model.gguf for Rockchip (gguf Q4_K_M)"}
     facts = healing_facts(SimpleNamespace(healing_proposal=lambda rid, a: proposal), "req_1", approve)

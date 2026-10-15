@@ -193,7 +193,8 @@ PLAIN_FILES = _sources("plain.py", "gui_state.py", "chat_window.py", "main_windo
 # Rich-text APIs are refused in these as well (they have none today).
 RICH_API_FILES = PLAIN_FILES + [GUI / name for name in ("approvals_window.py", "dialogs.py", "delegation_window.py",
                                                          "trash_window.py", "deletion_dialog.py",
-                                                         "connect_app_wizard.py") if (GUI / name).exists()]
+                                                         "connect_app_wizard.py", "knowledge_snapshots_window.py")
+                                if (GUI / name).exists()]
 RICH_API = {"QTextBrowser", "setHtml", "setMarkdown", "insertHtml", "RichText", "AutoText"}
 
 
