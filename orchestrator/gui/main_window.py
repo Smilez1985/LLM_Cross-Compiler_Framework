@@ -151,6 +151,7 @@ class MainOrchestrator(QMainWindow):
         menubar = self.menuBar()
         
         file_menu = menubar.addMenu(self.i18n.t("menu.file", "File"))
+        self._add_trash_action(file_menu)
         exit_action = QAction(self.i18n.t("menu.exit", "Exit"), self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -197,6 +198,7 @@ class MainOrchestrator(QMainWindow):
         tools_menu.addAction(act_proposals)
 
         self._add_knowledge_snapshots_action(tools_menu)
+        self._add_framework_images_action(tools_menu)
 
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
         self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
@@ -594,9 +596,36 @@ class MainOrchestrator(QMainWindow):
     def _open_knowledge_snapshots(self):
         from orchestrator.gui.knowledge_snapshots_window import KnowledgeSnapshotsDialog
         try:
-            KnowledgeSnapshotsDialog(self.framework.config.user_state_dir, self).exec()
+            KnowledgeSnapshotsDialog(self.framework.config.user_state_dir, self, framework=self.framework).exec()
         except Exception as e:  # e.g. no per-user folder; the error's text is shown as plain text (SEC-M2)
             plain_box(self, "critical", "Knowledge Snapshots", str(e))
+
+    def _add_trash_action(self, menu):
+        """File > Trash...: what deletions moved to the trash; only the person restores or empties it."""
+        self.act_trash = QAction("Trash...", self)
+        self.act_trash.triggered.connect(self._open_trash)
+        menu.addAction(self.act_trash)
+
+    def _open_trash(self):
+        from orchestrator.Core.trash import Trash
+        from orchestrator.gui.trash_window import TrashDialog
+        try:
+            TrashDialog(Trash.for_framework(self.framework), self).exec()
+        except Exception as e:  # e.g. no per-user folder; plain text (SEC-M2)
+            plain_box(self, "critical", "Trash", str(e))
+
+    def _add_framework_images_action(self, menu):
+        """Tools > Framework Build Images...: the framework's Docker images, deleted only as the person ticks them."""
+        self.act_images = QAction("Framework Build Images...", self)
+        self.act_images.triggered.connect(self._open_framework_images)
+        menu.addAction(self.act_images)
+
+    def _open_framework_images(self):
+        from orchestrator.gui.deletion_dialog import free_framework_images
+        try:
+            free_framework_images(self, self.framework)
+        except Exception as e:  # plain text (SEC-M2)
+            plain_box(self, "critical", "Framework Build Images", str(e))
 
     def _open_ai_folders(self):
         from orchestrator.gui.dialogs import AIFoldersDialog
@@ -750,7 +779,7 @@ class MainOrchestrator(QMainWindow):
 
     def trigger_healing_dialog(self, request_id, proposal):
         """Shows the proposal; the orchestrator applies an approved fix and retries the build."""
-        dlg = HealingConfirmDialog(proposal, self)
+        dlg = HealingConfirmDialog(proposal, self, free_docker_space=self._open_framework_images)
         approved = bool(dlg.exec()) and dlg.automatic
         if not self.framework.orchestrator.resolve_healing(request_id, approved):
             self.status.showMessage("The healing proposal is no longer pending.", 5000)

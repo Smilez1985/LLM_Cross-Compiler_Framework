@@ -13,15 +13,24 @@ folder), never by a path. Deleting it removes exactly that folder and its "golde
   another build),
 - and the folder is still the same folder (device and inode) the question was about.
 
+Deleting is the person's alone (round 5 f): `delete` runs only with the deletion plan the person accepted in the
+framework's own window (orchestrator/Core/deletion.py), built again right before and compared item by item. In the
+mode "trash" (the default, and the only one an AI's request offers) the folder and the ZIP are moved into the output
+folder's trash (orchestrator/Core/trash.py): the person can restore them, and the space stays used until the person
+empties the trash. In the mode "permanent" they are deleted for good.
+
 Nothing here follows a link inside the folder: shutil.rmtree removes links, never their targets.
 """
 
 import hashlib
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from orchestrator.Core.deletion import AcceptedDeletion, require_person, require_same
+from orchestrator.tools.spec import DeletionItem, DeletionPlan
 
 
 class ArtifactRefused(ValueError):
@@ -46,6 +55,14 @@ class ArtifactTarget:
     def describe(self) -> Dict[str, Any]:
         return {"artifact_id": self.artifact_id, "label": self.label, "sha256": self.sha256 or "",
                 "size": self.size, "identity": list(self.identity), "zips": [z.name for z in self.zips]}
+
+
+@dataclass
+class ArtifactDeletion:
+    """What a deletion did: the bytes freed now (0 when moved to the trash: the space stays used until the person
+    empties it) and the trash entries it made."""
+    freed_bytes: int = 0
+    trash_ids: List[str] = field(default_factory=list)
 
 
 def _tree_size(folder: Path) -> int:
@@ -132,16 +149,51 @@ class ArtifactStore:
         size = _tree_size(real) + sum(z.stat().st_size for z in zips)
         return ArtifactTarget(aid, label, real, zips, current, size, (st.st_dev, st.st_ino))
 
-    def delete(self, artifact_id: str, expect_sha256: Optional[str], identity: List[int]) -> int:
-        """Deletes the built model the question was about; returns the bytes freed."""
+    def plan(self, target: ArtifactTarget, modes: Tuple[str, ...] = ("trash", "permanent")) -> DeletionPlan:
+        """What the person is shown in the framework's own window, item by item with the full path (an AI sees labels
+        and sizes only): exactly the folder and the golden ZIP a deletion moves or deletes. OSError or ValueError
+        when the folder changed while it was looked up."""
+        zips = [(z, z.stat().st_size) for z in target.zips]
+        folder_bytes = max(0, target.size - sum(s for _, s in zips))
+        items = [DeletionItem(kind="artifact", speaking_name=target.label, full_path=str(target.folder),
+                              file_name=target.folder.name, size_bytes=folder_bytes,
+                              what="built model folder (the model files and build record of this build)")]
+        items += [DeletionItem(kind="artifact", speaking_name=f"{target.label} (golden ZIP)", full_path=str(z),
+                               file_name=z.name, size_bytes=size, what="the build's golden ZIP next to the folder")
+                  for z, size in zips]
+        return DeletionPlan(items=items, total_bytes=sum(i.size_bytes for i in items), mode_offered=tuple(modes))
+
+    def delete(self, artifact_id: str, expect_sha256: Optional[str], identity: List[int],
+               accepted: AcceptedDeletion, trash: Any = None, deleted_by: str = "") -> ArtifactDeletion:
+        """Deletes the built model the question was about, exactly as the person accepted it (`accepted`: the plan,
+        the mode and where the person answered): into the trash (`trash`, a Trash) or for good. PermissionError
+        without the person's accepted plan; PlanChanged when the folder or its ZIP changed since the plan was
+        shown."""
+        accepted = require_person(accepted)
         target = self.resolve(artifact_id, expect_sha256)
         if list(target.identity) != list(identity):
             raise ArtifactRefused(f"{target.label} is another folder than the one you were asked about; nothing was "
                                   "deleted.", code="failed", next="Call list_artifacts and ask again.")
+        try:
+            current = self.plan(target, accepted.plan.mode_offered)
+        except (OSError, ValueError):
+            current = None
+        require_same(accepted, current, f"the built model {target.label}")
+        result = ArtifactDeletion()
+        if accepted.mode == "trash":
+            if trash is None:
+                raise ArtifactRefused("The trash is not available; nothing was deleted.", code="failed",
+                                      next="Tell the person; they check 'llm-cli doctor'.")
+            root = self.output_dir.resolve()
+            for item, path in zip(current.items, (target.folder, *target.zips)):
+                entry = trash.move("artifact", path, root, "output", item.speaking_name, accepted, deleted_by)
+                result.trash_ids.append(entry.id)
+            return result
         shutil.rmtree(target.folder)
         for z in target.zips:
             try:
                 z.unlink()
             except OSError:
                 pass
-        return target.size
+        result.freed_bytes = target.size
+        return result

@@ -366,3 +366,28 @@ def test_source_names_no_kind_for_a_warning():
             if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) in (
                     "CallWarning", "warn"):
                 assert not any(k.arg == "kind" for k in node.keywords), path.name
+
+
+def test_delete_question_lists_full_path_name_size_kind_for_the_person_only(env):  # noqa: F811
+    """delete_artifact's facts carry the deletion plan (round 5 f, WP7): the person's window lists every item with its
+    full path, file name, size and what it is; the AI projection keeps labels, kinds and sizes; an AI's request only
+    moves to the trash."""
+    import hashlib
+    import json
+
+    folder = Path(env.framework.config.values["output_dir"]) / "Rockchip" / "m" / "Q4_K_M"
+    folder.mkdir(parents=True)
+    (folder / "model.gguf").write_bytes(b"g" * 64)
+    digest = hashlib.sha256(b"g" * 64).hexdigest()
+    (folder / "build_info.json").write_text(json.dumps({"primary": "model.gguf", "format": "gguf", "created": "1",
+                                                        "artifacts": [{"file": "model.gguf", "sha256": digest}]}))
+    aid = env.registry.call("list_artifacts", {}, ToolContext("ditto")).artifacts[0].artifact_id
+    facts = look_up(env.registry, "delete_artifact", {"artifact_id": aid, "expect_sha256": digest})
+    plan = facts.deletion
+    assert catalog.TOOL_FACTS["delete_artifact"].deletes and plan.mode_offered == ("trash",)
+    item = plan.items[0]
+    assert item.full_path == str(folder.resolve()) and item.file_name == "Q4_K_M" and item.kind == "artifact"
+    assert item.size_bytes > 64 and "built model folder" in item.what
+    view = ai_view(facts)
+    assert view["deletion"] == plan.ai_view() and str(env.tmp) not in json.dumps(view, default=str)
+    assert "to the trash" in facts.consequence

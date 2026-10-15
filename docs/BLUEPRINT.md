@@ -189,7 +189,8 @@ flowchart TB
 | Deep Ingest notice and spoken announcements (unreleased) | `orchestrator/utils/crawl_notice.py`, `orchestrator/utils/announce.py` | The one-time notice before the first Deep Ingest, remembered per user, and short announcements through the speech engine of the operating system. |
 | Community zoo (unreleased) | `orchestrator/Core/community_manager.py`, `orchestrator/Core/community_pack.py`, `orchestrator/schemas/recipes.py`, `orchestrator/gui/community_hub.py`, `configs/community_keys.yml` | Signed and encrypted community packs (targets, recipes, knowledge), the signed community index, installation through a quarantine with trust levels, export with privacy scrub and the hand-over to a pull request (see [Community packs](#community-packs-format-trust-and-exchange-unreleased)). |
 | Input history (unreleased) | `orchestrator/utils/input_history.py` | Recent values of the GUI input fields, per user and without secrets (see [Recent inputs](#recent-inputs-unreleased)). |
-| Doctor | `orchestrator/Core/doctor.py` | Deterministic health checks (Python, Docker and BuildKit, disk space, targets, state folder permissions, secrets and keyring, tool permissions and audit log, calibration data, installed community packs, knowledge snapshots) with stable codes, fix hints and tiered automatic fixes. Tier 2 deletes nothing by itself: it builds a deletion plan of the framework's dangling build images (`DeletionPlan` of `tools/spec.py`), and `delete_framework_images` removes exactly those ids after the person confirmed the plan at a terminal (actor `cli` or `gui` only, audited first, refused when the list changed); the Docker build cache is never cleared. `ai_findings` is what `run_doctor` returns to an AI: folders by label, other paths by file name. |
+| Doctor | `orchestrator/Core/doctor.py` | Deterministic health checks (Python, Docker and BuildKit, disk space, targets, state folder permissions, secrets and keyring, tool permissions and audit log, calibration data, installed community packs, knowledge snapshots) with stable codes, fix hints and tiered automatic fixes. Tier 2 deletes nothing by itself: it builds a deletion plan of every framework build image (`framework_image_plan`: left over without a name, named `last-build`, runtime builders; `DeletionPlan` of `tools/spec.py`), and `delete_framework_images` removes exactly the images the person ticked, after the person confirmed them at a terminal or in the GUI's Tools > Framework Build Images... (actor `cli` or `gui` only, audited first, refused when a chosen image changed); the Docker build cache is never cleared. `docker_storage` says where Docker keeps its images. `ai_findings` is what `run_doctor` returns to an AI: folders by label, other paths by file name. |
+| Deletion and trash (unreleased) | `orchestrator/Core/deletion.py`, `orchestrator/Core/trash.py`, `orchestrator/gui/deletion_dialog.py`, `orchestrator/gui/trash_window.py` | Every deletion of the person's objects takes an `AcceptedDeletion`: the plan the person accepted in the GUI or at a terminal (multiple choice rebuilds it from exactly the ticked items), its mode (trash or for good) and the channel. The deleting code builds the plan again and refuses a changed one (`PlanChanged`). The trash moves items with one rename into `.trash/<id>/` of their data folder (never across disks); its index `tool_trash.json` is signed; nothing leaves it by itself; only the person empties it; an AI restores only what it asked to delete. `tests/test_deletion.py` lists every place in the code that deletes, with how it is covered. |
 | Calibration data | `data/calibration/`, `orchestrator/utils/calibration.py` | Curated German, English and tool-use text (MIT licence) with SHA256 checks, used for importance matrices. |
 | Untrusted text handling | `orchestrator/utils/untrusted.py` | Cleans and wraps external text before it reaches a language model. |
 
@@ -266,8 +267,9 @@ records hashes and lets you install the result on your device.
    output folder (links in the build output are not followed), completes `build_info.json` with every model
    file's size and SHA256 hash and the primary file, writes `Model_Card.md` and creates a ZIP of these files. Only
    when the build can no longer be cancelled are they moved into `output/` and the ZIP next to the build folder; a
-   cancelled or failed build leaves no files there. The per-build image tag and the work folder are removed; image
-   layers stay in the build cache, so the next build is faster.
+   cancelled or failed build leaves no files there. The build's image is named `llm-framework/<target>:last-build`
+   and only its per-build name is dropped: the builder never deletes an image (an older one stays without a name until
+   the person deletes it), and the next build reuses the layers. The work folder is removed.
 10. **Deployment.** In the deployment window (or with `llm-cli deploy package` and `llm-cli deploy run`) you pick
     a build. The framework packs the model file, `build_info.json`, `Model_Card.md`, a generated `deploy.sh` and
     `checksums.sha256` into a ZIP.
@@ -435,7 +437,8 @@ Nothing is changed without your yes.
 5. **Only fixed actions.** An approved proposal is applied only if it is one of two framework-defined
    strategies (`AUTOMATIC_STRATEGIES` in `self_healing_manager.py`): lower `build_jobs` to 1, or simply retry. The
    job is then retried once. Neither deletes anything: a full Docker disk (`docker_prune`) is a manual step that
-   points to `llm-cli doctor --fix --tier 2`, which deletes only the listed images the person confirms. Command text from patterns or AI is shown read-only and never executed;
+   points to the list of the framework's build images (Tools > Framework Build Images..., `llm-cli doctor --fix
+   --tier 2`), which deletes only the images the person ticks and confirms. Command text from patterns or AI is shown read-only and never executed;
    approving a manual step through MCP is refused.
 
 ### The local model for offline mode (unreleased)

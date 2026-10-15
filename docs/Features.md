@@ -30,6 +30,7 @@ Back to the [README](../README.md) · All commands: [CLI_Usage.md](CLI_Usage.md)
 - [Tool permissions and audit log](#tool-permissions-and-audit-log)
 - [Secrets and personal state](#secrets-and-personal-state)
 - [Input history](#input-history)
+- [Deleting and the trash](#deleting-and-the-trash)
 - [Hardware probe and new targets](#hardware-probe-and-new-targets)
 - [Health check (doctor)](#health-check-doctor)
 - [Community zoo](#community-zoo)
@@ -210,9 +211,10 @@ built-in fixes itself:
 Everything else, including every AI suggestion, is shown as a manual step and never executed. A full disk is such a
 manual step too, because the framework deletes nothing without your list (unreleased; before, a "yes" removed the
 framework's dangling images and cleared the whole Docker build cache, other projects' too): when Docker's disk is
-full, run `llm-cli doctor --fix --tier 2` in a terminal, which lists the framework's dangling build images and
-deletes only those you confirm, then start the build again. Docker's build cache is never cleared by the
-framework. A retry gets its own build ID (`<job>_r1`), and both logs are kept.
+full, the dialog's **Free Docker space...** button (also **Tools > Framework Build Images...**) or `llm-cli doctor
+--fix --tier 2` in a terminal lists the framework's build images with name, id, size and what each is; nothing is
+ticked, and only the ones you tick and confirm are deleted. Then start the build again. Docker's build cache is never
+cleared by the framework. A retry gets its own build ID (`<job>_r1`), and both logs are kept.
 
 **Proposals from AI clients.** An MCP client that does Ditto's job (prompt `diagnose_build_failure`) can hand its own
 analysis of a failed build to the framework with the tool `propose_healing_fix`: a summary (up to 300 characters),
@@ -611,7 +613,8 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `start_local_runtime` / `stop_local_runtime` | local write | Optional, hidden until enabled: start (a job) or stop Ditto's local server; never its address or key |
 | `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on a catalog model or a built GGUF model; an untrusted model natively only after consent in the framework, or in the sandbox |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
-| `delete_artifact` | external, optional | Delete one built model (its folder below the output folder and its golden ZIP); hidden until you enable it, always asked |
+| `delete_artifact` | external, optional | Move one built model (its folder below the output folder and its golden ZIP) to the trash; hidden until you enable it, always asked |
+| `list_trash` / `restore_from_trash` | read / local write, optional | See the trash by name, kind and size; restore what this AI asked to delete itself (always asked); hidden until you enable them. No tool empties the trash |
 | `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |
 
 `delete_artifact` and `restore_knowledge_snapshot` destroy something, so they are denied by default and not listed until you enable them in
@@ -619,13 +622,14 @@ Tool Permissions (allowing the whole "external" class does not enable them), eve
 a standing approval. A deletion is decided only by you, in the framework's own window: Ditto's dialog or prompt, or
 for an MCP client a pending approval in the GUI or `llm-cli tools approvals`; the client's own form is never used for
 it. The question there lists each item (the model folder and its golden ZIP) with its full path, file name, size and
-what it is; the AI sees labels and sizes only. `delete_artifact` takes the id and the sha256 `list_artifacts` shows;
+what it is; the AI sees labels and sizes only. The model goes to the trash, where you can restore it (see
+[Deleting and the trash](#deleting-and-the-trash)). `delete_artifact` takes the id and the sha256 `list_artifacts` shows;
 it is refused for a folder outside the output folder (also through a link), while a build of any framework program
 writes into it or is queued for it, when the model file's sha256 changed since, and when the folder is no longer the
 one the question named. `restore_knowledge_snapshot` saves the current knowledge base as a snapshot
 `pre_restore_<time>` first and does not restore without that backup; the same backup rule now holds for every restore of a snapshot, and no
 snapshot is deleted by it (the framework deletes no snapshot by itself, see [Knowledge base](#knowledge-base-rag)).
-It stays outside every standing approval and delegation until the trash and the framework's deletion dialog exist.
+It stays outside every standing approval; whether a delegation may cover it is decided with the delegations.
 
 How a question with tools runs:
 
@@ -1129,9 +1133,10 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   `~/.llm-framework/knowledge_snapshots`. There is no limit (unreleased; before, only the newest 5 were kept, on
   every channel): the framework keeps as many as the disk holds, deletes none by itself, and no number of them brings
   a reminder or a warning. **Tools > Knowledge Snapshots...** in the GUI or `llm-cli knowledge snapshots` lists each
-  one with its full path, name, size and what it is; to free space you copy the ones to keep elsewhere (export) or
-  delete the ones you choose yourself. A trash and a deletion dialog in the framework follow. Restoring a snapshot is
-  not available from the GUI or the CLI yet.
+  one with its full path, name, size and what it is, nothing ticked. To free space you tick the ones to delete (they
+  go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
+  `llm-cli knowledge snapshots export NAME... --to FOLDER`, each copy checked by sha256). See [Deleting and the
+  trash](#deleting-and-the-trash). Restoring a snapshot is not available from the GUI or the CLI yet.
 - **Search:** hybrid. Dense vectors find meaning, BM25 finds exact terms such as error codes and compiler flags; both
   rankings are fused with Reciprocal Rank Fusion. The same text from several sources is returned once. A
   cross-encoder can then rerank the results ([Reranking](#reranking)).
@@ -1967,6 +1972,39 @@ The GUI's input fields offer what you used recently, newest first.
 
 ---
 
+## Deleting and the trash
+
+Nothing the framework deletes on your behalf is deleted without your question (unreleased). The question lists
+exactly what goes: for each item its name, the full path (or the Docker id of an image), the file name, the size and
+what it is. "No" is the default. An AI app or Ditto never sees the paths, only names, kinds and sizes, and never
+decides a deletion: not through its own form, a standing approval or a delegation.
+
+- **Multiple choice.** Where you pick from a list (knowledge snapshots, the trash, the framework's build images),
+  nothing is ticked. The framework builds the list again from exactly the items you ticked; the button says how many
+  and how much. If any of them changed while you read the list, nothing is deleted and you see the new list.
+- **The trash.** A deletion moves files and folders to the trash by default: `.trash` in the data folder they lie
+  in (the output folder for built models, the per-user folder for snapshots). You can restore them; their space
+  stays used until you empty the trash. A move to another disk is refused, never copied. Choose "Delete for good" to
+  free the space at once.
+- **Nothing leaves the trash by itself.** After `trash_retention_days` (default 14; an AI cannot change it) the trash
+  only reminds you. **File > Trash...** in the GUI and `llm-cli trash` show each entry with what it is, its size,
+  when it was moved, who asked for it and where it came from. You restore entries there, or delete the ones you tick
+  for good. No tool empties the trash.
+- **AI apps.** `delete_artifact` moves a built model to the trash after your yes in the framework's own window. The
+  optional tools `list_trash` and `restore_from_trash` (hidden until you enable them) let an AI see the trash by name
+  and restore only what it asked to delete itself; what you deleted, you restore.
+- **No AI reaches the trash folders.** They are folders no AI may read or mount, also through a link, and the lists
+  of built models skip them.
+- **The audit log** records every deletion, emptying and restore with the hash of the list you accepted
+  (`deletion_sha256`), before anything is deleted; without the audit log nothing is deleted.
+- **Knowledge snapshots** can also be exported: copied to a folder you pick (on this computer, a USB stick or a
+  network share). Each copy is checked against the original by sha256; an export never deletes a snapshot.
+- **The framework's Docker images** are never deleted by the framework itself. The builder keeps the newest image of
+  each target as `llm-framework/<target>:last-build` and drops only the per-build name; older images stay without a
+  name. **Tools > Framework Build Images...** in the GUI and `llm-cli doctor --fix --tier 2` list every framework
+  image (name, id, size, what it is), and delete only the ones you tick. This is the only way the framework deletes
+  Docker images.
+
 ## Hardware probe and new targets
 
 - **Probe:** one hardware probe in three implementations writes the same file, `target_hardware_config.txt`
@@ -2060,7 +2098,7 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | Area | Checks |
 |---|---|
 | Python | supported version (3.11 to 3.14) |
-| Docker | daemon reachable, buildx available |
+| Docker | daemon reachable, buildx available; where Docker keeps its images (`DockerRootDir`, with the free space of that disk) and how much the framework's build images use (information) |
 | Disk | free space for the cache and output folders (warning below 20 GB, error below 5 GB) |
 | Targets | targets found, capabilities readable |
 | Security | personal folder private, secrets store usable, keyring protects secrets |
@@ -2071,11 +2109,15 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
 
 `--fix` applies the automatic fixes up to `--tier` and checks again. Tier 1 makes the personal folder private. Tier 2
-deletes nothing by itself: it lists the framework's dangling build images (name, image id, size and what each is),
-and only your yes at a terminal deletes exactly that list (default no; without a terminal, and with `--json`, it
-only lists them). The Docker build cache is never cleared, because it cannot be limited to the framework: before,
+deletes nothing by itself: it lists every build image of the framework (those left over from earlier builds without
+a name, the named `llm-framework/<target>:last-build` images and the runtime builder images; name, image id, size and
+what each is), nothing ticked. You type the numbers of the ones to delete and then confirm exactly those at a
+terminal (default no; without a terminal, and with `--json`, it only lists them). **Tools > Framework Build
+Images...** in the GUI is the same list. The Docker build cache is never cleared, because it cannot be limited to the framework: before,
 tier 2 cleared the whole build cache of the Docker daemon, other projects' too. Nothing an AI app or Ditto can call
-reaches this deletion. Exit codes: 0 OK, 1 warnings, 2 errors; `--json` for scripts.
+reaches this deletion. Moving Docker's image storage to another disk is an administrator's step (see [Container
+setup](Container_Setup.md#10-where-docker-keeps-images)); the doctor only shows where it is. Exit codes: 0 OK, 1 warnings,
+2 errors; `--json` for scripts.
 
 What an AI reads (`run_doctor`): the same findings, with the framework's folders named by label (`state:audit.db`,
 "the state folder", `targets:<pack>`) and any other path by its file name only, also in the message of a check that

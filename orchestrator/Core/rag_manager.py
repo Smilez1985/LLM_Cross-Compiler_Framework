@@ -26,7 +26,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-from orchestrator.Core.knowledge_snapshots import SUFFIX, list_snapshots, snapshot_files
+from orchestrator.Core.knowledge_snapshots import (SUFFIX, delete_snapshots, list_snapshots, snapshot_files,
+                                                   snapshot_plan)
 from orchestrator.rag.chunking import PREAMBLE_RESERVE_TOKENS, chunk_document, passage_text, point_id
 from orchestrator.rag.embeddings import (DenseEmbedder, EmbeddingModelSpec, FastEmbedDenseEmbedder,
                                          FastEmbedSparseEmbedder, SparseEmbedder, check_vectors, recommend_model,
@@ -675,19 +676,15 @@ class RAGManager:
         """Every snapshot with its full path, size and time, oldest first (knowledge_snapshots.SnapshotFile)."""
         return list_snapshots(self.snapshot_dir)
 
-    def _prune_snapshots(self, keep_newest: int, keep: Optional[Path] = None) -> None:
-        """Deletes the oldest snapshots beyond the newest `keep_newest`. Nothing in the framework calls it: there is no
-        limit of its own (DECISIONS, sixth round), and deleting snapshots waits for the person's confirmed cleanup
-        with the full list (the trash and the deletion dialog, design WP7), the only place that may call it, with
-        the choice the person made."""
-        files = self._snapshot_files()
-        for old in files[:max(0, len(files) - max(0, int(keep_newest)))]:
-            if keep is not None and old == keep:
-                continue
-            try:
-                old.unlink()
-            except OSError:
-                pass
+    def snapshot_plan(self, names=None):
+        """The deletion plan of the snapshots `names` (default: all of them, for the person's multiple choice)."""
+        return snapshot_plan(self.snapshot_dir, names)
+
+    def delete_snapshots(self, accepted, trash=None, audit=None):
+        """Deletes exactly the snapshots of the plan the person accepted (knowledge_snapshots.delete_snapshots): no
+        count, no age, nothing chosen by the framework. There is no limit of the framework's own (DECISIONS, sixth
+        round); only the person's deletion dialog and `llm-cli knowledge snapshots delete` call this."""
+        return delete_snapshots(self.snapshot_dir, accepted, trash=trash, audit=audit)
 
     def list_snapshots(self) -> List[str]:
         return [p.name[:-len(".jsonl.gz")] for p in self._snapshot_files()]

@@ -62,6 +62,12 @@ class FakeImages:
         if image == getattr(self, "refuse", None):
             raise RuntimeError("conflict: image is being used by stopped container 1234")
         self.removed.append(image)
+        named = next((i for i in self.images if image in i.tags), None)
+        if named is not None:   # a name: Docker drops it, and the image with its last name
+            named.tags = [t for t in named.tags if t != image]
+            if named.tags:
+                return
+            image = named.id
         self.images = [i for i in self.images if i.id != image]
         hook = getattr(self, "after_remove", None)
         if hook is not None:
@@ -136,16 +142,17 @@ def test_fix_tier_2_deletes_nothing_by_itself_and_says_what_it_lists(tmp_path, m
     finding = next(f for f in report.findings if f.code == "disk.cache")
     assert finding.fix is None and finding.fix_tier == 2
     hint = finding.fix_hint
-    for words in ("lists the framework's dangling build images", "size", "what each is", "confirm in a terminal",
-                  "build cache is not touched"):
+    for words in ("lists the framework's build images", "size", "what it is", "tick and confirm", "in a terminal",
+                  "Tools > Framework Build Images...", "nothing is ticked by default", "build cache is not touched"):
         assert words in hint, words
     assert "removes" not in hint
 
 
-def test_the_plan_lists_only_the_frameworks_dangling_images():
+def test_the_plan_lists_only_the_frameworks_images():
+    from orchestrator.runtime.build.executor import BUILDER_LABEL
     client = FakeClient(images())
     plan = framework_image_plan(fake_framework(client))
-    assert client.images.filters == [{"dangling": True, "label": IMAGE_LABEL}]
+    assert client.images.filters == [{"label": IMAGE_LABEL}, {"label": BUILDER_LABEL}]
     assert [i.file_name for i in plan.items] == ["sha256:" + c * 64 for c in "abe"]
     first = plan.items[0]
     assert first.kind == "docker_image" and first.full_path == "" and first.size_bytes == 2_000_000_000
@@ -175,10 +182,25 @@ def test_a_changed_list_deletes_nothing():
     client = FakeClient(images())
     framework = fake_framework(client)
     plan = framework_image_plan(framework)
-    client.images.images.append(FakeImage("f", 99))  # became dangling after the list was shown
+    client.images.images[1].attrs["Size"] = 400_000_000   # a chosen image is not the one the person saw
+    with pytest.raises(ImagePlanChanged):
+        delete_framework_images(framework, plan, actor="cli")
+    client.images.images = [i for i in client.images.images if i.id != "sha256:" + "b" * 64]   # one went away
     with pytest.raises(ImagePlanChanged):
         delete_framework_images(framework, plan, actor="cli")
     assert deletions(client) == []
+
+
+def test_an_image_that_appeared_after_the_list_is_never_deleted():
+    """The person's choice covers exactly the images they ticked: an image that became dangling after the list was
+    shown is not part of it and stays."""
+    client = FakeClient(images())
+    framework = fake_framework(client)
+    plan = framework_image_plan(framework)
+    client.images.images.append(FakeImage("f", 99))
+    delete_framework_images(framework, plan, actor="cli")
+    assert "sha256:" + "f" * 64 not in client.images.removed
+    assert [i.id for i in client.images.images] == ["sha256:" + c * 64 for c in "cdf"]
 
 
 @pytest.mark.parametrize("actor", ["mcp", "mcp:laptop", "ditto", "grant:g_0123456789abcdef",
@@ -276,13 +298,18 @@ def test_cli_tier_2_without_a_terminal_lists_and_deletes_nothing(docker_framewor
 
 
 def test_cli_tier_2_needs_the_persons_yes(docker_framework, monkeypatch):
+    """Multiple choice (round 6 10.4): nothing is ticked; the person names the images, then confirms exactly those
+    (default no)."""
     framework, client = docker_framework
     _, out = run_cli(framework, monkeypatch, "doctor", "--fix", "--tier", "2", terminal=True, answer="\n")
-    assert "Delete exactly these 3 images?" in out and "Nothing was deleted." in out
+    assert "Numbers to delete" in out and "Nothing was deleted." in out
+    assert deletions(client) == [], "nothing is ticked by default"
+    _, out = run_cli(framework, monkeypatch, "doctor", "--fix", "--tier", "2", terminal=True, answer="1,3\n\n")
+    assert "Delete exactly 2 items (2.0 GB) for good?" in out and "Nothing was deleted." in out
     assert deletions(client) == [], "the default answer is no"
-    _, out = run_cli(framework, monkeypatch, "doctor", "--fix", "--tier", "2", terminal=True, answer="y\n")
-    assert client.images.removed == ["sha256:" + c * 64 for c in "abe"]
-    assert "Deleted: Framework build image aaaaaaaaaaaa (aarch64)" in out and "3 images deleted" in out
+    _, out = run_cli(framework, monkeypatch, "doctor", "--fix", "--tier", "2", terminal=True, answer="1,3\ny\n")
+    assert client.images.removed == ["sha256:" + c * 64 for c in "ae"], "exactly the ticked images"
+    assert "Deleted: Framework build image aaaaaaaaaaaa (aarch64)" in out and "2 images deleted" in out
 
 
 def test_cli_json_and_tier_1_never_delete(docker_framework, monkeypatch):
@@ -458,9 +485,10 @@ def test_there_is_no_snapshot_limit():
                inspect.getsource(rag_manager.RAGManager.create_snapshot)]
     for source in sources:
         assert "usual" not in source and "over_cap" not in source and "MAX_SNAPSHOTS" not in source
-    # the old pruning (kept for the person's confirmed clean-up, design WP7) has no count of its own any more
-    keep = inspect.signature(rag_manager.RAGManager._prune_snapshots).parameters["keep_newest"]
-    assert keep.default is inspect.Parameter.empty
+    # the old pruning by count is gone: the person's clean-up deletes exactly the snapshots of an accepted plan (WP7)
+    assert not hasattr(rag_manager.RAGManager, "_prune_snapshots")
+    assert list(inspect.signature(rag_manager.RAGManager.delete_snapshots).parameters)[:2] == ["self", "accepted"]
+    assert list(inspect.signature(knowledge_snapshots.delete_snapshots).parameters)[:2] == ["folder", "accepted"]
 
 
 def test_the_facts_vocabulary_has_no_snapshot_count_and_no_deleting_healing():
@@ -481,10 +509,15 @@ def test_the_facts_vocabulary_has_no_snapshot_count_and_no_deleting_healing():
 
 
 def test_nothing_calls_the_snapshot_pruning():
-    """`_prune_snapshots` stays for the person's confirmed cleanup (WP7); no code path calls it by itself."""
-    callers = [p.relative_to(REPO).as_posix() for p in (REPO / "orchestrator").rglob("*.py")
-               if "_prune_snapshots(" in p.read_text(encoding="utf-8").replace("def _prune_snapshots(", "")]
-    assert callers == []
+    """Deleting snapshots is the person's clean-up (WP7): only the CLI's question at a terminal and the GUI's deletion
+    dialog call it (the RAG manager's method only hands the accepted plan on); nothing deletes by count or age."""
+    callers = sorted(p.relative_to(REPO).as_posix() for p in (REPO / "orchestrator").rglob("*.py")
+                     if "delete_snapshots(" in p.read_text(encoding="utf-8").replace("def delete_snapshots(", ""))
+    assert callers == ["orchestrator/Core/rag_manager.py", "orchestrator/cli.py",
+                       "orchestrator/gui/knowledge_snapshots_window.py"]
+    hits = [p.relative_to(REPO).as_posix() for p in (REPO / "orchestrator").rglob("*.py")
+            if "_prune_snapshots" in p.read_text(encoding="utf-8")]
+    assert hits == []
 
 
 def test_the_doctor_lists_the_snapshots_and_never_asks_to_delete_them(tmp_path):

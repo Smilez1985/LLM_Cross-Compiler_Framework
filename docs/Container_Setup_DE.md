@@ -25,6 +25,7 @@ einem anderen Computer](Features_DE.md#ditto-und-ein-framework-auf-einem-anderen
 7. [Aktualisieren](#7-aktualisieren)
 8. [Grenzen](#8-grenzen)
 9. [Die Dateien](#9-die-dateien)
+10. [Wo Docker Images ablegt](#10-wo-docker-images-ablegt)
 
 ## 1. Was du brauchst
 
@@ -218,3 +219,27 @@ führe `make up` erneut aus und installiere die Packs wieder.
 | [`Docker Setup/docker-compose.yml`](../Docker%20Setup/docker-compose.yml) | Die Dienste `framework` und `gui` (Profil `gui`), das Volume `lcf-data`, `pull_policy: never` |
 | [`Makefile`](../Makefile) | `make build`, `build-gui`, `up`, `gui`, `down`, `kept-files`, `doctor`, `shell`, `clean`, `audit` (Trivy prüft ein Archiv des Images; der Scanner bekommt nie den Docker-Socket) |
 | `Docker Setup/pyproject.toml` | Eine alte Kopie der Projektdatei (Version 1.6.0), die nichts nutzt; die Projektdatei ist [`pyproject.toml`](../pyproject.toml) oben im Repository |
+
+## 10. Wo Docker Images ablegt
+
+Das gilt für jeden Computer, der mit Docker baut, nicht nur für die Container-Einrichtung (unveröffentlicht).
+
+- `llm-cli doctor` zeigt, wo Docker seine Images ablegt (Dockers Datenordner, `DockerRootDir`), wie viel Platz auf
+  dieser Platte frei ist und wie viel die Build-Images des Frameworks belegen.
+- Das Framework löscht nie von selbst ein Image. Der Builder behält das neueste Image jedes Targets als
+  `llm-framework/<Target>:last-build`; ältere bleiben ohne Namen. Die nicht mehr gebrauchten löschst du: **Tools >
+  Framework Build Images...** in der GUI oder `llm-cli doctor --fix --tier 2` im Terminal. Nichts ist angehakt; du
+  wählst aus.
+- Der Build-Cache von Docker gehört nicht dem Framework. `docker system df` zeigt seine Größe; `docker builder prune`
+  leert ihn für jedes Projekt auf diesem Computer. Das entscheidest du selbst.
+- Um Images auf einer anderen Platte abzulegen, verlegst du Dockers Datenordner. Das ist ein Schritt für
+  Administratoren: Er betrifft jeden Docker-Benutzer und jedes Projekt auf dem Computer, und das Framework ändert nie
+  Dockers Einstellungen.
+  - Linux mit Docker Engine: Docker anhalten (`sudo systemctl stop docker docker.socket`), den Ordner mit seinen
+    Rechten kopieren (`sudo rsync -aHAX /var/lib/docker/ /mnt/bigdisk/docker/`), `"data-root": "/mnt/bigdisk/docker"`
+    in `/etc/docker/daemon.json` eintragen und Docker wieder starten (`sudo systemctl start docker`). Prüfen mit
+    `docker info --format '{{.DockerRootDir}}'`. Den alten Ordner erst entfernen, wenn du geprüft hast, dass alles
+    funktioniert.
+  - Docker Desktop (Windows, macOS): Settings > Resources > Advanced > Disk image location.
+  - Rootless Docker legt den Ordner in deinem Home-Ordner ab; Dockers Dokumentation zu `data-root` beschreibt das
+    Verlegen.

@@ -10,7 +10,8 @@ import pytest
 
 from orchestrator.Core import disk_plan, hf_hub, hf_lookup
 
-# Design section 2.1: 37 core tools, 6 optional (default deny) and 2 later ones.
+# Design section 2.1: 37 core tools, 6 optional (default deny) and 2 later ones; the trash (delegation design 3.10)
+# adds two optional tools.
 CORE = {
     "list_build_requests", "get_build_status", "read_build_log", "list_artifacts", "get_artifact_details",
     "check_build_request", "start_build", "cancel_build", "resolve_healing", "propose_healing_fix",
@@ -24,14 +25,14 @@ CORE = {
 # deploy_device_runtime (T14): the board's runtime as `llm-cli device runtime deploy` does it (the design expected it
 # inside the deploy package; the device runtime is deployed on its own).
 OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
-            "stop_local_runtime", "run_benchmark", "deploy_device_runtime"}
+            "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash"}
 LATER = {"probe_remote_device", "run_device_benchmark"}
 # Built by phase T (T1-T9, T14): every core tool.
 BUILT = set(CORE)
 
 
 def test_the_catalogue_has_the_designed_size():
-    assert (len(CORE), len(OPTIONAL), len(LATER)) == (37, 7, 2)
+    assert (len(CORE), len(OPTIONAL), len(LATER)) == (37, 9, 2)
 
 
 def test_known_tools_is_exactly_the_pinned_catalogue():

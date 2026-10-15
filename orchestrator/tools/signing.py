@@ -33,8 +33,9 @@ SIGNATURE_FIELD = "signature"
 UNKEYED = "unkeyed"
 # confirmed_builds: the builds the person confirmed (orchestrator/Core/confirmed_builds.py), which open build standing
 # approvals for packs an AI installed. ditto_places: where each object Ditto saw lives, this computer or another one
-# (orchestrator/llm/hybrid_tools.py PlaceIndex), which routes Ditto's calls between the computers.
-KINDS = ("tool_policy", "mcp_tokens", "tool_approvals", "confirmed_builds", "ditto_places")
+# (orchestrator/llm/hybrid_tools.py PlaceIndex), which routes Ditto's calls between the computers. tool_trash: what
+# the trash holds and who asked to delete it (orchestrator/Core/trash.py), which decides who may restore it.
+KINDS = ("tool_policy", "mcp_tokens", "tool_approvals", "confirmed_builds", "ditto_places", "tool_trash")
 _UNSEEN = object()
 
 

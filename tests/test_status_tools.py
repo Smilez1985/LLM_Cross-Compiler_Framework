@@ -304,7 +304,9 @@ def test_oversight_settings_are_never_writable(fw, monkeypatch):
     rows = {s.key: s for s in out.settings}
     assert rows["audio_announcements"].writable == "read_only" and "keeps you informed" in rows[
         "audio_announcements"].allowed
-    assert "trash_retention_days" not in rows, "a setting of a part not built yet is not shown as empty"
+    # the trash exists now (WP7): its reminder setting is shown, read only like every oversight setting
+    assert rows["trash_retention_days"].writable == "read_only" and "keeps you informed" in rows[
+        "trash_retention_days"].allowed
     # The guard at registration: an update_settings that could change one is never registered.
     monkeypatch.setattr(tools_status, "WRITABLE", tools_status.WRITABLE + ("audio_announcements",))
     with pytest.raises(ValueError, match="keep the person informed"):

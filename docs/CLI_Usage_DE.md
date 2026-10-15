@@ -19,7 +19,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [Globale Optionen, Ausgabe und Exit-Codes](#globale-optionen-ausgabe-und-exit-codes)
 - [Überblick über alle Befehle](#überblick-über-alle-befehle)
 - [doctor](#doctor): Gesundheitscheck
-- [knowledge](#knowledge): `snapshots`
+- [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
@@ -32,6 +32,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [device](#device): `list`, `settings`, `runtime`
 - [config](#config): `show`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
+- [trash](#trash): `list`, `restore`, `empty`
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
 
 ---
@@ -116,7 +117,8 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | Befehl | Was er tut |
 |---|---|
 | `doctor` | Die Installation prüfen und erklären, wie man Probleme behebt |
-| `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten (unveröffentlicht) |
+| `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten; die ausgewählten löschen oder exportieren (unveröffentlicht) |
+| `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen (unveröffentlicht) |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
@@ -153,14 +155,17 @@ die Targets und ihre Capabilities, ob der persönliche Ordner privat ist, den Se
 Schlüsselbund, die Tool-Berechtigungen, das Audit-Log, den Chat-Verlauf (unveröffentlicht: er lässt sich
 schreiben, seine neuesten Einträge stimmen), die mitgelieferten Kalibrierungsdaten und die installierten
 Community-Pakete (zurückgezogen, verändert oder aus einer Datei importiert) und die Snapshots der Wissensbasis
-(unveröffentlicht: wie viele, ihre Größe und wo; es gibt keine Grenze, ihre Zahl ist also nie eine Warnung). Zu jedem
-Befund gibt es einen Hinweis, wie du ihn behebst.
+(unveröffentlicht: wie viele, ihre Größe und wo; es gibt keine Grenze, ihre Zahl ist also nie eine Warnung). Er sagt
+auch, wo Docker seine Images ablegt und wie viel die Build-Images des Frameworks belegen (unveröffentlicht; diesen
+Ordner zu verlegen ist ein Schritt für Administratoren, siehe
+[Container-Einrichtung](Container_Setup_DE.md#10-wo-docker-images-ablegt)). Zu jedem Befund gibt es einen Hinweis,
+wie du ihn behebst.
 
 | Option | Bedeutung |
 |---|---|
-| `--json` | Maschinenlesbare Ausgabe (Befunde, Korrekturen, Exit-Code). Mit `--fix --tier 2` listet sie auch die verwaisten Framework-Images (`framework_images`), löscht sie aber nie. |
+| `--json` | Maschinenlesbare Ausgabe (Befunde, Korrekturen, Exit-Code). Mit `--fix --tier 2` listet sie auch die Build-Images des Frameworks und wo Docker sie ablegt (`framework_images`), löscht sie aber nie. |
 | `--fix` | Die automatischen Korrekturen bis `--tier` anwenden, dann erneut prüfen. |
-| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (macht den persönlichen Ordner privat). `2`: listet auch die verwaisten Build-Images des Frameworks (Name, Image-ID, Größe und was jedes ist) und löscht genau diese Liste, nachdem du sie im Terminal bestätigt hast (die Vorgabe ist Nein). Ohne Terminal (eine Pipe, ein Skript, eine KI-App) listet es sie nur. Der Docker-Build-Cache wird nie geleert: Er lässt sich nicht auf das Framework beschränken. |
+| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (macht den persönlichen Ordner privat). `2`: listet auch jedes Build-Image des Frameworks (die ohne Namen aus früheren Builds, die benannten Images `llm-framework/<Target>:last-build` und die Builder-Images der Laufzeit; Name, Image-ID, Größe und was jedes ist), nichts ausgewählt. Du gibst die Nummern der zu löschenden ein und bestätigst genau diese im Terminal (die Vorgabe ist Nein). Ohne Terminal (eine Pipe, ein Skript, eine KI-App) listet es sie nur. **Tools > Framework Build Images...** in der GUI ist dieselbe Liste. Der Docker-Build-Cache wird nie geleert: Er lässt sich nicht auf das Framework beschränken. |
 
 Speicherplatz: Unter 20 GB frei gibt es eine Warnung, unter 5 GB einen Fehler.
 
@@ -178,21 +183,37 @@ llm-cli doctor --fix --tier 2
 
 ```
 llm-cli knowledge snapshots [list]
+llm-cli knowledge snapshots prune
+llm-cli knowledge snapshots delete NAME...
+llm-cli knowledge snapshots export NAME... --to ORDNER
 ```
 
 Unveröffentlicht. Vor jedem Deep Ingest, jeder Indexierung des eigenen Codes des Frameworks und jeder
 Wiederherstellung wird die Wissensbasis als Snapshot in `knowledge_snapshots/` des persönlichen Ordners gesichert,
-damit sich die Änderung rückgängig machen lässt. Der Befehl listet jeden Snapshot, den ältesten zuerst, mit Namen,
-Zeitpunkt, Größe, was er ist (zum Beispiel "backup of the knowledge base taken before a Deep Ingest") und vollem
-Pfad. Er löscht nichts. Die GUI zeigt dieselbe Liste unter **Tools > Knowledge Snapshots...**.
+damit sich die Änderung rückgängig machen lässt. `list` (die Vorgabe) zeigt jeden Snapshot, den ältesten zuerst, mit
+Namen, Zeitpunkt, Größe, was er ist (zum Beispiel "backup of the knowledge base taken before a Deep Ingest") und
+vollem Pfad. Es löscht nichts. Die GUI zeigt dieselbe Liste unter **Tools > Knowledge Snapshots...**, mit einem
+Kästchen für jeden (keines angehakt).
 
 Es gibt keine Grenze: Das Framework behält so viele Snapshots, wie die Platte fasst, löscht keinen von selbst, und
-keine Anzahl bringt eine Erinnerung oder eine Warnung. Um Platz zu schaffen, kopierst du die, die du behalten willst,
-woandershin (Export, zum Beispiel auf einen USB-Datenträger oder eine Netzwerkfreigabe) oder löschst die, die du
-nicht mehr brauchst, selbst, zum Beispiel im Dateimanager. Ein Papierkorb und ein Lösch-Dialog im Framework folgen.
+keine Anzahl bringt eine Erinnerung oder eine Warnung. Um Platz zu schaffen:
+
+- `prune` listet jeden Snapshot mit einer Nummer (nichts ist ausgewählt). Du gibst die Nummern der zu löschenden ein
+  (zum Beispiel `1,3` oder `2-4`), wählst `trash` (die Vorgabe: du kannst sie mit [`trash restore`](#trash)
+  wiederherstellen) oder `permanent` und bestätigst genau diese (die Vorgabe ist Nein).
+- `delete NAME...` listet genau die genannten Snapshots und fragt genauso.
+- `export NAME... --to ORDNER` kopiert die Snapshots in einen vorhandenen Ordner (auf diesem Computer, einen
+  USB-Stick, eine Netzwerkfreigabe) und vergleicht jede Kopie per sha256 mit dem Original. Eine gleichnamige Datei
+  dort wird nie überschrieben; eine Kopie, die nicht stimmt, wird wieder entfernt und gemeldet. Ein Export löscht nie
+  einen Snapshot. Exit-Code 1, wenn ein Snapshot nicht exportiert wurde.
+
+Löschen braucht ein Terminal: Ohne eines (eine Pipe, ein Skript, eine KI-App) wird die Liste ausgegeben und nichts
+gelöscht. Jedes Löschen wird im Audit-Log festgehalten, bevor etwas verschoben oder gelöscht wird.
 
 ```bash
 llm-cli knowledge snapshots
+llm-cli knowledge snapshots prune
+llm-cli knowledge snapshots export pre_ingest_20261001_101500 --to /media/usb/backups
 ```
 
 ---
@@ -1895,6 +1916,36 @@ llm-cli zoo keys > my.keys
 # encrypted packs (llm-cli zoo export --to) or check your signed packs.
 age1<58 Zeichen>
 ed25519:<base64>
+```
+
+---
+
+## trash
+
+```
+llm-cli trash [list]
+llm-cli trash restore ID...
+llm-cli trash empty ID... | --all | --due
+```
+
+Unveröffentlicht. Was Löschungen in den Papierkorb verschoben haben: gebaute Modelle (im `.trash` des
+Ausgabeordners) und Wissens-Snapshots (im `.trash` des persönlichen Ordners). `list` (die Vorgabe) zeigt jeden
+Eintrag mit ID, was er ist, Größe, wann er verschoben wurde, wer es angefordert hat (`gui`, `cli` oder eine KI-App wie
+`mcp:laptop`), Erinnerungsdatum und woher er kam. Nichts verlässt den Papierkorb von selbst: Nach
+`trash_retention_days` (Vorgabe 14; eine KI kann es nicht ändern) erinnert er nur.
+
+| Befehl | Bedeutung |
+|---|---|
+| `restore ID...` | Legt Einträge zurück, wo sie waren; ist der Platz belegt, daneben als `<Name>-restored-<Zeit>`. Nie über einen Link. |
+| `empty ID...` | Listet genau diese Einträge und löscht sie endgültig, nachdem du im Terminal bestätigt hast (Vorgabe Nein). |
+| `empty --all` / `--due` | Listet jeden Eintrag oder die, deren Erinnerungsdatum vorbei ist, mit einer Nummer; nichts ist ausgewählt. Du gibst die Nummern ein und bestätigst dann genau diese. |
+
+Kein Tool und keine KI-App leert den Papierkorb. Die GUI zeigt dasselbe unter **File > Trash...**.
+
+```bash
+llm-cli trash
+llm-cli trash restore tr_0123456789abcdef
+llm-cli trash empty --due
 ```
 
 ---

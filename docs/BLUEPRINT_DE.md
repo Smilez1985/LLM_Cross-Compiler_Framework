@@ -193,7 +193,8 @@ flowchart TB
 | Deep-Ingest-Hinweis und Sprachansagen (unveröffentlicht) | `orchestrator/utils/crawl_notice.py`, `orchestrator/utils/announce.py` | Der einmalige Hinweis vor dem ersten Deep Ingest, je Benutzer gemerkt, und kurze Ansagen über die Sprachausgabe des Betriebssystems. |
 | Community-Zoo (unveröffentlicht) | `orchestrator/Core/community_manager.py`, `orchestrator/Core/community_pack.py`, `orchestrator/schemas/recipes.py`, `orchestrator/gui/community_hub.py`, `configs/community_keys.yml` | Signierte und verschlüsselte Community-Pakete (Targets, Rezepte, Wissen), der signierte Community-Index, die Installation über eine Quarantäne mit Vertrauensstufen, der Export mit Datenschutz-Bereinigung und die Übergabe an einen Pull-Request (siehe [Community-Pakete](#community-pakete-format-vertrauen-und-austausch-unveröffentlicht)). |
 | Eingabe-Historie (unveröffentlicht) | `orchestrator/utils/input_history.py` | Zuletzt verwendete Werte der GUI-Eingabefelder, je Benutzer und ohne Geheimnisse (siehe [Zuletzt verwendete Eingaben](#zuletzt-verwendete-eingaben-unveröffentlicht)). |
-| Doctor | `orchestrator/Core/doctor.py` | Deterministische Gesundheitsprüfungen (Python, Docker und BuildKit, Speicherplatz, Targets, Rechte des Zustandsordners, Secrets und Schlüsselbund, Tool-Berechtigungen und Audit-Log, Kalibrierdaten, installierte Community-Pakete, Snapshots der Wissensbasis) mit festen Codes, Lösungshinweisen und gestuften automatischen Korrekturen. Stufe 2 löscht nichts von selbst: Sie baut einen Löschplan der verwaisten Build-Images des Frameworks (`DeletionPlan` aus `tools/spec.py`), und `delete_framework_images` entfernt genau diese IDs, nachdem die Person den Plan im Terminal bestätigt hat (nur Akteur `cli` oder `gui`, zuerst auditiert, abgelehnt, wenn sich die Liste geändert hat); der Docker-Build-Cache wird nie geleert. `ai_findings` ist, was `run_doctor` einer KI liefert: Ordner unter ihrer Bezeichnung, andere Pfade nur mit dem Dateinamen. |
+| Doctor | `orchestrator/Core/doctor.py` | Deterministische Gesundheitsprüfungen (Python, Docker und BuildKit, Speicherplatz, Targets, Rechte des Zustandsordners, Secrets und Schlüsselbund, Tool-Berechtigungen und Audit-Log, Kalibrierdaten, installierte Community-Pakete, Snapshots der Wissensbasis) mit festen Codes, Lösungshinweisen und gestuften automatischen Korrekturen. Stufe 2 löscht nichts von selbst: Sie baut einen Löschplan jedes Build-Images des Frameworks (`framework_image_plan`: ohne Namen übrig geblieben, benannt `last-build`, Builder der Laufzeit; `DeletionPlan` aus `tools/spec.py`), und `delete_framework_images` entfernt genau die Images, die die Person angehakt hat, nachdem sie sie im Terminal oder in der GUI unter Tools > Framework Build Images... bestätigt hat (nur Akteur `cli` oder `gui`, zuerst auditiert, abgelehnt, wenn sich ein gewähltes Image geändert hat); der Docker-Build-Cache wird nie geleert. `docker_storage` sagt, wo Docker seine Images ablegt. `ai_findings` ist, was `run_doctor` einer KI liefert: Ordner unter ihrer Bezeichnung, andere Pfade nur mit dem Dateinamen. |
+| Löschen und Papierkorb (unveröffentlicht) | `orchestrator/Core/deletion.py`, `orchestrator/Core/trash.py`, `orchestrator/gui/deletion_dialog.py`, `orchestrator/gui/trash_window.py` | Jedes Löschen von Objekten der Person nimmt eine `AcceptedDeletion`: den Plan, den die Person in der GUI oder im Terminal bestätigt hat (die Mehrfachauswahl baut ihn aus genau den angehakten Teilen neu), seinen Modus (Papierkorb oder endgültig) und den Kanal. Der löschende Code baut den Plan erneut und lehnt einen geänderten ab (`PlanChanged`). Der Papierkorb verschiebt Teile mit einem Umbenennen nach `.trash/<ID>/` ihres Datenordners (nie über Platten hinweg); sein Index `tool_trash.json` ist signiert; nichts verlässt ihn von selbst; nur die Person leert ihn; eine KI stellt nur wieder her, was sie selbst löschen wollte. `tests/test_deletion.py` listet jede Stelle im Code, die löscht, mit ihrer Absicherung. |
 | Kalibrierdaten | `data/calibration/`, `orchestrator/utils/calibration.py` | Kuratierter deutscher, englischer und Tool-Nutzungs-Text (MIT-Lizenz) mit SHA256-Prüfung, für Importance-Matrizen. |
 | Umgang mit nicht vertrauenswürdigem Text | `orchestrator/utils/untrusted.py` | Bereinigt und verpackt externen Text, bevor er ein Sprachmodell erreicht. |
 
@@ -271,9 +272,10 @@ Container um, hält Hashes fest und lässt dich das Ergebnis auf deinem Gerät i
    dem Ausgabeordner (Links in der Ausgabe des Builds werden nicht verfolgt), ergänzt `build_info.json` um Größe
    und SHA256-Hash jeder Modelldatei und um die Hauptdatei, schreibt `Model_Card.md` und erstellt ein ZIP dieser
    Dateien. Erst wenn der Build nicht mehr abgebrochen werden kann, werden sie nach `output/` verschoben und das ZIP
-   neben den Build-Ordner; ein abgebrochener oder gescheiterter Build hinterlässt dort keine Dateien. Das Image-Tag
-   des Builds und der Arbeitsordner werden entfernt; die Image-Schichten bleiben im Build-Cache, der nächste Build
-   geht also schneller.
+   neben den Build-Ordner; ein abgebrochener oder gescheiterter Build hinterlässt dort keine Dateien. Das Image des
+   Builds heißt `llm-framework/<Target>:last-build`, und nur sein Name für den einzelnen Build wird entfernt: Der
+   Builder löscht nie ein Image (ein älteres bleibt ohne Namen, bis die Person es löscht), und der nächste Build nutzt
+   die Schichten wieder. Der Arbeitsordner wird entfernt.
 10. **Deployment.** Im Deployment-Fenster (oder mit `llm-cli deploy package` und `llm-cli deploy run`) wählst du
     einen Build. Das Framework packt Modelldatei, `build_info.json`, `Model_Card.md`, ein erzeugtes `deploy.sh` und
     `checksums.sha256` in ein ZIP.
@@ -454,8 +456,9 @@ würde, und wartet. Ohne dein Ja wird nichts verändert.
 5. **Nur feste Maßnahmen.** Ein freigegebener Vorschlag wird nur angewendet, wenn er eine von zwei im Framework
    festgelegten Strategien ist (`AUTOMATIC_STRATEGIES` in `self_healing_manager.py`): `build_jobs` auf 1 senken oder
    einfach neu versuchen. Der Job wird dann einmal wiederholt. Keine davon löscht etwas: Eine volle Docker-Platte
-   (`docker_prune`) ist ein manueller Schritt, der auf `llm-cli doctor --fix --tier 2` verweist, das nur die
-   gelisteten Images löscht, die die Person bestätigt. Befehlstext aus Mustern oder von der
+   (`docker_prune`) ist ein manueller Schritt, der auf die Liste der Build-Images des Frameworks verweist (Tools >
+   Framework Build Images..., `llm-cli doctor --fix --tier 2`), die nur die Images löscht, die die Person anhakt und
+   bestätigt. Befehlstext aus Mustern oder von der
    KI wird nur angezeigt und nie ausgeführt; die Freigabe eines manuellen Schritts über MCP wird abgelehnt.
 
 ### Das lokale Modell für den Offline-Modus (unveröffentlicht)

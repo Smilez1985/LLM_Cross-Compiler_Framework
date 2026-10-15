@@ -174,6 +174,9 @@ NO_TOOL_ACTIONS = [
                                "'llm-cli zoo install --file' (unreviewed code an AI could write itself)."),
     ("run_command", "Run shell commands, read or write files by path, download URLs, run Docker images: no tool, "
                     "for any AI."),
+    ("empty_trash", "Empty the trash or delete anything for good, Docker images included: only the person, in the "
+                    "framework (File > Trash..., Tools > Framework Build Images..., 'llm-cli trash empty' or "
+                    "'llm-cli doctor --fix --tier 2' in a terminal), always with the full list; no tool does."),
 ]
 MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
 
@@ -193,7 +196,7 @@ KNOWN_TOOLS = frozenset({
     "run_doctor", "get_status", "get_settings", "update_settings", "report_cannot_do",
     # optional (default deny until the person enables them)
     "delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
-    "stop_local_runtime", "run_benchmark", "deploy_device_runtime",
+    "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
     # later
     "probe_remote_device", "run_device_benchmark",
 })
@@ -272,8 +275,9 @@ HEALING_CONSEQUENCES = {
     "retry_build": "Retries build request {rid} once, without changes.",
 }
 # Strategies asked even when the tool is allowed. None is left: no automatic strategy deletes anything (round 5 f); a
-# full Docker disk (docker_prune) is a manual step that points to the person's 'llm-cli doctor --fix --tier 2', and
-# approving a manual step is refused before anything is asked.
+# full Docker disk (docker_prune) is a manual step that points to the person's one deletion path for Docker images
+# (Tools > Framework Build Images... or 'llm-cli doctor --fix --tier 2'), and approving a manual step is refused
+# before anything is asked.
 DESTRUCTIVE_STRATEGIES: frozenset = frozenset()
 
 

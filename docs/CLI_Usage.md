@@ -19,7 +19,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [Global options, output and exit codes](#global-options-output-and-exit-codes)
 - [Overview of all commands](#overview-of-all-commands)
 - [doctor](#doctor): health check
-- [knowledge](#knowledge): `snapshots`
+- [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
@@ -32,6 +32,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [device](#device): `list`, `settings`, `runtime`
 - [config](#config): `show`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
+- [trash](#trash): `list`, `restore`, `empty`
 - [Known limitations](#known-limitations)
 
 ---
@@ -116,7 +117,8 @@ stays below the given share.
 | Command | What it does |
 |---|---|
 | `doctor` | Check the installation and explain how to fix problems |
-| `knowledge snapshots` | List the knowledge base's snapshots with full path, name, size and what each is (unreleased) |
+| `knowledge snapshots` | List the knowledge base's snapshots with full path, name, size and what each is; delete the ones you pick, or export them (unreleased) |
+| `trash list` / `restore` / `empty` | What deletions moved to the trash; put entries back; delete the ones you pick for good (unreleased) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
@@ -152,14 +154,16 @@ Checks Python, the Docker daemon and buildx, free disk space for the cache and o
 their capabilities, the privacy of the personal folder, the secrets store and the keyring, the tool
 permissions, the audit log, the chat feed (unreleased: it can be written, its newest entries verify), the shipped
 calibration data, the installed community packs (revoked, changed or imported from a file) and the knowledge
-snapshots (unreleased: how many, their size and where; there is no limit, so their number is never a warning). Each
-finding comes with a hint how to fix it.
+snapshots (unreleased: how many, their size and where; there is no limit, so their number is never a warning). It
+also says where Docker keeps its images and how much the framework's build images use (unreleased; moving that folder
+is an administrator's step, see [Container setup](Container_Setup.md#10-where-docker-keeps-images)). Each finding
+comes with a hint how to fix it.
 
 | Option | Meaning |
 |---|---|
-| `--json` | Machine-readable output (findings, fixes, exit code). With `--fix --tier 2` it also lists the dangling framework images (`framework_images`), but never deletes them. |
+| `--json` | Machine-readable output (findings, fixes, exit code). With `--fix --tier 2` it also lists the framework's build images and where Docker keeps them (`framework_images`), but never deletes them. |
 | `--fix` | Apply the automatic fixes up to `--tier`, then check again. |
-| `--tier INTEGER RANGE` | `1` (default): harmless fixes (makes the personal folder private). `2`: also lists the framework's dangling build images (name, image id, size and what each is) and deletes exactly that list after you confirm it at a terminal (the default answer is no). Without a terminal (a pipe, a script, an AI app) it only lists them. The Docker build cache is never cleared: it cannot be limited to the framework. |
+| `--tier INTEGER RANGE` | `1` (default): harmless fixes (makes the personal folder private). `2`: also lists every build image of the framework (left over from earlier builds without a name, the named `llm-framework/<target>:last-build` images and the runtime builder images; name, image id, size and what each is), nothing picked. You type the numbers of the ones to delete and confirm exactly those at a terminal (the default answer is no). Without a terminal (a pipe, a script, an AI app) it only lists them. The GUI's **Tools > Framework Build Images...** is the same list. The Docker build cache is never cleared: it cannot be limited to the framework. |
 
 Disk space: below 20 GB free is a warning, below 5 GB an error.
 
@@ -177,21 +181,36 @@ llm-cli doctor --fix --tier 2
 
 ```
 llm-cli knowledge snapshots [list]
+llm-cli knowledge snapshots prune
+llm-cli knowledge snapshots delete NAME...
+llm-cli knowledge snapshots export NAME... --to FOLDER
 ```
 
 Unreleased. Before every Deep Ingest, every index of the framework's own code and every restore, the knowledge base
-is saved as a snapshot in `knowledge_snapshots/` of the personal folder, so the change can be undone. The command
-lists every snapshot, oldest first, with its name, when it was taken, its size, what it is (for example "backup of
-the knowledge base taken before a Deep Ingest") and its full path. It deletes nothing. The GUI shows the same list
-under **Tools > Knowledge Snapshots...**.
+is saved as a snapshot in `knowledge_snapshots/` of the personal folder, so the change can be undone. `list` (the
+default) shows every snapshot, oldest first, with its name, when it was taken, its size, what it is (for example
+"backup of the knowledge base taken before a Deep Ingest") and its full path. It deletes nothing. The GUI shows the
+same list under **Tools > Knowledge Snapshots...**, with a check box for each (none ticked).
 
 There is no limit: the framework keeps as many snapshots as the disk holds, deletes none by itself, and no number of
-them brings a reminder or a warning. To free space, copy the ones you want to keep elsewhere (export, for example to a
-USB disk or a network share) or delete the ones you no longer need yourself, for example in your file manager. A
-trash and a deletion dialog in the framework follow.
+them brings a reminder or a warning. To free space:
+
+- `prune` lists every snapshot with a number (nothing is picked). You type the numbers to delete (for example `1,3`
+  or `2-4`), choose `trash` (the default: you can restore them with [`trash restore`](#trash)) or `permanent`, and
+  confirm exactly those (the default answer is no).
+- `delete NAME...` lists exactly the named snapshots and asks the same way.
+- `export NAME... --to FOLDER` copies the snapshots to an existing folder (on this computer, a USB stick, a network
+  share) and checks each copy against the original by sha256. A file of the same name there is never overwritten; a
+  copy that does not match is removed again and reported. Exporting never deletes a snapshot. Exit code 1 when a
+  snapshot was not exported.
+
+Deleting needs a terminal: without one (a pipe, a script, an AI app) the list is printed and nothing is deleted.
+Every deletion is recorded in the audit log before anything is moved or deleted.
 
 ```bash
 llm-cli knowledge snapshots
+llm-cli knowledge snapshots prune
+llm-cli knowledge snapshots export pre_ingest_20261001_101500 --to /media/usb/backups
 ```
 
 ---
@@ -1821,6 +1840,36 @@ llm-cli zoo keys > my.keys
 # encrypted packs (llm-cli zoo export --to) or check your signed packs.
 age1<58 characters>
 ed25519:<base64>
+```
+
+---
+
+## trash
+
+```
+llm-cli trash [list]
+llm-cli trash restore ID...
+llm-cli trash empty ID... | --all | --due
+```
+
+Unreleased. What deletions moved to the trash: built models (in the output folder's `.trash`) and knowledge snapshots
+(in the personal folder's `.trash`). `list` (the default) shows each entry with its id, what it is, its size, when it
+was moved there, who asked for it (`gui`, `cli`, or an AI app such as `mcp:laptop`), its reminder date and where it
+came from. Nothing leaves the trash by itself: after `trash_retention_days` (default 14; an AI cannot change it) it
+only reminds you.
+
+| Command | Meaning |
+|---|---|
+| `restore ID...` | Puts entries back where they were; when that place is taken, next to it as `<name>-restored-<time>`. Never through a link. |
+| `empty ID...` | Lists exactly these entries and deletes them for good after you confirm at a terminal (default no). |
+| `empty --all` / `--due` | Lists every entry, or those past their reminder date, with a number; nothing is picked. You type the numbers, then confirm exactly those. |
+
+No tool and no AI app empties the trash. The GUI shows the same under **File > Trash...**.
+
+```bash
+llm-cli trash
+llm-cli trash restore tr_0123456789abcdef
+llm-cli trash empty --due
 ```
 
 ---

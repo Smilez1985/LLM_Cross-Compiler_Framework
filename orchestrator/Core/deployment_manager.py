@@ -105,7 +105,9 @@ def _primary_name(info: Dict[str, Any]) -> Optional[str]:
 def list_builds(output_dir: Path) -> List[Dict[str, Any]]:
     """Finished builds below output_dir, found through their build manifest (newest first).
     Symlinked subfolders are followed (output trees moved to another disk), loops are skipped.
-    The build engine's staging folders are skipped: a build is staged there until it has completed."""
+    The build engine's staging folders are skipped: a build is staged there until it has completed. So is the output
+    folder's trash: a built model moved there is no build any more until the person restores it."""
+    from orchestrator.Core.trash import TRASH_FOLDER
     builds, seen = [], set()
     for root, dirs, files in os.walk(output_dir, followlinks=True):
         real = os.path.realpath(root)
@@ -113,7 +115,7 @@ def list_builds(output_dir: Path) -> List[Dict[str, Any]]:
             dirs[:] = []
             continue
         seen.add(real)
-        dirs[:] = [d for d in dirs if not is_staging_folder(d)]
+        dirs[:] = [d for d in dirs if not is_staging_folder(d) and d != TRASH_FOLDER]
         if BUILD_MANIFEST not in files:
             continue
         try:
