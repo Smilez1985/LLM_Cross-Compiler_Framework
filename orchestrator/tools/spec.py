@@ -147,6 +147,19 @@ def warning_spec(code: str) -> Any:
     return warnings.get(code) if isinstance(warnings, Mapping) else None
 
 
+def person_words(code: str, numbers: Mapping[str, Any], lang: Optional[str] = None) -> Dict[str, str]:
+    """The plain words the person reads for closed words in a warning's numbers (the catalogue's person_words: what
+    could not be checked, which vendor list), {} without a catalogue or such words: never a code in a person's text."""
+    catalog = _catalog()
+    hook = getattr(catalog, "person_words", None) if catalog is not None else None
+    if not callable(hook):
+        return {}
+    try:
+        return {str(k): str(v) for k, v in dict(hook(code, numbers, lang)).items()}
+    except (KeyError, IndexError, TypeError, ValueError):
+        return {}
+
+
 def volatile_numbers(tool: str) -> Tuple[str, ...]:
     """The number keys of a tool that are shown but never part of its decision digest (free space now, exact bytes
     still to download). Only the catalogue names them: a number it does not know is stable, so it can only ever make a
@@ -196,7 +209,8 @@ class CallWarning:
         from orchestrator.utils.localization import ui_text
         key = f"warning.{self.code}"
         try:
-            text = ui_text(key, lang, **{**dict(names or {}), **dict(self.numbers)})
+            text = ui_text(key, lang, **{**dict(names or {}), **dict(self.numbers),
+                                         **person_words(self.code, self.numbers, lang)})
         except (KeyError, IndexError, ValueError):
             text = key
         return self.ai_text() if text == key else text
@@ -276,7 +290,8 @@ class CallFacts:
             "scope": dict(self.scope),
             "facts": [[f.label, f.value, f.source] for f in self.facts if not f.volatile],
             "numbers": {k: v for k, v in self.numbers.items() if k not in volatile},
-            "consequence_template": self.consequence_template,
+            # without a template the look-up never said which part of its consequence is volatile: all of it counts
+            "consequence_template": self.consequence_template or self.consequence,
             "deletion": self.deletion.sha256() if self.deletion is not None else None,
         }
         return _sha256(_canonical(data))

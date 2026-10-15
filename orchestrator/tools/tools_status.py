@@ -735,7 +735,7 @@ def settings_schema(framework, key: str):
 def settings_facts(framework, inp: UpdateSettingsIn):
     """The question's facts (old and new value of every change) and what the handler applies; refuses before the
     question a value that is not one, a schema violation and every loosening of a tighten-only setting."""
-    from orchestrator.tools.registry import ToolError
+    from orchestrator.tools.facts_catalog import blocked
     from orchestrator.tools.spec import CallFacts, Fact
     seen, changes, facts, problems = set(), [], [], []
     for change in inp.changes:
@@ -755,20 +755,21 @@ def settings_facts(framework, inp: UpdateSettingsIn):
             continue
         loosens = direction_problem(key, old, new)
         if loosens:
-            raise ToolError(f"Refused: {loosens}.", code="permission_denied",
-                            next="Tell the person; only they can change it in that direction, in the GUI or CLI.",
-                            field="changes")
+            raise blocked("setting_loosens", f"Refused: {loosens}.",
+                          "Tell the person; only they can change it in that direction, in the GUI or CLI.",
+                          field="changes")
         changes.append({"key": key, "old": shown(old), "new": new})
         facts.append(Fact(key, f"{shown(old)} -> {shown(new)}"
                           + (" (tightens what an AI may do)" if key in TIGHTEN_ONLY else "")))
     if problems:
-        raise ToolError("Invalid settings: " + "; ".join(problems) + ".", code="invalid_value",
-                        next="Call get_settings for the current values and what each setting takes, then call "
-                             "update_settings again.", field="changes")
+        raise blocked("setting_invalid", "Invalid settings: " + "; ".join(problems) + ".",
+                      "Call get_settings for the current values and what each setting takes, then call "
+                      "update_settings again.", field="changes")
     keys = ", ".join(c["key"] for c in changes)
     consequence = (f"Changes {len(changes)} framework setting{'s' if len(changes) != 1 else ''} ({keys}) for every "
                    "AI and for your own builds, and saves them in your config.yml.")
-    return CallFacts(consequence=consequence, facts=tuple(facts), bound={"changes": changes})
+    return CallFacts(consequence=consequence, facts=tuple(facts), bound={"changes": changes},
+                     numbers={"changes": len(changes)}, consequence_template=consequence)
 
 
 def tighten_only(inp, _who=None) -> Any:

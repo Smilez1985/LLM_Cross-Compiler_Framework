@@ -9,7 +9,8 @@ Devices and deploy for AI callers (MCP design 2.7, work package T8, decision 2),
   checked for twice the model's size first, the package is written under a temporary name and gets its id when
   complete. Docker images go into a package only when each is pinned by its digest or was built on this computer.
 - deploy_to_device: a package copied to a trusted, paired device and its framework-generated deploy.sh run there, as
-  a job. Two-phase: the question shows the device by its label with user, address and host key fingerprint, the
+  a job. Two-phase: the question shows the device by its label (its login, account and address, only in the person's
+  own window: device account names and device paths never reach an AI, study 6.2 D0) and host key fingerprint, the
   package's sha256 and the trust of the target it was built for; before that the device's host key is read (a key
   read, no login) and must be the one the person trusted. The deploy then refuses when the package's hash or the
   device's key differs from what was shown. Always asked (max decision ask), never covered by a standing approval;
@@ -27,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.tools.facts_catalog import blocked, gb_number, size_class, warn, with_blocker
 from orchestrator.tools.job_audit import audited_job
 from orchestrator.tools.output import ToolOutput, count, fact
 from orchestrator.tools.policy import Decision, ToolTier
@@ -83,7 +85,9 @@ class DeviceOut(BaseModel):
     label: str = Field(description="The name the person gave the device")
     host: str
     port: int
-    user: str
+    # D0: the account the framework logs in with is never handed to an AI; the person's own window shows it
+    user: str = Field(default="device account", description="Always 'device account': the account's name stays with "
+                                                            "the person")
     key_type: str
     fingerprint: str = Field(description="SHA256 fingerprint of the host key the person confirmed")
     paired: bool = Field(description="The framework's own SSH key works there (no password needed)")
@@ -156,9 +160,12 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         try:
             _aid, label, info = service.artifact_entry(aid)
         except Exception as e:  # noqa: BLE001 - BuildServiceError: unknown id with the next step
-            raise ToolError(str(e), code=getattr(e, "code", "unknown_id"),
-                            next=getattr(e, "next", "") or "Call list_artifacts for the ids you can use.",
-                            field="artifact_id") from None
+            error = ToolError(str(e), code=getattr(e, "code", "unknown_id"),
+                              next=getattr(e, "next", "") or "Call list_artifacts for the ids you can use.",
+                              field="artifact_id")
+            if error.code == "unknown_id":
+                with_blocker(error, "artifact_unknown")
+            raise error from None
         return label, info
 
     def packages() -> Dict[str, Path]:
@@ -225,14 +232,20 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         return device
 
     def device_problem(device, store) -> str:
+        return device_blocker(device, store)[1]
+
+    def device_blocker(device, store):
+        """(blocker code, problem in words) of a device that cannot be used now; ("", "") when it can."""
         if not device.paired:
-            return "not paired: the framework's own SSH key is not installed there yet"
+            return "device_not_trusted", "not paired: the framework's own SSH key is not installed there yet"
         status = store.key_status(device)
         if status == "unknown":
-            return "its host key is no longer in the framework's known_hosts: the person must trust it again"
+            return "host_key_unknown", ("its host key is no longer in the framework's known_hosts: the person must "
+                                        "trust it again")
         if status == "changed":
-            return "the framework's known_hosts holds another host key for its address: the person must check it"
-        return ""
+            return "host_key_changed", ("the framework's known_hosts holds another host key for its address: the "
+                                        "person must check it")
+        return "", ""
 
     def trust_of(target: Optional[str]) -> str:
         if not target:
@@ -254,7 +267,7 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         for d in store.list():
             problem = device_problem(d, store)
             seen = last.get(d.device_id) or {}
-            rows.append(DeviceOut(device_id=d.device_id, label=d.label, host=d.host, port=d.port, user=d.user,
+            rows.append(DeviceOut(device_id=d.device_id, label=d.label, host=d.host, port=d.port,
                                   key_type=d.key_type, fingerprint=d.fingerprint, paired=d.paired,
                                   usable=not problem, problem=problem, trusted_via=d.trusted_via,
                                   last_deploy=str(seen["at"]) if seen.get("at") else None,
@@ -294,13 +307,12 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         needed = 2 * size  # the copy in a temporary folder and the zip (design 2.7)
         disk = disk_check(output_dir(), needed)
         if not disk["fits"]:
-            raise ToolError(f"Not enough disk space for the package: {_size(needed)} needed (twice the model), "
-                            f"{_size(disk['free'])} free, {_size(disk['reserve'])} kept free as a reserve.",
-                            code="insufficient_resources",
-                            next="Tell the person how much space is needed; they can free disk space in the output "
-                                 "folder.")
+            raise blocked("disk_full", f"Not enough disk space for the package: {_size(needed)} needed (twice the "
+                          f"model), {_size(disk['free'])} free, {_size(disk['reserve'])} kept free as a reserve.",
+                          "Tell the person how much space is needed; they can free disk space in the output folder.")
         facts = [Fact("Built model", label), Fact("Device profile", profile),
-                 Fact("Disk", f"{_size(disk['free'])} free on the output folder's disk, about {_size(needed)} needed")]
+                 Fact("Disk", f"{_size(disk['free'])} free on the output folder's disk, about {_size(needed)} needed",
+                      volatile=True)]
         if inp.include_docker_images:
             config = getattr(framework, "config", None)
             get = config.get if config is not None else (lambda k, d=None: d)
@@ -312,17 +324,21 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             for image in images:
                 problem = image_problem(image, client)
                 if problem:
-                    raise ToolError(problem[0].upper() + problem[1:] + ".", code="not_supported",
-                                    field="include_docker_images",
-                                    next="Package without Docker images, or ask the person to set "
-                                         "image_inference_runtime to an image@sha256:<digest> reference.")
+                    raise blocked("image_problem", problem[0].upper() + problem[1:] + ".",
+                                  "Package without Docker images, or ask the person to set image_inference_runtime "
+                                  "to an image@sha256:<digest> reference.", field="include_docker_images")
             facts.append(Fact("Docker images", ", ".join(images) + " (pinned by digest or built on this computer)"))
         consequence = (f"Packages the built model {label} ({_size(size)}) for the device profile {profile} into a "
                        "deployment package in the output folder" + (", with its Docker images" if
                                                                      inp.include_docker_images else "") + ".")
         bound = {"artifact_id": inp.artifact_id, "profile": profile, "docker": bool(inp.include_docker_images),
                  "size": size}
-        return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound)
+        warnings = ((warn("disk_tight", free_after_gb=gb_number(disk.get("after")),
+                          reserve_gb=gb_number(disk["reserve"])),) if disk.get("tight") else ())
+        return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, warnings=warnings,
+                         numbers={"size_class": size_class(int(size)), "needed_bytes": int(needed),
+                                  "free_after_bytes": int(disk.get("after", 0)), "reserve_bytes": int(disk["reserve"])},
+                         scope={"size_bytes": int(size)}, consequence_template=consequence)
 
     def running(kind: str, ctx: ToolContext) -> int:
         return sum(1 for j in jobs.list(ctx.owner) if j.kind == kind and not j.finished)
@@ -408,32 +424,32 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             key = ssh_trust.fetch_host_key(device.host, device.port)
             status = ssh_trust.check_host_key(devices().state_dir, device.host, device.port, key)
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
-            raise ToolError(f"The device {device.label} cannot be reached to read its host key "
-                            f"({e.__class__.__name__}).", code="hardware_unavailable", field="device_id",
-                            next="Ask the person whether the device is switched on and on the network.") from None
+            raise blocked("device_unreachable", f"The device {device.label} cannot be reached to read its host key "
+                          f"({e.__class__.__name__}).",
+                          "Ask the person whether the device is switched on and on the network.",
+                          field="device_id") from None
         fp = ssh_trust.fingerprint(key)
         if status == "unknown":
-            raise ToolError(f"The device {device.label} presents a host key that is not trusted ({fp}); nothing was "
-                            "deployed.", code="needs_person", field="device_id", next=PAIR_NEXT)
+            raise blocked("host_key_unknown", f"The device {device.label} presents a host key that is not trusted "
+                          f"({fp}); nothing was deployed.", PAIR_NEXT, field="device_id")
         if status == "changed" or fp != device.fingerprint:
-            raise ToolError(f"The host key of {device.label} has CHANGED ({fp}, trusted was {device.fingerprint}). "
-                            "This can be a reinstalled device, or someone in between; nothing was deployed.",
-                            code="needs_person", field="device_id",
-                            next="Tell the person: they must check the device and trust it again in the GUI or the "
-                                 "CLI. No tool can accept a changed key.")
+            raise blocked("host_key_changed", f"The host key of {device.label} has CHANGED ({fp}, trusted was "
+                          f"{device.fingerprint}). This can be a reinstalled device, or someone in between; nothing "
+                          "was deployed.", "Tell the person: they must check the device and trust it again in the "
+                          "GUI or the CLI. No tool can accept a changed key.", field="device_id")
         return fp
 
     def deploy_facts(inp: DeployIn, ctx: ToolContext) -> CallFacts:
         store = devices()
         device = device_record(inp.device_id)
-        problem = device_problem(device, store)
+        code, problem = device_blocker(device, store)
         if problem:
-            raise ToolError(f"The device {device.label} cannot be deployed to: {problem}.", code="needs_person",
-                            field="device_id", next=PAIR_NEXT)
+            raise blocked(code, f"The device {device.label} cannot be deployed to: {problem}.", PAIR_NEXT,
+                          field="device_id")
         jid = busy(device.device_id)
         if jid:
-            raise ToolError(f"A deploy to {device.label} is running ({jid}); one deploy per device at a time.",
-                            code="limit_reached", next=f"Wait for job {jid} with get_job_status.")
+            raise blocked("device_busy", f"A deploy to {device.label} is running ({jid}); one deploy per device at a "
+                          "time.", f"Wait for job {jid} with get_job_status.")
         path = package_path(inp.package_id)
         fp = read_host_key(device)
         digest = package_sha256(path)
@@ -442,20 +458,27 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         built = ", ".join(str(manifest[k]) for k in ("model", "format", "quantization", "board")
                           if manifest.get(k)) or "no build manifest in the package"
         src = "from the build manifest, not checked"
-        facts = (Fact("Device", f"{device.label}: {device.user}@{device.address}"),
+        # D0: the device by its label for everyone; its login (account and address) only in the person's window
+        facts = (Fact("Device", device.label),
+                 Fact("Login", f"{device.user}@{device.address}", person_only=True),
                  Fact("Host key", f"{device.key_type} {fp}, the key you trusted ({device.trusted_via}, "
                                   f"{device.trusted_at}); read from the device just now"),
                  Fact("Package", f"{path.name}, {_size(path.stat().st_size)}, sha256 {digest}"),
                  Fact("Built model", built, src),
                  Fact("Target", f"{target or 'unknown'}: trust {trust_of(target)}"),
                  Fact("On the device", "deploy.sh, written by the framework: checks the package's checksums, then "
-                                       "installs the model into ~/models (or loads the packed Docker images and starts "
-                                       "their containers); it runs as the device user"))
-        consequence = (f"Copies the package {path.name} to the device {device.label} ({device.user}@{device.address}) "
-                       "and runs its deploy.sh there.")
+                                       "installs the model into the models folder of the device account (or loads the "
+                                       "packed Docker images and starts their containers); it runs as the device "
+                                       "account"))
+        consequence = f"Copies the package {path.name} to the device {device.label} and runs its deploy.sh there."
         bound = {"package_id": inp.package_id, "package": path.name, "sha256": digest, "device_id": device.device_id,
                  "fingerprint": fp, "host": device.host, "port": device.port, "user": device.user}
-        return CallFacts(consequence=consequence, facts=facts, bound=bound, cap=Decision.ASK.value)
+        return CallFacts(consequence=consequence, facts=facts, bound=bound, cap=Decision.ASK.value,
+                         scope={"device_id": device.device_id}, consequence_template=consequence,
+                         names={"device": device.label},
+                         # what a decision binds to (design 4.4): the device, its host key and the package's hash
+                         digest_keys=("package_id", "package", "sha256", "device_id", "fingerprint", "host", "port",
+                                      "user"))
 
     def deploy_to_device(inp: DeployIn, ctx: ToolContext) -> JobStartedOut:
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
@@ -495,11 +518,23 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         def work(handle) -> Dict[str, Any]:
             from orchestrator.Core.job_service import EXTERNAL_KEY, JobCancelled
             handle.progress(None, None, f"deploying to {device.label}")
+            from orchestrator.tools.tools_runtime import device_text
+            users = [device.user, bound["user"]]
             try:
                 result = manager().deploy_package(path, bound["host"], bound["user"], port=int(bound["port"]),
                                                   password=None, pair=False, expect_fingerprint=bound["fingerprint"],
                                                   expect_sha256=bound["sha256"], on_client=on_client,
                                                   cancelled=lambda: stop.is_set() or handle.cancelled)
+            except JobCancelled:
+                raise
+            except ValueError as e:
+                # a refusal meant for the AI: the device's words, its account and its paths never reach it (D0). Any
+                # other exception is left to the job service, which never hands an unexpected error's text to an AI.
+                err = ValueError(device_text(str(e), users, {str(path.parent): "output"}))
+                err.code = getattr(e, "code", "failed")  # type: ignore[attr-defined]
+                err.external_text = [device_text(line, users, {str(path.parent): "output"})  # type: ignore
+                                     for line in getattr(e, "external_text", None) or []]
+                raise err from None
             finally:
                 with active_lock:
                     if active.get(device.device_id) == handle.job.job_id:
@@ -509,9 +544,11 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                 raise JobCancelled()
             out = {"success": result.success, "exit_status": result.exit_status,
                    "device_state": result.device_state, "device_id": device.device_id,
-                   # the framework's reason (the device's own words are in the output lines), without host paths
-                   "reason": hide_paths(result.reason, {str(path.parent): "the output folder"})[:500]
-                   if result.reason else "", EXTERNAL_KEY: list(result.output)}
+                   # the framework's reason (the device's own words are in the output lines), without host paths, the
+                   # device account's name or its paths (D0), also on success
+                   "reason": device_text(hide_paths(result.reason, {str(path.parent): "the output folder"}), users,
+                                         {str(path.parent): "output"})[:500] if result.reason else "",
+                   EXTERNAL_KEY: [device_text(line, users, {str(path.parent): "output"}) for line in result.output]}
             try:
                 devices().note_deploy(device.device_id, result.success, path.name)
             except Exception as e:  # noqa: BLE001 - the deploy happened; only the device list's last deploy is missing
@@ -566,9 +603,10 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
     # --- speaking names for the person (questions only) ---
 
     def device_name(value) -> Optional[str]:
+        """The device's label (a question for a client's form may reach an AI: never its login, D0)."""
         try:
             d = devices().get(str(value))
-            return f"{d.label} ({d.user}@{d.address})" if d else None
+            return d.label if d else None
         except Exception:  # noqa: BLE001
             return None
 
@@ -589,8 +627,9 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
     specs = [
         ToolSpec("list_devices", "List trusted devices",
                  "Devices the person trusted and paired in the GUI or the CLI, with the label they gave, address, "
-                 "user, host key fingerprint, whether the device is usable for deploy_to_device, and the last deploy. "
-                 "You cannot trust or pair a device yourself.",
+                 "host key fingerprint, whether the device is usable for deploy_to_device, and the last deploy (the "
+                 "account the framework logs in with is shown as 'device account'). You cannot trust or pair a device "
+                 "yourself.",
                  ToolTier.READ, NoInput, DevicesOut, list_devices, idempotent=True, takes_context=True,
                  summary=lambda o: count(len(o.devices), "trusted device", "trusted devices") + "."),
         ToolSpec("create_deploy_package", "Create a deployment package",

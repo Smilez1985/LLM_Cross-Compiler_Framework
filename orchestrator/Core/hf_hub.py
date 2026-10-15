@@ -50,11 +50,12 @@ OFFLINE_NEXT = "Offline mode is on; only the person can switch it off (setting o
 
 class HubError(ValueError):
     """A refusal or failure meant for the person and the calling model, with a reason code and the next step. It
-    never names the token or a folder of this computer."""
+    never names the token or a folder of this computer. `blocker`: the facts catalogue's code of a hard fact that
+    refuses the call before any question (offline_mode, disk_full, ...), "" otherwise."""
 
-    def __init__(self, message: str, code: str = "failed", next: str = ""):
+    def __init__(self, message: str, code: str = "failed", next: str = "", blocker: str = ""):
         super().__init__(message)
-        self.code, self.next = code, next
+        self.code, self.next, self.blocker = code, next, blocker
 
 
 class DownloadStopped(DownloadError):
@@ -170,7 +171,8 @@ class HubClient:
 
     def check_online(self) -> None:
         if self.offline():
-            raise HubError("Hugging Face is not used in offline mode.", code="not_supported", next=OFFLINE_NEXT)
+            raise HubError("Hugging Face is not used in offline mode.", code="not_supported", next=OFFLINE_NEXT,
+                           blocker="offline_mode")
 
     def _failed(self, e: BaseException, what: str) -> HubError:
         try:
@@ -443,8 +445,11 @@ def disk_check(folder: Path, needed: int, ledger: Any = None) -> Dict[str, int]:
         with _RESERVED_LOCK:
             others = sum(_RESERVED.values())
     left = int(usage.free) - others - int(needed)
-    return {"free": int(usage.free), "reserve": reserve_bytes(int(usage.total)), "reserved": others,
-            "needed": int(needed), "fits": left >= reserve_bytes(int(usage.total)),
+    reserve = reserve_bytes(int(usage.total))
+    # `after`: what stays free after this and every reservation; `tight`: it fits, but with less than twice the
+    # reserve left (the same verdict as disk_plan.DiskCheck, a situation warning of the facts catalogue)
+    return {"free": int(usage.free), "reserve": reserve, "reserved": others,
+            "needed": int(needed), "fits": left >= reserve, "after": left, "tight": reserve <= left < 2 * reserve,
             "fits_standing": left >= standing_reserve_bytes(int(usage.total))}
 
 

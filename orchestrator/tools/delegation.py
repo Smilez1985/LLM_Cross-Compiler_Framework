@@ -61,4 +61,39 @@ DELEGATION_SCOPE: Dict[str, ToolScope] = {
 }
 
 
-__all__ = ["DELEGATION_ID_RE", "DELEGATION_SCOPE", "NEVER_DELEGATE", "ToolScope", "WHO", "delegation_id_ok"]
+def ai_view(facts: Any) -> Dict[str, Any]:
+    """What an AI gets of the facts behind a question (design 4.4, the AI projection; work package WP4): the consequence
+    as rendered, the warnings as code, kind, English text and (for situation warnings) the rule for answering, the
+    numbers the facts catalogue names for the tool, every fact except those only the person sees (a login with its
+    address, a full path), external facts wrapped as untrusted data, and the deletion plan by label, kind and size.
+    Never the bound values, never a person-only fact."""
+    from orchestrator.tools.facts_catalog import NUMBER_KEYS, WARNINGS
+    from orchestrator.utils.untrusted import wrap_untrusted
+    if facts is None:
+        return {}
+    tool = str(getattr(facts, "tool", "") or "")
+    stable, volatile = NUMBER_KEYS.get(tool, (frozenset(), frozenset()))
+    allowed = set(stable) | set(volatile)
+    lines = []
+    for fact in getattr(facts, "facts", ()) or ():
+        if getattr(fact, "person_only", False):
+            continue
+        value = wrap_untrusted(fact.value, fact.source) if fact.source else fact.value
+        lines.append({"label": fact.label, "value": value})
+    warnings = []
+    for w in getattr(facts, "warnings", ()) or ():
+        spec = WARNINGS.get(w.code)
+        row = {"code": w.code, "kind": w.kind, "ai_text": w.ai_text()}
+        if spec is not None and w.kind == "situation" and spec.ai_rule:
+            row["ai_rule"] = spec.ai_rule
+        warnings.append(row)
+    view: Dict[str, Any] = {"tool": tool, "consequence": facts.consequence, "warnings": warnings,
+                            "numbers": {k: v for k, v in (facts.numbers or {}).items() if k in allowed},
+                            "facts": lines}
+    plan = getattr(facts, "deletion", None)
+    if plan is not None:
+        view["deletion"] = plan.ai_view()
+    return view
+
+
+__all__ = ["DELEGATION_ID_RE", "DELEGATION_SCOPE", "NEVER_DELEGATE", "ToolScope", "WHO", "ai_view", "delegation_id_ok"]

@@ -36,6 +36,7 @@ from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_I
 from orchestrator.schemas.build import TargetOut
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
 from orchestrator.schemas.targets import TargetCapabilities
+from orchestrator.tools.facts_catalog import warn
 from orchestrator.tools.grants import tool_rule
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
 from orchestrator.tools.policy import Decision, ToolTier
@@ -498,7 +499,9 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
                                       "is untested and AI-generated."))
         bound = {"base_os": pinned_base, "image": pinned, "definition": definition_sha256(inp),
                  "probe_id": inp.probe_id or "", "probe_sha256": probe_sha}
-        return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, cap=Decision.ASK.value)
+        return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, cap=Decision.ASK.value,
+                         warnings=module_warnings(data, image), consequence_template=consequence,
+                         names={"target": inp.module_name})
 
     def create_target_module(inp: CreateModuleIn, ctx: ToolContext) -> CreateModuleOut:
         bound = ctx.facts.bound if ctx.facts is not None else {}
@@ -524,6 +527,11 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
             raise ToolError(str(e).replace(str(root.resolve()), "targets").replace(str(root), "targets"),
                             code="invalid_value", next="Fix the fields listed and call create_target_module again; "
                             "nothing was written.") from None
+        from orchestrator.Core.confirmed_builds import unattended
+        if unattended(ctx.confirm_channel):
+            # made without the person answering this question (a delegation): its first build is the person's to see
+            # once, bound to exactly this definition ([Q1]; build_plan.confirmation_state)
+            mark_created_under(folder, str(ctx.confirm_channel), bound["definition"])
         tm = targets_manager()
         try:
             tm.initialize()
@@ -622,6 +630,38 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         "text.", "text/plain", tool="get_hardware_probe",
         arguments=lambda params: {"probe_id": params.get("probe_id", "")}, completions={"probe_id": probe_ids}))
     return registry
+
+
+def module_warnings(data: Dict[str, Any], image: Any) -> tuple:
+    """The warnings before a new module (design 4.3): untested on the board (situation); a base image outside the
+    Docker Official Images or not pinned by digest, and every vendor list above its soft cap (security: only the
+    person overrides a soft cap)."""
+    from orchestrator.Core.build_plan import _registry_word
+    from orchestrator.Core.confirmed_builds import pinned
+    from orchestrator.Core.module_generator import SOFT_CAPS
+    found = [warn("untested_module")]
+    reference = str(getattr(image, "pinned", "") or "")
+    if not getattr(image, "official", False):
+        found.append(warn("base_image_unofficial", registry=_registry_word(reference or str(data.get("base_os")))))
+    if not pinned(reference):
+        found.append(warn("base_image_unpinned"))
+    for key, cap in SOFT_CAPS.items():
+        count_ = len(data.get(key) or [])
+        if count_ > cap:
+            found.append(warn("vendor_soft_cap_exceeded", what=key, count=count_, cap=cap))
+    return tuple(found)
+
+
+def mark_created_under(folder: Path, channel: str, definition: str) -> None:
+    """Records in a new module's target.yml that it was created without the person answering the question itself
+    (`created_under`: the standing approval or delegation) and its definition's sha256, so its first build asks the
+    person once (first_build_unconfirmed) and a module recreated under the same name asks again."""
+    import yaml
+    path = Path(folder) / "target.yml"
+    config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    config.setdefault("metadata", {}).update({"created_under": channel[:80], "definition_sha256": definition})
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 
 def record_module_saved(framework: Any, actor: str, data: Dict[str, Any], folder: Path, channel: str) -> None:
