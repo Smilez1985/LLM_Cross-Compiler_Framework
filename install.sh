@@ -215,13 +215,14 @@ setup_venv() {
     python3 -m venv .venv
     ./.venv/bin/pip install --upgrade pip > /dev/null || echo "⚠️ pip ließ sich nicht aktualisieren; weiter mit der vorhandenen Version."
 
+    # Genau die Versionen aus requirements.txt dieses Stands (uv export aus uv.lock); pip prüft jede Datei gegen
+    # ihren Hash. Ohne die Datei wird nichts ungeprüft nachinstalliert.
     echo "Installiere Abhängigkeiten..."
-    if [ -f requirements.txt ]; then
-        ./.venv/bin/pip install -r requirements.txt > /dev/null
-    else
-        echo "⚠️ requirements.txt nicht gefunden. Installiere Basis-Pakete."
-        ./.venv/bin/pip install pyyaml requests psutil > /dev/null
+    if [ ! -f requirements.txt ]; then
+        echo "requirements.txt fehlt in $INSTALL_DIR; ohne die festgelegten Versionen wird nichts installiert." >&2
+        exit 1
     fi
+    ./.venv/bin/pip install --require-hashes -r requirements.txt > /dev/null
 EOF
     then
         log_error "Die Python-Umgebung in $INSTALL_DIR/.venv ließ sich nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Proxy oder eigener Spiegel: sudo -E ./install.sh bzw. PIP_INDEX_URL."

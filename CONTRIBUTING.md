@@ -49,12 +49,14 @@ python -m orchestrator.cli --help      # command line
 python -m orchestrator.main            # GUI
 ```
 
-### Option B: Poetry 2
+### Option B: uv project environment
+
+Installs exactly the versions pinned in `uv.lock`:
 
 ```bash
-poetry install                         # runtime and dev dependencies plus the llm-cli and llm-gui commands
-poetry run llm-cli --help
-poetry run llm-gui
+uv sync                                # runtime and dev dependencies plus the llm-cli and llm-gui commands
+uv run llm-cli --help
+uv run llm-gui
 ```
 
 ### Keep your development setup apart from your real one
@@ -73,9 +75,11 @@ poetry run llm-gui
 
 ## 2. Dependencies
 
-- `pyproject.toml` declares the allowed versions, `poetry.lock` pins them (Poetry 2 lock file).
-- `requirements.txt` (runtime) and `requirements-dev.txt` (dev tools) are exports of the lock file with hashes.
-  The installers and the CI install from them. **Never edit them by hand.**
+- `pyproject.toml` declares the allowed versions (`[project]`, the dev tools in `[dependency-groups]`), `uv.lock`
+  pins them (the lock file of [uv](https://docs.astral.sh/uv/)).
+- `requirements.txt` (runtime) and `requirements-dev.txt` (dev tools) are exports of `uv.lock` with hashes. Their
+  first lines name the command that made them. The installers and the CI install from them. **Never edit them by
+  hand.**
 - `anthropic`, `openai`, `fastembed` and `mcp` are pinned to exact versions on purpose: LLM tooling is a
   supply-chain target (see the comments in `pyproject.toml`). If you change such a pin, explain why in the pull
   request.
@@ -83,26 +87,25 @@ poetry run llm-gui
 After adding, removing or updating a dependency:
 
 ```bash
-poetry lock                                                    # update poetry.lock
-poetry check --lock                                            # pyproject.toml and poetry.lock agree
-poetry export -f requirements.txt -o requirements.txt          # runtime packages
-poetry export -f requirements.txt --only dev -o requirements-dev.txt
+uv lock                                         # update uv.lock (other pins stay; one package: --upgrade-package NAME)
+uv lock --check                                 # pyproject.toml and uv.lock agree
+uv export --frozen --format requirements-txt --no-dev --no-emit-project -o requirements.txt
+uv export --frozen --format requirements-txt --only-group dev --no-emit-project -o requirements-dev.txt
 ```
 
-Poetry 2 needs the export plugin for this: `poetry self add poetry-plugin-export`. `poetry check --lock` may print
-warnings about deprecated `[tool.poetry]` fields; what matters is the exit code. Then run pip-audit
-([section 5](#5-lint-and-security-checks)) and the tests, and commit `pyproject.toml`, `poetry.lock` and both
-requirements files together.
+Then run pip-audit ([section 5](#5-lint-and-security-checks)) and the tests, and commit `pyproject.toml`, `uv.lock`
+and both requirements files together. The CI job "Lock files" runs the same commands and fails when a file differs.
 
-Dependabot opens weekly pull requests for Python packages, GitHub Actions and the target Dockerfiles. For Python
-updates, check that both requirements files still match `poetry.lock`; export them again if not.
+Dependabot opens weekly pull requests for Python packages (`pyproject.toml` and `uv.lock`), GitHub Actions and the
+target Dockerfiles. It changes only `uv.lock`: run the two export commands on its branch and push the requirements
+files too.
 
 ---
 
 ## 3. Running the tests
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest      # with Poetry: QT_QPA_PLATFORM=offscreen poetry run pytest
+QT_QPA_PLATFORM=offscreen python -m pytest      # in the uv project environment: QT_QPA_PLATFORM=offscreen uv run pytest
 ```
 
 Windows (PowerShell):
@@ -303,7 +306,7 @@ GitHub Actions are pinned by commit SHA with the version as a comment. Keep it t
 builder or the Makefile change, the CI builds the framework's image with `scripts/build_container_image.sh` (a local
 tag, never pushed), lints its Dockerfile and runs smoke tests. `make build`, `make up`, `make down`, `make doctor` and
 `make audit` work with it locally ([docs/Container_Setup.md](docs/Container_Setup.md)). No workflow, Makefile target,
-script or document pushes or pulls a framework image (`tests/test_container_setup.py`). `make test` (Poetry),
+script or document pushes or pulls a framework image (`tests/test_container_setup.py`). `make test` (uv),
 `make hooks` and `make secret-scan` are unchanged.
 
 ---

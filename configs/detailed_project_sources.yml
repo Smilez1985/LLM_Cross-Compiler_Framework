@@ -72,10 +72,10 @@ deployment_philosophy:
 # BUILD TOOLS (Security Pinned)
 # ============================================================================
 build_tools:
-  poetry_installer: 
-    url: "https://install.python-poetry.org"
-    sha256: "3b5842cd6318176812455429c6c109909d21b184579720f154506f6734828455"
-    description: "Python dependency management"
+  uv:
+    url: "https://github.com/astral-sh/uv"
+    docs_workflow: "https://docs.astral.sh/uv/"
+    description: "Python dependency lock (uv.lock) and the hash-pinned requirements export the installers use"
   
   cmake:
     url: "https://cmake.org/download/"

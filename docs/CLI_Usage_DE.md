@@ -42,7 +42,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 |---|---|
 | Linux-Installer (`install.sh`) | `cd /opt/llm-conversion-framework`, dann `.venv/bin/python -m orchestrator.cli ...` |
 | Windows-Installer (`install.bat`) | `cd /d "C:\Program Files\LLM-Conversion-Framework"`, dann `.venv\Scripts\python.exe -m orchestrator.cli ...` |
-| Entwicklungsumgebung (`poetry install`) | `llm-cli ...` |
+| Entwicklungsumgebung (`uv sync`) | `llm-cli ...` |
 
 `python -m orchestrator.cli` braucht den Installationsordner im Suchpfad von Python. Ruf es entweder in diesem
 Ordner auf oder setze `PYTHONPATH`. Unter Linux funktioniert dieser Alias aus jedem Ordner:

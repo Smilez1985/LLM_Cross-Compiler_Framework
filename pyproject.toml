@@ -1,75 +1,80 @@
-[tool.poetry]
+[project]
 name = "llm-conversion-framework"
 version = "3.0.0"
 description = "Convert and quantize language models for edge hardware (GUI, CLI and MCP server)"
-authors = ["Smilez1985"]
+authors = [{ name = "Smilez1985" }]
 readme = "README.md"
-packages = [{include = "orchestrator"}]
-
-[tool.poetry.dependencies]
 # 3.10 is end-of-life (2026-10); lower bounds below exclude all versions with known advisories.
-python = ">=3.11,<3.15"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    # --- 1. Core & Installer ---
+    "requests>=2.34,<3",
+    "psutil>=7.0,<8",
+    "pyyaml>=6.0.3,<7",
+    "packaging>=24.2",
 
-# --- 1. Core & Installer ---
-requests = ">=2.34,<3"
-psutil = ">=7.0,<8"
-pyyaml = "^6.0.3"
-packaging = ">=24.2"
+    # --- 2. Docker Orchestration ---
+    "docker>=7.1.0,<8",
 
-# --- 2. Docker Orchestration ---
-docker = "^7.1.0"
+    # --- 3. GUI & CLI ---
+    # Only QtCore/QtGui/QtWidgets are used; the essentials wheel skips WebEngine, Pdf and the add-ons.
+    "pyside6-essentials>=6.11,<6.13",
+    "click>=8.3,<9",
+    "rich>=13.9,<16",
 
-# --- 3. GUI & CLI ---
-# Only QtCore/QtGui/QtWidgets are used; the essentials wheel skips WebEngine, Pdf and the add-ons.
-pyside6-essentials = ">=6.11,<6.13"
-click = "^8.3"
-rich = ">=13.9,<16"
+    # --- 4. Security ---
+    "cryptography>=49,<51",
+    "keyring>=25.6",
+    # Cross-process lock of the credential vault (GUI, CLI and MCP server write it); already installed through
+    # huggingface-hub, now a direct dependency.
+    "filelock>=3.20,<5",
+    # Privately shared community packs use the age format: rage (the Rust implementation of age) through its binding.
+    # Exact pin: it encrypts and decrypts user data.
+    "pyrage==1.4.0",
 
-# --- 4. Security ---
-cryptography = ">=49,<51"
-keyring = ">=25.6"
-# Cross-process lock of the credential vault (GUI, CLI and MCP server write it); already installed through
-# huggingface-hub, now a direct dependency.
-filelock = ">=3.20,<5"
-# Privately shared community packs use the age format: rage (the Rust implementation of age) through its binding.
-# Exact pin: it encrypts and decrypts user data.
-pyrage = "1.4.0"
+    # --- 5. AI Agent & RAG (host side) ---
+    # Ditto's provider layer uses the official SDKs only (OpenAI-compatible servers go through openai).
+    # Exact pins: LLM tooling is a supply-chain target.
+    "anthropic==1.13.0",
+    "openai==3.28.0",
+    # Local embeddings (ONNX on the CPU) and the embedded vector store of the knowledge base.
+    "fastembed==0.8.1",
+    "qdrant-client>=1.19,<2",
+    "huggingface-hub>=1.31,<3",
 
-# --- 5. AI Agent & RAG (host side) ---
-# Ditto's provider layer uses the official SDKs only (OpenAI-compatible servers go through openai).
-# Exact pins: LLM tooling is a supply-chain target.
-anthropic = "1.13.0"
-openai = "3.28.0"
-# Local embeddings (ONNX on the CPU) and the embedded vector store of the knowledge base.
-fastembed = "0.8.1"
-qdrant-client = "^1.19"
-huggingface-hub = ">=1.31,<3"
+    # Schemas for tool inputs/outputs, forced JSON answers and the MCP server.
+    "pydantic>=2.12,<3",
+    # Model Context Protocol server (spec 2026-07-28). Exact pin: LLM tooling is a supply-chain target.
+    "mcp==2.3.0",
 
-# Schemas for tool inputs/outputs, forced JSON answers and the MCP server.
-pydantic = ">=2.12,<3"
-# Model Context Protocol server (spec 2026-07-28). Exact pin: LLM tooling is a supply-chain target.
-mcp = "2.3.0"
+    # --- 6. Crawler & Ingestion ---
+    "beautifulsoup4>=4.14,<5",
+    "pypdf>=6.19,<7",
+    "langdetect>=1.0.9,<2",
 
-# --- 6. Crawler & Ingestion ---
-beautifulsoup4 = "^4.14"
-pypdf = ">=6.19,<7"
-langdetect = "^1.0.9"
+    # --- 7. Deployment (SSH) ---
+    "paramiko>=3.5.1,<6",
+]
 
-# --- 7. Deployment (SSH) ---
-paramiko = ">=3.5.1,<6"
-
-[tool.poetry.group.dev.dependencies]
-pytest = ">=9.0.3"
-ruff = ">=0.17"
-bandit = ">=1.9"
-pip-audit = ">=2.10"
-shellcheck-py = ">=0.11"
-actionlint-py = ">=1.7.12"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.scripts]
+[project.scripts]
 llm-gui = "orchestrator.main:main"
 llm-cli = "orchestrator.cli:cli"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "ruff>=0.17",
+    "bandit>=1.9",
+    "pip-audit>=2.10",
+    "shellcheck-py>=0.11",
+    "actionlint-py>=1.7.12",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# The package lives at the top of the repository (orchestrator/), not below src/.
+module-name = "orchestrator"
+module-root = ""

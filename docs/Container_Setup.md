@@ -210,4 +210,3 @@ volume first (a target of your own as a pack:
 | [`Docker Setup/Dockerfile.dockerignore`](../Docker%20Setup/Dockerfile.dockerignore) | Keeps large and personal folders out of a build context made from the repository folder itself |
 | [`Docker Setup/docker-compose.yml`](../Docker%20Setup/docker-compose.yml) | The services `framework` and `gui` (profile `gui`), the volume `lcf-data`, `pull_policy: never` |
 | [`Makefile`](../Makefile) | `make build`, `build-gui`, `up`, `gui`, `down`, `kept-files`, `doctor`, `shell`, `clean`, `audit` (Trivy scans an archive of the image; the scanner never gets the Docker socket) |
-| `Docker Setup/pyproject.toml` | An old copy of the project file (version 1.6.0) that nothing uses; the project file is [`pyproject.toml`](../pyproject.toml) at the top of the repository |

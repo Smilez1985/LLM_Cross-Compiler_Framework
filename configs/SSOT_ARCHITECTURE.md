@@ -308,7 +308,7 @@ moment.
 |---|---|---|
 | What a target can build | `targets/<id>/target.yml`, block `capabilities:` | `orchestrator/schemas/targets.py`; `tests/test_foundation.py`, `tests/test_review_capabilities_paths.py` |
 | Framework version | `orchestrator/__init__.py` (`__version__`) | `tests/test_versioning.py` |
-| Python dependencies | `pyproject.toml`, pinned in `poetry.lock`, exported to `requirements*.txt` | `poetry check --lock`; pip-audit in the CI |
+| Python dependencies | `pyproject.toml`, pinned in `uv.lock`, exported to `requirements*.txt` | `uv lock --check` and the export comparison (CI job "Lock files"); pip-audit in the CI |
 | Settings and their defaults | `ConfigSchema` entries in `orchestrator/Core/config_manager.py`; your values in `config.yml` | schema validation at start |
 | Tools for AI clients and Ditto | `orchestrator/tools/framework_tools.py` | `tests/test_foundation.py`, `tests/test_mcp_server.py` |
 | Ditto's evaluation cases | `evals/ditto/cases.yml` | `tests/test_ditto_eval.py` |

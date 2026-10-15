@@ -756,6 +756,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   saw are kept in `gui_state.json` in the per-user folder (never in QSettings); a damaged file gives the defaults.
 
 ### Changed
+- **uv replaces Poetry for the dependency lock** (sixth round, decision 14): `pyproject.toml` uses the standard
+  `[project]` table (the dev tools in `[dependency-groups]`), `uv.lock` replaces `poetry.lock`, and `requirements.txt`
+  and `requirements-dev.txt` are hash-pinned `uv export` outputs whose first lines name the command. No version
+  changed: all 121 pins are those of the former `poetry.lock`; the exports only leave out the hashes of wheels for
+  Python versions outside 3.11 to 3.14. The installers keep installing the hash-pinned `requirements.txt` of the
+  checked-out framework and now insist on the hashes (`--require-hashes`, no fallback to unpinned packages);
+  `install.bat` stops when pip fails instead of going on. Dependabot updates `uv.lock`, the new CI job "Lock files"
+  checks that `uv.lock` and both exports match, and `make test` and the development setup use uv (`uv sync`).
 - **Questions show a short summary and the warning classes** (delegation design 4.5, LAY-L2): a question in the
   framework's own window (Ditto's dialog, the CLI prompt, the approval window) starts, after its first line, with 3 to 6
   lines in the person's language (English or German): what happens with speaking names, how much it downloads and how
@@ -987,6 +995,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and prints a warning. `--optimization` stays; its help now says that the Rockchip target ignores it.
 
 ### Removed
+- The stale copy `Docker Setup/pyproject.toml` (version 1.6.0, read by nothing): the container image is built from
+  the repository's own `pyproject.toml` and `requirements.txt`.
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
 - The unused setting `input_history` (the input history is personal and lives in the per-user state directory,

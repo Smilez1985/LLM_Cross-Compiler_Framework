@@ -1,6 +1,8 @@
 version: 2
 updates:
-  - package-ecosystem: pip
+  # pyproject.toml and uv.lock. Dependabot changes the lock only: export requirements.txt and requirements-dev.txt
+  # again on its branch (CONTRIBUTING.md, section 2); the CI job "Lock files" fails until they match uv.lock.
+  - package-ecosystem: uv
     directory: "/"
     schedule:
       interval: weekly

@@ -315,7 +315,7 @@ derzeit keine Wirkung auf Builds.
 |---|---|---|
 | Was ein Target bauen kann | `targets/<ID>/target.yml`, Block `capabilities:` | `orchestrator/schemas/targets.py`; `tests/test_foundation.py`, `tests/test_review_capabilities_paths.py` |
 | Version des Frameworks | `orchestrator/__init__.py` (`__version__`) | `tests/test_versioning.py` |
-| Python-Abhängigkeiten | `pyproject.toml`, fixiert in `poetry.lock`, exportiert nach `requirements*.txt` | `poetry check --lock`; pip-audit in der CI |
+| Python-Abhängigkeiten | `pyproject.toml`, fixiert in `uv.lock`, exportiert nach `requirements*.txt` | `uv lock --check` und der Vergleich der Exporte (CI-Job "Lock files"); pip-audit in der CI |
 | Einstellungen und ihre Vorgaben | Einträge `ConfigSchema` in `orchestrator/Core/config_manager.py`; deine Werte in `config.yml` | Schemaprüfung beim Start |
 | Tools für KI-Clients und Ditto | `orchestrator/tools/framework_tools.py` | `tests/test_foundation.py`, `tests/test_mcp_server.py` |
 | Dittos Evaluationsfälle | `evals/ditto/cases.yml` | `tests/test_ditto_eval.py` |
