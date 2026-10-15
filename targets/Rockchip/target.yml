@@ -72,8 +72,11 @@ supported_boards:
 
 # Docker configuration
 docker:
+  # A local image name: the builder builds the image on this computer (each build tagged
+  # llm-framework/rockchip:<build id>); it is never pushed or pulled.
   image_name: "llm-framework/rockchip"
-  registry: "ghcr.io"
+  # No registry: the framework publishes no images. Nothing reads this field.
+  registry: ""
   build_context: "."
   dockerfile: "Dockerfile"
   
@@ -84,7 +87,7 @@ docker:
     BUILD_JOBS: "4"
     PYTHON_VERSION: "3.11"
     
-  # Image tags
+  # Local tag names only: nothing reads them, and no image is published under them.
   tags:
     - "latest"
     - "v1.0.0"

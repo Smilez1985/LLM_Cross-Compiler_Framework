@@ -256,7 +256,8 @@ Deployment copies a finished build to a board over SSH and installs the model fi
 - **Docker mode** (`--docker`, GUI option): also packs container images and starts them on the board. This mode
   is experimental and not verified in this version. An image goes into a package only when it is pinned by its
   digest (`image_inference_runtime: name@sha256:...`) or was built on this computer (it exists here and was never
-  pulled); an image named only by a tag, such as the default `...:latest`, is refused with the reason before anything
+  pulled); an image named only by a tag that was pulled, and the default `llm-framework/inference:local` (a local
+  name; no framework image is published) until you built it here, are refused with the reason before anything
   is copied. A digest-pinned image that is not here is pulled by its digest, never by a tag, and a failed export
   stops the package instead of leaving the image out. A digest-pinned image is packed under the local name
   `<repository>:lcf-<first 12 hex characters of the digest>` (`docker load` does not restore registry digests), and
