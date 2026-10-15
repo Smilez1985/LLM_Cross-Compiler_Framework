@@ -23,21 +23,24 @@ from PySide6.QtWidgets import (
     QMessageBox, QToolBar,
     QSizePolicy
 )
-from PySide6.QtGui import QAction, QPixmap
-from PySide6.QtCore import Qt, QSize, QTimer
+from PySide6.QtGui import QAction, QKeySequence, QPixmap
+from PySide6.QtCore import Qt, QSize, QTimer, Signal
 
 # Core Framework
 from orchestrator.Core.framework import FrameworkManager
 from orchestrator.Core.orchestrator import OrchestrationStatus
 from orchestrator.utils import input_history
 from orchestrator.utils.announce import SETTING as AUDIO_SETTING
+from orchestrator.utils.localization import current_language
 from orchestrator.utils.localization import get_instance as get_i18n
+from orchestrator.utils.localization import ui_text
 
 # GUI Components
 from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog, AIConfigurationDialog, ToolPermissionsDialog
 from orchestrator.gui.wizards import ModuleCreationWizard
 from orchestrator.gui.builder_tab import BuilderTab
 from orchestrator.gui.chat_window import ChatWindow
+from orchestrator.gui.plain import ask, button_text, notify, one_line, plain_box, plain_tooltip
 from orchestrator.gui.sign_in import STORAGE_CHOICE_CODES, UserConfigSnapshot, choose_storage_at_start
 from orchestrator.gui.deployment_window import DeploymentWindow
 
@@ -46,12 +49,16 @@ from orchestrator.gui.deployment_window import DeploymentWindow
 # ============================================================================
 
 class DittoAvatar(QLabel):
-    """Displays the AI state using sprite assets."""
+    """Displays the AI state using sprite assets; a click shows the chat panel."""
+    clicked = Signal()
+
     def __init__(self, asset_dir: Path):
         super().__init__()
         self.asset_dir = asset_dir
+        self.setTextFormat(Qt.PlainText)
         self.setFixedSize(64, 64)
         self.setScaledContents(True)
+        self.setCursor(Qt.PointingHandCursor)
         
         # Load Sprites
         self.sprites = {
@@ -69,6 +76,26 @@ class DittoAvatar(QLabel):
             self.setPixmap(QPixmap(path))
         else:
             self.setText(f"[{state.upper()}]") # Fallback text
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+def _app_sender(caller: str, client: str = ""):
+    """The sender of a chat notice about what an AI app (or Ditto) did: the app by its trusted caller id, its own name
+    only as its claim, so the chat names it in the person's language and in its own look (design 5.2 R4, R5). None
+    for a caller that is no app (the notice is then the framework's)."""
+    from orchestrator.Core.chat_feed import FeedWriter
+    try:
+        if caller == "ditto":
+            return FeedWriter.sender("ditto", "ditto")
+        if caller == "mcp" or caller.startswith("mcp:"):
+            return FeedWriter.sender("client", caller, client=client or "")
+    except ValueError:
+        pass
+    return None
 
 # ============================================================================
 # MAIN WINDOW CLASS
@@ -95,8 +122,8 @@ class MainOrchestrator(QMainWindow):
                     continue
             if before_choice is not None:
                 before_choice.restore()
-            QMessageBox.critical(self, "Fatal Error", f"Framework initialization failed: {cause}" if cause
-                                 else "Framework initialization failed. Check logs.")
+            plain_box(self, "critical", "Fatal Error", f"Framework initialization failed: {cause}" if cause
+                      else "Framework initialization failed. Check logs.")
             sys.exit(1)
             
         self.setWindowTitle(f"LLM Cross-Compiler Framework v{self.framework.info.version} (Enterprise)")
@@ -107,6 +134,7 @@ class MainOrchestrator(QMainWindow):
         self._setup_toolbar()
         self._setup_central_widget()
         self._setup_statusbar()
+        self._setup_chat_dock()
         self._apply_styles()
         
         # Start State Polling (Live Feedback Loop)
@@ -132,6 +160,8 @@ class MainOrchestrator(QMainWindow):
         act_openai.triggered.connect(lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))
         sec_menu.addAction(act_openai)
         
+
+        self.view_menu = menubar.addMenu(ui_text("chat.view.menu"))  # filled by _setup_chat_dock
 
         tools_menu = menubar.addMenu("Tools")
         act_ai = QAction("Configure AI Agent (Ditto)...", self)
@@ -185,6 +215,7 @@ class MainOrchestrator(QMainWindow):
 
     def _setup_toolbar(self):
         toolbar = QToolBar("Main Toolbar")
+        toolbar.setObjectName("mainToolbar")  # saveState() remembers the window layout by object names
         toolbar.setIconSize(QSize(32, 32))
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
@@ -194,6 +225,13 @@ class MainOrchestrator(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         toolbar.addWidget(spacer)
         
+        # The chat panel on the right: unread messages plus questions that wait, as text (no colour alone)
+        from PySide6.QtWidgets import QPushButton
+        self.btn_chat = QPushButton(button_text(ui_text("chat.toolbar.button")))
+        self.btn_chat.setToolTip(plain_tooltip(ui_text("chat.toolbar.tip")))
+        self.btn_chat.setAutoDefault(False)
+        toolbar.addWidget(self.btn_chat)
+
         # Ditto Avatar
         assets_path = self.app_root / "assets"
         self.ditto_avatar = DittoAvatar(assets_path)
@@ -215,21 +253,110 @@ class MainOrchestrator(QMainWindow):
         self.builder_tab = BuilderTab(self.framework)
         self.tabs.addTab(self.builder_tab, "🏗️ Builder")
         
-        # 2. Chat Window
-        self.chat_window = ChatWindow(self.framework)
-        self.tabs.addTab(self.chat_window, "💬 AI Chat")
-        
-        # 3. Deployment Window
+        # 2. Deployment Window (the AI chat moved into the panel on the right: _setup_chat_dock)
         self.deployment_window = DeploymentWindow(self.framework)
         self.tabs.addTab(self.deployment_window, "🚀 Deployment")
         
-        # 4. NEW: Hyperparameter Tuning (Roadmap)
+        # 3. NEW: Hyperparameter Tuning (Roadmap)
         self.tuning_tab = QLabel("\n\n🚧 Hyperparameter Auto-Tuning Module\n\nComing soon: Automated quantization matrix benchmarking.")
         self.tuning_tab.setAlignment(Qt.AlignCenter)
         self.tabs.addTab(self.tuning_tab, "🛠️ Auto-Tuning")
 
-        # 5. Model Manager Placeholder
+        # 4. Model Manager Placeholder
         self.tabs.addTab(QLabel("Model Manager (Local Library)"), "🧠 Models")
+
+    # --- the chat panel on the right (delegation design 5.1, 5.9) ---------------------------------------------------
+
+    def _setup_chat_dock(self):
+        """The former AI Chat tab as a dock on the right: F9 and the View menu show or hide it, Ctrl+Shift+C writes
+        in it, the toolbar button counts new messages and questions that wait, a click on Ditto shows it. Where it
+        sits and whether it is shown are remembered in gui_state.json in the per-user folder."""
+        from orchestrator.gui.chat_panel.dock import DEFAULT_WIDTH, ChatDock
+        from orchestrator.gui.gui_state import GuiState
+        self.chat_window = ChatWindow(self.framework)
+        self.chat_dock = ChatDock(self.chat_window, self, lang=self.chat_window.lang)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.chat_dock)
+        self.resizeDocks([self.chat_dock], [DEFAULT_WIDTH], Qt.Horizontal)
+        self.view_menu.addAction(self.chat_dock.toggleViewAction())
+        self.act_focus_chat = QAction(ui_text("chat.view.focus"), self)
+        self.act_focus_chat.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        self.act_focus_chat.setShortcutContext(Qt.ApplicationShortcut)
+        self.act_focus_chat.triggered.connect(self._focus_chat)
+        self.view_menu.addAction(self.act_focus_chat)
+
+        panel = self.chat_window
+        panel.counts_changed.connect(self._update_chat_button)
+        panel.question_arrived.connect(self._auto_show_chat)
+        panel.open_approvals_requested.connect(lambda _approval_id: self._open_approvals())
+        panel.permissions_requested.connect(self._open_tool_permissions)
+        panel.auto_show_changed.connect(self._set_chat_auto_show)
+        panel.set_auto_show(bool(self.framework.config.get("chat_panel_auto_show", True)))
+        self.btn_chat.clicked.connect(self._toggle_chat)
+        self.ditto_avatar.clicked.connect(self._show_chat)
+        notifier = getattr(self, "approval_notifier", None)
+        if notifier is not None:  # questions that wait come from the pending approvals, never from feed rows alone
+            panel.link_approvals(notifier.store, notifier.changed)
+        if self.i18n is not None:  # the dock, its View menu entries and the toolbar button follow the language too
+            self.i18n.language_changed.connect(self._chat_language_changed)
+
+        self.gui_state = GuiState.load(getattr(self.framework.config, "user_state_dir", None))
+        if self.gui_state.geometry:
+            self.restoreGeometry(GuiState.decode(self.gui_state.geometry))
+        if self.gui_state.dock_state:
+            self.restoreState(GuiState.decode(self.gui_state.dock_state))
+        self.chat_dock.setVisible(self.gui_state.chat_panel_visible)
+        panel.apply_state(self.gui_state)
+
+    def _chat_language_changed(self, lang: str):
+        self.chat_dock.retranslate(lang)
+        self.view_menu.setTitle(ui_text("chat.view.menu", lang))
+        self.act_focus_chat.setText(ui_text("chat.view.focus", lang))
+        self.btn_chat.setToolTip(plain_tooltip(ui_text("chat.toolbar.tip", lang)))
+        self._update_chat_button(self.chat_window.unread_count(), self.chat_window.pending_count())
+
+    def _toggle_chat(self):
+        if self.chat_dock.isHidden():
+            self._show_chat()
+        else:
+            self.chat_dock.hide()
+
+    def _show_chat(self):
+        self.chat_dock.show()
+        self.chat_dock.raise_()
+        self.chat_window.mark_seen()
+
+    def _focus_chat(self):
+        self._show_chat()
+        self.chat_dock.activateWindow()
+        self.chat_window.focus_composer()
+
+    def _auto_show_chat(self):
+        """A new question shows a hidden panel without taking the focus (unless the person turned that off)."""
+        if self.framework.config.get("chat_panel_auto_show", True):
+            self.chat_dock.show_without_focus()
+
+    def _set_chat_auto_show(self, enabled: bool):
+        cfg = self.framework.config
+        cfg.set("chat_panel_auto_show", bool(enabled))
+        if not cfg.save_user_config():
+            QMessageBox.warning(self, self.i18n.t("settings.not_saved.title"), self.i18n.t("settings.not_saved"))
+
+    def _update_chat_button(self, unread: int, pending: int):
+        count = unread + pending
+        self.btn_chat.setText(button_text(ui_text("chat.toolbar.button_count", n=count) if count
+                                          else ui_text("chat.toolbar.button")))
+
+    def _save_gui_state(self):
+        state = getattr(self, "gui_state", None)
+        if state is None:
+            return
+        from orchestrator.gui.gui_state import GuiState
+        state.dock_state = GuiState.encode(self.saveState())
+        state.geometry = GuiState.encode(self.saveGeometry())
+        state.chat_panel_visible = not self.chat_dock.isHidden()
+        state.last_seen_entry = self.chat_window.last_seen
+        state.filter = self.chat_window.header.current_filter()
+        state.save()
 
     def _setup_statusbar(self):
         self.status = QStatusBar()
@@ -287,16 +414,31 @@ class MainOrchestrator(QMainWindow):
         from orchestrator.tools.approvals import actor_label, tool_title
         self._used_grant = grant_id
         registry = getattr(self.framework, "tool_registry", None)
-        covers = ""
+        summary = ""
         try:
             found = registry.policy().grant_by_id(grant_id)
-            covers = f" ({found[1].summary})" if found else ""
+            summary = found[1].summary if found else ""
         except Exception:
             pass
+        covers = f" ({summary})" if summary else ""
         self.status.showMessage(f"{actor_label(actor)} ran '{tool_title(registry, tool)}' under your standing "
                                 f"approval{covers}{detail}.", 30000)
         self.btn_revoke_grant.show()
         QTimer.singleShot(30000, self.btn_revoke_grant.hide)
+        chat = getattr(self, "chat_window", None)
+        if chat is not None:  # the same notice in the chat (what it covers is quoted: it names packs and models)
+            sender, title = _app_sender(actor), tool_title(registry, tool)
+            if sender is not None:  # under the app's own bubble: its name in the person's language (R4)
+                if summary:
+                    chat.post_notice("chat.notice.grant_used_by", {"title": title, "covers": summary},
+                                     external=("covers",), sender=sender)
+                else:
+                    chat.post_notice("chat.notice.grant_used_by_plain", {"title": title}, sender=sender)
+            elif summary:
+                chat.post_notice("chat.notice.grant_used", {"who": actor_label(actor), "title": title,
+                                                            "covers": summary}, external=("covers",))
+            else:
+                chat.post_notice("chat.notice.grant_used_plain", {"who": actor_label(actor), "title": title})
 
     def _revoke_used_grant(self):
         registry = getattr(self.framework, "tool_registry", None)
@@ -305,7 +447,7 @@ class MainOrchestrator(QMainWindow):
         try:
             registry.revoke_grant(self._used_grant, "gui")
         except Exception as e:
-            QMessageBox.critical(self, "Standing approval", f"Could not revoke it: {e}")
+            plain_box(self, "critical", "Standing approval", f"Could not revoke it: {e}")
             return
         self.btn_revoke_grant.hide()
         self.status.showMessage(f"Standing approval {self._used_grant} revoked; those calls ask again.", 8000)
@@ -323,9 +465,9 @@ class MainOrchestrator(QMainWindow):
         listing = "\n".join(f"- {r['grant'].id}: {tool_title(registry, r['grant'].tool)} for "
                              f"{caller_label(r['caller'])}: {r['grant'].summary} (created {r['grant'].created} via "
                              f"{r['grant'].created_via})" for r in rows)
-        QMessageBox.information(self, "Standing approvals created on the command line",
-                                "These standing approvals were created on a command line. Revoke any you do not want "
-                                f"in Tools > Tool Permissions.\n\n{listing}")
+        plain_box(self, "information", "Standing approvals created on the command line",
+                  "These standing approvals were created on a command line. Revoke any you do not want "
+                  f"in Tools > Tool Permissions.\n\n{listing}")
         shown = {r["grant"].id for r in rows}
         try:
             registry.policy_store.update(lambda p: p.model_copy(update={"grants": {
@@ -344,8 +486,8 @@ class MainOrchestrator(QMainWindow):
                 if tray is None:
                     tray = self._approval_tray = QSystemTrayIcon(self.windowIcon(), self)
                     tray.show()
-                tray.showMessage("LLM Cross-Compiler Framework",
-                                 f"{count} call(s) of AI clients wait for your approval (Tools > Pending Approvals).")
+                notify(tray, "LLM Cross-Compiler Framework",
+                       f"{count} call(s) of AI clients wait for your approval (Tools > Pending Approvals).")
 
     def _open_approvals(self):
         registry = getattr(self.framework, "tool_registry", None)
@@ -446,7 +588,7 @@ class MainOrchestrator(QMainWindow):
         try:
             AIFoldersDialog(self.framework, getattr(self.framework, "tool_registry", None), self).exec()
         except Exception as e:  # e.g. no per-user folder
-            QMessageBox.critical(self, "Folders the AI may use", str(e))
+            plain_box(self, "critical", "Folders the AI may use", str(e))
 
     def _set_audio_announcements(self, enabled: bool):
         cfg = self.framework.config
@@ -455,13 +597,34 @@ class MainOrchestrator(QMainWindow):
             QMessageBox.warning(self, self.i18n.t("settings.not_saved.title"), self.i18n.t("settings.not_saved"))
 
     def _clear_input_history(self):
+        """Asks with the full list of what goes (full path, file name, size, what it is; "No" is the default) and
+        deletes only the files it listed: every deletion the person can see lists exactly what it deletes."""
+        from orchestrator.gui.chat_panel.panel import size_text
         t = self.i18n.t
-        answer = QMessageBox.question(self, t("history.clear.title"), t("history.clear.question"),
-                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if answer != QMessageBox.Yes:
-            return
         history = input_history.for_config(self.framework.config)
-        if history is None or not history.clear():
+        if history is None:
+            QMessageBox.warning(self, t("history.clear.title"), t("history.clear.failed"))
+            return
+        files = history.files()
+        if not files:
+            QMessageBox.information(self, t("history.clear.title"), ui_text("chat.clear.input_history.empty"))
+            return
+        lang, items = current_language(), []
+        for path, size in files:
+            kind = "damaged_" if path != history.path else ""
+            items.append("\n".join((
+                ui_text(f"chat.clear.input_history.{kind}name"),
+                ui_text("chat.clear.path", path=one_line(str(path.resolve()))),
+                ui_text("chat.clear.file", name=one_line(path.name)),
+                ui_text("chat.clear.size", size=size_text(size, lang)),
+                ui_text("chat.clear.what_label", what=ui_text(f"chat.clear.input_history.{kind}what")))))
+        if not ask(self, t("history.clear.title"), t("history.clear.question") + "\n\n" + "\n\n".join(items)):
+            return
+        listed = {path for path, _ in files}
+        if [f for f in history.files() if f[0] in listed] != files:   # changed while asked: the list is not true
+            QMessageBox.warning(self, t("history.clear.title"), ui_text("chat.clear.input_history.changed"))
+            return
+        if not history.clear(only=listed):
             QMessageBox.warning(self, t("history.clear.title"), t("history.clear.failed"))
             return
         self.builder_tab.reload_history()
@@ -550,6 +713,17 @@ class MainOrchestrator(QMainWindow):
         if new:
             from orchestrator.gui.proposals_window import proposal_notice
             self.status.showMessage(proposal_notice(new[-1]), 15000)
+            chat = getattr(self, "chat_window", None)
+            for p in new if chat is not None else ():
+                # Under the proposing app's bubble (its trusted name; its own name only as its claim, R4, R5); the
+                # build's label is quoted: it names a model, which is not the framework's word.
+                sender = _app_sender(p.proposed_by, p.client)
+                if sender is not None:
+                    chat.post_notice("chat.notice.proposal_by", {"build": p.request or p.request_id},
+                                     external=("build",), sender=sender)
+                else:
+                    chat.post_notice("chat.notice.proposal", {"who": p.who(), "build": p.request or p.request_id},
+                                     external=("who", "build"))
 
     def _open_client_proposals(self):
         from orchestrator.gui.proposals_window import ClientProposalsDialog
@@ -570,7 +744,8 @@ class MainOrchestrator(QMainWindow):
 
     def _show_about(self):
         ver = self.framework.info.version if hasattr(self.framework, 'info') else "Unknown"
-        QMessageBox.about(self, "About", f"LLM Cross-Compiler Framework\nVersion: {ver}\n\n(c) 2025 Framework Team")
+        plain_box(self, "information", "About",
+                  f"LLM Cross-Compiler Framework\nVersion: {ver}\n\n(c) 2025 Framework Team")
 
     def _apply_styles(self):
         self.setStyleSheet("""
@@ -593,7 +768,8 @@ class MainOrchestrator(QMainWindow):
     def closeEvent(self, event):
         chat = getattr(self, "chat_window", None)
         if chat is not None:
-            chat.confirmation.close()  # a tool call waiting for a confirmation is answered "no"
+            self._save_gui_state()
+            chat.close()  # a tool call waiting for a confirmation is answered "no"
         lock = getattr(self, "_gui_lock", None)
         if lock is not None:  # the command line may offer "do not ask again" again
             lock.release()

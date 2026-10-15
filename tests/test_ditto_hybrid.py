@@ -907,17 +907,22 @@ class TestPersonFacing:
         assert closed == [True]
 
     def test_the_chat_window_names_the_place_and_shows_the_notices(self, qapp, tmp_path):
+        """The chat panel (the former chat tab, design 5.9 and 6.9) names the other computer in a tool note and shows
+        the turn's notes about it; the computer's name and the notes are quoted as outside text (design 5.2 R2)."""
         pytest.importorskip("PySide6")
         from orchestrator.Core.config_manager import ConfigManager
         from orchestrator.Core.ditto_manager import ChatReply, ToolUse
         from orchestrator.gui import chat_window
-        framework = SimpleNamespace(config=ConfigManager(tmp_path / "configs"), ditto_manager=object())
+        registry = SimpleNamespace(get=lambda name: SimpleNamespace(title="Start a build"))
+        framework = SimpleNamespace(config=ConfigManager(tmp_path / "configs"), ditto_manager=object(),
+                                    tool_registry=registry)
         window = chat_window.ChatWindow(framework)
         use = ToolUse("start_build", "Start a build", True, place="build box")
         window._on_tool_used(use)
         window._on_ai_response(ChatReply(question="q", text="Started there.", new_messages=[], tools=[use],
                                          notices=["build box is not reachable now; Ditto works with this "
                                                   "computer's tools."]))
-        shown = window.txt_display.toPlainText()
-        assert "Used on build box: Start a build" in shown and "build box is not reachable now" in shown
+        shown = window.feed_view.plain_text()
+        assert "Used on 'build box': Start a build" in shown
+        assert "About the other computer: 'build box is not reachable now" in shown
         window.deleteLater()

@@ -238,9 +238,10 @@ Lösungsvorschlag. Nichts ändert sich, bevor du zustimmst. Selbst ausführen ka
 Schritte (weniger parallele Compile-Jobs nach Speichermangel, eigene Images und den Build-Cache löschen, wenn die
 Platte voll ist, ein erneuter Versuch nach einem Netzwerkfehler). Vorschläge einer KI werden nur als Rat angezeigt.
 
-**Reiter „AI Chat“:** mit Ditto sprechen (siehe [Ditto](#ditto-der-eingebaute-assistent)). **Reiter
-„Deployment“:** einen fertigen Build auf ein Board kopieren. Die Reiter **Auto-Tuning** und **Models** sind
-Platzhalter.
+**KI-Chat-Bereich rechts:** mit Ditto sprechen (siehe [Ditto](#ditto-der-eingebaute-assistent)); auch Fragen, die
+auf dich warten, und was KI-Apps für dich getan haben, kommen dort an. F9 oder **Ansicht > KI-Chat-Bereich** zeigt
+oder verbirgt ihn. **Reiter „Deployment“:** einen fertigen Build auf ein Board kopieren. Die Reiter **Auto-Tuning**
+und **Models** sind Platzhalter.
 
 Menüs: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (Assistent für ein neues Target, mit „Deep Ingest“, um Dokumentation in die Wissensbasis aufzunehmen),
@@ -458,9 +459,11 @@ monatliches API-Guthaben für eine verknüpfte Claude-Console-Organisation).
 Ditto beantwortet Fragen, schlägt Build-Einstellungen vor, analysiert gescheiterte Builds und schlägt neue
 Hardware-Module vor. Dabei nutzt es die Tools des Frameworks im Rahmen deiner Tool-Berechtigungen:
 
-- **GUI:** der Reiter **AI Chat**. Tools, die eine Bestätigung brauchen, öffnen einen Dialog mit dem Tool und
-  jedem Argument. Das Gespräch wird pro Benutzer gespeichert (`~/.llm-framework/chat_history.json`); ein langes
-  Gespräch wird in ein neues zusammengefasst. **Clear History** löscht es.
+- **GUI:** der **Chat-Bereich rechts** im Hauptfenster (F9 zeigt oder verbirgt ihn, Strg+Umschalt+C schreibt
+  hinein; siehe [Der Chat-Bereich](docs/Features_DE.md#der-chat-bereich)). Tools, die eine Bestätigung brauchen,
+  öffnen einen Dialog mit dem Tool und jedem Argument. Das Gespräch wird pro Benutzer gespeichert
+  (`~/.llm-framework/chat_history.json`); ein langes Gespräch wird in ein neues zusammengefasst. **Chat leeren…**
+  zählt zuerst auf, was es löscht (vollständiger Pfad, Dateiname, Größe, was es ist), mit „Nein“ als Vorgabe.
 - **CLI:** `llm-cli ditto ask "Welche Boards können RKLLM?"` stellt eine einzelne Frage (ohne gespeicherten
   Verlauf). Bestätigungen werden im Terminal abgefragt und ohne Terminal abgelehnt. `--no-tools` antwortet ohne
   Tools.
