@@ -246,6 +246,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the one Ditto uses; the runtime also takes it when it is given no folder), checked by size and sha256. Model
   tiers go down to 2-bit models for weak hardware (3 GB RAM). The "local" provider follows the running server
   without configuration.
+- **Ditto's local server bare metal or in Docker** (DECISIONS round 7 D): `llm-cli ditto runtime ensure [--mode
+  auto|bare-metal|docker] [--force]` installs it when it is not there and does nothing when it is (in either mode).
+  With nothing installed it chooses bare metal (no Docker overhead), or Docker when bare metal is not possible here,
+  and says why. Docker mode runs Ditto's image, built on your computer from the same pinned llama.cpp recipe on a
+  Docker Official base image pinned by digest (`orchestrator/runtime/build/ditto-runtime.Dockerfile`, two stages);
+  it is never pulled as a finished image and never pushed, and it is checked in containers of itself before it is
+  used. The container keeps the launch policy of every server (`server_policy.py`): the port is published on
+  127.0.0.1 only, the models folder and the per-start key file are mounted read-only, it runs as your user without
+  capabilities on a read-only root file system, Docker removes it when it stops, and the GPU is passed through where
+  it can be (NVIDIA Container Toolkit, `/dev/dri`) with a note where not. `--force` switches the mode (needs a
+  terminal): the models are reused and nothing is downloaded again; the bare-metal build is repackaged into the image,
+  or the image's build becomes the bare-metal build after it passed its checks on this computer; otherwise it builds
+  again and says why. Afterwards the old mode's build folders, images and containers are listed with full path or
+  name, ID, file name and size, and only what you confirm is removed ("No" is the default; without a terminal nothing
+  is removed). The installers get a Ditto step (`install.sh --ditto=auto|bare-metal|docker|skip`, the same for
+  `install.bat`, `LCF_DITTO` for unattended runs) that runs as you, never as root, does nothing in the framework's
+  own container build, shows a model's size and licence before it is downloaded, and never fails the installation.
+  The AI settings show the mode and offer the switch through the same code path. An AI client reads the mode in
+  `get_status`; switching and removing are yours alone. `runtime status` shows the mode.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`; the servers the run starts are stopped afterwards, one you started

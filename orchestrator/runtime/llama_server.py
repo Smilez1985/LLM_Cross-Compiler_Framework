@@ -14,14 +14,22 @@ forbidden list (orchestrator/runtime/server_policy.py, decision D22). It hands b
 layer (read_endpoint; LLMClient uses it for the "local" provider). The server never gets its own tools, agent mode,
 MCP servers or web UI: Ditto's tools run inside the framework, where approval is enforced.
 
+Ditto's server runs bare metal (above) or in Docker (runtime mode "docker", DECISIONS round 7 D): then start() starts
+Ditto's image, built and verified on this computer (container_server.py, runtime_mode.py), with the same launch policy,
+the port published on 127.0.0.1 only and the models folder mounted read-only; stop(), status() and read_endpoint()
+follow the container instead of a process.
+
 Files under <user state dir>/runtime/llama.cpp/:
   builds/<build id>/    self-built and imported builds with build.json and manifest.json (build/store.py)
   src/<commit>/         the verified llama.cpp source (build/source.py)
   b<build>-<variant>/   an opted-in prebuilt archive, unpacked, with its manifest (runtime.json)
   active.json           the active build and the CPU fallback (build_id, fallback_build_id), which one is used
-                        ("use": self-built or prebuilt), the prebuilt variant, and the model tier of `start --model`
+                        ("use": self-built or prebuilt), the prebuilt variant, the model tier of `start --model`, and
+                        the build Ditto's Docker image was made from (docker_build_id)
+  mode.json             the runtime mode (bare-metal or docker) and Ditto's verified image (runtime_mode.py)
   server.json           pid, start time, port and model of the running server; trusted only while that
-                        exact process (pid + start time + executable) is alive
+                        exact process (pid + start time + executable) is alive; in Docker mode the container's ID,
+                        trusted only while that container runs with Ditto's label and the recorded port
   server-<random>.key   API key of the running server (0600, deleted on stop)
   downloads/            archives while they are fetched (.part files resume)
 Models: <models_dir>/ditto/<file>.gguf plus a .<file>.verified.json marker. Log: <state dir>/logs/llama-server.log.
@@ -130,6 +138,9 @@ class LocalEndpoint(BaseModel):
 
 class RuntimeStatus(BaseModel):
     build: str
+    mode: str = "bare-metal"                             # bare-metal | docker (runtime_mode.py)
+    docker: Optional[Dict[str, Any]] = None              # Ditto's verified image in Docker mode (mode.json)
+    container: Optional[str] = None                      # the running server container's name (Docker mode)
     installed: Optional[InstalledRuntime] = None
     problems: List[str] = Field(default_factory=list)   # why a stored build cannot be used
     rebuild: Optional[str] = None                        # "required: ..." / "recommended: ..." (decision D16)
@@ -273,12 +284,20 @@ def owned_process(state: Optional[dict]) -> Optional[psutil.Process]:
         return None
 
 
-def read_endpoint(root: Path) -> Optional[LocalEndpoint]:
+def _server_alive(state: Optional[dict], docker: Any = None) -> bool:
+    """The recorded server still runs: that exact process, or in Docker mode that container of Ditto's."""
+    if state and state.get("mode") == "docker":
+        from orchestrator.runtime.container_server import container_alive
+        return container_alive(state, docker)
+    return owned_process(state) is not None
+
+
+def read_endpoint(root: Path, docker: Any = None) -> Optional[LocalEndpoint]:
     """base_url, key and model of the managed server under `root`, or None if it is not running. Reads only
     files of the current user; used by LLMClient in any process (GUI, CLI, MCP server)."""
     root = Path(root)
     state = _read_json(root / "server.json")
-    if owned_process(state) is None:
+    if not _server_alive(state, docker):
         return None
     try:
         key_file = Path(state["key_file"])
@@ -289,7 +308,7 @@ def read_endpoint(root: Path) -> Optional[LocalEndpoint]:
             return None
         key = key_file.read_text(encoding="utf-8").strip()
         return LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key, model=str(state["alias"]),
-                             port=port, pid=int(state["pid"]))
+                             port=port, pid=int(state.get("pid") or 0))
     except (OSError, KeyError, TypeError, ValueError):
         return None
 
@@ -362,10 +381,10 @@ class LocalLLMRuntime:
                  session: Optional[requests.Session] = None, runner: Optional[Runner] = None,
                  sleep: Callable[[float], None] = time.sleep, *, profile: Any = None, toolchain: Any = None,
                  engine: Any = None, executor: Any = None, verifier: Any = None,
-                 platform: Optional[Tuple[str, str]] = None):
+                 platform: Optional[Tuple[str, str]] = None, docker: Any = None):
         """profile (HardwareProfile), toolchain (DetectedToolchain), engine (ContainerEngine), executor and verifier
         replace the probe, the toolchain detection, Docker and the build steps (tests); platform is (os, arch) of this
-        machine."""
+        machine; docker (container_server.DittoDocker) replaces Docker for Ditto's container."""
         self.logger = get_logger("LocalLLMRuntime")
         self.catalog = catalog or load_catalog()
         self.data_dir = Path(data_dir) if data_dir else user_data_dir()
@@ -378,7 +397,9 @@ class LocalLLMRuntime:
         self._executor = executor
         self._verifier = verifier
         self._platform = platform
+        self._docker = docker
         self.state_file = self.root / "server.json"
+        self.mode_file = self.root / "mode.json"
         self.active_file = self.root / "active.json"
         self.lock_file = self.root / ".lock"
         self.log_file = self.data_dir / "logs" / "llama-server.log"
@@ -442,6 +463,36 @@ class LocalLLMRuntime:
             from orchestrator.runtime.build.executor import DockerEngine
             self._engine = DockerEngine()
         return self._engine
+
+    def docker(self):
+        """Docker for Ditto's container (container_server.DittoDocker through docker-py)."""
+        if self._docker is None:
+            from orchestrator.runtime.container_server import DittoDocker
+            self._docker = DittoDocker()
+        return self._docker
+
+    # --- runtime mode (runtime_mode.py) ---
+    def mode_record(self) -> Dict[str, Any]:
+        """mode.json: {"mode": "bare-metal" | "docker", "docker": Ditto's verified image, ...}; {} when nothing is
+        recorded (an installation of an earlier version: bare metal)."""
+        data = _read_json(self.mode_file) or {}
+        return data if data.get("mode") in ("bare-metal", "docker") else {}
+
+    def mode(self) -> str:
+        """The runtime mode Ditto's server runs in: docker when it is recorded, else bare-metal."""
+        return "docker" if self.mode_record().get("mode") == "docker" else "bare-metal"
+
+    def record_mode(self, mode: str, docker: Optional[Dict[str, Any]] = None) -> None:
+        """Records the runtime mode (and, for Docker mode, Ditto's verified image); the image record is kept when the
+        mode changes to bare metal, so switching back can reuse an image that is still there."""
+        if mode not in ("bare-metal", "docker"):
+            raise LocalRuntimeError("the runtime mode is bare-metal or docker")
+        with self._lock():
+            data = _read_json(self.mode_file) or {}
+            data.update({"mode": mode, "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+            if docker is not None:
+                data["docker"] = docker
+            _write_private(self.mode_file, json.dumps(data, sort_keys=True))
 
     @property
     def store(self):
@@ -654,27 +705,12 @@ class LocalLLMRuntime:
         cancelled install activates nothing more (the step running at that moment finishes, its result is kept in the
         store but not made active). Returns the HostInstallResult; raises LocalRuntimeError when the CPU build cannot be
         built or the install was cancelled before it was activated (nothing is activated then)."""
-        from orchestrator.runtime.build import source as llama_source
-        from orchestrator.runtime.build.executor import BuildExecutor
         from orchestrator.runtime.build.host import HostBuildError, install_host_runtime
         from orchestrator.runtime.build.store import smoke_model_file
-        from orchestrator.runtime.build.verify import Verifier
         plan = plan or self.plan_install(backend=backend, placement=placement)
-        pin = self.catalog.llama_cpp.source
-        source = None
-        if plan.needs_source:
-            try:
-                source = llama_source.cached_source(pin, self.data_dir)
-                if source is None:
-                    if fetch_source is not None and not fetch_source():
-                        raise LocalRuntimeError("The pinned llama.cpp source is needed for the build and was not "
-                                                "fetched. On a machine without network: llm-cli ditto runtime "
-                                                "import-source FILE (made with export-source elsewhere).")
-                    source = llama_source.fetch_source(pin, self.data_dir, log=log)
-            except llama_source.SourceError as e:
-                raise LocalRuntimeError(f"The pinned llama.cpp source: {e}") from None
-        executor = self._executor or BuildExecutor(engine=self.engine(), log=log)
-        verifier = self._verifier or Verifier()
+        source = self.pinned_source(plan.needs_source, fetch_source=fetch_source, log=log)
+        executor = self.executor(log=log)
+        verifier = self.verifier()
         smoke = smoke_model_file(self.catalog.smoke_model, self.models_dir.parent / "smoke")
         try:
             result = install_host_runtime(plan, store=self.store, source=source, executor=executor,
@@ -689,6 +725,58 @@ class LocalLLMRuntime:
         self.logger.info(f"Self-built llama.cpp {self.build}: active build {result.active.build_id[:16]} "
                          f"({result.active.backend}), CPU fallback {result.fallback.build_id[:16]}")
         return result
+
+    def executor(self, log: Optional[Callable[[str], None]] = None):
+        """The build executor (natively, or in the builder container through engine())."""
+        from orchestrator.runtime.build.executor import BuildExecutor
+        return self._executor or BuildExecutor(engine=self.engine(), log=log)
+
+    def verifier(self):
+        """The verification of builds that runs their programs on this machine itself."""
+        from orchestrator.runtime.build.verify import Verifier
+        return self._verifier or Verifier()
+
+    def use_store_build(self, build_id: str) -> InstalledRuntime:
+        """Makes a stored build that passed its verification on this machine the bare-metal build (a CPU build also
+        the fallback): the build Ditto's image was made from, when Docker mode is left. Raises LocalRuntimeError when
+        it cannot be started here (_store_problem says why)."""
+        from orchestrator.runtime.build.store import StoreError
+        build = self.store.get(build_id)
+        problem = self._store_problem(build, build_id, "active")
+        if problem:
+            raise LocalRuntimeError(problem)
+        try:
+            self.store.activate(build.build_id)
+            if build.backend == "cpu":
+                self.store.activate(build.build_id, role="fallback")
+        except StoreError as e:
+            raise LocalRuntimeError(str(e)) from None
+        with self._lock():
+            self._update_active(use="self-built")
+        inst = self.installed()
+        if inst is None or inst.build_id != build.build_id:
+            raise LocalRuntimeError(f"the build {build_id[:16]} could not be made the bare-metal build")
+        return inst
+
+    def pinned_source(self, needed: bool, fetch_source: Optional[Callable[[], bool]] = None,
+                      log: Optional[Callable[[str], None]] = None) -> Optional[Path]:
+        """The verified pinned llama.cpp source when a build needs it, else None; fetch_source() is asked before it is
+        fetched (about 215 MB), without it the source is fetched."""
+        from orchestrator.runtime.build import source as llama_source
+        if not needed:
+            return None
+        pin = self.catalog.llama_cpp.source
+        try:
+            source = llama_source.cached_source(pin, self.data_dir)
+            if source is None:
+                if fetch_source is not None and not fetch_source():
+                    raise LocalRuntimeError("The pinned llama.cpp source is needed for the build and was not "
+                                            "fetched. On a machine without network: llm-cli ditto runtime "
+                                            "import-source FILE (made with export-source elsewhere).")
+                source = llama_source.fetch_source(pin, self.data_dir, log=log)
+        except llama_source.SourceError as e:
+            raise LocalRuntimeError(f"The pinned llama.cpp source: {e}") from None
+        return source
 
     def import_build(self, archive: Path, confirm: Callable[[Dict[str, Any]], bool]) -> InstalledRuntime:
         """Imports a llama-server build made on another machine of the same kind (ditto runtime export there): the
@@ -1031,20 +1119,24 @@ class LocalLLMRuntime:
 
     def endpoint(self) -> Optional[LocalEndpoint]:
         """base_url, api key and model of the running server, or None."""
-        return read_endpoint(self.root)
+        return read_endpoint(self.root, self._docker)
 
     def status(self, check_rebuild: bool = False) -> RuntimeStatus:
         """The build in use (origin, ID, commit, backend, verification), why a stored build cannot be used, the
         running server, and with check_rebuild whether the build should be built again (plans the build, so it
         detects the toolchain)."""
         state = self._load_state()
-        proc = owned_process(state)
+        alive = _server_alive(state, self._docker) if state else False
         installed, problems = self.resolve_installed()
-        status = RuntimeStatus(build=self.build, installed=installed, problems=problems, log_file=self.log_file)
+        record = self.mode_record()
+        status = RuntimeStatus(build=self.build, installed=installed, problems=problems, log_file=self.log_file,
+                               mode=self.mode(),
+                               docker=record.get("docker") if record.get("mode") == "docker" else None)
         if check_rebuild and installed is not None and installed.build_id:
             status.rebuild = self.rebuild_advice()
-        if proc and state:
+        if alive and state:
             status.running, status.pid, status.port = True, state.get("pid"), state.get("port")
+            status.container = state.get("container_name") if state.get("mode") == "docker" else None
             status.model, status.tier, status.ctx = state.get("alias"), state.get("tier"), state.get("ctx")
             status.started_at = state.get("started_at")
             status.base_url = f"http://{LOOPBACK}:{state.get('port')}/v1"
@@ -1057,7 +1149,10 @@ class LocalLLMRuntime:
         """Starts llama-server (or returns the running one if it already serves this model and context).
         tier "auto" forgets a tier chosen earlier; tie_to_process ends the server together with this process;
         remember=False keeps the tier chosen earlier (e.g. for an evaluation run). Only a build that passed its
-        verification on this machine and still matches its manifest is started (or the opted-in prebuilt archive)."""
+        verification on this machine and still matches its manifest is started (or the opted-in prebuilt archive).
+        In Docker mode, Ditto's verified image is started instead (_start_container)."""
+        if self.mode() == "docker":
+            return self._start_container(tier, ctx, sleep_idle_seconds, timeout, remember)
         installed, problems = self.resolve_installed()
         if installed is None:
             if problems:
@@ -1158,6 +1253,145 @@ class LocalLLMRuntime:
             raise LocalRuntimeError(f"llama-server {what} (log: {self.log_file}).", log_tail=tail)
         raise LocalRuntimeError("Could not find a free local port for llama-server.")
 
+    # --- Docker mode (container_server.py) ------------------------------------------------------------------------
+    def docker_image(self):
+        """Ditto's verified image of the Docker mode (ImageInfo), checked against mode.json and the pin. Raises
+        LocalRuntimeError with the way out when Docker cannot be reached or the image is missing or another one."""
+        from orchestrator.runtime import container_server as cs
+        record = self.mode_record().get("docker") or {}
+        docker = self.docker()
+        reason = docker.unavailable()
+        if reason:
+            raise LocalRuntimeError(f"Ditto's server runs in Docker mode, but {reason}. Start Docker, or switch to "
+                                    "bare metal: llm-cli ditto runtime ensure --mode bare-metal --force")
+        image = docker.image(str(record.get("image_id") or "")) if record.get("image_id") else None
+        pin = self.catalog.llama_cpp.source
+        if (image is None or image.role != "image" or pin is None or image.labels.get(cs.LABEL_COMMIT) != pin.commit
+                or image.labels.get(cs.LABEL_BUILD) != record.get("build_id")):
+            raise LocalRuntimeError("Ditto's Docker image is missing or is not the one that was verified: llm-cli "
+                                    "ditto runtime ensure --mode docker --force makes it again (the models stay)")
+        return image
+
+    def _start_container(self, tier: Optional[str], ctx: Optional[int], sleep_idle_seconds: Optional[int],
+                         timeout: Optional[float], remember: bool) -> LocalEndpoint:
+        """start() in Docker mode: Ditto's verified image with the model from the framework's models folder (mounted
+        read-only, verified here first), on 127.0.0.1 only."""
+        image = self.docker_image()
+        model, _ = self.resolve_model(tier)
+        with self._lock():
+            state = self._load_state() or {}
+            running = self.endpoint()
+            if running:
+                same = (state.get("mode") == "docker" and state.get("alias") == model.alias
+                        and state.get("image_id") == image.image_id and (ctx is None or state.get("ctx") == ctx))
+                if same and self._health(running.port) == 200:
+                    return running
+                self._stop_locked()
+            self._cleanup_stale_locked()
+            model_path = self._ensure_model_verified(model)
+            endpoint = self._launch_container(image, model, model_path, ctx, sleep_idle_seconds, timeout)
+        if tier and remember:
+            self._update_active(tier=None if tier == "auto" else model.tier)
+        return endpoint
+
+    def _launch_container(self, image, model: ModelEntry, model_path: Path, ctx: Optional[int],
+                          sleep_idle_seconds: Optional[int], timeout: Optional[float]) -> LocalEndpoint:
+        from orchestrator.runtime import container_server as cs
+        from orchestrator.runtime.server_policy import container_server_command
+        from orchestrator.utils.sandbox import hand_over, sandbox_user
+        docker = self.docker()
+        hw = self.hardware(refresh=not self._hardware_given)
+        backend = str(image.labels.get(cs.LABEL_BACKEND, "cpu"))
+        gpu = cs.gpu_passthrough(docker, hw, backend)
+        choice = backend_choice(hw, backend if gpu.used else "cpu")
+        if ctx is None:
+            ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)
+        else:
+            ctx, why = max(256, min(int(ctx), model.native_context)), "set explicitly"
+        if sleep_idle_seconds is None:
+            sleep_idle_seconds = self.catalog.server.sleep_idle_seconds
+        if not self.catalog.llama_cpp.supports("sleep_idle_seconds"):
+            sleep_idle_seconds = 0
+        extra = ["-c", str(ctx), "--cache-ram", str(max(256, min(8192, hw.ram_total // (8 * MIB))))]
+        if gpu.used:
+            extra += ["-ngl", "auto"]
+        if sleep_idle_seconds:
+            extra += ["--sleep-idle-seconds", str(sleep_idle_seconds)]
+        timeout = timeout or self.catalog.server.health_timeout_seconds
+        name = cs.container_name()
+        for other in docker.containers():  # a server container of an earlier start that nobody recorded
+            if other.name == name and other.role == "server":
+                docker.stop_container(other.container_id)
+        key_file, key = write_key_file(self.root)
+        hand_over(key_file, sandbox_user())  # only on a root host: the container's user must read the key
+        try:
+            cmd = container_server_command(cs.SERVER_IN_IMAGE, f"{cs.MODELS_MOUNT}/{model_path.name}",
+                                           key_file=cs.KEY_MOUNT, alias=model.alias, extra=extra)
+            port = _free_port()
+            options, volumes = cs.server_options(models_dir=model_path.parent, key_file=key_file, port=port, gpu=gpu,
+                                                 name=name)
+            env = cs.server_environment(server_env(), gpu)
+            self.logger.info(f"Starting Ditto's container {image.name} ({image.image_id[7:19]}) on {LOOPBACK}:{port}, "
+                             f"model {model.file}, ctx {why}; GPU: {gpu.note}")
+            container_id = cs.start_server(docker, image.image_id, cmd, options=options, volumes=volumes, env=env)
+        except (PolicyError, cs.ContainerError) as e:
+            key_file.unlink(missing_ok=True)
+            raise LocalRuntimeError(str(e)) from None
+        except Exception as e:  # noqa: BLE001 - docker-py's errors (a name in use, a refused device)
+            key_file.unlink(missing_ok=True)
+            reason = redact_secrets(str(getattr(e, "explanation", "") or e))[:300]
+            raise LocalRuntimeError(f"Docker could not start Ditto's container: {reason}") from None
+        log = self._open_log()
+
+        def write(chunk: bytes) -> None:
+            try:
+                log.write(chunk)
+                log.flush()
+            except (OSError, ValueError):
+                pass
+        docker.follow_logs(container_id, write)
+        _write_private(self.state_file, json.dumps({
+            "mode": "docker", "container_id": container_id, "container_name": name, "image_id": image.image_id,
+            "build_id": image.labels.get(cs.LABEL_BUILD), "port": port, "variant": backend, "origin": "docker",
+            "tier": model.tier, "alias": model.alias, "ctx": ctx, "key_file": str(key_file),
+            "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+        outcome = self._wait_container_healthy(container_id, port, timeout)
+        if outcome == "ok":
+            try:
+                self._check_auth(port, key)
+            except (LocalRuntimeError, requests.RequestException) as e:
+                self._stop_locked()
+                raise LocalRuntimeError(str(e)) from e
+            return LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key, model=model.alias, port=port,
+                                 pid=0)
+        tail = self._log_tail()
+        self._stop_locked()
+        what = "did not become ready in time" if outcome == "timeout" else "ended during startup"
+        raise LocalRuntimeError(f"Ditto's container {what} (log: {self.log_file}).", log_tail=tail)
+
+    def _wait_container_healthy(self, container_id: str, port: int, timeout: float) -> str:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            info = self.docker().container(container_id)
+            if info is None or info.status in ("exited", "dead"):
+                return "exited"
+            if self._health(port) == 200:
+                return "ok"
+            self._sleep(0.25)
+        return "timeout"
+
+    def _stop_container_locked(self, state: dict, timeout: float) -> bool:
+        """Stops the recorded server container (Docker removes it itself); False when it no longer runs or Docker
+        cannot be reached (then nothing of it is running here that the framework could stop)."""
+        try:
+            docker = self.docker()
+            if docker.unavailable():
+                return False
+            return docker.stop_container(str(state.get("container_id") or ""), timeout=int(timeout))
+        except Exception as e:  # noqa: BLE001 - no docker module: no container to stop
+            self.logger.warning(f"Could not stop Ditto's container ({type(e).__name__})")
+            return False
+
     def _tie_to_this_process(self, pid: int, created: float) -> None:
         """Ends the server together with this process: a kill-on-close job on Windows, an exit handler elsewhere
         (which a hard kill of this process skips; the next start reuses or cleans up the server)."""
@@ -1195,7 +1429,14 @@ class LocalLLMRuntime:
             return stopped + self._cleanup_stale_locked()
 
     def _stop_locked(self, timeout: float = 15) -> bool:
-        proc = owned_process(self._load_state())
+        state = self._load_state()
+        if state and state.get("mode") == "docker":
+            stopped = self._stop_container_locked(state, timeout)
+            self.state_file.unlink(missing_ok=True)
+            for key_file in self.root.glob("server-*.key"):
+                key_file.unlink(missing_ok=True)
+            return stopped
+        proc = owned_process(state)
         if proc:
             self._terminate(proc, timeout)
         if self._proc is not None:
@@ -1272,17 +1513,39 @@ class LocalLLMRuntime:
     def _cleanup_stale_locked(self) -> int:
         """Removes bookkeeping of a server that is gone and stops orphaned servers; returns how many it stopped."""
         state = self._load_state()
-        proc = owned_process(state)
-        if state and proc is None:
+        docker_state = bool(state and state.get("mode") == "docker")
+        alive = _server_alive(state, self._docker) if state else False
+        if state and not alive:
             self.state_file.unlink(missing_ok=True)
-        live_key = Path(state["key_file"]).name if proc and state and state.get("key_file") else None
+        live_key = Path(state["key_file"]).name if alive and state and state.get("key_file") else None
         for key_file in self.root.glob("server-*.key"):
             if key_file.name != live_key:
                 key_file.unlink(missing_ok=True)
+        proc = owned_process(state) if alive and not docker_state else None
         orphans = self.find_orphans(keep_pid=proc.pid if proc else None)
         for orphan in orphans:
             self.logger.warning(f"Stopping a leftover llama-server (pid {orphan.pid})")
             self._terminate(orphan, 10)
+        stopped = len(orphans)
+        if docker_state or self.mode() == "docker":
+            stopped += self._stop_orphan_containers(state.get("container_id") if alive and docker_state else None)
+        return stopped
+
+    def _stop_orphan_containers(self, keep: Optional[str]) -> int:
+        """Stops server containers of this user that no state file records (Docker removes them itself)."""
+        from orchestrator.runtime import container_server as cs
+        try:
+            docker = self.docker()
+            if docker.unavailable():
+                return 0
+            name = cs.container_name()
+            orphans = [c for c in docker.containers() if c.role == "server" and c.name == name
+                       and c.container_id != keep and c.status == "running"]
+        except Exception:  # noqa: BLE001 - no docker module or daemon: nothing to stop
+            return 0
+        for orphan in orphans:
+            self.logger.warning(f"Stopping a leftover container of Ditto's server ({orphan.container_id[:12]})")
+            docker.stop_container(orphan.container_id, timeout=10)
         return len(orphans)
 
     def restart(self, **kwargs) -> LocalEndpoint:

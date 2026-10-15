@@ -1034,6 +1034,18 @@ class TestEvalTiers:
         assert rt.stopped == 1
         assert "was replaced for the evaluation" in result.out
 
+    def test_a_server_in_dittos_container_is_told_apart_by_its_port(self, run_eval):
+        """In Docker mode every endpoint has pid 0 (no process of this computer): the port tells two servers apart,
+        so the eval's own container is stopped and a replaced server is reported."""
+        class ContainerRuntime(FakeRuntime):
+            def endpoint(self):
+                return SimpleNamespace(pid=0, port=self.pid, model="mine") if self.pid else None
+        rt = ContainerRuntime(running_pid=4100)
+        result = run_eval(rt, "small")
+        assert rt.stopped == 1 and "was replaced for the evaluation" in result.out
+        mine = ContainerRuntime(running_pid=4100)
+        assert run_eval(mine, "mine").code == 0 and mine.stopped == 0 and mine.pid == 4100
+
 
 # ---------------------------------------------------------------------------------------------------------------
 # 15. A target whose id differs from its folder name

@@ -126,7 +126,16 @@ Der Installer:
    Community-Packs, `configs/config.yml`, Builds, Cache und Modelle. Starte Updates im Repository-Ordner: Die
    Kopie von `install.sh` in `/opt` kopiert und entfernt nichts,
 4. legt dort eine virtuelle Umgebung (`.venv`) an und installiert die festgelegten Pakete aus `requirements.txt`,
-5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet.
+5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet,
+6. richtet Dittos lokalen Modellserver ein (`llm-cli ditto runtime ensure`, als du, nie als root): standardmäßig
+   direkt, in Docker, wenn du das wählst oder wenn es direkt hier nicht geht. Ist Ditto schon da, tut der Schritt
+   nichts. Scheitert er, sagt der Installer warum und wird trotzdem fertig. Bevor ein Modell heruntergeladen wird,
+   siehst du seine Größe und Lizenz. Siehe [Offline-Modus](#offline-modus-das-verwaltete-lokale-modell).
+
+Den Ditto-Schritt wählst du mit `sudo ./install.sh --ditto=auto|bare-metal|docker|skip` (Standard `auto`). Für einen
+unbeaufsichtigten Lauf setzt du stattdessen `LCF_DITTO` (zum Beispiel `sudo LCF_DITTO=auto ./install.sh`): Dann wird
+nichts gefragt, und ein Modell unter einer freien Lizenz (etwa Apache 2.0) wird heruntergeladen, nachdem Größe und
+Lizenz angezeigt wurden.
 
 Melde dich einmal ab und wieder an, damit die Gruppe `docker` wirkt. Danach startest du die GUI mit
 `llm-framework`.
@@ -139,7 +148,10 @@ Melde dich einmal ab und wieder an, damit die Gruppe `docker` wirkt. Danach star
 Der Installer sucht Python (installiert Python 3.13 mit `winget`, wenn keines gefunden wird, und verlangt dann
 3.11 bis 3.14), kopiert das Framework nach `C:\Program Files\LLM-Conversion-Framework`, legt dort `.venv` an,
 installiert `requirements.txt` und legt eine Verknüpfung **LLM-Conversion-Framework** auf den Desktop. Die
-Verknüpfung startet `start_framework.bat` und damit die GUI.
+Verknüpfung startet `start_framework.bat` und damit die GUI. Der Ditto-Schritt ist derselbe wie unter Linux
+(`install.bat --ditto=...` oder `LCF_DITTO`); er läuft nur für die angemeldete Person. In dieser Version hat Windows
+noch keinen selbst gebauten Server und keinen Docker-Modus für Ditto, also sagt der Schritt das, und die
+Installation geht weiter.
 
 Konvertierungen auf einem Windows-Host sind noch nicht geprüft (siehe [Bekannte Lücken](#bekannte-lücken)).
 
@@ -574,9 +586,38 @@ wird (Version und Commit der Festlegung, die gefundenen Geräte, und dass der Se
   laufender Server gestartet wurde, bleiben immer erhalten, ebenso die Builds deiner Boards. `runtime status` sagt, wann ein neuer Build nötig (die
   Festlegung hat sich geändert) oder empfohlen ist (der Bauplan dieses Rechners hat sich geändert).
 
+**Direkt oder in Docker.** Der Server läuft standardmäßig direkt auf dem Rechner (ohne den Aufwand von Docker) oder
+in Docker:
+
+```bash
+llm-cli ditto runtime ensure                              # installiert ihn, wenn er fehlt; ein zweiter Lauf tut nichts
+llm-cli ditto runtime ensure --mode docker --force        # zu Docker wechseln (braucht ein Terminal)
+llm-cli ditto runtime ensure --mode bare-metal --force    # und zurück
+```
+
+- **Das Image** wird auf deinem Rechner aus demselben festgelegten llama.cpp-Rezept gebaut, auf einem Docker Official
+  Image als Basis (Debian, Ubuntu oder Alpine, per Digest festgelegt). Es wird nie als fertiges Image geholt und nie
+  hochgeladen. Bevor es benutzt wird, wird es in einem Container aus ihm selbst geprüft (Version und Commit der
+  Festlegung, die Geräte, die es sieht, und dass der Server seine eigenen Werkzeuge ablehnt).
+- **Der Container** hält dieselben Regeln ein wie der direkte Server: Sein Port wird nur auf 127.0.0.1
+  veröffentlicht, der Modellordner wird schreibgeschützt eingebunden (die Modelle werden nicht kopiert), er läuft als
+  dein Benutzer ohne zusätzliche Rechte, und er bekommt bei jedem Start eine neue Schlüsseldatei. Die GPU wird
+  durchgereicht, wo das geht (NVIDIA über das NVIDIA Container Toolkit, AMD und Intel über `/dev/dri`); wo nicht,
+  sagt `ensure` warum, und der Container rechnet auf der CPU.
+- **Ein Wechsel** behält die Modelle (nichts wird noch einmal heruntergeladen) und erzeugt nur den Server neu: Der
+  direkte Build kommt ins Image, wenn die C-Bibliothek des Basis-Images passt, und der Build des Images wird zum
+  direkten Build, sobald er seine Prüfungen auf diesem Rechner bestanden hat. Wo das nicht geht, sagt `ensure` warum
+  und baut neu.
+- **Die Dateien der alten Art** (Build-Ordner mit vollständigem Pfad, Docker-Images und -Container mit Name und ID,
+  jeweils mit Größe) werden nach dem Wechsel aufgelistet, und nur, was du bestätigst, wird entfernt („Nein“ ist
+  vorgewählt). Ohne Terminal wird nichts entfernt. Docker-Images werden sonst nie gelöscht.
+- `llm-cli ditto runtime status` zeigt die Art. Ein KI-Client darf sie lesen (`get_status`); wechseln und entfernen
+  darfst nur du.
+
 Wähle danach in den KI-Einstellungen **Local model (managed llama-server)** (Anbieter `local`). Schalte zusätzlich
 den **Offline Mode** ein, wenn Ditto nie einen Cloud-Anbieter nutzen soll. Ditto findet den laufenden Server von
-selbst. In dieser Version wird der Server nur über die Kommandozeile gesteuert.
+selbst. Die KI-Einstellungen zeigen, wo der Server läuft, und können ihn umstellen; gestartet und gestoppt wird er
+über die Kommandozeile.
 
 | Stufe | Modell | Download | Automatisch gewählt, wenn |
 |---|---|---|---|

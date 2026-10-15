@@ -281,6 +281,27 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (`models_dir`, den Ditto nutzt; die Laufzeit nimmt ihn auch, wenn sie keinen Ordner bekommt) und prüft sie
   anhand von Größe und sha256. Die Modellstufen reichen bis zu 2-Bit-Modellen für schwache Hardware (3 GB RAM).
   Der Anbieter „local“ folgt dem laufenden Server ohne Konfiguration.
+- **Dittos lokaler Server direkt oder in Docker** (DECISIONS Runde 7 D): `llm-cli ditto runtime ensure [--mode
+  auto|bare-metal|docker] [--force]` installiert ihn, wenn er fehlt, und tut nichts, wenn er da ist (in einer der
+  beiden Arten). Ist nichts installiert, wählt er direkt (ohne den Aufwand von Docker), oder Docker, wenn direkt hier
+  nicht geht, und sagt warum. Der Docker-Modus startet Dittos Image, auf deinem Rechner aus demselben festgelegten
+  llama.cpp-Rezept gebaut, auf einem Docker Official Image als Basis, per Digest festgelegt
+  (`orchestrator/runtime/build/ditto-runtime.Dockerfile`, zwei Stufen); es wird nie als fertiges Image geholt und nie
+  hochgeladen und vor dem Gebrauch in Containern aus ihm selbst geprüft. Der Container hält die Startregeln jedes
+  Servers ein (`server_policy.py`): Der Port wird nur auf 127.0.0.1 veröffentlicht, Modellordner und Schlüsseldatei
+  des Starts werden schreibgeschützt eingebunden, er läuft als dein Benutzer ohne Capabilities auf einem
+  schreibgeschützten Wurzeldateisystem, Docker entfernt ihn, wenn er stoppt, und die GPU wird durchgereicht, wo das
+  geht (NVIDIA Container Toolkit, `/dev/dri`), mit einem Hinweis, wo nicht. `--force` wechselt die Art (braucht ein
+  Terminal): Die Modelle werden weiter genutzt, nichts wird noch einmal heruntergeladen; der direkte Build wird ins
+  Image umgepackt, oder der Build des Images wird zum direkten Build, nachdem er seine Prüfungen auf diesem Rechner
+  bestanden hat; sonst wird neu gebaut und der Grund genannt. Danach werden Build-Ordner, Images und Container der
+  alten Art mit vollständigem Pfad oder Name, ID, Dateiname und Größe aufgelistet, und nur, was du bestätigst, wird
+  entfernt („Nein“ ist vorgewählt; ohne Terminal wird nichts entfernt). Die Installer bekommen einen Ditto-Schritt
+  (`install.sh --ditto=auto|bare-metal|docker|skip`, dasselbe für `install.bat`, `LCF_DITTO` für unbeaufsichtigte
+  Läufe), der als du läuft, nie als root, im Container-Build des Frameworks nichts tut, Größe und Lizenz eines Modells
+  vor dem Download zeigt und die Installation nie scheitern lässt. Die KI-Einstellungen zeigen die Art und bieten den
+  Wechsel über denselben Code-Pfad an. Ein KI-Client liest die Art in `get_status`; wechseln und entfernen darfst nur
+  du. `runtime status` zeigt die Art.
 - **Ditto-Evaluation** (`llm-cli ditto eval`): feste Fälle (Analyse von Build-Logs, Build-Empfehlungen,
   Modulvorschläge, Chat mit Tools, Prompt-Injection), nach Regeln bewertet, gegen den konfigurierten Anbieter oder
   je lokaler Modellstufe (`--tier small --tier small-q2`; die Server, die der Lauf startet, werden danach gestoppt,

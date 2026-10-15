@@ -1042,6 +1042,59 @@ official prebuilt download stays only as the explicit choice `--prebuilt`, shown
   189 seconds including the checks, 28 MB of binaries; `ditto runtime install` with Ditto's CPU build
   (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 seconds including the checks.
 
+### Bare metal or Docker (runtime mode)
+
+Ditto's local server (the self-built `llama-server` and its model) runs bare metal, the default (no Docker overhead),
+or in Docker. `llm-cli ditto runtime ensure` installs it when it is not there; the installers run it as their Ditto
+step (`install.sh --ditto=auto|bare-metal|docker|skip`, `install.bat --ditto=...`, or `LCF_DITTO` for an unattended
+run). The mode is recorded in `~/.llm-framework/runtime/llama.cpp/mode.json`.
+
+- **Idempotent:** if Ditto is there in either mode, nothing is done and the command says what it found. When nothing
+  is installed, `auto` installs bare metal; when bare metal is not possible here (no compiler and no builder base for
+  this computer's C library, for example), it uses Docker and says why. Without either it names both reasons.
+- **Ditto's image** is built on this computer from `orchestrator/runtime/build/ditto-runtime.Dockerfile` in two
+  stages on a Docker Official base image of the catalog (`build_bases`: Debian, Ubuntu or Alpine, pinned by digest):
+  `runtime-base` adds only the runtime libraries (OpenMP and C++ runtime; for a Vulkan build the Vulkan loader and
+  Mesa's drivers), `ditto` adds the programs of one verified build. The programs come from the bare-metal build when
+  the base's C library fits (a build of the builder container goes on its own base, a native build on the oldest base
+  with the same C library that is at least as new as this computer's): "repackaged". Otherwise llama.cpp is built
+  again in the builder container, planned for the image's base and checked in a container of the runtime base:
+  "rebuilt". The image is labelled as Ditto's runtime (`org.llm-framework.ditto-runtime`), never pulled as a finished
+  image and never pushed, and checked in containers of itself before it is used: `llama-server` and `llama-bench`
+  report the pinned build and commit, the server refuses `--tools`, and a GPU build sees its device when the GPU is
+  passed through. Docker mode needs Linux in this version.
+- **The container** keeps the launch policy of every server: the command line of `server_policy.py` (no forbidden
+  option, the key file, no web UI, no slots, offline); inside its own network namespace it listens on every interface
+  of the container, and its port is published on 127.0.0.1 only, so nothing outside this computer reaches it (the
+  per-start key still guards it against other containers). The models folder and the key file are mounted read-only
+  (the models are not copied), it runs as your user, without capabilities or privilege escalation, with a read-only
+  root file system and an init process, and Docker removes it when it stops. It is created by the image's ID, so
+  Docker never pulls anything for it. The GPU is passed through where it can be: NVIDIA GPUs through the NVIDIA
+  Container Toolkit (Docker lists an `nvidia` runtime), AMD and Intel GPUs as `/dev/dri` with the groups of its render
+  nodes; where not, the note says why and the image gets the CPU build. `runtime start`, `stop` and `status` follow the
+  container, and the key reaches the provider layer only while the recorded container runs with Ditto's label and
+  the recorded port.
+- **Switching** (`--force`, needs a terminal, or the AI settings) keeps the models: nothing is downloaded again, the
+  container mounts the same folder. Only the server is made again, by repackaging where possible: the bare-metal build
+  into the image, or the image's build into bare metal once it passed its checks on this computer itself (a build
+  checked only in the container never runs here before that). Where that is not possible, the reason is shown and
+  the server is built again. The old mode's server is stopped. The build store keeps the build the image was made
+  from, so a switch back needs no new build.
+- **The old mode's leftovers** are listed after the new mode is verified: Ditto's build folders with their full path,
+  folder name, build ID and size, Ditto's images and containers with their name, ID and size, and what each is. Only
+  the exact list you confirm is removed ("No" is the default), in the terminal or the AI settings; the list is looked
+  up again first and nothing is removed if it changed, and the removal is written to the audit log before anything is
+  removed. Without a terminal nothing is removed and the list is shown. Ditto's images are never deleted otherwise,
+  and a board's builds in the same store are never listed.
+- **The model:** `ensure` offers the model of the chosen or recommended tier when it is missing, with its source,
+  size and licence first; with `-y` it downloads only a model under a permissive licence. Any other licence is yours
+  to accept.
+- **For AI clients:** `get_status` (`local_runtime`) shows the mode, the image's name and whether it was repackaged
+  or rebuilt; `start_local_runtime` starts the server of the recorded mode. Switching the mode and removing the old
+  mode are the person's alone: no tool does either.
+- **The AI settings** show where the server runs and offer the switch through the same code path as the command,
+  with the same list of leftovers afterwards.
+
 ### Local runtime tools for AI clients (optional)
 
 Six optional MCP tools let an AI client (or Ditto) do what `llm-cli ditto runtime` and `llm-cli device runtime` do.
