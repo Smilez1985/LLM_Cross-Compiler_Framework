@@ -12,7 +12,7 @@ import hashlib
 import json
 import os
 import shutil
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +22,9 @@ from orchestrator.Core.build_service import BuildService
 
 GB = 1000 ** 3
 REPO = Path(__file__).resolve().parent.parent
+# A system folder of this host: /etc on POSIX; on Windows the Windows folder, since /etc there is C:\etc, an ordinary
+# folder on the current drive.
+HOST_SYSTEM_FOLDER = "/etc" if os.name == "posix" else os.environ.get("SystemRoot", r"C:\Windows")
 
 
 class Cfg:
@@ -71,6 +74,56 @@ def test_the_default_output_folder_is_in_the_home_folder(make_framework):
 @pytest.mark.skipif(os.name != "posix", reason="POSIX system folders")
 def test_system_folders_are_refused(fw, folder):
     assert "system folder" in ao.refusal(fw, Path(folder))
+    with pytest.raises(ao.DestinationRefused):
+        ao.check_destination(fw, folder, create=True)
+
+
+# The Windows list as the environment of a Windows host gives it; checked with PureWindowsPath on every system.
+WINDOWS_ENV = {"SystemDrive": "C:", "SystemRoot": r"C:\Windows", "windir": r"C:\Windows",
+               "ProgramFiles": r"C:\Program Files", "ProgramFiles(x86)": r"C:\Program Files (x86)",
+               "ProgramW6432": r"C:\Program Files", "ProgramData": r"C:\ProgramData"}
+WINDOWS_USERS = PureWindowsPath(r"C:\Users")
+
+
+@pytest.mark.parametrize("folder", [
+    r"C:\Windows", r"c:\windows\System32\models", r"C:\Program Files", r"C:\Program Files\LLM-Conversion-Framework",
+    r"C:\PROGRAM FILES (X86)\Vendor", r"C:\ProgramData", r"C:\ProgramData\Microsoft\Crypto", r"C:\ProgramData\ssh",
+    r"C:\Recovery", r"C:\Boot\x", r"C:\$Recycle.Bin\S-1-5-21", r"D:\$RECYCLE.BIN", r"D:\System Volume Information\x",
+    r"\\nas\share\$Recycle.Bin", r"C:\Users\Default\models", "C:\\", "c:/"])
+def test_windows_system_folders_are_refused_on_every_system(folder):
+    """The output folder refuses Windows' own folders too: its system folder, the program folders, ProgramData (the
+    computer's keys, credentials, the SSH server's host keys), the recovery and boot folders, every disk's recycle bin
+    and restore points, the template profile and the system drive itself, in any letter case."""
+    assert "system folder" in ao.windows_system_folder(PureWindowsPath(folder), WINDOWS_ENV, WINDOWS_USERS)
+
+
+@pytest.mark.parametrize("folder", [r"C:\etc", "D:\\", r"D:\models", r"C:\Users\<name>\llmcf\output",
+                                    r"C:\Users\Public\models", r"C:\Windows.old-models", r"\\nas\share\models"])
+def test_ordinary_windows_folders_are_not_system_folders(folder):
+    assert ao.windows_system_folder(PureWindowsPath(folder), WINDOWS_ENV, WINDOWS_USERS) == ""
+
+
+def test_windows_system_folders_without_their_environment():
+    """A process started with a reduced environment still refuses the usual places on the system drive; places the
+    environment names elsewhere count too, by either spelling of a name and in their resolved form."""
+    for folder in (r"C:\Windows\System32", r"C:\Program Files\x", r"C:\Program Files (x86)", r"C:\ProgramData\x"):
+        assert "system folder" in ao.windows_system_folder(PureWindowsPath(folder), {}), folder
+    moved = {"SystemDrive": "D:", "SYSTEMROOT": r"D:\WINNT", "ProgramData": r"E:\DATA~1"}
+    resolved = {PureWindowsPath(r"E:\DATA~1"): PureWindowsPath(r"E:\Machine Data")}
+
+    def why(folder):
+        return ao.windows_system_folder(PureWindowsPath(folder), moved, resolve=lambda p: resolved.get(p, p))
+    for folder in (r"D:\WINNT\x", r"D:\Program Files\x", "D:\\", r"E:\DATA~1\x", r"E:\Machine Data\Microsoft"):
+        assert "system folder" in why(folder), folder
+    assert why("C:\\") == "" and why(r"C:\models") == ""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows system folders of this host")
+@pytest.mark.parametrize("var, below", [("SystemRoot", ""), ("SystemRoot", "System32"), ("ProgramFiles", "Vendor"),
+                                        ("ProgramData", "Microsoft"), ("SystemDrive", "\\")])
+def test_the_windows_system_folders_of_this_host_are_refused(fw, var, below):
+    folder = Path(os.environ[var] + below if below == "\\" else os.path.join(os.environ[var], below))
+    assert "system folder" in ao.refusal(fw, folder)
     with pytest.raises(ao.DestinationRefused):
         ao.check_destination(fw, folder, create=True)
 
@@ -418,7 +471,7 @@ def test_cli_build_save_and_output_folder(cli, tmp_path):
     folder = finished_build(builds, "Rockchip/s/Q4_0")
     shown = cli.invoke("config", "output-folder")
     assert shown.code == 0 and str(Path.home() / "llmcf" / "output") in "".join(shown.out.split())
-    refused = cli.invoke("config", "output-folder", "/etc")
+    refused = cli.invoke("config", "output-folder", HOST_SYSTEM_FOLDER)
     assert refused.code == 2 and "system folder" in refused.out
     assert cli.invoke("config", "output-folder", str(tmp_path / "models-d")).code == 0
     assert cli.framework.config.get("output_dir") == str(tmp_path / "models-d")

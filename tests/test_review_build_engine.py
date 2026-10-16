@@ -1478,9 +1478,13 @@ class TestHealingRetryLog:
         assert any("attempt 2: quantizing" in line for line in retry.logs)
         assert not any("attempt 1" in line for line in retry.logs)
 
-        lines = service.log_tail("r1", lines=2000).lines
-        assert lines == ["===== r1_001 =====", *map(redact_secrets, first.logs),
-                         "===== r1_001_r1 =====", *map(redact_secrets, retry.logs)]
+        person = service.log_tail("r1", lines=2000, for_person=True).lines
+        assert person == ["===== r1_001 =====", *map(redact_secrets, first.logs),
+                          "===== r1_001_r1 =====", *map(redact_secrets, retry.logs)]
+        # An AI reads the same lines with a host path in the user's folder by its label or file name: on Windows
+        # tmp_path lies there (C:\Users\<name>\AppData\Local\Temp), on Linux in /tmp (the lines stay as they are).
+        clean = service._log_paths()
+        assert service.log_tail("r1", lines=2000).lines == [clean(line) for line in person]
 
     @staticmethod
     def service_for(build_ids, logs):

@@ -65,6 +65,32 @@ class TestWhatIsRead:
         docs, code = framework_documents(root, include_code=True)
         assert rel(code, root) == ["orchestrator/Core/builder.py"], "no cache, hidden folder, data or oversized file"
 
+    def test_the_order_is_the_same_on_every_system(self, tmp_path, monkeypatch):
+        """Windows compares paths without letter case, which put docs/Features.md before README.md and changed the
+        order of the progress and of `not_indexed`; the files are sorted by their names, with letter case, on every
+        system. Simulated here with paths that compare as on Windows."""
+        from orchestrator.Core import rag_manager
+
+        class WindowsOrder(type(Path())):
+            def __lt__(self, other):
+                return [part.lower() for part in self.parts] < [part.lower() for part in other.parts]
+
+            def __gt__(self, other):
+                return [part.lower() for part in self.parts] > [part.lower() for part in other.parts]
+        root = framework_tree(tmp_path / "fw")
+        (root / "Zeta.sh").write_text("true\n", encoding="utf-8")
+        (root / "alpha.sh").write_text("true\n", encoding="utf-8")
+        (root / "configs").mkdir()
+        for name in ("a.yml", "B.yml"):
+            (root / "configs" / name).write_text("x: 1\n", encoding="utf-8")
+        assert sorted([WindowsOrder("README.md"), WindowsOrder("docs")]) == [WindowsOrder("docs"),
+                                                                             WindowsOrder("README.md")]
+        monkeypatch.setattr(rag_manager, "Path", WindowsOrder)
+        docs, code = framework_documents(root, include_code=True)
+        assert rel(docs, root) == ["README.md", "README_DE.md", "docs/Features.md"]
+        assert rel(code, root) == ["Zeta.sh", "alpha.sh", "orchestrator/Core/builder.py", "configs/B.yml",
+                                   "configs/a.yml"]
+
     def test_only_what_the_framework_ships_never_the_persons_files(self, tmp_path):
         """Of targets/ only the template and the official targets without a pack's provenance that no AI made; of
         configs/ only the files at its top, never the person's settings (config.yml, framework.yml) nor the folders

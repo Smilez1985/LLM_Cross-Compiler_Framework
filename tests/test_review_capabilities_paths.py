@@ -33,6 +33,9 @@ from test_pipeline import FakeBuildEngine
 ROCKCHIP_DIR = REPO_ROOT / "targets" / "Rockchip"
 MODULES_DIR = ROCKCHIP_DIR / "modules"
 HF_MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct"
+# A system folder of this host: /etc on POSIX; on Windows the Windows folder, since /etc there is C:\etc, an ordinary
+# folder on the current drive.
+HOST_SYSTEM_FOLDER = "/etc" if os.name == "posix" else os.environ.get("SystemRoot", r"C:\Windows")
 
 
 def rockchip_capabilities_dict():
@@ -658,7 +661,7 @@ class TestCliBuildStart:
         assert Path(cli.submitted[0].output_base_dir) == Path(os.environ["HOME"]) / "llm-builds"
 
     def test_output_into_a_system_folder_is_refused(self, cli):
-        result = build_start(cli, "-o", "/etc/llm")
+        result = build_start(cli, "-o", os.path.join(HOST_SYSTEM_FOLDER, "llm"))
         assert result.code == 2 and "system folder" in result.out and cli.submitted == []
 
     def test_a_dash_keeps_the_build_in_the_build_folder(self, cli):

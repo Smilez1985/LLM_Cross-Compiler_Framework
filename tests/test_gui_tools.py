@@ -52,6 +52,10 @@ def fm(booted_framework):
 def builder(fm, surface):
     from orchestrator.gui.builder_tab import BuilderTab
     tab = BuilderTab(fm)
+    # The GPU box starts checked on Linux and unchecked on Windows and macOS, where filling "off" would change
+    # nothing (`unchanged`, not `filled`): every system starts from the Linux default. setChecked is the program's
+    # doing, not the person's click, so the field stays the form's own value.
+    tab.chk_gpu.setChecked(True)
     yield tab
     tab.deleteLater()
 
