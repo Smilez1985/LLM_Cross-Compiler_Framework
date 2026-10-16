@@ -1036,10 +1036,15 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 ### 3.2.0 - Laufzeit auf dem Gerät und die Hardware des Maintainers (geplant)
 
 Die eigene Hardware des Maintainers setzt die Prioritäten: Radxa ZERO 3W (RK3566), NVIDIA RTX 2080 Ti und RTX 3090,
-AMD Ryzen Z1 Extreme, unter Windows und Linux.
+AMD Ryzen Z1 Extreme, unter Windows und Linux. Die Rezepte kommen zuerst; die Rotationsstufe und das allgemeine
+ARM64-Target folgen direkt danach.
 
 | Punkt | Status |
 |---|---|
+| **Rezepte als Target-Vorlagen.** Eine Target-Vorlage enthält den Build-Code; Modell, Quantisierung, Format und Deployment sind Variablen, die du im Build-Menü wählst, und der Builder nutzt alles, was ein Rezept enthält. Warum: Du bist nie an die Wahl der Person gebunden, die die Vorlage gemacht hat. | geplant |
+| **Rotationsstufe vor der Quantisierung** (SpinQuant, QuaRot), direkt nach den Rezepten: Rotationen werden vor Konvertierung und Quantisierung in die Gewichte eingerechnet, nur wo das Zielformat sie unterstützt (eine Fähigkeit des Formats, kein fester Schritt). Warum: 4-Bit-Modelle der Llama-Familie behalten auf kleinen Boards ihre Qualität. | geplant |
+| **Allgemeines ARM64-CPU-Target (GGUF)** mit Board-Vorgaben für den Raspberry Pi 4 und 5, direkt nach den Rezepten. Warum: Rockchip war nur der Anfang, und diese Boards brauchen kein Hersteller-SDK. | geplant |
+| **Targets aus der Hardware-Probe, auf dem Board bewiesen.** Ein neues Target beginnt mit der Probe, die du auf dem Board ausführst (auch ohne Netz, die Datei zurückgetragen), oder, wenn du willst, mit Ditto, der es über SSH prüft; ein bestandener Benchmark auf dem Board ist der Beweis, gezeigt als „getestet auf <Board>“ im Community-Hub und in Paketen mitgegeben. Warum: Der Maintainer besitzt die meisten Boards nicht, und nur ein Lauf auf dem echten Board zeigt, dass ein Target funktioniert. | geplant |
 | **Laufzeit auf dem Gerät, der Rest.** Der erste Lauf der selbst gebauten Board-Laufzeit auf einem echten Radxa ZERO 3W; die Geräte-Laufzeit in Deployment-Paketen; das Laufzeit-Image für Docker-Deployments, lokal aus einem Geräte-Build gebaut (statt des geholten Laufzeit-Images); Benchmarks auf dem Gerät und eine gemessene Quantisierungsempfehlung je Board; ein Build auf dem Board, wenn keine Builder-Basis alt genug für seine C-Bibliothek ist; Vulkan auf Mali erst, wenn llama-bench zeigt, dass es den CPU-Build schlägt; MCP-Tools zum Proben, Deployen und Messen von Geräten. | geplant |
 | **Selbst gebautes llama.cpp, Stufe 2.** CUDA-Builds (die Redist-Archive von NVIDIA, das Toolkit nach Treiber, Compute Capability, Host-Compiler und CMake gewählt), Windows-Builds (Clang für das CPU-Backend, MSVC nur als CUDA-Host-Compiler; bis dahin Dittos lokales Modell unter Windows und macOS nur über den Opt-in `--prebuilt`), macOS (ungetestet), Benchmarks auf dem PC, die Dittos Modellstufe wählen, und MCP-Tools für die Laufzeit. | geplant |
 | **Weitere Rockchip-SoCs für RKLLM** (RK3562, RV1126B) mit einer Tabelle der unterstützten Typen je SoC. | geplant |
@@ -1075,9 +1080,54 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 
 ### Später (geplant)
 
-- **Mehr Hardware** über ein Beitragspaket: Hailo, Qualcomm, Intel NPU, NVIDIA Jetson.
-- **Builds auf einer GPU-Maschine, die du stellst** (gemietet oder eigene): Das Framework bietet die Anbindungen
-  (SSH zu deinem Rechner, Anbieter-APIs mit deinem eigenen Schlüssel); es mietet, startet und bezahlt keine Maschinen.
+- **Mehr Targets und Formate**, als Target-Vorlagen und über ein Beitragspaket:
+  - **Modelle der Llama-Familie in jedem Format.** Warum: Das Framework begann mit RKNN, und Llama-Modelle müssen auf
+    jedem Target laufen.
+  - **ONNX, mit einer Vorstufe von Hugging Face nach ONNX** für NPU-Werkzeugketten (RKNN, Hailo, Intel NPU), in einer
+    eigenen festgelegten Umgebung. Warum: Heute braucht RKNN eine lokale `.onnx`-Datei, die ein Laie nicht erstellen
+    kann.
+  - **NVIDIA Jetson** (das RTX-GPU-Target steht in 3.2.0). Warum: eine verbreitete Edge-Plattform mit eigener
+    Werkzeugkette.
+  - **Hailo.** Warum: eine verbreitete NPU-Erweiterung, etwa für den Raspberry Pi 5.
+  - **Intel** NPU und GPU. Warum: Viele kleine PCs haben eine.
+  - **Qualcomm.** Warum: Viele ARM-Boards und Laptops haben seine NPU.
+  - **Hersteller-SDK-Dateien, die du bereitstellst:** eine Datei, die du hinter einer Hersteller-Anmeldung
+    heruntergeladen hast, geprüft per sha256 und Größe; du nimmst ihre Lizenz an, und Pakete tragen nur einen Verweis,
+    nie die Datei. Warum: Hailo und Qualcomm geben Teile ihrer SDKs nur nach einer Registrierung heraus.
+- **Später nützlich**, aus den Notizen des Maintainers und der Lückenprüfung:
+  - **Versionsbewusstes Wissen:** Auszüge mit Target-, Toolkit- und Treiberversion markiert, Suchen danach gefiltert,
+    und Doku-Quellen mit ihrer SDK-Version in der `target.yml`. Warum: Antworten für verschiedene SDK-Versionen dürfen
+    sich nicht mischen.
+  - **Code-Signatur** für den Windows-Installer und die Skripte, zuerst die kostenlosen Wege für Open Source. Warum:
+    keine Warnung „unbekannter Herausgeber“ und kein `ExecutionPolicy Bypass`.
+  - **„Problem melden“** nach einem unbekannten Build-Fehler: ein vorausgefülltes Issue mit der datenschutzbereinigten
+    Probe, dir zuerst gezeigt und im Browser geöffnet, nie von selbst gesendet. Warum: Der Maintainer kann Boards, die
+    er nicht besitzt, nicht nachstellen.
+  - **Ein Hinweis auf eine neuere llama.cpp-Version** (eine Mojo-Zeile oder ein geplanter CI-Job); die Festlegung
+    verschiebt weiter ein Mensch. Warum: llama.cpp ändert sich schnell, und die Festlegung bleibt eine bewusste Wahl.
+  - **Lint erzeugter Module** (ShellCheck, hadolint), mit den Funden zurück an die KI, die sie erstellt hat. Warum:
+    Fehler werden vor dem ersten Build behoben.
+  - **Trivy-Funde als JSON** (Paket, CVE, Schweregrad, behobene Version) im Ergebnis und im Build-Datensatz. Warum: Du
+    und die KI seht die Funde, nicht nur Log-Zeilen.
+  - **Community-CI-Builds** beigetragener Targets (Image-Build ohne Push, Smoke-Test, Trivy auf dem Archiv). Warum:
+    Ein Beitrag muss funktionieren, nicht nur die Prüfungen bestehen.
+  - **Jedes Fenster übersetzt, mit einem Sprachmenü** (Menüs, Reiter, Dialoge, der Hub, das Deployment-Fenster).
+    Warum: Viele Fenster sind noch nur englisch.
+  - **Ein QEMU-Smoke-Test von Cross-Builds in der CI**, nie auf deinem Rechner. Warum: Ein kaputter Cross-Build fällt
+    auf, bevor er ein Board erreicht.
+  - **Ein Schritt „alle Dateien bearbeiten“ im Modul-Assistenten**, mit Diff und erneuten Prüfungen. Warum:
+    Herstellerpfade und Flags lassen sich fertigstellen, bevor das Modul gespeichert wird.
+  - **Ein Verlauf der Heilungs-Korrekturen** mit ihrer Erfolgsquote in Mojo; eine Korrektur wird nie von selbst
+    angewendet. Warum: Er zeigt, welche Korrekturen wirklich helfen.
+  - **Eine Warnung, bevor einem Build-Container der Speicher ausgeht.** Warum: Ein Build kann den Speicher von Docker
+    oder WSL2 aufbrauchen.
+  - **Ein Feld für den Zweck** (Chat, Code, Zusammenfassungen, Embeddings) für die Quantisierungsempfehlung. Warum:
+    Der beste Typ hängt vom Einsatz ab.
+  - **Eine optionale Ollama-Modelfile** neben einer GGUF. Warum: Ollama kann das Ergebnis dann direkt laden.
+  - **Eine Anleitung für Edge-Einsätze:** dein deploytes Modell in anderen Programmen (seine OpenAI-kompatible API,
+    lokales RAG, Sprache). Warum: Der Schritt nach dem Deployment ist noch nicht beschrieben.
+  - **Boards im Netz finden** (Zeroconf), mit unveränderten Regeln für Host-Schlüssel. Warum: Du musst die Adresse
+    des Boards nicht kennen.
 - **Crawls großer Doku-Seiten mit Fortsetzen**: einen gestoppten Crawl später fortsetzen statt nur eines Seitenlimits.
 - **Eine Reranker-Schwelle für Stichwortsuchen**: die Relevanzschwelle für kurze Anfragen aus Stichwörtern, etwa
   die Suchanfrage des Modulvorschlags, mit der Abruf-Evaluation kalibrieren, damit auch diese Suchen neu geordnet
@@ -1093,6 +1143,9 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
   ein einstellbarer Log-Ordner.
 - **MCP-Apps-Oberfläche.**
 - **Ein MCP-Server auf Edge-Geräten.**
+
+Nicht geplant: Builds in der Cloud (AWS, Azure) oder auf gemieteten Maschinen. Kompilieren auf entfernten Rechnern war
+nie geplant; kommen je Builds auf einem anderen Rechner, baut das Framework sie selbst.
 
 ## Geschichte
 

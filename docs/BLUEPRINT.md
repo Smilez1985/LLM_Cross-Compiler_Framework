@@ -975,10 +975,15 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 ### 3.2.0 - Device runtime and the maintainer's hardware (planned)
 
 The maintainer's own hardware sets the priorities: Radxa ZERO 3W (RK3566), NVIDIA RTX 2080 Ti and RTX 3090, AMD
-Ryzen Z1 Extreme, on Windows and Linux.
+Ryzen Z1 Extreme, on Windows and Linux. The recipes come first; the rotation stage and the generic ARM64 target follow
+right after them.
 
 | Item | Status |
 |---|---|
+| **Recipes as target templates.** A target template holds the build code; model, quantization, format and deployment are variables you pick in the build menu, and the builder uses everything a recipe holds. Why: you are never bound to the choices of the person who made the template. | planned |
+| **Rotation stage before quantization** (SpinQuant, QuaRot), right after the recipes: rotations are baked into the weights before conversion and quantization, only where the target format supports them (a capability of the format, not a fixed step). Why: 4-bit models of the Llama family keep their quality on small boards. | planned |
+| **Generic ARM64 CPU target (GGUF)** with board defaults for the Raspberry Pi 4 and 5, right after the recipes. Why: Rockchip was only the start, and these boards need no vendor SDK. | planned |
+| **Targets from the hardware probe, proven on the board.** A new target starts from the probe you run on the board (also without network, the file carried back) or, if you want, from Ditto probing it over SSH; a passed benchmark on the board is the proof, shown as "tested on <board>" in the Community Hub and carried in packs. Why: the maintainer does not own most boards, and only a run on the real board shows that a target works. | planned |
 | **Runtime on the device, the rest.** The first run of the self-built board runtime on a real Radxa ZERO 3W; the device runtime inside deployment packages; the runtime image for Docker deployments built locally from a device build (instead of the pulled runtime image); device benchmarks and a measured quantization recommendation per board; a build on the board when no builder base is old enough for its C library; Vulkan on Mali only after llama-bench shows that it beats the CPU build; MCP tools for probing, deploying and benchmarking devices. | planned |
 | **Self-built llama.cpp, stage 2.** CUDA builds (NVIDIA's redist archives, the toolkit chosen by driver, compute capability, host compiler and CMake), Windows builds (Clang for the CPU backend, MSVC only as CUDA host compiler; until then Ditto's local model on Windows and macOS only through the `--prebuilt` opt-in), macOS (untested), host benchmarks that choose Ditto's model tier, and MCP tools for the runtime. | planned |
 | **More Rockchip SoCs for RKLLM** (RK3562, RV1126B) with a per-SoC table of supported types. | planned |
@@ -1014,9 +1019,51 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 
 ### Later (planned)
 
-- **More hardware** through a contribution kit: Hailo, Qualcomm, Intel NPU, NVIDIA Jetson.
-- **Builds on a GPU machine you provide** (rented or your own): the framework offers the connections (SSH to
-  your host, provider APIs with your own key); it does not rent, start or bill machines.
+- **More targets and formats**, as target templates and through a contribution kit:
+  - **Llama-family models in every format.** Why: the framework started with RKNN, and Llama models must run on
+    every target.
+  - **ONNX, with a front end from Hugging Face to ONNX** for NPU toolchains (RKNN, Hailo, Intel NPU), in its own
+    pinned environment. Why: today RKNN needs a local `.onnx` file that a layperson cannot make.
+  - **NVIDIA Jetson** (the RTX GPU target is in 3.2.0). Why: a common edge platform with its own toolchain.
+  - **Hailo.** Why: a common NPU add-on, for example for the Raspberry Pi 5.
+  - **Intel** NPU and GPU. Why: many small PCs have one.
+  - **Qualcomm.** Why: many ARM boards and laptops have its NPU.
+  - **Vendor SDK files you provide:** a file you downloaded behind a vendor login, checked by sha256 and size; you
+    accept its licence, and packs carry only a reference, never the file. Why: Hailo and Qualcomm ship parts of their
+    SDKs only after registration.
+- **Useful later**, from the maintainer's notes and the gap check:
+  - **Version-aware knowledge:** excerpts tagged with target, toolkit and driver version, searches filtered by them,
+    and documentation sources with their SDK version in `target.yml`. Why: answers for different SDK versions must
+    not mix.
+  - **Code signing** of the Windows installer and scripts, free routes for open source first. Why: no "unknown
+    publisher" warning and no `ExecutionPolicy Bypass`.
+  - **"Report this problem"** after an unknown build failure: a prefilled issue with the privacy-scrubbed probe,
+    shown to you first and opened in the browser, never sent by itself. Why: the maintainer cannot reproduce boards
+    he does not own.
+  - **A notice of a newer llama.cpp release** (a Mojo line or a scheduled CI job); a person still moves the pin.
+    Why: llama.cpp changes fast, and the pin stays a deliberate choice.
+  - **Lint of generated modules** (ShellCheck, hadolint), with the findings returned to the AI that made them. Why:
+    mistakes are fixed before the first build.
+  - **Trivy findings as JSON** (package, CVE, severity, fixed version) in the result and the build record. Why: you
+    and the AI see the findings, not only log lines.
+  - **Community CI builds** of contributed targets (image build without push, smoke test, Trivy on the archive).
+    Why: a contribution must work, not only pass the checks.
+  - **Every window translated, with a language menu** (menus, tabs, dialogs, the hub, the deployment window). Why:
+    many windows are still English only.
+  - **A QEMU smoke test of cross builds in CI**, never on your computer. Why: a broken cross build is found before it
+    reaches a board.
+  - **An "edit all files" step in the module wizard**, with a diff and the checks run again. Why: vendor paths and
+    flags can be finished before the module is saved.
+  - **A history of healing fixes** with their success rate in Mojo; a fix is never applied by itself. Why: it shows
+    which fixes really work.
+  - **A warning before a build container runs out of memory.** Why: a build can use up the memory of Docker or WSL2.
+  - **A purpose field** (chat, code, summaries, embeddings) for the quantization recommendation. Why: the best type
+    depends on the use.
+  - **An optional Ollama Modelfile** next to a GGUF. Why: Ollama can then load the result directly.
+  - **A guide for edge use cases:** your deployed model in other programs (its OpenAI-compatible API, local RAG,
+    voice). Why: the step after the deploy is not documented yet.
+  - **Finding boards on the network** (zeroconf), with the host-key rules unchanged. Why: you do not need to know
+    the board's address.
 - **Crawls of large documentation sites with resume**: continue a stopped crawl later instead of only a page limit.
 - **A reranker floor for keyword searches**: calibrate the relevance floor for short keyword queries, such as the
   module proposal's search string, with the retrieval evaluation, so those searches can be reranked too.
@@ -1031,6 +1078,9 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
   a configurable log folder.
 - **MCP Apps UI.**
 - **An MCP server on edge devices.**
+
+Not planned: builds in the cloud (AWS, Azure) or on rented machines. Remote compiling was never planned; if builds on
+another computer ever come, the framework builds them itself.
 
 ## History
 

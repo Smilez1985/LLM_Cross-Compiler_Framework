@@ -559,3 +559,56 @@ def test_the_published_image_check_finds_the_old_wording():
     for line in ["No framework image is published or pulled.", "Kein Framework-Image wird veröffentlicht oder geladen.",
                  "docker exec -i lcf-framework llm-cli mcp serve", "the Rockchip build image installs Rockchip's toolkits"]:
         assert not any(pattern.search(line) for pattern in PUBLISHED_IMAGE_WORDING), line
+
+
+# --- (6) No cloud builds on the roadmap (DECISIONS round 8, Q-3) -------------------------------------------------
+
+# Remote compiling was never planned: the roadmap names builds in the cloud (AWS, Azure) or on rented machines only
+# in a "Not planned" line. If builds on another computer ever come, the framework builds them itself.
+CLOUD_BUILD_WORDING = re.compile(
+    r"(cloud|\bAWS\b|azure|rented|gemietet|GPU[- ]machine|GPU-Maschine)[^.|]{0,80}\bbuilds?\b"
+    r"|\bbuilds?\b[^.|]{0,80}(cloud|\bAWS\b|azure|rented|gemietet|GPU[- ]machine|GPU-Maschine)", re.I)
+NOT_PLANNED = ("Not planned", "Nicht geplant")
+
+
+def roadmap_items(rel: str) -> List[str]:
+    """The items of the roadmap section: table rows, list items with their wrapped lines, and paragraphs."""
+    items, inside = [], False
+    for line in _prose_lines(_read(rel)):
+        if line.startswith("## "):
+            inside = github_slug(line[3:]) == "roadmap"
+            continue
+        if not inside:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            items.append("")
+        elif stripped.startswith(("|", "- ", "#")) or not items or not items[-1]:
+            items.append(stripped)
+        else:
+            items[-1] += " " + stripped
+    return [item for item in items if item]
+
+
+def cloud_builds_planned(items: List[str]) -> List[str]:
+    return [item[:120] for item in items if CLOUD_BUILD_WORDING.search(item) and not item.startswith(NOT_PLANNED)]
+
+
+def test_the_roadmap_never_plans_cloud_builds():
+    found = []
+    for target in ROADMAP_LINKS.values():
+        rel = target.partition("#")[0]
+        found += [f"{rel}: {item}" for item in cloud_builds_planned(roadmap_items(rel))]
+    assert not found, ("the roadmap plans builds in the cloud or on rented machines (struck in the eighth round, "
+                       "Q-3):\n  " + "\n  ".join(found))
+
+
+def test_the_cloud_build_check_finds_the_old_wording():
+    old = ["- **Builds on a GPU machine you provide** (rented or your own): the framework offers the connections",
+           "- **Builds auf einer GPU-Maschine, die du stellst** (gemietet oder eigene): Das Framework bietet",
+           "| **Cloud builds** on AWS or Azure. | planned |"]
+    assert cloud_builds_planned(old) == [line[:120] for line in old]
+    kept = ["Not planned: builds in the cloud (AWS, Azure) or on rented machines.",
+            "Nicht geplant: Builds in der Cloud (AWS, Azure) oder auf gemieteten Maschinen.",
+            "- **Cloud platforms** (AWS, Google Cloud, Azure) through the vendors' own credential chains"]
+    assert cloud_builds_planned(kept) == []
