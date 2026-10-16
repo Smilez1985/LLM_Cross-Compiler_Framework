@@ -365,6 +365,90 @@ def test_cancel_between_runs_returns_the_finished_ones(monkeypatch, framework):
     assert [r.setup["label"] for r in caught.value.runs] == ["tier small"] and rt.started == ["small"]
 
 
+def test_a_replaced_server_is_reported_when_the_run_ends_early(monkeypatch, framework):
+    """Cancel (or a failed start) after a tier replaced the person's own llama-server: the eval's server is stopped
+    as after a normal run, and the person is told that theirs is not running now (the window promises it)."""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    monkeypatch.setattr(ditto_eval, "DittoEval", FakeEval)
+    cases = eval_run.select_cases(kinds=("healing",))[:2]
+    stop = threading.Event()
+
+    class StopAfterFirst(Recorder):
+        def result(self, result):
+            super().result(result)
+            stop.set()
+    events, rt = StopAfterFirst(), Runtime(running_pid=42)
+    with pytest.raises(EvalCancelled):
+        eval_run.run_evaluation(framework, cases, make_ditto=fake_ditto, make_runtime=lambda: rt,
+                                tiers=("small", "big"), events=events, stop=stop)
+    assert rt.stopped == 1 and events.seen[-1] == ("replaced", "mine")
+
+    events, rt = Recorder(), Runtime(running_pid=42)
+
+    def start(tier=None, remember=True):
+        if tier == "big":
+            raise LocalRuntimeError("llama-server did not start")
+        return Runtime.start(rt, tier, remember)
+    rt.start = start
+    with pytest.raises(LocalRuntimeError):
+        eval_run.run_evaluation(framework, cases[:1], make_ditto=fake_ditto, make_runtime=lambda: rt,
+                                tiers=("small", "big"), events=events)
+    assert events.seen[-1] == ("replaced", "mine")
+
+    stop = threading.Event()
+    stop.set()   # cancelled before the first tier: the person's server was never touched
+    events, rt = Recorder(), Runtime(running_pid=42)
+    with pytest.raises(EvalCancelled):
+        eval_run.run_evaluation(framework, cases[:1], make_ditto=fake_ditto, make_runtime=lambda: rt,
+                                tiers=("small",), events=events, stop=stop)
+    assert rt.started == [] and rt.stopped == 0 and ("replaced", "mine") not in events.seen
+
+
+def test_cancel_while_indexing_loads_no_reranker(monkeypatch, framework):
+    """Cancel while the retrieval corpus is indexed: the reranker (a download on first use) is not loaded and no
+    attempt runs."""
+    import contextlib
+    stop = threading.Event()
+    loaded = []
+
+    class Knowledge:
+        reranker_reason = model_reason = last_error = ""
+
+        def get_status(self):
+            return {"embedding_model": "embed-a"}
+
+        def reranker(self):
+            return SimpleNamespace(model_id="reranker-a")
+
+        def prepare_models(self):
+            loaded.append("reranker")
+            return True
+
+        def rerank_floor(self, reranker):
+            return 0.1
+
+    class Retrieval:
+        def __init__(self, knowledge, docs):
+            pass
+
+        def ingest(self):
+            stop.set()   # the person presses Cancel while the corpus is indexed
+
+        def run(self, cases, variant="fused", repeat=1, on_result=None, stop=None):
+            loaded.append(f"attempt {variant}")
+            return ditto_eval.run_cases(lambda case: Attempt(True, 0.1), cases, repeat, on_result, stop=stop)
+
+    monkeypatch.setattr(ditto_eval, "corpus_dir", lambda source: Path(source).parent)
+    monkeypatch.setattr(ditto_eval, "load_corpus", lambda folder: ["doc"])
+    monkeypatch.setattr(ditto_eval, "check_retrieval_cases", lambda cases, docs: None)
+    monkeypatch.setattr(ditto_eval, "temporary_knowledge_base", lambda fw: contextlib.nullcontext(Knowledge()))
+    monkeypatch.setattr(ditto_eval, "RetrievalEval", Retrieval)
+    cases = eval_run.select_cases(kinds=("retrieval",))
+    with pytest.raises(EvalCancelled):
+        eval_run.run_retrieval(framework, cases, ditto_eval.RETRIEVAL_CASES, ("fused", "rerank"), stop=stop)
+    assert loaded == []
+
+
 def test_run_cases_stops_between_attempts():
     stop = threading.Event()
     cases = load_cases()[:3]

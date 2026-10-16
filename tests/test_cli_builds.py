@@ -1069,6 +1069,22 @@ class TestEvalTiers:
         assert rt.stopped == 1
         assert "was replaced for the evaluation" in result.out
 
+    def test_a_replaced_server_is_reported_when_a_later_tier_fails(self, run_eval):
+        """The run stops with the failed start's error and exit code 1; the server is stopped as before, and the
+        person learns that their own server is no longer running (shared with Ditto > Evaluation...'s Cancel)."""
+        from orchestrator.runtime.llama_server import LocalRuntimeError
+
+        class FailingRuntime(FakeRuntime):
+            def start(self, tier=None, remember=True, **kw):
+                if tier == "big":
+                    raise LocalRuntimeError("llama-server did not start")
+                return super().start(tier, remember, **kw)
+        rt = FailingRuntime(running_pid=42)
+        result = run_eval(rt, "small", "big")
+        assert result.code == 1 and "llama-server did not start" in result.out
+        assert rt.started == ["small"] and rt.pid is None
+        assert "was replaced for the evaluation" in result.out
+
     def test_a_server_in_dittos_container_is_told_apart_by_its_port(self, run_eval):
         """In Docker mode every endpoint has pid 0 (no process of this computer): the port tells two servers apart,
         so the eval's own container is stopped and a replaced server is reported."""
