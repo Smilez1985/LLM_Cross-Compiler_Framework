@@ -166,7 +166,7 @@ class LocalRuntimeWindow(QDialog):
         inner = QWidget()
         body = QVBoxLayout(inner)
         body.addWidget(self._status_group())
-        self.box = RuntimeModeBox(framework, inner, runtime_factory=self._factory)
+        self.box = RuntimeModeBox(framework, inner, runtime_factory=self._factory, details=False)
         self.box.is_busy = lambda: self._job is not None
         self.box.changed.connect(self.refresh_status)
         body.addWidget(self.box)

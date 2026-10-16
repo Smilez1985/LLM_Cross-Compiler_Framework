@@ -106,6 +106,9 @@ TEXTS = {
         "ditto_runtime.offer_model": "Offer Ditto's model afterwards (its size and licence are shown first)",
         "ditto_runtime.offer_model.tip": "After the install, the model of the chosen or recommended tier is offered "
                                          "for download when it is not there yet. Untick it to skip the offer.",
+        "ditto_runtime.details": "Status and more…",
+        "ditto_runtime.details.tip": "Opens Ditto > Local Runtime...: whether the server runs, the build in use and "
+                                     "its problems, Start and Stop, builds and the source for offline computers.",
 
         # the model offer after ensure
         "ditto_runtime.model.offer": "Model for Ditto: {repo} / {file}, {size}, licence {licence} ({why}).",
@@ -317,6 +320,10 @@ TEXTS = {
         "ditto_runtime.offer_model.tip": "Nach der Installation wird das Modell der gewählten oder empfohlenen Stufe "
                                          "zum Herunterladen angeboten, wenn es noch nicht da ist. Ohne Haken entfällt "
                                          "das Angebot.",
+        "ditto_runtime.details": "Status und mehr…",
+        "ditto_runtime.details.tip": "Öffnet Ditto > Lokale Laufzeit...: ob der Server läuft, der Build in Gebrauch "
+                                     "und seine Probleme, Starten und Stoppen, Builds und der Quellcode für Computer "
+                                     "ohne Netz.",
 
         # das Modell nach ensure
         "ditto_runtime.model.offer": "Modell für Ditto: {repo} / {file}, {size}, Lizenz {licence} ({why}).",

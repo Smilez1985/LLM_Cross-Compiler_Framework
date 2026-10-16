@@ -317,6 +317,25 @@ class TestEnsure:
         assert "fits next to the old mode" in ui.asked[-1][0]
         box.deleteLater()
 
+    def test_the_ai_settings_box_opens_the_whole_window(self, qapp, tmp_path, ui):
+        from orchestrator.gui.ditto_runtime_window import LocalRuntimeWindow
+        from orchestrator.gui.runtime_mode_box import RuntimeModeBox
+        rt = FakeRuntime(tmp_path)
+        box = RuntimeModeBox(None, runtime_factory=lambda: rt)
+        assert ui.win.box.btn_details is None, "the window's own box has no button to open itself"
+        assert box.btn_details.objectName() == "btn_ditto_runtime_details"
+        assert box.btn_details.text() == "Status and more…"
+        box.btn_details.click()
+        window = box._details_window
+        try:
+            assert isinstance(window, LocalRuntimeWindow) and window._factory() is rt
+            wait_until(qapp, lambda: window._status_token is None)
+            assert window.txt_status.toPlainText().startswith("llama.cpp:")
+        finally:
+            window.close()
+            window.deleteLater()
+            box.deleteLater()
+
     def test_the_persons_mode_choice_survives_a_status_refresh(self, ui):
         box = ui.win.box
         box.cb_mode.setCurrentIndex(box.cb_mode.findData("docker"))

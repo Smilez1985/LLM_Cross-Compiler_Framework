@@ -1096,7 +1096,7 @@ wie die Befehle:
 - **Status:** was `ditto runtime status` zeigt (Hardware, Betriebsart, der Build in Gebrauch und seine Prüfungen,
   Probleme und der Rat zum Neubau, der Plan für den eigenen Build, das fertige Archiv, der Server mit Adresse, Modell
   und Kontext, das empfohlene und das gewählte Modell, die Protokolldatei), in deiner Sprache; **Noch einmal prüfen**
-  liest ihn neu.
+  liest ihn neu. In **Tools > Configure AI Agent (Ditto)...** öffnet **Status und mehr...** dasselbe Fenster.
 - **Installieren, prüfen oder wechseln:** der Bereich „Dittos lokaler Server“ (auch in **Tools > Configure AI Agent
   (Ditto)...**) führt `ditto runtime ensure` aus, mit der Betriebsart (Automatisch, Direkt, In Docker), den
   Build-Optionen (GPU-Backend, wo gebaut wird, Compile-Jobs) und dem Modell-Angebot danach (ohne Haken:

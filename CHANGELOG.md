@@ -25,7 +25,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   every question the CLI asks is asked with the same words and "No" as the default. The box "Ditto's local server"
   (here and in the AI settings) no longer refuses the installed mode: **Check and repair...** checks it and installs it
   again only when it cannot be used (an old llama.cpp build after an update, for example), and installs and switches
-  now take the build options; the switch keeps the space check and the complete removal of the old mode.
+  now take the build options; the switch keeps the space check and the complete removal of the old mode. Its new
+  button **Status and more...** opens the window from the AI settings.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record

@@ -97,7 +97,9 @@ class RuntimeModeBox(QGroupBox):
     changed = Signal()   # a run of ensure or a model download ended (the Local Runtime window shows its status again)
 
     def __init__(self, framework: Any = None, parent: Optional[QWidget] = None,
-                 runtime_factory: Optional[Callable[[], Any]] = None):
+                 runtime_factory: Optional[Callable[[], Any]] = None, *, details: bool = True):
+        """`details`: a button that opens Ditto > Local Runtime... (the full status, builds, server and source); the
+        window itself embeds the box without it."""
         super().__init__(ui_text("runtime.mode.title"), parent)
         self.framework = framework
         self._factory = runtime_factory or self._runtime
@@ -141,6 +143,17 @@ class RuntimeModeBox(QGroupBox):
         self.chk_model.setChecked(True)   # the CLI offers it unless --no-model
         self.chk_model.setToolTip(plain_tooltip(ui_text("ditto_runtime.offer_model.tip")))
         layout.addWidget(self.chk_model)
+        self.btn_details: Optional[QPushButton] = None
+        if details:
+            more = QHBoxLayout()
+            more.addStretch(1)
+            self.btn_details = QPushButton(button_text(ui_text("ditto_runtime.details")), self)
+            self.btn_details.setObjectName("btn_ditto_runtime_details")
+            self.btn_details.setAutoDefault(False)
+            self.btn_details.setToolTip(plain_tooltip(ui_text("ditto_runtime.details.tip")))
+            self.btn_details.clicked.connect(self._open_details)
+            more.addWidget(self.btn_details)
+            layout.addLayout(more)
         self.lbl_progress = _label()
         self.lbl_progress.setStyleSheet("color: #888;")
         layout.addWidget(self.lbl_progress)
@@ -183,6 +196,20 @@ class RuntimeModeBox(QGroupBox):
     def _runtime(self) -> Any:
         from orchestrator.runtime.llama_server import LocalLLMRuntime
         return LocalLLMRuntime.from_framework(self.framework)
+
+    def _open_details(self) -> Any:
+        """Ditto > Local Runtime... from the AI settings: the full status (is the server running, which build, what is
+        wrong) and every other runtime command; shown over the settings, which wait until it is closed."""
+        from orchestrator.gui.ditto_runtime_window import LocalRuntimeWindow
+        try:
+            window = LocalRuntimeWindow(self.framework, self.window(), runtime_factory=self._factory)
+        except Exception as e:  # noqa: BLE001 - e.g. no per-user folder; plain text (SEC-M2)
+            plain_box(self, "critical", ui_text("ditto_runtime.title"), str(e))
+            return None
+        self._details_window = window
+        window.finished.connect(lambda _result: self.refresh())
+        window.open()   # window-modal over the AI settings: its own questions and jobs work as in the menu's window
+        return window
 
     def refresh(self) -> None:
         """The mode and the build as recorded: no Docker call and no hardware probe, so the window opens at once. The
