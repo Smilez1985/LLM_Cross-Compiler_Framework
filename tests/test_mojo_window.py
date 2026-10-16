@@ -284,6 +284,38 @@ def test_mojo_miracle_runs_with_the_gui_as_the_persons_channel(qapp, tmp_path, e
         window.close()
 
 
+def test_mojo_miracles_image_list_is_the_real_deletion_dialog_with_no_as_the_default(qapp, tmp_path, engine, answers,
+                                                                                     monkeypatch):
+    """The list Mojo Miracle opens is the framework's deletion dialog itself (not a copy): every framework build image
+    with its full id, nothing ticked, "No" the default button; the person's No deletes nothing."""
+    from PySide6.QtWidgets import QMessageBox
+    from test_doctor_fixes import FakeClient, deletions, images
+
+    from orchestrator.Core.mojo.docker_objects import framework_image_plan
+    from orchestrator.gui import deletion_dialog
+    client = FakeClient(images())
+    framework = gui_framework(tmp_path, client)
+    engine.report, engine.offered = problems()
+    shown = []
+
+    def exec_no(dialog):
+        shown.append((dialog.btn_no.isDefault(), dialog.ticked(), dialog.multiple, dialog.plain_text()))
+        return 0   # the person's "No, keep everything"
+    monkeypatch.setattr(deletion_dialog.DeletionConfirmDialog, "exec", exec_no)
+    window = opened(qapp, framework)
+    try:
+        answers.answer = QMessageBox.Yes
+        window.btn_miracle.click()
+        wait_for(qapp, lambda: window._token is None)
+        ((no_default, ticked, multiple, text),) = shown
+        assert no_default and ticked == [] and multiple, "No is the default and nothing is ticked"
+        for item in framework_image_plan(framework).items:
+            assert item.file_name in text and item.speaking_name in text, "the full list with each full id"
+        assert engine.freed == [(0, "")] and deletions(client) == []
+    finally:
+        window.close()
+
+
 def test_mojo_miracle_deletes_exactly_what_the_person_ticked_and_shows_what_became_of_each_problem(
         qapp, tmp_path, engine, answers, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
