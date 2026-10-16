@@ -784,14 +784,14 @@ class CommunityManager:
         from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
         rel = KNOWLEDGE_FILE if kind == "knowledge" else KNOWLEDGE_SNAPSHOT
         path = Path(root) / rel
-        if not path.is_file():
-            return []
         try:
-            entries = json.loads(path.read_text(encoding="utf-8"))
+            entries = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
         except (OSError, ValueError, UnicodeDecodeError):
             entries = None
-        if not isinstance(entries, list):   # no pages to check (a knowledge pack's file: _check_knowledge says why)
-            return []
+        if not isinstance(entries, list):
+            # No pages to check (a knowledge pack's file: _check_knowledge says why); the licence texts next to it are
+            # still checked, so a text that is not the canonical one never comes in with a target pack.
+            entries = []
         folder = path.parent
         prefix = "" if folder == Path(root) else f"{folder.relative_to(root).as_posix()}/"
         problems, found = pack_licences.check(folder, [e for e in entries if isinstance(e, dict)], prefix)
@@ -892,7 +892,8 @@ class CommunityManager:
 
     # --- verify -----------------------------------------------------------------------------------------------
     def verify_installed(self) -> List[Tuple[Path, Provenance, Optional[TrustLevel], List[str]]]:
-        """Each installed pack with its trust and problems: revoked, or changed since it was installed."""
+        """Each installed pack with its trust and problems: revoked, changed since it was installed, or licence files
+        that do not match its pages (pack_licences.check)."""
         index = self.cached_index(revocations=True)
         results = []
         for folder, prov in self.installed():
@@ -1026,7 +1027,17 @@ class CommunityManager:
         licence texts."""
         from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
         snapshot = root / KNOWLEDGE_SNAPSHOT
+        folder = snapshot.parent
         if not snapshot.is_file():
+            # Licence files left from a removed snapshot would carry its pages' addresses and copyright lines: they
+            # stay out of the pack (only the export's temporary copy is changed, never the target folder).
+            stale = [f"{folder.relative_to(root).as_posix()}/{name}" for name in
+                     (licence_texts.NOTICE_NAME, licence_texts.LICENSES_DIR) if (folder / name).exists()]
+            shutil.rmtree(folder / licence_texts.LICENSES_DIR, ignore_errors=True)
+            (folder / licence_texts.NOTICE_NAME).unlink(missing_ok=True)
+            if stale:
+                notes.append(f"{' and '.join(stale)} left out: there is no knowledge snapshot ({KNOWLEDGE_SNAPSHOT}) "
+                             "they belong to")
             return [], []
         try:
             entries = json.loads(snapshot.read_text(encoding="utf-8"))
@@ -1040,7 +1051,6 @@ class CommunityManager:
             snapshot.write_text(text, encoding="utf-8")
         # The staged copy's licence files are made anew (the folder's own copy of them may be older than the rule);
         # only the export's temporary copy is changed, never the target folder.
-        folder = snapshot.parent
         shutil.rmtree(folder / licence_texts.LICENSES_DIR, ignore_errors=True)
         (folder / licence_texts.NOTICE_NAME).unlink(missing_ok=True)
         files = pack_licences.write(folder, pages, prefix=f"{folder.relative_to(root).as_posix()}/")

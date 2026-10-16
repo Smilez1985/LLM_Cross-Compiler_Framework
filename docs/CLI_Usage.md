@@ -1938,15 +1938,14 @@ the Community Hub fills in the Builder, including the model's pinned commit.
 llm-cli zoo verify [PACK_FILE]
 ```
 
-Without an argument it checks every installed community pack against the cached index, without downloading
-anything: revoked, changed since it was installed, or licence files that do not match its pages. It prints one line per pack (✔, or ✘ with the reason), or
-"No community packs installed.". Exit code 1 if a pack has a problem, otherwise 0.
+Without an argument it checks every installed community pack against the cached index, without downloading anything:
+revoked, changed since it was installed, or licence files that do not match its pages. It prints one line per pack (✔,
+or ✘ with the reason), or "No community packs installed.". Exit code 1 if a pack has a problem, otherwise 0.
 
-With `PACK_FILE` it checks a pack file without installing it: format, file list and hashes, the checks of its
-kind (for knowledge, and a target's knowledge snapshot, also its licence texts and `NOTICE`), an included author
-signature, and that the privacy scrub would not change anything in it. It prints
-"acceptable" or every problem (exit code 1). This form works without a keyring; the community repository's CI runs
-it on every submitted pack.
+With `PACK_FILE` it checks a pack file without installing it: format, file list and hashes, the checks of its kind
+(for knowledge, and a target's knowledge snapshot, also its licence texts and `NOTICE`), an included author signature,
+and that the privacy scrub would not change anything in it. It prints "acceptable" or every problem (exit code 1).
+This form works without a keyring; the community repository's CI runs it on every submitted pack.
 
 ```bash
 llm-cli zoo verify

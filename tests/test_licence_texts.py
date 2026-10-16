@@ -227,6 +227,23 @@ def sign_key_of(world):
     return UserKeys(world.secrets).signing_key().public_key()
 
 
+def test_every_copyright_line_of_a_repositorys_licence_file_goes_into_the_notice(world):
+    licence = ("MIT License\n\nCopyright (c) 2023 First Holder\nCopyright (c) 2024 Second Holder\n\nPermission is "
+               "hereby granted, free of charge, to any person obtaining a copy of this software")
+    world.rag.records = [
+        record(f"{TOOL}/blob/main/LICENSE", licence, code_repo="github.com/acme/tool", licence_file=True,
+               licence="MIT", root_url=TOOL),
+        record(f"{TOOL}/blob/main/src/main.c", "int main(void) { return 0; }", code_repo="github.com/acme/tool",
+               root_url=TOOL)]
+    notice = pack_files(world.cm.export_pack("knowledge", author="a", pack_id="docs").path)["NOTICE"].decode()
+    assert (f"Source: {TOOL}/blob/main/LICENSE\nCopyright: Copyright (c) 2023 First Holder\n"
+            "Copyright: Copyright (c) 2024 Second Holder\nSPDX id: MIT") in notice
+    assert (f"Source: {TOOL}/blob/main/src/main.c\n"
+            "Copyright: Copyright (c) 2023 First Holder (from the licence file of the repository)\n"
+            "Copyright: Copyright (c) 2024 Second Holder (from the licence file of the repository)\n"
+            "SPDX id: MIT") in notice, "MIT asks for the whole copyright notice, not only its first line"
+
+
 def test_without_a_page_that_asks_for_a_text_the_pack_ships_no_licence_file(world):
     world.rag.records = [record(f"{DOCS}/free", "Free text.", title="Free", licence="CC0-1.0"),
                          record(f"{DOCS}/sdk", "Vendor words.", copyright="© 2023 Vendor")]
@@ -353,6 +370,38 @@ def test_a_target_export_ships_the_licence_texts_of_its_snapshot(world):
                for n in prepared.notes), prepared.notes
 
 
+def test_a_target_without_a_snapshot_ships_no_licence_files_of_an_older_one(world):
+    from test_zoo import make_target
+    folder = make_target(world.root / "targets" / "own-board")
+    (folder / "knowledge" / "LICENSES").mkdir(parents=True)
+    old_notice = f"NOTICE\n\nSource: {DOCS}/removed\nCopyright: (c) 2020 Old Holder\nSPDX id: MIT\n"
+    (folder / "knowledge" / "NOTICE").write_text(old_notice, encoding="utf-8")
+    (folder / "knowledge" / "LICENSES" / "MIT.txt").write_bytes(MIT_TEXT)
+    result = world.cm.export_pack("target", "own-board", author="a")
+    files = pack_files(result.path)
+    assert not any(name.startswith(("knowledge/NOTICE", "knowledge/LICENSES/")) for name in files), sorted(files)
+    assert not any(b"Old Holder" in data or f"{DOCS}/removed".encode() in data for data in files.values()), \
+        "the pages of a removed snapshot never leave the computer through its old NOTICE"
+    assert any("knowledge/NOTICE" in n and "left out" in n for n in result.notes), result.notes
+    assert (folder / "knowledge" / "NOTICE").read_text(encoding="utf-8") == old_notice, "the target stays as it is"
+    assert (folder / "knowledge" / "LICENSES" / "MIT.txt").read_bytes() == MIT_TEXT
+
+
+@pytest.mark.parametrize("snapshot", [None, "{ not json"])
+def test_a_target_packs_licence_texts_are_checked_without_a_readable_snapshot_too(world, snapshot):
+    from test_zoo import TARGET_YML
+    files = {"target.yml": TARGET_YML, "Dockerfile": "FROM debian:bookworm-slim\nRUN echo ok\n",
+             "modules/build.sh": "#!/bin/bash\necho build\n",
+             "knowledge/LICENSES/MIT.txt": MIT_TEXT.replace(b"Permission", b"Leave")}
+    if snapshot is not None:
+        files["knowledge/initial_knowledge.json"] = snapshot
+    path = hand_pack(world, files, kind="target", pack_id="board")
+    with pytest.raises(PackError) as e:
+        world.cm.prepare_install_file(path)
+    assert "knowledge/LICENSES/MIT.txt: differs from the canonical text of MIT" in str(e.value)
+    assert any("knowledge/LICENSES/MIT.txt: differs" in p for p in world.cm.verify_file(path)[1])
+
+
 def test_a_target_pack_whose_snapshot_lacks_its_licence_text_is_refused(world):
     from test_zoo import TARGET_YML
     files = {"target.yml": TARGET_YML, "Dockerfile": "FROM debian:bookworm-slim\nRUN echo ok\n",
@@ -419,10 +468,14 @@ def test_an_ai_gets_the_licence_texts_in_fixed_words(env):  # noqa: F811
         assert site_text not in dumped, "copyright lines and notices are site text and never reach an AI"
 
 
-def test_the_knowledge_base_says_when_a_licence_text_is_missing(make_rag, without):  # noqa: F811
+def test_the_knowledge_base_says_when_a_licence_text_is_missing(make_rag, without, tmp_path):  # noqa: F811
+    from test_knowledge_tools import call as call_tool, tools_for
     without("ISC")
     rag = make_rag()
     assert rag.ingest_document(f"{DOCS}/isc", "# ISC\n\nText.", {"content_type": "html", "licence": "ISC"})
     (source,) = rag.list_sources()
     assert (source["licence_state"], source["pack_share"]) == ("no_licence_text", LINK_AND_FACTS)
+    (listed,) = call_tool(tools_for(tmp_path, rag), "list_knowledge_sources", {}).sources
+    assert (listed.licence, listed.licence_state, listed.pack_share) == ("ISC", "no_licence_text", LINK_AND_FACTS), \
+        "an AI gets the state in its fixed words too"
 
