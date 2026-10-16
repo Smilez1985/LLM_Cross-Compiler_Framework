@@ -6,8 +6,15 @@ Check, Save and Sign out; no sign-in; the `ant` CLI profile; the managed local s
 The status line says "Signed in as ...", "Not signed in", "Using key from environment variable X", ...
 
 When no keyring is usable, StorageChooser offers the explicit choices (passphrase, credential helper, an
-unencrypted key file with a confirmation); nothing is picked automatically. Every vault, keyring or network call
-runs in a worker thread (orchestrator/llm/auth/signin.py does the work); the worker never holds a widget.
+unencrypted key file with a confirmation); nothing is picked automatically. Security > Key Storage... shows it at any
+time, with the keyring as a choice too. Every vault, keyring or network call runs in a worker thread
+(orchestrator/llm/auth/signin.py does the work); the worker never holds a widget.
+
+The key form names the method's environment variables and note and offers "Store the key from <VARIABLE> in the
+vault" while one is set (`llmcf ditto login --from-env`); the no-sign-in form has Forget (`llmcf ditto logout` for a
+server without sign-in). With `address_field`, the panel has its own server address field (Security > Sign-in
+Overview...); an address given to the panel or typed there is remembered for that provider only
+(ai_base_url_<provider>, `llmcf ditto login --base-url`), without making it Ditto's provider.
 """
 
 import threading
@@ -21,12 +28,15 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QDialogButtonBo
                                QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton,
                                QStackedWidget, QVBoxLayout, QWidget)
 
+from orchestrator.gui.plain import button_text, plain_label
 from orchestrator.gui.worker_relay import worker_relay
-from orchestrator.llm.auth.signin import STORAGE, SignIn, method_infos, plain_http_to_remote, status_line
+from orchestrator.llm.auth.signin import (STORAGE, EnvKeyError, SignIn, method_infos, plain_http_to_remote,
+                                          status_line)
 from orchestrator.llm.auth.spec import KEY_TYPES, TYPE_LABELS
 from orchestrator.llm.auth.store import display_origin
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import get_instance as get_i18n
+from orchestrator.utils.localization import ui_text
 from orchestrator.utils.logging import get_logger
 
 logger = get_logger("SignIn")
@@ -117,6 +127,7 @@ class MethodCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
         self.radio = QRadioButton(info.spec.label)
+        self.radio.setObjectName("rb_signin_method")
         self.radio.setEnabled(info.built)
         layout.addWidget(self.radio)
         badges = [_t(f"signin.type.{info.spec.type}", TYPE_LABELS.get(info.spec.type, info.spec.type))]
@@ -139,17 +150,27 @@ class MethodCard(QFrame):
 
 
 class KeyForm(QWidget):
-    """api_key and bearer_optional: key page, password field, the catalog's extra fields, Check, Save, Sign out."""
+    """api_key and bearer_optional: key page, password field, the catalog's extra fields, Check, Save, Sign out; the
+    method's environment variables and note, and "Store the key from <VARIABLE> in the vault" while one is set."""
 
-    def __init__(self, preset, spec, parent=None):
+    def __init__(self, preset, spec, parent=None, *, lang: Optional[str] = None):
         super().__init__(parent)
         self.spec = spec
+        self.lang = lang
+        self.env_name: Optional[str] = None
         layout = QVBoxLayout(self)
         hint = spec.where
         self.lbl_where = QLabel(_t("signin.key_where", "Where to find it: {where}", where=hint) if hint else "")
         self.lbl_where.setWordWrap(True)
         self.lbl_where.setVisible(bool(hint))
         layout.addWidget(self.lbl_where)
+        self.lbl_env = plain_label(ui_text("signin.env_names", lang, names=", ".join(spec.env)) if spec.env else "")
+        self.lbl_env.setVisible(bool(spec.env))
+        layout.addWidget(self.lbl_env)
+        self.lbl_note = plain_label(spec.note or "")
+        self.lbl_note.setStyleSheet("color: #ff9800;")
+        self.lbl_note.setVisible(bool(spec.note))
+        layout.addWidget(self.lbl_note)
         self.btn_key_page = QPushButton(_t("signin.open_key_page", "Open key page"))
         self.btn_key_page.setVisible(bool(spec.key_page))
         self.btn_key_page.setToolTip(spec.key_page or "")
@@ -173,10 +194,31 @@ class KeyForm(QWidget):
         self.btn_check = QPushButton(_t("signin.check", "Check"))
         self.btn_save = QPushButton(_t("signin.save", "Save"))
         self.btn_sign_out = QPushButton(_t("signin.sign_out", "Sign out"))
-        for button in (self.btn_check, self.btn_save, self.btn_sign_out):
+        for button, name in ((self.btn_check, "btn_signin_check"), (self.btn_save, "btn_signin_save"),
+                             (self.btn_sign_out, "btn_signin_sign_out")):
+            button.setObjectName(name)
             buttons.addWidget(button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
+        env_row = QHBoxLayout()
+        self.btn_from_env = QPushButton("")
+        self.btn_from_env.setObjectName("btn_signin_from_env")
+        self.chk_from_env_check = QCheckBox(ui_text("signin.from_env_check", lang))
+        self.chk_from_env_check.setObjectName("chk_signin_from_env_check")
+        self.chk_from_env_check.setChecked(True)
+        env_row.addWidget(self.btn_from_env)
+        env_row.addWidget(self.chk_from_env_check)
+        env_row.addStretch(1)
+        layout.addLayout(env_row)
+        self.set_env_variable(None)
+
+    def set_env_variable(self, name: Optional[str]) -> None:
+        """The first of the method's environment variables that is set (its name only); the button shows while one
+        is set."""
+        self.env_name = name or None
+        self.btn_from_env.setText(button_text(ui_text("signin.from_env", self.lang, name=name)) if name else "")
+        self.btn_from_env.setVisible(bool(name))
+        self.chk_from_env_check.setVisible(bool(name))
 
     def open_key_page(self):
         if self.spec.key_page:  # an https URL from the catalog
@@ -203,13 +245,14 @@ class KeyForm(QWidget):
                 edit.setText(values.get(fid, ""))
 
     def buttons(self):
-        return (self.btn_check, self.btn_save, self.btn_sign_out)
+        return (self.btn_check, self.btn_save, self.btn_sign_out, self.btn_from_env)
 
 
 class NoneForm(QWidget):
-    """none: no sign-in; Check lists the models, the method can be chosen explicitly."""
+    """none: no sign-in; Check lists the models, the method can be chosen explicitly, and Forget drops the
+    remembered server address and method (`llmcf ditto logout PROVIDER`)."""
 
-    def __init__(self, preset, spec, parent=None):
+    def __init__(self, preset, spec, parent=None, *, lang: Optional[str] = None):
         super().__init__(parent)
         self.spec = spec
         layout = QVBoxLayout(self)
@@ -219,13 +262,16 @@ class NoneForm(QWidget):
         row = QHBoxLayout()
         self.btn_check = QPushButton(_t("signin.check", "Check"))
         self.btn_use = QPushButton(_t("signin.use_method", "Use this method"))
-        row.addWidget(self.btn_check)
-        row.addWidget(self.btn_use)
+        self.btn_forget = QPushButton(button_text(ui_text("signin.forget", lang)))
+        for button, name in ((self.btn_check, "btn_signin_check"), (self.btn_use, "btn_signin_use"),
+                             (self.btn_forget, "btn_signin_forget")):
+            button.setObjectName(name)
+            row.addWidget(button)
         row.addStretch(1)
         layout.addLayout(row)
 
     def buttons(self):
-        return (self.btn_check, self.btn_use)
+        return (self.btn_check, self.btn_use, self.btn_forget)
 
 
 class ManagedForm(QWidget):
@@ -278,13 +324,16 @@ class CliSessionForm(QWidget):
         layout.addLayout(row)
         form = QFormLayout()
         self.txt_profile = QLineEdit()
+        self.txt_profile.setObjectName("txt_signin_profile")
         self.txt_profile.setPlaceholderText(_t("signin.profile_placeholder", "empty: the active profile"))
         form.addRow(_t("signin.profile", "Profile:"), self.txt_profile)
         layout.addLayout(form)
         buttons = QHBoxLayout()
         self.btn_check = QPushButton(_t("signin.check", "Check"))
         self.btn_use = QPushButton(_t("signin.use_profile", "Use this profile"))
+        self.btn_use.setObjectName("btn_signin_use_profile")
         self.btn_sign_out = QPushButton(_t("signin.stop_using", "Stop using"))
+        self.btn_sign_out.setObjectName("btn_signin_stop_using")
         for button in (self.btn_check, self.btn_use, self.btn_sign_out):
             buttons.addWidget(button)
         buttons.addStretch(1)
@@ -318,18 +367,27 @@ class LaterForm(QWidget):
 
 
 class StorageChooser(QGroupBox):
-    """The explicit choices when no keyring is usable. Emits chosen(mode, helper); ephemeral is for CI only."""
+    """The explicit choices when no keyring is usable. Emits chosen(mode, helper); ephemeral is for CI only.
+    `with_keyring` adds the OS keyring as a choice (Security > Key Storage..., to go back to it)."""
 
     chosen = Signal(str, str)
 
-    def __init__(self, parent=None):
-        super().__init__(_t("signin.storage.title", "Choose how to protect your credentials"), parent)
+    def __init__(self, parent=None, *, with_keyring: bool = False, title: Optional[str] = None,
+                 lang: Optional[str] = None):
+        super().__init__(title or _t("signin.storage.title", "Choose how to protect your credentials"), parent)
         layout = QVBoxLayout(self)
         self.lbl_problem = QLabel("")
         self.lbl_problem.setWordWrap(True)
         self.lbl_problem.setTextFormat(Qt.PlainText)
         layout.addWidget(self.lbl_problem)
         self.group = QButtonGroup(self)
+        self.lang = lang
+        self.rb_keyring = None
+        if with_keyring:
+            self.rb_keyring = QRadioButton(ui_text("signin.keystore.keyring", lang))
+            self.rb_keyring.setObjectName("rb_storage_keyring")
+            self.group.addButton(self.rb_keyring)
+            layout.addWidget(self.rb_keyring)
         self.rb_passphrase = QRadioButton(_t("signin.storage.passphrase", "Passphrase, asked once per start"))
         self.rb_helper = QRadioButton(_t("signin.storage.helper", "Credential helper command, e.g. pass show "
                                                                   "llmcc/vault-key"))
@@ -341,14 +399,23 @@ class StorageChooser(QGroupBox):
                                                                                    "key"))
         self.chk_insecure = QCheckBox(_t("signin.storage.insecure_ack", "I understand that this key file is not "
                                                                         "encrypted"))
-        for button in (self.rb_passphrase, self.rb_helper, self.rb_insecure):
+        for button, name in ((self.rb_passphrase, "rb_storage_passphrase"), (self.rb_helper, "rb_storage_helper"),
+                             (self.rb_insecure, "rb_storage_insecure")):
+            button.setObjectName(name)
             self.group.addButton(button)
+        self.txt_helper.setObjectName("txt_storage_helper")
+        self.chk_insecure.setObjectName("chk_storage_insecure")
+        self.labels = {"passphrase": self.rb_passphrase.text(), "helper": self.rb_helper.text(),
+                       "insecure": self.rb_insecure.text()}
+        if self.rb_keyring is not None:
+            self.labels["keyring"] = self.rb_keyring.text()
         layout.addWidget(self.rb_passphrase)
         layout.addWidget(self.rb_helper)
         layout.addWidget(self.txt_helper)
         layout.addWidget(self.rb_insecure)
         layout.addWidget(self.chk_insecure)
         self.btn_use = QPushButton(_t("signin.storage.use", "Use this storage"))
+        self.btn_use.setObjectName("btn_storage_use")
         self.btn_use.clicked.connect(self._choose)
         layout.addWidget(self.btn_use, alignment=Qt.AlignLeft)
         self.lbl_result = QLabel("")
@@ -359,8 +426,23 @@ class StorageChooser(QGroupBox):
     def show_problem(self, text: str) -> None:
         self.lbl_problem.setText(text)
 
+    def radio(self, mode: str) -> Optional[QRadioButton]:
+        return {"keyring": self.rb_keyring, "passphrase": self.rb_passphrase, "helper": self.rb_helper,
+                "insecure": self.rb_insecure}.get(mode)
+
+    def mark_current(self, mode: Optional[str]) -> None:
+        """Marks and selects the protection in use ("... (current)"); the others keep their labels."""
+        for name, label in self.labels.items():
+            button = self.radio(name)
+            button.setText(ui_text("signin.keystore.current", self.lang, label=label) if name == mode else label)
+        button = self.radio(mode or "")
+        if button is not None:
+            button.setChecked(True)
+
     def _choose(self):
-        if self.rb_passphrase.isChecked():
+        if self.rb_keyring is not None and self.rb_keyring.isChecked():
+            self.chosen.emit("keyring", "")
+        elif self.rb_passphrase.isChecked():
             self.chosen.emit("passphrase", "")
         elif self.rb_helper.isChecked():
             command = self.txt_helper.text().strip()
@@ -434,15 +516,20 @@ def choose_storage_at_start(parent, config, problem: BaseException) -> bool:
 
 class SignInPanel(QWidget):
     """The sign-in of one provider. `base_url` is the address typed in the AI settings (presets whose address the
-    user sets); `service` is a SignIn (tests pass one)."""
+    user sets); `address_field` gives the panel its own address field instead (Security > Sign-in Overview...). An
+    address given either way is remembered for this provider only (`llmcf ditto login --base-url`). `service` is a
+    SignIn (tests pass one)."""
 
     changed = Signal()  # a credential, method or storage was stored or removed
 
     def __init__(self, framework, preset, *, base_url: Optional[str] = None, service: Optional[SignIn] = None,
-                 parent=None):
+                 parent=None, address_field: bool = False, lang: Optional[str] = None):
         super().__init__(parent)
         self.framework = framework
         self.preset = preset
+        self.lang = lang
+        self.txt_base_url: Optional[QLineEdit] = None
+        self._prefilled_url: Optional[str] = None
         self.base_url = base_url or None
         self._service = service
         self.status = None
@@ -456,6 +543,17 @@ class SignInPanel(QWidget):
         title = QLabel(_t("signin.title", "Sign in to {provider}", provider=preset.label))
         title.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(title)
+        if address_field and preset.base_url_configurable and not preset.runtime_endpoint:
+            address = QFormLayout()
+            self.txt_base_url = QLineEdit()
+            self.txt_base_url.setObjectName("txt_signin_base_url")
+            self.txt_base_url.setPlaceholderText(ui_text("signin.address_placeholder", lang))
+            if base_url:
+                self.txt_base_url.setText(base_url)
+                self.txt_base_url.setModified(True)
+            address.addRow(ui_text("signin.address", lang), self.txt_base_url)
+            layout.addLayout(address)
+            layout.addWidget(plain_label(ui_text("signin.address_hint", lang)))
         self.lbl_status = QLabel(_t("signin.status.loading", "Reading the sign-in..."))
         self.lbl_status.setWordWrap(True)
         self.lbl_status.setTextFormat(Qt.PlainText)
@@ -504,10 +602,11 @@ class SignInPanel(QWidget):
             form.btn_check.clicked.connect(partial(self.check, spec.id))
             return form
         if spec.type in KEY_TYPES:
-            form = KeyForm(self.preset, spec)
+            form = KeyForm(self.preset, spec, lang=self.lang)
             form.btn_check.clicked.connect(partial(self.check, spec.id))
             form.btn_save.clicked.connect(partial(self.save, spec.id))
             form.btn_sign_out.clicked.connect(partial(self.sign_out, spec.id))
+            form.btn_from_env.clicked.connect(partial(self.store_from_env, spec.id))
             return form
         if spec.type == "cli_session":
             form = CliSessionForm(self.preset, spec)
@@ -515,9 +614,10 @@ class SignInPanel(QWidget):
             form.btn_use.clicked.connect(partial(self.use, spec.id))
             form.btn_sign_out.clicked.connect(partial(self.sign_out, spec.id))
             return form
-        form = NoneForm(self.preset, spec)
+        form = NoneForm(self.preset, spec, lang=self.lang)
         form.btn_check.clicked.connect(partial(self.check, spec.id))
         form.btn_use.clicked.connect(partial(self.use, spec.id))
+        form.btn_forget.clicked.connect(partial(self.sign_out, spec.id))
         return form
 
     def service(self) -> SignIn:
@@ -527,6 +627,26 @@ class SignInPanel(QWidget):
         return self._service
 
     # --- state ----------------------------------------------------------------------------------------------
+    @property
+    def base_url(self) -> Optional[str]:
+        """The server address the panel works with: its own field when it has one, else the one it was given."""
+        if self.txt_base_url is not None:
+            return self.txt_base_url.text().strip() or None
+        return self._base_url
+
+    @base_url.setter
+    def base_url(self, value: Optional[str]) -> None:
+        self._base_url = value or None
+
+    def _remember_url(self) -> bool:
+        """An address given to the panel (the AI settings' field) or typed in its own field is remembered for this
+        provider only (ai_base_url_<provider>, as `llmcf ditto login --base-url`); the configured address that only
+        filled the field is not written again."""
+        if self.txt_base_url is not None:
+            text = self.txt_base_url.text().strip()
+            return bool(text) and text != self._prefilled_url
+        return bool(self._base_url)
+
     @property
     def busy(self) -> bool:
         return self.worker.busy
@@ -558,10 +678,22 @@ class SignInPanel(QWidget):
         return self.preset.method(method_id)
 
     def refresh(self) -> None:
-        """Reads the sign-in state (vault and settings) in a worker; the status line follows."""
+        """Reads the sign-in state (vault and settings) in a worker; the status line follows. With its own address
+        field the panel also reads the configured address (to fill the field) and which environment variable of each
+        key method is set (its name only)."""
         service, preset, base_url = self.service(), self.preset, self.base_url
+        key_specs = [form.spec for form in self.forms.values() if isinstance(form, KeyForm)]
+        with_address = self.txt_base_url is not None
         self._status_request += 1
-        self.worker.run("status", lambda: (service.status(preset, base_url), service.storage_problem(preset.id)),
+
+        def configured() -> Optional[str]:
+            try:
+                return service.endpoint(preset) if with_address else None
+            except Exception:  # noqa: BLE001 - no address yet: the field stays empty
+                return None
+
+        self.worker.run("status", lambda: (service.status(preset, base_url), service.storage_problem(preset.id),
+                                           {spec.id: service.env_variable(spec) for spec in key_specs}, configured()),
                         partial(self._on_status, self._status_request))
 
     def _on_status(self, request: int, result, error):
@@ -570,7 +702,14 @@ class SignInPanel(QWidget):
         if error is not None:
             self.lbl_status.setText(error_text(error))
             return
-        status, problem = result
+        status, problem, env_names, configured = result
+        if self.txt_base_url is not None and configured and not self.txt_base_url.isModified():
+            self.txt_base_url.setText(configured)
+            self._prefilled_url = configured
+        for method_id, name in env_names.items():
+            form = self.forms.get(method_id)
+            if isinstance(form, KeyForm):
+                form.set_env_variable(name)
         self.status = status
         self.lbl_status.setText(status_line(status, _translate))
         self.lbl_status.setStyleSheet(ERROR_STYLE if status.state == STORAGE else "")
@@ -635,15 +774,16 @@ class SignInPanel(QWidget):
         spec, form = self._spec(method_id), self.forms[method_id]
         service, preset, base_url = self.service(), self.preset, self.base_url
         key, fields = form.key(), form.field_values()
+        remember = self._remember_url()
         signed_in = self.status is not None and self.status.method == method_id and self.status.state == "signed_in"
         if key:
             if not self._plain_http_confirmed():
                 return
-            work = partial(service.save_key, preset, spec, key, base_url, fields=fields)
+            work = partial(service.save_key, preset, spec, key, base_url, fields=fields, remember_url=remember)
         elif signed_in and fields:
             work = partial(service.save_fields, preset, spec, fields, base_url)
         elif spec.type == "bearer_optional":
-            work = partial(service.use_method, preset, spec, base_url)
+            work = partial(service.use_method, preset, spec, base_url, remember_url=remember)
         else:
             self._show(_t("signin.key_needed", "Paste the key first."), False)
             return
@@ -666,16 +806,70 @@ class SignInPanel(QWidget):
         spec, form = self._spec(method_id), self.forms[method_id]
         service, preset, base_url = self.service(), self.preset, self.base_url
         profile = form.profile() if isinstance(form, CliSessionForm) else None
+        remember = self._remember_url()
         self._show(_t("signin.working", "Working..."))
-        self.worker.run("use", partial(service.use_method, preset, spec, base_url, profile=profile),
+        self.worker.run("use", partial(service.use_method, preset, spec, base_url, profile=profile,
+                                       remember_url=remember),
                         partial(self._on_saved, method_id))
+
+    def store_from_env(self, method_id: str) -> None:
+        """"Store the key from <VARIABLE> in the vault" (`llmcf ditto login PROVIDER --from-env`): in a worker, the
+        key is taken from the variable (SignIn.env_key), checked for free when the box is ticked (nothing is stored
+        when the check fails), and stored (SignIn.save_key, source env:<VARIABLE>). The key never reaches a widget."""
+        spec, form = self._spec(method_id), self.forms.get(method_id)
+        if not isinstance(form, KeyForm) or not self._plain_http_confirmed():
+            return
+        service, preset, base_url = self.service(), self.preset, self.base_url
+        fields = {fid: value for fid, value in form.field_values().items() if value}
+        check, remember = form.chk_from_env_check.isChecked(), self._remember_url()
+
+        def work():
+            key, name = service.env_key(preset, spec)
+            result = service.check(preset, spec, base_url, key=key, fields=fields or None) if check else None
+            if result is not None and not result.ok:
+                return name, result, None, False
+            saved = service.save_key(preset, spec, key, base_url, fields=fields, source=f"env:{name}",
+                                     remember_url=remember, checked=result)
+            return name, result, saved, getattr(service.secrets, "storage_mode", None) == "ephemeral"
+
+        self._show(_t("signin.checking", "Checking...") if check else _t("signin.working", "Working..."))
+        self.worker.run("from-env", work, self._on_from_env)
+
+    def _on_from_env(self, outcome, error):
+        if isinstance(error, EnvKeyError):
+            texts = {"not_set": ui_text("signin.from_env_not_set", self.lang, names=", ".join(error.variables)),
+                     "malformed": ui_text("signin.from_env_malformed", self.lang, name=error.name or ""),
+                     "no_variable": ui_text("signin.from_env_no_variable", self.lang)}
+            self._show(texts.get(error.code, error_text(error)), False)
+            self.refresh()
+            return
+        if error is not None:
+            self._show(error_text(error), False)
+            return
+        name, result, saved, memory_only = outcome
+        if saved is None:  # the check failed: nothing was stored
+            self._show(error_text(result.error) if result.error is not None else result.message, False)
+            return
+        parts = [ui_text("signin.from_env_memory", self.lang) if memory_only
+                 else ui_text("signin.from_env_done", self.lang, name=name)]
+        if result is not None:
+            parts.append(ui_text("signin.from_env_checked", self.lang, message=result.message))
+        parts.extend(getattr(saved, "warnings", []) or [])
+        self._show(" ".join(parts), True)
+        self.changed.emit()
+        self.refresh()
 
     def sign_out(self, method_id: str, confirm: bool = True) -> None:
         spec = self._spec(method_id)
-        if confirm and QMessageBox.question(
-                self, _t("signin.sign_out", "Sign out"),
-                _t("signin.confirm_sign_out", "Delete the stored sign-in of {provider} from this computer?",
-                   provider=self.preset.label), QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+        if spec.type == "none":  # Forget: the remembered address and method of a server without sign-in
+            title = ui_text("signin.forget", self.lang)
+            question = ui_text("signin.confirm_forget", self.lang, provider=self.preset.label)
+        else:
+            title = _t("signin.sign_out", "Sign out")
+            question = _t("signin.confirm_sign_out", "Delete the stored sign-in of {provider} from this computer?",
+                          provider=self.preset.label)
+        if confirm and QMessageBox.question(self, title, question, QMessageBox.Yes | QMessageBox.No,
+                                            QMessageBox.No) != QMessageBox.Yes:
             return
         service, preset, base_url = self.service(), self.preset, self.base_url
         self._show(_t("signin.working", "Working..."))
@@ -684,6 +878,12 @@ class SignInPanel(QWidget):
     def _on_signed_out(self, result, error):
         if error is not None:
             self._show(error_text(error), False)
+            return
+        if result.type == "none":
+            self._show(ui_text("signin.forgotten" if result.deleted else "signin.nothing_remembered", self.lang,
+                               provider=self.preset.label), True)
+            self.changed.emit()
+            self.refresh()
             return
         parts = [_t("signin.signed_out", "Signed out: the stored key was deleted from this computer.")
                  if result.deleted else _t("signin.nothing_stored", "Nothing was stored here.")]
