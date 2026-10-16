@@ -1710,7 +1710,10 @@ framework never sees it.
   (`llama-bench` prints the metadata of the model it loads) is returned in `external_text`; paths in such a message
   appear as the framework's folder labels (`state:...`, `output:...`) or as a file name only, never as a host path
   or `~/...`, also when a path holds spaces (a quoted path, the framework's folders and the home folder, also by its
-  real path, are replaced whole, also further on in a path list). When the deploy job ends, the audit log gets its
+  real path, are replaced whole, also further on in a path list). Paths of Linux and Windows are recognised on every
+  computer, with either separator and as Python quotes a Windows path; another account's home folder (`/home/<name>`,
+  `C:\Users\<name>`) appears as "a home folder", never by the account's name. When the deploy job ends, the audit
+  log gets its
   own end entry (done, failed or cancelled, with the job, the device's label and the device state), linked to the
   call's `started` entry; it is written on every way out of
   the job, also when the device list cannot record the deploy (the result then has a `note`). The jobs of
