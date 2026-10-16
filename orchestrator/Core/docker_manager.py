@@ -19,8 +19,6 @@ from datetime import datetime
 from typing import Dict, Any
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
-
 # Import Builder types
 try:
     from orchestrator.Core.builder import BuildConfiguration, ModelFormat, BuildStatus
@@ -37,23 +35,65 @@ try:
 except ImportError:
     SelfHealingManager = None
 
-class DockerManager(QObject):
+_SIGNALS_CLASS = None
+
+
+def _signals_class():
+    """The Qt object that carries DockerManager's signals. PySide6 is imported here, when a signal is first used (the
+    GUI connects to them), so the CLI and the MCP server boot without Qt (lazy loading)."""
+    global _SIGNALS_CLASS
+    if _SIGNALS_CLASS is None:
+        from PySide6.QtCore import QObject, Signal
+
+        class DockerSignals(QObject):
+            # Signals for GUI updates
+            build_started = Signal(str)
+            build_progress = Signal(str, int)
+            build_completed = Signal(str, bool, str)
+            build_output = Signal(str, str)
+            build_stats = Signal(str, float, float, float)
+
+            # Signal when AI finds a fix for an error
+            healing_requested = Signal(object)  # Payload: HealingProposal
+
+        _SIGNALS_CLASS = DockerSignals
+    return _SIGNALS_CLASS
+
+
+class _QtSignal:
+    """`manager.build_started` is the bound Qt signal of the manager's DockerSignals object (connect, emit), which is
+    made on first use."""
+
+    def __set_name__(self, owner, name):
+        self.name = name
+
+    def __get__(self, manager, owner=None):
+        if manager is None:
+            return self
+        with manager._signals_lock:
+            if manager._signals is None:
+                manager._signals = _signals_class()()
+        return getattr(manager._signals, self.name)
+
+
+class DockerManager:
     """
     Manages Docker lifecycle and build process via BuildEngine.
     Bridge between GUI and Core Logic.
     """
     # Signals for GUI updates
-    build_started = Signal(str)
-    build_progress = Signal(str, int)
-    build_completed = Signal(str, bool, str)
-    build_output = Signal(str, str)
-    build_stats = Signal(str, float, float, float)
+    build_started = _QtSignal()
+    build_progress = _QtSignal()
+    build_completed = _QtSignal()
+    build_output = _QtSignal()
+    build_stats = _QtSignal()
     
     # Signal when AI finds a fix for an error
-    healing_requested = Signal(object) # Payload: HealingProposal
+    healing_requested = _QtSignal()  # Payload: HealingProposal
     
     def __init__(self, config_manager=None, base_dir=None, secrets_manager=None):
-        super().__init__()
+        self._signals = None  # DockerSignals, made when a signal is first used
+        self._signals_lock = threading.Lock()
         self.logger = logging.getLogger("DockerManager")
         self.framework = None
         self.builder = None

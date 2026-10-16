@@ -24,7 +24,12 @@ _COMMIT = re.compile(r"^[0-9a-f]{40}$", re.ASCII)
 @lru_cache(maxsize=4)
 def _read(path: str, mtime_ns: int) -> dict:
     with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        # libyaml's safe loader (read at every start through the settings' default; the pure-Python loader takes
+        # about ten times longer for this file), else the same rules in Python when PyYAML was built without libyaml
+        try:
+            data = yaml.load(f, Loader=yaml.CSafeLoader)
+        except AttributeError:
+            data = yaml.safe_load(f)
     source = data["llama_cpp"]["source"]
     tag, commit = source["tag"], source["commit"]
     if not (isinstance(tag, str) and _TAG.fullmatch(tag) and isinstance(commit, str) and _COMMIT.fullmatch(commit)):

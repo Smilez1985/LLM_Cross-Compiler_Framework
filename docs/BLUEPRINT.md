@@ -949,6 +949,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 | 3.2.0 | Device runtime and the maintainer's hardware | planned |
 | 3.3.0 | LoRA and large models | planned |
 | 3.4.0 | Supply chain and community | planned |
+| later | Rust parts for the network and the board | planned |
 | later | More hardware and MCP extensions | planned |
 
 ### 3.1.0 - Ditto rebuild, sign-in and local AI (in progress)
@@ -971,6 +972,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 | **Documentation in English and German** for every document. | in progress |
 | **Crawler that checks the site's own signals.** A user cannot know whether a site may be evaluated, so the crawler checks the machine-readable opt-outs itself (robots.txt per RFC 9309, the `X-Robots-Tag` header, robots meta tags including `noai` and its own bot name, the TDM Reservation Protocol) and skips reserved pages, naming them in the log; any reservation wins, and no check can be switched off. Instead of a legal confirmation, a one-time notice (per user, again when its text changes) explains what is read and kept, with a spoken announcement through the operating system's speech engine (the technique of the rag4ll USB watcher); a Stop button keeps what was stored, the progress shows "Page N of M", the result says success, partial or failure honestly, and the crawler reports its real version. A person starts Deep Ingest in the GUI or confirms an AI client's `crawl_docs_site` (unreleased). | done |
 | **Input history**: recent models, targets, boards, URLs, devices and datasets offered in the GUI fields, per user, without secrets; Tools > Clear Input History... forgets them. | done |
+| **Faster start through lazy loading.** The CLI, the MCP server and the GUI load a heavy part only when a command first uses it: the framework's managers (not for commands that need no framework), the knowledge base and the crawler, Qt outside the GUI, Mojo's checks, rich for `--help`. The host check that ran when the URL checks were imported no longer waits one second. Why: `llm-cli mcp serve` must answer an AI client quickly, and `llm-cli --help` should not load everything. | done |
 | **Better answers from the knowledge base**, taken from rag4ll and kept small: reranking with a cross-encoder on the CPU and a relevance floor that keeps unrelated excerpts out of Ditto's prompt (on for build recommendations; for the chat and MCP searches with `rag_rerank_default`), a size budget for the excerpts, splitting of oversized code and table blocks, keyword search that understands identifiers such as `-DGGML_CUDA=ON`, and unloading of idle models; measured with the retrieval evaluation (`llm-cli ditto eval --kind retrieval`). | done |
 | **Community packs with real cryptography**: packs with a manifest of every file, public packs signed with Ed25519, private packs encrypted in the age format (rage, through `pyrage`) to the recipients' keys or a passphrase, signed by the sender and readable with the standard age tools. The XOR "SwarmCipher" upload and its GitHub token prompt are removed; the framework never asks for a token. | done |
 | **Model zoo from the community**: recipes (model at a pinned commit, target fingerprint, format, quantization, toolchain image and verified hashes) generated from finished builds; a signed index with revocations, installation through a quarantine with trust levels, `llm-cli zoo`, the Community Hub, export for the community with a hand-over to a pull request, and the maintainer tools for the community repository. | done |
@@ -1042,6 +1044,24 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **Signed updates** of the framework itself (`orchestrator/utils/updater.py`, in development: update check, update and restart; not wired yet), finished as verified updates of a signed release instead of a plain `git pull`. Toolchain images are not part of it: the framework shares recipes, never compiled images, so they stay built on your machine from the target's Dockerfile; the settings `docker_registry` (empty by default) and `docker_namespace`, which nothing reads, are kept. No default names a registry image: the image settings name local images (`llm-framework/...`) or third-party images such as Trivy and Qdrant, and the `docker` block of a target's `target.yml` names a local image without a registry. | planned |
 | **Clean-up**: removal of the legacy four-module scripts (the template `build.sh` and Dockerfile already follow the current pipeline: GGUF through llama.cpp built from the recipe, intermediates in the work folder). | planned |
 | **SSOT corrections** for the project-sources catalogue and its scripts. | done |
+
+### Rust parts (planned)
+
+The core stays Python. Parts that stand alone at a trust boundary and are not built yet are written in Rust; other
+parts move only when a measurement shows a gain (maintainer decision of 2026-10-16).
+
+| Item | Status |
+|---|---|
+| **Network MCP gateway in Rust.** One gateway process in front of the Python MCP server for clients on other devices: TLS, and sign-in by OAuth, a named token or a pre-shared key (an HMAC signature on every request). Why: this part faces the network; Rust gives it memory safety and a small, fast process. | planned |
+| **MQTT broker inside the gateway (rumqttd).** It wakes AI clients with fixed keywords only (the details come over MCP), and other applications can subscribe and add their own feeds. It replaces the amqtt broker that was planned inside the Python process. Why: no second server to run, and the broker sits where the network connections arrive. | planned |
+| **Root helper on the board in Rust**: a static binary with a fixed set of subcommands for what build and deploy need, and a sudoers rule for this helper only. Why: no general sudo on the board, and a static binary runs on every board, whatever its C library. | planned |
+| **The framework's Rust parts shipped prebuilt and signed.** CI makes them release assets of this repository and signs them keyless with Sigstore; their checksums are kept in the repository, and the installer checks signature and checksum before it uses a binary. Building them yourself stays possible as an opt-in. Why: no Rust toolchain on your computer, and every binary can still be checked. | planned |
+
+- **No prebuilt Docker images for targets.** Target images are still built on your computer from the target's
+  Dockerfile and never pushed to a registry. Why: the framework shares recipes, not images, and an image would need
+  a rebuild for every update.
+- **No Go.** Why: one compiled language next to Python is enough; a second one adds a second toolchain.
+- **The GUI stays Qt (PySide6).** Why: it runs on Windows and Linux, and Qt itself is native code.
 
 ### Later (planned)
 

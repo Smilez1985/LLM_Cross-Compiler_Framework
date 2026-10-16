@@ -752,6 +752,10 @@ The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGE
   and AMD (Ryzen Z1 Extreme); later Llama-family models in every format, ONNX, Hailo, Intel and Qualcomm; LoRA and
   large models, and supply-chain hardening. New targets start from the hardware probe, and a benchmark on the board
   is the proof ("tested on <board>"). Builds in the cloud are not planned.
+- **Rust where the framework meets the network or a board:** the network MCP gateway with the MQTT broker rumqttd
+  inside it, and the board's root helper as a static binary; shipped prebuilt and signed (Sigstore, checksums in the
+  repository), building them yourself stays an opt-in. No prebuilt Docker images for targets, no Go, the GUI stays
+  Qt.
 
 Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
 
