@@ -22,6 +22,11 @@ SUDO_QUESTION = ("The systemd unit is written to /etc/systemd/system and enabled
                  "must work without a password, the deployment never asks). Allow deployments to this device to run "
                  "these sudo commands? Your answer is written to the audit log.")
 SYSTEMD_CONSENT = ("device_runtime_systemd", "deployments may run sudo -n on the device to install the systemd unit")
+# The question before a model that is not a catalog model runs in the short benchmark on the board, asked only after
+# its sha256 was read there ({path} on the board, {user} the SSH user; CLI and GUI ask exactly this, "No" default).
+UNTRUSTED_QUESTION = ("{path} is not a catalog model, so it is untrusted. llama-bench loads it natively on the device "
+                      "as {user} (no sandbox). Run the short benchmark with it? Your answer is written to the audit "
+                      "log.")
 UNTRUSTED_CONSENT = ("device_runtime_untrusted_model",
                      "an untrusted model may run natively on the device for the short llama-bench run")
 
@@ -359,7 +364,7 @@ def remove_board_builds(shell: Any, accepted: Any, prune: BoardPrune, device_id:
 
 
 __all__ = ["BoardPrune", "BoardStepError", "SUDO_QUESTION", "SYSTEMD_CONSENT", "UNTRUSTED_CONSENT",
-           "add_trusted_board", "board_address", "boards_overview", "change_settings", "check_board_entry",
-           "connect_stored", "device_rows", "list_board_builds", "load_settings", "not_known_error",
-           "previous_build", "read_host_key", "record_consent", "remember_board", "remove_board_builds",
-           "remove_trust", "trusted_rows", "unreachable_error"]
+           "UNTRUSTED_QUESTION", "add_trusted_board", "board_address", "boards_overview", "change_settings",
+           "check_board_entry", "connect_stored", "device_rows", "list_board_builds", "load_settings",
+           "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",
+           "remove_board_builds", "remove_trust", "trusted_rows", "unreachable_error"]

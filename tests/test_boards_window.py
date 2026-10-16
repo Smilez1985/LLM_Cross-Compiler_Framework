@@ -21,7 +21,7 @@ from conftest import REPO_ROOT
 
 pytest.importorskip("PySide6")
 
-from test_device_runtime import DEVUAN, RK3566, FakeHostKey  # noqa: E402
+from test_device_runtime import DEVUAN, POSIX, RK3566, FakeHostKey  # noqa: E402
 
 
 class Audit:
@@ -598,7 +598,8 @@ def test_deploy_asks_for_the_password_each_time_and_never_keeps_it(qapp, window,
     wait(qapp, window)
     wait(qapp, window)
     (question,) = boxes.questions()
-    assert question.default_is_no and "without a sandbox" in question.text and "models/own.gguf" in question.text
+    # the CLI's words since the review of wave 5a (asked from the worker once the board named the model untrusted)
+    assert question.default_is_no and "(no sandbox)" in question.text and "models/own.gguf" in question.text
     assert fields == [True]
     assert ("connect", "dietpi", "s3cret-once", "runtime_deploy", False) in record
     assert ("remember", "gui") in record and ("bench", "models/own.gguf", False) in record
@@ -610,6 +611,72 @@ def test_deploy_asks_for_the_password_each_time_and_never_keeps_it(qapp, window,
     wait(qapp, window)
     wait(qapp, window)
     assert len(boxes.questions()) == 2, "asked again for the next deploy"
+
+
+@pytest.mark.parametrize("action", ["deploy", "verify"])
+def test_the_untrusted_model_question_comes_only_for_a_model_outside_the_catalog(qapp, window, monkeypatch, action):
+    """As the CLI (review of wave 5a): the model is hashed on the board first; a catalog model runs without a
+    question, any other one only after the person's yes to the CLI's own words ("No" is the default), asked while
+    the board is reached, and the consent is in the audit log before the model is loaded."""
+    import orchestrator.runtime.device.remote as remote
+    from PySide6.QtWidgets import QMessageBox
+    from orchestrator.gui import plain
+    from orchestrator.runtime.device import steps
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    from orchestrator.runtime.device.person_steps import UNTRUSTED_QUESTION
+    from orchestrator.utils.l10n_boards import TEXTS
+    assert TEXTS["en"]["boards.untrusted_question"] == UNTRUSTED_QUESTION, "the GUI asks the CLI's words"
+    real_choose = steps.choose_bench_model
+    order = []
+    runtime_fakes(monkeypatch, order)
+    monkeypatch.setattr(steps, "choose_bench_model", real_choose)
+    monkeypatch.setattr(remote, "model_sha256", lambda shell, path: {"/home/dietpi/models/cat.gguf": "c" * 64,
+                                                                     "/home/dietpi/models/own.gguf": "d" * 64}[path])
+    monkeypatch.setattr(steps, "catalog_model_digests", lambda: {"c" * 64})
+    real_install, real_check = steps.install_runtime, steps.check_runtime
+    monkeypatch.setattr(steps, "install_runtime", lambda shell, **kw: order.append(("bench", kw["bench"].allowed))
+                        or real_install(shell, **kw))
+    monkeypatch.setattr(steps, "check_runtime", lambda shell, **kw: order.append(("bench", kw["bench"].allowed))
+                        or real_check(shell, **kw))
+    answer = {"yes": False}
+
+    def box(message_box):
+        yes = message_box.button(QMessageBox.Yes)
+        order.append(("asked", message_box.text(), message_box.defaultButton() is message_box.button(QMessageBox.No),
+                      threading.current_thread() is threading.main_thread()))
+        return int(QMessageBox.Yes if answer["yes"] else QMessageBox.No) if yes is not None else int(QMessageBox.Ok)
+
+    monkeypatch.setattr(plain, "_exec", box)
+    state = state_of(window)
+    stored(state, ssh_user="dietpi")
+    DeviceRuntimeStore(state, "0123456789abcdef").save_record({"build_id": "b" * 64, "install": "user"})
+    window.reload()
+    entry = window.entries[0]
+
+    def run(model):
+        order.clear()
+        if action == "deploy":
+            window.deploy(entry, RK3566, None, None, model)
+        else:
+            window.verify(entry, RK3566, None, model)
+        for _ in range(3):
+            wait(qapp, window)
+        return [o for o in order if o[0] in ("connect", "asked", "bench")]
+
+    seen = run("models/cat.gguf")
+    assert [o[0] for o in seen] == ["connect", "bench"] and seen[-1] == ("bench", True), "a catalog model: no question"
+    seen = run("models/own.gguf")
+    question = UNTRUSTED_QUESTION.format(path="/home/dietpi/models/own.gguf", user="dietpi")
+    assert [o[0] for o in seen] == ["connect", "asked", "bench"], seen
+    assert seen[1] == ("asked", question, True, True), "the CLI's words, No by default, in the GUI thread"
+    assert seen[2] == ("bench", False), "No: the untrusted model is not loaded"
+    rows = window.framework.tool_registry.audit.rows
+    assert not [r for r in rows if r["tool"] == "device_runtime_untrusted_model"]
+    answer["yes"] = True
+    assert run("models/own.gguf")[-1] == ("bench", True)
+    (consent,) = [r for r in window.framework.tool_registry.audit.rows if r["tool"] == "device_runtime_untrusted_model"]
+    assert consent["arguments"] == {"device": "0123456789abcdef", "model_sha256": "d" * 64}
+    assert consent["extra"]["confirm_channel"] == "framework-gui"
 
 
 def test_deploy_refuses_what_the_cli_refuses_before_any_contact(qapp, window, monkeypatch):
@@ -853,3 +920,107 @@ def test_the_source_is_never_fetched_without_the_persons_yes(qapp, window, monke
     wait(qapp, window)
     assert boxes.questions() == [] and fetched == []
     assert "The build needs the pinned llama.cpp source" in window.output.toPlainText()
+
+
+@POSIX
+def test_deploy_and_verify_run_the_real_core_steps_on_a_fake_board(qapp, window, monkeypatch, tmp_path_factory):
+    """No stand-in for the core: the window's Deploy runtime... and Verify... run the CLI's own steps (the login to
+    the stored board, the trust record, install_runtime, check_runtime) against a board behind fake SSH, so a
+    wrong argument between the window and the core fails here."""
+    from test_device_runtime import HOST, LICENCE, FakeDevice, FakeDeviceExecutor, FormatOnlyVerifier, plan_for
+    from orchestrator.runtime.build.store import BuildStore
+    from orchestrator.runtime.device.package import DeviceRuntimeStore, package_runtime
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    from orchestrator.runtime.profile import device_id_for_host_key
+    from orchestrator.utils import ssh_trust
+    monkeypatch.setattr("orchestrator.runtime.build.toolchain.host_platform", lambda: HOST)
+    state = state_of(window)
+    device_id = device_id_for_host_key(ssh_trust.fingerprint(FakeHostKey()))
+    stored(state, device_id=device_id, ssh_user="dietpi", port=9090)
+    src = tmp_path_factory.mktemp("src")
+    (src / "CMakeLists.txt").write_text("project(llama.cpp)\n")
+    (src / "LICENSE").write_bytes(LICENCE.encode("utf-8"))
+    builds = BuildStore(state)
+    build = builds.build(plan_for(RK3566), source=src, executor=FakeDeviceExecutor(), verifier=FormatOnlyVerifier(),
+                         jobs=1, host=HOST, perf_key=RK3566.perf_key())
+    package_runtime(builds, build, licence=src / "LICENSE", out_dir=DeviceRuntimeStore(state, device_id).root)
+    board = FakeDevice(tmp_path_factory.mktemp("board"))
+    connected = []
+
+    class Client:
+        def exec_command(self, command, timeout=None):
+            return board.exec_command(command, timeout=timeout)
+
+        def close(self):
+            connected.append("closed")
+
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port: FakeHostKey())
+    monkeypatch.setattr(ssh_trust, "check_host_key", lambda st, host, port, key: "known")
+    monkeypatch.setattr(ssh_trust, "connect", lambda host, user, st, port=22, password=None: (
+        connected.append((host, user, port, password)) or Client()))
+    window.reload()
+    Boxes(monkeypatch)
+    window.deploy(window.entries[0], RK3566, None, None, None)
+    wait(qapp, window, timeout=60)
+    wait(qapp, window, timeout=60)
+    text = window.output.toPlainText()
+    assert f"Deployed build {build.build_id[:16]}" in text and "127.0.0.1:9090" in text, text
+    assert connected[0] == ("192.0.2.10", "dietpi", 22, None) and connected[-1] == "closed"
+    record = DeviceRuntimeStore(state, device_id).record()
+    assert record["build_id"] == build.build_id and record["verification"]["ok"] is True
+    trusted = TrustedDevices(state).get(device_id)
+    assert trusted is not None and trusted.trusted_via == "gui" and trusted.paired, "logged in: trusted by the person"
+    rows = window.framework.tool_registry.audit.rows
+    assert any(r["tool"] == "device_trusted" and r["actor"] == "gui" for r in rows)
+    connected.clear()
+    window.verify(window.entries[0], RK3566, None, None)
+    wait(qapp, window, timeout=60)
+    text = window.output.toPlainText()
+    assert f"Board {device_id}, build {build.build_id[:16]}:" in text and "version: passed" in text, text
+    assert DeviceRuntimeStore(state, device_id).record()["verified_at"] >= record["verified_at"]
+
+
+@POSIX
+def test_older_builds_on_a_fake_board_go_with_the_real_core_steps(qapp, window, monkeypatch, tmp_path_factory):
+    """Remove older builds on the board... with the CLI's own steps against a board behind fake SSH: the board's
+    list (never the active build) in the deletion dialog, exactly the ticked build removed for good, audited."""
+    from orchestrator.Core.deletion import accept, choose
+    from orchestrator.gui import deletion_dialog
+    from orchestrator.runtime.profile import device_id_for_host_key
+    from orchestrator.utils import ssh_trust
+    from test_device_runtime import FakeDevice, board_builds
+    state = state_of(window)
+    device_id = device_id_for_host_key(ssh_trust.fingerprint(FakeHostKey()))
+    stored(state, device_id=device_id, ssh_user="dietpi")
+    board = FakeDevice(tmp_path_factory.mktemp("board"))
+    a, b, c = "a" * 16, "b" * 16, "c" * 16
+    board_builds(board, a, b, c, current=c)
+
+    class Client:
+        def exec_command(self, command, timeout=None):
+            return board.exec_command(command, timeout=timeout)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port: FakeHostKey())
+    monkeypatch.setattr(ssh_trust, "check_host_key", lambda st, host, port, key: "known")
+    monkeypatch.setattr(ssh_trust, "connect", lambda host, user, st, port=22, password=None: Client())
+    shown = []
+
+    def ask(parent, plan, **kw):
+        shown.append(sorted(i.file_name for i in plan.items))
+        return accept(choose(plan, [[i.file_name for i in plan.items].index(a)]), "gui", "permanent")
+
+    monkeypatch.setattr(deletion_dialog, "ask_deletion", ask)
+    window.reload()
+    window.select(device_id)
+    Boxes(monkeypatch)
+    window.buttons["btn_boards_prune_board"].click()
+    wait(qapp, window, timeout=60)
+    wait(qapp, window, timeout=60)
+    assert shown == [[a, b]], "the active build is never listed"
+    assert not (board.root / a).exists() and (board.root / b).is_dir() and (board.root / c).is_dir()
+    rows = window.framework.tool_registry.audit.rows
+    assert [r["outcome"] for r in rows] == ["started", "ok"] and rows[0]["actor"] == "gui"
+    assert f"Deleted for good: runtime build {a}" in window.output.toPlainText()

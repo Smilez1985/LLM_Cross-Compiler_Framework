@@ -317,6 +317,22 @@ class TestSettings:
         from orchestrator import cli as cli_module
         assert "person_steps.SUDO_QUESTION" in inspect.getsource(cli_module.device_settings.callback)
 
+    def test_the_cli_asks_the_shared_untrusted_model_question(self, monkeypatch):
+        """The CLI and the Boards window ask the same words before an untrusted model runs on the board
+        (person_steps.UNTRUSTED_QUESTION; review of wave 5a)."""
+        import orchestrator.runtime.device.remote as remote
+        from orchestrator import cli as cli_module
+        asked = []
+        monkeypatch.setattr(remote, "model_sha256", lambda shell, path: "d" * 64)
+        monkeypatch.setattr(steps, "catalog_model_digests", lambda: set())
+        monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+        monkeypatch.setattr(cli_module.click, "confirm", lambda text, default=None: asked.append((text, default))
+                            or False)
+        assert cli_module._bench_choice(None, None, "/home/u", "models/own.gguf", False, "0" * 16, "dietpi") == (
+            "/home/u/models/own.gguf", False, "d" * 64)
+        assert asked == [(person_steps.UNTRUSTED_QUESTION.format(path="/home/u/models/own.gguf", user="dietpi"),
+                          False)]
+
 
 # --- the login to a stored board -------------------------------------------------------------------------------
 
