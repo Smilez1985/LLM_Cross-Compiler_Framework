@@ -7,7 +7,9 @@ it with a recipe in the hub comes later.
 A record lands in <build folder>/device_tests.json (schema llm-framework.device-test/1, newest last, at most
 MAX_TESTS): the board (the label the person gave it, its board and SoC model from the probe, the device id), the
 board's runtime build and llama.cpp version, the model's sha256, the measured prompt and generation speed, the KV-cache
-type, whether the checks passed, and the time. The build is found by the model's sha256 in the build manifests of the
+type the measurement used as llama-bench reported it (`kv_cache`, None when it did not say) and the one the board's
+server is set to (`server_kv_cache`, from the deploy settings; the short run does not use it), whether the checks
+passed, and the time. The build is found by the model's sha256 in the build manifests of the
 output folder (build_info.json, artifacts[].sha256), never by a file name or a path: a renamed copy on the board still
 finds its build, and a file that no build of this framework made is recorded with none (it stays with the board's own
 record).
@@ -37,10 +39,20 @@ def _text(value: Any, limit: int = 64) -> Optional[str]:
     return text or None
 
 
+def _measured_kv_cache(bench: List[Dict[str, Any]]) -> Optional[str]:
+    """The KV-cache type llama-bench reports for its runs (type_k and type_v), when all of them name the same one."""
+    kinds = {(r.get("type_k"), r.get("type_v")) for r in bench}
+    if len(kinds) != 1:
+        return None
+    k, v = kinds.pop()
+    return _text(k, 16) if isinstance(k, str) and k == v else None
+
+
 def make_entry(*, device: Any, profile: Any, report: Any, model_sha256: str, runtime_build_id: str,
                llama_cpp: str, kv_cache: Optional[str] = None) -> Dict[str, Any]:
     """The record of one benchmark on a board: `report` is the VerifyReport of the checks with the short llama-bench
-    run (its "smoke" check)."""
+    run (its "smoke" check); `kv_cache` is the type the board's deploy settings give its server, kept apart from the
+    one the measurement used."""
     smoke = report.check("smoke") if report is not None else None
     bench = (smoke.data.get("bench") if smoke is not None and smoke.data else None) or []
     speeds = {("prompt_ts" if r.get("n_prompt") else "gen_ts"): r.get("avg_ts") for r in bench
@@ -56,7 +68,8 @@ def make_entry(*, device: Any, profile: Any, report: Any, model_sha256: str, run
         "runtime_build_id": str(runtime_build_id)[:64],
         "llama_cpp": _text(llama_cpp, 32),
         "model_sha256": model_sha256,
-        "kv_cache": kv_cache,
+        "kv_cache": _measured_kv_cache(bench),
+        "server_kv_cache": kv_cache,
         "prompt_ts": speeds.get("prompt_ts"),
         "gen_ts": speeds.get("gen_ts"),
         "smoke_passed": bool(smoke is not None and smoke.ok),

@@ -761,7 +761,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   its host name (`myboard.local`; `llm-cli deploy run --host`, `--ip` stays as the old name). When the network drops
   during a deploy (a board with Wi-Fi only), the deploy waits for the board (300 s by default, `--wait`), shows that
   it waits with the time and the limit, and can be cancelled (Cancel in the Deployment window, Ctrl+C in the CLI,
-  `cancel_job`). It logs in again with the same host key check and continues: the upload resumes at the bytes that
+  `cancel_job`); the result then says whether `deploy.sh` had started, also when the network dropped just as it was
+  started. It logs in again with the same host key check and continues: the upload resumes at the bytes that
   arrived once their sha256 matches, and `deploy.sh` runs on the board on its own and is started once, never twice.
   `deploy_to_device` results also have `reason_code`, `resumed` and `waited_s`; its progress names the board by its
   label.
@@ -773,11 +774,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **KV cache of a board's server** (N7): `f16`, `q8_0` or `q4_0` (`-ctk`/`-ctv`, checked words of the shared launch
   policy and of the start script). Automatic by default: `q8_0` when little memory is left next to the model on the
   board (from its probe), otherwise `f16`; you can always choose a type, and `f16` switches it off. Chosen with
-  `llm-cli device settings --kv-cache` or in the Deployment window; the systemd unit, the start command and
-  `deploy.sh` take it from the board's deploy settings, and the question of `deploy_device_runtime` names it.
+  `llm-cli device settings --kv-cache` or in the Deployment window (a saved choice the window does not show is kept
+  unless you choose there); the systemd unit and the start command take it from the board's deploy settings, a
+  package made in the Deployment window names it in the start command of its `deploy.sh`, and the question of
+  `deploy_device_runtime` names it.
 - **"Tested on board X"** (N3): a passed benchmark on the board (`llm-cli device runtime verify` or `deploy` with
   `--bench-model`, `run_device_benchmark`, and the new "Benchmark on a board" part of the Deployment window) is
-  recorded with every build of that model in the output folder (`device_tests.json`, found by the model's sha256).
+  recorded with every build of that model in the output folder (`device_tests.json`, found by the model's sha256),
+  with the KV cache the measurement used next to the one the board's server is set to.
   The Deployment window lists such a build as "tested on <board>", and after a deploy of a GGUF model it fills in the
   board and the model for that measurement.
 ### Changed

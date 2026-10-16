@@ -41,6 +41,9 @@ from orchestrator.gui.plain import ask, plain_box, plain_label, plain_tooltip
 from orchestrator.utils import input_history
 
 KV_CHOICES = ("auto", "f16", "q8_0", "q4_0")
+# What a deploy keeps in the board's deploy settings when the person did not choose the KV cache in this window: the
+# saved choice stays (the window may not have shown it, e.g. under another name of the board).
+KV_KEEP = "keep"
 
 
 def _clock(seconds: float) -> str:
@@ -55,8 +58,11 @@ def _size(n: int) -> str:
 def event_text(event, host: str) -> str:
     """The visible state of a running deploy (N5) in the interface language."""
     if event.kind == "waiting":
-        return ui_text("device.wait.status", address=host, elapsed=_clock(event.elapsed), limit=_clock(event.limit))
+        key = "device.wait.status_install" if event.step == "install" else "device.wait.status"
+        return ui_text(key, address=host, elapsed=_clock(event.elapsed), limit=_clock(event.limit))
     if event.kind == "back":
+        if event.step == "install":
+            return ui_text("device.wait.install")
         return ui_text("device.wait.back", done=_size(event.done), total=_size(event.total))
     if event.kind == "uploading":
         return ui_text("device.deploy.uploading", done=_size(event.done), total=_size(event.total))
@@ -89,7 +95,7 @@ class DeploymentWorker(QThread):
         self.user = user
         self.password = password
         self.kv_cache = None            # the KV-cache type named in the package's start command
-        self.kv_setting = None          # what the board's deploy settings keep: None (automatic) or a type
+        self.kv_setting = KV_KEEP       # what the board's deploy settings get: None (automatic), a type, or KV_KEEP
         self.device_id = None           # the board's record after a successful deploy
         self.model_name = None          # the GGUF model the package installed (for the benchmark on the board)
         self._stop = threading.Event()
@@ -149,9 +155,12 @@ class DeploymentWorker(QThread):
             if result.success:
                 self._remember_device()
                 try:
+                    # deploy.sh copies a GGUF model to models/ in the home folder; with Docker it goes into the
+                    # container instead, so there is no path on the board to measure
                     from orchestrator.Core.deployment_manager import resolve_model_artifact
                     name = resolve_model_artifact(Path(self.artifact_path)).name
-                    self.model_name = name if name.lower().endswith(".gguf") else None
+                    docker = bool((self.docker_config or {}).get("use_docker"))
+                    self.model_name = name if name.lower().endswith(".gguf") and not docker else None
                 except (OSError, ValueError):
                     self.model_name = None
                 self.finished.emit(True, ui_text("device.deploy.done", name=pkg_path.name))
@@ -192,7 +201,8 @@ class DeploymentWorker(QThread):
                                        audit=audit, actor="gui")
         if device is not None:
             self.device_id = device.device_id
-            _save_kv_setting(Path(state), device.device_id, self.kv_setting)
+            if self.kv_setting != KV_KEEP:
+                _save_kv_setting(Path(state), device.device_id, self.kv_setting)
 
 
 def _save_kv_setting(state_dir: Path, device_id: str, kind) -> None:
@@ -346,6 +356,8 @@ class DeploymentWindow(QWidget):
         self.cb_kv.setAccessibleName(ui_text("device.kv.label").rstrip(":"))
         for kind in KV_CHOICES:
             self.cb_kv.addItem(ui_text(f"device.kv.{kind}") if kind != "auto" else "", kind)
+        self._kv_presetting, self._kv_touched = False, False
+        self.cb_kv.currentIndexChanged.connect(self._on_kv_changed)
         self.cb_kv.setToolTip(plain_tooltip(ui_text("device.kv.explain")))
         layout_kv.addWidget(QLabel(ui_text("device.kv.label")))
         layout_kv.addWidget(self.cb_kv, 1)
@@ -449,15 +461,25 @@ class DeploymentWindow(QWidget):
         self.cb_kv.setItemText(0, ui_text("device.kv.auto", kind=auto.kind, why=why))
         if device_id != getattr(self, "_kv_device", ""):
             self._kv_device = device_id
-            self.cb_kv.setCurrentIndex(max(0, self.cb_kv.findData(settings.kv_cache or "auto")))
+            self._kv_presetting = True
+            try:
+                self.cb_kv.setCurrentIndex(max(0, self.cb_kv.findData(settings.kv_cache or "auto")))
+            finally:
+                self._kv_presetting = False
+            self._kv_touched = False  # what is shown now is the board's saved choice, not one made here
         self._kv_auto = auto.kind
 
+    def _on_kv_changed(self, *_):
+        if not self._kv_presetting:
+            self._kv_touched = True
+
     def kv_choice(self):
-        """(type for the package's start command, what the deploy settings keep: None for automatic)."""
+        """(type for the package's start command, what the board's deploy settings get: None for automatic, or
+        KV_KEEP when the person did not choose here, so a saved choice the window could not show is never
+        replaced)."""
         kind = self.cb_kv.currentData() or "auto"
-        if kind == "auto":
-            return getattr(self, "_kv_auto", "f16"), None
-        return kind, kind
+        setting = (None if kind == "auto" else kind) if self._kv_touched else KV_KEEP
+        return (getattr(self, "_kv_auto", "f16") if kind == "auto" else kind), setting
 
     def refresh_data(self):
         # Artifacts
@@ -669,7 +691,8 @@ class DeploymentWindow(QWidget):
             plain_box(self, "warning", ui_text("device.bench.title"), ui_text("device.bench.missing"))
             return
         # asked before anything runs, No preselected: a model that is not a catalog model loads outside a sandbox
-        allowed = ask(self, ui_text("device.bench.title"), ui_text("device.bench.untrusted"))
+        allowed = ask(self, ui_text("device.bench.title"),
+                      ui_text("device.bench.untrusted", board=self.cb_bench_board.currentText(), model=model))
         self.btn_bench.setEnabled(False)
         self.lbl_bench.setText(ui_text("device.bench.running"))
         self.bench_worker = BoardBenchWorker(self.framework, device_id, model, allowed)

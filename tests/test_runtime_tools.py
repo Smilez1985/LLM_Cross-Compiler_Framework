@@ -333,6 +333,8 @@ class TestBenchmark:
         with pytest.raises(BenchError) as e:
             runner.run(model, kind="artifact_speed", label="board model", trusted=False, sha256="0" * 64)
         assert e.value.code == "not_supported" and "never benchmarked natively" in str(e.value)
+        assert "Deployment window" in e.value.next and "Benchmark window" not in e.value.next, \
+            "the next step names the window that measures on a board (the old Benchmark window is not wired)"
         assert started == []
 
     def test_an_allowed_benchmark_of_a_built_model_runs_in_the_sandbox_only(self, fw, bench):
