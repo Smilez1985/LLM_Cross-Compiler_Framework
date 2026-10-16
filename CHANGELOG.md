@@ -929,6 +929,26 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **Faster start: heavy parts load when they are first used** (unreleased; maintainer decision RG1, lazy loading):
+  `llm-cli`, the MCP server and the GUI imported the whole framework at start. Now a CLI command imports the
+  framework, the build engine and the managers only when it uses them; the framework imports its managers when it
+  boots, and the knowledge base only when it is switched on; Qt is loaded outside the GUI only when a signal of the
+  Docker manager is used; the crawler's HTML parser, Mojo's checks, the provider layer of `orchestrator.llm` and the
+  parts of `orchestrator.runtime` load with their first use; `--help` loads no rich. The host check that ran when the
+  URL checks were imported took a one-second CPU sample and looked up two programs, results it never showed; it now
+  runs only the checks whose errors it reports (disk, memory, Python, platform), so its disk warning appears when the
+  URL checks are first used, not at every start. Measured on the same machine with a temporary home, before and
+  after (median of 5): `llm-cli --help` 3.97 s and 143 MB to 0.28 s and 27 MB; `llm-cli mcp serve` until it answers
+  `initialize` 5.68 s and 191 MB to 2.81 s and 118 MB; the GUI main window 4.71 s and 203 MB to 2.38 s and 177 MB.
+  The boot still checks Docker as before, so `mcp serve` and the GUI still load the Docker SDK. Commands, results
+  and messages are unchanged; tests start the CLI, `mcp serve` and the GUI in a fresh interpreter and check that
+  the knowledge base, the crawler, the provider SDKs, Qt and Mojo's checks are not loaded.
+- **Roadmap: Rust where the framework meets the network or a board** (unreleased; maintainer decisions RG2 to RG5):
+  the blueprint's roadmap plans the network MCP gateway in Rust with the MQTT broker rumqttd inside it (instead of
+  the amqtt broker planned in the Python process), the board's root helper as a static Rust binary, and the
+  framework's Rust parts as prebuilt release assets signed with Sigstore, with their checksums in the repository and
+  building them yourself as an opt-in. It also records: no prebuilt Docker images for targets, no Go, the GUI stays
+  Qt, and Qdrant Edge for the knowledge base as a proposal.
 - **The identical-build check no longer blocks the builder window** (unreleased; eighth round, N11): before a build,
   the check asked Hugging Face for the model's current commit on the window's own thread, so the window stopped
   responding on a slow network (up to 10 seconds). The look-up now runs in the background; Start waits meanwhile and

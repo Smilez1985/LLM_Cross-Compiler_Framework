@@ -1,0 +1,253 @@
+"""Lazy loading (maintainer decision RG1): the CLI, the MCP server and the GUI start without the heavy libraries and
+framework parts they do not use yet. Each check runs in a fresh interpreter and reads sys.modules there, so it does
+not depend on timing or on what earlier tests imported."""
+
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+
+from conftest import REPO_ROOT
+
+# Third-party libraries that are expensive to import and only needed by some commands.
+HEAVY_LIBRARIES = ("fastembed", "onnxruntime", "qdrant_client", "tokenizers", "huggingface_hub", "docker", "paramiko",
+                   "anthropic", "openai", "PySide6", "bs4", "pypdf", "langdetect", "PIL", "numpy")
+# Framework parts that pull in those libraries or much code of their own.
+HEAVY_PARTS = ("orchestrator.Core.framework", "orchestrator.Core.builder", "orchestrator.Core.crawler_manager",
+               "orchestrator.Core.rag_manager", "orchestrator.Core.ditto_manager", "orchestrator.llm.client",
+               "orchestrator.Core.mojo")
+# Loaded when the framework boots: the managers and the build engine, whose Docker reachability check uses the Docker
+# SDK (which imports paramiko), and Ditto with its provider layer (not the provider SDKs), which self-healing needs.
+BOOT_USES = ("docker", "paramiko", "orchestrator.Core.framework", "orchestrator.Core.builder",
+             "orchestrator.Core.ditto_manager", "orchestrator.llm.client")
+
+REPORT = r"""
+import atexit, json, sys
+_OUT = sys.argv[1]
+def _report():
+    with open(_OUT, "w", encoding="utf-8") as f:
+        json.dump(sorted(sys.modules), f)
+atexit.register(_report)
+sys.argv = [sys.argv[0]] + sys.argv[2:]
+"""
+
+
+def environment(tmp_path, **extra):
+    """The test's isolated environment (conftest) for a child interpreter that imports the framework."""
+    env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), QT_QPA_PLATFORM="offscreen", LLM_SECRET_STORAGE="ephemeral",
+               LLM_FRAMEWORK_HOME=str(tmp_path / "state"), PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring")
+    env.update(extra)
+    return env
+
+
+def loaded_modules(tmp_path, code, *args, timeout=180):
+    """The modules a fresh interpreter has loaded when `code` ends (the list is written at exit)."""
+    out = tmp_path / "modules.json"
+    run = subprocess.run([sys.executable, "-c", REPORT + code, str(out), *args], cwd=tmp_path,
+                         env=environment(tmp_path), stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                         timeout=timeout)
+    assert out.exists(), run.stderr[-3000:]
+    return set(json.loads(out.read_text(encoding="utf-8"))), run
+
+
+def present(modules, names):
+    """The names (a package or a module) that are loaded."""
+    return sorted(name for name in names if name in modules or any(m.startswith(name + ".") for m in modules))
+
+
+def test_importing_the_cli_loads_no_heavy_module(tmp_path):
+    modules, _ = loaded_modules(tmp_path, "import orchestrator.cli")
+    assert present(modules, HEAVY_LIBRARIES + HEAVY_PARTS + ("rich", "mcp", "pydantic")) == []
+
+
+def test_cli_help_loads_no_heavy_module(tmp_path):
+    modules, run = loaded_modules(tmp_path, "from orchestrator.cli import cli\ncli()", "--help")
+    assert run.returncode == 0 and "Usage:" in run.stdout and "mcp" in run.stdout
+    assert present(modules, HEAVY_LIBRARIES + HEAVY_PARTS + ("rich", "mcp")) == []
+
+
+def test_importing_the_mcp_server_loads_no_heavy_module(tmp_path):
+    modules, _ = loaded_modules(tmp_path, "import orchestrator.mcp_server")
+    assert present(modules, HEAVY_LIBRARIES + HEAVY_PARTS + ("mcp", "rich")) == []
+
+
+def test_mcp_serve_answers_initialize_without_the_heavy_modules(tmp_path):
+    """`llm-cli mcp serve` over stdio: the framework boots, the server answers initialize, the client leaves. Only
+    what the boot itself uses is loaded (BOOT_USES); not the knowledge base, the crawler, the provider SDKs, Qt or
+    Mojo's checks."""
+    init = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}}
+    out = tmp_path / "modules.json"
+    server = subprocess.Popen([sys.executable, "-c", REPORT + "from orchestrator.cli import cli\ncli()", str(out),
+                               "-q", "mcp", "serve"], cwd=tmp_path, env=environment(tmp_path), stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        server.stdin.write(json.dumps(init) + "\n")
+        server.stdin.flush()
+        first = server.stdout.readline()  # the answer to initialize
+        _, errors = server.communicate(timeout=120)  # closes stdin: the client leaves, the server ends
+    finally:
+        if server.poll() is None:
+            server.kill()
+    answer = json.loads(first)
+    assert answer["id"] == 1 and answer["result"]["serverInfo"]["name"] == "llm-cross-compiler", errors[-3000:]
+    modules = set(json.loads(out.read_text(encoding="utf-8")))
+    assert present(modules, ("mcp",)) == ["mcp"], "the check would pass without a server"
+    heavy = [name for name in HEAVY_LIBRARIES + HEAVY_PARTS if name not in BOOT_USES]
+    assert present(modules, heavy) == []
+
+
+def test_the_gui_main_window_starts_without_the_heavy_modules(tmp_path):
+    pytest.importorskip("PySide6")
+    code = ("from PySide6.QtWidgets import QApplication\n"
+            "app = QApplication([])\n"
+            "from pathlib import Path\n"
+            "from orchestrator.gui.main_window import MainOrchestrator\n"
+            "MainOrchestrator._open_tool_permissions = lambda self, first_run=False: None\n"
+            f"window = MainOrchestrator(Path({str(REPO_ROOT)!r}))\n"
+            "app.processEvents()\n"
+            "assert window.framework.tool_registry is not None\n"
+            "window.close()\n")
+    modules, run = loaded_modules(tmp_path, code)
+    assert run.returncode == 0, run.stderr[-3000:]
+    assert "PySide6" in {m.split(".")[0] for m in modules}
+    heavy = [name for name in HEAVY_LIBRARIES + HEAVY_PARTS if name not in BOOT_USES + ("PySide6",)]
+    assert present(modules, heavy + ["mcp"]) == []
+
+
+def test_the_knowledge_base_is_still_created_once_it_is_enabled(monkeypatch):
+    """The other direction: lazy loading must not lose a part. The RAG manager (imported on first use) is created as
+    soon as the knowledge base is switched on."""
+    from orchestrator.Core import framework as framework_module
+    created = []
+
+    class FakeRag:
+        def __init__(self, framework):
+            created.append(framework)
+
+    monkeypatch.setattr(framework_module, "RAGManager", FakeRag)
+    fm = framework_module.FrameworkManager()
+    assert fm.ensure_rag_manager() is None and created == []
+    assert fm.config.set("enable_rag_knowledge", True)
+    assert isinstance(fm.ensure_rag_manager(), FakeRag) and created == [fm]
+
+
+# --- what the lazy names resolve to ---------------------------------------------------------------------------------
+
+def test_lazy_names_are_the_real_objects():
+    import orchestrator.cli as cli
+    import orchestrator.Core.framework as framework
+    from orchestrator.Core import build_formats, builder, module_generator
+    from orchestrator.Core.framework import FrameworkManager
+    assert cli.FrameworkManager is FrameworkManager and cli.ModuleGenerator is module_generator.ModuleGenerator
+    assert builder.ModelFormat is build_formats.ModelFormat and builder.OptimizationLevel is build_formats.OptimizationLevel
+    assert framework.build_tool_registry.__module__ == "orchestrator.tools.framework_tools"
+    for name in framework._LAZY:
+        assert getattr(framework, name).__name__ == name
+    with pytest.raises(AttributeError):
+        cli.no_such_name  # noqa: B018
+    with pytest.raises(AttributeError):
+        framework.no_such_name  # noqa: B018
+
+
+def test_build_format_choices_still_come_from_the_engine():
+    from orchestrator.cli import cli
+    from orchestrator.Core.builder import ModelFormat
+    option = next(p for p in cli.commands["build"].commands["start"].params if p.name == "format")
+    assert list(option.type.choices) == [f.value for f in ModelFormat if f is not ModelFormat.HUGGINGFACE]
+
+
+def test_package_exports_resolve():
+    import importlib
+    import orchestrator.llm as llm
+    import orchestrator.runtime as runtime
+    for package in (llm, runtime):
+        assert sorted(package.__all__) == sorted(n for names in package._SOURCES.values() for n in names)
+        for module, names in package._SOURCES.items():
+            for name in names:
+                assert getattr(package, name) is getattr(importlib.import_module(module), name)
+    from orchestrator.llm import LLMClient
+    from orchestrator.llm.client import LLMClient as Direct
+    assert LLMClient is Direct
+
+
+def test_the_cli_console_is_made_on_first_use_and_live_displays_get_the_real_one(monkeypatch):
+    """The commands' console is a stand-in until the first print; a live display (download progress) enters its
+    console with `with`, which a stand-in cannot forward, so it gets rich's Console itself."""
+    from rich.console import Console
+    import orchestrator.cli as cli
+    monkeypatch.setattr(cli, "console", cli._SharedConsole())
+    assert cli.console._console is None
+    bar, _update = cli._download_progress()
+    assert isinstance(bar.live.console, Console) and bar.live.console is cli.console._console
+    replaced = Console(width=80)
+    monkeypatch.setattr(cli, "console", replaced)  # a test's own console is used as it is
+    assert cli._download_progress()[0].live.console is replaced
+
+
+def test_mcp_token_variable_has_one_name():
+    from orchestrator.tools import mcp_env, mcp_tokens
+    assert mcp_tokens.ENV_VAR == mcp_env.ENV_VAR == "LCF_MCP_TOKEN"
+
+
+# --- the Docker manager's Qt signals --------------------------------------------------------------------------------
+
+def test_the_docker_manager_needs_qt_only_for_its_signals(tmp_path):
+    code = ("import sys\n"
+            "from orchestrator.Core.docker_manager import DockerManager\n"
+            "manager = DockerManager()\n"
+            "assert 'PySide6' not in sys.modules, 'Qt loaded with the manager'\n")
+    modules, run = loaded_modules(tmp_path, code)
+    assert run.returncode == 0, run.stderr[-3000:]
+    assert present(modules, ("PySide6",)) == []
+
+
+def test_docker_manager_signals_still_connect_and_emit():
+    pytest.importorskip("PySide6")
+    from orchestrator.Core.docker_manager import DockerManager
+    manager, other = DockerManager(), DockerManager()
+    got = []
+    manager.build_output.connect(lambda build, line: got.append((build, line)))
+    manager.build_completed.connect(lambda build, ok, path: got.append((build, ok, path)))
+    manager.build_output.emit("b1", "line")
+    manager.build_completed.emit("b1", True, "/out")
+    other.build_output.emit("b2", "not connected")
+    assert got == [("b1", "line"), ("b1", True, "/out")]
+
+
+# --- the import-time host check of utils.validation ---------------------------------------------------------------
+
+def test_validation_import_takes_no_cpu_sample_and_still_warns_about_disk_space(tmp_path):
+    """Importing the module checked the host with a one-second CPU sample (and two command lookups); their results
+    are only warnings, which the import never logged. The errors it logs (disk, memory, Python, platform) stay."""
+    code = ("import psutil, subprocess\n"
+            "samples, lookups = [], []\n"
+            "psutil.cpu_percent = lambda *a, **k: samples.append(1) or 0.0\n"
+            "real_run = subprocess.run\n"
+            "def run(args, *a, **k):\n"
+            "    if list(args)[:1] in (['which'], ['where']):  # the command lookups (other calls: platform, ...)\n"
+            "        lookups.append(args)\n"
+            "    return real_run(args, *a, **k)\n"
+            "subprocess.run = run\n"
+            "real_disk = psutil.disk_usage\n"
+            "psutil.disk_usage = lambda path: real_disk(path)._replace(free=1024 ** 3)\n"
+            "import orchestrator.utils.validation as v\n"
+            "assert samples == [] and lookups == [], (samples, lookups)\n"
+            "assert [r.message for r in v._init_validation.get_errors()] == ['Insufficient disk space: 1.0GB < 5.0GB']\n")
+    _, run = loaded_modules(tmp_path, code)
+    assert run.returncode == 0, run.stderr[-3000:]
+    assert "Validation Warning on Import: Insufficient disk space: 1.0GB < 5.0GB" in run.stderr
+
+
+def test_llama_pin_reads_the_same_values_with_either_loader(monkeypatch):
+    """The pin is read with libyaml's safe loader at every start; PyYAML without libyaml reads the same values."""
+    import yaml
+    from orchestrator.utils import llama_pin
+    with open(llama_pin.CATALOG_PATH, encoding="utf-8") as f:
+        source = yaml.safe_load(f)["llama_cpp"]["source"]
+    expected = {"tag": source["tag"], "commit": source["commit"]}
+    assert llama_pin.pinned_source() == expected
+    monkeypatch.delattr(yaml, "CSafeLoader", raising=False)
+    assert llama_pin._read.__wrapped__(str(llama_pin.CATALOG_PATH), 0) == expected
