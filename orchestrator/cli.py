@@ -3845,21 +3845,14 @@ def knowledge_snapshots_list(ctx: FrameworkContext):
 def _print_snapshot_disk(ctx: FrameworkContext, total: int) -> None:
     """What the snapshots use against the free space of their disk, and whether the next one fits (eighth round,
     answer 2: a snapshot that does not fit stops the change that needs it; nothing is deleted by itself)."""
-    from orchestrator.Core.knowledge_snapshots import FREE_SPACE_STEP, room_before, size_text
-    try:
-        room = room_before(ctx.framework_manager.config.user_state_dir)
-    except OSError:
+    from orchestrator.Core.knowledge_snapshots import snapshot_disk
+    disk = snapshot_disk(ctx.framework_manager.config.user_state_dir, total)  # the GUI's line says the same
+    if disk is None:
         return
-    if room is None or room.check is None:
-        return
-    console.print(f"The snapshots use {size_text(total)}; {size_text(room.free)} are free on that disk.")
-    if room.verdict == "does_not_fit":
-        console.print(f"[yellow]The next snapshot (about {size_text(room.estimate)}) does not fit: Deep Ingest, "
-                      f"restoring a snapshot and importing a knowledge pack are refused until there is room. "
-                      f"{escape(FREE_SPACE_STEP)}[/yellow]")
-    elif room.verdict == "tight":
-        console.print(f"[yellow]The next snapshot (about {size_text(room.estimate)}) still fits, but leaves little "
-                      "free space.[/yellow]")
+    console.print(escape(disk.line()))
+    warning = disk.warning()
+    if warning:
+        console.print(f"[yellow]{escape(warning)}[/yellow]")
 
 
 def _delete_snapshots_cli(ctx: FrameworkContext, names: Optional[Tuple[str, ...]]) -> None:
@@ -3951,44 +3944,11 @@ def knowledge_storage(click_ctx):
 
 def _print_storage_summary(info: Dict[str, Any], state_dir: Path, used: Optional[str] = None) -> None:
     """The storage the knowledge base really uses (`used`: qdrant-edge, old-local or server, as an open knowledge base
-    named it; else as the records say, nothing opened), the conversion and the old folder."""
-    from orchestrator.Core.knowledge_snapshots import size_text
+    named it; else as the records say, nothing opened), the conversion and the old folder (migration.storage_status:
+    Tools > Knowledge Snapshots... shows the same status)."""
     from orchestrator.rag import migration
-    from orchestrator.rag.errors import KnowledgeBaseError
-    reason = ""
-    if not used:
-        try:
-            use, reason = migration.current(state_dir)
-            used = "qdrant-edge" if use == "edge" else "old-local"
-        except KnowledgeBaseError as e:
-            used, reason = "", str(e)
-    state = info.get("state")
-    if used == "qdrant-edge":
-        console.print(f"Storage: Qdrant Edge in {escape(str(migration.edge_folder(state_dir)))}.")
-    elif used == "old-local":
-        console.print("Storage: the storage of earlier versions (qdrant-client's local mode) in "
-                      f"{escape(str(migration.old_folder(state_dir)))}.")
-        if reason and state != "failed":
-            console.print(f"{escape(reason)}.")
-    elif used == "server":
-        console.print("Storage: a Qdrant server (setting qdrant_url); the local storage is not used.")
-    else:
-        console.print(f"[red]{escape(reason)}[/red]")
-    if state == "converted":
-        console.print(f"Converted from the old storage on {escape(str(info.get('converted_at', '')))} "
-                      f"({int(info.get('points') or 0)} excerpts, counts and sample searches checked).")
-    elif state == "failed":
-        console.print(f"[yellow]The old storage is still in use: its conversion failed on "
-                      f"{escape(str(info.get('failed_at', '')))}: {escape(str(info.get('reason', '')))}[/yellow]")
-        console.print(escape(migration.retry_sentence(str(info.get("code") or ""))))
-    if info.get("old_folder"):
-        kept = size_text(int(info.get("old_folder_bytes") or 0))
-        if state == "converted":
-            console.print(f"The old folder {escape(str(info['old_folder']))} ({kept}) is kept until you delete it: "
-                          "'llm-cli knowledge storage delete-old' (or Tools > Knowledge Snapshots... > Delete the old "
-                          "storage... in the GUI) lists it and asks you first.")
-        else:
-            console.print(f"Old storage folder: {escape(str(info['old_folder']))} ({kept}).")
+    for style, line in migration.storage_lines(migration.storage_status(state_dir, info, used)):
+        console.print(f"[{style}]{escape(line)}[/{style}]" if style else escape(line))
 
 
 @knowledge_storage.command('show')
@@ -4010,11 +3970,12 @@ def knowledge_storage_convert(ctx: FrameworkContext):
     from orchestrator.rag import migration
     ctx.require_framework()
     state_dir = Path(ctx.framework_manager.config.user_state_dir)
-    if not migration.old_store_present(state_dir) or migration.edge_in_use(state_dir):
+    refusal = migration.convert_refusal(state_dir)   # the GUI's [Convert now] is offered on the same condition
+    if refusal == "nothing":
         console.print("There is no old storage to convert.")
         _print_storage_summary(migration.summary(state_dir), state_dir)
         return
-    if not migration.engine_available():
+    if refusal == "engine_missing":
         console.print(f"[red]{escape(migration.ENGINE_MISSING)}; nothing can be converted.[/red]")
         sys.exit(1)
     ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
@@ -4119,35 +4080,30 @@ def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
 def knowledge_sources(ctx: FrameworkContext, kind: str):
     """What the knowledge base holds: every source with the licence and copyright notice it shows, and what a
     knowledge pack would carry of it (full text, or only its address and short facts) and why"""
+    from orchestrator.Core import knowledge_sources as ks   # Tools > Knowledge Sources... lists the same
     from orchestrator.rag.errors import KnowledgeBaseError
     ctx.require_framework()
-    ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
-    rag = ensure() if callable(ensure) else None
-    if rag is None:
-        console.print("[red]The knowledge base is off (setting enable_rag_knowledge). Switch it on in the GUI's AI "
-                      "settings first.[/red]")
+    try:
+        rag = ks.knowledge_base(ctx.framework_manager)
+    except ks.KnowledgeOff as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     try:
-        entries = [e for e in rag.list_sources() if kind in ("any", e["kind"])]
+        entries = ks.sources(rag, kind)
     except KnowledgeBaseError as e:
         console.print(f"[red]The knowledge base cannot be read: {escape(str(e))}[/red]")
         sys.exit(1)
     if not entries:
-        console.print("The knowledge base holds no source" + ("." if kind == "any" else f" of kind {kind}."))
+        console.print(ks.empty_sentence(kind))
         return
-    carried = {"full_text": "full text", "link_and_facts": "link and short facts", "not_exported": "not exported"}
     table = Table(title="Knowledge sources, their licence and what a knowledge pack carries of them")
     for column in ("Source", "Kind", "Licence", "Copyright notice", "In a pack", "Why"):
         table.add_column(column, overflow="fold")
     for e in entries:   # addresses, titles and notices are site text: escaped, never markup
         table.add_row(escape(e["source"]), e["kind"], escape(e.get("licence") or "-"),
-                      escape(e.get("copyright") or "-"), carried.get(e.get("pack_share", ""), "-"),
-                      escape(e.get("share_reason") or ""))
+                      escape(e.get("copyright") or "-"), ks.carried(e), escape(e.get("share_reason") or ""))
     console.print(table)
-    full = sum(1 for e in entries if e.get("pack_share") == "full_text")
-    facts = sum(1 for e in entries if e.get("pack_share") == "link_and_facts")
-    console.print(f"{len(entries)} source(s): a knowledge pack would carry {full} with their full text and {facts} "
-                  "only as their address and short facts (llm-cli zoo export knowledge lists them again).")
+    console.print(escape(ks.totals_sentence(entries)))
 
 
 # ============================================================================
@@ -6146,17 +6102,11 @@ def _zoo_fail(error: Exception, code: int = 1):
 
 
 def _public_keys(files, kind):
-    from orchestrator.Core.community_pack import parse_public_keys
-    keys = []
-    for f in files:
-        try:
-            text = Path(f).read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            _zoo_fail(click.UsageError(f"{f} is not a text file with public keys (see 'llm-cli zoo keys')."), 2)
-        keys += [k for k in parse_public_keys(text) if isinstance(k, kind)]
-    if files and not keys:
-        _zoo_fail(ValueError("The key files contain no usable public key (see 'llm-cli zoo keys')."), 2)
-    return keys
+    from orchestrator.Core.community_pack import KeyFileError, read_public_key_files
+    try:
+        return read_public_key_files(files, kind)   # the Community Hub reads key files the same way
+    except KeyFileError as e:
+        _zoo_fail(click.UsageError(str(e)) if e.code == "not_text" else ValueError(str(e)), 2)
 
 
 @zoo.command('list')
@@ -6189,22 +6139,11 @@ def zoo_list(ctx: FrameworkContext, kind: Optional[str], refresh: bool, as_json:
 @pass_context
 def zoo_show(ctx: FrameworkContext, pack_id: str, kind: Optional[str]):
     """Show one entry of the zoo (and an installed recipe)"""
-    cm = _zoo(ctx)
-    items = [i for i in cm.list_items(cm.cached_index())
-             if i.id.casefold() == pack_id.casefold() and (not kind or i.kind == kind)]
-    if not items:
+    found = _zoo(ctx).details(pack_id, kind)   # the Community Hub's Details... shows the same
+    if not found:
         _zoo_fail(ValueError(f"'{pack_id}' is neither in the cached index nor installed (llm-cli zoo list --refresh)."))
-    for i in items:
-        lines = [f"{i.kind} {i.id} {i.version} by {i.author} ({i.license or 'licence unknown'})",
-                 f"Trust: {i.trust.value}" + (f" - revoked: {i.revoked}" if i.revoked else ""),
-                 f"Installed: {i.installed_version or 'no'}" + (f" in {i.path}" if i.path else "")]
-        if i.entry:
-            lines += [f"Download: {i.entry.url} ({i.entry.size} bytes, sha256 {i.entry.sha256})"]
-        if i.description:
-            lines.append(i.description)
-        if i.kind == "recipe" and i.path and (i.path / "recipe.yml").is_file():
-            lines += ["", (i.path / "recipe.yml").read_text(encoding="utf-8")]
-        console.print(Panel(escape("\n".join(lines)), title=escape(i.title)))
+    for details in found:
+        console.print(Panel(escape("\n".join(details.lines())), title=escape(details.item.title)))
 
 
 @zoo.command('install')
