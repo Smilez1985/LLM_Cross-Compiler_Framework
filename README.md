@@ -40,6 +40,7 @@ runtimes stay yours to install (see [The board](#the-board)).
 |---|---|---|---|
 | Rockchip | official | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
 | NVIDIA GPUs, AMD (Ryzen Z1 Extreme) | planned ([roadmap](docs/BLUEPRINT.md#roadmap)) | – | – |
+| Generic ARM64 CPU (Raspberry Pi 4 and 5) | planned ([roadmap](docs/BLUEPRINT.md#roadmap)) | – | GGUF |
 
 You can add other hardware yourself: [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md).
 
@@ -450,6 +451,12 @@ Console organization).
 
 ## Ditto, the built-in assistant
 
+**Ditto is optional and experimental. Use at your own risk and responsibility. The creator of LLMCF is not liable.**
+This repeats the no-warranty terms of [LICENSE.txt](LICENSE.txt) and adds nothing to them. Everything else in the
+framework works without Ditto. The chat panel and the AI settings show an **Experimental** badge; the first time you
+use Ditto, a notice says this once (stored per user), and `llm-cli ditto` and `llm-cli module generate-ai` print it
+once at a terminal.
+
 Ditto answers questions, suggests build settings, analyzes failed builds and proposes new hardware modules. It
 uses the framework's tools within your tool permissions:
 
@@ -633,8 +640,11 @@ crawler blocks private network addresses, limits pages and depth, and honours th
 site: robots.txt, the `X-Robots-Tag` header, robots meta tags (including `noai`) and the TDM Reservation Protocol.
 None of these checks can be switched off. The wizard shows "Page N of M", **Stop** keeps what is already stored, and
 the result says success, partial or failure; the outcome is also spoken by the speech engine of the operating system,
-if there is one, unless you turn that off. Search results are treated as external text, never as instructions. More:
-[knowledge base](docs/Features.md#knowledge-base-rag) and [Deep Ingest](docs/Features.md#deep-ingest).
+if there is one, unless you turn that off. Search results are treated as external text, never as instructions. Each
+page also records its licence and copyright notice: a knowledge pack carries a page's full text only where its licence
+allows passing it on, every other page as its address and short facts (`llm-cli knowledge sources` shows each page).
+More: [knowledge base](docs/Features.md#knowledge-base-rag), [Deep Ingest](docs/Features.md#deep-ingest) and
+[licences and copyright](docs/Features.md#licences-and-copyright).
 
 ---
 
@@ -643,10 +653,11 @@ if there is one, unless you turn that off. Search results are treated as externa
 Targets, recipes (how a model was built for a board) and knowledge can be shared as signed packs:
 `llm-cli zoo list|show|install|verify|export|keys` or **Tools > Open Community Hub**. A pack is installed only after
 checks in a quarantine folder and your confirmation, and it shows a trust level. Your own work is exported
-privacy-scrubbed and signed with your key; a pull request goes through the GitHub CLI or the browser, and the
-framework never asks for a token. Packs can also be encrypted for your own machines or a team, in the age format,
-so the standard age and rage tools open them too. No community repository or index is published yet, so today only
-pack files can be installed. Details: [docs/Features.md](docs/Features.md#community-zoo).
+privacy-scrubbed and signed with your key (knowledge with a page's full text only where its licence allows it, and
+the export lists every page with what it carries and why); a pull request goes through the GitHub CLI or the
+browser, and the framework never asks for a token. Packs can also be encrypted for your own machines or a team, in
+the age format, so the standard age and rage tools open them too. No community repository or index is published yet,
+so today only pack files can be installed. Details: [docs/Features.md](docs/Features.md#community-zoo).
 
 ---
 
@@ -735,8 +746,11 @@ The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGE
   provider is removed, and Claude subscribers use MCP or an API key); a new
   Ditto evaluation run with the improved prompts; the self-built llama.cpp runtime on the board (the command line
   works; the GUI, the MCP tools and a run on a real board follow).
-- **Planned:** targets for NVIDIA GPUs and AMD (Ryzen Z1 Extreme), more formats, LoRA and large models, and
-  supply-chain hardening.
+- **Planned:** recipes as target templates, then right after them a rotation stage before quantization (SpinQuant,
+  QuaRot; only where the format supports it) and a generic ARM64 target for the Raspberry Pi; targets for NVIDIA GPUs
+  and AMD (Ryzen Z1 Extreme); later Llama-family models in every format, ONNX, Hailo, Intel and Qualcomm; LoRA and
+  large models, and supply-chain hardening. New targets start from the hardware probe, and a benchmark on the board
+  is the proof ("tested on <board>"). Builds in the cloud are not planned.
 
 Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
 

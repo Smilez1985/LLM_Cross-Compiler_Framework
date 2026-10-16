@@ -296,6 +296,25 @@ llm-cli knowledge index-docs
 llm-cli knowledge index-docs --with-code
 ```
 
+### knowledge sources
+
+```
+llm-cli knowledge sources [--kind web|pack|docs|other|any]
+```
+
+Unveröffentlicht. Listet, was die Wissensbasis enthält: jede Quelle mit ihrer Art, der Lizenz, die sie nennt (eine
+SPDX-ähnliche ID wie `CC-BY-4.0`, `other` für eine, die das Framework nicht erkennt, `-` für keine), ihrem
+Urheberrechtshinweis und dem, was ein Wissenspaket von ihr enthielte, und warum: **full text** (ihre Lizenz erlaubt
+die Weitergabe des Textes), **link and short facts** (ein Urheberrechtshinweis ohne eine solche Lizenz, Code ohne
+Lizenz, eine unbekannte Lizenz) oder **not exported** (eine Seite eines installierten Wissenspakets, die eigenen
+Dokumente des Frameworks). Adressen, Titel und Hinweise sind Text der Website und werden als reiner Text gezeigt. Die
+Wissensbasis muss eingeschaltet sein.
+
+```bash
+llm-cli knowledge sources
+llm-cli knowledge sources --kind web
+```
+
 ---
 
 ## targets
@@ -598,6 +617,12 @@ Ditto ist der eingebaute Assistent. Die meisten `ditto`-Befehle nutzen Anbieter 
 (GUI: **Tools > Configure AI Agent (Ditto)...**, oder `ai_provider` und `ai_model` in der `config.yml`).
 Anmelden kannst du dich mit [`llm-cli ditto login`](#ditto-login) oder mit **Anmelden...** in den
 KI-Einstellungen.
+
+Ditto ist optional und experimentell. Vor dem ersten `ditto`-Befehl (oder `module generate-ai`) an einem Terminal
+geht einmal ein Hinweis auf stderr: „Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller von LLMCF haftet
+nicht.“ (der Gewährleistungsausschluss aus `LICENSE.txt`, nicht mehr). Er wird je Benutzer gespeichert und mit dem
+Hinweis der GUI geteilt; ohne Terminal wird nichts ausgegeben oder gespeichert. Der Befehl läuft immer
+([Details](Features_DE.md#experimentell)).
 
 ### ditto login
 
@@ -1516,7 +1541,8 @@ eingestellten Targets-Ordner angelegt (und vom Modulgenerator erneut geprüft). 
 Anmeldung des Anbieters ([`llm-cli ditto login`](#ditto-login)); der Befehl fragt selbst nie nach einem Schlüssel.
 Weder `module create` noch `module generate-ai` hängt Seiten aus der Wissensbasis an; das ist eine Option auf der
 letzten Seite des GUI-Assistenten. Ist die Probe-Datei ein Probe-Profil, wird der Block `runtime:` des Moduls daraus
-geplant; die CPU- und CMake-Flags des Vorschlags stehen dort als Hinweistext und werden nie angewendet.
+geplant; die CPU- und CMake-Flags des Vorschlags stehen dort als Hinweistext und werden nie angewendet. Ditto ist
+experimentell: Vor dem ersten Lauf an einem Terminal geht der Hinweis zu Ditto einmal auf stderr ([ditto](#ditto)).
 
 | Option | Bedeutung |
 |---|---|
@@ -2029,7 +2055,11 @@ Was in das Paket kommt:
   Zusammenfassung daran, es ebenfalls zu exportieren, sonst können andere das Rezept nicht bauen.
 - **knowledge:** deine Seiten der Wissensbasis (sie muss eingeschaltet sein), datenschutzbereinigt. Jede Seite
   behält ihre Quelladresse; Seiten ohne Quelle bleiben draußen, ebenso Seiten aus installierten
-  Community-Wissenspaketen (ein Hinweis sagt, wie viele).
+  Community-Wissenspaketen (ein Hinweis sagt, wie viele). Eine Seite kommt nur dann mit vollem Text hinein, wenn ihre
+  Lizenz die Weitergabe erlaubt, mit der Namensnennung, die die Lizenz verlangt; jede andere Seite kommt als ihre
+  Adresse mit kurzen Fakten hinein (Titel, Abschnittsnamen, Fachbegriffe). Die Zusammenfassung führt jede Seite auf,
+  mit dem, was das Paket von ihr enthält, und warum, und ein Hinweis zählt beides
+  ([knowledge sources](#knowledge-sources) zeigt dasselbe vor dem Export).
 
 Die Datei heißt `contribution-<Art>-<ID>-<Version>.zip`, verschlüsselt `<Art>-<ID>-<Version>.lcfpack`. Deine
 Schlüssel werden beim ersten Mal im Secrets-Speicher angelegt (siehe [zoo keys](#zoo-keys)). Der Empfänger eines

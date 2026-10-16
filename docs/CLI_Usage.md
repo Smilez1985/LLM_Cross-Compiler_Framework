@@ -290,6 +290,24 @@ llm-cli knowledge index-docs
 llm-cli knowledge index-docs --with-code
 ```
 
+### knowledge sources
+
+```
+llm-cli knowledge sources [--kind web|pack|docs|other|any]
+```
+
+Unreleased. Lists what the knowledge base holds: every source with its kind, the licence it names (an SPDX-like id
+such as `CC-BY-4.0`, `other` for one the framework does not recognise, `-` for none), its copyright notice, and what a
+knowledge pack would carry of it and why: **full text** (its licence allows passing the text on), **link and short
+facts** (a copyright notice and no such licence, code without a licence, an unknown licence) or **not exported** (a
+page of an installed knowledge pack, the framework's own documents). Addresses, titles and notices are site text and
+are shown as plain text. The knowledge base must be switched on.
+
+```bash
+llm-cli knowledge sources
+llm-cli knowledge sources --kind web
+```
+
 ---
 
 ## targets
@@ -578,6 +596,11 @@ changed key there (to trust a reinstalled board again), trust the board again wi
 Ditto is the built-in assistant. Most `ditto` commands use the provider and model from the AI settings (GUI:
 **Tools > Configure AI Agent (Ditto)...**, or `ai_provider` and `ai_model` in `config.yml`). Sign in with
 [`llm-cli ditto login`](#ditto-login), or with **Sign in...** in the AI settings.
+
+Ditto is optional and experimental. Before the first `ditto` command (or `module generate-ai`) at a terminal, a
+notice goes to stderr once: "Use at your own risk and responsibility. The creator of LLMCF is not liable." (the
+no-warranty terms of `LICENSE.txt`, nothing more). It is stored per user and shared with the GUI's notice; without a
+terminal nothing is printed or stored. The command always runs ([details](Features.md#experimental)).
 
 ### ditto login
 
@@ -1460,7 +1483,8 @@ generator) in the configured targets folder. Ditto uses the provider's stored si
 ([`llm-cli ditto login`](#ditto-login)); the command never asks for a key itself. Neither `module create` nor
 `module generate-ai` attaches pages from the knowledge base; that is an option on the last page of the GUI wizard.
 When the probe file is a probe profile, the module's `runtime:` block is planned from it; the proposal's CPU and
-CMake flags are kept there as advisory text and never applied.
+CMake flags are kept there as advisory text and never applied. Ditto is experimental: before the first run at a
+terminal the notice on Ditto goes to stderr once ([ditto](#ditto)).
 
 | Option | Meaning |
 |---|---|
@@ -1949,7 +1973,10 @@ What goes into the pack:
   it too, or others cannot build the recipe.
 - **knowledge:** your pages of the knowledge base (it must be enabled), privacy-scrubbed. Every page keeps its
   source address; pages without one are left out, and so are pages imported from installed community knowledge
-  packs (a note says how many).
+  packs (a note says how many). A page goes in with its full text only where its licence allows passing the text on,
+  with the attribution the licence requires; every other page goes in as its address and short facts (title, section
+  names, technical terms). The summary lists every page with what the pack carries of it and why, and a note counts
+  both ([knowledge sources](#knowledge-sources) shows the same before you export).
 
 The file is called `contribution-<kind>-<id>-<version>.zip`, or `<kind>-<id>-<version>.lcfpack` when it is
 encrypted. Your keys are created in the secrets store on first use (see [zoo keys](#zoo-keys)). The recipient of

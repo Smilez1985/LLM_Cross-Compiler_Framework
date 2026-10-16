@@ -9,7 +9,8 @@ Wird sowohl von der GUI (Wizard) als auch der CLI (Command) genutzt.
 Enthält Templates für Dockerfile, target.yml und build.sh.
 
 The generated target.yml carries a capabilities block (support level community) and no template placeholder.
-A knowledge snapshot is attached only on request and holds only the pages crawled for this target.
+A knowledge snapshot is attached only on request and holds only the pages crawled for this target, as the licences
+allow (full text only where a page's licence allows passing it on, otherwise its address and short facts).
 validate_target_folder checks a target folder from anywhere (generated, exported or a community pack).
 """
 
@@ -74,11 +75,13 @@ GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
 KNOWLEDGE_SNAPSHOT = "knowledge/initial_knowledge.json"  # crawled pages: data, not template output
 KNOWLEDGE_README = """# Knowledge snapshot of {slug}
 
-`initial_knowledge.json` holds the pages that Deep Ingest crawled for this target in the module wizard, as text
-sections after the privacy scrub (home folders, addresses, host and user names and keys removed). Every section
-keeps its source address (`source`) and its metadata, among them the start URL of its crawl (`root_url`). It
-records what the target was made from and can be read offline; the pages keep their owners' terms, and the
-target's licence does not cover them.
+`initial_knowledge.json` holds the pages that Deep Ingest crawled for this target in the module wizard, after the
+privacy scrub (home folders, addresses, host and user names and keys removed). Every entry keeps its source address
+(`source`) and its metadata, among them the start URL of its crawl (`root_url`), the licence and copyright notice the
+page shows, and how it is shared (`shared_as`, `share_reason`): a page whose licence allows passing the text on keeps
+its text in sections, with the attribution its licence requires; every other page (a copyright notice and no such
+licence, code without a licence, an unknown licence) keeps only its address and short facts. The pages keep their
+owners' terms, and the target's licence does not cover them.
 
 The framework does not read this file: nothing imports it into a knowledge base, and there is no command for
 that. To share knowledge so that it reaches other users' knowledge bases, export your knowledge base as a

@@ -42,6 +42,7 @@ RKLLM und RKNN installierst du selbst (siehe [Das Board](#das-board)).
 |---|---|---|---|
 | Rockchip | offiziell | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
 | NVIDIA-GPUs, AMD (Ryzen Z1 Extreme) | geplant ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)) | – | – |
+| Allgemeine ARM64-CPU (Raspberry Pi 4 und 5) | geplant ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)) | – | GGUF |
 
 Andere Hardware kannst du selbst ergänzen: [docs/Module_Developer_Guide_DE.md](docs/Module_Developer_Guide_DE.md).
 
@@ -474,6 +475,12 @@ monatliches API-Guthaben für eine verknüpfte Claude-Console-Organisation).
 
 ## Ditto, der eingebaute Assistent
 
+**Ditto ist optional und experimentell. Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller von LLMCF haftet
+nicht.** Das wiederholt den Gewährleistungsausschluss in [LICENSE.txt](LICENSE.txt) und fügt ihm nichts hinzu. Alles
+andere im Framework funktioniert ohne Ditto. Der Chat-Bereich und die KI-Einstellungen zeigen ein Abzeichen
+**Experimentell**; wenn du Ditto zum ersten Mal nutzt, sagt ein Hinweis das einmal (je Benutzer gespeichert), und
+`llm-cli ditto` und `llm-cli module generate-ai` geben ihn an einem Terminal einmal aus.
+
 Ditto beantwortet Fragen, schlägt Build-Einstellungen vor, analysiert gescheiterte Builds und schlägt neue
 Hardware-Module vor. Dabei nutzt es die Tools des Frameworks im Rahmen deiner Tool-Berechtigungen:
 
@@ -673,8 +680,11 @@ beachtet diese maschinenlesbaren Opt-outs einer Website: robots.txt, den Header 
 (auch `noai`) und das TDM Reservation Protocol. Keine dieser Prüfungen lässt sich abschalten. Der Assistent zeigt
 „Seite N von M“, **Stoppen** behält, was schon gespeichert ist, und das Ergebnis lautet Erfolg, teilweise oder
 Fehlschlag; das Ergebnis spricht auch die Sprachausgabe des Betriebssystems, wenn es eine gibt, außer du schaltest
-das aus. Suchergebnisse gelten als externer Text, nie als Anweisungen. Mehr dazu:
-[Wissensbasis](docs/Features_DE.md#wissensbasis-rag) und [Deep Ingest](docs/Features_DE.md#deep-ingest).
+das aus. Suchergebnisse gelten als externer Text, nie als Anweisungen. Jede Seite hält auch ihre Lizenz und ihren
+Urheberrechtshinweis fest: Ein Wissenspaket enthält den vollen Text einer Seite nur, wo ihre Lizenz die Weitergabe
+erlaubt, jede andere Seite als ihre Adresse mit kurzen Fakten (`llm-cli knowledge sources` zeigt jede Seite). Mehr
+dazu: [Wissensbasis](docs/Features_DE.md#wissensbasis-rag), [Deep Ingest](docs/Features_DE.md#deep-ingest) und
+[Lizenzen und Urheberrecht](docs/Features_DE.md#lizenzen-und-urheberrecht).
 
 ---
 
@@ -683,11 +693,12 @@ das aus. Suchergebnisse gelten als externer Text, nie als Anweisungen. Mehr dazu
 Targets, Rezepte (wie ein Modell für ein Board gebaut wurde) und Wissen lassen sich als signierte Packs teilen:
 `llm-cli zoo list|show|install|verify|export|keys` oder **Tools > Community Hub öffnen**. Ein Pack wird erst nach
 Prüfungen in einem Quarantäne-Ordner und deiner Bestätigung installiert und zeigt eine Vertrauensstufe. Deine eigene
-Arbeit wird datenschutzbereinigt exportiert und mit deinem Schlüssel signiert; ein Pull Request läuft über die
-GitHub CLI oder den Browser, und das Framework fragt nie nach einem Token. Packs lassen sich auch für deine eigenen
-Rechner oder ein Team verschlüsseln, im Format age, sodass auch die üblichen Werkzeuge age und rage sie öffnen. Ein
-Community-Repository oder ein Index ist noch nicht veröffentlicht; heute lassen sich deshalb nur Pack-Dateien
-installieren. Einzelheiten: [docs/Features_DE.md](docs/Features_DE.md#community-zoo).
+Arbeit wird datenschutzbereinigt exportiert und mit deinem Schlüssel signiert (Wissen mit dem vollen Text einer Seite
+nur, wo ihre Lizenz es erlaubt, und der Export führt jede Seite auf, mit dem, was sie enthält, und warum); ein Pull
+Request läuft über die GitHub CLI oder den Browser, und das Framework fragt nie nach einem Token. Packs lassen sich
+auch für deine eigenen Rechner oder ein Team verschlüsseln, im Format age, sodass auch die üblichen Werkzeuge age und
+rage sie öffnen. Ein Community-Repository oder ein Index ist noch nicht veröffentlicht; heute lassen sich deshalb nur
+Pack-Dateien installieren. Einzelheiten: [docs/Features_DE.md](docs/Features_DE.md#community-zoo).
 
 ---
 
@@ -780,8 +791,11 @@ Die Roadmap führt auf, was geplant ist; Erledigtes wandert beim Release in den 
   (API-Schlüssel, lokale Engines und das `ant`-Profil funktionieren in der GUI und mit `llm-cli ditto login`; der
   Claude-Abo-Anbieter ist entfernt, und Claude-Abonnenten nutzen MCP oder einen API-Schlüssel); eine neue Ditto-Evaluation mit den verbesserten Prompts; die selbst gebaute llama.cpp-Laufzeit auf dem
   Board (die Kommandozeile funktioniert; die GUI, die MCP-Werkzeuge und ein Lauf auf einem echten Board folgen).
-- **Geplant:** Targets für NVIDIA-GPUs und AMD (Ryzen Z1 Extreme), weitere Formate, LoRA und große Modelle sowie
-  eine gehärtete Lieferkette.
+- **Geplant:** Rezepte als Target-Vorlagen, direkt danach eine Rotationsstufe vor der Quantisierung (SpinQuant,
+  QuaRot; nur wo das Format sie unterstützt) und ein allgemeines ARM64-Target für den Raspberry Pi; Targets für
+  NVIDIA-GPUs und AMD (Ryzen Z1 Extreme); später Modelle der Llama-Familie in jedem Format, ONNX, Hailo, Intel und
+  Qualcomm; LoRA und große Modelle sowie eine gehärtete Lieferkette. Neue Targets beginnen mit der Hardware-Probe, und
+  ein Benchmark auf dem Board ist der Beweis („getestet auf <Board>“). Builds in der Cloud sind nicht geplant.
 
 Vollständige Liste: [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap).
 

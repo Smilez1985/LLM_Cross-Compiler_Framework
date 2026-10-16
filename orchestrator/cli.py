@@ -465,6 +465,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     Ditto uses the provider's stored sign-in (llm-cli ditto login <provider>).
     """
     from orchestrator.Core.ditto_manager import DittoError, proposal_facts
+    _ditto_notice_once()   # Ditto at work outside the ditto group: the notice comes first here too
     ctx.require_framework()
     ditto = _ai_override(ctx, provider, model)
     try:
@@ -1688,8 +1689,40 @@ def tools_crawl_notice(ctx: FrameworkContext):
 
 @cli.group()
 def ditto():
-    """Ditto, the AI assistant: sign-in (login, logout, auth), questions, evaluation and the local model"""
-    pass
+    """Ditto, the AI assistant (experimental): sign-in (login, logout, auth), questions, evaluation and the local
+    model"""
+    _ditto_notice_once()
+
+
+def _notice_terminal() -> bool:
+    """A person reads stderr: only then is the notice on Ditto printed and recorded."""
+    try:
+        return sys.stderr is not None and sys.stderr.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _ditto_notice_once() -> None:
+    """Ditto is optional and experimental (eighth round, Q-2): before the first command at a terminal that uses Ditto
+    (the `llm-cli ditto` group, `llm-cli module generate-ai`) the notice goes to stderr and is recorded per person
+    (utils/ditto_notice.py). Without a terminal nothing is printed or recorded, so the next command at a terminal
+    prints it. It never stops the command."""
+    if not _notice_terminal():
+        return
+    from orchestrator.Core.config_manager import ConfigManager
+    from orchestrator.utils.ditto_notice import DittoNotice, notice_text
+    from orchestrator.utils.localization import current_language
+    notice = DittoNotice(ConfigManager.user_state_path())
+    if not notice.needed():
+        return
+    title, text = notice_text(current_language())
+    err = Console(stderr=True)
+    err.print(f"[bold yellow]{escape(title)}[/bold yellow]\n{escape(text)}\n")
+    try:
+        notice.acknowledge("cli")
+    except OSError as e:
+        err.print(f"[yellow]The notice could not be remembered ({escape(str(e))}); it is shown again next time."
+                  "[/yellow]")
 
 
 def _local_runtime(ctx: FrameworkContext):
@@ -3536,7 +3569,7 @@ def _print_deletion_result(result, accepted) -> None:
 
 @cli.group()
 def knowledge():
-    """The knowledge base's files on this computer"""
+    """The knowledge base on this computer: its sources and their licences, snapshots, the framework's documents"""
     pass
 
 
@@ -3712,6 +3745,44 @@ def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
         console.print(f"Snapshot taken first: {escape(str(result['snapshot']))} (llm-cli knowledge snapshots).")
     console.print("Ditto finds these texts in its knowledge base now (search_knowledge with kind docs for AI "
                   "clients).")
+
+
+@knowledge.command('sources')
+@click.option('--kind', type=click.Choice(["web", "pack", "docs", "other", "any"]), default="any", show_default=True,
+              help='Only sources of this kind')
+@pass_context
+def knowledge_sources(ctx: FrameworkContext, kind: str):
+    """What the knowledge base holds: every source with the licence and copyright notice it shows, and what a
+    knowledge pack would carry of it (full text, or only its address and short facts) and why"""
+    from orchestrator.rag.errors import KnowledgeBaseError
+    ctx.require_framework()
+    ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
+    rag = ensure() if callable(ensure) else None
+    if rag is None:
+        console.print("[red]The knowledge base is off (setting enable_rag_knowledge). Switch it on in the GUI's AI "
+                      "settings first.[/red]")
+        sys.exit(1)
+    try:
+        entries = [e for e in rag.list_sources() if kind in ("any", e["kind"])]
+    except KnowledgeBaseError as e:
+        console.print(f"[red]The knowledge base cannot be read: {escape(str(e))}[/red]")
+        sys.exit(1)
+    if not entries:
+        console.print("The knowledge base holds no source" + ("." if kind == "any" else f" of kind {kind}."))
+        return
+    carried = {"full_text": "full text", "link_and_facts": "link and short facts", "not_exported": "not exported"}
+    table = Table(title="Knowledge sources, their licence and what a knowledge pack carries of them")
+    for column in ("Source", "Kind", "Licence", "Copyright notice", "In a pack", "Why"):
+        table.add_column(column, overflow="fold")
+    for e in entries:   # addresses, titles and notices are site text: escaped, never markup
+        table.add_row(escape(e["source"]), e["kind"], escape(e.get("licence") or "-"),
+                      escape(e.get("copyright") or "-"), carried.get(e.get("pack_share", ""), "-"),
+                      escape(e.get("share_reason") or ""))
+    console.print(table)
+    full = sum(1 for e in entries if e.get("pack_share") == "full_text")
+    facts = sum(1 for e in entries if e.get("pack_share") == "link_and_facts")
+    console.print(f"{len(entries)} source(s): a knowledge pack would carry {full} with their full text and {facts} "
+                  "only as their address and short facts (llm-cli zoo export knowledge lists them again).")
 
 
 # ============================================================================

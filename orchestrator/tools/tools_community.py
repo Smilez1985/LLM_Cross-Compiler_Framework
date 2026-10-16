@@ -826,6 +826,9 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         if inp.kind == "knowledge":
             facts.append(Fact("Pages", "your own crawled pages; pages from installed knowledge packs are left out, and "
                                        "every page keeps its source address"))
+            facts.append(Fact("Licences", "a page goes in with its full text only where its licence allows passing "
+                                          "it on (with the attribution it requires); every other page only as its "
+                                          "address and short facts; the result counts both"))
         bound = {"kind": inp.kind, "source": source, "author": author, "license": licence,
                  "model_license": inp.model_license, "pack_id": inp.pack_id, "signer": key}
         # always the person: the pack goes out under their name (design 4.3)
