@@ -692,7 +692,11 @@ from 3.10). qdrant-client stays for an optional Qdrant server (`qdrant_url`) and
   A failed conversion leaves the old store in use, removes the half-made copy and records why; Mojo Oracle and
   `llm-cli knowledge storage` show it. A failure of the moment (disk space, the old store held by an older framework)
   is tried again on the next start. A failure that would repeat (a check that did not match, an error while copying)
-  waits for `llm-cli knowledge storage convert` or a new engine version.
+  waits for the person (Tools > Knowledge Snapshots... > Try the conversion again, which runs in the background, or
+  `llm-cli knowledge storage convert`) or a new engine version. Once the knowledge base is in Qdrant Edge, the old
+  folder never stands in for it again: when the engine cannot be loaded later (a missing or broken package), the
+  knowledge base is refused with the reason and Mojo Oracle reports an error. The old folder lacks what was added since
+  the conversion, and what would be written into it would never reach Qdrant Edge.
 - **Snapshots.** A snapshot is a portable file (gzip, one JSON line per point with its vectors and payload), the same
   for every storage. Format 2 names the storage it came from. Snapshots of format 1, written by earlier versions,
   restore into Qdrant Edge and are converted that way. A newer format is refused before anything changes.
@@ -713,6 +717,12 @@ Qdrant Edge reserves its files in advance: the folder looks larger (187 MB for 5
 really uses on Linux. Its memory includes the files it maps. With Qdrant's graph index instead of the exact search,
 50 000 excerpts were searched in 6.5 ms, but each larger import then needed 37 s of indexing; the exact search was
 chosen. The embedding model (tens of milliseconds per excerpt on a CPU) stays the slowest part of storing.
+
+A second run with the same setup at another time on the same machine (other jobs running too) gave the same picture with
+lower times for the old storage. 50 000 excerpts: storing 187 s (old) against 39 s (Qdrant Edge), opening 10.6 s against
+0.9 s, a search 2492 / 3013 ms against 13.7 / 19.5 ms, memory after opening 1630 MB against 408 MB, disk 297 MB against
+280 MB; the conversion took 68 s with 2.0 GB of memory at its peak. 5 000 excerpts: a search 254 ms against 2.2 ms,
+opening 2.9 s against 0.1 s.
 
 ### Community packs: format, trust and exchange (unreleased)
 

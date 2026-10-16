@@ -3723,22 +3723,44 @@ def knowledge_storage(click_ctx):
         click_ctx.invoke(knowledge_storage_show)
 
 
-def _print_storage_summary(info: Dict[str, Any], edge_folder: Path) -> None:
+def _print_storage_summary(info: Dict[str, Any], state_dir: Path, used: Optional[str] = None) -> None:
+    """The storage the knowledge base really uses (`used`: qdrant-edge, old-local or server, as an open knowledge base
+    named it; else as the records say, nothing opened), the conversion and the old folder."""
     from orchestrator.Core.knowledge_snapshots import size_text
-    console.print(f"Storage: Qdrant Edge in {escape(str(edge_folder))}.")
+    from orchestrator.rag import migration
+    from orchestrator.rag.errors import KnowledgeBaseError
+    reason = ""
+    if not used:
+        try:
+            use, reason = migration.current(state_dir)
+            used = "qdrant-edge" if use == "edge" else "old-local"
+        except KnowledgeBaseError as e:
+            used, reason = "", str(e)
     state = info.get("state")
+    if used == "qdrant-edge":
+        console.print(f"Storage: Qdrant Edge in {escape(str(migration.edge_folder(state_dir)))}.")
+    elif used == "old-local":
+        console.print("Storage: the storage of earlier versions (qdrant-client's local mode) in "
+                      f"{escape(str(migration.old_folder(state_dir)))}.")
+        if reason and state != "failed":
+            console.print(f"{escape(reason)}.")
+    elif used == "server":
+        console.print("Storage: a Qdrant server (setting qdrant_url); the local storage is not used.")
+    else:
+        console.print(f"[red]{escape(reason)}[/red]")
     if state == "converted":
         console.print(f"Converted from the old storage on {escape(str(info.get('converted_at', '')))} "
                       f"({int(info.get('points') or 0)} excerpts, counts and sample searches checked).")
     elif state == "failed":
         console.print(f"[yellow]The old storage is still in use: its conversion failed on "
                       f"{escape(str(info.get('failed_at', '')))}: {escape(str(info.get('reason', '')))}[/yellow]")
-        console.print(f"It is tried again {escape(str(info.get('retry') or 'with llm-cli knowledge storage convert'))}.")
+        console.print(escape(migration.retry_sentence(str(info.get("code") or ""))))
     if info.get("old_folder"):
         kept = size_text(int(info.get("old_folder_bytes") or 0))
         if state == "converted":
             console.print(f"The old folder {escape(str(info['old_folder']))} ({kept}) is kept until you delete it: "
-                          "'llm-cli knowledge storage delete-old' lists it and asks you first.")
+                          "'llm-cli knowledge storage delete-old' (or Tools > Knowledge Snapshots... > Delete the old "
+                          "storage... in the GUI) lists it and asks you first.")
         else:
             console.print(f"Old storage folder: {escape(str(info['old_folder']))} ({kept}).")
 
@@ -3751,7 +3773,7 @@ def knowledge_storage_show(ctx: FrameworkContext):
     from orchestrator.rag import migration
     ctx.require_framework()
     state_dir = Path(ctx.framework_manager.config.user_state_dir)
-    _print_storage_summary(migration.summary(state_dir), migration.edge_folder(state_dir))
+    _print_storage_summary(migration.summary(state_dir), state_dir)
 
 
 @knowledge_storage.command('convert')
@@ -3763,9 +3785,12 @@ def knowledge_storage_convert(ctx: FrameworkContext):
     ctx.require_framework()
     state_dir = Path(ctx.framework_manager.config.user_state_dir)
     if not migration.old_store_present(state_dir) or migration.edge_in_use(state_dir):
-        console.print("There is no old storage to convert: the knowledge base is in Qdrant Edge.")
-        _print_storage_summary(migration.summary(state_dir), migration.edge_folder(state_dir))
+        console.print("There is no old storage to convert.")
+        _print_storage_summary(migration.summary(state_dir), state_dir)
         return
+    if not migration.engine_available():
+        console.print(f"[red]{escape(migration.ENGINE_MISSING)}; nothing can be converted.[/red]")
+        sys.exit(1)
     ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
     rag = ensure() if callable(ensure) else None
     if rag is None:
@@ -3774,7 +3799,7 @@ def knowledge_storage_convert(ctx: FrameworkContext):
         sys.exit(1)
     with console.status("Converting the knowledge base to Qdrant Edge (copy and check)..."):
         result = rag.convert_storage()
-    _print_storage_summary(result, migration.edge_folder(state_dir))
+    _print_storage_summary(result, state_dir, used=result.get("used") or None)
     if result.get("error"):
         console.print(f"[red]{escape(str(result['error']))}[/red]")
     if result.get("used") != "qdrant-edge":

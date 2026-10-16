@@ -28,6 +28,13 @@ def check_storage(state_dir) -> List[Finding]:
     except OSError:
         return []
     folder = str(info.get("old_folder") or migration.old_folder(state_dir))
+    if not migration.engine_available() and migration.edge_in_use(state_dir):
+        # The knowledge base is in Qdrant Edge, which cannot be loaded now: it cannot be opened, and the old folder
+        # never stands in for it (it lacks what was added since the conversion).
+        return [Finding("knowledge", "knowledge.storage", Severity.ERROR, migration.EDGE_UNAVAILABLE + ".",
+                        "Install the framework's requirements again (run the installer, or pip install -r "
+                        "requirements.txt); the knowledge base opens again as it was.",
+                        where=str(migration.edge_folder(state_dir)), why=STORAGE_WHY, cannot="person")]
     if not migration.engine_available():
         return [Finding("knowledge", "knowledge.storage", Severity.INFO,
                         migration.ENGINE_MISSING + ". It works, but searches are slower and it needs more memory.",
@@ -37,8 +44,7 @@ def check_storage(state_dir) -> List[Finding]:
         return [Finding("knowledge", "knowledge.storage", Severity.WARN,
                         "The knowledge base still uses the storage of earlier versions: its conversion to Qdrant Edge "
                         f"failed ({info.get('reason', '')}). It keeps working.",
-                        f"Free what the reason names, then run 'llm-cli knowledge storage convert' (it is also tried "
-                        f"again {info.get('retry') or 'on the next start'}).",
+                        "Free what the reason names. " + migration.retry_sentence(str(info.get("code") or "")),
                         where=folder, why=STORAGE_WHY, cannot="person")]
     if info.get("state") == "converted" and info.get("old_folder_kept"):
         size = size_text(int(info.get("old_folder_bytes") or 0))

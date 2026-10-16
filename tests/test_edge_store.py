@@ -751,3 +751,154 @@ def test_the_snapshots_window_offers_the_old_folder_only_after_the_conversion(qa
         assert dialog.btn_old.isHidden()
     finally:
         dialog.close()
+
+
+# --- review of the switch (w4-edge-v): the storage really in use, and the person's way to try again -----------------
+
+def failed_state(tmp_path, code="verify_mismatch") -> Path:
+    """An old store whose conversion failed (with `code`): the old storage is still the knowledge base."""
+    from orchestrator.rag import migration
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    build_old_store(state, extra_model=False, legacy=False)
+    migration.write_record(state, {"state": "failed", "failed_at": "2026-10-16T10:00:00", "code": code,
+                                   "reason": "a reason", "engine": migration.engine_version(),
+                                   "retry": ("on the next start" if code in migration.TRANSIENT else
+                                             "llm-cli knowledge storage convert")})
+    return state
+
+
+class TestTheStorageInUse:
+
+    def test_a_converted_knowledge_base_is_never_swapped_for_the_stale_old_store(self, make_rag, tmp_path,  # noqa: F811
+                                                                                 monkeypatch):
+        """After the conversion the knowledge base lives in Qdrant Edge. When the engine cannot be loaded later (a
+        missing or broken package), the old folder must not quietly become the knowledge base again: it lacks what was
+        added since the conversion, and what would be written into it never reaches Qdrant Edge. The knowledge base is
+        refused with the reason, the old folder stays as it was, and Mojo Oracle reports it as an error."""
+        import sys
+
+        from orchestrator.Core.mojo.checks.knowledge import check_storage
+        from orchestrator.Core.mojo.findings import Severity
+        from orchestrator.rag import migration
+        state = tmp_path / "state"
+        state.mkdir()
+        build_old_store(state, extra_model=False, legacy=False)
+        rag = make_rag()
+        ingest_all(rag, {"https://docs.example/added": "# Added later\n\nThe error E7777 appears after an update."})
+        assert rag.get_status()["store_format"] == "qdrant-edge"
+        rag.close()
+        old = state / "qdrant"
+
+        def files():
+            return sorted((str(p.relative_to(old)), p.stat().st_size, p.stat().st_mtime_ns)
+                          for p in old.rglob("*") if p.is_file())
+
+        before = files()
+        monkeypatch.setitem(sys.modules, "qdrant_edge", None)  # import qdrant_edge raises ImportError
+        again = make_rag()
+        status = again.get_status()
+        assert status.get("store_format") != "old-local", status
+        assert "cannot be loaded" in status.get("error", "")
+        assert again.ingest_document("https://docs.example/x", "# X\n\nText that must go nowhere.", {}) is False
+        with pytest.raises(KnowledgeBaseError, match="cannot be loaded"):
+            migration.current(state)
+        assert files() == before, "nothing was opened or written in the old folder"
+        (finding,) = check_storage(state)
+        assert finding.severity == Severity.ERROR and finding.cannot == "person"
+        assert "cannot be loaded" in finding.message
+
+    def test_the_cli_names_the_storage_that_is_really_in_use(self, tmp_path, monkeypatch):
+        """`llm-cli knowledge storage` while the conversion failed: the old storage is the knowledge base, so the
+        first line must not say Qdrant Edge; and the retry sentence names what really happens."""
+        from test_doctor_fixes import run_cli
+        state = failed_state(tmp_path)
+        fm = SimpleNamespace(config=SimpleNamespace(user_state_dir=state, get=lambda k, d=None: d))
+        _, out = run_cli(fm, monkeypatch, "knowledge", "storage")
+        assert "Storage: Qdrant Edge" not in out
+        assert "Storage: the storage of earlier versions" in out and str(state / "qdrant") in out
+        assert "It is tried again llm-cli" not in out
+        assert "not tried again by itself" in out and "Try the conversion again" in out
+        state2 = failed_state(tmp_path / "b", code="disk_space")
+        fm2 = SimpleNamespace(config=SimpleNamespace(user_state_dir=state2, get=lambda k, d=None: d))
+        _, out = run_cli(fm2, monkeypatch, "knowledge", "storage")
+        assert "tried again on the next start" in out
+
+    def test_the_cli_names_the_old_storage_without_the_engine(self, tmp_path, monkeypatch):
+        import sys
+
+        from test_doctor_fixes import run_cli
+        state = tmp_path / "state"
+        state.mkdir()
+        build_old_store(state, extra_model=False, legacy=False)
+        monkeypatch.setitem(sys.modules, "qdrant_edge", None)
+        fm = SimpleNamespace(config=SimpleNamespace(user_state_dir=state, get=lambda k, d=None: d))
+        _, out = run_cli(fm, monkeypatch, "knowledge", "storage")
+        assert "Storage: Qdrant Edge" not in out and "not available on this computer" in out
+
+    def test_an_old_store_that_cannot_be_read_is_a_recorded_failure_not_a_crash(self, tmp_path):
+        """run() never raises for a failed conversion: an old store qdrant-client cannot open (here a broken
+        meta.json) is recorded with its reason, so the person sees why (status, Mojo Oracle), and it is not tried
+        again on every start."""
+        from orchestrator.Core.mojo.checks.knowledge import check_storage
+        from orchestrator.rag import migration
+        state = tmp_path / "state"
+        (state / "qdrant").mkdir(parents=True)
+        (state / "qdrant" / "meta.json").write_text("{not json", encoding="utf-8")
+        use, reason = migration.run(state)
+        assert use == "old" and "cannot be read" in reason
+        record = migration.read_record(state)
+        assert record["state"] == "failed" and record["code"] == "unreadable"
+        assert migration.should_try(state)[0] is False
+        assert not (state / "qdrant_edge").exists() and not (state / "qdrant_edge.converting").exists()
+        assert (state / "qdrant" / "meta.json").read_text(encoding="utf-8") == "{not json"
+        (warn,) = check_storage(state)
+        assert "cannot be read" in warn.message
+
+    def test_mojo_names_the_ways_to_try_again_in_plain_words(self, tmp_path):
+        from orchestrator.Core.mojo.checks.knowledge import check_storage
+        (warn,) = check_storage(failed_state(tmp_path))
+        assert "tried again llm-cli" not in warn.fix_hint
+        assert "Try the conversion again" in warn.fix_hint and "llm-cli knowledge storage convert" in warn.fix_hint
+
+
+def test_the_snapshots_window_tries_a_failed_conversion_again(qapp, tmp_path, monkeypatch):
+    """W1': every action the person can start in the CLI can be started in the GUI by mouse. A failed conversion is
+    tried again with [Try the conversion again]; it runs off the GUI thread and says what happened. The German window
+    never shows the English retry text of the record."""
+    pytest.importorskip("PySide6")
+    import threading
+    import time as _time
+
+    from orchestrator.gui import knowledge_snapshots_window as window
+    from test_deletion_dialog import boxes
+    state = failed_state(tmp_path)
+    calls = []
+
+    class Rag:
+        def convert_storage(self):
+            from orchestrator.rag import migration
+            calls.append(threading.current_thread().name)
+            use = migration.run(state, force=True)[0]
+            return {**migration.summary(state), "used": "qdrant-edge" if use == "edge" else "old-local", "error": ""}
+
+    framework = SimpleNamespace(config=SimpleNamespace(user_state_dir=state, get=lambda k, d=None: d),
+                                tool_registry=SimpleNamespace(audit=Audit(), policy_store=None),
+                                ensure_rag_manager=lambda: Rag())
+    told = boxes(monkeypatch)
+    dialog = window.KnowledgeSnapshotsDialog(state, framework=framework, lang="de")
+    try:
+        assert not dialog.btn_convert.isHidden() and dialog.btn_convert.isEnabled()
+        text = dialog.storage.text()
+        assert "on the next start" not in text and "llm-cli knowledge storage convert" in text
+        assert "Umwandlung erneut versuchen" in text
+        dialog.btn_convert.click()
+        deadline = _time.monotonic() + 60
+        while not told and _time.monotonic() < deadline:
+            qapp.processEvents()
+            _time.sleep(0.02)
+        assert calls and calls[0] != threading.current_thread().name, "the conversion runs off the GUI thread"
+        assert told and "Qdrant Edge" in told[-1]
+        assert dialog.btn_convert.isHidden() and "umgewandelt" in dialog.storage.text()
+    finally:
+        dialog.close()
