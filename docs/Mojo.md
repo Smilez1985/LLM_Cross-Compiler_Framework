@@ -65,10 +65,18 @@ An information line (ℹ) shows its hint too. At the end one sentence counts eve
 it, for example: "Mojo Oracle found 3 problems (1 error, 2 warnings): Mojo Miracle can repair 1; 1 needs your list of
 what to delete; 1 needs you." Nothing is skipped. Mojo Oracle changes nothing.
 
-It checks Python, Docker and buildx, where Docker keeps its images, free disk space for the cache and output
+It checks Python, Docker and buildx, where Docker keeps its images, free disk space for the cache, output and build
 folders, the targets, the state folder, the secrets store and the keyring, the tool permissions, the MCP tokens and
-the audit log, the chat feed, the calibration data, the community packs, the knowledge snapshots and the local
-llama.cpp runtime.
+the audit log, the chat feed, the calibration data, the community packs, the knowledge snapshots against the free
+space of their disk, the local llama.cpp runtime (in Docker mode: whether Ditto's image is there, built on this
+computer and verified) and the boards you trusted.
+
+For each trusted board Mojo reads the framework's `known_hosts` and opens one connection to the board's SSH port. It
+never logs in, sends no password and names no device account. A board that cannot be used gets its reason code and
+the next step: `device_host_down` (information: nothing answers, the board may be switched off),
+`device_port_closed` or `device_host_key_changed` (warnings). A wrong password or a framework key that is gone
+(`device_auth_failed`) shows only at the next deploy or benchmark, because Mojo does not log in. Mojo checks the 16
+most recently trusted boards.
 
 ## 3. What Mojo Miracle repairs
 
@@ -100,10 +108,10 @@ Every problem that Mojo Miracle does not repair gets one of these reasons:
 
 | Reason | What it means | Examples |
 |---|---|---|
-| deleting needs your list | Freeing space means deleting, and the framework deletes only what you tick and confirm in its own window. At a terminal Mojo Miracle shows you the framework's build images (name, id, size, what each is; nothing is ticked). You type the numbers of the ones to delete and confirm exactly those; No is the default. The GUI has the same list under **Tools > Framework Build Images...**. Docker images are never deleted unless you do it, and Docker's build cache is never touched. | `disk.cache`, `disk.output` |
-| needs you | Only you can do this: your keys, the tool permissions, the audit log, your settings and files. An AI never changes them. | `secrets.store`, `secrets.storage`, `tools.permissions`, `tools.tokens`, `tools.audit`, `chat_feed.store`, `targets.none`, a revoked community pack (you delete its folder yourself) |
-| needs an administrator | It changes the system outside the framework. | `docker.daemon`, `docker.buildx`, `python.version`, `secrets.keyring` |
-| not repairable automatically | Nothing in the framework can do it by itself. The hint says what helps. | `runtime.build.damaged`, `runtime.build.outdated`, `data.calibration`, a check that crashed |
+| deleting needs your list | Freeing space means deleting, and the framework deletes only what you tick and confirm in its own window. At a terminal Mojo Miracle shows you the framework's build images (name, id, size, what each is; nothing is ticked). You type the numbers of the ones to delete and confirm exactly those; No is the default. The GUI has the same list under **Tools > Framework Build Images...**. Docker images are never deleted unless you do it, and Docker's build cache is never touched. For knowledge snapshots the list is **Tools > Knowledge Snapshots...** or `llm-cli knowledge snapshots`. | `disk.cache`, `disk.output`, `disk.builds`, `knowledge.snapshots` |
+| needs you | Only you can do this: your keys, the tool permissions, the audit log, your settings and files. An AI never changes them. | `secrets.store`, `secrets.storage`, `tools.permissions`, `tools.tokens`, `tools.audit`, `chat_feed.store`, `targets.none`, `devices.<device id>` (a board that refuses SSH or whose host key changed), a revoked community pack (you delete its folder yourself) |
+| needs an administrator | It changes the system outside the framework. | `docker.daemon`, `docker.buildx`, `python.version`, `secrets.keyring`, `runtime.docker.unavailable` |
+| not repairable automatically | Nothing in the framework can do it by itself. The hint says what helps. | `runtime.build.damaged`, `runtime.build.outdated`, `runtime.docker.image` (make Ditto's image again with `llm-cli ditto runtime ensure --mode docker --force`), `data.calibration`, a check that crashed |
 
 A repair can also end like this, always with its reason:
 

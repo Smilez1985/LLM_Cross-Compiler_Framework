@@ -162,9 +162,11 @@ Docker daemon and buildx, free disk space for the cache, output and build folder
 the privacy of the personal folder, the secrets store and the keyring, the tool permissions, the MCP tokens, the audit
 log, the chat feed (it can be written, its newest entries verify), the shipped calibration data, the installed community
 packs (revoked, changed or imported from a file), the knowledge snapshots (how many, their size against the free space
-of their disk, and where; there is no limit, so their number is never a warning) and the local llama.cpp runtime. It
-also says where Docker keeps its images and how much the framework's build images use (moving that folder is an
-administrator's step, see [Container setup](Container_Setup.md#10-where-docker-keeps-images)).
+of their disk, and where; there is no limit, so their number is never a warning), the local llama.cpp runtime (in Docker
+mode: Ditto's image) and the boards you trusted (host key and SSH port, by one connection without a login; a board that
+cannot be used gets its reason code such as `device_host_down`). It also says where Docker keeps its images and how much
+the framework's build images use (moving that folder is an administrator's step, see [Container
+setup](Container_Setup.md#10-where-docker-keeps-images)).
 
 For every warning and error it prints what it found, where (the full path or the object), why it matters, a hint and
 whether Mojo Miracle can repair it, with the plan of a repair (what changes, before and after, whether it can be
