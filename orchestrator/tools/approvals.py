@@ -696,6 +696,8 @@ class ApprovalService:
         with self._lock:
             if self._waiting.get(item.approval_id) is not item:  # withdrawn while it was checked: nothing runs
                 return
+            if item.running:  # another look at the store saw the same yes at the same time and started it
+                return
             item.running = True
         self.store.update(item.approval_id, state="running")
         threading.Thread(target=self._run, args=(item, record), name=f"approval-{item.approval_id}",

@@ -57,6 +57,8 @@ def embedding_download(rag: Any) -> Tuple[Optional[Fact], tuple]:
     text = (f"downloaded once first (about {size_gb} GB from huggingface.co)" if needed else
             f"downloaded once (about {size_gb} GB) if it is not on this computer yet")
     return Fact("Embedding model", text, volatile=True), (warn("embedding_model_download", size_gb=size_gb),)
+
+
 TRUST_NOTE = {
     "framework": "the framework's own code and documentation",
     "crawled": "a page added by Deep Ingest, by the person or by a crawl they confirmed (third-party text)",

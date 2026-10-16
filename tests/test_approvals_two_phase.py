@@ -14,6 +14,7 @@ questions (S8) cover every way of asking the person (MCP design 6.5, 6.6 rule 8,
 import asyncio
 import dataclasses
 import re
+import threading
 import time
 from types import SimpleNamespace
 from unittest import mock
@@ -52,15 +53,21 @@ def env(make_framework):
     fm = make_framework()
     registry = fm.tool_registry
     registry.approvals.poll = 0.05
-    state = SimpleNamespace(commit="c1", looked_up=0, seen=[], running=0)
+    # together: a barrier the next look-ups wait at; gate: an event the handler waits for once it has run
+    state = SimpleNamespace(commit="c1", looked_up=0, seen=[], running=0, together=None, gate=None)
 
     def prepare(inp, ctx):
         state.looked_up += 1
+        together = state.together
+        if together is not None:
+            together.wait(10)
         return CallFacts(consequence=f"Changes item {inp.item_id} to upstream commit {state.commit}.",
                          facts=(Fact("Upstream commit", state.commit),), bound={"commit": state.commit})
 
     def handler(inp, ctx):
         state.seen.append(ctx.facts.bound["commit"] if ctx.facts is not None else None)
+        if state.gate is not None:
+            state.gate.wait(10)
         return ItemOut(value=state.seen[-1] or "")
 
     registry.register(ToolSpec(
@@ -144,6 +151,25 @@ class TestThePendingQuestionIsTheTwoPhaseQuestion:
         assert env.state.seen == [], "nothing ran on the answer to the old question"
         decide(env, again)
         assert wait_job(env, job_id).state == "done" and env.state.seen == ["c2"]
+
+    def test_an_approved_call_runs_once_when_two_looks_see_the_yes_at_once(self, env):
+        """Two looks at the store at the same time (the watch thread and another poll_once) both find the yes: the
+        call runs once. Before, both started it while the first run was still going on."""
+        env.registry.approvals.poll = 60  # the watch thread stays asleep: the test makes both looks itself
+        job_id, record = ask_pending(env)
+        result = cli(env.registry, "tools", "approvals", "approve", record.id, input="y\n")
+        assert result.exit_code == 0, result.output
+        env.state.gate = threading.Event()  # the first run is still going on when the second look decides
+        # both looks wait for each other in the look-up, after they saw the yes and before either starts the call
+        env.state.together = threading.Barrier(2, action=lambda: setattr(env.state, "together", None))
+        looks = [threading.Thread(target=env.registry.approvals.poll_once) for _ in range(2)]
+        for look in looks:
+            look.start()
+        for look in looks:
+            look.join(10)
+        env.state.gate.set()
+        assert wait_job(env, job_id).state == "done"
+        assert env.state.seen == ["c1"], "the approved call ran once"
 
     def test_a_value_only_the_handler_sees_changes_nothing_the_person_approved(self, env):
         """The question reads the same: the handler gets the facts the person saw (it uses them or refuses)."""
