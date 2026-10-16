@@ -170,6 +170,12 @@ _ONLY_A_ROOT = re.compile(r"(?:[A-Za-z]:)?[/\\]*")
 # 'C:\\Users\\Jane Doe'"). A real Windows path never holds '\\' after its start, so within such a path the pairs are
 # single separators again before anything is compared.
 _DOUBLED_WINDOWS_PATH = re.compile(r"(?<![\w\\])(?:[A-Za-z]:\\\\(?!\\)|\\{4}(?=[^\\\s]))[^'\"`\n]*")
+# A bare home folder of any account, of either system: its last part is the account name ('/home/bob' on a board or
+# another person's here, 'C:\Users\Bob', '/c/Users/bob' from MSYS, '/mnt/c/Users/bob' from WSL, a share's
+# '\\server\Users\bob' or '\\server\home$\bob'), so it is never shown by that part.
+_OTHER_HOME = re.compile(r"(?:/usr|/var|/export)?/home/[^/\\]+"
+                         r"|(?i:(?:[a-z]:|/[a-z]|/mnt/[a-z]|[\\/]{2}[^\\/]+)?[\\/]"
+                         r"(?:users|home\$?|documents and settings)[\\/][^\\/]+)")
 
 
 def _undouble(text: str) -> str:
@@ -200,6 +206,30 @@ def home_folders() -> List[str]:
             if real and not _ONLY_A_ROOT.fullmatch(real):
                 found.add(real.rstrip("/\\"))
     return sorted(found, key=lambda h: (-len(h), h))
+
+
+def replace_folder(text: str, folder: str, new: str) -> str:
+    """Every occurrence of the folder `folder` in `text` replaced by `new`, found as _fold compares (with either
+    separator, a Windows path in any case)."""
+    if not folder:
+        return text
+    target, folded = _fold(folder, folder), _fold(text, folder)
+    out, pos = [], 0
+    k = folded.find(target)
+    while k >= 0:
+        out += [text[pos:k], new]
+        pos = k + len(folder)
+        k = folded.find(target, pos)
+    return "".join(out) + text[pos:]
+
+
+def shorten_home(text: str) -> str:
+    """`text` with this computer's home folder shortened to '~': every name home_folders knows, with either separator,
+    a Windows path in any case, and as Python quotes a Windows path (doubled backslashes)."""
+    text = _undouble(text or "")
+    for home in home_folders():
+        text = replace_folder(text, home, "~")
+    return text
 
 
 def _run_end(text: str, i: int) -> int:
@@ -314,6 +344,8 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
         if home_at is not None and token[len(home_at):len(home_at) + 1] not in ("/", "\\"):
             # the home folder and then text that is no part of a path ("'/home/Jane Doe)'", "/home/Jane Doe's")
             return "the home folder" + token[len(home_at):] + tail
+        if _OTHER_HOME.fullmatch(token.rstrip("/\\")):
+            return "a home folder" + tail  # its last part would be the account's name
         name = _PATH_SEP.split(token.rstrip("/\\"))[-1]
         return (name or "a folder") + tail
 

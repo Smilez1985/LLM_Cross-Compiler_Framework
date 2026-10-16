@@ -225,3 +225,73 @@ def test_vectors_that_cannot_be_deleted_are_reported(make_rag, windows_deletes):
     windows_deletes.set(lambda path, ignore_errors=False, **kw: None)  # e.g. another program holds a file
     assert rag.clear_knowledge_base() is False
     assert "could not be deleted" in (rag.last_error or "")
+
+
+# --- review: another account's home folder, and the status scrubber, on any host ------------------------------------
+
+class TestAnotherAccountsHomeFolder:
+    """A path is shown by its last part, and for a bare home folder that part is an account name: another person on
+    this computer ('/home/bob', 'C:\\\\Users\\\\Bob'), or a board's account the framework does not log in with (a
+    POSIX path in text a Windows host reads). Such a folder is 'a home folder'; a file in it keeps its name."""
+
+    @pytest.mark.parametrize("text, expected", [
+        ("Permission denied: /home/bob", "Permission denied: a home folder"),
+        ("cannot open '/home/bob'", "cannot open 'a home folder'"),
+        (r"access denied: C:\Users\Bob", "access denied: a home folder"),
+        ("no space in /Users/alice/.", "no space in a home folder."),
+        ("[WinError 5] Access is denied: " + repr(r"C:\Users\Bob Smith"),
+         "[WinError 5] Access is denied: 'a home folder'"),
+        ("see c:/users/bob and /c/Users/bob", "see a home folder and a home folder"),
+        ("ls /var/home/pi", "ls a home folder"),
+        (r"share \\fs\Users\bob", "share a home folder"),
+    ])
+    def test_it_is_never_shown_by_its_account_name(self, text, expected, monkeypatch):
+        monkeypatch.setenv("HOME", "/home/jane")  # this computer's own home folder is another one
+        monkeypatch.setenv("USERPROFILE", "/home/jane")
+        assert label_paths(text, {}) == expected
+
+    def test_a_file_in_it_keeps_its_name_and_other_folders_their_last_part(self, monkeypatch):
+        monkeypatch.setenv("HOME", "/home/jane")
+        assert label_paths("cannot read /home/bob/x.gguf", {}) == "cannot read x.gguf"
+        assert label_paths("cannot read /srv/home", {}) == "cannot read home"
+        assert label_paths("cannot read /data/users/list", {}) == "cannot read list"
+
+    def test_a_board_account_the_framework_does_not_log_in_with(self):
+        from orchestrator.tools.tools_runtime import device_text
+        out = device_text("no space in /home/dietpi and /home/other", ["dietpi"])
+        assert out == "no space in ~ and a home folder" and "other" not in out
+
+    def test_a_calibration_file_setting_of_either_system_is_shown_by_its_name(self):
+        """A settings file written on the other system: on Linux Path(r'C:\\\\Users\\\\...').name is the whole text."""
+        from orchestrator.tools.tools_status import setting_value
+        for value in (r"C:\Users\Jane Doe\data\calib.txt", "/home/jane/data/calib.txt"):
+            framework = SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None, v=value: v))
+            assert setting_value(framework, "default_calibration_dataset") == "datasets:calib.txt", value
+
+
+class TestStatusTextsWithoutTheHomeFolder:
+    """The runtime status and the deploy tools shorten the home folder to '~' (_scrub_paths) after their own labels:
+    on a Windows host a text names it with '/' (CMake, git), in another case, or doubled as Python quotes a path."""
+
+    @pytest.mark.parametrize("text", [
+        "build failed: " + repr(r"C:\Users\Jane Doe\llmcf\x.bin"),
+        "cmake: C:/Users/Jane Doe/src/llama.cpp",
+        r"open c:\users\jane doe\x",
+    ])
+    def test_the_status_scrubber_finds_every_spelling(self, text, monkeypatch):
+        from orchestrator.tools.tools_status import _scrub_paths
+        monkeypatch.setenv("HOME", r"C:\Users\Jane Doe")
+        monkeypatch.setenv("USERPROFILE", r"C:\Users\Jane Doe")
+        out = _scrub_paths(text)
+        assert "Jane" not in out and "jane" not in out and "~" in out, out
+
+    def test_a_package_error_quoting_the_build_folder(self, monkeypatch):
+        from orchestrator.tools.tools_deploy import hide_paths
+        monkeypatch.setenv("HOME", r"C:\Users\Jane Doe")
+        monkeypatch.setenv("USERPROFILE", r"C:\Users\Jane Doe")
+        folder = r"C:\Users\Jane Doe\llmcf\output\Rockchip\b1"
+        error = str(PermissionError(13, "Access is denied", folder + r"\package.zip"))
+        out = hide_paths(f"Cannot write the package: {error}", {folder: "the build folder"})
+        assert out == r"Cannot write the package: [Errno 13] Access is denied: 'the build folder\package.zip'", out
+        assert hide_paths("in c:/users/jane doe/llmcf/output/Rockchip/b1/x", {folder: "the build folder"}) == \
+            "in the build folder/x"

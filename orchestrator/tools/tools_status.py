@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field
 
 from orchestrator.tools.output import ToolOutput, untrusted_text
+from orchestrator.utils.any_path import last_part
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.untrusted import sanitize_untrusted
 
@@ -314,7 +315,8 @@ def setting_value(framework, key: str) -> SettingValue:
     if key in FOLDER_KEYS:
         if not value:
             return None
-        name = Path(str(value)).name if key == "default_calibration_dataset" else ""
+        # the file's name, split as a path of either system (a settings file written on the other one)
+        name = last_part(str(value)) if key == "default_calibration_dataset" else ""
         return f"{FOLDER_KEYS[key]}:{name}"
     if key == "source_repositories":
         if not isinstance(value, dict):
@@ -487,10 +489,10 @@ def host_section(framework, hardware: Callable[[], Any]) -> Optional[HostSection
 
 
 def _scrub_paths(text: str) -> str:
-    """Framework text about the local runtime with the home folder shortened to ~ (no user name), cleaned."""
-    home = str(Path.home())
-    text = text.replace(home, "~") if home and home != "/" else text
-    return sanitize_untrusted(redact_secrets(text), 500)
+    """Framework text about the local runtime with the home folder shortened to ~ (no user name; in every spelling a
+    Windows host's texts have, tools_runtime.shorten_home), cleaned."""
+    from orchestrator.tools.tools_runtime import shorten_home
+    return sanitize_untrusted(redact_secrets(shorten_home(text)), 500)
 
 
 def local_runtime_section(framework) -> LocalRuntimeSection:

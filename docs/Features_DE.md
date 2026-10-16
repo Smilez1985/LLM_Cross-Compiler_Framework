@@ -1877,7 +1877,10 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   solchen Meldung erscheinen als Ordner-Bezeichnungen des Frameworks (`state:...`, `output:...`) oder nur als
   Dateiname, nie als Pfad des Rechners oder `~/...`, auch wenn ein Pfad Leerzeichen enthält (ein Pfad in
   Anführungszeichen, die Ordner des Frameworks und der Home-Ordner, auch unter seinem echten Pfad, werden als Ganzes
-  ersetzt, auch weiter hinten in einer Pfadliste). Endet der Deploy-Job,
+  ersetzt, auch weiter hinten in einer Pfadliste). Pfade von Linux und Windows werden auf jedem Rechner erkannt, mit
+  beiden Trennzeichen und so, wie Python einen Windows-Pfad zitiert; der Home-Ordner eines anderen Kontos
+  (`/home/<name>`, `C:\Users\<name>`) erscheint als „a home folder“, nie unter dem Namen des Kontos. Endet der
+  Deploy-Job,
   bekommt das Audit-Log einen eigenen Abschlusseintrag (erledigt, gescheitert oder abgebrochen, mit Job, Gerätenamen
   und Gerätezustand), verknüpft mit dem `started`-Eintrag des Aufrufs; er wird auf jedem Weg aus dem Job geschrieben,
   auch wenn die Geräteliste das Deployment nicht eintragen kann (das Ergebnis hat dann eine `note`). Die Jobs von
