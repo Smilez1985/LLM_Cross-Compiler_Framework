@@ -912,13 +912,15 @@ class DittoCoder:
                                        optimization=answer.optimization, explanation=answer.explanation)
 
     def save_module(self, definition: Union[ModuleDefinition, Dict[str, Any]], targets_dir: Path,
-                    module_name: Optional[str] = None, profile=None, knowledge_roots=None) -> Path:
+                    module_name: Optional[str] = None, profile=None, knowledge_roots=None,
+                    generator: Any = None) -> Path:
         """Creates the module through the module generator (which validates every value again). `profile` is the
         parsed hardware probe of the target, when the probe file was one: the runtime: block of the module is the
         build recipe's plan from it. The proposal's cpu_flags and cmake_flags are kept there as advisory text and
         never applied (decision D20). A proposal never opts in to a prebuilt nvidia/cuda image (decision D6). The one
         save of an AI-made module (`llm-cli module generate-ai` and the module wizard); knowledge_roots: the pages
-        crawled for this target that the person chose to attach (the wizard's opt-in)."""
+        crawled for this target that the person chose to attach (the wizard's opt-in); generator: the module
+        generator class the caller uses (default ModuleGenerator)."""
         data = definition.model_dump() if isinstance(definition, BaseModel) else dict(definition)
         if PREBUILT_CUDA_IMAGE.search(str(data.get("base_os") or "")):
             raise ValueError(f"base_os: {PREBUILT_CUDA_REFUSAL}")
@@ -930,8 +932,10 @@ class DittoCoder:
             raise ValueError(f"base_os: '{base}' is not a Docker Official Image, so base_image_reason is required "
                              "(why this image); or use an official image with the vendor's package_sources.")
         from orchestrator.Core.module_generator import generator_input
-        return ModuleGenerator(Path(targets_dir)).generate_module(generator_input(data, module_name), self.framework,
-                                                                  knowledge_roots=knowledge_roots, profile=profile)
+        return (generator or ModuleGenerator)(Path(targets_dir)).generate_module(generator_input(data, module_name),
+                                                                                self.framework,
+                                                                                knowledge_roots=knowledge_roots,
+                                                                                profile=profile)
 
     # --- chat ---------------------------------------------------------------------------------------------
     def _context_limit(self) -> int:

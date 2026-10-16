@@ -27,7 +27,7 @@ from PySide6.QtGui import QPixmap, QAction
 from orchestrator.gui.builder_parts import (BoardAdvice, BuildProgressPanel, after_probe, apply_ditto_settings,
                                             bind_builder_form, board_confirmed, person_target, read_probe)
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
-from orchestrator.gui.plain import plain_label
+from orchestrator.gui.plain import button_text, plain_label, plain_tooltip
 from orchestrator.utils import input_history
 from orchestrator.utils.localization import ui_text
 
@@ -53,6 +53,20 @@ BUILD_FORMATS = [
     ("RKLLM (Rockchip NPU, LLM)", "rkllm"),
     ("RKNN (Rockchip NPU, ONNX models)", "rknn"),
 ]
+
+
+def _unchecked_formats():
+    """What `llm-cli build start --format` offers (every ModelFormat but hf), the three with a working pipeline
+    first: a target without capabilities is not checked against any of them, by the CLI or here."""
+    from orchestrator.Core.build_formats import ModelFormat as Formats
+    known = {value for _, value in BUILD_FORMATS}
+    return BUILD_FORMATS + [(f.value.upper(), f.value) for f in Formats
+                            if f is not Formats.HUGGINGFACE and f.value not in known]
+
+
+UNCHECKED_FORMATS = _unchecked_formats()
+# The build priorities of `llm-cli build start --priority` (PriorityLevel names), normal first as the default.
+PRIORITIES = ("NORMAL", "LOW", "HIGH", "URGENT", "CRITICAL")
 QUANT_SUGGESTIONS = {
     "gguf": ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0", "IQ4_XS", "Q3_K_M", "F16", "BF16"],
     "rkllm": ["w4a16", "w4a16_g128", "w8a8", "w8a8_g256"],
@@ -331,6 +345,7 @@ class BuilderTab(QWidget):
         src_layout = QFormLayout()
         
         self.model_input = QComboBox()
+        self.model_input.setObjectName("combo_builder_model")
         self.model_input.setEditable(True)
         self.model_input.setInsertPolicy(QComboBox.NoInsert)
         self.model_input.setPlaceholderText("HuggingFace ID or Path")
@@ -355,11 +370,24 @@ class BuilderTab(QWidget):
         tgt_layout = QVBoxLayout()
         
         self.target_combo = QComboBox()
+        self.target_combo.setObjectName("combo_builder_target")
         self._refresh_targets()
         
         h_layout = QHBoxLayout()
         h_layout.addWidget(QLabel("Profile:"))
         h_layout.addWidget(self.target_combo, 1)
+        # Every target with its ID, boards, formats and support level, and the check of the selected one (the CLI's
+        # `targets list` and `targets validate`)
+        self.btn_targets = QPushButton(button_text(ui_text("bld.builder.targets")))
+        self.btn_targets.setObjectName("btn_builder_targets")
+        self.btn_targets.setToolTip(plain_tooltip(ui_text("bld.builder.targets.tip")))
+        self.btn_targets.clicked.connect(self._open_targets)
+        h_layout.addWidget(self.btn_targets)
+        self.btn_check_target = QPushButton(button_text(ui_text("bld.builder.check")))
+        self.btn_check_target.setObjectName("btn_builder_check_target")
+        self.btn_check_target.setToolTip(plain_tooltip(ui_text("bld.builder.check.tip")))
+        self.btn_check_target.clicked.connect(self._check_target)
+        h_layout.addWidget(self.btn_check_target)
         
         # --- NEW SCAN MENU LOGIC ---
         self.scan_btn = QPushButton("🔍 Scan / Import...")
@@ -386,6 +414,11 @@ class BuilderTab(QWidget):
         h_layout.addWidget(self.scan_btn)
         
         tgt_layout.addLayout(h_layout)
+        # A target without capabilities: every format is offered and nothing is checked; said, never silent
+        self.lbl_no_caps = plain_label(ui_text("bld.builder.no_caps"), self)
+        self.lbl_no_caps.setObjectName("lbl_builder_no_caps")
+        self.lbl_no_caps.setVisible(False)
+        tgt_layout.addWidget(self.lbl_no_caps)
         # The probe's board as a recommendation (source, how sure), or the offer when no target fits it
         self.board_advice = BoardAdvice(self)
         self.board_advice.create_target.connect(
@@ -416,9 +449,11 @@ class BuilderTab(QWidget):
         build_group = QGroupBox("4. Build Configuration")
         build_layout = QFormLayout()
         self.format_combo = QComboBox()
+        self.format_combo.setObjectName("combo_builder_format")
         for label, value in BUILD_FORMATS:
             self.format_combo.addItem(label, value)
         self.quant_combo = QComboBox()
+        self.quant_combo.setObjectName("combo_builder_quantization")
         self.quant_combo.setEditable(True)
         # Only a type the user picked or typed survives a board/format change; defaults never count as a choice.
         self._quant_user_set = False
@@ -428,22 +463,33 @@ class BuilderTab(QWidget):
         self.quant_combo.lineEdit().setPlaceholderText("default")
         # Filled from the selected target's capabilities (_apply_target_capabilities).
         self.board_combo = QComboBox()
+        self.board_combo.setObjectName("combo_builder_board")
         self.format_combo.currentIndexChanged.connect(self._update_boards)
         self.board_combo.currentIndexChanged.connect(self._update_quant_options)
         self._update_quant_options()
         self.format_combo.currentIndexChanged.connect(self._update_calibration_options)
         self.opt_combo = QComboBox()
-        self.opt_combo.addItems(["BALANCED", "SPEED", "SIZE", "AGGRESSIVE"])
+        self.opt_combo.setObjectName("combo_builder_optimization")
+        self.opt_combo.addItems(["BALANCED", "SPEED", "SIZE", "AGGRESSIVE", "FAST"])  # every --optimization level
+        # The queue orders by it; a failed critical build stops the pipeline (`build start --priority`)
+        self.priority_combo = QComboBox()
+        self.priority_combo.setObjectName("combo_builder_priority")
+        for name in PRIORITIES:
+            self.priority_combo.addItem(ui_text(f"bld.builder.priority.{name.lower()}"), name)
+        self.priority_combo.setToolTip(plain_tooltip(ui_text("bld.builder.priority.tip")))
         self.chk_gpu = QCheckBox("Use Host GPU for Build Process")
+        self.chk_gpu.setObjectName("chk_builder_gpu")
         if platform.system() == "Linux": self.chk_gpu.setChecked(True)
         
         # Calibration: the dataset is used by every format (GGUF imatrix, RKLLM calibration, RKNN INT8);
         # the importance matrix itself exists only for GGUF.
         self.chk_imatrix = QCheckBox("Importance matrix (IMatrix, GGUF)")
+        self.chk_imatrix.setObjectName("chk_builder_imatrix")
         self.chk_imatrix.setToolTip("Computes an importance matrix from the calibration dataset to improve "
                                     "low-bit GGUF quantization (required for IQ1/IQ2 types).")
         # Recent datasets are offered, never preselected: a dataset changes the quantization.
         self.dataset_combo = QComboBox()
+        self.dataset_combo.setObjectName("combo_builder_dataset")
         self.dataset_combo.setEditable(True)
         self.dataset_combo.setInsertPolicy(QComboBox.NoInsert)
         self.dataset_combo.lineEdit().setPlaceholderText("Calibration dataset (none)")
@@ -463,6 +509,7 @@ class BuilderTab(QWidget):
         build_layout.addRow("Board:", self.board_combo)
         build_layout.addRow("Quantization:", self.quant_combo)
         build_layout.addRow("Optimization:", self.opt_combo)
+        build_layout.addRow(ui_text("bld.builder.priority"), self.priority_combo)
         build_layout.addRow("Calibration:", row_dataset)
         self._update_calibration_options()
         # Formats, boards and quantizations follow the selected target's declared capabilities.
@@ -476,12 +523,14 @@ class BuilderTab(QWidget):
         
         # START BUTTON
         self.btn_start = QPushButton("🚀 Start Build Pipeline")
+        self.btn_start.setObjectName("btn_builder_start")
         self.btn_start.setMinimumHeight(50)
         self.btn_start.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; font-size: 14px;")
         self.btn_start.clicked.connect(self._submit_build)
         left_col.addWidget(self.btn_start)
         # Cancels the build this tab started (through the build service); enabled only while it runs.
         self.btn_cancel = QPushButton("Cancel Build")
+        self.btn_cancel.setObjectName("btn_builder_cancel")
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setToolTip("Stops the running build and its container; nothing is written to the output "
                                    "folder.")
@@ -519,6 +568,7 @@ class BuilderTab(QWidget):
         # The running build: stage and percent, and its live log with search and a level filter
         right_col.addWidget(plain_label(ui_text("gui.log.title"), self))
         self.progress_panel = BuildProgressPanel(self)
+        self.progress_panel.setObjectName("panel_builder_progress")
         right_col.addWidget(self.progress_panel, 2)
         main_layout.addLayout(right_col, 3)
 
@@ -665,7 +715,8 @@ class BuilderTab(QWidget):
         return tm.get_capabilities(target) if tm and target and hasattr(tm, "get_capabilities") else None
 
     def _apply_target_capabilities(self):
-        """Offers exactly the formats the selected target declares (static defaults if it declares none)."""
+        """Offers exactly the formats the selected target declares. A target that declares none gets what the CLI
+        allows (every format), and the note that its boards, formats and quantizations are not checked."""
         caps = self._capabilities()
         current = self.format_combo.currentData()
         self.format_combo.blockSignals(True)
@@ -674,8 +725,10 @@ class BuilderTab(QWidget):
             for fid, cap in caps.formats.items():
                 self.format_combo.addItem(cap.label, fid)
         else:
-            for label, value in BUILD_FORMATS:
+            for label, value in UNCHECKED_FORMATS:
                 self.format_combo.addItem(label, value)
+        if hasattr(self, "lbl_no_caps"):
+            self.lbl_no_caps.setVisible(caps is None and self.target_combo.currentData() is not None)
         idx = self.format_combo.findData(current)
         self.format_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.format_combo.blockSignals(False)
@@ -966,7 +1019,8 @@ class BuilderTab(QWidget):
         values = {"model": self.model_input.currentText().strip(), "target": self.target_combo.currentData(),
                   "target_fmt": target_fmt, "opt_lvl": opt_lvl, "quant": quant, "board": board,
                   "dataset": self.dataset_path, "recipe": recipe, "output_dir": output_dir,
-                  "use_gpu": self.chk_gpu.isChecked(), "use_imatrix": self.chk_imatrix.isChecked()}
+                  "use_gpu": self.chk_gpu.isChecked(), "use_imatrix": self.chk_imatrix.isChecked(),
+                  "priority": self._priority()}
         found, lookup = self._earlier_builds(values)
         if lookup is not None:
             self._look_up_commit(values, found, lookup)
@@ -981,7 +1035,7 @@ class BuilderTab(QWidget):
         req = BuildRequest(
             request_id="",
             workflow_type=WorkflowType.SIMPLE_CONVERSION,
-            priority=PriorityLevel.NORMAL,
+            priority=values.get("priority", PriorityLevel.NORMAL),
             models=[values["model"]],
             targets=[values["target"]],
             target_formats=[values["target_fmt"]],
@@ -1077,6 +1131,29 @@ class BuilderTab(QWidget):
         return choice == "again"
 
     # --- SAVING A FINISHED BUILD (eighth round, answer 3) ---
+
+    def _priority(self):
+        """The chosen build priority (PriorityLevel; normal when the name is unknown)."""
+        name = self.priority_combo.currentData() if hasattr(self, "priority_combo") else None
+        return getattr(PriorityLevel, str(name or "NORMAL"), PriorityLevel.NORMAL)
+
+    # --- TARGETS (the CLI's `targets list` / `targets validate`) ---
+
+    def _open_targets(self):
+        """Targets...: every target with its ID, boards, formats and support level; the window selects this one."""
+        from orchestrator.gui.targets_window import open_targets_dialog
+        return open_targets_dialog(self, self.framework, select=self.target_combo.currentData(),
+                                   on_reload=self._refresh_targets)
+
+    def _check_target(self):
+        """Check target: TargetManager.validate on the selected target (its target.yml read again)."""
+        from orchestrator.gui.plain import plain_box
+        from orchestrator.gui.targets_window import show_target_check
+        target = self.target_combo.currentData()
+        if not target:
+            plain_box(self, "information", ui_text("bld.check.title"), ui_text("bld.builder.no_target"))
+            return None
+        return show_target_check(self, self.framework, target)
 
     def _offer_save(self, request_id):
         """For every golden artifact of a finished build the person started here: the save dialog at the output
