@@ -23,12 +23,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   importieren...**. Es laufen dieselben Kernfunktionen wie in der CLI (die Status-Übersicht, das Modell-Angebot und
   die llama.cpp-Festlegung sind jetzt Kernfunktionen, die auch die CLI aufruft; ihre Ausgabe bleibt gleich); Builds,
   Downloads, Docker und der Serverstart laufen im Hintergrund mit einer Fortschrittszeile und Abbrechen, wo sich der
-  Befehl unterbrechen lässt; jede Frage der CLI wird mit denselben Worten und „Nein“ als Vorgabe gestellt. Der Bereich
+  Befehl unterbrechen lässt; jede Frage der CLI wird mit denselben Worten und „Nein“ als Vorgabe gestellt (auch die
+  vor dem Holen des festgelegten Quellcodes); in der ganzen GUI läuft immer nur eine Aufgabe der Laufzeit. Der Bereich
   „Dittos lokaler Server“ (hier und in den KI-Einstellungen) lehnt die installierte Art nicht mehr ab: **Prüfen und
   reparieren...** prüft sie und installiert sie nur neu, wenn sie sich nicht nutzen lässt (zum Beispiel ein alter
   llama.cpp-Build nach einem Update), und Installieren und Wechseln nehmen jetzt die Build-Optionen mit; der Wechsel
   behält die Platzprüfung und das vollständige Entfernen der alten Art. Sein neuer Knopf **Status und mehr...** öffnet
-  das Fenster aus den KI-Einstellungen.
+  das Fenster aus den KI-Einstellungen. Ein gestoppter lokaler Server und ein abgelehntes Holen des Quellcodes nennen
+  jetzt neben dem Befehl auch den Weg in der GUI.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den

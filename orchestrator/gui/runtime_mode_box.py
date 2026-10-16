@@ -21,9 +21,15 @@ between two steps. The person's question comes first ("No" is the default):
   "Clear chat" style: name, full path or ID, file name, size and what it is; "No" by default, no choice per item), and
   runtime_mode.remove_leftovers() deletes exactly that list for good after the person's yes.
 
+Before the pinned llama.cpp source is fetched (about 215 MB, when it is not cached yet), the CLI's question is asked on
+the GUI thread ("No" by default) while the build waits; with No the build stops and says how to import the source.
 After a run, the model ensure offers (runtime_mode.model_offer: the tier chosen earlier or the recommendation) is
 named with its source, size and licence, and downloaded only after the person's yes (size and sha256 checked; Cancel
 keeps the part for a resume). Every text is plain text.
+
+One job of Ditto's runtime at a time in the whole GUI: this box exists in the AI settings and in Ditto > Local
+Runtime... (also when "Status and more..." opens that window over the settings), so every job is registered here
+(job_begins / job_ends) and none starts while another one runs.
 """
 
 import threading
@@ -43,6 +49,32 @@ from orchestrator.utils.localization import current_language, ui_text
 BACKENDS = ("auto", "cpu", "vulkan", "cuda", "rocm", "metal")
 PLACEMENTS = ("auto", "native", "container")
 MAX_JOBS = 256
+
+# The runtime jobs (builds, downloads, server start, ...) running in this GUI process, by their token: the AI settings'
+# box and the Local Runtime window are separate widgets, and none of them starts a job while another one runs.
+_JOBS: set = set()
+_JOBS_LOCK = threading.Lock()
+
+
+def job_begins(token: object) -> bool:
+    """Registers a runtime job; False (nothing registered) while another one runs."""
+    with _JOBS_LOCK:
+        if _JOBS:
+            return False
+        _JOBS.add(token)
+        return True
+
+
+def job_ends(token: object) -> None:
+    """The job is over (called on the GUI thread with its result, and by its worker thread when it ends, so a job
+    whose widget was closed meanwhile does not block the next one)."""
+    with _JOBS_LOCK:
+        _JOBS.discard(token)
+
+
+def job_running() -> bool:
+    with _JOBS_LOCK:
+        return bool(_JOBS)
 
 
 def _label(text: str = "") -> QLabel:
@@ -111,6 +143,10 @@ class RuntimeModeBox(QGroupBox):
         self._cancel = threading.Event()
         self._problems: list = []             # why the recorded build cannot be used (from the window's status)
         self.is_busy: Callable[[], bool] = lambda: False   # the Local Runtime window: another job of it runs
+        self._question = object()             # the token of a question a worker waits for (fetch the source?)
+        self._state = {"closed": False}
+        state = self._state
+        self.destroyed.connect(lambda *_: state.update(closed=True))   # a waiting worker gets "No"
         self.installed = False
         self.mode: Optional[str] = None
         self._shown: Optional[tuple] = None   # (installed, mode) the mode choice was last set for
@@ -261,22 +297,53 @@ class RuntimeModeBox(QGroupBox):
     def _name(self, mode: Optional[str]) -> str:
         return ui_text("ditto_runtime.mode.name.auto" if mode == "auto" else f"runtime.mode.name.{mode}")
 
+    def busy(self) -> bool:
+        """A job of this box, of the window around it, or of any other runtime widget of this GUI runs."""
+        return self._token is not None or self.is_busy() or job_running()
+
     def _switch(self) -> None:
         title = ui_text("runtime.mode.title")
-        if self._token is not None or self.is_busy():
+        if self.busy():
             plain_box(self, "information", title, ui_text("ditto_runtime.busy"))
             return
         target = self.cb_mode.currentData()
         switch = self.installed and target not in ("auto", self.mode)
         if switch:
             question = ui_text("runtime.mode.question", mode=self._name(target))
-        elif self.installed:   # the same mode (or auto): checked, and installed again only when it cannot be used
+        elif self.installed and target == "auto":   # ensure (auto): what works stays, else bare metal is preferred
+            question = ui_text("ditto_runtime.mode.repair_auto_question", mode=self._name(self.mode))
+        elif self.installed:   # the same mode: checked, and installed again only when it cannot be used
             question = ui_text("ditto_runtime.mode.repair_question", mode=self._name(self.mode))
         else:
             question = ui_text("runtime.mode.install_question", mode=self._name(target))
         if not ask(self, title, question):
             return
         self._start(target, switch)
+
+    def _ask_from_worker(self, text: str) -> bool:
+        """A question of the core in the middle of a job (fetch the source?): asked on the GUI thread ("No" by
+        default) while the worker waits; "No" when the box is gone."""
+        if threading.current_thread() is threading.main_thread():
+            return ask(self, ui_text("runtime.mode.title"), text)
+        event, answer = threading.Event(), []
+        worker_relay().done.emit(self._question, (text, event, answer))
+        while not event.wait(0.2):
+            if self._state["closed"]:
+                return False
+        return bool(answer and answer[0])
+
+    def _fetch_question(self, rt: Any) -> bool:
+        """`ditto runtime ensure`'s question before the pinned source is fetched, in the person's language."""
+        pin = rt.catalog.llama_cpp.source
+        return self._ask_from_worker(ui_text("ditto_runtime.source.fetch_question", tag=pin.tag,
+                                             commit=pin.commit[:12]))
+
+    def _begin(self) -> tuple:
+        """A new job of this box: its token (registered for the whole GUI), progress token and Cancel event."""
+        self._token, self._progress = object(), object()
+        job_begins(self._token)   # the button checked busy() before; a chained job follows its own finished one
+        self._cancel = threading.Event()
+        return self._token, self._progress, self._cancel
 
     def _working(self, on: bool) -> None:
         self.btn_switch.setEnabled(not on)
@@ -293,11 +360,9 @@ class RuntimeModeBox(QGroupBox):
     def _start(self, target: str, force: bool, after_removal: Optional[str] = None) -> None:
         """runtime_mode.ensure() in a worker thread with the build options; `force`: the switch; `after_removal`: the
         old mode the person deleted before this mode is made (a failure then offers it again)."""
-        self._token, self._progress = object(), object()
+        token, progress, cancel = self._begin()
         self._pending = (target, after_removal)
         self._kind, self._force = "ensure", force
-        self._cancel = threading.Event()
-        token, progress, cancel = self._token, self._progress, self._cancel
         relay, factory = worker_relay(), self._factory
         options, offer = self.options(), self.chk_model.isChecked()
         self._working(True)
@@ -308,7 +373,8 @@ class RuntimeModeBox(QGroupBox):
                 rt = factory()
                 result = runtime_mode.ensure(rt, mode=target, force=force, placement=options["placement"],
                                              backend=options["backend"], jobs=options["jobs"],
-                                             fetch_source=lambda: True, log=lambda msg: relay.done.emit(progress, msg),
+                                             fetch_source=lambda: self._fetch_question(rt),
+                                             log=lambda msg: relay.done.emit(progress, msg),
                                              cancelled=cancel.is_set,
                                              container_build=runtime_mode.container_build_requested())
                 offered: Any = None
@@ -322,15 +388,25 @@ class RuntimeModeBox(QGroupBox):
                 relay.done.emit(token, ("space", e))
             except Exception as e:  # noqa: BLE001 - shown to the person as it is (plain text)
                 relay.done.emit(token, ("error", str(e)))
+            finally:
+                job_ends(token)
         threading.Thread(target=work, name="ditto-runtime-mode", daemon=True).start()
 
     def _on_relay(self, token: object, result: Any) -> None:
+        if token is self._question and isinstance(result, tuple) and len(result) == 3:
+            text, event, answer = result
+            try:
+                answer.append(ask(self, ui_text("runtime.mode.title"), str(text)))
+            finally:
+                event.set()
+            return
         if token is self._progress and self._token is not None:
             self.lbl_progress.setText(one_line(str(result))[:300])
             return
         if token is not self._token or not isinstance(result, tuple) or len(result) != 2:
             return
         job = self._kind
+        job_ends(token)
         self._token = self._progress = None
         self._kind = None
         self._working(False)
@@ -391,10 +467,8 @@ class RuntimeModeBox(QGroupBox):
 
     def _download(self, tier: str) -> None:
         """LocalLLMRuntime.download_model in a worker thread (size and sha256 checked); Cancel keeps the part."""
-        self._token, self._progress = object(), object()
+        token, progress, cancel = self._begin()
         self._kind = "model"
-        self._cancel = threading.Event()
-        token, progress, cancel = self._token, self._progress, self._cancel
         relay, factory = worker_relay(), self._factory
         lang = current_language()
         say = throttled(lambda text: relay.done.emit(progress, text))
@@ -408,6 +482,8 @@ class RuntimeModeBox(QGroupBox):
                 relay.done.emit(token, ("ok", str(path)))
             except Exception as e:  # noqa: BLE001 - a stopped, failed or refused download: shown as it is
                 relay.done.emit(token, ("error", str(e)))
+            finally:
+                job_ends(token)
         threading.Thread(target=work, name="ditto-model-download", daemon=True).start()
 
     def _model_done(self, kind: str, value: Any) -> None:
