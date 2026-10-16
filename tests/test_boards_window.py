@@ -1,0 +1,692 @@
+"""
+Boards > Boards and Devices... (W1' of 2026-10-16: every action of `llmcf deploy devices` and `llmcf device` also by
+mouse). Offscreen: the entry is reachable from the menu bar, each button calls the same core function as its CLI
+command with the right arguments, every question defaults to No, deletions go through ask_deletion with the full list,
+every board contact and build runs off the GUI thread, a password is never kept, and every text exists in English and
+German.
+
+No network, no Docker, no board: the core functions behind the buttons are stand-ins where they would reach one.
+"""
+
+import re
+import string
+import threading
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from conftest import REPO_ROOT
+
+pytest.importorskip("PySide6")
+
+from test_device_runtime import DEVUAN, RK3566, FakeHostKey  # noqa: E402
+
+
+class Audit:
+    def __init__(self):
+        self.rows = []
+
+    def record(self, actor, tool, tier, decision, outcome, **kwargs):
+        self.rows.append(dict(actor=actor, tool=tool, outcome=outcome, **kwargs))
+
+
+class Boxes:
+    """Answers plain message boxes (plain._exec) and keeps what each one asked, with its default button."""
+
+    def __init__(self, monkeypatch, answer="no"):
+        from PySide6.QtWidgets import QMessageBox
+        from orchestrator.gui import plain
+        self.asked, self.answer = [], answer
+        buttons = {"yes": QMessageBox.Yes, "no": QMessageBox.No}
+
+        def fake(box):
+            default = box.defaultButton()
+            self.asked.append(SimpleNamespace(text=box.text(), title=box.windowTitle(),
+                                              default_is_no=default is not None and default is box.button(
+                                                  QMessageBox.No),
+                                              question=box.button(QMessageBox.Yes) is not None))
+            if box.button(QMessageBox.Yes) is None:
+                return int(QMessageBox.Ok)
+            return int(buttons[self.answer])
+
+        monkeypatch.setattr(plain, "_exec", fake)
+
+    def questions(self):
+        return [a for a in self.asked if a.question]
+
+
+def framework(tmp_path):
+    return SimpleNamespace(config=SimpleNamespace(user_state_dir=str(tmp_path / "state")),
+                           tool_registry=SimpleNamespace(audit=Audit()))
+
+
+def wait(qapp, dialog, timeout=10.0):
+    end = time.monotonic() + timeout
+    while dialog.running and time.monotonic() < end:
+        qapp.processEvents()
+        time.sleep(0.01)
+    qapp.processEvents()
+    assert not dialog.running, "the step did not end"
+
+
+def stored(state, device_id="0123456789abcdef", profile=RK3566, label="ZERO 3W", **settings):
+    from orchestrator.runtime.device.settings import DeploySettings
+    from orchestrator.runtime.profile import ProfileStore
+    store = ProfileStore(state)
+    store.save_device(device_id, profile, label=label, address="192.0.2.10")
+    if settings:
+        store.save_deploy_settings(device_id, DeploySettings(**settings).as_dict())
+    return store
+
+
+def trusted_board(state, label="Living room"):
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    from orchestrator.utils import ssh_trust
+    key = paramiko.ECDSAKey.generate()
+    ssh_trust.trust_host_key(state, "192.168.1.50", 22, key)
+    return TrustedDevices(state).record("192.168.1.50", 22, "dietpi", key, via="cli", paired=True, label=label)
+
+
+@pytest.fixture
+def window(qapp, tmp_path):
+    from orchestrator.gui.boards_window import BoardsWindow
+    fw = framework(tmp_path)
+    Path(fw.config.user_state_dir).mkdir(parents=True)
+    dialog = BoardsWindow(fw, lang="en")
+    yield dialog
+    if dialog.running:
+        dialog._on_cancel()
+        wait(qapp, dialog)
+    dialog.deleteLater()
+    qapp.processEvents()
+
+
+def state_of(dialog):
+    return Path(dialog.framework.config.user_state_dir)
+
+
+def threads(log):
+    """A recorder of the thread each call ran on."""
+    def note(*_a, **_k):
+        log.append(threading.current_thread() is threading.main_thread())
+    return note
+
+
+# --- the menu bar ------------------------------------------------------------------------------------------------
+
+def test_the_boards_menu_opens_the_window_from_the_menu_bar(qapp, tmp_path, monkeypatch, memory_keyring):
+    from orchestrator.Core.framework import FrameworkManager
+    from orchestrator.gui import main_window
+    from orchestrator.gui.boards_window import BoardsWindow
+    from orchestrator.gui.menus import boards as menu_module
+
+    (tmp_path / "configs").mkdir()
+
+    class TmpFramework(FrameworkManager):
+        def __init__(self, *args, **kwargs):
+            super().__init__(str(tmp_path / "configs"))
+            self.info.installation_path = tmp_path
+
+    monkeypatch.setattr(main_window, "FrameworkManager", TmpFramework)
+    monkeypatch.setattr(main_window.MainOrchestrator, "_open_tool_permissions", lambda self, first_run=False: None)
+    win = main_window.MainOrchestrator(REPO_ROOT)
+    qapp.processEvents()
+    try:
+        titles = [a.text() for a in win.menuBar().actions()]
+        assert titles.index("Boards") == titles.index(win.i18n.t("menu.file", "File")) + 1, titles
+        action = win.findChild(type(win.act_boards_devices), menu_module.ACTION_NAME)
+        assert action is win.act_boards_devices and action.text() == "Boards and Devices..."
+        assert action in win.menu_boards.actions()
+        stored(Path(win.framework.config.user_state_dir))
+        action.trigger()
+        dialog = win.boards_window
+        assert isinstance(dialog, BoardsWindow) and dialog.isVisible() and dialog.table.rowCount() == 1
+        for name in set(menu_module.WINDOW_OBJECTS):
+            assert dialog.findChild(type(dialog.btn_cancel), name) is not None, name
+        action.trigger()
+        assert len(win.findChildren(BoardsWindow)) == 1, "a second click shows the same window"
+        dialog.close()
+    finally:
+        win.close()
+
+
+def test_cli_paths_name_every_command_of_the_area_and_existing_objects():
+    from click.testing import CliRunner  # noqa: F401 - the command tree is walked below
+    from orchestrator import cli as cli_module
+    from orchestrator.gui.menus import boards as menu_module
+
+    def walk(group, path):
+        for name, command in group.commands.items():
+            full = f"{path} {name}".strip()
+            yield full, command
+            if hasattr(command, "commands"):
+                yield from walk(command, full)
+
+    area = {p: c for p, c in walk(cli_module.cli, "") if p.startswith(("deploy devices", "device"))}
+    for path, command in area.items():
+        assert path in menu_module.CLI_PATHS, path
+        for param in command.params:
+            flag = next((o for o in param.opts if o.startswith("--")), None)
+            if flag is None or flag == "--help":
+                continue
+            key = f"{path} {flag}"
+            assert key in menu_module.CLI_PATHS or key in menu_module.MACHINE_ONLY, key
+    for name in menu_module.CLI_PATHS.values():
+        assert name == menu_module.ACTION_NAME or menu_module.WINDOW_OBJECTS[name] == menu_module.ACTION_NAME
+
+
+# --- texts ------------------------------------------------------------------------------------------------------------
+
+def test_every_text_exists_in_english_and_german_with_the_same_placeholders():
+    from orchestrator.utils.l10n_boards import TEXTS
+    fields = string.Formatter()
+    assert set(TEXTS["en"]) == set(TEXTS["de"])
+    for key, text in TEXTS["en"].items():
+        en = {f for _, f, _, _ in fields.parse(text) if f}
+        de = {f for _, f, _, _ in fields.parse(TEXTS["de"][key]) if f}
+        assert en == de, key
+    from orchestrator.runtime.device.person_steps import SUDO_QUESTION
+    assert TEXTS["en"]["boards.settings.sudo_question"] == SUDO_QUESTION, "the GUI asks the CLI's words"
+
+
+def test_the_window_speaks_german(qapp, tmp_path):
+    from orchestrator.gui.boards_window import BoardsWindow
+    dialog = BoardsWindow(framework(tmp_path), lang="de")
+    try:
+        assert dialog.windowTitle() == "Boards und Geräte"
+        assert dialog.buttons["btn_boards_remove_trust"].text() == "Vertrauen entfernen..."
+        assert dialog.table.horizontalHeaderItem(1).text() == "Geräte-ID"
+    finally:
+        dialog.deleteLater()
+
+
+# --- the table ----------------------------------------------------------------------------------------------------
+
+def test_the_table_merges_stored_and_trusted_boards_and_shows_the_full_fingerprint(qapp, window):
+    state = state_of(window)
+    device = trusted_board(state)
+    stored(state, device_id=device.device_id, ssh_user="dietpi")
+    stored(state, device_id="fedcba9876543210", profile=DEVUAN, label="Attic")
+    window.reload()
+    assert window.table.rowCount() == 2
+    rows = {window.table.item(r, 0).text(): [window.table.item(r, c).text() for c in range(window.table.columnCount())]
+            for r in range(window.table.rowCount())}
+    living = rows["Living room"]
+    assert living[1] == device.device_id and living[3] == "dietpi"
+    assert device.fingerprint in living[4] and "(the trusted key)" in living[4]
+    assert "glibc" in living[8] and "user as dietpi" in living[9]
+    assert rows["Attic"][4] == "not trusted" and "sysvinit" in rows["Attic"][8]
+    window.select("fedcba9876543210")
+    assert not window.buttons["btn_boards_remove_trust"].isEnabled(), "an untrusted board has no trust to remove"
+    assert window.buttons["btn_boards_build"].isEnabled()
+
+
+# --- trusted boards ------------------------------------------------------------------------------------------------
+
+def test_remove_trust_asks_with_exactly_what_goes_no_by_default_and_audits(qapp, window, monkeypatch):
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    state = state_of(window)
+    device = trusted_board(state)
+    window.reload()
+    window.select(device.device_id)
+    boxes = Boxes(monkeypatch, answer="no")
+    window.buttons["btn_boards_remove_trust"].click()
+    (question,) = boxes.questions()
+    assert question.default_is_no
+    for part in (device.label, device.device_id, device.address, "dietpi", device.fingerprint, "audit log"):
+        assert part in question.text
+    assert TrustedDevices(state).get(device.device_id) is not None, "No keeps the board trusted"
+    boxes.answer = "yes"
+    window.buttons["btn_boards_remove_trust"].click()
+    assert TrustedDevices(state).get(device.device_id) is None
+    (row,) = window.framework.tool_registry.audit.rows
+    assert row["actor"] == "gui" and row["tool"] == "device_removed"
+    assert row["extra"]["confirm_channel"] == "framework-gui"
+
+
+def test_adding_a_board_shows_the_fingerprint_asks_no_by_default_and_runs_off_the_gui_thread(qapp, window,
+                                                                                             monkeypatch):
+    from orchestrator.gui import boards_window
+    from orchestrator.runtime.device import person_steps
+    ran, added = [], []
+    monkeypatch.setattr(person_steps, "read_host_key", lambda state, host, port: threads(ran)() or (
+        FakeHostKey(), "known", "SHA256:" + "A" * 43))
+
+    def add(state, host, port, user, key, *, label, via, audit, actor):
+        threads(ran)()
+        added.append(dict(host=host, port=port, user=user, label=label, via=via, actor=actor, audit=audit))
+        return None, False
+
+    monkeypatch.setattr(person_steps, "add_trusted_board", add)
+
+    def fill(dialog):
+        from PySide6.QtWidgets import QLineEdit, QSpinBox
+        dialog.findChild(QLineEdit, "txt_boards_add_host").setText("myboard.local")
+        dialog.findChild(QLineEdit, "txt_boards_add_user").setText("dietpi")
+        dialog.findChild(QSpinBox, "spn_boards_add_port").setValue(2222)
+        dialog.findChild(QLineEdit, "txt_boards_add_label").setText("Shelf")
+        return True
+
+    monkeypatch.setattr(boards_window, "_exec", fill)
+    boxes = Boxes(monkeypatch, answer="no")
+    window.buttons["btn_boards_add"].click()
+    wait(qapp, window)
+    (question,) = boxes.questions()
+    assert question.default_is_no and "SHA256:" + "A" * 43 in question.text and "myboard.local:2222" in question.text
+    assert added == [] and ran == [False], "the key is read off the GUI thread; No adds nothing"
+    boxes.answer = "yes"
+    window.buttons["btn_boards_add"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    assert added == [dict(host="myboard.local", port=2222, user="dietpi", label="Shelf", via="gui", actor="gui",
+                          audit=window.framework.tool_registry.audit)]
+    assert all(r is False for r in ran)
+
+
+def test_adding_a_board_nobody_trusted_is_refused_as_in_the_cli(qapp, window, monkeypatch):
+    from orchestrator.runtime.device import person_steps
+    monkeypatch.setattr(person_steps, "read_host_key", lambda state, host, port: (FakeHostKey(), "unknown", "SHA256:x"))
+    monkeypatch.setattr(person_steps, "add_trusted_board", lambda *a, **k: pytest.fail("nothing is added"))
+    boxes = Boxes(monkeypatch)
+    window.add_board("192.0.2.10", "dietpi", 22, None)
+    wait(qapp, window)
+    assert boxes.questions() == [] and "is not trusted yet (its host key is unknown)" in boxes.asked[-1].text
+    window.add_board("-oProxyCommand=x", "dietpi", 22, None)
+    assert "Enter an address or a host name" in boxes.asked[-1].text
+
+
+# --- deploy settings ---------------------------------------------------------------------------------------------
+
+def test_settings_show_everything_and_systemd_needs_the_sudo_yes_written_first(qapp, window, monkeypatch):
+    from orchestrator.gui import boards_window
+    from orchestrator.runtime.device.person_steps import load_settings
+    from orchestrator.runtime.profile import ProfileStore
+    state = state_of(window)
+    stored(state, ssh_user="dietpi", model="models/q.gguf")
+    window.reload()
+    window.select("0123456789abcdef")
+    shown = []
+
+    def fill(dialog):
+        from PySide6.QtWidgets import QComboBox, QLabel, QSpinBox
+        shown.append("\n".join(label.text() for label in dialog.findChildren(QLabel)))
+        install = dialog.findChild(QComboBox, "cmb_boards_install")
+        install.setCurrentIndex(install.findData("systemd"))
+        dialog.findChild(QSpinBox, "spn_boards_port").setValue(9090)
+        return True
+
+    monkeypatch.setattr(boards_window, "_exec", fill)
+    boxes = Boxes(monkeypatch, answer="no")
+    window.buttons["btn_boards_settings"].click()
+    assert "SSH user: dietpi" in shown[0] and "models/q.gguf" in shown[0] and "KV cache:" in shown[0]
+    (question,) = boxes.questions()
+    assert question.default_is_no and "sudo -n" in question.text
+    store = ProfileStore(state)
+    assert load_settings(store, "0123456789abcdef").install == "user", "No changes nothing"
+    assert window.framework.tool_registry.audit.rows == []
+    boxes.answer = "yes"
+    window.buttons["btn_boards_settings"].click()
+    saved = load_settings(store, "0123456789abcdef")
+    assert saved.install == "systemd" and saved.port == 9090 and saved.sudo_confirmed_at
+    (row,) = window.framework.tool_registry.audit.rows
+    assert row["tool"] == "device_runtime_systemd" and row["extra"]["confirm_channel"] == "framework-gui"
+
+
+def test_settings_refusals_are_the_clis(qapp, window, monkeypatch):
+    from orchestrator.runtime.device.person_steps import load_settings
+    from orchestrator.runtime.profile import ProfileStore
+    state = state_of(window)
+    store = stored(state, profile=DEVUAN, label="rock5")
+    window.reload()
+    boxes = Boxes(monkeypatch, answer="yes")
+    entry = window.entries[0]
+    current = load_settings(store, "0123456789abcdef")
+    assert window.change_settings(entry, DEVUAN, current, {"install": "systemd"}) is False
+    assert "does not run systemd" in boxes.asked[-1].text and "sysvinit" in boxes.asked[-1].text
+    assert window.change_settings(entry, DEVUAN, current, {"ssh_user": "root"}) is False
+    assert "never runs as root" in boxes.asked[-1].text
+    window.framework.tool_registry.audit = None   # no audit log: no consent, nothing changes
+    stored(state, device_id="fedcba9876543210")
+    window.reload()
+    entry = next(e for e in window.entries if e["device_id"] == "fedcba9876543210")
+    assert window.change_settings(entry, RK3566, load_settings(store, "fedcba9876543210"),
+                                  {"install": "systemd", "model": "m.gguf", "ssh_user": "dietpi"}) is False
+    assert "could not be written to the audit log" in boxes.asked[-1].text
+    assert ProfileStore(state).load_deploy_settings("fedcba9876543210") == {}
+
+
+# --- plan, status, build ----------------------------------------------------------------------------------------------
+
+def test_plan_and_status_run_the_clis_steps_off_the_gui_thread(qapp, window, monkeypatch):
+    from orchestrator.runtime.device import steps
+    from test_device_runtime import HOST
+    monkeypatch.setattr("orchestrator.runtime.build.toolchain.host_platform", lambda: HOST)
+    ran = []
+    real = steps.plan_runtime
+    monkeypatch.setattr(steps, "plan_runtime", lambda profile: threads(ran)() or real(profile))
+    stored(state_of(window))
+    window.reload()
+    window.select("0123456789abcdef")
+    window.buttons["btn_boards_plan"].click()
+    wait(qapp, window)
+    text = window.output.toPlainText()
+    assert "Builder: container debian-12" in text and "armv8.2-a+dotprod+fp16" in text and "Built: no" in text
+    window.buttons["btn_boards_status"].click()
+    wait(qapp, window)
+    assert "Deployed: nothing yet" in window.output.toPlainText()
+    assert ran == [False, False]
+
+
+def test_build_asks_before_the_download_no_by_default_and_passes_jobs_and_mirror(qapp, window, monkeypatch):
+    import orchestrator.runtime.build.source as source_module
+    from orchestrator.gui import boards_window
+    from orchestrator.runtime.device import steps
+    from test_device_runtime import HOST
+    monkeypatch.setattr("orchestrator.runtime.build.toolchain.host_platform", lambda: HOST)
+    monkeypatch.setattr(source_module, "cached_source", lambda pin, state: None)
+    calls = []
+
+    def build_runtime(state, device_id, profile, plan, source, **kw):
+        calls.append(dict(device_id=device_id, jobs=kw["jobs"], mirror=kw["mirror"], gui=threading.current_thread()
+                          is threading.main_thread(), fetch=kw["may_fetch"]()))
+        kw["on_step"]("build", None)
+        packaged = SimpleNamespace(path=Path("/x/llama-runtime-arm64-0123.tar.gz"), sha256="a" * 64)
+        return steps.RuntimeBuild(builds=None, build=SimpleNamespace(build_id="b" * 64), packaged=packaged,
+                                  source_dir=Path("/x"), built_now=True)
+
+    monkeypatch.setattr(steps, "build_runtime", build_runtime)
+
+    def fill(dialog):
+        from PySide6.QtWidgets import QLineEdit, QSpinBox
+        dialog.findChild(QSpinBox, "spn_boards_jobs").setValue(4)
+        dialog.findChild(QLineEdit, "txt_boards_mirror").setText("https://mirror.example/llama.cpp.git")
+        return True
+
+    monkeypatch.setattr(boards_window, "_exec", fill)
+    stored(state_of(window))
+    window.reload()
+    window.select("0123456789abcdef")
+    boxes = Boxes(monkeypatch, answer="no")
+    window.buttons["btn_boards_build"].click()
+    wait(qapp, window)
+    (question,) = boxes.questions()
+    assert question.default_is_no and "about 215 MB" in question.text and calls == []
+    boxes.answer = "yes"
+    window.buttons["btn_boards_build"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    assert calls == [dict(device_id="0123456789abcdef", jobs=4, mirror="https://mirror.example/llama.cpp.git",
+                          gui=False, fetch=True)]
+    text = window.output.toPlainText()
+    assert "Building llama.cpp for ZERO 3W" in text and "Board runtime ready" in text
+
+
+def test_cancel_stops_the_running_step_and_closes_its_session(qapp, window):
+    started, closed = threading.Event(), []
+
+    class Client:
+        def close(self):
+            closed.append(True)
+
+    def work():
+        window._keep_client(Client())
+        started.set()
+        for _ in range(500):
+            if window._cancel.is_set():
+                break
+            time.sleep(0.01)
+        window._check_cancel()
+        return "never shown"
+
+    done = []
+    window._start("A step", work, done.append)
+    assert started.wait(5) and not window.btn_cancel.isHidden() and window.lbl_busy.text().startswith("A step")
+    window.btn_cancel.click()
+    wait(qapp, window)
+    assert closed == [True] and done == [] and "Cancelled." in window.output.toPlainText()
+
+
+# --- deletions --------------------------------------------------------------------------------------------------------
+
+def test_older_packages_go_through_ask_deletion_with_the_full_list(qapp, window, monkeypatch):
+    from orchestrator.Core.deletion import accept
+    from orchestrator.gui import deletion_dialog
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    state = state_of(window)
+    stored(state)
+    devices = DeviceRuntimeStore(state, "0123456789abcdef")
+    devices.root.mkdir(parents=True)
+    old = devices.root / "llama-runtime-arm64-aaaaaaaaaaaaaaaa.tar.gz"
+    old.write_bytes(b"x" * 2048)
+    (devices.root / (old.name + ".sha256")).write_text("a  x\n")
+    window.reload()
+    window.select("0123456789abcdef")
+    asked = []
+    monkeypatch.setattr(deletion_dialog, "ask_deletion", lambda parent, plan, **kw: asked.append((plan, kw)))
+    Boxes(monkeypatch)
+    window.buttons["btn_boards_prune"].click()
+    (plan, kw), = asked
+    assert kw["multiple"] is True and kw["title"] == "Runtime packages of ZERO 3W"
+    item = next(i for i in plan.items if i.file_name == old.name)
+    assert item.full_path == str(old) and item.size_bytes == 2048 and "runtime package of build" in item.what
+    assert old.exists(), "No (or closing the dialog) deletes nothing"
+    monkeypatch.setattr(deletion_dialog, "ask_deletion", lambda parent, plan, **kw: accept(plan, "gui", "permanent"))
+    window.buttons["btn_boards_prune"].click()
+    assert not old.exists() and "Deleted for good" in window.output.toPlainText()
+    rows = window.framework.tool_registry.audit.rows
+    assert rows[0]["actor"] == "gui" and rows[0]["tool"] == "device_runtime"
+
+
+def test_older_builds_on_the_board_are_listed_off_the_gui_thread_and_removed_only_after_yes(qapp, window,
+                                                                                           monkeypatch):
+    from orchestrator.Core.deletion import accept
+    from orchestrator.gui import deletion_dialog
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.runtime.device.remote import board_cleanup_plan, BoardBuild
+    from orchestrator.runtime.device import remote
+    stored(state_of(window), ssh_user="dietpi")
+    window.reload()
+    window.select("0123456789abcdef")
+    ran, connected, removed = [], [], []
+
+    class Client:
+        def close(self):
+            connected.append("closed")
+
+    def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None):
+        threads(ran)()
+        connected.append((device_id, host, port, user, password, step))
+        on_client(Client())
+        return Client(), FakeHostKey()
+
+    plan = board_cleanup_plan([BoardBuild("a" * 16, 4096, False)], "/home/dietpi/.local/share/x")
+    prune = person_steps.BoardPrune(root="/home/dietpi/.local/share/x", plan=plan, busy=["c" * 16], previous=None)
+    monkeypatch.setattr(person_steps, "connect_stored", connect)
+    monkeypatch.setattr(remote, "RemoteShell", lambda client: client)
+    monkeypatch.setattr(person_steps, "list_board_builds", lambda shell, state, device_id: threads(ran)() or prune)
+    monkeypatch.setattr(person_steps, "remove_board_builds", lambda shell, accepted, p, device_id, audit: (
+        threads(ran)(), removed.append((accepted, p, device_id, audit)))[1] or SimpleNamespace(
+        done=["runtime build " + "a" * 16], failed=[], freed_bytes=4096))
+    asked = []
+    monkeypatch.setattr(deletion_dialog, "ask_deletion", lambda parent, plan, **kw: asked.append((plan, kw)))
+    Boxes(monkeypatch)
+    window.buttons["btn_boards_prune_board"].click()
+    wait(qapp, window)
+    (shown, kw), = asked
+    assert shown is plan and kw["multiple"] is True and "no trash" in kw["intro"]
+    assert connected[0] == ("0123456789abcdef", "192.0.2.10", 22, "dietpi", None, "")
+    assert removed == [] and "Not listed, because a running program uses them" in window.output.toPlainText()
+    accepted = accept(plan, "gui", "permanent")
+    monkeypatch.setattr(deletion_dialog, "ask_deletion", lambda parent, plan, **kw: accepted)
+    window.buttons["btn_boards_prune_board"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    assert removed == [(accepted, prune, "0123456789abcdef", window.framework.tool_registry.audit)]
+    assert ran and all(r is False for r in ran), "every board contact runs off the GUI thread"
+    assert f"Deleted for good: runtime build {'a' * 16}" in window.output.toPlainText()
+    assert "freed on the board" in window.output.toPlainText()
+
+
+# --- deploy and verify -------------------------------------------------------------------------------------------
+
+def runtime_fakes(monkeypatch, record):
+    """Stand-ins for the core steps behind Deploy and Verify; `record` collects their calls."""
+    from orchestrator.runtime.build.store import BuildStore
+    from orchestrator.runtime.build.verify import Check, VerifyReport
+    from orchestrator.runtime.device import person_steps, remote, steps
+    build = SimpleNamespace(build_id="b" * 64, plan={"verify": {}})
+    report = VerifyReport([Check("version", True, "b1")])
+    monkeypatch.setattr(steps, "plan_runtime", lambda profile: SimpleNamespace(build_id="b" * 64,
+                                                                               target={"arch": "arm64"},
+                                                                               verify={}))
+    monkeypatch.setattr(BuildStore, "find", lambda self, plan: build)
+    monkeypatch.setattr(steps, "ensure_package", lambda state, device_id, builds, b, source: (
+        SimpleNamespace(cleanup_plan=lambda: None), SimpleNamespace(path=Path("/x.tar.gz"), sha256="a" * 64)))
+
+    class Client:
+        def close(self):
+            record.append("closed")
+
+    def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None):
+        record.append(("connect", user, password, step, threading.current_thread() is threading.main_thread()))
+        return Client(), FakeHostKey()
+
+    monkeypatch.setattr(person_steps, "connect_stored", connect)
+    monkeypatch.setattr(person_steps, "remember_board", lambda *a, **k: record.append(("remember", k["via"])))
+    monkeypatch.setattr(remote, "RemoteShell", lambda client: client)
+    monkeypatch.setattr(remote, "read_facts", lambda shell: SimpleNamespace(uid=1000, home="/home/dietpi"))
+
+    def choose(shell, home, model, *, may_run_untrusted, record_consent):
+        allowed = may_run_untrusted("/home/dietpi/" + model) if model else False
+        record.append(("bench", model, allowed))
+        return steps.BenchChoice("/home/dietpi/" + model if model else None, allowed, None)
+
+    monkeypatch.setattr(steps, "choose_bench_model", choose)
+    monkeypatch.setattr(steps, "install_runtime", lambda shell, **kw: record.append(("install", kw["kv_cache"])) or
+                        steps.InstallOutcome(SimpleNamespace(root="/home/dietpi/.local/share/x", previous=None,
+                                                             notes=["start the server with: ..."]), report, True))
+    monkeypatch.setattr(steps, "check_runtime", lambda shell, **kw: record.append(("check", kw["port"])) or report)
+    return build
+
+
+def test_deploy_asks_for_the_password_each_time_and_never_keeps_it(qapp, window, monkeypatch):
+    from orchestrator.gui import boards_window
+    record = []
+    runtime_fakes(monkeypatch, record)
+    stored(state_of(window), ssh_user="dietpi")
+    window.reload()
+    window.select("0123456789abcdef")
+    fields = []
+
+    def fill(dialog):
+        from PySide6.QtWidgets import QLineEdit
+        password = dialog.findChild(QLineEdit, "txt_boards_password")
+        fields.append(password.echoMode() == QLineEdit.Password)
+        password.setText("s3cret-once")
+        dialog.findChild(QLineEdit, "txt_boards_bench_model").setText("models/own.gguf")
+        return True
+
+    monkeypatch.setattr(boards_window, "_exec", fill)
+    boxes = Boxes(monkeypatch, answer="no")
+    window.buttons["btn_boards_deploy"].click()
+    wait(qapp, window)
+    (question,) = boxes.questions()
+    assert question.default_is_no and "without a sandbox" in question.text and "models/own.gguf" in question.text
+    assert fields == [True]
+    assert ("connect", "dietpi", "s3cret-once", "runtime_deploy", False) in record
+    assert ("remember", "gui") in record and ("bench", "models/own.gguf", False) in record
+    assert "closed" in record, "the SSH session is closed"
+    assert "Deployed build bbbbbbbbbbbbbbbb" in window.output.toPlainText()
+    assert "s3cret-once" not in repr(vars(window)), "the password is never kept by the window"
+    record.clear()
+    window.buttons["btn_boards_deploy"].click()
+    wait(qapp, window)
+    assert len(boxes.questions()) == 2, "asked again for the next deploy"
+
+
+def test_deploy_refuses_what_the_cli_refuses_before_any_contact(qapp, window, monkeypatch):
+    from orchestrator.runtime.build.store import BuildStore
+    record = []
+    runtime_fakes(monkeypatch, record)
+    state = state_of(window)
+    stored(state, profile=DEVUAN, label="rock5", ssh_user="dietpi", install="user")
+    window.reload()
+    entry = window.entries[0]
+    boxes = Boxes(monkeypatch)
+    window.deploy(entry, DEVUAN, "root", None, None)
+    assert "never runs as root" in boxes.asked[-1].text
+    monkeypatch.setattr(BuildStore, "find", lambda self, plan: None)
+    window.deploy(entry, DEVUAN, None, None, None)
+    wait(qapp, window)
+    assert "not built yet" in boxes.asked[-1].text and not [r for r in record if r[0] == "connect"]
+
+
+def test_verify_works_without_a_model_and_with_a_user_override(qapp, window, monkeypatch):
+    from orchestrator.gui import boards_window
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    record = []
+    runtime_fakes(monkeypatch, record)
+    state = state_of(window)
+    stored(state, ssh_user="dietpi", port=9090)
+    DeviceRuntimeStore(state, "0123456789abcdef").save_record({"build_id": "b" * 64, "install": "user"})
+    window.reload()
+    window.select("0123456789abcdef")
+
+    def fill(dialog):
+        from PySide6.QtWidgets import QLineEdit
+        assert dialog.findChild(QLineEdit, "txt_boards_password") is None, "a verify never logs in with a password"
+        dialog.findChild(QLineEdit, "txt_boards_run_user").setText("tester")
+        return True
+
+    monkeypatch.setattr(boards_window, "_exec", fill)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_verify"].click()
+    wait(qapp, window)
+    assert boxes.questions() == [], "no benchmark model: no question"
+    assert ("connect", "tester", None, "verify", False) in record and ("check", 9090) in record
+    assert not [r for r in record if r[0] == "remember"], "a verify never rewrites the board's trust record"
+    assert "version: passed" in window.output.toPlainText()
+
+
+def test_verify_says_when_nothing_was_deployed(qapp, window, monkeypatch):
+    stored(state_of(window), ssh_user="dietpi")
+    window.reload()
+    boxes = Boxes(monkeypatch)
+    window.verify(window.entries[0], RK3566, None, None)
+    assert "Nothing was deployed to this board yet" in boxes.asked[-1].text and not window.running
+
+
+# --- Mojo's check of this board ----------------------------------------------------------------------------------
+
+def test_check_this_board_is_a_thin_call_of_mojos_board_check_off_the_gui_thread(qapp, window, monkeypatch):
+    from orchestrator.Core.mojo.checks import devices as mojo_devices
+    from orchestrator.Core.mojo.findings import Finding, Severity
+    state = state_of(window)
+    device = trusted_board(state)
+    window.reload()
+    window.select(device.device_id)
+    calls = []
+
+    def check(framework, contact=()):
+        calls.append((framework, tuple(contact), threading.current_thread() is threading.main_thread()))
+        return [Finding("devices", f"devices.{device.device_id}", Severity.OK, "Board Living room, checked now: it "
+                        "answers on its SSH port.", ""),
+                Finding("devices", "devices.recorded", Severity.OK, "1 trusted board: no recorded problem.")]
+
+    monkeypatch.setattr(mojo_devices, "check_devices", check)
+    window.buttons["btn_boards_check"].click()
+    wait(qapp, window)
+    assert calls == [(window.framework, (device.device_id,), False)]
+    assert "checked now: it answers on its SSH port" in window.output.toPlainText()
+
+
+def test_no_html_is_built_from_board_data(qapp, window):
+    """A label from a board's probe is shown literally (plain text table cells, plain labels)."""
+    stored(state_of(window), label="<b>bold</b>")
+    window.reload()
+    assert window.table.item(0, 0).text() == "<b>bold</b>"
+    source = (REPO_ROOT / "orchestrator/gui/boards_window.py").read_text(encoding="utf-8")
+    assert not re.search(r"setText\(f?[\"']<", source) and "setHtml" not in source

@@ -158,7 +158,8 @@ class MainOrchestrator(QMainWindow):
         exit_action = QAction(self.i18n.t("menu.exit", "Exit"), self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        
+        __import__("orchestrator.gui.menus.boards", fromlist=["install"]).install(self, menubar)  # Boards menu
+
         sec_menu = menubar.addMenu("Security")
         act_openai = QAction("Set OpenAI API Key", self)
         act_openai.triggered.connect(lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))

@@ -131,6 +131,27 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
     return RuntimeBuild(builds=builds, build=build, packaged=packaged, source_dir=src, built_now=built_now)
 
 
+class PackageNeedsSource(RuntimeError):
+    """The build's tarball is gone and packaging it again needs the pinned source (its licence text), which is not
+    cached."""
+
+
+def ensure_package(state_dir: Path, device_id: str, builds: Any, build: Any, source: Callable[[], Any]):
+    """(DeviceRuntimeStore, packaged tarball) of a stored build: the checked tarball that is there, or packaged again
+    from the cached pinned source (`source()` names the pin; asked only then). PackageNeedsSource when the source is
+    not cached; PackageError when packaging fails."""
+    from orchestrator.runtime.build.source import cached_source
+    from orchestrator.runtime.device.package import DeviceRuntimeStore, package_runtime
+    devices = DeviceRuntimeStore(state_dir, device_id)
+    packaged = devices.tarball(build)
+    if packaged is not None:
+        return devices, packaged
+    src = cached_source(source(), state_dir)
+    if src is None:
+        raise PackageNeedsSource("the tarball must be packaged again, which needs the pinned source")
+    return devices, package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
+
+
 def older_package_count(devices: Any, build: Any) -> int:
     """How many older runtime packages of the board are kept next to `build`'s (the framework deletes none by
     itself; `llmcf device runtime prune` lists them)."""
@@ -253,6 +274,7 @@ def check_lines(report: Any) -> List[Dict[str, Any]]:
     return [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in (report.checks if report is not None else [])]
 
 
-__all__ = ["BenchChoice", "BuildCancelled", "InstallOutcome", "RuntimeBuild", "SourceDeclined", "build_runtime",
-           "catalog_model_digests", "check_lines", "check_runtime", "choose_bench_model", "deployed_verify_plan",
-           "install_runtime", "older_package_count", "plan_runtime", "plan_view", "runtime_status", "utc_stamp"]
+__all__ = ["BenchChoice", "BuildCancelled", "InstallOutcome", "PackageNeedsSource", "RuntimeBuild", "SourceDeclined",
+           "build_runtime", "catalog_model_digests", "check_lines", "check_runtime", "choose_bench_model",
+           "deployed_verify_plan", "ensure_package", "install_runtime", "older_package_count", "plan_runtime",
+           "plan_view", "runtime_status", "utc_stamp"]
