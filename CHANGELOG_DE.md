@@ -882,10 +882,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Die Board-Empfehlung aus der Hardware-Probe** (`orchestrator/runtime/board_recommendation.py`): Nach einer Probe
   empfiehlt der Builder das Board des passenden Targets mit seiner Quelle (der SoC der Probe oder der Board-Name der
   Probe in der Liste bekannter Boards des Targets) und wie sicher es ist. Nur ein genauer Treffer wird eingetragen;
-  sonst werden die Kandidaten und der Grund gezeigt, und du wählst. Ein Board, das du gewählt hast, ersetzt weder eine
-  spätere Probe noch eine KI. Das Nachschlagen des Board-Namens online öffnet deinen Browser erst, wenn du zustimmst.
-  Passt kein Target, bietet der Builder **Target mit dem Assistenten erstellen** (beginnend mit dieser Probe) und
-  **Ditto fragen** an (eine Frage im Chat, die du abschickst).
+  sonst werden die Kandidaten und der Grund gezeigt, und du wählst. Ein Board, das du gewählt hast, wird weder durch
+  eine spätere Probe noch durch eine KI ersetzt, und ein Target, das du gewählt hast (oder das eines Rezepts), bleibt
+  auch: Das Target der Probe wird dann mit einem Klick angeboten. **Ask Ditto for Config** füllt das Build-Formular
+  genauso wie Dittos GUI-Tools (markiert, rückgängig zu machen, deine eigenen Werte bleiben), und eine Modell- oder
+  Datensatzdatei, die du im Dateidialog gewählt hast, zählt als deine Wahl. Das Nachschlagen des Board-Namens online
+  öffnet deinen Browser erst, wenn du zustimmst. Passt kein Target, bietet der Builder **Target mit dem Assistenten
+  erstellen** (beginnend mit dieser Probe) und **Ditto fragen** an (eine Frage im Chat, die du abschickst; ein Entwurf,
+  den du dort getippt hast, bleibt).
 - **Dokumentations-Links für Deep Ingest** (`orchestrator/Core/doc_sources.py`): Die `docs_*`-Links des
   Quellenkatalogs für den Hersteller der Probe und das SDK füllen das Deep-Ingest-Fenster des Assistenten; du prüfst
   sie und startest das Einlesen. Sagt Ditto, dass für ein Modul Informationen fehlen, bietet der Assistent Deep Ingest
@@ -893,8 +897,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `lcf://knowledge/doc-sources/{probe_id}`, nur lesend. Der Kopf des Katalogs und die Dokumente sagen jetzt, dass diese
   Links zur Laufzeit gelesen werden.
 - **Build-Fortschritt und Live-Protokoll im Builder** (`orchestrator/gui/builder_parts.py`): ein Fortschrittsbalken mit
-  dem Schritt und dem Prozentwert aus dem Build-Service und darunter das Protokoll des Builds live (Geheimnisse
-  geschwärzt, reiner Text), mit Suchfeld und einem Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht
+  dem Schritt und dem Prozentwert aus dem Build-Service (der eigene Schritt des laufenden Builds, siehe Behoben) und
+  darunter das Protokoll des Builds live (Geheimnisse geschwärzt, reiner Text, jede Zeile einmal, höchstens 20.000
+  Zeilen in der Ansicht), mit Suchfeld und einem Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht
   mehr liefert, werden vermerkt.
 
 ### Geändert
@@ -1506,6 +1511,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   verknüpft mit dem Start-Eintrag des Aufrufs und mit Geräten und Modellen unter ihren Bezeichnungen. Die Deploy- und
   Laufzeit-Tools erreichen gebaute Modelle über die öffentliche Methode `BuildService.artifact_entry` statt über eine
   private.
+- **Der Build-Fortschritt zählt den laufenden Build mit** (veröffentlicht in 3.0.0): `get_build_status` sagte bei einer
+  Anfrage mit einem Build 0 %, bis der Build endete, und nannte nur die Stufe der Anfrage. Prozent und Schritt
+  enthalten jetzt den eigenen Fortschritt des laufenden Builds (Vorbereitung, Image, Modell, Module, Archiv); eine
+  Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
 - **`run_doctor` gibt KI-Clients keinen Pfad des Rechners** (veröffentlicht in 3.0.0): die Befunde, die eine KI las,

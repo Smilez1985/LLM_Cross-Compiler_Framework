@@ -768,18 +768,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **The board recommendation from the hardware probe** (`orchestrator/runtime/board_recommendation.py`): after a
   probe the Builder recommends the matched target's board with its source (the probe's SoC, or the probe's board name
   in the target's list of known boards) and how sure it is. Only an exact match is filled in; otherwise the candidates
-  and the reason are shown and you pick. A board you chose is never replaced by a later probe or an AI. The online
-  look-up of the board name opens your browser only after you agree. When no target fits, the Builder offers
-  **Create a target with the wizard** (starting from that probe) and **Ask Ditto** (a question in the chat that you
-  send).
+  and the reason are shown and you pick. A board you chose is never replaced by a later probe or an AI, and a target
+  you chose (or a recipe's) stays too: the probe's target is then offered with one click. **Ask Ditto for Config**
+  fills the build form the same way as Ditto's GUI tools (marked, undoable, your own values stay), and a model or
+  dataset file you picked in the file dialog counts as your choice. The online look-up of the board name opens your
+  browser only after you agree. When no target fits, the Builder offers **Create a target with the wizard** (starting from
+  that probe) and **Ask Ditto** (a question in the chat that you send; a draft you typed there stays).
 - **Documentation links for Deep Ingest** (`orchestrator/Core/doc_sources.py`): the source catalogue's `docs_*` links
   for the probe's vendor and the SDK fill the wizard's Deep Ingest window; you check them and start the crawl. When
   Ditto says that information is missing for a module, the wizard offers Deep Ingest with these links. AI clients read
   them through the read-only resources `lcf://knowledge/doc-sources` and `lcf://knowledge/doc-sources/{probe_id}`.
   The catalogue's header and the documents now say that these links are read at run time.
 - **Build progress and the live build log in the Builder** (`orchestrator/gui/builder_parts.py`): a progress bar with
-  the step and the percent from the build service, and the build's log live below it (secrets redacted, plain text),
-  with a search box and a filter for Info, Warnings or Errors. Lines the service no longer returns are noted.
+  the step and the percent from the build service (the running build's own step, see Fixed), and the build's log
+  live below it (secrets redacted, plain text, each line once, at most 20,000 lines in view), with a search box and a
+  filter for Info, Warnings or Errors. Lines the service no longer returns are noted.
 
 ### Changed
 - **Questions show a short summary and the warning classes** (delegation design 4.5, LAY-L2): a question in the
@@ -1325,6 +1328,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   reason code, or cancelled), linked to the call's started entry and naming devices and models by their labels. The
   deploy and runtime tools reach built models through the public `BuildService.artifact_entry` instead of a private
   method.
+- **Build progress counts the running build** (released in 3.0.0): `get_build_status` said 0 % for a request with
+  one build until the build ended, and named only the request's stage. The percent and the step now include the
+  running build's own progress (preparing, image, model, modules, archive); a request that still runs never says
+  100 %.
 
 ### Security
 - **`run_doctor` gives AI clients no host path** (released in 3.0.0): the findings an AI read named the per-user

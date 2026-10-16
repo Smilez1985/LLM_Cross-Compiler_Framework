@@ -292,3 +292,119 @@ def test_the_builder_follows_its_build_with_the_panel(builder):
     service.get_status = lambda rid: (_ for _ in ()).throw(KeyError(rid))
     builder._poll_build()
     assert builder._active_request is None and not builder.btn_cancel.isEnabled()
+
+
+# --- review of the package: what the first tests let through ---------------------------------------------------------
+
+def _service_with(state, builds):
+    """The real BuildService over a request state and the engine's builds (build id -> BuildProgress)."""
+    from orchestrator.Core.build_service import BuildService
+    engine = SimpleNamespace(get_build_status=lambda bid: builds.get(bid))
+    return BuildService(SimpleNamespace(orchestrator=SimpleNamespace(_workflows={state.request_id: state},
+                                                                     build_engine=engine)))
+
+
+def test_the_build_services_step_and_percent_come_from_the_running_build():
+    """A request with one build said 0 % and no step of its own until the build ended, so the bar sat still for the
+    whole build (the first test used a fake service). The running build's step and percent (builder.py
+    BuildProgress) count now; an ended build adds nothing, and a running request never says 100 %."""
+    from datetime import datetime
+    from orchestrator.Core.builder import BuildProgress, BuildStatus
+    from orchestrator.Core.orchestrator import OrchestrationStatus, WorkflowState
+    state = WorkflowState("req_1", OrchestrationStatus.BUILDING, datetime.now(),
+                          current_stage="Building org/m for aarch64", total_builds=1, build_ids=["req_1_001"])
+    first = BuildProgress("req_1_001", BuildStatus.BUILDING, "Building Image", 40)
+    status = _service_with(state, {"req_1_001": first}).get_status("req_1")
+    assert status.progress_percent == 40 and status.stage == "Building org/m for aarch64: Building Image"
+    first.progress_percent = 100
+    assert _service_with(state, {"req_1_001": first}).get_status("req_1").progress_percent == 99
+    first.status = BuildStatus.FAILED   # ended (a fix may be waiting for approval): the request's own values
+    status = _service_with(state, {"req_1_001": first}).get_status("req_1")
+    assert status.progress_percent == 0 and status.stage == "Building org/m for aarch64"
+    state.total_builds, state.completed_builds = 2, 1
+    state.build_ids.append("req_1_002")
+    second = BuildProgress("req_1_002", BuildStatus.BUILDING, "Running modules", 60)
+    assert _service_with(state, {"req_1_001": first, "req_1_002": second}).get_status("req_1").progress_percent == 80
+    state.status = OrchestrationStatus.AWAITING_APPROVAL
+    assert _service_with(state, {"req_1_002": second}).get_status("req_1").progress_percent == 50
+
+
+def test_a_probe_never_replaces_the_target_the_person_chose(builder):
+    """The probe's target used to replace the person's target, which reset their board (a recipe's too) and then
+    filled in the probe's board. The person's target stays; one click takes the probe's target and its board."""
+    builder.target_combo.addItem("Other boards (aarch64)", "Other")
+    builder.target_combo.setCurrentIndex(builder.target_combo.findData("Other"))
+    builder.gui_form.person_edited("target")
+    builder._load_probe_config(REPO_ROOT / "tests" / "fixtures" / "hardware_probe" / "schema2_rk3566_dietpi.txt")
+    assert builder.target_combo.currentData() == "Other"
+    text = builder.board_advice.label.text()
+    assert "Rockchip" in text and "Your choice" in text
+    builder.board_advice.buttons[0].click()
+    assert builder.target_combo.currentData() == "Rockchip" and builder.gui_form.field("target").person_set
+    assert builder.board_combo.currentData() == "rk3566", "then the probe's board, as a recommendation"
+
+
+def test_a_target_the_person_did_not_choose_still_follows_the_probe(builder):
+    builder.target_combo.addItem("Other boards (aarch64)", "Other")
+    builder.target_combo.setCurrentIndex(builder.target_combo.findData("Other"))
+    builder._load_probe_config(REPO_ROOT / "tests" / "fixtures" / "hardware_probe" / "schema2_rk3566_dietpi.txt")
+    assert builder.target_combo.currentData() == "Rockchip" and builder.board_combo.currentData() == "rk3566"
+
+
+def test_dittos_recommended_settings_keep_the_persons_choice_and_are_marked(builder):
+    """'Ask Ditto for Config' filled format, quantization and optimization over the person's values and left no
+    mark. It fills through the build form now: the person's values stay, Ditto's are marked and undoable."""
+    from orchestrator.gui.form_surface import is_marked
+    builder.format_combo.setCurrentIndex(builder.format_combo.findData("gguf"))
+    builder.quant_combo.setCurrentText("Q5_K_M")
+    builder.gui_form.person_edited("quantization")
+    builder._on_ai_finished(True, {"format": "gguf", "quantization": "Q4_0", "optimization": "SPEED"}, "ok")
+    assert builder.quant_combo.currentText() == "Q5_K_M", "the person's quantization stays"
+    assert builder.opt_combo.currentText() == "SPEED" and is_marked(builder.opt_combo)
+    assert "Q4_0" in builder.log_area.toPlainText() and "Your choice stays" in builder.log_area.toPlainText()
+    builder.fill_banner.btn_undo.click()
+    assert builder.opt_combo.currentText() == "BALANCED"
+
+
+def test_the_log_view_keeps_at_most_its_limit(qapp, monkeypatch):
+    """Lines past the limit were dropped from the list but stayed in the view, so the 'removed' note was wrong and
+    the view grew without end."""
+    from orchestrator.gui import builder_parts
+    monkeypatch.setattr(builder_parts, "MAX_LOG_LINES", 5)
+    panel = builder_parts.BuildProgressPanel()
+    panel.start("req_4")
+    panel.add_lines([f"line {i}" for i in range(1, 9)], 1, 8)
+    assert panel.plain_text().splitlines() == [f"line {i}" for i in range(4, 9)]
+    assert "3 older lines" in panel.lbl_count.text()
+    panel.deleteLater()
+
+
+def test_a_second_attempt_repeats_no_line(qapp):
+    """Once a request has a second attempt, the build service puts a heading before each attempt, so the earlier
+    lines move down by one: the panel showed the last line again."""
+    from orchestrator.gui.builder_parts import BuildProgressPanel
+    panel = BuildProgressPanel()
+    panel.start("req_5")
+    panel.add_lines(["a", "b"], 1, 2)
+    panel.add_lines(["===== req_5_001 =====", "a", "b", "===== req_5_001_r1 =====", "c"], 1, 5)
+    assert panel.plain_text().splitlines() == ["a", "b", "===== req_5_001_r1 =====", "c"]
+    panel.add_lines(["===== req_5_001 =====", "a", "b", "===== req_5_001_r1 =====", "c", "d"], 1, 6)
+    assert panel.plain_text().splitlines()[-2:] == ["c", "d"]
+    fresh = BuildProgressPanel()   # a panel that starts after the second attempt began shifts nothing
+    fresh.start("req_5")
+    fresh.add_lines(["===== req_5_001 =====", "a", "===== req_5_001_r1 =====", "c"], 1, 4)
+    assert fresh.plain_text().splitlines() == ["===== req_5_001 =====", "a", "===== req_5_001_r1 =====", "c"]
+    panel.deleteLater()
+    fresh.deleteLater()
+
+
+def test_a_build_the_service_no_longer_knows_shows_no_old_step(qapp):
+    from orchestrator.gui.builder_parts import BuildProgressPanel
+    panel = BuildProgressPanel()
+    service = FakeService()
+    panel.start("req_6")
+    panel.poll(service, "req_6")
+    service.get_status = lambda rid: (_ for _ in ()).throw(KeyError(rid))
+    assert panel.poll(service, "req_6") is None
+    assert "40%" not in panel.lbl_stage.text() and "cannot be read" in panel.lbl_stage.text()
+    panel.deleteLater()

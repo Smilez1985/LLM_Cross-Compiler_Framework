@@ -409,7 +409,9 @@ def ask_ditto(window: Any, text: str) -> None:
     show = getattr(window, "_show_chat", None)
     if callable(show):
         show()
-    chat.txt_input.setText(text)
+    read = getattr(chat.txt_input, "text", None)
+    draft = (read() if callable(read) else "").rstrip()
+    chat.txt_input.setText(f"{draft}\n\n{text}" if draft else text)   # a draft the person typed stays
     chat.focus_composer()
 
 

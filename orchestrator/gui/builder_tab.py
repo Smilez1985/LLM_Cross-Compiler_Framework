@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect
 from PySide6.QtGui import QPixmap, QAction
 
-from orchestrator.gui.builder_parts import BoardAdvice, BuildProgressPanel, after_probe, bind_builder_form, read_probe
+from orchestrator.gui.builder_parts import (BoardAdvice, BuildProgressPanel, after_probe, apply_ditto_settings,
+                                            bind_builder_form, person_target, read_probe)
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
 from orchestrator.gui.plain import plain_label
 from orchestrator.utils import input_history
@@ -621,7 +622,9 @@ class BuilderTab(QWidget):
             
             if match:
                 idx = self.target_combo.findData(match)
-                if idx >= 0: 
+                if idx >= 0 and person_target(self) not in (None, match):  # N9'': after_probe offers it
+                    self._log(ui_text("gui.target.kept", target=match, chosen=person_target(self)))
+                elif idx >= 0:
                     self.target_combo.setCurrentIndex(idx)
                     self._set_state("success")
                     self._log(f"✅ Auto-Selected Profile: {match}")
@@ -851,14 +854,17 @@ class BuilderTab(QWidget):
 
     def _browse_model(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Model", "", "Models (*.bin *.gguf *.safetensors);;All Files (*)")
-        if path: self.model_input.setEditText(path)
+        if path:
+            self.model_input.setEditText(path)
+            self.gui_form.person_edited("model")  # the person's pick: never overwritten by an AI
 
     def _browse_dataset(self):
         """NEW: Browse for custom calibration dataset"""
         path, _ = QFileDialog.getOpenFileName(self, "Select Calibration Dataset", "",
                                               "Datasets (*.txt *.json);;All Files (*)")
-        if path: 
+        if path:
             self.dataset_path = path
+            self.gui_form.person_edited("dataset")
             self._log(f"Selected Dataset: {Path(path).name}")
 
     def _run_ai_optimizer(self):
@@ -898,16 +904,8 @@ class BuilderTab(QWidget):
         if success:
             self._set_state("success")
             self._log(f"Ditto Recommendation:\n{msg}")
-            # Format first: changing it repopulates the quantization list.
-            if "format" in config:
-                idx = self.format_combo.findData(str(config["format"]).lower())
-                if idx >= 0: self.format_combo.setCurrentIndex(idx)
-            if "quantization" in config:
-                idx = self.quant_combo.findText(str(config["quantization"]))
-                if idx >= 0: self.quant_combo.setCurrentIndex(idx)
-            if "optimization" in config:
-                idx = self.opt_combo.findText(config["optimization"])
-                if idx >= 0: self.opt_combo.setCurrentIndex(idx)
+            # Through the build form: marked and undoable, and the person's own values stay (N9'')
+            apply_ditto_settings(self, config)
         else:
             self._set_state("fail")
             self._log(f"AI Failed: {msg}")

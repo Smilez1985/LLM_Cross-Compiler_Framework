@@ -477,3 +477,63 @@ def test_every_gui_text_has_both_languages_with_the_same_placeholders():
         return {n for _, n, _, _ in string.Formatter().parse(text) if n}
     for key, text in TEXTS["en"].items():
         assert names(text) == names(TEXTS["de"][key]), key
+
+
+# --- review of the package: what the first tests let through ---------------------------------------------------------
+
+def test_a_file_the_person_browsed_to_is_never_overwritten(fm, builder, monkeypatch, tmp_path):
+    """A model or dataset the person picked with the Browse button was set by the program, so it did not count as the
+    person's choice and Ditto could fill over it."""
+    from orchestrator.gui import builder_tab
+    picked = iter([str(tmp_path / "mine.gguf"), str(tmp_path / "calib.txt")])
+    monkeypatch.setattr(builder_tab.QFileDialog, "getOpenFileName", lambda *a, **k: (next(picked), ""))
+    builder._browse_model()
+    builder._browse_dataset()
+    with pytest.raises(ToolError) as exc:
+        call(fm, "fill_gui_form", {"form": "builder", "values": {"model": "Qwen/Qwen3.5-0.8B"}},
+             ditto(confirm=lambda s, i: pytest.fail("nothing to ask")))
+    assert exc.value.code == "needs_person" and builder.model_input.currentText() == str(tmp_path / "mine.gguf")
+    assert builder.gui_form.field("dataset").person_set
+
+
+def test_choices_never_name_the_home_folder(fm, surface):
+    """The values of a choice field were checked, its offered choices were not: a local server can list its models by
+    their full path in the home folder."""
+    from orchestrator.gui.dialogs import AIConfigurationDialog
+    dialog = AIConfigurationDialog(fm)
+    dialog.show()
+    try:
+        private = str(Path.home() / "Private Person" / "models" / "local.gguf")
+        dialog._fill_models([private, "small-model"], keep="small-model")
+        form = call(fm, "read_gui_form", {"form": "ai_settings"}).form
+        model = next(f for f in form.fields if f.id == "model")
+        assert "small-model" in model.choices and any(c.endswith("local.gguf") for c in model.choices)
+        assert str(Path.home()) not in form.model_dump_json()
+    finally:
+        dialog.reject()
+
+
+def test_ask_ditto_keeps_what_the_person_typed_in_the_chat(qapp):
+    """The Builder's Ask Ditto wrote its question over a draft the person had typed in the chat."""
+    from orchestrator.gui import form_surface
+    from orchestrator.gui.chat_panel.composer import ComposerInput
+    box = ComposerInput()
+    box.setText("my own draft")
+    window = SimpleNamespace(chat_window=SimpleNamespace(txt_input=box, focus_composer=lambda: None),
+                             _show_chat=lambda: None)
+    form_surface.ask_ditto(window, "Which board is it?")
+    assert box.text().startswith("my own draft") and box.text().endswith("Which board is it?")
+    box.setText("")
+    form_surface.ask_ditto(window, "Which board is it?")
+    assert box.text() == "Which board is it?"
+    box.deleteLater()
+
+
+def test_a_field_on_another_wizard_page_names_the_way_there(fm, wizard):
+    """A small model that fills a field of another page was told to give up and ask the person; the way is to go to
+    that page first."""
+    call(fm, "wizard_step", {"action": "next"})
+    with pytest.raises(ToolError) as exc:
+        call(fm, "wizard_step", {"action": "fill", "values": {"packages": "cmake"}},
+             ditto(confirm=lambda s, i: pytest.fail("nothing to ask")))
+    assert "wizard_step" in exc.value.next and "page" in exc.value.next and "chat" not in exc.value.next

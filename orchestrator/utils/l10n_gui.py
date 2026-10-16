@@ -72,6 +72,8 @@ TEXTS = {
         "gui.progress.status.completed": "completed",
         "gui.progress.status.error": "failed",
         "gui.progress.status.cancelled": "cancelled",
+        "gui.progress.unknown": "The status of build {request} cannot be read any more. The log below shows its "
+                                "last lines.",
         "gui.log.title": "Build log (live)",
         "gui.log.search": "Search the build log",
         "gui.log.level": "Show the lines of this level",
@@ -111,6 +113,9 @@ TEXTS = {
         "gui.target.ask_ditto": "Ask Ditto",
         "gui.target.ask_text": "No target fits my board ({facts}). Please help me create a target module. You can "
                                "steer the target module wizard. I click Finish myself.",
+        "gui.target.kept": "The probe points to the target {target}. Your choice {chosen} stays.",
+        "gui.target.use": "Use {target}",
+        "gui.ditto.kept": "Ditto suggests {value} for {field}. Your choice stays.",
 
         # documentation links for Deep Ingest
         "gui.wizard.ingest_title": "Add documentation",
@@ -185,6 +190,8 @@ TEXTS = {
         "gui.progress.status.completed": "abgeschlossen",
         "gui.progress.status.error": "fehlgeschlagen",
         "gui.progress.status.cancelled": "abgebrochen",
+        "gui.progress.unknown": "Der Status von Build {request} lässt sich nicht mehr lesen. Das Protokoll darunter "
+                                "zeigt seine letzten Zeilen.",
         "gui.log.title": "Build-Protokoll (live)",
         "gui.log.search": "Im Build-Protokoll suchen",
         "gui.log.level": "Die Zeilen dieser Stufe zeigen",
@@ -227,6 +234,9 @@ TEXTS = {
         "gui.target.ask_text": "Kein Target passt zu meinem Board ({facts}). Bitte hilf mir, ein Target-Modul zu "
                                "erstellen. Du kannst den Assistenten für Target-Module steuern. Auf Finish klicke "
                                "ich selbst.",
+        "gui.target.kept": "Die Probe zeigt auf das Target {target}. Deine Wahl {chosen} bleibt.",
+        "gui.target.use": "{target} verwenden",
+        "gui.ditto.kept": "Ditto schlägt {value} für {field} vor. Deine Wahl bleibt.",
 
         "gui.wizard.ingest_title": "Dokumentation hinzufügen",
         "gui.wizard.ingest_offer": "Ditto fehlen Informationen über diese Hardware. Deep Ingest mit {n} "

@@ -10,14 +10,15 @@ Parts of the Builder tab from wave 3b, kept out of builder_tab.py so the tab its
   Info / Warning / Error filter. The log is plain text: build output never renders as rich text.
 - `BoardAdvice` shows the board the hardware probe points to as a recommendation with its source and how sure it is
   (orchestrator/runtime/board_recommendation.py), the candidates when it is not sure, and the offer to create a target
-  with the wizard or to ask Ditto when no target fits the probe. A board the person chose is never overwritten.
+  with the wizard or to ask Ditto when no target fits the probe. A board or target the person chose is never
+  overwritten; `apply_ditto_settings()` fills Ditto's recommended settings through the build form by the same rules.
 
 Every text is plain text (SEC-M2): plain_label, plain_tooltip, button_text and plain boxes only.
 """
 
 import re
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import quote_plus
 
 from PySide6.QtCore import QUrl, Signal
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLineEdit, QPlainTextEdit
 
 from orchestrator.gui.form_surface import FormBinding, person_audit
 from orchestrator.gui.plain import ask, button_text, one_line, plain_label, plain_tooltip
+from orchestrator.tools.gui_surface import GuiForm
 from orchestrator.utils.localization import current_language, ui_text
 
 LEVELS = ("all", "info", "warning", "error")
@@ -124,6 +126,29 @@ def person_board(tab: Any) -> Optional[str]:
     return chosen if chosen and chosen == tab._selected_board() else None
 
 
+def person_target(tab: Any) -> Optional[str]:
+    """The target the person chose (their pick, or a recipe they picked); a probe never replaces it (N9'')."""
+    form = getattr(tab, "gui_form", None)
+    field = form.field("target") if form is not None else None
+    return tab.target_combo.currentData() if field is not None and field.person_set else None
+
+
+def apply_ditto_settings(tab: Any, config: Dict[str, Any]) -> Any:
+    """Ditto's recommended build settings ('Ask Ditto for Config') through the build form, like fill_gui_form: they
+    are marked and undoable, and a value the person chose or is editing stays (the log names Ditto's suggestion)."""
+    form = getattr(tab, "gui_form", None)
+    values = {key: (str(config[key]).lower() if key == "format" else str(config[key]))
+              for key in ("format", "quantization", "optimization") if config.get(key)}
+    if form is None or not values:
+        return None
+    outcome = form.fill(values)
+    for field_id, _why in outcome.refused:
+        field = form.field(field_id)
+        if field is not None and (field.person_set or GuiForm._busy(field)):
+            tab._log(ui_text("gui.ditto.kept", value=one_line(values[field_id]), field=field.label(current_language())))
+    return outcome
+
+
 # --- progress bar and live build log --------------------------------------------------------------------------------
 
 def line_level(line: str) -> str:
@@ -180,17 +205,19 @@ class BuildProgressPanel(QWidget):
         # Plain text: build output and names from packs never render as rich text.
         self.log_view = QPlainTextEdit(self)
         self.log_view.setReadOnly(True)
+        self.log_view.setMaximumBlockCount(MAX_LOG_LINES)   # the view drops what the list drops
         self.log_view.setAccessibleName(ui_text("gui.log.title", self.lang))
         self.log_view.setStyleSheet("font-family: Consolas, Monospace; background: #222; color: #ddd;")
         layout.addWidget(self.log_view, 1)
         self._lines: List[Tuple[str, str]] = []
         self._seen = 0
         self._dropped = 0
+        self._attempts = False   # the service heads each attempt (it does so once a request has two)
         self.request_id: Optional[str] = None
 
     def start(self, request_id: str) -> None:
         self.request_id = request_id
-        self._lines, self._seen, self._dropped = [], 0, 0
+        self._lines, self._seen, self._dropped, self._attempts = [], 0, 0, False
         self.bar.setValue(0)
         self.lbl_stage.setText(ui_text("gui.progress.started", self.lang, request=request_id))
         self.apply_filter()
@@ -201,6 +228,7 @@ class BuildProgressPanel(QWidget):
         try:
             status = service.get_status(request_id)
         except Exception:  # noqa: BLE001 - unknown to the service: nothing to follow any more
+            self.lbl_stage.setText(ui_text("gui.progress.unknown", self.lang, request=request_id))
             return None
         self.show_status(status)
         try:
@@ -225,6 +253,12 @@ class BuildProgressPanel(QWidget):
         """New lines of the log (numbered from first_line); lines read before are skipped, lines the service no
         longer returns are noted."""
         new = []
+        heading = re.compile(r"^===== " + re.escape(self.request_id or "") + r"_\d+(?:_r\d+)? =====$")
+        if not self._attempts and any(heading.match(line) for line in lines):
+            # A second attempt began: the service now heads the first one too, so every line read before moved down
+            # by one (a panel that starts with the headings in place read none of them yet)
+            self._attempts = True
+            self._seen += 1 if self._seen else 0
         if lines and first_line > self._seen + 1:
             new.append(("info", ui_text("gui.log.skipped", self.lang, n=first_line - self._seen - 1)))
         for number, line in enumerate(lines, start=first_line):
@@ -407,6 +441,29 @@ class BoardAdvice(QWidget):
                      lambda: self.ask_ditto.emit(ui_text("gui.target.ask_text", self.lang, facts=one_line(facts))))
         self.setVisible(True)
 
+    def show_target_kept(self, profile: Any, match: str, chosen: str) -> None:
+        """The probe points to another target than the one the person chose: their choice stays (N9''); one click
+        takes the probe's target and then its board recommendation."""
+        self._clear_buttons()
+        self.recommendation, self.profile = None, profile
+        combo = self.tab.target_combo
+        label = combo.itemText(combo.findData(match)) or match
+        self.label.setText(ui_text("gui.target.kept", self.lang, target=one_line(label),
+                                   chosen=one_line(combo.itemText(combo.findData(chosen)) or chosen)))
+        self._button(ui_text("gui.target.use", self.lang, target=label), lambda: self.use_target(match))
+        self.setVisible(True)
+
+    def use_target(self, target: str) -> str:
+        """The person took the probe's target: their choice from now on, then the board recommendation for it."""
+        index = self.tab.target_combo.findData(target)
+        if index < 0:
+            return "none"
+        self.tab.target_combo.setCurrentIndex(index)
+        form = getattr(self.tab, "gui_form", None)
+        if form is not None:
+            form.person_edited("target")
+        return after_probe(self.tab, self.profile, target)
+
     def plain_text(self) -> str:
         return "\n".join([self.label.text()] + [b.text().replace("&&", "&") for b in self.buttons])
 
@@ -444,6 +501,10 @@ def after_probe(tab: Any, profile: Any, match: Optional[str]) -> str:
     if not match:
         advice.show_no_target(profile)
         return "no_target"
+    chosen = person_target(tab)
+    if chosen and chosen != match:   # the person's target stays; the probe's is offered with one click
+        advice.show_target_kept(profile, match, chosen)
+        return "kept_target"
     if profile is None:
         advice.hide_advice()
         return "none"
@@ -452,5 +513,5 @@ def after_probe(tab: Any, profile: Any, match: Optional[str]) -> str:
     return advice.show_recommendation(recommend_board(profile, tm, match), profile)
 
 
-__all__ = ["BoardAdvice", "BuildProgressPanel", "LEVELS", "after_probe", "bind_builder_form", "line_level",
-           "person_board", "read_probe"]
+__all__ = ["BoardAdvice", "BuildProgressPanel", "LEVELS", "after_probe", "apply_ditto_settings", "bind_builder_form",
+           "line_level", "person_board", "person_target", "read_probe"]

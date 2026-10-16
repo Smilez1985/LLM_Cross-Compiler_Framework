@@ -122,8 +122,10 @@ Further behaviour:
   it can no longer be cancelled and finishes on its own.
 - **Progress and live log:** while the build the Builder tab started runs, a progress bar under the Builder log
   shows the step and the percent from the build service, and the build's log follows live below it (secrets
-  redacted, plain text). A search box finds lines; a filter shows all lines or only Info, Warnings or Errors. Lines
-  the service no longer returns are noted instead of left out silently.
+  redacted, plain text, each line once). The step and the percent include the running build's own progress
+  (preparing, image, model, modules, archive), so the bar moves during a build; it says 100 % only when the request
+  has ended. A search box finds lines; a filter shows all lines or only Info, Warnings or Errors. Lines the service
+  no longer returns are noted instead of left out silently, and the view keeps the newest 20,000 lines.
 - **Build status across programs (shared build state):** every program that builds (the GUI, a CLI call, each MCP
   server) writes a summary of each build request into the per-user folder (`build_requests/`: model as repo id or
   label, target, format, quantization, status, stage, progress, who started it and in which program; no host path,
@@ -588,10 +590,12 @@ The rules are the same in every form (`orchestrator/tools/gui_surface.py`):
   `update_settings`).
 - **Paths:** a local file reaches the AI as a label (`models:tiny.gguf`) or by its file name, never with the home
   folder. Ditto names a local file by its id from `list_local_files` (`lf_...`) or as `<label>:<relative path>`.
-- **Your values are yours:** a value you typed, picked or clicked is never overwritten by an AI. Ditto may suggest
-  another one in the chat. A field you are editing (it has the keyboard focus) is never written. A fill that would
-  change a field you chose through the form's own logic (another target resets the board) is undone completely and
-  refused. What can never be filled is refused before you are asked; everything is checked again when filling.
+- **Your values are yours:** a value you typed, picked or clicked (also a file you chose in a file dialog, and a
+  recipe's values) is never overwritten by an AI. Ditto may suggest another one in the chat; **Ask Ditto for Config**
+  in the Builder fills the form by the same rules. A field you are editing (it has the keyboard focus) is never
+  written. A fill that would change a field you chose through the form's own logic (another target resets the board)
+  is undone completely and refused. What can never be filled is refused before you are asked; everything is checked
+  again when filling.
 - **Visible and undoable:** the form comes to the front, every filled field gets a purple frame, and a line above
   the form names the fields Ditto filled, with **Undo Ditto's changes**. A field you change afterwards keeps your
   value; the undo is recorded in the audit log.
@@ -2100,7 +2104,9 @@ The GUI's input fields offer what you used recently, newest first.
   filled in; it is only a recommendation, so the field stays editable. When it is not sure, nothing is filled in:
   the Builder names the candidates and why it is unsure, and you pick yours with one click. **Look up the board name
   online...** opens your web browser with a search for the probe's board name, only after you agree. **Ask Ditto**
-  writes a question into the chat for you to send. A board you chose is never replaced by a later probe or by an AI.
+  writes a question into the chat for you to send (a draft you typed there stays). A board you chose is never
+  replaced by a later probe or by an AI. A target you chose (or a recipe's) stays too: when the probe points to
+  another target, the Builder says so and offers **Use <target>**, which then recommends that target's board.
   Ditto probing a board over SSH itself needs the planned tool `probe_remote_device`.
 - **No matching target:** when no target fits the probe, the Builder offers **Create a target with the wizard** (the
   wizard starts from that probe) and **Ask Ditto**.
