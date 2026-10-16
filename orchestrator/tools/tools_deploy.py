@@ -68,6 +68,34 @@ def hide_paths(text: str, labels: Dict[str, str]) -> str:
     return _scrub_paths(text)
 
 
+def event_text(event: Any, label: str) -> str:
+    """A running deploy's event (DeploymentManager.DeployEvent) as plain English for the job's progress: the device by
+    its label, never its address or account."""
+    if event.kind == "uploading":
+        return f"uploading to {label}: {_size(event.done)} of {_size(event.total)}"
+    if event.kind == "waiting":
+        what = "the upload continues" if event.step != "install" else "the installation is followed again"
+        return (f"waiting for the board {label}: {int(event.elapsed)} s of at most {int(event.limit)} s (the network "
+                f"dropped; {what} when it answers)")
+    if event.kind == "back":
+        return f"{label} answers again: the upload continues at {_size(event.done)} of {_size(event.total)}"
+    return f"installing on {label}"
+
+
+def unreachable_error(device: Any, error: BaseException) -> ToolError:
+    """The refusal for a board whose host key could not be read: the SSH reason code of the failure (N6) with the
+    AI's next step, never the address, the account or the exception's text."""
+    from orchestrator.runtime.device import reasons
+    reason = reasons.classify(error)
+    if reason is None and isinstance(error, OSError):
+        reason = reasons.HOST_DOWN
+    if reason is None:
+        return ToolError(f"The host key of {device.label} could not be read ({error.__class__.__name__}).",
+                         code="failed", field="device_id", next="Tell the person; the framework's log has the details.")
+    return blocked(reason, f"The device {device.label} cannot be reached to read its host key ({reason}).",
+                   reasons.AI_NEXT[reason], field="device_id")
+
+
 def _size(n: Optional[int]) -> str:
     if n is None:
         return "size unknown"
@@ -243,8 +271,8 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             return "host_key_unknown", ("its host key is no longer in the framework's known_hosts: the person must "
                                         "trust it again")
         if status == "changed":
-            return "host_key_changed", ("the framework's known_hosts holds another host key for its address: the "
-                                        "person must check it")
+            return "device_host_key_changed", ("the framework's known_hosts holds another host key for its address: "
+                                               "the person must check it")
         return "", ""
 
     def trust_of(target: Optional[str]) -> str:
@@ -419,24 +447,21 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
     def read_host_key(device):
         """The key the device presents now (a key read, no login) and its state against the framework's known_hosts.
         Nothing is written: an unknown or changed key is refused, never trusted."""
+        from orchestrator.runtime.device import reasons
         from orchestrator.utils import ssh_trust
         try:
             key = ssh_trust.fetch_host_key(device.host, device.port)
             status = ssh_trust.check_host_key(devices().state_dir, device.host, device.port, key)
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
-            raise blocked("device_unreachable", f"The device {device.label} cannot be reached to read its host key "
-                          f"({e.__class__.__name__}).",
-                          "Ask the person whether the device is switched on and on the network.",
-                          field="device_id") from None
+            raise unreachable_error(device, e) from None
         fp = ssh_trust.fingerprint(key)
         if status == "unknown":
             raise blocked("host_key_unknown", f"The device {device.label} presents a host key that is not trusted "
                           f"({fp}); nothing was deployed.", PAIR_NEXT, field="device_id")
         if status == "changed" or fp != device.fingerprint:
-            raise blocked("host_key_changed", f"The host key of {device.label} has CHANGED ({fp}, trusted was "
+            raise blocked(reasons.HOST_KEY_CHANGED, f"The host key of {device.label} has CHANGED ({fp}, trusted was "
                           f"{device.fingerprint}). This can be a reinstalled device, or someone in between; nothing "
-                          "was deployed.", "Tell the person: they must check the device and trust it again in the "
-                          "GUI or the CLI. No tool can accept a changed key.", field="device_id")
+                          "was deployed.", reasons.AI_NEXT[reasons.HOST_KEY_CHANGED], field="device_id")
         return fp
 
     def deploy_facts(inp: DeployIn, ctx: ToolContext) -> CallFacts:
@@ -520,11 +545,25 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             handle.progress(None, None, f"deploying to {device.label}")
             from orchestrator.tools.tools_runtime import device_text
             users = [device.user, bound["user"]]
+            shown: Dict[str, Any] = {}
+
+            def on_event(event) -> None:
+                # the visible state of the deploy (N5), by the device's label only: whole percents of the upload, the
+                # wait for a board whose network dropped
+                text = event_text(event, device.label)
+                key = (text if event.kind != "uploading" else
+                       f"up {event.done * 100 // max(event.total, 1)}")
+                if shown.get("last") != key:
+                    shown["last"] = key
+                    handle.progress(event.done if event.kind == "uploading" else None,
+                                    event.total if event.kind == "uploading" else None, text)
+
             try:
                 result = manager().deploy_package(path, bound["host"], bound["user"], port=int(bound["port"]),
                                                   password=None, pair=False, expect_fingerprint=bound["fingerprint"],
                                                   expect_sha256=bound["sha256"], on_client=on_client,
-                                                  cancelled=lambda: stop.is_set() or handle.cancelled)
+                                                  cancelled=lambda: stop.is_set() or handle.cancelled,
+                                                  on_event=on_event)
             except JobCancelled:
                 raise
             except ValueError as e:
@@ -544,6 +583,9 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                 raise JobCancelled()
             out = {"success": result.success, "exit_status": result.exit_status,
                    "device_state": result.device_state, "device_id": device.device_id,
+                   # why the board could not be reached or logged in to (N6), and how often the deploy waited for it
+                   # and continued (N5): plain codes and numbers
+                   "reason_code": result.code, "resumed": result.resumed, "waited_s": result.waited_s,
                    # the framework's reason (the device's own words are in the output lines), without host paths, the
                    # device account's name or its paths (D0), also on success
                    "reason": device_text(hide_paths(result.reason, {str(path.parent): "the output folder"}), users,
@@ -559,9 +601,11 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         def deployed(out: Dict[str, Any]):
             ok = bool(out.get("success"))
             return ("ok" if ok else "error",
-                    f"{'deployed' if ok else 'not deployed'}, exit status {out.get('exit_status')}, device state "
-                    f"{out.get('device_state') or 'unknown'}" + ("; not recorded in the device list"
-                                                                 if out.get("note") else ""),
+                    f"{'deployed' if ok else 'not deployed'}"
+                    + (f" ({out['reason_code']})" if out.get("reason_code") else "")
+                    + f", exit status {out.get('exit_status')}, device state {out.get('device_state') or 'unknown'}"
+                    + (f"; continued {out['resumed']} times after the network dropped" if out.get("resumed") else "")
+                    + ("; not recorded in the device list" if out.get("note") else ""),
                     "" if ok else "failed")
 
         # The deploy's own end entry, linked to the call's started entry (the call returned at the job's start, so the

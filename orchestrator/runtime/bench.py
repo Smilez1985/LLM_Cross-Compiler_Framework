@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
 Speed benchmarks of GGUF models on this computer with the self-built llama-bench (runtime design 6.2 and 6.3, runtime
-decision D23).
+decision D23 as changed by the seventh round, 2').
 
 - The program is the llama-bench of a self-built (or imported) build of the build store that passed its verification
   here, still matches its manifest, is of the pinned llama.cpp commit and was built for this machine: the active build
   first, then the CPU fallback, then any other. No llama-bench from PATH and no prebuilt image is ever used.
-- Catalog models (Ditto's tiers and the smoke-test model, pinned by sha256) are trusted and run natively.
-- Every other GGUF (a user conversion, a download) is untrusted. It runs natively only after the person's explicit
-  consent, which the caller writes to the audit log before the run (decision D23: native is the point of the
-  self-built tools); without that consent nothing runs. The Docker sandbox is the opt-in: the build's own builder
-  image (made locally, never pulled), no network, no capabilities, a read-only root, the host user, the program and the
-  model mounted read-only.
+- Catalog models (Ditto's tiers and the smoke-test model, pinned by sha256) are trusted and run natively: Ditto's own
+  model really runs on this computer.
+- Every other GGUF (a model built for a board, a download) never runs natively on this computer: measuring it here
+  would say how fast this computer is, not the board (seventh round 2'). Its real values come from the board itself
+  (orchestrator/runtime/device/service.benchmark, after a deploy); here it runs only in the Docker sandbox: the
+  build's own builder image (made locally, never pulled), no network, no capabilities, a read-only root, the host
+  user, the program and the model mounted read-only. run() refuses a native run of a model that is not a catalog
+  model, whatever the caller asks.
 - Every run goes through the shared launch policy (server_policy.check_command, a cleared environment, no stdin).
 - Results are kept in <state dir>/benchmarks/runs/<run_id>.json (schema llm-framework.bench/1) with an append-only
   index.jsonl: kind, model sha256, build id, the llama-bench values (prompt and generation tokens per second), peak
@@ -49,7 +51,6 @@ MAX_OUTPUT = 4 * 1024 * 1024
 BENCH_ARGS = ("-p", "512", "-n", "128", "-r", "3", "-o", "json")
 # The tmpfs inside the sandbox container, not a host path.
 CONTAINER_TMP = "/tmp"  # nosec B108
-AUDIT_TOOL = "benchmark.untrusted_model_native"
 PIN_PREFIX = ".llm-bench-"              # the private folder of a sandbox run's model file
 PIN_STALE_SECONDS = 3 * RUN_TIMEOUT     # older private folders are leftovers of a crash
 COPY_RESERVE = 512 * 1024 ** 2          # free space a copy of the model leaves on its disk
@@ -250,12 +251,19 @@ class BenchRunner:
         """Runs llama-bench on `model` with the sha256 `sha256` (`trusted` says whether it is a catalog model). The
         file is opened once and hashed through that open file, and llama-bench reads exactly that file (the inherited
         descriptor natively, a private hard link of it in the sandbox), so it cannot be swapped between the check and
-        the run. An untrusted model runs natively only when the caller has the person's consent on record; this method
-        does not ask. Raises BenchError."""
+        the run. Only a catalog model runs natively; any other model only in the Docker sandbox (a native run of it is
+        refused here, before anything is opened). Raises BenchError."""
         import os
         model = Path(model)
         if not model.is_file() or model.is_symlink() or model.suffix.lower() != ".gguf":
             raise BenchError(f"{label} is not a GGUF model file.", code="not_supported")
+        if not sandbox and sha256 not in self.trusted_sha256():
+            raise BenchError(f"{label} is not one of Ditto's catalog models, so it is never benchmarked natively on "
+                             "this computer (that would measure this computer, not the board it was built for).",
+                             code="not_supported",
+                             next="Benchmark it on the board after deploying it (run_device_benchmark, 'llm-cli device "
+                                  "runtime verify --bench-model', or the GUI's Benchmark window), or here in the "
+                                  "Docker sandbox.")
         build, binary = self.bench_build(sandbox=sandbox)
         fd = open_pinned(model, sha256, label)
         try:
@@ -588,5 +596,4 @@ class BenchRunner:
         return out
 
 
-__all__ = ["AUDIT_TOOL", "BENCH", "BenchError", "BenchRun", "BenchRunner", "BenchStopped", "find_program_build",
-           "sha256_file"]
+__all__ = ["BENCH", "BenchError", "BenchRun", "BenchRunner", "BenchStopped", "find_program_build", "sha256_file"]

@@ -1,11 +1,12 @@
 """
-The perplexity check of converted models without any pulled image (WP11a, decisions D1 and D23): the self-built
-llama-perplexity of this machine runs natively for catalog models, asks for consent (written to the audit log) for
-every other model, and runs in the Docker sandbox only as the opt-in, in the build's own locally built image.
-Failures are explicit errors, never the old sentinel values.
+The perplexity check of converted models without any pulled image (WP11a, decisions D1 and D23 as changed by the
+seventh round, 2'): the self-built llama-perplexity of this machine runs natively for catalog models (Ditto's own); any
+other model, such as one converted for a board, never runs natively on this computer: it runs in the Docker sandbox,
+in the build's own locally built image. Failures are explicit errors, never the old sentinel values.
 """
 
 import hashlib
+import inspect
 import json
 from pathlib import Path
 
@@ -75,16 +76,6 @@ class Runner:
     def __call__(self, argv, timeout, cwd, env):
         self.calls.append((list(argv), cwd, dict(env)))
         return self.rc, self.out, self.err
-
-
-class Audit:
-    def __init__(self, fail=False):
-        self.fail, self.entries = fail, []
-
-    def record(self, actor, tool, tier, decision, outcome, arguments=None, approved=None, detail="", extra=None):
-        if self.fail:
-            raise OSError("disk full")
-        self.entries.append({"tool": tool, "outcome": outcome, "approved": approved, "arguments": arguments})
 
 
 class NoDocker:
@@ -158,56 +149,29 @@ class TestNative:
         assert set(env) <= {"HOME", "PATH", "LANG", "LC_ALL"}, "a cleared environment"
         assert "LLAMA_ARG_MODEL" not in env and "HTTPS_PROXY" not in env
 
-    def test_an_untrusted_model_needs_consent_written_to_the_audit_log_first(self, tmp_path):
-        store, _ = stored(tmp_path)
+    def test_a_model_converted_for_a_board_never_runs_natively_on_this_computer(self, tmp_path):
+        """Seventh round 2': only Ditto's own catalog models run natively; any other model goes to the Docker sandbox,
+        and without a container build it does not run at all (there is no consent that would run it natively)."""
+        store, _ = stored(tmp_path)  # a native build only
         model, text = model_file(tmp_path)
-        runner, audit = Runner(), Audit()
-        m = manager(tmp_path, store, runner=runner, audit=audit)
-        with pytest.raises(PerplexityError, match="consent"):
-            m.measure_perplexity(model, text)
-        assert runner.calls == [] and audit.entries == []
-        asked = []
-        assert m.measure_perplexity(model, text, consent=lambda info: asked.append(info) or True) == 8.9013
-        assert asked[0]["sha256"] == hashlib.sha256(model.read_bytes()).hexdigest()
-        assert "natively" in asked[0]["runs"]
-        assert audit.entries[-1]["approved"] is True and audit.entries[-1]["tool"] == dm.AUDIT_TOOL
-        assert len(runner.calls) == 1
-
-    def test_declined_or_unrecorded_consent_runs_nothing(self, tmp_path):
-        store, _ = stored(tmp_path)
-        model, text = model_file(tmp_path)
-        runner, audit = Runner(), Audit()
-        with pytest.raises(PerplexityError, match="declined"):
-            manager(tmp_path, store, runner=runner, audit=audit).measure_perplexity(model, text,
-                                                                                    consent=lambda info: False)
-        assert audit.entries[-1]["approved"] is False and audit.entries[-1]["outcome"] == "not_confirmed"
-        with pytest.raises(PerplexityError, match="audit log"):
-            manager(tmp_path, store, runner=runner, audit=Audit(fail=True)).measure_perplexity(
-                model, text, consent=lambda info: True)
-        with pytest.raises(PerplexityError, match="audit log"):
-            manager(tmp_path, store, runner=runner).measure_perplexity(model, text, consent=lambda info: True)
-        assert runner.calls == []
-
-    def test_the_framework_audit_log_is_used(self, tmp_path):
-        from orchestrator.tools.audit import AuditLog
-        store, _ = stored(tmp_path)
-        model, text = model_file(tmp_path)
-
-        class Registry:
-            audit = AuditLog(tmp_path / "audit.db")
-
-        m = DatasetManager(Framework(Registry()), store=store, catalog=CATALOG, platform=("linux", "x86_64"),
-                           runner=Runner(), profile=Z1)
-        m.measure_perplexity(model, text, consent=lambda info: True)
-        entry = Registry.audit.entries(5)[0]
-        assert entry["tool"] == dm.AUDIT_TOOL and entry["approved"] == 1 and entry["outcome"] == "ok"
+        runner = Runner()
+        with pytest.raises(PerplexityError, match="--placement container"):
+            manager(tmp_path, store, runner=runner, engine=Engine()).measure_perplexity(model, text)
+        assert runner.calls == [], "nothing ran natively"
+        image = TestSandbox.IMAGE
+        store, _ = stored(tmp_path / "c", placement="container", builder_image=image)
+        engine = Engine(images={image})
+        run = manager(tmp_path, store, runner=runner, engine=engine).run_perplexity(model, text, sandbox=False)
+        assert run.where == "sandbox" and not run.trusted and runner.calls == [] and len(engine.runs) == 1
+        assert "consent" not in inspect.signature(DatasetManager.run_perplexity).parameters
+        assert not hasattr(dm, "AUDIT_TOOL")
 
     def test_no_self_built_build_no_run(self, tmp_path):
         model, text = model_file(tmp_path)
         runner = Runner()
         with pytest.raises(PerplexityError, match="ditto runtime install"):
-            manager(tmp_path, BuildStore(tmp_path / "empty"), runner=runner).measure_perplexity(
-                model, text, consent=lambda info: True)
+            manager(tmp_path, BuildStore(tmp_path / "empty"), catalog=trusting(model), runner=runner
+                    ).measure_perplexity(model, text)
         assert runner.calls == []
 
     def test_a_changed_program_or_another_commit_is_not_used(self, tmp_path):

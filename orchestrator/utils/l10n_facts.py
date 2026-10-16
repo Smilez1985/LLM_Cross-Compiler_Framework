@@ -49,9 +49,9 @@ TEXTS = {
                                          "independently.",
         "warning.first_build_unconfirmed": "An AI made or installed this build code; you see its first build once.",
         "warning.preflight_error": "The check before the build found a problem ({check}); building anyway ignores it.",
-        "warning.untrusted_model_native": "Runs a model that is not from the framework's list directly on your "
-                                          "computer with your rights, or in the sandbox you have not allowed for "
-                                          "AIs.",
+        "warning.untrusted_model_native": "Runs a model that is not from the framework's list directly on a board "
+                                          "(as its device account), or in the sandbox of this computer that you have "
+                                          "not allowed for AIs.",
         "warning.signs_as_you": "The pack is signed with your personal key.",
         "warning.facts_unknown": "Some facts could not be checked ({unknown}), so the model may be unsafe or "
                                  "restricted.",
@@ -95,8 +95,10 @@ TEXTS = {
         "blocker.artifact_busy": "This built model is in use right now.",
         "blocker.device_not_trusted": "This board is not paired yet.",
         "blocker.host_key_unknown": "This board's identity is not confirmed yet.",
-        "blocker.host_key_changed": "This board's identity has changed.",
-        "blocker.device_unreachable": "The board cannot be reached.",
+        "blocker.device_host_key_changed": "This board's identity has changed.",
+        "blocker.device_host_down": "The board does not answer.",
+        "blocker.device_port_closed": "The board answers, but refuses the remote login.",
+        "blocker.device_auth_failed": "The board refused the login.",
         "blocker.toolchain_missing": "The build tools are not installed yet.",
         "blocker.runtime_not_built": "Ditto's model server is not built yet.",
         "blocker.model_not_downloaded": "The model is not downloaded yet.",
@@ -123,7 +125,12 @@ TEXTS = {
         "action.ingest_notice": "Read the Deep Ingest notice (Tools > Create Hardware Module..., then Deep Ingest).",
         "action.pair_device": "Pair the board in the Deployment window.",
         "action.check_device": "Check the board and confirm its identity again in the Deployment window.",
-        "action.device_on": "Check that the board is switched on and on the network.",
+        "action.device_on": "Check that the board is switched on and on the same network; if you entered a host "
+                            "name such as myboard.local, try the board's IP address.",
+        "action.device_ssh": "Check that the remote login (SSH) runs on the board, that the port is right and that no "
+                             "firewall blocks it.",
+        "action.device_login": "Check the user name and the password, then pair the board again in the Deployment "
+                               "window.",
         "action.install_tools": "Install the vendor tools: the framework shows what is missing and its licence.",
         "action.device_settings": "Choose the model in the board's deploy settings.",
         "action.signing_key": "Create your personal keys in the Community Hub.",
@@ -216,8 +223,8 @@ TEXTS = {
         "warning.preflight_error": "Die Prüfung vor dem Build hat ein Problem gefunden ({check}); trotzdem bauen "
                                    "übergeht es.",
         "warning.untrusted_model_native": "Führt ein Modell, das nicht aus der Liste des Frameworks stammt, direkt "
-                                          "auf deinem Computer mit deinen Rechten aus, oder in der Sandbox, die du "
-                                          "für KIs nicht freigegeben hast.",
+                                          "auf einem Board aus (als dessen Gerätekonto), oder in der Sandbox dieses "
+                                          "Computers, die du für KIs nicht freigegeben hast.",
         "warning.signs_as_you": "Das Paket wird mit deinem persönlichen Schlüssel signiert.",
         "warning.facts_unknown": "Einiges konnte nicht geprüft werden ({unknown}); das Modell könnte unsicher oder "
                                  "eingeschränkt sein.",
@@ -264,8 +271,10 @@ TEXTS = {
         "blocker.artifact_busy": "Dieses gebaute Modell wird gerade benutzt.",
         "blocker.device_not_trusted": "Dieses Board ist noch nicht gekoppelt.",
         "blocker.host_key_unknown": "Die Identität dieses Boards ist noch nicht bestätigt.",
-        "blocker.host_key_changed": "Die Identität dieses Boards hat sich geändert.",
-        "blocker.device_unreachable": "Das Board ist nicht erreichbar.",
+        "blocker.device_host_key_changed": "Die Identität dieses Boards hat sich geändert.",
+        "blocker.device_host_down": "Das Board antwortet nicht.",
+        "blocker.device_port_closed": "Das Board antwortet, lehnt aber die Fernanmeldung ab.",
+        "blocker.device_auth_failed": "Das Board hat die Anmeldung abgelehnt.",
         "blocker.toolchain_missing": "Die Build-Werkzeuge sind noch nicht installiert.",
         "blocker.runtime_not_built": "Dittos Modellserver ist noch nicht gebaut.",
         "blocker.model_not_downloaded": "Das Modell ist noch nicht heruntergeladen.",
@@ -296,7 +305,12 @@ TEXTS = {
                                 "Ingest).",
         "action.pair_device": "Das Board im Fenster „Deployment“ koppeln.",
         "action.check_device": "Das Board prüfen und seine Identität im Fenster „Deployment“ neu bestätigen.",
-        "action.device_on": "Prüfen, ob das Board eingeschaltet und im Netzwerk ist.",
+        "action.device_on": "Prüfen, ob das Board eingeschaltet und im selben Netzwerk ist; bei einem Hostnamen wie "
+                            "myboard.local die IP-Adresse des Boards versuchen.",
+        "action.device_ssh": "Prüfen, ob die Fernanmeldung (SSH) auf dem Board läuft, der Port stimmt und keine "
+                             "Firewall sie sperrt.",
+        "action.device_login": "Benutzernamen und Passwort prüfen, dann das Board im Fenster „Deployment“ neu "
+                               "koppeln.",
         "action.install_tools": "Die Hersteller-Werkzeuge installieren: das Framework zeigt, was fehlt, und die "
                                 "Lizenz dazu.",
         "action.device_settings": "Das Modell in den Deploy-Einstellungen des Boards wählen.",
