@@ -1625,7 +1625,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Fehler geschwärzt), und ein Build, dessen Programm endete, bevor er fertig war, erscheint als unterbrochen. Der
   Befehl braucht weder den Tresor für Zugangsdaten noch Docker; `--all` listet jeden aufbewahrten Build statt der
   20 neuesten. Unter Linux und macOS sind die Einträge nur für den Benutzer lesbar, der gebaut hat (Ordner 0700,
-  Dateien 0600).
+  Dateien 0600). Ein Eintrag nennt das Ergebnis des Builds, bevor sein Build-Platz frei wird: Wer sieht, dass der
+  Build zu Ende ist, liest dort das Ergebnis, nie die Stufe davor.
 - Strg+C in `llm-cli build start` bricht den Build über den Build-Service ab: Sein Container wird gestoppt, die CLI
   wartet, bis der Build angehalten hat (auch wenn er gerade noch an die Build-Engine übergeben wurde), sagt das
   und endet mit Exit-Code 130. Vorher liefen Build und Container weiter.

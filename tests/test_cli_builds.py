@@ -133,6 +133,35 @@ class TestBuildRecords:
         assert "broke it" in rec["error"] and "hf_abcdefghij" not in rec["error"]
         assert rec["ended"]
 
+    def test_the_record_names_the_outcome_before_the_slot_is_free(self, tmp_path, monkeypatch):
+        # A poller that sees the build no longer active reads its record next; the outcome must be in it already.
+        # The final record used to be written after the slot was freed, so a busy machine showed 'preparing' there.
+        from orchestrator.Core import build_records
+        from orchestrator.Core.builder import BuildConfiguration, BuildEngine
+        from orchestrator.Core.config_manager import ConfigManager
+        no_docker(monkeypatch)
+        engine = BuildEngine(ConfigManager(tmp_path / "configs"), base_dir=tmp_path)
+        monkeypatch.setattr(engine, "_resolve_dataset", lambda c, p: (_ for _ in ()).throw(RuntimeError("broke")))
+        writes = []
+        real_write = build_records.write_record
+
+        def watched(folder, data):
+            writes.append((data["status"], data["build_id"] in engine._running))
+            real_write(folder, data)
+
+        monkeypatch.setattr(build_records, "write_record", watched)
+        config = BuildConfiguration(build_id="req_slot_001", timestamp="t", model_source="org/m", target_arch="Rockchip",
+                                    target_format=ModelFormat.GGUF, output_dir=str(tmp_path / "out"),
+                                    quantization="Q4_0", target_board="rk3566", request_id="req_slot")
+        engine.build_model(config)
+        deadline = time.monotonic() + 10
+        while not any(status == "failed" for status, _ in writes) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ("failed", True) in writes, writes
+        assert not engine.is_active("req_slot_001")
+        (rec,) = build_records.read_records(engine.records_dir)
+        assert rec["status"] == "failed" and rec["ended"]
+
     def test_an_unfinished_build_of_an_ended_process_is_interrupted(self, tmp_path):
         from orchestrator.Core import build_records
         folder = tmp_path / "records"
