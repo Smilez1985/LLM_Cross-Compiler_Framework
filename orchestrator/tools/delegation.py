@@ -56,6 +56,9 @@ NEVER_DELEGATE: FrozenSet[str] = frozenset({"answer_approval", "export_pack", "d
 # The scope of each tool (WP11 fills it for every tool that is not a read tool, and the registry refuses a tool without
 # one from then on). Until then an entry is only read to check that a tool which deletes is the person's alone.
 DELEGATION_SCOPE: Dict[str, ToolScope] = {
+    # M6 makes harmless repairs delegable: ToolScope("delegable", group="repairs", when=<repair_class is delegable>)
+    "run_mojo_miracle": ToolScope("person", reason="repairs: you answer every Mojo Miracle question until the "
+                                                   "delegation group for harmless repairs exists"),
     "delete_artifact": ToolScope("person", reason="deleting: you confirm every deletion in the framework's own "
                                                   "window, with every item listed"),
 }

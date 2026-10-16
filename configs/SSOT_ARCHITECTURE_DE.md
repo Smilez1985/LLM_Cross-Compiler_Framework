@@ -319,7 +319,7 @@ derzeit keine Wirkung auf Builds.
 | Einstellungen und ihre Vorgaben | Einträge `ConfigSchema` in `orchestrator/Core/config_manager.py`; deine Werte in `config.yml` | Schemaprüfung beim Start |
 | Tools für KI-Clients und Ditto | `orchestrator/tools/framework_tools.py` | `tests/test_foundation.py`, `tests/test_mcp_server.py` |
 | Dittos Evaluationsfälle | `evals/ditto/cases.yml` | `tests/test_ditto_eval.py` |
-| Kalibriertext für Importance-Matrizen | `data/calibration/`, SHA256-Werte in `orchestrator/utils/calibration.py` | `llm-cli doctor` (Code `data.calibration`) |
+| Kalibriertext für Importance-Matrizen | `data/calibration/`, SHA256-Werte in `orchestrator/utils/calibration.py` | `llm-cli mojo` (Code `data.calibration`) |
 | llama.cpp-Version | `llama_cpp.source` in `configs/llama_runtime.yml` (der Commit) | `tests/test_build_recipe.py`, `python scripts/llama_cpp_pin.py check` |
 | Weitere Versionen in den Target-Images | das Dockerfile des Targets | hadolint und der Image-Build in `.github/workflows/docker.yml` |
 | Was war | [CHANGELOG_DE.md](../CHANGELOG_DE.md) | `tests/test_versioning.py` (neueste Version, an `CHANGELOG.md`) |

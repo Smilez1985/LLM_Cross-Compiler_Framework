@@ -69,6 +69,18 @@ TOOLS_OF_3_0_0 = frozenset({
     "list_artifacts", "run_doctor", "search_knowledge", "start_build", "cancel_build", "resolve_healing",
 })
 
+# Tools renamed after 3.0.0 (old name -> new name). The old name stays registered, callable but not listed. A person's
+# setting for either name applies to both and the stricter one wins, so neither name opens what the other's setting
+# closed; a tool reviewed under one name counts as reviewed under the other.
+TOOL_RENAMES: Dict[str, str] = {"run_doctor": "run_mojo_oracle"}
+
+
+def renamed_names(name: str) -> Tuple[str, ...]:
+    """The other names of a tool through TOOL_RENAMES (its old name, or its new one), in a fixed order."""
+    return tuple(sorted({new for old, new in TOOL_RENAMES.items() if old == name}
+                        | {old for old, new in TOOL_RENAMES.items() if new == name}))
+
+
 CALLER_DITTO = "ditto"   # Ditto in process
 CALLER_MCP = "mcp"       # local stdio MCP clients
 _CALLER = re.compile(r"^(ditto|mcp|mcp:[a-z0-9][a-z0-9_-]{0,31})$")
@@ -202,8 +214,8 @@ class ToolPolicy(BaseModel):
         section = self.section(caller)
         if section is None:
             return False
-        reviewed = section[2]
-        return name in (TOOLS_OF_3_0_0 if reviewed is None else reviewed)
+        reviewed = TOOLS_OF_3_0_0 if section[2] is None else section[2]
+        return any(n in reviewed for n in (name, *renamed_names(name)))
 
     def decide_tool(self, spec: Any, inp: Any = None, caller: Optional[str] = None,
                     owner: Optional[str] = None) -> Decision:
@@ -234,6 +246,7 @@ class ToolPolicy(BaseModel):
                 why += "; the tool's own default"
             elif name in self.overrides:
                 why += "; your shared setting for this tool"
+            decision, why = _renamed_setting(name, self.overrides, decision, why)
         else:
             tiers, overrides, _ = section
             tier_decision = tiers.get(tier, Decision.ASK)
@@ -251,12 +264,22 @@ class ToolPolicy(BaseModel):
                 decision = stricter(tier_decision, recommended)
                 why = (f"new tool: the recommended setting for {tier.value} until you review it"
                        if decision != tier_decision else f"your setting for the tier {tier.value}")
+            decision, why = _renamed_setting(name, overrides, decision, why)
         cap = (_rule(getattr(spec, "max_decision", None), inp, who, Decision.DENY)
                or TIER_CAPS.get(tier, Decision.ASK))
         capped = stricter(decision, cap)
         if capped != decision:
             why += f"; capped at {capped.value} for this tool"
         return capped, why
+
+
+def _renamed_setting(name: str, overrides: Dict[str, Decision], decision: Decision, why: str) -> Tuple[Decision, str]:
+    """A person's setting for another name of the same tool (TOOL_RENAMES): the stricter decision wins."""
+    for other in renamed_names(name):
+        setting = overrides.get(other)
+        if setting is not None and stricter(decision, setting) != decision:
+            decision, why = setting, f"your setting for {other} (another name of this tool)"
+    return decision, why
 
 
 def restrictive_policy() -> ToolPolicy:

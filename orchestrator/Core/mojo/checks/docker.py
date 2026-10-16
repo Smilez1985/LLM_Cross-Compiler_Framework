@@ -22,7 +22,9 @@ def check_docker(framework) -> List[Finding]:
     except Exception:
         return [Finding("docker", "docker.daemon", Severity.ERROR, "The Docker daemon is not reachable; builds cannot run.",
                         "Start Docker (Docker Desktop on Windows/macOS, 'sudo systemctl start docker' on Linux) and make "
-                        "sure your user may use it (docker group or rootless Docker).")]
+                        "sure your user may use it (docker group or rootless Docker).",
+                        where="the Docker daemon", why="Builds cross-compile inside Docker, so no build can run "
+                                                       "without it.", cannot="admin")]
     if shutil.which("docker"):
         try:
             buildx = subprocess.run(["docker", "buildx", "version"], capture_output=True, text=True, timeout=15)
@@ -31,7 +33,9 @@ def check_docker(framework) -> List[Finding]:
             else:
                 findings.append(Finding("docker", "docker.buildx", Severity.WARN,
                                         "docker buildx is missing; image builds fall back to the slower legacy builder.",
-                                        "Install the Docker buildx plugin."))
+                                        "Install the Docker buildx plugin.", where="the docker command",
+                                        why="Image builds take longer and reuse less of earlier builds.",
+                                        cannot="admin"))
         except (OSError, subprocess.SubprocessError):
             pass
     findings.extend(_storage_findings(framework))

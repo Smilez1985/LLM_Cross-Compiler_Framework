@@ -774,6 +774,28 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`orchestrator/utils/l10n_chat.py`; the dock, its View menu entries and the toolbar button follow a language change,
   and German texts name the menus as the window shows them). Where the panel sits, whether it is shown, its filter and the newest entry you
   saw are kept in `gui_state.json` in the per-user folder (never in QSettings); a damaged file gives the defaults.
+- **Mojo: the health check looks (Mojo Oracle) and repairs (Mojo Miracle)** (sixth round, decision 9; seventh round,
+  items 11', M' and T; [docs/Mojo.md](docs/Mojo.md)): `llmcf mojo` (Mojo Oracle, the default; `--oracle`) only looks.
+  For every warning and error it says what it found, where (the full path; an AI reads a label), why it matters, a
+  hint and whether Mojo Miracle can repair it, and one sentence counts every problem by what can be done about it.
+  At a terminal it then asks "Run Mojo Miracle now? [y/N]" when Mojo Miracle can act; on yes Mojo Miracle runs without
+  the command typed again. `llmcf mojo --miracle` makes only harmless repairs (the state folder narrowed to your user;
+  Ditto's server switched to an intact stored llama.cpp build when the active one is missing): each a dry-run plan
+  bound to its sha256 whose class comes from its steps, recorded in the audit log first, applied as a compare-and-swap
+  on the folder opened without following a link, one at a time, and checked again. Then it reports every problem:
+  repaired, already gone, still there, or not repaired with the reason (deleting needs your list, needs you, needs an
+  administrator, not repairable automatically, failed), and a problem found for the first time afterwards. Freeing
+  disk space goes only through the list of the framework's build images at a terminal, nothing ticked; without a
+  terminal only the harmless repairs run and nothing is deleted. `--json` never asks and never deletes.
+- **`llmcf`, the command line's new name** (seventh round, item 11): a second console script next to `llm-cli`, the
+  same program; `llm-cli` stays.
+- **The MCP tools `run_mojo_oracle` and `run_mojo_miracle` and the prompt `check_installation`** (seventh round, item
+  11'): `run_mojo_oracle` (read-only) gives every finding with `where` as a label (never a host path), `why` and
+  `repair` (`how`: `miracle`, `deletion_list`, `person`, `admin` or `not_automatic`, with the next step).
+  `run_mojo_miracle` repairs one problem whose `repair.how` is `miracle`: every call is asked with the plan (the full
+  path only in the framework's own window), no standing approval, no delegation, never a deletion; any other problem
+  is refused before the question with its reason, and the result says whether it was repaired, and if not, why. The
+  delegation group for harmless repairs comes with the delegations.
 
 ### Changed
 - **The builder no longer deletes images** (released in 3.0.0; round 7 item 12): every build ended by removing its
@@ -1005,6 +1027,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the hash of what was shown) before anything is deleted. Nothing is deleted without the audit log (also when there is
   no chat feed), when the chat or Ditto's conversation changed while you were asked, or when the window holds a
   conversation its file does not show.
+- **The doctor is Mojo now** (released in 3.0.0; sixth round, decision 9): the code moved into
+  `orchestrator/Core/mojo/` (`orchestrator/Core/doctor.py` re-exports every name it had); finding codes, exit codes
+  and JSON keys stay, and the JSON adds `where`, `why`, `repair_id` and `cannot` per finding. `llm-cli doctor` keeps
+  its options and output and prints a short note on stderr that names `llmcf mojo`. `doctor --fix` now makes the
+  audited harmless repairs of Mojo Miracle instead of an unrecorded change of the folder's mode; `--tier 2` still
+  shows the list of the framework's build images. The tool `run_doctor` stays callable but is no longer listed; a
+  setting for `run_doctor` or `run_mojo_oracle` applies to both, and the stricter one wins. `make mojo` next to
+  `make doctor`.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process

@@ -32,7 +32,7 @@ Zurück zur [README](../README_DE.md) · Alle Befehle: [CLI_Usage_DE.md](CLI_Usa
 - [Eingabeverlauf](#eingabeverlauf)
 - [Löschen und der Papierkorb](#löschen-und-der-papierkorb)
 - [Hardware-Probe und neue Targets](#hardware-probe-und-neue-targets)
-- [Gesundheitscheck (doctor)](#gesundheitscheck-doctor)
+- [Gesundheitscheck (Mojo)](#gesundheitscheck-mojo)
 - [Community-Zoo](#community-zoo)
 - [Secret-Scan für Mitwirkende](#secret-scan-für-mitwirkende)
 - [Bekannte Lücken](#bekannte-lücken)
@@ -634,7 +634,8 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `list_artifacts` | lesen | Fertige Builds mit ID und Label (nie ein Host-Pfad), mit Größe und Hash |
 | `get_artifact_details` | lesen | Manifest, Model Card und Dateien eines gebauten Modells (externer Text) |
 | `check_build_request` | lesen | Probelauf von `start_build`: Commit, Downloadgröße, Speicherplatz, Hardware-Schätzung, Lizenz, Zugangsbeschränkung; startet nichts |
-| `run_doctor` | lesen | Der Gesundheitscheck, ohne Korrekturen |
+| `run_mojo_oracle` | lesen | Der Gesundheitscheck (Mojo Oracle): jeder Befund mit Ort (eine Bezeichnung), warum er wichtig ist und was Mojo Miracle dagegen tun kann ([Einzelheiten](#gesundheitscheck-mojo)) |
+| `run_mojo_miracle` | lokal schreiben | Repariert ein Problem, das Mojo Oracle als reparierbar meldet (eine harmlose Reparatur); immer mit Frage, löscht nie, keine Vollmacht |
 | `search_knowledge` | lesen | In der Wissensbasis suchen; jeder Auszug mit Quellen-ID, Adresse oder Pack, Art (`web`, `pack`, `docs`), Vertrauensstufe, Aufnahmedatum und Position; `kind` grenzt die Suche ein |
 | `list_knowledge_sources` | lesen | Was die Wissensbasis enthält: jede Quelle mit ID, Titel, Art, Vertrauensstufe, Aufnahmedatum und Zahl der Auszüge (50 je Seite) |
 | `read_knowledge_source` | lesen | Die Auszüge einer Quelle in ihrer Reihenfolge, über die Quellen-ID (höchstens 20 je Aufruf) |
@@ -1658,7 +1659,7 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   befolgt werden dürfen, und dass er dir eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
 - **Ergebnisse:** Jedes Ergebnis läuft durch den Ausgabefilter der Registry, auch für Ditto. Secrets werden in jeder
   Zeichenkette geschwärzt. Text von außerhalb des Frameworks (Build-Logs und Stufennamen, Self-Healing-Vorschläge,
-  Build-Manifeste, Auszüge aus der Wissensbasis, Doctor-Meldungen sowie die Bezeichnungen, Hinweise und
+  Build-Manifeste, Auszüge aus der Wissensbasis, Meldungen von Mojo sowie die Bezeichnungen, Hinweise und
   Board-Beschreibungen aus der `target.yml` eines Targets, die ein Community-Target-Pack installieren kann) wird von
   unsichtbaren und bidirektionalen Steuerzeichen befreit und gekürzt (eine Log-Zeile auf 2.000 Zeichen, anderer externer Text auf 4.000); jede andere
   Zeichenkette wird auf 16 KiB gekürzt, und ein Ergebnis über 256 KiB wird mit einem Hinweis abgelehnt, wie man
@@ -1945,7 +1946,7 @@ Verfügung.
   den echten Grund nennen kann.
 - Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
   lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
-  `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
+  `llm-cli mojo`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
 - **Nur du änderst die Berechtigungen.** `tool_policy.json` und der Token-Speicher `mcp_tokens.json` sind mit einem
   Schlüssel signiert, der aus dem Audit-Schlüssel in deinem Schlüsselbund abgeleitet ist. Eine von Hand bearbeitete,
   mit einem anderen Schlüssel signierte oder unsignierte Datei (auch eine von 3.0.0 gespeicherte Berechtigungsdatei)
@@ -1960,7 +1961,7 @@ Verfügung.
   zusätzlich im Schlüsselbund: Eine ältere signierte Kopie, die über eine Datei zurückgelegt wird (sie brächte eine
   widerrufene dauerhafte Freigabe, ein widerrufenes Token oder eine lockerere Berechtigung zurück), wird wie eine
   Bearbeitung von Hand abgelehnt, und eine entfernte Berechtigungsdatei verbietet jedes Tool, statt auf die Vorgaben
-  zurückzufallen. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie die Audit-Kette) und `llm-cli doctor`
+  zurückzufallen. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie die Audit-Kette) und `llm-cli mojo`
   warnt; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt wird.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
@@ -2027,7 +2028,7 @@ kann. Nach jedem Eintrag wird der neueste zusätzlich in eine Anker-Datei geschr
 neuesten Einträge auffällt. `llm-cli tools audit --verify` prüft die Kette und unterscheidet einen geänderten Eintrag
 von einem falschen Schlüssel. Jeder Eintrag wird in einer eigenen Transaktion geschrieben, damit mehrere Prozesse die
 Kette nicht aufspalten. `llm-cli tools audit --archive` legt das Log und seinen Anker beiseite (mit Zeitstempel
-aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli doctor` ein Problem mit dem Log gemeldet hat.
+aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli mojo` ein Problem mit dem Log gemeldet hat.
 
 **Festgehalten, bevor er läuft.** Ein Aufruf, der etwas ändert (jede Stufe außer `read`), bekommt einen Eintrag
 `started`, bevor er läuft. Lässt sich dieser Eintrag nicht schreiben, wird der Aufruf abgelehnt und nichts läuft:
@@ -2124,7 +2125,7 @@ Board-Pfade.
   (der Befehl in `secret_helper`, ohne Shell ausgeführt), `passphrase` (einmal je Start abgefragt), `insecure` (eine
   Schlüsseldatei neben dem Tresor, im Ruhezustand nicht verschlüsselt) oder `ephemeral` (nur im Arbeitsspeicher).
   Der Tresor wird atomar unter einer Sperre geschrieben, die GUI, CLI und MCP-Server teilen, ist nur für dich lesbar,
-  liegt nie in einer Git-Arbeitskopie, und ein beschädigter Tresor wird nie überschrieben. `llm-cli doctor` warnt
+  liegt nie in einer Git-Arbeitskopie, und ein beschädigter Tresor wird nie überschrieben. `llm-cli mojo` warnt
   vor der Schlüsseldatei und vor einem Schlüsselbund, der Geheimnisse nicht schützt. `llm-cli ditto auth
   rotate-key` ersetzt den Schlüssel des Tresors und verschlüsselt jeden Eintrag neu.
 - **Schwärzen:** Eine Tabelle der Secret-Formate (`orchestrator/security/secret_patterns.py`) teilen sich der
@@ -2315,9 +2316,10 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 
 ---
 
-## Gesundheitscheck (doctor)
+## Gesundheitscheck (Mojo)
 
-`llm-cli doctor` (und das nur lesende Tool `run_doctor`) führt feste Prüfungen aus und erklärt jeden Befund:
+**Mojo** ist der Gesundheitscheck (er hieß doctor; unveröffentlicht). `llmcf mojo` (dasselbe wie `llm-cli mojo`) führt
+feste Prüfungen aus; nichts fragt ein Modell, was falsch ist. Die ganze Anleitung: [Mojo_DE.md](Mojo_DE.md).
 
 | Bereich | Prüfungen |
 |---|---|
@@ -2326,28 +2328,50 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 | Speicherplatz | freier Platz für den Cache- und den Ausgabeordner (Warnung unter 20 GB, Fehler unter 5 GB) |
 | Targets | Targets gefunden, Capabilities lesbar |
 | Sicherheit | persönlicher Ordner privat, Secrets-Speicher nutzbar, Schlüsselbund schützt Geheimnisse |
-| KI | Tool-Berechtigungen eingerichtet und lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel; unveröffentlicht) |
+| KI | Tool-Berechtigungen eingerichtet und lesbar, MCP-Token lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel; unveröffentlicht) |
 | Daten | mitgelieferte Kalibrierungsdaten intakt (Prüfsummen) |
 | Community | installierte Community-Packs gegen den zwischengespeicherten Index: gesperrt (Fehler), seit der Installation verändert (Warnung), Vertrauensstufe `local` (Information) |
 | Wissen | wie viele Snapshots der Wissensbasis es gibt, ihre Größe und ihr Ordner (keine Grenze: ihre Zahl ist nie eine Warnung; nichts wird gelöscht; unveröffentlicht) |
-| Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
+| Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung), fehlt (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
 
-`--fix` wendet die automatischen Korrekturen bis `--tier` an und prüft danach erneut. Stufe 1 macht den
-persönlichen Ordner privat. Stufe 2 löscht nichts von selbst: Sie listet jedes Build-Image des Frameworks (die ohne
-Namen aus früheren Builds, die benannten Images `llm-framework/<Target>:last-build` und die Builder-Images der
-Laufzeit; Name, Image-ID, Größe und was jedes ist), nichts angehakt. Du gibst die Nummern der zu löschenden ein und
-bestätigst dann genau diese im Terminal (Vorgabe Nein; ohne Terminal und mit `--json` listet sie sie nur). **Tools >
-Framework Build Images...** in der GUI ist dieselbe Liste. Der Docker-Build-Cache wird nie geleert, weil er sich nicht auf das
-Framework beschränken lässt: Bisher leerte Stufe 2 den ganzen Build-Cache des Docker-Daemons, auch den anderer
-Projekte. Nichts, was eine KI-App oder Ditto aufrufen kann, erreicht dieses Löschen. Den Speicherort der Docker-Images
-auf eine andere Platte zu verlegen ist ein Schritt für Administratoren (siehe
-[Container-Einrichtung](Container_Setup_DE.md#10-wo-docker-images-ablegt)); der Doctor zeigt nur, wo er liegt.
-Exit-Codes: 0 OK, 1 Warnungen, 2 Fehler; `--json` für Skripte.
+**Mojo Oracle** (Standard) schaut nur. Zu jeder Warnung und jedem Fehler sagt es, was es gefunden hat, wo (den vollen
+Pfad oder das Objekt), warum das wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann; ein Satz am Ende
+zählt jedes Problem danach, was sich tun lässt. Kann Mojo Miracle etwas tun, fragt es danach im Terminal „Run Mojo
+Miracle now? [y/N]“; bei Ja läuft Mojo Miracle, ohne dass der Befehl noch einmal getippt wird.
 
-Was eine KI liest (`run_doctor`): dieselben Befunde, mit den Ordnern des Frameworks unter ihrer Bezeichnung
-(`state:audit.db`, "the state folder", `targets:<Pack>`) und jedem anderen Pfad nur mit seinem Dateinamen, auch in
-der Meldung einer abgestürzten Prüfung; deine eigene Ausgabe (`llm-cli doctor`, auch `--json`) behält die vollen
-Pfade.
+**Mojo Miracle** (`llmcf mojo --miracle`) macht nur harmlose Reparaturen: Es schränkt den Zustandsordner auf deinen
+Benutzer ein, oder es lässt Dittos Server einen intakten gespeicherten llama.cpp-Build starten, wenn der aktive fehlt.
+Die Art einer Reparatur ergibt sich aus ihren Schritten (ein Schritt, der löscht, Zugriff erweitert, den Tresor, die
+Berechtigungen oder das Audit-Log berührt oder das System braucht, ist nie harmlos). Jede Reparatur ist ein Probelauf,
+an seinen sha256 gebunden; direkt bevor sie läuft, prüft Mojo noch einmal und ändert nichts, wenn das Problem weg ist
+oder sich der Plan geändert hat. Das Audit-Log hält sie zuerst fest (sonst ändert sich nichts), die Änderung ist ein
+Vergleichen-und-Tauschen am Ordner, der geöffnet wird, ohne einem Link zu folgen, es läuft immer nur ein Mojo Miracle,
+und danach läuft die Prüfung erneut. Speicherplatz freigeben heißt löschen, also gilt nur deine Liste: Im Terminal
+zeigt Mojo Miracle jedes Build-Image des Frameworks (die ohne Namen aus früheren Builds, die benannten Images
+`llm-framework/<Target>:last-build` und die Builder-Images der Laufzeit; Name, Image-ID, Größe und was jedes ist),
+nichts angehakt, und löscht genau die, deren Nummern du eingibst und bestätigst (Vorgabe Nein). **Tools > Framework
+Build Images...** in der GUI ist dieselbe Liste. Der Docker-Build-Cache wird nie geleert, weil er sich nicht auf das
+Framework beschränken lässt. Danach meldet Mojo Miracle jedes Problem: repariert (erneut geprüft), schon weg, noch da
+oder nicht repariert mit dem Grund (Löschen braucht deine Liste, braucht dich, braucht einen Administrator, nicht
+automatisch reparierbar, fehlgeschlagen); ein Problem, das die Prüfung danach zum ersten Mal findet, wird als neu
+genannt. Ohne Terminal laufen nur die harmlosen Reparaturen, und nichts wird gelöscht. Den Speicherort der
+Docker-Images auf eine andere Platte zu verlegen ist ein Schritt für Administratoren (siehe
+[Container-Einrichtung](Container_Setup_DE.md#10-wo-docker-images-ablegt)); Mojo zeigt nur, wo er liegt. Exit-Codes:
+0 OK, 1 Warnungen, 2 Fehler; `--json` für Skripte.
+
+`llm-cli doctor` behält seine Optionen (`--fix`, `--tier 1|2`, `--json`), seine Ausgabe und seine Exit-Codes, mit
+einem kurzen Hinweis, der `llmcf mojo` nennt; `--fix` macht dieselben protokollierten harmlosen Reparaturen, und
+`--tier 2` zeigt auch die Liste der Build-Images des Frameworks.
+
+Was eine KI liest: `run_mojo_oracle` liefert dieselben Befunde mit `where` als Bezeichnung, `why` und `repair` (`how`:
+`miracle`, `deletion_list`, `person`, `admin` oder `not_automatic`, mit dem nächsten Schritt), die Ordner des
+Frameworks unter ihrer Bezeichnung (`state:audit.db`, "the state folder", `targets:<Pack>`) und jeden anderen Pfad nur
+mit seinem Dateinamen, auch in der Meldung einer abgestürzten Prüfung. `run_mojo_miracle` repariert ein Problem, dessen
+`repair.how` `miracle` ist: Jeder Aufruf wird gefragt (der volle Pfad nur im eigenen Fenster des Frameworks), es löscht
+nie, lehnt jedes andere Problem vor der Frage ab und sagt, ob repariert wurde und, wenn nicht, warum. Der Prompt
+`check_installation` führt eine KI durch beides. `run_doctor`, der Name aus 3.0.0, bleibt aufrufbar, wird aber nicht
+aufgelistet; eine Einstellung für einen der beiden Namen gilt für beide, und die strengere gewinnt. Deine eigene
+Ausgabe (`llmcf mojo`, auch `--json`) behält die vollen Pfade.
 
 ---
 
@@ -2486,7 +2510,7 @@ ausgeschaltet ist, sobald sie eingeschaltet wird.
 | `verified` | im signierten Index: geprüft und unabhängig nachgebaut |
 | `community` | im signierten Index: geprüft |
 | `local` | eine Datei ohne Eintrag im signierten Index: niemand hat sie geprüft. Die Installation fragt immer, und jeder Build eines solchen Targets zeigt eine Warnung. |
-| `revoked` | in der Sperrliste des signierten Index: Die Installation ist blockiert. Installierte Kopien werden von `llm-cli zoo list`, `zoo verify`, `llm-cli doctor` und dem Hub markiert und nicht gebaut, auch nachdem der Schlüssel abgelaufen ist, der die Sperre signiert hat. |
+| `revoked` | in der Sperrliste des signierten Index: Die Installation ist blockiert. Installierte Kopien werden von `llm-cli zoo list`, `zoo verify`, `llm-cli mojo` und dem Hub markiert und nicht gebaut, auch nachdem der Schlüssel abgelaufen ist, der die Sperre signiert hat. |
 
 Targets, die mit dem Framework ausgeliefert werden, etwa Rockchip, haben keine Herkunftsdatei; sie sind keine Packs
 und haben keine Vertrauensstufe.
@@ -2498,8 +2522,8 @@ und haben keine Vertrauensstufe.
 - `llm-cli zoo verify <Pack-Datei>` prüft eine Datei, ohne sie zu installieren: Format, Hashes, die Prüfungen ihrer
   Art, eine enthaltene Signatur des Autors und die Datenschutz-Bereinigung (keine Home-Ordner, Adressen, Host- oder
   Benutzernamen, Schlüssel). Es braucht keinen Schlüsselbund; die CI des Community-Repositorys nutzt es.
-- `llm-cli doctor` meldet gesperrte Packs als Fehler, veränderte Packs als Warnung und Packs mit der Vertrauensstufe
-  `local` als Information ([Gesundheitscheck](#gesundheitscheck-doctor)).
+- `llm-cli mojo` meldet gesperrte Packs als Fehler, veränderte Packs als Warnung und Packs mit der Vertrauensstufe
+  `local` als Information ([Gesundheitscheck](#gesundheitscheck-mojo)).
 
 ### Community Hub
 

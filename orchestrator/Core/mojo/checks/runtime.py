@@ -10,6 +10,9 @@ from typing import List
 from orchestrator.Core.mojo.findings import Finding, Severity, _ok
 
 
+RUNTIME_WHY = "Ditto's local model server cannot start without an intact build."
+
+
 def check_runtime(framework) -> List[Finding]:
     """The local llama.cpp runtime: the self-built build in use (intact, of the pinned commit), a prebuilt download
     in use (not self-built), and whether this machine has the toolchain for a native build. Reads files and asks the
@@ -31,18 +34,22 @@ def check_runtime(framework) -> List[Finding]:
             findings.append(Finding("runtime", "runtime.build.damaged", Severity.ERROR,
                                     f"The self-built llama.cpp build {active.build_id[:16]} does not match its "
                                     f"manifest: {'; '.join(problems[:3])}.",
-                                    "Build the runtime again; a changed build is never started."))
+                                    "Build the runtime again; a changed build is never started.",
+                                    where=str(active.path), why=RUNTIME_WHY, cannot="not_automatic"))
         elif pin is not None and active.commit != pin.commit:
             findings.append(Finding("runtime", "runtime.build.outdated", Severity.WARN,
                                     f"The self-built llama.cpp build {active.build_id[:16]} is of commit "
                                     f"{active.commit[:8]}, older than the pin {pin.tag} ({pin.commit[:8]}).",
-                                    "Build the runtime again from the pinned commit."))
+                                    "Build the runtime again from the pinned commit.", where=str(active.path),
+                                    why="It lacks the fixes and checks of the pinned llama.cpp version.",
+                                    cannot="not_automatic"))
         else:
             findings.append(_ok("runtime", "runtime.build", describe(active)))
     elif "active" in refs:
         findings.append(Finding("runtime", "runtime.build.missing", Severity.WARN,
                                 f"The active self-built llama.cpp build {refs['active'][:16]} is missing or "
-                                "incomplete.", "Build the runtime again."))
+                                "incomplete.", "Build the runtime again.", where=str(store.builds_dir),
+                                why=RUNTIME_WHY, repair_id="runtime.switch_intact"))
     else:
         stored = store.list_builds()
         findings.append(Finding("runtime", "runtime.build.none", Severity.INFO,

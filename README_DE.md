@@ -92,7 +92,7 @@ GUI, CLI, Ditto und der MCP-Server bieten genau diese Optionen an und lehnen all
 - **Docker:** unter Linux Docker Engine (der Installer richtet es ein, falls es fehlt); unter Windows **Docker
   Desktop** mit **WSL-2-Backend**, installiert und gestartet, bevor du das Framework installierst.
 - **Speicherplatz:** mindestens 20 GB frei für das Build-Image, heruntergeladene Modelle und Ergebnisse
-  (`llm-cli doctor` warnt unter 20 GB und meldet unter 5 GB einen Fehler). Große Modelle brauchen während der
+  (`llm-cli mojo` warnt unter 20 GB und meldet unter 5 GB einen Fehler). Große Modelle brauchen während der
   Konvertierung das Zwei- bis Dreifache ihrer Größe.
 - **Internetzugang** für die Installation, den ersten Image-Build und Modell-Downloads.
 
@@ -152,7 +152,7 @@ ist ohne Oberfläche (CLI und MCP-Server); die GUI ist eine ausdrückliche Optio
 ```bash
 make build      # scripts/build_container_image.sh: prüft Docker, baut lcf-framework:local hier, zeigt, wie du es startest
 make up         # startet den Container lcf-framework; deine Daten liegen im Volume lcf-data
-docker exec -it lcf-framework llm-cli doctor
+docker exec -it lcf-framework llm-cli mojo
 ```
 
 KI-Clients erreichen seinen MCP-Server über stdio (`docker exec -i lcf-framework llm-cli mcp serve`, von einem
@@ -215,7 +215,7 @@ Die Installer legen keine eigenen Datenordner an.
 
    Darunter kannst du einzelne Tools abweichend einstellen. Später änderst du das unter **Tools > Tool
    Permissions (Ditto / MCP)...** oder mit `llm-cli tools permissions`.
-4. **Gesundheitscheck (empfohlen):** `llm-cli doctor` prüft Python, Docker, Speicherplatz, Targets,
+4. **Gesundheitscheck (empfohlen):** `llm-cli mojo` prüft Python, Docker, Speicherplatz, Targets,
    Sicherheitseinstellungen, Tool-Berechtigungen und die Kalibrierungsdaten und erklärt, wie du Probleme behebst.
 
 **Reiter „Builder“:** Hier konvertierst du ein Modell.
@@ -356,8 +356,8 @@ holst du in der GUI mit **Scan / Import... > Import from File (USB/Disk)...** in
 
 ```bash
 llm-cli --version
-llm-cli doctor                 # Gesundheitscheck; Exit-Code 0 = OK, 1 = Warnungen, 2 = Fehler
-llm-cli doctor --fix           # harmlose automatische Korrekturen (macht den persönlichen Ordner privat); --tier 2 listet auch die Build-Images des Frameworks und löscht nur die, die du auswählst und bestätigst
+llm-cli mojo                   # Gesundheitscheck (Mojo Oracle); Exit-Code 0 = OK, 1 = Warnungen, 2 = Fehler; im Terminal bietet er Mojo Miracle an
+llm-cli mojo --miracle         # reparieren, was harmlos ist (macht den persönlichen Ordner privat), dann sagen, was repariert wurde, was nicht und warum
 llm-cli targets list           # verfügbare Targets mit Boards und Formaten; der Wert für --target ist die ID (Rockchip)
 ```
 
@@ -668,7 +668,7 @@ installieren. Einzelheiten: [docs/Features_DE.md](docs/Features_DE.md#community-
   gespeichert; sein Schlüssel liegt im Schlüsselbund deines Betriebssystems. Ohne nutzbaren Schlüsselbund wird nichts
   für dich gewählt: Das Framework hält an und nennt die Möglichkeiten (Einstellung `secret_storage`: ein Befehl als
   Credential-Helper, eine Passphrase, eine unverschlüsselte Schlüsseldatei oder nur der Arbeitsspeicher).
-  Zugangsdaten werden in jedem Log geschwärzt, auch mit `--debug-http`. `llm-cli doctor` warnt, wenn der Schlüssel
+  Zugangsdaten werden in jedem Log geschwärzt, auch mit `--debug-http`. `llm-cli mojo` warnt, wenn der Schlüssel
   des Tresors nicht geschützt ist.
 - **Nicht vertrauenswürdiger Text:** Webseiten, Texte aus der Wissensbasis, Build-Logs, Tool-Ergebnisse und
   Probe-Dateien werden von versteckten Zeichen bereinigt und der KI als gekennzeichnete Daten übergeben, nie als
@@ -757,6 +757,7 @@ Vollständige Liste: [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap).
 | [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md) | Architektur und Roadmap |
 | [docs/Module_Developer_Guide_DE.md](docs/Module_Developer_Guide_DE.md) | Ein neues Hardware-Target hinzufügen |
 | [docs/Container_Setup_DE.md](docs/Container_Setup_DE.md) | Das Framework in einem Container, den du selbst baust (Server, NAS, Proxmox) |
+| [docs/Mojo_DE.md](docs/Mojo_DE.md) | Der Gesundheitscheck: Mojo Oracle schaut, Mojo Miracle repariert (früher der Doctor) |
 | [CHANGELOG_DE.md](CHANGELOG_DE.md) | Was sich in jeder Version geändert hat |
 | [CONTRIBUTING_DE.md](CONTRIBUTING_DE.md) | Entwicklungsumgebung, Tests, Konventionen |
 | [configs/SSOT_ARCHITECTURE_DE.md](configs/SSOT_ARCHITECTURE_DE.md) | Projektquellen (Single Source of Truth) |

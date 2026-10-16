@@ -335,6 +335,9 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                                       "vendor_soft_cap_exceeded", "facts_unknown", "gated_model"}), "transfers",
                                  "a fetched model: move it to the trash"),
     "answer_approval": ToolFacts(delegable="never"),
+    # Only harmless repairs, every call asked. Extension point M3a/M6 (with WP11): the blockers repair_manual,
+    # repair_needs_person and wrong_account, and the delegation group "repairs" for harmless repairs only.
+    "run_mojo_miracle": ToolFacts(delegable="never", undo="set the folder's mode or the active build back"),
 }
 
 

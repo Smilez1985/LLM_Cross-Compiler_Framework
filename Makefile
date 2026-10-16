@@ -19,7 +19,7 @@ KEPT := scripts/container_kept_files.sh
 # The vulnerability scanner for "make audit": the same pinned version the framework uses (setting image_trivy).
 TRIVY_IMAGE ?= aquasec/trivy:0.75.0
 
-.PHONY: help build build-gui up gui down kept-files doctor shell clean test audit hooks secret-scan
+.PHONY: help build build-gui up gui down kept-files doctor mojo shell clean test audit hooks secret-scan
 
 help:
 	@echo "LLM Framework - Build System"
@@ -30,7 +30,8 @@ help:
 	@echo "make gui            - Start the GUI in a container (needs make build-gui and an X11 display)"
 	@echo "make down           - Stop the containers (they, what they hold and the data volume lcf-data stay)"
 	@echo "make kept-files     - Show the files of yours the containers hold outside the data volume"
-	@echo "make doctor         - Run llm-cli doctor in the running container"
+	@echo "make mojo           - Check the installation in the running container (Mojo Oracle)"
+	@echo "make doctor         - The same under its old name (llm-cli doctor)"
 	@echo "make shell          - Open a shell in the running container"
 	@echo "make clean          - Remove the containers that hold nothing of yours and show what holds data (deletes no data)"
 	@echo "make test           - Run unit tests (Host execution)"
@@ -87,6 +88,9 @@ kept-files:
 		elif [ $$rc -eq 3 ]; then echo "$$container holds these files of yours outside the data volume:"; printf '%s\n' "$$kept"; \
 		else exit $$rc; fi; \
 	done
+
+mojo:
+	$(COMPOSE) exec framework llm-cli mojo
 
 doctor:
 	$(COMPOSE) exec framework llm-cli doctor

@@ -3,7 +3,8 @@
 LLM Cross-Compiler Framework - Mojo's findings and its report
 
 A check returns findings with a stable code (`state.permissions`, `targets.Rockchip`, ...), a severity and a fix hint;
-nothing asks a model what is wrong. The report's exit code follows the worst finding: 0 ok, 1 warnings, 2 errors.
+nothing asks a model what is wrong. Every warning and error also says where (the full path or object), why it matters
+and what Mojo Miracle can do about it. The report's exit code follows the worst finding: 0 ok, 1 warnings, 2 errors.
 """
 
 from dataclasses import asdict, dataclass, field
@@ -27,6 +28,13 @@ class Finding:
     fix_hint: str = ""
     fix_tier: int = 0  # 0: no automatic fix
     fix: Optional[Callable[[], None]] = field(default=None, repr=False, compare=False)
+    # Mojo (round 7 items 11' and T): the full path or object the finding is about (the person sees it, an AI reads its
+    # label), why it matters, and the Mojo Miracle repair (repairs.REPAIRS key) or why there is none (offers.REASONS:
+    # deletion_list, person, admin, not_automatic). Every warning and error says both.
+    where: str = ""
+    why: str = ""
+    repair_id: str = ""
+    cannot: str = ""
 
     def to_dict(self) -> Dict:
         data = asdict(self)

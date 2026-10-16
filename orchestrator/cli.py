@@ -3076,8 +3076,12 @@ def auth_rotate_key(ctx: FrameworkContext):
 
 
 # ============================================================================
-# DOCTOR (deterministic health checks)
+# DOCTOR (the 3.0.0 name of Mojo, kept as an alias with its options, output and exit codes)
 # ============================================================================
+
+DOCTOR_NOTE = ("Note: the health check is Mojo now: 'llmcf mojo' checks (Mojo Oracle) and 'llmcf mojo --miracle' "
+               "repairs (Mojo Miracle); 'llm-cli doctor' keeps working.")
+
 
 @cli.command('doctor')
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
@@ -3090,9 +3094,10 @@ def auth_rotate_key(ctx: FrameworkContext):
 def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
     """Check the installation and explain how to fix problems (exit code 0 ok, 1 warnings, 2 errors)"""
     from orchestrator.Core.doctor import Doctor, Severity
+    click.echo(DOCTOR_NOTE, err=True)
     ctx.require_framework()
     doc = Doctor(ctx.framework_manager)
-    report = doc.fix(tier) if fix else doc.run()
+    report = _doctor_fix(doc) if fix else doc.run()
     if as_json:
         data = report.to_dict()
         if fix and tier >= 2:  # listed only: a deletion needs the person's yes at a terminal
@@ -3115,6 +3120,20 @@ def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
     sys.exit(report.exit_code)
 
 
+def _doctor_fix(doc):
+    """`--fix` (tier 1 and the first part of tier 2): the harmless repairs of Mojo Miracle (they only narrow access or
+    switch to an intact build; audited, applied only while nothing changed, checked again), reported as the doctor
+    did: `fixed` and `still_present`."""
+    terminal = _interactive()
+    asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
+    result = doc.miracle(actor="cli", at_terminal=False, **asked)
+    report = result.after
+    tried = [e for e in result.entries if e.verdict == "miracle"]
+    report.fixed = [e.finding.code for e in tried if e.outcome == "repaired"]
+    report.still_present = [e.finding.code for e in tried if e.outcome not in ("repaired", "already_fixed")]
+    return report
+
+
 def _doctor_image_listing(framework) -> dict:
     """Tier 2 for `--json`: the list only (nothing is deleted without the person's yes at a terminal)."""
     from orchestrator.Core.mojo.docker_objects import DockerUnavailable, docker_storage, framework_image_plan
@@ -3131,43 +3150,215 @@ def _doctor_image_listing(framework) -> dict:
                        for i in items]}
 
 
-def _doctor_free_space(framework) -> None:
-    """Tier 2: lists every build image of the framework (name, id, size, what each is), nothing ticked, and deletes
-    exactly the images the person picks and then confirms at a terminal (default no). Docker's build cache is never
-    cleared: it cannot be limited to the framework. The same list and deletion as Tools > Framework Build Images...
-    in the GUI: the one deletion path for the framework's Docker images."""
+def _doctor_free_space(framework, heading: str = "Tier 2: the framework's build images",
+                       again: str = "llm-cli doctor --fix --tier 2") -> Tuple[int, str]:
+    """Tier 2 (and Mojo Miracle at a terminal): lists every build image of the framework (name, id, size, what each
+    is), nothing ticked, and deletes exactly the images the person picks and then confirms at a terminal (default no).
+    Docker's build cache is never cleared: it cannot be limited to the framework. The same list and deletion as Tools >
+    Framework Build Images... in the GUI: the one deletion path for the framework's Docker images. Returns how many
+    images were deleted and, when none was, why ("" when the person chose none)."""
     from orchestrator.Core.knowledge_snapshots import size_text
     from orchestrator.Core.mojo.docker_objects import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
                                                        docker_storage, framework_image_plan)
     cache_note = ("Docker's build cache is not touched: it cannot be limited to the framework ('docker system df' "
                   "shows its size; 'docker builder prune' would clear it for every project on this computer).")
-    console.print("\n[bold]Tier 2: the framework's build images[/bold]")
+    console.print(f"\n[bold]{escape(heading)}[/bold]")
     try:
         plan = framework_image_plan(framework)
     except DockerUnavailable as e:
         console.print(f"[yellow]{escape(str(e))}[/yellow] {escape(cache_note)}")
-        return
+        return 0, str(e)
     storage = docker_storage(framework) or {}
     if storage.get("root"):
         console.print(f"Docker keeps its images in {escape(storage['root'])}.")
     if plan is None:
         console.print(f"No framework images to delete. {escape(cache_note)}")
-        return
+        return 0, "there are no framework build images to delete"
     console.print("Sizes include layers other images may share, so less space can be freed. " + escape(cache_note))
     accepted = confirm_deletion(plan, title=f"{len(plan.items)} framework build images, {size_text(plan.total_bytes)}",
-                                multiple=True, again="llm-cli doctor --fix --tier 2")
+                                multiple=True, again=again)
     if accepted is None:
-        return
+        return 0, ""
     try:
         result = delete_framework_images(framework, accepted.plan, actor="cli")
     except (ImagePlanChanged, DockerUnavailable, RuntimeError) as e:
         console.print(f"[yellow]{escape(str(e))}[/yellow]")
-        return
+        return 0, str(e)
     for name in result.deleted:
         console.print(f"[green]Deleted: {escape(name)}[/green]")
     for name, reason in result.failed:
         console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
     console.print(f"{len(result.deleted)} images deleted, about {size_text(result.freed_bytes)}.")
+    return len(result.deleted), "" if result.deleted else "Docker kept every image you chose (the reasons are above)"
+
+
+# ============================================================================
+# MOJO (the health check: Mojo Oracle looks, Mojo Miracle repairs; round 6 design 7, round 7 items 11', M', T)
+# ============================================================================
+
+MOJO_ICONS = {"ok": "[green]✔[/green]", "info": "[blue]ℹ[/blue]", "warn": "[yellow]![/yellow]",
+              "error": "[red]✘[/red]"}
+
+
+@cli.command('mojo')
+@click.option('--oracle', 'mode', flag_value='oracle', default=True,
+              help='Only look and report what was found (the default); at a terminal it then offers Mojo Miracle')
+@click.option('--miracle', 'mode', flag_value='miracle',
+              help='Repair what can be repaired, then report what was repaired, what was not and why')
+@click.option('--json', 'as_json', is_flag=True,
+              help='Machine-readable output; never asks and never deletes (with --miracle only the harmless repairs '
+                   'run)')
+@pass_context
+def mojo(ctx: FrameworkContext, mode: str, as_json: bool):
+    """Check the installation (Mojo Oracle) and repair what can be repaired (Mojo Miracle); exit code 0 ok, 1
+    warnings, 2 errors"""
+    from orchestrator.Core.mojo import Mojo, offers
+    ctx.require_framework()
+    framework = ctx.framework_manager
+    engine = Mojo(framework)
+    report = engine.run()
+    offered = offers(framework, report)
+    if as_json:
+        if mode == "miracle":
+            # Without a person at a terminal: only the harmless repairs (round 6 Q11); nothing is deleted.
+            result = engine.miracle(actor="cli", at_terminal=False, before=report)
+            data = {"mode": mode, **_mojo_dict(result.after, offers(framework, result.after)),
+                    **_mojo_miracle_dict(result)}
+        else:
+            data = {"mode": mode, **_mojo_dict(report, offered)}
+        click.echo(json.dumps(data, indent=2))
+        sys.exit(data["exit_code"])
+    terminal = _interactive()
+    _mojo_print_oracle(report, offered, terminal)
+    if mode == "oracle":
+        acts = [o for o in offered if o.verdict == "miracle" or (o.verdict == "deletion_list" and _mojo_lists(o))]
+        if not acts:
+            sys.exit(report.exit_code)
+        if not terminal:
+            console.print("Mojo Miracle can act on " + ("1 of them" if len(acts) == 1 else f"{len(acts)} of them")
+                          + ": run 'llmcf mojo --miracle' (in a terminal it also shows you the list to choose what is "
+                            "deleted).")
+            sys.exit(report.exit_code)
+        if not click.confirm("Run Mojo Miracle now?", default=False):
+            console.print("Mojo Miracle did not run; nothing was changed.")
+            sys.exit(report.exit_code)
+    console.print("\n[bold]Mojo Miracle: repairing what can be repaired[/bold]")
+    asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
+    result = engine.miracle(actor="cli", at_terminal=terminal, before=report,
+                            free_space=(lambda: _mojo_free_space(framework)) if terminal else None, **asked)
+    _mojo_print_miracle(result)
+    sys.exit(result.exit_code)
+
+
+def _mojo_lists(offer) -> bool:
+    """Whether Mojo Miracle at a terminal opens the person's list for this deletion finding."""
+    from orchestrator.Core.mojo.offers import DELETION_LISTS
+    return offer.finding.code in DELETION_LISTS
+
+
+def _mojo_miracle_line(offer, terminal: bool) -> str:
+    """The person's line about what Mojo Miracle can do for one finding."""
+    from orchestrator.Core.mojo.offers import DELETION_WHERE
+    if offer.verdict == "miracle":
+        return f"Mojo Miracle can repair it: {offer.plan.summary}."
+    if offer.verdict == "deletion_list" and _mojo_lists(offer):
+        if terminal:
+            return ("Mojo Miracle shows you the framework's build images to choose from (name, id, size, what each "
+                    "is; nothing is ticked); only what you tick and confirm is deleted.")
+        return f"Mojo Miracle cannot repair it here: {offer.reason}; {DELETION_WHERE}."
+    return f"Mojo Miracle cannot repair it: {offer.reason}."
+
+
+def _mojo_print_oracle(report, offered, terminal: bool) -> None:
+    """What Mojo Oracle found: every finding; for each problem where (the full path), why it matters, the hint and
+    what Mojo Miracle can do; then one sentence that counts every problem by what can be done about it."""
+    from orchestrator.Core.mojo.views import oracle_summary
+    by_finding = {id(o.finding): o for o in offered}
+    console.print("[bold]Mojo Oracle: checking the installation (read-only, nothing is changed)[/bold]")
+    for finding in report.findings:
+        console.print(f"{MOJO_ICONS[finding.severity.value]} {escape(finding.subsystem)}: {escape(finding.message)}")
+        offer = by_finding.get(id(finding))
+        if offer is None:  # no problem: an information's hint is shown as the doctor showed it
+            if finding.severity.value == "info" and finding.fix_hint:
+                console.print(f"    → {escape(finding.fix_hint)}")
+            continue
+        if finding.where:
+            console.print(f"    Where: {escape(finding.where)}")
+        if finding.why:
+            console.print(f"    Why it matters: {escape(finding.why)}")
+        if finding.fix_hint:
+            console.print(f"    → {escape(finding.fix_hint)}")
+        console.print(f"    {escape(_mojo_miracle_line(offer, terminal))}")
+        if offer.verdict == "miracle":
+            for step in offer.plan.steps:
+                where = f" ({step.full_path})" if step.full_path else ""
+                console.print(f"      Plan: {escape(step.target_label)}{escape(where)}: {escape(step.before)} → "
+                              f"{escape(step.after)}" + (", can be undone" if step.undoable else ""))
+    console.print(escape(oracle_summary(offered, person=True)))
+
+
+def _mojo_print_miracle(result) -> None:
+    """What Mojo Miracle did: every problem, repaired or not, and why not; then the count."""
+    words = {"repaired": "[green]✔ Repaired[/green]", "already_fixed": "[green]✔ Already gone[/green]",
+             "still_present": "[yellow]! Still there[/yellow]", "declined": "[yellow]- Not deleted[/yellow]"}
+    for entry in result.entries:
+        finding = entry.finding
+        head = words.get(entry.outcome, "[red]✘ Not repaired[/red]")
+        if entry.outcome == "repaired":
+            text = f"{entry.summary}. Checked again: the problem is gone."
+        else:
+            text = entry.reason or entry.summary
+        console.print(f"{head}: {escape(finding.subsystem)} ({escape(finding.code)}): {escape(text)}")
+        if entry.outcome not in ("repaired", "already_fixed") and finding.fix_hint:
+            console.print(f"    → {escape(finding.fix_hint)}")
+    for finding in result.new_problems:
+        console.print(f"{MOJO_ICONS[finding.severity.value]} New after Mojo Miracle: {escape(finding.subsystem)} "
+                      f"({escape(finding.code)}): {escape(finding.message)}")
+        if finding.fix_hint:
+            console.print(f"    → {escape(finding.fix_hint)}")
+    total = len(result.entries)
+    if not total:
+        console.print("Mojo Oracle found no problems, so Mojo Miracle had nothing to repair.")
+        return
+    gone, rest = len(result.already_gone), len(result.not_repaired)
+    console.print(f"Mojo Miracle repaired {len(result.repaired)} of {total} problem{'' if total == 1 else 's'}"
+                  + (f"; {gone} {'was' if gone == 1 else 'were'} already gone" if gone else "")
+                  + (f"; {rest} {'was' if rest == 1 else 'were'} not repaired (why: above)" if rest else "")
+                  + (f"; the check afterwards found {len(result.new_problems)} new (above)" if result.new_problems
+                     else "") + ".")
+
+
+def _mojo_free_space(framework) -> Tuple[int, str]:
+    """The person's list of the framework's build images (WP7's deletion path), from Mojo Miracle at a terminal: how
+    many images were deleted, and why none was ("" when the person chose none)."""
+    return _doctor_free_space(framework, heading="Free disk space: the framework's build images",
+                              again="llmcf mojo --miracle")
+
+
+def _mojo_dict(report, offered) -> dict:
+    """Mojo Oracle for --json: the report (the doctor's keys) with what Mojo Miracle can do for each problem."""
+    from orchestrator.Core.mojo.views import oracle_summary
+    by_finding = {id(o.finding): o for o in offered}
+    data = report.to_dict()
+    for row, finding in zip(data["findings"], report.findings):
+        offer = by_finding.get(id(finding))
+        if offer is not None:
+            row["miracle"] = {"can": offer.verdict, "summary": offer.summary,
+                              "plan": [{"target": s.target_label, "path": s.full_path, "before": s.before,
+                                        "after": s.after, "undoable": s.undoable}
+                                       for s in (offer.plan.steps if offer.plan is not None else ())]}
+    data["summary"] = oracle_summary(offered, person=True)
+    return data
+
+
+def _mojo_miracle_dict(result) -> dict:
+    """Mojo Miracle for --json: what was repaired, and what was not and why."""
+    return {"exit_code": result.exit_code,
+            "repaired": [{"code": e.finding.code, "summary": e.summary} for e in result.repaired],
+            "already_gone": [{"code": e.finding.code, "reason": e.reason} for e in result.already_gone],
+            "not_repaired": [{"code": e.finding.code, "outcome": e.outcome, "can": e.verdict, "reason": e.reason}
+                             for e in result.not_repaired],
+            "new_problems": [f.code for f in result.new_problems]}
 
 
 # ============================================================================
