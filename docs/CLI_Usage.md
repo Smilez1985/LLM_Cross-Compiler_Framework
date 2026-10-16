@@ -273,9 +273,13 @@ llm-cli knowledge index-docs [--with-code]
 
 Unreleased. Adds the framework's own documentation (README, CONTRIBUTING and the `docs` folder, in both languages) to
 the knowledge base, so Ditto can answer questions about the framework itself, and AI clients find it with
-`search_knowledge` (kind `docs`). `--with-code` also adds its code and configuration (`orchestrator`, `targets`,
-`scripts`, `configs`, the container setup and the install scripts; many more files, takes minutes). Only what the
-framework ships is read: never your settings (`config.yml`), targets you or an AI created, or installed packs. It
+`search_knowledge` (kind `docs`). `--with-code` also adds its code and configuration (many more files, takes
+minutes): the shell scripts in the top folder of the installation (`install.sh`, `entrypoint.sh`; not `install.bat`),
+the `.py`, `.sh`, `.yml`, `.yaml`, `.json` and `.md` files and Dockerfiles in `orchestrator`, `scripts` and
+`Docker Setup`, the targets the framework ships (`targets/_template` and the official targets) and the files in the
+top folder of `configs`. Files above 512 KB, links, caches and generated folders are left out, and so are names that
+start with a dot. Only what the framework ships is read: never your settings (`config.yml`), targets you or an AI
+created, or installed packs. It
 never happens by itself: only this command, **Tools > Index the Framework's Documentation...** in the GUI (a question
 with "No" as the default and a box for the code) or the MCP tool `index_framework_docs` (asked every time) start it. A
 snapshot is taken first, so it can be undone with a restore; a file indexed before is replaced. When the disk has no
@@ -954,8 +958,11 @@ it says what it found and stops. The installers' Ditto step runs this command.
   possible: the bare-metal build into the image, or the image's build into bare metal after it passed its checks on
   this computer. Where that is not possible, the command says why and builds again. The server of the old mode is
   stopped. Then the old mode's leftovers are listed: build folders with their full path, folder name and build ID,
-  Docker images and containers with their name and ID, each with its size and what it is. Only what you confirm is
-  removed ("No" is the default). Without a terminal nothing is removed and the list is shown.
+  Docker images and containers with their name and ID, each with its size, what it is and where it goes. Only what
+  you confirm is removed, with one question for the whole list ("No" is the default): the build folders go to the
+  trash (`llm-cli trash` lists them, `llm-cli trash restore ID` brings one back, and their space stays used until you
+  empty the trash), Docker's images and containers are deleted for good (Docker has no trash). Without a terminal
+  nothing is removed and the list is shown.
 - **The model:** when the model of the chosen or recommended tier is not downloaded yet, its source, size and licence
   are shown first. It is downloaded after your yes, or with `-y` when its licence is permissive (Apache 2.0, MIT,
   BSD); any other licence is yours to accept with `llm-cli ditto models download`. Both modes use the same models
@@ -1585,7 +1592,7 @@ llm-cli device runtime deploy DEVICE [--user NAME] [--password [VALUE] | --passw
                               [--allow-untrusted-model]
 llm-cli device runtime verify DEVICE [--user NAME] [--bench-model PATH] [--allow-untrusted-model]
 llm-cli device runtime status DEVICE [--json]
-llm-cli device runtime prune DEVICE
+llm-cli device runtime prune DEVICE [--on-device]
 ```
 
 ### device list
@@ -1650,7 +1657,9 @@ comes from the deploy settings or `--user`.
    `llama-server` must refuse `--tools`; with `--bench-model` also a short `llama-bench` run on that model.
 5. Only a build that passes becomes `current`. A build that fails (for example a `SIGILL` because the CPU baseline
    does not fit the board) is removed again, the previous build stays active, and nothing else changes. After the
-   switch the previous build stays; older ones are removed unless a running program uses them.
+   switch every older build stays on the board (unreleased; before, all but the previous one were removed without
+   a question). The output says how many stayed and their size; `device runtime prune DEVICE --on-device` lists
+   them for you to remove.
 6. With the systemd setting the unit `llm-llama-server.service` is written and enabled with `sudo -n` and started
    when the model is there.
 
@@ -1695,6 +1704,13 @@ Lists the device's older runtime packages on your PC with a number each (each ta
 full path and size). The package of the build deployed last is never listed. Nothing is picked: you type the numbers
 to delete, choose the trash (the default) or deleting for good, and confirm exactly those (default no). It needs a
 terminal; without one it only lists them. It changes nothing on the board.
+
+With `--on-device` it logs in to the board (as the deploy settings' user, with the framework's key) and lists the
+older runtime builds there instead: each with its full path on the board, folder name, size and what it is (the
+build active before the last deployment says so). The active build and a build a running program uses are never
+listed. You type the numbers, nothing is picked, and you confirm exactly those (default no). A board has no trash,
+so they are removed for good. The removal is written to the audit log first, with the folder names only. No AI
+can do this: the AI tools only say how many older builds stayed.
 
 For a [trusted device](#deploy-devices), the optional MCP tools `probe_remote_device`, `deploy_device_runtime` and
 `run_device_benchmark` run `scan --device`, `device runtime build` with `deploy`, and `device runtime verify

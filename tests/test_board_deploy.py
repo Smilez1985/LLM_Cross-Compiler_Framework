@@ -11,6 +11,7 @@
 
 import errno
 import hashlib
+import os
 import shlex
 import socket
 import subprocess
@@ -166,6 +167,8 @@ class Board:
         self.polls = 0
         self.logins = 0
         self.install_polls_needed = 2
+        self.docker_ps = ""            # what `docker ps -a` answers on the board (the old Qdrant sidecar's look)
+        self.docker_commands = []
 
     def go_offline(self):
         self.online = False
@@ -178,6 +181,11 @@ class Board:
         if command == DeploymentManager.REMOTE_MKTEMP:
             self.dirs.add(TARGET)
             return 0, TARGET + "\n"
+        if "docker " in command:
+            self.docker_commands.append(command)
+            if command == dmod.OLD_SIDECAR_CHECK:
+                return 0, self.docker_ps
+            raise AssertionError(f"the framework runs no other Docker command on the board: {command}")
         words = shlex.split(command) if "|" not in command and "{" not in command and "nohup" not in command else []
         if words[:1] == ["sha256sum"]:
             data = self.files.get(words[1])
@@ -553,6 +561,125 @@ class TestReasonCodes:
         assert result.code == reasons.HOST_KEY_CHANGED and not result.success and board.logins == 0
 
 
+# --- an old Qdrant sidecar on the board: told, never removed ----------------------------------------------------------
+
+class TestOldSidecar:
+    """Packages with Docker images from earlier versions started a Qdrant sidecar on the board. A deploy tells the
+    person when it is still there and records it for Mojo; it never stops or removes it (round 5 f)."""
+
+    @pytest.mark.parametrize("answer, state", [("qdrant-sidecar|Up 3 days\n", "running"),
+                                               ("llm-node|Up 1 hour\nqdrant-sidecar|Exited (0) 2 days ago\n",
+                                                "stopped")])
+    def test_a_deploy_names_the_old_container_and_leaves_it_alone(self, manager, board, package, answer, state):
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        from orchestrator.runtime.profile import device_id_for_host_key
+        board.docker_ps = answer
+        result, _events = run(manager, package)
+        assert result.success and result.old_sidecar == state
+        assert any("qdrant-sidecar" in n and state in n and "does not remove it" in n for n in result.notes)
+        assert board.docker_commands == [dmod.OLD_SIDECAR_CHECK], "only a look; nothing is stopped or removed"
+        device_id = device_id_for_host_key(ssh_trust.fingerprint(board.key))
+        row = TrustedDevices(manager._state_dir()).last_deploys()[device_id]
+        assert row["old_sidecar"] == state and row["board_checked_at"]
+
+    @pytest.mark.skipif(not os.path.exists("/bin/sh"), reason="needs a POSIX shell")
+    def test_a_docker_that_hangs_on_the_board_never_holds_a_finished_deploy(self, tmp_path):
+        """The look runs after the deploy succeeded: a Docker daemon that does not answer on the board must not keep
+        the deploy (the GUI, the AI's job, the terminal) waiting. It is bounded with `timeout` where the board has
+        it, and runs as before where it does not."""
+        import stat
+        slow = tmp_path / "slow"
+        slow.mkdir()
+        (slow / "docker").write_text("#!/bin/sh\nsleep 30\necho 'qdrant-sidecar|Up 3 days'\n")
+        quick = tmp_path / "quick"
+        quick.mkdir()
+        (quick / "docker").write_text("#!/bin/sh\necho 'qdrant-sidecar|Up 3 days'\n")
+        for script in (slow / "docker", quick / "docker"):
+            script.chmod(script.stat().st_mode | stat.S_IXUSR)
+        check = dmod.old_sidecar_check(1)
+        started = time.monotonic()
+        answer = subprocess.run(["/bin/sh", "-c", check], capture_output=True, text=True, timeout=25,
+                                env={**os.environ, "PATH": f"{slow}{os.pathsep}{os.environ.get('PATH', '')}"}).stdout
+        assert time.monotonic() - started < 15 and dmod.old_sidecar_state(answer) == ""
+        # a board without `timeout` (only the fake docker on PATH): the look still runs
+        answer = subprocess.run(["/bin/sh", "-c", check], capture_output=True, text=True, timeout=25,
+                                env={"PATH": str(quick)}).stdout
+        assert dmod.old_sidecar_state(answer) == "running"
+        # an old BusyBox `timeout` (before 1.30) takes `-t SECONDS` and refuses `timeout 20 ...`: the look still runs
+        (quick / "timeout").write_text("#!/bin/sh\necho \"timeout: can't execute '$1'\" >&2\nexit 127\n")
+        (quick / "timeout").chmod(0o755)
+        answer = subprocess.run(["/bin/sh", "-c", check], capture_output=True, text=True, timeout=25,
+                                env={"PATH": str(quick)}).stdout
+        assert dmod.old_sidecar_state(answer) == "running"
+        assert dmod.OLD_SIDECAR_CHECK == dmod.old_sidecar_check(dmod.OLD_SIDECAR_SECONDS)
+
+    @pytest.mark.parametrize("answer", ["", "my-qdrant-sidecar|Up 3 days\n", "qdrant-sidecar-2|Up 1 day\n"])
+    def test_no_note_without_exactly_that_container(self, manager, board, package, answer):
+        board.docker_ps = answer
+        result, _events = run(manager, package)
+        assert result.success and result.old_sidecar == "" and result.notes == []
+
+    def test_a_later_deploy_that_finds_none_clears_the_record_and_keeps_it_across_the_tool_note(self, manager, board,
+                                                                                               package):
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        from orchestrator.runtime.profile import device_id_for_host_key
+        store = TrustedDevices(manager._state_dir())
+        device_id = device_id_for_host_key(ssh_trust.fingerprint(board.key))
+        board.docker_ps = "qdrant-sidecar|Up 3 days\n"
+        run(manager, package)
+        store.note_deploy(device_id, True, package.name)   # the deploy tool's own note keeps what the board showed
+        assert store.last_deploys()[device_id]["old_sidecar"] == "running"
+        board.docker_ps = ""
+        run(manager, package)
+        assert store.last_deploys()[device_id]["old_sidecar"] == ""
+
+    def test_the_gui_tells_the_person_in_their_language(self, qapp, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+        from orchestrator.Core.deployment_manager import DeployResult
+        from orchestrator.gui.deployment_window import DeploymentWorker
+        from orchestrator.utils.localization import ui_text
+        package = tmp_path / "deploy_model_1.zip"
+        package.write_bytes(b"zip")
+
+        class Deployment:
+            def create_deployment_package(self, **kw):
+                return package
+
+            def deploy_package(self, *a, **kw):
+                return DeployResult(True, exit_status=0, device_state="ok", old_sidecar="stopped",
+                                    notes=["English framework note"])
+
+        framework = SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None: default),
+                                    resolve_path=lambda value: tmp_path / value, get_component=lambda n: Deployment())
+        worker = DeploymentWorker(framework, tmp_path / "model.gguf", "Rockchip", {}, "192.0.2.40", "radxa", None)
+        monkeypatch.setattr(worker, "_remember_device", lambda *a, **k: None)
+        results = []
+        worker.finished.connect(lambda ok, message: results.append((ok, message)))
+        worker.run()
+        (ok, message), = results
+        expected = ui_text("device.deploy.old_sidecar", state=ui_text("device.deploy.state.stopped"))
+        assert ok and expected in message and "docker rm -f qdrant-sidecar" in message
+
+    def test_mojo_names_the_board_with_the_next_step_and_offers_no_repair(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+        from orchestrator.Core.mojo import Severity
+        from orchestrator.Core.mojo.checks import devices as devices_check
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        state = tmp_path / "state"
+        key = paramiko.ECDSAKey.generate()
+        ssh_trust.trust_host_key(state, "192.0.2.30", 22, key)
+        store = TrustedDevices(state)
+        device = store.record("192.0.2.30", 22, "radxa", key, via="cli", paired=True, label="Shed")
+        monkeypatch.setattr(reasons, "check_port", lambda host, port=22, timeout=3.0: None)
+        framework = SimpleNamespace(config=SimpleNamespace(user_state_dir=state))
+        assert not [f for f in devices_check.check_devices(framework) if f.code.endswith(".old_sidecar")]
+        store.note_board(device.device_id, old_sidecar="running")
+        (line,) = [f for f in devices_check.check_devices(framework) if f.code.endswith(".old_sidecar")]
+        assert line.severity == Severity.INFO and "Shed" in line.message and "running" in line.message
+        assert "docker rm -f qdrant-sidecar" in line.fix_hint and line.cannot == "person" and not line.repair_id
+        assert line.fix is None and "radxa" not in line.message + line.fix_hint + line.where
+
+
 # --- N4: an address or a host name; the host key stays per host string -----------------------------------------------
 
 class TestAddressOrHostName:
@@ -560,6 +687,22 @@ class TestAddressOrHostName:
     def test_a_host_name_deploys_like_an_address(self, manager, board, package):
         result, _events = run(manager, package)
         assert result.success
+
+    @pytest.mark.parametrize("host", ["fe80::1", "[fe80::1]", "[fe80::1", "fe80::1]", "[[fe80::1]]", "[x]",
+                                      "myboard.local", "192.168.1.50", "[192.168.1.50]"])
+    def test_the_cli_and_gui_check_and_the_deploy_agree_on_every_address(self, manager, board, package, monkeypatch,
+                                                                          host):
+        """valid_host (the CLI's and the GUI's check) accepted [fe80::1], which the deploy then refused. Both now give
+        the same answer for every form: an IPv6 address is written without brackets, and a refused address never
+        reaches the network."""
+        from orchestrator.runtime.remote_probe import valid_host
+        seen = []
+        monkeypatch.setattr(reasons, "check_port", lambda h, port=22, timeout=3.0: seen.append(h) or None)
+        result = manager.deploy_package(package, host, "radxa")
+        refused = "Invalid address" in (result.reason or "")
+        assert valid_host(host) is not refused, (host, result.reason)
+        assert refused == (seen == []), "a refused address is never tried"
+        assert not refused or "without brackets" in result.reason, "the person learns how to write an IPv6 address"
 
     def test_the_host_key_is_trusted_per_host_string(self, tmp_path):
         """Trusting the board under its host name does not trust its IP address (and the other way round): the

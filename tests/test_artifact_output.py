@@ -236,6 +236,51 @@ def test_every_folder_is_listed_once_and_an_ai_reads_labels(fw, tmp_path):
         assert str(tmp_path) not in item.label
 
 
+def test_an_id_from_before_the_output_folder_setting_still_reaches_its_build(fw, tmp_path):
+    """Before the output folder setting the build folder was the output folder, and a build's id came from its
+    relative path alone. Feed rows, pending approvals and AI callers that kept such an id still reach the build, and
+    the deletion side resolves it too; an earlier id that is now another build's id stays that build's."""
+    from orchestrator.Core.artifact_store import ArtifactStore
+    from orchestrator.Core.build_service import BuildServiceError, artifact_id
+    finished_build(tmp_path / "builds", "Rockchip/old/Q4_0")
+    service = BuildService(fw)
+    earlier, current = artifact_id("Rockchip/old/Q4_0"), artifact_id("builds:Rockchip/old/Q4_0")
+    assert service.artifact_aliases() == {earlier: current}
+    aid, label, _info = service.artifact_entry(earlier)
+    assert aid == current and label == "builds:Rockchip/old/Q4_0"
+    target = ArtifactStore.for_service(service).resolve(earlier, hashlib.sha256(b"weights").hexdigest())
+    assert target.artifact_id == current and target.folder == tmp_path / "builds" / "Rockchip" / "old" / "Q4_0"
+    finished_build(tmp_path / "out", "Rockchip/old/Q4_0")   # the same path in the output folder: its id is `earlier`
+    assert service.artifact_aliases() == {}
+    assert service.artifact_entry(earlier)[1] == "output:Rockchip/old/Q4_0"
+    with pytest.raises(BuildServiceError):
+        service.artifact_entry("a_" + "0" * 16)
+
+
+def test_deploy_packages_in_the_former_output_folder_are_still_found(booted_framework, tmp_path):
+    """Packages made before the output folder setting lie in the old output folder, now the build folder; the deploy
+    tools find them by their id. A package of the same name in the output folder comes first."""
+    from orchestrator.tools.tools_deploy import package_id
+    fw = booted_framework
+    out, builds = tmp_path / "pkg-out", tmp_path / "pkg-builds"
+    out.mkdir()
+    builds.mkdir()
+    fw.config.set("output_dir", str(out))
+    fw.config.set("build_dir", str(builds))
+    old = builds / "deploy_old_1791801300.zip"
+    old.write_bytes(b"old package")
+    registry = fw.tool_registry
+    spec = registry.get("deploy_to_device")
+    describe = spec.fields["package_id"].describe
+    assert describe(package_id(old.name)) == old.name, "the old package is found by its id"
+    newer = out / old.name
+    newer.write_bytes(b"same name in the output folder")
+    from orchestrator.tools.tools_deploy import find_packages
+    assert find_packages(fw, out)[package_id(old.name)] == newer, "the output folder comes first"
+    newer.unlink()
+    assert find_packages(fw, out)[package_id(old.name)] == old
+
+
 def test_builds_in_an_earlier_output_folder_stay_listed(fw, tmp_path):
     """The person moves the output folder to another disk: what is in the old one stays there and stays listed."""
     fw.config.save_user_config = lambda: True

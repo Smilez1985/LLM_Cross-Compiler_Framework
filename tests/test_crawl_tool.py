@@ -330,3 +330,23 @@ def test_a_knowledge_base_failure_reaches_the_client_without_a_folder_of_this_co
     job = wait_job(env, out.job_id)
     text = str(job.result)
     assert "/home/pat" not in text and "already accessed" in text and job.result["failed"][0]["address"] == SITE
+
+
+def test_the_one_time_model_download_is_in_the_question_with_its_warning(env):
+    """next-fixes 119: the first stored page loads the knowledge base's models; when they are not on this computer the
+    question says so with the declared situation warning, and the person sees it before the crawl starts."""
+    spec = env.registry.get("crawl_docs_site")
+
+    def warnings():
+        facts = env.registry.look_up(spec, env.registry.validate_input(spec, {"start_urls": [SITE]}),
+                                     ToolContext("mcp"))
+        return [(w.code, w.kind, dict(w.numbers)) for w in facts.warnings]
+
+    env.rag.embedding_download = lambda: (True, 0.48)
+    assert ("embedding_model_download", "situation", {"size_gb": 0.5}) in warnings()
+    asked = []
+    out = call(env, {"start_urls": [SITE]}, confirm=yes_recording(asked))
+    assert "downloaded once first (about 0.5 GB" in asked[0]
+    assert wait_job(env, out.job_id).state == "done"
+    env.rag.embedding_download = lambda: (False, 0.0)
+    assert "embedding_model_download" not in {code for code, _kind, _numbers in warnings()}

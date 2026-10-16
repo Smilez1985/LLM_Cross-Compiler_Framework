@@ -10,6 +10,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Ein Deployment sagt dir, wenn ein alter Qdrant-Sidecar auf dem Board ist**: Pakete mit Docker-Images früherer
+  Versionen starteten den Container `qdrant-sidecar`, den nichts mehr nutzt. Nach einem erfolgreichen Deployment
+  (`llm-cli deploy run`, das Deployment-Fenster, das KI-Tool `deploy_to_device`) schaut das Framework mit `docker ps`
+  (höchstens 20 Sekunden lang), ob er noch auf dem Board ist, und sagt dann, ob er läuft oder gestoppt ist und wie du
+  ihn dort entfernst. Mojo Oracle zeigt für dieses Board eine Zeile aus dem letzten Deployment. Das Framework stoppt
+  oder entfernt den Container nie.
 - **Wohin fertige Modelle kommen: der Ausgabeordner und ein Speichern-Dialog** (achte Runde, Antwort 3): fertige
   Builds (Golden-Artefakte) werden im Ausgabeordner gespeichert (Einstellung `output_dir`, Standard `~/llmcf/output`;
   unter Windows in deinem Benutzerordner), den du einmal mit **File > Output Folder...** oder `llm-cli config
@@ -1050,6 +1056,54 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Die Prüfung auf gleiche Builds blockiert das Builder-Fenster nicht mehr** (unveröffentlicht; achte Runde, N11):
+  Vor einem Build fragte die Prüfung Hugging Face im Thread des Fensters nach dem aktuellen Commit des Modells, daher
+  reagierte das Fenster bei langsamem Netz nicht (bis zu 10 Sekunden). Die Abfrage läuft jetzt im Hintergrund; Start
+  wartet so lange, und das Formular bleibt bedienbar. Der Build übernimmt genau die geprüften Werte.
+- **Builds im alten Standardordner behalten ihre ID, und Pakete werden dort gefunden** (unveröffentlicht; achte Runde,
+  Antwort 3): Seit der Einstellung für den Ausgabeordner ist der Build-Ordner des Frameworks nicht mehr der
+  Ausgabeordner, daher bekam ein Build dort eine neue ID, und das KI-Tool `deploy_to_device` fand die Deploy-Pakete
+  darin nicht mehr über ihre ID. Die frühere ID eines Builds erreicht ihn weiter (Feed-Zeilen, offene Freigaben und
+  KI-Aufrufer, die sie behalten haben), außer ein anderer Build hat diese ID jetzt. Pakete werden zuerst im
+  Ausgabeordner gesucht, dann im Build-Ordner und in früheren Ausgabeordnern, die du eingestellt hattest.
+- **`get_status` nennt den Datenträger des Build-Ordners** (unveröffentlicht; achte Runde, Antwort 3): Die Angabe zum
+  Speicherplatz nannte nur den Cache und den Ausgabeordner, nicht den Build-Ordner, in den ein Build zuerst schreibt.
+  Jetzt nennt sie alle drei; Ordner auf einem Datenträger werden zusammen genannt, nur mit ihrer Bezeichnung.
+- **Die Tools, die Text speichern, sagen, wann das Suchmodell zuerst heruntergeladen wird** (unveröffentlicht;
+  next-fixes 119): Die Situationswarnung `embedding_model_download` war erklärt, erschien aber nie. Jetzt prüfen
+  `crawl_docs_site`, `index_framework_docs` und ein Wissens-Pack über `add_pack_from_index`, ohne etwas herunterzuladen
+  oder zu laden, ob die Modelle der Wissensbasis auf diesem Rechner liegen. Ihre Frage sagt es, mit der Größe und der
+  Warnung, wenn ein Download nötig ist oder sich nicht ausschließen lässt. Ein MCP-Prompt mit Auszügen aus der
+  Wissensbasis startet den Download nie: Wie `search_knowledge` liest er nur mit den Modellen auf diesem Rechner und
+  sagt, wenn sie fehlen. Dittos automatische Diagnose eines gescheiterten Builds, nach der niemand gefragt wird, liest
+  genauso.
+- **Reparaturhinweise für KI-Aufrufer nennen Mojo** (unveröffentlicht; Runde 7 Punkt 11'): Ablehnungen und Fehler, die
+  KI-Aufrufer lesen, schickten sie zu `llm-cli doctor`. Jetzt nennen sie das Tool `run_mojo_oracle` (oder `llmcf mojo`
+  im Terminal). Der Hinweis auf fehlende Builder-Images behält `llm-cli doctor --fix --tier 2`, das sie baut.
+- **Dittos alte Laufzeit-Art kommt in den Papierkorb** (unveröffentlicht; WP7, Runde 7 D): Nach einem Wechsel
+  zwischen direkt und Docker wurden die Build-Ordner der alten Art endgültig gelöscht, wenn du die Liste bestätigt
+  hast. Jetzt kommen sie standardmäßig in den Papierkorb (`llm-cli trash` und File > Trash... listen sie und holen
+  einen zurück; ihr Platz bleibt belegt, bis du den Papierkorb leerst). Dockers Images und Container werden weiter
+  gelöscht, weil Docker keinen Papierkorb hat; sie stehen mit Name, ID und Größe in der Liste. Die Liste sagt, wohin
+  jedes Objekt kommt, und eine Frage bestätigt die ganze Liste („Nein“ als Standard).
+- **Die Adressprüfungen sind sich bei IPv6 in Klammern einig** (unveröffentlicht): `deploy run --host [fe80::1]`
+  bestand die Prüfung der CLI, aber das Deployment lehnte die Adresse ab. Jetzt lehnt jede Stelle, die eine
+  Board-Adresse nimmt (Deployment, `scan --device`, `deploy devices add`, die Prüfung und das Deployment-Fenster der
+  GUI), eine IPv6-Adresse in Klammern ab, bevor etwas gesendet wird. Schreib sie ohne Klammern (`fe80::1`); der Port
+  hat eine eigene Option.
+- **Der Benutzerordner wird beim Anlegen privat gemacht** (next-fixes 118): Jedes Lesen der Einstellungen setzte
+  `~/.llm-framework` wortlos auf Modus 0700, daher erschien Mojos Befund `state.permissions` fast nie. Jetzt bekommt der
+  Ordner 0700, wenn das Framework ihn anlegt; ein vorhandener Ordner behält seinen Modus, Mojo Oracle meldet einen, den
+  andere lesen können, und Mojo Miracle repariert ihn nach deinem Ja.
+- **Ein Deployment auf ein Board behält jeden älteren Laufzeit-Build** (Runde 5 f): `llm-cli device runtime deploy`
+  und das KI-Tool `deploy_device_runtime` entfernten alle älteren Laufzeit-Builds auf dem Board außer dem vorigen, ohne
+  Frage. Jetzt bleibt jeder ältere Build. Das Ergebnis sagt, wie viele geblieben sind und wie groß sie sind, und
+  `llm-cli device runtime prune GERÄT --on-device` listet sie für dich: voller Pfad auf dem Board, Ordnername, Größe
+  und was jeder ist, nichts angekreuzt, „Nein“ als Standard. Nur die Builds, die du ankreuzt, werden entfernt,
+  endgültig (ein Board hat keinen Papierkorb), nach einem Audit-Eintrag nur mit den Ordnernamen. Der aktive Build und
+  einer, den ein laufendes Programm nutzt, stehen nie in der Liste. Eine KI liest nur, wie viele Builds geblieben
+  sind und dass nur du sie entfernst. Wird ein Build erneut deployt, der schon auf dem Board liegt, bleibt er dort,
+  auch wenn seine Prüfungen scheitern.
 - **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte
   Runde, Antwort 3): die Einstellung `output_dir` nennt jetzt den Ordner, in dem fertige Modelle gespeichert werden
   (Standard `~/llmcf/output`, bisher `output/` der Installation oder des persönlichen Ordners). Dieser alte Ordner ist
@@ -1740,6 +1794,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Das Koppeln eines Boards sendet nur eine geprüfte Schlüsselzeile** (bandit B601): Der Befehl, der den öffentlichen
+  Schlüssel des Frameworks in `authorized_keys` des Boards einträgt, ist fest, und sein einziger Wert, die
+  Schlüsselzeile, wurde für die Shell maskiert. Jetzt muss die Zeile außerdem ein reiner öffentlicher SSH-Schlüssel
+  sein (Typ, Schlüssel, ein optionaler einfacher Kommentar); alles andere wird abgelehnt, bevor der Befehl gesendet
+  wird.
 - **`get_build_status` und `get_build_log` nennen fertige Builds über ihre Bezeichnung, nie über ihren Pfad**: in
   3.0.0 gaben der Status einer Build-Anfrage und Log-Zeilen wie „Golden Artifact created“ KI-Clients den vollen Pfad
   jedes fertigen Builds (mit dem Benutzernamen darin). Jetzt nennt der Status `output:<Target>/<Modell>/<Quantisierung>`

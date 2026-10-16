@@ -137,6 +137,35 @@ def test_a_finding_without_its_reason_counts_as_not_automatic():
 # --- Mojo Oracle looks only ------------------------------------------------------------------------------------------
 
 @POSIX
+def test_the_state_folder_is_private_when_created_and_an_open_one_is_reported_not_closed_silently(tmp_path,
+                                                                                                   monkeypatch):
+    """next-fixes 118: the settings set 0700 on every read of the per-user folder, so Mojo's state.permissions rarely
+    fired. Now a new folder is private from the start, an existing one keeps its mode, and Mojo reports an open one
+    (Mojo Miracle repairs it after the person's yes)."""
+    from orchestrator.Core.config_manager import ConfigManager
+    home = tmp_path / "people" / ".llm-framework"
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(home))
+    config = ConfigManager(tmp_path / "configs")
+    assert config.user_state_dir == home and stat.S_IMODE(home.stat().st_mode) == 0o700
+    home.chmod(0o755)
+    assert config.user_state_dir == home and stat.S_IMODE(home.stat().st_mode) == 0o755, "an existing folder keeps it"
+    (finding,) = check_user_state(SimpleNamespace(config=config))
+    assert finding.code == "state.permissions" and finding.severity == Severity.WARN
+    assert stat.S_IMODE(home.stat().st_mode) == 0o755, "looking changes nothing"
+
+
+def test_a_file_where_the_state_folder_belongs_is_refused_not_used(tmp_path, monkeypatch):
+    """An existing folder keeps its mode, but a file of that name is no per-user folder: refused at once, as before,
+    instead of being handed to every caller as a folder."""
+    from orchestrator.Core.config_manager import ConfigManager
+    home = tmp_path / ".llm-framework"
+    home.write_text("not a folder")
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(home))
+    with pytest.raises(OSError):
+        ConfigManager(tmp_path / "configs").user_state_dir
+
+
+@POSIX
 def test_oracle_changes_nothing(open_state):
     framework = framework_with(open_state)
     report = Mojo(framework, [check_user_state]).run()

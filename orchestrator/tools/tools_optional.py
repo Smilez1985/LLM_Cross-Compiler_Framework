@@ -113,7 +113,7 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
         service = getattr(framework, "build_service", None)
         if service is None:
             raise ToolError("The build service is not available.", code="failed",
-                            next="Tell the person; 'llm-cli doctor' shows why.")
+                            next="Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) shows why.")
         return ArtifactStore.for_service(service)  # the service's public methods only
 
     def refused(e) -> ToolError:
@@ -267,7 +267,8 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
                                                         "framework.") from None
         except (AttributeError, OSError, TypeError):
             raise ToolError("The trash is not available here.", code="not_supported",
-                            next="Tell the person; 'llm-cli doctor' shows why.") from None
+                            next="Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) shows "
+                                 "why.") from None
 
     def list_trash(inp: ListTrashIn, ctx: ToolContext) -> ListTrashOut:
         from orchestrator.Core.trash import Trash

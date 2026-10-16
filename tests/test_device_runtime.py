@@ -36,8 +36,8 @@ from orchestrator.runtime.device import launcher
 from orchestrator.runtime.device.devices import DeviceNotFound, resolve_device, split_address
 from orchestrator.runtime.device.package import (DeviceRuntimeStore, PackageError, package_runtime,
                                                  plan_device_runtime)
-from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, deploy_runtime, read_facts,
-                                                verify_on_device)
+from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, board_cleanup_plan, deploy_runtime,
+                                                older_builds, read_facts, remove_older_builds, verify_on_device)
 from orchestrator.runtime.device.settings import DeploySettings, SettingsError
 from orchestrator.runtime.profile import ProfileStore, parse_profile, read_profile
 
@@ -868,7 +868,9 @@ class TestDeploy:
         assert dev.sudo_calls() == ["-n true"], "no unit is written, enabled or restarted for a failed build"
         assert not (dev.fakeroot / "etc" / "systemd" / "system" / launcher.UNIT_NAME).exists()
 
-    def test_redeploying_keeps_the_previous_build_and_removes_older_ones(self, tmp_path, source, device_base):
+    def test_redeploying_keeps_every_older_build_and_lists_them(self, tmp_path, source, device_base):
+        """Round 5 f: a deployment removes no older build from the board (it did after every deploy before); it
+        lists them, and only the person removes them from the full list."""
         dev = FakeDevice(device_base)
         builds = []
         for index, libc in enumerate(("2.36", "2.39", "2.41")):
@@ -877,12 +879,44 @@ class TestDeploy:
             result = deploy(dev, build, packaged)
         ids = [b.build_id[:16] for b in builds]
         assert len(set(ids)) == 3
-        assert result.previous == ids[1] and result.removed == [ids[0]]
-        assert sorted(p.name for p in dev.root.iterdir() if p.is_dir() and not p.is_symlink()) == sorted(ids[1:])
-        assert os.readlink(dev.root / "current") == ids[2]
+        assert sorted(p.name for p in dev.root.iterdir() if p.is_dir() and not p.is_symlink()) == sorted(ids)
+        assert os.readlink(dev.root / "current") == ids[2] and result.previous == ids[1]
+        assert sorted(b.build_id16 for b in result.older) == sorted(ids[:2])
+        assert all(b.size_bytes > 0 and not b.in_use for b in result.older)
+        assert any("2 older runtime build(s) stay on the device" in n and "--on-device" in n for n in result.notes)
+        assert not any("rm -rf" in c and '"$d"' in c for c in dev.commands), "no clean-up loop runs on the board"
+
+    def test_a_failed_redeploy_of_an_older_build_keeps_that_build_on_the_board(self, tmp_path, source, device_base):
+        """Round 5 f: an older build the person kept on the board is theirs. Deploying it again replaces its files
+        with the same, checked files; when the checks then fail or break off, the build stays (it was there before),
+        and only a build this deployment brought is removed again."""
+        dev = FakeDevice(device_base)
+        old, old_packaged = packaged_build(tmp_path / "old", source)
+        assert deploy(dev, old, old_packaged).activated
+        new, new_packaged = packaged_build(tmp_path / "new", source, profile=changed(RK3566, LIBC_VERSION="2.41"))
+        assert deploy(dev, new, new_packaged).activated
+        kept = dev.root / old.build_id[:16]
+        assert kept.is_dir() and os.readlink(dev.root / "current") == new.build_id[:16]
+
+        def lost_connection(home, folder):
+            raise RemoteError("the SSH connection failed: reset")
+
+        with pytest.raises(RemoteError, match="connection failed"):
+            deploy(dev, old, old_packaged, check=lost_connection)
+        assert (kept / "bin" / "llama-server").is_file(), "the person's older build is never removed by a deploy"
+
+        def failed(home, folder):
+            return verify_on_device(RemoteShell(dev), home=home, folder=folder, plan_verify=old.plan["verify"],
+                                    pin_build=PIN.build_number + 1, pin_commit=PIN.commit, port=8080)
+
+        result = deploy(dev, old, old_packaged, check=failed)
+        assert not result.activated and not result.report.ok
+        assert (kept / "bin" / "llama-server").is_file() and os.readlink(dev.root / "current") == new.build_id[:16]
+        assert any("was on the device before" in n for n in result.notes), result.notes
+        assert not any("was removed from the device" in n for n in result.notes), result.notes
 
     @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="needs /proc")
-    def test_a_build_a_running_program_uses_is_never_removed(self, tmp_path, source, device_base):
+    def test_a_build_a_running_program_uses_is_kept_and_never_offered(self, tmp_path, source, device_base):
         dev = FakeDevice(device_base)
         first, packaged = packaged_build(tmp_path / "a", source)
         deploy(dev, first, packaged)
@@ -894,7 +928,11 @@ class TestDeploy:
                 build, packaged = packaged_build(tmp_path / f"b{index}", source,
                                                  profile=changed(RK3566, LIBC_VERSION=libc))
                 result = deploy(dev, build, packaged)
-            assert (dev.root / first.build_id[:16]).is_dir() and first.build_id[:16] not in result.removed
+            assert (dev.root / first.build_id[:16]).is_dir()
+            used = {b.build_id16: b.in_use for b in result.older}
+            assert used[first.build_id[:16]] is True and list(used.values()).count(True) == 1
+            plan = board_cleanup_plan(result.older, result.root, result.previous)
+            assert [i.file_name for i in plan.items] == [result.previous], "a build in use is not offered"
         finally:
             proc.kill()
             proc.wait()
@@ -995,6 +1033,127 @@ class TestDeploy:
         for command in dev.commands:
             words = shlex.split(command)
             assert words[:2] == ["sh", "-c"] and len(words) == 3
+
+
+class BoardAudit:
+    def __init__(self, fail=False):
+        self.rows, self.fail = [], fail
+
+    def record(self, actor, tool, tier, decision, outcome, **kwargs):
+        if self.fail:
+            raise OSError("audit log full")
+        self.rows.append(dict(actor=actor, tool=tool, outcome=outcome, **kwargs))
+
+
+def board_builds(dev, *ids, current=None):
+    """Build folders on the fake board (a file of 4 kB each) and `current` pointing at one of them."""
+    dev.root.mkdir(parents=True, exist_ok=True)
+    for id16 in ids:
+        (dev.root / id16 / "bin").mkdir(parents=True)
+        (dev.root / id16 / "bin" / "llama-server").write_bytes(b"x" * 4096)
+    if current:
+        os.symlink(current, dev.root / "current")
+    return str(dev.root)
+
+
+@POSIX
+class TestOlderBuildsOnTheBoard:
+    """Round 5 f: older runtime builds on a board are the person's objects. The framework lists them (full path on the
+    device, folder name, size, what it is) and removes exactly the ones the person ticked at a terminal; never an
+    AI, never the active build, never one a running program uses."""
+
+    A, B, C = "a" * 16, "b" * 16, "c" * 16
+
+    def test_the_list_names_each_older_build_with_its_path_size_and_what_it_is(self, device_base):
+        dev = FakeDevice(device_base)
+        root = board_builds(dev, self.A, self.B, self.C, current=self.C)
+        builds = older_builds(RemoteShell(dev), root)
+        assert sorted(b.build_id16 for b in builds) == [self.A, self.B], "the active build is never listed"
+        plan = board_cleanup_plan(builds, root, previous=self.B)
+        assert plan.mode_offered == ("permanent",), "a board has no trash"
+        items = {i.file_name: i for i in plan.items}
+        assert items[self.A].full_path == f"{root}/{self.A}" and items[self.A].size_bytes >= 4096
+        assert items[self.A].kind == "runtime_build" and "not the active one" in items[self.A].what
+        assert "kept to go back by hand" in items[self.B].what and root not in items[self.B].speaking_name
+        assert board_cleanup_plan([], root) is None
+
+    @pytest.mark.parametrize("actor", ["mcp", "ditto", "framework", "delegation:d_0123456789abcdef", ""])
+    def test_only_the_person_removes_them(self, device_base, actor):
+        from orchestrator.Core.deletion import AcceptedDeletion
+        dev = FakeDevice(device_base)
+        root = board_builds(dev, self.A, self.B, current=self.B)
+        plan = board_cleanup_plan(older_builds(RemoteShell(dev), root), root)
+        with pytest.raises(PermissionError):
+            remove_older_builds(RemoteShell(dev), AcceptedDeletion(plan, "permanent", actor), root=root,
+                                device_id="0" * 16, audit=BoardAudit())
+        with pytest.raises(PermissionError):   # a plain list nobody accepted
+            remove_older_builds(RemoteShell(dev), plan, root=root, device_id="0" * 16, audit=BoardAudit())
+        assert (dev.root / self.A).is_dir()
+
+    def test_exactly_the_ticked_builds_go_after_the_audit_entry(self, device_base):
+        from orchestrator.Core.deletion import accept, choose
+        dev = FakeDevice(device_base)
+        root = board_builds(dev, self.A, self.B, self.C, current=self.C)
+        plan = board_cleanup_plan(older_builds(RemoteShell(dev), root), root)
+        ticked = choose(plan, [[i.file_name for i in plan.items].index(self.A)])
+        audit = BoardAudit()
+        result = remove_older_builds(RemoteShell(dev), accept(ticked, "cli", "permanent"), root=root,
+                                     device_id="0" * 16, audit=audit)
+        assert result.done == [f"runtime build {self.A}"] and not result.failed and result.freed_bytes > 0
+        assert not (dev.root / self.A).exists() and (dev.root / self.B).is_dir() and (dev.root / self.C).is_dir()
+        assert [r["outcome"] for r in audit.rows] == ["started", "ok"]
+        started = audit.rows[0]
+        assert started["arguments"]["builds"] == [self.A] and started["extra"]["answered_by"] == "person"
+        assert root not in json.dumps(audit.rows), "the device's folders never reach the audit log (D0)"
+
+    def test_a_changed_list_or_no_audit_log_removes_nothing(self, device_base):
+        from orchestrator.Core.deletion import PlanChanged, accept
+        dev = FakeDevice(device_base)
+        root = board_builds(dev, self.A, self.B, current=self.B)
+        plan = board_cleanup_plan(older_builds(RemoteShell(dev), root), root)
+        for audit in (None, BoardAudit(fail=True)):
+            with pytest.raises(RuntimeError):
+                remove_older_builds(RemoteShell(dev), accept(plan, "cli", "permanent"), root=root,
+                                    device_id="0" * 16, audit=audit)
+        (dev.root / "current").unlink()
+        os.symlink(self.A, dev.root / "current")   # the listed build became the active one meanwhile
+        with pytest.raises(PlanChanged):
+            remove_older_builds(RemoteShell(dev), accept(plan, "cli", "permanent"), root=root, device_id="0" * 16,
+                                audit=BoardAudit())
+        assert (dev.root / self.A).is_dir() and (dev.root / self.B).is_dir()
+
+    def test_no_tool_and_no_deployment_removes_a_build_from_a_board(self):
+        """Only the person's prune command calls the removal; no tool module, no deployment, no GUI worker."""
+        callers = [p.relative_to(ROOT).as_posix() for p in (ROOT / "orchestrator").rglob("*.py")
+                   if "remove_older_builds(" in p.read_text(encoding="utf-8")]
+        assert sorted(callers) == ["orchestrator/cli.py", "orchestrator/runtime/device/remote.py"], callers
+        import inspect
+        from orchestrator.runtime.device import remote
+        source = inspect.getsource(remote.deploy_runtime)
+        assert "remove_older_builds" not in source and '"$d"' not in source
+
+    def test_the_cli_lists_them_and_removes_only_after_the_persons_yes(self, monkeypatch, device_base):
+        from orchestrator import cli as cli_module
+        from test_cli_builds import invoke_plain
+        _store, device_id = stored_device(ssh_user="dietpi")
+        dev = FakeDevice(device_base)
+        board_builds(dev, self.A, self.B, current=self.B)
+        TestCli.fake_ssh(None, monkeypatch, dev)
+        from rich.console import Console
+        monkeypatch.setattr(cli_module, "console", Console(width=400, color_system=None))  # one line per row
+        res = invoke_plain("device", "runtime", "prune", "ZERO 3W", "--on-device")
+        assert res.code == 0 and f"{dev.root}/{self.A}" in res.out and self.B not in res.out
+        assert "Nothing was deleted" in res.out and "kept to go back" not in res.out
+        assert (dev.root / self.A).is_dir(), "without a terminal nothing is removed"
+        monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+        monkeypatch.setattr(cli_module, "_device_audit", lambda ctx, state: BoardAudit())
+        res = invoke_plain("device", "runtime", "prune", "ZERO 3W", "--on-device", input="\n")
+        assert res.code == 0 and (dev.root / self.A).is_dir(), "nothing is ticked by default"
+        res = invoke_plain("device", "runtime", "prune", "ZERO 3W", "--on-device", input="1\n\n")
+        assert res.code == 0 and (dev.root / self.A).is_dir(), "No is the default"
+        res = invoke_plain("device", "runtime", "prune", "ZERO 3W", "--on-device", input="1\ny\n")
+        assert res.code == 0, res.out
+        assert not (dev.root / self.A).exists() and (dev.root / self.B).is_dir() and "Deleted" in res.out
 
 
 class ScriptedShell:
@@ -1393,14 +1552,17 @@ def test_gui_ssh_probe_sends_the_probe_on_stdin_and_stores_the_profile(qapp, tmp
     assert Path(path).parent == tmp_path / "probes"
 
 
-def test_gui_ssh_probe_refuses_a_bad_host(qapp, tmp_path, monkeypatch):
+@pytest.mark.parametrize("host", ["../../etc", "[fe80::1]"])
+def test_gui_ssh_probe_refuses_a_bad_host(qapp, tmp_path, monkeypatch, host):
+    """A bracketed IPv6 address is refused like in the CLI and the deploy, and the message says how to write it."""
     from orchestrator.gui import builder_tab
     monkeypatch.setattr(builder_tab, "PARAMIKO_AVAILABLE", True)
-    worker = builder_tab.SSHProbeWorker("../../etc", "u", None, tmp_path, tmp_path)
+    worker = builder_tab.SSHProbeWorker(host, "u", None, tmp_path, tmp_path)
     emitted = []
     worker.finished.connect(lambda ok, msg, path: emitted.append((ok, msg)))
     worker.run()
-    assert emitted == [(False, "Enter a host name or an IP address.")]
+    assert emitted == [(False, "Enter a host name or an IP address (an IPv6 address without brackets, e.g. "
+                               "fe80::1).")]
 
 
 def test_a_cli_consent_is_written_to_the_real_audit_log(tmp_path, monkeypatch):

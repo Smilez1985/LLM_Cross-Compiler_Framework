@@ -16,7 +16,7 @@ yet. Listing and reading sources need no model at all.
 """
 
 import re
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,7 +24,7 @@ from orchestrator.rag.errors import EmbeddingModelNotCached, KnowledgeBaseError
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
 from orchestrator.tools.policy import ToolTier
 from orchestrator.tools.registry import ResourceSpec, ToolError, ToolRegistry, ToolSpec
-from orchestrator.tools.spec import FieldMeta
+from orchestrator.tools.spec import Fact, FieldMeta
 
 SOURCE_ID_PATTERN = r"^ks_[0-9a-f]{16}$"
 KINDS = ("web", "pack", "docs", "any")
@@ -38,6 +38,25 @@ EXCERPT_NOTE = "Excerpts from the local knowledge base (web pages, community pac
 DISABLED_NEXT = "Only the person can switch it on (setting enable_rag_knowledge, in the GUI or with llm-cli)."
 NOT_CACHED_NEXT = ("Tell the person: asking Ditto one question in the GUI or with 'llm-cli ditto ask' loads the model "
                    "once (offline mode must be off for that); then search again.")
+
+
+def embedding_download(rag: Any) -> Tuple[Optional[Fact], tuple]:
+    """For a tool that stores into the knowledge base (a crawl, the framework's documents, a knowledge pack): the fact
+    about the one-time download of the knowledge base's models, and the situation warning embedding_model_download
+    (next-fixes 119) whenever the store can start that download: when the models are not on this computer, and when
+    that cannot be told. (None, ()) without a knowledge base. Reads only (RAGManager.embedding_download)."""
+    from orchestrator.tools.facts_catalog import warn
+    check = getattr(rag, "embedding_download", None)
+    if rag is None:
+        return None, ()
+    needed, size = check() if callable(check) else (False, 0.0)
+    # what is in the cache moves while a question waits: shown, never part of the decision
+    if needed is False:
+        return Fact("Embedding model", "on this computer already; nothing is downloaded", volatile=True), ()
+    size_gb = max(round(float(size or 0), 1), 0.1)
+    text = (f"downloaded once first (about {size_gb} GB from huggingface.co)" if needed else
+            f"downloaded once (about {size_gb} GB) if it is not on this computer yet")
+    return Fact("Embedding model", text, volatile=True), (warn("embedding_model_download", size_gb=size_gb),)
 TRUST_NOTE = {
     "framework": "the framework's own code and documentation",
     "crawled": "a page added by Deep Ingest, by the person or by a crawl they confirmed (third-party text)",
@@ -222,7 +241,8 @@ def register_knowledge_tools(registry: ToolRegistry, framework) -> ToolRegistry:
 
     def unavailable(e: Exception) -> ToolError:
         return ToolError(f"The knowledge base is unavailable: {_no_paths(e)}", code="failed",
-                         next="Tell the person; 'llm-cli doctor' shows what is wrong with the knowledge base.")
+                         next="Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) shows what is wrong "
+                              "with the knowledge base.")
 
     def search_knowledge(inp: SearchKnowledgeIn) -> SearchOut:
         from orchestrator.Core.rag_manager import local_models_only, source_id, source_kind

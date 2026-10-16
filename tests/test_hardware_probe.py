@@ -980,7 +980,7 @@ class TestRemoteProbe:
         assert shlex.split(rp.SHELL_COMMAND)[2].startswith("exec sh -s -- ")
 
     @pytest.mark.parametrize("host, ok", [("192.0.2.10", True), ("board.local", True), ("fe80::1", True),
-                                          ("[fe80::1]", True), ("radxa-zero3", True),
+                                          ("[fe80::1]", False), ("radxa-zero3", True),
                                           ("-oProxyCommand=x", False), ("a;b", False), ("", False),
                                           ("host name", False), ("192.0.2.300", False), ("192.0.2", False),
                                           ("board..local", False), ("fe80::zz", False), ("[board.local]", False)])

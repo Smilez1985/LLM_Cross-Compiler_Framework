@@ -60,6 +60,36 @@ INSTALL_STARTED = ".lcf-install.started"
 INSTALL_STATUS = ".lcf-install.status"
 INSTALL_LOG = ".lcf-install.log"
 _REMOTE_DIR = re.compile(r"^/tmp/llm_deploy\.[A-Za-z0-9]{8}$", re.ASCII)
+# Packages with Docker images from earlier versions started a Qdrant sidecar on the board (`docker run --name
+# qdrant-sidecar --restart unless-stopped`). Nothing uses it any more; after a deploy the framework looks whether it is
+# still there and tells the person, and never removes it (round 5 f: the person removes what they can see).
+OLD_SIDECAR = "qdrant-sidecar"
+OLD_SIDECAR_SECONDS = 20   # the look comes after a finished deploy: a Docker that does not answer never holds it
+
+
+def old_sidecar_check(seconds: int = OLD_SIDECAR_SECONDS) -> str:
+    """The board command that looks for the old sidecar: `docker ps`, bounded with `timeout SECONDS` where the board's
+    `timeout` takes that form (coreutils, BusyBox 1.30 and later), as before where it does not (no `timeout`, or an
+    older BusyBox one that wants `-t SECONDS`)."""
+    look = f"docker ps -a --filter name={OLD_SIDECAR} --format '{{{{.Names}}}}|{{{{.Status}}}}' 2>/dev/null"
+    return f"if timeout 5 true >/dev/null 2>&1; then timeout {int(seconds)} {look}; else {look}; fi"
+
+
+OLD_SIDECAR_CHECK = old_sidecar_check()
+OLD_SIDECAR_NOTE = ("The board still has the container {name} ({state}) from an earlier package with Docker images. "
+                    "Nothing uses it any more: the knowledge base stays on this computer. The framework does not "
+                    "remove it. To remove it, run on the board: docker rm -f {name} (the data folder data/qdrant of "
+                    "that old package stays until you delete it).")
+
+
+def old_sidecar_state(answer: str) -> str:
+    """'running' or 'stopped' when the board's `docker ps` answer (OLD_SIDECAR_CHECK) lists the old Qdrant sidecar by
+    its exact name, else "" (no Docker, no access to it, or no such container)."""
+    for line in str(answer or "").splitlines()[:50]:
+        name, _, status = line.strip().partition("|")
+        if name == OLD_SIDECAR:
+            return "running" if status.startswith("Up") else "stopped"
+    return ""
 
 
 class DeployError(ValueError):
@@ -84,6 +114,8 @@ class DeployResult:
     code: str = ""                  # the SSH reason code when the board could not be reached or logged in to (N6)
     resumed: int = 0                # how often the deploy continued after the network dropped (N5)
     waited_s: float = 0.0           # seconds it waited for the board
+    notes: List[str] = field(default_factory=list)   # the framework's own sentences for the person (no device text)
+    old_sidecar: str = ""           # "running" | "stopped": the old Qdrant sidecar is still on the board
 
 
 @dataclass(frozen=True)
@@ -522,7 +554,8 @@ class DeploymentManager:
         # A leading '-' would be parsed by ssh/scp as an option (e.g. -oProxyCommand=...).
         if not isinstance(host, str) or not _HOST.fullmatch(host) or not valid_host(host):
             return DeployResult(False, reason=f"Security/Format Error: Invalid address or host name: "
-                                              f"{str(host)[:64]!r}")
+                                              f"{str(host)[:64]!r} (an IPv6 address is written without brackets, "
+                                              "e.g. fe80::1)")
         if not SSH_USER_PATTERN.match(user or ""):
             return DeployResult(False, reason=f"Security/Format Error: Invalid SSH user name: {user!r}")
         if not Path(package).is_file():
@@ -584,6 +617,22 @@ class DeploymentManager:
         stdout = out.read().decode(errors="replace")
         stderr = err.read().decode(errors="replace")
         return out.channel.recv_exit_status(), stdout, stderr
+
+    def _old_sidecar(self, answer: str, fingerprint: str = "") -> Dict[str, Any]:
+        """What a successful deploy reports about the old Qdrant sidecar on the board (OLD_SIDECAR_CHECK's answer):
+        a note for the person and its state, kept with the board's last deploy for Mojo (by the device ID of the host
+        key it presented). The container is never stopped or removed here."""
+        state = old_sidecar_state(answer)
+        if fingerprint:
+            try:
+                from orchestrator.runtime.device.trusted import TrustedDevices
+                from orchestrator.runtime.profile import device_id_for_host_key
+                TrustedDevices(self._state_dir()).note_board(device_id_for_host_key(fingerprint), old_sidecar=state)
+            except Exception:  # noqa: BLE001 - bookkeeping never fails a deploy
+                pass
+        if not state:
+            return {}
+        return {"old_sidecar": state, "notes": [OLD_SIDECAR_NOTE.format(name=OLD_SIDECAR, state=state)]}
 
     @staticmethod
     def _connection_lost(ssh) -> bool:
@@ -657,7 +706,14 @@ class DeploymentManager:
             for line in (res.stdout or "").splitlines() + (res.stderr or "").splitlines():
                 self._keep(lines, line)
             if res.returncode == 0:
-                return DeployResult(True, exit_status=0, output=lines, device_state="ok")
+                try:
+                    answer = subprocess.run(["ssh", *opts, "-p", str(port), target, OLD_SIDECAR_CHECK],
+                                            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                            timeout=60).stdout
+                except (OSError, subprocess.SubprocessError):  # only a look; the deploy itself succeeded
+                    answer = ""
+                return DeployResult(True, exit_status=0, output=lines, device_state="ok",
+                                    **self._old_sidecar(answer))
             code = reasons.classify_ssh_output(res.stderr or "") if res.returncode == 255 else None
             return DeployResult(False, exit_status=res.returncode, output=lines, code=code or "",
                                 device_state="unknown" if code else "failed",
@@ -697,6 +753,7 @@ class _BoardSession:
         self.lines: List[str] = []
         self.resumed = 0
         self.waited = 0.0
+        self.fingerprint = ""          # the host key the board presented at the last login
         self.state_after_stop = "ok"   # "unknown" once deploy.sh was started on the board
 
     def result(self, success: bool, **values: Any) -> DeployResult:
@@ -727,6 +784,7 @@ class _BoardSession:
                                reason=f"The device {self.host} now presents another host key than the one shown "
                                       f"({ssh_trust.fingerprint(key)}, not {self.expect_fingerprint}); nothing was "
                                       "deployed.")
+        self.fingerprint = ssh_trust.fingerprint(key)
         if self.stop():
             raise _Stopped()
         try:
@@ -997,6 +1055,11 @@ class _BoardSession:
         code = int(exit_status)
         if code == 0:
             self.logger.info("Remote deployment successful.")
-            return self.result(True, exit_status=0, device_state="ok")
+            try:
+                _status, answer, _err = DeploymentManager._run(self.ssh, OLD_SIDECAR_CHECK)
+            except Exception:  # noqa: BLE001 - only a look; the deploy itself succeeded
+                answer = ""
+            return self.result(True, exit_status=0, device_state="ok",
+                               **self.manager._old_sidecar(answer, self.fingerprint))
         return self.result(False, exit_status=code, device_state="failed",
                            reason=f"deploy.sh failed on the device (exit {code}).")

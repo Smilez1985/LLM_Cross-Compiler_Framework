@@ -616,7 +616,8 @@ llm-cli ditto runtime ensure --mode bare-metal --force    # und zurück
   und baut neu.
 - **Die Dateien der alten Art** (Build-Ordner mit vollständigem Pfad, Docker-Images und -Container mit Name und ID,
   jeweils mit Größe) werden nach dem Wechsel aufgelistet, und nur, was du bestätigst, wird entfernt („Nein“ ist
-  vorgewählt). Ohne Terminal wird nichts entfernt. Docker-Images werden sonst nie gelöscht.
+  vorgewählt): Die Build-Ordner kommen in den Papierkorb, aus dem du sie wiederherstellen kannst; Docker-Images und
+  -Container werden gelöscht. Ohne Terminal wird nichts entfernt. Docker-Images werden sonst nie gelöscht.
 - `llm-cli ditto runtime status` zeigt die Art. Ein KI-Client darf sie lesen (`get_status`); wechseln und entfernen
   darfst nur du.
 

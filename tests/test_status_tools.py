@@ -170,6 +170,25 @@ class TestReportCannotDo:
         out, _ = call(fw, "report_cannot_do", args, session=session)
         return out
 
+    def test_the_disk_fact_names_the_build_folder_too(self, tmp_path, monkeypatch):
+        """Eighth round, answer 3: builds are written to the framework's build folder first, so a lack of space there
+        is a real reason; the disk fact names it (by label, never a path), and folders on one disk together."""
+        from collections import namedtuple
+        usage = namedtuple("usage", "total used free")
+        cache, out, builds = (tmp_path / name for name in ("cache", "out", "builds"))
+        for folder in (cache, out, builds):
+            folder.mkdir()
+        values = {"cache_dir": str(cache), "output_dir": str(out), "build_dir": str(builds)}
+        framework = SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None: values.get(key, default)))
+        disks = {str(cache): (1, 900), str(out): (1, 900), str(builds): (2, 1)}   # device, free GB
+        monkeypatch.setattr(tools_status, "_disk_of", lambda p: disks[str(p)][0])
+        monkeypatch.setattr(tools_status.shutil, "disk_usage",
+                            lambda p: usage(1000 * 2 ** 30, 0, disks[str(p)][1] * 2 ** 30))
+        checked, facts, _try = tools_status.disk_fact(framework)
+        assert checked == "confirmed", "the build folder's disk is full"
+        assert facts[0].startswith("The cache and output disk has") and facts[1].startswith("The build disk has")
+        assert not any(str(tmp_path) in f for f in facts)
+
     def test_there_is_no_untested_reason(self, fw):
         error, _ = refused(fw, "report_cannot_do", {"task": "t", "reason": "untested", "missing": "m"})
         assert error.code == "invalid_value"

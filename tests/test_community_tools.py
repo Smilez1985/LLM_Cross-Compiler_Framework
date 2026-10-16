@@ -46,7 +46,7 @@ def env(tmp_path, monkeypatch):
     registry = register_framework_tools(ToolRegistry(PolicyStore(tmp_path / "policy"), AuditLog(tmp_path / "a.db")),
                                         fw)
     registry.policy_store.replace(ToolPolicy(configured=True, reviewed=[s.name for s in registry.list()]))
-    return SimpleNamespace(world=world, registry=registry, jobs=jobs, cm=world.cm, tmp=tmp_path, disk=disk)
+    return SimpleNamespace(world=world, registry=registry, jobs=jobs, cm=world.cm, tmp=tmp_path, disk=disk, fw=fw)
 
 
 def call(env, name, arguments, actor="ditto", confirm=None):
@@ -439,3 +439,25 @@ def test_a_knowledge_pack_is_refused_when_the_snapshot_taken_first_does_not_fit(
     assert "snapshot" in asked[0].lower()
     job = wait_job(env, out.job_id)
     assert job.state == "done" and "snapshot" in job.result
+
+
+def test_a_knowledge_pack_says_when_its_import_downloads_the_search_model_first(env):
+    """next-fixes 119: a knowledge pack's pages are embedded; when the knowledge base's models are not on this computer
+    the question says so with the declared situation warning (they are there: a fact, no warning)."""
+    env.world.add(knowledge_pack(env.world, "rk-docs"), kind="knowledge", pack_id="rk-docs", version="1.0.0")
+    env.world.publish()
+    spec = env.registry.get("add_pack_from_index")
+
+    def facts():
+        inp = env.registry.validate_input(spec, {"kind": "knowledge", "pack_id": "rk-docs"})
+        return env.registry.look_up(spec, inp, ToolContext("ditto"))
+
+    env.fw.rag_manager = SimpleNamespace(embedding_download=lambda: (True, 0.48))
+    found = facts()
+    assert ("embedding_model_download", "situation", {"size_gb": 0.5}) in [
+        (w.code, w.kind, dict(w.numbers)) for w in found.warnings]
+    assert any(f.label == "Embedding model" and "downloaded once first" in f.value for f in found.facts)
+    env.fw.rag_manager = SimpleNamespace(embedding_download=lambda: (False, 0.0))
+    found = facts()
+    assert "embedding_model_download" not in {w.code for w in found.warnings}
+    assert any(f.label == "Embedding model" and "nothing is downloaded" in f.value for f in found.facts)

@@ -332,7 +332,10 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   stops the package instead of leaving the image out. A digest-pinned image is packed under the local name
   `<repository>:lcf-<first 12 hex characters of the digest>` (`docker load` does not restore registry digests), and
   `deploy.sh` starts every packed image with `--pull never`: the board runs exactly the packed image, and a board
-  where it is missing stops instead of pulling one from a registry.
+  where it is missing stops instead of pulling one from a registry. Packages of earlier versions also started a
+  Qdrant sidecar (`qdrant-sidecar`) that nothing uses any more: after a deploy the framework looks whether it is
+  still on the board and tells you (the deploy result, and a Mojo Oracle line for that board), with the command to
+  remove it there. The framework never stops or removes it.
 - **Trusted devices:** after a successful login to a board whose host key you confirmed (a deployment in the GUI or
   with `llm-cli deploy run`, a probe with `llm-cli scan --device`, a `device runtime deploy`), the framework records
   it in `~/.llm-framework/devices.json`: your label, address, user, the confirmed host key and whether the
@@ -402,9 +405,13 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
   checked against its sha256 and every file against `SHA256SUMS`, made readable only for the user, and placed next to
   the active build. The new build's programs are then checked on the board (below), and only a build that passes
   becomes `current`; one that fails is removed again and the previous build stays active (design 3.8: a failed
-  build is never activated). After the switch the previous build is kept; older ones are removed unless a running
-  program uses them. The key in `~/.config/llm-framework/llama-server.key` is generated on the board by the start
-  script under umask 077 and never leaves it.
+  build is never activated). After the switch every older build stays on the board: the framework removes none by
+  itself. The output says how many stayed; `llm-cli device runtime prune DEVICE --on-device` lists them (full path
+  on the board, size, what each is) and removes only the ones you tick, after your yes at a terminal. The active
+  build and one a running program uses are never listed, and an AI only learns how many stayed. A build deployed
+  again that is already on the board stays there, also when its checks fail. The key in
+  `~/.config/llm-framework/llama-server.key` is generated on the board by the start script under umask 077 and never
+  leaves it.
 - **Start script** (`llama-server.sh serve|start|stop|status|keygen|version`): POSIX sh, tested with dash and bash.
   It starts `llama-server` from its own folder (never from `PATH`) with `env -i` (HOME, a fixed PATH, the C locale),
   `--host 127.0.0.1`, `--api-key-file`, `--no-ui`, `--no-slots`, `--jinja` and `--offline`. It passes on only
@@ -1172,11 +1179,14 @@ run). The mode is recorded in `~/.llm-framework/runtime/llama.cpp/mode.json`.
   from, so a switch back needs no new build.
 - **The old mode's leftovers** are listed after the new mode is verified: Ditto's build folders with their full path,
   folder name, build ID and size, Ditto's images and containers with their name, ID and size, and what each is. Only
-  the exact list you confirm is removed ("No" is the default), in the terminal or the AI settings; the list is looked
-  up again first and nothing is removed if it changed, and the removal is written to the audit log before anything is
-  removed. Without a terminal nothing is removed and the list is shown. Ditto's images are never deleted otherwise,
-  and a board's builds in the same store are never listed. When Docker cannot be asked after a switch to bare metal,
-  the command says that Ditto's images and containers are not in the list, and how to list them later.
+  the exact list you confirm is removed, with one question for the whole list ("No" is the default), in the terminal
+  or the AI settings: the build folders go to the trash (restorable; their space stays used until you empty it), and
+  Docker's images and containers are deleted for good, since Docker has no trash. The list says where each one goes;
+  it is looked up again first and nothing is removed if it changed, and the removal is written to the audit log
+  before anything is removed. Without a terminal nothing is removed and the list is shown. Ditto's images are never
+  deleted otherwise, and a board's builds in the same store are never listed. When Docker cannot be asked after a
+  switch to bare metal, the command says that Ditto's images and containers are not in the list, and how to list them
+  later.
 - **The model:** `ensure` offers the model of the chosen or recommended tier when it is missing, with its source,
   size and licence first; with `-y` it downloads only a model under a permissive licence. Any other licence is yours
   to accept.
@@ -1305,6 +1315,11 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   untrusted. A tool call never downloads a model: if the embedding model is not on this computer yet, the search is
   refused with the next step (ask Ditto one question in the GUI or with `llm-cli ditto ask`, which loads it once),
   and a reranking model that is not there yet is skipped for that call only. Listing and reading need no model.
+  An MCP prompt with knowledge excerpts reads the same way: without the model it leaves the excerpts out and says
+  why. So does Ditto's automatic diagnosis of a failed build, which nobody is asked about. The tools that store
+  text (`crawl_docs_site`, `index_framework_docs` and a knowledge pack from `add_pack_from_index`) load the models
+  first: their question says whether they are on this computer already or are downloaded once first, with the size
+  and the situation warning `embedding_model_download`.
 - **Adding documentation:** [Deep Ingest](#deep-ingest) in the module wizard, and [knowledge packs](#community-zoo)
   from the community zoo.
 - **The framework's own documents** (unreleased): **Tools > Index the Framework's Documentation...**,
@@ -1524,8 +1539,8 @@ same crawler with the same opt-out checks as the GUI, as a job.
 - **Always asked, with every start address.** Default and cap are "ask" (a per-tool "allow" is capped), and it never
   offers "do not ask again". The question's first line says what happens (sites, pages per start address, link
   depth, the delay, that the opt-outs are honoured and cannot be switched off), then one line per start address
-  (marked as given by the AI client), the languages kept, PDFs, the snapshot, and that the embedding model may be
-  downloaded once.
+  (marked as given by the AI client), the languages kept, PDFs, the snapshot, and whether the embedding model is on
+  this computer already or is downloaded once first (then with its size and the warning `embedding_model_download`).
 - **Checked before the question:** the notice must be read (`needs_person` otherwise); offline mode off and the
   knowledge base on (`not_supported`); 1 to 5 start addresses, each a public `http(s)` address that passes the
   SSRF check (`invalid_value` for anything else); `max_pages` per start address from 1 to `crawler_max_pages`

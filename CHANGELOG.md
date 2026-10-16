@@ -10,6 +10,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **A deploy tells you about an old Qdrant sidecar on the board**: packages with Docker images from earlier versions
+  started the container `qdrant-sidecar`, which nothing uses any more. After a successful deploy (`llm-cli deploy
+  run`, the Deployment window, the AI tool `deploy_to_device`) the framework looks with `docker ps` (for at most 20
+  seconds) whether it is still on the board and, if so, says it is running or stopped and how to remove it there.
+  Mojo Oracle shows a line for that board from the last deploy. The framework never stops or removes the container.
 - **Where finished models go: the output folder and a save dialog** (eighth round, answer 3): finished builds
   (golden artifacts) are saved to the output folder (setting `output_dir`, default `~/llmcf/output`; on Windows in
   your user folder), which you set once with **File > Output Folder...** or `llm-cli config output-folder PATH`, for
@@ -924,6 +929,50 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **The identical-build check no longer blocks the builder window** (unreleased; eighth round, N11): before a build,
+  the check asked Hugging Face for the model's current commit on the window's own thread, so the window stopped
+  responding on a slow network (up to 10 seconds). The look-up now runs in the background; Start waits meanwhile and
+  the form stays usable. The build submits exactly the values that were checked.
+- **Builds in the old default folder keep their id and packages are found there** (unreleased; eighth round, answer
+  3): since the output folder setting, the framework's build folder is no longer the output folder, so a build there
+  got a new id, and the AI tool `deploy_to_device` no longer found the deploy packages in it by their id. The id a
+  build had before still reaches it (feed rows, pending approvals and AI callers that kept it), unless another build
+  has that id now. Packages are looked up in the output folder first, then in the build folder and in earlier output
+  folders you had set.
+- **`get_status` names the build folder's disk** (unreleased; eighth round, answer 3): the disk fact named the cache
+  and the output folder only, not the build folder where a build is written first. Now it names all three; folders on
+  one disk are named together, by label only.
+- **The tools that store text say when the search model is downloaded first** (unreleased; next-fixes 119): the
+  situation warning `embedding_model_download` was declared but never shown. Now `crawl_docs_site`,
+  `index_framework_docs` and a knowledge pack from `add_pack_from_index` check, without downloading or loading
+  anything, whether the knowledge base's models are on this computer. Their question says so, with the size and the
+  warning when a download is needed or cannot be ruled out. An MCP prompt with knowledge excerpts never starts the
+  download: like `search_knowledge` it reads with the models on this computer only and says when they are missing.
+  Ditto's automatic diagnosis of a failed build, which nobody is asked about, reads the same way.
+- **Repair hints for AI callers name Mojo** (unreleased; round 7 item 11'): refusals and errors that AI callers read
+  sent them to `llm-cli doctor`. They now name the tool `run_mojo_oracle` (or `llmcf mojo` in a terminal). The note
+  about missing builder images keeps `llm-cli doctor --fix --tier 2`, which builds them.
+- **Ditto's old runtime mode goes to the trash** (unreleased; WP7, round 7 D): after a switch between bare metal and
+  Docker, the old mode's build folders were deleted for good when you confirmed the list. Now they go to the trash by
+  default (`llm-cli trash` and File > Trash... list them and bring one back; their space stays used until you empty
+  the trash). Docker's images and containers are still deleted, since Docker has no trash; they are listed with name,
+  ID and size. The list says where each object goes, and one question confirms the whole list ("No" by default).
+- **The address checks agree on IPv6 in brackets** (unreleased): `deploy run --host [fe80::1]` passed the CLI's check,
+  but the deploy refused the address. Now every place that takes a board's address (deploy, `scan --device`, `deploy
+  devices add`, the GUI's probe and Deployment window) refuses an IPv6 address in brackets before anything is sent.
+  Write it without brackets (`fe80::1`); the port has its own option.
+- **The per-user folder is made private when it is created** (next-fixes 118): every read of the settings set
+  `~/.llm-framework` to mode 0700 without a word, so Mojo's `state.permissions` finding almost never showed. Now the
+  folder gets 0700 when the framework creates it; an existing folder keeps its mode, Mojo Oracle reports one that
+  others can read, and Mojo Miracle repairs it after your yes.
+- **A board deployment keeps every older runtime build** (round 5 f): `llm-cli device runtime deploy` and the AI
+  tool `deploy_device_runtime` removed all older runtime builds on the board except the previous one, without a
+  question. Now every older build stays. The result says how many stayed and their size, and
+  `llm-cli device runtime prune DEVICE --on-device` lists them for you: full path on the board, folder name, size and
+  what each is, nothing ticked, "No" by default. Only the builds you tick are removed, for good (a board has no
+  trash), after an audit entry with the folder names only. The active build and one a running program uses are never
+  listed. An AI only reads how many builds stayed and that only you remove them. Deploying a build again that is
+  already on the board keeps it there, also when its checks fail.
 - **The output folder is `~/llmcf/output`; the old output folder is the framework's build folder** (eighth round,
   answer 3): the setting `output_dir` now names the folder finished models are saved to (default `~/llmcf/output`,
   before the installation's or the per-user folder's `output/`). That old folder is the new setting `build_dir`: GUI
@@ -1542,6 +1591,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **Pairing a board sends only a checked key line** (bandit B601): the command that adds the framework's public key
+  to the board's `authorized_keys` is fixed, and its one value, the key line, was shell-quoted. Now the line must also
+  be a plain SSH public key (type, key, an optional simple comment); anything else is refused before the command is
+  sent.
 - **`get_build_status` and `get_build_log` name finished builds by label, never by host path**: in 3.0.0 the status
   of a build request, and log lines such as "Golden Artifact created", gave AI clients the full path of each finished
   build (with the user name in it). The status now gives `output:<target>/<model>/<quantization>` (or `builds:`,

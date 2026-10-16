@@ -39,6 +39,8 @@ _HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-F
 _USER = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.ASCII | re.IGNORECASE)
 _KEY_TYPE = re.compile(r"^[a-z0-9@.-]{3,64}$", re.ASCII)
 _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
+# What a deploy saw on the board, kept with its last deploy (note_board) until the next deploy looks again.
+BOARD_FACTS = ("old_sidecar", "board_checked_at")
 
 
 class DeviceStoreError(ValueError):
@@ -208,9 +210,25 @@ class TrustedDevices:
         try:
             with file_lock(self.state_dir / ".devices.lock"):
                 rows = self.last_deploys()
-                rows[device_id] = {"at": _now(), "ok": bool(ok), "package": str(package)[:64]}
+                seen = {k: v for k, v in (rows.get(device_id) or {}).items() if k in BOARD_FACTS}
+                rows[device_id] = {**seen, "at": _now(), "ok": bool(ok), "package": str(package)[:64]}
                 self._write(self.deploys_path, rows)
         except (OSError, TimeoutError):
+            pass  # a deploy is never failed by its bookkeeping
+
+    def note_board(self, device_id: str, *, old_sidecar: str = "") -> None:
+        """What the last successful deploy saw on the board, for Mojo (it never logs in to a board itself): whether the
+        Qdrant sidecar of an earlier package with Docker images is still there ("running", "stopped" or "")."""
+        if not DEVICE_ID_RE.fullmatch(device_id or "") or old_sidecar not in ("", "running", "stopped"):
+            return
+        try:
+            with file_lock(self.state_dir / ".devices.lock"):
+                rows = self.last_deploys()
+                row = dict(rows.get(device_id) or {})
+                row.update({"old_sidecar": old_sidecar, "board_checked_at": _now()})
+                rows[device_id] = row
+                self._write(self.deploys_path, rows)
+        except (OSError, TimeoutError, DeviceStoreError):
             pass  # a deploy is never failed by its bookkeeping
 
     def _write(self, path: Path, rows: Dict[str, Any]) -> None:

@@ -17,6 +17,7 @@ Status, settings and honest limits (MCP design 2.9, work package T2; DECISIONS r
 
 import json
 import math
+import os
 import re
 import shutil
 from pathlib import Path
@@ -538,7 +539,8 @@ def knowledge_section(framework) -> KnowledgeSection:
     section.storage = scheme_and_host(storage) if "://" in storage else "embedded in the per-user folder"
     section.embedding_model = status.get("embedding_model")
     if status.get("error"):  # its text can quote a server's reply: only that there is a problem is shown
-        section.problem = "The knowledge base could not be opened; 'llm-cli doctor' shows why."
+        section.problem = ("The knowledge base could not be opened; run_mojo_oracle (or 'llmcf mojo' in a terminal) "
+                           "shows why.")
     try:
         section.snapshots = [Path(str(s)).name for s in rag.list_snapshots()][:50]
     except Exception:  # noqa: BLE001
@@ -700,10 +702,17 @@ def _known(registry, name: str) -> bool:
         return False
 
 
+def _disk_of(path: Path) -> int:
+    """Which disk (file system) a folder lies on."""
+    return os.stat(path).st_dev
+
+
 def disk_fact(framework) -> Tuple[str, List[str], List[str]]:
+    """The free space of the disks builds use: the cache, the output folder and the framework's build folder, where a
+    build is written first (eighth round, answer 3). Folders on one disk are named together, by label only."""
     from orchestrator.Core.disk_plan import gb, reserve_for
-    facts, short = [], False
-    for label, key in (("cache", "cache_dir"), ("output", "output_dir")):
+    disks: Dict[Any, Tuple[List[str], Any]] = {}
+    for label, key in (("cache", "cache_dir"), ("output", "output_dir"), ("build", "build_dir")):
         value = _cfg(framework, key)
         if not value:
             continue
@@ -713,11 +722,15 @@ def disk_fact(framework) -> Tuple[str, List[str], List[str]]:
             path = path.parent
         try:
             usage = shutil.disk_usage(path)
+            device = _disk_of(path)
         except OSError:
             continue
+        disks.setdefault(device, ([], usage))[0].append(label)
+    facts, short = [], False
+    for labels, usage in disks.values():
         if usage.free < reserve_for(usage.total):
             short = True
-        facts.append(f"The {label} disk has {gb(usage.free)} free.")
+        facts.append(f"The {' and '.join(labels)} disk has {gb(usage.free)} free.")
     if not facts:
         return "unchecked", ["The framework could not read the free disk space."], []
     return ("confirmed" if short else "contradicted"), facts, (["check_build_request"] if not short else [])
