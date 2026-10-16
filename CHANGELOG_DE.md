@@ -10,6 +10,24 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Ditto > Lokale Laufzeit...: jeder Befehl `llm-cli ditto runtime` mit der Maus** (W1'): Ein Fenster zeigt, was
+  `ditto runtime status` zeigt (Hardware, Betriebsart, der Build in Gebrauch und seine Prüfungen, Probleme und der Rat
+  zum Neubau, der Plan für den eigenen Build, das fertige Archiv, der Server mit Adresse, Modell und Kontext, das
+  empfohlene und das gewählte Modell, die Protokolldatei), und erledigt `install` (**llama-server bauen...** mit
+  GPU-Backend, Ort des Builds und Compile-Jobs; **Offizielles fertiges Archiv installieren...** mit „Noch einmal
+  herunterladen“), `ensure` (Betriebsart Automatisch, Direkt oder In Docker, dieselben Build-Optionen und das
+  Modell-Angebot danach mit Größe und Lizenz, ohne Haken wie `--no-model`), **Starten** (Modellstufe oder die
+  Empfehlung, Kontextlänge, Entladen im Leerlauf; das früher gewählte Modell wird genannt) und **Stoppen**, **Build
+  importieren...** und **Build exportieren...**, **Ältere Builds entfernen...** (der Lösch-Dialog mit der ganzen
+  Liste, nichts angehakt, „Nein“ als Vorgabe), **Quellcode exportieren...** (mit optionalem Spiegel) und **Quellcode
+  importieren...**. Es laufen dieselben Kernfunktionen wie in der CLI (die Status-Übersicht, das Modell-Angebot und
+  die llama.cpp-Festlegung sind jetzt Kernfunktionen, die auch die CLI aufruft; ihre Ausgabe bleibt gleich); Builds,
+  Downloads, Docker und der Serverstart laufen im Hintergrund mit einer Fortschrittszeile und Abbrechen, wo sich der
+  Befehl unterbrechen lässt; jede Frage der CLI wird mit denselben Worten und „Nein“ als Vorgabe gestellt. Der Bereich
+  „Dittos lokaler Server“ (hier und in den KI-Einstellungen) lehnt die installierte Art nicht mehr ab: **Prüfen und
+  reparieren...** prüft sie und installiert sie nur neu, wenn sie sich nicht nutzen lässt (zum Beispiel ein alter
+  llama.cpp-Build nach einem Update), und Installieren und Wechseln nehmen jetzt die Build-Optionen mit; der Wechsel
+  behält die Platzprüfung und das vollständige Entfernen der alten Art.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den

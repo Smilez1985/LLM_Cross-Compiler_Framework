@@ -111,6 +111,7 @@ class RuntimeModeBox(QGroupBox):
         self.is_busy: Callable[[], bool] = lambda: False   # the Local Runtime window: another job of it runs
         self.installed = False
         self.mode: Optional[str] = None
+        self._shown: Optional[tuple] = None   # (installed, mode) the mode choice was last set for
         layout = QVBoxLayout(self)
         layout.addWidget(_label(ui_text("runtime.mode.intro")))
         self.lbl_mode = _label()
@@ -209,7 +210,9 @@ class RuntimeModeBox(QGroupBox):
         self.lbl_mode.setText(text)
         self.installed = bool(image) or build is not None
         self.mode = mode if self.installed else None
-        self.cb_mode.setCurrentIndex(max(0, self.cb_mode.findData(mode if self.installed else "auto")))
+        if self._shown != (self.installed, self.mode):   # the person's choice stays until the installation changes
+            self._shown = (self.installed, self.mode)
+            self.cb_mode.setCurrentIndex(max(0, self.cb_mode.findData(mode if self.installed else "auto")))
         self._update_button()
         self.btn_switch.setEnabled(self._token is None)
 
