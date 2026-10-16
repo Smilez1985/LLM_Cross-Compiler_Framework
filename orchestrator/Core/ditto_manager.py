@@ -373,15 +373,17 @@ def proposal_facts(definition: Union["ModuleDefinition", Dict[str, Any]]) -> str
     return "\n".join(lines)
 
 
-def ai_module_description(name: str, assumptions: Sequence[Any]) -> str:
+def ai_module_description(name: str, assumptions: Sequence[Any], lead: str = "") -> str:
     """The description of a target module made from Ditto's proposal (`llm-cli module generate-ai` and the module
     wizard alike): untested is a fact to state, not a reason to refuse, so it says so, with the values Ditto guessed
-    (brackets removed: target.yml must not look like a template placeholder)."""
+    (brackets removed: target.yml must not look like a template placeholder). `lead`: the person's own words for the
+    module (the module wizard's Description field), kept in front of that note."""
     cleaned = [re.sub(r"[\[\]{}]", "", str(a)).strip() for a in assumptions or [] if str(a).strip()]
     description = f"AI-generated target for {name}, untested on real hardware"
     if cleaned:
         description += ". Assumptions: " + "; ".join(cleaned)[:1500]
-    return description
+    lead = " ".join(str(lead or "").split()).rstrip(".")
+    return f"{lead}. {description}" if lead else description
 
 
 def provider_problem(catalog: Any, provider: Optional[str]) -> Optional[str]:
@@ -423,6 +425,11 @@ class RunSettings:
         if key in self._overrides:
             return self._overrides[key]
         return self._base.get(key, default) if self._base is not None else default
+
+    def set(self, key: str, value: Any, source_type: str = "run") -> bool:
+        """A value set during the run stays in the run: the saved settings are never changed through it."""
+        self._overrides[key] = value
+        return True
 
     @property
     def config_values(self) -> Dict[str, Any]:
@@ -913,14 +920,15 @@ class DittoCoder:
 
     def save_module(self, definition: Union[ModuleDefinition, Dict[str, Any]], targets_dir: Path,
                     module_name: Optional[str] = None, profile=None, knowledge_roots=None,
-                    generator: Any = None) -> Path:
+                    generator: Any = None, description: str = "") -> Path:
         """Creates the module through the module generator (which validates every value again). `profile` is the
         parsed hardware probe of the target, when the probe file was one: the runtime: block of the module is the
         build recipe's plan from it. The proposal's cpu_flags and cmake_flags are kept there as advisory text and
         never applied (decision D20). A proposal never opts in to a prebuilt nvidia/cuda image (decision D6). The one
         save of an AI-made module (`llm-cli module generate-ai` and the module wizard); knowledge_roots: the pages
         crawled for this target that the person chose to attach (the wizard's opt-in); generator: the module
-        generator class the caller uses (default ModuleGenerator)."""
+        generator class the caller uses (default ModuleGenerator); description: the person's own words for the
+        module (the wizard's Description field), kept in front of the framework's untested note."""
         data = definition.model_dump() if isinstance(definition, BaseModel) else dict(definition)
         if PREBUILT_CUDA_IMAGE.search(str(data.get("base_os") or "")):
             raise ValueError(f"base_os: {PREBUILT_CUDA_REFUSAL}")
@@ -932,8 +940,8 @@ class DittoCoder:
             raise ValueError(f"base_os: '{base}' is not a Docker Official Image, so base_image_reason is required "
                              "(why this image); or use an official image with the vendor's package_sources.")
         from orchestrator.Core.module_generator import generator_input
-        return (generator or ModuleGenerator)(Path(targets_dir)).generate_module(generator_input(data, module_name),
-                                                                                self.framework,
+        data = generator_input(data, module_name, description=description)
+        return (generator or ModuleGenerator)(Path(targets_dir)).generate_module(data, self.framework,
                                                                                 knowledge_roots=knowledge_roots,
                                                                                 profile=profile)
 

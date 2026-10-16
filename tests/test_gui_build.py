@@ -112,7 +112,8 @@ def test_the_build_menu_follows_file_and_settings_sits_above_exit(window):
     for command in ("targets list", "targets validate", "module create", "module generate-ai --provider",
                     "module generate-ai --model", "build start --format", "build start --optimization",
                     "build start --priority", "build status", "build status --all", "config show", "config repos",
-                    "config repos --add", "config repos --remove", "config output-folder"):
+                    "config repos --add", "config repos --remove", "config output-folder", "build save",
+                    "build save --to"):
         assert command in CLI_PATHS, command
 
 
@@ -257,6 +258,30 @@ def test_a_target_without_capabilities_offers_every_format_and_says_so(builder):
     assert builder.lbl_no_caps.isHidden()
     assert [builder.format_combo.itemData(i) for i in range(builder.format_combo.count())] == ["gguf", "rkllm",
                                                                                              "rknn"]
+
+
+def test_an_invalid_capabilities_block_is_named_invalid_not_undeclared(builder):
+    """Review: a capabilities block that fails the schema counts as none on the build path (every format, nothing
+    checked), but the target does declare one: the note says it is invalid and that Check target names each error,
+    instead of claiming that no capabilities are declared."""
+    from orchestrator.gui.builder_tab import UNCHECKED_FORMATS
+    from test_review_capabilities_paths import select
+    tm = builder.framework.get_component("target_manager")
+    caps = yaml.safe_load(ROCKCHIP_YML.read_text(encoding="utf-8"))["capabilities"]
+    caps["default_board"] = "rk9999"
+    folder = Path(tm.targets_dir) / "Broken"
+    folder.mkdir()
+    (folder / "target.yml").write_text(yaml.safe_dump({"metadata": {"name": "Broken"}, "capabilities": caps}),
+                                       encoding="utf-8")
+    tm.initialize()
+    builder._refresh_targets()
+    select(builder.target_combo, "Broken")
+    text = builder.lbl_no_caps.text()
+    assert not builder.lbl_no_caps.isHidden()
+    assert "invalid" in text and "Check target" in text and "declares no capabilities" not in text
+    assert builder.format_combo.count() == len(UNCHECKED_FORMATS), "what the CLI allows for it"
+    select(builder.target_combo, "MyJetson")
+    assert "declares no capabilities" in builder.lbl_no_caps.text()
 
 
 def test_onnx_on_a_target_without_capabilities_is_submitted_as_the_cli_does(builder):
@@ -530,6 +555,66 @@ def test_the_description_field_is_written_and_defaults_like_the_cli(wizard):
     wizard.accept()
     assert wizard.generated[-1][0]["description"] == "NPU board in the lab"
     assert wizard.gui_form.field("description") is not None, "the GUI tools read what the person entered"
+
+
+def test_the_description_placeholder_shows_the_value_written_in_both_languages():
+    """Review: the German placeholder promised "Target für <name>", but an empty field writes the CLI's default
+    "Target for <name>" into target.yml (that text is not translated)."""
+    from orchestrator.utils.localization import ui_text
+    for lang in ("en", "de"):
+        assert ui_text("bld.wizard.description_hint", lang, name="X") == "Target for X", lang
+
+
+def test_the_person_s_description_is_kept_when_an_ai_filled_other_fields(wizard):
+    """Review: an AI filled a field through the GUI tools, so the module is AI-made and its description says it is
+    untested; the description the person typed was dropped silently. It now leads, the framework's note follows."""
+    wizard.name_edit.setText("Board_D")
+    wizard.desc_edit.setText("NPU board in the lab")
+    assert wizard.gui_form.fill({"packages": "build-essential cmake"}).filled == ["packages"]
+    wizard.accept()
+    data = wizard.generated[-1][0]
+    assert data["provenance"] == "ai-generated"
+    assert data["description"].startswith("NPU board in the lab. ")
+    assert "AI-generated target for Board_D, untested on real hardware" in data["description"]
+
+
+def test_the_person_s_description_is_kept_on_the_save_module_path(wizard):
+    """The same when an AI chose the base image (the module is saved through DittoManager.save_module)."""
+    wizard.name_edit.setText("Board_E")
+    wizard.desc_edit.setText("NPU board in the lab.")
+    assert wizard.gui_form.fill({"base_image": f"debian:bookworm-slim@{DIGEST}"}).filled == ["base_image"]
+    wizard.accept()
+    data = wizard.generated[-1][0]
+    assert data["provenance"] == "ai-generated" and data["base_os"] == f"debian:bookworm-slim@{DIGEST}"
+    assert data["description"].startswith("NPU board in the lab. AI-generated target for Board_E, untested")
+
+
+def test_an_ai_cannot_fill_the_description(wizard):
+    """The framework writes the description of a module an AI helps with; a description an AI filled in was
+    replaced without a word. The field is the person's: the GUI tools read it, and a fill is refused with why."""
+    wizard.name_edit.setText("Board_F")
+    outcome = wizard.gui_form.fill({"description": "Best board ever"})
+    assert outcome.filled == [] and outcome.refused and outcome.refused[0][0] == "description"
+    assert wizard.desc_edit.text() == ""
+    assert wizard.gui_form.field("description").get() == ""
+
+
+def test_a_standard_import_after_dittos_proposal_keeps_none_of_dittos_values(wizard, tmp_path, monkeypatch):
+    """Review: the rule-based import of a probe replaced Ditto's proposal (the module was then saved as the person's,
+    unmarked and not audited), but Ditto's packages, quantization logic and setup commands stayed in their fields
+    and were written into that module. The import now replaces them too."""
+    from orchestrator.gui import wizards
+    wizard.on_ai_finished({**MODULE, "packages": ["libfoo-dev"], "setup_commands": "export SDK=/opt/vendor",
+                           "quantization_logic": "q4) QTYPE=Q4_0 ;;"})
+    probe = tmp_path / "probe.txt"
+    probe.write_text("Architecture=aarch64\n", encoding="utf-8")
+    monkeypatch.setattr(wizards.QFileDialog, "getOpenFileName", lambda *a, **k: (str(probe), ""))
+    wizard.run_standard_import()
+    wizard.accept()
+    data = wizard.generated[-1][0]
+    assert "libfoo-dev" not in data["packages"] and data["setup_commands"] == "" and data["quantization_logic"] == ""
+    assert data.get("provenance") != "ai-generated" and "untested" not in data["description"]
+    assert data["packages"][:4] == wizards.DEFAULT_PACKAGES.split()
 
 
 def test_dittos_proposal_is_saved_through_save_module_and_audited(wizard, tmp_path, monkeypatch):
