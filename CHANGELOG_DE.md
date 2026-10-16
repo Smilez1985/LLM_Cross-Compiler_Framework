@@ -1611,10 +1611,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   oder die ersten eigenen Berechtigungen eines Tokens verloren**: `llm-cli tools permissions --caller ditto|mcp` für
   einen Aufrufer, der schon eigene Berechtigungen hatte, baute dessen Abschnitt ohne diese Liste neu; ein Token, das
   als Kopie der Berechtigungen Dittos oder der lokalen MCP-Clients entstand (`llm-cli mcp token add --policy-from`
-  oder Add... in der GUI), bekam keine; und ein neues Token, das der gemeinsamen Liste folgt, verlor sie bei seinem
-  ersten `tools permissions --token NAME` (oder Permissions... in der GUI), das mit einer leeren Liste begann. Jedes
-  Mal konnten die Fragen zu diesen Tools wieder im eigenen Dialog des KI-Clients landen. Die Berechtigungen, die für
-  einen Aufrufer gezeigt und kopiert werden, tragen jetzt die Liste, die für ihn gilt (`ToolRegistry.policy`).
+  oder Hinzufügen... in der GUI), bekam keine; und ein neues Token, das der gemeinsamen Liste folgt, verlor sie bei
+  seinem ersten `tools permissions --token NAME` (oder Berechtigungen... in der GUI), das mit einer leeren Liste
+  begann. Jedes Mal konnten die Fragen zu diesen Tools wieder im eigenen Dialog des KI-Clients landen. Die
+  Berechtigungen, die für einen Aufrufer gezeigt und kopiert werden, tragen jetzt die Liste, die für ihn gilt
+  (`ToolRegistry.policy`).
+- **Die Token-Liste spricht die Sprache des Fensters, und „Server starten“ sagt, warum es nicht geht**: der Abschnitt
+  „MCP-Tokens (eines je Client)“ in Security > Verbindungen zu KI-Apps (MCP)... und in Tools > Tool Permissions (Ditto
+  / MCP)... war nur englisch (Überschrift, Hinweis, Spalten, Schaltflächen, die Fragen beim Hinzufügen und Rotieren);
+  er ist jetzt englisch und deutsch, und Rotieren sowie die Frage zu einem verknüpften Token kommen als reiner Text mit
+  „Nein“ als Vorwahl. Ein Installationspfad, den PYTHONPATH nicht aufnehmen kann, ließ „Server starten“ ohne jede
+  Meldung scheitern; jetzt sagt das Fenster den Grund, und nichts wird gestartet.
 - **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
   seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
   (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein

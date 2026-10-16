@@ -64,6 +64,33 @@ TEXTS = {
         "tmcp.token.revoked.grants_failed": "Token '{name}' and its permissions are deleted. Its standing approvals "
                                             "could not be removed ({reason}); they no longer apply.",
         "tmcp.token.title": "MCP tokens",
+        # the token list itself (in Tool Permissions and in AI App Connections)
+        "tmcp.tokens.box": "MCP tokens (one per client)",
+        "tmcp.tokens.note": "Each client that connects over HTTP, or over stdio with LCF_MCP_TOKEN, gets its own "
+                            "token: its name is the caller in the audit log (mcp:<name>), and it has its own "
+                            "permissions. A new token can only read until you allow more. A token is shown once; "
+                            "revoking or rotating it ends its client's access at once, also its open connections.",
+        "tmcp.tokens.col.name": "Name",
+        "tmcp.tokens.col.actor": "Audit actor",
+        "tmcp.tokens.col.permissions": "Permissions",
+        "tmcp.tokens.col.created": "Created",
+        "tmcp.tokens.col.rotated": "Rotated",
+        "tmcp.tokens.add": "Add...",
+        "tmcp.tokens.rotate": "Rotate",
+        "tmcp.tokens.revoke": "Revoke",
+        "tmcp.tokens.permissions": "Permissions...",
+        "tmcp.tokens.unusable": "Token store unusable: {reason}",
+        "tmcp.tokens.linked_to": "linked to {link}",
+        "tmcp.tokens.add.title": "MCP token",
+        "tmcp.tokens.add.name": "Name of the client (lower-case letters, digits and hyphens, e.g. claude-desktop):",
+        "tmcp.tokens.add.start": "Its permissions start as:",
+        "tmcp.tokens.start.read": "Read only (recommended for a new client)",
+        "tmcp.tokens.start.mcp": "A copy of the local stdio clients' permissions",
+        "tmcp.tokens.start.ditto": "A copy of Ditto's permissions",
+        "tmcp.tokens.start.link": "Ditto's permissions by reference (a change to Ditto's applies at once)",
+        "tmcp.tokens.rotate.question": "Replace the token '{name}'? The old one stops working at once; its permissions "
+                                       "stay.",
+        "tmcp.tokens.link.question": "The token '{name}' uses {link}'s permissions. Give it its own instead?",
         "tmcp.audit_problem": "Done, but the audit log could not record it: {reason}",
 
         # Tools > Folders the AI May Use... > Add folder...
@@ -259,6 +286,34 @@ TEXTS = {
         "tmcp.token.revoked.grants_failed": "Token „{name}“ und seine Berechtigungen sind gelöscht. Seine dauerhaften "
                                             "Freigaben ließen sich nicht entfernen ({reason}); sie gelten nicht mehr.",
         "tmcp.token.title": "MCP-Tokens",
+        "tmcp.tokens.box": "MCP-Tokens (eines je Client)",
+        "tmcp.tokens.note": "Jeder Client, der sich über HTTP verbindet oder über stdio mit LCF_MCP_TOKEN, bekommt sein "
+                            "eigenes Token: sein Name ist der Aufrufer im Prüfprotokoll (mcp:<name>), und es hat "
+                            "eigene Berechtigungen. Ein neues Token darf nur lesen, bis du mehr erlaubst. Ein Token "
+                            "wird einmal gezeigt; Widerrufen oder Rotieren beendet den Zugang seines Clients sofort, "
+                            "auch seine offenen Verbindungen.",
+        "tmcp.tokens.col.name": "Name",
+        "tmcp.tokens.col.actor": "Akteur im Prüfprotokoll",
+        "tmcp.tokens.col.permissions": "Berechtigungen",
+        "tmcp.tokens.col.created": "Angelegt",
+        "tmcp.tokens.col.rotated": "Rotiert",
+        "tmcp.tokens.add": "Hinzufügen...",
+        "tmcp.tokens.rotate": "Rotieren",
+        "tmcp.tokens.revoke": "Widerrufen",
+        "tmcp.tokens.permissions": "Berechtigungen...",
+        "tmcp.tokens.unusable": "Token-Speicher nicht nutzbar: {reason}",
+        "tmcp.tokens.linked_to": "verknüpft mit {link}",
+        "tmcp.tokens.add.title": "MCP-Token",
+        "tmcp.tokens.add.name": "Name des Clients (Kleinbuchstaben, Ziffern und Bindestriche, z. B. claude-desktop):",
+        "tmcp.tokens.add.start": "Seine Berechtigungen beginnen als:",
+        "tmcp.tokens.start.read": "Nur lesen (empfohlen für einen neuen Client)",
+        "tmcp.tokens.start.mcp": "Eine Kopie der Berechtigungen der lokalen stdio-Clients",
+        "tmcp.tokens.start.ditto": "Eine Kopie der Berechtigungen Dittos",
+        "tmcp.tokens.start.link": "Dittos Berechtigungen per Verweis (eine Änderung an Dittos gilt sofort)",
+        "tmcp.tokens.rotate.question": "Das Token „{name}“ ersetzen? Das alte wirkt sofort nicht mehr; seine "
+                                       "Berechtigungen bleiben.",
+        "tmcp.tokens.link.question": "Das Token „{name}“ nutzt die Berechtigungen von {link}. Ihm stattdessen eigene "
+                                     "geben?",
         "tmcp.audit_problem": "Erledigt, aber das Prüfprotokoll konnte es nicht festhalten: {reason}",
 
         "tmcp.folders.kind.title": "Art",

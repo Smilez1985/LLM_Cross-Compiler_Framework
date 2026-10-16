@@ -628,6 +628,56 @@ class TestMcpConnections:
         assert dialog.add_token("laptop") and dialog.token_table.item(0, 0).text() == "laptop"
         assert dialog.revoke_token("laptop") and dialog.registry.tokens.get("laptop") is None
 
+    # --- review of wave 5 -------------------------------------------------------------------------------------------
+
+    def test_an_installation_path_the_server_cannot_use_is_said_not_raised(self, window_of, monkeypatch):
+        """launch_command refuses an installation path that PYTHONPATH cannot hold; Start server let that ValueError
+        escape the click, so nothing was shown and nothing started."""
+        dialog = window_of()
+        dialog.registry.tokens.add("laptop")
+        dialog.server.app_root = Path("relative-folder")
+        boxes = Boxes(monkeypatch)
+        assert dialog.start_server() is False
+        assert "cannot be put on PYTHONPATH" in boxes.texts() and dialog.server.process is None
+        assert dialog.btn_start.isEnabled() and dialog.server.state == "off"
+
+    def test_the_token_list_speaks_the_windows_language(self, window_of, monkeypatch):
+        """The token list in the new window (and in Tool Permissions) was English only."""
+        german = window_of(lang="de")
+        german.registry.tokens.add("helper", link="ditto")
+        german.refresh_tokens()
+        assert {key: button.text() for key, button in german.token_buttons.items()} == {
+            "add": "Hinzufügen...", "rotate": "Rotieren", "revoke": "Widerrufen", "reset": "Zurück auf nur lesen...",
+            "permissions": "Berechtigungen..."}
+        assert german.token_table.horizontalHeaderItem(1).text() == "Akteur im Prüfprotokoll"
+        assert german.token_table.item(0, 2).text() == "verknüpft mit ditto"
+        assert german.start_choices()[0] == ("read", "Nur lesen (empfohlen für einen neuen Client)")
+        english = window_of(lang="en")
+        assert [english.token_buttons[k].text() for k in ("add", "rotate", "revoke", "permissions")] == [
+            "Add...", "Rotate", "Revoke", "Permissions..."]
+        assert english.start_choices()[0] == ("read", "Read only (recommended for a new client)")
+        # An unusable token store is said in the list, and its line is never taken for a token.
+        monkeypatch.setattr(german.registry.tokens, "list", lambda: (_ for _ in ()).throw(OSError("unreadable")))
+        german.refresh_tokens()
+        german.token_table.selectRow(0)
+        assert german.token_table.item(0, 0).text().startswith("Token-Speicher nicht nutzbar: unreadable")
+        assert german._selected_token() is None
+
+    def test_rotate_asks_in_plain_words_with_no_as_the_default(self, window_of, monkeypatch):
+        dialog = window_of(lang="de")
+        shown = []
+        monkeypatch.setattr(dialog, "_show_token", lambda name, token: shown.append(token))
+        dialog.registry.tokens.add("laptop")
+        dialog.refresh_tokens()
+        dialog.token_table.selectRow(0)
+        boxes = Boxes(monkeypatch, answer="no")
+        dialog.token_buttons["rotate"].click()
+        question = boxes.questions()[0]
+        assert question.default_is_no and "„laptop“ ersetzen" in question.text and not shown
+        boxes.answer = "yes"
+        dialog.token_buttons["rotate"].click()
+        assert len(shown) == 1 and dialog.registry.tokens.find(shown[0]).name == "laptop"
+
 
 # --- texts --------------------------------------------------------------------------------------------------------
 
