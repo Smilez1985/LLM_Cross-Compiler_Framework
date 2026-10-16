@@ -1,0 +1,106 @@
+{
+  "about": "Canonical licence texts, unchanged, from the SPDX License List data (text/<SPDX id>.txt). That data is under CC0-1.0. Never edit a text: replace it from another pinned version and record its sha256 here and in tests/test_licence_texts.py.",
+  "project": "https://github.com/spdx/license-list-data",
+  "data_licence": "CC0-1.0",
+  "licence_list_version": "3.29.0",
+  "tag": "v3.29.0",
+  "release_date": "2026-09-16",
+  "texts": {
+    "Apache-2.0": {
+      "file": "Apache-2.0.txt",
+      "name": "Apache License 2.0",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/Apache-2.0.txt"
+    },
+    "BSD-2-Clause": {
+      "file": "BSD-2-Clause.txt",
+      "name": "BSD 2-Clause \"Simplified\" License",
+      "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/BSD-2-Clause.txt"
+    },
+    "BSD-3-Clause": {
+      "file": "BSD-3-Clause.txt",
+      "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+      "sha256": "5a93d5831e1297ab10fe643e1a631e83be392896da14ee2951285a79012df69d",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/BSD-3-Clause.txt"
+    },
+    "CC-BY-1.0": {
+      "file": "CC-BY-1.0.txt",
+      "name": "Creative Commons Attribution 1.0 Generic",
+      "sha256": "1e4d54d3d9badc97d8bb32861cb3a449903129d02ab4482e142c85afe132b8a3",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-1.0.txt"
+    },
+    "CC-BY-2.0": {
+      "file": "CC-BY-2.0.txt",
+      "name": "Creative Commons Attribution 2.0 Generic",
+      "sha256": "f892996eb4b6f2e54241432ed67b743772224e191ba3a0ae595eb4feca3df4c5",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-2.0.txt"
+    },
+    "CC-BY-2.5": {
+      "file": "CC-BY-2.5.txt",
+      "name": "Creative Commons Attribution 2.5 Generic",
+      "sha256": "82d2eddedf451177a12c9753e518352f7f90fd4ca3542111c499be981e9a9600",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-2.5.txt"
+    },
+    "CC-BY-3.0": {
+      "file": "CC-BY-3.0.txt",
+      "name": "Creative Commons Attribution 3.0 Unported",
+      "sha256": "e6bc9e9c474700b708f568bac9e5a8a9bcb2b1dad53442f5ba449fcb848b8e76",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-3.0.txt"
+    },
+    "CC-BY-4.0": {
+      "file": "CC-BY-4.0.txt",
+      "name": "Creative Commons Attribution 4.0 International",
+      "sha256": "d557539df68e771cc1eedcc91d13f70fca930e508d11eedcafa4b15db49e3744",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-4.0.txt"
+    },
+    "CC-BY-SA-1.0": {
+      "file": "CC-BY-SA-1.0.txt",
+      "name": "Creative Commons Attribution Share Alike 1.0 Generic",
+      "sha256": "826ab33293d21891d7119d6d3bc658c0ac25a756df77bb733be910503e753154",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-SA-1.0.txt"
+    },
+    "CC-BY-SA-2.0": {
+      "file": "CC-BY-SA-2.0.txt",
+      "name": "Creative Commons Attribution Share Alike 2.0 Generic",
+      "sha256": "6d6b3bb586e5f4ae7e6a955556442fbfcc2a6cedb89be5e4e0492b2983e40760",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-SA-2.0.txt"
+    },
+    "CC-BY-SA-2.5": {
+      "file": "CC-BY-SA-2.5.txt",
+      "name": "Creative Commons Attribution Share Alike 2.5 Generic",
+      "sha256": "dbe7fadf81c75e0cb15a0cb338a6f42a7b34dced43958a4921ca056ca1b87a93",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-SA-2.5.txt"
+    },
+    "CC-BY-SA-3.0": {
+      "file": "CC-BY-SA-3.0.txt",
+      "name": "Creative Commons Attribution Share Alike 3.0 Unported",
+      "sha256": "3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-SA-3.0.txt"
+    },
+    "CC-BY-SA-4.0": {
+      "file": "CC-BY-SA-4.0.txt",
+      "name": "Creative Commons Attribution Share Alike 4.0 International",
+      "sha256": "cde7883b9050a1104f4ac19a1572aafd6e5d7323b68351aaf51fbf4beba54966",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/CC-BY-SA-4.0.txt"
+    },
+    "ISC": {
+      "file": "ISC.txt",
+      "name": "ISC License",
+      "sha256": "521c6f0ed8e64736684f89843d16a4df6b4b7449acbcfc6ca6630a3037ca8c53",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/ISC.txt"
+    },
+    "MIT": {
+      "file": "MIT.txt",
+      "name": "MIT License",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/MIT.txt"
+    },
+    "MPL-2.0": {
+      "file": "MPL-2.0.txt",
+      "name": "Mozilla Public License 2.0",
+      "sha256": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/MPL-2.0.txt"
+    }
+  }
+}

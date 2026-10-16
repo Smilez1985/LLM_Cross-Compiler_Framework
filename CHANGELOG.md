@@ -1233,15 +1233,26 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   still shows the list of the framework's build images. The tool `run_doctor` stays callable but is no longer listed; a
   setting for `run_doctor` or `run_mojo_oracle` applies to both, and the stricter one wins. `make mojo` next to
   `make doctor`.
-- **Knowledge packs carry a page's full text only where its licence allows it** (eighth round, Q-1 and Q-1'): a
-  knowledge pack and the knowledge snapshot the module wizard attaches to a target keep the full text of a page only
-  under a licence that allows passing it on (CC0, public domain, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD,
-  Unlicense, MPL-2.0), with the attribution it requires (title, address, copyright notice, licence, the changes made).
-  A page with a copyright notice and no such licence, code without a licence, an NC, ND or copyleft licence, an
-  unrecognised licence and a page without any go in as their address and short facts (title, section names,
-  technical terms); the recipient crawls them under their own checks. Before, every page went in with its full text.
-  The export summary lists every page with what it carries and why, a note counts both, and a target export applies
-  the rule to a snapshot made before it too. The one-time Deep Ingest notice says so, so it is shown once more.
+- **Knowledge packs carry a page's full text only where its licence allows it, with the licence texts it asks
+  for** (eighth round, Q-1 and Q-1'; W3 of 2026-10-16): a knowledge pack and the knowledge snapshot the module wizard
+  attaches to a target keep the full text of a page only under a licence that allows passing it on (CC0, public
+  domain, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), with the attribution it requires
+  (title, address, copyright notice, licence, the changes made). A page with a copyright notice and no such licence,
+  code without a licence, an NC, ND or copyleft licence, an unrecognised licence and a page without any go in as their
+  address and short facts (title, section names, technical terms); the recipient crawls them under their own checks.
+  Before, every page went in with its full text. Pages in full under a licence that asks for its text or permission
+  notice (MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA) come with that licence's text in `LICENSES/<SPDX
+  id>.txt` and a `NOTICE` (in a target, in `knowledge/`). The texts ship unchanged from the SPDX License List 3.29.0
+  (data under CC0) in `orchestrator/data/licenses/`, each checked by its sha256; the privacy scrub never changes them.
+  `NOTICE` lists every page with its source address, its copyright line as found and its SPDX id; for MIT, BSD and
+  ISC the copyright line stands with the licence text (code from GitHub takes the line of its repository's licence
+  file), and for Apache-2.0 the notices of the work's `NOTICE` file follow when the crawl read it. A page whose
+  licence asks for its text and has no canonical text in the framework goes in as its address and short facts, and
+  says why (state `no_licence_text`). The install, `zoo verify` and the community repository's check refuse a pack
+  whose licence files do not match its pages; an installed pack keeps them. The export summary lists every page with
+  what it carries and why and names each licence text and why (CLI, GUI; `export_pack` gives licence ids, files and
+  page counts), a note counts both, and a target export applies the rule to a snapshot made before it too. The
+  one-time Deep Ingest notice says so, so it is shown once more.
 
 ### Deprecated
 - `--password VALUE` on `deploy run`, `scan --device` and `device runtime deploy`: every user sees the value in the

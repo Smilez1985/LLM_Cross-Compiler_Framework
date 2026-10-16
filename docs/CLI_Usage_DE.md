@@ -2020,11 +2020,13 @@ llm-cli zoo verify [PACK_FILE]
 ```
 
 Ohne Argument prüft es jedes installierte Community-Paket gegen den zwischengespeicherten Index, ohne etwas
-herunterzuladen: zurückgezogen oder seit der Installation verändert. Es gibt eine Zeile pro Paket aus (✔, oder ✘ mit
+herunterzuladen: zurückgezogen, seit der Installation verändert oder Lizenzdateien, die nicht zu seinen Seiten
+passen. Es gibt eine Zeile pro Paket aus (✔, oder ✘ mit
 dem Grund) oder „No community packs installed.“. Exit-Code 1, wenn ein Paket ein Problem hat, sonst 0.
 
 Mit `PACK_FILE` prüft es eine Paketdatei, ohne sie zu installieren: Format, Dateiliste und Prüfsummen, die Prüfungen
-ihrer Art, eine enthaltene Autorensignatur und dass die Datenschutz-Bereinigung nichts darin ändern würde. Es gibt
+ihrer Art (bei Wissen und beim Wissens-Snapshot eines Targets auch seine Lizenztexte und die `NOTICE`), eine
+enthaltene Autorensignatur und dass die Datenschutz-Bereinigung nichts darin ändern würde. Es gibt
 „acceptable“ oder jedes Problem aus (Exit-Code 1). Diese Form funktioniert ohne Schlüsselbund; die CI des
 Community-Repositorys führt sie für jedes eingereichte Paket aus.
 
@@ -2075,7 +2077,11 @@ Was in das Paket kommt:
   Lizenz die Weitergabe erlaubt, mit der Namensnennung, die die Lizenz verlangt; jede andere Seite kommt als ihre
   Adresse mit kurzen Fakten hinein (Titel, Abschnittsnamen, Fachbegriffe). Die Zusammenfassung führt jede Seite auf,
   mit dem, was das Paket von ihr enthält, und warum, und ein Hinweis zählt beides
-  ([knowledge sources](#knowledge-sources) zeigt dasselbe vor dem Export).
+  ([knowledge sources](#knowledge-sources) zeigt dasselbe vor dem Export). Seiten mit vollem Text unter einer Lizenz,
+  die ihren Text oder Erlaubnishinweis verlangt (MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA), bekommen den
+  kanonischen Text in `LICENSES/<SPDX-ID>.txt` und eine `NOTICE`, die jede Seite mit Quelladresse, Copyright-Zeile und
+  Lizenz aufführt; die Zusammenfassung nennt jeden Lizenztext und warum. Der Wissens-Snapshot eines Targets bekommt
+  dasselbe in `knowledge/`.
 
 Die Datei heißt `contribution-<Art>-<ID>-<Version>.zip`, verschlüsselt `<Art>-<ID>-<Version>.lcfpack`. Deine
 Schlüssel werden beim ersten Mal im Secrets-Speicher angelegt (siehe [zoo keys](#zoo-keys)). Der Empfänger eines

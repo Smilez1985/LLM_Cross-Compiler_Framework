@@ -476,7 +476,9 @@ repository is configured" and leaves the pack in `community/contributions/`. Unt
 can be shared as a file (`llm-cli zoo install --file <pack>` installs it with trust `local`).
 
 Knowledge packs keep the source address of every page and claim no licence for the pages (`NOASSERTION`); the pages
-stay under their owners' terms. A target that should ship with the framework (support level `official`) is still
+stay under their owners' terms. Pages carried in full under a licence that asks for its text (MIT, BSD, ISC,
+Apache-2.0, MPL-2.0, CC BY, CC BY-SA) come with the canonical licence text in `LICENSES/` and a `NOTICE`; the check
+(`llm-cli zoo verify <file>`) refuses a pack whose licence files do not match its pages. A target that should ship with the framework (support level `official`) is still
 contributed with a normal pull request to this repository.
 
 ### Maintaining the community repository

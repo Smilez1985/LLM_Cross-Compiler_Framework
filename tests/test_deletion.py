@@ -118,6 +118,8 @@ DELETION_SITES = {
     ("orchestrator/Core/builder.py", "BuildEngine.cleanup_build"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.discard"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.export_pack"): STAGING,
+    # the export's staged copy of a target: its licence files are made anew there, the target folder is never touched
+    ("orchestrator/Core/community_manager.py", "CommunityManager._share_snapshot"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.finish_install"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.prepare_install"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.prepare_install_file"): STAGING,

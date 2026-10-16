@@ -10,10 +10,12 @@ Enthält Templates für Dockerfile, target.yml und build.sh.
 
 The generated target.yml carries a capabilities block (support level community) and no template placeholder.
 A knowledge snapshot is attached only on request and holds only the pages crawled for this target, as the licences
-allow (full text only where a page's licence allows passing it on, otherwise its address and short facts).
+allow (full text only where a page's licence allows passing it on, otherwise its address and short facts), with the
+licence texts and the NOTICE its pages need next to it (knowledge/LICENSES/, knowledge/NOTICE; rag/pack_licences.py).
 validate_target_folder checks a target folder from anywhere (generated, exported or a community pack).
 """
 
+import json
 import os
 import re
 import shutil
@@ -73,6 +75,13 @@ TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_F
     r"|PINNED_DOWNLOADS_COPY)\]|\{packages_str\}|YYYY-MM-DD")
 GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
 KNOWLEDGE_SNAPSHOT = "knowledge/initial_knowledge.json"  # crawled pages: data, not template output
+# The licence texts and the NOTICE next to the snapshot (rag/pack_licences.py): data from the web and from SPDX too.
+SNAPSHOT_LICENCE_FILES = ("knowledge/NOTICE", "knowledge/LICENSES/")
+
+
+def crawled_data(rel: str) -> bool:
+    """A file of a target folder that holds crawled pages or their licence files (data, not template output)."""
+    return rel == KNOWLEDGE_SNAPSHOT or rel == SNAPSHOT_LICENCE_FILES[0] or rel.startswith(SNAPSHOT_LICENCE_FILES[1])
 KNOWLEDGE_README = """# Knowledge snapshot of {slug}
 
 `initial_knowledge.json` holds the pages that Deep Ingest crawled for this target in the module wizard, after the
@@ -82,6 +91,12 @@ page shows, and how it is shared (`shared_as`, `share_reason`): a page whose lic
 its text in sections, with the attribution its licence requires; every other page (a copyright notice and no such
 licence, code without a licence, an unknown licence) keeps only its address and short facts. The pages keep their
 owners' terms, and the target's licence does not cover them.
+
+When pages are kept in full under a licence that asks for its text or permission notice (MIT, BSD, ISC, Apache-2.0,
+MPL-2.0, CC BY, CC BY-SA), `LICENSES/` holds the canonical text of each such licence, unchanged from the SPDX License
+List, and `NOTICE` lists every page with its source address, its copyright line as found and its licence (for
+Apache-2.0 also the notices of the work's NOTICE file, when the crawl read it). An export of the target makes both
+anew from the snapshot.
 
 The framework does not read this file: nothing imports it into a knowledge base, and there is no command for
 that. To share knowledge so that it reaches other users' knowledge bases, export your knowledge base as a
@@ -481,8 +496,8 @@ def _yaml_strings(value) -> Iterable[str]:
 def _leftover_placeholders(root: Path) -> List[str]:
     found = []
     for path in sorted(p for p in Path(root).rglob("*") if p.is_file() and not p.is_symlink()):
-        if path.relative_to(root).as_posix() == KNOWLEDGE_SNAPSHOT:
-            continue  # a crawled page may well write "YYYY-MM-DD"
+        if crawled_data(path.relative_to(root).as_posix()):
+            continue  # a crawled page, or a NOTICE quoting one, may well write "YYYY-MM-DD"
         text = path.read_text(encoding="utf-8", errors="replace")
         match = TEMPLATE_PLACEHOLDERS.search(text)
         if match is None and path.name == "target.yml":
@@ -727,6 +742,7 @@ class ModuleGenerator:
                 ensure_directory(dst.parent)
                 shutil.move(src, dst)
                 (dst.parent / "README.md").write_text(KNOWLEDGE_README.format(slug=module_slug), encoding="utf-8")
+                self._write_licence_files(dst)
                 self.logger.info(f"Attached the knowledge snapshot: {dst}")
             else:
                 self.logger.warning("No knowledge snapshot attached: no stored page comes from the crawled URLs, "
@@ -735,6 +751,20 @@ class ModuleGenerator:
         except Exception as e:
             self.logger.warning(f"Failed to create knowledge snapshot: {e}")
             # Non-fatal error, module creation should still succeed
+
+    def _write_licence_files(self, snapshot: Path) -> None:
+        """The licence texts and the NOTICE the snapshot's pages need, next to it (rag/pack_licences.py): pages kept in
+        full under a licence that asks for its text get it in knowledge/LICENSES/, and NOTICE lists every page."""
+        from orchestrator.rag import pack_licences
+        try:
+            entries = json.loads(snapshot.read_text(encoding="utf-8"))
+            files = pack_licences.write(snapshot.parent, [e for e in entries if isinstance(e, dict)]
+                                        if isinstance(entries, list) else [], prefix="knowledge/")
+        except (OSError, ValueError) as e:
+            self.logger.warning(f"The licence files of the knowledge snapshot were not written: {e}")
+            return
+        for note in files.notes():
+            self.logger.info(f"Knowledge snapshot: {note}")
 
     def _process_template(self, filename: str, target_dir: Path, data: Dict[str, Any], target_filename: str = None):
         """

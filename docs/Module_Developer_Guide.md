@@ -243,7 +243,10 @@ was attached. Nothing else from your knowledge base goes into the module, and wi
 the check box there is no `knowledge/` folder. `llm-cli module create` and `generate-ai` never attach knowledge.
 The framework does not import that file into a knowledge base, and the generator's placeholder check leaves it out
 (crawled pages may well contain text like `YYYY-MM-DD`). The pages remain under their owners' terms; the licence of
-a pack does not cover them.
+a pack does not cover them. Pages kept in full under a licence that asks for its text or permission notice (MIT, BSD,
+ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA) get the canonical licence text in `knowledge/LICENSES/<SPDX id>.txt` and a
+`knowledge/NOTICE` that lists every page with its source address, copyright line and licence; the placeholder check
+leaves these out too, and an export makes them anew from the snapshot.
 
 The result is a **skeleton**, not a working target yet:
 
@@ -707,7 +710,7 @@ and, for scripts, its line.
 | Shell deny-list | Every line of every `*.sh` file, comments included, unless the same line is in the template's file with the same path (for `modules/build.sh`: `targets/_template/modules/build.sh`). Refused: downloads (`curl`, `wget`, `aria2c`, and `fetch` as a word, which includes `git fetch`), deleting `/` (`rm -rf /`), `chmod 777`, `sudo`, `mkfs` and `dd if=`, the Docker socket or `docker run`, `eval`, `source` or `.` of a `$(...)` result, `sh -c "$(...)"`, and process substitution `<(...)` except as plain input (`done < <(grep ...)`). Downloads belong in the Dockerfile, pinned. |
 | Shell syntax | Every `*.sh` file passes `bash -n` (skipped where bash is not installed). |
 | Text only | No file contains a NUL byte: binary files are refused. On export every file must also be UTF-8 text. |
-| Placeholders | No file except the knowledge snapshot `knowledge/initial_knowledge.json` (crawled pages) contains a template placeholder (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` or `YYYY-MM-DD`), and no value in `target.yml` holds text in square brackets, such as `[Board Name 1]`. |
+| Placeholders | No file except the knowledge snapshot `knowledge/initial_knowledge.json` (crawled pages) and its licence files `knowledge/NOTICE` and `knowledge/LICENSES/` contains a template placeholder (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` or `YYYY-MM-DD`), and no value in `target.yml` holds text in square brackets, such as `[Board Name 1]`. |
 
 The pack format adds its own rules when a target is exported or installed:
 
