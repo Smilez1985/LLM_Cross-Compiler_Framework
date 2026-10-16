@@ -173,7 +173,8 @@ Eine KI nutzt Mojo über den MCP-Server (und Ditto über dieselben Tools):
   Es nimmt keinen Kontakt zu einem Board auf. Für ein Board, auf das ein aufgezeichneter Fakt zeigt, nennt
   `check_board` die Anfrage, die es prüft. `{"board": "Kitchen board"}` prüft dieses eine vertraute Board sofort:
   eine Verbindung zu seinem SSH-Port, keine Anmeldung. Eine KI nennt ein Board mit seiner Bezeichnung oder Geräte-ID
-  (`list_devices` zeigt beide), nie mit einer Adresse.
+  (`list_devices` zeigt beide), nie mit einer Adresse. Ein Board, dem du keinen eigenen Namen gegeben hast, hat seine
+  Adresse als Bezeichnung; eine KI nennt es mit seiner Geräte-ID, und `check_board` tut das auch.
 - **`run_mojo_miracle`** mit `{"code": "state.permissions"}`: repariert ein Problem, dessen `repair.how` `miracle`
   ist. Jeder Aufruf fragt zuerst dich; die Frage zeigt den Plan (den vollen Pfad nur im eigenen Fenster des
   Frameworks). Es gibt kein „nicht mehr fragen“ und keine Vollmacht dafür. Es löscht nie. Jedes andere Problem wird

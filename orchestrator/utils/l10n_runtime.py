@@ -55,6 +55,12 @@ TEXTS = {
         "runtime.mode.space.nothing_left": "{new} does not fit next to {old}, and nothing of {old} is left to delete. "
                                            "Nothing was built.\n\n{sizes}\n\nFree space on these disks and switch "
                                            "again.",
+        # the estimate once the old mode is deleted first (its build can then no longer be reused)
+        "runtime.mode.space.after": "With {old} deleted first:",
+        "runtime.mode.space.no_help": "{new} does not fit next to {old}, so nothing was built.\n\n{sizes}\n\nEven "
+                                      "with {old} deleted first, {new} would not fit:\n\n{after}\n\nSo deleting {old} "
+                                      "first is not offered: it would only leave Ditto without a local runtime. "
+                                      "Nothing was deleted. Free space on these disks and switch again.",
         "runtime.mode.space.declined": "Nothing was deleted and nothing was built. Free space and switch again.",
         "runtime.mode.space.removed": "{old} was deleted. {new} is made now; Ditto is unavailable until it works.",
         "runtime.mode.space.failed": "{new} could not be made: {reason}\n\nDitto has no local runtime now: {old} was "
@@ -114,6 +120,13 @@ TEXTS = {
         "runtime.mode.space.nothing_left": "Neben {old} ist kein Platz für {new}, und von {old} ist nichts mehr zu "
                                            "löschen. Nichts wurde gebaut.\n\n{sizes}\n\nSchaffe auf diesen "
                                            "Laufwerken Platz und wechsle noch einmal.",
+        # die Schätzung, wenn die alte Art zuerst gelöscht ist (ihr Build lässt sich dann nicht mehr nutzen)
+        "runtime.mode.space.after": "Wenn {old} zuerst gelöscht ist:",
+        "runtime.mode.space.no_help": "Neben {old} ist kein Platz für {new}, deshalb wurde nichts "
+                                      "gebaut.\n\n{sizes}\n\nAuch wenn {old} zuerst gelöscht wäre, hätte {new} keinen "
+                                      "Platz:\n\n{after}\n\nDeshalb wird das Löschen von {old} nicht angeboten: Ditto "
+                                      "stünde danach nur ohne lokale Laufzeit da. Nichts wurde gelöscht. Schaffe auf "
+                                      "diesen Laufwerken Platz und wechsle noch einmal.",
         "runtime.mode.space.declined": "Nichts wurde gelöscht und nichts gebaut. Schaffe Platz und wechsle noch "
                                        "einmal.",
         "runtime.mode.space.removed": "{old} wurde gelöscht. {new} wird jetzt erzeugt; Ditto ist bis dahin nicht "

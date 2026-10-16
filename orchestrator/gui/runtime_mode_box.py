@@ -201,7 +201,9 @@ class RuntimeModeBox(QGroupBox):
 
     def _space_shortage(self, shortage: Any) -> None:
         """W2: the new mode does not fit next to the old one, so nothing was built: the sizes, and the person may
-        delete the old mode first (its full list, one question, "No" by default); then the new mode is made."""
+        delete the old mode first (its full list, one question, "No" by default); then the new mode is made. Deleting
+        it first is offered only while the new mode may fit then (estimated again without the old mode's build);
+        otherwise the person is told so and asked nothing."""
         title = ui_text("runtime.mode.title")
         new, old, plan = shortage.estimate.mode, shortage.old_mode, shortage.old_plan
         names = {"new": ui_text(f"runtime.mode.what.{new}"), "old": ui_text(f"runtime.mode.what.{old}")}
@@ -209,6 +211,13 @@ class RuntimeModeBox(QGroupBox):
         if plan is None:
             plain_box(self, "warning", title, ui_text("runtime.mode.space.nothing_left", sizes=sizes, **names))
             return
+        after = shortage.after_removal
+        if shortage.removal_helps is False:
+            plain_box(self, "warning", title, ui_text("runtime.mode.space.no_help", sizes=sizes,
+                                                      after="\n".join(after.lines()), **names))
+            return
+        if after is not None:
+            sizes += "\n\n" + ui_text("runtime.mode.space.after", **names) + "\n" + "\n".join(after.lines())
         if not ask(self, title, ui_text("runtime.mode.space.question", sizes=sizes, n=len(plan.items),
                                         size=_size(plan.total_bytes), items=leftovers_text(plan), **names)):
             plain_box(self, "information", title, ui_text("runtime.mode.space.declined"))

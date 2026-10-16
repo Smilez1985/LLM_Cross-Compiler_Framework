@@ -532,17 +532,20 @@ class DeploymentManager:
     def deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, **options: Any) -> DeployResult:
         """Uploads the package and runs its deploy.sh on the device (_deploy_package says how), and records for Mojo
         what this contact with the board found (W1): a failure with an SSH reason code is kept with the trusted board
-        at this address, a successful deploy ends a recorded problem. Mojo reads that record instead of contacting the
-        board itself."""
+        at this address; a deploy that reached the board and logged in (it succeeded, or deploy.sh ran there and
+        failed) ends a recorded problem. Mojo reads that record instead of contacting the board itself."""
         result = self._deploy_package(package, host, user, port=port, **options)
         self._note_reach(host, port, result)
         return result
 
     def _note_reach(self, host: str, port: int, result: DeployResult) -> None:
         from orchestrator.runtime.device import reasons
-        code = result.code if result.code in reasons.REASONS else ("" if result.success else None)
+        # deploy.sh ran on the board and ended with its own exit status: the board was reached and logged in to (255 is
+        # also what the ssh command itself returns when it cannot connect, so it says nothing)
+        ran_there = result.exit_status is not None and result.exit_status != 255
+        code = result.code if result.code in reasons.REASONS else ("" if result.success or ran_there else None)
         if code is None:
-            return  # a failure that is not about reaching the board (the package, deploy.sh): nothing to record
+            return  # a failure before the board was reached (the package, a refused address): nothing to record
         try:
             from orchestrator.runtime.device.trusted import TrustedDevices
             TrustedDevices(self._state_dir()).note_reach_at(host, port, "deploy", code)

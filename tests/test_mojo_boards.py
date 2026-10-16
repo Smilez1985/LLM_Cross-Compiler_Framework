@@ -219,6 +219,15 @@ def test_every_board_contact_records_what_it_found(state, monkeypatch, tmp_path)
     monkeypatch.setattr(DeploymentManager, "_deploy_package", lambda self, *a, **k: DeployResult(False))
     manager.deploy_package(tmp_path / "p.zip", "192.0.2.11", "radxa")
     assert store.reach_problem(off)["code"] == reasons.PORT_CLOSED, "a failure of another kind changes nothing"
+    monkeypatch.setattr(DeploymentManager, "_deploy_package", lambda self, *a, **k: DeployResult(
+        False, exit_status=3, device_state="failed", reason="deploy.sh failed on the device (exit 3)."))
+    manager.deploy_package(tmp_path / "p.zip", "192.0.2.11", "radxa")
+    assert store.reach_problem(off) is None, "deploy.sh ran on the board and failed: the board was reached"
+    record(state, off, "deploy", reasons.PORT_CLOSED)
+    monkeypatch.setattr(DeploymentManager, "_deploy_package", lambda self, *a, **k: DeployResult(
+        False, exit_status=255, device_state="failed", reason="deploy.sh failed on the device (exit 255)."))
+    manager.deploy_package(tmp_path / "p.zip", "192.0.2.11", "radxa")
+    assert store.reach_problem(off)["code"] == reasons.PORT_CLOSED, "ssh's own 255 does not say the board was reached"
     monkeypatch.setattr(DeploymentManager, "_deploy_package", lambda self, *a, **k: DeployResult(True))
     manager.deploy_package(tmp_path / "p.zip", "192.0.2.11", "radxa")
     assert store.reach_problem(off) is None
@@ -240,6 +249,38 @@ def test_every_board_contact_records_what_it_found(state, monkeypatch, tmp_path)
     with pytest.raises(dev.DeviceRuntimeError):
         dev.connect(off, state, "radxa", off.fingerprint, step="probe")
     assert store.reach_problem(off)["code"] == reasons.AUTH_FAILED
+
+
+def test_the_cli_records_in_its_own_state_folder_and_a_verify_rewrites_no_trust(state, monkeypatch):
+    """W1: the CLI's contacts with a board record in the state folder the command works in (not some default one),
+    and a verify, which only checks, records what it found without rewriting the board's trust record (its
+    --ssh-user may name another account than the one AI tools deploy as)."""
+    paramiko = pytest.importorskip("paramiko")
+    from types import SimpleNamespace as NS
+    from orchestrator import cli as cli_module
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    from orchestrator.utils import ssh_trust
+    key = paramiko.ECDSAKey.generate()
+    off = board(state, "192.0.2.11", label="Garage", key=key)
+    store = TrustedDevices(state)
+    trust = store.path.read_text(encoding="utf-8")
+
+    def refused(host, port, **kw):
+        raise ConnectionRefusedError(111, "refused")
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", refused)
+    with pytest.raises(SystemExit):
+        cli_module._connect_device(state, off.device_id, "192.0.2.11", 22, "radxa", None, step="verify")
+    assert store.reach_problem(off)["step"] == "verify", "recorded in the state folder the command works in"
+    remembered = []
+    monkeypatch.setattr(cli_module, "_remember_device", lambda *a, **k: remembered.append(a))
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port, **kw: key)
+    monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: NS(close=lambda: None))
+    cli_module._connect_device(state, off.device_id, "192.0.2.11", 22, "checker", None, ctx=NS(), step="verify")
+    assert store.reach_problem(off) is None, "the verify reached the board and logged in: the record ends"
+    assert remembered == [] and store.path.read_text(encoding="utf-8") == trust, "a verify trusts nothing anew"
+    cli_module._connect_device(state, off.device_id, "192.0.2.11", 22, "radxa", None, ctx=NS(),
+                               step="runtime_deploy")
+    assert len(remembered) == 1, "a runtime deploy records the pairing as before"
 
 
 # --- on request: the tool for an AI and the person's command ---------------------------------------------------------
@@ -288,6 +329,34 @@ def test_the_tool_contacts_no_board_names_the_request_and_checks_one_board_by_it
     assert asked == [], "an address is never taken from an AI, and a refusal contacts nothing"
     spec = registry.get("run_mojo_oracle")
     assert spec.annotations()["readOnlyHint"] is True and spec.annotations()["openWorldHint"] is True
+
+
+def test_a_board_without_a_label_is_named_to_the_ai_by_its_device_id_never_by_its_address(booted_framework,
+                                                                                          monkeypatch):
+    """W1/D0: a board the person trusted without a label carries its address as label. The request an AI is given
+    names its device ID, and an address is refused from an AI also when it is such a label; the person's question
+    still shows the board's name, and the person's command names the device ID."""
+    from test_mojo_cli import run_cli
+    from orchestrator.runtime.device import reasons
+    from orchestrator.tools.registry import ToolContext, ToolError
+    only_board_checks(monkeypatch)
+    state = Path(booted_framework.config.user_state_dir)
+    bare = board(state, "192.0.2.14")
+    assert bare.label == "192.0.2.14", "no label given: the address is the label"
+    record(state, bare, "benchmark", reasons.HOST_DOWN)
+    asked = counted_port_checks(monkeypatch)
+    out = booted_framework.tool_registry.call("run_mojo_oracle", {}, ToolContext("mcp"))
+    (row,) = [f for f in out.findings if f.code == f"devices.{bare.device_id}"]
+    assert f'{{"board": "{bare.device_id}"}}' in row.check_board and "192.0.2.14" not in row.check_board
+    with pytest.raises(ToolError) as e:
+        booted_framework.tool_registry.call("run_mojo_oracle", {"board": "192.0.2.14"}, ToolContext("mcp"))
+    assert e.value.code == "unknown_id" and asked == [], "an address is never taken from an AI"
+    booted_framework.tool_registry.call("run_mojo_oracle", {"board": bare.device_id}, ToolContext("mcp"))
+    assert asked == [("192.0.2.14", 22)]
+    asked.clear()
+    result, text = run_cli(booted_framework, monkeypatch, "mojo", terminal=True, answer="n\n")
+    assert "Check 192.0.2.14 now?" in text and f"llmcf mojo --oracle --board {bare.device_id}" in text, text
+    assert asked == []
 
 
 def test_the_command_contacts_no_board_and_asks_before_checking_one(booted_framework, monkeypatch):
