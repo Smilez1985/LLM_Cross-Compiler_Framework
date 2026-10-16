@@ -49,23 +49,23 @@ def framework_for(state: Path, **extra):
 # --- the snapshot disk line ------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("free, verdict", [(50 * GB, "enough"), (int(3.2 * GB), "tight"),
-                                           (int(2.2 * GB), "does_not_fit")])
+                                           (int(2.0 * GB), "does_not_fit")])
 def test_the_disk_line_says_whether_the_next_snapshot_fits(tmp_path, monkeypatch, free, verdict):
     state = tmp_path / "state"
     snapshot(state, "pre_ingest_1", 10)
-    snapshot(state, "pre_ingest_2", 400_000_000)   # the newest one: the estimate of the next
+    snapshot(state, "pre_ingest_2", 4_000_000)   # the newest one: the estimate of the next (small files only)
     monkeypatch.setattr(ks, "_disk_usage", usage(free))
     disk = ks.snapshot_disk(state)
-    assert disk is not None and disk.verdict == verdict and disk.room.estimate == 400_000_000
-    assert disk.total == 400_000_010 and disk.line() == ks.DISK_LINE.format(size="400.0 MB",
+    assert disk is not None and disk.verdict == verdict and disk.room.estimate == 4_000_000
+    assert disk.total == 4_000_010 and disk.line() == ks.DISK_LINE.format(size="4.0 MB",
                                                                              free=ks.size_text(free))
     warning = disk.warning()
     if verdict == "enough":
         assert warning == ""
     elif verdict == "tight":
-        assert warning == ks.NEXT_TIGHT.format(size="400.0 MB") and "little free space" in warning
+        assert warning == ks.NEXT_TIGHT.format(size="4.0 MB") and "little free space" in warning
     else:
-        assert warning.startswith(ks.NEXT_DOES_NOT_FIT.format(size="400.0 MB")) and ks.FREE_SPACE_STEP in warning
+        assert warning.startswith(ks.NEXT_DOES_NOT_FIT.format(size="4.0 MB")) and ks.FREE_SPACE_STEP in warning
     _, out = run_cli(framework_for(state), monkeypatch, "knowledge", "snapshots")
     assert disk.line() in out
     if warning:
