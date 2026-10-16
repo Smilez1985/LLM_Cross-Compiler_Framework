@@ -145,11 +145,11 @@ TEXTS = {
         "device.deploy.installing": "Installation auf dem Board...",
         "device.deploy.done": "Deployment erfolgreich. Paket: {name}",
         "device.deploy.failed": "Das Deployment ist fehlgeschlagen: {reason}",
-        "device.deploy.old_sidecar": "Auf dem Board ist noch der Container qdrant-sidecar ({state}) aus einem früheren "
-                                     "Paket mit Docker-Images. Nichts nutzt ihn mehr: Die Wissensbasis bleibt auf "
-                                     "diesem Computer. Das Framework entfernt ihn nicht. Um ihn zu entfernen, führe "
-                                     "auf dem Board aus: docker rm -f qdrant-sidecar (der Datenordner data/qdrant "
-                                     "dieses alten Pakets bleibt, bis du ihn löschst).",
+        "device.deploy.old_sidecar": "Auf dem Board ist noch der Container qdrant-sidecar ({state}) aus einem "
+                                     "früheren Paket mit Docker-Images. Nichts nutzt ihn mehr: Die Wissensbasis "
+                                     "bleibt auf diesem Computer. Das Framework entfernt ihn nicht. Um ihn zu "
+                                     "entfernen, führe auf dem Board aus: docker rm -f qdrant-sidecar (der "
+                                     "Datenordner data/qdrant dieses alten Pakets bleibt, bis du ihn löschst).",
         "device.deploy.state.running": "läuft",
         "device.deploy.state.stopped": "gestoppt",
         "device.address.label": "Adresse oder Hostname:",
