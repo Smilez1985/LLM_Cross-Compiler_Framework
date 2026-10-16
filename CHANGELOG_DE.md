@@ -12,10 +12,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ### Hinzugefügt
 - **Ein Deployment sagt dir, wenn ein alter Qdrant-Sidecar auf dem Board ist**: Pakete mit Docker-Images früherer
   Versionen starteten den Container `qdrant-sidecar`, den nichts mehr nutzt. Nach einem erfolgreichen Deployment
-  (`llm-cli deploy run`, das Deployment-Fenster, das KI-Tool `deploy_to_device`) schaut das Framework mit `docker ps`,
-  ob er noch auf dem Board ist, und sagt dann, ob er läuft oder gestoppt ist und wie du ihn dort entfernst. Mojo
-  Oracle zeigt für dieses Board eine Zeile aus dem letzten Deployment. Das Framework stoppt oder entfernt den
-  Container nie.
+  (`llm-cli deploy run`, das Deployment-Fenster, das KI-Tool `deploy_to_device`) schaut das Framework mit `docker ps`
+  (höchstens 20 Sekunden lang), ob er noch auf dem Board ist, und sagt dann, ob er läuft oder gestoppt ist und wie du
+  ihn dort entfernst. Mojo Oracle zeigt für dieses Board eine Zeile aus dem letzten Deployment. Das Framework stoppt
+  oder entfernt den Container nie.
 - **Wohin fertige Modelle kommen: der Ausgabeordner und ein Speichern-Dialog** (achte Runde, Antwort 3): fertige
   Builds (Golden-Artefakte) werden im Ausgabeordner gespeichert (Einstellung `output_dir`, Standard `~/llmcf/output`;
   unter Windows in deinem Benutzerordner), den du einmal mit **File > Output Folder...** oder `llm-cli config
@@ -1041,10 +1041,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wartet so lange, und das Formular bleibt bedienbar. Der Build übernimmt genau die geprüften Werte.
 - **Builds im alten Standardordner behalten ihre ID, und Pakete werden dort gefunden** (unveröffentlicht; achte Runde,
   Antwort 3): Seit der Einstellung für den Ausgabeordner ist der Build-Ordner des Frameworks nicht mehr der
-  Ausgabeordner, daher bekam ein Build dort eine neue ID, und `packages` (und `deploy_package`) sahen die
-  Deploy-Pakete darin nicht mehr. Die frühere ID eines Builds erreicht ihn weiter (Feed-Zeilen, offene Freigaben und
-  KI-Aufrufer, die sie behalten haben), außer ein anderer Build hat diese ID jetzt. `packages` listet zuerst den
-  Ausgabeordner, dann den Build-Ordner und frühere Ausgabeordner, die du eingestellt hattest.
+  Ausgabeordner, daher bekam ein Build dort eine neue ID, und das KI-Tool `deploy_to_device` fand die Deploy-Pakete
+  darin nicht mehr über ihre ID. Die frühere ID eines Builds erreicht ihn weiter (Feed-Zeilen, offene Freigaben und
+  KI-Aufrufer, die sie behalten haben), außer ein anderer Build hat diese ID jetzt. Pakete werden zuerst im
+  Ausgabeordner gesucht, dann im Build-Ordner und in früheren Ausgabeordnern, die du eingestellt hattest.
 - **`get_status` nennt den Datenträger des Build-Ordners** (unveröffentlicht; achte Runde, Antwort 3): Die Angabe zum
   Speicherplatz nannte nur den Cache und den Ausgabeordner, nicht den Build-Ordner, in den ein Build zuerst schreibt.
   Jetzt nennt sie alle drei; Ordner auf einem Datenträger werden zusammen genannt, nur mit ihrer Bezeichnung.
@@ -1054,7 +1054,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   oder zu laden, ob die Modelle der Wissensbasis auf diesem Rechner liegen. Ihre Frage sagt es, mit der Größe und der
   Warnung, wenn ein Download nötig ist oder sich nicht ausschließen lässt. Ein MCP-Prompt mit Auszügen aus der
   Wissensbasis startet den Download nie: Wie `search_knowledge` liest er nur mit den Modellen auf diesem Rechner und
-  sagt, wenn sie fehlen.
+  sagt, wenn sie fehlen. Dittos automatische Diagnose eines gescheiterten Builds, nach der niemand gefragt wird, liest
+  genauso.
 - **Reparaturhinweise für KI-Aufrufer nennen Mojo** (unveröffentlicht; Runde 7 Punkt 11'): Ablehnungen und Fehler, die
   KI-Aufrufer lesen, schickten sie zu `llm-cli doctor`. Jetzt nennen sie das Tool `run_mojo_oracle` (oder `llmcf mojo`
   im Terminal). Der Hinweis auf fehlende Builder-Images behält `llm-cli doctor --fix --tier 2`, das sie baut.
@@ -1080,7 +1081,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   und was jeder ist, nichts angekreuzt, „Nein“ als Standard. Nur die Builds, die du ankreuzt, werden entfernt,
   endgültig (ein Board hat keinen Papierkorb), nach einem Audit-Eintrag nur mit den Ordnernamen. Der aktive Build und
   einer, den ein laufendes Programm nutzt, stehen nie in der Liste. Eine KI liest nur, wie viele Builds geblieben
-  sind und dass nur du sie entfernst.
+  sind und dass nur du sie entfernst. Wird ein Build erneut deployt, der schon auf dem Board liegt, bleibt er dort,
+  auch wenn seine Prüfungen scheitern.
 - **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte
   Runde, Antwort 3): die Einstellung `output_dir` nennt jetzt den Ordner, in dem fertige Modelle gespeichert werden
   (Standard `~/llmcf/output`, bisher `output/` der Installation oder des persönlichen Ordners). Dieser alte Ordner ist

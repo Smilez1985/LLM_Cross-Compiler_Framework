@@ -1045,6 +1045,29 @@ class TestAISettings:
         assert removed[-1]["actor"] == "gui" and removed[-1]["mode"] == "trash"
         assert len([q for q in questions]) == 1, "one question for the whole list (round 7 D)"
 
+    def test_the_question_names_only_where_the_listed_objects_go(self, qapp, tmp_path, monkeypatch, no_source, dri,
+                                                                 verify_in_container):
+        """A list of Docker objects only says nothing about a trash (none of them goes there); a list with build
+        folders says they go to the trash."""
+        from orchestrator.gui import runtime_mode_box as box_module
+        client = FakeClient()
+        ensure(runtime(tmp_path / "a", client, native=False), mode="docker")
+        back = runtime(tmp_path / "a", client, native=False, executor=Refuses())
+        docker_only = ensure(back, mode="bare-metal", force=True).leftovers
+        assert docker_only.mode_offered == ("permanent",)
+        asked = []
+        monkeypatch.setattr(box_module, "ask", lambda parent, title, question: asked.append(question) or False)
+        monkeypatch.setattr(box_module, "plain_box", lambda *a, **k: None)
+        box = box_module.RuntimeModeBox(SimpleNamespace(config=SimpleNamespace(get=lambda k, d=None: d)),
+                                        runtime_factory=lambda: back)
+        box._offer_removal(docker_only)
+        question = asked[-1].split("\n\n")[0]
+        assert "go to the trash" not in question and "File > Trash" not in question, question
+        assert "Docker has no trash, so its images and containers are deleted for good" in question
+        _rt, with_builds = _switched_to_docker(tmp_path / "b", FakeClient())
+        box._offer_removal(with_builds)
+        assert "Build folders go to the trash" in asked[-1].split("\n\n")[0]
+
     def test_the_question_says_where_each_object_goes_and_the_folders_reach_the_trash(self, qapp, tmp_path,
                                                                                      monkeypatch, no_source, dri):
         from types import SimpleNamespace

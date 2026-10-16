@@ -282,10 +282,14 @@ class SelfHealingManager:
             confidence=0.9, strategy=HealingStrategy.MANUAL_INTERVENTION, target_scope="HOST")
 
     def _analyze_via_ai(self, ditto, log: str, context: str) -> Optional[HealingProposal]:
-        """Asks Ditto for a validated analysis. AI proposals are always a manual step for the user."""
+        """Asks Ditto for a validated analysis. AI proposals are always a manual step for the user. Nobody is asked
+        before this diagnosis (it runs by itself, also for a build an AI client started), so its knowledge search
+        reads with the models on this computer only: it never starts their one-time download (next-fixes 119)."""
         from orchestrator.Core.ditto_manager import DittoError, HealingAnalysis
+        from orchestrator.Core.rag_manager import local_models_only
         try:
-            analysis = ditto.analyze_error_log(log, context)
+            with local_models_only():
+                analysis = ditto.analyze_error_log(log, context)
             if not isinstance(analysis, HealingAnalysis):
                 analysis = HealingAnalysis.model_validate(analysis)  # e.g. a plain dict from another caller
         except DittoError as e:

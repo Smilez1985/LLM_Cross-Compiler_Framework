@@ -305,6 +305,9 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
             "umask 077",
             f"cd {_q(root)}",
             "old=$(readlink current 2>/dev/null || true)",
+            # the same build already on the device (an older one the person kept): its files are replaced by the
+            # same, checked files, and the folder is theirs, so a failed check never removes it (round 5 f)
+            f"if [ -d {_q(id16)} ] && [ ! -L {_q(id16)} ]; then echo existed=1; fi",
             f"rm -rf {_q(id16)}",
             f"mv {_q(staging + '/' + id16)} {_q(id16)}",
             'printf "current=%s\\n" "$old"',
@@ -314,6 +317,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
             raise RemoteError(f"installing on the device failed (exit {res.status}): {_tail(res.err or res.out)}")
         active = next((ln.split("=", 1)[1].strip() for ln in res.out.splitlines() if ln.startswith("current=")), "")
         active = active if _RE_ID16.fullmatch(active) else ""
+        existed = "existed=1" in res.out.splitlines()
     finally:
         shell.run(f"rm -rf {_q(staging)}")
     folder = f"{root}/{id16}"
@@ -327,7 +331,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
     ])
     res = shell.run(key_check)
     if res.status != 0:
-        _discard(shell, root, id16, active)
+        _discard(shell, root, id16, active, existed)
         raise RemoteError(f"the key could not be created on the device (exit {res.status}): "
                           f"{_tail(res.err or res.out)}")
 
@@ -335,13 +339,17 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
     try:
         result.report = check(facts.home, folder)
     except BaseException:
-        _discard(shell, root, id16, active)
+        _discard(shell, root, id16, active, existed)
         raise
     if not result.report.ok:
-        _discard(shell, root, id16, active)
+        _discard(shell, root, id16, active, existed)
         if active == id16:
             result.notes.append("this build was already the active one; its files were replaced by the same, "
                                 "checked files")
+        elif existed:
+            result.notes.append((f"the previous build {active} stays active" if active else "nothing was activated")
+                                + "; the new build failed its checks. It was on the device before, as an older "
+                                  "build, so it stays there with the same, checked files")
         else:
             result.notes.append((f"the previous build {active} stays active" if active else "nothing was activated")
                                 + "; the new build failed its checks and was removed from the device")
@@ -349,7 +357,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
 
     res = shell.run("\n".join(["set -eu", f"cd {_q(root)}", f"ln -sfn {_q(id16)} current"]))
     if res.status != 0:
-        _discard(shell, root, id16, active)
+        _discard(shell, root, id16, active, existed)
         raise RemoteError(f"switching to the new build failed (exit {res.status}): {_tail(res.err or res.out)}")
     result.activated = True
     result.previous = active if active and active != id16 else None
@@ -507,11 +515,12 @@ def remove_older_builds(shell: RemoteShell, accepted: Any, *, root: str, device_
     return result
 
 
-def _discard(shell: RemoteShell, root: str, id16: str, active: str) -> None:
-    """Removes a new build that did not pass, unless it is the active build itself (the same build deployed again,
-    whose folder now holds the same files, checked against SHA256SUMS). Best effort: a folder that stays behind is
-    not active and goes with the next deployment's clean-up."""
-    if id16 != active:
+def _discard(shell: RemoteShell, root: str, id16: str, active: str, existed: bool = False) -> None:
+    """Removes a new build that did not pass, unless it is the active build itself or was on the device before this
+    deployment (the same build deployed again, whose folder now holds the same files, checked against SHA256SUMS: an
+    older build the person kept stays theirs, round 5 f). Best effort: a folder that stays behind is not active, and
+    only the person removes it (llm-cli device runtime prune DEVICE --on-device)."""
+    if id16 != active and not existed:
         try:
             shell.run(f"rm -rf {_q(root + '/' + id16)}")
         except RemoteError:
