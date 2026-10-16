@@ -88,8 +88,9 @@ WINDOWS_USERS = PureWindowsPath(r"C:\Users")
 @pytest.mark.parametrize("folder", [
     r"C:\Windows", r"c:\windows\System32\models", r"C:\Program Files", r"C:\Program Files\LLM-Conversion-Framework",
     r"C:\PROGRAM FILES (X86)\Vendor", r"C:\ProgramData", r"C:\ProgramData\Microsoft\Crypto", r"C:\ProgramData\ssh",
-    r"C:\Recovery", r"C:\Boot\x", r"C:\$Recycle.Bin\S-1-5-21", r"D:\$RECYCLE.BIN", r"D:\System Volume Information\x",
-    r"\\nas\share\$Recycle.Bin", r"C:\Users\Default\models", "C:\\", "c:/"])
+    r"C:\Program Files (Arm)\Vendor", r"C:\Windows.old\models", r"C:\Recovery", r"C:\Boot\x",
+    r"C:\$Recycle.Bin\S-1-5-21", r"D:\$RECYCLE.BIN", r"D:\System Volume Information\x", r"\\nas\share\$Recycle.Bin",
+    r"C:\Users\Default\models", "C:\\", "c:/"])
 def test_windows_system_folders_are_refused_on_every_system(folder):
     """The output folder refuses Windows' own folders too: its system folder, the program folders, ProgramData (the
     computer's keys, credentials, the SSH server's host keys), the recovery and boot folders, every disk's recycle bin
@@ -118,11 +119,38 @@ def test_windows_system_folders_without_their_environment():
     assert why("C:\\") == "" and why(r"C:\models") == ""
 
 
-@pytest.mark.skipif(os.name != "nt", reason="the Windows system folders of this host")
+@pytest.mark.parametrize("folder", [r"\\?\C:\Windows\llm", "//?/c:/program files/x", r"\\.\C:\Windows", "\\\\?\\C:\\",
+                                    r"\\?\UNC\nas\share\$Recycle.Bin", r"\\?\unc\nas\share\$RECYCLE.BIN"])
+def test_a_device_prefix_never_hides_a_windows_system_folder(folder):
+    """ntpath.realpath keeps a \\\\?\\ prefix the path was given with, and the prefix makes the drive another one:
+    \\\\?\\C:\\Windows is the Windows folder all the same."""
+    assert "system folder" in ao.windows_system_folder(PureWindowsPath(folder), WINDOWS_ENV, WINDOWS_USERS)
+
+
+@pytest.mark.parametrize("given, plain", [(r"\\?\C:\Windows", r"C:\Windows"), (r"\\.\D:\models", r"D:\models"),
+                                          (r"\\?\UNC\nas\share\x", r"\\nas\share\x"), (r"C:\models", r"C:\models"),
+                                          (r"\\?\Volume{0b1c}\models", r"\\?\Volume{0b1c}\models")])
+def test_the_plain_form_of_a_windows_path(given, plain):
+    assert ao.windows_plain_path(PureWindowsPath(given)) == PureWindowsPath(plain)
+
+
+WINDOWS_HOST_ONLY = ("reads this Windows host's own SystemRoot, ProgramFiles, ProgramData and SystemDrive; the same "
+                     "list is checked with PureWindowsPath on every system")
+
+
+@pytest.mark.skipif(os.name != "nt", reason=WINDOWS_HOST_ONLY)
 @pytest.mark.parametrize("var, below", [("SystemRoot", ""), ("SystemRoot", "System32"), ("ProgramFiles", "Vendor"),
                                         ("ProgramData", "Microsoft"), ("SystemDrive", "\\")])
 def test_the_windows_system_folders_of_this_host_are_refused(fw, var, below):
     folder = Path(os.environ[var] + below if below == "\\" else os.path.join(os.environ[var], below))
+    assert "system folder" in ao.refusal(fw, folder)
+    with pytest.raises(ao.DestinationRefused):
+        ao.check_destination(fw, folder, create=True)
+
+
+@pytest.mark.skipif(os.name != "nt", reason=WINDOWS_HOST_ONLY)
+def test_a_device_path_to_a_system_folder_of_this_host_is_refused(fw):
+    folder = Path("\\\\?\\" + os.path.join(os.environ["SystemRoot"], "llm"))
     assert "system folder" in ao.refusal(fw, folder)
     with pytest.raises(ao.DestinationRefused):
         ao.check_destination(fw, folder, create=True)
