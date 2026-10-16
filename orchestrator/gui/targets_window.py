@@ -29,6 +29,14 @@ def _target_manager(framework: Any) -> Any:
     return tm if tm is not None else getattr(framework, "target_manager", None)
 
 
+def declares_capabilities(framework: Any, target_id: str) -> bool:
+    """Whether the target's target.yml has a capabilities block, valid or not (an invalid one counts as none for a
+    build, but it is not "none declared")."""
+    tm = _target_manager(framework)
+    data = tm.get_target(target_id) if tm is not None and hasattr(tm, "get_target") else None
+    return isinstance(data, dict) and "capabilities" in data
+
+
 def build_service(framework: Any) -> Any:
     """The framework's build service (the CLI's `targets list` uses the same), or one made for it."""
     service = getattr(framework, "build_service", None)
@@ -134,12 +142,13 @@ class TargetsDialog(QDialog):
             self.intro.setText(self._t("bld.targets.intro", n=len(self.targets), path=one_line(self._folder()))
                                if self.targets else self._t("bld.targets.empty", path=one_line(self._folder())))
         self.table.setRowCount(len(self.targets))
-        none = self._t("bld.targets.none_declared")
+        none, invalid = self._t("bld.targets.none_declared"), self._t("bld.targets.invalid")
         for row, target in enumerate(self.targets):
             formats = ", ".join(f.id for f in target.formats)
             support = getattr(target.support_level, "value", target.support_level)
             values = (target.id, target.name or "", target.architecture or "-", ", ".join(target.boards) or "-",
-                      formats or none, support or "-")
+                      formats or (invalid if declares_capabilities(self.framework, target.id) else none),
+                      support or "-")
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(one_line(value))   # plain text, never rich text
                 if column == 0:
@@ -187,5 +196,5 @@ def open_targets_dialog(parent: Optional[QWidget], framework: Any, select: Optio
     return dialog
 
 
-__all__ = ["COLUMNS", "TargetsDialog", "build_service", "check_target", "open_targets_dialog", "show_target_check",
-           "target_check_text"]
+__all__ = ["COLUMNS", "TargetsDialog", "build_service", "check_target", "declares_capabilities", "open_targets_dialog",
+           "show_target_check", "target_check_text"]
