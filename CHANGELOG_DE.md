@@ -23,7 +23,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nur nach einer ausdrücklichen Warnung), Prüfen... (auch ohne Modell), Ältere Laufzeit-Pakete entfernen... und
   Ältere Builds auf dem Board entfernen... (der Löschdialog mit der vollständigen Liste) sowie Dieses Board prüfen
   (Mojo). Jeder Kontakt mit einem Board und jeder Build laufen im Hintergrund. Die Laufzeit-Tools der KI bauen und
-  installieren mit denselben Schritten.
+  installieren mit denselben Schritten. Beschädigte Deploy-Einstellungen ("damaged; set them again") lassen sich jetzt
+  neu festlegen, im Fenster und mit `device settings`, nach einer Frage, die die Datei mit vollem Pfad und Größe nennt.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den

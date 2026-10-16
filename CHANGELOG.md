@@ -21,7 +21,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   stored; an untrusted benchmark model only after an explicit warning), Verify... (also without a model),
   Remove older runtime packages... and Remove older builds on the board... (the deletion dialog with the full list)
   and Check this board (Mojo). Every board contact and build runs in the background. The AI's runtime tools build
-  and install with the same steps.
+  and install with the same steps. Damaged deploy settings ("damaged; set them again") can now be set again, in the
+  window and with `device settings`, after a question that names the file with its full path and size.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record
