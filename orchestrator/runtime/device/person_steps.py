@@ -27,6 +27,10 @@ SYSTEMD_CONSENT = ("device_runtime_systemd", "deployments may run sudo -n on the
 UNTRUSTED_QUESTION = ("{path} is not a catalog model, so it is untrusted. llama-bench loads it natively on the device "
                       "as {user} (no sandbox). Run the short benchmark with it? Your answer is written to the audit "
                       "log.")
+# The question before damaged deploy settings are set again from the defaults (CLI and GUI; "No" is the default).
+DAMAGED_QUESTION = ("The deploy settings of device {device_id} cannot be used ({reason}). Set them again, starting "
+                    "from the defaults? The damaged file {path} ({size}) is overwritten with the new settings; the "
+                    "board's probe, its trust and its runtime stay as they are.")
 UNTRUSTED_CONSENT = ("device_runtime_untrusted_model",
                      "an untrusted model may run natively on the device for the short llama-bench run")
 
@@ -34,8 +38,8 @@ UNTRUSTED_CONSENT = ("device_runtime_untrusted_model",
 class BoardStepError(RuntimeError):
     """A board step that cannot be done. `kind` names the case (no_paramiko, unreachable, host_key_changed,
     not_trusted, other_device, login_failed, key_install, host_user, label, not_known, no_systemd, sudo_declined,
-    not_saved, no_user, no_address); `reason` is the SSH reason code when the board could not be reached or logged in
-    to; `error` the exception behind it."""
+    not_saved, damaged, no_user, no_address); `reason` is the SSH reason code when the board could not be reached or
+    logged in to; `error` the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None,
                  **facts: Any):
@@ -230,6 +234,28 @@ def load_settings(store: Any, device_id: str):
     return DeploySettings.from_dict(store.load_deploy_settings(device_id))
 
 
+def settings_to_change(store: Any, device_id: str, *, may_replace: Callable[[str, str, str], bool]):
+    """(settings, replaced) that `llmcf device settings` and the Boards window change: the stored ones; or, when the
+    stored file is damaged ("damaged; set them again") and the person said yes to DAMAGED_QUESTION
+    (`may_replace(reason, full path, size)`), the defaults with replaced=True: nothing of the damaged file is read as
+    a setting, and it is overwritten only when the new settings are saved. BoardStepError ("damaged") otherwise."""
+    from orchestrator.Core.deletion import size_text
+    from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    try:
+        return load_settings(store, device_id), False
+    except (SettingsError, ValueError) as e:
+        reason = str(e)
+    path = Path(store.deploy_settings_path(device_id))
+    try:
+        size = size_text(path.stat().st_size)
+    except OSError:
+        size = "?"
+    if not may_replace(reason, str(path), size):
+        raise BoardStepError(f"The deploy settings of device {device_id} cannot be used: {reason}", "damaged",
+                             detail=reason)
+    return DeploySettings(), True
+
+
 def change_settings(store: Any, device_id: str, profile: Any, current: Any, changes: Dict[str, Any], *,
                     may_use_sudo: Callable[[], bool], record_sudo_consent: Callable[[], None],
                     stamp: Callable[[], str]):
@@ -363,8 +389,8 @@ def remove_board_builds(shell: Any, accepted: Any, prune: BoardPrune, device_id:
                                audit=audit)
 
 
-__all__ = ["BoardPrune", "BoardStepError", "SUDO_QUESTION", "SYSTEMD_CONSENT", "UNTRUSTED_CONSENT",
-           "UNTRUSTED_QUESTION", "add_trusted_board", "board_address", "boards_overview", "change_settings",
-           "check_board_entry", "connect_stored", "device_rows", "list_board_builds", "load_settings",
-           "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",
-           "remove_board_builds", "remove_trust", "trusted_rows", "unreachable_error"]
+__all__ = ["BoardPrune", "BoardStepError", "DAMAGED_QUESTION", "SUDO_QUESTION", "SYSTEMD_CONSENT",
+           "UNTRUSTED_CONSENT", "UNTRUSTED_QUESTION", "add_trusted_board", "board_address", "boards_overview",
+           "change_settings", "check_board_entry", "connect_stored", "device_rows", "list_board_builds",
+           "load_settings", "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",
+           "remove_board_builds", "remove_trust", "settings_to_change", "trusted_rows", "unreachable_error"]

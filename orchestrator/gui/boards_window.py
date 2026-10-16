@@ -592,12 +592,11 @@ class BoardsWindow(QDialog):
     def _on_settings(self) -> None:
         """device settings: the full current settings, and install, user, port, model and KV cache to change."""
         entry = self._need("stored")
-        if entry is None:
+        profile = self._profile(entry) if entry is not None else None
+        found = self._settings_to_change(entry) if profile is not None else None
+        if found is None:
             return
-        profile = self._profile(entry)
-        current = self._settings(entry) if profile is not None else None
-        if current is None:
-            return
+        current, replaced = found
         dialog, form = _form_dialog(self, self._t("boards.settings.title", label=entry["label"]),
                                     self._settings_text(current, profile))
         install = QComboBox(dialog)
@@ -635,7 +634,24 @@ class BoardsWindow(QDialog):
                   "port": int(port.value()), "model": model.text().strip() or None,
                   "kv_cache": None if kv.currentData() == "auto" else kv.currentData()}
         dialog.deleteLater()
-        self.change_settings(entry, profile, current, wanted)
+        self.change_settings(entry, profile, current, wanted, replace=replaced)
+
+    def _settings_to_change(self, entry: Dict[str, Any]):
+        """(settings, replaced) for Settings...: the stored ones, or the defaults after the person's yes to the
+        question about damaged settings (with the file's full path and size; "No" is the default)."""
+        from orchestrator.runtime.device import person_steps
+        title = self._t("boards.settings.title", label=entry["label"])
+
+        def may_replace(reason: str, path: str, size: str) -> bool:
+            return ask(self, title, self._t("boards.settings.damaged_question", device_id=entry["device_id"],
+                                            reason=reason, path=path, size=size))
+
+        try:
+            return person_steps.settings_to_change(self._store(), entry["device_id"], may_replace=may_replace)
+        except person_steps.BoardStepError as e:
+            self._info(self._t("boards.settings.damaged_text", reason=one_line(e.facts.get("detail") or str(e))),
+                       "warning")
+            return None
 
     def _settings_text(self, current: Any, profile: Any) -> str:
         t = self._t
@@ -650,12 +666,14 @@ class BoardsWindow(QDialog):
             lines += [f"- {p}" for p in problems]
         return "\n".join(lines)
 
-    def change_settings(self, entry: Dict[str, Any], profile: Any, current: Any, wanted: Dict[str, Any]) -> bool:
-        """Saves exactly the fields that differ from the current settings, through the CLI's core step."""
+    def change_settings(self, entry: Dict[str, Any], profile: Any, current: Any, wanted: Dict[str, Any],
+                        replace: bool = False) -> bool:
+        """Saves exactly the fields that differ from the current settings, through the CLI's core step; with
+        `replace` (damaged settings set again from the defaults) every field, so the damaged file is overwritten."""
         from orchestrator.runtime.device import person_steps
         from orchestrator.runtime.device.settings import SettingsError
         from orchestrator.runtime.device.steps import utc_stamp
-        changes = {k: v for k, v in wanted.items() if getattr(current, k) != v}
+        changes = dict(wanted) if replace else {k: v for k, v in wanted.items() if getattr(current, k) != v}
         if not changes:
             self._say(self._t("boards.settings.unchanged"))
             return False

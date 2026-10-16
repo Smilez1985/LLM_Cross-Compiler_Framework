@@ -1114,6 +1114,10 @@ class ProfileStore:
     def _deploy_path(self, device_id: str) -> Path:
         return self.devices_dir / f"{_check_device_id(device_id)}.deploy.json"
 
+    def deploy_settings_path(self, device_id: str) -> Path:
+        """Where the device's deploy settings are stored (the person sees it before damaged settings are set again)."""
+        return self._deploy_path(device_id)
+
     def load_deploy_settings(self, device_id: str) -> Dict[str, Any]:
         """The device's deploy settings as stored ({} when there are none). ValueError when the file is damaged:
         settings decide what a deployment does, so a damaged file is never read as the defaults."""

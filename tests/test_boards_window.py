@@ -335,6 +335,36 @@ def test_settings_show_everything_and_systemd_needs_the_sudo_yes_written_first(q
     assert row["tool"] == "device_runtime_systemd" and row["extra"]["confirm_channel"] == "framework-gui"
 
 
+def test_damaged_settings_are_set_again_after_a_question_with_the_file(qapp, window, monkeypatch):
+    """The table says 'damaged; set them again' (review of wave 5a): Settings... asks, with the file's full path and
+    size and "No" as the default, whether to start again from the defaults; only a yes opens the form, and its OK
+    writes the settings even when no field differs from the defaults."""
+    from orchestrator.gui import boards_window
+    from orchestrator.runtime.device.person_steps import DAMAGED_QUESTION, load_settings
+    from orchestrator.runtime.device.settings import DeploySettings
+    from orchestrator.utils.l10n_boards import TEXTS
+    assert TEXTS["en"]["boards.settings.damaged_question"] == DAMAGED_QUESTION, "the GUI asks the CLI's words"
+    state = state_of(window)
+    store = stored(state)
+    path = Path(store.deploy_settings_path("0123456789abcdef"))
+    path.write_text("{damaged", encoding="utf-8")
+    window.reload()
+    window.select("0123456789abcdef")
+    assert window.table.item(0, 9).text() == "damaged; set them again"
+    forms = []
+    monkeypatch.setattr(boards_window, "_exec", lambda dialog: forms.append(dialog) or True)
+    boxes = Boxes(monkeypatch, answer="no")
+    window.buttons["btn_boards_settings"].click()
+    (question,) = boxes.questions()
+    assert question.default_is_no and str(path) in question.text and "is overwritten" in question.text
+    assert forms == [] and path.read_text(encoding="utf-8") == "{damaged", "No: no form, nothing changed"
+    boxes.answer = "yes"
+    window.buttons["btn_boards_settings"].click()
+    assert len(forms) == 1
+    assert load_settings(store, "0123456789abcdef") == DeploySettings(), "set again: the defaults, now readable"
+    assert "user as not set" in window.table.item(0, 9).text()
+
+
 def test_settings_refusals_are_the_clis(qapp, window, monkeypatch):
     from orchestrator.runtime.device.person_steps import load_settings
     from orchestrator.runtime.profile import ProfileStore

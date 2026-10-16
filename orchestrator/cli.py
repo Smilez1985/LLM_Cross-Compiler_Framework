@@ -5434,11 +5434,21 @@ def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[s
     from orchestrator.runtime.device import person_steps
     from orchestrator.runtime.device.settings import SettingsError
     _state, store, device_id, profile = _device_context(ctx, device_name)
-    current = _deploy_settings(store, device_id)
     changes = {k: v for k, v in (("install", install), ("ssh_user", ssh_user), ("port", port), ("model", model))
                if v is not None}
     if kv_cache is not None:
         changes["kv_cache"] = None if kv_cache == "auto" else kv_cache
+    if not changes:
+        current = _deploy_settings(store, device_id)   # damaged settings are named, never shown as the defaults
+    else:
+        try:   # damaged settings are set again from the defaults only after your yes at a terminal
+            current, _replaced = person_steps.settings_to_change(
+                store, device_id, may_replace=lambda reason, path, size: _interactive() and click.confirm(
+                    person_steps.DAMAGED_QUESTION.format(device_id=device_id, reason=reason, path=path, size=size),
+                    default=False))
+        except person_steps.BoardStepError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
     if changes:
         tool, detail = person_steps.SYSTEMD_CONSENT
         try:

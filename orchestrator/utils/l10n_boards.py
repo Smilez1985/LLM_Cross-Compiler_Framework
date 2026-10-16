@@ -150,6 +150,11 @@ TEXTS = {
         "boards.settings.not_saved": "Could not save the deploy settings: {reason}",
         "boards.settings.bad_value": "This value cannot be used: {reason}",
         "boards.settings.damaged_text": "The deploy settings of this board cannot be used: {reason}",
+        # the CLI's words (person_steps.DAMAGED_QUESTION)
+        "boards.settings.damaged_question": "The deploy settings of device {device_id} cannot be used ({reason}). Set "
+                                            "them again, starting from the defaults? The damaged file {path} ({size}) "
+                                            "is overwritten with the new settings; the board's probe, its trust and "
+                                            "its runtime stay as they are.",
         "boards.settings.saved": "Deploy settings of {label} saved.",
         "boards.settings.unchanged": "Nothing was changed.",
         # runtime plan and status (device runtime plan|status)
@@ -410,6 +415,11 @@ TEXTS = {
         "boards.settings.not_saved": "Die Deploy-Einstellungen konnten nicht gespeichert werden: {reason}",
         "boards.settings.bad_value": "Dieser Wert ist nicht verwendbar: {reason}",
         "boards.settings.damaged_text": "Die Deploy-Einstellungen dieses Boards sind nicht verwendbar: {reason}",
+        "boards.settings.damaged_question": "Die Deploy-Einstellungen von Gerät {device_id} sind nicht verwendbar "
+                                            "({reason}). Neu festlegen, ausgehend von den Vorgaben? Die beschädigte "
+                                            "Datei {path} ({size}) wird mit den neuen Einstellungen überschrieben; "
+                                            "die Probe des Boards, das Vertrauen und seine Laufzeit bleiben, wie sie "
+                                            "sind.",
         "boards.settings.saved": "Deploy-Einstellungen von {label} gespeichert.",
         "boards.settings.unchanged": "Es wurde nichts geändert.",
         "boards.plan.title": "Laufzeit-Plan von {label}",
