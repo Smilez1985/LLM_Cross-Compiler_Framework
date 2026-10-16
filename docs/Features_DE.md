@@ -130,6 +130,13 @@ Weiteres Verhalten:
   Schritt kann den Abbruch rückgängig machen; Schaltfläche und Strg+C warten, bis der Build angehalten hat, und
   sagen das. Ist ein Build gescheitert oder verschiebt er gerade seine Dateien in den Ausgabeordner, lässt er sich
   nicht mehr abbrechen und läuft von selbst zu Ende.
+- **Fortschritt und Live-Protokoll:** Solange der Build läuft, den der Builder-Tab gestartet hat, zeigt ein
+  Fortschrittsbalken unter dem Builder-Log den Schritt und den Prozentwert aus dem Build-Service, und das Protokoll
+  des Builds läuft live darunter mit (Geheimnisse geschwärzt, reiner Text, jede Zeile einmal). Schritt und Prozentwert
+  enthalten den eigenen Fortschritt des laufenden Builds (Vorbereitung, Image, Modell, Module, Archiv), sodass sich der
+  Balken während eines Builds bewegt; 100 % zeigt er erst, wenn die Anfrage beendet ist. Ein Suchfeld findet Zeilen;
+  ein Filter zeigt alle Zeilen oder nur Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert,
+  werden vermerkt statt still weggelassen, und die Ansicht behält die neuesten 20.000 Zeilen.
 - **Build-Status über Programme hinweg (gemeinsamer Build-Zustand):** Jedes Programm, das baut (die GUI, ein
   CLI-Aufruf, jeder MCP-Server), schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner
   (`build_requests/`: Modell als Repo-ID oder Label, Target, Format, Quantisierung, Status, Stufe, Fortschritt, wer
@@ -721,6 +728,51 @@ die Vorgaben).
 
 Eine Frage direkt im Chat mit Ja oder Nein beantworten, „Warum?“ und Rückgängig kommen mit späterer Arbeit; bis
 dahin entscheidet das Freigabe-Fenster.
+
+### Dittos Hände im Fenster (GUI-Tools)
+
+Die Tools des Frameworks sind Dittos Hände, auch im Fenster. Solange die GUI offen ist, bekommt Ditto (das im
+GUI-Programm läuft) fünf weitere Tools. Sie arbeiten auf den offenen Formularen: dem Build-Formular im Builder-Tab,
+dem Assistenten für Target-Module (Seite für Seite) und dem Dialog der KI-Einstellungen.
+
+| Tool | Stufe | Was es tut |
+|---|---|---|
+| `read_gui_form` | lesen | Was du in einem offenen Formular eingegeben hast: jedes Feld mit seinem Wert, ob Ditto es ausgefüllt hat, ob du es gewählt hast und ob es schreibgeschützt ist. Ohne Formular: die offenen Formulare und die Fenster, die `show_gui` öffnen kann |
+| `fill_gui_form` | lokal ändern | Füllt Felder eines offenen Formulars sichtbar aus (fragt standardmäßig, wie jedes neue Tool, das etwas ändert) |
+| `wizard_state` | lesen | Die aktuelle Seite des Assistenten, alle Seitentitel und die Felder dieser Seite |
+| `wizard_step` | lokal ändern | Öffnet den Assistenten, füllt die aktuelle Seite aus, geht zur nächsten oder vorigen Seite oder öffnet Deep Ingest mit den Dokumentations-Links des Frameworks für die Hardware |
+| `show_gui` | lesen | Zeigt einen Tab oder ein Fenster: den Builder- oder Deployment-Tab, den Chat-Bereich, den Assistenten, die KI-Einstellungen, den Hugging-Face-Browser, den Community Hub oder die Wissens-Snapshots. Es ändert nichts |
+
+Die Regeln sind in jedem Formular gleich (`orchestrator/tools/gui_surface.py`):
+
+- **Geheimnisse:** Eine KI liest einen Schlüssel nur als „gesetzt“ oder „nicht gesetzt“ und füllt nie einen aus. Die
+  KI-Einstellungen zeigen Ditto den Anbieter, die Basis-URL, die Datenschutzstufe und die Ersatzkette, aber nur du
+  änderst sie: Sie entscheiden, wohin deine Daten gehen. Ditto darf die Wissensbasis aus- und den Offline-Modus
+  einschalten, nie umgekehrt (dieselbe Regel wie bei `update_settings`).
+- **Pfade:** Eine lokale Datei erreicht die KI als Label (`models:tiny.gguf`) oder mit ihrem Dateinamen, nie mit dem
+  Home-Ordner. Ein Home-Ordner in Text, den du getippt hast (auch der eines anderen Kontos, `/home/<Name>` oder
+  `C:\Users\<Name>`), erreicht die KI als `~`. Ditto nennt eine lokale Datei mit ihrer ID aus `list_local_files`
+  (`lf_...`) oder als `<Label>:<relativer Pfad>`.
+- **Deine Werte gehören dir:** Einen Wert, den du getippt, gewählt oder angeklickt hast (auch eine Datei, die du in
+  einem Dateidialog gewählt hast, und die Werte eines Rezepts), überschreibt eine KI nie. Ditto darf im Chat einen
+  anderen vorschlagen; **Ask Ditto for Config** im Builder füllt das Formular nach denselben Regeln, und das
+  Builder-Log nennt jeden Wert, den es nicht eingetragen hat, und warum. Ein Feld, das du gerade bearbeitest (es hat
+  den Tastaturfokus), wird nie beschrieben. Würde ein Ausfüllen über die Logik des Formulars ein Feld ändern, das du
+  gewählt hast (ein anderes Target setzt das Board zurück), wird es ganz zurückgenommen und abgelehnt. Was nie
+  ausgefüllt werden kann, wird abgelehnt, bevor du gefragt wirst; beim Ausfüllen wird alles noch einmal geprüft.
+- **Sichtbar und rückgängig zu machen:** Das Formular kommt nach vorn, jedes ausgefüllte Feld bekommt einen lila
+  Rahmen, und eine Zeile über dem Formular nennt die Felder, die Ditto ausgefüllt hat, mit **Dittos Änderungen
+  rückgängig machen**. Ein Feld, das du danach änderst, behält deinen Wert; das Rückgängigmachen steht im Audit-Log.
+- **Nichts wird abgeschickt:** Kein Feld startet einen Build, speichert ein Modul oder eine Einstellung. **Start
+  Build**, **Finish** im Assistenten und **Save** bleiben deine Klicks, mit ihren eigenen Prüfungen und Fragen. Ein
+  Modul, das Ditto im Assistenten ausgefüllt hat, wird als KI-erstellt und ungetestet markiert, und seinen ersten
+  Build siehst du einmal. Was der Assistent teilt (angehängtes gesammeltes Wissen, der Export für die Community),
+  entscheidest du.
+- **Audit:** Jeder Aufruf geht wie jedes andere Tool durch die Tool-Registry: Berechtigungen, Grenzen (30
+  Ausfüllvorgänge pro Minute) und ein Audit-Eintrag.
+
+Nur Ditto bekommt diese Tools, und nur solange das Fenster offen ist. Externe KI-Apps erreichen das Fenster später über
+den Host-Dienst; die Tools sind dafür vorbereitet (`GUI_TOOL_CALLERS` in `orchestrator/tools/tools_gui.py`).
 
 ---
 
@@ -1773,8 +1825,10 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<Request-ID>/status`,
   `lcf://builds/<Request-ID>/log` (die letzten 200 Zeilen), `lcf://permissions`,
   `lcf://knowledge/sources/<Quellen-ID>` (die ersten Auszüge einer Wissensquelle, wie `read_knowledge_source`),
-  `lcf://packs/index` (der zwischengespeicherte Community-Index und die installierten Packs, wie `list_packs`) und die
-  Dokumente der Installation
+  `lcf://packs/index` (der zwischengespeicherte Community-Index und die installierten Packs, wie `list_packs`),
+  `lcf://knowledge/doc-sources` und `lcf://knowledge/doc-sources/<Probe-ID>` (die Dokumentations-Links des
+  Quellenkatalogs, alle oder die für Hersteller und SDK einer Probe; nur lesend, ein Crawl bleibt `crawl_docs_site`
+  mit seiner Frage) sowie die Dokumente der Installation
   `lcf://docs/<Name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` und ihre deutschen
   `_DE`-Zwillinge; aufgeführt werden nur die vorhandenen). Eine Ressource liefert, was ihr Lese-Tool liefert, und wird
   über die Tool-Registry gelesen: Deine Berechtigung für dieses Tool entscheidet (die Ressource eines verbotenen Tools
@@ -2412,6 +2466,26 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   auf; zum Teilen von Wissen exportierst du ein Wissens-Pack.
 - **Export für die Community:** Die letzte Seite des Assistenten bietet außerdem **Export for community after
   creating** an (siehe [Export für die Community](#export-für-die-community)).
+- **Board-Empfehlung:** Nach einer Probe empfiehlt der Builder das Board des passenden Targets, mit der Angabe, woher
+  die Empfehlung kommt und wie sicher sie ist: Der SoC der Probe heißt wie ein Board des Targets, oder der Board-Name
+  der Probe steht in der Liste bekannter Boards des Targets (`examples` in `target.yml`). Nur ein genauer Treffer ist
+  sicher und wird eingetragen; es ist nur eine Empfehlung, das Feld bleibt änderbar. Ist es nicht sicher, wird nichts
+  eingetragen: Der Builder nennt die Kandidaten und warum es unsicher ist, und du wählst deins mit einem Klick. Bis du
+  eins wählst, fragt **Start Build**, ob das Board im Formular deins ist („Nein“ ist die Vorgabe). **Board-Namen
+  online nachschlagen...** öffnet deinen Webbrowser mit einer Suche nach dem Board-Namen der Probe, erst wenn du
+  zustimmst. **Ditto fragen** schreibt eine Frage in den Chat, die du abschickst (ein Entwurf, den du dort getippt
+  hast, bleibt). Ein Board, das du gewählt hast, wird weder durch eine spätere Probe noch durch eine KI ersetzt. Ein
+  Target, das du gewählt hast (auch über ein Board, das du gewählt hast, oder das eines Rezepts), bleibt auch: Zeigt
+  die Probe auf ein anderes Target, sagt der Builder das und bietet **<Target> verwenden** an, das dann das Board
+  dieses Targets empfiehlt. Dass Ditto ein Board selbst über SSH untersucht, braucht das geplante Tool
+  `probe_remote_device`.
+- **Kein passendes Target:** Passt kein Target zur Probe, bietet der Builder **Target mit dem Assistenten erstellen**
+  (der Assistent beginnt mit dieser Probe) und **Ditto fragen** an.
+- **Dokumentations-Links für Deep Ingest:** Der Quellenkatalog (`configs/project_sources.yml`) enthält die
+  Dokumentations-Links der Hersteller. Das Deep-Ingest-Fenster des Assistenten wird mit den Links für den Hersteller
+  der Probe und das SDK auf der Hardware-Seite gefüllt; du prüfst sie und startest das Einlesen. Sagt Ditto, dass für
+  das Modul Informationen fehlen, bietet der Assistent Deep Ingest mit diesen Links an. KI-Clients lesen sie über die
+  Ressource `lcf://knowledge/doc-sources`; der MCP-Prompt `add_board` verweist auf sie, wenn Informationen fehlen.
 
 Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 

@@ -198,9 +198,9 @@ The Rockchip folder also still contains `source_module.sh`, `config_module.sh`, 
 `target_module.sh` from the four-module chain of version 1.x. The current dispatcher `build.sh` does not call
 them; their removal is planned for 3.4.0.
 
-`configs/project_sources.yml` is a catalogue of upstream projects and documentation links. The framework does not
-read it at runtime; see [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md) for what each file in `configs/`
-is for.
+`configs/project_sources.yml` is a catalogue of upstream projects and documentation links. At runtime the
+framework reads only its hardware documentation links (they fill the Deep Ingest window for a probe's vendor and
+SDK); see [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md) for what each file in `configs/` is for.
 
 ### Where things are stored
 
@@ -839,8 +839,9 @@ These are real limitations of the current state. Most are scheduled in the [road
   image checks.
 - **Image builds have network access.** This is by design (they download toolchains); only the conversion stages
   are offline.
-- **The project-sources catalogue** (`configs/project_sources.yml`) is not read at runtime; it is a reference for
-  developers (see [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md)).
+- **The project-sources catalogue** (`configs/project_sources.yml`) is a reference for developers; at runtime only
+  its hardware documentation links are read, for Deep Ingest (see
+  [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md)).
 
 ## Key decisions
 

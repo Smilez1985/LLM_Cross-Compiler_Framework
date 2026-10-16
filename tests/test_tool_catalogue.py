@@ -13,7 +13,7 @@ from orchestrator.Core import disk_plan, hf_hub, hf_lookup
 # Design section 2.1: 37 core tools, 6 optional (default deny) and 2 later ones; the trash (delegation design 3.10)
 # adds two optional tools. Mojo (round 7 item 11') replaces run_doctor by run_mojo_oracle and adds run_mojo_miracle;
 # run_doctor stays registered under its 3.0.0 name, callable but never listed (HIDDEN). index_framework_docs (N12)
-# adds one core tool.
+# adds one core tool. The five GUI tools (GUI) exist only while the window is open and only for Ditto.
 CORE = {
     "list_build_requests", "get_build_status", "read_build_log", "list_artifacts", "get_artifact_details",
     "check_build_request", "start_build", "cancel_build", "resolve_healing", "propose_healing_fix",
@@ -30,24 +30,43 @@ HIDDEN = {"run_doctor"}
 OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
             "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash"}
 LATER = {"probe_remote_device", "run_device_benchmark"}
+# Ditto's hands in the open GUI (DECISIONS round 8): registered only while the window is open, only for Ditto.
+GUI = {"read_gui_form", "fill_gui_form", "wizard_state", "wizard_step", "show_gui"}
 # Built by phase T (T1-T9, T14): every core tool.
 BUILT = set(CORE)
 
 
 def test_the_catalogue_has_the_designed_size():
-    assert (len(CORE), len(OPTIONAL), len(LATER), len(HIDDEN)) == (39, 9, 2, 1)
+    assert (len(CORE), len(OPTIONAL), len(LATER), len(HIDDEN), len(GUI)) == (39, 9, 2, 1, 5)
 
 
 def test_known_tools_is_exactly_the_pinned_catalogue():
     """framework_tools.KNOWN_TOOLS is the catalogue, one constant, kept equal to the sets pinned here."""
-    from orchestrator.tools.framework_tools import KNOWN_TOOLS
-    assert KNOWN_TOOLS == CORE | OPTIONAL | LATER | HIDDEN
+    from orchestrator.tools.framework_tools import GUI_ONLY_TOOLS, KNOWN_TOOLS
+    from orchestrator.tools.tools_gui import GUI_TOOLS
+    assert KNOWN_TOOLS == CORE | OPTIONAL | LATER | HIDDEN | GUI
+    assert GUI_ONLY_TOOLS == GUI_TOOLS == GUI
+
+
+def test_the_gui_tools_never_push_a_client_past_the_cap(booted_framework):
+    """With the window open Ditto gets the GUI tools as well; an MCP client still lists exactly the core tools, inside
+    the client cap (MAX_LISTED_TOOLS), and get_status warns only about what a client lists."""
+    from orchestrator.tools.framework_tools import MAX_LISTED_TOOLS
+    from orchestrator.tools.registry import ToolContext
+    from orchestrator.tools.tools_gui import register_gui_tools
+    registry = booted_framework.tool_registry
+    register_gui_tools(registry, booted_framework)
+    listed = {c: {r["tool"] for r in registry.permissions(c) if r["listed"]} for c in ("mcp", "ditto")}
+    assert listed["mcp"] == BUILT and len(listed["mcp"]) <= MAX_LISTED_TOOLS
+    assert not GUI & {s.name for s in registry.visible("mcp")}
+    status = registry.call("get_status", {"sections": ["permissions"]}, ToolContext("ditto"))
+    assert status.permissions.warning == "", "Ditto in the GUI process is no client with a cap"
 
 
 def test_every_registered_tool_has_a_catalogue_name(booted_framework):
     names = [s.name for s in booted_framework.tool_registry.list()]
     assert len(names) == len(set(names)), "a tool is registered twice"
-    assert set(names) <= CORE | OPTIONAL | LATER | HIDDEN, sorted(set(names) - CORE - OPTIONAL - LATER - HIDDEN)
+    assert set(names) <= CORE | OPTIONAL | LATER | HIDDEN | GUI, sorted(set(names) - CORE - OPTIONAL - LATER - HIDDEN)
     from orchestrator.tools.framework_tools import KNOWN_TOOLS
     assert set(names) <= KNOWN_TOOLS, "every registered tool is in the one catalogue"
     assert all(len(n) <= 39 for n in names), "names fit the clients' prefix limits (design 2.0)"

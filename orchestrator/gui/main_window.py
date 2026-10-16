@@ -43,6 +43,7 @@ from orchestrator.gui.chat_window import ChatWindow
 from orchestrator.gui.plain import ask, button_text, notify, one_line, plain_box, plain_tooltip
 from orchestrator.gui.sign_in import STORAGE_CHOICE_CODES, UserConfigSnapshot, choose_storage_at_start
 from orchestrator.gui.deployment_window import DeploymentWindow
+from orchestrator.gui.form_surface import close_gui, open_gui
 
 # ============================================================================
 # DITTO AVATAR WIDGET
@@ -136,6 +137,7 @@ class MainOrchestrator(QMainWindow):
         self._setup_statusbar()
         self._setup_chat_dock()
         self._apply_styles()
+        self.gui_surface = open_gui(self)  # Ditto's hands in this window: the GUI tools on its forms
         
         # Start State Polling (Live Feedback Loop)
         self.update_timer = QTimer(self)
@@ -722,9 +724,11 @@ class MainOrchestrator(QMainWindow):
         self.deployment_window.reload_history()
         self.status.showMessage(t("history.cleared"), 5000)
 
-    def _open_module_wizard(self):
+    def _open_module_wizard(self, *_args, probe_path=None):
         targets_dir = self.app_root / self.framework.config.get("targets_dir", "targets")
         wizard = ModuleCreationWizard(targets_dir, self)
+        if probe_path:  # the Builder's offer when no target fits a probe: the wizard starts from that probe
+            wizard.import_probe_file(str(probe_path))
         wizard.exec()
         if self.framework.target_manager:
             self.framework.target_manager.initialize()
@@ -857,6 +861,7 @@ class MainOrchestrator(QMainWindow):
         """)
 
     def closeEvent(self, event):
+        close_gui(getattr(self, "gui_surface", None))  # the GUI tools are hidden again
         chat = getattr(self, "chat_window", None)
         if chat is not None:
             self._save_gui_state()

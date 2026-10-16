@@ -167,6 +167,9 @@ NO_TOOL_ACTIONS = [
                     "'llm-cli doctor --fix --tier 2' in a terminal), always with the full list; no tool does."),
 ]
 MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
+# Ditto's hands in the open GUI (tools_gui.GUI_TOOLS): registered only while the window is open and offered only to
+# Ditto in the GUI process (DECISIONS round 8); no MCP client lists them, so they do not count against the cap.
+GUI_ONLY_TOOLS = frozenset({"read_gui_form", "fill_gui_form", "wizard_state", "wizard_step", "show_gui"})
 
 # Every tool name of this framework's catalogue (design section 2.1: the core, optional and later tools; pinned by
 # tests/test_tool_catalogue.py). A new tool joins this set and the test, so the catalogue stays one deliberate list.
@@ -187,6 +190,8 @@ KNOWN_TOOLS = frozenset({
     "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
     # later
     "probe_remote_device", "run_device_benchmark",
+    # the GUI tools: only while the GUI is open, only for Ditto
+    *GUI_ONLY_TOOLS,
 })
 
 
@@ -434,6 +439,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         # loaded after permissions(): the damage flag below belongs to this load; a token's own permissions for it
         policy = running.policy(caller) if caller else running.policy()
         listed = sum(1 for r in rows if r["listed"])
+        # The cap is a client's (MCP): the GUI tools are offered only to Ditto in the GUI process, never to a client
+        client_listed = sum(1 for r in rows if r["listed"] and r["tool"] not in GUI_ONLY_TOOLS)
         grant_caller = running._grant_caller(caller)[0] if caller else ""
         standing = [StandingApprovalOut(id=g["grant"].id, tool=g["grant"].tool, scope=g["grant"].summary,
                                         state=g["state"], created=g["grant"].created,
@@ -445,8 +452,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
             damaged=bool(getattr(running.policy_store, "problem", None)), listed=listed,
             tools=[ToolPermission(**{k: r[k] for k in ToolPermission.model_fields}) for r in rows],
             standing_approvals=standing, no_tool_actions=[NoToolAction(action=a, where=w) for a, w in NO_TOOL_ACTIONS],
-            warning=(f"{listed} tools are listed; some clients take at most {MAX_LISTED_TOOLS}."
-                     if listed > MAX_LISTED_TOOLS else ""))
+            warning=(f"{client_listed} tools are listed for MCP clients; some clients take at most "
+                     f"{MAX_LISTED_TOOLS}." if client_listed > MAX_LISTED_TOOLS else ""))
 
     specs = [
         ToolSpec("get_build_status", "Build status",

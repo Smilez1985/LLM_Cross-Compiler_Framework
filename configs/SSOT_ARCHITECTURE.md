@@ -17,7 +17,8 @@ project live.
 - **`hardware_probe_schema.yml`** defines the hardware probe file (schema 2): every key with its source,
   normalisation and validation. The profile parser loads it and enforces it. It is new and not released yet.
 - **`project_sources.yml`** and **`detailed_project_sources.yml`** are a reference catalogue of upstream projects
-  and documentation links for developers. The framework does **not** read them while it runs.
+  and documentation links for developers. While it runs, the framework reads only the hardware documentation links
+  of `project_sources.yml` (for Deep Ingest).
 - Your own settings are saved in **`config.yml`** in the config folder. It is personal and never committed.
 
 ## The files in configs/
@@ -27,7 +28,7 @@ project live.
 | `llm_providers.yml` | Presets of the AI providers Ditto can use | yes | `orchestrator/llm/catalog.py` |
 | `llama_runtime.yml` | The llama.cpp pin (commit), the prebuilt llama.cpp archives, CUDA toolkits and builder bases for self-built llama.cpp, pinned GGUF models, server defaults, rules for the recommended model | yes | `orchestrator/runtime/catalog.py`; the pin also `orchestrator/utils/llama_pin.py` |
 | `hardware_probe_schema.yml` | Keys of the hardware probe file (schema 2): type, validation, source and normalisation per OS, whether a key enters the performance key | yes, when a hardware profile is read | `orchestrator/runtime/profile.py` |
-| `project_sources.yml` | Catalogue of upstream projects: repositories, versions, documentation links, notes | no | people; `scripts/validate_ssot.py`, `scripts/sync_ssot.py` |
+| `project_sources.yml` | Catalogue of upstream projects: repositories, versions, documentation links, notes | only the `docs_*` links of `hardware_targets` | people; `scripts/validate_ssot.py`, `scripts/sync_ssot.py`; `orchestrator/Core/doc_sources.py` (Deep Ingest window, resource `lcf://knowledge/doc-sources`) |
 | `detailed_project_sources.yml` | Extended developer reference: guides, decision trees, more vendor sections | no | people; `scripts/sync_ssot.py` |
 | `config.yml` (not in git) | Your settings | yes | `orchestrator/Core/config_manager.py` |
 | `SSOT_ARCHITECTURE.md`, `SSOT_ARCHITECTURE_DE.md` | This document | no | people |
@@ -235,8 +236,9 @@ inference_backends:
 
 What the file is **not** (its header comment says the same):
 
-- No part of the framework reads it while it runs. It is not turned into environment variables for the build
-  containers, the crawler does not follow its links, and Ditto does not use `docs_workflow`.
+- While the framework runs, only the `docs_*` links of `hardware_targets` are read: they fill the Deep Ingest window
+  for a probe's vendor and SDK, and AI clients read them through the resource `lcf://knowledge/doc-sources`. Nothing
+  is crawled until a person starts it. The file is not turned into environment variables for the build containers.
 - Its versions are not the versions builds use. Builds use what the target's Dockerfile pins and the llama.cpp pin
   in `llama_runtime.yml`, which target images and the local model server build by commit. Its llama.cpp entry is
   still checked against that pin.

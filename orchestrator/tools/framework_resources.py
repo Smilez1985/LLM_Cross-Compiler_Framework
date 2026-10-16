@@ -132,6 +132,46 @@ def register_framework_resources(registry: ToolRegistry, framework) -> ToolRegis
                          "whose model_card field holds it).", "text/plain", tool="get_artifact_details",
                          arguments=args, completions=artifact),
         ]
+    specs += doc_source_resources(framework)
     for spec in specs:
         registry.register_resource(spec)
     return registry
+
+
+def doc_source_resources(framework) -> List[ResourceSpec]:
+    """The source catalogue's documentation links (configs/project_sources.yml), all of them or those that fit a
+    stored probe's vendor and SDK (N10): read-only framework text; crawling stays crawl_docs_site's, confirmed."""
+    from orchestrator.Core.doc_sources import catalogue_text, links_for, load_catalogue
+
+    def every(_params: Dict[str, str]) -> str:
+        links = [link for vendor_links in load_catalogue().values() for link in vendor_links]
+        return catalogue_text(links, "Documentation links of the source catalogue, by vendor and project:")
+
+    def probes():
+        from orchestrator.runtime.probe_service import HardwareProbes
+        return HardwareProbes.for_framework(framework)
+
+    def for_probe(params: Dict[str, str]) -> str:
+        from orchestrator.runtime.probe_service import ProbeError
+        try:
+            profile = probes().get(params.get("probe_id", ""))
+        except ProbeError as e:
+            raise ResourceUnknown(str(e), next=getattr(e, "next", "")) from None
+        return catalogue_text(links_for(profile), "Documentation links for this probe's vendor and SDK (from the "
+                                                  "source catalogue):")
+
+    def probe_ids(_args, _ctx) -> List[str]:
+        try:
+            return [p.probe_id for p in probes().list()]
+        except Exception:  # noqa: BLE001 - a completion is a hint
+            return []
+
+    return [
+        ResourceSpec("lcf://knowledge/doc-sources", "doc-sources", "Documentation links",
+                     "The vendors' SDK documentation links of the framework's source catalogue (read-only). Adding "
+                     "one to the knowledge base is crawl_docs_site, which the person confirms.", "text/plain",
+                     read=every),
+        ResourceSpec("lcf://knowledge/doc-sources/{probe_id}", "doc-sources-probe", "Documentation links for a probe",
+                     "The source catalogue's documentation links that fit a stored hardware probe's vendor and SDK "
+                     "(read-only).", "text/plain", read=for_probe, completions={"probe_id": probe_ids}),
+    ]

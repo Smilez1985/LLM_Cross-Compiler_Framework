@@ -236,6 +236,70 @@ class ModuleCreationWizard(QWizard):
         self.addPage(self.create_docker_page())
         self.addPage(self.create_flags_page())
         self.addPage(self.create_summary_page())
+        self.gui_form = self._bind_gui_form()
+
+    def _bind_gui_form(self):
+        """The wizard's fields for Ditto's GUI tools, page by page (orchestrator/gui/form_surface.py). Finish is no field:
+        only the person's click creates the module. Sharing (export, attached knowledge) stays the person's choice."""
+        from orchestrator.gui.form_surface import FormBinding, QWizardPages, person_audit
+        b = FormBinding("module_wizard", "gui.form.module_wizard")
+        b.line("name", "gui.field.wizard.name", self.name_edit, page=1, hint="letters, digits, '_', '.', '-'")
+        b.combo("arch", "gui.field.wizard.arch", self.arch_combo, by_data=False, page=1)
+        b.line("sdk", "gui.field.wizard.sdk", self.sdk_edit, page=1, hint="e.g. RKNN, CUDA, OpenVINO, none")
+
+        def base_image():
+            if self.rad_debian.isChecked():
+                return "debian:bookworm-slim"
+            if self.rad_ubuntu.isChecked():
+                return "ubuntu:22.04"
+            return self.custom_os_edit.text().strip()
+
+        def set_base_image(value):
+            text = str(value).strip()
+            if text == "debian:bookworm-slim":
+                self.rad_debian.setChecked(True)
+            elif text == "ubuntu:22.04":
+                self.rad_ubuntu.setChecked(True)
+            else:
+                self.rad_custom.setChecked(True)
+                self.custom_os_edit.setText(text)
+
+        image_widgets = (self.rad_debian, self.rad_ubuntu, self.rad_custom, self.custom_os_edit)
+        b.add("base_image", "gui.field.wizard.base_image", "text", base_image, set_base_image, image_widgets, page=2,
+              hint="a Docker image as image:tag, best an official one pinned by digest (name@sha256:...)")
+        for widget in image_widgets[:3]:
+            widget.clicked.connect(lambda *_a: self.gui_form.person_edited("base_image"))
+        self.custom_os_edit.textEdited.connect(lambda _t: self.gui_form.person_edited("base_image"))
+        b.line("packages", "gui.field.wizard.packages", self.packages_edit, page=2, hint="Debian package names")
+        b.line("cpu_flags", "gui.field.wizard.cpu_flags", self.cpu_flags, page=3)
+        b.line("cmake_flags", "gui.field.wizard.cmake_flags", self.cmake_flags, page=3)
+        b.text("quantization_logic", "gui.field.wizard.quantization_logic", self.quant_logic, page=3,
+               hint="shell code (bash 'case' branches) for build.sh; the person reviews it on the last page")
+        b.text("setup_commands", "gui.field.wizard.setup_commands", self.setup_commands, page=3,
+               hint="shell commands build.sh runs before converting (no network, unprivileged)")
+
+        def person_only():
+            return "only the person decides what a module shares"
+        b.check("attach_knowledge", "gui.field.wizard.attach_knowledge", self.chk_knowledge, page=4,
+                read_only=person_only)
+        b.check("export", "gui.field.wizard.export", self.chk_export, page=4, read_only=person_only)
+
+        def show():
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+        form = b.finish(self, show=show, pages=QWizardPages(self), is_open=self.isVisible)
+        form.actions["deep_ingest"] = lambda: QTimer.singleShot(0, self.run_deep_ingest)
+        b.close_with(self)
+        registry = getattr(self.framework_manager, "tool_registry", None)
+        for page_id in self.pageIds()[1:]:   # the banner of what Ditto filled, with its Undo, on every page
+            layout = self.page(page_id).layout()
+            if layout is not None:
+                layout.addWidget(b.banner(self.page(page_id), audit=person_audit(registry)))
+        b.refresh()
+        self.gui_binding = b
+        return form
 
     def create_intro_page(self):
         page = QWizardPage()
@@ -599,7 +663,9 @@ Setup commands:
         show_crawl_notice_once(self, cfg, announcer=speak,
                                registry=getattr(self.framework_manager, "tool_registry", None))
         history = input_history.for_config(cfg)
-        dlg = URLInputDialog(self, recent=history.get("url") if history else (), config=cfg)
+        links = self.documentation_links()   # filled in for the person to check (N10)
+        dlg = URLInputDialog(self, recent=history.get("url") if history else (), config=cfg,
+                             **({"suggested": links} if links else {}))
         if dlg.exec() == QDialog.Accepted:
             urls = dlg.get_urls()
             options = dlg.get_options()
@@ -631,6 +697,15 @@ Setup commands:
             self.crawl_worker.finished.connect(self._crawl_state_changed)
             self.crawl_worker.start()
             self._crawl_state_changed()
+
+    def documentation_links(self) -> List[str]:
+        """The source catalogue's documentation links for this hardware (the probe's vendor, the SDK typed on the
+        hardware page), offered in the Deep Ingest window; the person checks them and starts the crawl (N10)."""
+        from orchestrator.Core.doc_sources import links_for
+        try:
+            return [link.url for link in links_for(self._target_profile(), self.sdk_edit.text())]
+        except Exception:  # noqa: BLE001 - no links: the window opens empty, as before
+            return []
 
     def _crawl_running(self) -> bool:
         return self.crawl_worker is not None and self.crawl_worker.isRunning()
@@ -708,6 +783,10 @@ Setup commands:
     def run_standard_import(self):
         path, _ = QFileDialog.getOpenFileName(self, tr("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
         if not path: return
+        self.import_probe_file(path)
+
+    def import_probe_file(self, path):
+        """The rule-based import of a probe file (also from the Builder's offer when no target fits a probe)."""
         self.probe_path = path
         self._store_probe(path)
 
@@ -875,8 +954,11 @@ Setup commands:
     def _ai_worker(ditto, path, token, relay):
         """Runs in a worker thread: touches no Qt object of the wizard, answers on the relay only."""
         from orchestrator.Core.ditto_manager import DittoError
+        from orchestrator.Core.ditto_manager import DittoCannot
         try:
             result = ("done", ditto.generate_module(path).model_dump())
+        except DittoCannot as e:  # its reason code decides whether Deep Ingest is offered
+            result = ("cannot", (str(e), e.cannot.reason))
         except (DittoError, OSError) as e:
             result = ("error", str(e))
         except Exception as e:
@@ -891,10 +973,12 @@ Setup commands:
         kind, value = result
         if kind == "done":
             self.on_ai_finished(value)
+        elif kind == "cannot" and isinstance(value, tuple) and len(value) == 2:
+            self.on_ai_error(value[0], reason=value[1])
         else:
             self.on_ai_error(value)
 
-    def on_ai_error(self, err):
+    def on_ai_error(self, err, reason=""):
         self._set_avatar_state("fail")
         self.btn_import_ai.setEnabled(True)
         self.btn_import_std.setEnabled(True)
@@ -904,6 +988,19 @@ Setup commands:
         box = QMessageBox(QMessageBox.Critical, "AI Error", str(err), QMessageBox.Ok, self)
         box.setTextFormat(Qt.PlainText)
         box.exec()
+        if reason == "missing_information":
+            self.offer_deep_ingest()
+
+    def offer_deep_ingest(self) -> bool:
+        """Ditto lacks information about this hardware: Deep Ingest is offered with the framework's documentation links
+        for it. Nothing is crawled unless the person checks the links and starts it."""
+        from orchestrator.gui.plain import ask
+        links = self.documentation_links()
+        text = ui_text("gui.wizard.ingest_offer", n=len(links)) if links else ui_text("gui.wizard.ingest_offer_none")
+        if not ask(self, ui_text("gui.wizard.ingest_title"), text):
+            return False
+        self.run_deep_ingest()
+        return True
 
     def on_ai_finished(self, config):
         self._set_avatar_state("success")
@@ -984,13 +1081,17 @@ Setup commands:
                  packages_list.append("g++-riscv64-linux-gnu")
 
         from orchestrator.Core.ditto_manager import ai_module_description
+        # A module Ditto helped with (its proposal, or fields it filled through the GUI tools) is AI-made: marked
+        # untested, and its first build is shown to the person once.
+        ai_made = bool(self.ai_proposal) or bool(getattr(self, "gui_form", None) and self.gui_form.ai_touched())
         self.module_data = {
             "module_name": self.name_edit.text(),
             "architecture": arch,
             "sdk": self.sdk_edit.text(),
             # A module from Ditto's proposal says it is untested and names Ditto's guesses, as generate-ai's does.
-            "description": (ai_module_description(self.name_edit.text(), self.ai_proposal.get("assumptions") or [])
-                            if self.ai_proposal else f"Target for {self.name_edit.text()}"),
+            "description": (ai_module_description(self.name_edit.text(),
+                                                  (self.ai_proposal or {}).get("assumptions") or [])
+                            if ai_made else f"Target for {self.name_edit.text()}"),
             "base_os": self.custom_os_edit.text() if self.rad_custom.isChecked() else ("debian:bookworm-slim" if self.rad_debian.isChecked() else "ubuntu:22.04"),
             "packages": packages_list,
             "cpu_flags": self.cpu_flags.text(),
@@ -1000,12 +1101,12 @@ Setup commands:
             "quantization_logic": self.quant_logic.toPlainText(),
             "detection_commands": "lscpu"
         }
-        if self.ai_proposal:
+        if ai_made:
             # The proposal's fields without a widget of their own are passed on, never dropped (the person saw them
             # in the proposal's facts), and the module is marked AI-generated and untested.
             from orchestrator.Core.module_generator import AI_DEFINITION_FIELDS
             for key in AI_DEFINITION_FIELDS:
-                if key not in self.module_data and self.ai_proposal.get(key):
+                if key not in self.module_data and (self.ai_proposal or {}).get(key):
                     self.module_data[key] = self.ai_proposal[key]
             self.module_data["provenance"] = "ai-generated"
 
@@ -1019,7 +1120,7 @@ Setup commands:
                                                         profile=profile)
             else:
                 output_path = generator.generate_module(self.module_data, profile=profile)
-            if self.ai_proposal:  # a module from an AI's proposal, saved by the person: audited (design 6.7)
+            if ai_made:  # a module from an AI's proposal, saved by the person: audited (design 6.7)
                 from orchestrator.tools.tools_targets import record_module_saved
                 record_module_saved(self.framework_manager, "gui", self.module_data, Path(output_path),
                                     "framework-gui")
