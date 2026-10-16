@@ -116,6 +116,11 @@ TEXTS = {
         "gui.target.kept": "The probe points to the target {target}. Your choice {chosen} stays.",
         "gui.target.use": "Use {target}",
         "gui.ditto.kept": "Ditto suggests {value} for {field}. Your choice stays.",
+        "gui.ditto.not_filled": "Ditto suggests {value} for {field}. It was not filled: {why}.",
+        "gui.board.confirm.title": "Which board?",
+        "gui.board.confirm": "The probe could not tell your board for sure (candidates: {candidates}). The form says "
+                             "{board}. Build for {board}?",
+        "gui.board.confirm.no": "The build was not started. Pick your board, then start the build.",
 
         # documentation links for Deep Ingest
         "gui.wizard.ingest_title": "Add documentation",
@@ -237,6 +242,11 @@ TEXTS = {
         "gui.target.kept": "Die Probe zeigt auf das Target {target}. Deine Wahl {chosen} bleibt.",
         "gui.target.use": "{target} verwenden",
         "gui.ditto.kept": "Ditto schlägt {value} für {field} vor. Deine Wahl bleibt.",
+        "gui.ditto.not_filled": "Ditto schlägt {value} für {field} vor. Es wurde nicht eingetragen: {why}.",
+        "gui.board.confirm.title": "Welches Board?",
+        "gui.board.confirm": "Die Probe konnte dein Board nicht sicher bestimmen (Kandidaten: {candidates}). Im "
+                             "Formular steht {board}. Für {board} bauen?",
+        "gui.board.confirm.no": "Der Build wurde nicht gestartet. Wähle dein Board und starte dann den Build.",
 
         "gui.wizard.ingest_title": "Dokumentation hinzufügen",
         "gui.wizard.ingest_offer": "Ditto fehlen Informationen über diese Hardware. Deep Ingest mit {n} "

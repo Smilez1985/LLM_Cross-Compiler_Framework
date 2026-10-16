@@ -25,7 +25,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect
 from PySide6.QtGui import QPixmap, QAction
 
 from orchestrator.gui.builder_parts import (BoardAdvice, BuildProgressPanel, after_probe, apply_ditto_settings,
-                                            bind_builder_form, person_target, read_probe)
+                                            bind_builder_form, board_confirmed, person_target, read_probe)
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
 from orchestrator.gui.plain import plain_label
 from orchestrator.utils import input_history
@@ -911,6 +911,8 @@ class BuilderTab(QWidget):
             self._log(f"AI Failed: {msg}")
 
     def _submit_build(self):
+        if not board_confirmed(self):  # a probe that was not sure about the board: the person confirms it (N9')
+            return
         get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
         output_dir = get_cfg("output_dir", "output")
         if hasattr(self.framework, "resolve_path"):

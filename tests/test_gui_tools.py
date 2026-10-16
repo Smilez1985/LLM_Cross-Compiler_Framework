@@ -537,3 +537,13 @@ def test_a_field_on_another_wizard_page_names_the_way_there(fm, wizard):
         call(fm, "wizard_step", {"action": "fill", "values": {"packages": "cmake"}},
              ditto(confirm=lambda s, i: pytest.fail("nothing to ask")))
     assert "wizard_step" in exc.value.next and "page" in exc.value.next and "chat" not in exc.value.next
+
+
+def test_a_home_folder_of_another_account_never_reaches_the_ai(fm, wizard):
+    """Only the framework's own home folder was hidden. The person may type a path of their own account (the framework
+    can run under another one), and the name in /home/<name> or C:\\Users\\<name> reached the AI."""
+    wizard.setup_commands.setPlainText("cp /home/jane.doe/sdk/setup.sh . && tar xf C:\\Users\\Jane Roe\\x.tar")
+    wizard.sdk_edit.setText("RKNN from /Users/bob")
+    out = call(fm, "read_gui_form", {"form": "module_wizard"}).form.model_dump_json()
+    assert "jane" not in out.lower() and "Roe" not in out and "bob" not in out
+    assert "~/sdk/setup.sh" in out, "the rest of the path stays readable"

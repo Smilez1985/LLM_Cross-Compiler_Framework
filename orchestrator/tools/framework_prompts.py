@@ -70,7 +70,10 @@ DIAGNOSE_INSTRUCTIONS = (
     "explicit decision." + CLOSING)
 ADD_BOARD_INSTRUCTIONS = (
     CLIENT_ROLE + MODULE_TASK + " Show the user the whole definition with base_image_reason and assumptions, then "
-    "create it with create_target_module; the person confirms every module." + CLOSING)
+    "create it with create_target_module; the person confirms every module. If information about the hardware is "
+    "missing, read the framework's documentation links for it (lcf://knowledge/doc-sources/<probe id>, or "
+    "lcf://knowledge/doc-sources) and offer the user to add them with crawl_docs_site, which the person confirms."
+    + CLOSING)
 DEPLOY_INSTRUCTIONS = (
     CLIENT_ROLE + "Deploy a built model to a device. A device must be trusted and paired by the person in the "
     "framework's GUI or CLI first; you can never trust a device or its host key. list_devices shows the devices "

@@ -755,30 +755,34 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and German texts name the menus as the window shows them). Where the panel sits, whether it is shown, its filter and the newest entry you
   saw are kept in `gui_state.json` in the per-user folder (never in QSettings); a damaged file gives the defaults.
 - **Ditto's hands in the window: the GUI tools** (`read_gui_form`, `fill_gui_form`, `wizard_state`, `wizard_step`,
-  `show_gui`; `orchestrator/tools/tools_gui.py`, `orchestrator/tools/gui_surface.py`, `orchestrator/gui/form_surface.py`):
-  the build form, the target module wizard (page by page) and the AI settings dialog register their fields, and Ditto
-  reads what you entered and fills fields visibly. Secrets are only "set" or "not set" and never filled; local files
-  reach the AI as labels; a field you are editing or a value you chose is never overwritten; a fill that would change
-  your choice through the form's own logic is undone completely. Every filled field has a purple frame and is named in
-  a line above the form with **Undo Ditto's changes** (the undo is audited). Nothing is submitted: Start Build, the
+  `show_gui`; `orchestrator/tools/tools_gui.py`, `orchestrator/tools/gui_surface.py`,
+  `orchestrator/gui/form_surface.py`): the build form, the target module wizard (page by page) and the AI settings
+  dialog register their fields, and Ditto reads what you entered and fills fields visibly. Secrets are only "set" or
+  "not set" and never filled; local files reach the AI as labels, and no home folder (also not another account's)
+  reaches it by name; a field you are editing or a value you chose is never overwritten; a fill that would change your
+  choice through the form's own logic is undone completely. Every filled field has a purple frame and is named in a
+  line above the form with **Undo Ditto's changes** (the undo is audited). Nothing is submitted: Start Build, the
   wizard's Finish and Save stay your clicks, and a module Ditto filled is marked AI-generated, so its first build is
   shown to you once. The AI settings never let an AI change the provider, the address, the privacy level or the
   fallback chain. The tools exist while the window is open and only for Ditto; external AI apps get them later through
   the host service (`GUI_TOOL_CALLERS`). Every call goes through the tool registry (permissions, limits, audit).
-- **The board recommendation from the hardware probe** (`orchestrator/runtime/board_recommendation.py`): after a
-  probe the Builder recommends the matched target's board with its source (the probe's SoC, or the probe's board name
-  in the target's list of known boards) and how sure it is. Only an exact match is filled in; otherwise the candidates
-  and the reason are shown and you pick. A board you chose is never replaced by a later probe or an AI, and a target
-  you chose (or a recipe's) stays too: the probe's target is then offered with one click. **Ask Ditto for Config**
-  fills the build form the same way as Ditto's GUI tools (marked, undoable, your own values stay), and a model or
-  dataset file you picked in the file dialog counts as your choice. The online look-up of the board name opens your
-  browser only after you agree. When no target fits, the Builder offers **Create a target with the wizard** (starting from
-  that probe) and **Ask Ditto** (a question in the chat that you send; a draft you typed there stays).
+- **The board recommendation from the hardware probe** (`orchestrator/runtime/board_recommendation.py`): after a probe
+  the Builder recommends the matched target's board with its source (the probe's SoC, or the probe's board name in the
+  target's list of known boards) and how sure it is. Only an exact match is filled in; otherwise the candidates and
+  the reason are shown and you pick; until you pick, **Start Build** asks whether the board in the form is yours. A
+  board you chose is never replaced by a later probe or an AI, and a target you chose (also through a board you chose,
+  or a recipe's) stays too: the probe's target is then offered with one click. **Ask Ditto for Config** fills the
+  build form the same way as Ditto's GUI tools (marked, undoable, your own values stay; the log names each value it
+  did not fill and why), and a model or dataset file you picked in the file dialog counts as your choice. The online
+  look-up of the board name opens your browser only after you agree. When no target fits, the Builder offers **Create
+  a target with the wizard** (starting from that probe) and **Ask Ditto** (a question in the chat that you send; a
+  draft you typed there stays).
 - **Documentation links for Deep Ingest** (`orchestrator/Core/doc_sources.py`): the source catalogue's `docs_*` links
   for the probe's vendor and the SDK fill the wizard's Deep Ingest window; you check them and start the crawl. When
   Ditto says that information is missing for a module, the wizard offers Deep Ingest with these links. AI clients read
-  them through the read-only resources `lcf://knowledge/doc-sources` and `lcf://knowledge/doc-sources/{probe_id}`.
-  The catalogue's header and the documents now say that these links are read at run time.
+  them through the read-only resources `lcf://knowledge/doc-sources` and `lcf://knowledge/doc-sources/{probe_id}`; the
+  MCP prompt `add_board` points to them when information is missing. The catalogue's header and the documents now say
+  that these links are read at run time.
 - **Build progress and the live build log in the Builder** (`orchestrator/gui/builder_parts.py`): a progress bar with
   the step and the percent from the build service (the running build's own step, see Fixed), and the build's log
   live below it (secrets redacted, plain text, each line once, at most 20,000 lines in view), with a search box and a

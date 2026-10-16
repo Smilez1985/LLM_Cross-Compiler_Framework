@@ -641,14 +641,16 @@ Die Regeln sind in jedem Formular gleich (`orchestrator/tools/gui_surface.py`):
   änderst sie: Sie entscheiden, wohin deine Daten gehen. Ditto darf die Wissensbasis aus- und den Offline-Modus
   einschalten, nie umgekehrt (dieselbe Regel wie bei `update_settings`).
 - **Pfade:** Eine lokale Datei erreicht die KI als Label (`models:tiny.gguf`) oder mit ihrem Dateinamen, nie mit dem
-  Home-Ordner. Ditto nennt eine lokale Datei mit ihrer ID aus `list_local_files` (`lf_...`) oder als `<Label>:<relativer
-  Pfad>`.
+  Home-Ordner. Ein Home-Ordner in Text, den du getippt hast (auch der eines anderen Kontos, `/home/<Name>` oder
+  `C:\Users\<Name>`), erreicht die KI als `~`. Ditto nennt eine lokale Datei mit ihrer ID aus `list_local_files`
+  (`lf_...`) oder als `<Label>:<relativer Pfad>`.
 - **Deine Werte gehören dir:** Einen Wert, den du getippt, gewählt oder angeklickt hast (auch eine Datei, die du in
   einem Dateidialog gewählt hast, und die Werte eines Rezepts), überschreibt eine KI nie. Ditto darf im Chat einen
-  anderen vorschlagen; **Ask Ditto for Config** im Builder füllt das Formular nach denselben Regeln. Ein Feld, das du
-  gerade bearbeitest (es hat den Tastaturfokus), wird nie beschrieben. Würde ein Ausfüllen über die Logik des Formulars ein Feld ändern, das du gewählt hast (ein anderes
-  Target setzt das Board zurück), wird es ganz zurückgenommen und abgelehnt. Was nie ausgefüllt werden kann, wird
-  abgelehnt, bevor du gefragt wirst; beim Ausfüllen wird alles noch einmal geprüft.
+  anderen vorschlagen; **Ask Ditto for Config** im Builder füllt das Formular nach denselben Regeln, und das
+  Builder-Log nennt jeden Wert, den es nicht eingetragen hat, und warum. Ein Feld, das du gerade bearbeitest (es hat
+  den Tastaturfokus), wird nie beschrieben. Würde ein Ausfüllen über die Logik des Formulars ein Feld ändern, das du
+  gewählt hast (ein anderes Target setzt das Board zurück), wird es ganz zurückgenommen und abgelehnt. Was nie
+  ausgefüllt werden kann, wird abgelehnt, bevor du gefragt wirst; beim Ausfüllen wird alles noch einmal geprüft.
 - **Sichtbar und rückgängig zu machen:** Das Formular kommt nach vorn, jedes ausgefüllte Feld bekommt einen lila
   Rahmen, und eine Zeile über dem Formular nennt die Felder, die Ditto ausgefüllt hat, mit **Dittos Änderungen
   rückgängig machen**. Ein Feld, das du danach änderst, behält deinen Wert; das Rückgängigmachen steht im Audit-Log.
@@ -2313,20 +2315,22 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
   die Empfehlung kommt und wie sicher sie ist: Der SoC der Probe heißt wie ein Board des Targets, oder der Board-Name
   der Probe steht in der Liste bekannter Boards des Targets (`examples` in `target.yml`). Nur ein genauer Treffer ist
   sicher und wird eingetragen; es ist nur eine Empfehlung, das Feld bleibt änderbar. Ist es nicht sicher, wird nichts
-  eingetragen: Der Builder nennt die Kandidaten und warum es unsicher ist, und du wählst deins mit einem Klick.
-  **Board-Namen online nachschlagen...** öffnet deinen Webbrowser mit einer Suche nach dem Board-Namen der Probe, erst
-  wenn du zustimmst. **Ditto fragen** schreibt eine Frage in den Chat, die du abschickst (ein Entwurf, den du dort
-  getippt hast, bleibt). Ein Board, das du gewählt hast, wird weder durch eine spätere Probe noch durch eine KI
-  ersetzt. Ein Target, das du gewählt hast (oder das eines Rezepts), bleibt auch: Zeigt die Probe auf ein anderes
-  Target, sagt der Builder das und bietet **<Target> verwenden** an, das dann das Board dieses Targets empfiehlt. Dass
-  Ditto ein Board selbst über SSH untersucht, braucht das geplante Tool `probe_remote_device`.
+  eingetragen: Der Builder nennt die Kandidaten und warum es unsicher ist, und du wählst deins mit einem Klick. Bis du
+  eins wählst, fragt **Start Build**, ob das Board im Formular deins ist („Nein“ ist die Vorgabe). **Board-Namen
+  online nachschlagen...** öffnet deinen Webbrowser mit einer Suche nach dem Board-Namen der Probe, erst wenn du
+  zustimmst. **Ditto fragen** schreibt eine Frage in den Chat, die du abschickst (ein Entwurf, den du dort getippt
+  hast, bleibt). Ein Board, das du gewählt hast, wird weder durch eine spätere Probe noch durch eine KI ersetzt. Ein
+  Target, das du gewählt hast (auch über ein Board, das du gewählt hast, oder das eines Rezepts), bleibt auch: Zeigt
+  die Probe auf ein anderes Target, sagt der Builder das und bietet **<Target> verwenden** an, das dann das Board
+  dieses Targets empfiehlt. Dass Ditto ein Board selbst über SSH untersucht, braucht das geplante Tool
+  `probe_remote_device`.
 - **Kein passendes Target:** Passt kein Target zur Probe, bietet der Builder **Target mit dem Assistenten erstellen**
   (der Assistent beginnt mit dieser Probe) und **Ditto fragen** an.
 - **Dokumentations-Links für Deep Ingest:** Der Quellenkatalog (`configs/project_sources.yml`) enthält die
   Dokumentations-Links der Hersteller. Das Deep-Ingest-Fenster des Assistenten wird mit den Links für den Hersteller
   der Probe und das SDK auf der Hardware-Seite gefüllt; du prüfst sie und startest das Einlesen. Sagt Ditto, dass für
   das Modul Informationen fehlen, bietet der Assistent Deep Ingest mit diesen Links an. KI-Clients lesen sie über die
-  Ressource `lcf://knowledge/doc-sources`.
+  Ressource `lcf://knowledge/doc-sources`; der MCP-Prompt `add_board` verweist auf sie, wenn Informationen fehlen.
 
 Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 

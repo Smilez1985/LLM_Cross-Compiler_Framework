@@ -408,3 +408,73 @@ def test_a_build_the_service_no_longer_knows_shows_no_old_step(qapp):
     assert panel.poll(service, "req_6") is None
     assert "40%" not in panel.lbl_stage.text() and "cannot be read" in panel.lbl_stage.text()
     panel.deleteLater()
+
+
+def test_a_board_the_person_chose_keeps_its_target(builder, monkeypatch):
+    """A board belongs to its target: the person's board stayed only while they had picked the target too, so a probe
+    of another target replaced the target and with it the board they chose."""
+    tm = builder.framework.get_component("target_manager")
+    builder.target_combo.addItem("Other boards (aarch64)", "Other")
+    builder.board_combo.setCurrentIndex(builder.board_combo.findData("rk3588"))
+    builder.gui_form.person_edited("board")
+    monkeypatch.setattr(tm, "find_matching_target", lambda data: "Other")
+    builder._load_probe_config(REPO_ROOT / "tests" / "fixtures" / "hardware_probe" / "schema2_rk3566_dietpi.txt")
+    assert builder.target_combo.currentData() == "Rockchip" and builder.board_combo.currentData() == "rk3588"
+    assert "Your choice" in builder.board_advice.label.text()
+
+
+def _submit(builder, monkeypatch, answer):
+    """Start Build with the build itself stubbed out: (the questions asked, the requests submitted)."""
+    from orchestrator.gui import builder_parts, builder_tab
+    asked, submitted = [], []
+    monkeypatch.setattr(builder_parts, "ask", lambda parent, title, text: asked.append(text) or answer)
+    monkeypatch.setattr(builder.framework.orchestrator, "submit_build_request",
+                        lambda req: submitted.append(req) or "req_x")
+    monkeypatch.setattr(builder.framework, "run_coroutine", lambda value, timeout=30: value)
+    monkeypatch.setattr(builder, "_track_build", lambda rid: None)
+    monkeypatch.setattr(builder, "_remember_build", lambda *a: None)
+    monkeypatch.setattr(builder_tab.QMessageBox, "information", lambda *a, **k: 0)
+    monkeypatch.setattr(builder_tab.QMessageBox, "warning", lambda *a, **k: pytest.fail(str(a[2:])))
+    builder.model_input.setEditText("org/m")
+    builder._submit_build()
+    return asked, submitted
+
+
+def test_start_build_asks_when_the_probe_was_not_sure_about_the_board(builder, monkeypatch):
+    """A weak match filled nothing in, but the form still held a board nobody chose (the first of the list), and Start
+    Build used it without a word. Until the person picks a board, Start Build asks first ("No" is the default)."""
+    from orchestrator.gui.builder_parts import after_probe
+    assert after_probe(builder, Profile(BOARD_MODEL="Radxa ROCK 5B Plus"), "Rockchip") == "ask"
+    asked, submitted = _submit(builder, monkeypatch, False)
+    assert asked and "could not tell your board for sure" in asked[0] and submitted == []
+    assert "was not started" in builder.log_area.toPlainText()
+    asked, submitted = _submit(builder, monkeypatch, True)
+    assert len(submitted) == 1 and builder.gui_form.field("board").person_set, "their yes makes it their choice"
+    asked, submitted = _submit(builder, monkeypatch, False)
+    assert asked == [] and len(submitted) == 1, "asked once"
+
+
+def test_a_board_picked_after_a_weak_match_is_not_asked_about(builder, monkeypatch):
+    from orchestrator.gui.builder_parts import after_probe
+    assert after_probe(builder, Profile(BOARD_MODEL="Radxa ROCK 5B Plus"), "Rockchip") == "ask"
+    next(b for b in builder.board_advice.buttons if "RK3588" in b.text()).click()
+    asked, submitted = _submit(builder, monkeypatch, False)
+    assert asked == [] and [r.target_board for r in submitted] == ["rk3588"]
+
+
+def test_dittos_settings_that_were_not_filled_are_named_with_the_reason(builder):
+    """Ask Ditto for Config skipped a value the form does not offer without a word (only the person's own values were
+    named)."""
+    builder.format_combo.setCurrentIndex(builder.format_combo.findData("gguf"))
+    builder._on_ai_finished(True, {"format": "gguf", "quantization": "Q9_NOPE"}, "ok")
+    log = builder.log_area.toPlainText()
+    assert "Q9_NOPE" in log and "It was not filled" in log
+
+
+def test_add_board_offers_the_documentation_links_when_information_is_missing(booted_framework):
+    """The wizard offered Deep Ingest with the links on missing information; an AI client running the add_board prompt
+    was never told where the framework's documentation links are."""
+    from orchestrator.tools.registry import ToolContext
+    _description, parts = booted_framework.tool_registry.get_prompt("add_board", {"board": "Radxa ROCK 5B, RK3588"},
+                                                                    ToolContext("mcp"))
+    assert "lcf://knowledge/doc-sources" in parts[0] and "crawl_docs_site" in parts[0]

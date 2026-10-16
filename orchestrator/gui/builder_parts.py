@@ -114,6 +114,9 @@ def _remember_person_board(tab: Any, event: str, data: Any) -> None:
     field = tab.gui_form.field("board") if getattr(tab, "gui_form", None) is not None else None
     if event == "person" and data in ("board", "") and field is not None and field.person_set:
         tab._person_board = tab._selected_board()
+        advice = getattr(tab, "board_advice", None)
+        if advice is not None:   # the person picked a board: nothing left to confirm
+            advice.unsure = False
 
 
 def person_board(tab: Any) -> Optional[str]:
@@ -127,10 +130,12 @@ def person_board(tab: Any) -> Optional[str]:
 
 
 def person_target(tab: Any) -> Optional[str]:
-    """The target the person chose (their pick, or a recipe they picked); a probe never replaces it (N9'')."""
+    """The target the person chose (their pick, or a recipe they picked), also through a board they chose (a board
+    belongs to its target); a probe never replaces it (N9'')."""
     form = getattr(tab, "gui_form", None)
     field = form.field("target") if form is not None else None
-    return tab.target_combo.currentData() if field is not None and field.person_set else None
+    chosen = field is not None and field.person_set
+    return tab.target_combo.currentData() if chosen or person_board(tab) else None
 
 
 def apply_ditto_settings(tab: Any, config: Dict[str, Any]) -> Any:
@@ -142,11 +147,36 @@ def apply_ditto_settings(tab: Any, config: Dict[str, Any]) -> Any:
     if form is None or not values:
         return None
     outcome = form.fill(values)
-    for field_id, _why in outcome.refused:
+    for field_id, why in outcome.refused:   # every value not filled is named with its reason
         field = form.field(field_id)
-        if field is not None and (field.person_set or GuiForm._busy(field)):
-            tab._log(ui_text("gui.ditto.kept", value=one_line(values[field_id]), field=field.label(current_language())))
+        if field is None:
+            continue
+        name, value = field.label(current_language()), one_line(values[field_id])
+        if field.person_set or GuiForm._busy(field):
+            tab._log(ui_text("gui.ditto.kept", value=value, field=name))
+        else:
+            tab._log(ui_text("gui.ditto.not_filled", value=value, field=name, why=one_line(why)))
     return outcome
+
+
+def board_confirmed(tab: Any) -> bool:
+    """Start Build after a probe that could not tell the board for sure (N9': never guess): until the person picks a
+    board, they are asked whether the board in the form is theirs ("No" is the default); their yes makes it their
+    choice. Returns whether the build may start."""
+    advice = getattr(tab, "board_advice", None)
+    if advice is None or not advice.unsure:
+        return True
+    names = ", ".join(c.label for c in getattr(advice.recommendation, "candidates", ()) or ()) or "-"
+    board = one_line(tab.board_combo.currentText().strip() or "-")
+    if not ask(tab, ui_text("gui.board.confirm.title"), ui_text("gui.board.confirm", board=board,
+                                                                candidates=one_line(names))):
+        tab._log(ui_text("gui.board.confirm.no"))
+        return False
+    form = getattr(tab, "gui_form", None)
+    if form is not None:
+        form.person_edited("board")
+    advice.unsure = False
+    return True
 
 
 # --- progress bar and live build log --------------------------------------------------------------------------------
@@ -332,6 +362,7 @@ class BoardAdvice(QWidget):
         self.buttons: List[QPushButton] = []
         self.recommendation = None
         self.profile = None
+        self.unsure = False   # a probe could not tell the board and the person has not picked one since
         self.setVisible(False)
 
     def _clear_buttons(self) -> None:
@@ -339,6 +370,7 @@ class BoardAdvice(QWidget):
             self.row.removeWidget(button)
             button.deleteLater()
         self.buttons = []
+        self.unsure = False
 
     def _button(self, text: str, slot: Callable[[], Any], tip: str = "") -> QPushButton:
         button = QPushButton(button_text(text), self)
@@ -389,6 +421,7 @@ class BoardAdvice(QWidget):
             if rec.board_model:
                 self._button(ui_text("gui.board.online", lang), self.look_up_online)
             self._button(ui_text("gui.board.ask_ditto", lang), self._ask_about_board)
+            self.unsure = True   # Start Build asks until the person picks a board
             outcome = "ask"
         else:
             self.hide_advice()
@@ -514,4 +547,4 @@ def after_probe(tab: Any, profile: Any, match: Optional[str]) -> str:
 
 
 __all__ = ["BoardAdvice", "BuildProgressPanel", "LEVELS", "after_probe", "apply_ditto_settings", "bind_builder_form",
-           "line_level", "person_board", "person_target", "read_probe"]
+           "board_confirmed", "line_level", "person_board", "person_target", "read_probe"]
