@@ -10,6 +10,33 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Tools > Knowledge Snapshots... sagt vorher, ob der nächste Snapshot passt, und zeigt den Speicher in jedem
+  Zustand** (W1'): Die Zeile zur Festplatte sagt jetzt mit den Worten von `llm-cli knowledge snapshots`, wenn der
+  nächste Snapshot (etwa so groß wie der neueste) nicht passen würde, sodass Deep Ingest, eine Wiederherstellung und ein
+  Paket-Import abgelehnt würden, oder nur wenig Platz ließe. Die Zeile zum Speicher erscheint in jedem Zustand, so wie
+  `llm-cli knowledge storage` ihn zeigt (Qdrant Edge mit seinem Ordner, der alte Speicher mit seinem Grund, ein
+  Qdrant-Server, Qdrant Edge, das sich nicht laden lässt), und **Jetzt umwandeln** wird auch vor dem ersten Versuch
+  angeboten, unter der Bedingung von `llm-cli knowledge storage convert`. CLI und Fenster rufen dieselben neuen
+  Kernfunktionen auf (`knowledge_snapshots.snapshot_disk`, `migration.storage_status`, `storage_lines` und
+  `convert_refusal`); die Ausgabe der CLI bleibt gleich.
+- **Tools > Wissensquellen...: jede Quelle der Wissensbasis per Maus** (W1'): Ein neues Fenster listet jede Quelle mit
+  ihrer Art, der Lizenz und dem Urheberrechtshinweis, die sie zeigt, und was ein Wissenspaket von ihr mitnähme (voller
+  Text, Link und kurze Fakten, nicht exportiert) und warum, mit einem Filter nach Art (Webseiten, Seiten aus
+  Wissenspaketen, Dokumente des Frameworks, sonstige). Es liest die Liste im Hintergrund über das neue Kernmodul
+  `knowledge_sources`, das auch `llm-cli knowledge sources` nutzt, sodass beide dieselben Worte zeigen. Die Verdrahtung
+  des Menüs liegt in `orchestrator/gui/menus/knowledge.py`, dessen `CLI_PATHS` den Mausweg jedes `knowledge`- und
+  `zoo`-Befehls nennt.
+- **Community Hub: jede Aktion von `llm-cli zoo` per Maus** (W1'): **Details...** (oder ein Doppelklick) zeigt, was
+  `zoo show` zeigt (Lizenz, Vertrauensstufe, installierter Ordner, Download-Adresse, Größe, sha256, die `recipe.yml`
+  eines installierten Rezepts); **Import file...** nimmt eine Passphrase (nie gespeichert oder angezeigt) und die
+  Schlüsseldateien der einzigen Absender, die angenommen werden, wie `zoo install --file --passphrase / --from`;
+  **Installierte Pakete prüfen** und **Paketdatei prüfen...** führen `zoo verify` ohne und mit Datei aus;
+  **Exportieren...** exportiert jeden Target-Ordner (auch einen vorhandenen oder installierten), einen fertigen Build
+  oder die Wissensbasis mit ihrer Paket-ID, offen oder an die Schlüssel in Schlüsseldateien bzw. mit einer Passphrase
+  verschlüsselt, in einen Ordner deiner Wahl; **Meine öffentlichen Schlüssel...** zeigt `zoo keys` mit Kopieren und
+  Speichern.... Jede ruft die Kernfunktion der CLI auf (neu: `CommunityManager.details`, `exportable_targets`,
+  `read_public_key_files`, `needs_passphrase`), im Hintergrund; Fragen behalten „Nein“ als Vorgabe, und ein
+  verschlüsseltes Paket wird nie eingereicht.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
