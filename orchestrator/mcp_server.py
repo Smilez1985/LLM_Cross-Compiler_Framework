@@ -69,7 +69,7 @@ import unicodedata
 import uuid
 import weakref
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError
@@ -1887,9 +1887,13 @@ def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: in
 
 def launch_command(app_root: Path, windows: Optional[bool] = None) -> Dict[str, Any]:
     """How a client starts this server over stdio (the current interpreter, so the venv is used).
-    -P keeps the folder the client starts it in off sys.path; the installation comes from PYTHONPATH."""
+    -P keeps the folder the client starts it in off sys.path; the installation comes from PYTHONPATH. The POSIX
+    variant follows POSIX path rules on every host: a path the caller made on Windows ('\\opt\\llm' from
+    Path('/opt/llm')) is written with '/' again."""
     windows = (sys.platform == "win32") if windows is None else windows
-    root, separator = str(app_root), (";" if windows else ":")
+    root = PureWindowsPath(app_root).as_posix() if not windows and isinstance(app_root, PureWindowsPath) \
+        else str(app_root)
+    separator = ";" if windows else ":"
     # A relative entry, or one that the separator splits, would be looked up in the working directory.
     if separator in root or not (ntpath if windows else posixpath).isabs(root):
         raise ValueError(f"The installation path {root!r} cannot be put on PYTHONPATH safely (it is relative or "

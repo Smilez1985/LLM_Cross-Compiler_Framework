@@ -10,6 +10,7 @@ vector (Qdrant applies the IDF), and queries fuse both rankings with Reciprocal 
 import base64
 import gzip
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator, List, Optional, Sequence
@@ -193,14 +194,32 @@ class KnowledgeStore:
                 break
 
     def recreate(self) -> None:
-        self.client.delete_collection(self.collection)
+        self._delete_collection(self.collection)
         self._create()
         self._point_alias()
 
     def drop_all(self) -> None:
         """Deletes the collections of every embedding model of this knowledge base."""
         for name in self.knowledge_collections():
-            self.client.delete_collection(name)
+            self._delete_collection(name)
+
+    def _delete_collection(self, name: str) -> None:
+        """Deletes one collection. Embedded Qdrant deletes the collection's folder with errors ignored, and on Windows a
+        file that is still open cannot be deleted: its storage file stayed, and the next start (or the collection made
+        again right away) loaded every vector back, while clearing said it had worked. So the collection's storage is
+        closed first, and a folder that is still there afterwards is an error."""
+        local = getattr(self.client, "_client", None)  # QdrantLocal behind QdrantClient(path=...)
+        collections = getattr(local, "collections", None)
+        collection = collections.get(name) if isinstance(collections, dict) else None
+        close = getattr(collection, "close", None)
+        if callable(close):
+            close()
+        self.client.delete_collection(name)
+        where = getattr(local, "_collection_path", None)
+        folder = where(name) if callable(where) else None
+        if isinstance(folder, (str, Path)) and os.path.exists(folder):
+            raise KnowledgeBaseError(f"The stored vectors of {name} could not be deleted (a file in their folder is "
+                                     "still open, for example by another program). Close it and try again.")
 
     # --- snapshots (portable files; local Qdrant has no snapshot API) ---
 

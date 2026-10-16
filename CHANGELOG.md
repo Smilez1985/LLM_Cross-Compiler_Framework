@@ -1212,6 +1212,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   no passwd entry).
 - On Windows, saving a secret no longer fails when another process or a virus scanner has the store open for
   a moment.
+- On Windows, a build of a local model lands in the output folder again (released in 3.0.0): the build folder was
+  named after the model's part behind the last `/`, which for a Windows path such as `C:\models\my-model` is the
+  whole path, so the build went into the model's own folder (`C:\models\my-model\<quantization>`) and no listing
+  found it. The folder is named after the last part at `/` or `\` on every system.
 - `llm-cli secrets set` says where the secret went (the encrypted vault, or memory only with `ephemeral`)
   instead of always "Keyring". The GUI names the encrypted credential vault as well (the secret dialog, the API key
   field and its error message in the AI settings, the token check box of the Hugging Face browser).

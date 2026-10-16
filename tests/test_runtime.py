@@ -334,7 +334,10 @@ class TestBackend:
         choice = select_backend(hw(gpus), CATALOG)
         assert choice.asset.cuda == "12.8" and choice.gpu.name == "NVIDIA GeForce RTX 3090"
 
-    def test_ryzen_z1_extreme_uses_vulkan_with_shared_memory(self, tmp_path):
+    def test_ryzen_z1_extreme_uses_vulkan_with_shared_memory(self, tmp_path, monkeypatch):
+        # The probe asks the running C library for the glibc version (os.confstr); this simulated Linux machine has
+        # glibc 2.39 whatever the test runs on (Windows has no confstr, Alpine has musl).
+        monkeypatch.setattr(os, "confstr", lambda name: "glibc 2.39", raising=False)
         info = detect_hardware(FakeRunner(vulkaninfo=(0, VULKAN_780M, "")), system="Linux", machine="x86_64",
                                memory=(16 * GIB, 12 * GIB), sysfs_root=amd_sysfs(tmp_path / "sys", vram=4 * GIB),
                                find_library=lambda n: None, rocm_globs=())
@@ -844,7 +847,9 @@ class TestServerCommand:
                           "HF_TOKEN": "hf_fake", "AWS_SECRET_ACCESS_KEY": "x", "GGML_VK_VISIBLE_DEVICES": "0",
                           "GGML_BACKEND_PATH": "/tmp/extra-backend.so"})
         assert {k: v for k, v in env.items() if k not in ("SYSTEMROOT", "SystemRoot", "WINDIR", "TEMP", "TMP")} == {
-            "PATH": "/usr/bin:/bin" if os.name != "nt" else "", "HOME": "/home/u", "LANG": "C", "LC_ALL": "C",
+            # HOME as a path of this computer: on Windows '/home/u' is the folder '\\home\\u' of the current drive
+            "PATH": "/usr/bin:/bin" if os.name != "nt" else "", "HOME": str(Path("/home/u")),
+            "LANG": "C", "LC_ALL": "C",
             "CUDA_VISIBLE_DEVICES": "0", "GGML_VK_VISIBLE_DEVICES": "0",
             **({"USERPROFILE": str(Path("/home/u"))} if os.name == "nt" else {})}
 

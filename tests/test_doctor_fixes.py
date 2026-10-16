@@ -577,11 +577,13 @@ def test_the_gui_lists_every_snapshot_as_plain_text_and_deletes_nothing(qapp, tm
     folder = tmp_path / "knowledge_snapshots"
     for i in range(12):
         snapshot(folder, f"pre_ingest_{i}", size=1_500_000, when=1_000_000 + i)
-    snapshot(folder, "<b>pre_restore_x", size=10, when=1_000_100)  # a name is shown as written, never as markup
+    # A name is shown as written, never as markup. Windows refuses '<' and '>' in file names: an entity is markup too.
+    marked = "<b>pre_restore_x" if os.name != "nt" else "&lt;b&gt;pre_restore_&amp;x"
+    snapshot(folder, marked, size=10, when=1_000_100)
     dialog = KnowledgeSnapshotsDialog(tmp_path)
     try:
         rows = [[dialog.table.item(r, c).text() for c in range(len(COLUMNS))] for r in range(dialog.table.rowCount())]
-        assert [r[0] for r in rows] == [f"pre_ingest_{i}" for i in range(12)] + ["<b>pre_restore_x"]
+        assert [r[0] for r in rows] == [f"pre_ingest_{i}" for i in range(12)] + [marked]
         assert rows[0][2] == "1.5 MB" and "before a Deep Ingest" in rows[0][3]
         assert rows[0][4] == str(folder / "pre_ingest_0.jsonl.gz")
         note = dialog.note.text()

@@ -1254,7 +1254,8 @@ class TestLauncherEnvironment:
         for name in ("LLAMA_ARG_TOOLS", "GGML_BACKEND_PATH", "AIP_MODE", "AIP_HTTP_PORT", "HTTPS_PROXY",
                      "LD_PRELOAD", "OPENAI_API_KEY"):
             assert name not in env, name
-        assert env["PATH"] == server_policy.CLEARED_PATH and env["HOME"] == "/home/u"
+        # HOME as a path of this computer (on Windows '/home/u' is '\\home\\u' of the current drive)
+        assert env["PATH"] == server_policy.CLEARED_PATH and env["HOME"] == str(Path("/home/u"))
         assert set(env) <= set(server_policy.cleared_env(Path("/home/u"))) | server_policy.SERVER_ENV_PASS
 
 

@@ -430,13 +430,16 @@ class TestLocationAndLock:
             except LockTimeout:
                 results.append("waited")
 
+        locks = tmp_path / "state" / "locks"
         with sm.credential_lock("openai_api_key"):  # the same credential as cred/openai/api_key
+            assert len(list(locks.glob("*.lock"))) == 1, "the held credential's own lock file"
             for name in ("cred/openai/api_key", "cred/anthropic/api_key"):
                 worker = threading.Thread(target=second_refresh, args=(name,))
                 worker.start()
                 worker.join(10)
         assert results == ["waited", "cred/anthropic/api_key"]
-        assert len(list((tmp_path / "state" / "locks").glob("*.lock"))) == 2
+        if os.name != "nt":  # filelock removes a released lock file on Windows only; on POSIX both stay
+            assert len(list(locks.glob("*.lock"))) == 2
 
     def test_two_processes_writing_at_once_lose_nothing(self, tmp_path):
         state = tmp_path / "state"
@@ -1027,14 +1030,21 @@ class TestReviewFindings:
             main_window.MainOrchestrator(REPO_ROOT)
         assert shown and "secret_storage" in shown[0] and "passphrase" in shown[0]
 
-    def test_the_cli_never_says_an_ephemeral_secret_was_saved(self, tmp_path):
+    @pytest.mark.parametrize("how", [
+        pytest.param("prompt", marks=pytest.mark.skipif(
+            os.name == "nt", reason="the hidden prompt (getpass) reads the Windows console through msvcrt, never a "
+                                    "piped stdin, so a piped value never arrives there; on Windows a value is piped "
+                                    "with --with-token, tested by the with_token case")),
+        "with_token"])
+    def test_the_cli_never_says_an_ephemeral_secret_was_saved(self, tmp_path, how):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_", "FRAMEWORK_"))}
         env.update(PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
                    LLM_SECRET_STORAGE="ephemeral", LLM_FRAMEWORK_HOME=str(tmp_path / "state"),
                    LLM_FRAMEWORK_CONFIG_DIR=str(tmp_path / "cfg"), COLUMNS="300")
-        result = subprocess.run([sys.executable, "-m", "orchestrator.cli", "-q", "secrets", "set", "hf_token"],
-                                cwd=tmp_path, env=env, input="placeholder-value\nplaceholder-value\n",
-                                capture_output=True, text=True, timeout=120)
+        extra, given = (["--with-token"], "placeholder-value\n") if how == "with_token" else \
+            ([], "placeholder-value\nplaceholder-value\n")
+        result = subprocess.run([sys.executable, "-m", "orchestrator.cli", "-q", "secrets", "set", "hf_token", *extra],
+                                cwd=tmp_path, env=env, input=given, capture_output=True, text=True, timeout=120)
         assert result.returncode == 0, result.stderr
         assert "nothing was saved" in result.stdout and "Keyring" not in result.stdout
         assert "placeholder-value" not in result.stdout + result.stderr

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from orchestrator.utils.any_path import is_absolute_anywhere, last_part
 from orchestrator.utils.logging import get_logger
 from orchestrator.Core.builder import (BuildEngine, BuildStatus, OptimizationLevel, ModelFormat, BuildConfiguration,
                                        BuildSlotsBusy)
@@ -178,11 +179,12 @@ class BuildJob:
 
 def model_label(model: str, local_inputs: Any = None) -> str:
     """The model as it may be shown to people and AI models: a local model an AI caller pinned by its
-    `<label>:<relative path>`, another local path by its file name, a Hugging Face repo id as it is."""
+    `<label>:<relative path>`, another local path by its file name, a Hugging Face repo id as it is. A path of either
+    system counts as a path on every host (on Windows a board's or a Linux build's '/home/...' path has no drive)."""
     pin = getattr(local_inputs, "model", None)
     if pin is not None:
         return pin.ref
-    return Path(model).name if Path(str(model)).is_absolute() else str(model)
+    return last_part(model) if is_absolute_anywhere(str(model)) else str(model)
 
 
 def request_summary(request: "BuildRequest") -> Dict[str, Any]:
@@ -667,7 +669,8 @@ class LLMOrchestrator:
                         base = Path(req.output_base_dir).expanduser()
                         if not base.is_absolute() and getattr(self.build_engine, "base_dir", None):
                             base = Path(self.build_engine.base_dir) / base
-                        out_dir = base / target / model.split("/")[-1]
+                        # the repo id's or the local folder's last part, at '/' and '\\' (a Windows path)
+                        out_dir = base / target / last_part(model)
                         if q: out_dir = out_dir / q
                         
                         job = BuildJob(

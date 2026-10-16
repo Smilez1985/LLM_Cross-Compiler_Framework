@@ -7,6 +7,7 @@ Failures are explicit errors, never the old sentinel values.
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -155,7 +156,9 @@ class TestNative:
         assert argv[0] == str(build.bin_dir / "llama-perplexity"), "the self-built program, never one from PATH"
         assert argv[argv.index("-m") + 1] == str(model.resolve()) and argv[argv.index("-c") + 1] == "512"
         assert server_policy.forbidden_in(argv) == []
-        assert set(env) <= {"HOME", "PATH", "LANG", "LC_ALL"}, "a cleared environment"
+        # A cleared environment; on Windows plus what a process needs to start there at all (server_policy.cleared_env)
+        windows_start = {"SYSTEMROOT", "SystemRoot", "WINDIR", "TEMP", "TMP", "USERPROFILE"} if os.name == "nt" else set()
+        assert set(env) <= {"HOME", "PATH", "LANG", "LC_ALL"} | windows_start, "a cleared environment"
         assert "LLAMA_ARG_MODEL" not in env and "HTTPS_PROXY" not in env
 
     def test_an_untrusted_model_needs_consent_written_to_the_audit_log_first(self, tmp_path):
