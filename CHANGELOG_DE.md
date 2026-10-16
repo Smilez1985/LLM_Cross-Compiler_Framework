@@ -10,6 +10,25 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Tab Deployment: jede Option von `deploy package` und `deploy run` mit der Maus** (W1', GUI-Parität): **Nur Paket
+  erstellen…** erstellt das Paket des ausgewählten Builds (oder einer Modelldatei, die du wählst) für das gewählte
+  Profil, ohne ein Board zu kontaktieren, mit Docker-Images für ein Board ohne Netz, wenn du Docker ankreuzt; der
+  Ordnerdialog öffnet sich beim Ausgabeordner wie für jedes Golden Artifact, und die Meldung nennt den vollen Pfad des
+  Pakets oder den Grund und den nächsten Schritt (`llm-cli deploy package`, derselbe Schritt im Kern). **Vorhandenes
+  Paket deployen…** lädt ein früher erstelltes ZIP hoch (`deploy run PACKAGE_PATH`). Die neuen Felder **Port**,
+  **Name** und **Auf das Board warten** sind `--port`, `--label` und `--wait` für beide Deploy-Schaltflächen. Der
+  Host-Schlüssel des Boards wird jetzt im Hintergrund gelesen und sein Fingerabdruck mit „Nein“ als Vorgabe gezeigt; ein
+  fehlgeschlagenes Paket bei **Deploy to Target** sagt, warum; die Erfolgsmeldung nennt den vollen Pfad des Pakets, wie
+  oft das Deployment auf das Board gewartet hat, und den Namen des vertrauten Boards.
+- **Tab Builder > Scan / Import...: jede Option von `llm-cli scan` mit der Maus** (W1', GUI-Parität): **Scan Local
+  Host** führt jetzt den Schritt der CLI aus, die Python-Probe, und speichert das Ergebnis als Probe dieses Rechners
+  (Probe-ID `local`, die KI-Clients und Ditto nennen), mit seinen Hinweisen und der Warnung „Probe noch einmal laufen
+  lassen“ im Protokoll; **Lokalen Rechner mit dem Ersatz-Skript scannen** (`--script`) und **Lokalen Rechner scannen
+  und Profil speichern unter...** (`--output`; eine `.json`-Datei bekommt die JSON-Ansicht, `--json`) sind neu.
+  **Remote Scan via SSH...** bekommt die Felder **Port** und **Name** und schreibt wie `scan --device` den Eintrag des
+  Boards als vertraut und gekoppelt (im Audit-Log), so dass das Board in der Benchmark-Liste erscheint und
+  KI-Deployments es nennen können; CLI und GUI teilen einen Schritt im Kern (`scan_steps.scan_device`). **Import from
+  File** fragt nach dem Namen des Boards (`--label`).
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
