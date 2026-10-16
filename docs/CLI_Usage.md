@@ -364,6 +364,9 @@ target's folder name works as well. `json` and `yaml` give the same data with th
 |---|---|
 | `-f, --format [table\|json\|yaml]` | Output format (default `table`). |
 
+In the GUI: **Build > Targets...** (the same list, with each target's support level), or **Targets...** next to the
+Builder's target list.
+
 ### targets validate
 
 ```
@@ -377,6 +380,10 @@ not found or its capabilities are invalid. A target without capabilities is repo
 ```bash
 llm-cli targets validate Rockchip
 ```
+
+In the GUI: **Check target** next to the Builder's target list, or **Build > Targets... > Check target** (the same
+check; the target.yml is read again). It also runs after the module wizard created a target and after a Community Hub
+target install.
 
 ---
 
@@ -437,6 +444,12 @@ Behaviour:
   at all: they use `<label>:<relative path>` inside the [folders the AI may use](#tools-folders).
 - The first build of a target builds its Docker image first and takes much longer.
 
+In the GUI: the **Builder** tab: model, target (**Targets...** shows every target), format (a target without
+capabilities offers every format of `--format`, with the note that nothing is checked), board, quantization,
+**Optimization** (all levels, also `FAST`), **Priority**, calibration and GPU, then **Start Build Pipeline**. The
+progress panel follows the build (`--follow`), **Cancel Build** stops it (Ctrl+C), and the finished model is offered
+in a save dialog at the output folder (`--output`; **File > Output Folder...** sets the default).
+
 ```bash
 # GGUF for the RK3566 CPU (default quantization Q4_0 on this board)
 llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t Rockchip -f gguf -b rk3566 --follow
@@ -485,6 +498,8 @@ $ echo $?
 2
 ```
 
+In the GUI: Deployment tab > **Save...**.
+
 ### build status
 
 ```
@@ -510,6 +525,10 @@ A request that waits for a self-healing decision shows its failed first attempt;
 With a request ID, the fix proposals AI clients made for it (`propose_healing_fix`) follow, each marked as
 AI-generated with who proposed it (the caller and the client's own, self-reported name) and its manual step, which
 the framework never runs. Without an ID, a line says for how many failed builds there are such proposals.
+
+In the GUI: **Build > Build History...**: every build (all of them, as `--all`); **Show details** (or a double click)
+shows one build as with `REQUEST_ID`, with its errors, every attempt and its output folder, and the AI clients' fix
+proposals.
 
 ---
 
@@ -1530,6 +1549,10 @@ GGUF as the only format; add your real boards and formats there. The command's n
 `*_module.sh` scripts are legacy files the build pipeline does not call
 ([Module Developer Guide](Module_Developer_Guide.md#10-legacy-files)).
 
+In the GUI: **Tools > Create Hardware Module...**: name, architecture, SDK and **Description** on the hardware page,
+base image and packages on the Docker page, CPU and CMake flags on the flags page; the standard import on the first
+page reads a probe file (`--probe`). After **Finish** the new target is checked as with `targets validate`.
+
 ### module generate-ai
 
 ```
@@ -1554,6 +1577,11 @@ terminal the notice on Ditto goes to stderr once ([ditto](#ditto)).
 llm-cli scan
 llm-cli module generate-ai target_hardware_config.txt --provider local
 ```
+
+In the GUI: **Tools > Create Hardware Module...**, first page: **AI Auto-Discovery (Ditto)**, with provider and model
+**for this analysis only** (`--provider`, `--model`; the saved AI settings stay unchanged). The base image is pinned
+to its digest before you see the proposal, and the module is saved through the same function as this command, with the
+same refusals.
 
 ---
 
@@ -1802,6 +1830,8 @@ as labels) and change ordinary ones with `update_settings`, which asks you with 
 the change in `config.yml`. Settings that limit what an AI may do can only be tightened that way; permissions,
 secrets, the vault, AI provider settings, addresses and folders are changed only by you, here or in the GUI.
 
+In the GUI: **File > Settings...**, tab **Effective settings** (read-only; secrets redacted).
+
 ### config output-folder
 
 ```
@@ -1818,6 +1848,8 @@ the old folder stay where they are and stay listed. An AI cannot change this set
 ```bash
 llm-cli config output-folder /mnt/models/llmcf
 ```
+
+In the GUI: **File > Output Folder...** (also offered in **File > Settings...**).
 
 ### config repos
 
@@ -1840,6 +1872,9 @@ also gives `LLAMA_CPP_REPO_OVERRIDE`). `--add` refuses a name without any ASCII 
 
 The current Rockchip scripts read none of these variables (only the legacy `source_module.sh` reads
 `LLAMA_CPP_REPO_OVERRIDE`), so the overrides have no effect on Rockchip builds.
+
+In the GUI: **File > Settings...**, tab **Source repositories**: the list, **Add** (name and URL) and **Remove
+selected...** (asks first; "No" is the default).
 
 ---
 

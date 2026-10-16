@@ -81,6 +81,15 @@ Das Schema steht in `orchestrator/schemas/targets.py`. GUI, CLI, Build-Dienst, D
 Block: Sie bieten genau diese Optionen an, ergänzen die Standardwerte und lehnen alles andere mit einem klaren Grund
 ab, bevor etwas läuft. Die Werte für Rockchip stehen in der [README](../README_DE.md#unterstützte-targets-und-formate).
 
+GUI: **Build > Targets…** listet jedes Target mit seiner ID (dem Wert für `--target`), Name, Architektur, Boards,
+Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“; **Targets…** neben der Target-Liste des Builders
+öffnet dasselbe Fenster. **Target prüfen** (in diesem Fenster und neben der Target-Liste des Builders) prüft das
+gewählte Target wie `llm-cli targets validate`, über dieselbe Funktion (`TargetManager.validate`), mit frisch
+gelesener `target.yml`, und nennt jeden Schemafehler mit seinem Feld. Dieselbe Prüfung läuft, nachdem der
+Modul-Assistent ein Target angelegt hat und nach der Installation eines Targets aus dem Community Hub, und ihr
+Ergebnis wird angezeigt. Ein Target ohne Fähigkeiten bekommt im Builder jedes Format, wie auf der Kommandozeile, mit
+dem Hinweis, dass seine Boards, Formate und Quantisierungen nicht geprüft werden.
+
 ---
 
 ## Build-Pipeline
@@ -145,6 +154,15 @@ Weiteres Verhalten:
   `<cache_dir>/build_records/`. So sehen die Statusleiste der GUI, `llm-cli build status`, `list_build_requests` und
   `get_build_status` dieselben Builds, auch eine Anfrage, die noch in der Warteschlange eines anderen Programms
   wartet; eine Anfrage, deren Programm endete, bevor sie fertig war, erscheint als unterbrochen.
+- **Build-Verlauf (GUI):** **Build > Build-Verlauf…** listet jeden Build jedes Programms (wie `llm-cli build status
+  --all`: auch gescheiterte, abgebrochene, unterbrochene und wartende) aus derselben Abfrage
+  (`build_history.read_history`); **Details anzeigen** (oder ein Doppelklick) zeigt einen Build wie `build status
+  REQUEST_ID`: seine Anfrage mit Fehlern und Hinweisen, jeden Versuch mit seinem Ausgabeordner (voller Pfad) und
+  Fehler, und die Korrekturvorschläge, die KI-Clients dafür gemacht haben, als KI-generiert markiert und nie
+  ausgeführt. Die Statusleiste nennt dieses Fenster für Builds anderer Programme.
+- **Optimierung und Priorität (GUI):** Die Liste **Optimization** des Builders bietet jede Stufe von `--optimization`
+  (auch `FAST`), und **Priorität** setzt die Build-Priorität von `--priority` (Vorgabe normal; ein fehlgeschlagener
+  kritischer Build beendet die Pipeline).
 - **Build-Slots:** In einem Programm laufen höchstens `max_concurrent_builds` Builds gleichzeitig (Einstellung, 1
   bis 10, Vorgabe 2); ein weiterer Build wartet auf einen freien Slot (seine Stufe zeigt „Waiting for a free build
   slot“), statt zu scheitern. Ein abgebrochener Build behält seinen Slot, bis sein Container gestoppt ist.
@@ -2463,6 +2481,12 @@ Board-Pfade.
   [Community-Index](#der-signierte-index) mit den festgehaltenen Autorenschlüsseln und zwei Zufallswerte pro
   Installation (einer für die Datenschutz-Platzhalter, einer als anonyme Cache-ID für OpenAI). Deine Schlüsselpaare
   für [Community-Packs](#verschlüsselte-packs-zum-privaten-teilen) liegen im verschlüsselten Secrets-Speicher.
+- **Einstellungen in der GUI:** **Datei > Einstellungen…** zeigt die wirksamen Einstellungen und woher jeder Wert
+  kommt (die Vorgaben, eine Einstellungsdatei mit ihrem vollen Pfad, eine Variable `LLM_FRAMEWORK_*` oder während des
+  Laufs geändert), Geheimnisse geschwärzt, wie `llm-cli config show` (`settings_view.effective_settings`), und die
+  Repository-Überschreibungen mit der Variablen, zu der jede wird, zum Hinzufügen und Entfernen wie mit `llm-cli
+  config repos` (Entfernen fragt zuerst, „Nein“ ist die Vorgabe). Der Ausgabeordner hat seinen eigenen Eintrag,
+  **Datei > Output Folder...**.
 - **Einstellungen** werden nie aus dem Arbeitsverzeichnis gelesen: `LLM_FRAMEWORK_CONFIG_DIR`, dann `configs/` in der
   Installation, wenn du dort schreiben darfst, dann der persönliche Ordner.
 - **Datenordner** (`output/`, `cache/`, `models/`) liegen in der Installation, wenn du dort schreiben darfst, sonst im
@@ -2596,13 +2620,19 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   llama.cpp. Eine lange Definition wird zu einer ausstehenden Freigabe im Framework, mit bis zu 16.000 Zeichen
   angezeigt.
 - **Neues Target per Fragen:** `llm-cli module create` oder der Assistent unter **Tools > Create Hardware
-  Module...**.
+  Module...**, der auch nach der Beschreibung fragt (Vorgabe „Target für <Name>“). Nach **Finish** prüft der
+  Assistent das neue Target wie `llm-cli targets validate` und zeigt das Ergebnis.
 - **Neues Target aus einer Probe:** `llm-cli module generate-ai <Probe-Datei>` oder die KI-Analyse im Assistenten.
   Ditto schlägt Architektur, SDK, Basis-Image, Pakete, Hersteller-Paketquellen, pip-Pakete und Downloads, CPU- und
   CMake-Flags, Setup-Befehle und den Quantisierungsblock von `build.sh` vor; du siehst zuerst den ganzen Vorschlag.
-  `module generate-ai` legt das Basis-Image vor der Frage auf seinen Digest fest, und der Assistent gibt jedes Feld
-  des Vorschlags weiter; beide halten das gespeicherte Modul im Audit-Log fest (`module_saved`, mit dem sha256 der
-  Definition und dem Basis-Image).
+  Beide gehen denselben Weg: Das Basis-Image wird auf seinen Digest festgelegt, bevor du den Vorschlag siehst
+  (`pin_base_image`; im Assistenten außerhalb des GUI-Threads), das Modul wird über `DittoManager.save_module`
+  gespeichert, das ein vorgefertigtes `nvidia/cuda`-Image und ein Image, das kein Docker Official Image ist, ohne die
+  Begründung der KI ablehnt (auch für ein Basis-Image, das eine KI über die GUI-Werkzeuge in den Assistenten
+  eingetragen hat), und beide halten das gespeicherte Modul im Audit-Log fest (`module_saved`, mit dem sha256 der
+  Definition und dem Basis-Image). Der Assistent gibt jedes Feld des Vorschlags weiter. Seine erste Seite bietet
+  Anbieter und Modell **nur für diese Analyse** (`--provider`, `--model`, `DittoManager.for_run`): Die gespeicherten
+  KI-Einstellungen bleiben unverändert.
 - **Die Geräte-Laufzeit im Modul:** Jede neue `target.yml` bekommt einen Block `runtime:`, den Plan des Build-Rezepts
   für die llama.cpp-Laufzeit des Boards aus der Probe des Targets (die im Assistenten eingelesene Probe-Datei, die
   Probe-Datei von `module generate-ai` oder `llm-cli module create --probe <Datei>`): Architektur, Betriebssystem, die
@@ -2883,7 +2913,8 @@ installierten Packs mit Name, Art, Version, einer farbigen Spalte für die Vertr
 einem Suchfeld und Filtern nach Art und Vertrauensstufe. **Refresh** holt den Index neu, **Install** installiert einen
 Eintrag des Index nach seiner Zusammenfassung, **Import file...** installiert eine Pack-Datei (auch eine, die für
 deinen Schlüssel verschlüsselt ist), und **Build** bei einem installierten Rezept füllt den Builder aus. Ein
-gesperrtes Pack zeigt eine abgeschaltete Schaltfläche **Revoked**.
+gesperrtes Pack zeigt eine abgeschaltete Schaltfläche **Revoked**. Ein installiertes Target wird wie mit `llm-cli
+targets validate` geprüft, und das Ergebnis wird angezeigt.
 
 ### Export für die Community
 
