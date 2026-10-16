@@ -781,14 +781,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   At a terminal it then asks "Run Mojo Miracle now? [y/N]" when Mojo Miracle can act; on yes Mojo Miracle runs without
   the command typed again. `llmcf mojo --miracle` makes only harmless repairs (the state folder narrowed to your user;
   Ditto's server switched to an intact stored llama.cpp build when the active one is missing): each a dry-run plan
-  bound to its sha256 whose class comes from its steps, recorded in the audit log first, applied as a compare-and-swap
-  on the folder opened without following a link, one at a time, and checked again. Then it reports every problem:
+  bound to its sha256 whose class comes from its steps, applied only as Mojo Oracle showed it (a problem that changed
+  since then is not repaired), recorded in the audit log first, applied as a compare-and-swap on the folder opened
+  without following a link, one at a time, and checked again. Then it reports every problem:
   repaired, already gone, still there, or not repaired with the reason (deleting needs your list, needs you, needs an
   administrator, not repairable automatically, failed), and a problem found for the first time afterwards. Freeing
   disk space goes only through the list of the framework's build images at a terminal, nothing ticked; without a
   terminal only the harmless repairs run and nothing is deleted. `--json` never asks and never deletes.
 - **`llmcf`, the command line's new name** (seventh round, item 11): a second console script next to `llm-cli`, the
-  same program; `llm-cli` stays.
+  same program; `llm-cli` stays. The framework container has both commands.
 - **The MCP tools `run_mojo_oracle` and `run_mojo_miracle` and the prompt `check_installation`** (seventh round, item
   11'): `run_mojo_oracle` (read-only) gives every finding with `where` as a label (never a host path), `why` and
   `repair` (`how`: `miracle`, `deletion_list`, `person`, `admin` or `not_automatic`, with the next step).
@@ -1031,8 +1032,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `orchestrator/Core/mojo/` (`orchestrator/Core/doctor.py` re-exports every name it had); finding codes, exit codes
   and JSON keys stay, and the JSON adds `where`, `why`, `repair_id` and `cannot` per finding. `llm-cli doctor` keeps
   its options and output and prints a short note on stderr that names `llmcf mojo`. `doctor --fix` now makes the
-  audited harmless repairs of Mojo Miracle instead of an unrecorded change of the folder's mode; `--tier 2` still
-  shows the list of the framework's build images. The tool `run_doctor` stays callable but is no longer listed; a
+  audited harmless repairs of Mojo Miracle instead of an unrecorded change of the folder's mode, and says why a
+  problem is still present (for example: the audit log cannot record the repair, so nothing was changed); `--tier 2`
+  still shows the list of the framework's build images. The tool `run_doctor` stays callable but is no longer listed; a
   setting for `run_doctor` or `run_mojo_oracle` applies to both, and the stricter one wins. `make mojo` next to
   `make doctor`.
 

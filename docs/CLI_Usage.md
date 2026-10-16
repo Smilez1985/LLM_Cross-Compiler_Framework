@@ -54,7 +54,7 @@ alias llm-cli='PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-fram
 ```
 
 The examples below use `llm-cli`. `llmcf` is the same program under its new name (unreleased): the development
-setup creates both commands, and `llmcf mojo` does exactly what `llm-cli mojo` does.
+setup and the framework container have both commands, and `llmcf mojo` does exactly what `llm-cli mojo` does.
 
 ### Environment variables
 
@@ -206,7 +206,7 @@ The old name of [mojo](#mojo); options, output and exit codes stay as in 3.0.0, 
 | Option | Meaning |
 |---|---|
 | `--json` | Machine-readable output (findings, fixes, exit code). With `--fix --tier 2` it also lists the framework's build images and where Docker keeps them (`framework_images`), but never deletes them. |
-| `--fix` | Apply the automatic fixes up to `--tier`, then check again. These are the harmless, audited repairs of Mojo Miracle (unreleased). |
+| `--fix` | Apply the automatic fixes up to `--tier`, then check again. These are the harmless, audited repairs of Mojo Miracle (unreleased); a problem still present is shown with the reason. |
 | `--tier INTEGER RANGE` | `1` (default): harmless fixes (makes the personal folder private). `2`: also lists every build image of the framework (left over from earlier builds without a name, the named `llm-framework/<target>:last-build` images and the runtime builder images; name, image id, size and what each is), nothing picked. You type the numbers of the ones to delete and confirm exactly those at a terminal (the default answer is no). Without a terminal (a pipe, a script, an AI app) it only lists them. The GUI's **Tools > Framework Build Images...** is the same list. The Docker build cache is never cleared: it cannot be limited to the framework. |
 
 ```bash

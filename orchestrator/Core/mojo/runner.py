@@ -10,12 +10,15 @@ the person's list (WP7), which it opens at a terminal when one exists, never by 
 """
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from orchestrator.Core.mojo.checks import (check_calibration, check_chat_feed, check_community, check_disk,
                                            check_docker, check_knowledge, check_python, check_runtime, check_secrets,
                                            check_targets, check_tool_policy, check_user_state)
 from orchestrator.Core.mojo.findings import Check, Finding, MojoReport, Severity
+
+if TYPE_CHECKING:
+    from orchestrator.Core.mojo.offers import Offer
 
 DEFAULT_CHECKS: List[Check] = [check_python, check_docker, check_disk, check_targets, check_user_state,
                                check_secrets, check_tool_policy, check_chat_feed, check_calibration, check_community,
@@ -87,19 +90,20 @@ class Mojo:
 
     def miracle(self, *, actor: str, at_terminal: bool, before: Optional[MojoReport] = None,
                 free_space: Optional[Callable[[], Tuple[int, str]]] = None, decision: str = "allow",
-                answered_by: str = "",
-                confirm_channel: str = "") -> MiracleReport:
-        """Mojo Miracle on the problems of `before` (a fresh Oracle run when None). `actor`, `decision`, `answered_by`
-        and `confirm_channel` go into the audit entries of each repair (decision "allow": harmless, without a
-        question, e.g. the CLI without a terminal). `free_space`: the person's list of what to delete (at a terminal
-        only; returns how many items were deleted and, when none was, why: "" when the person chose none), opened once
-        for every finding that shares it."""
+                answered_by: str = "", confirm_channel: str = "",
+                offered: Optional[List["Offer"]] = None) -> MiracleReport:
+        """Mojo Miracle on the problems of `before` (a fresh Oracle run when None). `offered`: the offers the person
+        was shown (offers.offers of `before`); each repair applies exactly the plan shown, or nothing when the problem
+        changed meanwhile (plan_changed). `actor`, `decision`, `answered_by` and `confirm_channel` go into the audit
+        entries of each repair (decision "allow": harmless, without a question, e.g. the CLI without a terminal).
+        `free_space`: the person's list of what to delete (at a terminal only; returns how many items were deleted
+        and, when none was, why: "" when the person chose none), opened once for every finding that shares it."""
         from orchestrator.Core.mojo.offers import DELETION_LISTS, DELETION_WHERE, offers
         from orchestrator.Core.mojo.repairs.engine import apply_repair
         before = before if before is not None else self.run()
         entries: List[MiracleEntry] = []
         deleted: Dict[str, Tuple[int, str]] = {}
-        for offer in offers(self.framework, before):
+        for offer in (offered if offered is not None else offers(self.framework, before)):
             finding = offer.finding
             if offer.verdict == "miracle":
                 result = apply_repair(self.framework, finding.code, actor=actor, decision=decision,

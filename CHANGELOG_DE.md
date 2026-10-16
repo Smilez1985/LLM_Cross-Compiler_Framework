@@ -897,7 +897,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Miracle now? [y/N]“; bei Ja läuft Mojo Miracle, ohne dass der Befehl noch einmal getippt wird. `llmcf mojo
   --miracle` macht nur harmlose Reparaturen (der Zustandsordner auf deinen Benutzer eingeschränkt; Dittos Server auf
   einen intakten gespeicherten llama.cpp-Build umgestellt, wenn der aktive fehlt): jede ein Probelauf, an seinen
-  sha256 gebunden, dessen Art sich aus seinen Schritten ergibt, zuerst im Audit-Log festgehalten, als
+  sha256 gebunden, dessen Art sich aus seinen Schritten ergibt, nur so angewendet, wie Mojo Oracle ihn gezeigt hat
+  (ein Problem, das sich seitdem geändert hat, wird nicht repariert), zuerst im Audit-Log festgehalten, als
   Vergleichen-und-Tauschen am Ordner angewendet, der geöffnet wird, ohne einem Link zu folgen, immer nur eine, und
   erneut geprüft. Danach meldet es jedes Problem: repariert, schon weg, noch da oder nicht repariert mit dem Grund
   (Löschen braucht deine Liste, braucht dich, braucht einen Administrator, nicht automatisch reparierbar,
@@ -905,7 +906,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   die Liste der Build-Images des Frameworks im Terminal, nichts angehakt; ohne Terminal laufen nur die harmlosen
   Reparaturen, und nichts wird gelöscht. `--json` fragt nie und löscht nie.
 - **`llmcf`, der neue Name der Kommandozeile** (siebte Runde, Punkt 11): ein zweites Konsolenskript neben `llm-cli`,
-  dasselbe Programm; `llm-cli` bleibt.
+  dasselbe Programm; `llm-cli` bleibt. Der Framework-Container hat beide Befehle.
 - **Die MCP-Tools `run_mojo_oracle` und `run_mojo_miracle` und der Prompt `check_installation`** (siebte Runde, Punkt
   11'): `run_mojo_oracle` (nur lesen) liefert jeden Befund mit `where` als Bezeichnung (nie ein Host-Pfad), `why` und
   `repair` (`how`: `miracle`, `deletion_list`, `person`, `admin` oder `not_automatic`, mit dem nächsten Schritt).
@@ -1177,8 +1178,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Exit-Codes und JSON-Schlüssel bleiben, und das JSON nennt je Befund zusätzlich `where`, `why`, `repair_id` und
   `cannot`. `llm-cli doctor` behält seine Optionen und seine Ausgabe und schreibt einen kurzen Hinweis auf stderr, der
   `llmcf mojo` nennt. `doctor --fix` macht jetzt die protokollierten harmlosen Reparaturen von Mojo Miracle statt
-  einer nicht festgehaltenen Änderung der Rechte des Ordners; `--tier 2` zeigt weiter die Liste der Build-Images des
-  Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine Einstellung für
+  einer nicht festgehaltenen Änderung der Rechte des Ordners und sagt, warum ein Problem noch da ist (zum Beispiel:
+  Das Audit-Log kann die Reparatur nicht festhalten, also wurde nichts geändert); `--tier 2` zeigt weiter die Liste
+  der Build-Images des Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine Einstellung für
   `run_doctor` oder `run_mojo_oracle` gilt für beide, und die strengere gewinnt. `make mojo` neben `make doctor`.
 
 ### Veraltet

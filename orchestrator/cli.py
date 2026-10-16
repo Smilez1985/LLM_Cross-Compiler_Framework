@@ -3097,7 +3097,7 @@ def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
     click.echo(DOCTOR_NOTE, err=True)
     ctx.require_framework()
     doc = Doctor(ctx.framework_manager)
-    report = _doctor_fix(doc) if fix else doc.run()
+    report, why_not = _doctor_fix(doc) if fix else (doc.run(), {})
     if as_json:
         data = report.to_dict()
         if fix and tier >= 2:  # listed only: a deletion needs the person's yes at a terminal
@@ -3114,7 +3114,8 @@ def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
     for code in report.fixed:
         console.print(f"[green]Fixed: {escape(code)}[/green]")
     for code in report.still_present:
-        console.print(f"[yellow]Still present after the fix: {escape(code)}[/yellow]")
+        why = f" ({why_not[code]})" if why_not.get(code) else ""
+        console.print(f"[yellow]Still present after the fix: {escape(code)}{escape(why)}[/yellow]")
     if fix and tier >= 2:
         _doctor_free_space(ctx.framework_manager)
     sys.exit(report.exit_code)
@@ -3123,7 +3124,7 @@ def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
 def _doctor_fix(doc):
     """`--fix` (tier 1 and the first part of tier 2): the harmless repairs of Mojo Miracle (they only narrow access or
     switch to an intact build; audited, applied only while nothing changed, checked again), reported as the doctor
-    did: `fixed` and `still_present`."""
+    did: `fixed` and `still_present`, plus why each one still present was not repaired (for the person's output)."""
     terminal = _interactive()
     asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
     result = doc.miracle(actor="cli", at_terminal=False, **asked)
@@ -3131,7 +3132,7 @@ def _doctor_fix(doc):
     tried = [e for e in result.entries if e.verdict == "miracle"]
     report.fixed = [e.finding.code for e in tried if e.outcome == "repaired"]
     report.still_present = [e.finding.code for e in tried if e.outcome not in ("repaired", "already_fixed")]
-    return report
+    return report, {e.finding.code: e.reason for e in tried if e.outcome not in ("repaired", "already_fixed")}
 
 
 def _doctor_image_listing(framework) -> dict:
@@ -3244,7 +3245,8 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool):
             sys.exit(report.exit_code)
     console.print("\n[bold]Mojo Miracle: repairing what can be repaired[/bold]")
     asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
-    result = engine.miracle(actor="cli", at_terminal=terminal, before=report,
+    # The plans printed above bind the repairs: a problem that changed since then is not repaired (plan_changed).
+    result = engine.miracle(actor="cli", at_terminal=terminal, before=report, offered=offered,
                             free_space=(lambda: _mojo_free_space(framework)) if terminal else None, **asked)
     _mojo_print_miracle(result)
     sys.exit(result.exit_code)
@@ -3309,7 +3311,9 @@ def _mojo_print_miracle(result) -> None:
         else:
             text = entry.reason or entry.summary
         console.print(f"{head}: {escape(finding.subsystem)} ({escape(finding.code)}): {escape(text)}")
-        if entry.outcome not in ("repaired", "already_fixed") and finding.fix_hint:
+        if entry.outcome == "plan_changed":
+            console.print("    → Run 'llmcf mojo' again: it shows the new plan.")
+        elif entry.outcome not in ("repaired", "already_fixed") and finding.fix_hint:
             console.print(f"    → {escape(finding.fix_hint)}")
     for finding in result.new_problems:
         console.print(f"{MOJO_ICONS[finding.severity.value]} New after Mojo Miracle: {escape(finding.subsystem)} "

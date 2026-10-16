@@ -100,7 +100,7 @@ _KEEP = ("reason_code", "answer", "confirm_channel", "question_sha256", "duratio
          "delegation", "reason_sha256", "facts_sha256", "feed_entry", "place", "deletion_sha256", "plan_sha256",
          "repair_class", "finding_code")
 # The only forms of Mojo Miracle's repair fields (a finding code, a repair id, a class); never a plan's text or a path.
-_FINDING_CODE =re.compile(r"^[A-Za-z0-9_.+-]{1,120}$")
+_FINDING_CODE = re.compile(r"^[A-Za-z0-9_.+-]{1,120}$")
 _REPAIR_ID = re.compile(r"^[a-z][a-z0-9_.]{1,63}$")
 REPAIR_CLASSES = frozenset({"delegable", "person", "person_deletion", "person_here", "manual"})
 _EXTRA_MAX = 2000

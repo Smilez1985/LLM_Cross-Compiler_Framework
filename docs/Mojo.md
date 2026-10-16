@@ -37,9 +37,9 @@ llmcf mojo --json       # machine-readable; never asks and never deletes
 ```
 
 `llmcf` is the framework's command line under its new name. `llm-cli` is the same program and keeps working, so
-`llm-cli mojo` does exactly the same. The development setup creates both commands. With the installers you call the
-command line as [Calling the CLI](CLI_Usage.md#calling-the-cli) shows. In the container: `make mojo`, or
-`docker exec -it lcf-framework llm-cli mojo`.
+`llm-cli mojo` does exactly the same. The development setup and the framework container have both commands. With
+the installers you call the command line as [Calling the CLI](CLI_Usage.md#calling-the-cli) shows. In the container:
+`make mojo`, or `docker exec -it lcf-framework llmcf mojo`.
 
 When Mojo Oracle finds a problem that Mojo Miracle can act on, it asks at a terminal:
 
@@ -84,7 +84,7 @@ How a repair runs:
 
 1. Every repair is a plan first (a dry run). Mojo Oracle shows it.
 2. Right before the change Mojo checks again. If the problem is gone, nothing is changed ("already gone"). If the
-   plan is different now, nothing is changed ("the problem changed").
+   plan is not the one Mojo Oracle showed you, nothing is changed ("the problem changed").
 3. The folder is opened without following a link, and its mode is changed only while it is still the mode of the
    plan.
 4. The audit log records the repair before it happens. If it cannot, nothing is changed.
@@ -109,7 +109,7 @@ A repair can also end like this, always with its reason:
 
 - **Still there**: the change was made, but the check still finds the problem.
 - **Already gone**: the problem was gone before Mojo Miracle changed anything.
-- **The problem changed**: nothing was changed; look at the new plan.
+- **The problem changed**: nothing was changed; `llmcf mojo` shows the new plan.
 - **Failed**: for example the audit log could not record it, or the folder changed meanwhile.
 - **Not deleted**: you chose nothing from the list.
 
@@ -143,8 +143,9 @@ A delegation for harmless repairs comes later, together with the delegations.
 ## 7. The old names keep working
 
 - `llm-cli doctor` keeps its options, its output and its exit codes. It prints a short note on stderr that names
-  `llmcf mojo`. `doctor --fix` makes the harmless repairs (the same audited repairs as Mojo Miracle);
-  `doctor --fix --tier 2` also shows the list of the framework's build images, as before.
+  `llmcf mojo`. `doctor --fix` makes the harmless repairs (the same audited repairs as Mojo Miracle); a problem
+  still present after it is shown with the reason. `doctor --fix --tier 2` also shows the list of the framework's
+  build images, as before.
 - The tool `run_doctor` stays callable but is no longer listed. A setting for `run_doctor` also applies to
   `run_mojo_oracle`, and the other way round; the stricter one wins.
 - In Python, `orchestrator.Core.doctor` re-exports everything from `orchestrator.Core.mojo`.
