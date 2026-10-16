@@ -1123,8 +1123,12 @@ class TestForAnAI:
 
 def _cli(monkeypatch, rt, *args, **kw):
     from click.testing import CliRunner
+    from rich.console import Console
     from orchestrator import cli as cli_module
     monkeypatch.setattr(cli_module, "_local_runtime", lambda ctx: rt)
+    # One line per table row: on a narrow console a long full path (a Windows temp folder) folds the cells, and a
+    # file name split over two lines is no longer one piece in the flattened output.
+    monkeypatch.setattr(cli_module, "console", Console(width=1000, color_system=None))
     return CliRunner().invoke(cli_module.cli, ["-q", "ditto", "runtime", *args], **kw)
 
 
