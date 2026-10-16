@@ -11,10 +11,12 @@ value reaches a build script, what a setting does, which tool to use. It is an e
   (snapshot_space, the same check the GUI and the CLI make: no room, nothing is indexed); the question shows how many
   files and how much text it reads. Default and cap "ask": it writes the knowledge base.
 - A job: get_job_status shows "file n of m"; cancel_job stops after the current file and keeps what is stored. A
-  snapshot is taken first, as before a Deep Ingest, so the index can be undone with a restore. The result has counts
-  and the snapshot's name, never a host path or file text.
+  snapshot is taken first, as before a Deep Ingest, so the index can be undone with a restore; when it cannot be made,
+  nothing is indexed and the job fails saying so. The result has counts, the snapshot's name and every file it did not
+  index (its name inside the framework's folder, with why), never a host path or file text.
 """
 
+import os
 from pathlib import Path
 from typing import List
 
@@ -59,15 +61,34 @@ def files_size(paths: List) -> int:
     return total
 
 
+def job_failure(message: str, code: str = "failed") -> ValueError:
+    """A failed index as get_job_status shows it: the framework's own sentence and reason code (the job service keeps
+    the message of a ValueError and hides any other error's text)."""
+    error = ValueError(message)
+    error.code = code  # type: ignore[attr-defined]
+    return error
+
+
+def folder_size(folder: Path) -> int:
+    """The bytes of the files below `folder` (linked folders are not followed); 0 for a folder that is not there."""
+    total = 0
+    for base, _dirs, names in os.walk(folder):
+        total += files_size([Path(base) / name for name in names])
+    return total
+
+
 def snapshot_space(rag, disk_usage=None) -> List:
     """The disk check (disk_plan.DiskCheck per file system) of the snapshot taken before the index: about the size of
-    the largest snapshot so far (without an earlier snapshot there is no size to go by, and nothing is checked). A
-    check that does not fit means: nothing is indexed (no snapshot, no "continue anyway"); "tight" is a situation
-    warning. Its sentences name labels, never a path."""
+    the largest snapshot so far or of the knowledge base's own storage folder, whichever is larger (the storage holds
+    the excerpts and vectors a snapshot writes, so the first snapshot is checked too). A check that does not fit
+    means: nothing is indexed (no snapshot, no "continue anyway"); "tight" is a situation warning. Its sentences name
+    labels, never a path."""
     from orchestrator.Core.disk_plan import DiskNeed, check_disk
     folder = Path(rag.snapshot_dir)
     largest = max((files_size([p]) for p in folder.glob("*.jsonl.gz")), default=0) if folder.is_dir() else 0
-    return check_disk([DiskNeed("knowledge snapshots", folder, largest, "snapshot taken first")],
+    storage = getattr(rag, "storage_dir", None)
+    held = folder_size(Path(storage)) if storage is not None else 0
+    return check_disk([DiskNeed("knowledge snapshots", folder, max(largest, held), "snapshot taken first")],
                       disk_usage=disk_usage)
 
 
@@ -132,17 +153,26 @@ def register_framework_docs_tools(registry: ToolRegistry, framework, jobs) -> To
         def work(handle) -> dict:
             result = rag.ingest_codebase(include_code=inp.include_code, stop=stop,
                                          progress=lambda n, total, _name: handle.progress(n, total, "indexing"))
+            if result.get("snapshot_failed"):
+                raise job_failure("The snapshot of the knowledge base taken first could not be made (for example the "
+                                  "disk is full), so nothing was indexed. Next: Tell the person; they free disk space "
+                                  "before it is tried again.")
             if not result.get("success"):
-                raise ToolError("The framework's documents could not be indexed: the knowledge base reported a "
-                                "problem.", code="failed",
-                                next="Tell the person; 'llm-cli doctor' shows what is wrong with the knowledge base.")
+                raise job_failure("The framework's documents could not be indexed: the knowledge base reported a "
+                                  "problem. Next: Tell the person; 'llm-cli doctor' shows what is wrong with the "
+                                  "knowledge base.")
+            # Relative names inside the framework's folder and the framework's own reasons: never a host path.
+            not_indexed = [{"file": str(item.get("file", ""))[:200], "reason": str(item.get("reason", ""))[:60]}
+                           for item in (result.get("not_indexed") or [])[:50] if isinstance(item, dict)]
             return {"files_indexed": int(result.get("count", 0)), "files": int(result.get("files", 0)),
                     "excerpts": int(result.get("chunks", 0)), "snapshot": result.get("snapshot") or "",
-                    "stopped": bool(result.get("stopped"))}
+                    "stopped": bool(result.get("stopped")), "not_indexed": not_indexed}
 
         def done(result) -> tuple:
+            skipped = len(result.get("not_indexed") or [])
             return ("ok", f"{result.get('files_indexed')} of {result.get('files')} files indexed, "
-                          f"{result.get('excerpts')} excerpts, snapshot {result.get('snapshot') or 'none (empty)'}", "")
+                          f"{result.get('excerpts')} excerpts" + (f", {skipped} not indexed" if skipped else "")
+                          + f", snapshot {result.get('snapshot') or 'none (empty)'}", "")
 
         audited = audited_job(registry, "index_framework_docs", inp.model_dump(mode="json"), ctx, work,
                               "the framework's own documents" + (" and code" if inp.include_code else ""),

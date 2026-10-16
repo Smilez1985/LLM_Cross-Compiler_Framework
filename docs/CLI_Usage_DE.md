@@ -213,8 +213,11 @@ Framework's Documentation...** in der GUI (eine Frage mit „Nein“ als Vorgabe
 MCP-Tool `index_framework_docs` (jedes Mal gefragt) starten es. Vorher wird ein Snapshot angelegt, damit es sich mit
 einer Wiederherstellung rückgängig machen lässt; eine schon aufgenommene Datei wird ersetzt. Hat die Platte keinen
 Platz für diesen Snapshot, wird nichts aufgenommen, und der Befehl sagt, wie viel Platz fehlt (kein „trotzdem
-weiter“); bleibt nur wenig Platz übrig, sagt er das und macht weiter. Die Wissensbasis muss eingeschaltet sein. Ein
-Wissenspaket, das du exportierst, enthält diese Texte nie: Jede Installation nimmt sie selbst auf.
+weiter“); bleibt nur wenig Platz übrig, sagt er das und macht weiter. Der erste Snapshot wird an der Größe der
+Wissensbasis selbst gemessen, und ein Snapshot, der sich nicht schreiben lässt, hält die Aufnahme ebenfalls an. Eine
+Datei, die gelesen, aber nicht aufgenommen wurde (eine leere Datei, ein Fehler), wird mit dem Grund genannt. Die
+Wissensbasis muss eingeschaltet sein. Ein Wissenspaket, das du exportierst, enthält diese Texte nie: Jede Installation
+nimmt sie selbst auf.
 
 ```bash
 llm-cli knowledge index-docs

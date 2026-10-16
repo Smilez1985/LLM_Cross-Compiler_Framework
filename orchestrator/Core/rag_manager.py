@@ -680,8 +680,10 @@ class RAGManager:
         code and configuration, so Ditto and every AI caller (search_knowledge, kind docs) can answer questions about
         the framework itself. An explicit action (GUI, `llm-cli knowledge index-docs`, the tool index_framework_docs),
         never automatic. A snapshot is taken first, as before a Deep Ingest, so the index can be undone with a restore;
-        a file indexed again replaces its earlier excerpts. Setting stop ends it after the current file and keeps
-        what is stored; progress gets (file, files, relative path)."""
+        a file indexed again replaces its earlier excerpts. When the knowledge base holds excerpts and that snapshot
+        cannot be made, nothing is indexed (snapshot_failed). Every file read but not stored is named with why
+        (not_indexed). Setting stop ends it after the current file and keeps what is stored; progress gets (file,
+        files, relative path)."""
         root = Path(root_path) if root_path else self.app_root
         if not root.is_dir():
             return {"success": False, "message": "The framework's folder was not found.", "count": 0}
@@ -691,11 +693,22 @@ class RAGManager:
             return {"success": False, "message": "No documentation was found in the framework's folder.", "count": 0}
         if not self._connect():
             return {"success": False, "message": f"Knowledge base unavailable: {self.last_error}", "count": 0}
+        try:
+            held = self.chunk_count()
+        except KnowledgeBaseError as e:
+            self._fail(e)
+            return {"success": False, "message": str(e), "count": 0}
         snapshot = self.create_snapshot(f"pre_codebase_{int(time.time())}")  # None while the base is empty
+        if held and not snapshot:  # no undo point (a full disk): nothing is written, never "continue anyway"
+            return {"success": False, "count": 0, "chunks": 0, "files": len(files), "snapshot": None,
+                    "snapshot_failed": True, "stopped": False,
+                    "message": "The snapshot of the knowledge base taken first could not be made, so nothing was "
+                               f"indexed ({self.last_error or 'see the log'}). Free disk space and try again."}
         self.logger.info(f"Indexing the framework's own documents: {len(docs)} documentation files, "
                          f"{len(code)} code files.")
         stored = chunks = 0
         stopped = False
+        not_indexed: List[Dict[str, str]] = []  # every file read but not stored, with why
         for n, file_path in enumerate(files, 1):
             if stop is not None and stop.is_set():
                 stopped = True
@@ -707,6 +720,7 @@ class RAGManager:
             try:
                 content = file_path.read_text(encoding="utf-8", errors="ignore")
                 if not content.strip():
+                    not_indexed.append({"file": rel_path, "reason": "empty"})
                     continue
                 meta = {"type": "internal_code", "filepath": rel_path, "filename": file_path.name,
                         "extension": file_path.suffix, "title": rel_path}
@@ -714,17 +728,25 @@ class RAGManager:
                 if added:
                     stored += 1
                     chunks += added
+                else:
+                    not_indexed.append({"file": rel_path, "reason": "no text to store"})
             except KnowledgeBaseError as e:
                 self._fail(e)
                 return {"success": False, "message": str(e), "count": stored, "chunks": chunks, "files": len(files),
-                        "snapshot": snapshot, "stopped": False}
+                        "snapshot": snapshot, "stopped": False, "not_indexed": not_indexed}
             except Exception as e:
                 self.logger.warning(f"Failed to index {rel_path}: {type(e).__name__}")
+                not_indexed.append({"file": rel_path, "reason": type(e).__name__})
         what = "documentation and code files" if include_code else "documentation files"
-        msg = f"Indexed {stored} of {len(files)} {what} ({chunks} excerpts)" + (", then stopped" if stopped else "")
+        msg = f"Indexed {stored} of {len(files)} {what} ({chunks} excerpts)"
+        if not_indexed:
+            shown = ", ".join(f"{item['file']} ({item['reason']})" for item in not_indexed[:5])
+            msg += f"; not indexed: {shown}" + (f" and {len(not_indexed) - 5} more" if len(not_indexed) > 5 else "")
+        if stopped:
+            msg += f"; then stopped, {len(files) - n + 1} files were not read"
         self.logger.info(msg)
         return {"success": True, "message": msg + ".", "count": stored, "chunks": chunks, "files": len(files),
-                "snapshot": snapshot, "stopped": stopped}
+                "snapshot": snapshot, "stopped": stopped, "not_indexed": not_indexed}
 
     # --- SNAPSHOT & ROLLBACK ---
 
