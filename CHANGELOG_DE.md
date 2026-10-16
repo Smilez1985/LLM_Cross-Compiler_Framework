@@ -19,8 +19,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Pläne binden die Reparaturen, die Build-Images des Frameworks öffnen sich im Löschdialog mit der ganzen Liste und
   nichts angehakt, und das Fenster zeigt, was repariert wurde, was nicht und warum. Kein Board wird von sich aus
   kontaktiert: Ein Board, auf das ein aufgezeichneter Fakt zeigt, bekommt **<Board> jetzt prüfen**, und **Ein Board
-  prüfen...** prüft ein beliebiges vertrautes Board, das du auswählst (eine Verbindung zu seinem SSH-Port, keine
-  Anmeldung). Befehl und Fenster teilen dieselben Kernfunktionen (`Core/mojo/boards.py`, die Sicht der Person in
+  prüfen...** prüft ein beliebiges vertrautes Board, das du auswählst (an Bezeichnung und Adresse, und auch an der
+  Geräte-ID, wo zwei Boards gleich aussehen; eine Verbindung zu seinem SSH-Port, keine Anmeldung). Befehl und Fenster teilen dieselben Kernfunktionen (`Core/mojo/boards.py`, die Sicht der Person in
   `Core/mojo/views.py`, `docker_objects.offer_image_list`), die Ausgabe von `llmcf mojo` bleibt also, wie sie war.
 - **Dieses Board prüfen im Deployment-Tab** (Gruppe „Benchmark auf einem Board“, DECISIONS W1'): prüft das gewählte
   Board so, wie es `llmcf mojo --oracle --board` tut, im Hintergrund (eine Verbindung zu seinem SSH-Port, keine

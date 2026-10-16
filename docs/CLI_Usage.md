@@ -213,8 +213,9 @@ where, why it matters, the next step, what Mojo Miracle can do with the steps of
 overall line with the exit code. **Run Mojo Miracle...** (`--miracle`) asks "Run Mojo Miracle now?" (No is the
 default), applies exactly the plans shown and opens the framework's build images in the deletion dialog (the full
 list, nothing ticked), then shows what was repaired, what was not and why. Each board a recorded fact points to gets
-**Check <board> now**, and **Check a board...** (`--board`) checks any trusted board you pick (label and address):
-one connection to its SSH port, no login. The Deployment tab's **Check this board** (group "Benchmark on a board")
+**Check <board> now**, and **Check a board...** (`--board`) checks any trusted board you pick (label and address;
+two boards that read the same, such as a board set up again with a new host key, also show their device ID): one
+connection to its SSH port, no login. The Deployment tab's **Check this board** (group "Benchmark on a board")
 checks the chosen board the same way.
 
 ---
