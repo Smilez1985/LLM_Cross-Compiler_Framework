@@ -903,6 +903,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   below it (secrets redacted, full paths, plain text, each line once, at most 20,000 lines in view; an AI that reads the
   log gets the folders by label), with a search box and a filter for Info, Warnings or Errors. Lines the service no
   longer returns are noted.
+- **Ditto is marked experimental** (eighth round, Q-2; `orchestrator/utils/ditto_notice.py`): Ditto stays optional.
+  The chat panel and the AI settings show an **Experimental** badge, and a notice says once per user, in English or
+  German: "Use at your own risk and responsibility. The creator of LLMCF is not liable." It repeats the no-warranty
+  terms of `LICENSE.txt` and adds nothing to them. In the GUI it stays at the top of the chat panel until you click
+  **Understood** and blocks nothing; `llm-cli ditto` prints it once on stderr at a terminal (without a terminal
+  nothing is printed or stored). README and Features say the same.
 
 ### Changed
 - **The output folder is `~/llmcf/output`; the old output folder is the framework's build folder** (eighth round,

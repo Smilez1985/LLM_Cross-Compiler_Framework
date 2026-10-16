@@ -1027,6 +1027,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   darunter das Protokoll des Builds live (Geheimnisse geschwärzt, volle Pfade, reiner Text, jede Zeile einmal, höchstens
   20.000 Zeilen in der Ansicht; eine KI, die das Protokoll liest, bekommt die Ordner als Label), mit Suchfeld und einem
   Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert, werden vermerkt.
+- **Ditto ist als experimentell gekennzeichnet** (achte Runde, Q-2; `orchestrator/utils/ditto_notice.py`): Ditto
+  bleibt optional. Der Chat-Bereich und die KI-Einstellungen zeigen ein Abzeichen **Experimentell**, und ein Hinweis
+  sagt einmal je Benutzer, auf Deutsch oder Englisch: „Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller von
+  LLMCF haftet nicht.“ Er wiederholt den Gewährleistungsausschluss aus `LICENSE.txt` und fügt ihm nichts hinzu. In der
+  GUI bleibt er oben im Chat-Bereich, bis du auf **Verstanden** klickst, und blockiert nichts; `llm-cli ditto` gibt
+  ihn an einem Terminal einmal auf stderr aus (ohne Terminal wird nichts ausgegeben oder gespeichert). README und
+  Features sagen dasselbe.
 
 ### Geändert
 - **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte

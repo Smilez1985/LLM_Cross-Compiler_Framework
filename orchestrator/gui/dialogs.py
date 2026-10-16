@@ -279,6 +279,12 @@ class AIConfigurationDialog(QDialog):
         info_lbl = QLabel(info_text)
         info_lbl.setWordWrap(True)
         layout.addWidget(info_lbl)
+        # Ditto is optional and experimental (eighth round, Q-2): shown in its setup every time.
+        self.lbl_experimental = QLabel(ui_text("chat.ditto.setup"))
+        self.lbl_experimental.setTextFormat(Qt.PlainText)
+        self.lbl_experimental.setWordWrap(True)
+        self.lbl_experimental.setStyleSheet("color: #1e1e1e; background-color: #ffd27f; padding: 4px;")
+        layout.addWidget(self.lbl_experimental)
 
         form = QFormLayout()
 

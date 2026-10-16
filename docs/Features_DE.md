@@ -483,6 +483,25 @@ installierst du selbst.
 Ditto baut auf der eigenen **Anbieterschicht** des Frameworks auf (`orchestrator/llm`), die die offiziellen SDKs
 `anthropic` und `openai` verwendet (OpenAI-kompatible Server laufen über `openai`).
 
+### Experimentell
+
+Ditto ist optional und als experimentell gekennzeichnet: **Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller
+von LLMCF haftet nicht.** Das wiederholt den Gewährleistungsausschluss in [LICENSE.txt](../LICENSE.txt) und fügt ihm
+nichts hinzu.
+
+- **Abzeichen:** Der Kopf des Chat-Bereichs und die KI-Einstellungen (**Tools > Configure AI Agent (Ditto)...**)
+  zeigen **Experimentell** mit diesem Satz; es bleibt.
+- **Hinweis, einmal je Benutzer:** Wenn der Chat-Bereich zum ersten Mal erscheint, sagt ein Hinweis oben darin, dass
+  Ditto experimentell und optional ist, dass seine Antworten falsch sein können, dass alles, was er tut, weiter über
+  deine Werkzeugrechte und Bestätigungen läuft, und den Satz oben. Er bleibt, bis du auf **Verstanden** klickst. Er
+  blockiert nichts: Der Chat, die wartenden Fragen und jedes andere Fenster funktionieren, während er angezeigt wird.
+- **Kommandozeile:** Vor dem ersten Befehl `llm-cli ditto ...` an einem Terminal geht derselbe Hinweis einmal auf
+  stderr. Ohne Terminal (ein Skript, ein KI-Client mit Shell) wird nichts ausgegeben oder gespeichert, also gibt ihn
+  der nächste Befehl an einem Terminal aus. Der Befehl läuft immer.
+- Die Zustandsdatei `ditto_notice.json` im benutzereigenen Ordner (`~/.llm-framework`) speichert einen Hash der
+  Hinweistexte in beiden Sprachen, wann er gezeigt wurde und wo (`via`: `gui` oder `cli`). Ein geänderter Text wird
+  erneut gezeigt. Kein Tool, keine Ressource und kein Prompt zeigt oder beantwortet ihn.
+
 ### Aufgaben, Modelle und Aufwand
 
 Dittos vier Arten von Arbeit entsprechen den Aufgabenprofilen der Anbieterschicht; jedes Aufgabenprofil hat pro
