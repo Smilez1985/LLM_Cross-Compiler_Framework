@@ -20,8 +20,8 @@ from PySide6.QtWidgets import QMenu
 from orchestrator.gui.plain import one_line, plain_box
 from orchestrator.utils.localization import current_language, ui_text
 
-# CLI command path -> objectName of the QAction or button that does it by mouse. Machine-only switches (targets list
-# --format json|yaml, the deprecated build start --parallel) have no entry.
+# CLI command path -> objectName of the QAction or button that does it by mouse. Machine-only switches are in
+# MACHINE_ONLY below.
 CLI_PATHS: Dict[str, str] = {
     "targets list": "act_build_targets",
     "targets validate": "btn_builder_check_target",           # also Build > Targets... > Check target
@@ -55,6 +55,11 @@ CLI_PATHS: Dict[str, str] = {
     "config repos": "act_file_settings",
     "config repos --add": "act_file_settings",
     "config repos --remove": "act_file_settings",
+}
+# The switches of this area that are for scripts only, with the reason (as the other menu modules list theirs; the
+# hidden, deprecated build start --parallel is not offered at all).
+MACHINE_ONLY: Dict[str, str] = {
+    "targets list --format": "json or yaml output for scripts; Build > Targets... shows the same rows as a table",
 }
 
 
@@ -172,4 +177,4 @@ def open_settings(window):
     return dialog
 
 
-__all__ = ["CLI_PATHS", "install", "open_build_history", "open_settings", "open_targets"]
+__all__ = ["CLI_PATHS", "MACHINE_ONLY", "install", "open_build_history", "open_settings", "open_targets"]

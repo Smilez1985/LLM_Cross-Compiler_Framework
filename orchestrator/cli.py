@@ -437,21 +437,21 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_f
 
 
 def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional[str]):
-    """Ditto with provider/model chosen for this command only (the saved AI settings stay unchanged)."""
-    from orchestrator.Core.ditto_manager import provider_problem
+    """Ditto with provider/model chosen for this command only (the saved AI settings stay unchanged: they are set in
+    this short-lived process; the GUI uses Core/ai_override.ditto_with instead, and DittoManager.for_run goes through
+    it too)."""
+    from orchestrator.Core.ai_override import override_values, provider_problem
     fm = ctx.framework_manager
     ditto = fm.get_component("ditto_manager")
     if ditto is None:
         console.print("[red]The AI assistant (Ditto) is not available.[/red]")
         sys.exit(1)
-    if provider:
-        problem = provider_problem(ditto.client.catalog, provider)
-        if problem:
-            console.print(f"[red]{escape(problem)}[/red]")
-            sys.exit(2)
-        fm.config.set("ai_provider", provider)
-    if model:
-        fm.config.set("ai_model", model)
+    problem = provider_problem(ditto.client.catalog, provider) if provider else None
+    if problem:
+        console.print(f"[red]{escape(problem)}[/red]")
+        sys.exit(2)
+    for key, value in override_values(provider, model).items():
+        fm.config.set(key, value)
     return ditto
 
 
@@ -2364,27 +2364,19 @@ def ditto_models():
 @pass_context
 def models_list(ctx: FrameworkContext):
     """Pinned models, their size and whether they are downloaded"""
-    rt = _local_runtime(ctx)
-    recommended, why = rt.choose_tier()
-    preferred = rt.preferred_tier()
+    from orchestrator.runtime.ditto_models import models_overview
+    view = models_overview(_local_runtime(ctx))  # the GUI's Ditto > Local Models... shows the same
     table = Table(title="Ditto models")
     for column in ("Tier", "File", "Size", "License", "Status", "Note"):
         table.add_column(column)
     labels = {"ready": "[green]downloaded[/green]", "unverified": "[yellow]not verified yet[/yellow]", "missing": "-"}
-    for m in rt.catalog.models:
-        notes = []
-        if m.tier == recommended.tier:
-            notes.append("recommended")
-        if m.tier == preferred:
-            notes.append("chosen")
-        if m.on_request and not notes:
-            notes.append("on request")
-        if not m.pinned:
-            notes.append("[red]not pinned[/red]")
-        table.add_row(escape(m.tier), escape(m.file), _gib(m.size), escape(m.license), labels[rt.model_state(m)],
+    for row in view.rows:
+        m = row.model
+        notes = ["[red]not pinned[/red]" if note == "not pinned" else note for note in row.notes()]
+        table.add_row(escape(m.tier), escape(m.file), _gib(m.size), escape(m.license), labels[row.state],
                       ", ".join(notes))
     console.print(table)
-    console.print(f"Recommended for this machine: {escape(why)}")
+    console.print(f"Recommended for this machine: {escape(view.why)}")
 
 
 @ditto_models.command('download')
@@ -2393,17 +2385,16 @@ def models_list(ctx: FrameworkContext):
 @pass_context
 def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
     """Download a model at its pinned revision and check size and sha256 (default: the recommended tier)"""
+    from orchestrator.runtime.ditto_models import model_to_download
     from orchestrator.runtime.llama_server import LocalRuntimeError
     rt = _local_runtime(ctx)
-    if tier is None:
-        model, why = rt.choose_tier()
+    try:
+        model, why = model_to_download(rt, tier)  # the GUI's Ditto > Local Models... asks for the same model
+    except KeyError as e:
+        console.print(f"[red]{escape(str(e.args[0]))}[/red]")
+        sys.exit(2)
+    if why is not None:
         console.print(f"Recommended: {escape(why)}")
-    else:
-        try:
-            model = rt.catalog.model(tier)
-        except KeyError as e:
-            console.print(f"[red]{escape(str(e.args[0]))}[/red]")
-            sys.exit(2)
     if rt.model_ready(model):
         console.print(f"[green]{escape(model.file)} is already downloaded.[/green]")
         return
@@ -2493,181 +2484,86 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
     """Grade Ditto on fixed cases with the chosen provider/model, e.g. to check whether a 2-bit local model is
     good enough, or the knowledge-base search (--kind retrieval, works offline once the embedding model is
     downloaded). Nothing is built or changed. Cloud providers bill every request (about 20 per run and repeat)."""
-    from orchestrator.evals.ditto_eval import DEFAULT_CASES, RETRIEVAL_CASES, DittoEval, load_cases, run_setup
+    from orchestrator.Core.ai_override import override_values
+    from orchestrator.Core.ditto_manager import DittoError
+    from orchestrator.evals.eval_run import (EvalEvents, EvalRunError, check_choice, retrieval_table, run_evaluation,
+                                             select_cases, summary_table, write_report)
+    from orchestrator.runtime.llama_server import LocalRuntimeError
     ctx.require_framework()
-    if tiers and (provider or model):
-        console.print("[red]--tier runs the managed local model; it cannot be combined with --provider/--model.[/red]")
-        sys.exit(2)
-    if cases_file:
-        files = [cases_file]
-    else:  # retrieval cases need the embedding model, not an AI model: only when asked for
-        files = [] if set(kinds) == {"retrieval"} else [DEFAULT_CASES]
-        if "retrieval" in kinds or (case_ids and not kinds):
-            files.append(RETRIEVAL_CASES)
+    # The same run as the GUI's Ditto > Evaluation... (evals/eval_run.py); this command prints it.
     try:
-        cases = [c for path in files for c in load_cases(path)]
-    except (OSError, ValueError) as e:
-        console.print(f"[red]Cannot read the cases: {escape(str(e))}[/red]")
-        sys.exit(2)
-    cases = [c for c in cases if (not kinds or c.kind in kinds) and (not case_ids or c.id in case_ids)]
-    if not cases:
-        console.print("[red]No case matches the filters.[/red]")
-        sys.exit(2)
-    ai_cases = [c for c in cases if c.kind != "retrieval"]
-    retrieval_cases = [c for c in cases if c.kind == "retrieval"]
+        check_choice(tiers, provider, model)
+        cases = select_cases(cases_file, kinds, case_ids)
+    except EvalRunError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(e.exit_code)
     fm = ctx.framework_manager
-    runs = []
 
-    def progress(result):
-        mark = "[green]pass[/green]" if result.pass_rate == 1 else (
-            "[red]fail[/red]" if result.pass_rate == 0 else f"[yellow]{result.pass_rate:.0%}[/yellow]")
-        note = f"  [dim]{escape(result.first_problem()[:160])}[/dim]" if result.pass_rate < 1 else ""
-        console.print(f"  {mark} {escape(result.case.id)} ({result.seconds:.1f}s){note}")
+    class Printed(EvalEvents):
+        def busy(self, step, **values):
+            text = {"start_tier": f"Starting llama-server with {values.get('tier')} ...",
+                    "index": f"Indexing {values.get('documents')} corpus documents into a temporary knowledge base "
+                             "(the embedding model is downloaded on first use) ...",
+                    "reranker": f"Loading the reranker {values.get('model')} (downloaded on first use) ..."}[step]
+            return console.status(text)
 
-    if ai_cases:
+        def run_started(self, label, name, run_model, count, times):
+            what = f"{escape(name)} / {escape(run_model)}" if name is not None else escape(run_model)
+            console.print(f"[bold]{escape(label)}[/bold]: {what}, {count} cases x {times}")
+
+        def result(self, result):
+            mark = "[green]pass[/green]" if result.pass_rate == 1 else (
+                "[red]fail[/red]" if result.pass_rate == 0 else f"[yellow]{result.pass_rate:.0%}[/yellow]")
+            note = f"  [dim]{escape(result.first_problem()[:160])}[/dim]" if result.pass_rate < 1 else ""
+            console.print(f"  {mark} {escape(result.case.id)} ({result.seconds:.1f}s){note}")
+
+        def server_replaced(self, served):
+            console.print(f"[yellow]Your llama-server ({escape(served)}) was replaced for the evaluation; "
+                          "start it again with: llm-cli ditto runtime start[/yellow]")
+
+        def unused_options(self):
+            console.print("[dim]--tier, --provider, --model and --effort apply to AI cases; retrieval needs none.[/dim]")
+
+    def make_ditto():
         ditto = _ai_override(ctx, "local" if tiers else provider, model)
-        if effort:
-            for key in ("ai_effort", "ai_effort_chat", "ai_effort_tools", "ai_effort_json", "ai_effort_healing"):
-                fm.config.set(key, effort)  # this run only; the saved settings stay unchanged
-        targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
+        for key, value in override_values(effort=effort).items():
+            fm.config.set(key, value)  # this run only; the saved settings stay unchanged
+        return ditto
 
-        def run_once(label: str):
-            from orchestrator.Core.ditto_manager import DittoError
-            ditto.reload()
-            try:
-                setup = ditto.describe("chat")
-            except DittoError as e:
-                console.print(f"[red]{escape(str(e))}[/red]")
-                sys.exit(1)
-            console.print(f"[bold]{escape(label)}[/bold]: {escape(setup['label'])} / {escape(setup['model'])}, "
-                          f"{len(ai_cases)} cases x {repeat}")
-            report = DittoEval(ditto, targets_dir).run(ai_cases, repeat=repeat, on_result=progress)
-            models = {}
-            for task in ("chat", "json", "healing"):  # each task may use its own model
-                try:
-                    models[task] = ditto.describe(task).get("model", "")
-                except DittoError:
-                    models[task] = ""
-            report.setup = run_setup(label, setup.get("provider", ""), setup.get("model", ""), cases_file, ai_cases,
-                                     repeat, task_models=models, effort=effort or "settings")
-            runs.append(report)
+    try:
+        runs = run_evaluation(fm, cases, make_ditto=make_ditto, make_runtime=lambda: _local_runtime(ctx), tiers=tiers,
+                              provider=provider, model=model, effort=effort, cases_file=cases_file,
+                              rag_variants=rag_variants, repeat=repeat, events=Printed())
+    except EvalRunError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(e.exit_code)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    except DittoError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
 
-        if tiers:
-            from orchestrator.runtime.llama_server import LocalRuntimeError
-            rt = _local_runtime(ctx)
-            before = rt.endpoint()  # a server you started yourself keeps running
-
-            def same_server(a, b) -> bool:
-                # pid and port: a server in Ditto's container has no process of this computer (pid 0)
-                return (a.pid, getattr(a, "port", None)) == (b.pid, getattr(b, "port", None))
-            for tier in tiers:
-                try:
-                    with console.status(f"Starting llama-server with {tier} ..."):
-                        rt.start(tier=tier, remember=False)
-                    run_once(f"tier {tier}")
-                except LocalRuntimeError as e:
-                    _runtime_failure(e)
-                finally:
-                    running = rt.endpoint()
-                    if before is None or running is None or not same_server(running, before):
-                        rt.stop()  # the eval's own server (or what is left of a failed start)
-            after = rt.endpoint()
-            if before is not None and (after is None or not same_server(after, before)):
-                console.print(f"[yellow]Your llama-server ({escape(before.model)}) was replaced for the evaluation; "
-                              "start it again with: llm-cli ditto runtime start[/yellow]")
-        else:
-            run_once("configured model" if not (provider or model) else f"{provider or ''} {model or ''}".strip())
-    elif tiers or provider or model or effort:
-        console.print("[dim]--tier, --provider, --model and --effort apply to AI cases; retrieval needs none.[/dim]")
-    if retrieval_cases:
-        runs += _eval_retrieval(fm, retrieval_cases, cases_file or RETRIEVAL_CASES, rag_variants or ("fused",),
-                                repeat, progress)
-
-    all_kinds = sorted({c.kind for c in cases})
+    columns, rows = summary_table(runs, sorted({c.kind for c in cases}))
     table = Table(title="Ditto evaluation")
-    for column in ("Run", "Model", "Passed", *all_kinds, "Avg s/case"):
+    for column in columns:
         table.add_column(column)
-    for report in runs:
-        kinds_rate = report.by_kind()
-        avg = sum(r.seconds for r in report.results) / len(report.results)
-        table.add_row(escape(report.setup["label"]), escape(report.setup["model"]), f"{report.pass_rate:.0%}",
-                      *[f"{kinds_rate[k]:.0%}" if k in kinds_rate else "-" for k in all_kinds], f"{avg:.1f}")
+    for row in rows:
+        table.add_row(escape(row[0]), escape(row[1]), *row[2:])
     console.print(table)
-    metrics = [(report, report.retrieval()) for report in runs if report.retrieval() is not None]
-    if metrics:
-        def share(value):
-            return "-" if value is None else f"{value:.0%}"
-
+    retrieval = retrieval_table(runs)
+    if retrieval is not None:
+        columns, rows = retrieval
         table = Table(title="Retrieval")
-        for column in ("Run", "hit@1", "hit@3", "hit@k", "MRR", "Unrelated: no excerpt", "p50 ms"):
+        for column in columns:
             table.add_column(column)
-        for report, m in metrics:
-            table.add_row(escape(report.setup["label"]), share(m["hit@1"]), share(m["hit@3"]), share(m["hit@k"]),
-                          "-" if m["mrr"] is None else f"{m['mrr']:.3f}", share(m["empty_when_irrelevant"]),
-                          f"{m['latency_p50_ms']:.0f}")
+        for row in rows:
+            table.add_row(escape(row[0]), *row[1:])
         console.print(table)
     if json_out:
-        json_out.write_text(json.dumps({"runs": [r.to_dict() for r in runs]}, indent=2, ensure_ascii=False),
-                            encoding="utf-8")
+        write_report(json_out, runs)
         console.print(f"Report written to {escape(str(json_out))}")
     if min_pass is not None and any(r.pass_rate < min_pass for r in runs):
         sys.exit(1)
-
-
-def _eval_retrieval(fm, cases, source: Path, variants, repeat: int, progress) -> list:
-    """Retrieval cases: the corpus is indexed once into a temporary knowledge base, one report per variant."""
-    import time
-    from orchestrator.evals.ditto_eval import (RetrievalEval, RetrievalEvalError, check_retrieval_cases,
-                                               corpus_digest, corpus_dir, load_corpus, run_setup,
-                                               temporary_knowledge_base)
-    try:
-        folder = corpus_dir(source)
-        docs = load_corpus(folder)
-        check_retrieval_cases(cases, docs)
-    except (OSError, ValueError) as e:
-        console.print(f"[red]Cannot read the retrieval corpus: {escape(str(e))}[/red]")
-        sys.exit(2)
-    reports = []
-    with temporary_knowledge_base(fm) as knowledge:
-        ev = RetrievalEval(knowledge, docs)
-        start = time.monotonic()
-        try:
-            with console.status(f"Indexing {len(docs)} corpus documents into a temporary knowledge base "
-                                "(the embedding model is downloaded on first use) ..."):
-                ev.ingest()
-        except RetrievalEvalError as e:
-            console.print(f"[red]{escape(str(e))}[/red]")
-            sys.exit(1)
-        index_seconds = round(time.monotonic() - start, 1)
-        embedding = str(knowledge.get_status().get("embedding_model", ""))
-        reranker = knowledge.reranker() if "rerank" in variants else None
-        if "rerank" in variants:
-            if reranker is None:
-                console.print(f"[red]The rerank variant needs a reranker: {escape(knowledge.reranker_reason)}. Set "
-                              "rag_reranker to a model id to grade one anyway.[/red]")
-                sys.exit(2)
-            with console.status(f"Loading the reranker {reranker.model_id} (downloaded on first use) ..."):
-                ready = knowledge.prepare_models()
-            if not ready:
-                console.print(f"[red]{escape(knowledge.last_error)}[/red]")
-                sys.exit(1)
-        for variant in dict.fromkeys(variants):
-            label, reranked = f"retrieval {variant}", variant == "rerank"
-            model = f"{embedding} + {reranker.model_id}" if reranked else embedding
-            console.print(f"[bold]{escape(label)}[/bold]: {escape(model)}, {len(cases)} cases x {repeat}")
-            report = ev.run(cases, variant=variant, repeat=repeat, on_result=progress)
-            try:
-                import psutil
-                rss_mb = round(psutil.Process().memory_info().rss / 2 ** 20)  # models loaded
-            except Exception:
-                rss_mb = None
-            used = {"model": reranker.model_id, "min_score": knowledge.rerank_floor(reranker)} if reranked else None
-            report.setup = run_setup(
-                label, "knowledge base", model, source, cases, repeat, variant=variant, reranker=used,
-                model_reason=knowledge.model_reason, corpus_sha256=corpus_digest(folder), corpus_documents=len(docs),
-                index_seconds=index_seconds, rss_mb=rss_mb)
-            reports.append(report)
-    return reports
 
 
 # ============================================================================

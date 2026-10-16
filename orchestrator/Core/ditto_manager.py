@@ -35,6 +35,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Type,
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, field_validator, model_validator
 
+from orchestrator.Core.ai_override import SettingsOverlay as RunSettings, provider_problem  # noqa: F401 - shared
 from orchestrator.Core.module_generator import ARCHITECTURES, INPUT_LIST_BOUNDS, MODULE_NAME_RE, ModuleGenerator
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
 from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest, InvalidOutput, LLMClient, LLMError,
@@ -386,67 +387,10 @@ def ai_module_description(name: str, assumptions: Sequence[Any], lead: str = "")
     return f"{lead}. {description}" if lead else description
 
 
-def provider_problem(catalog: Any, provider: Optional[str]) -> Optional[str]:
-    """Why `provider` cannot be chosen for one run (`--provider`, the module wizard's "for this analysis only"): an id
-    the provider catalog does not know, or a removed provider (with its alternatives). None when it can be chosen
-    (also for no provider: the AI settings' one is used)."""
-    if not provider or catalog.get(provider) is not None:
-        return None
-    removed = catalog.removed_message(provider)
-    return removed or f"Unknown AI provider '{provider}'. Choose one of: {', '.join(catalog.ids())}."
-
-
-@dataclass(frozen=True)
-class _RunSource:
-    source_type: str = "run"
-    source_path: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class _RunValue:
-    """A setting chosen for one run, in the shape of ConfigManager's config_values entries."""
-    key: str
-    value: Any
-    schema: Any = None
-    is_secret: bool = False
-    source: _RunSource = field(default_factory=_RunSource)
-
-
-class RunSettings:
-    """The settings with the AI provider and model chosen for one run. Every other value is read live from the saved
-    settings; the chosen values are kept here only, so the saved AI settings (and this program's own settings) stay
-    unchanged, also when something else saves the settings meanwhile."""
-
-    def __init__(self, base: Any, overrides: Dict[str, Any]):
-        self._base = base
-        self._overrides = {k: v for k, v in overrides.items() if v not in (None, "")}
-
-    def get(self, key: str, default: Any = None) -> Any:
-        if key in self._overrides:
-            return self._overrides[key]
-        return self._base.get(key, default) if self._base is not None else default
-
-    def set(self, key: str, value: Any, source_type: str = "run") -> bool:
-        """A value set during the run stays in the run: the saved settings are never changed through it."""
-        self._overrides[key] = value
-        return True
-
-    @property
-    def config_values(self) -> Dict[str, Any]:
-        values = dict(getattr(self._base, "config_values", None) or {})
-        for key, value in self._overrides.items():
-            old = values.get(key)
-            values[key] = _RunValue(key, value, schema=getattr(old, "schema", None))
-        return values
-
-    @property
-    def overrides(self) -> Dict[str, Any]:
-        return dict(self._overrides)
-
-    def __getattr__(self, name: str) -> Any:   # config_dir, user_state_dir ... of the saved settings
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return getattr(self._base, name)
+# provider_problem() and the settings overlay for one run (RunSettings) are the shared ones of Core/ai_override.py
+# (imported above): `module generate-ai --provider --model`, the module wizard's "for this analysis only", `ditto
+# ask/eval --provider --model`, the chat panel's "For this question" and Ditto > Evaluation... check a provider with
+# the same words and read the chosen values over the saved settings the same way.
 
 
 def pin_base_image(definition: "ModuleDefinition", offline: bool = False, client: Any = None) -> "ModuleDefinition":
@@ -766,16 +710,16 @@ class DittoCoder:
 
     def for_run(self, provider: Optional[str] = None, model: Optional[str] = None) -> "DittoCoder":
         """Ditto with the AI provider and/or model chosen for one run only (`--provider/--model`, the module wizard's
-        "for this analysis only"): a Ditto of its own on RunSettings, so the saved AI settings stay unchanged. This
-        Ditto itself when neither is given. DittoError when the provider is unknown or removed."""
+        "for this analysis only"): a Ditto of its own on the shared settings overlay (Core/ai_override.ditto_with, the
+        same path as the chat panel's "For this question" and Ditto > Evaluation...), so the saved AI settings stay
+        unchanged. This Ditto itself when neither is given. DittoError when the provider is unknown or removed."""
         if not provider and not model:
             return self
         problem = provider_problem(self.client.catalog, provider)
         if problem:
             raise DittoError(problem)
-        overrides = {"ai_provider": provider, "ai_model": model}
-        return type(self)(self.framework, config_manager=RunSettings(self.config, overrides),
-                          secrets_manager=self._secrets, registry=self._registry_override)
+        from orchestrator.Core.ai_override import ditto_with, override_values
+        return ditto_with(self, override_values(provider, model))
 
     def pin_base_image(self, definition: "ModuleDefinition") -> "ModuleDefinition":
         """pin_base_image() in this Ditto's offline mode (the settings' offline_mode)."""

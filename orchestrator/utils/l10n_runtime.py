@@ -36,7 +36,8 @@ TEXTS = {
                                          "source with the build options below (a few minutes; when the source, about "
                                          "215 MB, is not there yet, you are asked before it is fetched). Afterwards "
                                          "Ditto's model is "
-                                         "offered with its size and licence, unless you untick that below.\n\n"
+                                         "offered with its size and licence, unless you untick that below (you can "
+                                         "also download it later in Ditto > Local Models...).\n\n"
                                          "Continue?",
         "runtime.mode.working": "Working… this can take minutes; the window can stay open.",
         "runtime.mode.failed": "Nothing was switched: {reason}",
@@ -99,7 +100,8 @@ TEXTS = {
                                          "llama.cpp-Quellcode mit den Build-Optionen unten gebaut (einige Minuten; "
                                          "fehlt der Quellcode, etwa 215 MB, wirst du gefragt, bevor er geholt wird). "
                                          "Danach wird Dittos Modell mit Größe und Lizenz angeboten, außer du nimmst "
-                                         "unten den Haken weg.\n\nWeiter?",
+                                         "unten den Haken weg (du kannst es auch später unter Ditto > Lokale "
+                                         "Modelle... herunterladen).\n\nWeiter?",
         "runtime.mode.working": "Läuft … das kann Minuten dauern; das Fenster kann offen bleiben.",
         "runtime.mode.failed": "Nichts wurde gewechselt: {reason}",
         "runtime.mode.leftovers.question": "Die neue Art funktioniert. Jedes Objekt der alten Art endgültig löschen, "
