@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Texts of Ditto's runtime mode in the AI settings (bare metal or Docker, DECISIONS round 7 D), English and German.
+Texts of Ditto's runtime mode in the AI settings and in Ditto > Local Runtime... (bare metal or Docker, DECISIONS
+round 7 D), English and German; the newer texts of that window are in l10n_ditto_runtime.
 LocalizationManager merges them (localization.TEXT_MODULES); a key that exists already is refused there.
 
 Every key has the same {placeholders} in both languages (tests/test_runtime_mode.py). This module imports nothing from
@@ -21,7 +22,6 @@ TEXTS = {
         "runtime.mode.now.none": "Now: not installed",
         "runtime.mode.switch": "Switch…",
         "runtime.mode.install": "Install…",
-        "runtime.mode.same": "Ditto's server runs {mode} already.",
         "runtime.mode.name.bare-metal": "bare metal",
         "runtime.mode.name.docker": "in Docker",
         "runtime.mode.question": "Ditto's server will run {mode}.\n\nThe models stay where they are and are not "
@@ -32,9 +32,10 @@ TEXTS = {
                                  "of the old mode is listed, and with your one yes it is deleted for good: the two "
                                  "modes are alternatives, so nothing of the old one stays.\n\nContinue?",
         "runtime.mode.install_question": "Ditto's server will be installed {mode}: built from the pinned llama.cpp "
-                                         "source (a few minutes; the source, about 215 MB, is fetched once when it is "
-                                         "not there yet). The model is downloaded separately (llm-cli ditto models "
-                                         "download).\n\nContinue?",
+                                         "source with the build options below (a few minutes; the source, about 215 "
+                                         "MB, is fetched once when it is not there yet). Afterwards Ditto's model is "
+                                         "offered with its size and licence, unless you untick that below.\n\n"
+                                         "Continue?",
         "runtime.mode.working": "Working… this can take minutes; the window can stay open.",
         "runtime.mode.failed": "Nothing was switched: {reason}",
         "runtime.mode.leftovers.question": "The new mode works. Delete every object of the old mode for good: exactly "
@@ -82,7 +83,6 @@ TEXTS = {
         "runtime.mode.now.none": "Jetzt: nicht installiert",
         "runtime.mode.switch": "Wechseln…",
         "runtime.mode.install": "Installieren…",
-        "runtime.mode.same": "Dittos Server läuft schon {mode}.",
         "runtime.mode.name.bare-metal": "direkt",
         "runtime.mode.name.docker": "in Docker",
         "runtime.mode.question": "Dittos Server läuft danach {mode}.\n\nDie Modelle bleiben, wo sie sind, und werden "
@@ -94,9 +94,10 @@ TEXTS = {
                                  "aufgelistet, und mit deinem einen Ja wird es endgültig gelöscht: Die beiden Arten "
                                  "sind Alternativen, von der alten bleibt nichts.\n\nWeiter?",
         "runtime.mode.install_question": "Dittos Server wird {mode} installiert: aus dem festgelegten "
-                                         "llama.cpp-Quellcode gebaut (einige Minuten; der Quellcode, etwa 215 MB, wird "
-                                         "einmal geholt, wenn er noch nicht da ist). Das Modell wird getrennt "
-                                         "heruntergeladen (llm-cli ditto models download).\n\nWeiter?",
+                                         "llama.cpp-Quellcode mit den Build-Optionen unten gebaut (einige Minuten; der "
+                                         "Quellcode, etwa 215 MB, wird einmal geholt, wenn er noch nicht da ist). "
+                                         "Danach wird Dittos Modell mit Größe und Lizenz angeboten, außer du nimmst "
+                                         "unten den Haken weg.\n\nWeiter?",
         "runtime.mode.working": "Läuft … das kann Minuten dauern; das Fenster kann offen bleiben.",
         "runtime.mode.failed": "Nichts wurde gewechselt: {reason}",
         "runtime.mode.leftovers.question": "Die neue Art funktioniert. Jedes Objekt der alten Art endgültig löschen, "
