@@ -666,8 +666,9 @@ läuft auf deinem Rechner:
 - Embeddings werden lokal mit FastEmbed (ONNX Runtime) berechnet; das Modell wird einmal nach
   `models/embeddings/` geladen (etwa 0,5 GB auf einem Rechner ohne CUDA); im Offline-Modus wird nichts
   heruntergeladen,
-- die Vektoren liegen in einer eingebetteten Qdrant-Datenbank in `~/.llm-framework/qdrant`, ohne Docker und ohne
-  offenen Port,
+- die Vektoren liegen in Qdrant Edge, der Rust-Engine von Qdrant im Framework, in `~/.llm-framework/qdrant_edge`,
+  ohne Docker, ohne Server und ohne offenen Port; eine Wissensbasis einer früheren Version wird bei der ersten
+  Nutzung umgewandelt, und ihr alter Ordner bleibt, bis du ihn löschst,
 - die Suche verbindet Bedeutung (Vektoren) mit exakten Wörtern (BM25), sodass auch Fehlercodes und Compiler-Flags
   gefunden werden, auch Teile von Bezeichnern wie `GGML_CUDA` in `-DGGML_CUDA=ON`,
 - ein lokaler Cross-Encoder bewertet die Auszüge für Build-Empfehlungen neu und wirft unpassende weg (Einstellung
@@ -838,8 +839,8 @@ ausführst und Änderungen einreichst: [CONTRIBUTING_DE.md](CONTRIBUTING_DE.md).
 - **[Model Context Protocol](https://modelcontextprotocol.io)**: das Python-SDK hinter dem MCP-Server
 - **[eaddario/imatrix-calibration](https://huggingface.co/datasets/eaddario/imatrix-calibration)**: die
   mitgelieferten Kalibrierungstexte (MIT)
-- **[Qdrant](https://qdrant.tech/)** und **[FastEmbed](https://github.com/qdrant/fastembed)**: die lokale
-  Wissensbasis
+- **[Qdrant](https://qdrant.tech/)** (Qdrant Edge, qdrant-client) und **[FastEmbed](https://github.com/qdrant/fastembed)**:
+  die lokale Wissensbasis
 - **[rag4ll](https://github.com/Smilez1985/rag4ll)**: Der Reranker, das Budget für Auszüge, das Manifest der Packs,
   die Datenschutz-Bereinigung und der Aufbau des Sprachaufrufs sind daraus übernommen (MIT, siehe
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))

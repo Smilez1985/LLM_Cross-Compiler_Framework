@@ -10,6 +10,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
+  knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
+  geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
+  Eintrag. `convert` versucht die Umwandlung sofort erneut. `delete-old` und **Tools > Knowledge Snapshots... > Delete
+  the old storage...** in der GUI zeigen den alten Ordner nach seiner Umwandlung und löschen ihn erst nach deinem Ja
+  (Papierkorb oder endgültig; "Nein" ist die Vorgabe; im Audit-Log als `old_store_deleted`); nichts löscht ihn von
+  selbst, und eine KI kann es nie. Mojo Oracle meldet eine fehlgeschlagene Umwandlung (mit dem Grund) und einen alten
+  Ordner, der noch da ist.
 - **Ein Deployment sagt dir, wenn ein alter Qdrant-Sidecar auf dem Board ist**: Pakete mit Docker-Images früherer
   Versionen starteten den Container `qdrant-sidecar`, den nichts mehr nutzt. Nach einem erfolgreichen Deployment
   (`llm-cli deploy run`, das Deployment-Fenster, das KI-Tool `deploy_to_device`) schaut das Framework mit `docker ps`
@@ -1056,6 +1064,26 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Die lokale Wissensbasis liegt in Qdrant Edge** (DECISIONS RG5): Die Rust-Engine von Qdrant läuft im
+  Framework-Prozess (neue Abhängigkeit `qdrant-edge-py` 0.8.0, Apache-2.0, exakt gepinnt; Wheels für Linux x86_64 und
+  aarch64, Windows x86_64 und macOS, ein Wheel für jedes Python ab 3.10) statt des lokalen Modus von qdrant-client,
+  einer Python-Nachbildung für die Entwicklung. Die Daten liegen jetzt in `~/.llm-framework/qdrant_edge`. Collections
+  je Embedding-Modell, IDs, Payloads, Filter, das Ersetzen einer Quelle, der Reranker, das Budget für Auszüge und die
+  Schnappschüsse verhalten sich wie bisher; die dichte Suche bleibt exakt, und die verbundenen Werte bleiben gleich
+  (RRF k = 2). Den Speicher öffnet immer nur ein Prozess: die Sperrdatei `qdrant_edge.lock` des Frameworks verhindert,
+  dass GUI, CLI und MCP-Server gleichzeitig schreiben; ein zweiter Prozess wartet bis zu 5 Sekunden und bekommt dann
+  einen klaren Fehler "in use". Eine ältere Wissensbasis wird bei der ersten Nutzung umgewandelt: Vektoren und Texte
+  werden kopiert (nichts wird neu eingebettet), Anzahl und eine Stichprobe von Punkten und Suchen werden gegen den
+  alten Speicher geprüft, und die Umwandlung wird in `knowledge_conversion.json` festgehalten; der alte Ordner `qdrant`
+  bleibt, bis du ihn löschst. Eine fehlgeschlagene Umwandlung lässt den alten Speicher arbeiten und sagt, warum.
+  Gemessen mit 50 000 künstlichen Auszügen: eine Suche dauert 12 ms statt 4,9 s, das Öffnen 1,1 s statt 19 s, der
+  Speicher 520 MB statt 2 GB; die Umwandlung dauerte 159 s (5 000 Auszüge: 13,5 s). qdrant-client bleibt für einen
+  optionalen Qdrant-Server (`qdrant_url`) und um den alten Speicher zu lesen. Qdrant Edge hat keinen Build für
+  Windows auf ARM; dort behält die Wissensbasis den lokalen Modus von qdrant-client, und Mojo Oracle sagt es.
+- **Wissens-Schnappschüsse nennen den Speicher, aus dem sie kommen (Format 2)**: Ein Schnappschuss bleibt eine
+  portable Datei, für jeden Speicher gleich. Schnappschüsse im Format 1, von früheren Versionen geschrieben, lassen
+  sich in Qdrant Edge wiederherstellen und werden so umgewandelt; ein neueres Format, ein Vektor der falschen Dimension
+  oder ein kaputter Stichwort-Vektor wird abgelehnt, bevor sich etwas ändert.
 - **Die Prüfung auf gleiche Builds blockiert das Builder-Fenster nicht mehr** (unveröffentlicht; achte Runde, N11):
   Vor einem Build fragte die Prüfung Hugging Face im Thread des Fensters nach dem aktuellen Commit des Modells, daher
   reagierte das Fenster bei langsamem Netz nicht (bis zu 10 Sekunden). Die Abfrage läuft jetzt im Hintergrund; Start

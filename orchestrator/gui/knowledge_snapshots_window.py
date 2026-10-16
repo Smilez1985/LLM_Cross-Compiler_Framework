@@ -15,6 +15,11 @@ The window also shows what the snapshots use against the free space of their dis
 change does not fit (eighth round, answer 2), `offer_snapshot_list` says so and opens this window on the person's
 "Open"; nothing is ticked and nothing is deleted by itself.
 
+It also says where the knowledge base is stored (DECISIONS RG5): in Qdrant Edge, converted from the storage of earlier
+versions on first use, whose old folder is kept until the person deletes it here ([Delete the old storage...] opens
+the deletion dialog with that folder's full path and size; "No" is the default), or still in the old storage when its
+conversion failed, with the reason.
+
 Every text is plain text.
 """
 
@@ -53,6 +58,7 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.setWindowTitle(self._t("snapshots.title"))
         self.resize(1000, 420)
         self.folder = snapshot_folder(state_dir)
+        self.state_dir = Path(state_dir)
         layout = QVBoxLayout(self)
         self.intro = _plain("")
         layout.addWidget(self.intro)
@@ -67,12 +73,15 @@ class KnowledgeSnapshotsDialog(QDialog):
         layout.addWidget(self.table)
         self.note = _plain(self._t("snapshots.note"))
         layout.addWidget(self.note)
+        self.storage = _plain("")
+        layout.addWidget(self.storage)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, self)
         self.btn_delete = QPushButton(self._t("snapshots.delete").replace("&", "&&"), self)
         self.btn_export = QPushButton(self._t("snapshots.export").replace("&", "&&"), self)
         self.open_folder = QPushButton(self._t("snapshots.open").replace("&", "&&"), self)
+        self.btn_old = QPushButton(self._t("storage.old.delete").replace("&", "&&"), self)
         for button, slot in ((self.btn_delete, self._delete), (self.btn_export, self._export),
-                             (self.open_folder, self._open_folder)):
+                             (self.open_folder, self._open_folder), (self.btn_old, self._delete_old_store)):
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             buttons.addButton(button, QDialogButtonBox.ActionRole)
@@ -103,6 +112,26 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.btn_delete.setEnabled(has and self.framework is not None)
         self.btn_export.setEnabled(has)
         self.open_folder.setEnabled(self.folder.is_dir())
+        self._storage_line()
+
+    def _storage_line(self) -> None:
+        """Where the knowledge base is stored, from the conversion record (nothing is opened): converted (with the old
+        folder kept, and the button that lists it for deletion), or still in the old storage with the reason."""
+        from orchestrator.rag import migration
+        info = migration.summary(self.state_dir)
+        text = ""
+        if info.get("state") == "converted" and info.get("old_folder_kept"):
+            text = self._t("storage.old.converted", when=str(info.get("converted_at", ""))[:16].replace("T", " "),
+                           points=int(info.get("points") or 0), folder=str(info.get("old_folder", "")),
+                           size=size_text(int(info.get("old_folder_bytes") or 0)))
+        elif info.get("state") == "failed" and info.get("old_store"):
+            text = self._t("storage.old.failed", reason=str(info.get("reason", "")),
+                           retry=str(info.get("retry", "")))
+        self.storage.setText(text)
+        self.storage.setVisible(bool(text))
+        offered = self.framework is not None and migration.old_store_plan(self.state_dir) is not None
+        self.btn_old.setVisible(offered)
+        self.btn_old.setEnabled(offered)
 
     def _disk_line(self, total: int) -> str:
         """What the snapshots use against the free space of their disk ("" when it cannot be read)."""
@@ -160,6 +189,43 @@ class KnowledgeSnapshotsDialog(QDialog):
         lines = [self._t(done, name=one_line(n)) for n in result.done]
         lines += [self._t("deletion.kept", name=one_line(n), reason=one_line(r)) for n, r in result.failed]
         self._box("information", "\n".join(lines))
+        self.reload()
+
+    def _delete_old_store(self) -> None:
+        """The old storage folder after its conversion: the deletion dialog with its full path and size, then
+        migration.delete_old_store (trash or for good, audited) only on the person's yes."""
+        from orchestrator.Core.deletion import PlanChanged
+        from orchestrator.Core.trash import Trash
+        from orchestrator.gui.deletion_dialog import ask_deletion
+        from orchestrator.gui.plain import one_line
+        from orchestrator.rag import migration
+        plan = migration.old_store_plan(self.state_dir) if self.framework is not None else None
+        if plan is None:
+            self._box("information", self._t("storage.old.none"))
+            self.reload()
+            return
+        accepted = ask_deletion(self, plan, title=self._t("storage.old.title"), lang=self.lang)
+        if accepted is None:
+            return
+        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        rag = getattr(self.framework, "rag_manager", None)
+        if callable(getattr(rag, "close", None)):
+            rag.close()  # the GUI's own hold on the knowledge base (its lock) is released first
+        try:
+            result = migration.delete_old_store(self.state_dir, accepted, trash=Trash.for_framework(self.framework),
+                                                audit=audit)
+        except PlanChanged:
+            self._box("warning", self._t("deletion.changed"))
+            self.reload()
+            return
+        except (PermissionError, RuntimeError) as e:
+            self._box("warning", self._t("deletion.failed", reason=one_line(str(e))))
+            return
+        if result.done:
+            key = "storage.old.done.trash" if accepted.mode == "trash" else "storage.old.done.permanent"
+            self._box("information", self._t(key))
+        else:
+            self._box("warning", self._t("storage.old.kept", reason=one_line(result.problem)))
         self.reload()
 
     def _export(self) -> None:

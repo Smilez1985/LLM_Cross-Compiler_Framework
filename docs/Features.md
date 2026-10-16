@@ -50,7 +50,7 @@ Back to the [README](../README.md) · All commands: [CLI_Usage.md](CLI_Usage.md)
   Orchestrator        LLM provider layer   (permissions, confirmation, audit log)
   Build engine ---> Docker (sandboxed conversion containers)
        |                   |
-  Target capabilities  Knowledge base (FastEmbed + embedded Qdrant)
+  Target capabilities  Knowledge base (FastEmbed + Qdrant Edge)
   Self-healing         Local runtime (managed llama-server)
   Deployment (SSH)
 ```
@@ -1269,10 +1269,27 @@ verification here, still matches its manifest and is of the pinned commit.
 The knowledge base gives Ditto and MCP clients documentation to search (setting `enable_rag_knowledge`, GUI: **Enable
 Local Knowledge Base**). Nothing is loaded until it is first used.
 
-- **Storage:** Qdrant runs embedded in the framework process, with its data in `~/.llm-framework/qdrant` (no Docker,
-  no open port). The storage is locked while in use and released after 30 idle seconds, so the GUI and the MCP
-  server can take turns. To use it from several processes at the same time, set `qdrant_url` to a Qdrant server; a
-  remote server needs https and the API key stored as the secret `qdrant_api_key` (never credentials in the URL).
+- **Storage:** Qdrant Edge, the Rust engine of Qdrant, runs inside the framework process (PyPI `qdrant-edge-py`,
+  Apache-2.0), with its data in `~/.llm-framework/qdrant_edge` (no Docker, no server, no open port). One process at a
+  time opens it: the GUI, the CLI and the MCP server take turns. The framework holds a lock file
+  (`qdrant_edge.lock` next to the folder) while the storage is open, and releases it after 30 idle seconds. A second
+  process that wants it (also only to read) waits up to 5 seconds and then gets a clear "in use by another framework
+  process" error; it never reads a half-written state. To use the knowledge base from several processes at the same
+  time, set `qdrant_url` to a Qdrant server; a remote server needs https and the API key stored as the secret
+  `qdrant_api_key` (never credentials in the URL). Searches are exact (no approximate graph index), as before. On a
+  computer without a build of Qdrant Edge (Windows on ARM), the knowledge base keeps the older local storage of
+  qdrant-client: slower, but complete; Mojo Oracle says so.
+- **Conversion of an older knowledge base (unreleased):** earlier versions stored it in qdrant-client's local mode
+  (`~/.llm-framework/qdrant`, a pure-Python stand-in for Qdrant meant for development). On first use it is converted:
+  the vectors and texts are copied (nothing is embedded again), every collection's count is compared and a sample of
+  points and searches is checked against the old store. The result is recorded in
+  `~/.llm-framework/knowledge_conversion.json`. The old folder stays until you delete it: **Tools > Knowledge
+  Snapshots... > Delete the old storage...** or `llm-cli knowledge storage delete-old` list it with its full path and
+  size and ask you first (trash or for good); nothing deletes it by itself. If the conversion fails, the old store
+  keeps working, nothing of the half-made copy stays, and the reason is shown (`llm-cli knowledge storage`, Mojo
+  Oracle, the knowledge snapshots window). A lack of disk space is tried again on the next start; other failures with
+  `llm-cli knowledge storage convert`. Converting 50 000 excerpts took about 2.5 minutes in a test, 5 000 about 15
+  seconds.
 - **Embeddings:** computed locally with FastEmbed on ONNX Runtime; the model is downloaded once into
   `models/embeddings/`. With `rag_embedding_model: auto` (default) an existing knowledge base keeps the model it was
   built with; a new one gets `intfloat/multilingual-e5-small` (384 dimensions, about 100 languages, fast on a CPU),
@@ -1297,7 +1314,8 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   one with its full path, name, size and what it is, nothing ticked. To free space you tick the ones to delete (they
   go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
   `llm-cli knowledge snapshots export NAME... --to FOLDER`, each copy checked by sha256). See [Deleting and the
-  trash](#deleting-and-the-trash). Restoring a snapshot is not available from the GUI or the CLI yet.
+  trash](#deleting-and-the-trash). Restoring a snapshot is not available from the GUI or the CLI yet. A snapshot is a
+  portable file; snapshots written by earlier versions (format 1) are converted when they are restored.
 - **Search:** hybrid. Dense vectors find meaning, BM25 finds exact terms such as error codes and compiler flags; both
   rankings are fused with Reciprocal Rank Fusion. The same text from several sources is returned once. A
   cross-encoder can then rerank the results ([Reranking](#reranking)).
