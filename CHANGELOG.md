@@ -834,7 +834,6 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   itself; a snapshot that cannot be written stops it too; with little room left the question or the command says
   so), a file indexed again is replaced, a file it read but did not index is named with the reason, and a knowledge
   pack export leaves these texts out.
-
 - **Board deployment over a network that drops** (eighth round, N4 and N5): you name the board by its address or
   its host name (`myboard.local`; `llm-cli deploy run --host`, `--ip` stays as the old name). When the network drops
   during a deploy (a board with Wi-Fi only), the deploy waits for the board (300 s by default, `--wait`), shows that
@@ -862,6 +861,41 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   were saved to (`device_tests.json`, found by the model's sha256), with the KV cache the measurement used next to the
   one the board's server is set to. The Deployment window lists such a build as "tested on <board>", and after a
   deploy of a GGUF model it fills in the board and the model for that measurement.
+- **Ditto's hands in the window: the GUI tools** (`read_gui_form`, `fill_gui_form`, `wizard_state`, `wizard_step`,
+  `show_gui`; `orchestrator/tools/tools_gui.py`, `orchestrator/tools/gui_surface.py`,
+  `orchestrator/gui/form_surface.py`): the build form, the target module wizard (page by page) and the AI settings
+  dialog register their fields, and Ditto reads what you entered and fills fields visibly. Secrets are only "set" or
+  "not set" and never filled; local files reach the AI as labels, and no home folder (also not another account's)
+  reaches it by name; a field you are editing or a value you chose is never overwritten; a fill that would change your
+  choice through the form's own logic is undone completely. Every filled field has a purple frame and is named in a
+  line above the form with **Undo Ditto's changes** (the undo is audited). Nothing is submitted: Start Build, the
+  wizard's Finish and Save stay your clicks, and a module Ditto filled is marked AI-generated, so its first build is
+  shown to you once. The AI settings never let an AI change the provider, the address, the privacy level or the
+  fallback chain. The tools exist while the window is open and only for Ditto; external AI apps get them later through
+  the host service (`GUI_TOOL_CALLERS`). Every call goes through the tool registry (permissions, limits, audit). An
+  MCP client still lists only the core tools, inside the 40 tools some clients take, and `get_status` warns only
+  about what a client lists.
+- **The board recommendation from the hardware probe** (`orchestrator/runtime/board_recommendation.py`): after a probe
+  the Builder recommends the matched target's board with its source (the probe's SoC, or the probe's board name in the
+  target's list of known boards) and how sure it is. Only an exact match is filled in; otherwise the candidates and
+  the reason are shown and you pick; until you pick, **Start Build** asks whether the board in the form is yours. A
+  board you chose is never replaced by a later probe or an AI, and a target you chose (also through a board you chose,
+  or a recipe's) stays too: the probe's target is then offered with one click. **Ask Ditto for Config** fills the
+  build form the same way as Ditto's GUI tools (marked, undoable, your own values stay; the log names each value it
+  did not fill and why), and a model or dataset file you picked in the file dialog counts as your choice. The online
+  look-up of the board name opens your browser only after you agree. When no target fits, the Builder offers **Create
+  a target with the wizard** (starting from that probe) and **Ask Ditto** (a question in the chat that you send; a
+  draft you typed there stays).
+- **Documentation links for Deep Ingest** (`orchestrator/Core/doc_sources.py`): the source catalogue's `docs_*` links
+  for the probe's vendor and the SDK fill the wizard's Deep Ingest window; you check them and start the crawl. When
+  Ditto says that information is missing for a module, the wizard offers Deep Ingest with these links. AI clients read
+  them through the read-only resources `lcf://knowledge/doc-sources` and `lcf://knowledge/doc-sources/{probe_id}`; the
+  MCP prompt `add_board` points to them when information is missing. The catalogue's header and the documents now say
+  that these links are read at run time.
+- **Build progress and the live build log in the Builder** (`orchestrator/gui/builder_parts.py`): a progress bar with
+  the step and the percent from the build service (the running build's own step, see Fixed), and the build's log
+  live below it (secrets redacted, plain text, each line once, at most 20,000 lines in view), with a search box and a
+  filter for Info, Warnings or Errors. Lines the service no longer returns are noted.
 
 ### Changed
 - **The output folder is `~/llmcf/output`; the old output folder is the framework's build folder** (eighth round,
@@ -1467,6 +1501,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   tokens-per-second table and the speed-up factors without a source are removed; the Hailo note no longer states "not
   for LLM inference" as a fact but says to check Hailo's current documentation; the old TensorRT-LLM pin v0.10.0 is
   marked as not checked against current releases.
+- **Build progress counts the running build** (released in 3.0.0): `get_build_status` said 0 % for a request with
+  one build until the build ended, and named only the request's stage. The percent and the step now include the
+  running build's own progress (preparing, image, model, modules, archive); a request that still runs never says
+  100 %.
 
 ### Security
 - **`get_build_status` and `get_build_log` name finished builds by label, never by host path**: in 3.0.0 the status

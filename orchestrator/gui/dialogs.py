@@ -364,6 +364,7 @@ class AIConfigurationDialog(QDialog):
         layout.addWidget(buttons)
 
         self._load_current_config()
+        self.gui_form = self._bind_gui_form(layout)
 
     def _runtime_mode_section(self) -> QGroupBox:
         """Ditto's local server: bare metal or in Docker, with the switch (gui/runtime_mode_box.py)."""
@@ -698,6 +699,53 @@ class AIConfigurationDialog(QDialog):
         """Selected settings after the dialog was accepted (empty otherwise); never contains a key."""
         return dict(self._result_config)
 
+    def _bind_gui_form(self, layout: QVBoxLayout):
+        """The dialog's fields for Ditto's GUI tools (orchestrator/gui/form_surface.py). Nothing is saved until the
+        person presses Save. An AI never reads or fills a key, and never fills what decides where data goes or widens
+        what an AI may do (provider, address, privacy, fallback chain); the knowledge base only off, offline mode only
+        on (the direction rule of update_settings)."""
+        from orchestrator.gui.form_surface import FormBinding, person_audit
+        from orchestrator.tools.tools_status import direction_problem
+        b = FormBinding("ai_settings", "gui.form.ai_settings")
+
+        def person_only(why_key: str) -> Callable[[], str]:
+            return lambda: ui_text(why_key, "en")
+
+        def key_set() -> bool:
+            try:
+                return bool(self.txt_api_key.text().strip() or self._stored_key())
+            except Exception:  # noqa: BLE001 - unknown counts as not set
+                return False
+
+        b.combo("provider", "gui.field.ai.provider", self.cb_provider, read_only=person_only("gui.ai.where_data"))
+        b.combo("model", "gui.field.ai.model", self.cb_model, by_data=False, hint="a model id of this provider")
+        b.add("api_key", "gui.field.ai.api_key", "secret", key_set, None, [self.txt_api_key])
+        b.add("workspace_id", "gui.field.ai.workspace", "secret", lambda: bool(self.txt_workspace.text().strip()),
+              None, [self.txt_workspace])
+        b.add("base_url", "gui.field.ai.base_url", "text",
+              lambda: "set" if self.txt_base_url.text().strip() else "not set", None, [self.txt_base_url],
+              read_only=person_only("gui.ai.where_data"))
+        b.combo("effort", "gui.field.ai.effort", self.cb_effort)
+        b.combo("privacy", "gui.field.ai.privacy", self.cb_security, read_only=person_only("gui.ai.privacy"))
+        b.line("fallback", "gui.field.ai.fallback", self.txt_fallback, read_only=person_only("gui.ai.where_data"))
+        b.check("enable_rag", "gui.field.ai.enable_rag", self.chk_enable_rag,
+                check=lambda old, new: direction_problem("enable_rag_knowledge", old, new) or "")
+        b.check("offline", "gui.field.ai.offline", self.chk_offline,
+                check=lambda old, new: direction_problem("offline_mode", old, new) or "")
+
+        def show():
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+        form = b.finish(self, show=show, is_open=self.isVisible)
+        b.close_with(self)
+        layout.insertWidget(max(0, layout.count() - 1),
+                            b.banner(self, audit=person_audit(getattr(self.framework, "tool_registry", None))))
+        b.refresh()
+        self.gui_binding = b
+        return form
+
 
 def fill_recent(combo: QComboBox, values: Sequence[str], text: Optional[str] = None) -> None:
     """Refills an editable combo with values (recent inputs first, duplicates dropped). The edit text becomes
@@ -735,8 +783,9 @@ class URLInputDialog(QDialog):
     crawler_download_pdfs and crawler_rate_limit of config. There is no switch for robots.txt or the other
     opt-outs: the site's machine-readable reservations decide, not the user.
     recent: URLs crawled before (newest first), offered in an editable list.
+    suggested: documentation links of the source catalogue for this hardware, filled in for the person to check.
     """
-    def __init__(self, parent=None, recent: Sequence[str] = (), config: Any = None):
+    def __init__(self, parent=None, recent: Sequence[str] = (), config: Any = None, suggested: Sequence[str] = ()):
         super().__init__(parent)
         setting = config.get if config is not None else (lambda key, default: default)
         self.setWindowTitle("Deep Ingest: Add Documentation URLs")
@@ -756,6 +805,12 @@ class URLInputDialog(QDialog):
         self.txt_urls.setPlaceholderText("https://example.com/docs/\nhttps://wiki.example.org/")
         self.txt_urls.setMinimumHeight(150)
         layout.addWidget(self.txt_urls)
+        if suggested:  # nothing is crawled until the person presses OK; they may remove any link
+            self.txt_urls.setPlainText("\n".join(dict.fromkeys(suggested)))
+            note = QLabel(ui_text("gui.ingest.suggested", n=len(set(suggested))))
+            note.setTextFormat(Qt.PlainText)
+            note.setWordWrap(True)
+            layout.addWidget(note)
 
         # Recent URLs: pick (or edit) one and add it to the list
         row_recent = QHBoxLayout()

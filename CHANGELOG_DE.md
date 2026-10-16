@@ -952,7 +952,6 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ebenfalls an; bei wenig übrigem Platz sagen es die Frage oder der Befehl), eine erneut aufgenommene Datei wird
   ersetzt, eine gelesene, aber nicht aufgenommene Datei wird mit dem Grund genannt, und ein Export als Wissenspaket
   lässt diese Texte weg.
-
 - **Deployment auf ein Board über ein Netzwerk, das wegbricht** (achte Runde, N4 und N5): Du nennst das Board über
   seine Adresse oder seinen Hostnamen (`myboard.local`; `llm-cli deploy run --host`, `--ip` bleibt als alter Name).
   Bricht das Netzwerk während eines Deployments weg (ein Board nur mit WLAN), wartet das Deployment auf das Board
@@ -981,6 +980,47 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   dem KV-Cache der Messung neben dem, auf den der Server des Boards eingestellt ist. Das Deployment-Fenster zeigt einen
   solchen Build als „getestet auf <Board>“ und trägt nach dem Deployment eines GGUF-Modells Board und Modell für diese
   Messung ein.
+- **Dittos Hände im Fenster: die GUI-Tools** (`read_gui_form`, `fill_gui_form`, `wizard_state`, `wizard_step`,
+  `show_gui`; `orchestrator/tools/tools_gui.py`, `orchestrator/tools/gui_surface.py`,
+  `orchestrator/gui/form_surface.py`): Das Build-Formular, der Assistent für Target-Module (Seite für Seite) und der
+  Dialog der KI-Einstellungen melden ihre Felder an, und Ditto liest, was du eingegeben hast, und füllt Felder
+  sichtbar aus. Geheimnisse sind nur „gesetzt“ oder „nicht gesetzt“ und werden nie ausgefüllt; lokale Dateien
+  erreichen die KI als Labels, und kein Home-Ordner (auch nicht der eines anderen Kontos) erreicht sie mit Namen; ein
+  Feld, das du gerade bearbeitest, oder ein Wert, den du gewählt hast, wird nie überschrieben; ein Ausfüllen, das über
+  die Logik des Formulars deine Wahl ändern würde, wird ganz zurückgenommen. Jedes ausgefüllte Feld hat einen lila
+  Rahmen und steht in einer Zeile über dem Formular mit **Dittos Änderungen rückgängig machen** (das Rückgängigmachen
+  steht im Audit-Log). Nichts wird abgeschickt: Start Build, Finish im Assistenten und Save bleiben deine Klicks, und
+  ein Modul, das Ditto ausgefüllt hat, wird als KI-erstellt markiert, sodass du seinen ersten Build einmal siehst. Die
+  KI-Einstellungen lassen eine KI nie den Anbieter, die Adresse, die Datenschutzstufe oder die Ersatzkette ändern. Die
+  Tools gibt es, solange das Fenster offen ist, und nur für Ditto; externe KI-Apps bekommen sie später über den
+  Host-Dienst (`GUI_TOOL_CALLERS`). Jeder Aufruf geht durch die Tool-Registry (Berechtigungen, Grenzen, Audit). Ein
+  MCP-Client listet weiter nur die Kern-Tools, innerhalb der 40 Tools, die manche Clients nehmen, und `get_status`
+  warnt nur über das, was ein Client listet.
+- **Die Board-Empfehlung aus der Hardware-Probe** (`orchestrator/runtime/board_recommendation.py`): Nach einer Probe
+  empfiehlt der Builder das Board des passenden Targets mit seiner Quelle (der SoC der Probe oder der Board-Name der
+  Probe in der Liste bekannter Boards des Targets) und wie sicher es ist. Nur ein genauer Treffer wird eingetragen;
+  sonst werden die Kandidaten und der Grund gezeigt, und du wählst; bis du wählst, fragt **Start Build**, ob das Board
+  im Formular deins ist. Ein Board, das du gewählt hast, wird weder durch eine spätere Probe noch durch eine KI
+  ersetzt, und ein Target, das du gewählt hast (auch über ein Board, das du gewählt hast, oder das eines Rezepts),
+  bleibt auch: Das Target der Probe wird dann mit einem Klick angeboten. **Ask Ditto for Config** füllt das
+  Build-Formular genauso wie Dittos GUI-Tools (markiert, rückgängig zu machen, deine eigenen Werte bleiben; das
+  Protokoll nennt jeden Wert, den es nicht eingetragen hat, und warum), und eine Modell- oder Datensatzdatei, die du
+  im Dateidialog gewählt hast, zählt als deine Wahl. Das Nachschlagen des Board-Namens online öffnet deinen Browser
+  erst, wenn du zustimmst. Passt kein Target, bietet der Builder **Target mit dem Assistenten erstellen** (beginnend
+  mit dieser Probe) und **Ditto fragen** an (eine Frage im Chat, die du abschickst; ein Entwurf, den du dort getippt
+  hast, bleibt).
+- **Dokumentations-Links für Deep Ingest** (`orchestrator/Core/doc_sources.py`): Die `docs_*`-Links des
+  Quellenkatalogs für den Hersteller der Probe und das SDK füllen das Deep-Ingest-Fenster des Assistenten; du prüfst
+  sie und startest das Einlesen. Sagt Ditto, dass für ein Modul Informationen fehlen, bietet der Assistent Deep Ingest
+  mit diesen Links an. KI-Clients lesen sie über die Ressourcen `lcf://knowledge/doc-sources` und
+  `lcf://knowledge/doc-sources/{probe_id}`, nur lesend; der MCP-Prompt `add_board` verweist auf sie, wenn
+  Informationen fehlen. Der Kopf des Katalogs und die Dokumente sagen jetzt, dass diese Links zur Laufzeit gelesen
+  werden.
+- **Build-Fortschritt und Live-Protokoll im Builder** (`orchestrator/gui/builder_parts.py`): ein Fortschrittsbalken mit
+  dem Schritt und dem Prozentwert aus dem Build-Service (der eigene Schritt des laufenden Builds, siehe Behoben) und
+  darunter das Protokoll des Builds live (Geheimnisse geschwärzt, reiner Text, jede Zeile einmal, höchstens 20.000
+  Zeilen in der Ansicht), mit Suchfeld und einem Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht
+  mehr liefert, werden vermerkt.
 
 ### Geändert
 - **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte
@@ -1656,6 +1696,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   daraus; die Tabelle der Tokens pro Sekunde und die Beschleunigungsfaktoren ohne Quelle sind entfernt; der Hinweis zu
   Hailo nennt „nicht für LLM-Inferenz“ nicht mehr als Tatsache, sondern sagt, die aktuelle Dokumentation von Hailo zu
   prüfen; der alte TensorRT-LLM-Stand v0.10.0 ist als nicht gegen aktuelle Releases geprüft markiert.
+- **Der Build-Fortschritt zählt den laufenden Build mit** (veröffentlicht in 3.0.0): `get_build_status` sagte bei einer
+  Anfrage mit einem Build 0 %, bis der Build endete, und nannte nur die Stufe der Anfrage. Prozent und Schritt
+  enthalten jetzt den eigenen Fortschritt des laufenden Builds (Vorbereitung, Image, Modell, Module, Archiv); eine
+  Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
 - **`get_build_status` und `get_build_log` nennen fertige Builds über ihre Bezeichnung, nie über ihren Pfad**: in

@@ -189,7 +189,8 @@ def _sources(*names):
 
 
 # The new and touched windows (design 5.2 R1, SEC-M2); a package that touches another window adds it here.
-PLAIN_FILES = _sources("plain.py", "gui_state.py", "chat_window.py", "main_window.py")
+PLAIN_FILES = _sources("plain.py", "gui_state.py", "chat_window.py", "main_window.py", "form_surface.py",
+                       "builder_parts.py")
 # Rich-text APIs are refused in these as well (they have none today).
 RICH_API_FILES = PLAIN_FILES + [GUI / name for name in ("approvals_window.py", "dialogs.py", "delegation_window.py",
                                                          "trash_window.py", "deletion_dialog.py",
