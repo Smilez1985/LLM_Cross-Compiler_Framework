@@ -43,8 +43,9 @@ DELETION_SITES = {
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.delete_old_builds.take"): PERSON,
     ("orchestrator/runtime/build/store.py", "BuildStore.remove"): PERSON,
     ("orchestrator/runtime/device/package.py", "DeviceRuntimeStore.delete_packages"): PERSON,
-    # the old runtime mode's build folders, images and containers after a switch of Ditto's server: only the list the
-    # person confirmed (runtime_mode.remove_leftovers; tests/test_runtime_mode.py covers every actor and changed list)
+    # every object of the old runtime mode after a switch of Ditto's server (build folders, images, containers, its
+    # records and image log), deleted for good: only the list the person confirmed (runtime_mode.remove_leftovers;
+    # tests/test_runtime_mode.py covers every actor, a changed list and the new mode that must work first)
     ("orchestrator/runtime/runtime_mode.py", "_remove_item"): PERSON,
     ("orchestrator/runtime/container_server.py", "DittoDocker.remove_image"): PERSON,
     ("orchestrator/runtime/container_server.py", "DittoDocker.remove_container"): PERSON,

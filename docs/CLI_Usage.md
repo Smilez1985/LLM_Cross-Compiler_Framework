@@ -1,4 +1,4 @@
-Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-11
+Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-16
 
 **English** · [Deutsch](CLI_Usage_DE.md)
 
@@ -154,7 +154,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 ## mojo
 
 ```
-llm-cli mojo [--oracle | --miracle] [--json]
+llm-cli mojo [--oracle | --miracle] [--json] [--board NAME]
 ```
 
 The health check (unreleased; it was called `doctor`). **Mojo Oracle** (the default) only looks: it checks Python, the
@@ -163,10 +163,16 @@ the privacy of the personal folder, the secrets store and the keyring, the tool 
 log, the chat feed (it can be written, its newest entries verify), the shipped calibration data, the installed community
 packs (revoked, changed or imported from a file), the knowledge snapshots (how many, their size against the free space
 of their disk, and where; there is no limit, so their number is never a warning), the local llama.cpp runtime (in Docker
-mode: Ditto's image) and the boards you trusted (host key and SSH port, by one connection without a login; a board that
-cannot be used gets its reason code such as `device_host_down`). It also says where Docker keeps its images and how much
+mode: Ditto's image) and the boards you trusted. It also says where Docker keeps its images and how much
 the framework's build images use (moving that folder is an administrator's step, see [Container
 setup](Container_Setup.md#10-where-docker-keeps-images)).
+
+**Boards:** Mojo makes no network contact with a board unless you ask it to. It reports what the framework recorded:
+a host key in its `known_hosts` that changed or is gone, and the last deploy, runtime deploy, verify, benchmark or
+probe that could not reach a board, with its reason code (`device_host_down`, `device_port_closed`,
+`device_auth_failed`, `device_host_key_changed`) and the next step. For a board such a fact points to it asks at a
+terminal "Check <board> now? [y/N]"; with `y` it opens one connection to the board's SSH port (no login, no password)
+and prints the result. Without a terminal it prints the command instead. `--board NAME` checks one board right away.
 
 For every warning and error it prints what it found, where (the full path or the object), why it matters, a hint and
 whether Mojo Miracle can repair it, with the plan of a repair (what changes, before and after, whether it can be
@@ -188,13 +194,15 @@ failed). A problem the check afterwards finds for the first time is listed as ne
 |---|---|
 | `--oracle` | Only look and report what was found (the default); at a terminal it then offers Mojo Miracle. |
 | `--miracle` | Repair what can be repaired, then report what was repaired, what was not and why. Without a terminal (a pipe, a script, an AI app) only the harmless repairs run and nothing is deleted. |
-| `--json` | Machine-readable output: the keys of `doctor --json` plus `mode`, `summary` and, per finding, `where`, `why`, `repair_id`, `cannot` and `miracle`; with `--miracle` also `repaired`, `already_gone`, `not_repaired` and `new_problems`. Never asks and never deletes. |
+| `--json` | Machine-readable output: the keys of `doctor --json` plus `mode`, `summary` and, per finding, `where`, `why`, `repair_id`, `cannot` and `miracle`, and `check_board` (the board, its device ID and the command that checks it) for a board a recorded fact points to; with `--miracle` also `repaired`, `already_gone`, `not_repaired` and `new_problems`. Never asks, never deletes and contacts no board. |
+| `--board NAME` | Check this one trusted board now: its label, device ID or address (one connection to its SSH port, no login). Only with `--oracle`. A name that fits no board, or several, lists the trusted boards and exits with 2. |
 
 Disk space: below 20 GB free is a warning, below 5 GB an error.
 
 ```bash
 llmcf mojo
 llmcf mojo --miracle
+llmcf mojo --oracle --board "Kitchen board"
 llm-cli mojo --json > mojo.json
 ```
 
@@ -957,12 +965,20 @@ it says what it found and stops. The installers' Ditto step runs this command.
   your decision). The models stay and are not downloaded again; only the server is made again, repackaged where
   possible: the bare-metal build into the image, or the image's build into bare metal after it passed its checks on
   this computer. Where that is not possible, the command says why and builds again. The server of the old mode is
-  stopped. Then the old mode's leftovers are listed: build folders with their full path, folder name and build ID,
-  Docker images and containers with their name and ID, each with its size, what it is and where it goes. Only what
-  you confirm is removed, with one question for the whole list ("No" is the default): the build folders go to the
-  trash (`llm-cli trash` lists them, `llm-cli trash restore ID` brings one back, and their space stays used until you
-  empty the trash), Docker's images and containers are deleted for good (Docker has no trash). Without a terminal
-  nothing is removed and the list is shown.
+  stopped.
+- **Space first:** bare metal and Docker are two alternatives. Before the new mode is built next to the old one, the
+  command estimates what it needs while it is built and what it keeps, and checks that against the free space of
+  each disk involved (Ditto's runtime folder; Docker's image storage when Docker names a folder of this computer).
+  The estimates are shown. When it does not fit, nothing is built. You see the sizes and choose: free space yourself
+  and run the command again, or delete the old mode first. For that the command lists every object of the old mode
+  and asks once ("No" is the default); Ditto is unavailable until the new mode works, and the models stay. When the
+  new mode then fails, the command says so and offers to make the old mode again.
+- **The old mode goes completely:** once the new mode works, every object of the old mode is listed: its build
+  folders (full path, folder name, build ID), Ditto's images and containers (name and ID), its entries in `mode.json`
+  and `active.json`, and the log of the image builds, each with its size and what it is. One question deletes exactly
+  that list for good, not into the trash ("No" is the default, no choice per item). Shared things stay: the models,
+  the pinned source, the framework's builder images and a board's runtime builds. Without a terminal nothing is
+  removed and the list is shown.
 - **The model:** when the model of the chosen or recommended tier is not downloaded yet, its source, size and licence
   are shown first. It is downloaded after your yes, or with `-y` when its licence is permissive (Apache 2.0, MIT,
   BSD); any other licence is yours to accept with `llm-cli ditto models download`. Both modes use the same models
@@ -972,7 +988,7 @@ it says what it found and stops. The installers' Ditto step runs this command.
 | Option | Meaning |
 |---|---|
 | `--mode [auto\|bare-metal\|docker]` | `auto` (default): keep what is installed; when nothing is, bare metal, or Docker when bare metal is not possible. |
-| `--force` | Switch to `--mode` (bare-metal or docker). Needs a terminal. |
+| `--force` | Switch to `--mode` (bare-metal or docker) after the space check; once the new mode works, every object of the old mode is deleted for good after your one yes. Needs a terminal. |
 | `--placement [auto\|native\|container]` | Where a build runs, as for `install`. With Docker mode, `native` puts a native build into the image. |
 | `--backend [...]` | GPU backend, as for `install`. |
 | `--jobs INTEGER RANGE` | Parallel compile jobs of a build. |

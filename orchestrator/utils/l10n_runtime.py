@@ -27,28 +27,40 @@ TEXTS = {
         "runtime.mode.question": "Ditto's server will run {mode}.\n\nThe models stay where they are and are not "
                                  "downloaded again. Only the server is made again for the new mode: repackaged where "
                                  "possible, otherwise built again from the pinned llama.cpp source (a few minutes; the "
-                                 "source, about 215 MB, is fetched once when it is not there yet).\n\nAfterwards the "
-                                 "old mode's files are listed, and you decide what is removed.\n\nContinue?",
+                                 "source, about 215 MB, is fetched once when it is not there yet). First the framework "
+                                 "checks that it fits next to the old mode.\n\nOnce the new mode works, every object "
+                                 "of the old mode is listed, and with your one yes it is deleted for good: the two "
+                                 "modes are alternatives, so nothing of the old one stays.\n\nContinue?",
         "runtime.mode.install_question": "Ditto's server will be installed {mode}: built from the pinned llama.cpp "
                                          "source (a few minutes; the source, about 215 MB, is fetched once when it is "
                                          "not there yet). The model is downloaded separately (llm-cli ditto models "
                                          "download).\n\nContinue?",
         "runtime.mode.working": "Working… this can take minutes; the window can stay open.",
         "runtime.mode.failed": "Nothing was switched: {reason}",
-        "runtime.mode.leftovers.question": "The old mode's files and Docker objects are not needed any more. Remove "
-                                           "exactly these {n} objects ({size})? {where}With No, nothing is "
-                                           "removed.\n\n{items}",
-        # {where} of the question: only the sentences for what the list holds
-        "runtime.mode.leftovers.trash": "Build folders go to the trash (File > Trash... restores them; their space "
-                                        "stays used until you empty the trash). ",
-        "runtime.mode.leftovers.docker": "Docker has no trash, so its images and containers are deleted for good. ",
+        "runtime.mode.leftovers.question": "The new mode works. Delete every object of the old mode for good: exactly "
+                                           "these {n} objects ({size})? Nothing goes to the trash, so the old mode is "
+                                           "gone completely. The models stay. With No, nothing is removed.\n\n{items}",
         "runtime.mode.item.id": "ID: {id}",
-        "runtime.mode.goes.trash": "Goes to: the trash",
-        "runtime.mode.goes.deleted": "Goes to: deleted for good",
-        "runtime.mode.removed": "{n} removed, about {size}.",
-        "runtime.mode.trashed": "{n} moved to the trash (File > Trash... lists them).",
+        "runtime.mode.removed": "{n} deleted for good, about {size}.",
         "runtime.mode.kept": "Kept: {name} ({reason})",
         "runtime.mode.nothing_removed": "Nothing was removed; the objects stay until you remove them.",
+        # the modes as the space questions name them
+        "runtime.mode.what.bare-metal": "bare metal",
+        "runtime.mode.what.docker": "Docker mode",
+        "runtime.mode.space.question": "{new} does not fit next to {old}, so nothing was built.\n\n{sizes}\n\nYou can "
+                                       "free space yourself and switch again. Or you delete {old} first: every object "
+                                       "below goes for good. Ditto is unavailable until {new} works; the models stay. "
+                                       "If {new} then fails, you are told so and can make {old} again.\n\nDelete all "
+                                       "{n} objects of {old} first ({size})? With No, nothing is deleted.\n\n{items}",
+        "runtime.mode.space.nothing_left": "{new} does not fit next to {old}, and nothing of {old} is left to delete. "
+                                           "Nothing was built.\n\n{sizes}\n\nFree space on these disks and switch "
+                                           "again.",
+        "runtime.mode.space.declined": "Nothing was deleted and nothing was built. Free space and switch again.",
+        "runtime.mode.space.removed": "{old} was deleted. {new} is made now; Ditto is unavailable until it works.",
+        "runtime.mode.space.failed": "{new} could not be made: {reason}\n\nDitto has no local runtime now: {old} was "
+                                     "deleted before. The models are still there.\n\nMake {old} again now?",
+        "runtime.mode.space.later": "You can make it again here later, or in a terminal: llm-cli ditto runtime ensure "
+                                    "--mode {mode}",
     },
     "de": {
         "runtime.mode.title": "Dittos lokaler Server",
@@ -71,28 +83,45 @@ TEXTS = {
                                  "nicht noch einmal heruntergeladen. Nur der Server wird für die neue Art neu erzeugt: "
                                  "umgepackt, wo das geht, sonst aus dem festgelegten llama.cpp-Quellcode neu gebaut "
                                  "(einige Minuten; der Quellcode, etwa 215 MB, wird einmal geholt, wenn er noch nicht "
-                                 "da ist).\n\nDanach werden die Dateien der alten Art aufgelistet, und du entscheidest, "
-                                 "was entfernt wird.\n\nWeiter?",
+                                 "da ist). Vorher prüft das Framework, ob die neue Art neben der alten Platz "
+                                 "hat.\n\nSobald die neue Art funktioniert, wird jedes Objekt der alten Art "
+                                 "aufgelistet, und mit deinem einen Ja wird es endgültig gelöscht: Die beiden Arten "
+                                 "sind Alternativen, von der alten bleibt nichts.\n\nWeiter?",
         "runtime.mode.install_question": "Dittos Server wird {mode} installiert: aus dem festgelegten "
                                          "llama.cpp-Quellcode gebaut (einige Minuten; der Quellcode, etwa 215 MB, wird "
                                          "einmal geholt, wenn er noch nicht da ist). Das Modell wird getrennt "
                                          "heruntergeladen (llm-cli ditto models download).\n\nWeiter?",
         "runtime.mode.working": "Läuft … das kann Minuten dauern; das Fenster kann offen bleiben.",
         "runtime.mode.failed": "Nichts wurde gewechselt: {reason}",
-        "runtime.mode.leftovers.question": "Die Dateien und Docker-Objekte der alten Art werden nicht mehr gebraucht. "
-                                           "Genau diese {n} Objekte ({size}) entfernen? {where}Mit Nein wird nichts "
+        "runtime.mode.leftovers.question": "Die neue Art funktioniert. Jedes Objekt der alten Art endgültig löschen, "
+                                           "also genau diese {n} Objekte ({size})? Nichts kommt in den Papierkorb, die "
+                                           "alte Art ist danach ganz weg. Die Modelle bleiben. Mit Nein wird nichts "
                                            "entfernt.\n\n{items}",
-        # {where} der Frage: nur die Sätze für das, was die Liste enthält
-        "runtime.mode.leftovers.trash": "Build-Ordner kommen in den Papierkorb (File > Trash... stellt sie wieder "
-                                        "her; ihr Platz bleibt belegt, bis du den Papierkorb leerst). ",
-        "runtime.mode.leftovers.docker": "Docker hat keinen Papierkorb, seine Images und Container werden also "
-                                         "endgültig gelöscht. ",
         "runtime.mode.item.id": "ID: {id}",
-        "runtime.mode.goes.trash": "Kommt: in den Papierkorb",
-        "runtime.mode.goes.deleted": "Kommt: endgültig gelöscht",
-        "runtime.mode.removed": "{n} entfernt, etwa {size}.",
-        "runtime.mode.trashed": "{n} in den Papierkorb gelegt (File > Trash... listet sie).",
+        "runtime.mode.removed": "{n} endgültig gelöscht, etwa {size}.",
         "runtime.mode.kept": "Behalten: {name} ({reason})",
         "runtime.mode.nothing_removed": "Nichts wurde entfernt; die Objekte bleiben, bis du sie entfernst.",
+        # die Arten, wie die Fragen zum Platz sie nennen
+        "runtime.mode.what.bare-metal": "Direktbetrieb",
+        "runtime.mode.what.docker": "Docker-Betrieb",
+        "runtime.mode.space.question": "Neben {old} ist kein Platz für {new}, deshalb wurde nichts "
+                                       "gebaut.\n\n{sizes}\n\nDu kannst selbst Platz schaffen und noch einmal "
+                                       "wechseln. Oder du löschst {old} zuerst: Jedes Objekt unten ist dann endgültig "
+                                       "weg. Ditto ist nicht verfügbar, bis {new} funktioniert; die Modelle bleiben. "
+                                       "Scheitert {new} danach, erfährst du das und kannst {old} wieder "
+                                       "herstellen.\n\nAlle {n} Objekte von {old} zuerst löschen ({size})? Mit Nein "
+                                       "wird nichts gelöscht.\n\n{items}",
+        "runtime.mode.space.nothing_left": "Neben {old} ist kein Platz für {new}, und von {old} ist nichts mehr zu "
+                                           "löschen. Nichts wurde gebaut.\n\n{sizes}\n\nSchaffe auf diesen "
+                                           "Laufwerken Platz und wechsle noch einmal.",
+        "runtime.mode.space.declined": "Nichts wurde gelöscht und nichts gebaut. Schaffe Platz und wechsle noch "
+                                       "einmal.",
+        "runtime.mode.space.removed": "{old} wurde gelöscht. {new} wird jetzt erzeugt; Ditto ist bis dahin nicht "
+                                      "verfügbar.",
+        "runtime.mode.space.failed": "{new} ließ sich nicht erzeugen: {reason}\n\nDitto hat jetzt keine lokale "
+                                     "Laufzeit: {old} wurde vorher gelöscht. Die Modelle sind noch da.\n\n{old} jetzt "
+                                     "wieder herstellen?",
+        "runtime.mode.space.later": "Du kannst es später hier wieder herstellen, oder in einem Terminal: llm-cli ditto "
+                                    "runtime ensure --mode {mode}",
     },
 }

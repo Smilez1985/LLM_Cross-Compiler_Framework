@@ -19,19 +19,29 @@ ensure`, the installers' Ditto step and the AI settings run, and it is idempoten
   becomes the bare-metal build once it passed its verification on this computer. Where that is not possible, the
   result says why, and the runtime is built again (the bare-metal path of `ditto runtime install`, or the builder
   container for the image).
-- After the new mode is verified, leftovers() lists the old mode's objects as a DeletionPlan: every build folder with
-  its full path, build ID, folder name and size, every image and container with its name, ID and size, and what each
-  is. Nothing is removed here: the person confirms exactly that list in the framework's own window (CLI or GUI, "No"
-  by default; one confirmation for the whole list, round 7 D), and remove_leftovers() removes exactly that list: the
-  build folders go to the trash (WP7: the person can restore them, and their space stays used until the person empties
-  the trash), Docker's images and containers are deleted (Docker has no trash). Without a terminal, and for an AI,
-  nothing is removed and the list is reported. Ditto's images are never deleted otherwise.
+- Bare metal and Docker are two alternatives (W2 of 2026-10-16). Before a switch builds the new mode next to the old
+  one, space_needed() estimates what the new mode needs while it is built and what it keeps, and checks that against
+  the free space of every disk involved (Ditto's runtime folder; Docker's image storage). When it does not fit,
+  nothing is built: SpaceShortage carries the sizes and the old mode's list, and the person chooses: free space and
+  switch again, or remove the old mode first (old_mode_plan(); Ditto is unavailable until the new mode works, the
+  models stay; when the new mode then fails, the person is told so and offered the old mode again).
+- After the new mode is verified, leftovers() lists EVERY object of the old mode as a DeletionPlan: every build folder
+  with its full path, build ID, folder name and size, every image and container with its name, ID and size, the old
+  mode's records in mode.json and active.json, the log of Docker mode's image builds, and what each is. Nothing is
+  removed here: the person confirms exactly that list in the framework's own window (CLI or GUI, "No" by default; one
+  confirmation for the whole list, no choice per item, round 7 D), and remove_leftovers() deletes exactly that list for
+  good (no trash: the old mode is gone completely), and only while the new mode is installed and verified. Without a
+  terminal, and for an AI, nothing is removed and the list is reported. Ditto's images are never deleted otherwise.
+  What both modes share stays: the models, the pinned source, the framework's builder images, a board's runtime
+  builds.
 
 An AI may read the mode (get_status, local_runtime); switching it and removing the old mode are the person's alone:
 no tool calls ensure() or remove_leftovers(), and remove_leftovers() refuses every actor but the person's CLI and GUI.
 """
 
+import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,6 +68,23 @@ class LeftoversChanged(RuntimeError):
     def __init__(self):
         super().__init__("The list changed after it was shown (something was built, removed or started meanwhile); "
                          "nothing was removed. Look at the new list and confirm it.")
+
+
+class SpaceShortage(RuntimeModeError):
+    """The new mode does not fit next to the old one (W2): nothing was built. `estimate` has the sizes per disk,
+    `old_mode` and `old_plan` the old mode and every object of it (None when nothing of it is left), which the person
+    may remove first."""
+
+    def __init__(self, estimate: "SpaceEstimate", old_mode: Optional[str], old_plan: Optional[Any]):
+        self.estimate, self.old_mode, self.old_plan = estimate, old_mode, old_plan
+        if old_plan is not None:
+            way = (f" Free space there and switch again, or remove {mode_label(old_mode)} first ({len(old_plan.items)} "
+                   f"objects, {_size(old_plan.total_bytes)}): Ditto is unavailable until {mode_label(estimate.mode)} "
+                   "works, and the models stay.")
+        else:
+            way = " Nothing of the old mode is left to remove: free space there and switch again."
+        super().__init__(f"{mode_label(estimate.mode)} does not fit next to {mode_label(old_mode)}, so nothing was "
+                         f"built. {' '.join(estimate.lines())}{way}")
 
 
 def mode_label(mode: Optional[str]) -> str:
@@ -99,8 +126,9 @@ class EnsureResult:
     action: str                          # skipped | installed | switched | recorded
     mode: str
     lines: List[str]                     # what was found, done and decided, and why (for the person)
-    leftovers: Optional[Any] = None      # DeletionPlan of the old mode's objects (nothing removed yet)
+    leftovers: Optional[Any] = None      # DeletionPlan of every object of the old mode (nothing removed yet)
     problems: List[str] = field(default_factory=list)
+    space: Optional["SpaceEstimate"] = None   # the space check before the new mode was built (a switch)
 
 
 class _Told(list):
@@ -122,11 +150,11 @@ class _Told(list):
 
 @dataclass
 class Removal:
-    deleted: List[str] = field(default_factory=list)       # deleted for good: Docker's objects, or every item in
-    freed_bytes: int = 0                                    # the mode "permanent"
+    deleted: List[str] = field(default_factory=list)       # deleted for good (every object of the old mode)
+    freed_bytes: int = 0
     failed: List[Tuple[str, str]] = field(default_factory=list)
-    trashed: List[str] = field(default_factory=list)       # build folders moved to the trash (restorable)
-    trash_ids: List[str] = field(default_factory=list)
+    stopped: bool = False                                   # Ditto's server was stopped first (the old mode removed
+                                                            # before the new one was built)
 
 
 # --- detection --------------------------------------------------------------------------------------------------------
@@ -221,7 +249,8 @@ def ensure(rt: Any, *, mode: str = "auto", force: bool = False, placement: str =
            container_build: bool = False) -> EnsureResult:
     """Makes sure Ditto's runtime is installed (see the module docstring); returns what was found, done and decided.
     Raises RuntimeModeError when the mode cannot be made here (nothing was changed then, except builds that were made
-    and stay for the next try). Removes nothing: the old mode's leftovers are in the result for the person."""
+    and stay for the next try), and SpaceShortage before anything is built when a switch's new mode does not fit next
+    to the old one. Removes nothing: every object of the old mode is in the result for the person."""
     if mode not in CHOICES:
         raise RuntimeModeError(f"the mode is one of {', '.join(CHOICES)}")
     if force and mode == "auto":
@@ -259,7 +288,16 @@ def ensure(rt: Any, *, mode: str = "auto", force: bool = False, placement: str =
             lines.append(why)
     old = det.recorded or next((f.mode for f in det.found()), None)
     target = det.get(mode)
-    if target is not None and (mode == "bare-metal" or target.verified):
+    space = None
+    built = target is not None and (mode == "bare-metal" or target.verified)
+    if not built and old is not None and old != mode:
+        # W2: the new mode is built next to the old one only when it fits there; otherwise nothing is built and the
+        # person decides (free space, or remove the old mode first)
+        space = space_needed(rt, det, mode, placement, backend, container_build)
+        lines += space.lines()
+        if not space.fits:
+            raise SpaceShortage(space, old, old_mode_plan(rt, old))
+    if built:
         lines.append(f"{mode_label(mode)} is installed already: nothing was built.")
         record = _docker_record_of(rt, target) if mode == "docker" else None
         action = "recorded"
@@ -285,7 +323,7 @@ def ensure(rt: Any, *, mode: str = "auto", force: bool = False, placement: str =
             lines.append(f"Ditto's images and containers could not be listed ({unlisted}), so none of them is in the "
                          "list. To see them, start Docker and run: llm-cli ditto runtime ensure --mode bare-metal "
                          "--force (nothing is built again then).")
-    return EnsureResult(action, mode, list(lines), leftovers=plan)
+    return EnsureResult(action, mode, list(lines), leftovers=plan, space=space)
 
 
 def _docker_unlisted(rt: Any) -> Optional[str]:
@@ -586,7 +624,201 @@ def _rebuild_for_docker(rt: Any, backend: str, jobs: Optional[int], lines: List[
     return _image_record(image)
 
 
-# --- the old mode's leftovers -----------------------------------------------------------------------------------------
+
+
+# --- the space a switch needs (W2) -----------------------------------------------------------------------------------
+
+MB = 1000 ** 2
+GB = 1000 ** 3
+# Estimates of what a new llama.cpp build of each backend needs while it is built (its build tree in the store's
+# staging folder) and keeps (its build folder); a build that is there already is measured instead.
+BUILD_TREE = {"cpu": 1500 * MB, "vulkan": 2 * GB, "cuda": 8 * GB, "rocm": 8 * GB, "metal": 1500 * MB}
+BUILD_KEPT = {"cpu": 200 * MB, "vulkan": 300 * MB, "cuda": 2 * GB, "rocm": 2 * GB, "metal": 200 * MB}
+SOURCE_BYTES = 215 * MB          # the pinned llama.cpp source when it is not cached yet
+# Docker's side: the runtime base of Ditto's image (a Docker Official base with the runtime libraries) when it is not
+# there yet, and the framework's builder image a build in the builder container runs in.
+RUNTIME_BASE = {"cpu": 300 * MB, "vulkan": 700 * MB, "cuda": 5 * GB, "rocm": 8 * GB, "metal": 300 * MB}
+BUILDER_IMAGE = 3 * GB
+RUNTIME_FOLDER = "Ditto runtime folder"
+DOCKER_STORAGE = "Docker image storage"
+
+
+def _disk_usage(path: str):
+    """shutil.disk_usage (tests replace it)."""
+    return shutil.disk_usage(path)
+
+
+def _size(n: int) -> str:
+    from orchestrator.Core.disk_plan import gb
+    return gb(n)
+
+
+@dataclass
+class SpaceEstimate:
+    """What making `mode` needs on each disk while it is made (the peak), what it keeps afterwards, and whether that
+    fits there (disk_plan.DiskCheck: the free space minus a reserve, the trash never counted as free)."""
+    mode: str
+    how: str                                               # what making it means here, for the person
+    needs: List[Any] = field(default_factory=list)         # disk_plan.DiskNeed
+    keeps: int = 0
+    checks: List[Any] = field(default_factory=list)        # disk_plan.DiskCheck per disk
+    unmeasured: List[str] = field(default_factory=list)    # what could not be checked, and why
+
+    @property
+    def fits(self) -> bool:
+        return all(c.fits for c in self.checks)
+
+    @property
+    def total(self) -> int:
+        return sum(n.bytes for n in self.needs)
+
+    def lines(self) -> List[str]:
+        out = [f"Space for {mode_label(self.mode)} ({self.how}): about {_size(self.total)} while it is made, "
+               f"{_size(self.keeps)} kept afterwards (estimates)."]
+        for check in self.checks:
+            text = check.sentence()
+            out.append(text[0].upper() + text[1:] + ".")
+        return out + self.unmeasured
+
+
+def _docker_root(rt: Any) -> Tuple[Optional[Path], str]:
+    """The folder Docker keeps its images in, when it is a folder of this computer (else None and why)."""
+    try:
+        root = str((rt.docker().info() or {}).get("DockerRootDir") or "")
+    except Exception as e:  # noqa: BLE001 - Docker did not answer
+        return None, f"Docker did not answer ({type(e).__name__})"
+    if not root:
+        return None, "Docker does not say where it keeps its images"
+    path = Path(root)
+    if not path.is_dir():
+        return None, ("that folder is not on this computer (Docker Desktop keeps its images in its own virtual "
+                      "disk)")
+    return path, ""
+
+
+def _source_cached(rt: Any) -> bool:
+    from orchestrator.runtime.build.source import SourceError, source_dir
+    pin = rt.catalog.llama_cpp.source
+    try:
+        return pin is not None and source_dir(rt.data_dir, pin.commit).is_dir()
+    except SourceError:
+        return False
+
+
+def _base_there(rt: Any, base_id: str, backend: str) -> bool:
+    try:
+        return any(i.role == "base" and i.labels.get(cs.LABEL_BASE) == base_id
+                   and i.labels.get(cs.LABEL_BACKEND) == backend for i in rt.docker().images())
+    except Exception:  # noqa: BLE001 - not known: counted as missing
+        return False
+
+
+def _builds_need(rt: Any, backends: List[str], state: Path, needs: List[Any]) -> int:
+    """The runtime folder's part of new builds of `backends`, one after the other: the source when it is not cached,
+    the largest build tree and every build kept. Returns what is kept."""
+    from orchestrator.Core.disk_plan import DiskNeed
+    if not backends:
+        return 0
+    if not _source_cached(rt):
+        needs.append(DiskNeed(RUNTIME_FOLDER, state, SOURCE_BYTES,
+                              f"the pinned llama.cpp source {_size(SOURCE_BYTES)}"))
+    tree = max(BUILD_TREE.get(b, BUILD_TREE["cpu"]) for b in backends)
+    kept = sum(BUILD_KEPT.get(b, BUILD_KEPT["cpu"]) for b in backends)
+    plural = "s" if len(backends) > 1 else ""
+    needs.append(DiskNeed(RUNTIME_FOLDER, state, tree, f"the build tree while it is built {_size(tree)}"))
+    needs.append(DiskNeed(RUNTIME_FOLDER, state, kept, f"the {', '.join(backends)} build{plural} kept {_size(kept)}"))
+    return kept
+
+
+def _bare_metal_need(rt: Any, placement: str, backend: str, state: Path, needs: List[Any],
+                     docker_needs: List[Tuple[int, str]]) -> Tuple[str, int]:
+    """(how, kept) of making bare metal: the build of Ditto's image verified here, or new builds."""
+    saved = rt.mode_record().get("docker") or {}
+    build_id = saved.get("build_id") or rt.store.references().get("docker")
+    build = rt.store.get(build_id) if build_id else None
+    if build is not None and backend in ("auto", build.backend):
+        return f"the build {build.build_id[:16]} of Ditto's image is verified here, nothing is built", 0
+    try:
+        plan = rt.plan_install(backend=backend, placement=placement)
+    except LocalRuntimeError:
+        return "a new CPU build (its plan could not be made yet)", _builds_need(rt, ["cpu"], state, needs)
+    backends = [b.backend for b in plan.builds if b.to_build]
+    kept = _builds_need(rt, backends, state, needs)
+    if backends and plan.placement == "container":
+        docker_needs.append((BUILDER_IMAGE, f"the framework's builder image {_size(BUILDER_IMAGE)} (when it is not "
+                                            "there yet)"))
+    where = "natively" if plan.placement == "native" else "in the builder container"
+    return (f"new {', '.join(backends)} build{'s' if len(backends) > 1 else ''} {where}" if backends
+            else "builds that are stored already, nothing is built"), kept
+
+
+def _docker_need(rt: Any, det: Detection, placement: str, backend: str, state: Path, needs: List[Any],
+                 docker_needs: List[Tuple[int, str]]) -> Tuple[str, int]:
+    """(how, kept) of making Docker mode: an image that is there checked, the bare-metal build repackaged, or a new
+    build in the builder container put into an image."""
+    if det.docker is not None and not det.docker.verified:
+        return f"the image {det.docker.image.name} is checked, nothing is built", 0
+    if placement in ("auto", "native"):
+        try:
+            build, base, _why = _repackage_candidate(rt, backend, rt.docker(), rt.hardware(), [])
+        except Exception:  # noqa: BLE001 - estimated as a new build below
+            build = base = None
+        if build is not None:
+            size = _folder_size(build.path)
+            base_bytes = 0 if _base_there(rt, base.id, build.backend) else RUNTIME_BASE.get(build.backend, 0)
+            if base_bytes:
+                docker_needs.append((base_bytes, f"the runtime base on {base.id} {_size(base_bytes)}"))
+            docker_needs.append((size, f"Ditto's image with the build's programs {_size(size)}"))
+            return f"the bare-metal build {build.build_id[:16]} repackaged on {base.id}", base_bytes + size
+    want = backend if backend in BUILD_TREE else "cpu"
+    kept = _builds_need(rt, [want], state, needs)
+    docker_needs.append((BUILDER_IMAGE, f"the framework's builder image {_size(BUILDER_IMAGE)} (when it is not there "
+                                        "yet)"))
+    base_bytes = RUNTIME_BASE.get(want, RUNTIME_BASE["cpu"])
+    try:
+        base, _why = image_base(rt.catalog, rt.profile())
+        if _base_there(rt, base.id, want):
+            base_bytes = 0
+    except Exception:  # noqa: BLE001 - counted as missing
+        pass
+    if base_bytes:
+        docker_needs.append((base_bytes, f"the runtime base {_size(base_bytes)}"))
+    image = BUILD_KEPT.get(want, BUILD_KEPT["cpu"])
+    docker_needs.append((image, f"Ditto's image with the build's programs {_size(image)}"))
+    return f"a new {want} build in the builder container", kept + base_bytes + image
+
+
+def space_needed(rt: Any, det: Detection, mode: str, placement: str = "auto", backend: str = "auto",
+                 container_build: bool = False) -> SpaceEstimate:
+    """What making `mode` next to the other mode needs on each disk (estimates; a build that is there is measured),
+    checked against the free space there. Reads only. A disk whose free space cannot be read is named and not
+    checked; an estimate that cannot be made at all is named and blocks nothing."""
+    from orchestrator.Core.disk_plan import DiskNeed, ReservationLedger, check_disk
+    state = Path(rt.root)
+    needs: List[Any] = []
+    docker_needs: List[Tuple[int, str]] = []
+    try:
+        if mode == "bare-metal":
+            how, keeps = _bare_metal_need(rt, placement, backend, state, needs, docker_needs)
+        else:
+            how, keeps = _docker_need(rt, det, placement, backend, state, needs, docker_needs)
+    except Exception as e:  # noqa: BLE001 - the build itself says what is wrong
+        return SpaceEstimate(mode, "not estimated", unmeasured=[f"The space for {mode_label(mode)} could not be "
+                                                                f"estimated ({type(e).__name__}); it is not checked."])
+    unmeasured = []
+    if docker_needs:
+        root, why = _docker_root(rt)
+        total = sum(n for n, _ in docker_needs)
+        if root is None:
+            unmeasured.append(f"{DOCKER_STORAGE}: about {_size(total)} (estimate); its free space could not be read "
+                              f"({why}), so it is not checked.")
+        else:
+            needs += [DiskNeed(DOCKER_STORAGE, root, n, what) for n, what in docker_needs]
+    checks = check_disk(needs, ledger=ReservationLedger(Path(rt.data_dir)), disk_usage=_disk_usage) if needs else []
+    return SpaceEstimate(mode, how, needs, keeps, checks, unmeasured)
+
+
+# --- every object of a mode ------------------------------------------------------------------------------------------
 
 def _folder_size(path: Path) -> int:
     total = 0
@@ -600,48 +832,51 @@ def _folder_size(path: Path) -> int:
     return total
 
 
-def _build_items(rt: Any, mode: str) -> List[Any]:
-    """Ditto's llama.cpp build folders that the mode `mode` does not use (never a build of a board's runtime, which
-    shares the store, and never the build a running server uses)."""
+def other_mode(mode: str) -> str:
+    return "docker" if mode == "bare-metal" else "bare-metal"
+
+
+def _build_items(rt: Any, of: str, include_running: bool) -> List[Any]:
+    """Ditto's llama.cpp build folders that belong to the mode `of` (never a build of a board's runtime, which shares
+    the store): bare metal's are the builds verified on this computer and the ones it uses, and the official archives;
+    Docker mode's are the builds verified only in Ditto's container. A build a running server uses is left out unless
+    the server is stopped first (`include_running`)."""
     from orchestrator.runtime.build.host import PURPOSE
     from orchestrator.tools.spec import DeletionItem
     store = rt.store
     refs = store.references()
-    running = store.running_build_ids()
+    running = set() if include_running else store.running_build_ids()
     items = []
     for build in store.list_builds():
         if build.purpose != PURPOSE or build.build_id in running:
             continue
-        in_use = build.build_id in (refs.get("active"), refs.get("fallback"))
-        if mode == "bare-metal" and (in_use or build.verified_in == "native"):
+        role = (" (the active bare-metal build)" if build.build_id == refs.get("active") else
+                " (the bare-metal CPU fallback)" if build.build_id == refs.get("fallback") else "")
+        bare = bool(role) or build.verified_in == "native"
+        if (of == "bare-metal") != bare:
             continue
-        if mode == "bare-metal":
-            what = (f"a {build.backend} build of llama-server verified only in Ditto's container; bare metal does not "
-                    "use it")
-        elif build.build_id == refs.get("docker"):
-            what = (f"the {build.backend} build Ditto's image was made from; the image holds its programs, so Docker "
-                    "mode does not need this folder (keeping it makes a switch back to bare metal quick)")
+        if of == "bare-metal":
+            image = "; Ditto's image holds its programs" if build.build_id == refs.get("docker") else ""
+            what = f"Ditto's bare-metal {build.backend} build of llama-server{role}{image}"
         else:
-            role = " (the active bare-metal build)" if build.build_id == refs.get("active") else \
-                " (the bare-metal CPU fallback)" if build.build_id == refs.get("fallback") else ""
-            what = f"Ditto's bare-metal {build.backend} build of llama-server{role}; Docker mode does not use it"
+            what = (f"a {build.backend} build of llama-server verified only in Ditto's container"
+                    + ("; Ditto's image was made from it" if build.build_id == refs.get("docker") else ""))
         items.append(DeletionItem(kind="runtime_build", speaking_name=f"llama.cpp build {build.build_id[:16]} "
                                   f"({build.backend})", full_path=str(build.path), file_name=build.path.name,
                                   size_bytes=_folder_size(build.path), what=f"{what}; build ID {build.build_id}"))
-    if mode == "docker":
+    if of == "bare-metal":
         for manifest in sorted(Path(rt.root).glob("b*-*/runtime.json")):
             folder = manifest.parent
             items.append(DeletionItem(kind="runtime_build", speaking_name=f"official llama.cpp archive {folder.name} "
                                       f"({PREBUILT_LABEL})", full_path=str(folder), file_name=folder.name,
                                       size_bytes=_folder_size(folder),
-                                      what="the official prebuilt archive you installed for bare metal; Docker mode "
-                                           "does not use it"))
+                                      what="the official prebuilt archive installed for bare metal"))
     return items
 
 
-def _docker_items(rt: Any, mode: str) -> List[Any]:
-    """Ditto's images and containers the mode `mode` does not use: in bare metal all of them, in Docker every one but
-    the verified image in use and its runtime base."""
+def _docker_items(rt: Any, keep_in_use: bool, include_running: bool) -> List[Any]:
+    """Ditto's images and containers: all of them, or (`keep_in_use`, Docker mode runs) every one but the verified
+    image in use and its runtime base. A running server container is left out unless the server is stopped first."""
     from orchestrator.tools.spec import DeletionItem
     try:
         docker = rt.docker()
@@ -652,7 +887,7 @@ def _docker_items(rt: Any, mode: str) -> List[Any]:
         return []
     keep: set = set()
     saved = rt.mode_record().get("docker") or {}
-    if mode == "docker" and saved.get("image_id"):
+    if keep_in_use and saved.get("image_id"):
         keep.add(saved["image_id"])
         used = next((i for i in images if i.image_id == saved["image_id"]), None)
         if used is not None:
@@ -661,7 +896,7 @@ def _docker_items(rt: Any, mode: str) -> List[Any]:
                      and i.labels.get(cs.LABEL_BACKEND) == used.labels.get(cs.LABEL_BACKEND)}
     items = []
     for c in containers:
-        if c.status == "running" and c.role == "server":
+        if c.status == "running" and c.role == "server" and not include_running:
             continue  # a running server is stopped by the switch itself; one that still runs is not listed
         items.append(DeletionItem(kind="docker_container",
                                   speaking_name=f"Ditto container {c.name or c.container_id[:12]}",
@@ -677,111 +912,217 @@ def _docker_items(rt: Any, mode: str) -> List[Any]:
         else:
             what = (f"the runtime base Ditto's images are built on ({image.labels.get(cs.LABEL_BASE, '?')} with the "
                     "runtime libraries)")
-        why = "bare metal does not use it" if mode == "bare-metal" else "not the image in use"
         items.append(DeletionItem(kind="docker_image", speaking_name=f"Ditto image {image.name}",
-                                  file_name=image.image_id, size_bytes=image.size, what=f"{what}; {why}"))
+                                  file_name=image.image_id, size_bytes=image.size, what=what))
     return items
 
 
-def leftovers(rt: Any, mode: str) -> Optional[Any]:
-    """The objects of the other mode when Ditto runs in `mode`, as a DeletionPlan for the person (None: nothing).
-    With a build folder on the list the trash is offered first (WP7): the folders go there, Docker's objects are
-    deleted. Reads only."""
-    from orchestrator.tools.spec import DeletionPlan
-    if mode not in MODES:
+# The old mode's records (W2: "A's recorded runtime entry"): the keys of active.json and mode.json that name it. The
+# files stay: they also hold the new mode and the model tier.
+BARE_METAL_KEYS = ("build_id", "fallback_build_id", "use", "variant")
+DOCKER_ACTIVE_KEYS = ("docker_build_id",)
+DOCKER_MODE_KEYS = ("docker",)
+
+
+def _entries_size(data: Dict[str, Any], keys: Tuple[str, ...]) -> int:
+    present = {k: data[k] for k in keys if k in data}
+    return len(json.dumps(present, sort_keys=True).encode("utf-8")) if present else 0
+
+
+def _read(path: Path) -> Dict[str, Any]:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _record_items(rt: Any, of: str) -> List[Any]:
+    """The old mode's records: bare metal's entries in active.json (active build, CPU fallback, the official archive
+    chosen); Docker mode's entry in mode.json (the image it used) and its build reference in active.json."""
+    from orchestrator.tools.spec import DeletionItem
+    active, mode_file = Path(rt.root) / "active.json", Path(rt.root) / "mode.json"
+    items = []
+    wanted = ([(active, BARE_METAL_KEYS, "the bare-metal entries of active.json (active build, CPU fallback, the "
+                                         "official archive chosen); the file stays")]
+              if of == "bare-metal" else
+              [(mode_file, DOCKER_MODE_KEYS, "the Docker-mode entry of mode.json (the image Ditto's server used); the "
+                                             "file stays"),
+               (active, DOCKER_ACTIVE_KEYS, "the entry of active.json that names the build of Ditto's image; the "
+                                            "file stays")])
+    for path, keys, what in wanted:
+        size = _entries_size(_read(path), keys)
+        if size:
+            items.append(DeletionItem(kind="runtime_record", speaking_name=f"{mode_label(of)} record in {path.name}",
+                                      full_path=str(path), file_name=path.name, size_bytes=size,
+                                      what=f"{what}; keys {', '.join(k for k in keys if k in _read(path))}"))
+    return items
+
+
+def _log_items(rt: Any, of: str) -> List[Any]:
+    """The log of the builds of Ditto's image (Docker mode only)."""
+    from orchestrator.tools.spec import DeletionItem
+    log = Path(rt.data_dir) / "logs" / IMAGE_LOG
+    if of != "docker" or not log.is_file():
+        return []
+    return [DeletionItem(kind="runtime_record", speaking_name=f"log of Ditto's image builds ({IMAGE_LOG})",
+                         full_path=str(log), file_name=log.name, size_bytes=log.stat().st_size,
+                         what="the log of building Ditto's Docker images")]
+
+
+def mode_objects(rt: Any, of: str, *, in_use: bool) -> List[Any]:
+    """Every object of the mode `of` on this computer (W2: no leftovers): its build folders, Ditto's images and
+    containers, its records and logs. `in_use`: the other mode runs now, so what that mode uses is left out (the
+    image in use, the bare-metal build in use, a running server); else (`of` is the mode Ditto is recorded in, removed
+    before the new one is built) everything of it is listed and its server is stopped before the removal."""
+    if of not in MODES:
         raise RuntimeModeError("the mode is bare-metal or docker")
-    items = _build_items(rt, mode) + _docker_items(rt, mode)
+    whole = not in_use
+    items = _build_items(rt, of, include_running=whole)
+    if of == "docker":
+        items += _docker_items(rt, keep_in_use=False, include_running=whole)
+    return items + _record_items(rt, of) + _log_items(rt, of)
+
+
+def _plan(items: List[Any]) -> Optional[Any]:
+    from orchestrator.tools.spec import DeletionPlan
     if not items:
         return None
-    modes = ("trash", "permanent") if any(i.kind == "runtime_build" for i in items) else ("permanent",)
-    return DeletionPlan(items=items, total_bytes=sum(i.size_bytes for i in items), mode_offered=modes)
+    return DeletionPlan(items=items, total_bytes=sum(i.size_bytes for i in items), mode_offered=("permanent",))
 
 
-def goes_to_trash(item: Any, mode: str) -> bool:
-    """Whether `item` of a confirmed list goes to the trash in `mode` (build folders; Docker has no trash)."""
-    return mode == "trash" and item.kind == "runtime_build"
+def leftovers(rt: Any, mode: str) -> Optional[Any]:
+    """Every object of the other mode while Ditto runs in `mode`, as a DeletionPlan for the person (None: nothing
+    left). Deleted for good, never into the trash (W2). Reads only."""
+    if mode not in MODES:
+        raise RuntimeModeError("the mode is bare-metal or docker")
+    items = mode_objects(rt, other_mode(mode), in_use=True)
+    if mode == "docker":   # Docker mode runs: the images it does not use belong to no mode any more
+        items += _docker_items(rt, keep_in_use=True, include_running=False)
+    return _plan(items)
 
 
-def remove_leftovers(rt: Any, plan: Any, *, actor: str, audit: Any, trash: Any = None,
-                     mode: Optional[str] = None) -> Removal:
-    """Removes exactly the objects of `plan`, which the person confirmed in the framework's own window (actor "cli" or
-    "gui"; never an AI, never under a delegation), in `mode` (default the plan's first: the trash when it lists a build
-    folder). In the mode "trash" the build folders are moved to the person's trash (`trash`,
-    orchestrator/Core/trash.py) and Docker's objects are deleted; in "permanent" everything is deleted. The list is
-    looked up again first: if it changed, nothing is removed (LeftoversChanged). The removal is audited before anything
-    is removed (nothing is removed when the audit cannot be written); each object is looked at again right before its
-    removal and kept when it changed (a build a running server uses, an image that lost Ditto's label, a container that
-    runs)."""
+def old_mode_plan(rt: Any, old: Optional[str]) -> Optional[Any]:
+    """Every object of the mode Ditto is recorded in, for the person who removes it before the new mode is built (a
+    switch that does not fit next to it): its server is stopped first. None when nothing of it is left."""
+    if old not in MODES:
+        return None
+    return _plan(mode_objects(rt, old, in_use=False))
+
+
+def _new_mode_works(rt: Any) -> Optional[str]:
+    """Why the mode Ditto is recorded in does not work (None: installed and verified)."""
+    det = detect(rt)
+    found = det.get(rt.mode())
+    if found is None:
+        return f"{mode_label(rt.mode())} is not installed"
+    if not found.verified:
+        return f"{mode_label(rt.mode())} has not passed its check yet"
+    return None
+
+
+def remove_leftovers(rt: Any, plan: Any, *, actor: str, audit: Any, before_switch: bool = False,
+                     removes: Optional[str] = None) -> Removal:
+    """Deletes exactly the objects of `plan` for good, which the person confirmed once in the framework's own window
+    (actor "cli" or "gui"; never an AI, never under a delegation). The list is looked up again first: if it changed,
+    nothing is removed (LeftoversChanged).
+
+    Normally `plan` is leftovers(): every object of the old mode, removed only while the new mode is installed and
+    verified (W2: A is removed after B works). With `before_switch` it is old_mode_plan() of `removes` (default the
+    recorded mode): the person chose to remove the old mode before the new one is built (it did not fit next to it);
+    Ditto's server is stopped first, and Ditto is unavailable until the new mode works.
+
+    The removal is audited before anything is removed (nothing is removed when the audit cannot be written); each
+    object is looked at again right before its removal and kept when it changed (a build a running server uses, an
+    image that lost Ditto's label, a container that runs)."""
     from orchestrator.Core.deletion import AcceptedDeletion
     if actor not in PERSON_ACTORS:
-        raise PermissionError("Only the person removes the old mode's leftovers, in the GUI or at a terminal.")
-    mode = mode or plan.mode_offered[0]
-    current = leftovers(rt, rt.mode())
+        raise PermissionError("Only the person removes the old mode, in the GUI or at a terminal.")
+    removes = (removes or rt.mode()) if before_switch else other_mode(rt.mode())
+    if not before_switch:
+        problem = _new_mode_works(rt)
+        if problem:
+            raise RuntimeModeError(f"The old mode is removed only after the new one works, and {problem}; nothing was "
+                                   "removed.")
+    current = old_mode_plan(rt, removes) if before_switch else leftovers(rt, rt.mode())
     if current is None or current.sha256() != plan.sha256():
         raise LeftoversChanged()
-    accepted = AcceptedDeletion(plan, mode, actor)   # a mode the plan did not offer is refused here
-    if mode == "trash" and trash is None:
-        raise RuntimeModeError("The trash is not available, so nothing was removed.")
+    accepted = AcceptedDeletion(plan, "permanent", actor)
     if audit is None or not callable(getattr(audit, "record", None)):
         raise RuntimeModeError("The audit log is not available, so nothing was removed.")
     extra = accepted.audit_extra()
     try:
         audit.record(actor, "ditto_runtime_mode", "framework", "person", "started", approved=True,
-                     arguments={"mode": rt.mode(), "items": len(plan.items), "bytes": plan.total_bytes,
-                                "deletion_mode": mode},
-                     detail=f"removing {len(plan.items)} leftovers of the old runtime mode"
-                            + (" (build folders to the trash)" if mode == "trash" else ""), extra=extra)
+                     arguments={"mode": rt.mode(), "removes": removes, "items": len(plan.items),
+                                "bytes": plan.total_bytes, "deletion_mode": "permanent",
+                                "before_switch": bool(before_switch)},
+                     detail=f"removing every object of the {mode_label(removes)} mode ({len(plan.items)})"
+                            + (" before the new mode is built" if before_switch else " after the new mode works"),
+                     extra=extra)
     except Exception:  # noqa: BLE001
         raise RuntimeModeError("The audit log cannot record the removal; nothing was removed.") from None
     result = Removal()
-    order = {"docker_container": 0, "docker_image": 1, "runtime_build": 2}
-    items = sorted(plan.items, key=lambda i: (order.get(i.kind, 3), cs.BASE_REPO in i.speaking_name))
+    if before_switch:
+        result.stopped = _stop_server(rt)
+    order = {"docker_container": 0, "docker_image": 1, "runtime_build": 2, "runtime_record": 3}
+    items = sorted(plan.items, key=lambda i: (order.get(i.kind, 4), cs.BASE_REPO in i.speaking_name))
     for item in items:
-        to_trash = goes_to_trash(item, mode)
         try:
-            kept = _remove_item(rt, item, (trash, accepted, result) if to_trash else None)
-        except Exception as e:  # noqa: BLE001 - e.g. Docker or the trash refused: kept and reported
+            kept = _remove_item(rt, item, removes)
+        except Exception as e:  # noqa: BLE001 - e.g. Docker refused: kept and reported
             from orchestrator.utils.helpers import redact_secrets
             kept = redact_secrets(str(getattr(e, "explanation", "") or e))[:300]
         if kept:
             result.failed.append((item.speaking_name, kept))
-        elif to_trash:
-            result.trashed.append(item.speaking_name)
         else:
             result.deleted.append(item.speaking_name)
             result.freed_bytes += item.size_bytes
     try:
         audit.record(actor, "ditto_runtime_mode", "framework", "person", "error" if result.failed else "ok",
-                     approved=True, arguments={"deleted": len(result.deleted), "trashed": len(result.trashed),
-                                               "kept": len(result.failed)},
-                     detail=f"{len(result.deleted)} leftovers deleted, {len(result.trashed)} moved to the trash, "
+                     approved=True, arguments={"deleted": len(result.deleted), "kept": len(result.failed)},
+                     detail=f"{len(result.deleted)} objects of the {mode_label(removes)} mode deleted, "
                             f"{len(result.failed)} kept", extra=extra)
     except Exception:  # noqa: BLE001 - the removal happened and is shown to the person; its start is recorded
         pass
     return result
 
 
-def _remove_item(rt: Any, item: Any, to_trash: Optional[Tuple[Any, Any, Removal]] = None) -> Optional[str]:
-    """Removes one listed object, or moves a build folder to the trash (`to_trash`: the trash, the person's accepted
-    deletion and the result that keeps the trash entry); returns why it was kept, or None."""
+def _forget_keys(rt: Any, path: Path, keys: Tuple[str, ...]) -> None:
+    """Drops the old mode's keys from one of Ditto's records (the file stays)."""
+    from orchestrator.runtime.llama_server import _write_private
+    with rt._lock():
+        data = _read(path)
+        kept = {k: v for k, v in data.items() if k not in keys}
+        if kept != data:
+            _write_private(path, json.dumps(kept, sort_keys=True))
+
+
+def _remove_item(rt: Any, item: Any, removes: str) -> Optional[str]:
+    """Deletes one listed object for good; returns why it was kept, or None."""
     from orchestrator.runtime.build.source import remove_tree
+    root = Path(rt.root).resolve()
     if item.kind == "runtime_build":
         path = Path(item.full_path)
-        root = Path(rt.root).resolve()
         if path.is_symlink() or not path.is_dir() or path.resolve().parent not in (root, root / "builds"):
             return "kept: it is not a build folder of Ditto's runtime"
         store = rt.store
         if path.parent.resolve() == (root / "builds") and path.name in {b[:16] for b in store.running_build_ids()}:
             return "kept: a running server uses it"
-        if to_trash is not None:
-            trash, accepted, result = to_trash
-            entry = trash.move("runtime_build", path, Path(rt.data_dir), "state", item.speaking_name, accepted,
-                               accepted.actor)
-            result.trash_ids.append(entry.id)
-        else:
-            remove_tree(path)
+        remove_tree(path)
         if path.parent.resolve() == (root / "builds"):
             store.forget(path.name)
+        return None
+    if item.kind == "runtime_record":
+        path = Path(item.full_path)
+        if path.name == IMAGE_LOG and path.parent.resolve() == (Path(rt.data_dir) / "logs").resolve():
+            path.unlink(missing_ok=True)
+            return None
+        if path.resolve().parent != root or path.name not in ("active.json", "mode.json"):
+            return "kept: it is not one of Ditto's records"
+        if path.name == "mode.json":
+            _forget_keys(rt, path, DOCKER_MODE_KEYS)
+        else:
+            _forget_keys(rt, path, BARE_METAL_KEYS if removes == "bare-metal" else DOCKER_ACTIVE_KEYS)
         return None
     docker = rt.docker()
     if item.kind == "docker_image":
@@ -792,6 +1133,8 @@ def _remove_item(rt: Any, item: Any, to_trash: Optional[Tuple[Any, Any, Removal]
         return None
     if item.kind == "docker_container":
         info = docker.container(item.file_name)
+        if info is None and not docker.unavailable():
+            return None   # gone already (a server container is removed when it stops)
         if info is None or not info.role:
             return "kept: it could not be found again as Ditto's container"
         if info.status == "running":
@@ -802,5 +1145,6 @@ def _remove_item(rt: Any, item: Any, to_trash: Optional[Tuple[Any, Any, Removal]
 
 
 __all__ = ["CHOICES", "Detection", "EnsureResult", "Found", "LeftoversChanged", "MODES", "Removal",
-           "RuntimeModeError", "base_for_build", "detect", "docker_problem", "ensure", "goes_to_trash", "image_base",
-           "leftovers", "mode_label", "profile_for_base", "remove_leftovers"]
+           "RuntimeModeError", "SpaceEstimate", "SpaceShortage", "base_for_build", "detect", "docker_problem",
+           "ensure", "image_base", "leftovers", "mode_label", "mode_objects", "old_mode_plan", "other_mode",
+           "profile_for_base", "remove_leftovers", "space_needed"]

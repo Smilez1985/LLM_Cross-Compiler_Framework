@@ -1015,7 +1015,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             from orchestrator.runtime.device import service as dev
             device = trusted(inp.device_id)
             try:
-                fp = dev.read_key(device, state_dir())
+                fp = dev.read_key(device, state_dir(), step="probe")
             except dev.DeviceRuntimeError as e:
                 raise svc_error(e, device_users(device)) from None
             facts = device_lines(device, fp) + [Fact("On the device", "the framework's read-only hardware probe runs "
@@ -1066,7 +1066,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 if offline() and not plan.built and not plan.source_cached:
                     raise blocked("offline_mode", "Offline mode is on, and the build needs the pinned source.",
                                   "Ask the person to switch offline mode off or import the source.")
-                fp = dev.read_key(device, state_dir())
+                fp = dev.read_key(device, state_dir(), step="runtime_deploy")
             except dev.DeviceRuntimeError as e:
                 raise svc_error(e, users) from None
             target = plan.target
@@ -1167,7 +1167,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 if settings.model is None:
                     raise blocked("device_model_unset", f"No model on {device.label} is named for the benchmark.",
                                   "Ask the person to name one with 'llm-cli device settings DEVICE --model PATH'.")
-                fp = dev.read_key(device, state_dir())
+                fp = dev.read_key(device, state_dir(), step="benchmark")
             except dev.DeviceRuntimeError as e:
                 raise svc_error(e, users) from None
             facts = device_lines(device, fp) + [

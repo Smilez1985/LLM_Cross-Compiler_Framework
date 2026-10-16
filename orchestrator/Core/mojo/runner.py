@@ -10,7 +10,7 @@ the person's list (WP7), which it opens at a terminal when one exists, never by 
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence, Tuple
 
 from orchestrator.Core.mojo.checks import (check_calibration, check_chat_feed, check_community, check_devices,
                                            check_disk, check_docker, check_knowledge, check_python, check_runtime,
@@ -67,10 +67,26 @@ class MiracleReport:
                 if f.severity in (Severity.WARN, Severity.ERROR) and (f.code, f.where) not in before]
 
 
+def boards_on_request(device_ids: Sequence[str]) -> Check:
+    """check_devices that also checks these boards now (one connection to each one's SSH port), for a run the person
+    or an AI asked to check them in."""
+    wanted = tuple(device_ids)
+
+    def check_devices_on_request(framework) -> List[Finding]:
+        return check_devices(framework, contact=wanted)
+    check_devices_on_request.__name__ = "check_devices"
+    return check_devices_on_request
+
+
 class Mojo:
-    def __init__(self, framework, checks: Optional[List[Check]] = None):
+    def __init__(self, framework, checks: Optional[List[Check]] = None, contact: Sequence[str] = ()):
         self.framework = framework
         self.checks = checks if checks is not None else list(DEFAULT_CHECKS)
+        self.contact = tuple(contact)
+        if self.contact:
+            # only the boards asked for are contacted; a default run reads the records only (W1)
+            self.checks = [boards_on_request(self.contact) if check is check_devices else check
+                           for check in self.checks]
 
     def run(self) -> MojoReport:
         """Mojo Oracle: every check, nothing changed."""
@@ -144,4 +160,4 @@ class Mojo:
         return MiracleReport(entries, after)
 
 
-__all__ = ["DEFAULT_CHECKS", "MIRACLE_OUTCOMES", "MiracleEntry", "MiracleReport", "Mojo"]
+__all__ = ["DEFAULT_CHECKS", "MIRACLE_OUTCOMES", "MiracleEntry", "MiracleReport", "Mojo", "boards_on_request"]

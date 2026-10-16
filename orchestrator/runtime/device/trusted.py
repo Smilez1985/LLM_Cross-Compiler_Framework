@@ -16,6 +16,10 @@ a key the person removed there (to trust a reinstalled device again) makes the r
 the device again in the GUI or the CLI.
 
 The time of the last deploy is kept apart (device_deploys.json), so the deploy tool never writes the trust records.
+The same file keeps what the framework's last contact with a board found (note_reach: a deploy, a runtime deploy, a
+verify, a benchmark or a probe that could not reach the board or log in, with its SSH reason code). Mojo Oracle reads
+these recorded facts instead of contacting the boards itself (W1): it contacts a board only when the person or an AI
+asks for that one board.
 """
 
 import json
@@ -39,8 +43,12 @@ _HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-F
 _USER = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.ASCII | re.IGNORECASE)
 _KEY_TYPE = re.compile(r"^[a-z0-9@.-]{3,64}$", re.ASCII)
 _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
-# What a deploy saw on the board, kept with its last deploy (note_board) until the next deploy looks again.
-BOARD_FACTS = ("old_sidecar", "board_checked_at")
+# What a deploy saw on the board, kept with its last deploy (note_board) until the next deploy looks again, and what the
+# last contact found (note_reach), kept until a contact reaches the board again.
+BOARD_FACTS = ("old_sidecar", "board_checked_at", "reach")
+# The framework's contacts with a board whose failure is recorded for Mojo (note_reach), in plain words.
+REACH_STEPS = {"deploy": "deploy", "runtime_deploy": "runtime deploy", "verify": "verify", "benchmark": "benchmark",
+               "probe": "probe"}
 
 
 class DeviceStoreError(ValueError):
@@ -167,6 +175,23 @@ class TrustedDevices:
         rows = self._read(self.deploys_path)
         return {k: v for k, v in rows.items() if DEVICE_ID_RE.fullmatch(str(k)) and isinstance(v, dict)}
 
+    def reach_problem(self, device: TrustedDevice) -> Optional[Dict[str, str]]:
+        """The recorded problem of the framework's last contact with the board ({"step", "code", "at"}: a deploy,
+        verify, benchmark, ... that failed with one of the SSH reason codes), or None. A record older than the
+        person's last trust of the board (they trusted or paired it again since) is no longer a problem. Reads only
+        the file, never the network."""
+        from orchestrator.runtime.device import reasons
+        row = (self.last_deploys().get(device.device_id) or {}).get("reach")
+        if not isinstance(row, dict):
+            return None
+        step, code, at = row.get("step"), row.get("code"), row.get("at")
+        if step not in REACH_STEPS or code not in reasons.REASONS or not isinstance(at, str) \
+                or not _STAMP.fullmatch(at):
+            return None
+        if at < device.trusted_at:
+            return None
+        return {"step": step, "code": code, "at": at}
+
     # --- writing: the person's channels only (GUI and CLI), never a tool ---
 
     def record(self, host: str, port: int, user: str, key: Any, *, via: str, paired: bool,
@@ -231,6 +256,39 @@ class TrustedDevices:
         except (OSError, TimeoutError, DeviceStoreError):
             pass  # a deploy is never failed by its bookkeeping
 
+    def note_reach(self, device_id: str, step: str, code: str) -> None:
+        """What the framework's last contact with the board found, for Mojo (W1: Mojo itself contacts no board unless it
+        is asked to check that one): `code` one of the SSH reason codes records the problem of the step (deploy,
+        runtime_deploy, verify, benchmark, probe); "" says the step reached the board and logged in, which ends a
+        recorded problem. Never fails the caller's work."""
+        from orchestrator.runtime.device import reasons
+        if not DEVICE_ID_RE.fullmatch(device_id or "") or step not in REACH_STEPS \
+                or (code and code not in reasons.REASONS):
+            return
+        try:
+            with file_lock(self.state_dir / ".devices.lock"):
+                rows = self.last_deploys()
+                row = dict(rows.get(device_id) or {})
+                if code:
+                    row["reach"] = {"step": step, "code": code, "at": _now()}
+                elif "reach" in row:
+                    del row["reach"]
+                else:
+                    return
+                rows[device_id] = row
+                self._write(self.deploys_path, rows)
+        except (OSError, TimeoutError, DeviceStoreError):
+            pass  # bookkeeping never fails a deploy, a verify or a benchmark
+
+    def note_reach_at(self, host: str, port: int, step: str, code: str) -> None:
+        """note_reach for every trusted board at this address and port (a caller that knows only the address)."""
+        try:
+            matches = [d for d in self.list() if d.host == host and d.port == int(port)]
+        except (TypeError, ValueError):
+            return
+        for device in matches:
+            self.note_reach(device.device_id, step, code)
+
     def _write(self, path: Path, rows: Dict[str, Any]) -> None:
         from orchestrator.Core.vault_key import write_private
         text = json.dumps(rows, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
@@ -259,5 +317,29 @@ def record_trusted_device(state_dir: Path, host: str, port: int, user: str, key:
     return device
 
 
-__all__ = ["DEVICE_ID_RE", "DeviceStoreError", "TrustedDevice", "TrustedDevices", "clean_label",
-           "record_trusted_device"]
+def find_boards(store: "TrustedDevices", name: str, *, by_address: bool) -> List[TrustedDevice]:
+    """The trusted boards a name means: its device ID or its label (case does not matter) and, for the person only
+    (`by_address`), its address (host, host:port or [host]:port). An AI names a board by its label or device ID,
+    never by an address (W1, D0)."""
+    wanted = " ".join(str(name or "").split())
+    if not wanted:
+        return []
+    boards = store.list()
+    exact = [d for d in boards if d.device_id == wanted.lower()]
+    if exact:
+        return exact
+    found = [d for d in boards if d.label.casefold() == wanted.casefold()]
+    if found or not by_address:
+        return found
+    return [d for d in boards if wanted in (d.host, d.address, f"{d.host}:{d.port}")]
+
+
+def board_name(store: "TrustedDevices", device: TrustedDevice) -> str:
+    """The name to give for this board in `llmcf mojo --board` or run_mojo_oracle: its label when no other trusted
+    board has the same label, else its device ID."""
+    same = [d for d in store.list() if d.label.casefold() == device.label.casefold()]
+    return device.label if len(same) <= 1 else device.device_id
+
+
+__all__ = ["DEVICE_ID_RE", "DeviceStoreError", "REACH_STEPS", "TrustedDevice", "TrustedDevices", "board_name",
+           "clean_label", "find_boards", "record_trusted_device"]

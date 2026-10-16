@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-11
+Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-16
 
 [English](Features.md) · **Deutsch**
 
@@ -1284,19 +1284,27 @@ fehlt; die Installer führen den Befehl als ihren Ditto-Schritt aus (`install.sh
   einmal heruntergeladen, der Container bindet denselben Ordner ein. Nur der Server wird neu erzeugt, umgepackt, wo
   das geht: der direkte Build ins Image, oder der Build des Images in die direkte Art, sobald er seine Prüfungen auf
   diesem Rechner selbst bestanden hat (ein Build, der nur im Container geprüft wurde, läuft vorher nie hier). Wo das
-  nicht geht, wird der Grund gezeigt und der Server neu gebaut. Der Server der alten Art wird gestoppt. Der
-  Build-Speicher behält den Build, aus dem das Image gemacht wurde, also braucht ein Wechsel zurück keinen neuen Build.
-- **Die Reste der alten Art** werden aufgelistet, nachdem die neue Art geprüft ist: Dittos Build-Ordner mit
-  vollständigem Pfad, Ordnername, Build-ID und Größe, Dittos Images und Container mit Name, ID und Größe, und was
-  jedes ist. Entfernt wird nur genau die Liste, die du bestätigst, mit einer Frage für die ganze Liste („Nein“ ist
-  vorgewählt), im Terminal oder in den KI-Einstellungen: Die Build-Ordner kommen in den Papierkorb
-  (wiederherstellbar; ihr Platz bleibt belegt, bis du ihn leerst), und Dockers Images und Container werden endgültig
-  gelöscht, weil Docker keinen Papierkorb hat. Die Liste sagt, wohin jedes kommt; sie wird vorher noch einmal
-  ermittelt, und hat sie sich geändert, wird nichts entfernt, und das Entfernen wird ins Audit-Log geschrieben, bevor
-  etwas entfernt wird. Ohne Terminal wird nichts entfernt, und die Liste wird angezeigt. Dittos Images werden sonst
-  nie gelöscht, und die Builds eines Boards im selben Speicher werden nie aufgelistet. Ist Docker nach einem Wechsel
-  zur direkten Art nicht erreichbar, sagt der Befehl, dass Dittos Images und Container nicht in der Liste stehen, und
-  wie du sie später auflistest.
+  nicht geht, wird der Grund gezeigt und der Server neu gebaut. Der Server der alten Art wird gestoppt.
+- **Zuerst der Platz:** Direkt und Docker sind zwei Alternativen, und ein Wechsel baut die neue Art neben der alten.
+  Vorher schätzt das Framework, was die neue Art beim Bauen braucht (den Quellcode, den Build-Baum, die Builder- und
+  Laufzeit-Basis-Images) und was danach bleibt, und vergleicht das mit dem freien Platz jedes beteiligten Laufwerks:
+  Dittos Laufzeitordner, und Dockers Image-Speicher, wenn Docker einen Ordner dieses Rechners nennt (das eigene
+  Laufwerk von Docker Desktop lässt sich nicht messen; das wird gesagt und hält nichts auf). Ein Laufwerk hält eine
+  Reserve frei, und der Papierkorb zählt nie als frei. Passt es nicht, wird nichts gebaut. Du siehst die Größen und
+  wählst: Platz schaffen und noch einmal wechseln, oder die alte Art zuerst löschen. Dann wird jedes Objekt der alten
+  Art aufgelistet und nach deinem einen Ja gelöscht; Ditto ist nicht verfügbar, bis die neue Art funktioniert, und die
+  Modelle bleiben. Scheitert die neue Art danach, erfährst du das und bekommst die alte Art wieder angeboten.
+- **Die alte Art verschwindet ganz**, sobald die neue Art funktioniert: Jedes ihrer Objekte wird mit vollständigem
+  Pfad oder Name, ID, Größe und was es ist aufgelistet: Dittos Build-Ordner (Pfad, Ordnername, Build-ID), das
+  offizielle Archiv, Dittos Images und Container (Name, ID), die Einträge der alten Art in `mode.json` und
+  `active.json` und das Log der Image-Builds. Eine Frage löscht genau diese Liste endgültig, nicht in den Papierkorb
+  („Nein“ ist vorgewählt, keine Auswahl je Objekt), im Terminal oder in den KI-Einstellungen. Das Entfernen lehnt ab,
+  solange die neue Art nicht funktioniert; die Liste wird vorher noch einmal ermittelt, und hat sie sich geändert, wird
+  nichts entfernt, und das Entfernen wird ins Audit-Log geschrieben, bevor etwas entfernt wird. Ohne Terminal wird
+  nichts entfernt, und die Liste wird angezeigt. Was beide teilen, bleibt: die Modelle, der festgelegte Quellcode, die
+  Builder-Images des Frameworks und die Builds eines Boards im selben Speicher. Dittos Images werden sonst nie
+  gelöscht. Ist Docker nach einem Wechsel zur direkten Art nicht erreichbar, sagt der Befehl, dass Dittos Images und
+  Container nicht in der Liste stehen, und wie du sie später auflistest.
 - **Das Modell:** `ensure` bietet das Modell der gewählten oder empfohlenen Stufe an, wenn es fehlt, zuerst mit
   Quelle, Größe und Lizenz; mit `-y` lädt es nur ein Modell unter freier Lizenz. Jede andere Lizenz nimmst du selbst
   an.
@@ -2599,7 +2607,7 @@ feste Prüfungen aus; nichts fragt ein Modell, was falsch ist. Die ganze Anleitu
 | Community | installierte Community-Packs gegen den zwischengespeicherten Index: gesperrt (Fehler), seit der Installation verändert (Warnung), Vertrauensstufe `local` (Information) |
 | Wissen | wie viele Snapshots der Wissensbasis es gibt, ihre Größe im Vergleich zum freien Platz ihrer Platte und ihr Ordner; eine Warnung, wenn der nächste Snapshot nicht mehr passen würde, eine Information, wenn er passt, aber wenig Platz übrig lässt (keine Grenze: ihre Zahl ist nie eine Warnung; nichts wird gelöscht; unveröffentlicht) |
 | Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung), fehlt (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information); im Docker-Modus Dittos Image: da, auf diesem Rechner gebaut, vom Pin und geprüft (OK), Docker nicht erreichbar oder das Image weg oder ein anderes (Warnung; unveröffentlicht) |
-| Boards | jedes vertraute Board (unveröffentlicht): sein Host-Schlüssel noch in den `known_hosts` des Frameworks und sein SSH-Port antwortet, mit einer Verbindung ohne Anmeldung; `device_host_down` (Information), `device_port_closed` und `device_host_key_changed` (Warnungen) mit dem nächsten Schritt; nie das Gerätekonto |
+| Boards | jedes vertraute Board (unveröffentlicht), aus dem, was aufgezeichnet ist, ohne jeden Netzwerkkontakt: sein Host-Schlüssel in den `known_hosts` des Frameworks (geändert oder fehlt: Warnung) und das letzte Deployment, Laufzeit-Deployment, die letzte Prüfung, der letzte Benchmark oder die letzte Hardware-Prüfung, die es nicht erreicht haben (`device_host_down` Information; `device_port_closed`, `device_auth_failed`, `device_host_key_changed` Warnungen), mit dem nächsten Schritt und dem Angebot, es zu prüfen; `--board NAME` (oder `run_mojo_oracle` mit der Bezeichnung eines Boards) prüft ein Board sofort mit einer Verbindung zu seinem SSH-Port, ohne Anmeldung; nie das Gerätekonto |
 
 **Mojo Oracle** (Standard) schaut nur. Zu jeder Warnung und jedem Fehler sagt es, was es gefunden hat, wo (den vollen
 Pfad oder das Objekt), warum das wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann; ein Satz am Ende
@@ -2635,8 +2643,10 @@ Was eine KI liest: `run_mojo_oracle` liefert dieselben Befunde mit `where` als B
 Frameworks unter ihrer Bezeichnung (`state:audit.db`, "the state folder", `targets:<Pack>`) und jeden anderen Pfad nur
 mit seinem Dateinamen, auch in der Meldung einer abgestürzten Prüfung. `run_mojo_miracle` repariert ein Problem, dessen
 `repair.how` `miracle` ist: Jeder Aufruf wird gefragt (der volle Pfad nur im eigenen Fenster des Frameworks), es löscht
-nie, lehnt jedes andere Problem vor der Frage ab und sagt, ob repariert wurde und, wenn nicht, warum. Der Prompt
-`check_installation` führt eine KI durch beides. `run_doctor`, der Name aus 3.0.0, bleibt aufrufbar, wird aber nicht
+nie, lehnt jedes andere Problem vor der Frage ab und sagt, ob repariert wurde und, wenn nicht, warum.
+`run_mojo_oracle` nimmt keinen Kontakt zu einem Board auf; für ein Board, auf das ein aufgezeichneter Fakt zeigt, nennt
+`check_board` die Anfrage, die es prüft, und `{"board": "<Bezeichnung>"}` prüft dieses eine Board sofort (eine
+Bezeichnung oder Geräte-ID, nie eine Adresse). Der Prompt `check_installation` führt eine KI durch beides. `run_doctor`, der Name aus 3.0.0, bleibt aufrufbar, wird aber nicht
 aufgelistet; eine Einstellung für einen der beiden Namen gilt für beide, und die strengere gewinnt. Deine eigene
 Ausgabe (`llmcf mojo`, auch `--json`) behält die vollen Pfade.
 

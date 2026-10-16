@@ -1968,8 +1968,9 @@ def runtime_install(ctx: FrameworkContext, backend: str, placement: str, jobs: O
               "Docker when bare metal is not possible. bare-metal or docker: the mode of a new installation (with "
               "--force: switch to it)")
 @click.option('--force', is_flag=True, help="Switch to --mode although Ditto is installed in the other mode: the "
-              "models are reused, only the runtime is made again (repackaged where possible); then the old mode's "
-              "leftovers are listed for your confirmation. Needs a terminal")
+              "models are reused, only the runtime is made again (repackaged where possible) after a check that it "
+              "fits next to the old mode; once the new mode works, every object of the old mode is listed and deleted "
+              "for good after your one yes. Needs a terminal")
 @click.option('--placement', type=click.Choice(['auto', 'native', 'container']), default='auto', show_default=True,
               help="Where a build runs (as for install): with this machine's toolchain or in the builder container")
 @click.option('--backend', type=click.Choice(['auto', 'cpu', 'vulkan', 'cuda', 'rocm', 'metal']), default='auto',
@@ -1984,7 +1985,7 @@ def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str
                    no_model: bool, yes: bool):
     """Install Ditto's local runtime when it is not there, bare metal or in Docker (running it again does nothing)"""
     from orchestrator.runtime.llama_server import LocalRuntimeError
-    from orchestrator.runtime.runtime_mode import RuntimeModeError, ensure
+    from orchestrator.runtime.runtime_mode import RuntimeModeError, SpaceShortage, ensure
     if force and mode == "auto":
         _usage("--force needs a mode: --mode bare-metal or --mode docker.")
     if force:
@@ -2003,10 +2004,15 @@ def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str
             return False
         return click.confirm(f"{text[0].upper() + text[1:]} is not cached yet. Fetch it now?", default=True)
 
+    def run(wanted: str, forced: bool):
+        return ensure(rt, mode=wanted, force=forced, placement=placement, backend=backend, jobs=jobs,
+                      log=lambda msg: console.print(escape(msg)), fetch_source=fetch_ok,
+                      container_build=os.environ.get("LCF_CONTAINER_BUILD") == "1")
+
     try:
-        result = ensure(rt, mode=mode, force=force, placement=placement, backend=backend, jobs=jobs,
-                        log=lambda msg: console.print(escape(msg)), fetch_source=fetch_ok,
-                        container_build=os.environ.get("LCF_CONTAINER_BUILD") == "1")
+        result = run(mode, force)
+    except SpaceShortage as e:
+        result = _runtime_space_shortage(ctx, rt, e, run)
     except (RuntimeModeError, LocalRuntimeError) as e:
         _runtime_failure(e)
     if result.leftovers is not None:
@@ -2015,49 +2021,111 @@ def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str
         _offer_ditto_model(rt, yes)
 
 
-def _runtime_leftovers(ctx: FrameworkContext, rt, plan) -> None:
-    """The old mode's leftovers: the full list (name, full path or ID, file name, size, what each is, where it goes),
-    then exactly that list is removed after your one yes at a terminal (default no): the build folders go to the trash
-    (WP7), Docker's images and containers are deleted. Without a terminal nothing is removed."""
+def _runtime_objects_table(title: str, plan) -> None:
+    """Every object of a list: its name, full path (or Docker's ID), file name, size and what it is."""
     from orchestrator.Core.knowledge_snapshots import size_text
-    from orchestrator.runtime.runtime_mode import LeftoversChanged, RuntimeModeError, goes_to_trash, remove_leftovers
-    mode = plan.mode_offered[0]
-    table = Table(title=f"Leftovers of the old mode: {len(plan.items)}, {size_text(plan.total_bytes)}")
-    for column in ("Name", "Full path or ID", "File name", "Size", "What it is", "Goes to"):
+    table = Table(title=title)
+    for column in ("Name", "Full path or ID", "File name", "Size", "What it is"):
         table.add_column(column, overflow="fold")
     for item in plan.items:
         table.add_row(escape(item.speaking_name), escape(item.full_path or item.file_name), escape(item.file_name),
-                      size_text(item.size_bytes), escape(item.what),
-                      "the trash" if goes_to_trash(item, mode) else "deleted for good")
+                      size_text(item.size_bytes), escape(item.what))
     console.print(table)
-    console.print("Image sizes include layers other images may share, so less space can be freed.")
-    if mode == "trash":
-        console.print("Build folders go to the trash: 'llm-cli trash restore ID' brings them back, and their space "
-                      "stays used until you empty the trash. Docker has no trash: its images and containers are "
-                      "deleted for good.")
+    if any(i.kind == "docker_image" for i in plan.items):
+        console.print("Image sizes include layers other images may share, so less space can be freed.")
+
+
+def _runtime_removed(removal) -> None:
+    from orchestrator.Core.knowledge_snapshots import size_text
+    for name in removal.deleted:
+        console.print(f"[green]Deleted: {escape(name)}[/green]")
+    for name, reason in removal.failed:
+        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    console.print(f"{len(removal.deleted)} deleted for good, about {size_text(removal.freed_bytes)}.")
+
+
+def _runtime_space_shortage(ctx: FrameworkContext, rt, shortage, run):
+    """W2: the new mode does not fit next to the old one, so nothing was built. The sizes, then your choice: free space
+    and switch again, or remove the old mode first (its full list, one yes, default no; Ditto is unavailable until the
+    new mode works, the models stay). When the new mode then fails, you are told so and offered the old mode again.
+    Returns the result of the switch; exits when nothing was switched."""
+    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    from orchestrator.runtime.runtime_mode import (LeftoversChanged, RuntimeModeError, SpaceShortage, mode_label,
+                                                   remove_leftovers)
+    new, old, plan = shortage.estimate.mode, shortage.old_mode, shortage.old_plan
+    again = f"llm-cli ditto runtime ensure --mode {new} --force"
+    console.print(f"[yellow]{escape(mode_label(new))} does not fit next to {escape(mode_label(old))}, so nothing was "
+                  "built.[/yellow]")
+    for line in shortage.estimate.lines():
+        console.print(escape(line))
+    if plan is None:
+        console.print(f"Nothing of {escape(mode_label(old))} is left to remove. Free space on the disks above and run "
+                      f"again: {escape(again)}")
+        sys.exit(1)
+    console.print(f"You can:\n  1. free space on the disks above yourself and run again: {escape(again)}\n"
+                  f"  2. remove {escape(mode_label(old))} first: every object below is deleted for good. Ditto is "
+                  f"unavailable until {escape(mode_label(new))} works; the models stay.")
+    _runtime_objects_table(f"Every object of {mode_label(old)}: {len(plan.items)}, {size_text(plan.total_bytes)}",
+                           plan)
+    if not click.confirm(f"Delete all {len(plan.items)} objects of {mode_label(old)} for good first? Ditto is "
+                         f"unavailable until {mode_label(new)} works; the models stay", default=False):
+        console.print(f"Nothing was deleted and nothing was built. Free space and run again: {escape(again)}")
+        sys.exit(1)
+    try:
+        removal = remove_leftovers(rt, plan, actor="cli", audit=_device_audit(ctx, _state_dir(ctx)),
+                                   before_switch=True, removes=old)
+    except (LeftoversChanged, RuntimeModeError, PermissionError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        sys.exit(1)
+    if removal.stopped:
+        console.print("Ditto's server was stopped first.")
+    _runtime_removed(removal)
+    try:
+        return run(new, True)
+    except SpaceShortage as e:
+        console.print(f"[red]Even without {escape(mode_label(old))}, {escape(mode_label(new))} does not fit:[/red]")
+        for line in e.estimate.lines():
+            console.print(escape(line))
+        failure = f"free space and run again: {again}"
+    except (RuntimeModeError, LocalRuntimeError) as e:
+        failure = str(e)
+    console.print(f"[red]{escape(mode_label(new))} could not be made: {escape(failure)}[/red]")
+    console.print(f"Ditto has no local runtime now: {escape(mode_label(old))} was deleted before. The models are still "
+                  "there.")
+    if click.confirm(f"Make {mode_label(old)} again now?", default=False):
+        try:
+            run(old, True)
+        except (RuntimeModeError, LocalRuntimeError) as e:
+            _runtime_failure(e)
+        console.print(f"Ditto runs {escape(mode_label(old))} again.")
+    else:
+        console.print(f"Later: llm-cli ditto runtime ensure --mode {escape(old)}")
+    sys.exit(1)
+
+
+def _runtime_leftovers(ctx: FrameworkContext, rt, plan) -> None:
+    """W2: the new mode works, so the old mode goes completely: the full list (name, full path or ID, file name, size,
+    what each is), then exactly that list is deleted for good after your one yes at a terminal (default no; no choice
+    per item, no trash). Without a terminal nothing is removed."""
+    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.runtime.runtime_mode import LeftoversChanged, RuntimeModeError, remove_leftovers
+    _runtime_objects_table(f"Every object of the old mode: {len(plan.items)}, {size_text(plan.total_bytes)}", plan)
+    console.print("The new mode works. Everything on this list is deleted for good (not into the trash), so the old "
+                  "mode is gone completely; the models stay.")
     if not _interactive():
         console.print("[yellow]Nothing was removed: run 'llm-cli ditto runtime ensure --mode "
                       f"{escape(rt.mode())} --force' yourself in a terminal to confirm this list.[/yellow]")
         return
-    if not click.confirm(f"Remove exactly these {len(plan.items)} objects?", default=False):
+    if not click.confirm(f"Delete exactly these {len(plan.items)} objects for good?", default=False):
         console.print("Nothing was removed; they stay until you remove them.")
         return
-    state_dir = _state_dir(ctx)
-    trash, audit = _person_trash(ctx, state_dir) if mode == "trash" else (None, _device_audit(ctx, state_dir))
     try:
-        removal = remove_leftovers(rt, plan, actor="cli", audit=audit, trash=trash, mode=mode)
+        removal = remove_leftovers(rt, plan, actor="cli", audit=_device_audit(ctx, _state_dir(ctx)))
     except (LeftoversChanged, RuntimeModeError, PermissionError) as e:
         console.print(f"[yellow]{escape(str(e))}[/yellow]")
         return
-    for name in removal.trashed:
-        console.print(f"[green]Moved to the trash: {escape(name)}[/green]")
-    for name in removal.deleted:
-        console.print(f"[green]Removed: {escape(name)}[/green]")
-    for name, reason in removal.failed:
-        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
-    console.print(f"{len(removal.deleted)} removed, about {size_text(removal.freed_bytes)}."
-                  + (f" {len(removal.trashed)} moved to the trash ('llm-cli trash' lists them)."
-                     if removal.trashed else ""))
+    _runtime_removed(removal)
 
 
 def _offer_ditto_model(rt, yes: bool) -> None:
@@ -3301,14 +3369,20 @@ MOJO_ICONS = {"ok": "[green]✔[/green]", "info": "[blue]ℹ[/blue]", "warn": "[
 @click.option('--json', 'as_json', is_flag=True,
               help='Machine-readable output; never asks and never deletes (with --miracle only the harmless repairs '
                    'run)')
+@click.option('--board', 'board', default=None, metavar='NAME',
+              help="Check this one trusted board now: its label, device ID or address (one connection to its SSH "
+                   "port, no login). Without it Mojo contacts no board and reports only what was recorded")
 @pass_context
-def mojo(ctx: FrameworkContext, mode: str, as_json: bool):
+def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
     """Check the installation (Mojo Oracle) and repair what can be repaired (Mojo Miracle); exit code 0 ok, 1
     warnings, 2 errors"""
     from orchestrator.Core.mojo import Mojo, offers
+    if board is not None and mode != "oracle":
+        _usage("--board goes with --oracle: Mojo Oracle checks the board, Mojo Miracle repairs nothing on a board.")
     ctx.require_framework()
     framework = ctx.framework_manager
-    engine = Mojo(framework)
+    contact = (_mojo_board(ctx, board),) if board is not None else ()
+    engine = Mojo(framework, contact=contact)
     report = engine.run()
     offered = offers(framework, report)
     if as_json:
@@ -3323,6 +3397,7 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool):
         sys.exit(data["exit_code"])
     terminal = _interactive()
     _mojo_print_oracle(report, offered, terminal)
+    _mojo_offer_boards(framework, report, terminal)
     if mode == "oracle":
         acts = [o for o in offered if o.verdict == "miracle" or (o.verdict == "deletion_list" and _mojo_lists(o))]
         if not acts:
@@ -3342,6 +3417,60 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool):
                             free_space=(lambda: _mojo_free_space(framework)) if terminal else None, **asked)
     _mojo_print_miracle(result)
     sys.exit(result.exit_code)
+
+
+def _mojo_board(ctx: FrameworkContext, name: str) -> str:
+    """The device ID of the trusted board `--board` names (its label, device ID or address); exits with the trusted
+    boards when it names none or several."""
+    from orchestrator.runtime.device.trusted import TrustedDevices, find_boards
+    store = TrustedDevices(_state_dir(ctx))
+    found = find_boards(store, name, by_address=True)
+    if len(found) == 1:
+        return found[0].device_id
+    boards = found or store.list()
+    what = (f"{len(found)} trusted boards match '{name}'" if found else f"No trusted board is named '{name}'")
+    console.print(f"[red]{escape(what)}.[/red]" + (" Give one of these (label, device ID or address):" if boards
+                                                    else " No board is trusted yet."))
+    for d in boards:
+        console.print(f"  {escape(d.label)}  {d.device_id}  {escape(d.address)}")
+    sys.exit(2)
+
+
+def _mojo_board_command(name: str, device_id: str) -> str:
+    """The command that checks one board: its name in double quotes when it has spaces, its device ID when the name
+    cannot be quoted plainly."""
+    if all(ch.isalnum() or ch in "._:-[]" for ch in name):
+        arg = name
+    elif not any(ch in name for ch in '"`$%!\\'):
+        arg = f'"{name}"'
+    else:
+        arg = device_id
+    return f"llmcf mojo --oracle --board {arg}"
+
+
+def _mojo_offer_boards(framework, report, terminal: bool) -> None:
+    """Boards a recorded fact points to and that Mojo did not contact (W1): at a terminal "Check <board> now? [y/N]"
+    for each (yes: one connection to its SSH port, no login, and the result); without a terminal the command that
+    checks it."""
+    from orchestrator.Core.mojo.checks.devices import check_devices
+    boards = {}
+    for finding in report.findings:
+        if finding.board_check and finding.board_check not in boards:
+            boards[finding.board_check] = finding.board_name or finding.board_check
+    for device_id, name in boards.items():
+        command = _mojo_board_command(name, device_id)
+        if not terminal:
+            console.print(f"Mojo did not contact the board {escape(name)}. To check it: {escape(command)}")
+            continue
+        if not click.confirm(f"Check {name} now? (one connection to its SSH port, no login)", default=False):
+            console.print(f"Mojo did not contact {escape(name)}. Later: {escape(command)}")
+            continue
+        for finding in check_devices(framework, contact=(device_id,)):
+            if finding.code != f"devices.{device_id}":
+                continue
+            console.print(f"{MOJO_ICONS[finding.severity.value]} {escape(finding.subsystem)}: {escape(finding.message)}")
+            if finding.severity.value != "ok" and finding.fix_hint:
+                console.print(f"    → {escape(finding.fix_hint)}")
 
 
 def _mojo_lists(offer) -> bool:
@@ -3440,6 +3569,9 @@ def _mojo_dict(report, offered) -> dict:
     by_finding = {id(o.finding): o for o in offered}
     data = report.to_dict()
     for row, finding in zip(data["findings"], report.findings):
+        if finding.board_check:   # a recorded fact points to this board; Mojo did not contact it (W1)
+            row["check_board"] = {"board": finding.board_name, "device_id": finding.board_check,
+                                  "command": _mojo_board_command(finding.board_name, finding.board_check)}
         offer = by_finding.get(id(finding))
         if offer is not None:
             row["miracle"] = {"can": offer.verdict, "summary": offer.summary,
@@ -4360,8 +4492,9 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
     try:
         status, key = dep_mgr.host_key_status(host, port)
     except Exception as e:
-        _unreachable(ctx, host, port, e)
+        _unreachable(ctx, host, port, e, step="deploy")
     if status == "changed":
+        _note_reach(ctx, host, port, "deploy", reasons.HOST_KEY_CHANGED)
         _print_reason(ctx, reasons.HOST_KEY_CHANGED, host, port)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
@@ -4463,14 +4596,38 @@ def _print_reason(ctx: Optional[FrameworkContext], code: str, host: str, port: i
     console.print(escape(reasons.person_next(code, lang, address=host, port=port)))
 
 
+def _note_reach(ctx: Optional[FrameworkContext], host: str, port: int, step: str, code: str,
+                device_id: str = "") -> None:
+    """Records for Mojo what this contact with a trusted board found (W1: Mojo reads it instead of contacting the
+    board): a reason code keeps the problem, "" (the board was reached and logged in to) ends it. Never fails."""
+    if not step:
+        return
+    try:
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        store = TrustedDevices(_state_dir(ctx) if ctx is not None else _default_state_dir())
+        if device_id:
+            store.note_reach(device_id, step, code)
+        else:
+            store.note_reach_at(host, port, step, code)
+    except Exception:  # noqa: BLE001 - bookkeeping never changes what the command does
+        pass
+
+
+def _default_state_dir() -> Path:
+    from orchestrator.runtime.profile import default_state_dir
+    return default_state_dir()
+
+
 def _unreachable(ctx: Optional[FrameworkContext], host: str, port: int, error: BaseException,
-                 doing: str = "reach") -> None:
-    """Exits after a failed connection or login: its reason code with the next step when it has one."""
+                 doing: str = "reach", step: str = "", device_id: str = "") -> None:
+    """Exits after a failed connection or login: its reason code with the next step when it has one (recorded for
+    Mojo with the board when `step` names the contact)."""
     from orchestrator.runtime.device import reasons
     code = reasons.classify(error)
     if code is None and isinstance(error, OSError):
         code = reasons.HOST_DOWN
     if code is not None:
+        _note_reach(ctx, host, port, step, code, device_id)
         _print_reason(ctx, code, host, port)
     else:
         console.print(f"[red]Could not {doing} {escape(host)}:{port}: {escape(str(error))}[/red]")
@@ -4687,8 +4844,9 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
         key = ssh_trust.fetch_host_key(host, port)
         status = ssh_trust.check_host_key(state_dir, host, port, key)
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        _unreachable(ctx, host, port, e)
+        _unreachable(ctx, host, port, e, step="probe")
     if status == "changed":
+        _note_reach(ctx, host, port, "probe", "device_host_key_changed")
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
     if status == "unknown":
@@ -4731,7 +4889,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     try:
         client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
     except Exception as e:  # authentication, network, a host key that changed meanwhile
-        _unreachable(ctx, host, port, e, doing=f"log in to {user}@")
+        _unreachable(ctx, host, port, e, doing=f"log in to {user}@", step="probe")
+    _note_reach(ctx, host, port, "probe", "")
     try:
         if password:
             ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
@@ -4941,7 +5100,7 @@ def _device_plan(profile):
 
 
 def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str],
-                    ctx: Optional[FrameworkContext] = None):
+                    ctx: Optional[FrameworkContext] = None, step: str = ""):
     """An SSH client for the stored device: its host key must be the trusted one the device was probed with (the
     device ID is derived from it), so a deployment never reaches another machine at the same address."""
     from orchestrator.runtime.profile import device_id_for_host_key
@@ -4953,8 +5112,9 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
         key = ssh_trust.fetch_host_key(host, port)
         status = ssh_trust.check_host_key(state_dir, host, port, key)
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        _unreachable(ctx, host, port, e)
+        _unreachable(ctx, host, port, e, step=step, device_id=device_id)
     if status == "changed":
+        _note_reach(ctx, host, port, step, "device_host_key_changed", device_id)
         _print_reason(ctx, "device_host_key_changed", host, port)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
@@ -4972,8 +5132,9 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
         from orchestrator.runtime.device import reasons
         code = reasons.classify(e)
         if code not in (None, reasons.AUTH_FAILED):
-            _unreachable(ctx, host, port, e)
+            _unreachable(ctx, host, port, e, step=step, device_id=device_id)
         if code == reasons.AUTH_FAILED:
+            _note_reach(ctx, host, port, step, reasons.AUTH_FAILED, device_id)
             _print_reason(ctx, reasons.AUTH_FAILED, host, port)
         else:  # none of the four reasons: shown as it is, never relabelled as a refused login
             console.print(f"[red]SSH login to {escape(user)}@{escape(host)} failed: {escape(str(e))}[/red]")
@@ -4989,6 +5150,7 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
             sys.exit(1)
     if ctx is not None:  # trusted by the person when it was probed, and logged in to with the framework's key now
         _remember_device(ctx, host, port, user, key, paired=True)
+    _note_reach(ctx, host, port, step, "", device_id)   # reached and logged in: a recorded problem ends
     return client
 
 
@@ -5444,7 +5606,8 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     source = _pinned_llama_source()
-    client = _connect_device(state_dir, device_id, host, port, settings.ssh_user, password, ctx=ctx)
+    client = _connect_device(state_dir, device_id, host, port, settings.ssh_user, password, ctx=ctx,
+                             step="runtime_deploy")
     try:
         shell = RemoteShell(client)
         facts = read_facts(shell)
@@ -5543,7 +5706,7 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     source = _pinned_llama_source()
-    client = _connect_device(state_dir, device_id, host, port, user, None)
+    client = _connect_device(state_dir, device_id, host, port, user, None, ctx=ctx, step="verify")
     try:
         shell = RemoteShell(client)
         facts = read_facts(shell)

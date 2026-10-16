@@ -35,6 +35,11 @@ class Finding:
     why: str = ""
     repair_id: str = ""
     cannot: str = ""
+    # W1: a recorded fact points to a problem with this trusted board (its device ID), and Mojo did not contact it: the
+    # person is offered a check of that board ("Check <board> now?"), an AI the request it can make. `board_name` is
+    # the name to give for it (its label, or its device ID when another board has the same label; never an address).
+    board_check: str = ""
+    board_name: str = ""
 
     def to_dict(self) -> Dict:
         data = asdict(self)
