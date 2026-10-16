@@ -188,7 +188,8 @@ class LLMClient:
         if preset.runtime_endpoint:
             endpoint = self._runtime_endpoint(preset)
             if not endpoint:
-                hint = " Start it with: llm-cli ditto runtime start" if preset.id == MANAGED_RUNTIME_PROVIDER else ""
+                hint = (" Start it in the GUI with Ditto > Local Runtime... > Start, or with: llm-cli ditto runtime "
+                        "start" if preset.id == MANAGED_RUNTIME_PROVIDER else "")
                 raise NotConfigured(f"{preset.label}: the local model server is not running.{hint}",
                                     provider=preset.id)
             return endpoint[0]

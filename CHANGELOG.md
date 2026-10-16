@@ -37,6 +37,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   page offers provider and model **for this analysis only** (`module generate-ai --provider --model`): Ditto runs on
   them through `DittoManager.for_run`, which the CLI's `generate-ai` now uses too, and the saved AI settings stay
   unchanged.
+- **Ditto > Local Runtime...: every `llm-cli ditto runtime` command by mouse** (W1'): one window shows what `ditto
+  runtime status` shows (hardware, mode, the build in use and its checks, problems and the rebuild advice, the
+  self-built plan, the prebuilt option, the server with address, model and context, the recommended and the chosen
+  model, the log file) and does `install` (**Build llama-server...** with GPU backend, where the build runs and
+  compile jobs; **Install the official prebuilt archive...** with "Download it again"), `ensure` (mode Automatic,
+  Bare metal or In Docker, the same build options, and the model offer afterwards with its size and licence, unticked
+  like `--no-model`), **Start** (model tier or the recommendation, context length, idle unload; the model chosen
+  earlier is named) and **Stop**, **Import a build...** and **Export the build...**, **Remove older builds...** (the
+  deletion dialog with the full list, nothing ticked, "No" by default), **Export the source...** (with an optional
+  mirror) and **Import the source...**. The same core functions as the CLI run (the status overview, the model offer
+  and the llama.cpp pin now are core functions the CLI calls too; its output is unchanged); builds, downloads, Docker
+  and the server start run in the background with a progress line and Cancel where the command can be interrupted;
+  every question the CLI asks is asked with the same words and "No" as the default (also the one before the pinned
+  source is fetched); one runtime task runs at a time in the whole GUI. The box "Ditto's local server"
+  (here and in the AI settings) no longer refuses the installed mode: **Check and repair...** checks it and installs it
+  again only when it cannot be used (an old llama.cpp build after an update, for example), and installs and switches
+  now take the build options; the switch keeps the space check and the complete removal of the old mode. Its new
+  button **Status and more...** opens the window from the AI settings. A stopped local server and a declined source
+  fetch now name the GUI path next to the command.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record

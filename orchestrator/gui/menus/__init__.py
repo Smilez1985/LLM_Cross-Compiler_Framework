@@ -1,1 +1,1 @@
-"""Menu wiring of the GUI parity chains (W1'): each module adds its entries with install(window, menubar)."""
+"""Menu wiring of the GUI parity chains (W1'): one module per area, each with install(window, menubar) and CLI_PATHS."""

@@ -827,8 +827,8 @@ llm-cli ditto ask "Start a GGUF build of HuggingFaceTB/SmolLM2-135M-Instruct for
 llm-cli ditto ask "Explain IQ4_XS" --no-tools --provider local
 ```
 
-Without setup the command explains what is missing, for example "the local model server is not running. Start it
-with: llm-cli ditto runtime start".
+Without setup the command explains what is missing, for example "the local model server is not running. Start it in
+the GUI with Ditto > Local Runtime... > Start, or with: llm-cli ditto runtime start".
 
 ### ditto eval
 
@@ -944,6 +944,9 @@ file. Checking the rebuild detects the toolchain (it compiles nothing).
 |---|---|
 | `--json` | Machine-readable output (`installed`, `problems`, `rebuild`, `recommended_backend`, `prebuilt_option`, ...). |
 
+In the GUI: **Ditto > Local Runtime...**, box "Status" (the same values as text in your language; "Check again" reads
+them again). In **Tools > Configure AI Agent (Ditto)...**, "Status and more..." opens the same window.
+
 #### ditto runtime install
 
 ```
@@ -978,6 +981,11 @@ running server keeps running; the next `runtime start` uses the new build.
 | `--prebuilt` | Download upstream's official prebuilt archive instead (size and sha256 checked before unpacking). Only on this request, always shown as "prebuilt, not self-built". An archive that is already installed, also one an earlier version downloaded (which is not used without this request), is taken without downloading it again. Linux archives need glibc 2.35 or 2.39; none is offered on musl. |
 | `--force` | With `--prebuilt`: download and unpack again even if it is installed. |
 | `-y, --yes` | Do not ask before building, fetching the source or downloading. |
+
+In the GUI: **Ditto > Local Runtime... > Build llama-server...** with the build options of the box "Ditto's local
+server" (GPU backend, Build, Compile jobs); `--prebuilt`: **Install the official prebuilt archive...**, `--force`:
+"Download it again even if it is installed". The questions have "No" as the default; Cancel stops before the next build
+step or between two download chunks.
 
 #### ditto runtime ensure
 
@@ -1049,6 +1057,13 @@ llm-cli ditto runtime ensure --mode docker --force        # switch to Docker
 llm-cli ditto runtime ensure --mode bare-metal --force    # and back
 ```
 
+In the GUI: box "Ditto's local server" in **Ditto > Local Runtime...** and in **Tools > Configure AI Agent (Ditto)...**:
+the mode (Automatic, Bare metal, In Docker), the build options and "Offer Ditto's model afterwards" (unticked:
+`--no-model`). The button says Install... (nothing installed), Check and repair... (the installed mode: checked, and
+installed again only when it cannot be used; with Automatic chosen it is `--mode auto`, which prefers bare metal when
+nothing usable is left) or Switch... (`--force`). Before the pinned source is fetched, the GUI asks the command's
+question ("No" by default). One runtime task runs at a time in the whole GUI.
+
 #### ditto runtime import
 
 ```
@@ -1068,6 +1083,9 @@ builds you made yourself.
 |---|---|
 | `-y, --yes` | Do not ask before running the imported programs for the check. |
 
+In the GUI: **Ditto > Local Runtime... > Import a build...** (file dialog; the question before its programs run has "No"
+as the default).
+
 #### ditto runtime export
 
 ```
@@ -1076,6 +1094,9 @@ llm-cli ditto runtime export FILE
 
 Writes the self-built build in use to `FILE` (`.tar.gz`: its programs, `build.json` and `manifest.json`, no logs)
 for `ditto runtime import` on another machine of the same kind. The prebuilt archive is never exported.
+
+In the GUI: **Ditto > Local Runtime... > Export the build...** (save dialog; `.tar.gz` is added when the name has no
+such ending).
 
 #### ditto runtime prune
 
@@ -1090,6 +1111,9 @@ You type the numbers to delete, choose the trash (the default) or deleting for g
 running server was started from and the builds of your boards (`llm-cli device runtime build`, same build store) are
 never listed, and a build that became one of them after the list was shown is kept. `runtime install` deletes
 nothing: it says how many older builds it kept (before, it kept only the two newest).
+
+In the GUI: **Ditto > Local Runtime... > Remove older builds...** (the deletion dialog: full path, file name, size and
+what each is; nothing ticked, "No" by default; trash or for good). **File > Trash...** restores what went to the trash.
 
 #### ditto runtime start
 
@@ -1112,6 +1136,10 @@ already runs from the same build, it is reused.
 
 The model must be downloaded first (`ditto models download`). Ditto uses the server as the provider `local`.
 
+In the GUI: **Ditto > Local Runtime... > Start** with Model (as before; "Recommended for this computer" is
+`--model auto`; or a tier), Context length (automatic, or 256 and more) and "Unload the model when idle after" (the
+default, or seconds; 0 = never). The window names the model chosen earlier.
+
 #### ditto runtime stop
 
 ```
@@ -1127,6 +1155,8 @@ llm-cli ditto models download -y
 llm-cli ditto runtime start --model small --sleep-idle 0
 llm-cli ditto runtime stop
 ```
+
+In the GUI: **Ditto > Local Runtime... > Stop**.
 
 #### ditto runtime export-source
 
@@ -1148,6 +1178,9 @@ added (files git ignores included) and need no network. A relative `FILE` is rel
 | `--mirror URL` | Fetch from this mirror instead of the pinned repository. The commit is checked the same way. |
 | `-y, --yes` | Fetch without asking when the source is not cached yet. |
 
+In the GUI: **Ditto > Local Runtime... > Export the source...** with the optional field "Mirror" (`--mirror`); the
+question before the source is fetched has "No" as the default.
+
 #### ditto runtime import-source
 
 ```
@@ -1166,6 +1199,8 @@ llm-cli ditto runtime export-source llama.cpp-source.bundle -y
 # Air-gapped machine (copy llama.cpp-source.bundle and llama.cpp-source.bundle.json first)
 llm-cli ditto runtime import-source llama.cpp-source.bundle
 ```
+
+In the GUI: **Ditto > Local Runtime... > Import the source...** (file dialog).
 
 ### ditto models
 
