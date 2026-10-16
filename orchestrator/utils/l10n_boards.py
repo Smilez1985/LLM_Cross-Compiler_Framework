@@ -203,6 +203,8 @@ TEXTS = {
                              "listed.",
         "boards.prune.intro": "The older runtime packages of this board on this computer (the one of the build "
                               "deployed last is never listed). Tick what you want to delete; nothing is ticked.",
+        "boards.prune.reading": "Reading the runtime packages of this board",
+        "boards.prune.deleting": "Deleting the ticked runtime packages",
         # older builds on the board (device runtime prune --on-device)
         "boards.prune_board.title": "Runtime builds on {label}",
         "boards.prune_board.reading": "Reading the builds on the board",
@@ -240,6 +242,13 @@ TEXTS = {
         "boards.deploy.done": "Deployed build {build} to {root}.",
         "boards.deploy.previous": "The previous build {previous} is kept.",
         "boards.deploy.failed": "Build {build} did not pass its checks on the board; it was not activated.",
+        "boards.deploy.server_user": "The server listens on 127.0.0.1:{port}; its key is in "
+                                     "~/.config/llm-framework/llama-server.key. stop, status and serve (in the "
+                                     "foreground) work the same way as the start command above.",
+        "boards.deploy.server_systemd": "systemd unit: {state}; the server listens on 127.0.0.1:{port}; its key is in "
+                                        "~/.config/llm-framework/llama-server.key.",
+        "boards.deploy.unit_started": "started",
+        "boards.deploy.unit_enabled": "enabled",
         "boards.checks": "Checks on the board:",
         "boards.check_line": "{name}: {result} - {detail}",
         "boards.check.passed": "passed",
@@ -451,6 +460,8 @@ TEXTS = {
         "boards.prune.intro": "Die älteren Laufzeit-Pakete dieses Boards auf diesem Rechner (das Paket des zuletzt "
                               "installierten Builds wird nie aufgeführt). Hake an, was du löschen willst; nichts ist "
                               "angehakt.",
+        "boards.prune.reading": "Die Laufzeit-Pakete dieses Boards werden gelesen",
+        "boards.prune.deleting": "Die angehakten Laufzeit-Pakete werden gelöscht",
         "boards.prune_board.title": "Laufzeit-Builds auf {label}",
         "boards.prune_board.reading": "Builds auf dem Board werden gelesen",
         "boards.prune_board.busy": "Nicht aufgeführt, weil ein laufendes Programm sie nutzt: {builds}.",
@@ -489,6 +500,13 @@ TEXTS = {
         "boards.deploy.previous": "Der vorherige Build {previous} bleibt erhalten.",
         "boards.deploy.failed": "Build {build} hat seine Prüfungen auf dem Board nicht bestanden; er wurde nicht "
                                 "aktiviert.",
+        "boards.deploy.server_user": "Der Server lauscht auf 127.0.0.1:{port}; sein Schlüssel liegt in "
+                                     "~/.config/llm-framework/llama-server.key. stop, status und serve (im "
+                                     "Vordergrund) funktionieren genauso wie der Startbefehl oben.",
+        "boards.deploy.server_systemd": "systemd-Unit: {state}; der Server lauscht auf 127.0.0.1:{port}; sein "
+                                        "Schlüssel liegt in ~/.config/llm-framework/llama-server.key.",
+        "boards.deploy.unit_started": "gestartet",
+        "boards.deploy.unit_enabled": "aktiviert",
         "boards.checks": "Prüfungen auf dem Board:",
         "boards.check_line": "{name}: {result} - {detail}",
         "boards.check.passed": "bestanden",

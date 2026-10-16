@@ -103,6 +103,25 @@ class TestTrustedBoards:
         out = CliRunner().invoke(cli_module.cli, ["-q", "deploy", "devices", "list", "--json"])
         assert json.loads(out.output) == [row]
 
+    def test_the_cli_list_names_only_a_deploy_as_the_last_deploy(self, tmp_path, monkeypatch, paramiko_key):
+        """A board whose only bookkeeping is a recorded contact (a failed verify for Mojo) shows "-" as its last
+        deploy, never "None (failed)" (review of wave 5a)."""
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
+        from orchestrator.runtime.device import reasons
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        state = tmp_path / "state"
+        device = trusted(state, paramiko_key)
+        TrustedDevices(state).note_reach(device.device_id, "verify", reasons.HOST_DOWN)
+        monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(state))
+        monkeypatch.setenv("COLUMNS", "400")
+        out = CliRunner().invoke(cli_module.cli, ["-q", "deploy", "devices", "list"])
+        assert out.exit_code == 0, out.output
+        assert "None" not in out.output and "(failed)" not in out.output
+        TrustedDevices(state).note_deploy(device.device_id, False, "pkg")
+        out = CliRunner().invoke(cli_module.cli, ["-q", "deploy", "devices", "list"])
+        assert "(failed)" in out.output and "None" not in out.output
+
     def test_removing_trust_is_audited_with_the_persons_channel(self, tmp_path, paramiko_key):
         from orchestrator.runtime.device.trusted import TrustedDevices
         state = tmp_path / "state"
@@ -526,6 +545,36 @@ class TestRuntimeSteps:
         assert order == [("asked", "/home/u/models/own.gguf"), ("consent", "d" * 64)], "the consent is written first"
         with pytest.raises(SettingsError):
             choose("../etc/passwd", True)
+
+    def test_the_ai_paths_benchmark_trusts_the_same_catalog_models(self, tmp_path, monkeypatch):
+        """service.benchmark (the AI tool and the Deployment tab's 'Measure on the board') decides which model is a
+        catalog model with the same step as the CLI and the Boards window (steps.catalog_model_digests); review of
+        wave 5a."""
+        import orchestrator.runtime.device.remote as remote
+        from orchestrator.runtime.device import service
+        from orchestrator.runtime.device.package import DeviceRuntimeStore
+        DeviceRuntimeStore(tmp_path, "0123456789abcdef").save_record({"build_id": "b" * 64, "install": "user"})
+        device = SimpleNamespace(device_id="0123456789abcdef", label="ZERO 3W")
+        settings = DeploySettings(ssh_user="dietpi", model="models/q.gguf")
+
+        class Client:
+            def close(self):
+                pass
+
+        monkeypatch.setattr(service, "connect", lambda *a, **k: Client())
+        monkeypatch.setattr(remote, "RemoteShell", lambda client: client)
+        monkeypatch.setattr(remote, "read_facts", lambda shell: SimpleNamespace(uid=1000, home="/home/dietpi"))
+        monkeypatch.setattr(remote, "model_sha256", lambda shell, path: "e" * 64)
+        ran = []
+        monkeypatch.setattr(remote, "verify_on_device", lambda shell, **kw: ran.append(kw["bench_model"]) or
+                            VerifyReport([Check("version", True, "")]))
+        monkeypatch.setattr(steps, "catalog_model_digests", lambda: {"e" * 64})
+        out = service.benchmark(tmp_path, device, RK3566, settings, "SHA256:x", allow_untrusted=False)
+        assert out["trusted_model"] is True and ran == ["/home/dietpi/models/q.gguf"]
+        monkeypatch.setattr(steps, "catalog_model_digests", lambda: set())
+        with pytest.raises(service.DeviceRuntimeError) as e:
+            service.benchmark(tmp_path, device, RK3566, settings, "SHA256:x", allow_untrusted=False)
+        assert e.value.code == "declined" and len(ran) == 1
 
     def test_installing_saves_the_record_only_when_the_new_build_passed(self, tmp_path, monkeypatch):
         import orchestrator.runtime.device.remote as remote

@@ -208,9 +208,9 @@ class BoardsWindow(QDialog):
         if trusted:
             key = t(f"boards.key.{trusted['host_key']}", key_type=trusted["key_type"],
                     fingerprint=trusted["fingerprint"])
-            last = trusted.get("last_deploy") or {}
+            last = trusted.get("last_deploy") or {}   # may hold only a recorded contact for Mojo: no deploy then
             last_text = t("boards.last", at=last.get("at"), result=t("boards.last.ok" if last.get("ok") else
-                                                                     "boards.last.failed")) if last else dash
+                                                                     "boards.last.failed")) if last.get("at") else dash
             trust = [trusted["user"], key, t("boards.yes" if trusted["paired"] else "boards.no"), trusted["trusted"],
                      last_text]
         else:
@@ -441,22 +441,34 @@ class BoardsWindow(QDialog):
         """The explicit warning before an untrusted model may run on the board; "No" is the default."""
         return ask(self, self._t("boards.title"), self._t("boards.untrusted_question", model=model, user=user))
 
-    def _record_test(self, entry: Dict[str, Any], profile: Any, report: Any, digest: Optional[str],
-                     build_id: str, source: Any, kv: Optional[str]) -> List[str]:
-        """'tested on' this board for the builds of the benchmarked model (N3), as the CLI records it."""
+    @staticmethod
+    def _board_label(entry: Dict[str, Any]) -> str:
+        """The board's name in a 'tested on' record: its stored label, as the CLI writes it."""
+        return (entry.get("stored") or {}).get("label") or entry["device_id"]
+
+    def _record_tested_on(self, entry: Dict[str, Any], profile: Any, report: Any, digest: Optional[str],
+                          build_id: str, source: Any, kv: Optional[str]) -> Optional[int]:
+        """'tested on' this board for the builds of the benchmarked model (N3), as the CLI records it; it walks every
+        golden-artifact folder, so it runs in the worker thread. The number of builds it was recorded with, or None
+        when no short benchmark ran."""
         from orchestrator.Core.artifact_output import artifact_folders
         from orchestrator.runtime.device.service import record_board_test
         smoke = report.check("smoke") if report is not None else None
         if smoke is None or smoke.ok is None or not digest:
-            return []
+            return None
         try:
             builds = record_board_test(artifact_folders(self.framework),
-                                       SimpleNamespace(device_id=entry["device_id"], label=entry["label"]), profile,
-                                       report, digest, build_id, source, kv)
+                                       SimpleNamespace(device_id=entry["device_id"], label=self._board_label(entry)),
+                                       profile, report, digest, build_id, source, kv)
         except Exception:  # noqa: BLE001 - the check itself ran; the record is a convenience
             builds = []
-        board = profile.get("BOARD_MODEL") or entry["label"]
-        return [ui_text("device.bench.recorded", self.lang, board=board, count=len(builds)) if builds else
+        return len(builds)
+
+    def _tested_on_lines(self, entry: Dict[str, Any], profile: Any, count: Optional[int]) -> List[str]:
+        if count is None:
+            return []
+        board = profile.get("BOARD_MODEL") or self._board_label(entry)
+        return [ui_text("device.bench.recorded", self.lang, board=board, count=count) if count else
                 ui_text("device.bench.not_recorded", self.lang)]
 
     # --- trusted boards ------------------------------------------------------------------------------------------
@@ -773,12 +785,14 @@ class BoardsWindow(QDialog):
             if not allowed:
                 self._show_text(self._t("boards.build.source_needed"), warn=True)
                 return
-            self._run_build(entry, profile, source, jobs, mirror)
+            # the source is fetched only after the person's yes: when it was cached at the look, nobody was asked,
+            # and a cache that is gone by the time the build runs stops the build (SourceDeclined) instead
+            self._run_build(entry, profile, source, jobs, mirror, may_fetch=not cached)
 
         self._start(self._t("boards.build.checking"), lambda: cached_source(source, state) is not None, asked)
 
     def _run_build(self, entry: Dict[str, Any], profile: Any, source: Any, jobs: Optional[int],
-                   mirror: Optional[str]) -> None:
+                   mirror: Optional[str], may_fetch: bool = False) -> None:
         from orchestrator.runtime.device import steps
         state, device_id, label = self.state_dir, entry["device_id"], entry["label"]
 
@@ -791,7 +805,7 @@ class BoardsWindow(QDialog):
         def work():
             plan = steps.plan_runtime(profile)
             built = steps.build_runtime(state, device_id, profile, plan, source, jobs=jobs, mirror=mirror,
-                                        may_fetch=lambda: True, on_step=on_step, log=self._progress,
+                                        may_fetch=lambda: may_fetch, on_step=on_step, log=self._progress,
                                         cancelled=self._cancel.is_set)
             from orchestrator.runtime.device.package import DeviceRuntimeStore
             return built, steps.older_package_count(DeviceRuntimeStore(state, device_id), built.build)
@@ -812,6 +826,9 @@ class BoardsWindow(QDialog):
         if isinstance(error, steps.BuildCancelled):
             self._say(self._t("boards.build.cancelled"))
             return True
+        if isinstance(error, steps.SourceDeclined):
+            self._show_text(self._t("boards.build.source_needed"), warn=True)
+            return True
         if self._plan_failed(error):
             return True
         text = self._t("boards.build.failed", reason=str(error))
@@ -823,17 +840,27 @@ class BoardsWindow(QDialog):
     # --- older packages on this computer -----------------------------------------------------------------------
 
     def _on_prune(self) -> None:
-        """device runtime prune: the full list through ask_deletion; into the trash or for good, as the CLI."""
-        from orchestrator.Core.deletion import PlanChanged
-        from orchestrator.Core.trash import Trash
-        from orchestrator.gui.deletion_dialog import ask_deletion
+        """device runtime prune: the full list through ask_deletion; into the trash or for good, as the CLI. The
+        folder is read and the ticked files are deleted in the background (the trash hashes each file it takes); only
+        the question runs in the GUI thread."""
         from orchestrator.runtime.device.package import DeviceRuntimeStore
         entry = self._need("stored")
         if entry is None:
             return
         title = self._t("boards.prune.title", label=entry["label"])
         devices = DeviceRuntimeStore(self.state_dir, entry["device_id"])
-        plan = devices.cleanup_plan()
+
+        def read():
+            plan = devices.cleanup_plan()
+            self._check_cancel()   # a cancelled look asks nothing
+            return plan
+
+        self._start(self._t("boards.prune.reading"), read, lambda plan: self._ask_packages(devices, plan, title))
+
+    def _ask_packages(self, devices: Any, plan: Any, title: str) -> None:
+        from orchestrator.Core.deletion import PlanChanged
+        from orchestrator.Core.trash import Trash
+        from orchestrator.gui.deletion_dialog import ask_deletion
         if plan is None:
             self._info(self._t("boards.prune.none"))
             return
@@ -841,16 +868,22 @@ class BoardsWindow(QDialog):
                                 lang=self.lang)
         if accepted is None:
             return
-        try:
-            result = devices.delete_packages(accepted, self.state_dir, trash=Trash.for_framework(self.framework),
-                                             audit=self.audit)
-        except PlanChanged:
-            self._info(self._t("deletion.changed"), "warning")
-            return
-        except (PermissionError, RuntimeError) as e:
-            self._info(self._t("deletion.failed", reason=one_line(str(e))), "warning")
-            return
-        self._deletion_result(result, accepted.mode, title)
+        state, framework, audit = self.state_dir, self.framework, self.audit
+
+        def delete():
+            return devices.delete_packages(accepted, state, trash=Trash.for_framework(framework), audit=audit)
+
+        def failed(error: BaseException) -> bool:
+            if isinstance(error, PlanChanged):
+                self._info(self._t("deletion.changed"), "warning")
+                return True
+            if isinstance(error, (PermissionError, RuntimeError)):
+                self._info(self._t("deletion.failed", reason=one_line(str(error))), "warning")
+                return True
+            return False
+
+        self._start(self._t("boards.prune.deleting"), delete,
+                    lambda result: self._deletion_result(result, accepted.mode, title), failed=failed)
 
     def _deletion_result(self, result: Any, mode: str, title: str) -> None:
         from orchestrator.Core.deletion import size_text
@@ -1032,7 +1065,7 @@ class BoardsWindow(QDialog):
             allowed = bool(bench_model) and self._ask_untrusted(bench_model, settings.ssh_user)
             self._start(self._t("boards.deploy.running"),
                         lambda: work(plan, build, devices, packaged, allowed),
-                        lambda out: self._deployed(entry, profile, source, kv, out),
+                        lambda out: self._deployed(entry, profile, settings, kv, out),
                         failed=lambda e: self._runtime_failed(e, host, port, settings.ssh_user, device_id))
 
         def work(plan: Any, build: Any, devices: Any, packaged: Any, allowed: bool):
@@ -1058,13 +1091,15 @@ class BoardsWindow(QDialog):
             finally:
                 client.close()
             older = steps.older_package_count(devices, build)
-            return build, bench, outcome, older
+            tested = self._record_tested_on(entry, profile, outcome.report, bench.digest if bench.allowed else None,
+                                            build.build_id, source, kv.kind) if outcome.ok else None
+            return build, bench, outcome, older, tested
 
         self._start(self._t("boards.deploy.preparing"), prepare, prepared,
                     failed=lambda e: self._runtime_failed(e, host, port, settings.ssh_user, device_id))
 
-    def _deployed(self, entry: Dict[str, Any], profile: Any, source: Any, kv: Any, out: Any) -> None:
-        build, bench, outcome, older = out
+    def _deployed(self, entry: Dict[str, Any], profile: Any, settings: Any, kv: Any, out: Any) -> None:
+        build, bench, outcome, older, tested = out
         t, result = self._t, outcome.result
         lines = []
         if bench.missing:
@@ -1080,12 +1115,17 @@ class BoardsWindow(QDialog):
         if result.previous:
             lines.append(t("boards.deploy.previous", previous=result.previous))
         lines += self._check_lines(outcome.report)
-        lines += self._record_test(entry, profile, outcome.report, bench.digest if bench.allowed else None,
-                                   build.build_id, source, kv.kind)
+        lines += self._tested_on_lines(entry, profile, tested)
         lines += [one_line(n) for n in result.notes]
         if older:
             lines.append(t("boards.build.older", n=older))
         lines.append(t("boards.kv", kv=self._kv_text(kv)))
+        # where the server listens and where its key is, as the CLI says it (the note above names the start command)
+        if settings.install == "systemd":
+            lines.append(t("boards.deploy.server_systemd", port=settings.port, state=t(
+                "boards.deploy.unit_started" if getattr(result, "unit_started", None) else "boards.deploy.unit_enabled")))
+        else:
+            lines.append(t("boards.deploy.server_user", port=settings.port))
         self._say("\n".join(lines))
         self.reload()
 
@@ -1162,15 +1202,16 @@ class BoardsWindow(QDialog):
                                              port=settings.port, bench=bench)
             finally:
                 client.close()
-            return bench, report
+            tested = self._record_tested_on(entry, profile, report, bench.digest if bench.allowed else None,
+                                            record["build_id"], source, settings.kv_choice(profile).kind)
+            return bench, report, tested
 
         def done(out: Any) -> None:
-            bench, report = out
+            bench, report, tested = out
             lines = [self._t("boards.bench.missing", path=bench.missing)] if bench.missing else []
             lines.append(self._t("boards.verify.result", device_id=device_id, build=record["build_id"][:16]))
             lines += self._check_lines(report)
-            lines += self._record_test(entry, profile, report, bench.digest if bench.allowed else None,
-                                       record["build_id"], source, settings.kv_choice(profile).kind)
+            lines += self._tested_on_lines(entry, profile, tested)
             self._show_text("\n".join(lines), warn=not report.ok)
             self.reload()
 

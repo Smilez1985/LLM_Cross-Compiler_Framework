@@ -4939,11 +4939,11 @@ def deploy_devices_list(ctx: FrameworkContext, as_json: bool):
     for r in rows:
         state = {"known": "trusted", "changed": "[red]CHANGED in known_hosts[/red]",
                  "unknown": "[yellow]not in known_hosts[/yellow]"}[r["host_key"]]
-        last_deploy = r["last_deploy"] or {}
+        last_deploy = r["last_deploy"] or {}   # may hold only a recorded contact for Mojo: then no deploy is shown
         table.add_row(r["device_id"], escape(r["label"]), escape(r["address"]), escape(r["user"]),
                       f"{escape(r['key_type'])} {r['fingerprint']} ({state})", "yes" if r["paired"] else "no",
                       escape(f"{last_deploy.get('at')} ({'ok' if last_deploy.get('ok') else 'failed'})")
-                      if last_deploy else "-")
+                      if last_deploy.get("at") else "-")
     console.print(table)
 
 
