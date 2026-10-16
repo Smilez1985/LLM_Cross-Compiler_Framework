@@ -533,7 +533,10 @@ def build():
               help='Target format (gguf: llama.cpp/CPU, rkllm: Rockchip NPU LLM, rknn: Rockchip NPU ONNX)')
 @click.option('--board', '-b', help='Board within the target family, e.g. rk3588, rk3576, rk3566')
 @click.option('--quantization', '-q', help='Quantization, e.g. Q4_K_M, IQ4_XS, F16 (gguf) or w4a16, w8a8 (rkllm)')
-@click.option('--output-dir', '-o', help='Custom output directory')
+@click.option('--output', '--output-dir', '-o', 'output_dir',
+              help="Folder the finished model (golden artifact) is saved to; default: the output folder ('llm-cli "
+                   "config output-folder'). At a terminal without it you are asked; '-' keeps it in the framework's "
+                   "build folder")
 @click.option('--optimization', default='balanced',
               type=click.Choice(['fast', 'balanced', 'size', 'speed', 'aggressive']),
               help='Optimization level, passed to the target\'s build scripts as OPTIMIZATION_LEVEL '
@@ -604,12 +607,10 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         elif board:
             board = board.strip().lower()  # the module scripts lower-case it as well
 
-        # A path given here means the current directory; the configured default the installation's.
-        if output_dir:
-            output_dir = str(Path(output_dir).expanduser().resolve())
-        else:
-            base = ctx.framework_manager.resolve_path(ctx.framework_manager.config.get("output_dir", "output"))
-            output_dir = str(base / f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        # Where the golden artifact goes (eighth round, answer 3): --output, else at a terminal the person's answer to
+        # a prompt with the output folder as its default, else the output folder; '-' keeps it in the framework's
+        # build folder ('llm-cli build save' saves it later). A relative path means the current directory.
+        output_dir, chosen = _build_destination(ctx, output_dir)
         
         build_request = BuildRequest(
             request_id="",
@@ -675,6 +676,8 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         if workflow_status:
             for artifact in workflow_status.artifacts:
                 console.print(f"[green]Artifacts: {escape(str(artifact))}[/green]")
+                if chosen:  # outside the output folder: the listings keep showing it
+                    _remember_saved(ctx, artifact, output_dir)
             for warning in workflow_status.warnings:
                 console.print(f"[yellow]{escape(str(warning))}[/yellow]")
             for error in workflow_status.errors:
@@ -688,6 +691,36 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
 
 BUILD_POLL_SECONDS = 2
+KEEP_IN_BUILD_FOLDER = "-"
+
+
+def _build_destination(ctx: FrameworkContext, given: Optional[str]) -> Tuple[str, bool]:
+    """(folder the build publishes to, whether the person chose it): --output, else at a terminal the answer to a
+    prompt with the output folder as its default ('-': the framework's build folder), else the output folder. A folder
+    the person chose is checked (no system folder, not the program folder) and made when it does not exist."""
+    from orchestrator.Core.artifact_output import DestinationRefused, build_folder, check_destination, output_folder
+    fm = ctx.framework_manager
+    default = output_folder(fm)
+    if given is None and _interactive():
+        given = click.prompt(f"Save the finished model to (Enter: the output folder, '{KEEP_IN_BUILD_FOLDER}': keep "
+                             "it in the framework's build folder)", default=str(default), show_default=True)
+    if given is not None and given.strip() == KEEP_IN_BUILD_FOLDER:
+        return str(build_folder(fm)), False
+    if given is None or Path(given).expanduser() == default:
+        return str(default), False
+    try:
+        return str(check_destination(fm, given, create=True)), True
+    except DestinationRefused as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
+        sys.exit(2)
+
+
+def _remember_saved(ctx: FrameworkContext, artifact: Any, root: str) -> None:
+    from orchestrator.Core.artifact_output import remember
+    try:
+        remember(ctx.framework_manager, artifact, root)
+    except (OSError, TimeoutError) as e:
+        console.print(f"[yellow]Saved, but not listed by the framework ({escape(str(e))}).[/yellow]")
 # How long Ctrl+C waits for a cancelled build to stop (its container stops within about 10 s; a large model file
 # being copied is noticed between two chunks).
 CANCEL_WAIT_SECONDS = 120
@@ -754,6 +787,50 @@ def _resolve_healing_interactively(orchestrator, request_id, proposal):
 
 
 STATUS_ROWS = 20  # builds `build status` lists without --all
+
+
+@build.command('save')
+@click.argument('artifact')
+@click.option('--to', 'destination', help="Folder to save it to (default: the output folder; at a terminal you are "
+                                          "asked)")
+@pass_context
+def build_save(ctx: FrameworkContext, artifact: str, destination: Optional[str]):
+    """Save a finished build that waits in the framework's build folder (the GUI's Save...): ARTIFACT is its folder
+    as 'llm-cli deploy list-artifacts' shows it, its full path, or its id. On the same disk it is moved; onto
+    another disk every file is copied and checked by sha256 before the build folder's copy is removed."""
+    from orchestrator.Core.artifact_output import (BUILDS, DestinationRefused, build_folder, list_artifacts,
+                                                   output_folder, save_artifact)
+    from orchestrator.Core.build_service import artifact_id
+    from orchestrator.Core.knowledge_snapshots import size_text
+    ctx.require_framework()
+    fm = ctx.framework_manager
+    waiting = [a for a in list_artifacts(fm) if a.where == BUILDS]
+    given = Path(artifact).expanduser()
+    match = next((a for a in waiting if artifact in (a.label, a.label.split(":", 1)[1], artifact_id(a.key))
+                  or (given.is_absolute() and os.path.realpath(given) == os.path.realpath(a.path))), None)
+    if match is None:
+        console.print(f"[red]No finished build '{escape(artifact)}' waits in the framework's build folder "
+                      f"({escape(str(build_folder(fm)))}).[/red] 'llm-cli deploy list-artifacts' lists them.")
+        sys.exit(2)
+    if destination is None:
+        destination = str(output_folder(fm))
+        if _interactive():
+            destination = click.prompt("Save it to", default=destination, show_default=True)
+    try:
+        result = save_artifact(fm, match.path, destination, create=True)
+    except DestinationRefused as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
+        sys.exit(1)
+    how = "moved on the same disk, nothing copied" if result.renamed else \
+        "every copy checked against its original by sha256; not everything could be copied, so the build folder's " \
+        "copy stays" if result.kept else \
+        "every copy checked against its original by sha256, then the build folder's copy removed"
+    console.print(f"[green]Saved: {escape(str(result.folder))} ({result.files} files, {size_text(result.bytes)}; "
+                  f"{how}).[/green]")
+    if result.zip is not None:
+        console.print(f"Golden ZIP: {escape(str(result.zip))}")
+    for note in result.notes:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
 
 
 @build.command('status')
@@ -3486,7 +3563,28 @@ def knowledge_snapshots_list(ctx: FrameworkContext):
     for s in snapshots:
         table.add_row(escape(s.name), s.taken, size_text(s.size_bytes), escape(s.what), escape(str(s.path)))
     console.print(table)
+    _print_snapshot_disk(ctx, total)
     console.print(escape(KEEPING_NOTE))
+
+
+def _print_snapshot_disk(ctx: FrameworkContext, total: int) -> None:
+    """What the snapshots use against the free space of their disk, and whether the next one fits (eighth round,
+    answer 2: a snapshot that does not fit stops the change that needs it; nothing is deleted by itself)."""
+    from orchestrator.Core.knowledge_snapshots import FREE_SPACE_STEP, room_before, size_text
+    try:
+        room = room_before(ctx.framework_manager.config.user_state_dir)
+    except OSError:
+        return
+    if room is None or room.check is None:
+        return
+    console.print(f"The snapshots use {size_text(total)}; {size_text(room.free)} are free on that disk.")
+    if room.verdict == "does_not_fit":
+        console.print(f"[yellow]The next snapshot (about {size_text(room.estimate)}) does not fit: Deep Ingest, "
+                      f"restoring a snapshot and importing a knowledge pack are refused until there is room. "
+                      f"{escape(FREE_SPACE_STEP)}[/yellow]")
+    elif room.verdict == "tight":
+        console.print(f"[yellow]The next snapshot (about {size_text(room.estimate)}) still fits, but leaves little "
+                      "free space.[/yellow]")
 
 
 def _delete_snapshots_cli(ctx: FrameworkContext, names: Optional[Tuple[str, ...]]) -> None:
@@ -4021,31 +4119,32 @@ def _output_dir(ctx: FrameworkContext) -> Path:
 @deploy.command('list-artifacts')
 @pass_context
 def list_artifacts(ctx: FrameworkContext):
-    """List finished builds (from their manifests) in the output directory."""
-    from orchestrator.Core.deployment_manager import list_builds
+    """List finished builds (from their manifests): in the output folder, in the framework's build folder (not
+    saved yet; 'llm-cli build save' saves one) and in folders you saved them to."""
+    from orchestrator.Core.artifact_output import WHERE_TEXT, list_artifacts as listed_artifacts
     output_dir = _output_dir(ctx)
-    builds = list_builds(output_dir) if output_dir.exists() else []
+    builds = listed_artifacts(ctx.framework_manager)
     if not builds:
-        console.print(f"[yellow]No finished builds in {escape(str(output_dir))}.[/yellow]")
+        console.print(f"[yellow]No finished builds in {escape(str(output_dir))} or the framework's build folder."
+                      "[/yellow]")
         return
 
-    table = Table(title=f"Builds in {escape(str(output_dir))}")
+    table = Table(title=f"Finished builds (output folder: {escape(str(output_dir))})")
     table.add_column("Folder", style="bold yellow")
+    table.add_column("Where")
     table.add_column("Model")
     table.add_column("Format", style="cyan")
     table.add_column("Quantization")
     table.add_column("Board")
     table.add_column("Size (MB)", justify="right")
-    for info in builds:
-        folder = Path(info["path"])
-        try:
-            shown = str(folder.relative_to(output_dir))
-        except ValueError:
-            shown = str(folder)
+    table.add_column("Full path", overflow="fold")
+    for item in builds:
+        info, folder = item.info, item.path
         size_mb = sum(f.stat().st_size for f in folder.glob('**/*') if f.is_file()) / (1024 * 1024)
-        table.add_row(escape(shown), escape(str(info.get("model") or info.get("model_source") or "?")),
+        table.add_row(escape(item.label.split(":", 1)[1]), WHERE_TEXT.get(item.where, item.where),
+                      escape(str(info.get("model") or info.get("model_source") or "?")),
                       escape(str(info.get("format") or "?")), escape(str(info.get("quantization") or "-")),
-                      escape(str(info.get("board") or "-")), f"{size_mb:.2f}")
+                      escape(str(info.get("board") or "-")), f"{size_mb:.2f}", escape(str(folder)))
     console.print(table)
 
 @deploy.command('package')
@@ -4065,9 +4164,14 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
         sys.exit(1)
         
     output_dir = _output_dir(ctx)
-    # A folder from 'deploy list-artifacts' (relative to the output directory) or any existing path.
+    # A folder from 'deploy list-artifacts' (relative to the output folder or the framework's build folder) or any
+    # existing path.
     given = Path(artifact_name).expanduser()
     artifact_path = given.resolve() if given.is_absolute() or given.exists() else output_dir / artifact_name
+    if not artifact_path.exists():
+        from orchestrator.Core.artifact_output import build_folder
+        waiting = build_folder(ctx.framework_manager) / artifact_name
+        artifact_path = waiting if waiting.exists() else artifact_path
     
     docker_config = {"use_docker": docker}
     if docker:
@@ -5251,6 +5355,33 @@ def _effective_settings(config) -> Dict[str, Any]:
     return result
 
 
+@config.command('output-folder')
+@click.argument('folder', required=False)
+@pass_context
+def config_output_folder(ctx: FrameworkContext, folder: Optional[str]):
+    """Show or set the output folder finished models are saved to (default ~/llmcf/output, for example a folder on
+    a big second disk). Builds in the old folder stay where they are and stay listed."""
+    from orchestrator.Core.artifact_output import DestinationRefused, build_folder, output_folder, set_output_folder
+    ctx.require_framework()
+    fm = ctx.framework_manager
+    if folder is None:
+        console.print(f"Output folder: {escape(str(output_folder(fm)))}")
+        console.print(f"The framework's build folder (builds that are not saved yet, and earlier builds): "
+                      f"{escape(str(build_folder(fm)))}")
+        return
+    try:
+        chosen = set_output_folder(fm, folder)
+    except DestinationRefused as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
+        sys.exit(2)
+    except OSError:
+        console.print(f"[red]Not saved: {escape(str(Path(fm.config.config_dir) / 'config.yml'))} could not be "
+                      "updated (see the log); the output folder is unchanged.[/red]")
+        sys.exit(1)
+    console.print(f"[green]Output folder: {escape(str(chosen))}[/green] Builds in the old folder stay where they are "
+                  "and stay listed ('llm-cli deploy list-artifacts').")
+
+
 @config.command('repos')
 @click.option('--add', nargs=2, help="Add repo override: <name> <url>")
 @click.option('--remove', help="Remove repo override: <name>")
@@ -5440,6 +5571,13 @@ def zoo_install(ctx: FrameworkContext, pack_id: Optional[str], kind: str, file_p
         ctx.framework_manager.target_manager.initialize()
     console.print(f"[green]Installed {prepared.manifest.kind} {escape(prepared.manifest.id)} in "
                   f"{escape(str(dest))}[/green]")
+    if prepared.manifest.kind == "knowledge":  # N13: a snapshot first, and nothing imported without it
+        if getattr(cm, "last_sync_problem", ""):
+            console.print(f"[yellow]Not imported into the knowledge base yet: {escape(cm.last_sync_problem)}"
+                          "[/yellow]")
+        elif getattr(cm, "last_sync_snapshot", None):
+            console.print(f"The knowledge base was saved first as the snapshot {escape(cm.last_sync_snapshot)} "
+                          "('llm-cli knowledge snapshots' lists it).")
 
 
 @zoo.command('verify')

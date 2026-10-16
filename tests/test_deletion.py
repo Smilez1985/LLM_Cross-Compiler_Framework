@@ -28,6 +28,8 @@ STAGING = "bookkeeping: staging, quarantine or working folders the framework mad
 CONTAINERS = "bookkeeping: the containers the framework started for one build, removed when it ended"
 OWN_SERVER = "bookkeeping: state, key and log files of the framework's own local model server"
 NAME_ONLY = "never deletes an image: drops the per-build name once the image carries its last-build name"
+MOVED = ("a move the person chose (save dialog, Save..., llm-cli build save): the build folder's copy goes only after "
+         "every file arrived and matched its original by sha256; the artifact itself is kept (eighth round, answer 3)")
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
 
 DELETION_SITES = {
@@ -49,6 +51,7 @@ DELETION_SITES = {
     ("orchestrator/utils/input_history.py", "InputHistory.clear"): PERSON_LIST,
     # (the chat: FeedStore.clear_conversation and ChatHistory.clear delete rows and messages, not files; see below)
     ("orchestrator/Core/builder.py", "BuildEngine._keep_as_last_build"): NAME_ONLY,
+    ("orchestrator/Core/artifact_output.py", "_remove_moved_source"): MOVED,
     # temporary and partial files
     ("orchestrator/Core/build_records.py", "write_record"): TEMP,
     ("orchestrator/Core/client_proposals.py", "ClientProposalStore._write"): TEMP,
@@ -65,6 +68,7 @@ DELETION_SITES = {
     ("orchestrator/Core/vault_key.py", "write_private"): TEMP,
     ("orchestrator/Core/deployment_manager.py", "DeploymentManager.create_package"): TEMP,
     ("orchestrator/Core/knowledge_snapshots.py", "_copy_checked"): TEMP,   # an export's unfinished copy
+    ("orchestrator/Core/artifact_output.py", "_copy_verified"): TEMP,      # a save's unfinished copy
     ("orchestrator/Core/hf_hub.py", "HubFetcher._download_range"): TEMP,
     ("orchestrator/Core/hf_hub.py", "HubFetcher.fetch_file"): TEMP,
     ("orchestrator/gui/gui_state.py", "GuiState.save"): TEMP,

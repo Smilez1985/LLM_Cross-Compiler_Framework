@@ -33,7 +33,8 @@ REASONS = {
 }
 # The person's lists Mojo Miracle opens at a terminal for a deletion finding (the framework's build images, WP7), and
 # where the person finds that list otherwise.
-DELETION_LISTS = {"disk.cache": "framework_images", "disk.output": "framework_images"}
+DELETION_LISTS = {"disk.cache": "framework_images", "disk.output": "framework_images",
+                  "disk.builds": "framework_images"}
 DELETION_WHERE = ("you choose what is deleted: 'llmcf mojo --miracle' in a terminal, or Tools > Framework Build "
                   "Images... in the GUI")
 _CLASS_VERDICT = {"delegable": "miracle", "person_deletion": "deletion_list", "manual": "admin"}

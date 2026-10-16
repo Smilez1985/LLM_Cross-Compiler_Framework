@@ -222,10 +222,14 @@ ihn zur Laufzeit nicht; wofür jede Datei in `configs/` da ist, steht in
 | Einstellungsordner (meist `configs/`) | `config.yml` (Benutzereinstellungen); auf Wunsch eine eigene `llm_providers.yml`, die Anbietervorlagen ergänzt oder ersetzt. |
 | `chat_feed.sqlite` im Benutzerordner (unveröffentlicht) | Der Chat-Verlauf: was der Chat-Bereich rechts zeigt (deine Nachrichten, Dittos Antworten, wartende Fragen, Entscheidungen einer KI mit ihrer Begründung, Ergebnisse von Arbeit, die eine KI gestartet hat). Jede Zeile ist signiert; nichts darin wird von selbst gelöscht. |
 
-`cache/`, `output/` und `models/` sind relativ zum Installationsordner, sofern die Einstellungen `cache_dir`,
-`output_dir` und `models_dir` nichts anderes sagen. Darf der Benutzer im Installationsordner nicht schreiben (zum
-Beispiel `C:\Program Files`), liegen ihre Vorgaben stattdessen im Benutzerordner (`ConfigManager.default_data_root`).
-Keiner von ihnen wird beim Start angelegt; ein Build, ein Download oder die Wissensbasis legt an, was sie nutzen.
+`cache/`, `output/` (der Build-Ordner des Frameworks) und `models/` sind relativ zum Installationsordner, sofern die
+Einstellungen `cache_dir`, `build_dir` und `models_dir` nichts anderes sagen. Darf der Benutzer im Installationsordner
+nicht schreiben (zum Beispiel `C:\Program Files`), liegen ihre Vorgaben stattdessen im Benutzerordner
+(`ConfigManager.default_data_root`). Fertige Modelle (Golden-Artefakte) werden im Ausgabeordner gespeichert,
+Einstellung `output_dir`, Standard `~/llmcf/output` (unveröffentlicht; siehe
+[Funktionen](Features_DE.md#wohin-fertige-modelle-kommen)); ein in der GUI gestarteter Build wartet im Build-Ordner,
+bis er gespeichert ist, und frühere Builds bleiben dort aufgelistet. Keiner von ihnen wird beim Start angelegt; ein
+Build, ein Download oder die Wissensbasis legt an, was sie nutzen.
 
 ## Datenflüsse
 

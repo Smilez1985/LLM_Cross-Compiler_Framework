@@ -15,8 +15,8 @@ from orchestrator.Core.mojo.findings import MojoReport, Severity
 
 
 def ai_folder_labels(framework) -> Dict[str, str]:
-    """The framework's own folders by the label an AI may read: state (the per-user folder), cache, output, models,
-    targets, community and framework (the installation)."""
+    """The framework's own folders by the label an AI may read: state (the per-user folder), cache, output, builds
+    (the framework's build folder), models, targets, community and framework (the installation)."""
     roots: Dict[str, str] = {}
 
     def add(path: Any, label: str) -> None:
@@ -35,7 +35,8 @@ def ai_folder_labels(framework) -> Dict[str, str]:
     add(getattr(engine, "cache_dir", None), "cache")
     add(getattr(engine, "output_dir", None), "output")
     resolve = getattr(framework, "resolve_path", None)
-    for key, label in (("cache_dir", "cache"), ("output_dir", "output"), ("models_dir", "models")):
+    for key, label in (("cache_dir", "cache"), ("output_dir", "output"), ("build_dir", "builds"),
+                       ("models_dir", "models")):
         try:
             value = config.get(key, None) if config is not None else None
             if value:

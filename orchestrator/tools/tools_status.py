@@ -55,7 +55,7 @@ READ_ONLY = ("max_concurrent_builds", "build_timeout", "auto_cleanup", "log_leve
              "gui_refresh_interval", "api_enabled") + OVERSIGHT
 URL_KEYS = ("qdrant_url", "community_index_url", "community_repo", "docker_registry", "source_repositories")
 FOLDER_KEYS = {"targets_dir": "targets", "models_dir": "models", "datasets_dir": "datasets", "output_dir": "output",
-               "cache_dir": "cache", "logs_dir": "logs", "default_calibration_dataset": "datasets"}
+               "build_dir": "builds", "cache_dir": "cache", "logs_dir": "logs", "default_calibration_dataset": "datasets"}
 READABLE = WRITABLE + READ_ONLY + URL_KEYS + tuple(FOLDER_KEYS)
 NOT_A_VALUE = ("", "default", "null", "none", "reset", "unset")
 SETTINGS_PER_HOUR = 10

@@ -500,6 +500,9 @@ class LLMOrchestrator:
                     job.error_log = "Build vanished"
                     return False
                 if status.status == BuildStatus.COMPLETED:
+                    published = getattr(status, "published", None)
+                    if isinstance(published, str) and published:
+                        job.output_path = published  # next to the planned folder when an earlier build is there
                     return True
                 if status.status == BuildStatus.CANCELLED:
                     job.error_log = "Cancelled by the user."

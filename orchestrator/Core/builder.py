@@ -37,7 +37,7 @@ from docker.models.images import Image
 from docker.types import DeviceRequest
 
 from orchestrator import __version__
-from orchestrator.Core import build_records
+from orchestrator.Core import build_identity, build_records
 from orchestrator.tools import local_files
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
@@ -231,6 +231,8 @@ class BuildProgress:
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     artifacts: List[str] = field(default_factory=list)
+    # The folder the build was published to: its planned folder, or next to it ("-2") when an earlier build is there
+    published: Optional[str] = None
     
     def add_log(self, message: str, level: str = "INFO"):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -316,6 +318,10 @@ class BuildEngine:
         self.targets_dir = self.base_dir / Path(str(self._get_conf("targets_dir", "targets"))).expanduser()
         self.models_dir = self.base_dir / Path(str(self._get_conf("models_dir", "models"))).expanduser()
         self.output_dir = self.base_dir / Path(str(self._get_conf("output_dir", "output"))).expanduser()
+        # The framework's build folder (GUI builds wait there to be saved; artifact_output): build_dir, else the same
+        # folder as the output folder (a configuration without it)
+        self.build_dir = self.base_dir / Path(str(self._get_conf("build_dir", None)
+                                                  or self._get_conf("output_dir", "output"))).expanduser()
         self.cache_dir = self.base_dir / Path(str(self._get_conf("cache_dir", "cache"))).expanduser()
         # One record per build for `llm-cli build status` in other processes (see build_records).
         self.records_dir = build_records.records_dir(self.cache_dir)
@@ -734,7 +740,9 @@ class BuildEngine:
         from orchestrator.Core.disk_plan import gb
         free = []
         output = self.base_dir / Path(str(self._get_conf("output_dir", "output"))).expanduser()
-        for label, folder in (("cache", Path(self.cache_dir)), ("output", output)):
+        builds = Path(getattr(self, "build_dir", output))
+        for label, folder in (("cache", Path(self.cache_dir)), ("output", output),
+                              *((("builds", builds),) if builds != output else ())):
             try:
                 free.append(f"{label} disk {gb(shutil.disk_usage(folder if folder.exists() else folder.parent).free)} "
                             "free")
@@ -1614,13 +1622,30 @@ class BuildEngine:
         except OSError:
             shutil.move(str(src), str(dst))
 
+    @staticmethod
+    def _free_folder(dst: Path) -> Path:
+        """The folder a build is published to: `dst`, or dst-2, dst-3, ... next to it when an earlier finished build
+        (its manifest or its golden ZIP) is there. A golden artifact is never replaced by another build (eighth round,
+        answer 3: golden artifacts are deleted only by the person)."""
+        def taken(folder: Path) -> bool:
+            return (folder / BUILD_MANIFEST).exists() or os.path.lexists(folder.parent / f"{folder.name}.zip")
+
+        candidate, n = dst, 1
+        while taken(candidate):
+            n += 1
+            candidate = dst.with_name(f"{dst.name}-{n}")
+        return candidate
+
     def _publish_artifacts(self, config: BuildConfiguration, progress: BuildProgress):
-        """Moves the staged files into the output folder (the manifest last) and the ZIP next to it.
-        Files of earlier builds in that folder are replaced only now."""
+        """Moves the staged files into the output folder (the manifest last) and the ZIP next to it. When an earlier
+        build is in that folder, this one goes next to it (_free_folder): nothing of an earlier build is replaced."""
         root = self._staging_root(config)
         if not root.is_dir():
             return
-        staged, dst = self._staged_output(config), Path(config.output_dir)
+        staged, planned = self._staged_output(config), Path(config.output_dir)
+        dst = self._free_folder(planned)
+        if dst != planned:
+            progress.add_log(f"An earlier build is in {planned}; this build goes next to it: {dst}")
         files = sorted((f for f in staged.rglob("*") if f.is_file()),
                        key=lambda f: (f.name == BUILD_MANIFEST, str(f))) if staged.is_dir() else []
         ensure_directory(dst)
@@ -1628,10 +1653,26 @@ class BuildEngine:
             target = dst / f.relative_to(staged)
             ensure_directory(target.parent)
             self._move(f, target)
-        archive = root / f"{dst.name}.zip"
+        archive = root / f"{planned.name}.zip"
         if archive.is_file():
-            self._move(archive, dst.parent / archive.name)
-            progress.add_log(f"✅ Golden Artifact created: {dst.parent / archive.name}")
+            self._move(archive, dst.parent / f"{dst.name}.zip")
+            progress.add_log(f"✅ Golden Artifact created: {dst.parent / f'{dst.name}.zip'}")
+        if dst != planned:  # the artifacts are where they were published
+            moved = []
+            for item in progress.artifacts:
+                path = Path(item)
+                if path == planned.parent / f"{planned.name}.zip":
+                    moved.append(str(dst.parent / f"{dst.name}.zip"))
+                    continue
+                try:
+                    moved.append(str(dst / path.relative_to(planned)))
+                except ValueError:
+                    moved.append(item)
+            progress.artifacts[:] = moved
+            info = self._records.get(config.build_id)
+            if info is not None:
+                info["output_dir"] = str(dst)
+        progress.published = str(dst)
         shutil.rmtree(root, ignore_errors=True)
 
     def _copy_file(self, src: Path, dst: Path, progress: BuildProgress):
@@ -1713,6 +1754,8 @@ class BuildEngine:
         primary = max(preferred, key=lambda a: a["bytes"])["file"] if preferred else None
         # Several weight files or bare safetensors/bin weights need their sidecar files (config, tokenizer).
         multi_file = len(preferred) > 1 or bool(primary and primary.lower().endswith((".safetensors", ".bin")))
+        dataset = self._dataset_ref(config, progress)
+        options = self._build_options(config, info, dataset)
         info.update({
             "build_id": config.build_id,
             # A local model an AI caller pinned is recorded by its label, never its host path (it reaches AI callers)
@@ -1733,11 +1776,40 @@ class BuildEngine:
             "toolchain_image": config.toolchain_image,
             "llama_cpp_tools": config.llama_cpp_tools,
             "max_context_length": config.max_context_length,
-            "dataset": self._dataset_ref(config, progress),
+            "dataset": dataset,
             "lcf_version": __version__,
+            # Every option this build was made with: an identical build is found by them (eighth round, N11)
+            build_identity.MANIFEST_KEY: options,
+            build_identity.DIGEST_KEY: build_identity.options_sha256(options),
         })
         manifest_path.write_text(json.dumps(info, indent=2), encoding="utf-8")
         return info
+
+    @staticmethod
+    def _build_options(config: BuildConfiguration, info: Dict[str, Any],
+                       dataset: Optional[Dict[str, str]]) -> Dict[str, Any]:
+        """The chosen options of this build (build_identity): a Hugging Face model by its repo id and the commit that
+        was fetched, a local model by its weights files (name, size, time; never its path), the target and the sha256
+        of its folder, board, format, quantization, importance matrix, calibration data, optimization, context
+        length, GPU use and task."""
+        pin = getattr(config.local_inputs, "model", None)
+        local, is_local = None, pin is not None  # a local model is never named by its path here (AIs read manifests)
+        if pin is not None:
+            local = Path(pin.path) if getattr(pin, "path", None) else None
+        elif config.local_inputs is None and config.model_source:
+            candidate = Path(config.model_source).expanduser()
+            if candidate.exists():
+                local, is_local = candidate.resolve(), True
+        return build_identity.build_options(
+            model=None if is_local else config.model_source,
+            revision=None if is_local else config.model_revision,
+            weights=build_identity.local_weights(local) if local is not None else None,
+            target=config.target_arch, target_sha256=config.target_pack_sha256,
+            board=config.target_board or info.get("board"), fmt=config.target_format.value,
+            quantization=config.quantization or info.get("quantization"),
+            imatrix=bool(config.use_imatrix and config.target_format == ModelFormat.GGUF),
+            dataset_sha256=(dataset or {}).get("sha256"), optimization=config.optimization_level.value,
+            max_context_length=config.max_context_length, use_gpu=config.use_gpu, model_task=config.model_task)
 
     def _dataset_ref(self, config: BuildConfiguration, progress: Optional[BuildProgress]) -> Optional[Dict[str, str]]:
         path = Path(config.dataset_path) if config.dataset_path else None

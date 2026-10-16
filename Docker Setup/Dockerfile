@@ -97,6 +97,7 @@ RUN PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv
 ENV LLM_FRAMEWORK_HOME=/data/home \
     LLM_FRAMEWORK_CONFIG_DIR=/data/config \
     LLM_FRAMEWORK_OUTPUT_DIR=/data/output \
+    LLM_FRAMEWORK_BUILD_DIR=/data/builds \
     LLM_FRAMEWORK_CACHE_DIR=/data/cache \
     LLM_FRAMEWORK_MODELS_DIR=/data/models \
     LLM_FRAMEWORK_DATASETS_DIR=/data/datasets \

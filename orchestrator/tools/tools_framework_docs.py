@@ -79,15 +79,22 @@ def folder_size(folder: Path) -> int:
 
 def snapshot_space(rag, disk_usage=None) -> List:
     """The disk check (disk_plan.DiskCheck per file system) of the snapshot taken before the index: about the size of
-    the largest snapshot so far or of the knowledge base's own storage folder, whichever is larger (the storage holds
-    the excerpts and vectors a snapshot writes, so the first snapshot is checked too). A check that does not fit
+    the largest snapshot so far or of the next snapshot as the knowledge base estimates it (rag.snapshot_estimate, the
+    same estimate create_snapshot checks), whichever is larger, so the first snapshot is checked too. When the
+    knowledge base cannot give an estimate, the size of its own storage folder stands in. A check that does not fit
     means: nothing is indexed (no snapshot, no "continue anyway"); "tight" is a situation warning. Its sentences name
     labels, never a path."""
     from orchestrator.Core.disk_plan import DiskNeed, check_disk
     folder = Path(rag.snapshot_dir)
     largest = max((files_size([p]) for p in folder.glob("*.jsonl.gz")), default=0) if folder.is_dir() else 0
-    storage = getattr(rag, "storage_dir", None)
-    held = folder_size(Path(storage)) if storage is not None else 0
+    estimate = getattr(rag, "snapshot_estimate", None)
+    try:
+        held = int(estimate()) if callable(estimate) else None
+    except Exception:  # the knowledge base cannot be read now: its storage folder gives the size
+        held = None
+    if held is None:
+        storage = getattr(rag, "storage_dir", None)
+        held = folder_size(Path(storage)) if storage is not None else 0
     return check_disk([DiskNeed("knowledge snapshots", folder, max(largest, held), "snapshot taken first")],
                       disk_usage=disk_usage)
 

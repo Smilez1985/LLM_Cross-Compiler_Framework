@@ -106,8 +106,11 @@ TEXTS = {
         "blocker.trash_not_yours": "You deleted this yourself, so only you can restore it.",
         "blocker.file_outside_folders": "The file is outside the folders you shared.",
         "blocker.file_changed": "The file changed in the meantime.",
+        "blocker.snapshot_no_room": "The backup of the knowledge base taken first does not fit on the disk.",
         # --- what the person can do ---
         "action.free_disk": "Free disk space (old builds, the model cache, the trash), or choose a smaller model.",
+        "action.free_snapshots": "Delete or export knowledge snapshots you no longer need (Tools > Knowledge "
+                                 "Snapshots...), or free space on that disk otherwise.",
         "action.offline_off": "Switch offline mode off in Settings, or use a model already on this computer.",
         "action.sandbox_on": "Switch the build sandbox on in Settings.",
         "action.knowledge_on": "Switch the knowledge base on in Settings.",
@@ -271,9 +274,13 @@ TEXTS = {
         "blocker.trash_not_yours": "Du hast das selbst gelöscht, deshalb kannst nur du es wiederherstellen.",
         "blocker.file_outside_folders": "Die Datei liegt außerhalb der Ordner, die du freigegeben hast.",
         "blocker.file_changed": "Die Datei hat sich inzwischen geändert.",
+        "blocker.snapshot_no_room": "Die Sicherung der Wissensbasis, die zuerst angelegt wird, passt nicht auf die "
+                                    "Festplatte.",
         # --- was die Person tun kann ---
         "action.free_disk": "Speicherplatz freigeben (alte Builds, den Modell-Cache, den Papierkorb) oder ein "
                             "kleineres Modell wählen.",
+        "action.free_snapshots": "Wissens-Snapshots, die du nicht mehr brauchst, löschen oder exportieren (Tools > "
+                                 "Knowledge Snapshots...) oder auf dieser Festplatte anders Platz schaffen.",
         "action.offline_off": "Den Offline-Modus in den Einstellungen ausschalten oder ein Modell nehmen, das schon "
                               "auf diesem Computer ist.",
         "action.sandbox_on": "Die Build-Sandbox in den Einstellungen einschalten.",

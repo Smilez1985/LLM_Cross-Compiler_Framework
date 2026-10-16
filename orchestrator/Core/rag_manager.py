@@ -26,8 +26,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-from orchestrator.Core.knowledge_snapshots import (SUFFIX, delete_snapshots, list_snapshots, snapshot_files,
-                                                   snapshot_plan)
+from orchestrator.Core.knowledge_snapshots import (SUFFIX, SnapshotNoRoom, delete_snapshots, list_snapshots,
+                                                   require_room, snapshot_files, snapshot_plan, snapshot_room)
 from orchestrator.rag.chunking import PREAMBLE_RESERVE_TOKENS, chunk_document, passage_text, point_id
 from orchestrator.rag.embeddings import (DenseEmbedder, EmbeddingModelSpec, FastEmbedDenseEmbedder,
                                          FastEmbedSparseEmbedder, SparseEmbedder, check_vectors, recommend_model,
@@ -271,6 +271,7 @@ class RAGManager:
         self._sparse = sparse_embedder
         self.model_reason = "provided by the caller" if embedder is not None else ""
         self.last_error = ""
+        self.last_snapshot_room = None  # the disk room of the last snapshot looked at (knowledge_snapshots.SnapshotRoom)
         self.idle_close_seconds = self.IDLE_CLOSE_SECONDS
         self._lock = threading.RLock()
         self._idle_timer: Optional[threading.Timer] = None
@@ -632,7 +633,10 @@ class RAGManager:
         if not self._connect():
             return {"success": False, "outcome": "failure",
                     "message": f"Knowledge base unavailable: {self.last_error}"}
-        snapshot = self.create_snapshot(f"pre_ingest_{int(time.time())}")  # None while the base is empty
+        try:
+            snapshot = self.create_snapshot(f"pre_ingest_{int(time.time())}", "a Deep Ingest")  # None while empty
+        except SnapshotNoRoom as e:  # no snapshot, so no crawl either: there is no "continue anyway"
+            return dict(self._crawl_result(None, 0, 0, str(e)), snapshot=None, blocker=e.blocker)
 
         crawler, pages, chunks, error = None, 0, 0, None
         try:
@@ -699,8 +703,13 @@ class RAGManager:
         except KnowledgeBaseError as e:
             self._fail(e)
             return {"success": False, "message": str(e), "count": 0}
-        snapshot = self.create_snapshot(f"pre_codebase_{int(time.time())}")  # None while the base is empty
-        if held and not snapshot:  # no undo point (a full disk): nothing is written, never "continue anyway"
+        try:  # None while the base is empty
+            snapshot = self.create_snapshot(f"pre_codebase_{int(time.time())}", "the framework's own documents are "
+                                                                                  "indexed")
+        except SnapshotNoRoom as e:  # no room for the undo point on the disk: nothing is indexed (eighth round, 2)
+            return {"success": False, "count": 0, "chunks": 0, "files": len(files), "snapshot": None,
+                    "snapshot_failed": True, "stopped": False, "message": str(e), "blocker": e.blocker}
+        if held and not snapshot:  # no undo point (not written): nothing is indexed, never "continue anyway"
             return {"success": False, "count": 0, "chunks": 0, "files": len(files), "snapshot": None,
                     "snapshot_failed": True, "stopped": False,
                     "message": "The snapshot of the knowledge base taken first could not be made, so nothing was "
@@ -751,14 +760,38 @@ class RAGManager:
 
     # --- SNAPSHOT & ROLLBACK ---
 
-    def create_snapshot(self, name: Optional[str] = None) -> Optional[str]:
+    def create_snapshot(self, name: Optional[str] = None, before: str = "the change") -> Optional[str]:
         """Saves the active collection (vectors included) to a file; returns its name, None if empty or failed.
         No snapshot is ever deleted here, on any channel, and there is no limit (DECISIONS, sixth round: as many as
-        the disk holds); the person deletes or exports them, with the full list (`llm-cli knowledge snapshots`)."""
+        the disk holds); the person deletes or exports them, with the full list (`llm-cli knowledge snapshots`).
+        Its size is estimated first (eighth round, answer 2): when it does not fit on the disk, SnapshotNoRoom (the
+        caller does not make its change either, there is no "continue anyway"); when it fits but leaves little free
+        space, last_snapshot_room says so (verdict tight) and the snapshot is made. `before`: the change it backs up,
+        as the refusal names it. A name that is taken (two snapshots in one second) gets "-2", "-3": an earlier
+        snapshot is never written over."""
         name = sanitize_filename(name or f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}") or "snapshot"
+        base, n = name, 1
+        while os.path.lexists(self.snapshot_dir / f"{name}{SUFFIX}"):
+            n += 1
+            name = f"{base}-{n}"
         path = self.snapshot_dir / f"{name}{SUFFIX}"
+        self.last_snapshot_room = None
+
+        def export(store) -> int:
+            if not store.count():
+                return 0
+            room = self.snapshot_room(store.export_estimate())
+            self.last_snapshot_room = room
+            require_room(room, before)
+            if room.verdict == "tight":
+                self.logger.warning(f"Knowledge snapshot {name}: the disk is tight ({room.sentence()}).")
+            return store.export_file(path)
+
         try:
-            count = self._with_store(lambda store: store.export_file(path) if store.count() else 0)
+            count = self._with_store(export)
+        except SnapshotNoRoom as e:
+            self.logger.warning(str(e))
+            raise
         except KnowledgeBaseError as e:
             self._fail(e)
             return None
@@ -766,6 +799,18 @@ class RAGManager:
             return None
         self.logger.info(f"Knowledge base snapshot {name}: {count} chunks.")
         return name
+
+    def snapshot_room(self, estimate: Optional[int] = None):
+        """The room on the disk for the next snapshot (knowledge_snapshots.SnapshotRoom): of `estimate` bytes, or as
+        estimated from the knowledge base itself (0 when it is empty). Never deletes anything."""
+        if estimate is None:
+            estimate = self.snapshot_estimate()
+        return snapshot_room(self.snapshot_dir, int(estimate or 0), self._state_dir())
+
+    def snapshot_estimate(self) -> int:
+        """The bytes the next snapshot would take (0 when the knowledge base is empty); KnowledgeBaseError when it
+        cannot be read."""
+        return int(self._with_store(lambda store: store.export_estimate()) or 0)
 
     def _snapshot_files(self) -> List[Path]:
         return snapshot_files(self.snapshot_dir)
@@ -795,6 +840,7 @@ class RAGManager:
         happened. `proceed` is asked after the backup, right before the knowledge base is replaced: False (the job was
         cancelled) leaves the knowledge base as it was."""
         self.last_backup, self.last_restored_chunks, self.last_restore_problem = None, 0, ""
+        self.last_restore_blocker = ""  # snapshot_no_room when the backup did not fit on the disk
         path = self.snapshot_dir / f"{sanitize_filename(snapshot_name)}.jsonl.gz"
         if not path.is_file():
             self.logger.error(f"Snapshot {snapshot_name} not found.")
@@ -808,7 +854,11 @@ class RAGManager:
             return False
         if current:
             name = backup or f"pre_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            self.last_backup = self.create_snapshot(name)
+            try:
+                self.last_backup = self.create_snapshot(name, "the restore")
+            except SnapshotNoRoom as e:
+                self.last_restore_problem, self.last_restore_blocker = str(e), e.blocker
+                return False
             if not self.last_backup:
                 self.last_restore_problem = "the backup of the current knowledge base could not be written"
                 self.logger.error(f"Snapshot {snapshot_name} not restored: {self.last_restore_problem}.")

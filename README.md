@@ -196,7 +196,8 @@ In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm
 | What | Where |
 |---|---|
 | Program and Python environment | Linux: `/opt/llm-conversion-framework` · Windows: `C:\Program Files\LLM-Conversion-Framework` |
-| Builds, cache, downloaded models | `output/`, `cache/` and `models/` in the installation folder if your user may write there (Linux), otherwise in the personal folder below (Windows: `%USERPROFILE%\.llm-framework\output` and so on); created when they are first needed. The settings `output_dir`, `cache_dir` and `models_dir` set other folders |
+| Finished models | The output folder `~/llmcf/output` (Windows: `%USERPROFILE%\llmcf\output`), set once with **File > Output Folder...** or `llm-cli config output-folder`; in the GUI a save dialog opens there for every finished build (unreleased) |
+| Builds not saved yet, cache, downloaded models | `output/` (the framework's build folder; earlier builds stay there and stay listed), `cache/` and `models/` in the installation folder if your user may write there (Linux), otherwise in the personal folder below (Windows: `%USERPROFILE%\.llm-framework\output` and so on); created when they are first needed. The settings `build_dir`, `cache_dir` and `models_dir` set other folders |
 | Settings (`config.yml`) | `configs/` in the installation folder if your user may write there, otherwise the personal folder below; `LLM_FRAMEWORK_CONFIG_DIR` sets another folder |
 | Personal state: tool permissions, audit log, SSH key and known devices, MCP token, chat history, input history, knowledge base, local model server, community index cache | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` sets another folder |
 | API keys and tokens | encrypted in `~/.llm-framework/secrets.store`; the key for it is kept in your operating system's keyring, or as you choose with the setting `secret_storage` |
@@ -374,8 +375,9 @@ llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t Rockchip -f gguf -
 llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
 ```
 
-- Results go to `output/build_<date>_<time>/Rockchip/<model>/<quantization>/` (model file, `build_info.json`,
-  `Model_Card.md`). `-o/--output-dir` sets another folder.
+- Results go to the output folder, `~/llmcf/output/Rockchip/<model>/<quantization>/` (model file, `build_info.json`,
+  `Model_Card.md`, and the ZIP next to it). At a terminal you are asked first, with the output folder as the default;
+  `-o/--output` sets another folder (unreleased; before, `output/build_<date>_<time>/` in the installation).
 - A combination the target does not support stops before anything runs, with exit code 2 and the reason (for
   example "Format 'rkllm' does not run on rk3566").
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token` (asks for the value).

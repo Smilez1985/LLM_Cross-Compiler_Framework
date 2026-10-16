@@ -71,6 +71,8 @@ class WarningSpec:
 _PAIR = "action.pair_device"
 BLOCKERS: Dict[str, BlockerSpec] = {
     "disk_full": BlockerSpec("insufficient_resources", person_action="action.free_disk"),
+    # the knowledge snapshot taken before a change does not fit (eighth round, answer 2): no snapshot, no change
+    "snapshot_no_room": BlockerSpec("insufficient_resources", person_action="action.free_snapshots"),
     "offline_mode": BlockerSpec("needs_person", person_action="action.offline_off", also=("not_supported",)),
     "sandbox_off": BlockerSpec("needs_person", person_action="action.sandbox_on"),
     "knowledge_off": BlockerSpec("not_supported", person_action="action.knowledge_on", also=("needs_person",)),
@@ -269,7 +271,8 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
         _FS({"pickle_weights", "facts_unknown", "gated_model", "base_model_gated", "license_restrictive",
              "license_unknown"}), "downloads", "running: stop; done: move the file to the trash"),
     "add_pack_from_index": ToolFacts(
-        _FS({"offline_mode", "index_stale", "pack_unknown", "pack_revoked", "pack_rejected", "disk_full"}),
+        _FS({"offline_mode", "index_stale", "pack_unknown", "pack_revoked", "pack_rejected", "disk_full",
+             "snapshot_no_room"}),
         _FS({"disk_tight"}),
         _FS({"target_pack_community", "base_image_unofficial", "base_image_unpinned", "vendor_soft_cap_exceeded"}),
         "downloads", "remove the pack (deletion dialog)"),
@@ -277,11 +280,13 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                              "delete the exported file (deletion dialog)"),
     "crawl_docs_site": ToolFacts(
         _FS({"ingest_notice_unread", "offline_mode", "knowledge_off", "url_not_public", "crawl_caps", "crawl_quota",
-             "crawl_running"}),
-        # no warning counts knowledge snapshots: they have no limit and none is deleted by itself (sixth round)
-        _FS({"embedding_model_download", "many_pages"}), _FS(), "knowledge",
+             "crawl_running", "snapshot_no_room"}),
+        # no warning counts knowledge snapshots: they have no limit and none is deleted by itself (sixth round); the
+        # disk room of the snapshot taken first is checked (eighth round, answer 2)
+        _FS({"embedding_model_download", "many_pages", "disk_tight"}), _FS(), "knowledge",
         "running: stop; done: restore the snapshot taken before (backup first)"),
-    "restore_knowledge_snapshot": ToolFacts(_FS({"snapshot_unknown", "knowledge_off", "disk_full"}), _FS(), _FS(),
+    "restore_knowledge_snapshot": ToolFacts(_FS({"snapshot_unknown", "knowledge_off", "disk_full",
+                                                 "snapshot_no_room"}), _FS({"disk_tight"}), _FS(),
                                             "knowledge", "restore the backup snapshot"),
     "index_framework_docs": ToolFacts(_FS({"knowledge_off", "disk_full"}), _FS({"disk_tight"}), _FS(), "knowledge",
                                       "running: stop; done: restore the snapshot taken before (backup first)"),

@@ -343,6 +343,28 @@ class TestExportsAndDocs:
             assert "index-docs" in text, name
 
 
+def test_the_snapshot_check_uses_the_knowledge_bases_own_estimate(tmp_path):
+    """The check before the index uses the estimate create_snapshot checks (rag.snapshot_estimate), so a knowledge
+    base on a Qdrant server, which has no storage folder here, is checked too; only when no estimate can be read does
+    the storage folder stand in."""
+    from orchestrator.tools.tools_framework_docs import snapshot_space
+    rag = SimpleNamespace(snapshot_dir=tmp_path / "snaps", storage_dir=None, snapshot_estimate=lambda: 5 * GB)
+    (short,) = snapshot_space(rag, disk(3))
+    assert not short.fits and short.needed == 5 * GB
+    (roomy,) = snapshot_space(rag, disk(90))
+    assert roomy.fits
+
+    def unreadable():
+        raise RuntimeError("the knowledge base is busy")
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    with open(storage / "collection.bin", "wb") as f:
+        f.truncate(7 * 1000 ** 2)
+    (fallback,) = snapshot_space(SimpleNamespace(snapshot_dir=tmp_path / "snaps", storage_dir=storage,
+                                                 snapshot_estimate=unreadable), disk(90))
+    assert fallback.needed == 7 * 1000 ** 2
+
+
 def test_the_gui_action_asks_with_no_as_default_and_plain_text(qapp, tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QMessageBox, QWidget

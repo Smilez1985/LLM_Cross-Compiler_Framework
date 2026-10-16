@@ -455,6 +455,7 @@ class BuilderTab(QWidget):
         self.btn_cancel.clicked.connect(self._cancel_build)
         left_col.addWidget(self.btn_cancel)
         self._active_request = None
+        self._save_workers = []  # running saves of finished builds (kept until they end)
         self._build_timer = QTimer(self)
         self._build_timer.setInterval(1500)
         self._build_timer.timeout.connect(self._poll_build)
@@ -890,10 +891,10 @@ class BuilderTab(QWidget):
             self._log(f"AI Failed: {msg}")
 
     def _submit_build(self):
-        get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
-        output_dir = get_cfg("output_dir", "output")
-        if hasattr(self.framework, "resolve_path"):
-            output_dir = str(self.framework.resolve_path(output_dir))  # same folder the deployment window lists
+        from orchestrator.Core.artifact_output import build_folder
+        # A build the person starts here waits in the framework's build folder; when it has finished, the save dialog
+        # opens at the output folder (eighth round, answer 3). The deployment window lists both folders.
+        output_dir = str(build_folder(self.framework))
 
         # Check the request against the target's capabilities before starting a long build, and submit
         # exactly the values that were checked (an empty field means the board's default type).
@@ -919,6 +920,8 @@ class BuilderTab(QWidget):
 
         model = self.model_input.currentText().strip()
         dataset = self.dataset_path
+        if not self._decide_about_earlier(model, board, quant, target_fmt, opt_lvl, recipe, dataset):
+            return
         req = BuildRequest(
             request_id="",
             workflow_type=WorkflowType.SIMPLE_CONVERSION,
@@ -953,6 +956,65 @@ class BuilderTab(QWidget):
             self._set_state("fail")
             self._log(f"Submission Error: {e}")
 
+    def _earlier_builds(self, model, board, quant, target_fmt, opt_lvl, recipe, dataset):
+        """Finished builds with 100 % the same options (eighth round, N11). The commit of a Hugging Face model's
+        default branch is looked up (once, without the file list, never in offline mode) only when an earlier build
+        could be identical; [] when nothing can be told."""
+        service = self._build_service()
+        if service is None or not hasattr(service, "earlier_builds"):
+            return []
+        from orchestrator.schemas.build import BuildRequestIn
+        try:
+            request = BuildRequestIn(model=model, revision=recipe.model.revision if recipe else None,
+                                     target=self.target_combo.currentData(), format=target_fmt.value, board=board,
+                                     quantization=quant, use_imatrix=self.chk_imatrix.isChecked(),
+                                     dataset_path=dataset, use_gpu=self.chk_gpu.isChecked(),
+                                     max_context_length=recipe.options.max_context_length if recipe else None)
+            level = getattr(opt_lvl, "value", "balanced")
+            found = service.earlier_builds(request, optimization=level, local_paths=True)
+            if found and not request.revision and all(b.match == "commit_unchecked" for b in found):
+                commit = service.model_commit(model)
+                if commit:
+                    found = service.earlier_builds(request, revision=commit, optimization=level, local_paths=True)
+            return found
+        except Exception as e:  # noqa: BLE001 - the look-up never stops a build; the person builds as asked
+            self._log(f"Earlier builds not checked: {e}")
+            return []
+
+    def _decide_about_earlier(self, model, board, quant, target_fmt, opt_lvl, recipe, dataset) -> bool:
+        """True when the build is to start: no earlier build with the same options, or the person chose to build
+        again. "Use the existing build" starts nothing and names it; nothing is skipped without the person."""
+        found = self._earlier_builds(model, board, quant, target_fmt, opt_lvl, recipe, dataset)
+        if not found:
+            return True
+        from orchestrator.gui import artifact_save
+        from orchestrator.utils.localization import ui_text
+        choice = artifact_save.ask_earlier(self, found)
+        if choice == "use":
+            self._log(ui_text("earlier.used", path=str(found[0].info.get("path") or found[0].label)))
+            return False
+        return choice == "again"
+
+    # --- SAVING A FINISHED BUILD (eighth round, answer 3) ---
+
+    def _offer_save(self, request_id):
+        """For every golden artifact of a finished build the person started here: the save dialog at the output
+        folder (artifact_save.ask_and_save). Cancel keeps it in the build folder; nothing is deleted."""
+        from orchestrator.gui import artifact_save
+        orch = getattr(self.framework, "orchestrator", None)
+        state = getattr(orch, "_workflows", {}).get(request_id) if orch is not None else None
+        for folder in list(getattr(state, "artifacts", []) or []):
+            worker = artifact_save.ask_and_save(self, self.framework, Path(folder), self._on_saved)
+            if worker is not None:
+                self._save_workers.append(worker)
+                worker.finished.connect(lambda w=worker: self._save_workers.remove(w)
+                                        if w in self._save_workers else None)
+
+    def _on_saved(self, ok: bool, text: str):
+        self._log(text)
+        if ok:
+            self._set_state("success")
+
     # --- RUNNING BUILD (Cancel button) ---
 
     def _build_service(self):
@@ -979,6 +1041,8 @@ class BuilderTab(QWidget):
             self.btn_cancel.setEnabled(False)
             if status:
                 self._log(f"Build {rid} ended: {status}.")
+            if status == "completed":
+                self._offer_save(rid)
 
     def _cancel_build(self):
         rid, service = self._active_request, self._build_service()
