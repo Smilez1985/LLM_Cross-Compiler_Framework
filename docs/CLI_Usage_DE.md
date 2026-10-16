@@ -272,6 +272,10 @@ keine Anzahl bringt eine Erinnerung oder eine Warnung. Um Platz zu schaffen:
 Löschen braucht ein Terminal: Ohne eines (eine Pipe, ein Skript, eine KI-App) wird die Liste ausgegeben und nichts
 gelöscht. Jedes Löschen wird im Audit-Log festgehalten, bevor etwas verschoben oder gelöscht wird.
 
+In der GUI: **Tools > Knowledge Snapshots...**: dieselbe Liste, und die Zeile zur Festplatte sagt vorher mit denselben
+Worten, ob der nächste Snapshot passt; **Angehakte löschen…** für `prune` und `delete` (die Löschliste, „Nein“ ist die
+Vorgabe), **Angehakte exportieren…** für `export --to`.
+
 ```bash
 llm-cli knowledge snapshots
 llm-cli knowledge snapshots prune
@@ -304,6 +308,8 @@ Datei, die gelesen, aber nicht aufgenommen wurde (eine leere Datei, ein Fehler),
 Wissensbasis muss eingeschaltet sein. Ein Wissenspaket, das du exportierst, enthält diese Texte nie: Jede Installation
 nimmt sie selbst auf.
 
+In der GUI: **Tools > Index the Framework's Documentation...** (das Kästchen der Frage ist `--with-code`).
+
 ```bash
 llm-cli knowledge index-docs
 llm-cli knowledge index-docs --with-code
@@ -323,6 +329,8 @@ Lizenz, eine unbekannte Lizenz) oder **not exported** (eine Seite eines installi
 Dokumente des Frameworks). Adressen, Titel und Hinweise sind Text der Website und werden als reiner Text gezeigt. Die
 Wissensbasis muss eingeschaltet sein.
 
+In der GUI: **Tools > Wissensquellen...** (dieselben Spalten; der Filter **Art** ist `--kind`).
+
 ```bash
 llm-cli knowledge sources
 llm-cli knowledge sources --kind web
@@ -341,12 +349,16 @@ früheren Version (`~/.llm-framework/qdrant`) wird bei ihrer ersten Nutzung umge
 kopiert und geprüft, nichts wird neu eingebettet. `show` (die Vorgabe) liest den Eintrag dieser Umwandlung und öffnet
 nichts: wann sie umgewandelt wurde, wie viele Auszüge, und den alten Ordner mit vollem Pfad und Größe; oder, wenn die
 Umwandlung fehlschlug, warum und wann sie erneut versucht wird (der alte Speicher arbeitet so lange weiter). Die erste
-Zeile nennt den Speicher, der wirklich genutzt wird. `convert` versucht die Umwandlung sofort, auch nach einem Fehler,
-der nicht von selbst erneut versucht wird; dafür muss die Wissensbasis eingeschaltet sein (in der GUI: **Tools >
-Knowledge Snapshots... > Umwandlung erneut versuchen**). `delete-old` zeigt den alten Ordner nach seiner Umwandlung und
+Zeile nennt den Speicher, der wirklich genutzt wird. `convert` wandelt sofort um, vor jedem Versuch oder nach einem
+Fehler, der nicht von selbst erneut versucht wird; dafür muss die Wissensbasis eingeschaltet sein. `delete-old` zeigt den alten Ordner nach seiner Umwandlung und
 löscht ihn erst nach deiner Antwort in einem Terminal (Vorgabe Papierkorb, oder endgültig; "Nein" ist die Vorgabe). Ohne
 Terminal wird nichts gelöscht. Vor der Umwandlung oder solange sie fehlschlug, ist der alte Ordner die Wissensbasis
 selbst und wird nicht angeboten.
+
+In der GUI: **Tools > Knowledge Snapshots...**: die Zeile zum Speicher in jedem Zustand (`show`: Qdrant Edge, der alte
+Speicher mit seinem Grund, ein Qdrant-Server, oder Qdrant Edge, das sich nicht laden lässt); **Jetzt umwandeln** (noch
+nicht versucht) oder **Umwandlung erneut versuchen** (nach einem Fehler) für `convert`, unter derselben Bedingung
+angeboten; **Alten Speicher löschen...** für `delete-old`.
 
 ```bash
 llm-cli knowledge storage
@@ -1974,8 +1986,9 @@ Installierte Targets landen im Targets-Ordner, Rezepte in `community/recipes/<ID
 Wissensbasis importiert oder, wenn die Wissensbasis ausgeschaltet ist, sobald sie eingeschaltet wird.
 
 In der GUI: **Tools > Community Hub öffnen** (Liste, Filter nach Art und Vertrauensstufe, „Import file...“, „Build“
-bei einem installierten Rezept), die letzte Seite des Modul-Assistenten und das Kontextmenü des Builder-Logs
-(„Export a finished build for the community...“).
+bei einem installierten Rezept, **Details...**, **Installierte Pakete prüfen**, **Paketdatei prüfen...**,
+**Exportieren...** und **Meine öffentlichen Schlüssel...**), die letzte Seite des Modul-Assistenten und das
+Kontextmenü des Builder-Logs („Export a finished build for the community...“).
 
 ### zoo list
 
@@ -1994,6 +2007,8 @@ community_index_url).“); installierte Pakete werden in jedem Fall aufgeführt.
 | `--refresh` | Den signierten Index erneut herunterladen, auch wenn der zwischengespeicherte jünger als einen Tag ist. Ohne Netzwerk wird der zwischengespeicherte Index verwendet. |
 | `--json` | Maschinenlesbare Ausgabe: eine Liste mit `kind`, `id`, `version`, `trust`, `installed_version`, `revoked`, `author` und `title`. |
 
+In der GUI: **Tools > Community Hub öffnen** (der Filter nach Art ist `--kind`, **Refresh** ist `--refresh`).
+
 ### zoo show
 
 ```
@@ -2009,6 +2024,8 @@ sehen. Eine unbekannte ID endet mit Exit-Code 1.
 | Option | Bedeutung |
 |---|---|
 | `--kind [target\|recipe\|knowledge]` | Die Art, wenn es die ID für mehrere Arten gibt. |
+
+In der GUI: **Tools > Community Hub öffnen > Details...** für die gewählte Zeile (oder ein Doppelklick auf sie).
 
 ### zoo install
 
@@ -2048,8 +2065,8 @@ Verhalten:
   Signatur geprüft. Es öffnet sich mit deiner eigenen age-Identität (siehe [zoo keys](#zoo-keys)) oder mit
   `--passphrase` mit der Passphrase; eine Passphrase mit einem scrypt-Arbeitsfaktor über 2^20 wird abgelehnt. Ein
   Paket mit Passphrase, das ohne `--passphrase` geöffnet wird, sagt das; deine eigene Identität wird nur für ein an
-  Schlüssel verschlüsseltes Paket gelesen (und beim ersten Mal angelegt). Der Community Hub öffnet Pakete, die an
-  deinen Schlüssel verschlüsselt sind; Pakete mit Passphrase brauchen diesen Befehl.
+  Schlüssel verschlüsseltes Paket gelesen (und beim ersten Mal angelegt). **Import file...** im Community Hub öffnet
+  beide: Es hat ein Feld für die Passphrase und **Nur diese Absender annehmen** mit Schlüsseldateien (`--from`).
 - Nichts wird über einen vorhandenen Ordner gleichen Namens installiert, auch wenn sich nur die Groß- und
   Kleinschreibung unterscheidet; entferne den alten Ordner zuerst.
 - Exit-Code 1: Eine Prüfung ist gescheitert (die Probleme werden aufgeführt und der Quarantäne-Ordner wird gelöscht),
@@ -2062,6 +2079,10 @@ llm-cli zoo install --file contribution-target-my-board-1.0.0.zip
 llm-cli zoo install --file target-my-board-1.0.0.lcfpack --from kollegin.keys
 llm-cli zoo install --file target-my-board-1.0.0.lcfpack --passphrase
 ```
+
+In der GUI: **Tools > Community Hub öffnen**: **Install** in einer Zeile (`PACK_ID`), oder **Import file...** (`--file`,
+mit dem Feld für die Passphrase und den Schlüsseldateien der Absender); die Zusammenfassung fragt mit „Nein“ als
+Vorgabe.
 
 Ein Rezept braucht sein Target: Installiere zuerst das Target, damit das Rezept auch gegen die Capabilities des
 Targets geprüft wird (ohne das Target vermerkt die Zusammenfassung nur, dass es fehlt). „Build“ bei einem
@@ -2083,6 +2104,9 @@ ihrer Art (bei Wissen und beim Wissens-Snapshot eines Targets auch seine Lizenzt
 enthaltene Autorensignatur und dass die Datenschutz-Bereinigung nichts darin ändern würde. Es gibt „acceptable“ oder
 jedes Problem aus (Exit-Code 1). Diese Form funktioniert ohne Schlüsselbund; die CI des Community-Repositorys führt
 sie für jedes eingereichte Paket aus.
+
+In der GUI: **Tools > Community Hub öffnen > Installierte Pakete prüfen** (ohne Argument) und **Paketdatei
+prüfen...** (`PACK_FILE`).
 
 ```bash
 llm-cli zoo verify
@@ -2188,6 +2212,13 @@ llm-cli zoo export target my-board --author "<dein Name>" --passphrase
 llm-cli zoo export target my-board --author "<dein Name>" --pr
 ```
 
+In der GUI: **Tools > Community Hub öffnen > Exportieren...**: ein Target (auch ein selbst erstelltes oder
+installiertes; ein Community-Paket wird wie hier abgelehnt), die `build_info.json` eines fertigen Builds, oder die
+Wissensbasis; dann Autor, Lizenz, **Paket-ID** (Wissen, `--id`), **Privat teilen** an die Schlüssel in
+Schlüsseldateien (`--to`) oder mit einer zweimal eingegebenen Passphrase (`--passphrase`), **Ordner** (`--out`),
+**Create pack** und **Open pull request** (`--pr`). Außerdem die letzte Seite des Modul-Assistenten und das
+Kontextmenü des Builder-Logs.
+
 ### zoo keys
 
 ```
@@ -2202,6 +2233,9 @@ Leuten, mit denen du Pakete austauschst. Die Schlüssel werden beim ersten Mal a
 Secrets-Speicher aufbewahrt (Namen `community_signing_key` und `community_age_identity`). Ein gespeicherter
 Schlüssel, der sich nicht lesen lässt, wird nie automatisch ersetzt; bei einem beschädigten nennt die Fehlermeldung
 den Befehl, der einen neuen Schlüssel speichert.
+
+In der GUI: **Tools > Community Hub öffnen > Meine öffentlichen Schlüssel...** (mit **Kopieren** und
+**Speichern...**).
 
 ```bash
 llm-cli zoo keys > my.keys

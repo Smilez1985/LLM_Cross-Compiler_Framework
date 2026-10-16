@@ -268,6 +268,10 @@ them brings a reminder or a warning. To free space:
 Deleting needs a terminal: without one (a pipe, a script, an AI app) the list is printed and nothing is deleted.
 Every deletion is recorded in the audit log before anything is moved or deleted.
 
+In the GUI: **Tools > Knowledge Snapshots...**: the same list, and the disk line says beforehand, in the same words,
+whether the next snapshot fits; **Delete ticked…** for `prune` and `delete` (the deletion list, "No" is the default),
+**Export ticked…** for `export --to`.
+
 ```bash
 llm-cli knowledge snapshots
 llm-cli knowledge snapshots prune
@@ -298,6 +302,8 @@ itself, and a snapshot that cannot be written stops the index too. A file it rea
 error) is named with the reason. The knowledge base must be switched on. A knowledge pack you export never carries
 these texts: every installation indexes them itself.
 
+In the GUI: **Tools > Index the Framework's Documentation...** (the question's box is `--with-code`).
+
 ```bash
 llm-cli knowledge index-docs
 llm-cli knowledge index-docs --with-code
@@ -316,6 +322,8 @@ facts** (a copyright notice and no such licence, code without a licence, an unkn
 page of an installed knowledge pack, the framework's own documents). Addresses, titles and notices are site text and
 are shown as plain text. The knowledge base must be switched on.
 
+In the GUI: **Tools > Knowledge Sources...** (the same columns; the **Kind** filter is `--kind`).
+
 ```bash
 llm-cli knowledge sources
 llm-cli knowledge sources --kind web
@@ -333,12 +341,16 @@ Unreleased. The knowledge base is stored in Qdrant Edge (`~/.llm-framework/qdran
 version (`~/.llm-framework/qdrant`) is converted on its first use; vectors and texts are copied and checked, nothing is
 embedded again. `show` (the default) reads the record of that conversion and opens nothing: when it was converted, how
 many excerpts, and the old folder with its full path and size; or, when the conversion failed, why and when it is tried
-again (the old store keeps working meanwhile). The first line names the storage really in use. `convert` tries the
-conversion now, also after a failure that is not tried again by itself; it needs the knowledge base switched on (in the
-GUI: **Tools > Knowledge Snapshots... > Try the conversion again**). `delete-old` lists the old folder after its
+again (the old store keeps working meanwhile). The first line names the storage really in use. `convert` converts now,
+before any attempt or after a failure that is not tried again by itself; it needs the knowledge base switched on. `delete-old` lists the old folder after its
 conversion and deletes it only after your answer at a terminal (trash by default, or for good; "No" is the default).
 Without a terminal nothing is deleted. Before the conversion, or while it failed, the old folder is the knowledge base
 itself and is not offered.
+
+In the GUI: **Tools > Knowledge Snapshots...**: the storage line in every state (`show`: Qdrant Edge, the old storage
+with its reason, a Qdrant server, or Qdrant Edge that cannot be loaded); **Convert now** (not tried yet) or **Try the
+conversion again** (after a failure) for `convert`, offered on the same condition; **Delete the old storage...** for
+`delete-old`.
 
 ```bash
 llm-cli knowledge storage
@@ -1894,8 +1906,9 @@ Installed targets go into the targets folder, recipes into `community/recipes/<i
 it is installed or, if the knowledge base is off, as soon as it is turned on.
 
 In the GUI: **Tools > Open Community Hub** (list, filters by kind and trust, "Import file...", "Build" on an
-installed recipe), the module wizard's last page and the Builder log's context menu ("Export a finished build for
-the community...").
+installed recipe, **Details...**, **Check installed packs**, **Check a pack file...**, **Export...** and **My public
+keys...**), the module wizard's last page and the Builder log's context menu ("Export a finished build for the
+community...").
 
 ### zoo list
 
@@ -1914,6 +1927,8 @@ packs are listed in either case.
 | `--refresh` | Download the signed index again, even if the cached one is less than a day old. Without network the cached index is used. |
 | `--json` | Machine-readable output: a list with `kind`, `id`, `version`, `trust`, `installed_version`, `revoked`, `author` and `title`. |
 
+In the GUI: **Tools > Open Community Hub** (the kind filter is `--kind`, **Refresh** is `--refresh`).
+
 ### zoo show
 
 ```
@@ -1928,6 +1943,8 @@ see new entries. An unknown ID exits with code 1.
 | Option | Meaning |
 |---|---|
 | `--kind [target\|recipe\|knowledge]` | The kind, if the ID exists for several kinds. |
+
+In the GUI: **Tools > Open Community Hub > Details...** for the selected row (or a double click on it).
 
 ### zoo install
 
@@ -1966,7 +1983,8 @@ Behaviour:
   decrypted. It opens with your own age identity (see [zoo keys](#zoo-keys)) or, with `--passphrase`, with the
   passphrase; a passphrase whose scrypt work factor is above 2^20 is refused. A pack with a passphrase opened
   without `--passphrase` says so; your own identity is read (and created on first use) only for a pack encrypted
-  to keys. The Community Hub opens packs encrypted to your key; packs with a passphrase need this command.
+  to keys. The Community Hub's **Import file...** opens both: it has a passphrase field and **Only accept these
+  senders** key files (`--from`).
 - Nothing is installed over an existing folder of the same name, also when only the case differs; remove the old
   folder first.
 - Exit code 1: a check failed (the problems are listed and the quarantine folder is removed), you answered no, or
@@ -1979,6 +1997,9 @@ llm-cli zoo install --file contribution-target-my-board-1.0.0.zip
 llm-cli zoo install --file target-my-board-1.0.0.lcfpack --from colleague.keys
 llm-cli zoo install --file target-my-board-1.0.0.lcfpack --passphrase
 ```
+
+In the GUI: **Tools > Open Community Hub**: **Install** on a row (`PACK_ID`), or **Import file...** (`--file`, with the
+passphrase field and the sender key files); the summary asks with "No" as the default.
 
 A recipe needs its target: install the target first, so the recipe is also checked against the target's
 capabilities (without the target, the summary only notes that it is missing). "Build" on an installed recipe in
@@ -1998,6 +2019,9 @@ With `PACK_FILE` it checks a pack file without installing it: format, file list 
 (for knowledge, and a target's knowledge snapshot, also its licence texts and `NOTICE`), an included author signature,
 and that the privacy scrub would not change anything in it. It prints "acceptable" or every problem (exit code 1).
 This form works without a keyring; the community repository's CI runs it on every submitted pack.
+
+In the GUI: **Tools > Open Community Hub > Check installed packs** (no argument) and **Check a pack file...**
+(`PACK_FILE`).
 
 ```bash
 llm-cli zoo verify
@@ -2099,6 +2123,12 @@ llm-cli zoo export target my-board --author "<your name>" --passphrase
 llm-cli zoo export target my-board --author "<your name>" --pr
 ```
 
+In the GUI: **Tools > Open Community Hub > Export...**: a target (also one you made or installed; a community pack is
+refused as here), a finished build's `build_info.json`, or the knowledge base; then the author, licence, **Pack id**
+(knowledge, `--id`), **Private sharing** to the keys in key files (`--to`) or with a passphrase typed twice
+(`--passphrase`), **Folder** (`--out`), **Create pack** and **Open pull request** (`--pr`). Also the module wizard's
+last page and the Builder log's context menu.
+
 ### zoo keys
 
 ```
@@ -2112,6 +2142,8 @@ cannot be opened), and an `ed25519:` line, which checks your signatures (others 
 keys are created on first use and kept only in the encrypted secrets store (names `community_signing_key` and
 `community_age_identity`). A stored key that cannot be read is never replaced automatically; for a damaged one the
 error message names the command that stores a new key.
+
+In the GUI: **Tools > Open Community Hub > My public keys...** (with **Copy** and **Save...**).
 
 ```bash
 llm-cli zoo keys > my.keys
