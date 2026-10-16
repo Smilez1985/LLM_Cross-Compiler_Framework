@@ -56,17 +56,17 @@ def test_the_snapshots_window_says_beforehand_whether_the_next_snapshot_fits(tmp
     from orchestrator.utils.localization import ui_text
     folder = tmp_path / "knowledge_snapshots"
     folder.mkdir()
-    (folder / "pre_ingest_1.jsonl.gz").write_bytes(b"x" * 300_000_000)
+    (folder / "pre_ingest_1.jsonl.gz").write_bytes(b"x" * 3_000_000)   # small files only
     calls = []
     real = ks.snapshot_disk
     monkeypatch.setattr(ks, "snapshot_disk", lambda *a, **k: calls.append(a) or real(*a, **k))
-    monkeypatch.setattr(ks, "_disk_usage", usage(int(2.3 * GB)))
+    monkeypatch.setattr(ks, "_disk_usage", usage(int(2.0 * GB)))
     dialog = window.KnowledgeSnapshotsDialog(tmp_path, lang=lang)
     try:
         assert calls and calls[0][0] == Path(tmp_path), "the core function of `llm-cli knowledge snapshots`"
         text = dialog.disk.text()
         assert dialog.snapshot_disk.verdict == "does_not_fit"
-        assert ui_text("snapshots.next.no_room", lang, size="300.0 MB") in text
+        assert ui_text("snapshots.next.no_room", lang, size="3.0 MB") in text
         assert ui_text("snapshots.next.step", lang) in text
         if lang == "en":   # the same warning words as the CLI
             assert dialog.snapshot_disk.warning() in text
@@ -75,9 +75,9 @@ def test_the_snapshots_window_says_beforehand_whether_the_next_snapshot_fits(tmp
     monkeypatch.setattr(ks, "_disk_usage", usage(int(3.5 * GB)))
     dialog = window.KnowledgeSnapshotsDialog(tmp_path, lang=lang)
     try:
-        assert ui_text("snapshots.next.tight", lang, size="300.0 MB") in dialog.disk.text()
+        assert ui_text("snapshots.next.tight", lang, size="3.0 MB") in dialog.disk.text()
         if lang == "en":
-            assert ks.NEXT_TIGHT.format(size="300.0 MB") in dialog.disk.text()
+            assert ks.NEXT_TIGHT.format(size="3.0 MB") in dialog.disk.text()
     finally:
         dialog.close()
     monkeypatch.setattr(ks, "_disk_usage", usage(500 * GB))
