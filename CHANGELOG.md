@@ -1434,7 +1434,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   writes one record per build into `<cache_dir>/build_records/` (status, stage, progress, the error redacted), and
   a build whose program ended before it finished is shown as interrupted. The command needs neither the credential
   vault nor Docker; `--all` lists every kept build instead of the 20 newest. On Linux and macOS the records are
-  readable only by the user who built (folder 0700, files 0600).
+  readable only by the user who built (folder 0700, files 0600). A record names the build's outcome before its build
+  slot is free, so whoever sees the build ended reads the outcome there, never the stage before it.
 - Ctrl+C in `llm-cli build start` cancels the build through the build service: its container is stopped, the CLI
   waits until the build has stopped (also when it was still being handed to the build engine), says so and exits
   with code 130. Before, the build and its container kept running.

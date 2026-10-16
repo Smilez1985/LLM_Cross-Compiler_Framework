@@ -614,14 +614,15 @@ class BuildEngine:
             outcome = self._execute_build_stages(config, prog)
         finally:
             # The outcome becomes visible together with the free slot, so a poller that sees it can submit
-            # its next build right away. A cancel is never undone.
+            # its next build right away. A cancel is never undone. The record names the outcome before the slot is
+            # free: a poller that sees the build ended reads its record next.
             with self._lock:
                 if prog.status != BuildStatus.CANCELLED:
                     prog.status = outcome
+                prog.end_time = prog.end_time or datetime.now()
+                self._save_record(bid)
                 self._running.discard(bid)
                 self._settled.discard(bid)
-            prog.end_time = prog.end_time or datetime.now()
-            self._save_record(bid)
 
     def _execute_build_stages(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
         """Runs the stages and returns the outcome; _execute_build publishes it."""
