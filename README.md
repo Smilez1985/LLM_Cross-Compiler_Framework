@@ -124,7 +124,15 @@ The installer:
    `llm-cli module create`), installed community packs, `configs/config.yml`, builds, cache and models. Start
    updates in the repository folder: the copy of `install.sh` in `/opt` copies and removes nothing,
 4. creates a virtual environment (`.venv`) there and installs the pinned packages from `requirements.txt`,
-5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI.
+5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI,
+6. sets up Ditto's local model server (`llm-cli ditto runtime ensure`, run as you, never as root): bare metal by
+   default, in Docker when you choose it or when bare metal is not possible here. If Ditto is there already, it does
+   nothing. If it fails, the installer says why and finishes anyway. Before a model is downloaded you see its size
+   and licence. See [Offline mode](#offline-mode-the-managed-local-model).
+
+Choose the Ditto step with `sudo ./install.sh --ditto=auto|bare-metal|docker|skip` (default `auto`). For an unattended
+run set `LCF_DITTO` instead (for example `sudo LCF_DITTO=auto ./install.sh`): then nothing is asked, and a model under
+a permissive licence (such as Apache 2.0) is downloaded after its size and licence are shown.
 
 Log out and back in once so the `docker` group takes effect. Then start the GUI with `llm-framework`.
 
@@ -136,7 +144,9 @@ Log out and back in once so the `docker` group takes effect. Then start the GUI 
 The installer checks for Python (installs Python 3.13 with `winget` if none is found, then requires 3.11 to
 3.14), copies the framework to `C:\Program Files\LLM-Conversion-Framework`, creates `.venv` there, installs
 `requirements.txt`, and puts a **LLM-Conversion-Framework** shortcut on the desktop. The shortcut runs
-`start_framework.bat`, which starts the GUI.
+`start_framework.bat`, which starts the GUI. The Ditto step is the same as on Linux (`install.bat --ditto=...` or
+`LCF_DITTO`); it runs only for the person who is signed in. In this version Windows has no self-built server and
+no Docker mode for Ditto yet, so the step says so and the installation goes on.
 
 Conversions on a Windows host have not been verified yet (see [Known gaps](#known-gaps)).
 
@@ -552,9 +562,34 @@ tools), and `runtime start` starts nothing else.
   listed. `runtime status` says when a rebuild is required (the pin changed) or recommended (this machine's build plan
   changed).
 
+**Bare metal or Docker.** The server runs bare metal by default (no Docker overhead) or in Docker:
+
+```bash
+llm-cli ditto runtime ensure                              # installs it if it is not there; a second run does nothing
+llm-cli ditto runtime ensure --mode docker --force        # switch to Docker (needs a terminal)
+llm-cli ditto runtime ensure --mode bare-metal --force    # and back
+```
+
+- **The image** is built on your computer from the same pinned llama.cpp recipe, on a Docker Official base image
+  (Debian, Ubuntu or Alpine, pinned by digest). It is never pulled as a finished image and never pushed. It is checked
+  in a container of itself before it is used (version and commit of the pin, the devices it sees, and that the server
+  refuses its own tools).
+- **The container** keeps the same rules as the bare-metal server: its port is published on 127.0.0.1 only, the
+  models folder is mounted read-only (the models are not copied), it runs as your user without extra rights, and it
+  gets a new key file at every start. The GPU is passed through where it can be (NVIDIA through the NVIDIA Container
+  Toolkit, AMD and Intel through `/dev/dri`); where not, `ensure` says why and the container uses the CPU.
+- **Switching** keeps the models (nothing is downloaded again) and makes only the server again: the bare-metal build
+  is put into the image when the base image's C library fits, and the image's build becomes the bare-metal build once
+  it passed its checks on this computer. Where that is not possible, `ensure` says why and builds again.
+- **The old mode's files** (build folders with their full path, Docker images and containers with their name and ID,
+  each with its size) are listed after the switch, and only what you confirm is removed ("No" is the default).
+  Without a terminal nothing is removed. Docker images are never deleted otherwise.
+- `llm-cli ditto runtime status` shows the mode. An AI client may read it (`get_status`); switching and removing
+  are yours alone.
+
 Then choose **Local model (managed llama-server)** in the AI settings (provider `local`). Turn on **Offline Mode**
-as well if Ditto should never use a cloud provider. Ditto finds the running server by itself. In this version the
-server is controlled from the command line only.
+as well if Ditto should never use a cloud provider. Ditto finds the running server by itself. The AI settings show
+where the server runs and can switch it; starting and stopping it is on the command line.
 
 | Tier | Model | Download | Chosen automatically when |
 |---|---|---|---|

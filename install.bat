@@ -17,6 +17,8 @@ if %errorLevel% NEQ 0 (
     exit /b
 )
 
+:: Die Argumente (z. B. --ditto=skip) erreichen den PowerShell-Teil als Variable.
+set "LCF_INSTALL_ARGS=%*"
 :: Rufe den PowerShell-Teil dieses Skripts auf
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression ($(Get-Content '%~f0' -Raw))"
 if %errorlevel% NEQ 0 (
@@ -45,6 +47,15 @@ $InstallDir = Join-Path $ProgramFiles $AppName
 # Program Files is read-only for standard users: the framework keeps builds, cache and models in each user's
 # own folder (%USERPROFILE%\.llm-framework, or LLM_FRAMEWORK_HOME) and creates them when they are needed.
 $UserDataHint = "%USERPROFILE%\.llm-framework"
+# Ditto's local runtime: --ditto=auto|bare-metal|docker|skip, for unattended runs also LCF_DITTO (no questions; the
+# model's size and licence are still shown). An unknown value stops here, before anything is installed.
+$DittoChoice = if ($env:LCF_DITTO) { $env:LCF_DITTO } else { "auto" }
+foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
+    if ($InstallArg -like "--ditto=*") { $DittoChoice = $InstallArg.Substring(8) }
+}
+if ($DittoChoice -notin @("auto", "bare-metal", "docker", "skip")) {
+    Write-Error "Unbekannter Wert fuer --ditto: '$DittoChoice' (auto, bare-metal, docker oder skip)."
+}
 
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host "      LLM Framework - Enterprise Installer"
@@ -147,6 +158,29 @@ try {
     Set-Content -Path (Join-Path $ScriptPath ".install_complete") -Value $InstallDir -Encoding ASCII
 } catch {
     Write-Warning "Marker fuer den Uninstaller nicht geschrieben ($_); er findet die Installation dann nicht."
+}
+
+# DITTO: lokale Laufzeit (llm-cli ditto runtime ensure). Idempotent, und sie laesst die Installation nie scheitern:
+# ein Fehler wird gemeldet, die Installation geht weiter. Sie laeuft nur fuer die angemeldete Person selbst (ihr
+# Benutzerordner); hat ein anderes Administratorkonto die Rechte gegeben, wird sie der Person ueberlassen.
+Write-Host "[Ditto] Lokale Laufzeit fuer Ditto ($DittoChoice)..." -ForegroundColor Yellow
+try {
+    $SignedIn = (Get-CimInstance Win32_ComputerSystem).UserName
+    $Elevated = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    if ($DittoChoice -eq "skip") {
+        Write-Host "Uebersprungen (--ditto=skip). Spaeter: llm-cli ditto runtime ensure"
+    } elseif ($SignedIn -and ($SignedIn -ne $Elevated)) {
+        Write-Warning "Ditto wird fuer $SignedIn eingerichtet, nicht fuer das Administratorkonto. Spaeter als du selbst (normales Terminal, im Ordner $InstallDir): .venv\Scripts\python.exe -m orchestrator.cli ditto runtime ensure"
+    } else {
+        $DittoArgs = @("-m", "orchestrator.cli", "ditto", "runtime", "ensure", "--mode", $DittoChoice)
+        if ($env:LCF_DITTO) { $DittoArgs += "--yes" }
+        & $PythonVenv @DittoArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Ditto liess sich nicht einrichten (Meldungen oben); die Installation ist trotzdem fertig. Spaeter erneut: llm-cli ditto runtime ensure"
+        }
+    }
+} catch {
+    Write-Warning "Ditto: $_ - die Installation ist trotzdem fertig. Spaeter: llm-cli ditto runtime ensure"
 }
 
 Write-Host "Installation Erfolgreich!" -ForegroundColor Green

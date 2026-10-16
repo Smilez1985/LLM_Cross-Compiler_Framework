@@ -201,6 +201,13 @@ führe `make up` erneut aus und installiere die Packs wieder.
 - **Keine Konvertierungen im Container.** Das Image enthält keine Docker-Engine, und Builds brauchen Docker auf dem
   Computer, der konvertiert. Baue auf einem Computer, auf dem das Framework direkt installiert ist. Den Docker-Socket
   des Hosts in den Container zu geben wird nicht angeboten: Der Container bekäme damit Rechte wie Root auf dem Host.
+- **Dittos lokaler Modellserver wird im Image nicht eingerichtet.** Der Image-Build führt den Ditto-Schritt des
+  Installers mit `LCF_CONTAINER_BUILD=1` aus: Er sagt warum und tut nichts. Dittos Docker-Modus gibt es im Container
+  nicht (darin läuft keine Docker-Engine), und ein ins Image gebauter Server passte nicht zur Hardware, auf der der
+  Container später läuft. Im Container bräuchte ein direkter Server einen Compiler, den das Image ohne GUI nicht hat.
+  Nutze dort für Ditto einen Cloud-Anbieter oder einen lokalen Server in deinem Netzwerk, oder installiere das
+  Framework direkt auf dem Rechner, der Dittos Modell ausführen soll (`llm-cli ditto runtime ensure`, direkt oder in
+  Docker).
 - **Kein Schlüsselbund:** siehe Schritt 1 unter [Starten und einmal einrichten](#3-starten-und-einmal-einrichten).
 - **Targets und Community-Packs** liegen im Programmordner des Containers, nicht im Volume: Der Wechsel zu einem
   neuen Image braucht vorher einen Export ([Aktualisieren](#7-aktualisieren)).

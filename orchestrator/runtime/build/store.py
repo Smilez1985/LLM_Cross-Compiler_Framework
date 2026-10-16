@@ -139,8 +139,20 @@ class StoredBuild:
         return str(self.manifest.get("built_at", ""))
 
     @property
+    def verified_in(self) -> str:
+        """Where the programs ran for the verification: "native" (on this machine itself; every build before Ditto's
+        container mode) or "container" (in Ditto's runtime container: the build of a Docker-mode image)."""
+        return "container" if self.manifest.get("verified_in") == "container" else "native"
+
+    @property
     def verified(self) -> bool:
-        """The verification passed and ran the programs on this machine."""
+        """The verification passed and ran the programs on this machine itself (not only in Ditto's container): only
+        then may the framework start them here."""
+        return self.verified_anywhere and self.verified_in == "native"
+
+    @property
+    def verified_anywhere(self) -> bool:
+        """The verification passed and ran the programs, on this machine or in Ditto's runtime container."""
         report = self.manifest.get("verification") or {}
         return bool(report.get("ok")) and bool(report.get("ran_binaries"))
 
@@ -228,16 +240,25 @@ class BuildStore:
     def build(self, plan: BuildPlan, *, source: Path, executor: BuildExecutor, verifier: Verifier,
               jobs: Optional[int] = None,
               toolchain: Optional[DetectedToolchain] = None, smoke_model: Optional[SmokeModelFile] = None,
-              perf_key: Optional[str] = None, host: Optional[Tuple[str, str]] = None) -> StoredBuild:
+              perf_key: Optional[str] = None, host: Optional[Tuple[str, str]] = None,
+              verified_in: str = "native") -> StoredBuild:
         """Builds the plan (or returns the stored build of the same ID), verifies it and stores it. A build that fails
-        is not stored; its logs are kept in logs/failed-<id>-<time>/."""
+        is not stored; its logs are kept in logs/failed-<id>-<time>/. `verified_in`: "native" when `verifier` runs the
+        programs on this machine, "container" when it runs them in Ditto's runtime container (Docker mode). A stored
+        build that was verified only in the container is verified on this machine first when a native build is asked
+        for (verify_here)."""
+        if verified_in not in ("native", "container"):
+            raise StoreError("verified_in must be native or container")
         existing = self.find(plan)
-        if existing is not None:
+        if existing is not None and (verified_in == "container" or existing.verified_in == "native"):
             return existing
         self.builds_dir.mkdir(parents=True, exist_ok=True)
         with self._lock():
             existing = self.find(plan)
             if existing is not None:
+                if verified_in == "native" and existing.verified_in == "container":
+                    return self._verify_here_locked(existing, verifier, smoke_model=smoke_model, host=host or (
+                        (toolchain.info.host_os, toolchain.info.host_arch) if toolchain else None))
                 return existing
             staging = self.builds_dir / f".staging-{plan.build_id[:16]}-{secrets.token_hex(4)}"
             try:
@@ -254,13 +275,41 @@ class BuildStore:
                     raise BuildFailed(f"the build failed its verification: {report.summary()}", report=report,
                                       log=kept)
                 return self._commit(plan, result, report, staging, perf_key=perf_key, host=host or (
-                    (toolchain.info.host_os, toolchain.info.host_arch) if toolchain else None))
+                    (toolchain.info.host_os, toolchain.info.host_arch) if toolchain else None),
+                    verified_in=verified_in)
             finally:
                 if staging.exists():
                     remove_tree(staging)
 
+    def verify_here(self, build_id: str, verifier: Verifier, *, smoke_model: Optional[SmokeModelFile] = None,
+                    host: Optional[Tuple[str, str]] = None) -> StoredBuild:
+        """Verifies a stored build on this machine itself (`verifier` runs its programs here) and records that in its
+        manifest, so it may be started here: the build of a Docker-mode image becomes Ditto's bare-metal build without
+        being built again. Raises BuildFailed when the programs do not pass here (the manifest stays as it was)."""
+        with self._lock():
+            build = self.get(build_id)
+            if build is None or self.check_files(build):
+                raise StoreError(f"there is no intact stored build {build_id[:16]}")
+            return self._verify_here_locked(build, verifier, smoke_model=smoke_model, host=host)
+
+    def _verify_here_locked(self, build: StoredBuild, verifier: Verifier, *, smoke_model: Optional[SmokeModelFile],
+                            host: Optional[Tuple[str, str]]) -> StoredBuild:
+        report = verifier.verify(build.plan, build.bin_dir, smoke_model=smoke_model,
+                                 host_arch=host[1] if host else None)
+        if not report.ok or not report.ran_binaries:
+            raise BuildFailed(f"the build {build.build_id[:16]} does not pass its verification on this machine: "
+                              f"{report.summary()}", report=report)
+        manifest = dict(build.manifest)
+        manifest.update({"verification": report.as_dict(), "verified_at": _now(), "verified_in": "native"})
+        _write_json(build.path / "manifest.json", manifest)
+        stored = self.get(build.build_id)
+        if stored is None:  # pragma: no cover - just written
+            raise StoreError(f"the build in {build.path} could not be read back")
+        return stored
+
     def _commit(self, plan: BuildPlan, result: BuildResult, report: VerifyReport, staging: Path, *,
-                perf_key: Optional[str], host: Optional[Tuple[str, str]]) -> StoredBuild:
+                perf_key: Optional[str], host: Optional[Tuple[str, str]],
+                verified_in: str = "native") -> StoredBuild:
         for scratch in ("build", "home", "tmp", "config"):
             remove_tree(staging / scratch)  # never follows a link the build left there
         build = {"format": STORE_FORMAT, "build_id": plan.build_id, "plan": plan.as_dict(), "perf_key": perf_key,
@@ -270,6 +319,8 @@ class BuildStore:
                     "jobs": result.jobs, "placement": result.placement, "builder_image": result.builder_image,
                     "build_host": {"os": host[0], "arch": host[1]} if host else None, "built_at": _now(),
                     "verification": report.as_dict(), "verified_at": _now()}
+        if verified_in != "native":
+            manifest["verified_in"] = verified_in
         _write_json(staging / "build.json", build)
         _write_json(staging / "manifest.json", manifest)
         target = self.path_for(plan.build_id)
@@ -290,10 +341,11 @@ class BuildStore:
         return data if isinstance(data, dict) else {}
 
     def references(self) -> Dict[str, str]:
-        """{role: build_id} of active.json (active, fallback)."""
+        """{role: build_id} of active.json (active, fallback, and docker: the build Ditto's Docker-mode image was made
+        from, kept for a quick switch back)."""
         data = self._read_active()
         refs = {}
-        for role, key in (("active", "build_id"), ("fallback", "fallback_build_id")):
+        for role, key in (("active", "build_id"), ("fallback", "fallback_build_id"), ("docker", "docker_build_id")):
             value = data.get(key)
             if isinstance(value, str) and _RE_ID.fullmatch(value):
                 refs[role] = value
@@ -318,6 +370,36 @@ class BuildStore:
             data["build_id" if role == "active" else "fallback_build_id"] = build.build_id
             _write_private(self.active_file, json.dumps(data))
         return build
+
+    def keep_for_docker(self, build_id: Optional[str]) -> None:
+        """Records the build Ditto's Docker-mode image was made from (active.json docker_build_id; None forgets it).
+        Retention keeps it, so switching back to bare metal or making the image again needs no new build. It never
+        becomes the active build by this: a build verified only in the container is not started on this machine."""
+        if build_id is not None and self.get(build_id) is None:
+            raise StoreError(f"there is no stored build {build_id[:16]}")
+        from orchestrator.runtime.llama_server import _write_private
+        with self._lock(".lock", timeout=60):
+            data = self._read_active()
+            if build_id is None:
+                data.pop("docker_build_id", None)
+            else:
+                data["docker_build_id"] = self.get(build_id).build_id
+            _write_private(self.active_file, json.dumps(data))
+
+    def forget(self, build_id: str) -> List[str]:
+        """Removes the references of active.json to a build (its ID or the 16-character folder name) whose folder the
+        person removed; returns the roles it had."""
+        keys = {"active": "build_id", "fallback": "fallback_build_id", "docker": "docker_build_id"}
+        from orchestrator.runtime.llama_server import _write_private
+        with self._lock(".lock", timeout=60):
+            data = self._read_active()
+            gone = [role for role, key in keys.items()
+                    if isinstance(data.get(key), str) and data[key][:16] == build_id[:16]]
+            for role in gone:
+                data.pop(keys[role], None)
+            if gone:
+                _write_private(self.active_file, json.dumps(data))
+        return gone
 
     def running_build_ids(self) -> Set[str]:
         """IDs of stored builds the managed server runs from (pid, start time and executable checked)."""

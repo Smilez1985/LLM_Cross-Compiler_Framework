@@ -131,6 +131,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `ditto ask` | Ask Ditto one question |
 | `ditto eval` | Grade Ditto on fixed test cases, or the knowledge-base search |
 | `ditto runtime install/start/status/stop/import/export/prune` | The managed local model server (llama.cpp, built on this machine) for offline mode |
+| `ditto runtime ensure` | Install Ditto's local model server when it is not there, bare metal or in Docker; `--force` switches the mode |
 | `ditto runtime export-source/import-source` | Carry the pinned llama.cpp source to an air-gapped machine as a git bundle (checked by its commit) |
 | `ditto models list/download` | The model tiers for offline mode |
 | `tools list` / `tools permissions` / `tools audit` | The framework tools, their permissions and the audit log |
@@ -805,8 +806,9 @@ llm-cli ditto eval --kind retrieval --case retr-en-rknn-onnx-convert --case retr
 
 ### ditto runtime
 
-The managed llama.cpp server for Ditto's offline mode. These commands work without Docker and without the keyring.
-Files: `~/.llm-framework/runtime/llama.cpp/` (builds and state) and `~/.llm-framework/logs/llama-server.log`.
+The managed llama.cpp server for Ditto's offline mode. These commands work without Docker and without the keyring
+(in Docker mode, `start` and `stop` need Docker; see `ditto runtime ensure`). Files:
+`~/.llm-framework/runtime/llama.cpp/` (builds, state and `mode.json`) and `~/.llm-framework/logs/llama-server.log`.
 The optional MCP tools `build_local_runtime`, `start_local_runtime`, `stop_local_runtime` and `run_benchmark` do the
 same for an AI client once you enable them ([details](Features.md#local-runtime-tools-for-ai-clients-optional));
 `install --prebuilt` and installing toolchain parts stay commands for you only.
@@ -817,7 +819,8 @@ same for an AI client once you enable them ([details](Features.md#local-runtime-
 llm-cli ditto runtime status [--json]
 ```
 
-Shows the detected hardware; the build in use with its origin (`self-built`, `imported` or `prebuilt, not
+Shows the runtime mode (bare metal or Docker, with Ditto's image in Docker mode); the detected hardware; the
+bare-metal build with its origin (`self-built`, `imported` or `prebuilt, not
 self-built`), build ID, llama.cpp commit, backend, where and how long it was built, when it was verified and which
 devices it found; why a stored build cannot be used; whether a rebuild is required (the pin changed) or recommended
 (this machine's build plan changed); the GPU backend the build recipe chooses for this machine and why; which
@@ -863,6 +866,61 @@ running server keeps running; the next `runtime start` uses the new build.
 | `--prebuilt` | Download upstream's official prebuilt archive instead (size and sha256 checked before unpacking). Only on this request, always shown as "prebuilt, not self-built". An archive that is already installed, also one an earlier version downloaded (which is not used without this request), is taken without downloading it again. Linux archives need glibc 2.35 or 2.39; none is offered on musl. |
 | `--force` | With `--prebuilt`: download and unpack again even if it is installed. |
 | `-y, --yes` | Do not ask before building, fetching the source or downloading. |
+
+#### ditto runtime ensure
+
+```
+llm-cli ditto runtime ensure [--mode auto|bare-metal|docker] [--force] [--placement auto|native|container]
+                             [--backend ...] [--jobs N] [--no-model] [-y]
+```
+
+Installs Ditto's local model server when it is not there, bare metal or in Docker. Running it again does nothing:
+it says what it found and stops. The installers' Ditto step runs this command.
+
+- **What it finds:** a bare-metal build that passed its checks on this computer (or the official archive you chose
+  with `install --prebuilt`), and Ditto's image of the pinned llama.cpp commit, built here (never one from a
+  registry) and checked in a container of itself. While Docker cannot be asked, Docker mode stays as you chose it.
+  The command removes nothing on its way: no old build is removed by retention.
+- **When nothing is installed:** `--mode auto` installs bare metal (no Docker overhead); when bare metal is not
+  possible here, it uses Docker and says why. `--mode bare-metal` or `--mode docker` choose the mode yourself.
+- **Docker mode:** Ditto's image is built on this computer from the same pinned recipe, on a Docker Official base
+  image pinned by digest (`configs/llama_runtime.yml`, `build_bases`). It is never pulled as a finished image and
+  never pushed. The programs come from the bare-metal build when the base image's C library fits ("repackaged"), or
+  from a new build in the builder container ("rebuilt", no network during the build, checked in a container of the
+  runtime base). Every image is checked in a container of itself: version and commit of the pin, the devices it
+  sees, and that the server refuses `--tools`. The server container publishes its port on 127.0.0.1 only, mounts
+  the models folder and the per-start key file read-only, runs as your user without capabilities and with a
+  read-only root file system, and is removed by Docker when it stops. The GPU is passed through where it can be
+  (NVIDIA through the NVIDIA Container Toolkit, AMD and Intel through `/dev/dri`); where not, the command says why
+  and the image gets the CPU build. Docker mode needs Linux in this version.
+- **`--force`** switches to `--mode` although Ditto is installed in the other mode. It needs a terminal (switching is
+  your decision). The models stay and are not downloaded again; only the server is made again, repackaged where
+  possible: the bare-metal build into the image, or the image's build into bare metal after it passed its checks on
+  this computer. Where that is not possible, the command says why and builds again. The server of the old mode is
+  stopped. Then the old mode's leftovers are listed: build folders with their full path, folder name and build ID,
+  Docker images and containers with their name and ID, each with its size and what it is. Only what you confirm is
+  removed ("No" is the default). Without a terminal nothing is removed and the list is shown.
+- **The model:** when the model of the chosen or recommended tier is not downloaded yet, its source, size and licence
+  are shown first. It is downloaded after your yes, or with `-y` when its licence is permissive (Apache 2.0, MIT,
+  BSD); any other licence is yours to accept with `llm-cli ditto models download`. Both modes use the same models
+  folder.
+- In the framework's own container build (`LCF_CONTAINER_BUILD=1`) Docker mode is not available.
+
+| Option | Meaning |
+|---|---|
+| `--mode [auto\|bare-metal\|docker]` | `auto` (default): keep what is installed; when nothing is, bare metal, or Docker when bare metal is not possible. |
+| `--force` | Switch to `--mode` (bare-metal or docker). Needs a terminal. |
+| `--placement [auto\|native\|container]` | Where a build runs, as for `install`. With Docker mode, `native` puts a native build into the image. |
+| `--backend [...]` | GPU backend, as for `install`. |
+| `--jobs INTEGER RANGE` | Parallel compile jobs of a build. |
+| `--no-model` | Do not offer the model download. |
+| `-y, --yes` | Do not ask before fetching the source or downloading a model under a permissive licence (size and licence are still shown). The build itself starts without a question, as the installers need it. Never removes anything. |
+
+```bash
+llm-cli ditto runtime ensure                              # installs it if it is not there
+llm-cli ditto runtime ensure --mode docker --force        # switch to Docker
+llm-cli ditto runtime ensure --mode bare-metal --force    # and back
+```
 
 #### ditto runtime import
 

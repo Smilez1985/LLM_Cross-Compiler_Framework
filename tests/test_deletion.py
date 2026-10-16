@@ -41,6 +41,11 @@ DELETION_SITES = {
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.delete_old_builds.take"): PERSON,
     ("orchestrator/runtime/build/store.py", "BuildStore.remove"): PERSON,
     ("orchestrator/runtime/device/package.py", "DeviceRuntimeStore.delete_packages"): PERSON,
+    # the old runtime mode's build folders, images and containers after a switch of Ditto's server: only the list the
+    # person confirmed (runtime_mode.remove_leftovers; tests/test_runtime_mode.py covers every actor and changed list)
+    ("orchestrator/runtime/runtime_mode.py", "_remove_item"): PERSON,
+    ("orchestrator/runtime/container_server.py", "DittoDocker.remove_image"): PERSON,
+    ("orchestrator/runtime/container_server.py", "DittoDocker.remove_container"): PERSON,
     ("orchestrator/utils/input_history.py", "InputHistory.clear"): PERSON_LIST,
     # (the chat: FeedStore.clear_conversation and ChatHistory.clear delete rows and messages, not files; see below)
     ("orchestrator/Core/builder.py", "BuildEngine._keep_as_last_build"): NAME_ONLY,
@@ -133,9 +138,11 @@ DELETION_SITES = {
     ("orchestrator/Core/builder.py", "BuildEngine._run_container"): CONTAINERS,
     ("orchestrator/Core/builder.py", "BuildEngine._scan_image_security"): CONTAINERS,
     ("orchestrator/runtime/build/executor.py", "DockerEngine.run"): CONTAINERS,
+    ("orchestrator/runtime/container_server.py", "DittoDocker.run_check"): CONTAINERS,   # checks of Ditto's image
     # the framework's own local model server
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._open_log"): OWN_SERVER,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._launch"): OWN_SERVER,
+    ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._launch_container"): OWN_SERVER,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._stop_locked"): OWN_SERVER,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._cleanup_stale_locked"): OWN_SERVER,
     # open, reported
@@ -267,6 +274,11 @@ def test_every_deletion_path_needs_an_accepted_deletion_plan(tmp_path):
     from orchestrator.Core.doctor import delete_framework_images
     with pytest.raises(PermissionError):
         delete_framework_images(SimpleNamespace(), plan, actor="framework")
+
+    # The old runtime mode's leftovers: only the person (tests/test_runtime_mode.py covers every actor).
+    from orchestrator.runtime.runtime_mode import remove_leftovers
+    with pytest.raises(PermissionError):
+        remove_leftovers(SimpleNamespace(), plan, actor="mcp", audit=Audit())
 
     # The chat: rows and Ditto's conversation (WP6), only the person, only the unchanged list.
     from orchestrator.Core.chat_feed import FeedStore

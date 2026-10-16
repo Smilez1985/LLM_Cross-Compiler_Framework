@@ -291,4 +291,4 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
     with pytest.raises(ValueError, match="unknown language"):
         localization.merge_text_modules(table, ("lcf_texts_odd",))
     assert set(localization.TEXT_MODULES) == {"orchestrator.utils.l10n_facts", "orchestrator.utils.l10n_chat",
-                                             "orchestrator.utils.l10n_deletion"}
+                                             "orchestrator.utils.l10n_deletion", "orchestrator.utils.l10n_runtime"}

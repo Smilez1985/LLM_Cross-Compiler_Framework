@@ -581,10 +581,27 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             ctx.notes.append("Follow the build with get_job_status (wait_seconds=50); a CPU build takes minutes.")
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
-        def start_facts(inp: StartRuntimeIn, ctx: ToolContext) -> CallFacts:
-            rt = runtime()
+        def in_use(rt) -> tuple:
+            """(what start() starts as the build key, its description, why there is none) in either runtime mode: the
+            bare-metal build, or in Docker mode Ditto's verified image (the person chose the mode; never an AI)."""
+            from orchestrator.runtime.llama_server import LocalRuntimeError
+            if rt.mode() == "docker":
+                try:
+                    image = rt.docker_image()
+                except LocalRuntimeError as e:
+                    return None, "", [str(e)]
+                return (image.image_id, f"Ditto's image {image.name} "
+                        f"({image.labels.get('org.llm-framework.ditto-backend', '?')}), Docker mode", [])
             installed, problems = rt.resolve_installed()
             if installed is None:
+                return None, "", problems
+            return (installed.build_id or installed.asset_id or "",
+                    f"{installed.name} ({installed.backend}), {installed.label}, bare metal", [])
+
+        def start_facts(inp: StartRuntimeIn, ctx: ToolContext) -> CallFacts:
+            rt = runtime()
+            key, described, problems = in_use(rt)
+            if key is None:
                 raise blocked("runtime_not_built", "Ditto's local server is not built on this computer" +
                               (f": {scrub('; '.join(problems))}" if problems else "."), BUILD_NEXT)
             try:
@@ -595,13 +612,11 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             if not rt.model_path(model).is_file():
                 raise blocked("model_not_downloaded", f"The model of tier {model.tier} is not downloaded.",
                               f"Fetch it with build_local_runtime(model_tier='{model.tier}').", field="tier")
-            origin = installed.label
-            facts = (Fact("Build", f"{installed.name} ({installed.backend}), {origin}"),
+            facts = (Fact("Build", described),
                      Fact("Model", f"tier {model.tier}: {model.file} ({why})"),
                      Fact("Server", "on 127.0.0.1 only, with a new key for every start (never shown to an AI)"))
             consequence = f"Starts Ditto's local model server on this computer with the model {model.tier}."
-            return CallFacts(consequence=consequence, facts=facts,
-                             bound={"tier": model.tier, "build": installed.build_id or installed.asset_id or ""})
+            return CallFacts(consequence=consequence, facts=facts, bound={"tier": model.tier, "build": key})
 
         def start_local_runtime(inp: StartRuntimeIn, ctx: ToolContext) -> JobStartedOut:
             bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
@@ -611,8 +626,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
 
             def work(handle) -> Dict[str, Any]:
                 rt = runtime()
-                installed = rt.installed()
-                if installed is None or (installed.build_id or installed.asset_id or "") != bound["build"]:
+                if in_use(rt)[0] != bound["build"]:
                     raise ValueError("The build in use changed after the person was asked; nothing was started.")
                 handle.progress(None, None, f"starting the server with {bound['tier']}")
                 try:
@@ -621,11 +635,14 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     raise job_error(e) from None
                 status = rt.status()
                 inst = status.installed
+                origin, build_id = (inst.label, inst.build_id) if inst is not None else (None, None)
+                if status.mode == "docker":  # what runs is Ditto's image, not a bare-metal build
+                    image = status.docker or {}
+                    origin = f"Ditto's image ({image.get('made_by') or 'made here'}), Docker mode"
+                    build_id = image.get("build_id")
                 # The server's address and its per-start key are never part of a result.
                 return {"running": status.running, "healthy": status.healthy, "model": status.model,
-                        "tier": status.tier, "ctx": status.ctx,
-                        "origin": inst.label if inst is not None else None,
-                        "build_id": inst.build_id if inst is not None else None}
+                        "tier": status.tier, "ctx": status.ctx, "origin": origin, "build_id": build_id}
 
             def started(out: Dict[str, Any]):
                 ok = bool(out.get("running"))

@@ -194,6 +194,12 @@ volume first (a target of your own as a pack:
 - **No conversions inside the container.** The image contains no Docker engine, and builds need Docker on the
   computer that converts. Build on a computer where the framework is installed directly. Giving the container the
   host's Docker socket is not offered: it would give the container root-equivalent rights on the host.
+- **Ditto's local model server is not set up in the image.** The image build runs the installer's Ditto step with
+  `LCF_CONTAINER_BUILD=1`: it says why and does nothing. Ditto's Docker mode is not available inside the container
+  (there is no Docker engine), and a server built into the image would not fit the hardware the container runs on
+  later. Inside the container a bare-metal server needs a compiler the headless image does not have. Use a cloud
+  provider or a local server on your network for Ditto there, or install the framework directly on the computer that
+  should run Ditto's model (`llm-cli ditto runtime ensure`, bare metal or in Docker).
 - **No keyring:** see step 1 of [Start it and set it up once](#3-start-it-and-set-it-up-once).
 - **Targets and community packs** live in the container's program folder, not in the volume: moving to a new image
   needs an export first ([Updating](#7-updating)).

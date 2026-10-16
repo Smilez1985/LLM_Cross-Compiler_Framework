@@ -160,6 +160,18 @@ class TestBuild:
         (question,) = confirm.asked
         assert "pinned commit" in question and "self-built" in question and "cpu build" in question
 
+    def test_the_build_of_an_ai_removes_no_old_build(self, fw, fake_rt, monkeypatch):
+        from orchestrator.runtime.build.store import BuildStore
+        removed = []   # BuildStore.remove deletes only what the person chose from the list (WP7)
+        monkeypatch.setattr(BuildStore, "remove", lambda self, *a, **k: removed.append(a) or ([], []))
+        other = fake_rt["rt"].root / "b1000-cpu-x64"  # the official archive of another llama.cpp build
+        other.mkdir(parents=True)
+        (other / "runtime.json").write_text("{}")
+        allow(fw, "build_local_runtime")
+        job = wait_job(fw, call(fw, "build_local_runtime", {"backend": "cpu"}, confirm=asking(True)).job_id)
+        assert job.state == "done", job.error
+        assert removed == [] and other.is_dir(), "an AI never reaches a deletion (round 5 f)"
+
     def test_a_cancelled_build_is_never_activated(self, tmp_path, no_source):
         ex = rs.FakeExecutor()
         rt = rs.runtime(tmp_path / "rt", executor=ex)
