@@ -210,6 +210,17 @@ llmcf mojo --oracle --board "Kitchen board"
 llm-cli mojo --json > mojo.json
 ```
 
+In der GUI: **Tools > Mojo-Gesundheitscheck...** startet Mojo Oracle beim Öffnen (**Erneut prüfen** startet es noch
+einmal) und zeigt jeden Befund so, wie der Befehl ihn ausgibt: die Schwere als Text mit Zeichen und Symbol, den
+Bereich, die Meldung, wo, warum es wichtig ist, den nächsten Schritt, was Mojo Miracle tun kann, mit den Schritten
+seines Plans, den zusammenfassenden Satz und eine Gesamtzeile mit dem Exit-Code. **Mojo Miracle ausführen...**
+(`--miracle`) fragt „Mojo Miracle jetzt ausführen?“ (Nein ist die Vorgabe), wendet genau die gezeigten Pläne an und
+öffnet die Build-Images des Frameworks im Löschdialog (die ganze Liste, nichts angehakt); danach zeigt es, was
+repariert wurde, was nicht und warum. Jedes Board, auf das ein aufgezeichneter Fakt zeigt, bekommt **<Board> jetzt
+prüfen**, und **Ein Board prüfen...** (`--board`) prüft ein beliebiges vertrautes Board, das du auswählst
+(Bezeichnung und Adresse): eine Verbindung zu seinem SSH-Port, keine Anmeldung. **Dieses Board prüfen** im
+Deployment-Tab (Gruppe „Benchmark auf einem Board“) prüft das gewählte Board genauso.
+
 ---
 
 ## doctor
@@ -232,6 +243,9 @@ llm-cli doctor
 llm-cli doctor --json > doctor.json
 llm-cli doctor --fix --tier 2
 ```
+
+In der GUI: **Tools > Mojo-Gesundheitscheck...** (die Prüfung; **Mojo Miracle ausführen...** macht die Reparaturen
+von `--fix`) und **Tools > Framework Build Images...** (die Liste von `--tier 2`).
 
 ---
 

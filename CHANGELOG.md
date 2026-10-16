@@ -10,6 +10,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Tools > Mojo Health Check... in the GUI** (DECISIONS W1': every action of the command line also by mouse): the
+  Mojo window runs Mojo Oracle when it opens, off the GUI thread, and shows every finding as `llmcf mojo` prints it
+  (the severity as text with its mark and icon, never colour alone; where with the full path, why it matters, the
+  next step, what Mojo Miracle can do with the steps of its plan; the summary sentence and an overall line with the
+  exit code). **Run Mojo Miracle...** asks "Run Mojo Miracle now?" ("No" is the default) and runs Mojo Miracle with
+  the GUI as your channel: the plans shown bind the repairs, the framework's build images open in the deletion dialog
+  with the full list and nothing ticked, and the window shows what was repaired, what was not and why. No board is
+  contacted by itself: a board a recorded fact points to gets **Check <board> now**, and **Check a board...** checks
+  any trusted board you pick (one connection to its SSH port, no login). The command and the window share the same
+  core functions (`Core/mojo/boards.py`, the person's view in `Core/mojo/views.py`, `docker_objects.offer_image_list`),
+  so the output of `llmcf mojo` stays as it was.
+- **Check this board in the Deployment tab** (group "Benchmark on a board", DECISIONS W1'): checks the chosen board
+  as `llmcf mojo --oracle --board` does, in the background (one connection to its SSH port, no login), and shows its
+  finding with the next step under the row; a problem is also said in a message.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record

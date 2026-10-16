@@ -51,6 +51,11 @@ Run Mojo Miracle now? [y/N]:
 With `y` Mojo Miracle runs right away; you do not type the command again. No is the default: then nothing is
 changed.
 
+In the GUI (unreleased): **Tools > Mojo Health Check...** runs Mojo Oracle when the window opens and shows the same
+findings with an overall line for the exit code; **Run Mojo Miracle...** asks the same question (No is the default),
+opens the framework's build images in the deletion dialog and shows what was repaired, what was not and why. The
+window and the command call the same functions.
+
 ## 2. What Mojo Oracle reports
 
 Mojo Oracle prints one line per check. For every warning and error it also prints:
@@ -119,6 +124,11 @@ address. Mojo never logs in, sends no password and names no device account. A wr
 is gone (`device_auth_failed`) shows only at the next deploy or benchmark; when such a failure is recorded and the
 board answers now, Mojo says that it cannot check the login. A checked board keeps its recorded problem until a
 deploy, verify or benchmark reaches it again, because Mojo Oracle only looks and writes nothing.
+
+In the GUI the Mojo window contacts no board by itself either: a board a recorded fact points to gets a **Check
+<board> now** button, and **Check a board...** checks any trusted board you pick by its label and address. The
+Deployment tab's **Check this board** (group "Benchmark on a board") checks the board chosen there. Each is the same
+single connection to the board's SSH port, without a login, and shows the board's finding with its next step.
 
 ## 3. What Mojo Miracle repairs
 
