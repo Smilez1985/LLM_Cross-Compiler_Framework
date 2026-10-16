@@ -304,6 +304,19 @@ class BoardsWindow(QDialog):
         if token is not None:
             worker_relay().done.emit(token, str(text))
 
+    def _ask_from_worker(self, title: str, text: str) -> bool:
+        """A yes/no question the running step needs answered before it goes on (the CLI asks it at that point too):
+        asked in the GUI thread with "No" as the default while the worker waits; Cancel ends the wait."""
+        from orchestrator.gui.worker_relay import worker_relay
+        token = self._progress_token
+        if token is None:
+            raise Cancelled()
+        question = _Question(title, text)
+        worker_relay().done.emit(token, question)
+        while not question.answered.wait(0.1):
+            self._check_cancel()
+        return question.yes
+
     def _keep_client(self, client: Any) -> None:
         """The SSH session of the running step, so Cancel can close it."""
         self._client = client
@@ -328,6 +341,12 @@ class BoardsWindow(QDialog):
     def _finished(self, token: object, result: Any) -> None:
         if token is not None and token is self._progress_token and isinstance(result, str):
             self._say(result)
+            return
+        if token is not None and token is self._progress_token and isinstance(result, _Question):
+            try:
+                result.yes = ask(self, result.title, result.text)
+            finally:
+                result.answered.set()
             return
         if token is None or token is not self._token:
             return
@@ -437,9 +456,11 @@ class BoardsWindow(QDialog):
                                         detail=one_line(check.detail)))
         return lines
 
-    def _ask_untrusted(self, model: str, user: str) -> bool:
-        """The explicit warning before an untrusted model may run on the board; "No" is the default."""
-        return ask(self, self._t("boards.title"), self._t("boards.untrusted_question", model=model, user=user))
+    def _may_run_untrusted(self, user: str) -> Callable[[str], bool]:
+        """The CLI's question before a model that is not a catalog model runs in the short benchmark, asked from the
+        worker once the board named the model's sha256 ("No" is the default); a catalog model is never asked about."""
+        return lambda path: self._ask_from_worker(self._t("boards.title"),
+                                                  self._t("boards.untrusted_question", path=path, user=user))
 
     @staticmethod
     def _board_label(entry: Dict[str, Any]) -> str:
@@ -1062,13 +1083,12 @@ class BoardsWindow(QDialog):
 
         def prepared(found: Any) -> None:
             plan, build, devices, packaged = found
-            allowed = bool(bench_model) and self._ask_untrusted(bench_model, settings.ssh_user)
             self._start(self._t("boards.deploy.running"),
-                        lambda: work(plan, build, devices, packaged, allowed),
+                        lambda: work(plan, build, devices, packaged),
                         lambda out: self._deployed(entry, profile, settings, kv, out),
                         failed=lambda e: self._runtime_failed(e, host, port, settings.ssh_user, device_id))
 
-        def work(plan: Any, build: Any, devices: Any, packaged: Any, allowed: bool):
+        def work(plan: Any, build: Any, devices: Any, packaged: Any):
             client, key = person_steps.connect_stored(state, device_id, host, port, settings.ssh_user, password,
                                                       step="runtime_deploy", on_client=self._keep_client)
             try:
@@ -1079,8 +1099,9 @@ class BoardsWindow(QDialog):
                 facts = read_facts(shell)
                 if facts.uid == 0:
                     raise _Refusal(self._t("boards.deploy.root"))
+                # asked before anything changes on the board (decision D23), as the CLI asks it
                 bench = steps.choose_bench_model(
-                    shell, facts.home, bench_model, may_run_untrusted=lambda _path: allowed,
+                    shell, facts.home, bench_model, may_run_untrusted=self._may_run_untrusted(settings.ssh_user),
                     record_consent=lambda digest: person_steps.record_consent(
                         audit, tool, {"device": device_id, "model_sha256": digest}, detail, channel="framework-gui"))
                 self._check_cancel()
@@ -1122,8 +1143,9 @@ class BoardsWindow(QDialog):
         lines.append(t("boards.kv", kv=self._kv_text(kv)))
         # where the server listens and where its key is, as the CLI says it (the note above names the start command)
         if settings.install == "systemd":
-            lines.append(t("boards.deploy.server_systemd", port=settings.port, state=t(
-                "boards.deploy.unit_started" if getattr(result, "unit_started", None) else "boards.deploy.unit_enabled")))
+            started = getattr(result, "unit_started", None)
+            lines.append(t("boards.deploy.server_systemd", port=settings.port,
+                           state=t("boards.deploy.unit_started" if started else "boards.deploy.unit_enabled")))
         else:
             lines.append(t("boards.deploy.server_user", port=settings.port))
         self._say("\n".join(lines))
@@ -1178,7 +1200,6 @@ class BoardsWindow(QDialog):
         source = self._pin() if address is not None else None
         if source is None:
             return
-        allowed = bool(bench_model) and self._ask_untrusted(bench_model, user)
         host, port = address
         tool, detail = person_steps.UNTRUSTED_CONSENT
 
@@ -1193,7 +1214,7 @@ class BoardsWindow(QDialog):
                 if facts.uid == 0:
                     raise _Refusal(self._t("boards.verify.root"))
                 bench = steps.choose_bench_model(
-                    shell, facts.home, bench_model, may_run_untrusted=lambda _path: allowed,
+                    shell, facts.home, bench_model, may_run_untrusted=self._may_run_untrusted(user),
                     record_consent=lambda digest: person_steps.record_consent(
                         audit, tool, {"device": device_id, "model_sha256": digest}, detail, channel="framework-gui"))
                 self._check_cancel()
@@ -1254,6 +1275,14 @@ class BoardsWindow(QDialog):
 
 class _Refusal(Exception):
     """A step the board's state refuses (not built, root, ...): its text is the person's message."""
+
+
+class _Question:
+    """A yes/no question from the worker thread, answered in the GUI thread (BoardsWindow._ask_from_worker)."""
+
+    def __init__(self, title: str, text: str):
+        self.title, self.text, self.yes = title, text, False
+        self.answered = threading.Event()
 
 
 def open_boards(window: Any) -> Optional[BoardsWindow]:

@@ -5329,13 +5329,11 @@ def _bench_choice(ctx: FrameworkContext, shell, home: str, bench_model: Optional
     """(model path on the device or None, allowed, its sha256): a catalog model (by sha256) runs; any other model only
     after the user's consent, written to the audit log first (decision D23)."""
     from orchestrator.runtime.device import steps
-    from orchestrator.runtime.device.person_steps import UNTRUSTED_CONSENT
+    from orchestrator.runtime.device.person_steps import UNTRUSTED_CONSENT, UNTRUSTED_QUESTION
     from orchestrator.runtime.device.settings import SettingsError
 
-    def may_run(path: str) -> bool:
-        question = (f"{path} is not a catalog model, so it is untrusted. llama-bench loads it natively on the device "
-                    f"as {user} (no sandbox). Run the short benchmark with it? Your answer is written to the audit "
-                    "log.")
+    def may_run(path: str) -> bool:   # the GUI's Boards window asks these same words
+        question = UNTRUSTED_QUESTION.format(path=path, user=user)
         return allow_untrusted or (_interactive() and click.confirm(question, default=False))
 
     tool, detail = UNTRUSTED_CONSENT

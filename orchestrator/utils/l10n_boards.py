@@ -226,10 +226,11 @@ TEXTS = {
         "boards.deploy.password_hint": "used once to install the framework's key, never stored",
         "boards.bench.model": "Model for a short benchmark (optional):",
         "boards.bench.hint": "path on the board, e.g. models/model.gguf (relative: in the home folder)",
-        "boards.untrusted_question": "If {model} is not one of the framework's catalog models, it is untrusted: "
-                                     "llama-bench then loads it natively on the board as {user}, without a sandbox. "
-                                     "Allow that for this run? A catalog model runs without this question; your "
-                                     "consent is written to the audit log before such a model is loaded.",
+        # asked only after the board named the model's sha256 and it is not a catalog model: the CLI's words
+        # (person_steps.UNTRUSTED_QUESTION)
+        "boards.untrusted_question": "{path} is not a catalog model, so it is untrusted. llama-bench loads it "
+                                     "natively on the device as {user} (no sandbox). Run the short benchmark with "
+                                     "it? Your answer is written to the audit log.",
         "boards.deploy.not_built": "The runtime for this board is not built yet (or the board's probe changed): "
                                    "Build runtime... first.",
         "boards.deploy.needs_source": "The tarball must be packaged again, which needs the pinned source (its "
@@ -481,11 +482,9 @@ TEXTS = {
         "boards.deploy.password_hint": "einmal genutzt, um den Schlüssel des Frameworks einzurichten, nie gespeichert",
         "boards.bench.model": "Modell für einen kurzen Benchmark (optional):",
         "boards.bench.hint": "Pfad auf dem Board, z. B. models/model.gguf (relativ: im Home-Ordner)",
-        "boards.untrusted_question": "Wenn {model} keines der Katalogmodelle des Frameworks ist, ist es nicht "
-                                     "vertrauenswürdig: llama-bench lädt es dann nativ auf dem Board als {user}, ohne "
-                                     "Sandbox. Für diesen Lauf erlauben? Ein Katalogmodell läuft ohne diese Frage; "
-                                     "deine Zustimmung wird im Audit-Log vermerkt, bevor ein solches Modell geladen "
-                                     "wird.",
+        "boards.untrusted_question": "{path} ist kein Katalogmodell und daher nicht vertrauenswürdig. llama-bench "
+                                     "lädt es nativ auf dem Gerät als {user} (ohne Sandbox). Den kurzen Benchmark "
+                                     "damit ausführen? Deine Antwort wird im Audit-Log vermerkt.",
         "boards.deploy.not_built": "Die Laufzeit für dieses Board ist noch nicht gebaut (oder sein Prüfprofil hat "
                                    "sich geändert): zuerst Laufzeit bauen...",
         "boards.deploy.needs_source": "Das Paket muss neu gepackt werden, dafür wird die festgelegte Quelle gebraucht "
