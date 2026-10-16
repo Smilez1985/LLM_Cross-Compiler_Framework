@@ -855,6 +855,21 @@ class TestLeftovers:
         assert rt.installed() is not None, "bare metal keeps working (the image's build is its build now)"
         assert leftovers(rt, "bare-metal") is None
 
+    def test_the_official_archive_chosen_goes_with_bare_metals_record(self, tmp_path, no_source, dri):
+        """W2: bare metal's record in active.json also names the official archive chosen earlier (asset_id): it is
+        listed and deleted with the other entries, so nothing of bare metal stays in the file."""
+        rt, _plan = _switched_to_docker(tmp_path, FakeClient())
+        active = rt.root / "active.json"
+        data = json.loads(active.read_text())
+        data.update(asset_id="linux-cpu-x64", variant="cpu-x64")
+        active.write_text(json.dumps(data))
+        plan = leftovers(rt, "docker")
+        (record,) = [i for i in plan.items if i.kind == "runtime_record"]
+        assert "asset_id" in record.what, record.what
+        removal = remove_leftovers(rt, plan, actor="cli", audit=Audit())
+        left = json.loads(active.read_text())
+        assert not removal.failed and "asset_id" not in left and "variant" not in left, left
+
     def test_the_old_mode_is_removed_only_while_the_new_one_works(self, tmp_path, no_source, dri):
         client = FakeClient()
         rt, plan = _switched_to_docker(tmp_path, client)
@@ -906,10 +921,13 @@ class TestSpace:
         estimate = shortage.estimate
         assert estimate.mode == "docker" and not estimate.fits and estimate.total > 0
         labels = {label for check in estimate.checks for label in check.labels}
-        assert labels == {runtime_mode.RUNTIME_FOLDER, runtime_mode.DOCKER_STORAGE}
+        assert labels == {runtime_mode.RUNTIME_FOLDER, runtime_mode.DOCKER_STORAGE, runtime_mode.TEMP_FOLDER}
+        assert any(n.label == runtime_mode.TEMP_FOLDER for n in estimate.needs), \
+            "the image's build context (a copy of the build's programs) is made in the temporary folder"
         text = str(shortage)
         assert "does not fit next to bare metal" in text and "not enough" in text and "free" in text
-        assert "remove bare metal first" in text and "the models stay" in text
+        assert shortage.removal_helps is False and "would not fit either" in text, \
+            "3 GB free on 1000 GB: deleting bare metal first cannot make room"
         assert shortage.old_mode == "bare-metal"
         assert {i.kind for i in shortage.old_plan.items} == {"runtime_build", "runtime_record"}
         assert len([i for i in shortage.old_plan.items if i.kind == "runtime_build"]) == 2
@@ -963,6 +981,32 @@ class TestSpace:
         assert audit.rows[0]["arguments"]["before_switch"] is True
         result = ensure(runtime(tmp_path, client, profile=newer), mode="docker", force=True)
         assert result.mode == "docker" and result.leftovers is None, "nothing of bare metal is left to list"
+
+    def test_removing_first_is_not_offered_when_the_new_mode_would_still_not_fit(self, tmp_path, no_source, dri,
+                                                                                monkeypatch):
+        """W2: bare metal -> Docker by repackaging does not fit. Once bare metal is deleted, its build can no longer
+        be repackaged, so Docker mode would need a new build in the builder container. The estimate after removing
+        the old mode first is made without its build and counts what its objects free on their disk; here it does
+        not fit either, so deleting bare metal first is not offered (it would only leave Ditto without a runtime)."""
+        client = FakeClient()
+        rt = runtime(tmp_path, client)
+        rt.install()
+        _docker_disk(client, tmp_path / "docker-root")
+        monkeypatch.setattr(runtime_mode, "_folder_size", lambda path: GB)
+        monkeypatch.setattr(runtime_mode, "_disk_usage", disks(21 * GB))   # 20 GB of 1000 GB are kept free
+        with pytest.raises(runtime_mode.SpaceShortage) as e:
+            ensure(runtime(tmp_path, client, executor=Refuses()), mode="docker", force=True)
+        shortage = e.value
+        assert "repackaged" in shortage.estimate.how and client.builds == []
+        after = shortage.after_removal
+        assert after is not None and "builder container" in after.how and after.total > shortage.estimate.total
+        assert after.freed == shortage.old_plan.total_bytes > 2 * GB - 1
+        (before_check,), (after_check,) = shortage.estimate.checks, after.checks
+        assert after_check.free == before_check.free + after.freed, "what the old mode frees there is counted"
+        assert shortage.removal_helps is False and not after.fits
+        assert any("deleted first" in line for line in after.lines())
+        text = str(shortage)
+        assert "would not fit either" in text and "remove bare metal first" not in text
 
     def test_removing_first_is_refused_when_the_list_changed(self, tmp_path, no_source, dri):
         rt = runtime(tmp_path, FakeClient())
@@ -1142,12 +1186,20 @@ class TestCli:
             assert re.sub(r"\s+", "", item.file_name) in flat
         assert "deletedforgood(notintothetrash)" in flat and "themodelsstay" in flat, "what happens to them"
 
-    def _shortage(self, rt, old="bare-metal"):
+    def _shortage(self, rt, old="bare-metal", after_fits=None):
+        """A shortage of Docker mode next to `old`; `after_fits`: whether it fits once the old mode is deleted first
+        (None: that estimate could not be made)."""
         from orchestrator.Core.disk_plan import DiskCheck
         check = DiskCheck(["Ditto runtime folder"], 2 * GB, GB, 1000 * GB, 20 * GB, 0, "1")
         estimate = runtime_mode.SpaceEstimate("docker", "a new cpu build in the builder container",
                                               keeps=GB, checks=[check])
-        return runtime_mode.SpaceShortage(estimate, old, runtime_mode.old_mode_plan(rt, old))
+        after = None
+        if after_fits is not None:
+            free = 30 * GB if after_fits else 21 * GB
+            after = runtime_mode.SpaceEstimate("docker", "a new cpu build in the builder container", keeps=GB,
+                                               checks=[DiskCheck(["Ditto runtime folder"], 6 * GB, free, 1000 * GB,
+                                                                 20 * GB, 0, "1")], freed=GB)
+        return runtime_mode.SpaceShortage(estimate, old, runtime_mode.old_mode_plan(rt, old), after)
 
     def _terminal_cli(self, monkeypatch, rt, answers, ensure_steps):
         """`ditto runtime ensure --mode docker --force` at a terminal: each call of ensure takes the next step (an
@@ -1186,7 +1238,7 @@ class TestCli:
     def test_removing_the_old_mode_first_then_switching(self, tmp_path, monkeypatch, no_source, dri):
         rt = runtime(tmp_path)
         rt.install()
-        shortage = self._shortage(rt)
+        shortage = self._shortage(rt, after_fits=True)
         done = runtime_mode.EnsureResult("switched", "docker", ["Ditto's runtime mode is now Docker."])
         result, calls, removed = self._terminal_cli(monkeypatch, rt, "y\n", [shortage, done])
         assert result.exit_code == 0, result.output
@@ -1194,6 +1246,44 @@ class TestCli:
         assert plan is shortage.old_plan and kw["actor"] == "cli" and kw["before_switch"] is True
         assert kw["removes"] == "bare-metal" and calls == [("docker", True), ("docker", True)]
         assert "server was stopped first" in result.output
+        assert "With bare metal deleted first" in re.sub(r"\s+", " ", result.output), "the sizes after the removal"
+
+    def test_removing_first_is_not_offered_when_the_new_mode_would_still_not_fit(self, tmp_path, monkeypatch,
+                                                                                no_source, dri):
+        """W2: when Docker mode would not fit even with bare metal deleted first, deleting it is not offered: the
+        person frees space; nothing is deleted or built."""
+        rt = runtime(tmp_path)
+        rt.install()
+        shortage = self._shortage(rt, after_fits=False)
+        result, calls, removed = self._terminal_cli(monkeypatch, rt, "y\ny\n", [shortage])
+        assert result.exit_code == 1 and removed == [] and calls == [("docker", True)], result.output
+        flat = re.sub(r"\s+", " ", result.output)
+        assert "Even with bare metal deleted first, Docker would not fit" in flat
+        assert "Delete all" not in flat and "llm-cli ditto runtime ensure --mode docker --force" in flat
+        assert rt.installed() is not None
+
+    def test_a_shortage_without_a_terminal_deletes_nothing_whatever_stdin_holds(self, tmp_path, monkeypatch,
+                                                                               no_source, dri):
+        """W2: deleting the old mode first is asked only of a person at a terminal. A run without one (a pipe, the
+        installers' step, a script) shows the sizes and the list and deletes nothing, even when its input holds a
+        'y'."""
+        rt = runtime(tmp_path)
+        rt.install()
+        shortage = self._shortage(rt, after_fits=True)
+        calls, removed = [], []
+
+        def fake_ensure(rt_, **kw):
+            calls.append(kw["mode"])
+            raise shortage
+        monkeypatch.setattr(runtime_mode, "ensure", fake_ensure)
+        monkeypatch.setattr(runtime_mode, "remove_leftovers", lambda *a, **k: removed.append(1))
+        result = _cli(monkeypatch, rt, "ensure", "--no-model", input="y\ny\n")
+        assert result.exit_code == 1 and removed == [] and calls == ["auto"], result.output
+        flat = re.sub(r"[\s│┃|]+", "", result.output)
+        for item in shortage.old_plan.items:
+            assert re.sub(r"\s+", "", item.file_name) in flat
+        assert "Nothingwasdeletedandnothingwasbuilt" in flat and "terminal" in result.output
+        assert rt.installed() is not None
 
     def test_when_the_new_mode_fails_after_the_old_one_was_removed_it_is_said_and_the_old_one_offered(
             self, tmp_path, monkeypatch, no_source, dri):
@@ -1318,6 +1408,35 @@ class TestAISettings:
         box._space_shortage(shortage)
         assert removed == [{"actor": "gui", "audit": None, "before_switch": True, "removes": "bare-metal"}]
         assert started == [(("docker", True), {"after_removal": "bare-metal"})]
+
+    def test_deleting_first_is_not_offered_when_it_would_not_help(self, qapp, tmp_path, monkeypatch, no_source, dri):
+        """W2: Docker mode would not fit even with bare metal deleted first: the GUI says so with both estimates and
+        asks nothing; nothing is deleted or built. When it would fit, the question shows the estimate after the
+        removal too."""
+        from orchestrator.Core.disk_plan import DiskCheck
+        from orchestrator.gui import runtime_mode_box as box_module
+        rt = runtime(tmp_path)
+        rt.install()
+        plan = runtime_mode.old_mode_plan(rt, "bare-metal")
+        check = DiskCheck(["Ditto runtime folder"], 2 * GB, GB, 1000 * GB, 20 * GB, 0, "1")
+        estimate = runtime_mode.SpaceEstimate("docker", "the bare-metal build repackaged", keeps=GB, checks=[check])
+
+        def after(free):
+            return runtime_mode.SpaceEstimate("docker", "a new cpu build in the builder container", keeps=GB,
+                                              checks=[DiskCheck(["Ditto runtime folder"], 6 * GB, free, 1000 * GB,
+                                                                20 * GB, 0, "1")], freed=GB)
+        asked, shown, removed, started = [], [], [], []
+        monkeypatch.setattr(box_module, "ask", lambda parent, title, question: asked.append(question) or False)
+        monkeypatch.setattr(box_module, "plain_box", lambda *a, **k: shown.append(a[-1]))
+        monkeypatch.setattr(box_module.runtime_mode, "remove_leftovers", lambda *a, **k: removed.append(k))
+        box = box_module.RuntimeModeBox(None, runtime_factory=lambda: rt)
+        monkeypatch.setattr(box, "_start", lambda *a, **k: started.append((a, k)))
+        box._space_shortage(runtime_mode.SpaceShortage(estimate, "bare-metal", plan, after(21 * GB)))
+        assert asked == [] and removed == [] and started == []
+        assert "Even with bare metal deleted first, Docker mode would not fit" in shown[-1]
+        assert "a new cpu build in the builder container" in shown[-1]
+        box._space_shortage(runtime_mode.SpaceShortage(estimate, "bare-metal", plan, after(30 * GB)))
+        assert len(asked) == 1 and "With bare metal deleted first" in asked[-1] and removed == []
 
     def test_a_failure_after_the_old_mode_was_deleted_offers_it_again(self, qapp, tmp_path, monkeypatch):
         from orchestrator.gui import runtime_mode_box as box_module

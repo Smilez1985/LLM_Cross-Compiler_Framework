@@ -166,7 +166,8 @@ An AI uses Mojo through the MCP server (and Ditto through the same tools):
   Mojo Miracle would do or why not; `repair.next` says what the AI does next. It contacts no board. For a board a
   recorded fact points to, `check_board` names the request that checks it. `{"board": "Kitchen board"}` checks that
   one trusted board now: one connection to its SSH port, no login. An AI names a board by its label or device ID
-  (`list_devices` shows both), never by an address.
+  (`list_devices` shows both), never by an address. A board you trusted without a name of its own has its address as
+  label; an AI names it by its device ID, and `check_board` does so too.
 - **`run_mojo_miracle`** with `{"code": "state.permissions"}`: repairs one problem whose `repair.how` is `miracle`.
   Every call asks you first; the question shows the plan (the full path only in the framework's own window). There
   is no "do not ask again" and no delegation for it. It never deletes. Any other problem is refused before the

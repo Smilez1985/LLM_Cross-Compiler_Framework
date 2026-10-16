@@ -317,10 +317,17 @@ def record_trusted_device(state_dir: Path, host: str, port: int, user: str, key:
     return device
 
 
+def label_is_address(device: TrustedDevice) -> bool:
+    """Whether the board's label is its address: the person gave it no name of its own, so the address became the
+    label (TrustedDevices.record)."""
+    forms = (device.host, device.address, f"{device.host}:{device.port}", f"[{device.host}]:{device.port}")
+    return device.label.casefold() in {form.casefold() for form in forms}
+
+
 def find_boards(store: "TrustedDevices", name: str, *, by_address: bool) -> List[TrustedDevice]:
     """The trusted boards a name means: its device ID or its label (case does not matter) and, for the person only
     (`by_address`), its address (host, host:port or [host]:port). An AI names a board by its label or device ID,
-    never by an address (W1, D0)."""
+    never by an address (W1, D0), also not by a label that is only the board's address."""
     wanted = " ".join(str(name or "").split())
     if not wanted:
         return []
@@ -328,7 +335,7 @@ def find_boards(store: "TrustedDevices", name: str, *, by_address: bool) -> List
     exact = [d for d in boards if d.device_id == wanted.lower()]
     if exact:
         return exact
-    found = [d for d in boards if d.label.casefold() == wanted.casefold()]
+    found = [d for d in boards if d.label.casefold() == wanted.casefold() and (by_address or not label_is_address(d))]
     if found or not by_address:
         return found
     return [d for d in boards if wanted in (d.host, d.address, f"{d.host}:{d.port}")]
@@ -336,10 +343,11 @@ def find_boards(store: "TrustedDevices", name: str, *, by_address: bool) -> List
 
 def board_name(store: "TrustedDevices", device: TrustedDevice) -> str:
     """The name to give for this board in `llmcf mojo --board` or run_mojo_oracle: its label when no other trusted
-    board has the same label, else its device ID."""
+    board has the same label and the label is a name of its own, else its device ID (so the request an AI is given
+    never names an address)."""
     same = [d for d in store.list() if d.label.casefold() == device.label.casefold()]
-    return device.label if len(same) <= 1 else device.device_id
+    return device.label if len(same) <= 1 and not label_is_address(device) else device.device_id
 
 
 __all__ = ["DEVICE_ID_RE", "DeviceStoreError", "REACH_STEPS", "TrustedDevice", "TrustedDevices", "board_name",
-           "clean_label", "find_boards", "record_trusted_device"]
+           "clean_label", "find_boards", "label_is_address", "record_trusted_device"]

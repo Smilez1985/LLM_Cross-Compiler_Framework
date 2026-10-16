@@ -1183,8 +1183,9 @@ run). The mode is recorded in `~/.llm-framework/runtime/llama.cpp/mode.json`.
   own disk cannot be measured; that is said, and it does not block). A disk keeps a reserve free, and the trash never
   counts as free. When it does not fit, nothing is built. You see the sizes and choose: free space and switch again,
   or delete the old mode first. Then every object of the old mode is listed and deleted after your one yes; Ditto is
-  unavailable until the new mode works, and the models stay. When the new mode then fails, you are told so and offered
-  the old mode again.
+  unavailable until the new mode works, and the models stay. Deleting it first is offered only when the new mode then
+  fits (estimated again without the old mode's build, counting what its objects free), and only at a terminal or in
+  the GUI. When the new mode then fails, you are told so and offered the old mode again.
 - **The old mode goes completely** once the new mode works: every object of it is listed with its full path or name,
   ID, size and what it is: Ditto's build folders (path, folder name, build ID), the official archive, Ditto's images
   and containers (name, ID), the old mode's entries in `mode.json` and `active.json`, and the log of the image builds.

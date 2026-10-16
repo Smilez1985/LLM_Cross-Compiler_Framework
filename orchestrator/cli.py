@@ -2047,13 +2047,16 @@ def _runtime_removed(removal) -> None:
 def _runtime_space_shortage(ctx: FrameworkContext, rt, shortage, run):
     """W2: the new mode does not fit next to the old one, so nothing was built. The sizes, then your choice: free space
     and switch again, or remove the old mode first (its full list, one yes, default no; Ditto is unavailable until the
-    new mode works, the models stay). When the new mode then fails, you are told so and offered the old mode again.
-    Returns the result of the switch; exits when nothing was switched."""
+    new mode works, the models stay). Removing it first is offered only while the new mode may fit then (estimated
+    again without the old mode's build), and only at a terminal: without one nothing is deleted or built. When the new
+    mode then fails, you are told so and offered the old mode again. Returns the result of the switch; exits when
+    nothing was switched."""
     from orchestrator.Core.knowledge_snapshots import size_text
     from orchestrator.runtime.llama_server import LocalRuntimeError
     from orchestrator.runtime.runtime_mode import (LeftoversChanged, RuntimeModeError, SpaceShortage, mode_label,
                                                    remove_leftovers)
     new, old, plan = shortage.estimate.mode, shortage.old_mode, shortage.old_plan
+    after = shortage.after_removal
     again = f"llm-cli ditto runtime ensure --mode {new} --force"
     console.print(f"[yellow]{escape(mode_label(new))} does not fit next to {escape(mode_label(old))}, so nothing was "
                   "built.[/yellow]")
@@ -2063,11 +2066,28 @@ def _runtime_space_shortage(ctx: FrameworkContext, rt, shortage, run):
         console.print(f"Nothing of {escape(mode_label(old))} is left to remove. Free space on the disks above and run "
                       f"again: {escape(again)}")
         sys.exit(1)
+    if shortage.removal_helps is False:
+        # deleting the old mode first would only leave Ditto without a local runtime: not offered
+        console.print(f"[yellow]Even with {escape(mode_label(old))} deleted first, {escape(mode_label(new))} would not "
+                      "fit:[/yellow]")
+        for line in after.lines():
+            console.print(escape(line))
+        console.print(f"So deleting {escape(mode_label(old))} first is not offered; nothing was deleted and nothing was "
+                      f"built. Free space on the disks above and run again: {escape(again)}")
+        sys.exit(1)
+    if after is not None:
+        console.print(f"With {escape(mode_label(old))} deleted first:")
+        for line in after.lines():
+            console.print(escape(line))
     console.print(f"You can:\n  1. free space on the disks above yourself and run again: {escape(again)}\n"
                   f"  2. remove {escape(mode_label(old))} first: every object below is deleted for good. Ditto is "
                   f"unavailable until {escape(mode_label(new))} works; the models stay.")
     _runtime_objects_table(f"Every object of {mode_label(old)}: {len(plan.items)}, {size_text(plan.total_bytes)}",
                            plan)
+    if not _interactive():
+        console.print("[yellow]Nothing was deleted and nothing was built: only you decide this, at a terminal. Run "
+                      f"there: {escape(again)}[/yellow]")
+        sys.exit(1)
     if not click.confirm(f"Delete all {len(plan.items)} objects of {mode_label(old)} for good first? Ditto is "
                          f"unavailable until {mode_label(new)} works; the models stay", default=False):
         console.print(f"Nothing was deleted and nothing was built. Free space and run again: {escape(again)}")
@@ -3451,19 +3471,25 @@ def _mojo_board_command(name: str, device_id: str) -> str:
 def _mojo_offer_boards(framework, report, terminal: bool) -> None:
     """Boards a recorded fact points to and that Mojo did not contact (W1): at a terminal "Check <board> now? [y/N]"
     for each (yes: one connection to its SSH port, no login, and the result); without a terminal the command that
-    checks it."""
+    checks it. The person sees the board's label; the command names it as `--board` takes it best (board_name)."""
     from orchestrator.Core.mojo.checks.devices import check_devices
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    try:
+        labels = {d.device_id: d.label for d in TrustedDevices.for_framework(framework).list()}
+    except Exception:  # noqa: BLE001 - the command's name stands in
+        labels = {}
     boards = {}
     for finding in report.findings:
         if finding.board_check and finding.board_check not in boards:
             boards[finding.board_check] = finding.board_name or finding.board_check
     for device_id, name in boards.items():
         command = _mojo_board_command(name, device_id)
+        label = labels.get(device_id) or name
         if not terminal:
-            console.print(f"Mojo did not contact the board {escape(name)}. To check it: {escape(command)}")
+            console.print(f"Mojo did not contact the board {escape(label)}. To check it: {escape(command)}")
             continue
-        if not click.confirm(f"Check {name} now? (one connection to its SSH port, no login)", default=False):
-            console.print(f"Mojo did not contact {escape(name)}. Later: {escape(command)}")
+        if not click.confirm(f"Check {label} now? (one connection to its SSH port, no login)", default=False):
+            console.print(f"Mojo did not contact {escape(label)}. Later: {escape(command)}")
             continue
         for finding in check_devices(framework, contact=(device_id,)):
             if finding.code != f"devices.{device_id}":
@@ -4597,14 +4623,16 @@ def _print_reason(ctx: Optional[FrameworkContext], code: str, host: str, port: i
 
 
 def _note_reach(ctx: Optional[FrameworkContext], host: str, port: int, step: str, code: str,
-                device_id: str = "") -> None:
+                device_id: str = "", state_dir: Optional[Path] = None) -> None:
     """Records for Mojo what this contact with a trusted board found (W1: Mojo reads it instead of contacting the
-    board): a reason code keeps the problem, "" (the board was reached and logged in to) ends it. Never fails."""
+    board): a reason code keeps the problem, "" (the board was reached and logged in to) ends it. `state_dir`: the
+    state folder the command works in (else the context's). Never fails."""
     if not step:
         return
     try:
         from orchestrator.runtime.device.trusted import TrustedDevices
-        store = TrustedDevices(_state_dir(ctx) if ctx is not None else _default_state_dir())
+        folder = state_dir or (_state_dir(ctx) if ctx is not None else _default_state_dir())
+        store = TrustedDevices(Path(folder))
         if device_id:
             store.note_reach(device_id, step, code)
         else:
@@ -4619,15 +4647,15 @@ def _default_state_dir() -> Path:
 
 
 def _unreachable(ctx: Optional[FrameworkContext], host: str, port: int, error: BaseException,
-                 doing: str = "reach", step: str = "", device_id: str = "") -> None:
+                 doing: str = "reach", step: str = "", device_id: str = "", state_dir: Optional[Path] = None) -> None:
     """Exits after a failed connection or login: its reason code with the next step when it has one (recorded for
-    Mojo with the board when `step` names the contact)."""
+    Mojo with the board, in `state_dir`, when `step` names the contact)."""
     from orchestrator.runtime.device import reasons
     code = reasons.classify(error)
     if code is None and isinstance(error, OSError):
         code = reasons.HOST_DOWN
     if code is not None:
-        _note_reach(ctx, host, port, step, code, device_id)
+        _note_reach(ctx, host, port, step, code, device_id, state_dir)
         _print_reason(ctx, code, host, port)
     else:
         console.print(f"[red]Could not {doing} {escape(host)}:{port}: {escape(str(error))}[/red]")
@@ -4844,9 +4872,9 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
         key = ssh_trust.fetch_host_key(host, port)
         status = ssh_trust.check_host_key(state_dir, host, port, key)
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        _unreachable(ctx, host, port, e, step="probe")
+        _unreachable(ctx, host, port, e, step="probe", state_dir=state_dir)
     if status == "changed":
-        _note_reach(ctx, host, port, "probe", "device_host_key_changed")
+        _note_reach(ctx, host, port, "probe", "device_host_key_changed", state_dir=state_dir)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
     if status == "unknown":
@@ -4889,8 +4917,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     try:
         client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
     except Exception as e:  # authentication, network, a host key that changed meanwhile
-        _unreachable(ctx, host, port, e, doing=f"log in to {user}@", step="probe")
-    _note_reach(ctx, host, port, "probe", "")
+        _unreachable(ctx, host, port, e, doing=f"log in to {user}@", step="probe", state_dir=state_dir)
+    _note_reach(ctx, host, port, "probe", "", state_dir=state_dir)
     try:
         if password:
             ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
@@ -5102,7 +5130,9 @@ def _device_plan(profile):
 def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str],
                     ctx: Optional[FrameworkContext] = None, step: str = ""):
     """An SSH client for the stored device: its host key must be the trusted one the device was probed with (the
-    device ID is derived from it), so a deployment never reaches another machine at the same address."""
+    device ID is derived from it), so a deployment never reaches another machine at the same address. `step` names
+    the contact for Mojo's record of the board (W1), kept in `state_dir`. A verify only checks: it never rewrites the
+    board's trust record (its --ssh-user may name another account than the one AI tools deploy as)."""
     from orchestrator.runtime.profile import device_id_for_host_key
     from orchestrator.utils import ssh_trust
     if ssh_trust.paramiko is None:
@@ -5112,9 +5142,9 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
         key = ssh_trust.fetch_host_key(host, port)
         status = ssh_trust.check_host_key(state_dir, host, port, key)
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        _unreachable(ctx, host, port, e, step=step, device_id=device_id)
+        _unreachable(ctx, host, port, e, step=step, device_id=device_id, state_dir=state_dir)
     if status == "changed":
-        _note_reach(ctx, host, port, step, "device_host_key_changed", device_id)
+        _note_reach(ctx, host, port, step, "device_host_key_changed", device_id, state_dir)
         _print_reason(ctx, "device_host_key_changed", host, port)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
@@ -5132,9 +5162,9 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
         from orchestrator.runtime.device import reasons
         code = reasons.classify(e)
         if code not in (None, reasons.AUTH_FAILED):
-            _unreachable(ctx, host, port, e, step=step, device_id=device_id)
+            _unreachable(ctx, host, port, e, step=step, device_id=device_id, state_dir=state_dir)
         if code == reasons.AUTH_FAILED:
-            _note_reach(ctx, host, port, step, reasons.AUTH_FAILED, device_id)
+            _note_reach(ctx, host, port, step, reasons.AUTH_FAILED, device_id, state_dir)
             _print_reason(ctx, reasons.AUTH_FAILED, host, port)
         else:  # none of the four reasons: shown as it is, never relabelled as a refused login
             console.print(f"[red]SSH login to {escape(user)}@{escape(host)} failed: {escape(str(e))}[/red]")
@@ -5148,9 +5178,9 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
             client.close()
             console.print(f"[red]{escape(str(e))}[/red]")
             sys.exit(1)
-    if ctx is not None:  # trusted by the person when it was probed, and logged in to with the framework's key now
-        _remember_device(ctx, host, port, user, key, paired=True)
-    _note_reach(ctx, host, port, step, "", device_id)   # reached and logged in: a recorded problem ends
+    if ctx is not None and step != "verify":  # trusted by the person when it was probed, logged in to with the
+        _remember_device(ctx, host, port, user, key, paired=True)  # framework's key now (a verify only checks)
+    _note_reach(ctx, host, port, step, "", device_id, state_dir)   # reached and logged in: a recorded problem ends
     return client
 
 

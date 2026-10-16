@@ -968,11 +968,15 @@ it says what it found and stops. The installers' Ditto step runs this command.
   stopped.
 - **Space first:** bare metal and Docker are two alternatives. Before the new mode is built next to the old one, the
   command estimates what it needs while it is built and what it keeps, and checks that against the free space of
-  each disk involved (Ditto's runtime folder; Docker's image storage when Docker names a folder of this computer).
-  The estimates are shown. When it does not fit, nothing is built. You see the sizes and choose: free space yourself
-  and run the command again, or delete the old mode first. For that the command lists every object of the old mode
-  and asks once ("No" is the default); Ditto is unavailable until the new mode works, and the models stay. When the
-  new mode then fails, the command says so and offers to make the old mode again.
+  each disk involved (Ditto's runtime folder; Docker's image storage when Docker names a folder of this computer; the
+  temporary folder where the image's build context is made). The estimates are shown. When it does not fit, nothing
+  is built. You see the sizes and choose: free space yourself and run the command again, or delete the old mode
+  first. For that the command lists every object of the old mode and asks once ("No" is the default); Ditto is
+  unavailable until the new mode works, and the models stay. Deleting the old mode first is offered only when the new
+  mode then fits: the command estimates it again without the old mode's build (a bare-metal build that is deleted
+  cannot be repackaged) and counts the space the old mode's objects free. It asks only at a terminal; without one
+  nothing is deleted or built. When the new mode then fails, the command says so and offers to make the old mode
+  again.
 - **The old mode goes completely:** once the new mode works, every object of the old mode is listed: its build
   folders (full path, folder name, build ID), Ditto's images and containers (name and ID), its entries in `mode.json`
   and `active.json`, and the log of the image builds, each with its size and what it is. One question deletes exactly

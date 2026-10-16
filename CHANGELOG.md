@@ -286,10 +286,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   or the image's build becomes the bare-metal build after it passed its checks on this computer; otherwise it builds
   again and says why. Bare metal and Docker are two alternatives (W2): before the new mode is built next to the old
   one, its space is estimated (what its build needs while it runs and what it keeps) and checked against the free
-  space of each disk involved (Ditto's runtime folder, Docker's image storage). When it does not fit, nothing is built:
-  you see the sizes and choose to free space and switch again, or to delete the old mode first (its full list, one
-  question; Ditto is unavailable until the new mode works, the models stay; when the new mode then fails, you are told
-  so and offered the old mode again). Once the new mode works, every object of the old mode is listed with full path
+  space of each disk involved (Ditto's runtime folder, Docker's image storage, the temporary folder of the image's
+  build). When it does not fit, nothing is built: you see the sizes and choose to free space and switch again, or to
+  delete the old mode first (its full list, one question, only at a terminal or in the GUI; Ditto is unavailable until
+  the new mode works, the models stay; when the new mode then fails, you are told so and offered the old mode again).
+  Deleting it first is offered only when the new mode then fits: it is estimated again without the old mode's build,
+  which can then no longer be reused, and counts what the old mode's objects free. Once the new mode works, every object of the old mode is listed with full path
   or name, ID, file name, size and what it is: its build folders, Ditto's images and containers, its entries in
   `mode.json` and `active.json` and the log of the image builds. One question deletes exactly that list for good, not
   into the trash ("No" is the default, no choice per item; without a terminal nothing is removed). The installers get
@@ -848,7 +850,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   is refused before the question with its reason, and the result says whether it was repaired, and if not, why. The
   delegation group for harmless repairs comes with the delegations. `run_mojo_oracle` contacts no board; a finding of a
   board a recorded fact points to names the request that checks it (`check_board`), and `{"board": "<label>"}` checks
-  that one trusted board now. An AI names a board by its label or device ID, never by an address.
+  that one trusted board now. An AI names a board by its label or device ID, never by an address (a board without a
+  name of its own, whose label is its address, by its device ID).
 - **The framework's own documents in the knowledge base** (DECISIONS round 8, N12): **Tools > Index the Framework's
   Documentation...**, `llm-cli knowledge index-docs [--with-code]` and the MCP tool `index_framework_docs` (asked
   every time, runs as a job) add the framework's documentation (README, CONTRIBUTING, the `docs` folder) and, on

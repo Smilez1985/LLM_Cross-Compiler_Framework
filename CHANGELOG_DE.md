@@ -326,10 +326,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   bestanden hat; sonst wird neu gebaut und der Grund genannt. Direkt und Docker sind zwei Alternativen (W2): Bevor
   die neue Art neben der alten gebaut wird, wird ihr Platzbedarf geschätzt (was ihr Build beim Bauen braucht und was
   danach bleibt) und mit dem freien Platz jedes beteiligten Laufwerks verglichen (Dittos Laufzeitordner, Dockers
-  Image-Speicher). Passt sie nicht, wird nichts gebaut: Du siehst die Größen und wählst, selbst Platz zu schaffen und
-  noch einmal zu wechseln, oder die alte Art zuerst zu löschen (ihre volle Liste, eine Frage; Ditto ist nicht
-  verfügbar, bis die neue Art funktioniert, die Modelle bleiben; scheitert die neue Art danach, erfährst du das und
-  bekommst die alte Art wieder angeboten). Sobald die neue Art funktioniert, wird jedes Objekt der alten Art mit
+  Image-Speicher, der temporäre Ordner des Image-Builds). Passt sie nicht, wird nichts gebaut: Du siehst die Größen
+  und wählst, selbst Platz zu schaffen und noch einmal zu wechseln, oder die alte Art zuerst zu löschen (ihre volle
+  Liste, eine Frage, nur an einem Terminal oder in der GUI; Ditto ist nicht verfügbar, bis die neue Art funktioniert,
+  die Modelle bleiben; scheitert die neue Art danach, erfährst du das und bekommst die alte Art wieder angeboten). Das
+  Löschen zuerst wird nur angeboten, wenn die neue Art danach passt: Sie wird noch einmal geschätzt, ohne den Build
+  der alten Art, der sich dann nicht mehr nutzen lässt, und mit dem Platz, den die Objekte der alten Art freigeben.
+  Sobald die neue Art funktioniert, wird jedes Objekt der alten Art mit
   vollständigem Pfad oder Name, ID, Dateiname, Größe und was es ist aufgelistet: ihre Build-Ordner, Dittos Images und
   Container, ihre Einträge in `mode.json` und `active.json` und das Log der Image-Builds. Eine Frage löscht genau diese
   Liste endgültig, nicht in den Papierkorb („Nein“ ist vorgewählt, keine Auswahl je Objekt; ohne Terminal wird nichts
@@ -969,7 +972,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wenn nicht, warum. Die Vollmachtsgruppe für harmlose Reparaturen kommt mit den Vollmachten. `run_mojo_oracle` nimmt
   keinen Kontakt zu einem Board auf; der Befund eines Boards, auf das ein aufgezeichneter Fakt zeigt, nennt die Anfrage,
   die es prüft (`check_board`), und `{"board": "<Bezeichnung>"}` prüft dieses eine vertraute Board sofort. Eine KI
-  nennt ein Board mit seiner Bezeichnung oder Geräte-ID, nie mit einer Adresse.
+  nennt ein Board mit seiner Bezeichnung oder Geräte-ID, nie mit einer Adresse (ein Board ohne eigenen Namen, dessen
+  Bezeichnung seine Adresse ist, mit seiner Geräte-ID).
 - **Die eigenen Dokumente des Frameworks in der Wissensbasis** (ENTSCHEIDUNGEN Runde 8, N12): **Tools > Index the
   Framework's Documentation...**, `llm-cli knowledge index-docs [--with-code]` und das MCP-Tool `index_framework_docs`
   (jedes Mal gefragt, läuft als Job) nehmen die Dokumentation des Frameworks (README, CONTRIBUTING, den Ordner `docs`)

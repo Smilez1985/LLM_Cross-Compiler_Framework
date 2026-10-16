@@ -24,7 +24,9 @@ ensure`, the installers' Ditto step and the AI settings run, and it is idempoten
   the free space of every disk involved (Ditto's runtime folder; Docker's image storage). When it does not fit,
   nothing is built: SpaceShortage carries the sizes and the old mode's list, and the person chooses: free space and
   switch again, or remove the old mode first (old_mode_plan(); Ditto is unavailable until the new mode works, the
-  models stay; when the new mode then fails, the person is told so and offered the old mode again).
+  models stay; when the new mode then fails, the person is told so and offered the old mode again). Removing it first
+  is offered only while the new mode may fit then: space_after_removal() estimates it again without the old mode's
+  build (a bare-metal build that is gone cannot be repackaged) and counts what the old mode's objects free.
 - After the new mode is verified, leftovers() lists EVERY object of the old mode as a DeletionPlan: every build folder
   with its full path, build ID, folder name and size, every image and container with its name, ID and size, the old
   mode's records in mode.json and active.json, the log of Docker mode's image builds, and what each is. Nothing is
@@ -42,7 +44,8 @@ no tool calls ensure() or remove_leftovers(), and remove_leftovers() refuses eve
 import json
 import os
 import shutil
-from dataclasses import dataclass, field
+import tempfile
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -73,18 +76,33 @@ class LeftoversChanged(RuntimeError):
 class SpaceShortage(RuntimeModeError):
     """The new mode does not fit next to the old one (W2): nothing was built. `estimate` has the sizes per disk,
     `old_mode` and `old_plan` the old mode and every object of it (None when nothing of it is left), which the person
-    may remove first."""
+    may remove first. `after_removal` is the estimate once every object of the old mode is deleted first: without the
+    old mode's build, which can then no longer be reused, and with the space its objects free on each disk (None when
+    there is nothing to remove). Removing the old mode first is offered only while it may help (removal_helps is not
+    False); otherwise it would only leave Ditto without a local runtime."""
 
-    def __init__(self, estimate: "SpaceEstimate", old_mode: Optional[str], old_plan: Optional[Any]):
+    def __init__(self, estimate: "SpaceEstimate", old_mode: Optional[str], old_plan: Optional[Any],
+                 after_removal: Optional["SpaceEstimate"] = None):
         self.estimate, self.old_mode, self.old_plan = estimate, old_mode, old_plan
-        if old_plan is not None:
-            way = (f" Free space there and switch again, or remove {mode_label(old_mode)} first ({len(old_plan.items)} "
-                   f"objects, {_size(old_plan.total_bytes)}): Ditto is unavailable until {mode_label(estimate.mode)} "
-                   "works, and the models stay.")
-        else:
+        self.after_removal = after_removal
+        new, old = mode_label(estimate.mode), mode_label(old_mode)
+        if old_plan is None:
             way = " Nothing of the old mode is left to remove: free space there and switch again."
-        super().__init__(f"{mode_label(estimate.mode)} does not fit next to {mode_label(old_mode)}, so nothing was "
-                         f"built. {' '.join(estimate.lines())}{way}")
+        elif self.removal_helps is False:
+            way = (f" Even with {old} deleted first, {new} would not fit either ({' '.join(after_removal.lines())}): "
+                   "free space there and switch again.")
+        else:
+            way = (f" Free space there and switch again, or remove {old} first ({len(old_plan.items)} objects, "
+                   f"{_size(old_plan.total_bytes)}): Ditto is unavailable until {new} works, and the models stay.")
+        super().__init__(f"{new} does not fit next to {old}, so nothing was built. {' '.join(estimate.lines())}{way}")
+
+    @property
+    def removal_helps(self) -> Optional[bool]:
+        """Whether the new mode fits once the old mode is deleted first (None: not known, so the removal may help)."""
+        after = self.after_removal
+        if self.old_plan is None or after is None or not after.checks:
+            return None
+        return after.fits
 
 
 def mode_label(mode: Optional[str]) -> str:
@@ -292,11 +310,14 @@ def ensure(rt: Any, *, mode: str = "auto", force: bool = False, placement: str =
     built = target is not None and (mode == "bare-metal" or target.verified)
     if not built and old is not None and old != mode:
         # W2: the new mode is built next to the old one only when it fits there; otherwise nothing is built and the
-        # person decides (free space, or remove the old mode first)
+        # person decides (free space, or remove the old mode first while the new mode then fits)
         space = space_needed(rt, det, mode, placement, backend, container_build)
         lines += space.lines()
         if not space.fits:
-            raise SpaceShortage(space, old, old_mode_plan(rt, old))
+            old_plan = old_mode_plan(rt, old)
+            after = (space_after_removal(rt, det, mode, old_plan, placement, backend, container_build)
+                     if old_plan is not None else None)
+            raise SpaceShortage(space, old, old_plan, after)
     if built:
         lines.append(f"{mode_label(mode)} is installed already: nothing was built.")
         record = _docker_record_of(rt, target) if mode == "docker" else None
@@ -641,6 +662,7 @@ RUNTIME_BASE = {"cpu": 300 * MB, "vulkan": 700 * MB, "cuda": 5 * GB, "rocm": 8 *
 BUILDER_IMAGE = 3 * GB
 RUNTIME_FOLDER = "Ditto runtime folder"
 DOCKER_STORAGE = "Docker image storage"
+TEMP_FOLDER = "temporary folder"   # where the build context of Ditto's image is made (a copy of the build's programs)
 
 
 def _disk_usage(path: str):
@@ -663,6 +685,7 @@ class SpaceEstimate:
     keeps: int = 0
     checks: List[Any] = field(default_factory=list)        # disk_plan.DiskCheck per disk
     unmeasured: List[str] = field(default_factory=list)    # what could not be checked, and why
+    freed: int = 0     # the estimate after the old mode is deleted first: what its objects free, counted as free
 
     @property
     def fits(self) -> bool:
@@ -675,6 +698,9 @@ class SpaceEstimate:
     def lines(self) -> List[str]:
         out = [f"Space for {mode_label(self.mode)} ({self.how}): about {_size(self.total)} while it is made, "
                f"{_size(self.keeps)} kept afterwards (estimates)."]
+        if self.freed:
+            out.append(f"With the old mode deleted first: its objects free about {_size(self.freed)} on their disks, "
+                       "counted as free here (estimate).")
         for check in self.checks:
             text = check.sentence()
             out.append(text[0].upper() + text[1:] + ".")
@@ -731,12 +757,13 @@ def _builds_need(rt: Any, backends: List[str], state: Path, needs: List[Any]) ->
 
 
 def _bare_metal_need(rt: Any, placement: str, backend: str, state: Path, needs: List[Any],
-                     docker_needs: List[Tuple[int, str]]) -> Tuple[str, int]:
-    """(how, kept) of making bare metal: the build of Ditto's image verified here, or new builds."""
+                     docker_needs: List[Tuple[int, str]], gone: frozenset = frozenset()) -> Tuple[str, int]:
+    """(how, kept) of making bare metal: the build of Ditto's image verified here, or new builds. A build whose folder
+    is in `gone` (deleted with the old mode first) is not reused."""
     saved = rt.mode_record().get("docker") or {}
     build_id = saved.get("build_id") or rt.store.references().get("docker")
     build = rt.store.get(build_id) if build_id else None
-    if build is not None and backend in ("auto", build.backend):
+    if build is not None and backend in ("auto", build.backend) and str(build.path) not in gone:
         return f"the build {build.build_id[:16]} of Ditto's image is verified here, nothing is built", 0
     try:
         plan = rt.plan_install(backend=backend, placement=placement)
@@ -752,10 +779,19 @@ def _bare_metal_need(rt: Any, placement: str, backend: str, state: Path, needs: 
             else "builds that are stored already, nothing is built"), kept
 
 
+def _context_need(size: int, needs: List[Any]) -> None:
+    """The build context of Ditto's image: a copy of the build's programs in the temporary folder while the image is
+    built (container_server.build_runtime_image)."""
+    from orchestrator.Core.disk_plan import DiskNeed
+    needs.append(DiskNeed(TEMP_FOLDER, Path(tempfile.gettempdir()), size,
+                          f"a copy of the build's programs for the image's build {_size(size)}"))
+
+
 def _docker_need(rt: Any, det: Detection, placement: str, backend: str, state: Path, needs: List[Any],
-                 docker_needs: List[Tuple[int, str]]) -> Tuple[str, int]:
+                 docker_needs: List[Tuple[int, str]], gone: frozenset = frozenset()) -> Tuple[str, int]:
     """(how, kept) of making Docker mode: an image that is there checked, the bare-metal build repackaged, or a new
-    build in the builder container put into an image."""
+    build in the builder container put into an image. A bare-metal build whose folder is in `gone` (deleted with the
+    old mode first) cannot be repackaged."""
     if det.docker is not None and not det.docker.verified:
         return f"the image {det.docker.image.name} is checked, nothing is built", 0
     if placement in ("auto", "native"):
@@ -763,12 +799,13 @@ def _docker_need(rt: Any, det: Detection, placement: str, backend: str, state: P
             build, base, _why = _repackage_candidate(rt, backend, rt.docker(), rt.hardware(), [])
         except Exception:  # noqa: BLE001 - estimated as a new build below
             build = base = None
-        if build is not None:
+        if build is not None and str(build.path) not in gone:
             size = _folder_size(build.path)
             base_bytes = 0 if _base_there(rt, base.id, build.backend) else RUNTIME_BASE.get(build.backend, 0)
             if base_bytes:
                 docker_needs.append((base_bytes, f"the runtime base on {base.id} {_size(base_bytes)}"))
             docker_needs.append((size, f"Ditto's image with the build's programs {_size(size)}"))
+            _context_need(size, needs)
             return f"the bare-metal build {build.build_id[:16]} repackaged on {base.id}", base_bytes + size
     want = backend if backend in BUILD_TREE else "cpu"
     kept = _builds_need(rt, [want], state, needs)
@@ -785,23 +822,25 @@ def _docker_need(rt: Any, det: Detection, placement: str, backend: str, state: P
         docker_needs.append((base_bytes, f"the runtime base {_size(base_bytes)}"))
     image = BUILD_KEPT.get(want, BUILD_KEPT["cpu"])
     docker_needs.append((image, f"Ditto's image with the build's programs {_size(image)}"))
+    _context_need(image, needs)
     return f"a new {want} build in the builder container", kept + base_bytes + image
 
 
 def space_needed(rt: Any, det: Detection, mode: str, placement: str = "auto", backend: str = "auto",
-                 container_build: bool = False) -> SpaceEstimate:
+                 container_build: bool = False, gone: frozenset = frozenset()) -> SpaceEstimate:
     """What making `mode` next to the other mode needs on each disk (estimates; a build that is there is measured),
     checked against the free space there. Reads only. A disk whose free space cannot be read is named and not
-    checked; an estimate that cannot be made at all is named and blocks nothing."""
+    checked; an estimate that cannot be made at all is named and blocks nothing. `gone`: the folders deleted with the
+    old mode first, whose builds are not reused."""
     from orchestrator.Core.disk_plan import DiskNeed, ReservationLedger, check_disk
     state = Path(rt.root)
     needs: List[Any] = []
     docker_needs: List[Tuple[int, str]] = []
     try:
         if mode == "bare-metal":
-            how, keeps = _bare_metal_need(rt, placement, backend, state, needs, docker_needs)
+            how, keeps = _bare_metal_need(rt, placement, backend, state, needs, docker_needs, gone)
         else:
-            how, keeps = _docker_need(rt, det, placement, backend, state, needs, docker_needs)
+            how, keeps = _docker_need(rt, det, placement, backend, state, needs, docker_needs, gone)
     except Exception as e:  # noqa: BLE001 - the build itself says what is wrong
         return SpaceEstimate(mode, "not estimated", unmeasured=[f"The space for {mode_label(mode)} could not be "
                                                                 f"estimated ({type(e).__name__}); it is not checked."])
@@ -816,6 +855,36 @@ def space_needed(rt: Any, det: Detection, mode: str, placement: str = "auto", ba
             needs += [DiskNeed(DOCKER_STORAGE, root, n, what) for n, what in docker_needs]
     checks = check_disk(needs, ledger=ReservationLedger(Path(rt.data_dir)), disk_usage=_disk_usage) if needs else []
     return SpaceEstimate(mode, how, needs, keeps, checks, unmeasured)
+
+
+def _freed_by(rt: Any, plan: Any) -> Dict[str, int]:
+    """What deleting the objects of `plan` frees on each disk (by device): folders and records where they are,
+    Docker's objects in its image storage when that is a folder of this computer (image sizes include layers other
+    images share, so this can be more than is really freed: the removal is then rather offered than withheld)."""
+    from orchestrator.Core.disk_plan import device_of
+    docker_root = None
+    if any(not item.full_path for item in plan.items):
+        docker_root, _why = _docker_root(rt)
+    freed: Dict[str, int] = {}
+    for item in plan.items:
+        where = Path(item.full_path) if item.full_path else docker_root
+        if where is not None:
+            device = device_of(where)
+            freed[device] = freed.get(device, 0) + int(item.size_bytes)
+    return freed
+
+
+def space_after_removal(rt: Any, det: Detection, mode: str, plan: Any, placement: str = "auto",
+                        backend: str = "auto", container_build: bool = False) -> SpaceEstimate:
+    """What making `mode` needs once every object of the old mode (`plan`, old_mode_plan()) is deleted first: the old
+    mode's builds are not reused (a bare-metal build that is gone cannot be repackaged), and what its objects use on
+    each disk counts as free there. Reads only (W2: removing the old mode first is offered only while it may help)."""
+    gone = frozenset(item.full_path for item in plan.items if item.full_path)
+    estimate = space_needed(rt, det, mode, placement, backend, container_build, gone=gone)
+    freed = _freed_by(rt, plan)
+    estimate.checks = [replace(c, free=c.free + freed.get(c.device, 0)) for c in estimate.checks]
+    estimate.freed = sum(freed.values())
+    return estimate
 
 
 # --- every object of a mode ------------------------------------------------------------------------------------------
@@ -919,7 +988,7 @@ def _docker_items(rt: Any, keep_in_use: bool, include_running: bool) -> List[Any
 
 # The old mode's records (W2: "A's recorded runtime entry"): the keys of active.json and mode.json that name it. The
 # files stay: they also hold the new mode and the model tier.
-BARE_METAL_KEYS = ("build_id", "fallback_build_id", "use", "variant")
+BARE_METAL_KEYS = ("build_id", "fallback_build_id", "use", "variant", "asset_id")
 DOCKER_ACTIVE_KEYS = ("docker_build_id",)
 DOCKER_MODE_KEYS = ("docker",)
 
@@ -1147,4 +1216,4 @@ def _remove_item(rt: Any, item: Any, removes: str) -> Optional[str]:
 __all__ = ["CHOICES", "Detection", "EnsureResult", "Found", "LeftoversChanged", "MODES", "Removal",
            "RuntimeModeError", "SpaceEstimate", "SpaceShortage", "base_for_build", "detect", "docker_problem",
            "ensure", "image_base", "leftovers", "mode_label", "mode_objects", "old_mode_plan", "other_mode",
-           "profile_for_base", "remove_leftovers", "space_needed"]
+           "profile_for_base", "remove_leftovers", "space_after_removal", "space_needed"]

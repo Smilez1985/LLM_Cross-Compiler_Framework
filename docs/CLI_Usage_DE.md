@@ -1008,11 +1008,14 @@ Befehl aus.
 - **Zuerst der Platz:** Direkt und Docker sind zwei Alternativen. Bevor die neue Art neben der alten gebaut wird,
   schätzt der Befehl, was sie beim Bauen braucht und was danach bleibt, und vergleicht das mit dem freien Platz jedes
   beteiligten Laufwerks (Dittos Laufzeitordner; Dockers Image-Speicher, wenn Docker einen Ordner dieses Rechners
-  nennt). Die Schätzungen werden angezeigt. Passt sie nicht, wird nichts gebaut. Du siehst die Größen und wählst:
-  selbst Platz schaffen und den Befehl noch einmal ausführen, oder die alte Art zuerst löschen. Dafür listet der
-  Befehl jedes Objekt der alten Art auf und fragt einmal („Nein“ ist vorgewählt); Ditto ist nicht verfügbar, bis die
-  neue Art funktioniert, und die Modelle bleiben. Scheitert die neue Art danach, sagt der Befehl das und bietet an,
-  die alte Art wieder herzustellen.
+  nennt; der temporäre Ordner, in dem der Build-Kontext des Images entsteht). Die Schätzungen werden angezeigt. Passt
+  sie nicht, wird nichts gebaut. Du siehst die Größen und wählst: selbst Platz schaffen und den Befehl noch einmal
+  ausführen, oder die alte Art zuerst löschen. Dafür listet der Befehl jedes Objekt der alten Art auf und fragt
+  einmal („Nein“ ist vorgewählt); Ditto ist nicht verfügbar, bis die neue Art funktioniert, und die Modelle bleiben.
+  Das Löschen der alten Art wird nur angeboten, wenn die neue Art danach passt: Der Befehl schätzt sie noch einmal
+  ohne den Build der alten Art (ein gelöschter direkter Build lässt sich nicht umpacken) und zählt den Platz, den die
+  Objekte der alten Art freigeben. Er fragt nur an einem Terminal; ohne Terminal wird nichts gelöscht und nichts
+  gebaut. Scheitert die neue Art danach, sagt der Befehl das und bietet an, die alte Art wieder herzustellen.
 - **Die alte Art verschwindet ganz:** Sobald die neue Art funktioniert, wird jedes Objekt der alten Art aufgelistet:
   ihre Build-Ordner (vollständiger Pfad, Ordnername, Build-ID), Dittos Images und Container (Name und ID), ihre
   Einträge in `mode.json` und `active.json` und das Log der Image-Builds, jeweils mit Größe und was es ist. Eine Frage

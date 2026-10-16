@@ -1293,7 +1293,9 @@ fehlt; die Installer führen den Befehl als ihren Ditto-Schritt aus (`install.sh
   Reserve frei, und der Papierkorb zählt nie als frei. Passt es nicht, wird nichts gebaut. Du siehst die Größen und
   wählst: Platz schaffen und noch einmal wechseln, oder die alte Art zuerst löschen. Dann wird jedes Objekt der alten
   Art aufgelistet und nach deinem einen Ja gelöscht; Ditto ist nicht verfügbar, bis die neue Art funktioniert, und die
-  Modelle bleiben. Scheitert die neue Art danach, erfährst du das und bekommst die alte Art wieder angeboten.
+  Modelle bleiben. Das Löschen zuerst wird nur angeboten, wenn die neue Art danach passt (noch einmal geschätzt ohne
+  den Build der alten Art, mit dem Platz, den ihre Objekte freigeben), und nur an einem Terminal oder in der GUI.
+  Scheitert die neue Art danach, erfährst du das und bekommst die alte Art wieder angeboten.
 - **Die alte Art verschwindet ganz**, sobald die neue Art funktioniert: Jedes ihrer Objekte wird mit vollständigem
   Pfad oder Name, ID, Größe und was es ist aufgelistet: Dittos Build-Ordner (Pfad, Ordnername, Build-ID), das
   offizielle Archiv, Dittos Images und Container (Name, ID), die Einträge der alten Art in `mode.json` und
