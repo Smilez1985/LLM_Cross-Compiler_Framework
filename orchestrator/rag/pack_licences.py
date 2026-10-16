@@ -8,8 +8,9 @@ ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA; licence_texts.py), the pack ships nex
 
 * LICENSES/<SPDX id>.txt: the canonical text of each such licence, unchanged from the SPDX License List;
 * NOTICE: every page of the knowledge file with its source address, its copyright line as found and its SPDX id,
-  grouped by licence. For MIT, BSD and ISC the copyright lines stand with the licence text they go with (code from
-  GitHub without a notice of its own takes the line of its repository's licence file). For Apache-2.0 the notices of
+  grouped by licence. For MIT, BSD and ISC the copyright lines stand with the licence text they go with (a
+  repository's licence file, and code from GitHub without a notice of its own, list every copyright line of that
+  file: MIT, BSD and ISC ask to keep the whole notice, not only its first line). For Apache-2.0 the notices of
   the work's NOTICE file follow, when the same crawl read it (a repository's NOTICE file at its top folder, or a page
   named NOTICE on the same site); otherwise NOTICE says that none was read. The pages shared only as their address
   and short facts are listed with why.
@@ -125,13 +126,49 @@ def _licence_words(licence: str) -> str:
     return licence or "none found"
 
 
-def _entry(source: str, meta: Mapping[str, Any], why: str = "") -> List[str]:
-    notice = licences.clean(meta.get("copyright") or "")
+def _entry(source: str, meta: Mapping[str, Any], why: str = "", notices: Sequence[str] = ()) -> List[str]:
+    """A page's lines in NOTICE: its source, each copyright line (notices, or the one in its metadata) and its SPDX
+    id."""
+    notices = [n for n in notices if n] or [n for n in [licences.clean(meta.get("copyright") or "")] if n]
     found = licences.clean(meta.get(licences.COPYRIGHT_FOUND_KEY) or "")
-    lines = [f"{SOURCE_PREFIX}{source}",
-             "Copyright: " + ((f"{notice} (from {found})" if found else notice) if notice else "none found"),
-             f"SPDX id: {_licence_words(str(meta.get('licence') or ''))}"]
+    lines = [f"{SOURCE_PREFIX}{source}"]
+    lines += [f"Copyright: {n} (from {found})" if found else f"Copyright: {n}" for n in notices] or \
+        ["Copyright: none found"]
+    lines.append(f"SPDX id: {_licence_words(str(meta.get('licence') or ''))}")
     return lines + ([f"Why: {why}"] if why else []) + [""]
+
+
+def _file_notices(meta: Mapping[str, Any], chunks: Sequence[Mapping[str, Any]]) -> List[str]:
+    """Every copyright line of a licence file: the line recorded for it first, then every other one its text names."""
+    notices = [n for n in [licences.clean(meta.get("copyright") or "")] if n]
+    notices += [n for n in licences.copyright_notices(joined_text(chunks)) if n not in notices]
+    return notices[:licences.MAX_NOTICES]
+
+
+def _licence_file_notices(pages: Mapping[str, Sequence[Mapping[str, Any]]],
+                          full: Mapping[str, Mapping[str, Any]]) -> Dict[Tuple[str, str], List[str]]:
+    """{(crawl start address, repository): every copyright line of the repository's licence file} for the licence
+    files the pack carries in full (the first one per repository, as share_pages takes its line)."""
+    found: Dict[Tuple[str, str], List[str]] = {}
+    for source, meta in full.items():
+        if meta.get("licence_file") and meta.get("code_repo"):
+            found.setdefault(licences.work_key(source, meta), _file_notices(meta, pages[source]))
+    return found
+
+
+def _notices(source: str, meta: Mapping[str, Any], pages: Mapping[str, Sequence[Mapping[str, Any]]],
+             files: Mapping[Tuple[str, str], List[str]]) -> List[str]:
+    """The copyright lines NOTICE names for a page carried in full: a repository's licence file every line it names,
+    code that takes its line from that file (copyright_found) every line of the file; any other page the one it
+    shows."""
+    own = licences.clean(meta.get("copyright") or "")
+    if meta.get("licence_file") and meta.get("code_repo"):
+        return _file_notices(meta, pages[source])
+    if meta.get(licences.COPYRIGHT_FOUND_KEY) == licences.FROM_LICENCE_FILE:
+        lines = files.get(licences.work_key(source, meta)) or []
+        if own in lines:   # the file its line came from
+            return list(lines)
+    return [own] if own else []
 
 
 def _quoted(text: str) -> List[str]:
@@ -161,6 +198,7 @@ def build(entries: Sequence[Mapping[str, Any]], prefix: str = "") -> LicenceFile
     # A NOTICE file the pack carries in full gives its notices; one shared only as its address is named with it.
     notices = {licences.work_key(s, m): (s, joined_text(pages[s]) if s in full else None) for s, m in metas.items()
                if licences.is_notice_file(s)}
+    licence_file_lines = _licence_file_notices(pages, full)
     out = ["NOTICE", "",
            "What this pack carries of each page and file: its source address, its copyright line as found and its",
            "licence (SPDX id). Pages carried in full keep their own licences; the pack's licence does not cover them.",
@@ -182,7 +220,7 @@ def build(entries: Sequence[Mapping[str, Any]], prefix: str = "") -> LicenceFile
         else:
             out += [f"== {_licence_words(licence)} (asks for no licence text) ==", ""]
         for source in sources:
-            out += _entry(source, full[source])
+            out += _entry(source, full[source], notices=_notices(source, full[source], pages, licence_file_lines))
         if licence == "Apache-2.0":
             for work in sorted({licences.work_key(s, full[s]) for s in sources}):
                 found = notices.get(work)

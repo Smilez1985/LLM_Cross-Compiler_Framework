@@ -2020,15 +2020,15 @@ llm-cli zoo verify [PACK_FILE]
 ```
 
 Ohne Argument prüft es jedes installierte Community-Paket gegen den zwischengespeicherten Index, ohne etwas
-herunterzuladen: zurückgezogen, seit der Installation verändert oder Lizenzdateien, die nicht zu seinen Seiten
-passen. Es gibt eine Zeile pro Paket aus (✔, oder ✘ mit
-dem Grund) oder „No community packs installed.“. Exit-Code 1, wenn ein Paket ein Problem hat, sonst 0.
+herunterzuladen: zurückgezogen, seit der Installation verändert oder Lizenzdateien, die nicht zu seinen Seiten passen.
+Es gibt eine Zeile pro Paket aus (✔, oder ✘ mit dem Grund) oder „No community packs installed.“. Exit-Code 1, wenn ein
+Paket ein Problem hat, sonst 0.
 
 Mit `PACK_FILE` prüft es eine Paketdatei, ohne sie zu installieren: Format, Dateiliste und Prüfsummen, die Prüfungen
 ihrer Art (bei Wissen und beim Wissens-Snapshot eines Targets auch seine Lizenztexte und die `NOTICE`), eine
-enthaltene Autorensignatur und dass die Datenschutz-Bereinigung nichts darin ändern würde. Es gibt
-„acceptable“ oder jedes Problem aus (Exit-Code 1). Diese Form funktioniert ohne Schlüsselbund; die CI des
-Community-Repositorys führt sie für jedes eingereichte Paket aus.
+enthaltene Autorensignatur und dass die Datenschutz-Bereinigung nichts darin ändern würde. Es gibt „acceptable“ oder
+jedes Problem aus (Exit-Code 1). Diese Form funktioniert ohne Schlüsselbund; die CI des Community-Repositorys führt
+sie für jedes eingereichte Paket aus.
 
 ```bash
 llm-cli zoo verify

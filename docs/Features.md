@@ -1485,25 +1485,27 @@ per page from that (`orchestrator/rag/licences.py`; eighth round, Q-1 and Q-1').
   unrecognised licence, or none at all. The recipient crawls those pages under their own checks.
 - **Licence texts and NOTICE:** some licences ask for their text or permission notice with every copy: MIT,
   BSD-2-Clause, BSD-3-Clause, ISC, Apache-2.0, MPL-2.0, and CC BY and CC BY-SA 1.0 to 4.0. When a pack carries pages
-  in full under one of them, it also carries `LICENSES/<SPDX id>.txt` with the licence's text and a file `NOTICE`, next
-  to its knowledge file (in a target, in `knowledge/`). The texts come unchanged from the SPDX License List 3.29.0
-  (its data is under CC0). They are stored in `orchestrator/data/licenses/`, each checked by its sha256, and the privacy
-  scrub never changes them. `NOTICE` lists every page with its source address, its copyright line as found and its
-  SPDX id, grouped by licence. For MIT, BSD and ISC each copyright line stands with the licence text it goes with; code
-  from GitHub without a notice of its own takes the line of its repository's licence file. For Apache-2.0 the notices
-  of the work's `NOTICE` file follow, when the same crawl read it (a repository's `NOTICE` at its top folder, or a page
-  named `NOTICE` on the same site); otherwise `NOTICE` says that none was read. CC0, public domain, 0BSD and the
-  Unlicense ask for no text. A licence that asks for its text, but whose text the framework does not have (a missing or
-  changed file), lets no page in with its full text: such a page goes in as its address and short facts, and the
-  reason says why.
-- **Checked on the way in:** an install, `llm-cli zoo verify` and the community repository's check refuse a pack
-  whose licence texts are not the canonical ones byte for byte, name a licence the framework has no text for, or lack
-  a text or the `NOTICE` its pages need. An installed pack keeps `LICENSES/` and `NOTICE` in its folder, and each page
-  it adds to the knowledge base names its licence text (`licence_text_file`).
+  in full under one of them, it also carries `LICENSES/<SPDX id>.txt` with the licence's text and a file `NOTICE`,
+  next to its knowledge file (in a target, in `knowledge/`). The texts come unchanged from the SPDX License List
+  3.29.0 (its data is under CC0). They are stored in `orchestrator/data/licenses/`, each checked by its sha256, and
+  the privacy scrub never changes them. `NOTICE` lists every page with its source address, its copyright line as found
+  and its SPDX id, grouped by licence. For MIT, BSD and ISC each copyright line stands with the licence text it goes
+  with; a repository's licence file and code from GitHub without a notice of its own list every copyright line of that
+  file. For Apache-2.0 the notices of the work's `NOTICE` file follow, when the same crawl read it (a repository's
+  `NOTICE` at its top folder, or a page named `NOTICE` on the same site); otherwise `NOTICE` says that none was read.
+  CC0, public domain, 0BSD and the Unlicense ask for no text. A licence that asks for its text, but whose text the
+  framework does not have (a missing or changed file), lets no page in with its full text: such a page goes in as its
+  address and short facts, and the reason says why.
+- **Checked on the way in:** an install, `llm-cli zoo verify` and the community repository's check refuse a pack whose
+  licence texts are not the canonical ones byte for byte (in a target pack also when it has no knowledge snapshot),
+  name a licence the framework has no text for, or lack a text or the `NOTICE` its pages need. An installed pack keeps
+  `LICENSES/` and `NOTICE` in its folder, and each page it adds to the knowledge base names its licence text
+  (`licence_text_file`).
 - **You see it per page:** `llm-cli knowledge sources` lists every source with its licence, its copyright notice and
   what a pack would carry and why; `llm-cli zoo export knowledge` lists every page again with what the pack carries
   and why, and names each licence text in the pack and why. A target export does the same for the target's knowledge
-  snapshot, also for a snapshot made before this rule (the target folder itself stays as it is).
+  snapshot, also for a snapshot made before this rule (the target folder itself stays as it is); licence files left in
+  `knowledge/` without a snapshot stay out of the pack, and a note says so.
 - **For AI clients:** `list_knowledge_sources` gives each source's licence id, state (`open`, `restricted`,
   `copyright`, `code_without_licence`, `unknown`, or `no_licence_text` when the framework has no text of a licence that
   asks for it) and what a pack would carry; `export_pack` names each licence text with its file, page count and why.
@@ -2326,15 +2328,15 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   never overwritten. Setup commands run later as an unprivileged user without network. A target that pulls a
   prebuilt llama.cpp image, copies llama.cpp binaries out of another image, downloads release archives or binaries
   or installs a llama.cpp package is refused: the framework shares recipes, not binaries.
-- **Knowledge snapshot (opt-in):** on the wizard's last page, **Attach the knowledge crawled for this target** (off
-  by default, available after a Deep Ingest in the wizard) writes the pages crawled from the wizard's Deep Ingest
-  URLs, privacy-scrubbed, to `knowledge/initial_knowledge.json` in the new target, with a `README.md` that says
-  what it holds, and the licence texts and the `NOTICE` its pages need (see
-  [Licences and copyright](#licences-and-copyright)). While a Deep Ingest is still running, the wizard's **Finish** stays disabled (the page says why),
-  so the snapshot holds every crawled page; if no stored page comes from those URLs, the wizard says that no
-  snapshot was attached. The rest of your knowledge base never goes into a module, and
-  `llm-cli module create` and `module generate-ai` attach nothing. The framework does not import such a snapshot
-  into a knowledge base; to share knowledge, export a knowledge pack.
+- **Knowledge snapshot (opt-in):** on the wizard's last page, **Attach the knowledge crawled for this target** (off by
+  default, available after a Deep Ingest in the wizard) writes the pages crawled from the wizard's Deep Ingest URLs,
+  privacy-scrubbed, to `knowledge/initial_knowledge.json` in the new target, with a `README.md` that says what it
+  holds, and the licence texts and the `NOTICE` its pages need (see
+  [Licences and copyright](#licences-and-copyright)). While a Deep Ingest is still running, the wizard's **Finish**
+  stays disabled (the page says why), so the snapshot holds every crawled page; if no stored page comes from those
+  URLs, the wizard says that no snapshot was attached. The rest of your knowledge base never goes into a module, and
+  `llm-cli module create` and `module generate-ai` attach nothing. The framework does not import such a snapshot into
+  a knowledge base; to share knowledge, export a knowledge pack.
 - **Export for community:** the wizard's last page also offers **Export for community after creating** (see
   [Export for community](#export-for-community)).
 - **Board recommendation:** after a probe, the Builder recommends the board of the matched target, with where the

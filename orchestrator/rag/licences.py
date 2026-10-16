@@ -388,10 +388,25 @@ def work_key(source: str, meta: Mapping[str, Any]) -> Tuple[str, str]:
 
 def copyright_notice(text: str) -> str:
     """The first copyright notice in the text (the line it is on, cleaned and capped), or ''."""
+    found = copyright_notices(text, 1)
+    return found[0] if found else ""
+
+
+MAX_NOTICES = 20   # copyright lines kept from one licence file
+
+
+def copyright_notices(text: str, limit: int = MAX_NOTICES) -> List[str]:
+    """Every copyright notice in the text, in its order and without repeats (the lines they are on, cleaned and
+    capped), at most `limit`: a licence file may name several holders, and MIT, BSD and ISC ask to keep them all."""
+    found: List[str] = []
     for line in str(text or "").splitlines():
         if _NOTICE.search(line):
-            return clean(line)
-    return ""
+            notice = clean(line)
+            if notice and notice not in found:
+                found.append(notice)
+                if len(found) >= limit:
+                    break
+    return found
 
 
 def _link_header_licence(headers: Optional[Mapping[str, Any]], base: str) -> Optional[str]:

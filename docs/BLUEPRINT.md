@@ -564,9 +564,10 @@ MPL-2.0), with the attribution the licence requires (title, address, copyright n
 A licence that asks for its text or permission notice (MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA) also puts
 its canonical text into the pack (`LICENSES/<SPDX id>.txt`, unchanged from the SPDX License List 3.29.0, checked by
 sha256; `orchestrator/rag/licence_texts.py`), and a `NOTICE` lists every page with its source address, its copyright
-line as found and its SPDX id: for MIT, BSD and ISC code from GitHub the line of its repository's licence file, for
-Apache-2.0 the notices of the work's `NOTICE` file when the crawl read it (`orchestrator/rag/pack_licences.py`). Without
-the canonical text of such a licence a page goes out as its address and short facts (state `no_licence_text`).
+line as found and its SPDX id: for MIT, BSD and ISC code from GitHub every copyright line of its repository's licence
+file, for Apache-2.0 the notices of the work's `NOTICE` file when the crawl read it
+(`orchestrator/rag/pack_licences.py`). Without the canonical text of such a licence a page goes out as its address and
+short facts (state `no_licence_text`).
 Every other page goes out as its address and short facts (title, section names, technical terms): a page with a
 copyright notice and no such licence, code without a licence, a licence that forbids changes or commercial use, a
 copyleft licence (it needs the whole licence text and the source with every copy), an unrecognised licence and a page
@@ -737,8 +738,8 @@ expired, so a revocation never stops applying because the framework was not upda
    only its `recipe.yml` or `knowledge.json` and a `README.md`; a knowledge pack also `LICENSES/<SPDX id>.txt` and
    `NOTICE`. These must match its pages: every licence text is the canonical one byte for byte, every licence that
    asks for its text and covers a page carried in full has its text there, and `NOTICE` lists each such page. A target
-   pack's knowledge snapshot is checked the same way (`knowledge/LICENSES/`, `knowledge/NOTICE`); `llm-cli zoo verify`
-   checks installed packs again.
+   pack's knowledge snapshot is checked the same way (`knowledge/LICENSES/`, `knowledge/NOTICE`; its licence texts
+   also without a snapshot); `llm-cli zoo verify` checks installed packs again.
 5. A summary in plain text shows kind, id, version, author, licence, trust level, source, files and destination,
    and you confirm. `--yes` skips the question only when the signed index lists the pack (trust `verified` or
    `community`), also for a pack file.
@@ -769,10 +770,9 @@ address; a page's full text goes in only where its licence allows it, every othe
 every page with what it carries and why. Pages carried in full under a licence that asks for its text get that text in
 `LICENSES/` and a `NOTICE`, and the export names each licence text and why. A target you installed from someone else
 is not re-signed as yours, and pages imported from installed community knowledge packs are left out of a knowledge
-export. "Open pull request"
-(`--pr`) hands the pack to the community repository (`community_repo`): through the GitHub CLI when it is installed
-and logged in, otherwise the repository's upload page opens in the browser. Both keep their own credentials; the
-framework never asks for, reads or shows a token.
+export. "Open pull request" (`--pr`) hands the pack to the community repository (`community_repo`): through the GitHub
+CLI when it is installed and logged in, otherwise the repository's upload page opens in the browser. Both keep their
+own credentials; the framework never asks for, reads or shows a token.
 
 **Maintainer tools.** `scripts/zoo_sign_index.py` creates the index key in the OS keyring (`keygen`), checks a pack
 and prints its index entry (`entry`) and signs `index.json` (`sign`; with `--previous` the version must be higher
