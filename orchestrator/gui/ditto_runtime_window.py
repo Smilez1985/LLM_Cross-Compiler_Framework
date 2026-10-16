@@ -17,11 +17,12 @@ One window, the same core calls as the CLI:
   deletion dialog with the full list, nothing ticked, "No" by default), Export the source... with an optional mirror
   URL and Import the source... for a computer without network.
 
-Long work (probes, builds, downloads, Docker, the server start, git) runs in a plain worker thread whose progress and
-result come back on the application's worker relay; Cancel stops a build before its next step and a download between
-two chunks. A question the core asks in the middle of a job (fetch the source? run the imported programs?) is asked
-here on the GUI thread with "No" as the default, while the worker waits. Every text is plain text; the person sees
-full paths; nothing here goes to an AI.
+Long work (probes, builds, downloads, Docker, the server start, git, the sizes and the deletion of older builds) runs
+in a plain worker thread whose progress and result come back on the application's worker relay; Cancel stops a build
+before its next step and a download between two chunks. One runtime job at a time in the whole GUI (with the box of
+the AI settings, runtime_mode_box.job_begins). A question the core asks in the middle of a job (fetch the source?
+run the imported programs?) is asked here on the GUI thread with "No" as the default, while the worker waits. Every
+text is plain text; the person sees full paths; nothing here goes to an AI.
 """
 
 import threading
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
                                QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
-from orchestrator.gui.runtime_mode_box import RuntimeModeBox, gib, throttled
+from orchestrator.gui.runtime_mode_box import RuntimeModeBox, gib, job_begins, job_ends, job_running, throttled
 from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.runtime.runtime_overview import overview
 from orchestrator.utils.localization import current_language, ui_text
@@ -319,7 +320,8 @@ class LocalRuntimeWindow(QDialog):
     # --- jobs off the GUI thread ------------------------------------------------------------------------------------
 
     def busy(self) -> bool:
-        return self._job is not None or self.box._token is not None
+        """A job of this window, of its box, or of another runtime widget of this GUI (the AI settings' box) runs."""
+        return self._job is not None or self.box._token is not None or job_running()
 
     def _run(self, name: str, work: Callable[..., Any], done: Callable[[bool, Any], None], *, cancellable: bool = False,
              busy_key: str = "ditto_runtime.working") -> bool:
@@ -329,6 +331,7 @@ class LocalRuntimeWindow(QDialog):
             self._box("information", self._t("ditto_runtime.busy"))
             return False
         token, progress = object(), object()
+        job_begins(token)
         self._job, self._progress, self._done = token, progress, done
         self._cancel = cancel = threading.Event()
         relay = worker_relay()
@@ -345,6 +348,8 @@ class LocalRuntimeWindow(QDialog):
                 relay.done.emit(token, ("ok", value))
             except Exception as e:  # noqa: BLE001 - shown to the person (plain text)
                 relay.done.emit(token, ("error", e))
+            finally:
+                job_ends(token)
         threading.Thread(target=run, name=f"ditto-runtime-{name}", daemon=True).start()
         return True
 
@@ -383,6 +388,7 @@ class LocalRuntimeWindow(QDialog):
         if token is not self._job or not isinstance(result, tuple) or len(result) != 2:
             return
         done = self._done
+        job_ends(token)
         self._job = self._progress = self._done = None
         for button in self._actions():
             button.setEnabled(True)
@@ -633,40 +639,50 @@ class LocalRuntimeWindow(QDialog):
     def prune(self) -> None:
         """`ditto runtime prune`: the older builds (never the active build, the CPU fallback or the running one) in the
         deletion dialog, nothing ticked and "No" by default; exactly the ticked ones go to the trash or for good,
-        audited, as the person chose."""
+        audited, as the person chose. The list (it measures every build folder) and the deletion run off the GUI
+        thread; only the dialog is on it."""
+        factory = self._factory
+
+        def listed(ok: bool, value: Any) -> None:
+            if not ok:
+                self._failed(value)
+            elif value is None:
+                self._box("information", self._t("ditto_runtime.prune.none"))
+            else:
+                self._prune_ask(value)
+        self._run("prune-list", lambda say, cancel, ask_from_worker: factory().cleanup_plan(), listed,
+                  busy_key="ditto_runtime.prune.listing")
+
+    def _prune_ask(self, plan: Any) -> None:
+        """The deletion dialog for the listed builds, then delete_old_builds in a worker (trash or for good)."""
         from orchestrator.Core.deletion import PlanChanged
         from orchestrator.Core.trash import Trash
         from orchestrator.gui.deletion_dialog import ask_deletion
-        if self.busy():
-            self._box("information", self._t("ditto_runtime.busy"))
-            return
-        try:
-            rt = self._factory()
-            plan = rt.cleanup_plan()
-        except Exception as e:  # noqa: BLE001 - e.g. no per-user folder
-            self._failed(e)
-            return
-        if plan is None:
-            self._box("information", self._t("ditto_runtime.prune.none"))
-            return
         accepted = ask_deletion(self, plan, multiple=True, title=self._t("ditto_runtime.prune.title"),
                                 intro=self._t("ditto_runtime.prune.intro"), lang=self.lang)
         if accepted is None:
             return
         audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
         try:
-            result = rt.delete_old_builds(accepted, trash=Trash.for_framework(self.framework), audit=audit)
-        except PlanChanged:
-            self._box("warning", self._t("deletion.changed"))
-            return
-        except (PermissionError, RuntimeError, AttributeError) as e:
+            trash = Trash.for_framework(self.framework)
+        except (AttributeError, TypeError) as e:
             self._box("warning", self._t("deletion.failed", reason=one_line(str(e))))
             return
-        done = "deletion.done.trash" if accepted.mode == "trash" else "deletion.done.permanent"
-        lines = [self._t(done, name=one_line(name)) for name in result.done]
-        lines += [self._t("deletion.kept", name=one_line(name), reason=one_line(why)) for name, why in result.failed]
-        self._box("information", "\n".join(lines) or self._t("ditto_runtime.prune.nothing"))
-        self.refresh_status()
+        factory = self._factory
+
+        def deleted(ok: bool, value: Any) -> None:
+            if not ok:
+                key = "deletion.changed" if isinstance(value, PlanChanged) else None
+                self._box("warning", self._t(key) if key else self._t("deletion.failed",
+                                                                        reason=one_line(str(value))))
+                return
+            done = "deletion.done.trash" if accepted.mode == "trash" else "deletion.done.permanent"
+            lines = [self._t(done, name=one_line(name)) for name in value.done]
+            lines += [self._t("deletion.kept", name=one_line(name), reason=one_line(why))
+                      for name, why in value.failed]
+            self._box("information", "\n".join(lines) or self._t("ditto_runtime.prune.nothing"))
+        self._run("prune", lambda say, cancel, ask_from_worker: factory().delete_old_builds(
+            accepted, trash=trash, audit=audit), deleted, busy_key="ditto_runtime.prune.deleting")
 
     # --- the source for a computer without network (`export-source`, `import-source`) -------------------------------
 

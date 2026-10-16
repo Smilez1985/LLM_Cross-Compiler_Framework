@@ -289,9 +289,12 @@ class TestEnsure:
         (kw, gui), = calls
         assert gui is False and kw["mode"] == "docker" and kw["force"] is False
         assert (kw["backend"], kw["placement"], kw["jobs"]) == ("cuda", "container", 4)
-        assert kw["container_build"] is False and kw["cancelled"]() is False and kw["fetch_source"]() is True
+        assert kw["container_build"] is False and kw["cancelled"]() is False
         assert offers == [], "unticked: no model offer (--no-model)"
         assert ui.shown[-1][1] == "Built for bare metal."
+        ui.answers.append(True)   # the source is fetched only after the CLI's question (asked here on the GUI thread)
+        assert kw["fetch_source"]() is True and ui.asked[-1][0].endswith("is not cached yet. Fetch it now?")
+        assert kw["fetch_source"]() is False, "No is the default"
 
     def test_the_installed_mode_is_checked_and_repaired_never_refused(self, qapp, tmp_path, monkeypatch, ui):
         from orchestrator.gui.runtime_mode_box import RuntimeModeBox
@@ -636,30 +639,36 @@ class TestBuilds:
                                      what="older self-built llama.cpp build of Ditto's server; not in use")],
                        ("trash", "permanent"))
         plans = [None, plan, plan]
-        rt.cleanup_plan = lambda: plans.pop(0)
+        rt.cleanup_plan = lambda: rt.record("cleanup_plan") or plans.pop(0)
         dialogs, answers = [], [None, "trash"]
 
         def ask_deletion(parent, shown_plan, **kw):
-            dialogs.append((shown_plan, kw))
+            dialogs.append((shown_plan, kw, on_gui_thread()))
             mode = answers.pop(0)
             return None if mode is None else accept(shown_plan, "gui", mode)
         monkeypatch.setattr(deletion_dialog, "ask_deletion", ask_deletion)
         deleted = []
 
         def delete_old_builds(accepted, trash=None, audit=None):
-            deleted.append((accepted, trash, audit))
+            deleted.append((accepted, trash, audit, on_gui_thread()))
             return DeletionResult(done=[accepted.plan.items[0].speaking_name])
         rt.delete_old_builds = delete_old_builds
         ui.win.btn_prune.click()
+        done(ui)
         assert dialogs == [] and ui.shown[-1][1].startswith("No old runtime builds")
         ui.win.btn_prune.click()
-        (shown_plan, kw), = dialogs
+        done(ui)
+        (shown_plan, kw, gui), = dialogs
         assert shown_plan is plan and kw["multiple"] is True and deleted == [], "No: nothing is deleted"
+        assert gui is True, "the deletion dialog is on the GUI thread"
         ui.win.btn_prune.click()
-        (accepted, trash, audit), = deleted
+        done(ui)
+        (accepted, trash, audit, gui), = deleted
         assert accepted.plan.items == plan.items and accepted.mode == "trash" and accepted.actor == "gui"
         assert isinstance(trash, Trash) and audit is framework.tool_registry.audit
         assert ui.shown[-1][1] == "Moved to the trash: llama-server build 0123456789abcdef"
+        assert gui is False and rt.threads("cleanup_plan") == [False, False, False], \
+            "measuring the build folders and deleting them run off the GUI thread"
 
     def test_the_deletion_dialog_shows_the_full_list_with_nothing_ticked_and_no_as_default(self, qapp, tmp_path):
         from orchestrator.Core.deletion import plan_of
@@ -794,3 +803,104 @@ class TestTextsAndQuestions:
         assert archive_path(str(tmp_path / "a.tar.gz")) == tmp_path / "a.tar.gz"
         assert archive_path(str(tmp_path / "a.tgz")) == tmp_path / "a.tgz"
         assert Path(archive_path("b.zip")).name == "b.zip.tar.gz"
+
+
+# --- one job at a time in the whole GUI, the source question, the automatic check, the hints ------------------------
+
+class TestOneCodePathDetails:
+
+    def test_a_job_of_another_box_blocks_every_runtime_job(self, qapp, tmp_path, monkeypatch, ui):
+        """The AI settings' box and the window (or the window opened by "Status and more...") are separate widgets:
+        while one of them builds, none of the others starts a second build, download or server start."""
+        from orchestrator.gui.runtime_mode_box import RuntimeModeBox
+        release, started = threading.Event(), threading.Event()
+
+        def ensure(rt, **kw):
+            started.set()
+            release.wait(10)
+            return runtime_mode.EnsureResult("installed", kw["mode"], ["Built for bare metal."])
+        monkeypatch.setattr(runtime_mode, "ensure", ensure)
+        monkeypatch.setattr(runtime_mode, "model_offer", lambda r: None)
+        TestServer()._fake(ui.rt)
+        settings_box = RuntimeModeBox(None, runtime_factory=lambda: FakeRuntime(tmp_path))
+        try:
+            ui.answers.append(True)
+            settings_box.btn_switch.click()
+            assert started.wait(10)
+            ui.win.btn_start.click()
+            assert ui.rt.called("start") == [] and ui.shown[-1][1].startswith("Another task")
+            asked = len(ui.asked)
+            ui.win.box.btn_switch.click()
+            assert len(ui.asked) == asked and ui.shown[-1][1].startswith("Another task"), "nothing asked, nothing run"
+            release.set()
+            wait_until(qapp, lambda: settings_box._token is None)
+            ui.win.btn_start.click()
+            done(ui)
+            assert len(ui.rt.called("start")) == 1, "free again once the other job ended"
+        finally:
+            release.set()
+            settings_box.deleteLater()
+
+    def test_the_box_asks_the_clis_question_before_the_source_is_fetched(self, ui, monkeypatch):
+        """`ditto runtime ensure` asks before it fetches the pinned source (about 215 MB); so does the box, on the GUI
+        thread with "No" as the default, while the build waits."""
+        answers_seen = []
+
+        def ensure(rt, **kw):
+            answers_seen.append((kw["fetch_source"](), on_gui_thread()))
+            return runtime_mode.EnsureResult("installed", kw["mode"], ["Built for bare metal."])
+        monkeypatch.setattr(runtime_mode, "ensure", ensure)
+        monkeypatch.setattr(runtime_mode, "model_offer", lambda r: None)
+        ui.answers.append(True)   # the install question; the source question gets the default No
+        ui.win.box.btn_switch.click()
+        done(ui)
+        question, gui = ui.asked[-1]
+        assert answers_seen == [(False, False)] and gui is True
+        assert question == (f"The pinned llama.cpp source ({PIN.tag}, commit {PIN.commit[:12]}, about 215 MB) is not "
+                            "cached yet. Fetch it now?")
+        ui.answers.extend([True, True])
+        ui.win.box.btn_switch.click()
+        done(ui)
+        assert answers_seen[-1] == (True, False)
+
+    def test_automatic_on_an_installed_runtime_says_what_ensure_does(self, qapp, tmp_path, monkeypatch, ui):
+        """'Automatic' with a runtime installed is `ensure` (auto): what is installed stays when it works, otherwise
+        bare metal is preferred, which may be the other mode. The question says so instead of promising the installed
+        mode."""
+        from orchestrator.gui.runtime_mode_box import RuntimeModeBox
+        rt = FakeRuntime(tmp_path, active="a" * 64)
+        box = RuntimeModeBox(None, runtime_factory=lambda: rt)
+        calls = []
+        monkeypatch.setattr(runtime_mode, "ensure", lambda r, **kw: calls.append(kw) or runtime_mode.EnsureResult(
+            "skipped", "bare-metal", ["Nothing to do."]))
+        monkeypatch.setattr(runtime_mode, "model_offer", lambda r: None)
+        try:
+            box.cb_mode.setCurrentIndex(box.cb_mode.findData("auto"))
+            assert box.btn_switch.text() == "Check and repair…"
+            box._switch()
+            question = ui.asked[-1][0]
+            assert calls == [] and "installed again bare metal" not in question
+            assert "bare metal when it can be built here, otherwise in Docker" in question and "now (bare metal)" in \
+                question
+            ui.answers.append(True)
+            box._switch()
+            wait_until(qapp, lambda: box._token is None)
+            assert calls[-1]["mode"] == "auto" and calls[-1]["force"] is False
+        finally:
+            box.deleteLater()
+
+    def test_the_hints_name_the_mouse_path_too(self, tmp_path):
+        """A stopped local server and a declined source fetch name the GUI path next to the command."""
+        from orchestrator.llm import LLMClient, NotConfigured
+        from test_runtime import FakeConfig
+        client = LLMClient(FakeConfig(ai_provider="local"), None, state_dir=tmp_path / "state",
+                           runtime_resolver=lambda pid: None)
+        with pytest.raises(NotConfigured) as info:
+            client.resolve()
+        assert "llm-cli ditto runtime start" in str(info.value)
+        assert "Ditto > Local Runtime... > Start" in str(info.value)
+        rt = runtime(tmp_path / "rt")
+        with pytest.raises(LocalRuntimeError) as info:
+            rt.pinned_source(True, fetch_source=lambda: False)
+        assert "Ditto > Local Runtime... > Import the source..." in str(info.value)
+        assert "llm-cli ditto runtime import-source FILE" in str(info.value)

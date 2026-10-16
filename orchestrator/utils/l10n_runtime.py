@@ -26,14 +26,16 @@ TEXTS = {
         "runtime.mode.name.docker": "in Docker",
         "runtime.mode.question": "Ditto's server will run {mode}.\n\nThe models stay where they are and are not "
                                  "downloaded again. Only the server is made again for the new mode: repackaged where "
-                                 "possible, otherwise built again from the pinned llama.cpp source (a few minutes; the "
-                                 "source, about 215 MB, is fetched once when it is not there yet). First the framework "
+                                 "possible, otherwise built again from the pinned llama.cpp source (a few minutes; "
+                                 "when the source, about 215 MB, is not there yet, you are asked before it is "
+                                 "fetched). First the framework "
                                  "checks that it fits next to the old mode.\n\nOnce the new mode works, every object "
                                  "of the old mode is listed, and with your one yes it is deleted for good: the two "
                                  "modes are alternatives, so nothing of the old one stays.\n\nContinue?",
         "runtime.mode.install_question": "Ditto's server will be installed {mode}: built from the pinned llama.cpp "
-                                         "source with the build options below (a few minutes; the source, about 215 "
-                                         "MB, is fetched once when it is not there yet). Afterwards Ditto's model is "
+                                         "source with the build options below (a few minutes; when the source, about "
+                                         "215 MB, is not there yet, you are asked before it is fetched). Afterwards "
+                                         "Ditto's model is "
                                          "offered with its size and licence, unless you untick that below.\n\n"
                                          "Continue?",
         "runtime.mode.working": "Working… this can take minutes; the window can stay open.",
@@ -88,14 +90,14 @@ TEXTS = {
         "runtime.mode.question": "Dittos Server läuft danach {mode}.\n\nDie Modelle bleiben, wo sie sind, und werden "
                                  "nicht noch einmal heruntergeladen. Nur der Server wird für die neue Art neu erzeugt: "
                                  "umgepackt, wo das geht, sonst aus dem festgelegten llama.cpp-Quellcode neu gebaut "
-                                 "(einige Minuten; der Quellcode, etwa 215 MB, wird einmal geholt, wenn er noch nicht "
-                                 "da ist). Vorher prüft das Framework, ob die neue Art neben der alten Platz "
+                                 "(einige Minuten; fehlt der Quellcode, etwa 215 MB, wirst du gefragt, bevor er geholt "
+                                 "wird). Vorher prüft das Framework, ob die neue Art neben der alten Platz "
                                  "hat.\n\nSobald die neue Art funktioniert, wird jedes Objekt der alten Art "
                                  "aufgelistet, und mit deinem einen Ja wird es endgültig gelöscht: Die beiden Arten "
                                  "sind Alternativen, von der alten bleibt nichts.\n\nWeiter?",
         "runtime.mode.install_question": "Dittos Server wird {mode} installiert: aus dem festgelegten "
-                                         "llama.cpp-Quellcode mit den Build-Optionen unten gebaut (einige Minuten; der "
-                                         "Quellcode, etwa 215 MB, wird einmal geholt, wenn er noch nicht da ist). "
+                                         "llama.cpp-Quellcode mit den Build-Optionen unten gebaut (einige Minuten; "
+                                         "fehlt der Quellcode, etwa 215 MB, wirst du gefragt, bevor er geholt wird). "
                                          "Danach wird Dittos Modell mit Größe und Lizenz angeboten, außer du nimmst "
                                          "unten den Haken weg.\n\nWeiter?",
         "runtime.mode.working": "Läuft … das kann Minuten dauern; das Fenster kann offen bleiben.",

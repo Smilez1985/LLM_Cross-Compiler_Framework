@@ -808,8 +808,8 @@ llm-cli ditto ask "Start a GGUF build of HuggingFaceTB/SmolLM2-135M-Instruct for
 llm-cli ditto ask "Explain IQ4_XS" --no-tools --provider local
 ```
 
-Without setup the command explains what is missing, for example "the local model server is not running. Start it
-with: llm-cli ditto runtime start".
+Without setup the command explains what is missing, for example "the local model server is not running. Start it in
+the GUI with Ditto > Local Runtime... > Start, or with: llm-cli ditto runtime start".
 
 ### ditto eval
 
@@ -1041,7 +1041,9 @@ llm-cli ditto runtime ensure --mode bare-metal --force    # and back
 In the GUI: box "Ditto's local server" in **Ditto > Local Runtime...** and in **Tools > Configure AI Agent (Ditto)...**:
 the mode (Automatic, Bare metal, In Docker), the build options and "Offer Ditto's model afterwards" (unticked:
 `--no-model`). The button says Install... (nothing installed), Check and repair... (the installed mode: checked, and
-installed again only when it cannot be used) or Switch... (`--force`).
+installed again only when it cannot be used; with Automatic chosen it is `--mode auto`, which prefers bare metal when
+nothing usable is left) or Switch... (`--force`). Before the pinned source is fetched, the GUI asks the command's
+question ("No" by default). One runtime task runs at a time in the whole GUI.
 
 #### ditto runtime import
 

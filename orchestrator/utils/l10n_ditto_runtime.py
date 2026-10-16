@@ -81,9 +81,19 @@ TEXTS = {
         "ditto_runtime.mode.repair_question": "Ditto's server is checked {mode}. When it cannot be used (for example "
                                               "an old llama.cpp build after an update, or files that no longer match "
                                               "their manifest), it is installed again {mode}: built from the pinned "
-                                              "llama.cpp source with the build options below (a few minutes; the "
-                                              "source, about 215 MB, is fetched once when it is not there yet). When "
-                                              "it works, nothing is changed.\n\nContinue?",
+                                              "llama.cpp source with the build options below (a few minutes; when "
+                                              "the source, about 215 MB, is not there yet, you are asked before it is "
+                                              "fetched). When it works, nothing is changed.\n\nContinue?",
+        "ditto_runtime.mode.repair_auto_question": "Ditto's server is checked automatically: what is installed now "
+                                                   "({mode}) stays when it can be used. When nothing usable is "
+                                                   "installed any more (for example an old llama.cpp build after an "
+                                                   "update, or a Docker image that is gone), Ditto's server is "
+                                                   "installed again: bare metal when it can be built here, otherwise "
+                                                   "in Docker, with the build options below (a few minutes; when the "
+                                                   "source, about 215 MB, is not there yet, you are asked before it is "
+                                                   "fetched). If that is not the mode installed now, every object of "
+                                                   "the old mode is listed afterwards and deleted only after your one "
+                                                   "yes.\n\nContinue?",
         "ditto_runtime.mode.failed": "It did not work: {reason}",
         "ditto_runtime.mode.unusable": "It cannot be used now: {problems}",
         "ditto_runtime.options.backend": "GPU backend:",
@@ -205,6 +215,8 @@ TEXTS = {
         "ditto_runtime.prune.none": "No old runtime builds: the active build, the CPU fallback and the running one are "
                                     "never listed.",
         "ditto_runtime.prune.nothing": "Nothing was deleted.",
+        "ditto_runtime.prune.listing": "Measuring the older builds …",
+        "ditto_runtime.prune.deleting": "Deleting the chosen builds …",
         "ditto_runtime.source.intro": "For a computer without network: export the pinned llama.cpp source here (from "
                                       "the pinned repository or a mirror; the commit is checked the same way) and "
                                       "import it there.",
@@ -293,9 +305,19 @@ TEXTS = {
                                               "Beispiel ein alter llama.cpp-Build nach einem Update oder Dateien, die "
                                               "nicht mehr zu ihrem Manifest passen), wird er {mode} neu installiert: "
                                               "aus dem festgelegten llama.cpp-Quellcode mit den Build-Optionen unten "
-                                              "gebaut (einige Minuten; der Quellcode, etwa 215 MB, wird einmal geholt, "
-                                              "wenn er noch nicht da ist). Funktioniert er, wird nichts "
+                                              "gebaut (einige Minuten; fehlt der Quellcode, etwa 215 MB, wirst du "
+                                              "gefragt, bevor er geholt wird). Funktioniert er, wird nichts "
                                               "geändert.\n\nWeiter?",
+        "ditto_runtime.mode.repair_auto_question": "Dittos Server wird automatisch geprüft: Was jetzt installiert ist "
+                                                   "({mode}), bleibt, wenn es sich nutzen lässt. Ist nichts Nutzbares "
+                                                   "mehr installiert (zum Beispiel ein alter llama.cpp-Build nach "
+                                                   "einem Update oder ein Docker-Image, das fehlt), wird Dittos Server "
+                                                   "neu installiert: direkt, wenn er hier gebaut werden kann, sonst in "
+                                                   "Docker, mit den Build-Optionen unten (einige Minuten; fehlt der "
+                                                   "Quellcode, etwa 215 MB, wirst du gefragt, bevor er geholt wird). "
+                                                   "Ist das nicht die Art, die jetzt installiert ist, wird danach "
+                                                   "jedes Objekt der alten Art aufgelistet und erst nach deinem einen "
+                                                   "Ja gelöscht.\n\nWeiter?",
         "ditto_runtime.mode.failed": "Das hat nicht geklappt: {reason}",
         "ditto_runtime.mode.unusable": "Lässt sich gerade nicht nutzen: {problems}",
         "ditto_runtime.options.backend": "GPU-Backend:",
@@ -426,6 +448,8 @@ TEXTS = {
         "ditto_runtime.prune.none": "Keine alten Laufzeit-Builds: Der aktive Build, der CPU-Ersatz und der laufende "
                                     "werden nie aufgelistet.",
         "ditto_runtime.prune.nothing": "Nichts wurde gelöscht.",
+        "ditto_runtime.prune.listing": "Die älteren Builds werden gemessen …",
+        "ditto_runtime.prune.deleting": "Die gewählten Builds werden gelöscht …",
         "ditto_runtime.source.intro": "Für einen Computer ohne Netz: den festgelegten llama.cpp-Quellcode hier "
                                       "exportieren (aus dem festgelegten Repository oder einem Spiegel; der Commit "
                                       "wird genauso geprüft) und dort importieren.",

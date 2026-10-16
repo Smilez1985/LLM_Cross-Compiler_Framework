@@ -770,7 +770,8 @@ class LocalLLMRuntime:
             if source is None:
                 if fetch_source is not None and not fetch_source():
                     raise LocalRuntimeError("The pinned llama.cpp source is needed for the build and was not "
-                                            "fetched. On a machine without network: llm-cli ditto runtime "
+                                            "fetched. On a machine without network: Ditto > Local Runtime... > "
+                                            "Import the source... in the GUI, or llm-cli ditto runtime "
                                             "import-source FILE (made with export-source elsewhere).")
                 source = llama_source.fetch_source(pin, self.data_dir, log=log)
         except llama_source.SourceError as e:

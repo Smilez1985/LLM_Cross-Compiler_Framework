@@ -837,8 +837,8 @@ llm-cli ditto ask "Starte einen GGUF-Build von HuggingFaceTB/SmolLM2-135M-Instru
 llm-cli ditto ask "Erkläre IQ4_XS" --no-tools --provider local
 ```
 
-Ohne Einrichtung erklärt der Befehl, was fehlt, zum Beispiel „the local model server is not running. Start it with:
-llm-cli ditto runtime start“.
+Ohne Einrichtung erklärt der Befehl, was fehlt, zum Beispiel „the local model server is not running. Start it in the
+GUI with Ditto > Local Runtime... > Start, or with: llm-cli ditto runtime start“.
 
 ### ditto eval
 
@@ -1081,7 +1081,10 @@ llm-cli ditto runtime ensure --mode bare-metal --force    # und zurück
 In der GUI: Bereich „Dittos lokaler Server“ in **Ditto > Lokale Laufzeit...** und in **Tools > Configure AI Agent
 (Ditto)...**: die Betriebsart (Automatisch, Direkt, In Docker), die Build-Optionen und „Danach Dittos Modell anbieten“
 (ohne Haken: `--no-model`). Der Knopf heißt Installieren... (nichts installiert), Prüfen und reparieren... (die
-installierte Art: geprüft und nur neu installiert, wenn sie sich nicht nutzen lässt) oder Wechseln... (`--force`).
+installierte Art: geprüft und nur neu installiert, wenn sie sich nicht nutzen lässt; mit Automatisch ist es `--mode
+auto`, das direkt bevorzugt, wenn nichts Nutzbares mehr da ist) oder Wechseln... (`--force`). Bevor der festgelegte
+Quellcode geholt wird, stellt die GUI die Frage des Befehls („Nein“ als Vorgabe). In der ganzen GUI läuft immer nur
+eine Aufgabe der Laufzeit.
 
 #### ditto runtime import
 
