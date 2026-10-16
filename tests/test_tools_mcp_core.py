@@ -293,3 +293,53 @@ class TestMcpConnections:
         assert mcp_server.http_url("::1", 9000) == "http://[::1]:9000/mcp"
         assert mcp_server.http_url("0.0.0.0", 9000, container=True) == "http://127.0.0.1:9000/mcp"
         assert Path(command["env"]["PYTHONPATH"]) == Path(launch["cwd"])
+
+
+# --- review of wave 5 (tools-mcp): the tools asked in the framework only are never lost by a copy or a re-run ------
+
+class TestFrameworkOnlyIsKept:
+    """A caller's "Ask in the framework" list (`--confirm-in-framework`) keeps a tool's questions out of the AI
+    client's own dialog. Rebuilding a caller's section, copying a caller's permissions to a token, or setting a token's
+    permissions for the first time must never drop it (that would loosen the setting without the person seeing it)."""
+
+    def test_the_cli_keeps_an_existing_sections_framework_only_list(self, registry):
+        """`tools permissions --caller mcp` for a caller with a section of its own rebuilt it without that list."""
+        from test_tool_policy_callers import invoke
+        registry.policy_store.replace(ToolPolicy(configured=True, callers={"mcp": CallerPolicy(
+            framework_only=["write"])}))
+        assert registry.framework_channel_required(registry.get("write"), "mcp")
+        result = invoke(registry, "tools", "permissions", "--caller", "mcp", input="allow\nask\nask\n")
+        assert result.exit_code == 0, result.output
+        assert registry.policy().callers["mcp"].framework_only == ["write"]
+        assert registry.framework_channel_required(registry.get("write"), "mcp")
+
+    @pytest.mark.parametrize("source", ["ditto", "mcp"])
+    def test_a_token_made_as_a_copy_keeps_the_callers_list(self, registry, source):
+        """`mcp token add --policy-from ditto|mcp` (GUI: Add... > a copy of ...): the copy had no such list, so the
+        token's questions about those tools could reach its client's own dialog."""
+        registry.policy_store.replace(ToolPolicy(configured=True, framework_only=["write"], reviewed=["echo", "write"],
+                                                 callers={"mcp": CallerPolicy(framework_only=["echo", "write"],
+                                                                              reviewed=["echo", "write"])}))
+        expected = {"ditto": ["write"], "mcp": ["echo", "write"]}[source]
+        assert registry.policy(source).framework_only == expected
+        add_token(registry, "copy", "cli", policy_from=source)
+        for tool in ("echo", "write"):
+            assert registry.framework_channel_required(registry.get(tool), "mcp:copy") \
+                == registry.framework_channel_required(registry.get(tool), source), tool
+        add_token(registry, "copy-of-copy", "gui", policy_from="mcp:copy")
+        assert registry.framework_channel_required(registry.get("write"), "mcp:copy-of-copy")
+
+    def test_a_new_tokens_permissions_start_from_the_list_that_applies_to_it(self, registry):
+        """A new token's questions follow the shared list; `tools permissions --token NAME` (GUI: the token's
+        Permissions...) started from an empty list, so the first save dropped it."""
+        from test_tool_policy_callers import invoke
+        registry.policy_store.replace(ToolPolicy(configured=True, framework_only=["write"],
+                                                 reviewed=["echo", "write"]))
+        registry.tokens.add("fresh")
+        assert registry.framework_channel_required(registry.get("write"), "mcp:fresh")
+        shown = registry.policy("mcp:fresh")
+        assert shown.framework_only == ["write"] and shown.tiers == read_only_policy().tiers, "still read only"
+        result = invoke(registry, "tools", "permissions", "--token", "fresh", input="allow\nask\nask\n")
+        assert result.exit_code == 0, result.output
+        assert registry.tokens.get("fresh").policy.configured
+        assert registry.framework_channel_required(registry.get("write"), "mcp:fresh")

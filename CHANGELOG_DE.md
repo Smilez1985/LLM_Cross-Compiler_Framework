@@ -1607,6 +1607,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   --caller ditto|mcp` legte den neuen Abschnitt eines Aufrufers ohne die gemeinsame Liste der Tools an, deren Fragen
   dir nur im Framework gestellt werden, sodass diese Fragen für diesen Aufrufer wieder im eigenen Dialog des
   KI-Clients landen konnten; der neue Abschnitt beginnt jetzt auch mit dieser Liste, wie bei `--confirm-in-framework`.
+- **Die Liste der Tools, die nur im Framework gefragt werden, geht nicht mehr durch einen zweiten Aufruf, eine Kopie
+  oder die ersten eigenen Berechtigungen eines Tokens verloren**: `llm-cli tools permissions --caller ditto|mcp` für
+  einen Aufrufer, der schon eigene Berechtigungen hatte, baute dessen Abschnitt ohne diese Liste neu; ein Token, das
+  als Kopie der Berechtigungen Dittos oder der lokalen MCP-Clients entstand (`llm-cli mcp token add --policy-from`
+  oder Add... in der GUI), bekam keine; und ein neues Token, das der gemeinsamen Liste folgt, verlor sie bei seinem
+  ersten `tools permissions --token NAME` (oder Permissions... in der GUI), das mit einer leeren Liste begann. Jedes
+  Mal konnten die Fragen zu diesen Tools wieder im eigenen Dialog des KI-Clients landen. Die Berechtigungen, die für
+  einen Aufrufer gezeigt und kopiert werden, tragen jetzt die Liste, die für ihn gilt (`ToolRegistry.policy`).
 - **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
   seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
   (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein

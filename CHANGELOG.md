@@ -1422,6 +1422,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli tools permissions --caller ditto|mcp` built a caller's new section without the shared list of tools whose
   questions are put to you in the framework only, so those questions could reach the AI client's own dialog again for
   that caller; the new section now starts from that list too, as `--confirm-in-framework` did.
+- **The list of tools asked in the framework only is no longer dropped by a re-run, a copy or a token's first own
+  permissions**: running `llm-cli tools permissions --caller ditto|mcp` again for a caller that already had permissions
+  of its own rebuilt its section without that list; a token made as a copy of Ditto's or the local MCP clients'
+  permissions (`llm-cli mcp token add --policy-from`, or Add... in the GUI) got none; and a new token, which follows
+  the shared list, lost it at its first `tools permissions --token NAME` (or Permissions... in the GUI), which started
+  from an empty list. Each time, the questions about those tools could reach the AI client's own dialog again. The
+  permissions shown and copied for a caller now carry the list that applies to it (`ToolRegistry.policy`).
 - **A build no longer replaces an earlier build of the same name**: in 3.0.0 a completed build moved its files into
   the folder `<target>/<model>/<quantization>` and replaced the files of an earlier build there (for example one for
   another board), so a finished golden artifact was lost without being asked. A later build now goes next to it

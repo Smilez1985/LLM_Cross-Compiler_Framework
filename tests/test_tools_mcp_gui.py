@@ -340,6 +340,18 @@ class TestToolPermissions:
         dialog.save()   # the window carries on from the new state: its save is not refused as stale
         assert registry.audit.entries(1)[0]["tool"] == "tool_policy"
 
+    def test_a_new_tokens_window_shows_and_keeps_the_tools_asked_in_the_framework(self, registry, dialog_of):
+        """Review of wave 5: a new token follows the shared "Ask in the framework" list, but its own Permissions...
+        window started with every box unticked, so its first save let those questions reach the client's dialog."""
+        save(registry, framework_only=["write"])
+        registry.tokens.add("fresh")
+        assert registry.framework_channel_required(registry.get("write"), "mcp:fresh")
+        own = dialog_of(lang="en", token="fresh")
+        assert own.framework_checks["write"].isChecked() and not own.framework_checks["echo"].isChecked()
+        own.save()
+        assert registry.tokens.get("fresh").policy.configured
+        assert registry.framework_channel_required(registry.get("write"), "mcp:fresh")
+
 
 # --- Folders the AI May Use: the kind -------------------------------------------------------------------------------
 
