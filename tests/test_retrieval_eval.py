@@ -384,7 +384,8 @@ def test_temporary_knowledge_base_is_private_and_removed(tmp_path, monkeypatch, 
         report = ev.run(load_cases(RETRIEVAL_CASES))
         assert storage.is_dir() and not storage.is_relative_to(tmp_path / "state")
     assert not storage.exists()
-    assert not (tmp_path / "state" / "qdrant").exists()
+    assert not (tmp_path / "state" / "qdrant").exists() and not (tmp_path / "state" / "qdrant_edge").exists()
+    assert not (tmp_path / "state" / "qdrant_edge.lock").exists()
     assert no_network == []
     # The configured model and the framework's models folder (cached there, offline afterwards).
     assert fake_models == {"spec": "intfloat/multilingual-e5-small", "cache_dir": tmp_path / "models" / "embeddings",

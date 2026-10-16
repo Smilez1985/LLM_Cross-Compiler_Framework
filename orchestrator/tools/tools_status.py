@@ -159,6 +159,8 @@ class KnowledgeSection(BaseModel):
     vector_count: int = 0
     mode: Optional[str] = None
     storage: str = Field(default="", description="embedded in the per-user folder, or scheme://host:port")
+    store_format: Optional[str] = Field(default=None, description="qdrant-edge (the local knowledge base), old-local "
+                                        "(the storage of earlier versions, while its conversion failed) or server")
     embedding_model: Optional[str] = None
     reranker: Optional[str] = None
     snapshots: List[str] = Field(default_factory=list)
@@ -540,6 +542,7 @@ def knowledge_section(framework) -> KnowledgeSection:
     section.mode = status.get("mode")
     section.storage = scheme_and_host(storage) if "://" in storage else "embedded in the per-user folder"
     section.embedding_model = status.get("embedding_model")
+    section.store_format = status.get("store_format")
     if status.get("error"):  # its text can quote a server's reply: only that there is a problem is shown
         section.problem = ("The knowledge base could not be opened; run_mojo_oracle (or 'llmcf mojo' in a terminal) "
                            "shows why.")

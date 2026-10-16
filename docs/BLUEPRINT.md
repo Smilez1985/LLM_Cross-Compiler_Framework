@@ -95,7 +95,7 @@ flowchart TB
         ORC["LLMOrchestrator"]
         HEAL["Self-healing"]
         DITTO["Ditto<br/>Core/ditto_manager.py"]
-        RAG["Knowledge base<br/>FastEmbed + embedded Qdrant"]
+        RAG["Knowledge base<br/>FastEmbed + Qdrant Edge"]
         CRAWL["Crawler<br/>Core/crawler_manager.py"]
         ZOO["Community zoo<br/>Core/community_manager.py"]
         DOC["Mojo<br/>Core/mojo/"]
@@ -185,7 +185,7 @@ flowchart TB
 | Managed local model (unreleased) | `orchestrator/runtime/`, `configs/llama_runtime.yml` | Builds `llama-server` on the machine from the pinned llama.cpp commit (b11429, the same commit as v0.6.0): the CPU build first, then a GPU build (Vulkan in this version), each verified before it is used; imports a build of another machine of the same kind; downloads the official prebuilt archive only on explicit request, labelled not self-built. Downloads pinned GGUF models in tiers (Qwen3.5 9B, 4B and 2B, 2-bit variants for weak hardware, and an IBM Granite 4.2 3B model on request), each checked by size and SHA256. Runs `llama-server` on 127.0.0.1 with a free port and a per-start API key. The `local` provider finds the running server by itself. |
 | Ditto evaluation (unreleased) | `orchestrator/evals/ditto_eval.py`, `evals/ditto/cases.yml`, `evals/retrieval/` | `llm-cli ditto eval`: 19 fixed cases (build-log analysis, build recommendations, module proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local model tier. Nothing is built: chat cases use the real tool definitions over a stand-in build service. With `--kind retrieval`, 42 searches grade the knowledge-base search on a fixed corpus, without an AI model (see [A knowledge-base search](#a-knowledge-base-search-unreleased)). |
 | Self-healing | `orchestrator/Core/self_healing_manager.py` | Recognizes known failures with fixed patterns first and asks Ditto only for unknown ones. Applies only framework-defined fixes, and only after your approval. |
-| Knowledge base and crawler | `orchestrator/Core/rag_manager.py`, `orchestrator/rag/`, `orchestrator/Core/crawler_manager.py` | Optional (`enable_rag_knowledge`). Web pages, PDFs, community knowledge packs and, when you index them (`llm-cli knowledge index-docs`, the GUI or the tool `index_framework_docs`, never by themselves), the framework's own documentation and code are split into chunks and stored with a local dense embedding (FastEmbed on ONNX Runtime, CPU; model chosen by hardware unless `rag_embedding_model` is set) and a BM25 vector. Searches combine both rankings with Reciprocal Rank Fusion; a local cross-encoder can rerank the results and drop those below a relevance floor (unreleased, see [A knowledge-base search](#a-knowledge-base-search-unreleased)). Qdrant runs embedded in the process with its storage in the per-user folder (unreleased); a Qdrant server is used only when `qdrant_url` is set. The crawler of Deep Ingest honours the sites' machine-readable opt-outs (see [Deep Ingest](#deep-ingest-from-a-web-page-to-the-knowledge-base-unreleased)). |
+| Knowledge base and crawler | `orchestrator/Core/rag_manager.py`, `orchestrator/rag/`, `orchestrator/Core/crawler_manager.py` | Optional (`enable_rag_knowledge`). Web pages, PDFs, community knowledge packs and, when you index them (`llm-cli knowledge index-docs`, the GUI or the tool `index_framework_docs`, never by themselves), the framework's own documentation and code are split into chunks and stored with a local dense embedding (FastEmbed on ONNX Runtime, CPU; model chosen by hardware unless `rag_embedding_model` is set) and a BM25 vector. Searches combine both rankings with Reciprocal Rank Fusion; a local cross-encoder can rerank the results and drop those below a relevance floor (unreleased, see [A knowledge-base search](#a-knowledge-base-search-unreleased)). Qdrant Edge, the Rust engine of Qdrant, runs in the process with its storage in the per-user folder (unreleased; a knowledge base of an earlier version is converted on first use, see [The knowledge base's storage](#the-knowledge-bases-storage-qdrant-edge-unreleased)); a Qdrant server is used only when `qdrant_url` is set. The crawler of Deep Ingest honours the sites' machine-readable opt-outs (see [Deep Ingest](#deep-ingest-from-a-web-page-to-the-knowledge-base-unreleased)). |
 | Deep Ingest notice and spoken announcements (unreleased) | `orchestrator/utils/crawl_notice.py`, `orchestrator/utils/announce.py` | The one-time notice before the first Deep Ingest, remembered per user, and short announcements through the speech engine of the operating system. |
 | Community zoo (unreleased) | `orchestrator/Core/community_manager.py`, `orchestrator/Core/community_pack.py`, `orchestrator/schemas/recipes.py`, `orchestrator/gui/community_hub.py`, `configs/community_keys.yml` | Signed and encrypted community packs (targets, recipes, knowledge), the signed community index, installation through a quarantine with trust levels, export with privacy scrub and the hand-over to a pull request (see [Community packs](#community-packs-format-trust-and-exchange-unreleased)). |
 | Input history (unreleased) | `orchestrator/utils/input_history.py` | Recent values of the GUI input fields, per user and without secrets (see [Recent inputs](#recent-inputs-unreleased)). |
@@ -214,7 +214,7 @@ SDK); see [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md) for what each 
 | `models/ditto/` | Ditto's local GGUF models with a `.verified.json` marker each (unreleased). |
 | `models/embeddings/` | Embedding and reranking models of the knowledge base (unreleased). |
 | `community/` | Installed community recipes (`recipes/`) and knowledge packs (`knowledge/`), each with a `.lcf-provenance.json`, and the packs you export (`contributions/`). Community targets are installed into `targets/`. A `.quarantine/` folder inside an install folder holds a pack only while it is checked (unreleased). |
-| `~/.llm-framework/` (or `LLM_FRAMEWORK_HOME`) | `secrets.store` (also your community keys), `tool_policy.json`, `audit.db` with `audit.db.anchor`, `known_hosts`, the framework SSH key `id_ed25519_llm_framework` (+ `.pub`), `mcp_tokens.json` (the named MCP tokens, as SHA-256 hashes, with their permissions), `chat_history.json`, `llm_privacy_key` and `llm_install_id`; `crawl_notice.json` and `input_history.json` (unreleased); the cached community index `community/index.json` with `index.json.sig` and the authors' public keys remembered at the first install, `community/authors.json` (unreleased); the embedded knowledge base `qdrant/` and `knowledge_snapshots/`; the local model server under `runtime/llama.cpp/` (builds, `active.json`, `server.json`, the key file while the server runs) and its log in `logs/llama-server.log`. |
+| `~/.llm-framework/` (or `LLM_FRAMEWORK_HOME`) | `secrets.store` (also your community keys), `tool_policy.json`, `audit.db` with `audit.db.anchor`, `known_hosts`, the framework SSH key `id_ed25519_llm_framework` (+ `.pub`), `mcp_tokens.json` (the named MCP tokens, as SHA-256 hashes, with their permissions), `chat_history.json`, `llm_privacy_key` and `llm_install_id`; `crawl_notice.json` and `input_history.json` (unreleased); the cached community index `community/index.json` with `index.json.sig` and the authors' public keys remembered at the first install, `community/authors.json` (unreleased); the knowledge base `qdrant_edge/` with its lock file `qdrant_edge.lock` and the record of its conversion `knowledge_conversion.json` (unreleased; the folder `qdrant/` of earlier versions stays until you delete it) and `knowledge_snapshots/`; the local model server under `runtime/llama.cpp/` (builds, `active.json`, `server.json`, the key file while the server runs) and its log in `logs/llama-server.log`. |
 | Config folder (usually `configs/`) | `config.yml` (user settings); optionally an own `llm_providers.yml` that adds or replaces provider presets. |
 | `chat_feed.sqlite` in the per-user folder (unreleased) | The chat feed: what the chat panel on the right shows (your messages, Ditto's answers, questions that wait, decisions an AI made with its reason, results of work an AI started). Every row is signed; nothing in it is deleted by itself. |
 
@@ -607,8 +607,8 @@ importing a document again adds its parts.
 1. **Query.** The query gets a dense vector. It also gets a BM25 vector when it has at least three words or
    contains an identifier (a digit, an underscore, two capital letters in a row, or a dot or hyphen inside a
    word), so one-word searches such as `E2041` or `GGML_CUDA` use the keyword index as well.
-2. **Hybrid search.** Qdrant ranks the candidates by both vectors and fuses the two rankings with Reciprocal Rank
-   Fusion. The same text stored under several sources is returned once.
+2. **Hybrid search.** Qdrant Edge ranks the candidates by both vectors (the dense search is exact) and fuses the
+   two rankings with Reciprocal Rank Fusion (k = 2). The same text stored under several sources is returned once.
 3. **Reranking (optional).** A cross-encoder reads the query together with each candidate (its heading and the
    first 1500 characters; up to 20 candidates, at least 12) and rates it between 0 and 1. Candidates below the
    relevance floor are dropped, so the list may be empty: no excerpt is better than an unrelated one. The floor is
@@ -654,6 +654,75 @@ excerpt, figures per tag and the search latency. A GitHub workflow (`retrieval-e
 nightly and on demand with cached models. A change to the search becomes a default only when this evaluation
 shows that it helps: the floor, the identifier splitting and the block splitting were measured this way, and the
 reranker stays off where it did not help. The figures are in the [changelog](../CHANGELOG.md).
+
+### The knowledge base's storage: Qdrant Edge (unreleased)
+
+Earlier versions kept the local knowledge base in qdrant-client's local mode: a pure-Python re-implementation of
+Qdrant, meant for development. It loads every point into memory when it opens and compares a query with each point in
+Python. Qdrant Edge is Qdrant's own engine (Rust) as a library in the framework process (PyPI `qdrant-edge-py`,
+Apache-2.0, pinned exactly; wheels for Linux x86_64 and aarch64, Windows x86_64 and macOS, one wheel for every Python
+from 3.10). qdrant-client stays for an optional Qdrant server (`qdrant_url`) and to read the old storage once.
+
+- **Layout.** `~/.llm-framework/qdrant_edge/` holds one Edge shard per collection (`collections/<name>/`), what each
+  collection holds (`collections/<name>.json`: embedding model, dimension) and which one is active (`aliases.json`).
+  The callers did not change: a collection per embedding model, point ids and `chunk_hash`, payload fields and
+  filters, replacing a source, the reranker, the excerpt budget and the snapshots work as before. The dense search is
+  exact (no graph index), as before: a few milliseconds even for 50 000 excerpts, and every result is the true nearest
+  one. The rankings are fused with Reciprocal Rank Fusion with k = 2, the value of the old storage, so the fused scores
+  stay the same.
+- **One process at a time.** Qdrant Edge locks a shard's write-ahead log, so even a reader cannot open a shard that
+  another process holds. The framework takes its own lock first (`qdrant_edge.lock` next to the folder, through
+  `filelock`, on Linux and Windows), for the whole time the storage is open and around the conversion. GUI, CLI and
+  MCP server take turns: each releases the storage after 30 seconds without use. A second process waits up to 5
+  seconds and then gets the error "in use by another framework process", never a half-written state. To share one
+  knowledge base between processes that run at the same time, use a Qdrant server (`qdrant_url`).
+- **Conversion.** On the first use of an old store (`~/.llm-framework/qdrant`), under that lock:
+  1. The disk: the new storage needs about the old one's size again, and 512 MB must stay free.
+  2. Every collection of the knowledge base is copied with its vectors and payloads into a separate folder
+     (`qdrant_edge.converting`). Nothing is embedded again.
+  3. The check: every collection holds as many points as before, and a sample of 16 points per collection is compared
+     one by one (payload, direction of the vector, keyword vector) and searched for in both stores (exact dense search;
+     four of them also by keyword search with the IDF, which the old storage computes slowly in Python). Both stores
+     must give the same results.
+  4. Only then the folder is moved into place, and the conversion is recorded (`knowledge_conversion.json`: when, the
+     collections, the points, what was checked, how long it took, the engine version).
+
+  The old folder stays. Only the person deletes it, through the deletion list (Tools > Knowledge Snapshots... > Delete
+  the old storage..., or `llm-cli knowledge storage delete-old`; trash or for good; audited as `old_store_deleted`).
+  A failed conversion leaves the old store in use, removes the half-made copy and records why; Mojo Oracle and
+  `llm-cli knowledge storage` show it. A failure of the moment (disk space, the old store held by an older framework)
+  is tried again on the next start. A failure that would repeat (a check that did not match, an error while copying)
+  waits for the person (Tools > Knowledge Snapshots... > Try the conversion again, which runs in the background, or
+  `llm-cli knowledge storage convert`) or a new engine version. Once the knowledge base is in Qdrant Edge, the old
+  folder never stands in for it again: when the engine cannot be loaded later (a missing or broken package), the
+  knowledge base is refused with the reason and Mojo Oracle reports an error. The old folder lacks what was added since
+  the conversion, and what would be written into it would never reach Qdrant Edge.
+- **Snapshots.** A snapshot is a portable file (gzip, one JSON line per point with its vectors and payload), the same
+  for every storage. Format 2 names the storage it came from. Snapshots of format 1, written by earlier versions,
+  restore into Qdrant Edge and are converted that way. A newer format is refused before anything changes.
+
+**Measured** with synthetic excerpts (384-dimensional vectors, a keyword vector and about 1 KB of text each), through
+the store layer as the framework uses it, on 4 CPU cores shared with other jobs (so the times are rough):
+
+| | Old storage, 5 000 | Qdrant Edge, 5 000 | Old storage, 50 000 | Qdrant Edge, 50 000 |
+|---|---|---|---|---|
+| Storing every excerpt (64 per call) | 21.9 s | 3.6 s | 246 s | 79 s |
+| Opening the stored knowledge base | 2.9 s | 0.1 s | 19.1 s | 1.1 s |
+| Hybrid search, median / 95th percentile | 414 / 586 ms | 2.6 / 4.3 ms | 4949 / 5935 ms | 12.3 / 17.7 ms |
+| Memory after opening (more than before) | 291 MB | 118 MB | 2026 MB | 520 MB |
+| Disk used | 42 MB | 38 MB | 415 MB | 370 MB |
+| Conversion from the old storage | | 13.5 s | | 159 s |
+
+Qdrant Edge reserves its files in advance: the folder looks larger (187 MB for 5 000 excerpts) than what the disk
+really uses on Linux. Its memory includes the files it maps. With Qdrant's graph index instead of the exact search,
+50 000 excerpts were searched in 6.5 ms, but each larger import then needed 37 s of indexing; the exact search was
+chosen. The embedding model (tens of milliseconds per excerpt on a CPU) stays the slowest part of storing.
+
+A second run with the same setup at another time on the same machine (other jobs running too) gave the same picture with
+lower times for the old storage. 50 000 excerpts: storing 187 s (old) against 39 s (Qdrant Edge), opening 10.6 s against
+0.9 s, a search 2492 / 3013 ms against 13.7 / 19.5 ms, memory after opening 1630 MB against 408 MB, disk 297 MB against
+280 MB; the conversion took 68 s with 2.0 GB of memory at its peak. 5 000 excerpts: a search 254 ms against 2.2 ms,
+opening 2.9 s against 0.1 s.
 
 ### Community packs: format, trust and exchange (unreleased)
 
@@ -883,6 +952,7 @@ These are real limitations of the current state. Most are scheduled in the [road
 | **Providers as data** | New models and OpenAI-compatible servers appear faster than releases. Presets in `configs/llm_providers.yml` (model and effort per task, endpoint, how reasoning is sent) and a live model list mean that such changes need no code change. |
 | **Local model through a managed llama-server** | The 3.0.0 offline mode loaded a Transformers model inside the framework, which needed torch and transformers (not part of the default installation). A llama.cpp server, built on the user's machine from a pinned commit for that machine (the official prebuilt archive only on explicit request), is small, runs on CPU, Vulkan, CUDA, ROCm and Metal, speaks the OpenAI-compatible API the provider layer already uses, and runs as a separate process with its own key; the framework itself stays free of GPU libraries. |
 | **Local embeddings and an embedded vector store** | In 3.0.0 the knowledge base sent ingested text and search queries to OpenAI for embeddings and needed a Qdrant container. FastEmbed on ONNX Runtime and Qdrant embedded in the process keep all text on the computer and open no port; a Qdrant server remains optional. |
+| **Qdrant Edge instead of qdrant-client's local mode** | The local mode is a Python re-implementation of Qdrant meant for development: it loads every point into memory and compares each query with every point in Python (measured with 50 000 excerpts: 5 s per search and 2 GB of memory). Qdrant Edge is the Rust engine of Qdrant as a library in the process: no server, no port, no Docker, milliseconds per search. An older knowledge base is converted and checked, never embedded again, and its old folder stays until the person deletes it. qdrant-client stays for an optional Qdrant server. |
 | **Structured answers, never free text, for actions** | A healing fix, a module proposal or a build recommendation that comes back as free text cannot be checked. Pydantic models with limits make an invalid answer an error that is never applied, and the module generator checks every value again. |
 | **Evaluation by rules** | Whether a small or 2-bit model is good enough for Ditto has to be measurable on the user's machine. Fixed cases graded by deterministic rules are reproducible and need no second model as a judge; the cases file is data. |
 | **Low effort means no thinking on local models** | Qwen3.5 on llama-server otherwise thinks at full length, which takes minutes on a CPU. "medium" and up keep thinking on. |
@@ -958,6 +1028,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 |---|---|
 | **Ditto rebuilt on its own provider layer.** Official `anthropic` and `openai` SDKs instead of LiteLLM; providers as data (`configs/llm_providers.yml`) with model and effort per task and a live model list; retries, fallback chain, validated structured answers, prompt caching, privacy filter for cloud providers; Ditto uses the framework tools within your permissions (GUI chat and `llm-cli ditto ask`). | done |
 | **Local knowledge base.** FastEmbed embeddings on the CPU, Qdrant embedded in the process, hybrid search (BM25 plus dense vectors, Reciprocal Rank Fusion); no vector-database server and no cloud embeddings. | done |
+| **Knowledge base in Qdrant Edge.** The Rust engine of Qdrant in the process instead of qdrant-client's local mode; an older knowledge base is converted on first use and checked, its old folder stays until you delete it (see [The knowledge base's storage](#the-knowledge-bases-storage-qdrant-edge-unreleased)). | done |
 | **Managed local model with tiers down to 2-bit.** llama.cpp `llama-server` self-built on your machine from a pinned commit (Linux: CPU, then Vulkan; see the self-built runtime below), the official prebuilt archive (CUDA, Vulkan, Metal or CPU; ROCm only when chosen) only as the explicit `--prebuilt` opt-in, labelled "not self-built", and pinned Qwen3.5 models from 9B down to 2-bit models for weak hardware (3 GB RAM); `llm-cli ditto runtime` and `llm-cli ditto models`. | done |
 | **Self-built llama.cpp, stage 1: one hardware probe.** Probe format schema 2 with the Python probe as the main path and the `.sh` and `.ps1` scripts as fallbacks that write the same keys: OS, version, init system, C library and its version, architecture and CPU features of the machine that will run the binaries, read on a board over SSH without writing anything there; no host names, serial or part numbers in profiles. | done |
 | **Self-built llama.cpp, stage 1: one recipe, pinned by commit, built without network.** One build recipe turns a profile into a build plan with a build ID; llama.cpp is pinned by commit in one place, which target images, templates and the catalog fetch and check (moved up from 3.4.0); the source is fetched once and checked, and carried to air-gapped machines as a bundle; configure and build run natively or in the builder container without network; every build is verified (format, glibc symbol versions, version and commit, devices, the server refuses `--tools`) and kept in one build store; a build from another of your machines can be imported. | done |

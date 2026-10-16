@@ -14,10 +14,13 @@ from conftest import REPO_ROOT
 # Third-party libraries that are expensive to import and only needed by some commands.
 HEAVY_LIBRARIES = ("fastembed", "onnxruntime", "qdrant_client", "qdrant_edge", "tokenizers", "huggingface_hub",
                    "docker", "paramiko", "anthropic", "openai", "PySide6", "bs4", "pypdf", "langdetect", "PIL", "numpy")
-# Framework parts that pull in those libraries or much code of their own.
+# Framework parts that pull in those libraries or much code of their own. The knowledge base's storage (Qdrant Edge,
+# qdrant-client for a server and the old storage, its conversion) loads when it is first used, also when the
+# knowledge base is on.
 HEAVY_PARTS = ("orchestrator.Core.framework", "orchestrator.Core.builder", "orchestrator.Core.crawler_manager",
                "orchestrator.Core.rag_manager", "orchestrator.Core.ditto_manager", "orchestrator.llm.client",
-               "orchestrator.Core.mojo")
+               "orchestrator.Core.mojo", "orchestrator.rag.store", "orchestrator.rag.edge_store",
+               "orchestrator.rag.client_store", "orchestrator.rag.migration")
 # Loaded when the framework boots: the managers and the build engine, whose Docker reachability check uses the Docker
 # SDK (which imports paramiko), and Ditto with its provider layer (not the provider SDKs), which self-healing needs.
 BOOT_USES = ("docker", "paramiko", "orchestrator.Core.framework", "orchestrator.Core.builder",

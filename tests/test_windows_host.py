@@ -182,7 +182,64 @@ def test_an_approval_is_stored_while_a_reader_holds_the_file(tmp_path, monkeypat
 
 @pytest.fixture
 def windows_deletes(monkeypatch):
-    """Embedded Qdrant's collection deletion with Windows' rule: a folder whose storage file is still open stays."""
+    """Qdrant Edge's storage with Windows' rule: a folder that still holds an open (mapped) shard file cannot be
+    deleted; rmtree with an error handler (or ignore_errors) then leaves it silently."""
+    from orchestrator.rag import storage_lock
+    from orchestrator.rag.edge_store import EdgeStorage
+    open_shards = set()
+    real_shard, real_create, real_close = EdgeStorage.shard, EdgeStorage.create, EdgeStorage.close_shard
+
+    def shard(self, name):
+        opened = real_shard(self, name)
+        open_shards.add(self._path(name))
+        return opened
+
+    def create(self, name, *args, **kwargs):
+        made = real_create(self, name, *args, **kwargs)
+        open_shards.add(self._path(name))
+        return made
+
+    def close_shard(self, name):
+        real_close(self, name)
+        open_shards.discard(self._path(name))
+
+    def rmtree(path, ignore_errors=False, **kwargs):
+        if any(Path(path) == p or Path(path) in p.parents for p in open_shards):
+            if ignore_errors or kwargs.get("onexc") or kwargs.get("onerror"):
+                return
+            raise PermissionError(13, "The process cannot access the file", str(path))
+        shutil.rmtree(path, ignore_errors=ignore_errors, **kwargs)
+
+    monkeypatch.setattr(EdgeStorage, "shard", shard)
+    monkeypatch.setattr(EdgeStorage, "create", create)
+    monkeypatch.setattr(EdgeStorage, "close_shard", close_shard)
+    monkeypatch.setattr(storage_lock, "shutil", SimpleNamespace(rmtree=rmtree))
+    return SimpleNamespace(rmtree=rmtree, set=lambda fn: monkeypatch.setattr(storage_lock, "shutil",
+                                                                              SimpleNamespace(rmtree=fn)))
+
+
+def test_clearing_the_knowledge_base_deletes_the_vectors_on_windows(make_rag, windows_deletes):  # noqa: F811
+    rag = make_rag()
+    ingest_all(rag)
+    count = rag.get_status()["vector_count"]
+    assert count > 0
+    name = rag.create_snapshot("before_clear")
+    assert rag.clear_knowledge_base() and rag.get_status()["vector_count"] == 0
+    assert rag.restore_snapshot(name) and rag.get_status()["vector_count"] == count
+
+
+def test_vectors_that_cannot_be_deleted_are_reported(make_rag, windows_deletes):  # noqa: F811
+    rag = make_rag()
+    ingest_all(rag)
+    windows_deletes.set(lambda path, ignore_errors=False, **kw: None)  # e.g. another program holds a file
+    assert rag.clear_knowledge_base() is False
+    assert "could not be deleted" in (rag.last_error or "")
+
+
+@pytest.fixture
+def windows_deletes_old_local(monkeypatch):
+    """The storage of earlier versions (qdrant-client's local mode, in use while its conversion failed) with Windows'
+    rule: a folder whose storage file is still open stays."""
     from qdrant_client.local import persistence, qdrant_local
     open_files = set()
     real_init, real_close = persistence.CollectionPersistence.__init__, persistence.CollectionPersistence.close
@@ -209,9 +266,28 @@ def windows_deletes(monkeypatch):
                                                                               SimpleNamespace(rmtree=fn)))
 
 
-def test_clearing_the_knowledge_base_deletes_the_vectors_on_windows(make_rag, windows_deletes):  # noqa: F811
+def old_local_rag(make_rag, monkeypatch):  # noqa: F811
+    """A knowledge base that stays in the storage of earlier versions because its conversion failed."""
+    from qdrant_client import QdrantClient
+
+    from orchestrator.rag import migration
     rag = make_rag()
+    old = rag.old_storage_dir
+    old.mkdir(parents=True)
+    QdrantClient(path=str(old)).close()  # an old store (its meta.json) without collections
+
+    def fail(*args, **kwargs):
+        raise migration.ConversionFailed("simulated", code="error")
+
+    monkeypatch.setattr(migration, "convert", fail)
     ingest_all(rag)
+    assert rag.get_status()["store_format"] == "old-local"
+    return rag
+
+
+def test_clearing_the_old_local_storage_deletes_the_vectors_on_windows(make_rag, monkeypatch,  # noqa: F811
+                                                                       windows_deletes_old_local):
+    rag = old_local_rag(make_rag, monkeypatch)
     count = rag.get_status()["vector_count"]
     assert count > 0
     name = rag.create_snapshot("before_clear")
@@ -219,10 +295,10 @@ def test_clearing_the_knowledge_base_deletes_the_vectors_on_windows(make_rag, wi
     assert rag.restore_snapshot(name) and rag.get_status()["vector_count"] == count
 
 
-def test_vectors_that_cannot_be_deleted_are_reported(make_rag, windows_deletes):  # noqa: F811
-    rag = make_rag()
-    ingest_all(rag)
-    windows_deletes.set(lambda path, ignore_errors=False, **kw: None)  # e.g. another program holds a file
+def test_old_local_vectors_that_cannot_be_deleted_are_reported(make_rag, monkeypatch,  # noqa: F811
+                                                               windows_deletes_old_local):
+    rag = old_local_rag(make_rag, monkeypatch)
+    windows_deletes_old_local.set(lambda path, ignore_errors=False, **kw: None)
     assert rag.clear_knowledge_base() is False
     assert "could not be deleted" in (rag.last_error or "")
 
