@@ -4307,6 +4307,8 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         if result.resumed:
             console.print(f"The network dropped {result.resumed} time(s); the deploy waited {result.waited_s:.0f} s "
                           "for the board and continued where it stopped.")
+        for note in result.notes:  # e.g. an old container on the board that only you remove
+            console.print(f"[yellow]{escape(note)}[/yellow]")
         # Trusted by you and logged in to with the framework's key: AI tools may now name it (deploy_to_device).
         _remember_device(ctx, host, port, user, key, paired=True, label=label)
     else:
@@ -5221,13 +5223,19 @@ def _ensure_package(state_dir: Path, device_id: str, builds, build):
 
 @device_runtime.command('prune')
 @click.argument('device_name', metavar='DEVICE')
+@click.option('--on-device', is_flag=True,
+              help="List the older runtime builds on the device itself (over SSH) instead of the packages on this "
+                   "computer; never the active build, never one a running program uses")
 @pass_context
-def device_runtime_prune(ctx: FrameworkContext, device_name: str):
+def device_runtime_prune(ctx: FrameworkContext, device_name: str, on_device: bool):
     """List the device's older runtime packages and delete the ones you pick, after you confirm them in a terminal
     (nothing preselected; never the package of the build deployed last)"""
     from orchestrator.Core.deletion import PlanChanged, size_text
     from orchestrator.runtime.device.package import DeviceRuntimeStore
-    state_dir, _store, device_id, _profile = _device_context(ctx, device_name)
+    state_dir, store, device_id, _profile = _device_context(ctx, device_name)
+    if on_device:
+        _prune_on_device(ctx, state_dir, store, device_id)
+        return
     devices = DeviceRuntimeStore(state_dir, device_id)
     plan = devices.cleanup_plan()
     if plan is None:
@@ -5245,6 +5253,58 @@ def device_runtime_prune(ctx: FrameworkContext, device_name: str):
     except (PlanChanged, PermissionError, RuntimeError) as e:
         console.print(f"[yellow]{escape(str(e))}[/yellow]")
         return
+    _print_deletion_result(result, accepted)
+
+
+def _prune_on_device(ctx: FrameworkContext, state_dir: Path, store, device_id: str) -> None:
+    """The older runtime builds on the device (round 5 f): a deployment keeps every one of them, and this lists them
+    with their full path on the device, size and what each is; exactly the ones you tick are removed after your yes
+    at a terminal (nothing ticked, "No" by default). A board has no trash, so a removal is for good."""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    from orchestrator.runtime.device.devices import split_address
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, board_cleanup_plan, older_builds,
+                                                    read_facts, remove_older_builds)
+    settings = _deploy_settings(store, device_id)
+    if settings.ssh_user is None:
+        console.print(f"[red]No SSH user is set for device {device_id} (llm-cli device settings ... --user).[/red]")
+        sys.exit(1)
+    try:
+        host, port = split_address(store.device_info(device_id).get("address"))
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    previous = str(DeviceRuntimeStore(state_dir, device_id).record().get("previous") or "")[:16] or None
+    client = _connect_device(state_dir, device_id, host, port, settings.ssh_user, None)
+    try:
+        shell = RemoteShell(client)
+        root = read_facts(shell).root
+        builds = older_builds(shell, root)
+        busy = [b.build_id16 for b in builds if b.in_use]
+        if busy:
+            console.print(f"Not listed, because a running program uses them: {', '.join(busy)}.")
+        plan = board_cleanup_plan(builds, root, previous)
+        if plan is None:
+            console.print(f"No older runtime builds on device {device_id} to remove: the active build is never "
+                          "listed.")
+            return
+        accepted = confirm_deletion(plan, title=f"Runtime builds on device {device_id} ({len(plan.items)}, "
+                                                f"{size_text(plan.total_bytes)}; a board has no trash)",
+                                    multiple=True, verb="Remove",
+                                    again=f"llm-cli device runtime prune {device_id} --on-device")
+        if accepted is None:
+            return
+        try:
+            result = remove_older_builds(shell, accepted, root=root, device_id=device_id, previous=previous,
+                                         audit=_device_audit(ctx, state_dir))
+        except (PlanChanged, PermissionError, RuntimeError) as e:
+            console.print(f"[yellow]{escape(str(e))}[/yellow]")
+            return
+    except RemoteError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    finally:
+        client.close()
     _print_deletion_result(result, accepted)
 
 

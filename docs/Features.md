@@ -332,7 +332,10 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   stops the package instead of leaving the image out. A digest-pinned image is packed under the local name
   `<repository>:lcf-<first 12 hex characters of the digest>` (`docker load` does not restore registry digests), and
   `deploy.sh` starts every packed image with `--pull never`: the board runs exactly the packed image, and a board
-  where it is missing stops instead of pulling one from a registry.
+  where it is missing stops instead of pulling one from a registry. Packages of earlier versions also started a
+  Qdrant sidecar (`qdrant-sidecar`) that nothing uses any more: after a deploy the framework looks whether it is
+  still on the board and tells you (the deploy result, and a Mojo Oracle line for that board), with the command to
+  remove it there. The framework never stops or removes it.
 - **Trusted devices:** after a successful login to a board whose host key you confirmed (a deployment in the GUI or
   with `llm-cli deploy run`, a probe with `llm-cli scan --device`, a `device runtime deploy`), the framework records
   it in `~/.llm-framework/devices.json`: your label, address, user, the confirmed host key and whether the
@@ -402,9 +405,12 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
   checked against its sha256 and every file against `SHA256SUMS`, made readable only for the user, and placed next to
   the active build. The new build's programs are then checked on the board (below), and only a build that passes
   becomes `current`; one that fails is removed again and the previous build stays active (design 3.8: a failed
-  build is never activated). After the switch the previous build is kept; older ones are removed unless a running
-  program uses them. The key in `~/.config/llm-framework/llama-server.key` is generated on the board by the start
-  script under umask 077 and never leaves it.
+  build is never activated). After the switch every older build stays on the board: the framework removes none by
+  itself. The output says how many stayed; `llm-cli device runtime prune DEVICE --on-device` lists them (full path
+  on the board, size, what each is) and removes only the ones you tick, after your yes at a terminal. The active
+  build and one a running program uses are never listed, and an AI only learns how many stayed. The key in
+  `~/.config/llm-framework/llama-server.key` is generated on the board by the start script under umask 077 and never
+  leaves it.
 - **Start script** (`llama-server.sh serve|start|stop|status|keygen|version`): POSIX sh, tested with dash and bash.
   It starts `llama-server` from its own folder (never from `PATH`) with `env -i` (HOME, a fixed PATH, the C locale),
   `--host 127.0.0.1`, `--api-key-file`, `--no-ui`, `--no-slots`, `--jinja` and `--offline`. It passes on only

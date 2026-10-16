@@ -361,7 +361,10 @@ class TestSSHDeployment:
         pkg.write_bytes(b"zip")
 
         assert dm.deploy_artifact(pkg, "192.168.1.50", "radxa") is True
-        assert [c[0] for c in calls] == ["ssh", "scp", "ssh"]
+        # mktemp, the upload, the installation, and a look for the old Qdrant sidecar (never a removal)
+        assert [c[0] for c in calls] == ["ssh", "scp", "ssh", "ssh"]
+        from orchestrator.Core.deployment_manager import OLD_SIDECAR_CHECK
+        assert calls[3][-1] == OLD_SIDECAR_CHECK
         assert calls[1][-1] == "radxa@192.168.1.50:/tmp/llm_deploy.Ab12Cd34/"
         for call in calls:
             assert "BatchMode=yes" in call and "StrictHostKeyChecking=yes" in call and "IdentitiesOnly=yes" in call

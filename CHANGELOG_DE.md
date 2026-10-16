@@ -10,6 +10,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Ein Deployment sagt dir, wenn ein alter Qdrant-Sidecar auf dem Board ist**: Pakete mit Docker-Images früherer
+  Versionen starteten den Container `qdrant-sidecar`, den nichts mehr nutzt. Nach einem erfolgreichen Deployment
+  (`llm-cli deploy run`, das Deployment-Fenster, das KI-Tool `deploy_to_device`) schaut das Framework mit `docker ps`,
+  ob er noch auf dem Board ist, und sagt dann, ob er läuft oder gestoppt ist und wie du ihn dort entfernst. Mojo
+  Oracle zeigt für dieses Board eine Zeile aus dem letzten Deployment. Das Framework stoppt oder entfernt den
+  Container nie.
 - **Wohin fertige Modelle kommen: der Ausgabeordner und ein Speichern-Dialog** (achte Runde, Antwort 3): fertige
   Builds (Golden-Artefakte) werden im Ausgabeordner gespeichert (Einstellung `output_dir`, Standard `~/llmcf/output`;
   unter Windows in deinem Benutzerordner), den du einmal mit **File > Output Folder...** oder `llm-cli config
@@ -1029,6 +1035,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert, werden vermerkt.
 
 ### Geändert
+- **Ein Deployment auf ein Board behält jeden älteren Laufzeit-Build** (Runde 5 f): `llm-cli device runtime deploy`
+  und das KI-Tool `deploy_device_runtime` entfernten alle älteren Laufzeit-Builds auf dem Board außer dem vorigen, ohne
+  Frage. Jetzt bleibt jeder ältere Build. Das Ergebnis sagt, wie viele geblieben sind und wie groß sie sind, und
+  `llm-cli device runtime prune GERÄT --on-device` listet sie für dich: voller Pfad auf dem Board, Ordnername, Größe
+  und was jeder ist, nichts angekreuzt, „Nein“ als Standard. Nur die Builds, die du ankreuzt, werden entfernt,
+  endgültig (ein Board hat keinen Papierkorb), nach einem Audit-Eintrag nur mit den Ordnernamen. Der aktive Build und
+  einer, den ein laufendes Programm nutzt, stehen nie in der Liste. Eine KI liest nur, wie viele Builds geblieben
+  sind und dass nur du sie entfernst.
 - **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte
   Runde, Antwort 3): die Einstellung `output_dir` nennt jetzt den Ordner, in dem fertige Modelle gespeichert werden
   (Standard `~/llmcf/output`, bisher `output/` der Installation oder des persönlichen Ordners). Dieser alte Ordner ist

@@ -52,6 +52,13 @@ TEXTS = {
         "device.deploy.installing": "Installing on the board...",
         "device.deploy.done": "Deployment successful. Package: {name}",
         "device.deploy.failed": "The deployment failed: {reason}",
+        "device.deploy.old_sidecar": "The board still has the container qdrant-sidecar ({state}) from an earlier "
+                                     "package with Docker images. Nothing uses it any more: the knowledge base stays "
+                                     "on this computer. The framework does not remove it. To remove it, run on the "
+                                     "board: docker rm -f qdrant-sidecar (the data folder data/qdrant of that old "
+                                     "package stays until you delete it).",
+        "device.deploy.state.running": "running",
+        "device.deploy.state.stopped": "stopped",
         "device.address.label": "Address or host name:",
         "device.address.hint": "e.g. 192.168.1.50 or myboard.local",
         # --- the KV cache (N7) ---
@@ -138,6 +145,13 @@ TEXTS = {
         "device.deploy.installing": "Installation auf dem Board...",
         "device.deploy.done": "Deployment erfolgreich. Paket: {name}",
         "device.deploy.failed": "Das Deployment ist fehlgeschlagen: {reason}",
+        "device.deploy.old_sidecar": "Auf dem Board ist noch der Container qdrant-sidecar ({state}) aus einem früheren "
+                                     "Paket mit Docker-Images. Nichts nutzt ihn mehr: Die Wissensbasis bleibt auf "
+                                     "diesem Computer. Das Framework entfernt ihn nicht. Um ihn zu entfernen, führe "
+                                     "auf dem Board aus: docker rm -f qdrant-sidecar (der Datenordner data/qdrant "
+                                     "dieses alten Pakets bleibt, bis du ihn löschst).",
+        "device.deploy.state.running": "läuft",
+        "device.deploy.state.stopped": "gestoppt",
         "device.address.label": "Adresse oder Hostname:",
         "device.address.hint": "z. B. 192.168.1.50 oder myboard.local",
         # --- der KV-Cache (N7) ---

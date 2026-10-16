@@ -47,6 +47,8 @@ DEPLOY_RATE = Rate(6, 3600.0)       # deploys per client and hour (the limits ta
 PAIR_NEXT = ("Ask the person to trust and pair the device once in the GUI's Deployment window, with "
              "'llm-cli deploy run' or 'llm-cli scan --device', or to add a device they already trusted with "
              "'llm-cli deploy devices add' (a terminal is needed; no tool can do this).")
+OLD_SIDECAR_AI_NOTE = ("Tell the person about the old container; only they remove it, on the board. Never try to stop "
+                       "or remove it yourself.")
 
 
 def package_id(name: str) -> str:
@@ -591,6 +593,11 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                    "reason": device_text(hide_paths(result.reason, {str(path.parent): "the output folder"}), users,
                                          {str(path.parent): "output"})[:500] if result.reason else "",
                    EXTERNAL_KEY: [device_text(line, users, {str(path.parent): "output"}) for line in result.output]}
+            if result.old_sidecar:
+                # an old Qdrant sidecar from an earlier package with Docker images still on the board: the person
+                # removes it, never the framework (framework text, no device text)
+                out["old_sidecar"] = result.old_sidecar
+                out["board_notes"] = list(result.notes) + [OLD_SIDECAR_AI_NOTE]
             try:
                 devices().note_deploy(device.device_id, result.success, path.name)
             except Exception as e:  # noqa: BLE001 - the deploy happened; only the device list's last deploy is missing

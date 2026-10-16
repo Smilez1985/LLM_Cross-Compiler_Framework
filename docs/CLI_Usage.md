@@ -1561,7 +1561,7 @@ llm-cli device runtime deploy DEVICE [--user NAME] [--password [VALUE] | --passw
                               [--allow-untrusted-model]
 llm-cli device runtime verify DEVICE [--user NAME] [--bench-model PATH] [--allow-untrusted-model]
 llm-cli device runtime status DEVICE [--json]
-llm-cli device runtime prune DEVICE
+llm-cli device runtime prune DEVICE [--on-device]
 ```
 
 ### device list
@@ -1626,7 +1626,9 @@ comes from the deploy settings or `--user`.
    `llama-server` must refuse `--tools`; with `--bench-model` also a short `llama-bench` run on that model.
 5. Only a build that passes becomes `current`. A build that fails (for example a `SIGILL` because the CPU baseline
    does not fit the board) is removed again, the previous build stays active, and nothing else changes. After the
-   switch the previous build stays; older ones are removed unless a running program uses them.
+   switch every older build stays on the board (unreleased; before, all but the previous one were removed without
+   a question). The output says how many stayed and their size; `device runtime prune DEVICE --on-device` lists
+   them for you to remove.
 6. With the systemd setting the unit `llm-llama-server.service` is written and enabled with `sudo -n` and started
    when the model is there.
 
@@ -1671,6 +1673,13 @@ Lists the device's older runtime packages on your PC with a number each (each ta
 full path and size). The package of the build deployed last is never listed. Nothing is picked: you type the numbers
 to delete, choose the trash (the default) or deleting for good, and confirm exactly those (default no). It needs a
 terminal; without one it only lists them. It changes nothing on the board.
+
+With `--on-device` it logs in to the board (as the deploy settings' user, with the framework's key) and lists the
+older runtime builds there instead: each with its full path on the board, folder name, size and what it is (the
+build active before the last deployment says so). The active build and a build a running program uses are never
+listed. You type the numbers, nothing is picked, and you confirm exactly those (default no). A board has no trash,
+so they are removed for good. The removal is written to the audit log first, with the folder names only. No AI
+can do this: the AI tools only say how many older builds stayed.
 
 For a [trusted device](#deploy-devices), the optional MCP tools `probe_remote_device`, `deploy_device_runtime` and
 `run_device_benchmark` run `scan --device`, `device runtime build` with `deploy`, and `device runtime verify
