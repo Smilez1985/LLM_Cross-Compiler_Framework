@@ -1008,13 +1008,14 @@ class BoardsWindow(QDialog):
         source = self._pin() if address is not None else None
         if source is None:
             return
-        allowed = bool(bench_model) and self._ask_untrusted(bench_model, settings.ssh_user)
         host, port = address
         state, device_id, audit = self.state_dir, entry["device_id"], self.audit
         kv = settings.kv_choice(profile)
         tool, detail = person_steps.UNTRUSTED_CONSENT
 
-        def work():
+        def prepare():
+            # the stored build is checked file by file and its package hashed: off the GUI thread, and before the
+            # question about the benchmark model, so a board without a build is refused first
             plan = steps.plan_runtime(profile)
             builds = BuildStore(state)
             build = builds.find(plan)
@@ -1024,6 +1025,17 @@ class BoardsWindow(QDialog):
                 devices, packaged = steps.ensure_package(state, device_id, builds, build, lambda: source)
             except steps.PackageNeedsSource:
                 raise _Refusal(self._t("boards.deploy.needs_source")) from None
+            return plan, build, devices, packaged
+
+        def prepared(found: Any) -> None:
+            plan, build, devices, packaged = found
+            allowed = bool(bench_model) and self._ask_untrusted(bench_model, settings.ssh_user)
+            self._start(self._t("boards.deploy.running"),
+                        lambda: work(plan, build, devices, packaged, allowed),
+                        lambda out: self._deployed(entry, profile, source, kv, out),
+                        failed=lambda e: self._runtime_failed(e, host, port, settings.ssh_user, device_id))
+
+        def work(plan: Any, build: Any, devices: Any, packaged: Any, allowed: bool):
             client, key = person_steps.connect_stored(state, device_id, host, port, settings.ssh_user, password,
                                                       step="runtime_deploy", on_client=self._keep_client)
             try:
@@ -1048,8 +1060,7 @@ class BoardsWindow(QDialog):
             older = steps.older_package_count(devices, build)
             return build, bench, outcome, older
 
-        self._start(self._t("boards.deploy.running"), work,
-                    lambda out: self._deployed(entry, profile, source, kv, out),
+        self._start(self._t("boards.deploy.preparing"), prepare, prepared,
                     failed=lambda e: self._runtime_failed(e, host, port, settings.ssh_user, device_id))
 
     def _deployed(self, entry: Dict[str, Any], profile: Any, source: Any, kv: Any, out: Any) -> None:

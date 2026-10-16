@@ -235,6 +235,7 @@ TEXTS = {
         "boards.deploy.problems": "Nothing was deployed; change the deploy settings first (Settings...):",
         "boards.deploy.root": "The SSH user on the board is root: the runtime never runs as root. Deploy as an "
                               "unprivileged user (Settings...).",
+        "boards.deploy.preparing": "Checking the build and its package",
         "boards.deploy.running": "Deploying to the board",
         "boards.deploy.done": "Deployed build {build} to {root}.",
         "boards.deploy.previous": "The previous build {previous} is kept.",
@@ -482,6 +483,7 @@ TEXTS = {
                                   "(Einstellungen...):",
         "boards.deploy.root": "Der SSH-Benutzer auf dem Board ist root: die Laufzeit läuft nie als root. Installiere "
                               "als Benutzer ohne Sonderrechte (Einstellungen...).",
+        "boards.deploy.preparing": "Build und Paket werden geprüft",
         "boards.deploy.running": "Installation auf dem Board",
         "boards.deploy.done": "Build {build} nach {root} installiert.",
         "boards.deploy.previous": "Der vorherige Build {previous} bleibt erhalten.",

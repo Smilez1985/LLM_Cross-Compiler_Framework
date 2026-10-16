@@ -593,6 +593,7 @@ def test_deploy_asks_for_the_password_each_time_and_never_keeps_it(qapp, window,
     boxes = Boxes(monkeypatch, answer="no")
     window.buttons["btn_boards_deploy"].click()
     wait(qapp, window)
+    wait(qapp, window)
     (question,) = boxes.questions()
     assert question.default_is_no and "without a sandbox" in question.text and "models/own.gguf" in question.text
     assert fields == [True]
@@ -603,6 +604,7 @@ def test_deploy_asks_for_the_password_each_time_and_never_keeps_it(qapp, window,
     assert "s3cret-once" not in repr(vars(window)), "the password is never kept by the window"
     record.clear()
     window.buttons["btn_boards_deploy"].click()
+    wait(qapp, window)
     wait(qapp, window)
     assert len(boxes.questions()) == 2, "asked again for the next deploy"
 
@@ -619,9 +621,10 @@ def test_deploy_refuses_what_the_cli_refuses_before_any_contact(qapp, window, mo
     window.deploy(entry, DEVUAN, "root", None, None)
     assert "never runs as root" in boxes.asked[-1].text
     monkeypatch.setattr(BuildStore, "find", lambda self, plan: None)
-    window.deploy(entry, DEVUAN, None, None, None)
+    window.deploy(entry, DEVUAN, None, None, "models/own.gguf")
     wait(qapp, window)
     assert "not built yet" in boxes.asked[-1].text and not [r for r in record if r[0] == "connect"]
+    assert boxes.questions() == [], "a board without a build is refused before the benchmark question"
 
 
 def test_verify_works_without_a_model_and_with_a_user_override(qapp, window, monkeypatch):
