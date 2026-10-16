@@ -850,6 +850,8 @@ def build_save(ctx: FrameworkContext, artifact: str, destination: Optional[str])
         console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
         sys.exit(1)
     how = "moved on the same disk, nothing copied" if result.renamed else \
+        "every copy checked against its original by sha256; not everything could be copied, so the build folder's " \
+        "copy stays" if result.kept else \
         "every copy checked against its original by sha256, then the build folder's copy removed"
     console.print(f"[green]Saved: {escape(str(result.folder))} ({result.files} files, {size_text(result.bytes)}; "
                   f"{how}).[/green]")

@@ -175,6 +175,43 @@ def test_free_space_is_checked_before_copying(fw, tmp_path, monkeypatch):
     assert list((tmp_path / "disk2").iterdir()) == []
 
 
+@pytest.mark.skipif(os.name != "posix", reason="links without extra rights")
+def test_a_link_that_is_not_copied_is_named_and_the_build_folder_keeps_its_copy(fw, tmp_path, monkeypatch):
+    """Onto another disk a link in the build is never followed and not copied: the result says what was left out and
+    why, and the build folder's copy stays, so nothing the new copy does not hold is removed."""
+    monkeypatch.setattr(ao, "_device", lambda path: 1 if str(path).startswith(str(tmp_path / "builds")) else 2)
+    folder = finished_build(tmp_path / "builds")
+    (tmp_path / "elsewhere.json").write_text("{}")
+    (folder / "tokenizer.json").symlink_to(tmp_path / "elsewhere.json")
+    (tmp_path / "disk2").mkdir()
+    result = ao.save_artifact(fw, folder, tmp_path / "disk2")
+    assert (result.folder / "m.gguf").read_bytes() == b"weights" and not (result.folder / "tokenizer.json").exists()
+    assert any("tokenizer.json" in note and "link" in note for note in result.notes), result.notes
+    assert (folder / "tokenizer.json").is_symlink() and (folder / "m.gguf").is_file(), "the build folder keeps it"
+    assert (folder.parent / "Q4_K_M.zip").is_file()
+    from orchestrator.gui.artifact_save import result_text
+    text = result_text(result, "en")
+    assert result.kept and "tokenizer.json" in text and "stays" in text and "was removed" not in text
+
+
+def test_an_output_folder_that_holds_the_frameworks_own_folders_is_refused(fw, tmp_path):
+    """Everything below the output folder is listed: one that holds the build folder or the per-user folder (for
+    example the home folder) would list and label the framework's own folders, so it is refused. A single model may
+    still be saved there."""
+    fw.config.save_user_config = lambda: True
+    fw.config.values["build_dir"] = str(tmp_path / "disk" / "lcf" / "builds")
+    with pytest.raises(ao.DestinationRefused, match="build folder"):
+        ao.set_output_folder(fw, tmp_path / "disk")
+    home = tmp_path / "users" / "me"
+    fw.config.user_state_dir = str(home / ".llm-framework")
+    Path(fw.config.user_state_dir).mkdir(parents=True)
+    with pytest.raises(ao.DestinationRefused, match="per-user folder"):
+        ao.set_output_folder(fw, home)
+    assert fw.config.get("output_dir") == str(tmp_path / "out"), "unchanged"
+    assert ao.refusal(fw, home) == "", "a single model may be saved there"
+    assert ao.set_output_folder(fw, home / "llmcf" / "output") == home / "llmcf" / "output"
+
+
 def test_only_a_build_waiting_in_the_build_folder_is_saved(fw, tmp_path):
     saved = finished_build(tmp_path / "out")
     with pytest.raises(ao.DestinationRefused, match="build folder"):
@@ -244,6 +281,25 @@ def test_the_build_log_an_ai_reads_names_the_output_folder_by_label(fw, tmp_path
                      "An earlier build is in output:Rockchip/m/Q4_K_M", "cached in x.bin",
                      "CONT: /workspace/build/llama-quantize done"], "a line without a host path stays as it is"
     assert not any("jane" in line for line in lines)
+
+
+def test_the_build_log_names_no_user_from_paths_outside_the_home_folder(fw, tmp_path, monkeypatch):
+    """A local model on a removable disk (/media/<user>/..., /run/media/<user>/...) or in another user's folder is
+    named by its file name in the log an AI reads, like every other host path."""
+    from datetime import datetime
+
+    from orchestrator.Core.orchestrator import OrchestrationStatus, WorkflowState
+    monkeypatch.setenv("HOME", str(tmp_path / "home" / "me"))
+    logs = ["Using local model /media/jane/USB/models/x.gguf", "Using local model /run/media/jane/disk/y.gguf",
+            "Using local model /home/bob/models/z.gguf", "Using local model /Users/bob/m.gguf",
+            "Using local model C:\\Users\\bob\\w.gguf", "CONT: /workspace/build/llama-quantize done"]
+    state = WorkflowState("r1", OrchestrationStatus.COMPLETED, datetime.now(), build_ids=["b1"])
+    engine = SimpleNamespace(get_build_status=lambda bid: SimpleNamespace(logs=logs))
+    fw.orchestrator = SimpleNamespace(_workflows={"r1": state}, build_engine=engine)
+    lines = BuildService(fw).log_tail("r1").lines
+    assert lines == ["Using local model x.gguf", "Using local model y.gguf", "Using local model z.gguf",
+                     "Using local model m.gguf", "Using local model w.gguf",
+                     "CONT: /workspace/build/llama-quantize done"]
 
 
 def test_the_gui_commit_look_up_asks_nobody_offline_or_for_a_local_model(fw, monkeypatch):

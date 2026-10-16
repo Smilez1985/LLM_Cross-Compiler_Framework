@@ -147,7 +147,9 @@ folder) is saved to a folder you choose (unreleased; eighth round, answer 3):
 - **The output folder** (setting `output_dir`, default `~/llmcf/output`; on Windows `C:\Users\<name>\llmcf\output`).
   You set it once: **File > Output Folder...** in the GUI (the system's own folder dialog) or `llm-cli config
   output-folder PATH`, for example to a folder on a big second disk. An AI cannot change it. Builds in the old
-  folder stay where they are and stay listed.
+  folder stay where they are and stay listed. Everything below the output folder is listed, so a folder that holds
+  the framework's build folder, per-user folder or program folder (for example your home folder) cannot be the
+  output folder.
 - **The framework's build folder** (setting `build_dir`, default the data folder's `output` folder, where builds went
   before): a build you start in the GUI waits here until it is saved. Earlier builds stay here and stay listed.
 
@@ -162,12 +164,15 @@ Who saves where:
   save` saves it later). Without a terminal the build goes to the output folder.
 - **Ditto and MCP clients:** always the output folder; `start_build` says so, and `get_build_status` names each
   finished build by its label (`output:<target>/<model>/<quantization>`), never by its host path. In `get_build_log`
-  a line with a path on this computer names the framework's folders by label and any other path by its file name.
+  a line with a path on this computer names the framework's folders by label and any other path by its file name;
+  paths below `/home/`, `/media/`, `/run/media/`, `/Users/` and `C:\Users\` count too (a local model on a USB disk).
   Your own windows show the full path.
 
 Saving moves the build out of the build folder. On the same disk it is renamed and nothing is copied. Onto another
 disk every file is copied, each copy is checked against its original by sha256 (a model file also against the hash
-in its manifest), and only then is the copy in the build folder removed. The free space is checked before copying,
+in its manifest), and only then is the copy in the build folder removed. A link in the build is never followed and
+not copied; when anything was left out, the result names it and the copy in the build folder stays. The free space
+is checked before copying,
 with the reserve that always stays free. If a check fails, the build stays where it was and only the unfinished copy
 is removed. A name that is taken is never overwritten (`-2`, `-3`). A system folder, the framework's program folder,
 its build folder and its per-user folder are refused as destinations. A build you saved outside the output folder
@@ -1186,7 +1191,8 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   stay whole unless they are larger than the model's context ([Large code blocks and
   tables](#large-code-blocks-and-tables)).
 - **Snapshots:** before every crawl, every restore and every knowledge pack import the knowledge base is saved as a
-  snapshot in `~/.llm-framework/knowledge_snapshots`. There is no limit (unreleased; before, only the newest 5 were
+  snapshot in `~/.llm-framework/knowledge_snapshots`; a name that is taken gets `-2`, so no snapshot is ever written
+  over. There is no limit (unreleased; before, only the newest 5 were
   kept, on every channel): the framework keeps as many as the disk holds, deletes none by itself, and no number of
   them brings a reminder or a warning. What counts is the disk (unreleased; eighth round, answer 2): before a
   snapshot is made, its size is estimated. When it does not fit beside the reserve that always stays free, no
@@ -2302,7 +2308,8 @@ Targets go to `targets/`, recipes to `community/recipes/`, knowledge to `communi
 imported into the knowledge base right after its installation or, if the knowledge base is off, as soon as it is
 turned on. Before its first page is imported, the knowledge base is saved as a snapshot (`pre_pack_<time>`), so the
 import can be undone (unreleased). When that snapshot does not fit on the disk, nothing is imported: the pack stays
-installed and is imported once there is room.
+installed and is imported once there is room. A pack that cannot be imported yet (for example offline without the
+embedding model) is tried again at the next start without another snapshot; a pack installed again gets a new one.
 
 ### Trust levels
 

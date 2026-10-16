@@ -350,7 +350,9 @@ Vorgabe.
 
 Auf derselben Platte wird der Build verschoben (umbenannt, nichts kopiert). Auf eine andere Platte wird jede Datei
 kopiert, jede Kopie wird per sha256 mit ihrem Original verglichen (eine Modelldatei auch mit dem Hash in ihrem
-Manifest), und erst dann wird die Kopie im Build-Ordner entfernt. Vor dem Kopieren wird der freie Platz geprüft. Ein
+Manifest), und erst dann wird die Kopie im Build-Ordner entfernt. Einem Link im Build wird nie gefolgt, er wird nicht
+kopiert; fehlt etwas in der Kopie, nennt die Ausgabe es, und die Kopie im Build-Ordner bleibt. Vor dem Kopieren wird
+der freie Platz geprüft. Ein
 belegter Name wird nie überschrieben (`-2`). Schlägt eine Prüfung fehl, wird nichts verschoben (Exit-Code 1). Ein
 Systemordner, der Programmordner des Frameworks, sein Build-Ordner und sein persönlicher Ordner werden abgelehnt.
 
@@ -1650,7 +1652,9 @@ Unveröffentlicht. Ohne `ORDNER` zeigt es den Ausgabeordner (Einstellung `output
 den Build-Ordner des Frameworks (Einstellung `build_dir`). Mit `ORDNER` legt es den Ausgabeordner fest und speichert
 `config.yml`, zum Beispiel auf einen Ordner auf einer großen zweiten Platte; der Ordner wird angelegt, wenn es ihn
 noch nicht gibt. Ein Systemordner, der Programmordner des Frameworks, sein Build-Ordner und sein persönlicher Ordner
-werden abgelehnt (Exit-Code 2). Builds im alten Ordner bleiben, wo sie sind, und werden weiter aufgelistet. Eine KI
+werden abgelehnt (Exit-Code 2), ebenso ein Ordner, der einen davon enthält (wie dein Home-Ordner), weil alles
+unterhalb des Ausgabeordners aufgelistet wird. Builds im alten Ordner bleiben, wo sie sind, und werden weiter
+aufgelistet. Eine KI
 kann diese Einstellung nicht ändern.
 
 ```bash

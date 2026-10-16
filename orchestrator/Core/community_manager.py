@@ -270,6 +270,23 @@ def ai_generated_target(target_path: Path) -> bool:
         meta["metadata"].get("provenance") == "ai-generated"
 
 
+def _file_stamp(path: Path) -> str:
+    """Size and modification time of a knowledge pack's file: another file (a pack installed again) is another
+    stamp."""
+    try:
+        st = Path(path).stat()
+    except OSError:
+        return ""
+    return f"{st.st_size}:{st.st_mtime_ns}"
+
+
+def _read_text(path: Path) -> Optional[str]:
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return None
+
+
 AUTHORS_FILE = "authors.json"  # the author keys pinned on first use (community cache folder)
 
 
@@ -869,7 +886,8 @@ class CommunityManager:
         Before the first page is imported, the knowledge base is saved as a snapshot (pre_pack_<time>), so the import
         can be undone (eighth round, N13). When that snapshot does not fit on the disk, nothing is imported (the packs
         stay installed and are imported once there is room); `last_sync_problem` says why, `last_sync_snapshot` names
-        the snapshot taken."""
+        the snapshot taken. A pack that cannot be imported yet is tried again at the next start without another
+        snapshot; a pack installed again gets one."""
         self.last_sync_problem, self.last_sync_snapshot = "", None
         if rag_manager is None and hasattr(self.framework, "get_component"):
             rag_manager = self.framework.get_component("rag_manager")
@@ -882,7 +900,11 @@ class CommunityManager:
         pending = [(f, f.with_suffix(".imported") if f.parent == self.knowledge_dir else
                     self.knowledge_dir / f"{f.parent.name}.imported") for f in files]
         pending = [(f, marker) for f, marker in pending if not marker.exists()]
-        if pending and callable(getattr(rag_manager, "create_snapshot", None)):
+        # A pack that cannot be imported yet stays pending and is tried again at every start: its snapshot is taken
+        # once (<pack>.snapshotted names the file it was taken for), never one per start (none is deleted by itself)
+        fresh = [(f, marker.with_suffix(".snapshotted"), _file_stamp(f)) for f, marker in pending]
+        fresh = [(f, mark, stamp) for f, mark, stamp in fresh if _read_text(mark) != stamp]
+        if fresh and callable(getattr(rag_manager, "create_snapshot", None)):
             from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom
             try:
                 self.last_sync_snapshot = rag_manager.create_snapshot(f"pre_pack_{int(time.time())}",
@@ -891,6 +913,11 @@ class CommunityManager:
                 self.last_sync_problem = str(e)
                 self.logger.warning(f"Knowledge packs not imported: {e}")
                 return 0
+            for _f, mark, stamp in fresh:
+                try:
+                    mark.write_text(stamp, encoding="utf-8")
+                except OSError as e:
+                    self.logger.warning(f"Could not note the snapshot taken before {mark.stem}: {e}")
         for json_file, marker in pending:
             try:
                 if marker.exists():

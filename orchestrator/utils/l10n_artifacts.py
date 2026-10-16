@@ -27,6 +27,8 @@ TEXTS = {
         "save.done.renamed": "Saved: {path} (moved on the same disk, nothing copied; {files} files, {size}).",
         "save.done.copied": "Saved: {path} ({files} files, {size}; every copy was checked against its original, then "
                             "the copy in the build folder was removed).",
+        "save.done.kept": "Saved: {path} ({files} files, {size}; every copy was checked against its original). Not "
+                          "everything could be copied, so the copy in the build folder stays.",
         "save.done.zip": "Golden ZIP: {path}",
         "save.failed": "Not saved: {reason} {next}",
         "save.button": "Save…",
@@ -66,6 +68,8 @@ TEXTS = {
                              "{size}).",
         "save.done.copied": "Gespeichert: {path} ({files} Dateien, {size}; jede Kopie wurde mit ihrem Original "
                             "verglichen, danach wurde die Kopie im Build-Ordner entfernt).",
+        "save.done.kept": "Gespeichert: {path} ({files} Dateien, {size}; jede Kopie wurde mit ihrem Original "
+                          "verglichen). Nicht alles ließ sich kopieren, deshalb bleibt die Kopie im Build-Ordner.",
         "save.done.zip": "Golden-ZIP: {path}",
         "save.failed": "Nicht gespeichert: {reason} {next}",
         "save.button": "Speichern…",
