@@ -9,9 +9,36 @@ these never replace another text. Every key has the same {placeholders} in both 
 
 TEXTS = {
     "en": {
-        "storage.old.converted": "The knowledge base is stored in Qdrant Edge. It was converted from the storage of "
-                                 "earlier versions on {when} ({points} excerpts; counts and sample searches were "
-                                 "checked). The old folder {folder} ({size}) is kept until you delete it.",
+        "storage.used.edge": "The knowledge base is stored in Qdrant Edge in {folder}.",
+        "storage.used.old": "The knowledge base uses the storage of earlier versions (qdrant-client's local mode) in "
+                            "{folder}.",
+        "storage.used.server": "The knowledge base uses a Qdrant server (setting qdrant_url); the local storage is "
+                               "not used.",
+        "storage.used.none": "The knowledge base cannot be opened: {reason}",
+        "storage.reason.engine_missing": "Qdrant Edge is not available on this computer (the package qdrant-edge-py "
+                                         "has no build for it, for example Windows on ARM), so the knowledge base "
+                                         "stays in the older local storage; nothing can be converted.",
+        "storage.reason.not_converted": "It has not been converted to Qdrant Edge yet; that happens the next time the "
+                                        "knowledge base is opened.",
+        "storage.reason.edge_unavailable": "it is stored in Qdrant Edge, but Qdrant Edge cannot be loaded on this "
+                                           "computer (the package qdrant-edge-py is missing or broken). Nothing was "
+                                           "changed, and the storage of earlier versions is not used in its place: "
+                                           "it lacks what was added since the conversion. Install the framework's "
+                                           "requirements again (the installer, or pip install -r requirements.txt).",
+        "storage.convert.offer": "[Convert now] converts it now: the texts and vectors are copied and checked, nothing "
+                                 "is embedded again, and the old folder is kept.",
+        "storage.converted": "It was converted from the storage of earlier versions on {when} ({points} excerpts; "
+                             "counts and sample searches were checked).",
+        "storage.old.folder.kept": "The old folder {folder} ({size}) is kept until you delete it.",
+        "storage.old.folder": "Old storage folder: {folder} ({size}).",
+        "storage.convert.now": "Convert now",
+        "snapshots.next.no_room": "The next snapshot (about {size}) does not fit: Deep Ingest, restoring a snapshot "
+                                  "and importing a knowledge pack are refused until there is room.",
+        "snapshots.next.tight": "The next snapshot (about {size}) still fits, but leaves little free space.",
+        "snapshots.next.step": "Free space first: delete or export the knowledge snapshots you no longer need (Tools > "
+                               "Knowledge Snapshots... in the GUI, 'llm-cli knowledge snapshots prune' or 'llm-cli "
+                               "knowledge snapshots export NAME --to FOLDER' in a terminal), or free space on that "
+                               "disk otherwise. Nothing is deleted by itself.",
         "storage.old.failed": "The knowledge base still uses the storage of earlier versions: its conversion to "
                               "Qdrant Edge failed ({reason}). It keeps working. It is tried again {retry}.",
         "storage.old.delete": "Delete the old storage...",
@@ -35,9 +62,40 @@ TEXTS = {
         "storage.convert.off": "The knowledge base is off. Switch it on in Tools > Configure AI Agent (Ditto) first.",
     },
     "de": {
-        "storage.old.converted": "Die Wissensdatenbank liegt in Qdrant Edge. Sie wurde am {when} aus dem Speicher "
-                                 "früherer Versionen umgewandelt ({points} Auszüge; Anzahl und Stichproben-Suchen "
-                                 "wurden geprüft). Der alte Ordner {folder} ({size}) bleibt, bis du ihn löschst.",
+        "storage.used.edge": "Die Wissensdatenbank liegt in Qdrant Edge in {folder}.",
+        "storage.used.old": "Die Wissensdatenbank nutzt den Speicher früherer Versionen (den lokalen Modus von "
+                            "qdrant-client) in {folder}.",
+        "storage.used.server": "Die Wissensdatenbank nutzt einen Qdrant-Server (Einstellung qdrant_url); der lokale "
+                               "Speicher wird nicht genutzt.",
+        "storage.used.none": "Die Wissensdatenbank kann nicht geöffnet werden: {reason}",
+        "storage.reason.engine_missing": "Qdrant Edge ist auf diesem Computer nicht verfügbar (das Paket "
+                                         "qdrant-edge-py hat keinen Build für ihn, zum Beispiel Windows auf ARM), "
+                                         "daher bleibt die Wissensdatenbank im älteren lokalen Speicher; es kann "
+                                         "nichts umgewandelt werden.",
+        "storage.reason.not_converted": "Sie wurde noch nicht in Qdrant Edge umgewandelt; das geschieht, wenn die "
+                                        "Wissensdatenbank das nächste Mal geöffnet wird.",
+        "storage.reason.edge_unavailable": "sie liegt in Qdrant Edge, aber Qdrant Edge kann auf diesem Computer nicht "
+                                           "geladen werden (das Paket qdrant-edge-py fehlt oder ist beschädigt). Es "
+                                           "wurde nichts geändert, und der Speicher früherer Versionen springt nicht "
+                                           "ein: ihm fehlt, was seit der Umwandlung dazukam. Installiere die "
+                                           "Abhängigkeiten des Frameworks erneut (der Installer, oder pip install -r "
+                                           "requirements.txt).",
+        "storage.convert.offer": "[Jetzt umwandeln] wandelt sie jetzt um: Texte und Vektoren werden kopiert und "
+                                 "geprüft, nichts wird neu eingebettet, und der alte Ordner bleibt.",
+        "storage.converted": "Sie wurde am {when} aus dem Speicher früherer Versionen umgewandelt ({points} Auszüge; "
+                             "Anzahl und Stichproben-Suchen wurden geprüft).",
+        "storage.old.folder.kept": "Der alte Ordner {folder} ({size}) bleibt, bis du ihn löschst.",
+        "storage.old.folder": "Alter Speicherordner: {folder} ({size}).",
+        "storage.convert.now": "Jetzt umwandeln",
+        "snapshots.next.no_room": "Der nächste Snapshot (etwa {size}) passt nicht: Deep Ingest, das Wiederherstellen "
+                                  "eines Snapshots und der Import eines Wissenspakets werden abgelehnt, bis Platz "
+                                  "ist.",
+        "snapshots.next.tight": "Der nächste Snapshot (etwa {size}) passt noch, lässt aber wenig freien Platz.",
+        "snapshots.next.step": "Schaffe zuerst Platz: lösche oder exportiere die Wissens-Snapshots, die du nicht mehr "
+                               "brauchst (Tools > Knowledge Snapshots... in der GUI, 'llm-cli knowledge snapshots "
+                               "prune' oder 'llm-cli knowledge snapshots export NAME --to FOLDER' im Terminal), oder "
+                               "schaffe auf andere Weise Platz auf dieser Festplatte. Es wird nichts von selbst "
+                               "gelöscht.",
         "storage.old.failed": "Die Wissensdatenbank nutzt noch den Speicher früherer Versionen: die Umwandlung in "
                               "Qdrant Edge ist fehlgeschlagen ({reason}). Sie funktioniert weiter. Ein neuer Versuch "
                               "läuft {retry}.",

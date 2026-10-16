@@ -11,16 +11,20 @@ nothing is ticked. There is no limit and the framework deletes no snapshot by it
 - [Export ticked...] copies them to a folder the person picks (this computer, a USB stick, a network share), checks
   every copy by sha256 and changes nothing here.
 
-The window also shows what the snapshots use against the free space of their disk. When a snapshot taken before a
-change does not fit (eighth round, answer 2), `offer_snapshot_list` says so and opens this window on the person's
-"Open"; nothing is ticked and nothing is deleted by itself.
+The window also shows what the snapshots use against the free space of their disk, and beforehand whether the next
+snapshot fits (knowledge_snapshots.snapshot_disk, the same words as `llm-cli knowledge snapshots`): when it does not,
+a Deep Ingest, a restore and a pack import are refused until there is room. When a snapshot taken before a change does
+not fit (eighth round, answer 2), `offer_snapshot_list` says so and opens this window on the person's "Open"; nothing
+is ticked and nothing is deleted by itself.
 
-It also says where the knowledge base is stored (DECISIONS RG5): in Qdrant Edge, converted from the storage of earlier
-versions on first use, whose old folder is kept until the person deletes it here ([Delete the old storage...] opens
-the deletion dialog with that folder's full path and size; "No" is the default), or still in the old storage when its
-conversion failed, with the reason. [Try the conversion again] then converts it now (RAGManager.convert_storage, the
-same as `llm-cli knowledge storage convert`; DECISIONS W1': the CLI is never the person's only way), in a worker thread
-that reports through the one WorkerRelay, since a large knowledge base takes minutes.
+It also says where the knowledge base is stored (DECISIONS RG5), in every state (migration.storage_status, the same
+status as `llm-cli knowledge storage`): in Qdrant Edge, converted from the storage of earlier versions on first use,
+whose old folder is kept until the person deletes it here ([Delete the old storage...] opens the deletion dialog with
+that folder's full path and size; "No" is the default); still in the old storage (not converted yet, no Qdrant Edge
+for this computer, or its conversion failed, with the reason); on a Qdrant server; or in Qdrant Edge that cannot be
+loaded. [Convert now] (not tried yet) or [Try the conversion again] (after a failure) converts it now on the condition
+of `llm-cli knowledge storage convert` (RAGManager.convert_storage; DECISIONS W1': the CLI is never the person's only
+way), in a worker thread that reports through the one WorkerRelay, since a large knowledge base takes minutes.
 
 Every text is plain text.
 """
@@ -66,6 +70,7 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.intro = _plain("")
         layout.addWidget(self.intro)
         self.disk = _plain("")
+        self.disk.setObjectName("lbl_knowledge_snapshots_disk")
         layout.addWidget(self.disk)
         self.table = QTableWidget(0, len(COLUMNS), self)
         self.table.setHorizontalHeaderLabels([self._t(c) for c in COLUMNS])
@@ -77,6 +82,7 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.note = _plain(self._t("snapshots.note"))
         layout.addWidget(self.note)
         self.storage = _plain("")
+        self.storage.setObjectName("lbl_knowledge_storage")
         layout.addWidget(self.storage)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, self)
         self.btn_delete = QPushButton(self._t("snapshots.delete").replace("&", "&&"), self)
@@ -84,15 +90,20 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.open_folder = QPushButton(self._t("snapshots.open").replace("&", "&&"), self)
         self.btn_old = QPushButton(self._t("storage.old.delete").replace("&", "&&"), self)
         self.btn_convert = QPushButton(self._t("storage.convert").replace("&", "&&"), self)
-        for button, slot in ((self.btn_delete, self._delete), (self.btn_export, self._export),
-                             (self.open_folder, self._open_folder), (self.btn_old, self._delete_old_store),
-                             (self.btn_convert, self._convert)):
+        for button, slot, name in ((self.btn_delete, self._delete, "btn_knowledge_snapshots_delete"),
+                                   (self.btn_export, self._export, "btn_knowledge_snapshots_export"),
+                                   (self.open_folder, self._open_folder, "btn_knowledge_snapshots_open"),
+                                   (self.btn_old, self._delete_old_store, "btn_knowledge_storage_delete_old"),
+                                   (self.btn_convert, self._convert, "btn_knowledge_storage_convert")):
+            button.setObjectName(name)   # menus/knowledge.py names them in CLI_PATHS
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             buttons.addButton(button, QDialogButtonBox.ActionRole)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.snapshots = []
+        self.snapshot_disk = None   # the last disk line's facts (knowledge_snapshots.SnapshotDisk)
+        self.storage_status = None  # the last storage line's facts (migration.StorageStatus)
         self._convert_token: Optional[object] = None  # the running conversion's (one at a time)
         from orchestrator.gui.worker_relay import worker_relay
         worker_relay().done.connect(self._converted, Qt.QueuedConnection)
@@ -123,31 +134,64 @@ class KnowledgeSnapshotsDialog(QDialog):
         self._storage_line()
 
     def _storage_line(self) -> None:
-        """Where the knowledge base is stored, from the conversion record (nothing is opened): converted (with the old
-        folder kept, and the button that lists it for deletion), or still in the old storage with the reason."""
+        """Where the knowledge base is stored, in every state (migration.storage_status, the same status as `llm-cli
+        knowledge storage`; nothing is opened): Qdrant Edge, the old storage with the reason, a Qdrant server, or
+        Qdrant Edge that cannot be loaded; the conversion and the old folder. [Convert now] (before any attempt) or
+        [Try the conversion again] (after a failed one) is offered on the condition of `llm-cli knowledge storage
+        convert` (migration.convert_refusal); [Delete the old storage...] only after the conversion."""
         from orchestrator.rag import migration
-        info = migration.summary(self.state_dir)
-        text = ""
-        if info.get("state") == "converted" and info.get("old_folder_kept"):
-            text = self._t("storage.old.converted", when=str(info.get("converted_at", ""))[:16].replace("T", " "),
-                           points=int(info.get("points") or 0), folder=str(info.get("old_folder", "")),
-                           size=size_text(int(info.get("old_folder_bytes") or 0)))
-        elif info.get("state") == "failed" and info.get("old_store"):
-            # How it is tried again, in the window's language (the record's own words are English).
-            retry = "storage.retry.start" if info.get("code") in migration.TRANSIENT else "storage.retry.person"
-            text = self._t("storage.old.failed", reason=str(info.get("reason", "")), retry=self._t(retry))
-        if self._convert_token is not None:
-            text = self._t("storage.converting")
+        rag = getattr(self.framework, "rag_manager", None) if self.framework is not None else None
+        used = str(getattr(rag, "storage_format", "") or "") or None   # an open knowledge base names its storage
+        status = migration.storage_status(self.state_dir, used=used,
+                                          reason=str(getattr(rag, "storage_reason", "") or "") if used else "")
+        self.storage_status = status
+        can_convert = (status.can_convert and self.framework is not None
+                       and callable(getattr(self.framework, "ensure_rag_manager", None)))
+        text = self._t("storage.converting") if self._convert_token is not None else \
+            self._storage_text(status, can_convert)
         self.storage.setText(text)
         self.storage.setVisible(bool(text))
         offered = self.framework is not None and migration.old_store_plan(self.state_dir) is not None
         self.btn_old.setVisible(offered)
         self.btn_old.setEnabled(offered)
-        can_convert = (self.framework is not None and callable(getattr(self.framework, "ensure_rag_manager", None))
-                       and info.get("state") == "failed" and bool(info.get("old_store"))
-                       and not migration.edge_in_use(self.state_dir) and migration.engine_available())
+        label = "storage.convert" if status.state == "failed" else "storage.convert.now"
+        if self._convert_token is None:
+            self.btn_convert.setText(self._t(label).replace("&", "&&"))
         self.btn_convert.setVisible(can_convert or self._convert_token is not None)
         self.btn_convert.setEnabled(can_convert and self._convert_token is None)
+
+    def _storage_text(self, status: Any, can_convert: bool) -> str:
+        """The storage status in the window's language, line by line (the records' own reasons are English)."""
+        from orchestrator.gui.plain import one_line
+        from orchestrator.rag import migration
+        lines = []
+        if status.used == "qdrant-edge":
+            lines.append(self._t("storage.used.edge", folder=status.folder))
+        elif status.used == "old-local":
+            lines.append(self._t("storage.used.old", folder=status.folder))
+            if status.state == "failed":
+                # How it is tried again, in the window's language (the record's own words are English).
+                retry = "storage.retry.start" if status.code in migration.TRANSIENT else "storage.retry.person"
+                lines.append(self._t("storage.old.failed", reason=one_line(status.failure), retry=self._t(retry)))
+            elif status.reason_code in ("engine_missing", "not_converted"):
+                lines.append(self._t(f"storage.reason.{status.reason_code}"))
+            elif status.reason:
+                lines.append(one_line(status.reason))
+            if can_convert and status.state != "failed":
+                lines.append(self._t("storage.convert.offer"))
+        elif status.used == "server":
+            lines.append(self._t("storage.used.server"))
+        else:
+            reason = self._t("storage.reason.edge_unavailable") if status.reason_code == "edge_unavailable" else \
+                one_line(status.reason)
+            lines.append(self._t("storage.used.none", reason=reason))
+        if status.state == "converted":
+            lines.append(self._t("storage.converted", when=status.converted_at[:16].replace("T", " "),
+                                 points=status.points))
+        if status.old_folder:
+            key = "storage.old.folder.kept" if status.state == "converted" else "storage.old.folder"
+            lines.append(self._t(key, folder=status.old_folder, size=size_text(status.old_folder_bytes)))
+        return "\n".join(lines)
 
     def _convert(self) -> None:
         """[Try the conversion again]: RAGManager.convert_storage in a worker thread (copy and check take minutes for a
@@ -185,15 +229,22 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.reload()
 
     def _disk_line(self, total: int) -> str:
-        """What the snapshots use against the free space of their disk ("" when it cannot be read)."""
-        from orchestrator.Core.knowledge_snapshots import snapshot_room
-        try:
-            room = snapshot_room(self.folder, 0)
-        except OSError:
+        """What the snapshots use against the free space of their disk, and whether the next snapshot fits
+        (knowledge_snapshots.snapshot_disk, the same as `llm-cli knowledge snapshots`: the newest snapshot's size is the
+        estimate). "" when the disk cannot be read. Said beforehand, so the person sees that a Deep Ingest, a restore
+        or a pack import would be refused; nothing is deleted by itself."""
+        from orchestrator.Core.knowledge_snapshots import snapshot_disk
+        disk = snapshot_disk(self.state_dir, total)
+        self.snapshot_disk = disk
+        if disk is None:
             return ""
-        if room.check is None:
-            return ""
-        return self._t("snapshots.disk", size=size_text(total), free=size_text(room.free))
+        lines = [self._t("snapshots.disk", size=size_text(disk.total), free=size_text(disk.room.free))]
+        size = size_text(disk.room.estimate)
+        if disk.verdict == "does_not_fit":
+            lines.append(f"{self._t('snapshots.next.no_room', size=size)} {self._t('snapshots.next.step')}")
+        elif disk.verdict == "tight":
+            lines.append(self._t("snapshots.next.tight", size=size))
+        return "\n".join(lines)
 
     def ticked(self) -> List[str]:
         return [self.snapshots[r].name for r in range(self.table.rowCount())
