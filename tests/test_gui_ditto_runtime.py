@@ -317,6 +317,13 @@ class TestEnsure:
         assert "fits next to the old mode" in ui.asked[-1][0]
         box.deleteLater()
 
+    def test_the_persons_mode_choice_survives_a_status_refresh(self, ui):
+        box = ui.win.box
+        box.cb_mode.setCurrentIndex(box.cb_mode.findData("docker"))
+        box.note_problems(["the active build is old"])
+        assert box.cb_mode.currentData() == "docker"
+        assert "It cannot be used now: the active build is old" in box.lbl_mode.text()
+
     def test_cancel_reaches_the_build(self, ui, monkeypatch):
         box = ui.win.box
         seen = []
