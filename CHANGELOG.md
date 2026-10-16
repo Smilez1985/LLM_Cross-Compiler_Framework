@@ -10,6 +10,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Boards > Boards and Devices...: every `deploy devices` and `device` command by mouse** (W1'): a new Boards
+  menu opens one window for every board you probed or trusted, with the board's account, the full host-key
+  fingerprint and its state in `known_hosts`, since when it is trusted, the last deploy, its system, deploy settings
+  and deployed runtime. Its buttons call the same core functions as the CLI (new `runtime/device/person_steps.py`
+  and `steps.py`; the CLI calls them too, its output unchanged), with the same checks, refusals, questions ("No" is
+  the default) and audit records: Add a trusted board..., Remove trust... (until now only the CLI could withdraw a
+  board's permission for AI deploys), Settings... (with the systemd sudo question), Runtime plan, Status, Build
+  runtime... (jobs, mirror, the source question, Cancel), Deploy runtime... (the password asked each time, never
+  stored; an untrusted benchmark model only after an explicit warning), Verify... (also without a model),
+  Remove older runtime packages... and Remove older builds on the board... (the deletion dialog with the full list)
+  and Check this board (Mojo). Every board contact and build runs in the background. The AI's runtime tools build
+  and install with the same steps.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record
