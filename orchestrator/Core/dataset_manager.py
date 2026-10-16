@@ -3,20 +3,20 @@
 LLM Cross-Compiler Framework - Dataset Manager
 
 Calibration datasets for quantization and the perplexity check of converted models (design 5.1, decisions D1 and
-D23).
+D23 as changed by the seventh round, 2').
 
 The perplexity check runs the self-built llama-perplexity of this machine: a build of the build store
 (<state dir>/runtime/llama.cpp/builds/, made by `llm-cli ditto runtime install` or imported) that passed its
 verification here, still matches its manifest and is of the pinned llama.cpp commit. No prebuilt image and no
 llama-perplexity from PATH is ever used.
 
-- Trusted models (catalog models, checked by sha256) run natively.
-- Every other GGUF (a user conversion, a download) is an untrusted model. It runs natively only after explicit consent,
-  which is written to the tool audit log before the run (decision D23: native is the point of the self-built tools,
-  no Docker overhead); without consent, or when the consent cannot be written to the audit log, nothing runs.
-- The Docker sandbox is the opt-in (sandbox=True): the build runs in its own builder image (only a build made in the
-  builder container has one; the image exists locally and is never pulled) with no network, no capabilities, a
-  read-only root and the host user, the model and the text mounted read-only.
+- Trusted models (catalog models, checked by sha256: Ditto's own models) run natively, or in the Docker sandbox with
+  sandbox=True.
+- Every other GGUF (a model converted for a board, a download) never runs natively on this computer (seventh round
+  2': models built for a target are measured on the target, or in Docker once the golden artifact is ready). It runs
+  in the Docker sandbox: the build runs in its own builder image (only a build made in the builder container has one;
+  the image exists locally and is never pulled) with no network, no capabilities, a read-only root and the host user,
+  the model and the text mounted read-only.
 
 Every run uses the shared launch policy (orchestrator/runtime/server_policy.py): no forbidden option and a cleared
 environment. Failures raise PerplexityError with the reason instead of returning sentinel values.
@@ -38,8 +38,6 @@ PERPLEXITY = "llama-perplexity"
 PPL_TIMEOUT = 3600
 MAX_OUTPUT = 4 * 1024 * 1024
 CHUNKS = 4  # a quick estimate (llama-perplexity --chunks)
-AUDIT_TOOL = "perplexity.untrusted_model_native"
-AUDIT_ACTOR = "user"
 # The working folder and HOME of the sandbox: the tmpfs inside the container (orchestrator/utils/sandbox.py), not a
 # host path.
 CONTAINER_TMP = "/tmp"  # nosec B108
@@ -50,8 +48,6 @@ _RE_BUILDER_IMAGE = re.compile(r"^llm-framework/llama-builder:[a-z0-9][a-z0-9._-
 
 # (argv, timeout, cwd, env) -> (returncode, stdout, stderr); -1 when it could not start or ran out of time.
 Runner = Callable[[Sequence[str], float, str, Mapping[str, str]], Tuple[int, str, str]]
-# What the user is asked before an untrusted model runs natively; True means yes.
-Consent = Callable[[Dict[str, Any]], bool]
 
 
 class PerplexityError(RuntimeError):
@@ -109,17 +105,16 @@ class DatasetManager:
     """Calibration datasets and the perplexity check of GGUF models."""
 
     def __init__(self, framework_manager, *, store: Any = None, runner: Optional[Runner] = None,
-                 engine: Any = None, audit: Any = None, catalog: Any = None,
+                 engine: Any = None, catalog: Any = None,
                  platform: Optional[Tuple[str, str]] = None, profile: Any = None):
-        """store (BuildStore), runner, engine (ContainerEngine), audit (AuditLog), catalog, platform ((os, arch)) and
-        profile (this machine's HardwareProfile) replace the framework's (tests)."""
+        """store (BuildStore), runner, engine (ContainerEngine), catalog, platform ((os, arch)) and profile (this
+        machine's HardwareProfile) replace the framework's (tests)."""
         self.logger = get_logger(__name__)
         self.framework = framework_manager
         self.config = getattr(framework_manager, "config", None)
         self._store = store
         self._runner = runner or default_runner
         self._engine = engine
-        self._audit = audit
         self._catalog = catalog
         self._platform = platform
         self._profile = profile
@@ -170,16 +165,6 @@ class DatasetManager:
             self._store = BuildStore(Path(state) if state else user_data_dir())
         return self._store
 
-    def _audit_log(self):
-        if self._audit is not None:
-            return self._audit
-        registry = None
-        try:
-            registry = self.framework.get_component("tool_registry")
-        except Exception:
-            registry = None
-        return getattr(registry, "audit", None)
-
     def _host(self) -> Tuple[str, str]:
         if self._platform is None:
             from orchestrator.runtime.hardware import normalize_platform
@@ -226,15 +211,15 @@ class DatasetManager:
 
     # --- the perplexity check ---
     def measure_perplexity(self, model_path: Path, dataset_path: Path, context_length: int = 512, *,
-                           sandbox: bool = False, consent: Optional[Consent] = None) -> float:
+                           sandbox: bool = False) -> float:
         """The perplexity (PPL, lower is better) of a GGUF model on a text file. See run_perplexity."""
-        return self.run_perplexity(model_path, dataset_path, context_length, sandbox=sandbox, consent=consent).ppl
+        return self.run_perplexity(model_path, dataset_path, context_length, sandbox=sandbox).ppl
 
     def run_perplexity(self, model_path: Path, dataset_path: Path, context_length: int = 512, *,
-                       sandbox: bool = False, consent: Optional[Consent] = None) -> PerplexityRun:
-        """Runs the self-built llama-perplexity on the model. A catalog model runs natively; any other model runs
-        natively only after consent() said yes and that answer is in the audit log, or in the Docker sandbox when
-        sandbox=True. Raises PerplexityError."""
+                       sandbox: bool = False) -> PerplexityRun:
+        """Runs the self-built llama-perplexity on the model. A catalog model runs natively (or in the Docker sandbox
+        with sandbox=True); any other model runs in the Docker sandbox only, never natively on this computer.
+        Raises PerplexityError."""
         model = Path(model_path)
         text = Path(dataset_path)
         if not model.is_file() or model.is_symlink() or model.suffix.lower() != ".gguf":
@@ -244,45 +229,20 @@ class DatasetManager:
         ctx = int(context_length)
         if not 64 <= ctx <= 32768:
             raise PerplexityError("the context length must be between 64 and 32768 tokens")
-        build, binary = self.perplexity_build(sandbox=sandbox)
         digest = _sha256(model)
         trusted = digest in self.trusted_sha256()
+        sandbox = sandbox or not trusted  # a model built for a board is never measured natively here
+        build, binary = self.perplexity_build(sandbox=sandbox)
         if sandbox:
             output = self._run_sandbox(build, model, text, ctx)
             where = "sandbox"
         else:
-            if not trusted:
-                self._ask_consent(model, digest, build, consent)
             output = self._run_native(binary, model, text, ctx)
             where = "native"
         ppl = parse_perplexity(output)
         self.logger.info(f"Perplexity of {model.name}: {ppl} ({where}, build {build.build_id[:16]})")
         return PerplexityRun(ppl=ppl, model=model.name, sha256=digest, trusted=trusted, where=where,
                              build_id=build.build_id)
-
-    def _ask_consent(self, model: Path, digest: str, build: Any, consent: Optional[Consent]) -> None:
-        """An untrusted model runs natively only after an explicit yes, and only once that yes is in the audit log."""
-        info = {"model": model.name, "sha256": digest, "build_id": build.build_id, "program": PERPLEXITY,
-                "runs": "natively, with your user's rights (not in a sandbox)",
-                "why": "the model is not a catalog model pinned by sha256, so it is untrusted"}
-        audit = self._audit_log()
-        if consent is None:
-            raise PerplexityError(f"{model.name} is not a catalog model: it runs natively only after your consent "
-                                  "(or use the Docker sandbox)")
-        if audit is None:
-            raise PerplexityError("the consent to run an untrusted model natively cannot be written to the audit log "
-                                  "(no tool audit log); use the Docker sandbox")
-        approved = bool(consent(dict(info)))
-        try:
-            audit.record(AUDIT_ACTOR, AUDIT_TOOL, "LOCAL_WRITE", "ask", "ok" if approved else "not_confirmed",
-                         arguments=info, approved=approved,
-                         detail=f"perplexity check of an untrusted model, native run "
-                                f"{'allowed' if approved else 'refused'}",
-                         extra={"answer": "accepted" if approved else "declined", "confirm_channel": "framework"})
-        except Exception as e:
-            raise PerplexityError(f"the consent could not be written to the audit log ({e}); nothing was run") from None
-        if not approved:
-            raise PerplexityError(f"the native run of {model.name} was declined; nothing was run")
 
     def _run_native(self, binary: Path, model: Path, text: Path, ctx: int) -> str:
         from orchestrator.runtime.server_policy import check_command, cleared_env
@@ -333,21 +293,21 @@ class DatasetManager:
         return output
 
     def compare_quantizations(self, base_model: Optional[Path], quant_models: List[Path], dataset: Path, *,
-                              sandbox: bool = False, consent: Optional[Consent] = None) -> Dict[str, Any]:
+                              sandbox: bool = False) -> Dict[str, Any]:
         """Measures the perplexity of each quantization (and of the base model) and ranks them; a model whose
         measurement failed is listed with its error, after the measured ones."""
         results: Dict[str, Any] = {}
         base_ppl = None
         if base_model and Path(base_model).exists():
             try:
-                base_ppl = self.measure_perplexity(base_model, dataset, sandbox=sandbox, consent=consent)
+                base_ppl = self.measure_perplexity(base_model, dataset, sandbox=sandbox)
                 results["baseline"] = {"path": str(base_model), "ppl": base_ppl}
             except PerplexityError as e:
                 results["baseline"] = {"path": str(base_model), "error": str(e)}
         measured, failed = [], []
         for qm in quant_models:
             try:
-                ppl = self.measure_perplexity(qm, dataset, sandbox=sandbox, consent=consent)
+                ppl = self.measure_perplexity(qm, dataset, sandbox=sandbox)
             except PerplexityError as e:
                 failed.append({"name": Path(qm).name, "path": str(qm), "error": str(e)})
                 continue

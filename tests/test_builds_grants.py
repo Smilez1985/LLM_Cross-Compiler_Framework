@@ -400,11 +400,13 @@ def test_the_packs_index_resource_mirrors_list_packs(zoo):
 
 # --- run_benchmark: the file it hashed is the file it runs ------------------------------------------------------------
 
-def bench_runner(tmp_path, popen):
+def bench_runner(tmp_path, popen, pinned=()):
+    """A runner whose catalog pins `pinned` (only catalog models run natively, seventh round 2')."""
     from orchestrator.runtime import bench
     runner = bench.BenchRunner(tmp_path / "state", popen=popen)
     build = SimpleNamespace(build_id="b" * 64, backend="cpu")
     runner.bench_build = lambda sandbox=False: (build, Path("/bin/true"))
+    runner.trusted_sha256 = lambda: {digest: "catalog model" for digest in pinned}
     return runner
 
 
@@ -436,7 +438,8 @@ def test_the_benchmark_reads_the_open_file_it_hashed_even_if_the_path_is_swapped
         seen["read"] = Path(path).read_bytes()
         stdout.write(RESULT)
         return Proc()
-    run = bench_runner(tmp_path, popen).run(model, kind="tier_speed", label="tier", trusted=True, sha256=digest)
+    run = bench_runner(tmp_path, popen, pinned=(digest,)).run(model, kind="tier_speed", label="tier", trusted=True,
+                                                               sha256=digest)
     assert seen["read"] == b"GGUF trusted catalog model" and run.gen_ts == 10.0
 
 
@@ -447,8 +450,8 @@ def test_a_model_whose_hash_differs_never_starts(tmp_path, monkeypatch):
     model.write_bytes(b"GGUF swapped before the run")
     started = []
     with pytest.raises(bench.BenchError) as e:
-        bench_runner(tmp_path, lambda *a, **k: started.append(a)).run(model, kind="tier_speed", label="tier",
-                                                                       trusted=True, sha256="0" * 64)
+        bench_runner(tmp_path, lambda *a, **k: started.append(a), pinned=("0" * 64,)).run(
+            model, kind="tier_speed", label="tier", trusted=True, sha256="0" * 64)
     assert "changed after it was checked" in str(e.value) and started == []
 
 

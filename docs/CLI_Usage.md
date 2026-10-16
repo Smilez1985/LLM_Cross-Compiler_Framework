@@ -495,9 +495,9 @@ llm-cli deploy package Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
 ### deploy run
 
 ```
-llm-cli deploy run PACKAGE_PATH --ip IP --user USER [--port 22] [--password [VALUE] | --password-stdin]
+llm-cli deploy run PACKAGE_PATH --host HOST --user USER [--port 22] [--password [VALUE] | --password-stdin]
                    [--trust-fingerprint TEXT]
-                   [--label TEXT]
+                   [--label TEXT] [--wait SECONDS]
 ```
 
 Uploads a package over SSH to a private temporary folder on the board, runs `deploy.sh` there and removes the
@@ -507,13 +507,24 @@ a matching `llama-server` command if `llama-server` is installed on the board.
 | Argument / option | Meaning |
 |---|---|
 | `PACKAGE_PATH` | The ZIP file from `deploy package`, which prints its full path (must exist). |
-| `--ip TEXT` | **Required.** The board's IP address. |
+| `--host TEXT` | **Required.** The board's address or host name, for example `192.168.1.50` or `myboard.local`. `--ip` is the old name and still works. |
 | `--user TEXT` | **Required.** User on the board. |
 | `--port INTEGER` | SSH port (default 22). |
 | `--password` | Only for the first connection: used once to install the framework's SSH key, never stored. Without a value it is asked with hidden input; when you give nothing on a terminal it is asked too (Enter if the key is already installed). `--password VALUE` still works for scripts but is deprecated and prints a warning: every user sees the value in the process list, and it stays in your shell history. A value that starts with `-` is read as another option: give such a password at the prompt or with `--password-stdin`. |
 | `--password-stdin` | Reads the password from standard input (one line), for example piped from a password manager. Refused on a terminal, where it would be shown while you type; use `--password` there. |
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has exactly this SHA256 fingerprint (for scripts). |
 | `--label TEXT` | Your name for the board in the trusted devices (default: the label it already has, or its address). |
+| `--wait SECONDS` | When the network drops during the deploy, wait this long for the board (default 300, 0 to 86400). |
+
+When the network drops (a board with Wi-Fi only, for example), the deploy waits for the board and shows how long
+it has waited and the limit. Ctrl+C cancels, and the CLI then says whether `deploy.sh` had already started on the
+board (a second Ctrl+C stops at once). Once the board answers on its SSH port again, the CLI logs in again
+with the same host key check and the upload continues where it stopped, after the sha256 of what arrived matched.
+`deploy.sh` runs on the board on its own and is started once, never twice. When the board cannot be reached or
+refuses the login, the CLI says why with a code and what to do: `device_host_down` (nothing answers: the board is
+off, on another network, or the host name does not resolve), `device_port_closed` (the board refuses SSH on that
+port), `device_auth_failed` (wrong user name or password, or the framework's key is gone),
+`device_host_key_changed` (another host key than the one you trusted).
 
 First connection: the CLI shows the board's host key fingerprint and asks whether to trust it. Compare it with
 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the board. Without a terminal and without
@@ -523,10 +534,14 @@ may deploy to it later, each time with your confirmation. `ssh` and `scp` (used 
 get the framework's standard input.
 
 ```bash
-llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --ip 192.168.1.50 --user rock
+llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --host 192.168.1.50 --user rock
+
+# A board on Wi-Fi by its host name, waiting up to 10 minutes when the network drops
+llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --host myboard.local --user rock \
+  --wait 600
 
 # In a script, with the fingerprint checked beforehand
-llm-cli deploy run output/deploy_model_1791801300.zip --ip 192.168.1.50 --user rock \
+llm-cli deploy run output/deploy_model_1791801300.zip --host 192.168.1.50 --user rock \
   --trust-fingerprint SHA256:AbCdEf...
 ```
 
@@ -1537,6 +1552,7 @@ the board needs SSH, `tar`, `gzip` and `sha256sum` (BusyBox has them), and an un
 ```
 llm-cli device list [--json]
 llm-cli device settings DEVICE [--install user|systemd] [--user NAME] [--port N] [--model PATH] [--confirm-sudo]
+                               [--kv-cache auto|f16|q8_0|q4_0]
 llm-cli device runtime plan DEVICE [--json]
 llm-cli device runtime build DEVICE [--jobs N] [--mirror URL] [--yes]
 llm-cli device runtime deploy DEVICE [--user NAME] [--password [VALUE] | --password-stdin] [--bench-model PATH]
@@ -1564,6 +1580,7 @@ never asks.
 | `--port N` | The loopback port of the systemd unit's server (1024-65535, default 8080). The start script listens on 8080 unless it gets `--port`; the start command a deployment prints includes this port. |
 | `--model PATH` | The model file on the board that the systemd unit serves (relative paths are in the user's home). |
 | `--confirm-sudo` | With `--install systemd`: confirm without a question. |
+| `--kv-cache auto\|f16\|q8_0\|q4_0` | The KV cache of the board's server (`-ctk`/`-ctv`): `q8_0` needs about half the memory of `f16`, `q4_0` about a quarter with some loss of quality. `auto` (the default) chooses `q8_0` when little memory is left next to the model on the board (from its probe), otherwise `f16`. Choose `f16` to switch the quantized cache off. The systemd unit starts the server with it; for the start script, the deployment prints the start command with it. |
 
 Exit code 1 when the board does not run systemd or the confirmation is missing (nothing is changed), 2 for a bad
 value.
@@ -1624,13 +1641,22 @@ curl -s http://127.0.0.1:8080/health   # needs no key; every other request needs
 ```
 
 It listens on 127.0.0.1 (default port 8080, `--port` from 1024 up) with the key file and a cleared environment.
-It passes on `-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`, `-fa`, `-cram`, `-lm`, `-a` and
-`--sleep-idle-seconds` with checked values and refuses every other option (exit code 2). `serve` runs in the
-foreground, `keygen` creates the key, `version` prints the server's version.
+It passes on `-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`, `-fa`, `-cram`, `-lm`, `-a`,
+`--sleep-idle-seconds` and `-ctk`/`-ctv` (only `f16`, `q8_0` or `q4_0`) with checked values and refuses every
+other option (exit code 2). `serve` runs in the foreground, `keygen` creates the key, `version` prints the
+server's version.
 
 ### device runtime verify
 
 Runs the checks of step 4 again on the active build, `current` (also with `--bench-model`), and updates the record.
+
+A short benchmark with `--bench-model` (here or with `device runtime deploy`) is the proof that a model works on
+that board. Its result is recorded with every build of that model in the output folder: the file
+`device_tests.json` in the build folder, found by the model's sha256 (also when the file on the board has another
+name). It holds the board (your label, the board and SoC model from its probe), the runtime build, the measured
+speeds, the KV cache the measurement used (as `llama-bench` reports it) next to the one the board's server is set
+to, and whether the checks passed. The Deployment window lists the build as "tested on <board>".
+A model that no build of this framework made is recorded nowhere.
 
 ### device runtime status
 

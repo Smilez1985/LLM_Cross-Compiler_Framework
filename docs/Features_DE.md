@@ -353,6 +353,38 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   ([CLI](CLI_Usage_DE.md#deploy-devices)). Nur diese Geräte kann ein KI-Client oder Ditto für ein Deployment nennen,
   und nur, solange die `known_hosts` des Frameworks noch genau diesen Schlüssel enthält; kein Tool vertraut einem
   Gerät, koppelt es oder trägt es ein.
+- **Adresse oder Hostname:** Du gibst ein, was du weißt, die IP-Adresse des Boards oder seinen Hostnamen
+  (`myboard.local`). Dem Host-Schlüssel wird je eingegebenem Namen vertraut: ein Board, das du unter beiden Namen
+  erreichst, bestätigst du für jeden einmal, und es bleibt dasselbe vertraute Gerät.
+- **Wenn das Netzwerk wegbricht** (ein Board nur mit WLAN, etwa das Radxa ZERO 3W): Das Deployment wartet auf das
+  Board (Vorgabe 300 s; `--wait` in der CLI) und zeigt, dass es wartet, wie lange schon und wie lange höchstens, mit
+  „Abbrechen“ in der GUI und Strg+C in der CLI. Es versucht den SSH-Port alle 5 Sekunden; sobald das Board antwortet,
+  meldet es sich mit derselben Prüfung des Host-Schlüssels neu an (ein geänderter Schlüssel wird abgelehnt, auch
+  jetzt) und macht weiter. Der Upload geht nach `<Name>.part` und setzt bei den angekommenen Bytes fort, sobald ihre
+  sha256 auf dem Board zu denselben Bytes hier passt; sonst beginnt er von vorn. Die sha256 des ganzen Pakets wird auf
+  dem Board geprüft, bevor es umbenannt wird. `deploy.sh` läuft auf dem Board für sich (abgekoppelt, seine Ausgabe in
+  einer Log-Datei dort) und wird einmal gestartet, nie zweimal, auch wenn die Verbindung abreißt, während es läuft. Ein
+  Board, das neu gestartet hat (sein Upload-Ordner ist weg), beendet das Deployment mit dem Grund: neu deployen. Ein
+  Fehler auf dem Board selbst, etwa eine volle Platte, beendet es sofort.
+- **Warum ein Board nicht erreichbar ist:** vier Grund-Codes, jeder mit dem, was passiert ist, und dem, was du tun
+  kannst, auf Englisch und Deutsch, in GUI und CLI: `device_host_down` (nichts antwortet: ausgeschaltet, ein anderes
+  Netzwerk, ein Hostname, der nicht aufgelöst wird, oder eine Firewall, die die Verbindung verwirft),
+  `device_port_closed` (das Board antwortet, lehnt aber SSH auf diesem Port ab), `device_auth_failed` (die Anmeldung
+  wurde abgelehnt), `device_host_key_changed` (ein anderer Host-Schlüssel als der, dem du vertraut hast). Eine KI
+  bekommt den reinen Code und einen nächsten Schritt ohne Adresse und ohne Konto.
+- **KV-Cache** (Deployment-Fenster, `llm-cli device settings --kv-cache`): `f16`, `q8_0` oder `q4_0` für den Server
+  des Boards (`-ctk`/`-ctv`). Standardmäßig automatisch: `q8_0`, wenn neben dem Modell auf dem Board wenig Speicher
+  frei bleibt (aus seiner Probe), sonst `f16`; das Fenster sagt, was und warum. Eine Wahl, die du im Fenster
+  triffst, bleibt in den Deploy-Einstellungen des Boards; ohne sie bleibt die gespeicherte Wahl, wie sie ist. `f16`
+  schaltet den quantisierten Cache aus. Ein im Deployment-Fenster gemachtes Paket nennt ihn im Startbefehl, den sein
+  `deploy.sh` ausgibt.
+- **Benchmark auf einem Board** (Deployment-Fenster): Für ein Board gebaute Modelle werden auf dem Board selbst
+  gemessen, nie auf diesem Computer. Wähle das Board und das Modell darauf (nach einem Deployment ist beides
+  eingetragen) und klicke „Auf dem Board messen“: die Laufzeitprüfungen und ein kurzer `llama-bench`-Lauf dort (das
+  Board braucht den Modellserver des Frameworks, `llm-cli device runtime deploy`). Vorher wirst du gefragt, mit „Nein“
+  vorgewählt und mit Board und Modell genannt, ob ein Modell, das kein Katalogmodell ist, dort geladen werden darf;
+  dein Ja wird ins Audit-Log geschrieben. Ein bestandener Lauf wird beim Build dieses Modells vermerkt, und die Build-Liste zeigt „getestet auf
+  <Board>“.
 - **Fehler mit Grund:** Paketieren und Übertragen melden, warum sie gescheitert sind (kein Docker, ein nicht
   festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`), statt es nur zu protokollieren.
   Ein Paket wird unter einem vorläufigen Namen geschrieben und erst umbenannt, wenn es vollständig ist. Ohne paramiko
@@ -399,7 +431,8 @@ installierst du selbst.
   startet `llama-server` aus seinem eigenen Ordner (nie aus `PATH`) mit `env -i` (HOME, ein fester PATH, die
   C-Locale), `--host 127.0.0.1`, `--api-key-file`, `--no-ui`, `--no-slots`, `--jinja` und `--offline`. Es reicht nur
   Tuning-Optionen mit geprüften Werten weiter (`-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`,
-  `-fa`, `-cram`, `-lm`, `-a`, `--sleep-idle-seconds` und `--port` ab 1024); eine Option der gemeinsamen Verbotsliste
+  `-fa`, `-cram`, `-lm`, `-a`, `--sleep-idle-seconds`, `-ctk`/`-ctv` mit `f16`, `q8_0` oder `q4_0` und `--port` ab
+  1024); eine Option der gemeinsamen Verbotsliste
   wird mit Namen abgelehnt, auch in der Schreibweise `--a_b`, und jede andere Option ebenso, sodass das Modell nie
   Werkzeuge bekommt und der Server Loopback nie verlässt.
 - **Deploy-Einstellungen, vor dem Deployment entschieden** (Entscheidung D7, `llm-cli device settings`): das
@@ -411,7 +444,9 @@ installierst du selbst.
   und startet sie, sobald das Modell da ist. Die Unit führt `serve` des
   Startskripts als der Benutzer aus, ohne `Environment=`, mit `NoNewPrivileges`, schreibgeschütztem System und Home
   sowie `IPAddressDeny=any` mit `IPAddressAllow=localhost`. Boards mit OpenRC oder SysV-Init nutzen das Startskript.
-  Ein Deployment stellt nie eine Frage.
+  Der KV-Cache der Deploy-Einstellungen (`--kv-cache`, automatisch `q8_0` auf einem Board mit wenig Speicher) kommt
+  in den Befehl der Unit; mit dem Startskript gibt das Deployment den Startbefehl damit aus. Ein Deployment stellt
+  nie eine Frage.
 - **Prüfungen auf dem Board** (auch `llm-cli device runtime verify`), als unprivilegierter Benutzer und nie mit
   sudo: `llama-server --version` und `llama-bench --version` müssen den Pin melden, `llama-bench --list-devices`
   muss die geplanten Geräte zeigen, und `llama-server --tools all` muss abgelehnt werden. Mit `--bench-model` läuft ein
@@ -420,7 +455,10 @@ installierst du selbst.
   `SIGILL` heißt, dass die CPU-Grundstufe des Builds nicht zum Board passt. Ein Deployment führt diese Prüfungen am
   neuen Build aus, bevor er zu `current` wird; ein Build, der sie nicht besteht, läuft also nie als Server des
   Boards. Das Ergebnis liegt in `device/<Geräte-ID>/deployed.json`; `llm-cli device runtime status` sagt, ob der
-  deployte Build noch der ist, den Profil und Pin verlangen.
+  deployte Build noch der ist, den Profil und Pin verlangen. Ein bestandener kurzer Benchmark ist der Beweis
+  „getestet auf <Board>“: Er wird bei jedem Build dieses Modells im Ausgabeordner, im Build-Ordner des Frameworks
+  und in den Ordnern, in die Builds gespeichert wurden, vermerkt (`device_tests.json`, gefunden über die sha256 des
+  Modells) und im Deployment-Fenster gezeigt.
 - **Gemessen** mit echten Programmen statt eines Boards: `llama-server` und `llama-bench`, nativ mit den Optionen des
   Geräte-Bauplans für einen x86-64-Rechner gebaut (GCC 13.3, `-j4`, etwa 8 Minuten auf 4 geteilten Kernen), ergaben
   30 MB Programme und einen Tarball von 11,6 MB; die Formatprüfung (glibc 2.38 nötig, keine geteilte C++-Laufzeit),
@@ -733,7 +771,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `deploy_to_device` | extern | Ein Paket auf ein vertrautes, gekoppeltes Gerät kopieren und dessen `deploy.sh` ausführen (immer mit Frage; die Frage zeigt Host-Schlüssel und Paket-Hash; ein Job) |
 | `build_local_runtime` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-server für diesen Rechner aus dem festgelegten Commit bauen (ein Job; nie vorgebaut) |
 | `start_local_runtime` / `stop_local_runtime` | lokal schreiben | Optional, verborgen bis zur Freigabe: Dittos lokalen Server starten (ein Job) oder stoppen; nie seine Adresse oder sein Schlüssel |
-| `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf einem Katalogmodell oder einem gebauten GGUF-Modell; ein nicht vertrauenswürdiges Modell nativ nur nach Zustimmung im Framework, oder in der Sandbox |
+| `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf Dittos Katalogmodell (nativ oder in der Sandbox) oder einem gebauten GGUF-Modell (immer in der Sandbox: ein für ein Board gebautes Modell wird auf dem Board gemessen) |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
 | `delete_artifact` | extern, optional | Ein gebautes Modell (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP) in den Papierkorb verschieben; verborgen, bis du es freigibst, immer mit Frage |
 | `list_trash` / `restore_from_trash` | lesen / lokal schreiben, optional | Den Papierkorb mit Name, Art und Größe sehen; wiederherstellen, was diese KI selbst löschen wollte (immer mit Frage); verborgen, bis du sie freigibst. Kein Tool leert den Papierkorb |
@@ -1202,12 +1240,13 @@ ganze Stufe erlaubt hast.
   Dittos Server. Gestartet wird nur ein Build, der seine Prüfung hier bestanden hat. Kein Ergebnis enthält die
   Adresse des Servers oder seinen Schlüssel für diesen Start.
 - **`run_benchmark`** misst Prompt- und Erzeugungsgeschwindigkeit und den höchsten Speicherbedarf mit dem selbst
-  gebauten `llama-bench`: `tier_speed` für ein heruntergeladenes Katalogmodell, `artifact_speed` für ein gebautes
-  GGUF-Modell. Ein Katalogmodell läuft nativ. Jedes andere Modell gilt als nicht vertrauenswürdig
-  (Laufzeit-Entscheidung D23): Es läuft nativ nur nach deiner Zustimmung, die im eigenen Fenster des Frameworks
-  erfragt wird (Dittos Dialog, die ausstehenden Freigaben der GUI oder `llm-cli tools approvals`, nie der Dialog eines
-  Clients), auch dann erfragt wird, wenn das Tool erlaubt ist, und ins Audit-Log geschrieben wird, bevor das Modell
-  geladen wird; mit `sandbox: true` läuft es stattdessen in der Docker-Sandbox. Die Modelldatei wird einmal geöffnet
+  gebauten `llama-bench`: `tier_speed` für ein heruntergeladenes Katalogmodell (Dittos eigenes Modell, das wirklich
+  auf diesem Computer läuft: nativ, oder mit `sandbox: true` in der Docker-Sandbox), `artifact_speed` für ein gebautes
+  GGUF-Modell. Ein für ein Board gebautes Modell wird nie nativ auf diesem Computer gemessen, denn das würde diesen
+  Computer messen und nicht das Board: Es läuft in der Docker-Sandbox (`sandbox: false` wird abgelehnt), und seine
+  echten Werte kommen vom Board selbst (`run_device_benchmark` nach `deploy_to_device`). Ein nicht vertrauenswürdiges
+  Modell in der Sandbox ist ein Sicherheitshinweis, den nur du entscheidest, außer du hast das für KIs erlaubt
+  (`bench_untrusted_sandbox_ok`). Die Modelldatei wird einmal geöffnet
   und über diese offene Datei gehasht; llama-bench liest genau diese Datei (nativ über den geerbten Deskriptor, in
   der Sandbox über einen privaten Hardlink darauf), so dass sie zwischen Prüfung und Lauf nicht ausgetauscht werden
   kann. Der private Link der Sandbox liegt neben dem Modell oder, wenn dieser Ordner schreibgeschützt ist, im Cache-
@@ -1227,8 +1266,11 @@ ganze Stufe erlaubt hast.
   `device runtime build` und `deploy`; aktiv erst, wenn ihre Prüfungen auf dem Board bestehen);
   `run_device_benchmark` führt die Laufzeitprüfungen mit einem kurzen `llama-bench` auf dem Modell aus, das die
   Deploy-Einstellungen nennen (wie `device runtime verify --bench-model`), ein nicht vertrauenswürdiges Modell nur
-  mit deiner Zustimmung im Framework, die zuerst ins Audit-Log geschrieben wird. Die Ausgabe des Boards kommt als
-  externer Text zurück.
+  mit deiner Zustimmung im Framework, die zuerst ins Audit-Log geschrieben wird. Hier wird ein für ein Board gebautes
+  Modell gemessen; ein bestandener Lauf wird beim Build dieses Modells als auf dem Board getestet vermerkt
+  (`recorded_builds` im Ergebnis). Die Ausgabe des Boards kommt als externer Text zurück. Ein nicht erreichbares
+  Board wird mit seinem Grund-Code (`device_host_down`, `device_port_closed`, `device_auth_failed`,
+  `device_host_key_changed`) und dem nächsten Schritt für die Person abgelehnt.
 - Die Ressource `lcf://runtime/catalog` enthält den festgelegten Commit und die Modellstufen; der Prompt
   `set_up_offline_assistant` führt einen Client durch Bauen, Starten und Messen.
 
@@ -1240,12 +1282,12 @@ Server baut. Es wird kein vorgebautes Laufzeit-Image geholt und kein `llama-perp
 ein gespeicherter Build, der seine Prüfung hier bestanden hat, noch zu seinem Manifest passt und vom festgelegten
 Commit ist.
 
-- **Katalogmodelle** (über sha256 festgelegt) laufen nativ.
-- **Jedes andere Modell** (deine Umwandlungen, Downloads) gilt als nicht vertrauenswürdig. Es läuft nativ, ohne
-  Docker-Aufwand, nur nach deiner ausdrücklichen Zustimmung, und diese Zustimmung wird vor dem Lauf ins
-  Tool-Audit-Log geschrieben (`llm-cli tools audit`); ohne Zustimmung, oder wenn das Audit-Log nicht geschrieben
-  werden kann, läuft nichts.
-- **Docker-Sandbox (auf Wunsch):** Der Lauf geschieht im eigenen Builder-Image des Builds (nur ein im
+- **Katalogmodelle** (über sha256 festgelegt: Dittos eigene Modelle) laufen nativ, oder auf Wunsch in der
+  Docker-Sandbox.
+- **Jedes andere Modell** (ein für ein Board umgewandeltes Modell, ein Download) läuft nie nativ auf diesem Computer:
+  Für ein Board gebaute Modelle werden auf dem Board gemessen, oder hier in der Docker-Sandbox, sobald das fertige
+  Modell da ist. Es läuft in der Sandbox; ohne einen im Builder-Container gemachten Build läuft es gar nicht.
+- **Docker-Sandbox:** Der Lauf geschieht im eigenen Builder-Image des Builds (nur ein im
   Builder-Container gemachter Build hat eines; es wird lokal gebaut und nie geholt), ohne Netzwerk, ohne
   Capabilities, mit schreibgeschütztem Wurzeldateisystem und deinem Benutzer; Programm, Modell und Text werden
   schreibgeschützt eingebunden.
@@ -1852,9 +1894,12 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Passwort und bricht ab, wenn das sha256 des Pakets (berechnet aus derselben geöffneten Datei, die hochgeladen
   wird) oder der Schlüssel des Geräts von dem abweicht, was dir gezeigt wurde. Es wird immer erfragt (es lässt sich
   nie auf „erlauben“ stellen), nie von einer Daueranfrage abgedeckt, läuft eins je Gerät zur Zeit und sechs je Stunde
-  je Client. `cancel_job` schließt die SSH-Sitzung, und der Job sagt, dass der Zustand des Geräts unbekannt ist;
-  nichts wird wiederholt. Das Job-Ergebnis enthält `success`, `exit_status`, `device_state` (`ok`, `failed`,
-  `unknown`) und die letzten 100 Zeilen, die das Gerät ausgegeben hat, in `external_text`, als externer Text markiert;
+  je Client. Bricht das Netzwerk weg, wartet der Job auf das Board (sein Fortschritt sagt „waiting for the board
+  <Name>: N s of at most 300 s“) und setzt den Upload dort fort, wo er stehen blieb; `deploy.sh` wird nie zweimal
+  gestartet. `cancel_job` schließt die SSH-Sitzung und beendet das Warten; sobald `deploy.sh` läuft, sagt der Job,
+  dass der Zustand des Geräts unbekannt ist. Das Job-Ergebnis enthält `success`, `exit_status`, `device_state` (`ok`,
+  `failed`, `unknown`), `reason_code` (einer der vier SSH-Grund-Codes oder leer), `resumed` und `waited_s` sowie die
+  letzten 100 Zeilen, die das Gerät ausgegeben hat, in `external_text`, als externer Text markiert;
   `reason` ist immer der eigene Satz des Frameworks, ohne Pfade des Rechners. Scheitert ein Job der Geräte- oder
   Laufzeit-Tools, ist auch die Fehlermeldung der Satz des Frameworks: Was das Gerät oder `llama-bench` ausgegeben hat
   (`llama-bench` gibt die Metadaten des geladenen Modells aus), kommt in `external_text` zurück; Pfade in einer
@@ -2128,8 +2173,9 @@ sie:
 - **Sicherheits- und Rechtshinweise** bleiben immer bei dir: Modelldateien in einem alten Format, das versteckten Code
   ausführen kann (pickle), eine Build-Umgebung von außerhalb der geprüften Docker-Sammlung oder nicht auf eine genaue
   Version festgelegt, mehr Hersteller-Downloads als üblich, ein ungeprüftes oder ein Community-Hardware-Modul, ein
-  nicht vertrauenswürdiges Modell, das direkt auf deinem Computer läuft (oder in der Sandbox, außer du hast das für
-  KIs mit der Einstellung `bench_untrusted_sandbox_ok` erlaubt, die keine KI ändern kann), ein Paket mit deinem
+  nicht vertrauenswürdiges Modell, das direkt auf einem Board als dessen Gerätekonto läuft (oder in der Sandbox
+  dieses Computers, außer du hast das für KIs mit der Einstellung `bench_untrusted_sandbox_ok` erlaubt, die keine
+  KI ändern kann), ein Paket mit deinem
   Schlüssel signiert, ein Modell mit Bedingungen, eine Lizenz, die die Nutzung einschränkt oder nicht auf der Liste
   bekannter freier Lizenzen steht. Fakten, die sich nicht prüfen ließen (Hugging Face hat nicht geantwortet, keine
   Lizenz genannt, ein Basismodell, das nicht nachgeschlagen werden konnte, ein unbekanntes Dateiformat), sind

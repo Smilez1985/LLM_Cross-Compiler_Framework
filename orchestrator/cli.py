@@ -4238,7 +4238,8 @@ def _device_password(password: Optional[str], from_stdin: bool, ask_when_omitted
 
 @deploy.command('run')
 @click.argument('package_path', type=click.Path(exists=True))
-@click.option('--ip', required=True, help="Target IP")
+@click.option('--host', '--ip', 'host', required=True,
+              help="Address or host name of the device, e.g. 192.168.1.50 or myboard.local (--ip is the old name)")
 @click.option('--user', required=True, help="Target Username")
 @click.option('--port', default=22, show_default=True, type=int)
 @device_password_options("Only for the first connection (asked when omitted on a terminal)")
@@ -4246,13 +4247,20 @@ def _device_password(password: Optional[str], from_stdin: bool, ask_when_omitted
               help="Trust a new device non-interactively if its host key has this SHA256 fingerprint")
 @click.option('--label', default=None, help="Your name for the device (shown to you and to AI tools; default: the "
               "label it already has, or its address)")
+@click.option('--wait', 'wait_seconds', default=300, show_default=True, type=click.IntRange(0, 86400),
+              help="When the network drops during the deploy (a Wi-Fi board), wait this many seconds for the board "
+                   "to answer again; the upload then continues where it stopped")
 @pass_context
-def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, password_stdin, trust_fingerprint,
-               label):
+def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, password_stdin, trust_fingerprint,
+               label, wait_seconds):
     """
-    Upload and execute a deployment package on the target.
+    Upload and execute a deployment package on the target (its address or host name).
     """
+    from orchestrator.runtime.device import reasons
+    from orchestrator.runtime.remote_probe import valid_host
     from orchestrator.utils import ssh_trust
+    if not valid_host(host):
+        raise click.UsageError("--host takes an address or a host name, e.g. 192.168.1.50 or myboard.local")
     password = _device_password(password, password_stdin)  # read before any question: stdin may be the pipe
     ctx.require_framework()
     dep_mgr = ctx.deployment_manager
@@ -4262,16 +4270,16 @@ def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, pa
 
     # Trust on first use, never silently.
     try:
-        status, key = dep_mgr.host_key_status(ip, port)
+        status, key = dep_mgr.host_key_status(host, port)
     except Exception as e:
-        console.print(f"[red]Could not reach {escape(ip)}:{port}: {escape(str(e))}[/red]")
-        sys.exit(1)
+        _unreachable(ctx, host, port, e)
     if status == "changed":
-        console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(ip, port)))}[/bold red]")
+        _print_reason(ctx, reasons.HOST_KEY_CHANGED, host, port)
+        console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
     if status == "unknown":
         fp = ssh_trust.fingerprint(key)
-        console.print(f"New device {escape(ip)}:{port} - {key.get_name()} {fp}")
+        console.print(f"New device {escape(host)}:{port} - {key.get_name()} {fp}")
         if trust_fingerprint:
             if trust_fingerprint != fp:
                 console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
@@ -4280,26 +4288,127 @@ def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, pa
                 "Compare with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the device. Trust it?", default=False)):
             console.print("[red]Device not trusted; nothing was deployed.[/red]")
             sys.exit(1)
-        dep_mgr.trust_host(ip, key, port)
+        dep_mgr.trust_host(host, key, port)
     if password is None and not password_stdin:
         password = _device_password(None, False, ask_when_omitted=True)
 
-    with console.status(f"Deploying to {user}@{ip}...", spinner="earth"):
-        success = dep_mgr.deploy_artifact(
-            artifact_path=Path(package_path),
-            target_ip=ip,
-            user=user,
-            password=password,
-            port=port,
-        )
-        
-    if success:
+    import threading
+    stop = threading.Event()
+    with _ctrl_c_cancels(stop), console.status(f"Deploying to {user}@{host}...", spinner="earth") as shown:
+        result = dep_mgr.deploy_package(Path(package_path), host, user, port=port, password=password,
+                                        wait_seconds=wait_seconds, cancelled=stop.is_set,
+                                        on_event=lambda event: shown.update(_deploy_event_text(ctx, event, host)))
+
+    if result.success:
         console.print("[bold green]✅ Deployment Execution Successful![/bold green]")
+        if result.resumed:
+            console.print(f"The network dropped {result.resumed} time(s); the deploy waited {result.waited_s:.0f} s "
+                          "for the board and continued where it stopped.")
         # Trusted by you and logged in to with the framework's key: AI tools may now name it (deploy_to_device).
-        _remember_device(ctx, ip, port, user, key, paired=True, label=label)
+        _remember_device(ctx, host, port, user, key, paired=True, label=label)
     else:
         console.print("[bold red]❌ Deployment Failed.[/bold red]")
+        if result.code:
+            _print_reason(ctx, result.code, host, port)
+        if result.reason:
+            console.print(escape(result.reason))
+        for line in result.output[-20:]:
+            console.print(f"  [dim]{escape(line)}[/dim]")
         sys.exit(1)
+
+
+class _ctrl_c_cancels:
+    """While a deploy runs, Ctrl+C sets `stop` (the deploy's own cancel) instead of ending the CLI at once: the wait
+    for the board ends, and the result says what happened on the board (deploy.sh started or not). A second Ctrl+C
+    stops at once. Without a main thread to catch the signal, Ctrl+C keeps its usual meaning."""
+
+    def __init__(self, stop):
+        self.stop, self.before, self.installed = stop, None, False
+
+    def _caught(self, _signum, _frame) -> None:
+        if self.stop.is_set():
+            raise KeyboardInterrupt
+        self.stop.set()
+
+    def __enter__(self):
+        import signal
+        try:
+            self.before = signal.signal(signal.SIGINT, self._caught)
+            self.installed = True
+        except ValueError:  # not the main thread
+            pass
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        import signal
+        if self.installed:
+            signal.signal(signal.SIGINT, self.before if self.before is not None else signal.default_int_handler)
+        return False
+
+
+def _kv_text(ctx: Optional[FrameworkContext], choice) -> str:
+    """The KV-cache type of a board's server and why (DeploySettings.kv_choice), in the configured language."""
+    from orchestrator.utils.localization import ui_text
+    lang = _config_language(ctx)
+    if not choice.automatic:
+        return ui_text("device.kv.chosen", lang, kind=choice.kind)
+    why = ui_text(f"device.kv.why_{choice.why}", lang, free=choice.free_gib)
+    return ui_text("device.kv.auto", lang, kind=choice.kind, why=why)
+
+
+def _config_language(ctx: Optional[FrameworkContext]) -> Optional[str]:
+    """The interface language of the settings (en/de), read without booting the framework; else the default."""
+    try:
+        value = _settings(ctx)[0].get("language") if ctx is not None else None
+    except Exception:  # noqa: BLE001 - a broken setting never stops a deploy's message
+        value = None
+    return value if value in ("en", "de") else None
+
+
+def _print_reason(ctx: Optional[FrameworkContext], code: str, host: str, port: int) -> None:
+    """Why the board cannot be reached or logged in to, and what to do about it (eighth round N6)."""
+    from orchestrator.runtime.device import reasons
+    lang = _config_language(ctx)
+    console.print(f"[red]{escape(reasons.person_title(code, lang, address=host, port=port))}[/red] ({code})")
+    console.print(escape(reasons.person_next(code, lang, address=host, port=port)))
+
+
+def _unreachable(ctx: Optional[FrameworkContext], host: str, port: int, error: BaseException,
+                 doing: str = "reach") -> None:
+    """Exits after a failed connection or login: its reason code with the next step when it has one."""
+    from orchestrator.runtime.device import reasons
+    code = reasons.classify(error)
+    if code is None and isinstance(error, OSError):
+        code = reasons.HOST_DOWN
+    if code is not None:
+        _print_reason(ctx, code, host, port)
+    else:
+        console.print(f"[red]Could not {doing} {escape(host)}:{port}: {escape(str(error))}[/red]")
+    sys.exit(1)
+
+
+def _deploy_event_text(ctx: FrameworkContext, event, host: str) -> str:
+    """The console line of a running deploy: the upload's progress, or the wait for the board (N5)."""
+    from orchestrator.utils.localization import ui_text
+    lang = _config_language(ctx)
+
+    def size(n):
+        return f"{n / 1000 ** 2:.1f} MB"
+
+    def clock(seconds):
+        return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+    if event.kind == "waiting":
+        key = "device.wait.status_install" if event.step == "install" else "device.wait.status"
+        return escape(ui_text(key, lang, address=host, elapsed=clock(event.elapsed), limit=clock(event.limit))
+                      + " (Ctrl+C)")
+    if event.kind == "back":
+        if event.step == "install":
+            return escape(ui_text("device.wait.install", lang))
+        return escape(ui_text("device.wait.back", lang, done=size(event.done), total=size(event.total)))
+    if event.kind == "uploading":
+        return escape(ui_text("device.deploy.uploading", lang, done=size(event.done), total=size(event.total)))
+    return escape(ui_text("device.deploy.installing", lang))
 
 
 def _device_audit(ctx: FrameworkContext, state_dir: Path):
@@ -4410,7 +4519,8 @@ def deploy_devices_add(ctx: FrameworkContext, host: str, user: str, port: int, l
                       "[/red]")
         sys.exit(1)
     if not valid_host(host) or not SSH_USER_PATTERN.fullmatch(user or ""):
-        raise click.UsageError("HOST must be a host name or an IP address and --user an account name")
+        raise click.UsageError("HOST must be an address or a host name (e.g. 192.168.1.50 or myboard.local) and "
+                               "--user an account name")
     if label is not None:
         try:
             label = clean_label(label)
@@ -4424,8 +4534,7 @@ def deploy_devices_add(ctx: FrameworkContext, host: str, user: str, port: int, l
         key = ssh_trust.fetch_host_key(host, port)
         status = ssh_trust.check_host_key(state_dir, host, port, key)
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        console.print(f"[red]Could not reach {escape(host)}:{port}: {escape(str(e))}[/red]")
-        sys.exit(1)
+        _unreachable(ctx, host, port, e)
     if status != "known":
         console.print(f"[red]{escape(host)}:{port} is not trusted yet (its host key is {status}). Trust it with "
                       "'llm-cli deploy run' or 'llm-cli scan --device', which show the fingerprint for you to "
@@ -4480,15 +4589,15 @@ def _write_profile_file(profile, output_file: Path, as_json: bool) -> None:
     write_private(output_file, profile.to_json() + "\n" if as_json else profile.to_text())
 
 
-def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Optional[str]):
+def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Optional[str],
+                  ctx: Optional[FrameworkContext] = None):
     """The device's host key, trusted on first use but never silently (as for deploy run). Exits when refused."""
     from orchestrator.utils import ssh_trust
     try:
         key = ssh_trust.fetch_host_key(host, port)
         status = ssh_trust.check_host_key(state_dir, host, port, key)
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        console.print(f"[red]Could not reach {escape(host)}:{port}: {escape(str(e))}[/red]")
-        sys.exit(1)
+        _unreachable(ctx, host, port, e)
     if status == "changed":
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
@@ -4517,7 +4626,7 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     if not user:
         raise click.UsageError("--device needs --user")
     if not valid_host(host):
-        raise click.UsageError("--device takes a host name or an IP address")
+        raise click.UsageError("--device takes an address or a host name, e.g. 192.168.1.50 or myboard.local")
     if not 1 <= port <= 65535:
         raise click.UsageError("--port must be between 1 and 65535")
     if label is not None and not (1 <= len(" ".join(label.split())) <= 64 and label.isprintable()):
@@ -4525,14 +4634,13 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     if ssh_trust.paramiko is None:
         console.print("[red]Probing a device needs the 'paramiko' package.[/red]")
         sys.exit(1)
-    key = _trust_device(state_dir, host, port, trust_fingerprint)
+    key = _trust_device(state_dir, host, port, trust_fingerprint, ctx)
     if password is None:
         password = _device_password(None, False, ask_when_omitted=True)
     try:
         client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
     except Exception as e:  # authentication, network, a host key that changed meanwhile
-        console.print(f"[red]SSH login to {escape(user)}@{escape(host)} failed: {escape(str(e))}[/red]")
-        sys.exit(1)
+        _unreachable(ctx, host, port, e, doing=f"log in to {user}@")
     try:
         if password:
             ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
@@ -4571,7 +4679,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
 @click.option('--script', 'use_script', is_flag=True,
               help="Use the fallback script (hardware_probe.sh, on Windows hardware_probe.ps1) instead of the "
                    "Python probe")
-@click.option('--device', default=None, help="Probe this device over SSH instead of this computer (host or IP)")
+@click.option('--device', default=None, help="Probe this device over SSH instead of this computer (its address or "
+              "host name, e.g. 192.168.1.50 or myboard.local)")
 @click.option('--user', default=None, help="SSH user on the device (with --device)")
 @click.option('--port', default=22, show_default=True, type=int, help="SSH port of the device (with --device)")
 @device_password_options("With --device, only for the first connection (asked when omitted on a terminal)")
@@ -4753,9 +4862,9 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
         key = ssh_trust.fetch_host_key(host, port)
         status = ssh_trust.check_host_key(state_dir, host, port, key)
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        console.print(f"[red]Could not reach {escape(host)}:{port}: {escape(str(e))}[/red]")
-        sys.exit(1)
+        _unreachable(ctx, host, port, e)
     if status == "changed":
+        _print_reason(ctx, "device_host_key_changed", host, port)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
     if status != "known":
@@ -4769,8 +4878,16 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
     try:
         client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
     except Exception as e:  # authentication, network, a host key that changed meanwhile
-        console.print(f"[red]SSH login to {escape(user)}@{escape(host)} failed: {escape(str(e))}. Pair the device "
-                      "once with llm-cli scan --device (it asks for the password one time) or pass --password.[/red]")
+        from orchestrator.runtime.device import reasons
+        code = reasons.classify(e)
+        if code not in (None, reasons.AUTH_FAILED):
+            _unreachable(ctx, host, port, e)
+        if code == reasons.AUTH_FAILED:
+            _print_reason(ctx, reasons.AUTH_FAILED, host, port)
+        else:  # none of the four reasons: shown as it is, never relabelled as a refused login
+            console.print(f"[red]SSH login to {escape(user)}@{escape(host)} failed: {escape(str(e))}[/red]")
+        console.print(f"[red]Pair the device once with llm-cli scan --device (it asks for the password one time) or "
+                      "pass --password.[/red]")
         sys.exit(1)
     if password:
         try:
@@ -4786,13 +4903,13 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
 
 def _bench_choice(ctx: FrameworkContext, shell, home: str, bench_model: Optional[str], allow_untrusted: bool,
                   device_id: str, user: str):
-    """(model path on the device or None, allowed): a catalog model (by sha256) runs; any other model only after
-    the user's consent, written to the audit log first (decision D23)."""
+    """(model path on the device or None, allowed, its sha256): a catalog model (by sha256) runs; any other model only
+    after the user's consent, written to the audit log first (decision D23)."""
     from orchestrator.runtime.catalog import load_catalog
     from orchestrator.runtime.device.remote import model_sha256
     from orchestrator.runtime.device.settings import SettingsError, check_model_path
     if bench_model is None:
-        return None, False
+        return None, False, None
     try:
         path = check_model_path(bench_model if bench_model.startswith("/") else f"{home}/{bench_model}")
     except SettingsError as e:
@@ -4801,20 +4918,41 @@ def _bench_choice(ctx: FrameworkContext, shell, home: str, bench_model: Optional
     if digest is None:
         console.print(f"[yellow]No readable model at {escape(path)} on the device; the short benchmark is skipped."
                       "[/yellow]")
-        return None, False
+        return None, False, None
     catalog = load_catalog()
     pinned = {m.sha256 for m in catalog.models if m.sha256}
     if catalog.smoke_model is not None:
         pinned.add(catalog.smoke_model.sha256)
     if digest in pinned:
-        return path, True
+        return path, True, digest
     question = (f"{path} is not a catalog model, so it is untrusted. llama-bench loads it natively on the device as "
                 f"{user} (no sandbox). Run the short benchmark with it? Your answer is written to the audit log.")
     if not (allow_untrusted or (_interactive() and click.confirm(question, default=False))):
-        return path, False
+        return path, False, digest
     _record_consent(ctx, "device_runtime_untrusted_model", {"device": device_id, "model_sha256": digest},
                     "an untrusted model may run natively on the device for the short llama-bench run")
-    return path, True
+    return path, True, digest
+
+
+def _record_board_test(ctx: FrameworkContext, store, device_id: str, profile, report, digest: Optional[str],
+                       runtime_build_id: str, source, kv_cache: Optional[str]) -> None:
+    """Records a benchmark on the board with the builds of its model as "tested on" the board (N3) and says so."""
+    from types import SimpleNamespace
+    from orchestrator.runtime.device.service import record_board_test
+    from orchestrator.utils.localization import ui_text
+    smoke = report.check("smoke")
+    if smoke is None or smoke.ok is None or not digest:
+        return
+    label = store.device_info(device_id).get("label") or device_id
+    from orchestrator.Core.artifact_output import artifact_folders
+    config, resolve = _settings(ctx)  # the folders of golden artifacts without booting the framework
+    builds = record_board_test(artifact_folders(SimpleNamespace(config=config, resolve_path=resolve)),
+                               SimpleNamespace(device_id=device_id, label=label), profile, report, digest,
+                               runtime_build_id, source, kv_cache)
+    lang = _config_language(ctx)
+    board = profile.get("BOARD_MODEL") or label
+    console.print(escape(ui_text("device.bench.recorded", lang, board=board, count=len(builds)) if builds else
+                         ui_text("device.bench.not_recorded", lang)))
 
 
 def _print_report(report) -> None:
@@ -4892,9 +5030,12 @@ def device_list(ctx: FrameworkContext, as_json: bool):
 @click.option('--model', help='Model file on the device that the systemd unit serves (relative: in the home folder)')
 @click.option('--confirm-sudo', is_flag=True,
               help='With --install systemd: confirm without a question that deployments may run sudo on the device')
+@click.option('--kv-cache', type=click.Choice(['auto', 'f16', 'q8_0', 'q4_0']),
+              help='KV cache of the server: q8_0 about half the memory, q4_0 about a quarter (some quality loss), '
+                   'f16 full precision; auto (the default) chooses q8_0 for a board with little RAM, else f16')
 @pass_context
 def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[str], ssh_user: Optional[str],
-                    port: Optional[int], model: Optional[str], confirm_sudo: bool):
+                    port: Optional[int], model: Optional[str], confirm_sudo: bool, kv_cache: Optional[str]):
     """Show or change how the runtime is installed on a device. Decided here, before a deployment: a deployment
     never asks."""
     from dataclasses import replace
@@ -4903,6 +5044,8 @@ def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[s
     current = _deploy_settings(store, device_id)
     changes = {k: v for k, v in (("install", install), ("ssh_user", ssh_user), ("port", port), ("model", model))
                if v is not None}
+    if kv_cache is not None:
+        changes["kv_cache"] = None if kv_cache == "auto" else kv_cache
     if changes:
         try:
             new = current.changed(**changes)
@@ -4936,6 +5079,7 @@ def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[s
     console.print(f"SSH user: {escape(current.ssh_user or 'not set (--user)')}")
     console.print(f"Port: {current.port}")
     console.print(f"Model for the systemd unit: {escape(current.model or 'not set')}")
+    console.print(f"KV cache: {escape(_kv_text(ctx, current.kv_choice(profile)))}")
     for problem in current.problems(profile):
         console.print(f"[yellow]{escape(problem)}[/yellow]")
 
@@ -5117,9 +5261,8 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     from orchestrator.runtime.build.store import BuildStore
     from orchestrator.runtime.device.devices import split_address
     from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, deploy_runtime, read_facts,
-                                                    start_script_path, verify_on_device)
+                                                    verify_on_device)
     from orchestrator.runtime.device.settings import SettingsError
-    from orchestrator.runtime.server_policy import DEVICE_DEFAULT_PORT
     state_dir, store, device_id, profile = _device_context(ctx, device_name)
     settings = _deploy_settings(store, device_id)
     if ssh_user is not None:
@@ -5137,6 +5280,7 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
             console.print(f"[red]{escape(problem)}[/red]")
         console.print("[red]Nothing was deployed; change the deploy settings first (llm-cli device settings).[/red]")
         sys.exit(1)
+    kv = settings.kv_choice(profile)
     plan = _device_plan(profile)
     builds = BuildStore(state_dir)
     build = builds.find(plan)
@@ -5160,8 +5304,8 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
                           "unprivileged user (llm-cli device settings DEVICE --user NAME).[/red]")
             sys.exit(1)
         # Asked before anything changes on the device (decision D23: an untrusted model only after consent).
-        model_path, allowed = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model, device_id,
-                                            settings.ssh_user)
+        model_path, allowed, digest = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model,
+                                                    device_id, settings.ssh_user)
 
         def check_new_build(home: str, folder: str):
             # Design 3.8 and P6: the new build is checked in its own folder and becomes current only if it passes.
@@ -5171,7 +5315,8 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
 
         result = deploy_runtime(shell, tarball=packaged.path, tarball_sha256=packaged.sha256,
                                 build_id=build.build_id, arch=str(plan.target["arch"]), settings=settings,
-                                check=check_new_build, say=lambda msg: console.print(escape(msg)))
+                                check=check_new_build, say=lambda msg: console.print(escape(msg)),
+                                kv_cache=kv.kind)
     except RemoteError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
@@ -5188,25 +5333,27 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         sys.exit(1)
     now = _utc_stamp()
     devices.save_record({"build_id": build.build_id, "deployed_at": now, "install": settings.install,
+                         "kv_cache": kv.kind,
                          "ssh_user": settings.ssh_user, "previous": result.previous, "perf_key": profile.perf_key(),
                          "verification": report.as_dict(), "verified_at": now,
                          "unit_started": result.unit_started})
     console.print(f"[bold green]Deployed[/bold green] build {build.build_id[:16]} to {escape(result.root)}"
                   + (f" (previous {result.previous} kept)" if result.previous else ""))
     _print_report(report)
+    _record_board_test(ctx, store, device_id, profile, report, digest if allowed else None, build.build_id, source,
+                       kv.kind)
     for note in result.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
     _say_older_packages(devices, build)
-    script = start_script_path(result.home)
+    console.print(f"KV cache: {escape(_kv_text(ctx, kv))}")
     if settings.install == "systemd":
         console.print(f"systemd unit: {'started' if result.unit_started else 'enabled'}; the server listens on "
                       f"127.0.0.1:{settings.port} with the key in ~/.config/llm-framework/llama-server.key")
     else:
-        # The start script listens on its default port unless --port is given.
-        port_option = f" --port {settings.port}" if settings.port != DEVICE_DEFAULT_PORT else ""
-        console.print(f"Start it on the device: sh {escape(script)} start MODEL.gguf{port_option} "
-                      f"(127.0.0.1:{settings.port}, key in ~/.config/llm-framework/llama-server.key; stop, status, "
-                      "serve for the foreground)")
+        # The note above names the start command (the port when it is not the default, the KV cache).
+        console.print(f"The server listens on 127.0.0.1:{settings.port}, key in "
+                      "~/.config/llm-framework/llama-server.key; stop, status and serve (foreground) work the same "
+                      "way.")
 
 
 @device_runtime.command('verify')
@@ -5254,8 +5401,8 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         if facts.uid == 0:
             console.print("[red]The SSH user is root; the checks run as the unprivileged user only.[/red]")
             sys.exit(1)
-        model_path, allowed = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model, device_id,
-                                            user)
+        model_path, allowed, digest = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model,
+                                                    device_id, user)
         report = verify_on_device(shell, home=facts.home, plan_verify=plan_verify, pin_build=source.build_number,
                                   pin_commit=source.commit, port=settings.port, bench_model=model_path,
                                   bench_allowed=allowed)
@@ -5269,6 +5416,8 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     devices.save_record(record)
     console.print(f"Device {device_id}, build {record['build_id'][:16]}:")
     _print_report(report)
+    _record_board_test(ctx, store, device_id, profile, report, digest if allowed else None, record["build_id"],
+                       source, settings.kv_choice(profile).kind)
     if not report.ok:
         sys.exit(1)
 
@@ -5300,6 +5449,8 @@ def device_runtime_status(ctx: FrameworkContext, device_name: str, as_json: bool
     console.print(f"Deployed: build {record['build_id'][:16]} on {escape(str(record.get('deployed_at')))} "
                   f"({escape(str(record.get('install')))}), checks on the device "
                   f"{'passed' if report.get('ok') else 'failed'} ({escape(str(record.get('verified_at')))})")
+    if record.get("kv_cache"):
+        console.print(f"KV cache at that deployment: {escape(str(record['kv_cache']))}")
     if not status["current"]:
         console.print("[yellow]The deployed build is not the one planned now (the profile, the pin or the recipe "
                       "changed): build and deploy again.[/yellow]")

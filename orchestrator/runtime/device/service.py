@@ -11,21 +11,29 @@ here trusts a key, pairs a device or changes the deploy settings (decision D7: t
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from orchestrator.runtime.device.trusted import TrustedDevice
 
 
 class DeviceRuntimeError(RuntimeError):
-    """A device step that cannot be done; `code` is a tool reason code, `next` the step that helps. `external_text`
-    holds what the device answered (its stderr, a check's output): never part of the message, returned to AI callers
-    marked as external text."""
+    """A device step that cannot be done; `code` is a tool reason code, `next` the step that helps, `reason` one of the
+    SSH reason codes of orchestrator/runtime/device/reasons.py when the board could not be reached or logged in to.
+    `external_text` holds what the device answered (its stderr, a check's output): never part of the message,
+    returned to AI callers marked as external text."""
 
     def __init__(self, message: str, code: str = "failed", next: str = "",
-                 external_text: Optional[List[str]] = None):
+                 external_text: Optional[List[str]] = None, reason: str = ""):
         super().__init__(message)
-        self.code, self.next = code, next
+        self.code, self.next, self.reason = code, next, reason
         self.external_text = list(external_text or [])
+
+
+def unreachable(device: TrustedDevice, reason: str) -> DeviceRuntimeError:
+    """The refusal for a board that could not be reached or logged in to, with its SSH reason code (N6)."""
+    from orchestrator.runtime.device import reasons
+    return DeviceRuntimeError(f"The device {device.label} cannot be used now ({reason}).",
+                              code=reasons.TOOL_CODES[reason], next=reasons.AI_NEXT[reason], reason=reason)
 
 
 def _device_said(what: str, device: TrustedDevice, error: Exception) -> DeviceRuntimeError:
@@ -56,14 +64,21 @@ def read_key(device: TrustedDevice, state_dir: Path) -> str:
     """The fingerprint of the key the device presents now (a key read, no login); refused unless it is the trusted
     one. Nothing is written."""
     from orchestrator.utils import ssh_trust
+    from orchestrator.runtime.device import reasons
     try:
         key = ssh_trust.fetch_host_key(device.host, device.port)
         status = ssh_trust.check_host_key(state_dir, device.host, device.port, key)
     except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
-        raise DeviceRuntimeError(f"The device {device.label} cannot be reached ({e.__class__.__name__}).",
-                                 code="hardware_unavailable",
-                                 next="Ask the person whether the device is switched on and on the network.") from None
+        reason = reasons.classify(e)
+        if reason is None and isinstance(e, OSError):
+            reason = reasons.HOST_DOWN
+        if reason is not None:
+            raise unreachable(device, reason) from None
+        raise DeviceRuntimeError(f"The host key of {device.label} could not be read ({e.__class__.__name__}).",
+                                 code="failed", next="Tell the person; the framework's log has the details.") from None
     fp = ssh_trust.fingerprint(key)
+    if status == "changed":
+        raise unreachable(device, reasons.HOST_KEY_CHANGED)
     if status != "known" or fp != device.fingerprint:
         raise DeviceRuntimeError(f"The host key of {device.label} is not the one the person trusted ({fp}); nothing "
                                  "was done.", code="needs_person",
@@ -81,11 +96,15 @@ def connect(device: TrustedDevice, state_dir: Path, user: str, expect_fingerprin
     if fp != expect_fingerprint:
         raise DeviceRuntimeError(f"The device {device.label} presents another host key than the one shown; nothing "
                                  "was done.", code="needs_person", next="Call the tool again.")
+    from orchestrator.runtime.device import reasons
     try:
         client = ssh_trust.connect(device.host, user, state_dir, port=device.port, password=None)
     except Exception as e:  # noqa: BLE001 - authentication or network
+        reason = reasons.classify(e)
+        if reason is not None and reason != reasons.AUTH_FAILED:
+            raise unreachable(device, reason) from None
         raise DeviceRuntimeError(f"The framework's SSH key does not log in to {device.label} as {user} "
-                                 f"({e.__class__.__name__}).", code="needs_person",
+                                 f"({e.__class__.__name__}).", code="needs_person", reason=reasons.AUTH_FAILED,
                                  next="Ask the person to pair the device once with 'llm-cli deploy run' or "
                                       "'llm-cli scan --device' (they enter the password there).") from None
     if on_client is not None:
@@ -252,7 +271,7 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
             result = deploy_runtime(shell, tarball=packaged.path, tarball_sha256=packaged.sha256,
                                     build_id=build.build_id, arch=str(build.plan.get("target", {}).get("arch") or
                                                                       profile.arch), settings=settings,
-                                    check=check_new_build, say=say)
+                                    check=check_new_build, say=say, kv_cache=settings.kv_choice(profile).kind)
         except RemoteError as e:
             raise _device_said("The deploy", device, e) from None
     finally:
@@ -263,6 +282,7 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         devices = DeviceRuntimeStore(state_dir, device.device_id)
         devices.save_record({"build_id": build.build_id, "deployed_at": now, "install": settings.install,
+                             "kv_cache": settings.kv_choice(profile).kind,
                              "ssh_user": settings.ssh_user, "previous": result.previous,
                              "perf_key": profile.perf_key(), "verification": report.as_dict(), "verified_at": now,
                              "unit_started": result.unit_started})
@@ -273,11 +293,13 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
 
 def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, expect_fingerprint: str, *,
               allow_untrusted: bool, on_client: Optional[Callable[[Any], None]] = None,
-              consent: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+              consent: Optional[Callable[[str], None]] = None,
+              output_dirs: Sequence[Path] = ()) -> Dict[str, Any]:
     """The checks of the deployed runtime on the device with a short llama-bench run on the model the deploy settings
     name (as `llm-cli device runtime verify --bench-model`). A model that is not a catalog model runs only when
     `allow_untrusted` (the person approved exactly that); `consent(sha256)` writes that consent to the audit log before
-    the model is loaded."""
+    the model is loaded. The measurement runs on the board, never on this computer (seventh round 2'); its result is
+    recorded with every build of that model below `output_dirs` as "tested on" the board (tested.py, N3)."""
     from orchestrator.runtime.build.store import BuildStore
     from orchestrator.runtime.catalog import load_catalog
     from orchestrator.runtime.device.package import DeviceRuntimeStore
@@ -335,12 +357,28 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
     record.update({"verification": report.as_dict(), "verified_at": report_time()})
     record.pop("format", None)
     devices.save_record(record)
+    recorded = record_board_test(output_dirs, device, profile, report, digest, record["build_id"], source,
+                                 settings.kv_choice(profile).kind)
     smoke = report.check("smoke")
     bench = (smoke.data.get("bench") if smoke is not None else None) or []
     speeds = {("prompt_ts" if r.get("n_prompt") else "gen_ts"): r.get("avg_ts") for r in bench
               if isinstance(r.get("avg_ts"), (int, float))}
     return {"ok": report.ok, "trusted_model": trusted, "model_sha256": digest, "build_id": record["build_id"],
-            "checks": [c.as_dict() for c in report.checks], **speeds}
+            "checks": [c.as_dict() for c in report.checks], "recorded_builds": len(recorded), **speeds}
+
+
+def record_board_test(output_dirs: Sequence[Path], device: Any, profile: Any, report: Any, digest: Optional[str],
+                      runtime_build_id: str, source: Any, kv_cache: Optional[str] = None) -> List[Path]:
+    """Records a benchmark on the board with the builds of its model ("tested on", N3) when the short llama-bench run
+    ran; returns the build folders it was recorded with."""
+    from orchestrator.runtime.device.tested import make_entry, record_device_test
+    smoke = report.check("smoke") if report is not None else None
+    if not digest or smoke is None or smoke.ok is None:
+        return []
+    entry = make_entry(device=device, profile=profile, report=report, model_sha256=digest,
+                       runtime_build_id=runtime_build_id, llama_cpp=f"b{source.build_number} {source.commit[:8]}",
+                       kv_cache=kv_cache)
+    return record_device_test(output_dirs, entry)
 
 
 def report_time() -> str:
@@ -349,4 +387,5 @@ def report_time() -> str:
 
 
 __all__ = ["DevicePlanFacts", "DeviceRuntimeError", "Stopped", "benchmark", "connect", "deploy", "deploy_settings",
-           "device_profile", "ensure_build", "pinned_source", "plan_facts", "probe", "read_key"]
+           "device_profile", "ensure_build", "pinned_source", "plan_facts", "probe", "read_key", "record_board_test",
+           "unreachable"]

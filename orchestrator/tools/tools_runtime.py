@@ -14,10 +14,10 @@ This computer (Ditto's offline server, self-built from the pinned llama.cpp comm
   command. A cancelled build is never activated.
 - start_local_runtime / stop_local_runtime: start (a job) and stop Ditto's server; only a build that passed its
   verification here is started. No result holds the server's address or its per-start key.
-- run_benchmark: llama-bench on a catalog tier model or a built GGUF artifact. A catalog model is trusted and runs
-  natively. Any other model is untrusted: it runs natively only after the person's explicit consent in the framework's
-  own window (always asked there, written to the audit log first; runtime decision D23), or in the Docker sandbox when
-  `sandbox` is set.
+- run_benchmark: llama-bench on a catalog tier model (Ditto's own model, natively, or in the Docker sandbox when
+  `sandbox` is set) or a built GGUF artifact. A model built for a board is never benchmarked natively on this computer
+  (seventh round 2': that would measure this computer, not the board): it runs in the Docker sandbox, and its real
+  values come from the board itself (run_device_benchmark after deploy_to_device).
 
 A board (a device the person trusted and paired, orchestrator/runtime/device/trusted.py):
 - probe_remote_device: the read-only hardware probe over SSH (as `llm-cli scan --device`).
@@ -120,8 +120,11 @@ class BenchmarkIn(BaseModel):
     tier: Optional[str] = Field(default=None, min_length=1, max_length=32, description="The tier (tier_speed)")
     artifact_id: Optional[str] = Field(default=None, min_length=18, max_length=18, pattern=r"^a_[0-9a-f]{16}$",
                                        description="A built GGUF model from list_artifacts (artifact_speed)")
-    sandbox: bool = Field(default=False, description="Run an untrusted model in the Docker sandbox instead of "
-                                                     "natively (needs a build made in the builder container)")
+    sandbox: Optional[bool] = Field(default=None, description="tier_speed: true runs Ditto's model in the Docker "
+                                                              "sandbox instead of natively. artifact_speed always runs "
+                                                              "in the Docker sandbox (a built model is never "
+                                                              "benchmarked natively here); false is refused. The "
+                                                              "sandbox needs a build made in the builder container")
 
 
 class DeviceIn(BaseModel):
@@ -416,6 +419,15 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             except Exception:  # noqa: BLE001
                 continue
         return roots
+
+    def output_folders() -> List[Path]:
+        """Where the built models are (the output folder, the framework's build folder and the folders golden
+        artifacts were saved to), for the "tested on" record of a board benchmark."""
+        from orchestrator.Core.artifact_output import artifact_folders
+        try:
+            return artifact_folders(framework)
+        except Exception:  # noqa: BLE001 - no output folder: the result stays with the board's record
+            return []
 
     def scrub(text: str) -> str:
         """An error of a local or board runtime tool as an AI may see it: the framework's folders by label, any other
@@ -715,6 +727,19 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 hashes[key] = sha256_file(path)
             return hashes[key]
 
+        def in_sandbox(inp: BenchmarkIn) -> bool:
+            """Where the run happens: Ditto's own model natively unless the sandbox is asked for; a model built for a
+            board always in the Docker sandbox, never natively on this computer (seventh round 2')."""
+            if inp.kind == "tier_speed":
+                return bool(inp.sandbox)
+            if inp.sandbox is False:
+                raise ToolError("A model built for a board is never benchmarked natively on this computer: that would "
+                                "measure this computer, not the board.", code="not_supported", field="sandbox",
+                                next="Benchmark it on the board (create_deploy_package, deploy_to_device, then "
+                                     "run_device_benchmark), or here in the Docker sandbox: leave sandbox out or set "
+                                     "it to true.")
+            return True
+
         def bench_model(inp: BenchmarkIn):
             """(path, label, sha256, trusted) of the model to measure."""
             from orchestrator.runtime.bench import BenchRunner
@@ -752,61 +777,45 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
 
         def bench_facts(inp: BenchmarkIn, ctx: ToolContext) -> CallFacts:
             from orchestrator.runtime.bench import BenchError, BenchRunner
+            sandbox = in_sandbox(inp)
             path, label, digest, trusted = bench_model(inp)
             try:
-                build, _binary = BenchRunner(state_dir()).bench_build(sandbox=inp.sandbox and not trusted)
+                build, _binary = BenchRunner(state_dir()).bench_build(sandbox=sandbox)
             except BenchError as e:
                 raise ToolError(str(e), code=e.code, next=e.next) from None
-            native = trusted or not inp.sandbox
             facts = [Fact("Model", f"{label}, sha256 {digest}"),
                      Fact("Trust", "a catalog model pinned by sha256: trusted" if trusted else
                           "not a catalog model: UNTRUSTED (a user conversion or a download)"),
                      Fact("Program", f"llama-bench of the self-built build {build.build_id[:16]} ({build.backend})"),
-                     Fact("Where", "natively on this computer" if native else
-                          "in the Docker sandbox (no network, no capabilities, read-only)")]
-            if native and not trusted:
-                facts.append(Fact("Your consent", "llama-bench loads this untrusted model natively, with your user's "
-                                                  "rights and not in a sandbox. Approving this is your consent, and "
-                                                  "it is written to the audit log before the model is loaded."))
+                     Fact("Where", "in the Docker sandbox (no network, no capabilities, read-only)" if sandbox else
+                          "natively on this computer (Ditto's own model)")]
+            if inp.kind == "artifact_speed":
+                facts.append(Fact("On the board", "this measures this computer in the sandbox, not the board: the "
+                                                  "real values of a model built for a board come from the board "
+                                                  "(deploy it, then run_device_benchmark)"))
             consequence = (f"Measures the speed of {label} with llama-bench on this computer "
-                           + ("natively" if native else "in the Docker sandbox")
-                           + (" (an UNTRUSTED model, run natively)" if native and not trusted else "") + ".")
-            bound = {"sha256": digest, "trusted": trusted, "sandbox": bool(inp.sandbox and not trusted),
-                     "label": label, "build_id": build.build_id,
-                     # a standing approval never covers an untrusted model run natively (runtime decision D23)
-                     "grant": {} if trusted or inp.sandbox else None}
-            # an untrusted model run natively is the person's alone (a security warning, runtime decision D23); so is
-            # one in the Docker sandbox unless the person allowed that for AIs (bench_untrusted_sandbox_ok, an
-            # oversight setting no AI can change; design 4.3, SEC-M9)
-            warnings = (warn("untrusted_model_native"),) if not trusted and (native or not sandbox_allowed()) else ()
+                           + ("in the Docker sandbox" if sandbox else "natively") + ".")
+            # a standing approval covers catalog models natively and every other model only in the sandbox
+            bound = {"sha256": digest, "trusted": trusted, "sandbox": sandbox, "label": label,
+                     "build_id": build.build_id, "grant": {}}
+            # an untrusted model in the Docker sandbox is the person's unless the person allowed that for AIs
+            # (bench_untrusted_sandbox_ok, an oversight setting no AI can change; design 4.3, SEC-M9)
+            warnings = (warn("untrusted_model_native"),) if not trusted and not sandbox_allowed() else ()
             return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, warnings=warnings,
-                             cap=None if trusted or inp.sandbox else Decision.ASK.value,
                              consequence_template=consequence)
 
         def run_benchmark(inp: BenchmarkIn, ctx: ToolContext) -> JobStartedOut:
-            from orchestrator.runtime.bench import AUDIT_TOOL
             bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
             if not bound.get("sha256"):
                 raise ToolError("The benchmark is not bound to what the person was shown; nothing ran.",
                                 code="failed", next="Call run_benchmark again through the framework's registry.")
             path, label, digest, trusted = bench_model(inp)
-            if digest != bound["sha256"] or trusted != bound["trusted"]:
+            if digest != bound["sha256"] or trusted != bound["trusted"] or in_sandbox(inp) != bound["sandbox"]:
                 raise ToolError("The model changed after the person was asked (its sha256 differs); nothing ran.",
                                 code="failed", next="Call run_benchmark again.")
-            if not trusted and not bound["sandbox"]:
-                # Runtime decision D23: the consent is on record before an untrusted model is loaded natively.
-                audit = getattr(registry, "audit", None)
-                if audit is None:
-                    raise ToolError("The consent to run an untrusted model natively cannot be written to the audit "
-                                    "log; nothing ran.", code="failed", next="Use sandbox=true.")
-                try:
-                    audit.record(ctx.actor or "unknown", AUDIT_TOOL, ToolTier.LOCAL_WRITE.value, "ask", "ok",
-                                 arguments={"model_sha256": digest, "build_id": bound.get("build_id"),
-                                            "runs": "natively, not in a sandbox"}, approved=True,
-                                 detail="benchmark of an untrusted model: the person approved the native run")
-                except Exception:  # noqa: BLE001 - without the record there is no consent
-                    raise ToolError("The consent could not be written to the audit log; nothing ran.", code="failed",
-                                    next="Try again, or use sandbox=true.") from None
+            if not trusted and not bound["sandbox"]:  # never: only catalog models run natively (seventh round 2')
+                raise ToolError("Only Ditto's own catalog models are benchmarked natively; nothing ran.",
+                                code="not_supported", next="Benchmark it on the board, or in the Docker sandbox.")
             stop = threading.Event()
 
             def work(handle) -> Dict[str, Any]:
@@ -845,12 +854,13 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         specs.append(ToolSpec(
             "run_benchmark", "Benchmark a model",
             "Measures prompt and generation speed (tokens per second) and peak memory with the self-built "
-            "llama-bench on this computer: a catalog tier model (tier_speed) or a built GGUF model "
-            "(artifact_speed). A model that is not a catalog model is untrusted: it runs natively only after the "
-            "person's consent in the framework, or in the Docker sandbox with sandbox=true. A job.",
+            "llama-bench on this computer: Ditto's own catalog tier model (tier_speed, natively or in the Docker "
+            "sandbox) or a built GGUF model (artifact_speed, always in the Docker sandbox: a model built for a board "
+            "is never benchmarked natively here). For real values of a model on its board use run_device_benchmark "
+            "after deploy_to_device. A job.",
             ToolTier.LOCAL_WRITE, BenchmarkIn, JobStartedOut, run_benchmark, takes_context=True,
             default_decision=Decision.DENY, max_decision=Decision.ALLOW, prepare=bench_facts,
-            # the person's consent to load an untrusted model natively is given in the framework's own window only
+            # an untrusted model in the sandbox is the person's to allow, in the framework's own window only
             channels=("framework",),
             fields={"kind": FieldMeta(kind="choice", choices=("tier_speed", "artifact_speed")), "tier": tier_field,
                     "artifact_id": FieldMeta(kind="id", list_tool="list_artifacts", describe=artifact_name),
@@ -878,7 +888,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                 next="Call list_devices for the ids you can use.")
             if not device.paired or store.key_status(device) != "known":
                 status = store.key_status(device) if device.paired else "not_paired"
-                code = {"changed": "host_key_changed", "unknown": "host_key_unknown"}.get(status, "device_not_trusted")
+                code = {"changed": "device_host_key_changed", "unknown": "host_key_unknown"}.get(status,
+                                                                                               "device_not_trusted")
                 raise blocked(code, f"The device {device.label} cannot be used now (not paired, or its trusted host "
                               "key is no longer in the framework's known_hosts).",
                               "Ask the person to trust and pair it again in the GUI or the CLI.", field="device_id")
@@ -887,11 +898,10 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         def svc_error(e: Exception, users: Sequence[str] = ()) -> ToolError:
             text = device_text(str(e), users, folder_labels()) if users else scrub(str(e))
             error = ToolError(text, code=getattr(e, "code", "failed"), next=getattr(e, "next", ""))
-            reason = getattr(e, "code", "")
-            if reason == "hardware_unavailable":
-                with_blocker(error, "device_unreachable")
-            elif reason == "needs_person" and "host key" in str(e):
-                with_blocker(error, "host_key_changed")
+            # the SSH reason code of a board that could not be reached or logged in to (N6) is its blocker
+            reason = getattr(e, "reason", "")
+            if reason:
+                with_blocker(error, reason)
             return error
 
         def device_lines(device, fp: str) -> List[Fact]:
@@ -970,6 +980,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 settings = dev.deploy_settings(state_dir(), device, profile)
                 users = device_users(device, settings)
                 plan = dev.plan_facts(state_dir(), profile)
+                kv = settings.kv_choice(profile)
                 if offline() and not plan.built and not plan.source_cached:
                     raise blocked("offline_mode", "Offline mode is on, and the build needs the pinned source.",
                                   "Ask the person to switch offline mode off or import the source.")
@@ -992,14 +1003,18 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 Fact("Install as", f"{settings.ssh_user}@{device.address} into "
                                    "~/.local/share/llm-framework/llama.cpp", person_only=True),
                 Fact("Checks", "the new build's programs are checked on the device before it becomes active; a "
-                               "build that fails is removed and the previous one stays active")]
+                               "build that fails is removed and the previous one stays active"),
+                # the KV-cache type the server gets (eighth round N7): q8_0 and q4_0 need less memory
+                Fact("KV cache", kv.describe() + (" (the systemd unit starts the server with it)"
+                                                  if settings.install == "systemd" else
+                                                  " (named in the start command)"))]
             consequence = (f"Installs the self-built llama.cpp runtime on the device {device.label}"
                            + ("" if plan.built else ", building it first on this computer") + ".")
             replaced = DeviceRuntimeStore(state_dir(), device.device_id).record()
             warnings = (warn("device_runtime_replaced"),) if replaced else ()
             return CallFacts(consequence=consequence, facts=tuple(facts), cap=Decision.ASK.value,
                              bound={"device_id": device.device_id, "fingerprint": fp, "build_id": plan.build_id,
-                                    "user": settings.ssh_user, "install": settings.install},
+                                    "user": settings.ssh_user, "install": settings.install, "kv_cache": kv.kind},
                              warnings=warnings, scope={"device_id": device.device_id},
                              consequence_template=consequence, names={"device": device.label})
 
@@ -1021,7 +1036,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     profile = dev.device_profile(state_dir(), device)
                     settings = dev.deploy_settings(state_dir(), device, profile)
                     users = device_users(device, settings)
-                    if (settings.ssh_user, settings.install) != (bound["user"], bound["install"]):
+                    if (settings.ssh_user, settings.install, settings.kv_choice(profile).kind) != \
+                            (bound["user"], bound["install"], bound.get("kv_cache")):
                         raise ValueError("The deploy settings changed after the person was asked; nothing was done.")
                     out = dev.deploy(state_dir(), device, profile, settings, bound["fingerprint"], bound["build_id"],
                                      on_client=on_client, cancelled=lambda: stop.is_set() or handle.cancelled,
@@ -1125,7 +1141,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                         raise ValueError("The deploy settings changed after the person was asked; nothing ran.")
                     handle.progress(None, None, f"checking the runtime on {device.label}")
                     out = dev.benchmark(state_dir(), device, profile, settings, bound["fingerprint"],
-                                        allow_untrusted=True, on_client=on_client, consent=consent)
+                                        allow_untrusted=True, on_client=on_client, consent=consent,
+                                        output_dirs=output_folders())
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set():
                         raise JobCancelled() from None
@@ -1177,7 +1194,9 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                      summary=lambda o: f"Board runtime job {fact(o.job_id)} is {fact(o.state)}.", **external),
             ToolSpec("run_device_benchmark", "Benchmark on a board",
                      "Runs the checks of the deployed runtime and a short llama-bench on a trusted board with the "
-                     "model its deploy settings name; an untrusted model only with the person's consent. A job.",
+                     "model its deploy settings name; an untrusted model only with the person's consent. This is "
+                     "where a model built for a board is benchmarked (never on this computer); the result is recorded "
+                     "with the build of that model as tested on the board (recorded_builds). A job.",
                      ToolTier.EXTERNAL, DeviceIn, JobStartedOut, run_device_benchmark, channels=("framework",),
                      prepare=bench_device_facts, limits=ToolLimits(per_day=20, what="board benchmarks"),
                      summary=lambda o: f"Board benchmark job {fact(o.job_id)} is {fact(o.state)}.", **external),

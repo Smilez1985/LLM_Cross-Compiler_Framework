@@ -391,7 +391,7 @@ llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
 ```bash
 llm-cli deploy list-artifacts
 llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
-llm-cli deploy run output/deploy_<model>_<timestamp>.zip --ip 192.168.1.50 --user rock
+llm-cli deploy run output/deploy_<model>_<timestamp>.zip --host 192.168.1.50 --user rock
 ```
 
 Every command and option, with examples: [docs/CLI_Usage.md](docs/CLI_Usage.md).

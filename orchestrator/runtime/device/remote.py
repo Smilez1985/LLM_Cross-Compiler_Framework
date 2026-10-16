@@ -37,8 +37,8 @@ from orchestrator.runtime.build.verify import Check, VerifyReport, parse_bench_j
 from orchestrator.runtime.device.launcher import (KEY_REL, START_SCRIPT, UNIT_NAME, UNIT_PATH, install_root,
                                                   render_systemd_unit)
 from orchestrator.runtime.device.settings import DeploySettings
-from orchestrator.runtime.server_policy import (POSIX_CLEARED_PATH, SERVER_TOOLS_REFUSAL, check_command,
-                                                posix_cleared_env, tools_check_args)
+from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, POSIX_CLEARED_PATH, SERVER_TOOLS_REFUSAL,
+                                                check_command, kv_cache_args, posix_cleared_env, tools_check_args)
 
 COMMAND_TIMEOUT = 120
 UPLOAD_TIMEOUT = 1800
@@ -222,12 +222,14 @@ def _hex16_glob() -> str:
 
 def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, build_id: str, arch: str,
                    settings: DeploySettings, check: CheckNewBuild,
-                   say: Callable[[str], None] = lambda _m: None) -> DeployResult:
+                   say: Callable[[str], None] = lambda _m: None, kv_cache: Optional[str] = None) -> DeployResult:
     """Installs the tarball on the device behind `shell` (see the module docstring). The caller has checked the
     settings against the device's profile (DeploySettings.problems) before; this function checks the device itself
     again (user, architecture, tools, systemd, sudo) before it changes anything. `check` runs the checks of the new
     build in its own folder (verify_on_device with `folder`); only when they pass does the build become `current`
-    and, with the systemd setting, the unit's build (result.activated)."""
+    and, with the systemd setting, the unit's build (result.activated). `kv_cache`: the KV-cache type the caller
+    resolved from the deploy settings (DeploySettings.kv_choice): the unit starts the server with it, and the notes
+    name the start command with it."""
     if not _RE_ID.fullmatch(build_id or "") or not _RE_SHA.fullmatch(tarball_sha256 or ""):
         raise RemoteError("the build ID or the tarball's sha256 is missing")
     if not callable(check):
@@ -363,8 +365,12 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
                       if ln.startswith("removed=") and _RE_ID16.fullmatch(ln.split("=", 1)[1])]
 
     if systemd:
-        _install_unit(shell, facts, settings, result, say)
-    elif facts.unit_installed:
+        _install_unit(shell, facts, settings, result, say, kv_cache)
+    else:
+        result.notes.append("start the server with: " + start_command(facts.home, settings.model_on_device(facts.home),
+                                                                       settings.port, kv_cache)
+                            + (f" (KV cache {kv_cache}, from the deploy settings)" if kv_cache_args(kv_cache) else ""))
+    if not systemd and facts.unit_installed:
         result.notes.append(f"a systemd unit of an earlier deployment is still installed ({UNIT_PATH}); it starts "
                             "the new build after its next restart. To remove it: sudo systemctl disable --now "
                             f"{UNIT_NAME} && sudo rm {UNIT_PATH}")
@@ -387,12 +393,12 @@ def _discard(shell: RemoteShell, root: str, id16: str, active: str) -> None:
 
 
 def _install_unit(shell: RemoteShell, facts: DeviceFacts, settings: DeploySettings, result: DeployResult,
-                  say: Callable[[str], None]) -> None:
+                  say: Callable[[str], None], kv_cache: Optional[str] = None) -> None:
     user = settings.ssh_user
     model = settings.model_on_device(facts.home)
     if user is None or model is None:
         raise RemoteError("the systemd unit needs the SSH user and the model path in the deploy settings")
-    unit = render_systemd_unit(user=user, home=facts.home, model=model, port=settings.port)
+    unit = render_systemd_unit(user=user, home=facts.home, model=model, port=settings.port, kv_cache=kv_cache)
     say(f"installing the systemd unit {UNIT_NAME} (sudo -n) ...")
     res = shell.run(f"sudo -n tee {UNIT_PATH} >/dev/null", stdin=[unit.encode("utf-8")])
     if res.status != 0:
@@ -544,5 +550,16 @@ def start_script_path(home: str) -> str:
     return f"{install_root(home)}/current/{START_SCRIPT}"
 
 
+def start_command(home: str, model: Optional[str] = None, port: int = DEVICE_DEFAULT_PORT,
+                  kv_cache: Optional[str] = None) -> str:
+    """The command that starts the board's server with the start script: the model (MODEL.gguf when the deploy
+    settings name none), the port when it is not the default, and the KV-cache type of the deploy settings."""
+    argv = [start_script_path(home), "start"]
+    words = ["sh", *(_q(a) for a in argv), _q(model) if model else "MODEL.gguf"]
+    if port != DEVICE_DEFAULT_PORT:
+        words += ["--port", str(int(port))]
+    return " ".join(words + kv_cache_args(kv_cache))
+
+
 __all__ = ["DeployResult", "DeviceFacts", "RemoteError", "RemoteShell", "deploy_runtime", "model_sha256",
-           "read_facts", "start_script_path", "verify_on_device"]
+           "read_facts", "start_command", "start_script_path", "verify_on_device"]

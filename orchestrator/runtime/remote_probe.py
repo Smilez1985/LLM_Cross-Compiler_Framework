@@ -12,6 +12,7 @@ The caller brings an authenticated SSH client whose host key is trusted (orchest
 this module never trusts a host key or asks for a password itself.
 """
 
+import ipaddress
 import re
 import shlex
 import socket
@@ -47,8 +48,25 @@ class RemoteProbeResult:
 
 
 def valid_host(host: str) -> bool:
-    """A host name or IP address without options or shell characters (a leading '-' would read as an option)."""
-    return isinstance(host, str) and bool(_HOST.fullmatch(host)) and not host.startswith("-")
+    """A board's address or host name as the person entered it (eighth round N4): an IPv4 or IPv6 address, or a host
+    name such as myboard.local; never an option (a leading '-' would read as one) or a shell character. Digits and
+    dots alone must be a valid IPv4 address (192.168.1.300 is a typo, not a name), and a name has no empty part."""
+    if not isinstance(host, str) or not _HOST.fullmatch(host) or host.startswith("-"):
+        return False
+    bare = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    if ":" in bare or bare != host:
+        try:
+            ipaddress.IPv6Address(bare)
+        except ValueError:
+            return False
+        return True
+    if re.fullmatch(r"[0-9.]+", host):
+        try:
+            ipaddress.IPv4Address(host)
+        except ValueError:
+            return False
+        return True
+    return ".." not in host
 
 
 def store_address(host: str, port: int) -> str:

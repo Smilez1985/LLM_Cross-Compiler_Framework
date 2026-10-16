@@ -77,7 +77,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   haben) bringen eine Regel für eine KI mit; Sicherheits- und
   Rechtshinweise (Pickle-Gewichte, ein Basis-Image außerhalb der Docker Official Images oder nicht gepinnt,
   Hersteller-Downloads über der weichen Grenze, ein ungeprüftes oder Community-Target, der erste Build von KI-Build-
-  Code, ein nicht vertrauenswürdiges Modell nativ oder in der Sandbox, die die Person nicht für KIs erlaubt hat
+  Code, ein nicht vertrauenswürdiges Modell nativ auf einem Board oder in der Sandbox, die die Person nicht für KIs
+  erlaubt hat
   (`bench_untrusted_sandbox_ok`), Signieren als die Person, Modelle mit Bedingungen, Lizenzen) bleiben immer bei der
   Person, ein Basis-Image außerhalb der Docker Official Images auch nach einem bestätigten Build damit, und Fakten,
   die sich nicht prüfen ließen, sind der Sicherheitshinweis `facts_unknown`, nie „kein Problem“ (die Person liest in
@@ -862,9 +863,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   fehlender Toolchain-Teil wird mit `needs_person` und `llm-cli ditto runtime install` abgelehnt; gestartet wird nur ein
   geprüfter Build, und kein Ergebnis enthält seine Adresse oder seinen Schlüssel; eine abgebrochene Installation wird
   nie aktiv, und ein abgebrochener Modell-Download behält seine `.part`-Datei; der Build einer KI entfernt keinen
-  alten Build (alte Builds bleiben, bis du sie entfernst). Ein nicht vertrauenswürdiges Modell wird
-  nativ nur nach deiner Zustimmung im eigenen Fenster des Frameworks gemessen, die zuerst ins Audit-Log geschrieben
-  wird, oder in der Docker-Sandbox. Die Board-Tools erreichen nur vertraute Geräte mit dem vertrauten Host-Schlüssel,
+  alten Build (alte Builds bleiben, bis du sie entfernst). Nur Dittos eigene Katalogmodelle werden nativ gemessen;
+  ein für ein Board gebautes Modell nie (siebte Runde, 2'): `run_benchmark` misst es in der Docker-Sandbox, und seine
+  echten Werte kommen vom Board (`run_device_benchmark`). Die Board-Tools erreichen nur vertraute Geräte mit dem
+  vertrauten Host-Schlüssel,
   werden immer erfragt und nie von einer Daueranfrage abgedeckt; ihre Fakten, Folgen, Fortschritte, Prüfergebnisse und
   Fehler (auch bei Erfolg) nennen nie das Gerätekonto (weder die gekoppelte Anmeldung noch das Konto, das die
   Deploy-Einstellungen nennen) oder einen Pfad auf dem Board (das Fenster der Person zeigt die Anmeldung und den Pfad
@@ -950,6 +952,35 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ebenfalls an; bei wenig übrigem Platz sagen es die Frage oder der Befehl), eine erneut aufgenommene Datei wird
   ersetzt, eine gelesene, aber nicht aufgenommene Datei wird mit dem Grund genannt, und ein Export als Wissenspaket
   lässt diese Texte weg.
+
+- **Deployment auf ein Board über ein Netzwerk, das wegbricht** (achte Runde, N4 und N5): Du nennst das Board über
+  seine Adresse oder seinen Hostnamen (`myboard.local`; `llm-cli deploy run --host`, `--ip` bleibt als alter Name).
+  Bricht das Netzwerk während eines Deployments weg (ein Board nur mit WLAN), wartet das Deployment auf das Board
+  (Vorgabe 300 s, `--wait`), zeigt mit Zeit und Grenze, dass es wartet, und lässt sich abbrechen („Abbrechen“ im
+  Deployment-Fenster, Strg+C in der CLI, `cancel_job`); das Ergebnis sagt dann, ob `deploy.sh` schon gestartet war,
+  auch wenn das Netzwerk genau beim Start wegbrach. Es meldet sich mit derselben Prüfung des Host-Schlüssels neu an
+  und macht weiter: Der Upload setzt bei den angekommenen Bytes fort, sobald ihre sha256 passt, und `deploy.sh` läuft
+  auf dem Board für sich und wird einmal gestartet, nie zweimal. Ergebnisse von `deploy_to_device` haben zusätzlich
+  `reason_code`, `resumed` und `waited_s`; sein Fortschritt nennt das Board über deinen Namen dafür.
+- **Warum ein Board nicht erreichbar ist** (N6): die Grund-Codes `device_host_down`, `device_port_closed`,
+  `device_auth_failed` und `device_host_key_changed` (`orchestrator/runtime/device/reasons.py`) mit dem, was passiert
+  ist, und dem nächsten Schritt für die Person auf Englisch und Deutsch, in GUI und CLI. Eine KI bekommt den reinen
+  Code mit einem nächsten Schritt, ohne Adresse und ohne Konto; sie sind die Blocker der Board-Tools und ersetzen
+  `device_unreachable` und `host_key_changed` des Faktenkatalogs.
+- **KV-Cache des Servers auf einem Board** (N7): `f16`, `q8_0` oder `q4_0` (`-ctk`/`-ctv`, geprüfte Wörter der
+  gemeinsamen Startregel und des Startskripts). Standardmäßig automatisch: `q8_0`, wenn neben dem Modell auf dem Board
+  wenig Speicher frei bleibt (aus seiner Probe), sonst `f16`; du kannst immer einen Typ wählen, und `f16` schaltet ihn
+  aus. Gewählt mit `llm-cli device settings --kv-cache` oder im Deployment-Fenster (eine gespeicherte Wahl, die das
+  Fenster nicht zeigt, bleibt, außer du wählst dort); die systemd-Unit und der Startbefehl nehmen ihn aus den
+  Deploy-Einstellungen des Boards, ein im Deployment-Fenster gemachtes Paket nennt ihn im Startbefehl seines
+  `deploy.sh`, und die Frage von `deploy_device_runtime` nennt ihn.
+- **„Getestet auf Board X“** (N3): Ein bestandener Benchmark auf dem Board (`llm-cli device runtime verify` oder
+  `deploy` mit `--bench-model`, `run_device_benchmark` und der neue Teil „Benchmark auf einem Board“ im
+  Deployment-Fenster) wird bei jedem Build dieses Modells im Ausgabeordner, im Build-Ordner des Frameworks und in den
+  Ordnern, in die Builds gespeichert wurden, vermerkt (`device_tests.json`, gefunden über die sha256 des Modells), mit
+  dem KV-Cache der Messung neben dem, auf den der Server des Boards eingestellt ist. Das Deployment-Fenster zeigt einen
+  solchen Build als „getestet auf <Board>“ und trägt nach dem Deployment eines GGUF-Modells Board und Modell für diese
+  Messung ein.
 
 ### Geändert
 - **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte
@@ -1124,10 +1155,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   deployt (`llm-cli device runtime build` und `deploy`). `llm-cli scan --device` merkt sich den SSH-Benutzer als
   Deploy-Benutzer des Boards (nie root).
 - Die Perplexity-Prüfung des Dataset-Managers nutzt das selbst gebaute `llama-perplexity` dieses Rechners, statt
-  `ghcr.io/smilez1985/llm-runtime` zu holen: Katalogmodelle nativ; jedes andere Modell nativ nur nach deiner
-  Zustimmung, die zuerst ins Tool-Audit-Log geschrieben wird; die Docker-Sandbox (das eigene, lokal gebaute Image des
-  Builds, ohne Netzwerk) auf Wunsch. Eine gescheiterte Messung ist ein Fehler mit Grund statt der Werte 999.99 oder
-  888.88.
+  `ghcr.io/smilez1985/llm-runtime` zu holen: Katalogmodelle (Dittos eigene) nativ oder in der Docker-Sandbox; jedes
+  andere Modell, etwa ein für ein Board umgewandeltes, nur in der Docker-Sandbox (das eigene, lokal gebaute Image des
+  Builds, ohne Netzwerk), nie nativ auf diesem Computer. Eine gescheiterte Messung ist ein Fehler mit Grund statt
+  der Werte 999.99 oder 888.88.
 - **MCP-Ergebnisse**: Der Textblock eines Tool-Ergebnisses beginnt mit einem Satz, der nur aus Fakten des Frameworks
   besteht (IDs, Zustände, Anzahlen), gefolgt vom JSON, eingepackt als nicht vertrauenswürdige Daten;
   Ausgabeschemas markieren jedes Feld mit externem Text (`"untrusted": true`); Ergebnisse tragen `notes`, die das
@@ -1668,8 +1699,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   für dich.
 - **`run_benchmark` startet genau die Datei, die es gehasht hat**: das Modell wird einmal geöffnet, über die offene
   Datei gehasht und llama-bench als genau diese offene Datei übergeben (nativ ein geerbter Deskriptor, in der
-  Sandbox ein privater Hardlink), so dass ein Katalogmodell zwischen Prüfung und einem nativen Lauf ohne Zustimmung
-  nicht gegen ein nicht vertrauenswürdiges ausgetauscht werden kann.
+  Sandbox ein privater Hardlink), so dass ein Katalogmodell zwischen Prüfung und einem nativen Lauf nicht gegen ein
+  anderes Modell ausgetauscht werden kann.
 - **Fehler der Board- und lokalen Laufzeit-Tools nennen keinen Pfad des Rechners**: Pfade in ihren Meldungen
   erscheinen als Ordner-Bezeichnungen des Frameworks (`state:...`, `cache:...`, `output:...`, `models:...`) oder nur
   als Dateiname, nie als Pfad des Rechners oder `~/...` (auch nach einem Doppelpunkt wie in `file:/...` oder

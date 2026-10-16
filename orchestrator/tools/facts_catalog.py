@@ -31,8 +31,10 @@ from orchestrator.tools.spec import CallWarning
 
 # Raised whenever SECURITY_LEGAL or a blocker's reason code changes (the snapshot test pins it): every delegation made
 # under an older version is outdated and must be renewed by the person. 2: the remote mode's codes are gone
-# (artifact_from_other_computer, transfer_unsupported; DECISIONS round 8).
-DELEGATION_RULES_VERSION = 2
+# (artifact_from_other_computer, transfer_unsupported; DECISIONS round 8). 3: snapshot_no_room (eighth round, answer
+# 2) and why a board cannot be reached (device_host_down, device_port_closed, device_auth_failed,
+# device_host_key_changed instead of device_unreachable and host_key_changed; N6).
+DELEGATION_RULES_VERSION = 3
 
 # Starting values (design [A7]), tuned with the evals.
 GB = 1000 ** 3
@@ -104,8 +106,11 @@ BLOCKERS: Dict[str, BlockerSpec] = {
     "artifact_busy": BlockerSpec("limit_reached"),
     "device_not_trusted": BlockerSpec("needs_person", person_action=_PAIR),
     "host_key_unknown": BlockerSpec("needs_person", person_action=_PAIR),
-    "host_key_changed": BlockerSpec("needs_person", person_action="action.check_device"),
-    "device_unreachable": BlockerSpec("hardware_unavailable", person_action="action.device_on"),
+    # why a board cannot be reached over SSH (eighth round N6; orchestrator/runtime/device/reasons.py)
+    "device_host_key_changed": BlockerSpec("needs_person", person_action="action.check_device"),
+    "device_host_down": BlockerSpec("hardware_unavailable", person_action="action.device_on"),
+    "device_port_closed": BlockerSpec("needs_person", person_action="action.device_ssh"),
+    "device_auth_failed": BlockerSpec("needs_person", person_action="action.device_login"),
     "toolchain_missing": BlockerSpec("needs_person", person_action="action.install_tools"),
     "runtime_not_built": BlockerSpec("missing_information", resolved_by="build_local_runtime"),
     # The catalog model of a tier is fetched by build_local_runtime(model_tier=...) (the design named
@@ -186,8 +191,8 @@ WARNINGS: Dict[str, WarningSpec] = {
     "preflight_error": WarningSpec(
         "security", "The pre-flight check found an error ({check}); building anyway overrides it."),
     "untrusted_model_native": WarningSpec(
-        "security", "Runs a model that is not a catalog model natively, with the user's rights, or in the Docker "
-                    "sandbox the person has not allowed for AIs.",
+        "security", "Runs a model that is not a catalog model natively on a board, as the device account, or in "
+                    "the Docker sandbox of this computer the person has not allowed for AIs.",
         safer="safer.sandbox"),
     "signs_as_you": WarningSpec("security", "The pack is signed with the person's community key."),
     "facts_unknown": WarningSpec(
@@ -251,7 +256,8 @@ class ToolFacts:
 
 
 _FS = frozenset
-_DEVICE = _FS({"device_not_trusted", "device_unreachable", "host_key_unknown", "host_key_changed", "device_busy"})
+_DEVICE = _FS({"device_not_trusted", "host_key_unknown", "device_host_key_changed", "device_host_down",
+               "device_port_closed", "device_auth_failed", "device_busy"})
 _BUILD_BLOCKERS = _FS({"target_revoked", "sandbox_off", "offline_mode", "gated_no_access", "unknown_repository",
                        "no_convertible_weights", "disk_full", "commit_required"})
 _BUILD_SITUATION = _FS({"disk_tight", "download_large", "host_fit_tight", "host_fit_does_not_fit", "target_fit_tight",

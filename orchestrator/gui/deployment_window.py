@@ -11,8 +11,21 @@ Updates v2.3.0:
 - Safe config access via ConfigManager.get().
 - Improved file browsing for artifacts.
 - Robust SecretsManager integration.
+
+Board deployment (eighth round N4-N7):
+- The board is named by its address or its host name (192.168.1.50 or myboard.local); the host key is trusted per
+  host string, after the person compared the fingerprint (dialogs.confirm_host_key).
+- When the network drops during the deploy (a Wi-Fi board), the window shows that it waits for the board, how long
+  it has waited and the limit, with a Cancel button; the upload then continues where it stopped
+  (DeploymentManager.deploy_package).
+- A board that cannot be reached or logged in to says why and what to do (orchestrator/runtime/device/reasons.py).
+- The KV-cache type of the board's server: automatic (q8_0 for a board with little RAM next to the model, from its
+  probe) or the person's choice; it is named in the start command of the package and kept in the board's deploy
+  settings.
+Every text that can hold a value from outside the framework is plain text (gui/plain.py).
 """
 
+import threading
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -21,9 +34,47 @@ from PySide6.QtWidgets import (
     QProgressBar, QInputDialog, QLineEdit, QListWidgetItem
 )
 from PySide6.QtCore import Qt, QThread, Signal
-from orchestrator.utils.localization import get_instance as get_i18n
+from orchestrator.utils.localization import get_instance as get_i18n, ui_text
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
+from orchestrator.gui.plain import ask, plain_box, plain_label, plain_tooltip
 from orchestrator.utils import input_history
+
+KV_CHOICES = ("auto", "f16", "q8_0", "q4_0")
+# What a deploy keeps in the board's deploy settings when the person did not choose the KV cache in this window: the
+# saved choice stays (the window may not have shown it, e.g. under another name of the board).
+KV_KEEP = "keep"
+
+
+def _clock(seconds: float) -> str:
+    seconds = int(max(0, seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def _size(n: int) -> str:
+    return f"{n / 1000 ** 2:.1f} MB"
+
+
+def event_text(event, host: str) -> str:
+    """The visible state of a running deploy (N5) in the interface language."""
+    if event.kind == "waiting":
+        key = "device.wait.status_install" if event.step == "install" else "device.wait.status"
+        return ui_text(key, address=host, elapsed=_clock(event.elapsed), limit=_clock(event.limit))
+    if event.kind == "back":
+        if event.step == "install":
+            return ui_text("device.wait.install")
+        return ui_text("device.wait.back", done=_size(event.done), total=_size(event.total))
+    if event.kind == "uploading":
+        return ui_text("device.deploy.uploading", done=_size(event.done), total=_size(event.total))
+    return ui_text("device.deploy.installing")
+
+
+def tested_suffix(build_dir: Path) -> str:
+    """" · tested on <boards>" for a build that passed its benchmark on a board (N3; the names come from the boards'
+    probes, shown as plain text), else ""."""
+    from orchestrator.runtime.device.tested import tested_on
+    boards = tested_on(build_dir)
+    return " · " + ui_text("device.tested_on", boards=", ".join(boards)) if boards else ""
+
 
 class DeploymentWorker(QThread):
     """
@@ -31,6 +82,7 @@ class DeploymentWorker(QThread):
     """
     progress = Signal(str)
     finished = Signal(bool, str)
+    event = Signal(object)   # DeployEvent: the upload's progress, the wait for the board
 
     def __init__(self, framework, artifact_path, profile_name, docker_config, target_ip, user, password):
         super().__init__()
@@ -41,6 +93,27 @@ class DeploymentWorker(QThread):
         self.target_ip = target_ip
         self.user = user
         self.password = password
+        self.kv_cache = None            # the KV-cache type named in the package's start command
+        self.kv_setting = KV_KEEP       # what the board's deploy settings get: None (automatic), a type, or KV_KEEP
+        self.device_id = None           # the board's record after a successful deploy
+        self.model_name = None          # the GGUF model the package installed (for the benchmark on the board)
+        self._stop = threading.Event()
+        self._client = None
+
+    def cancel(self) -> None:
+        """Stops the deploy: the wait for the board ends at once, a running upload stops and its session closes."""
+        self._stop.set()
+        client = self._client
+        if client is not None:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001 - the session is closed anyway
+                pass
+
+    def _on_client(self, client) -> None:
+        self._client = client
+        if self._stop.is_set():
+            client.close()
 
     def run(self):
         dep_mgr = self.framework.get_component("deployment_manager")
@@ -59,39 +132,58 @@ class DeploymentWorker(QThread):
             if hasattr(self.framework, "resolve_path"):
                 output_dir = self.framework.resolve_path(output_dir)
 
+            extra = {"kv_cache": self.kv_cache} if self.kv_cache else {}
             pkg_path = dep_mgr.create_deployment_package(
                 artifact_path=self.artifact_path,
                 profile_name=self.profile_name,
                 docker_config=self.docker_config,
-                output_dir=output_dir
+                output_dir=output_dir,
+                **extra
             )
             
             if not pkg_path:
                 self.finished.emit(False, "Package generation failed.")
                 return
 
-            # 2. Deployment
+            # 2. Deployment: waits for the board when its network drops, and says why when it cannot reach it
             self.progress.emit(f"🚀 Deploying to {self.target_ip}...")
-            success = dep_mgr.deploy_artifact(
-                artifact_path=pkg_path,
-                target_ip=self.target_ip,
-                user=self.user,
-                password=self.password
-            )
+            result = dep_mgr.deploy_package(Path(pkg_path), self.target_ip, self.user, password=self.password,
+                                            cancelled=self._stop.is_set, on_client=self._on_client,
+                                            on_event=self.event.emit)
 
-            if success:
+            if result.success:
                 self._remember_device()
-                self.finished.emit(True, f"Deployment successful!\nPackage: {pkg_path.name}")
+                try:
+                    # deploy.sh copies a GGUF model to models/ in the home folder; with Docker it goes into the
+                    # container instead, so there is no path on the board to measure
+                    from orchestrator.Core.deployment_manager import resolve_model_artifact
+                    name = resolve_model_artifact(Path(self.artifact_path)).name
+                    docker = bool((self.docker_config or {}).get("use_docker"))
+                    self.model_name = name if name.lower().endswith(".gguf") and not docker else None
+                except (OSError, ValueError):
+                    self.model_name = None
+                self.finished.emit(True, ui_text("device.deploy.done", name=pkg_path.name))
             else:
-                self.finished.emit(False, "Deployment failed during transfer/execution.")
+                self.finished.emit(False, self._failure_text(result))
 
         except Exception as e:
             self.finished.emit(False, str(e))
 
+    def _failure_text(self, result) -> str:
+        """Why the deploy failed, for the person: the reason code's title and next step first, then the details."""
+        from orchestrator.runtime.device import reasons
+        parts = []
+        if result.code in reasons.REASONS:
+            parts.append(reasons.person_text(result.code, address=self.target_ip))
+        parts.append(ui_text("device.deploy.failed", reason=result.reason or "Deployment failed during "
+                                                                            "transfer/execution."))
+        return "\n\n".join(parts)
+
     def _remember_device(self, port: int = 22) -> None:
         """After a deployment to a device whose host key the person confirmed in this window (confirm_host_key) and
         that the framework logged in to: its record, so AI tools may name it for deploy_to_device (each deploy is
-        still confirmed). Written only here and in the CLI, never by a tool; it never fails the deployment."""
+        still confirmed). Written only here and in the CLI, never by a tool; it never fails the deployment. The KV-cache
+        choice of this window goes into the board's deploy settings."""
         from orchestrator.runtime.device.trusted import record_trusted_device
         from orchestrator.utils import ssh_trust
         state = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
@@ -104,8 +196,94 @@ class DeploymentWorker(QThread):
         except Exception:  # noqa: BLE001 - unreachable now: the next deployment records it
             return
         audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
-        record_trusted_device(Path(state), self.target_ip, port, self.user, key, via="gui", paired=True,
-                              audit=audit, actor="gui")
+        device = record_trusted_device(Path(state), self.target_ip, port, self.user, key, via="gui", paired=True,
+                                       audit=audit, actor="gui")
+        if device is not None:
+            self.device_id = device.device_id
+            if self.kv_setting != KV_KEEP:
+                _save_kv_setting(Path(state), device.device_id, self.kv_setting)
+
+
+def _save_kv_setting(state_dir: Path, device_id: str, kind) -> None:
+    """Keeps the person's KV-cache choice in the board's deploy settings (None: automatic); never fails a deploy."""
+    from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    from orchestrator.runtime.profile import ProfileStore
+    store = ProfileStore(state_dir)
+    try:
+        current = DeploySettings.from_dict(store.load_deploy_settings(device_id))
+        if current.kv_cache != kind:
+            store.save_deploy_settings(device_id, current.changed(kv_cache=kind).as_dict())
+    except (SettingsError, ValueError, OSError):
+        pass  # damaged settings stay as they are; `llm-cli device settings` repairs them
+
+
+class BoardBenchWorker(QThread):
+    """The checks of the board's runtime with a short llama-bench run on a model on the board (seventh round 2',
+    N3): the measurement runs on the board, never on this computer, and a passed run is recorded with the builds of
+    that model as "tested on" the board."""
+    finished = Signal(bool, str)
+
+    def __init__(self, framework, device_id: str, model: str, allow_untrusted: bool):
+        super().__init__()
+        self.framework = framework
+        self.device_id = device_id
+        self.model = model
+        self.allow_untrusted = allow_untrusted
+
+    def _consent(self, digest: str) -> None:
+        """The person's yes to an untrusted model, written to the audit log before the board loads it."""
+        from orchestrator.runtime.device.service import DeviceRuntimeError
+        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        try:
+            if audit is None:
+                raise RuntimeError("no audit log")
+            audit.record("user", "device_runtime_untrusted_model", "external", "ask", "ok",
+                         arguments={"device": self.device_id, "model_sha256": digest}, approved=True,
+                         detail="an untrusted model may run natively on the device for the short llama-bench run",
+                         extra={"answer": "accepted", "confirm_channel": "framework-gui"})
+        except Exception as e:  # noqa: BLE001 - without its record there is no consent
+            raise DeviceRuntimeError(f"The consent could not be written to the audit log ({e}); nothing was "
+                                     "loaded.") from None
+
+    def run(self):
+        from orchestrator.runtime.device import reasons
+        from orchestrator.runtime.device import service as dev
+        from orchestrator.runtime.device.settings import SettingsError, check_model_path
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        config = getattr(self.framework, "config", None)
+        state = Path(getattr(config, "user_state_dir", "") or ".")
+        device = TrustedDevices(state).get(self.device_id)
+        if device is None:
+            self.finished.emit(False, ui_text("device.bench.none"))
+            return
+        try:
+            from orchestrator.Core.artifact_output import artifact_folders
+            profile = dev.device_profile(state, device)
+            settings = dev.deploy_settings(state, device, profile).changed(model=check_model_path(self.model))
+            fp = dev.read_key(device, state)
+            out = dev.benchmark(state, device, profile, settings, fp, allow_untrusted=self.allow_untrusted,
+                                consent=self._consent, output_dirs=artifact_folders(self.framework))
+        except SettingsError as e:
+            self.finished.emit(False, str(e))
+            return
+        except dev.DeviceRuntimeError as e:
+            parts = [reasons.person_text(e.reason, address=device.host, port=device.port)
+                     if e.reason in reasons.REASONS else str(e)]
+            parts += e.external_text[-10:]  # the board's own words, shown as plain text
+            self.finished.emit(False, "\n".join(parts))
+            return
+        except Exception as e:  # noqa: BLE001 - a failure no step expected
+            self.finished.emit(False, str(e))
+            return
+        lines = [f"{ui_text('device.bench.prompt')}: {out.get('prompt_ts') or '-'} t/s",
+                 f"{ui_text('device.bench.gen')}: {out.get('gen_ts') or '-'} t/s",
+                 f"{ui_text('device.bench.checks')}: " + ", ".join(f"{c['name']} {c['result']}"
+                                                                   for c in out.get("checks", []))]
+        board = profile.get("BOARD_MODEL") or device.label
+        lines.append(ui_text("device.bench.recorded", board=board, count=out["recorded_builds"])
+                     if out.get("recorded_builds") else ui_text("device.bench.not_recorded"))
+        self.finished.emit(bool(out.get("ok")), "\n".join(lines))
+
 
 class DeploymentWindow(QWidget):
     def __init__(self, framework_manager, parent=None):
@@ -130,10 +308,10 @@ class DeploymentWindow(QWidget):
         grp_artifact = QGroupBox("1. Select Golden Artifact")
         layout_art = QVBoxLayout()
         self.list_artifacts = QListWidget()
+        self.list_artifacts.currentItemChanged.connect(lambda *_: self._update_kv_auto())
         layout_art.addWidget(self.list_artifacts)
         # Save...: a build still in the framework's build folder goes to the output folder or another folder
         # (eighth round, answer 3); the person's save dialog, never by itself
-        from orchestrator.utils.localization import ui_text
         self.btn_save = QPushButton(ui_text("save.button").replace("&", "&&"))
         self.btn_save.clicked.connect(self._on_save)
         layout_art.addWidget(self.btn_save)
@@ -143,21 +321,24 @@ class DeploymentWindow(QWidget):
         
         # --- 2. Target Profile Selection ---
         grp_target = QGroupBox("2. Select Target Hardware Profile")
+        layout_group = QVBoxLayout()
         layout_target = QHBoxLayout()
         self.cb_profiles = QComboBox()
         layout_target.addWidget(QLabel("Profile:"))
         layout_target.addWidget(self.cb_profiles, 1)
         
-        # Target Connection Info (Quick Edit); devices deployed to before are offered first
+        # Target Connection Info (Quick Edit); devices deployed to before are offered first. The person enters what
+        # they know: an IP address or a host name such as myboard.local (N4).
         self.cb_device = QComboBox()
         self.cb_device.setEditable(True)
         self.cb_device.setInsertPolicy(QComboBox.NoInsert)
         self.cb_device.setMinimumWidth(160)
-        self.cb_device.setAccessibleName("Target IP or host name")
-        self.cb_device.lineEdit().setPlaceholderText("Target IP")
+        self.cb_device.setAccessibleName(ui_text("device.address.label").rstrip(":"))
+        self.cb_device.lineEdit().setPlaceholderText(ui_text("device.address.hint"))
         recent = self._recent("device")
         fill_recent(self.cb_device, recent, text=None if recent else "192.168.1.100")
-        layout_target.addWidget(QLabel("IP:"))
+        self.cb_device.editTextChanged.connect(lambda *_: self._update_kv_auto())
+        layout_target.addWidget(QLabel(ui_text("device.address.label")))
         layout_target.addWidget(self.cb_device)
         
         self.txt_user = QLineEdit("root")
@@ -169,8 +350,24 @@ class DeploymentWindow(QWidget):
         btn_refresh = QPushButton("🔄 Refresh")
         btn_refresh.clicked.connect(self.refresh_data)
         layout_target.addWidget(btn_refresh)
+        layout_group.addLayout(layout_target)
         
-        grp_target.setLayout(layout_target)
+        # The KV cache of the board's server (N7): automatic or the person's choice, and what it changes.
+        layout_kv = QHBoxLayout()
+        self.cb_kv = QComboBox()
+        self.cb_kv.setAccessibleName(ui_text("device.kv.label").rstrip(":"))
+        for kind in KV_CHOICES:
+            self.cb_kv.addItem(ui_text(f"device.kv.{kind}") if kind != "auto" else "", kind)
+        self._kv_presetting, self._kv_touched = False, False
+        self.cb_kv.currentIndexChanged.connect(self._on_kv_changed)
+        self.cb_kv.setToolTip(plain_tooltip(ui_text("device.kv.explain")))
+        layout_kv.addWidget(QLabel(ui_text("device.kv.label")))
+        layout_kv.addWidget(self.cb_kv, 1)
+        layout_group.addLayout(layout_kv)
+        self.lbl_kv = plain_label(ui_text("device.kv.explain"))
+        layout_group.addWidget(self.lbl_kv)
+
+        grp_target.setLayout(layout_group)
         layout.addWidget(grp_target)
         
         # --- 3. Docker Configuration ---
@@ -191,11 +388,15 @@ class DeploymentWindow(QWidget):
         layout_docker.addWidget(self.table_docker)
         self.grp_docker.setLayout(layout_docker)
         layout.addWidget(self.grp_docker)
+        self._init_board_bench(layout)
         
-        # --- Progress Bar ---
+        # --- Progress Bar and the visible state of the deploy (uploading, waiting for the board) ---
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
+        self.lbl_status = plain_label("")
+        self.lbl_status.setVisible(False)
+        layout.addWidget(self.lbl_status)
         
         # --- 4. Action Buttons ---
         btn_layout = QHBoxLayout()
@@ -205,7 +406,12 @@ class DeploymentWindow(QWidget):
         self.btn_deploy.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; padding: 10px;")
         
         btn_layout.addWidget(self.btn_deploy)
+        self.btn_cancel = QPushButton(ui_text("device.wait.cancel"))
+        self.btn_cancel.setVisible(False)
+        self.btn_cancel.clicked.connect(self._on_cancel)
+        btn_layout.addWidget(self.btn_cancel)
         layout.addLayout(btn_layout)
+        self._update_kv_auto()
 
     def _add_docker_row(self, name, options):
         row = self.table_docker.rowCount()
@@ -215,6 +421,67 @@ class DeploymentWindow(QWidget):
         cb.addItems(options)
         self.table_docker.setCellWidget(row, 1, cb)
 
+    # --- the KV cache (N7) ---
+
+    def _board(self):
+        """(device id, stored profile, deploy settings) of the board the address names, when it was probed before."""
+        from orchestrator.runtime.device.devices import DeviceNotFound, resolve_device
+        from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+        from orchestrator.runtime.profile import ProfileError, ProfileStore
+        state = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
+        address = self.cb_device.currentText().strip()
+        if not state or not address:
+            return None, None, DeploySettings()
+        store = ProfileStore(Path(state))
+        try:
+            device_id = resolve_device(store, address)
+            profile = store.load_device(device_id)
+            settings = DeploySettings.from_dict(store.load_deploy_settings(device_id))
+        except (DeviceNotFound, ProfileError, SettingsError, ValueError, OSError):
+            return None, None, DeploySettings()
+        return device_id, profile, settings
+
+    def _model_bytes(self):
+        from orchestrator.Core.deployment_manager import resolve_model_artifact
+        item = self.list_artifacts.currentItem()
+        if item is None:
+            return None
+        try:
+            return resolve_model_artifact(Path(item.data(Qt.UserRole))).stat().st_size
+        except (OSError, ValueError, TypeError):
+            return None
+
+    def _update_kv_auto(self):
+        """The automatic choice for this board and model. When the address names another known board, its saved
+        choice is preselected; a choice the person made here is never replaced by a change of the model."""
+        if not hasattr(self, "cb_kv"):
+            return
+        device_id, profile, settings = self._board()
+        auto = settings.changed(kv_cache=None).kv_choice(profile, self._model_bytes())
+        why = ui_text(f"device.kv.why_{auto.why}", free=auto.free_gib)
+        self.cb_kv.setItemText(0, ui_text("device.kv.auto", kind=auto.kind, why=why))
+        if device_id != getattr(self, "_kv_device", ""):
+            self._kv_device = device_id
+            self._kv_presetting = True
+            try:
+                self.cb_kv.setCurrentIndex(max(0, self.cb_kv.findData(settings.kv_cache or "auto")))
+            finally:
+                self._kv_presetting = False
+            self._kv_touched = False  # what is shown now is the board's saved choice, not one made here
+        self._kv_auto = auto.kind
+
+    def _on_kv_changed(self, *_):
+        if not self._kv_presetting:
+            self._kv_touched = True
+
+    def kv_choice(self):
+        """(type for the package's start command, what the board's deploy settings get: None for automatic, or
+        KV_KEEP when the person did not choose here, so a saved choice the window could not show is never
+        replaced)."""
+        kind = self.cb_kv.currentData() or "auto"
+        setting = (None if kind == "auto" else kind) if self._kv_touched else KV_KEEP
+        return (getattr(self, "_kv_auto", "f16") if kind == "auto" else kind), setting
+
     def refresh_data(self):
         # Artifacts
         self.list_artifacts.clear()
@@ -222,7 +489,6 @@ class DeploymentWindow(QWidget):
         # Every finished build writes build_info.json; list builds, not raw folders or archives: in the output
         # folder, in the framework's build folder (not saved yet, earlier builds) and where the person saved them.
         from orchestrator.Core.artifact_output import BUILDS, list_artifacts
-        from orchestrator.utils.localization import ui_text
         try:
             listed = list_artifacts(self.framework)
         except Exception:  # noqa: BLE001 - a folder that cannot be read lists nothing
@@ -237,6 +503,7 @@ class DeploymentWindow(QWidget):
                 build.get("quantization") or "default",
                 build.get("board") or build.get("target") or "?",
             ))
+            label += tested_suffix(item.path)
             if item.where == BUILDS:
                 label += f" ({ui_text('save.not_saved')})"
             list_item = QListWidgetItem(f"📦 {label}")
@@ -267,7 +534,6 @@ class DeploymentWindow(QWidget):
         from orchestrator.Core.artifact_output import BUILDS
         from orchestrator.gui import artifact_save
         from orchestrator.gui.plain import plain_box
-        from orchestrator.utils.localization import ui_text
         item = self.list_artifacts.currentItem()
         if item is None or item.data(Qt.UserRole + 1) != BUILDS:
             plain_box(self, "information", ui_text("save.button").rstrip("…"), ui_text("save.only_build_folder"))
@@ -327,6 +593,8 @@ class DeploymentWindow(QWidget):
 
         # 4. Start Worker
         self.btn_deploy.setEnabled(False)
+        self.btn_cancel.setVisible(True)
+        self.btn_cancel.setEnabled(True)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0) # Indeterminate animation
         
@@ -334,19 +602,132 @@ class DeploymentWindow(QWidget):
             self.framework, artifact_path, profile_name, 
             docker_config, target_ip, user, password
         )
+        self.worker.kv_cache, self.worker.kv_setting = self.kv_choice()
         self.worker.progress.connect(self._update_progress)
+        self.worker.event.connect(self._on_event)
         self.worker.finished.connect(self._on_finished)
         self.worker.start()
+
+    def _on_cancel(self):
+        if self.worker is not None:
+            self.btn_cancel.setEnabled(False)
+            self.worker.cancel()
 
     def _update_progress(self, msg):
         self.btn_deploy.setText(msg)
 
+    def _on_event(self, event):
+        """The deploy's visible state: the upload's progress, or the wait for the board with its time (N5)."""
+        target = self.worker.target_ip if self.worker is not None else ""
+        self.lbl_status.setText(event_text(event, target))
+        self.lbl_status.setVisible(True)
+        if event.kind == "uploading" and event.total:
+            self.progress_bar.setRange(0, 1000)
+            self.progress_bar.setValue(int(event.done * 1000 / event.total))
+        else:
+            self.progress_bar.setRange(0, 0)
+
     def _on_finished(self, success, msg):
         self.btn_deploy.setEnabled(True)
         self.btn_deploy.setText("🚀 Deploy to Target")
+        self.btn_cancel.setVisible(False)
         self.progress_bar.setVisible(False)
+        self.lbl_status.setVisible(False)
         
         if success:
-            QMessageBox.information(self, "Success", msg)
+            worker = self.worker
+            if worker is not None and worker.device_id and worker.model_name:
+                # after a deploy, the benchmark on the board is the next step: the board and the model are filled in
+                self._refresh_boards(select=worker.device_id)
+                self.txt_bench_model.setText(f"models/{worker.model_name}")
+                msg = f"{msg}\n\n{ui_text('device.bench.after_deploy')}"
+            plain_box(self, "information", "Success", msg)
         else:
-            QMessageBox.critical(self, "Error", msg)
+            plain_box(self, "critical", "Error", msg)
+
+    # --- the benchmark on a board (seventh round 2', N3) ---
+
+    def _init_board_bench(self, layout):
+        """Models built for a board are measured on the board: its runtime's checks and a short llama-bench run."""
+        group = QGroupBox(ui_text("device.bench.title"))
+        box = QVBoxLayout()
+        box.addWidget(plain_label(ui_text("device.bench.intro")))
+        row = QHBoxLayout()
+        self.cb_bench_board = QComboBox()
+        self.cb_bench_board.setAccessibleName(ui_text("device.bench.device").rstrip(":"))
+        self.cb_bench_board.currentIndexChanged.connect(lambda *_: self._on_bench_board())
+        row.addWidget(QLabel(ui_text("device.bench.device")))
+        row.addWidget(self.cb_bench_board, 1)
+        self.txt_bench_model = QLineEdit()
+        self.txt_bench_model.setPlaceholderText(ui_text("device.bench.model_hint"))
+        self.txt_bench_model.setAccessibleName(ui_text("device.bench.model").rstrip(":"))
+        row.addWidget(QLabel(ui_text("device.bench.model")))
+        row.addWidget(self.txt_bench_model, 2)
+        self.btn_bench = QPushButton(ui_text("device.bench.start"))
+        self.btn_bench.clicked.connect(self._on_bench)
+        row.addWidget(self.btn_bench)
+        box.addLayout(row)
+        self.lbl_bench = plain_label("")
+        box.addWidget(self.lbl_bench)
+        group.setLayout(box)
+        layout.addWidget(group)
+        self.bench_worker = None
+        self._refresh_boards()
+
+    def _refresh_boards(self, select=None):
+        """The paired boards by the names the person gave them."""
+        from orchestrator.runtime.device.trusted import DeviceStoreError, TrustedDevices
+        state = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
+        try:
+            devices = [d for d in TrustedDevices(Path(state)).list() if d.paired] if state else []
+        except (DeviceStoreError, OSError, ValueError):
+            devices = []
+        keep = select or self.cb_bench_board.currentData()
+        self.cb_bench_board.blockSignals(True)
+        self.cb_bench_board.clear()
+        for device in devices:
+            self.cb_bench_board.addItem(device.label, device.device_id)
+        self.cb_bench_board.blockSignals(False)
+        found = self.cb_bench_board.findData(keep) if keep else -1
+        self.cb_bench_board.setCurrentIndex(found if found >= 0 else (0 if devices else -1))
+        self.btn_bench.setEnabled(bool(devices))
+        self.lbl_bench.setText("" if devices else ui_text("device.bench.none"))
+        self._on_bench_board()
+
+    def _on_bench_board(self):
+        """Prefills the model the board's deploy settings name, unless the person typed one."""
+        from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+        from orchestrator.runtime.profile import ProfileStore
+        state = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
+        device_id = self.cb_bench_board.currentData()
+        if not state or not device_id or self.txt_bench_model.text().strip():
+            return
+        try:
+            model = DeploySettings.from_dict(ProfileStore(Path(state)).load_deploy_settings(device_id)).model
+        except (SettingsError, ValueError, OSError):
+            model = None
+        if model:
+            self.txt_bench_model.setText(model)
+
+    def _on_bench(self):
+        device_id = self.cb_bench_board.currentData()
+        model = self.txt_bench_model.text().strip()
+        if not device_id or not model:
+            plain_box(self, "warning", ui_text("device.bench.title"), ui_text("device.bench.missing"))
+            return
+        # asked before anything runs, No preselected: a model that is not a catalog model loads outside a sandbox
+        allowed = ask(self, ui_text("device.bench.title"),
+                      ui_text("device.bench.untrusted", board=self.cb_bench_board.currentText(), model=model))
+        self.btn_bench.setEnabled(False)
+        self.lbl_bench.setText(ui_text("device.bench.running"))
+        self.bench_worker = BoardBenchWorker(self.framework, device_id, model, allowed)
+        self.bench_worker.finished.connect(self._on_bench_done)
+        self.bench_worker.start()
+
+    def _on_bench_done(self, ok, text):
+        self.btn_bench.setEnabled(True)
+        self.lbl_bench.setText(text)
+        if ok:
+            self.refresh_data()  # the build list shows "tested on" now
+        else:
+            plain_box(self, "warning", ui_text("device.bench.title"), text)

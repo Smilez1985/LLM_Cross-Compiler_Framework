@@ -36,6 +36,9 @@ from orchestrator.runtime.profile import HardwareProfile, ProfileError, load_sch
 GIB = 1024 ** 3
 MIB = 1024 ** 2
 SYSTEM_RESERVE = int(1.5 * GIB)  # RAM left to the OS, the GUI and the knowledge base when a model is chosen
+# Less RAM than this left next to a board's model and the system reserve: its server gets a quantized KV cache unless
+# the person chose otherwise (eighth round N7).
+KV_LITTLE_RAM = 2 * GIB
 # The package copy of scripts/hardware_probe.py (byte-identical, tests/test_hardware_probe.py compares them): a wheel
 # install has no scripts/ folder.
 PROBE_PATH = Path(__file__).resolve().with_name("hardware_probe.py")
@@ -484,6 +487,16 @@ def choose_model_tier(hw: HardwareInfo, catalog: RuntimeCatalog,
                        "usable): close other programs")
         return model, reason
     raise ValueError("No tier rule matched; the catalog needs a final rule without conditions.")
+
+
+def kv_cache_default(ram_total: int, model_bytes: Optional[int] = None) -> Tuple[str, float]:
+    """(KV-cache type, GiB left) for a server with `ram_total` bytes of RAM and a model of `model_bytes`: q8_0 (about
+    half the memory of f16) when less than KV_LITTLE_RAM is left next to the weights and the system reserve, else f16
+    (llama.cpp's default). A model of unknown size is estimated at half of the RAM left after the reserve."""
+    usable = max(0, int(ram_total) - SYSTEM_RESERVE)
+    weights = int(model_bytes * 1.05) if model_bytes else usable // 2
+    left = max(0, usable - weights)
+    return ("q8_0" if left < KV_LITTLE_RAM else "f16"), round(left / GIB, 1)
 
 
 def compute_context(model: ModelEntry, hw: HardwareInfo, choice: Optional[BackendChoice],
