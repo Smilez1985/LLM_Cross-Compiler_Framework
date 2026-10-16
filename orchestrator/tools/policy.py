@@ -108,6 +108,21 @@ def _rule(rule: DecisionRule, inp: Any, who: str, failed: Decision) -> Optional[
     return rule
 
 
+def call_only_reads(spec: Any, inp: Any) -> bool:
+    """Whether one call of a tool only reads: a read tool, or a call of a tool with reading and changing actions
+    (ToolSpec.reads, e.g. the GUI tool's read_form) that its `reads(input)` names as reading. A rule that fails, or a
+    call without input, counts as changing something (never a looser answer)."""
+    if getattr(spec, "tier", None) == ToolTier.READ:
+        return True
+    rule = getattr(spec, "reads", None)
+    if not callable(rule) or inp is None:
+        return False
+    try:
+        return rule(inp) is True
+    except Exception:
+        return False
+
+
 def _check_tiers(tiers: Dict[ToolTier, Decision]) -> Dict[ToolTier, Decision]:
     if tiers.get(ToolTier.FORBIDDEN, Decision.DENY) != Decision.DENY:
         raise ValueError("forbidden tools cannot be enabled")
@@ -249,6 +264,10 @@ class ToolPolicy(BaseModel):
             decision, why = _renamed_setting(name, self.overrides, decision, why)
         else:
             tiers, overrides, _ = section
+            # A call that only reads (a reading action of a tool that can also change things) is decided like a read
+            # tool: the caller's read tier. A new token (no section) stays with the tool's own tier above.
+            if tier != ToolTier.READ and call_only_reads(spec, inp):
+                tier = ToolTier.READ
             tier_decision = tiers.get(tier, Decision.ASK)
             default = _rule(getattr(spec, "default_decision", None), inp, who, Decision.ASK)
             if name in overrides:

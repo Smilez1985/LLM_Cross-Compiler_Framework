@@ -109,6 +109,7 @@ TEXTS = {
         "blocker.file_outside_folders": "The file is outside the folders you shared.",
         "blocker.file_changed": "The file changed in the meantime.",
         "blocker.snapshot_no_room": "The backup of the knowledge base taken first does not fit on the disk.",
+        "blocker.gui_not_open": "The framework window is not open.",
         # --- what the person can do ---
         "action.free_disk": "Free disk space (old builds, the model cache, the trash), or choose a smaller model.",
         "action.free_snapshots": "Delete or export knowledge snapshots you no longer need (Tools > Knowledge "
@@ -136,6 +137,7 @@ TEXTS = {
         "action.commit_required": "Try again when Hugging Face answers, or start the build yourself.",
         "action.restore_yourself": "Restore it yourself in the trash.",
         "action.add_folder": "Share the folder with the framework (Add folder).",
+        "action.open_window": "Open the framework window.",
         # --- safer options ---
         "safer.smaller_model": "a smaller model",
         "safer.smaller_quantization": "a smaller quantization",
@@ -285,6 +287,7 @@ TEXTS = {
         "blocker.file_changed": "Die Datei hat sich inzwischen geändert.",
         "blocker.snapshot_no_room": "Die Sicherung der Wissensbasis, die zuerst angelegt wird, passt nicht auf die "
                                     "Festplatte.",
+        "blocker.gui_not_open": "Das Framework-Fenster ist nicht offen.",
         # --- was die Person tun kann ---
         "action.free_disk": "Speicherplatz freigeben (alte Builds, den Modell-Cache, den Papierkorb) oder ein "
                             "kleineres Modell wählen.",
@@ -318,6 +321,7 @@ TEXTS = {
                                   "starten.",
         "action.restore_yourself": "Es selbst im Papierkorb wiederherstellen.",
         "action.add_folder": "Den Ordner für das Framework freigeben (Ordner hinzufügen).",
+        "action.open_window": "Das Framework-Fenster öffnen.",
         # --- sicherere Wahl ---
         "safer.smaller_model": "ein kleineres Modell",
         "safer.smaller_quantization": "eine kleinere Quantisierung",

@@ -27,6 +27,8 @@ RECORDS = "bookkeeping: old records of the framework (build records, requests, j
 STAGING = "bookkeeping: staging, quarantine or working folders the framework made for one build or install"
 CONTAINERS = "bookkeeping: the containers the framework started for one build, removed when it ended"
 OWN_SERVER = "bookkeeping: state, key and log files of the framework's own local model server"
+OWN_BRIDGE = ("bookkeeping: the endpoint and key file of the framework's own GUI bridge (W4): only a socket of this "
+              "account in the bridge's own folders, its own temporary folder, or the key file it wrote itself")
 NAME_ONLY = "never deletes an image: drops the per-build name once the image carries its last-build name"
 MOVED = ("a move the person chose (save dialog, Save..., llm-cli build save): the build folder's copy goes only after "
          "every file arrived and matched its original by sha256; the artifact itself is kept (eighth round, answer 3)")
@@ -152,6 +154,11 @@ DELETION_SITES = {
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._launch_container"): OWN_SERVER,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._stop_locked"): OWN_SERVER,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._cleanup_stale_locked"): OWN_SERVER,
+    # the framework's own GUI bridge for AI apps
+    ("orchestrator/tools/gui_bridge.py", "_clear_socket_path"): OWN_BRIDGE,
+    ("orchestrator/tools/gui_bridge.py", "_remove_stale_endpoint"): OWN_BRIDGE,
+    ("orchestrator/tools/gui_bridge.py", "BridgeServer._stop_bridge"): OWN_BRIDGE,
+    ("orchestrator/tools/gui_bridge.py", "BridgeServer._remove_temp_folder"): OWN_BRIDGE,
     # open, reported
     ("orchestrator/runtime/profile.py", "ProfileStore.remove_device"): UNUSED,
 }

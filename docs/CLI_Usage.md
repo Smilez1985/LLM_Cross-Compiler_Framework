@@ -1164,7 +1164,9 @@ The framework tools are what Ditto and MCP clients use: 16 read-only tools (`lis
 this computer (`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`,
 `download_hf_file`, `create_deploy_package`, `run_mojo_miracle`) and `deploy_to_device`, which reaches a device you
 trusted (tier `external`: always asked). `run_doctor`, the 3.0.0 name of `run_mojo_oracle`, stays callable but is
-not listed (unreleased).
+not listed (unreleased). `gui` (unreleased) reads and fills the open framework window (tier `local_write`; its reading
+actions `read_form`, `wizard_state` and `show_window` are decided like read tools, and your setting for `gui` covers
+all its actions; see [Features](Features.md)).
 
 ### tools list
 
@@ -1323,6 +1325,11 @@ llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT] [--contai
 Runs the MCP server. Normally the AI client starts it for you (see `mcp config`). stdout carries the protocol;
 logs go to stderr. If the tool permissions are not set up yet, read-only tools work and everything else asks (when
 the client cannot ask, the question waits in the framework: see [tools approvals](#tools-approvals)).
+
+While the framework window (the GUI) is open, the tool `gui` reaches its forms through a private bridge that only
+your account can use (unreleased): the client reads and fills them like Ditto, and each field it fills is marked with
+its MCP token's name or with the name the client gives itself. When no framework window is open, `gui` answers with
+the blocker `gui_not_open` ("Open the framework window."). Nothing needs to be set up for this.
 
 | Option | Meaning |
 |---|---|
