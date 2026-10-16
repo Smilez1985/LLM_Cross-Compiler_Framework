@@ -12,7 +12,6 @@ import sys
 import json
 import asyncio
 import os
-import re
 import time
 import shutil
 from pathlib import Path
@@ -326,34 +325,29 @@ def list_targets(ctx: FrameworkContext, format: str):
 @pass_context
 def validate_target(ctx: FrameworkContext, target_name: str):
     """Check that a target loads and that its capabilities block passes the schema (exit code 1 if not)"""
-    from pydantic import ValidationError
-    from orchestrator.schemas.targets import TargetCapabilities
     ctx.require_framework()
     tm = ctx.framework_manager.get_component("target_manager")
     if not tm:
         console.print("[red]Target Manager not available[/red]")
         sys.exit(1)
-    tid = tm.resolve(target_name)
-    if tid is None:
+    check = tm.validate(target_name)  # the one check (the GUI's Check target calls it too)
+    if not check.found:
         console.print(f"[red]❌ Target '{escape(target_name)}' not found (or its target.yml cannot be read; "
                       f"see the log).[/red]")
         sys.exit(1)
-    data = tm.get_target(tid) or {}
-    if "capabilities" not in data:
+    tid = check.target_id
+    if check.no_capabilities:
         console.print(f"[yellow]Target '{escape(tid)}' loads but declares no capabilities: boards, formats and "
                       "quantizations are not checked before a build. Add a 'capabilities:' block "
                       "(see targets/Rockchip/target.yml).[/yellow]")
         return
-    try:
-        caps = TargetCapabilities.model_validate(data["capabilities"])
-    except ValidationError as e:
+    if check.errors:
         console.print(f"[red]❌ Target '{escape(tid)}': its capabilities block is invalid:[/red]")
-        for err in e.errors():
-            where = ".".join(str(part) for part in err.get("loc", ())) or "capabilities"
-            console.print(f"[red]  capabilities.{escape(where)}: {escape(str(err.get('msg', '')))}[/red]")
+        for where, message in check.errors:
+            console.print(f"[red]  {escape(where)}: {escape(message)}[/red]")
         sys.exit(1)
-    console.print(f"[green]✅ Target '{escape(tid)}' is valid ({len(caps.boards)} boards, formats: "
-                  f"{escape(', '.join(caps.formats))})[/green]")
+    console.print(f"[green]✅ Target '{escape(tid)}' is valid ({check.boards} boards, formats: "
+                  f"{escape(', '.join(check.formats))})[/green]")
 
 
 # ============================================================================
@@ -444,22 +438,36 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_f
 
 def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional[str]):
     """Ditto with provider/model chosen for this command only (the saved AI settings stay unchanged)."""
+    from orchestrator.Core.ditto_manager import provider_problem
     fm = ctx.framework_manager
     ditto = fm.get_component("ditto_manager")
     if ditto is None:
         console.print("[red]The AI assistant (Ditto) is not available.[/red]")
         sys.exit(1)
     if provider:
-        if ditto.client.catalog.get(provider) is None:
-            removed = ditto.client.catalog.removed_message(provider)
-            console.print(f"[red]{escape(removed)}[/red]" if removed else
-                          f"[red]Unknown AI provider '{escape(provider)}'. Choose one of: "
-                          f"{escape(', '.join(ditto.client.catalog.ids()))}.[/red]")
+        problem = provider_problem(ditto.client.catalog, provider)
+        if problem:
+            console.print(f"[red]{escape(problem)}[/red]")
             sys.exit(2)
         fm.config.set("ai_provider", provider)
     if model:
         fm.config.set("ai_model", model)
     return ditto
+
+
+def _run_ditto(ctx: FrameworkContext, provider: Optional[str], model: Optional[str]):
+    """Ditto with provider/model chosen for this run only, through DittoManager.for_run (the module wizard's "for this
+    analysis only" takes the same path): the settings themselves are not changed."""
+    from orchestrator.Core.ditto_manager import DittoError
+    ditto = ctx.framework_manager.get_component("ditto_manager")
+    if ditto is None:
+        console.print("[red]The AI assistant (Ditto) is not available.[/red]")
+        sys.exit(1)
+    try:
+        return ditto.for_run(provider, model)
+    except DittoError as e:  # an unknown or removed provider
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
 
 
 PAGED_QUESTION_LINES = 30  # a longer question (up to 16,000 characters) is shown through the pager first
@@ -532,7 +540,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     from orchestrator.Core.ditto_manager import DittoError, proposal_facts
     _ditto_notice_once()   # Ditto at work outside the ditto group: the notice comes first here too
     ctx.require_framework()
-    ditto = _ai_override(ctx, provider, model)
+    ditto = _run_ditto(ctx, provider, model)
     try:
         info = ditto.describe("json")
     except DittoError as e:
@@ -548,17 +556,15 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
         sys.exit(1)
 
     # The base image is pinned to the digest its tag points at now, before the question (DECISIONS round 3): the
-    # module is written with exactly the digest shown.
-    if "@sha256:" not in definition.base_os:
-        from orchestrator.utils.image_registry import ImageLookupError, inspect_image
-        try:
-            image = inspect_image(definition.base_os,
-                                  offline=bool(ctx.framework_manager.config.get("offline_mode", False)))
-        except ImageLookupError as e:
-            console.print(f"[red]The base image {escape(definition.base_os)} cannot be pinned: {escape(str(e))}[/red]")
-            console.print(escape(e.next))
-            sys.exit(1)
-        definition = definition.model_copy(update={"base_os": image.pinned})
+    # module is written with exactly the digest shown (the module wizard's AI import pins it the same way).
+    from orchestrator.Core.ditto_manager import pin_base_image
+    from orchestrator.utils.image_registry import ImageLookupError
+    try:
+        definition = pin_base_image(definition, offline=bool(ctx.framework_manager.config.get("offline_mode", False)))
+    except ImageLookupError as e:
+        console.print(f"[red]The base image {escape(definition.base_os)} cannot be pinned: {escape(str(e))}[/red]")
+        console.print(escape(e.next))
+        sys.exit(1)
     # The definition is shown in full before anything is written; the module generator checks it again.
     console.print("\n[bold green]AI analysis finished. Review the proposal:[/bold green]")
     click.echo(json.dumps(definition.model_dump(exclude={"cannot"}), indent=2, ensure_ascii=False))
@@ -910,83 +916,60 @@ def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
     """Status of builds, including those the GUI, the MCP server or another CLI call started (the shared build state
     in the per-user folder, and the build records in the cache folder). REQUEST_ID: a request id (req_...) or a
     build id."""
-    from orchestrator.Core.build_records import read_records, records_dir
+    from orchestrator.Core.build_history import client_proposals, read_history
     config, resolve = _settings(ctx)
-    folder = records_dir(resolve(config.get("cache_dir", "cache")))
-    records = read_records(folder)
-    requests = _shared_requests(config)
-    by_request = {r.get("request_id"): r for r in requests}
-    with_builds = {r.get("request_id") for r in records}
-    # Requests without a build record yet (queued, preparing, or ended before a build ran)
-    waiting = [r for r in requests if r.get("request_id") not in with_builds]
+    history = read_history(config, resolve)  # the one query (the GUI's Build History reads it too)
+    folder = history.folder
     if request_id:
-        matches = [r for r in records if request_id in (r.get("request_id"), r.get("build_id"))]
-        request = by_request.get(request_id)
-        if not matches and request is None:
+        details = history.details(request_id)
+        if details is None:
             console.print(f"[red]Build '{escape(request_id)}' not found in {escape(str(folder))}.[/red]")
             sys.exit(1)
-        if request is not None:
-            _print_request_summary(request)
-        for record in reversed(matches):  # attempts in order
+        if details.request is not None:
+            _print_request_summary(details.request)
+        for record in details.attempts:  # attempts in order
             _print_build_record(record)
-        for rid in dict.fromkeys([r.get("request_id") for r in matches if r.get("request_id")]
-                                 + ([request_id] if request is not None else [])):
-            _print_client_proposals(_client_proposals(config, rid))
+        for rid in details.proposal_requests:
+            _print_client_proposals(client_proposals(config, rid))
         return
-    if not records and not waiting:
+    rows = history.rows()
+    if not rows:
         console.print(f"[yellow]No builds found in {escape(str(folder))}.[/yellow]")
         return
-    rows = sorted([("b", r) for r in records] + [("r", r) for r in waiting],
-                  key=lambda pair: str(pair[1].get("started") or ""), reverse=True)
     shown = rows if all else rows[:STATUS_ROWS]
     table = Table(title="Builds")
+    columns = ("request", "build", "status", "progress", "target", "format", "quantization", "model", "started",
+               "where")
     for column in ("Request", "Build", "Status", "Progress", "Target", "Format", "Quantization", "Model",
                    "Started", "Where"):
         table.add_column(column)
-    for kind, r in shown:
-        if kind == "r":
-            summary = r.get("summary") if isinstance(r.get("summary"), dict) else {}
-            table.add_row(escape(str(r.get("request_id"))), "-", escape(str(r.get("status"))),
-                          f"{r.get('progress') or 0}%", escape(str(summary.get("target") or "-")),
-                          escape(str(summary.get("format") or "-")), escape(str(summary.get("quantization") or "-")),
-                          escape(str(summary.get("model") or "-")), escape(str(r.get("started") or "-")),
-                          escape(str(r.get("program") or "-")))
-            continue
-        where = (by_request.get(r.get("request_id")) or {}).get("program") or "-"
-        table.add_row(escape(str(r.get("request_id") or "-")), escape(str(r.get("build_id"))),
-                      escape(str(r.get("status"))), f"{r.get('progress') or 0}%", escape(str(r.get("target") or "-")),
-                      escape(str(r.get("format") or "-")), escape(str(r.get("quantization") or "-")),
-                      escape(str(r.get("model") or "-")), escape(str(r.get("started") or "-")), escape(str(where)))
+    for row in shown:
+        values = row.values()
+        table.add_row(*(values[c] if c == "progress" else escape(values[c]) for c in columns))
     console.print(table)
     if len(rows) > len(shown):
         console.print(f"{len(rows) - len(shown)} older builds: llm-cli build status --all")
-    proposed = sorted({p.request_id for p in _client_proposals(config)})
+    proposed = sorted({p.request_id for p in client_proposals(config)})
     if proposed:
         console.print(f"[magenta]AI clients proposed fixes for {len(proposed)} failed build(s): "
                       f"llm-cli build status {escape(proposed[-1])}[/magenta]")
 
 
-def _shared_requests(config) -> list:
-    """The build request summaries every framework process writes into the per-user folder (request_store)."""
-    from orchestrator.Core.request_store import for_config
-    try:
-        store = for_config(config)
-        return store.read() if store is not None else []
-    except OSError:
-        return []
+# The CLI's labels of the fields build_history lists (the GUI labels them in the person's language).
+_BUILD_FIELD_LABELS = {"request": "Request", "build": "Build", "status": "Status", "stage": "Stage",
+                       "progress": "Progress", "model": "Model", "target": "Target", "board": "Board",
+                       "format": "Format", "quantization": "Quantization", "optimization": "Optimization",
+                       "owner": "Started by", "where": "Where", "started": "Started", "ended": "Ended",
+                       "output": "Output", "process": "Process", "error": "Error"}
 
 
 def _print_request_summary(r: dict) -> None:
-    summary = r.get("summary") if isinstance(r.get("summary"), dict) else {}
-    rows = [("Request", r.get("request_id")), ("Status", r.get("status")), ("Stage", r.get("stage")),
-            ("Progress", f"{r.get('progress') or 0}%"), ("Model", summary.get("model")),
-            ("Target", summary.get("target")), ("Board", summary.get("board")), ("Format", summary.get("format")),
-            ("Quantization", summary.get("quantization")), ("Optimization", summary.get("optimization")),
-            ("Started by", r.get("owner") or "the person"), ("Where", r.get("program")),
-            ("Started", r.get("started")), ("Ended", r.get("ended"))]
-    for label, value in rows:
+    from orchestrator.Core.build_history import request_rows
+    for name, value in request_rows(r):
+        if name == "owner":
+            value = value or "the person"
         if value not in (None, ""):
-            console.print(f"[bold]{label}:[/bold] {escape(str(value))}")
+            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(str(value))}")
     for error in r.get("errors") or []:
         console.print(f"[bold]Error:[/bold] {escape(str(error))}")
     if r.get("status") == "interrupted":
@@ -995,13 +978,6 @@ def _print_request_summary(r: dict) -> None:
         console.print(f"[yellow]Waits for a decision on a self-healing proposal in the {escape(str(r.get('program')))}"
                       " that started it.[/yellow]")
     console.print("")
-
-
-def _client_proposals(config, request_id: Optional[str] = None) -> list:
-    """The fix proposals AI clients made (propose_healing_fix), kept in the per-user folder."""
-    from orchestrator.Core.client_proposals import ClientProposalStore
-    state_dir = getattr(config, "user_state_dir", None)
-    return ClientProposalStore(Path(state_dir)).list(request_id) if state_dir else []
 
 
 def _print_client_proposals(proposals: list) -> None:
@@ -1024,15 +1000,10 @@ def _print_client_proposals(proposals: list) -> None:
 
 
 def _print_build_record(r: dict) -> None:
-    rows = [("Build", r.get("build_id")), ("Request", r.get("request_id")), ("Status", r.get("status")),
-            ("Stage", r.get("stage")), ("Progress", f"{r.get('progress') or 0}%"), ("Model", r.get("model")),
-            ("Target", r.get("target")), ("Board", r.get("board")), ("Format", r.get("format")),
-            ("Quantization", r.get("quantization")), ("Output", r.get("output_dir")),
-            ("Started", r.get("started")), ("Ended", r.get("ended")), ("Process", r.get("pid")),
-            ("Error", r.get("error"))]
-    for label, value in rows:
+    from orchestrator.Core.build_history import record_rows
+    for name, value in record_rows(r):
         if value not in (None, ""):
-            console.print(f"[bold]{label}:[/bold] {escape(str(value))}")
+            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(str(value))}")
     if r.get("status") == "interrupted":
         console.print("[yellow]The process that ran this build has ended before the build finished.[/yellow]")
     console.print("")
@@ -6006,40 +5977,9 @@ def config():
 def show_config(ctx: FrameworkContext):
     """Show the effective settings (config.yml, a -c file, LLM_FRAMEWORK_* variables, defaults) as JSON, each with
     its source; secrets are redacted"""
+    from orchestrator.Core.settings_view import effective_settings
     config, _ = _settings(ctx)
-    click.echo(json.dumps(_effective_settings(config), indent=2, default=str, ensure_ascii=False))
-
-
-# Settings that are not part of the schema but look like credentials are never printed.
-SECRET_NAME = re.compile(r"(?i)(^|[_.-])(token|password|passwd|secret|api_?key|access_key|private_key|credentials?)"
-                         r"($|[_.-])")
-
-
-def _redacted(value: Any) -> Any:
-    if isinstance(value, str):
-        return redact_secrets(value)
-    if isinstance(value, dict):  # below a key that names a credential, even a value no pattern recognizes
-        return {k: "REDACTED" if v and SECRET_NAME.search(str(k)) else _redacted(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_redacted(v) for v in value]
-    return value
-
-
-def _effective_settings(config) -> Dict[str, Any]:
-    """Every setting with its value and source (default, a file, the environment, or changed in this run)."""
-    result = {}
-    values = getattr(config, "config_values", {})
-    for key in sorted(values):
-        entry = values[key]
-        src = entry.source
-        source = f"file {src.source_path}" if src.source_type == "file" and src.source_path else src.source_type
-        unknown = getattr(entry, "schema", None) is None
-        if getattr(entry, "is_secret", False) or (unknown and SECRET_NAME.search(key) and entry.value):
-            value = "REDACTED"
-        else:
-            value = _redacted(entry.value)
-        result[key] = {"value": value, "source": source}
-    return result
+    click.echo(json.dumps(effective_settings(config), indent=2, default=str, ensure_ascii=False))
 
 
 @config.command('output-folder')
@@ -6075,48 +6015,36 @@ def config_output_folder(ctx: FrameworkContext, folder: Optional[str]):
 @pass_context
 def config_repos(ctx: FrameworkContext, add, remove):
     """Manage SSOT Source Repositories"""
+    from orchestrator.Core.settings_view import (RepoOverrideError, add_repo_override, remove_repo_override,
+                                                 repo_overrides)
     ctx.require_framework()
     cm = ctx.framework_manager.config
-    current_repos = dict(cm.get("source_repositories", {}) or {})
-    
-    def save():
-        if not (cm.set("source_repositories", current_repos) and cm.save_user_config()):
-            console.print(f"[red]Not saved: {escape(str(Path(cm.config_dir) / 'config.yml'))} could not be updated "
-                          f"(see the log); the repository overrides are unchanged.[/red]")
-            sys.exit(1)
-
-    if add:
-        name, url = add
-        from orchestrator.Core.builder import repo_override_names
-        variables = repo_override_names(name)
-        if not variables:  # the build engine could not pass it on under any name
-            console.print(f"[red]Invalid name {escape(repr(name))}: it needs ASCII letters or digits (it becomes "
-                          f"<NAME>_REPO_OVERRIDE, e.g. llama.cpp -> LLAMA_CPP_REPO_OVERRIDE).[/red]")
-            sys.exit(2)
-        # The shape the build engine passes on as <NAME>_REPO_OVERRIDE (plain URLs of earlier versions still work).
-        current_repos[name.lower()] = {"url": url}
-        save()
-        console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(redact_secrets(url))} (passed to "
-                      f"builds as {escape(variables[0])})[/green]")
-    elif remove:
-        if remove.lower() in current_repos:
-            del current_repos[remove.lower()]
-            save()
-            console.print(f"[green]Removed repo override: {escape(remove)}[/green]")
+    # The same functions as File > Settings... in the GUI.
+    try:
+        if add:
+            name, url = add
+            variable = add_repo_override(cm, name, url)
+            console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(redact_secrets(url))} "
+                          f"(passed to builds as {escape(variable)})[/green]")
+        elif remove:
+            if remove_repo_override(cm, remove):
+                console.print(f"[green]Removed repo override: {escape(remove)}[/green]")
+            else:
+                console.print(f"[yellow]Repo {escape(remove)} not found.[/yellow]")
         else:
-            console.print(f"[yellow]Repo {escape(remove)} not found.[/yellow]")
-    else:
-        # List
-        if not current_repos:
-            console.print("[yellow]No repository overrides defined.[/yellow]")
-        else:
-            table = Table(title="Source Repositories (SSOT)")
-            table.add_column("Key", style="cyan")
-            table.add_column("URL", style="green")
-            for k, v in current_repos.items():
-                url = v.get('url') if isinstance(v, dict) else v
-                table.add_row(escape(str(k)), escape(redact_secrets(str(url or "-"))))
-            console.print(table)
+            current_repos = repo_overrides(cm)
+            if not current_repos:
+                console.print("[yellow]No repository overrides defined.[/yellow]")
+            else:
+                table = Table(title="Source Repositories (SSOT)")
+                table.add_column("Key", style="cyan")
+                table.add_column("URL", style="green")
+                for k, url in current_repos.items():
+                    table.add_row(escape(k), escape(redact_secrets(url)))
+                console.print(table)
+    except RepoOverrideError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2 if e.code == "invalid_name" else 1)
 
 # ============================================================================
 # COMMUNITY ZOO (signed community packs: targets, recipes, knowledge)
