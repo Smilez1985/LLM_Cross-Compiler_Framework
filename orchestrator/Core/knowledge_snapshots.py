@@ -439,8 +439,8 @@ def export_snapshots(folder: Path, names: Iterable[str], destination: Path) -> L
     return results
 
 
-__all__ = ["DISK_LINE", "ExportedSnapshot", "FOLDER", "FREE_SPACE_STEP", "KEEPING_NOTE", "NEXT_DOES_NOT_FIT", "NEXT_TIGHT",
-           "SUFFIX", "SnapshotDeletion", "SnapshotDisk", "SnapshotFile", "SnapshotNoRoom", "SnapshotRoom",
+__all__ = ["DISK_LINE", "ExportedSnapshot", "FOLDER", "FREE_SPACE_STEP", "KEEPING_NOTE", "NEXT_DOES_NOT_FIT",
+           "NEXT_TIGHT", "SUFFIX", "SnapshotDeletion", "SnapshotDisk", "SnapshotFile", "SnapshotNoRoom", "SnapshotRoom",
            "delete_snapshots", "export_snapshots", "folder_bytes", "list_snapshots", "newest_size", "require_room",
            "room_before", "size_text", "snapshot_disk", "snapshot_files", "snapshot_folder", "snapshot_plan",
            "snapshot_room"]

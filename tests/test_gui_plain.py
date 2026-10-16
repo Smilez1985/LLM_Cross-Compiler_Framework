@@ -24,7 +24,7 @@ SCANNED = sorted((GUI / "chat_panel").glob("*.py")) + [GUI / n for n in ("plain.
                                                                          "knowledge_snapshots_window.py",
                                                                          "form_surface.py", "builder_parts.py",
                                                                          "knowledge_sources_window.py",
-                                                                         "menus/knowledge.py")]
+                                                                         "menus/knowledge.py", "community_dialogs.py")]
 STATIC_BOXES = {"question", "information", "warning", "critical", "about"}
 TRANSLATION_CALLS = {"t", "ui_text", "tr", "text", "feed_text"}
 MARKUP = '<b>bold</b> & <a href="https://evil.example">link</a><img src=x>'
