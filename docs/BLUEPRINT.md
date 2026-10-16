@@ -561,6 +561,13 @@ or releases.
 A knowledge pack, and the knowledge snapshot in a generated target, carry a page's full text only when its licence
 allows passing the text on (CC0, public domain, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense,
 MPL-2.0), with the attribution the licence requires (title, address, copyright notice, licence, the changes made).
+A licence that asks for its text or permission notice (MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA) also puts
+its canonical text into the pack (`LICENSES/<SPDX id>.txt`, unchanged from the SPDX License List 3.29.0, checked by
+sha256; `orchestrator/rag/licence_texts.py`), and a `NOTICE` lists every page with its source address, its copyright
+line as found and its SPDX id: for MIT, BSD and ISC code from GitHub every copyright line of its repository's licence
+file, for Apache-2.0 the notices of the work's `NOTICE` file when the crawl read it
+(`orchestrator/rag/pack_licences.py`). Without the canonical text of such a licence a page goes out as its address and
+short facts (state `no_licence_text`).
 Every other page goes out as its address and short facts (title, section names, technical terms): a page with a
 copyright notice and no such licence, code without a licence, a licence that forbids changes or commercial use, a
 copyleft licence (it needs the whole licence text and the source with every copy), an unrecognised licence and a page
@@ -728,7 +735,11 @@ expired, so a revocation never stops applying because the framework was not upda
    pulls pinned by digest unless it is an official base image, no prebuilt llama.cpp, the shell deny-list, `bash -n`,
    no template placeholders, no binary files); a recipe must match its schema and the capabilities of its target if that is
    installed; knowledge must be a list of entries that each keep their source. A recipe or knowledge pack may hold
-   only its `recipe.yml` or `knowledge.json` and a `README.md`.
+   only its `recipe.yml` or `knowledge.json` and a `README.md`; a knowledge pack also `LICENSES/<SPDX id>.txt` and
+   `NOTICE`. These must match its pages: every licence text is the canonical one byte for byte, every licence that
+   asks for its text and covers a page carried in full has its text there, and `NOTICE` lists each such page. A target
+   pack's knowledge snapshot is checked the same way (`knowledge/LICENSES/`, `knowledge/NOTICE`; its licence texts
+   also without a snapshot); `llm-cli zoo verify` checks installed packs again.
 5. A summary in plain text shows kind, id, version, author, licence, trust level, source, files and destination,
    and you confirm. `--yes` skips the question only when the signed index lists the pack (trust `verified` or
    `community`), also for a pack file.
@@ -756,11 +767,12 @@ recipients) or `--passphrase` the signed pack is also encrypted for private shar
 submitted with `--pr`. The licence defaults to MIT, for knowledge to `NOASSERTION`, and every page keeps its source
 address; a page's full text goes in only where its licence allows it, every other page as its address and short facts
 (see [Licences and copyright](#deep-ingest-from-a-web-page-to-the-knowledge-base-unreleased)), and the export lists
-every page with what it carries and why. A target you installed from someone else is not re-signed as yours, and
-pages imported from installed community knowledge packs are left out of a knowledge export. "Open pull request"
-(`--pr`) hands the pack to the community repository (`community_repo`): through the GitHub CLI when it is installed
-and logged in, otherwise the repository's upload page opens in the browser. Both keep their own credentials; the
-framework never asks for, reads or shows a token.
+every page with what it carries and why. Pages carried in full under a licence that asks for its text get that text in
+`LICENSES/` and a `NOTICE`, and the export names each licence text and why. A target you installed from someone else
+is not re-signed as yours, and pages imported from installed community knowledge packs are left out of a knowledge
+export. "Open pull request" (`--pr`) hands the pack to the community repository (`community_repo`): through the GitHub
+CLI when it is installed and logged in, otherwise the repository's upload page opens in the browser. Both keep their
+own credentials; the framework never asks for, reads or shows a token.
 
 **Maintainer tools.** `scripts/zoo_sign_index.py` creates the index key in the OS keyring (`keygen`), checks a pack
 and prints its index entry (`entry`) and signs `index.json` (`sign`; with `--previous` the version must be higher
@@ -904,6 +916,7 @@ These are real limitations of the current state. Most are scheduled in the [road
 | **Installing always reads the current index first** | A revocation only protects users who see it. An install needs the network anyway, so it fetches the index first and installs nothing without it. A cached index serves listing and file installs, and is never replaced by an older one. |
 | **No token in the framework, and no upload of its own** | A repository token in the framework would be a valuable secret in one more place, and an upload button sends data without a review step. The framework prepares a scrubbed, signed pack and shows what the scrub changed; only when you open the pull request do the GitHub CLI or the browser send it, with their own credentials. |
 | **`NOASSERTION` for knowledge packs** | A knowledge pack holds other people's pages. The exporter cannot license them, so the pack claims no licence for them and every page keeps its source address. |
+| **Canonical licence texts from the SPDX License List** | MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY and CC BY-SA ask for their text or permission notice with every copy. The texts ship as data, unchanged from the SPDX License List data (CC0) at a pinned version, each with its sha256, so the framework never writes a licence text itself. Without the text, a page under such a licence goes out as its address and short facts rather than without its licence. |
 | **Full text only where the licence allows it** | Text and data mining allows a copy for the miner, not passing the text on. So a pack carries a page's text only under a licence that allows it, with the attribution it requires; every other page goes as its address and short facts, and the recipient crawls it under their own checks. Code without a licence is all rights reserved. |
 | **Recipes instead of shared model files** | Model files are large and come with their own licences. A recipe pins the model commit, the target fingerprint and the toolchain image and lists the artifact hashes, so anyone can rebuild the model and compare; "verified" means reproduced independently. |
 | **Input history per user and without secrets** | The shared `config.yml` may sit in the installation folder and be shared. Recent inputs are personal, so they live in the per-user folder (mode 0600), and values that look like credentials are never written. |

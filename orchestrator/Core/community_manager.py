@@ -28,6 +28,12 @@ a knowledge pack, or into a target's knowledge snapshot, with its full text only
 text on, and keeps the attribution its licence requires. A page with a copyright notice and no such licence, code
 without a licence, and a page whose licence is unknown go out as their address and short facts; the recipient crawls
 them under their own checks. The export lists every page with what it carries and why.
+
+A pack that carries pages in full under a licence that asks for its text or permission notice (MIT, BSD, ISC,
+Apache-2.0, MPL-2.0, CC BY, CC BY-SA) ships, next to its knowledge file, LICENSES/<SPDX id>.txt with the canonical
+text of each such licence and a NOTICE listing every page with its source address, its copyright line as found and
+its licence (rag/pack_licences.py). The install, `zoo verify` and verify_file check them; the canonical texts are never
+changed by the privacy scrub.
 """
 
 import difflib
@@ -45,7 +51,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Literal, Mapping, Optional, Sequence, Tuple
 
 import yaml
 from packaging.version import InvalidVersion, Version
@@ -58,7 +64,7 @@ from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_P
                                               list_files, load_trusted_keys, read_manifest, read_pack, scrub,
                                               sign_manifest, tree_sha256, utc_now, verify_index, verify_manifest,
                                               write_pack)
-from orchestrator.rag import licences
+from orchestrator.rag import licence_texts, licences, pack_licences
 from orchestrator.rag.licences import FULL_TEXT, LINK_AND_FACTS, SharePlan
 from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file
 from orchestrator.utils.file_lock import file_lock
@@ -239,6 +245,21 @@ def _page_meta(records: Sequence[dict]) -> Dict[str, Any]:
     return meta
 
 
+def _repo_copyrights(groups: Mapping[str, Sequence[dict]],
+                     metas: Mapping[str, Dict[str, Any]]) -> Dict[Tuple[str, str], str]:
+    """{(crawl start address, repository): the copyright line of the repository's licence file} from the licence files
+    the crawls read: its notice when one was recorded, otherwise the first one in its text. Code without a notice of
+    its own goes out with this line, as MIT, BSD and ISC ask."""
+    found: Dict[Tuple[str, str], str] = {}
+    for source, meta in metas.items():
+        if meta.get("licence_file") and meta.get("code_repo"):
+            line = licences.clean(meta.get("copyright") or "") or \
+                licences.copyright_notice(pack_licences.joined_text(groups[source]))
+            if line:
+                found.setdefault((str(meta.get("root_url") or ""), str(meta["code_repo"])), line)
+    return found
+
+
 def _scrubbed(source: str, content: str, metadata: Dict[str, Any]) -> dict:
     return {"source": scrub(source), "content": scrub(content),
             "metadata": {k: scrub(v) if isinstance(v, str) else v for k, v in metadata.items()}}
@@ -249,6 +270,9 @@ def share_pages(records: Iterable[dict]) -> Tuple[List[dict], List[PageShare]]:
     (home folders, addresses, host and user names, secrets), and per page what is carried and why (Q-1'):
     * full text only when the page's licence allows passing the text on (rag/licences.py), each chunk with its licence
       and, when the licence requires it, the attribution (title, address, copyright notice, licence, the changes made);
+      code without a notice of its own takes the copyright line of its repository's licence file (copyright_found
+      says so), and a licence that asks for its text names its file in the pack (licence_text_file: LICENSES/<id>.txt,
+      written by pack_licences.write next to the knowledge file);
     * otherwise one entry with the address and short facts (title, section names, technical terms), the licence and
       copyright notice the page shows, and why; the recipient crawls the page under their own checks.
     Code takes its repository's licence only from a licence file the same crawl read. A page without its source is
@@ -260,6 +284,7 @@ def share_pages(records: Iterable[dict]) -> Tuple[List[dict], List[PageShare]]:
             groups.setdefault(source, []).append(record)
     metas = {source: _page_meta(chunks) for source, chunks in groups.items()}
     repos = licences.repo_licences(metas.values())
+    repo_notices = _repo_copyrights(groups, metas)
     pages: List[dict] = []
     shares: List[PageShare] = []
     for source, chunks in groups.items():
@@ -274,8 +299,18 @@ def share_pages(records: Iterable[dict]) -> Tuple[List[dict], List[PageShare]]:
             plan = licences.plan_for(meta, repos)
             if plan.shared_as == FULL_TEXT:
                 extra: Dict[str, Any] = {"licence": plan.licence, "shared_as": FULL_TEXT, "share_reason": plan.reason}
+                if not licences.clean(meta.get("copyright") or "") and meta.get("code_repo"):
+                    if meta.get("licence_file"):   # the licence file itself: its own line, found on the page
+                        line = licences.copyright_notice(pack_licences.joined_text(chunks))
+                        extra.update({"copyright": line} if line else {})
+                    else:
+                        line = repo_notices.get((str(meta.get("root_url") or ""), str(meta["code_repo"])))
+                        extra.update({"copyright": line, licences.COPYRIGHT_FOUND_KEY: licences.FROM_LICENCE_FILE}
+                                     if line else {})
+                if licence_texts.needs_text(plan.licence):
+                    extra[licence_texts.TEXT_FILE_KEY] = licence_texts.text_path(plan.licence)
                 if plan.attribution_required:
-                    extra["attribution"] = licences.attribution(source, title, meta, plan)
+                    extra["attribution"] = licences.attribution(source, title, {**meta, **extra}, plan)
                 pages += [_scrubbed(source, c["content"], {**(c.get("metadata") or {}), **extra}) for c in chunks]
             else:
                 facts = licences.short_facts(source, title, [str((c.get("metadata") or {}).get("section") or "")
@@ -298,6 +333,8 @@ class ExportResult:
     notes: List[str] = field(default_factory=list)
     encrypted: bool = False
     shares: List[PageShare] = field(default_factory=list)   # a knowledge pack: every page, what it carries and why
+    # The licence texts the pack ships (LICENSES/, with a NOTICE), each with its pages and why
+    licence_texts: List[pack_licences.IncludedText] = field(default_factory=list)
 
     def summary(self) -> str:
         m = self.manifest
@@ -311,6 +348,15 @@ class ExportResult:
         if self.shares:
             lines.append("What the pack carries of each page, and why:")
             lines += [f"- {share.line()}" for share in self.shares]
+        if self.licence_texts:
+            lines.append("Licence texts in the pack (unchanged from the SPDX License List "
+                         f"{licence_texts.list_version()}), and why:")
+            lines += [f"- {text.line()}" for text in self.licence_texts]
+            lines.append("- NOTICE (next to them) lists every page with its source address, its copyright line as "
+                         "found and its licence.")
+        elif any(share.plan.shared_as == FULL_TEXT for share in self.shares):
+            lines.append("Licence texts in the pack: none; no page carried in full is under a licence that asks for "
+                         "its text.")
         return "\n".join(lines + [f"Note: {n}" for n in self.notes])
 
 
@@ -713,15 +759,44 @@ class CommunityManager:
         except OSError as e:
             self.logger.warning(f"The damaged store of pinned author keys could not be copied: {e}")
 
-    def _validate(self, manifest: PackManifest, root: Path, notes: List[str]) -> List[str]:
+    def _validate(self, manifest: PackManifest, root: Path, notes: List[str], exporting: bool = False) -> List[str]:
+        """The problems of a pack in `root` (empty: none); notes for the person's summary. exporting: the export's own
+        check, whose summary names the licence texts already (no second note about them)."""
         from orchestrator.Core.module_generator import validate_target_folder
         names = {f.path for f in manifest.files}
+        licence_notes = [] if exporting else notes
         if manifest.kind == "target":
-            return validate_target_folder(root)
+            return validate_target_folder(root) + self._check_licence_files(root, "target", licence_notes)
         allowed = {RECIPE_FILE if manifest.kind == "recipe" else KNOWLEDGE_FILE, "README.md"}
+        if manifest.kind == "knowledge":   # the licence texts and the NOTICE its pages need (_check_licence_files)
+            allowed |= {licence_texts.NOTICE_NAME} | {n for n in names if n.startswith(licence_texts.LICENSES_DIR + "/")}
         problems = [f"{name}: not allowed in a {manifest.kind} pack" for name in sorted(names - allowed)]
-        return problems + (self._check_recipe(root, manifest, notes) if manifest.kind == "recipe"
-                           else self._check_knowledge(root))
+        if manifest.kind == "recipe":
+            return problems + self._check_recipe(root, manifest, notes)
+        knowledge = self._check_knowledge(root)
+        return problems + knowledge + ([] if knowledge else self._check_licence_files(root, "knowledge",
+                                                                                    licence_notes))
+
+    @staticmethod
+    def _check_licence_files(root: Path, kind: str, notes: List[str]) -> List[str]:
+        """The licence texts and the NOTICE of a knowledge pack, or of a target pack's knowledge snapshot
+        (pack_licences.check): its problems; a note names the texts kept with the pack."""
+        from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
+        rel = KNOWLEDGE_FILE if kind == "knowledge" else KNOWLEDGE_SNAPSHOT
+        path = Path(root) / rel
+        try:
+            entries = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+        except (OSError, ValueError, UnicodeDecodeError):
+            entries = None
+        if not isinstance(entries, list):
+            # No pages to check (a knowledge pack's file: _check_knowledge says why); the licence texts next to it are
+            # still checked, so a text that is not the canonical one never comes in with a target pack.
+            entries = []
+        folder = path.parent
+        prefix = "" if folder == Path(root) else f"{folder.relative_to(root).as_posix()}/"
+        problems, found = pack_licences.check(folder, [e for e in entries if isinstance(e, dict)], prefix)
+        notes += found
+        return problems
 
     def _target_folder(self, target_id: str) -> Optional[Path]:
         if not self.targets_dir.is_dir():
@@ -817,7 +892,8 @@ class CommunityManager:
 
     # --- verify -----------------------------------------------------------------------------------------------
     def verify_installed(self) -> List[Tuple[Path, Provenance, Optional[TrustLevel], List[str]]]:
-        """Each installed pack with its trust and problems: revoked, or changed since it was installed."""
+        """Each installed pack with its trust and problems: revoked, changed since it was installed, or licence files
+        that do not match its pages (pack_licences.check)."""
         index = self.cached_index(revocations=True)
         results = []
         for folder, prov in self.installed():
@@ -828,6 +904,8 @@ class CommunityManager:
                     problems.append("changed since it was installed")
             except PackError as e:
                 problems.append(str(e))
+            if prov.kind in ("knowledge", "target"):   # its licence texts and NOTICE (pack_licences.check)
+                problems += self._check_licence_files(folder, prov.kind, [])
             results.append((folder, prov, trust, problems))
         return results
 
@@ -842,6 +920,8 @@ class CommunityManager:
             if contents.signature is not None and contents.signature.embedded_key() is not None:
                 verify_manifest(contents.manifest, contents.signature, [contents.signature.embedded_key()])
             for rel, file in list_files(work / "pack"):
+                if licence_texts.canonical_file(rel, file.read_bytes()):
+                    continue  # a canonical licence text is checked byte for byte instead (_check_licence_files)
                 text = file.read_text(encoding="utf-8", errors="replace")
                 if scrub(text) != text:
                     problems.append(f"{rel}: contains personal data the privacy scrub would remove")
@@ -870,12 +950,12 @@ class CommunityManager:
         license = license or ("NOASSERTION" if kind == "knowledge" else "MIT")
         out_dir = ensure_directory(Path(out_dir) if out_dir else self.contributions_dir)
         staging = Path(tempfile.mkdtemp(prefix=".export-", dir=out_dir))
-        root, notes, shares = staging / "pack", [], []
+        root, notes, shares, texts = staging / "pack", [], [], []
         try:
             root.mkdir()
             version = "1.0.0"
             if kind == "target":
-                pack_id, version = self._stage_target(str(source or ""), root, notes, shares)
+                pack_id, version = self._stage_target(str(source or ""), root, notes, shares, texts)
             elif kind == "recipe":
                 pack_id = self._stage_recipe(Path(str(source or "")), root, author, model_license, notes)
             else:
@@ -887,11 +967,14 @@ class CommunityManager:
                 if not pages:
                     raise PackError("The knowledge base has nothing to export.")
                 (root / KNOWLEDGE_FILE).write_text(json.dumps(pages, indent=2), encoding="utf-8")
+                files = pack_licences.write(root, pages)
+                texts += files.texts
                 notes.append("every page keeps its source address; the pages stay under their owners' terms")
                 notes.append(share_counts(shares))
+                notes += files.notes()
             changes = self._scrub_tree(root)
             manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license=license)
-            problems = self._validate(manifest, root, notes)
+            problems = self._validate(manifest, root, notes, exporting=True)
             if problems:
                 raise PackError("The pack would be rejected:\n- " + "\n- ".join(problems[:20]))
             key = UserKeys(self._secrets()).signing_key()
@@ -905,12 +988,12 @@ class CommunityManager:
             tmp = staging / name
             tmp.write_bytes(data)
             os.replace(tmp, out)
-            return ExportResult(out, manifest, signature.key_id, changes, notes, encrypted, shares)
+            return ExportResult(out, manifest, signature.key_id, changes, notes, encrypted, shares, texts)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
-    def _stage_target(self, target_id: str, root: Path, notes: List[str],
-                      shares: List[PageShare]) -> Tuple[str, str]:
+    def _stage_target(self, target_id: str, root: Path, notes: List[str], shares: List[PageShare],
+                      texts: List[pack_licences.IncludedText]) -> Tuple[str, str]:
         folder = self._target_folder(target_id) if re.fullmatch(ID_PATTERN, target_id) else None
         if folder is None:
             raise PackError(f"Target '{target_id}' not found in {self.targets_dir}.")
@@ -925,7 +1008,9 @@ class CommunityManager:
             dest = root.joinpath(*rel.split("/"))
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, dest, follow_symlinks=False)  # a link appearing meanwhile is refused below
-        shares += self._share_snapshot(root, notes)
+        snapshot_shares, snapshot_texts = self._share_snapshot(root, notes)
+        shares += snapshot_shares
+        texts += snapshot_texts
         try:
             meta = (yaml.safe_load((folder / "target.yml").read_text(encoding="utf-8")) or {}).get("metadata") or {}
         except (OSError, yaml.YAMLError, AttributeError):
@@ -934,14 +1019,26 @@ class CommunityManager:
         return folder.name, version if re.fullmatch(VERSION_PATTERN, version) else "1.0.0"
 
     @staticmethod
-    def _share_snapshot(root: Path, notes: List[str]) -> List[PageShare]:
+    def _share_snapshot(root: Path, notes: List[str]) -> Tuple[List[PageShare], List[pack_licences.IncludedText]]:
         """The knowledge snapshot of a staged target as the licences allow (share_pages): a snapshot made before this
-        rule, with every page's full text, goes out with full text only where a page's licence allows it. Returns
-        every page with what the pack carries of it and why."""
+        rule, with every page's full text, goes out with full text only where a page's licence allows it; the licence
+        texts and the NOTICE it needs are written next to it (knowledge/LICENSES/, knowledge/NOTICE), made anew from
+        the snapshot as the pack carries it. Returns every page with what the pack carries of it and why, and the
+        licence texts."""
         from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
         snapshot = root / KNOWLEDGE_SNAPSHOT
+        folder = snapshot.parent
         if not snapshot.is_file():
-            return []
+            # Licence files left from a removed snapshot would carry its pages' addresses and copyright lines: they
+            # stay out of the pack (only the export's temporary copy is changed, never the target folder).
+            stale = [f"{folder.relative_to(root).as_posix()}/{name}" for name in
+                     (licence_texts.NOTICE_NAME, licence_texts.LICENSES_DIR) if (folder / name).exists()]
+            shutil.rmtree(folder / licence_texts.LICENSES_DIR, ignore_errors=True)
+            (folder / licence_texts.NOTICE_NAME).unlink(missing_ok=True)
+            if stale:
+                notes.append(f"{' and '.join(stale)} left out: there is no knowledge snapshot ({KNOWLEDGE_SNAPSHOT}) "
+                             "they belong to")
+            return [], []
         try:
             entries = json.loads(snapshot.read_text(encoding="utf-8"))
         except (OSError, ValueError, UnicodeDecodeError):
@@ -952,8 +1049,14 @@ class CommunityManager:
         text = json.dumps(pages, indent=2)
         if text != snapshot.read_text(encoding="utf-8"):
             snapshot.write_text(text, encoding="utf-8")
+        # The staged copy's licence files are made anew (the folder's own copy of them may be older than the rule);
+        # only the export's temporary copy is changed, never the target folder.
+        shutil.rmtree(folder / licence_texts.LICENSES_DIR, ignore_errors=True)
+        (folder / licence_texts.NOTICE_NAME).unlink(missing_ok=True)
+        files = pack_licences.write(folder, pages, prefix=f"{folder.relative_to(root).as_posix()}/")
         notes.append(f"{KNOWLEDGE_SNAPSHOT}: {share_counts(shares)}")
-        return shares
+        notes += [f"{KNOWLEDGE_SNAPSHOT}: {note}" for note in files.notes()]
+        return shares, files.texts
 
     def _stage_recipe(self, build_info: Path, root: Path, author: str, model_license: str,
                       notes: List[str]) -> str:
@@ -983,6 +1086,8 @@ class CommunityManager:
         changes = []
         for rel, path in list_files(root):
             data = path.read_bytes()
+            if licence_texts.canonical_file(rel, data):
+                continue  # a canonical licence text stays byte for byte (no personal data; the check compares it)
             try:
                 if b"\0" in data:
                     raise UnicodeDecodeError("utf-8", data, 0, 1, "NUL byte")

@@ -49,6 +49,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## SPDX License List data (canonical licence texts)
+
+Source: https://github.com/spdx/license-list-data, version 3.29.0 (tag `v3.29.0`), the folder `text/`.
+
+`orchestrator/data/licenses/<SPDX id>.txt` holds the texts of the licences that ask for their text or permission
+notice with every copy (MIT, BSD-2-Clause, BSD-3-Clause, ISC, Apache-2.0, MPL-2.0, CC BY and CC BY-SA 1.0 to 4.0),
+unchanged; `licenses.json` next to them records the version, where each text came from and its sha256. A knowledge
+pack ships the texts its pages need (`orchestrator/rag/pack_licences.py`). The SPDX License List data is under the
+Creative Commons Zero v1.0 Universal dedication (CC0-1.0); each licence text stays the text of its own licence.
+
 ## rag4ll
 
 Source: https://github.com/Smilez1985/rag4ll
