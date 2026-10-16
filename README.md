@@ -362,8 +362,9 @@ llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t Rockchip -f gguf -
 llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
 ```
 
-- Results go to `output/build_<date>_<time>/Rockchip/<model>/<quantization>/` (model file, `build_info.json`,
-  `Model_Card.md`). `-o/--output-dir` sets another folder.
+- Results go to the output folder, `~/llmcf/output/Rockchip/<model>/<quantization>/` (model file, `build_info.json`,
+  `Model_Card.md`, and the ZIP next to it). At a terminal you are asked first, with the output folder as the default;
+  `-o/--output` sets another folder (unreleased; before, `output/build_<date>_<time>/` in the installation).
 - A combination the target does not support stops before anything runs, with exit code 2 and the reason (for
   example "Format 'rkllm' does not run on rk3566").
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token` (asks for the value).

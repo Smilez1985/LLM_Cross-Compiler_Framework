@@ -627,7 +627,9 @@ class BuildService:
         """A log line as an AI reads it (the log reaches AI callers only): a line with a path on this computer, such
         as the output folder in the home folder, gets the framework's folders by label (output:<path>, builds:,
         cache:, ...) and any other path by its file name (tools_runtime.label_paths), so no user name is left; a line
-        without one stays as it is, with the paths inside the build container."""
+        without one stays as it is, with the paths inside the build container. Folders that hold user names on any
+        system (/home/, /media/ and /run/media/ for removable disks, /Users/, C:\\Users\\) count as paths on this
+        computer too, so a local model on a USB disk or in another user's folder is named by its file name."""
         import os
         from orchestrator.Core.doctor import ai_folder_labels
         from orchestrator.tools.tools_runtime import label_paths
@@ -635,7 +637,14 @@ class BuildService:
         home = str(Path.home())
         marks = [r for r in roots if r not in ("", "/", "\\")]
         marks += [h for h in {home, os.path.realpath(home)} if h not in ("", "/", "\\")]
-        return lambda line: label_paths(line, roots) if any(m in line for m in marks) else line
+        users = ("/home/", "/media/", "/users/", "\\users\\")  # compared without letter case
+
+        def clean(line: str) -> str:
+            lowered = line.lower()
+            if any(m in line for m in marks) or any(u in lowered for u in users):
+                return label_paths(line, roots)
+            return line
+        return clean
 
     # --- the plan of a build (check_build_request, start_build's question) ------------------------------------
 

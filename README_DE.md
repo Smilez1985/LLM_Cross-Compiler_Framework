@@ -378,8 +378,10 @@ llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t Rockchip -f gguf -
 llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
 ```
 
-- Ergebnisse landen in `output/build_<Datum>_<Uhrzeit>/Rockchip/<Modell>/<Quantisierung>/` (Modelldatei,
-  `build_info.json`, `Model_Card.md`). `-o/--output-dir` legt einen anderen Ordner fest.
+- Ergebnisse landen im Ausgabeordner, `~/llmcf/output/Rockchip/<Modell>/<Quantisierung>/` (Modelldatei,
+  `build_info.json`, `Model_Card.md` und das ZIP daneben). Im Terminal wirst du vorher gefragt, mit dem Ausgabeordner
+  als Vorgabe; `-o/--output` legt einen anderen Ordner fest (unveröffentlicht; vorher `output/build_<Datum>_<Uhrzeit>/`
+  in der Installation).
 - Eine Kombination, die das Target nicht unterstützt, stoppt, bevor etwas läuft, mit Exit-Code 2 und dem Grund
   (zum Beispiel „Format 'rkllm' does not run on rk3566“).
 - Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token` (fragt nach dem

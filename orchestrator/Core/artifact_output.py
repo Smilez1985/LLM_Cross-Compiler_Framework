@@ -21,9 +21,11 @@ Where a build goes:
 
 Saving (`save_artifact`) moves an artifact out of the build folder: on the same disk it is renamed (nothing is
 copied); onto another disk every file is copied, each copy is checked against its original by sha256 (and a model
-file against the hash its manifest lists), and only then is the build folder's copy removed. Before copying, the free
-space of the destination is checked (with the reserve that always stays free). A failed check leaves the artifact
-where it was and removes only the unfinished copy. Nothing is ever overwritten: a name that is taken gets "-2", "-3".
+file against the hash its manifest lists), and only then is the build folder's copy removed. A link is never followed
+and not copied; when anything was left out, the result names it and the build folder's copy stays. Before copying,
+the free space of the destination is checked (with the reserve that always stays free). A failed check leaves the
+artifact where it was and removes only the unfinished copy. Nothing is ever overwritten: a name that is taken gets
+"-2", "-3".
 
 A destination is refused when it is (or lies in) a system folder, the framework's program folder, its build folder or
 its per-user folder. Artifacts saved outside the output folder are remembered (`saved_artifacts.json` in the per-user
@@ -355,10 +357,12 @@ def label_for(framework, path: Any) -> str:
 @dataclass
 class SaveResult:
     """What a save did: the artifact's new folder and ZIP (full paths, for the person), whether it was renamed on one
-    disk or copied and checked, and how many files and bytes."""
+    disk or copied and checked, whether the build folder's copy stays (something was not copied), and how many files
+    and bytes."""
     folder: Path
     zip: Optional[Path] = None
     renamed: bool = False
+    kept: bool = False
     files: int = 0
     bytes: int = 0
     notes: List[str] = field(default_factory=list)
@@ -418,25 +422,31 @@ def _copy_file(source: Path, target: Path) -> str:
     return digest.hexdigest()
 
 
-def _copy_verified(folder: Path, zip_file: Optional[Path], target: Path, listed: Dict[str, str]) -> Tuple[int, int]:
+def _copy_verified(folder: Path, zip_file: Optional[Path], target: Path,
+                   listed: Dict[str, str]) -> Tuple[int, int, List[str]]:
     """Copies the artifact folder and its ZIP next to `target` as unfinished copies, checks every copy against its
     original by sha256 (and a model file against the hash the manifest lists), then gives them their names (the
     manifest last, so a listing never sees half an artifact). The unfinished copies are the save's own: they are
-    removed again whatever went wrong. Returns (files, bytes)."""
+    removed again whatever went wrong. Returns (files, bytes, what was not copied and why: links are never followed,
+    and anything that is no plain file or folder is left out)."""
     token = secrets.token_hex(4)
     partial = target.parent / f".{target.name}.{token}.partial"
     partial_zip = target.parent / f".{target.name}.zip.{token}.partial"
     files = size = 0
+    skipped: List[str] = []
     try:
         partial.mkdir(parents=True)
-        entries = sorted((p for p in folder.rglob("*") if not p.is_symlink()),
-                         key=lambda p: (p.name == MANIFEST, str(p)))
+        entries = sorted(folder.rglob("*"), key=lambda p: (p.name == MANIFEST, str(p)))
         for item in entries:
             dest = partial / item.relative_to(folder)
+            if item.is_symlink():
+                skipped.append(f"{item.relative_to(folder).as_posix()} (a link; links are never followed)")
+                continue
             if item.is_dir():
                 dest.mkdir(parents=True, exist_ok=True)
                 continue
             if not item.is_file():
+                skipped.append(f"{item.relative_to(folder).as_posix()} (not a plain file)")
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
             read = _copy_file(item, dest)
@@ -459,7 +469,7 @@ def _copy_verified(folder: Path, zip_file: Optional[Path], target: Path, listed:
         os.rename(partial, target)
         if zip_file is not None:
             os.rename(partial_zip, target.parent / f"{target.name}.zip")
-        return files, size
+        return files, size, skipped
     finally:
         if partial.exists():
             shutil.rmtree(partial, ignore_errors=True)
@@ -557,12 +567,17 @@ def save_artifact(framework, folder: Any, destination: Any, *, create: bool = Fa
                                      "Free space there or choose a folder on another disk; the model stays in the "
                                      "build folder.", code="insufficient_resources")
         try:
-            result.files, result.bytes = _copy_verified(real, zip_file, target, listed)
+            result.files, result.bytes, skipped = _copy_verified(real, zip_file, target, listed)
         except OSError as e:  # a disk that ran full or a file that cannot be read: only the unfinished copy went
             raise DestinationRefused(f"Not saved: the copy failed ({e.strerror or e}); the model stays in the build "
                                      "folder.", "Check the disk there, then try again.", code="failed") from None
-        result.notes += [f"Could not remove the build folder's copy of {p}; the model is in both places now."
-                         for p in _remove_moved_source(real, zip_file)]
+        if skipped:  # the new copy does not hold everything: the build folder's copy stays, nothing is removed
+            result.kept = True
+            result.notes += [f"Not copied: {', '.join(skipped)}. The build folder's copy stays in {real}, so the "
+                             "model is in both places now."]
+        else:
+            result.notes += [f"Could not remove the build folder's copy of {p}; the model is in both places now."
+                             for p in _remove_moved_source(real, zip_file)]
     out = output_folder(framework)
     state = _state_dir(framework)
     if state is not None and not _inside(_real(target), _real(out)):
@@ -577,7 +592,13 @@ def set_output_folder(framework, folder: Any) -> Path:
     """The person sets the output folder (File > Output Folder... in the GUI, `llm-cli config output-folder`; never an
     AI): checked like a destination and made when it does not exist, then saved in config.yml. The earlier output
     folder stays listed (keep_listing). DestinationRefused when the folder is refused; OSError when config.yml could
-    not be written (the setting is unchanged then)."""
+    not be written (the setting is unchanged then). Everything below the output folder is listed, so a folder that
+    holds the framework's build folder, per-user folder or program folder (for example the home folder) is refused
+    as the output folder; a single model may still be saved there."""
+    holds = _holds_framework_folders(framework, folder)
+    if holds:
+        raise DestinationRefused(f"Not the output folder: {holds}.", "Choose a folder inside it that holds none of "
+                                                                     "them, for example ~/llmcf/output.")
     chosen = check_destination(framework, folder, create=True)
     old_value, old = _config_get(framework, "output_dir", None), output_folder(framework)
     config = framework.config
@@ -591,6 +612,23 @@ def set_output_folder(framework, folder: Any) -> Path:
         except (OSError, TimeoutError):
             pass  # the earlier builds stay where they are; only the listing misses them
     return chosen
+
+
+def _holds_framework_folders(framework, folder: Any) -> str:
+    """Why `folder` cannot be the output folder ("" when it can): it holds the framework's build folder, its per-user
+    folder or its program folder, which a listing of the output folder would walk through."""
+    if folder is None or not str(folder).strip():
+        return ""
+    real = _real(Path(str(folder).strip()))
+    own = [("the framework's build folder", build_folder(framework))]
+    state = _state_dir(framework)
+    if state is not None:
+        own.append(("the framework's per-user folder", state))
+    own += [("the framework's program folder", program) for program in _program_folders(framework)]
+    for what, path in own:
+        if real in _real(Path(path)).parents:
+            return f"{real} holds {what}"
+    return ""
 
 
 def keep_listing(framework, old: Any) -> None:

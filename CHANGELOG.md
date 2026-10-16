@@ -20,8 +20,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   start --output PATH` (at a terminal without it: a prompt with the output folder as the default, `-` keeps it in the
   build folder); without a terminal, and for Ditto and MCP clients, builds go to the output folder. Saving renames on
   the same disk; onto another disk every file is copied, checked by sha256 and only then removed from the build
-  folder; the free space is checked first, taken names get `-2`, and system folders, the program folder, the build
-  folder and the per-user folder are refused. The Deployment tab, `deploy list-artifacts` and `list_artifacts` list
+  folder (a link is never followed; when anything was not copied, the result names it and the build folder keeps its
+  copy); the free space is checked first, taken names get `-2`, and system folders, the program folder, the build
+  folder and the per-user folder are refused (as the output folder also a folder that holds one of them, such as your
+  home folder). The Deployment tab, `deploy list-artifacts` and `list_artifacts` list
   the output folder, the build folder (earlier builds stay there), earlier output folders after you changed it and
   folders you saved to; `start_build` tells an AI where the build will be.
 - **Identical builds are named before building** (eighth round, N11): `check_build_request` (`earlier_builds`, with a
@@ -38,7 +40,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   code index); there is no "continue anyway". AI clients get the blocker `snapshot_no_room` with your action before
   the question; the GUI offers **Knowledge Snapshots...** to delete or export snapshots. When it fits but leaves little
   space, a situation warning (`disk_tight`). A knowledge pack import now saves the knowledge base first
-  (`pre_pack_<time>`); without room nothing is imported and the pack is imported later. The doctor's knowledge line
+  (`pre_pack_<time>`); without room nothing is imported and the pack is imported later. A pack that cannot be
+  imported yet is tried again at the next start without another snapshot, and a name that is taken gets `-2`, so no
+  snapshot is ever written over. The doctor's knowledge line
   and `llm-cli knowledge snapshots` show what the snapshots use against the free space. Nothing is deleted by itself.
 - **Deleting with the full list, and the trash** (delegation design 3.10, round 5 f; round 6 10.4): every deletion of
   something you can see asks first in the framework's own window (the GUI's deletion dialog, or a table and a question
@@ -1371,7 +1375,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   of a build request, and log lines such as "Golden Artifact created", gave AI clients the full path of each finished
   build (with the user name in it). The status now gives `output:<target>/<model>/<quantization>` (or `builds:`,
   `saved:`, a file name elsewhere), and a log line with a path on this computer names the framework's folders by
-  label and any other path by its file name; your own windows keep the full path.
+  label and any other path by its file name (also below `/home/`, `/media/`, `/Users/` and `C:\Users\`, for example a
+  local model on a USB disk); your own windows keep the full path.
 - **No deletion without your confirmation in the framework** (round 5 f; WP7): every code path that deletes a built
   model, a knowledge snapshot, a trash entry or a framework image takes only the plan you accepted in the GUI or at a
   terminal, builds it again from what is on disk right before, and deletes nothing when it changed or when the audit

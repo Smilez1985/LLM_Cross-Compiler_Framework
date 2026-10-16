@@ -8,6 +8,7 @@ free space, that is a situation warning. The doctor's knowledge line shows what 
 space. Nothing is ever deleted to make room.
 """
 
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -77,6 +78,18 @@ def test_no_snapshot_is_written_when_it_does_not_fit_and_nothing_is_deleted(tmp_
         rag.create_snapshot("pre_ingest_2", "a Deep Ingest")
     assert files_of(rag.snapshot_dir) == ["pre_ingest_1.jsonl.gz"], "nothing written, nothing deleted"
     assert rag.last_snapshot_room.verdict == "does_not_fit"
+
+
+def test_a_snapshot_never_replaces_an_earlier_one_of_the_same_name(tmp_path, disk):
+    """Snapshot names carry the second they were taken (pre_ingest_<time>): two in one second (a crawl of two start
+    addresses, a pack import right after it) must not write over the first, which holds the state before both."""
+    rag = rag_with(tmp_path, Store())
+    disk(500 * GB)
+    first = rag.snapshot_dir / "pre_ingest_1.jsonl.gz"
+    first.write_bytes(b"the state before the crawl")
+    assert rag.create_snapshot("pre_ingest_1") == "pre_ingest_1-2"
+    assert first.read_bytes() == b"the state before the crawl"
+    assert files_of(rag.snapshot_dir) == ["pre_ingest_1-2.jsonl.gz", "pre_ingest_1.jsonl.gz"]
 
 
 def test_a_tight_disk_still_takes_the_snapshot_and_says_so(tmp_path, disk):
@@ -180,6 +193,32 @@ def test_a_knowledge_pack_is_not_imported_when_its_snapshot_does_not_fit(tmp_pat
     assert not (cm.knowledge_dir / "docs.imported").exists(), "imported later, once there is room"
     rag.no_room = False
     assert cm.sync_knowledge_base() == 1 and rag.ingested == ["s"]
+
+
+def test_a_pack_that_stays_pending_is_snapshotted_once_not_at_every_start(tmp_path):
+    """A pack that cannot be imported yet (its pages are refused, e.g. offline without the embedding model, or the old
+    'swarm' format) stays pending, and the framework tries again whenever the knowledge base starts. The snapshot
+    before its import is taken once: snapshots are never deleted by themselves, so one per start would fill the
+    disk. A pack installed later gets its own snapshot before its first page."""
+    rag = PackRag()
+    rag.ingest_document = lambda source, content, meta: False  # refused every time
+    cm = pack_manager(tmp_path, rag)
+    (cm.knowledge_dir / "old.json").write_text('{"swarm_encrypted": true}')
+    for _ in range(3):
+        assert cm.sync_knowledge_base() == 0
+    assert len(rag.snapshots) == 1, "one snapshot for the packs that wait, not one per start"
+    assert not (cm.knowledge_dir / "docs.imported").exists(), "still pending: imported once it can be"
+    (cm.knowledge_dir / "new.json").write_text('[{"source": "n", "content": "c", "metadata": {}}]')
+    assert cm.sync_knowledge_base() == 0 and len(rag.snapshots) == 2, "a new pack: a snapshot before its import"
+    rag.ingest_document = lambda source, content, meta: rag.ingested.append(source) or True
+    assert cm.sync_knowledge_base() == 2 and len(rag.snapshots) == 2
+    # installed again (an earlier version was removed): its marker goes, and it gets a snapshot of its own again
+    rag.ingested.clear()
+    (cm.knowledge_dir / "docs.imported").unlink()
+    docs = cm.knowledge_dir / "docs.json"
+    docs.write_text('[{"source": "s2", "content": "c2", "metadata": {}}]')
+    os.utime(docs, ns=(docs.stat().st_atime_ns, docs.stat().st_mtime_ns + 10 ** 9))
+    assert cm.sync_knowledge_base() == 1 and len(rag.snapshots) == 3
 
 
 def test_the_snapshot_list_names_pack_backups(tmp_path):

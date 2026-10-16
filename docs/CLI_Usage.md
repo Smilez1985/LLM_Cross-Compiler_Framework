@@ -341,9 +341,10 @@ Without `--to` it goes to the output folder; at a terminal you are asked, with t
 
 On the same disk the build is moved (renamed, nothing copied). Onto another disk every file is copied, each copy is
 checked against its original by sha256 (a model file also against the hash in its manifest), and only then is the
-copy in the build folder removed. The free space is checked before copying. A name that is taken is never
-overwritten (`-2`). If a check fails, nothing is moved (exit code 1). A system folder, the framework's program
-folder, its build folder and its per-user folder are refused.
+copy in the build folder removed. A link in the build is never followed and not copied; when anything was left out,
+the output names it and the copy in the build folder stays. The free space is checked before copying. A name that
+is taken is never overwritten (`-2`). If a check fails, nothing is moved (exit code 1). A system folder, the
+framework's program folder, its build folder and its per-user folder are refused.
 
 ```bash
 llm-cli build save Rockchip/SmolLM2-135M-Instruct/Q4_0 --to /mnt/models
@@ -1584,8 +1585,9 @@ llm-cli config output-folder [FOLDER]
 Unreleased. Without `FOLDER` it shows the output folder (setting `output_dir`, default `~/llmcf/output`) and the
 framework's build folder (setting `build_dir`). With `FOLDER` it sets the output folder and saves `config.yml`, for
 example to a folder on a big second disk; the folder is made when it does not exist. A system folder, the
-framework's program folder, its build folder and its per-user folder are refused (exit code 2). Builds in the old
-folder stay where they are and stay listed. An AI cannot change this setting.
+framework's program folder, its build folder and its per-user folder are refused (exit code 2), and so is a folder
+that holds one of them (such as your home folder), because everything below the output folder is listed. Builds in
+the old folder stay where they are and stay listed. An AI cannot change this setting.
 
 ```bash
 llm-cli config output-folder /mnt/models/llmcf

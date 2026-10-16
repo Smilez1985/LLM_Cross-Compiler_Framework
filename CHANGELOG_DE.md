@@ -21,8 +21,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   start --output PFAD` (an einem Terminal ohne diese Angabe: eine Frage mit dem Ausgabeordner als Vorgabe, `-` lässt
   ihn im Build-Ordner); ohne Terminal, und für Ditto und MCP-Clients, kommen Builds in den Ausgabeordner. Speichern
   benennt auf derselben Platte um; auf eine andere Platte wird jede Datei kopiert, per sha256 geprüft und erst dann
-  aus dem Build-Ordner entfernt; vorher wird der freie Platz geprüft, belegte Namen bekommen `-2`, und Systemordner,
-  der Programmordner, der Build-Ordner und der persönliche Ordner werden abgelehnt. Der Tab „Deployment“,
+  aus dem Build-Ordner entfernt (einem Link wird nie gefolgt; fehlt etwas in der Kopie, nennt das Ergebnis es, und
+  der Build-Ordner behält seine Kopie); vorher wird der freie Platz geprüft, belegte Namen bekommen `-2`, und
+  Systemordner, der Programmordner, der Build-Ordner und der persönliche Ordner werden abgelehnt (als Ausgabeordner
+  auch ein Ordner, der einen davon enthält, wie dein Home-Ordner). Der Tab „Deployment“,
   `deploy list-artifacts` und `list_artifacts` listen den Ausgabeordner, den Build-Ordner (frühere Builds bleiben
   dort), frühere Ausgabeordner, nachdem du ihn geändert hast, und die Ordner, in die du gespeichert hast;
   `start_build` sagt einer KI, wohin der Build kommt.
@@ -41,7 +43,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   vor der Frage den Blocker `snapshot_no_room` mit deiner Handlung; die GUI bietet **Knowledge Snapshots...** an, um
   Snapshots zu löschen oder zu exportieren. Passt er, lässt aber wenig Platz, eine Lagewarnung (`disk_tight`). Ein
   Import eines Wissens-Packs sichert die Wissensbasis jetzt zuerst (`pre_pack_<Zeit>`); ohne Platz wird nichts
-  aufgenommen, und das Pack wird später aufgenommen. Die Wissenszeile des Doctors und `llm-cli knowledge snapshots`
+  aufgenommen, und das Pack wird später aufgenommen. Ein Pack, das sich noch nicht aufnehmen lässt, wird beim nächsten
+  Start ohne weiteren Snapshot noch einmal versucht, und ein belegter Name bekommt `-2`, so wird nie ein Snapshot
+  überschrieben. Die Wissenszeile des Doctors und `llm-cli knowledge snapshots`
   zeigen, was die Snapshots im Vergleich zum freien Platz belegen. Nichts wird von selbst gelöscht.
 - **Löschen mit der vollen Liste, und der Papierkorb** (Delegationsentwurf 3.10, Runde 5 f; Runde 6 10.4): Jedes
   Löschen von etwas, das du sehen kannst, fragt zuerst im eigenen Fenster des Frameworks (der Lösch-Dialog der GUI oder
@@ -1558,7 +1562,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   3.0.0 gaben der Status einer Build-Anfrage und Log-Zeilen wie „Golden Artifact created“ KI-Clients den vollen Pfad
   jedes fertigen Builds (mit dem Benutzernamen darin). Jetzt nennt der Status `output:<Target>/<Modell>/<Quantisierung>`
   (oder `builds:`, `saved:`, sonst einen Dateinamen), und eine Log-Zeile mit einem Pfad auf diesem Computer nennt die
-  Ordner des Frameworks über ihre Bezeichnung und jeden anderen Pfad über seinen Dateinamen; deine eigenen Fenster
+  Ordner des Frameworks über ihre Bezeichnung und jeden anderen Pfad über seinen Dateinamen (auch unter `/home/`,
+  `/media/`, `/Users/` und `C:\Users\`, zum Beispiel ein lokales Modell auf einem USB-Stick); deine eigenen Fenster
   behalten den vollen Pfad.
 - **Kein Löschen ohne deine Bestätigung im Framework** (Runde 5 f; WP7): Jeder Codepfad, der ein gebautes Modell, einen
   Wissens-Snapshot, einen Papierkorb-Eintrag oder ein Image des Frameworks löscht, nimmt nur den Plan, den du in der GUI

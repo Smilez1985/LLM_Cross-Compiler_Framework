@@ -667,8 +667,13 @@ class RAGManager:
         Its size is estimated first (eighth round, answer 2): when it does not fit on the disk, SnapshotNoRoom (the
         caller does not make its change either, there is no "continue anyway"); when it fits but leaves little free
         space, last_snapshot_room says so (verdict tight) and the snapshot is made. `before`: the change it backs up,
-        as the refusal names it."""
+        as the refusal names it. A name that is taken (two snapshots in one second) gets "-2", "-3": an earlier
+        snapshot is never written over."""
         name = sanitize_filename(name or f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}") or "snapshot"
+        base, n = name, 1
+        while os.path.lexists(self.snapshot_dir / f"{name}{SUFFIX}"):
+            n += 1
+            name = f"{base}-{n}"
         path = self.snapshot_dir / f"{name}{SUFFIX}"
         self.last_snapshot_room = None
 

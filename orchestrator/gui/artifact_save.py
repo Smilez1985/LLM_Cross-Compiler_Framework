@@ -29,7 +29,8 @@ def choose_folder(parent, title: str, start: str) -> str:
 def result_text(result: Any, lang: Optional[str] = None) -> str:
     """What a save did, for the person: where the model is now and how it got there."""
     from orchestrator.Core.knowledge_snapshots import size_text
-    key = "save.done.renamed" if result.renamed else "save.done.copied"
+    key = "save.done.renamed" if result.renamed else "save.done.kept" if getattr(result, "kept", False) \
+        else "save.done.copied"
     lines = [ui_text(key, lang, path=str(result.folder), files=result.files, size=size_text(result.bytes))]
     if result.zip is not None:
         lines.append(ui_text("save.done.zip", lang, path=str(result.zip)))

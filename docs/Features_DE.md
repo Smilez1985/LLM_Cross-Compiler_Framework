@@ -154,6 +154,9 @@ Ordner) wird in einem Ordner deiner Wahl gespeichert (unveröffentlicht; achte R
   `C:\Users\<Name>\llmcf\output`). Du legst ihn einmal fest: **File > Output Folder...** in der GUI (der Ordnerdialog
   des Systems) oder `llm-cli config output-folder PFAD`, zum Beispiel auf einen Ordner auf einer großen zweiten
   Platte. Eine KI kann ihn nicht ändern. Builds im alten Ordner bleiben, wo sie sind, und werden weiter aufgelistet.
+  Alles unterhalb des Ausgabeordners wird aufgelistet, deshalb kann ein Ordner, der den Build-Ordner, den
+  persönlichen Ordner oder den Programmordner des Frameworks enthält (zum Beispiel dein Home-Ordner), nicht der
+  Ausgabeordner sein.
 - **Der Build-Ordner des Frameworks** (Einstellung `build_dir`, Standard der Ordner `output` im Datenordner, wohin
   Builds bisher kamen): ein Build, den du in der GUI startest, wartet hier, bis er gespeichert ist. Frühere Builds
   bleiben hier und werden weiter aufgelistet.
@@ -170,11 +173,15 @@ Wer wohin speichert:
 - **Ditto und MCP-Clients:** immer der Ausgabeordner; `start_build` sagt das, und `get_build_status` nennt jeden
   fertigen Build über seine Bezeichnung (`output:<Target>/<Modell>/<Quantisierung>`), nie über seinen Pfad auf dem
   Rechner. In `get_build_log` nennt eine Zeile mit einem Pfad auf diesem Computer die Ordner des Frameworks über ihre
-  Bezeichnung und jeden anderen Pfad über seinen Dateinamen. Deine eigenen Fenster zeigen den vollen Pfad.
+  Bezeichnung und jeden anderen Pfad über seinen Dateinamen; Pfade unter `/home/`, `/media/`, `/run/media/`,
+  `/Users/` und `C:\Users\` zählen auch dazu (ein lokales Modell auf einem USB-Stick). Deine eigenen Fenster zeigen
+  den vollen Pfad.
 
 Speichern verschiebt den Build aus dem Build-Ordner. Auf derselben Platte wird er umbenannt, nichts wird kopiert.
 Auf eine andere Platte wird jede Datei kopiert, jede Kopie wird per sha256 mit ihrem Original verglichen (eine
-Modelldatei auch mit dem Hash in ihrem Manifest), und erst dann wird die Kopie im Build-Ordner entfernt. Vor dem
+Modelldatei auch mit dem Hash in ihrem Manifest), und erst dann wird die Kopie im Build-Ordner entfernt. Einem Link
+im Build wird nie gefolgt, er wird nicht kopiert; fehlt etwas in der Kopie, nennt das Ergebnis es, und die Kopie im
+Build-Ordner bleibt. Vor dem
 Kopieren wird der freie Platz geprüft, mit der Reserve, die immer frei bleibt. Schlägt eine Prüfung fehl, bleibt der
 Build, wo er war, und nur die unfertige Kopie wird entfernt. Ein belegter Name wird nie überschrieben (`-2`, `-3`).
 Ein Systemordner, der Programmordner des Frameworks, sein Build-Ordner und sein persönlicher Ordner werden als Ziel
@@ -1294,7 +1301,8 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   neue Fassung nicht mehr hat, werden entfernt. Codeblöcke und Tabellen bleiben ganz, außer sie sind größer als der
   Kontext des Modells ([Große Codeblöcke und Tabellen](#große-codeblöcke-und-tabellen)).
 - **Schnappschüsse:** Vor jedem Crawl, jeder Wiederherstellung und jedem Import eines Wissens-Packs wird die
-  Wissensbasis als Schnappschuss in `~/.llm-framework/knowledge_snapshots` gesichert. Es gibt keine Grenze
+  Wissensbasis als Schnappschuss in `~/.llm-framework/knowledge_snapshots` gesichert; ein belegter Name bekommt
+  `-2`, so wird nie ein Schnappschuss überschrieben. Es gibt keine Grenze
   (unveröffentlicht; bisher blieben auf jedem Weg nur die neuesten 5): Das Framework behält so viele, wie die Platte
   fasst, löscht keinen von selbst, und keine Anzahl bringt eine Erinnerung oder eine Warnung. Was zählt, ist die
   Platte (unveröffentlicht; achte Runde, Antwort 2): bevor ein Schnappschuss angelegt wird, wird seine Größe
@@ -2535,7 +2543,9 @@ Wissens-Pack wird direkt nach seiner Installation in die Wissensbasis aufgenomme
 ausgeschaltet ist, sobald sie eingeschaltet wird. Bevor seine erste Seite aufgenommen wird, wird die Wissensbasis als
 Schnappschuss gesichert (`pre_pack_<Zeit>`), damit sich der Import rückgängig machen lässt (unveröffentlicht). Passt
 dieser Schnappschuss nicht mehr auf die Platte, wird nichts aufgenommen: das Pack bleibt installiert und wird
-aufgenommen, sobald Platz da ist.
+aufgenommen, sobald Platz da ist. Ein Pack, das sich noch nicht aufnehmen lässt (zum Beispiel offline ohne das
+Embedding-Modell), wird beim nächsten Start ohne weiteren Schnappschuss noch einmal versucht; ein erneut installiertes
+Pack bekommt einen neuen.
 
 ### Vertrauensstufen
 
