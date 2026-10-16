@@ -69,8 +69,24 @@ what to delete; 1 needs you." Nothing is skipped. Mojo Oracle changes nothing.
 It checks Python, Docker and buildx, where Docker keeps its images, free disk space for the cache, output and build
 folders, the targets, the state folder, the secrets store and the keyring, the tool permissions, the MCP tokens and
 the audit log, the chat feed, the calibration data, the community packs, the knowledge snapshots against the free
-space of their disk, the local llama.cpp runtime (in Docker mode: whether Ditto's image is there, built on this
-computer and verified) and the boards you trusted.
+space of their disk, the storage of the knowledge base, the local llama.cpp runtime (in Docker mode: whether Ditto's
+image is there, built on this computer and verified) and the boards you trusted.
+
+### The storage of the knowledge base
+
+The knowledge base is stored in Qdrant Edge; one in the storage of earlier versions is converted on its first use.
+Mojo reads the record of that conversion and opens nothing (`knowledge.storage`):
+
+- a conversion that failed is a warning: the knowledge base still uses the old storage and keeps working. The line
+  gives the reason and how to try again: **Tools > Knowledge Snapshots... > Try the conversion again** in the GUI, or
+  `llm-cli knowledge storage convert` in a terminal;
+- a knowledge base in Qdrant Edge whose engine cannot be loaded (a missing or broken package) is an error: it is not
+  opened, and the old folder never stands in for it. Install the framework's requirements again;
+- the old storage folder kept after a conversion is information, with its full path and size. Nothing deletes it by
+  itself, Mojo Miracle neither: **Tools > Knowledge Snapshots... > Delete the old storage...** in the GUI or
+  `llm-cli knowledge storage delete-old` list it and ask you first;
+- on a computer without a build of Qdrant Edge (Windows on ARM) an information says that the knowledge base keeps the
+  older storage.
 
 ### The boards you trusted
 
@@ -135,7 +151,7 @@ Every problem that Mojo Miracle does not repair gets one of these reasons:
 | Reason | What it means | Examples |
 |---|---|---|
 | deleting needs your list | Freeing space means deleting, and the framework deletes only what you tick and confirm in its own window. At a terminal Mojo Miracle shows you the framework's build images (name, id, size, what each is; nothing is ticked). You type the numbers of the ones to delete and confirm exactly those; No is the default. The GUI has the same list under **Tools > Framework Build Images...**. Docker images are never deleted unless you do it, and Docker's build cache is never touched. For knowledge snapshots the list is **Tools > Knowledge Snapshots...** or `llm-cli knowledge snapshots`. | `disk.cache`, `disk.output`, `disk.builds`, `knowledge.snapshots` |
-| needs you | Only you can do this: your keys, the tool permissions, the audit log, your settings and files. An AI never changes them. | `secrets.store`, `secrets.storage`, `tools.permissions`, `tools.tokens`, `tools.audit`, `chat_feed.store`, `targets.none`, `devices.<device id>` (a board that refuses SSH or whose host key changed), a revoked community pack (you delete its folder yourself) |
+| needs you | Only you can do this: your keys, the tool permissions, the audit log, your settings and files. An AI never changes them. | `secrets.store`, `secrets.storage`, `tools.permissions`, `tools.tokens`, `tools.audit`, `chat_feed.store`, `targets.none`, `devices.<device id>` (a board that refuses SSH or whose host key changed), `knowledge.storage` (a failed conversion of the knowledge base, or Qdrant Edge that cannot be loaded), a revoked community pack (you delete its folder yourself) |
 | needs an administrator | It changes the system outside the framework. | `docker.daemon`, `docker.buildx`, `python.version`, `secrets.keyring`, `runtime.docker.unavailable` |
 | not repairable automatically | Nothing in the framework can do it by itself. The hint says what helps. | `runtime.build.damaged`, `runtime.build.outdated`, `runtime.docker.image` (make Ditto's image again with `llm-cli ditto runtime ensure --mode docker --force`), `data.calibration`, a check that crashed |
 

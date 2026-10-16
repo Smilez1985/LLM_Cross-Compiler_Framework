@@ -786,8 +786,8 @@ alten Speicher einmal zu lesen.
      (`knowledge_conversion.json`: wann, die Collections, die Punkte, was geprüft wurde, wie lange es dauerte, die
      Version der Engine).
 
-  Der alte Ordner bleibt. Nur die Person löscht ihn, über die Löschliste (Tools > Knowledge Snapshots... > Delete the
-  old storage... oder `llm-cli knowledge storage delete-old`; Papierkorb oder endgültig; im Audit-Log als
+  Der alte Ordner bleibt. Nur die Person löscht ihn, über die Löschliste (Tools > Knowledge Snapshots... > Alten
+  Speicher löschen... oder `llm-cli knowledge storage delete-old`; Papierkorb oder endgültig; im Audit-Log als
   `old_store_deleted`). Eine fehlgeschlagene Umwandlung lässt den alten Speicher in Gebrauch, entfernt die halbe Kopie
   und hält den Grund fest; Mojo Oracle und `llm-cli knowledge storage` zeigen ihn. Ein Fehler des Augenblicks
   (Plattenplatz, der alte Speicher von einem älteren Framework belegt) wird beim nächsten Start erneut versucht. Ein

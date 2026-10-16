@@ -429,3 +429,18 @@ def test_a_problem_that_appears_after_the_repairs_is_reported():
     assert [e.finding.code for e in result.entries] == ["a.person"], "the old problem is reported as not repaired"
     assert result.exit_code == 2
 
+
+def test_the_mojo_guide_names_every_list_mojo_points_to_and_the_knowledge_storage_check():
+    """Every finding Mojo answers with the person's own list (DELETION_LISTS and OTHER_LISTS: the framework's build
+    images, the knowledge snapshots, the old knowledge base storage) is named in the Mojo guide and its German twin,
+    and the guides and Mojo's table in the feature lists name the check of the knowledge base's storage (Qdrant Edge,
+    a failed conversion, the old folder kept), which Mojo Oracle got with the storage in Qdrant Edge."""
+    from orchestrator.Core.mojo.offers import DELETION_LISTS, OTHER_LISTS
+    for name in ("docs/Mojo.md", "docs/Mojo_DE.md"):
+        text = (REPO / name).read_text(encoding="utf-8")
+        missing = [code for code in (*DELETION_LISTS, *OTHER_LISTS) if f"`{code}`" not in text]
+        assert not missing, f"{name} does not name {missing}"
+        assert "Qdrant Edge" in text and "llm-cli knowledge storage delete-old" in text, name
+    for name, row in (("docs/Features.md", "| Knowledge |"), ("docs/Features_DE.md", "| Wissen |")):
+        (line,) = [ln for ln in (REPO / name).read_text(encoding="utf-8").splitlines() if ln.startswith(row)]
+        assert "Qdrant Edge" in line, f"{name}: Mojo's row for the knowledge base does not name its storage check"

@@ -15,7 +15,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
   Eintrag, und seine erste Zeile nennt den Speicher, der wirklich genutzt wird. `convert` und **Tools > Knowledge
   Snapshots... > Umwandlung erneut versuchen** in der GUI (im Hintergrund) versuchen die Umwandlung sofort erneut.
-  `delete-old` und **Tools > Knowledge Snapshots... > Delete the old storage...** in der GUI zeigen den alten Ordner
+  `delete-old` und **Tools > Knowledge Snapshots... > Alten Speicher löschen...** in der GUI zeigen den alten Ordner
   nach seiner Umwandlung und löschen ihn erst nach deinem Ja (Papierkorb oder endgültig; "Nein" ist die Vorgabe; im
   Audit-Log als `old_store_deleted`); nichts löscht ihn von selbst, und eine KI kann es nie. Mojo Oracle meldet eine
   fehlgeschlagene Umwandlung (mit dem Grund und beiden Wegen zum neuen Versuch) und einen alten Ordner, der noch da
