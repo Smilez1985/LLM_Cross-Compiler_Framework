@@ -114,27 +114,8 @@ class BuildStatus(Enum):
     CANCELLED = "cancelled"
     CLEANING = "cleaning"
 
-class ModelFormat(Enum):
-    HUGGINGFACE = "hf"
-    GGUF = "gguf"
-    RKLLM = "rkllm"          # Rockchip NPU LLM (RK3588/RK3576)
-    ONNX = "onnx"
-    TENSORFLOW_LITE = "tflite"
-    PYTORCH_MOBILE = "pytorch_mobile"
-    # Hardware-Specific Formats
-    RKNN = "rknn"           # Rockchip NPU
-    TENSORRT = "tensorrt"   # NVIDIA GPU
-    OPENVINO = "openvino"   # Intel NPU/CPU
-    COREML = "coreml"       # Apple Silicon
-    NCNN = "ncnn"           # Mobile High-Performance
-    MNN = "mnn"             # Alibaba Mobile
-
-class OptimizationLevel(Enum):
-    FAST = "fast"
-    BALANCED = "balanced"
-    SIZE = "size"
-    SPEED = "speed"
-    AGGRESSIVE = "aggressive"
+# ModelFormat and OptimizationLevel live in build_formats (the CLI imports them without this module).
+from orchestrator.Core.build_formats import ModelFormat, OptimizationLevel  # noqa: E402,F401 - re-exported
 
 TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"

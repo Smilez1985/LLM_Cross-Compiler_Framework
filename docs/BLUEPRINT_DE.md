@@ -1012,6 +1012,7 @@ dieser Version.
 | 3.2.0 | Laufzeit auf dem Gerät und die Hardware des Maintainers | geplant |
 | 3.3.0 | LoRA und große Modelle | geplant |
 | 3.4.0 | Lieferkette und Community | geplant |
+| später | Rust-Teile für das Netzwerk und das Board | geplant |
 | später | Mehr Hardware und MCP-Erweiterungen | geplant |
 
 ### 3.1.0 - Ditto-Neubau, Anmeldung und lokale KI (in Arbeit)
@@ -1034,6 +1035,7 @@ dieser Version.
 | **Dokumentation auf Englisch und Deutsch** für jedes Dokument. | in Arbeit |
 | **Crawler, der die eigenen Signale der Seite prüft.** Ob eine Seite ausgewertet werden darf, kann ein Nutzer nicht wissen. Deshalb prüft der Crawler die maschinenlesbaren Nutzungsvorbehalte selbst (robots.txt nach RFC 9309, den Header `X-Robots-Tag`, Robots-Meta-Tags einschließlich `noai` und seines eigenen Bot-Namens, das TDM Reservation Protocol) und überspringt vorbehaltene Seiten mit Nennung im Log; jeder Vorbehalt gewinnt, und keine Prüfung lässt sich abschalten. Statt einer rechtlichen Bestätigung erklärt ein einmaliger Hinweis (je Benutzer, erneut, wenn sich sein Text ändert), was gelesen und behalten wird, mit Sprachansage über die Sprachausgabe des Betriebssystems (die Technik des USB-Watchers aus rag4ll); ein Stopp-Knopf behält das Gespeicherte, der Fortschritt zeigt „Seite N von M“, das Ergebnis nennt ehrlich Erfolg, Teilerfolg oder Fehler, und der Crawler meldet seine echte Version. Eine Person startet Deep Ingest in der GUI oder bestätigt das `crawl_docs_site` eines KI-Clients (unveröffentlicht). | fertig |
 | **Eingabe-Historie**: zuletzt verwendete Modelle, Targets, Boards, URLs, Geräte und Datensätze als Auswahl in den GUI-Feldern, je Benutzer, ohne Geheimnisse; Tools > Eingabeverlauf löschen... vergisst sie. | fertig |
+| **Schnellerer Start durch Lazy Loading.** CLI, MCP-Server und GUI laden einen schweren Teil erst, wenn ein Befehl ihn zum ersten Mal braucht: die Manager des Frameworks (nicht für Befehle, die kein Framework brauchen), die Wissensbasis und den Crawler, Qt außerhalb der GUI, die Prüfungen von Mojo, rich für `--help`. Die Host-Prüfung, die beim Import der URL-Prüfungen lief, wartet keine Sekunde mehr. Warum: `llm-cli mcp serve` muss einem KI-Client schnell antworten, und `llm-cli --help` soll nicht alles laden. | fertig |
 | **Bessere Antworten aus der Wissensbasis**, aus rag4ll übernommen und klein gehalten: Reranking mit einem Cross-Encoder auf der CPU und eine Relevanzschwelle, die unpassende Auszüge aus Dittos Prompt heraushält (eingeschaltet für Build-Empfehlungen; für Chat und MCP-Suchen mit `rag_rerank_default`), ein Größenbudget für die Auszüge, das Aufteilen übergroßer Code- und Tabellenblöcke, eine Stichwortsuche, die Bezeichner wie `-DGGML_CUDA=ON` versteht, und das Entladen unbenutzter Modelle; gemessen mit der Abruf-Evaluation (`llm-cli ditto eval --kind retrieval`). | fertig |
 | **Community-Pakete mit echter Kryptografie**: Pakete mit einem Manifest jeder Datei, öffentliche Pakete mit Ed25519 signiert, private Pakete im Format age (rage, über `pyrage`) an die Schlüssel der Empfänger oder eine Passphrase verschlüsselt, vom Absender signiert und mit den üblichen age-Werkzeugen lesbar. Der Upload mit der XOR-„SwarmCipher“ und seine Abfrage eines GitHub-Tokens entfallen; das Framework fragt nie nach einem Token. | fertig |
 | **Model-Zoo aus der Community**: Rezepte (Modell mit festgelegtem Commit, Target-Fingerabdruck, Format, Quantisierung, Toolchain-Image und geprüfte Hashes), aus fertigen Builds erzeugt; ein signierter Index mit Widerrufen, Installation über eine Quarantäne mit Vertrauensstufen, `llm-cli zoo`, der Community-Hub, der Export für die Community mit Übergabe an einen Pull-Request und die Werkzeuge des Maintainers für das Community-Repository. | fertig |
@@ -1106,6 +1108,25 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **Signierte Updates** des Frameworks selbst (`orchestrator/utils/updater.py`, in Entwicklung: Update-Prüfung, Update und Neustart; noch nicht eingebunden), fertig gebaut als geprüfte Updates einer signierten Veröffentlichung statt eines einfachen `git pull`. Werkzeugketten-Images gehören nicht dazu: Das Framework teilt Rezepte, nie kompilierte Images, daher werden sie weiter auf deinem Rechner aus dem Dockerfile des Targets gebaut; die Einstellungen `docker_registry` (standardmäßig leer) und `docker_namespace`, die nichts liest, bleiben erhalten. Keine Vorgabe nennt ein Image aus einer Registry: Die Image-Einstellungen nennen lokale Images (`llm-framework/...`) oder Images Dritter wie Trivy und Qdrant, und der Block `docker` in der `target.yml` eines Targets nennt ein lokales Image ohne Registry. | geplant |
 | **Aufräumen**: Entfernung der alten Vier-Module-Skripte (Vorlagen-`build.sh` und Vorlagen-Dockerfile folgen bereits der aktuellen Pipeline: GGUF über llama.cpp, nach dem Rezept gebaut, Zwischendateien im Arbeitsordner). | geplant |
 | **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
+
+### Rust-Teile (geplant)
+
+Der Kern bleibt Python. Teile, die für sich an einer Vertrauensgrenze stehen und noch nicht gebaut sind, werden in
+Rust geschrieben; andere Teile wechseln nur, wenn eine Messung einen Gewinn zeigt (Entscheidung des Maintainers vom
+2026-10-16).
+
+| Punkt | Status |
+|---|---|
+| **Netzwerk-Gateway für MCP in Rust.** Ein Gateway-Prozess vor dem Python-MCP-Server für Clients auf anderen Geräten: TLS und Anmeldung per OAuth, benanntem Token oder vorab geteiltem Schlüssel (eine HMAC-Signatur bei jeder Anfrage). Warum: Dieser Teil steht zum Netzwerk hin; Rust gibt ihm Speichersicherheit und einen kleinen, schnellen Prozess. | geplant |
+| **MQTT-Broker im Gateway (rumqttd).** Er weckt KI-Clients nur mit festen Stichwörtern (die Einzelheiten kommen über MCP), und andere Anwendungen können ihn abonnieren und eigene Feeds hinzufügen. Er ersetzt den amqtt-Broker, der im Python-Prozess geplant war. Warum: kein zweiter Server, und der Broker sitzt dort, wo die Netzwerkverbindungen ankommen. | geplant |
+| **Root-Helfer auf dem Board in Rust**: ein statisches Programm mit festen Unterbefehlen für das, was Build und Deploy brauchen, und eine sudoers-Regel nur für diesen Helfer. Warum: kein allgemeines sudo auf dem Board, und ein statisches Programm läuft auf jedem Board, egal welche C-Bibliothek es hat. | geplant |
+| **Die Rust-Teile des Frameworks fertig gebaut und signiert ausgeliefert.** Die CI macht sie zu Release-Dateien dieses Repositorys und signiert sie schlüssellos mit Sigstore; ihre Prüfsummen liegen im Repository, und der Installer prüft Signatur und Prüfsumme, bevor er ein Programm nutzt. Selbst bauen bleibt als Opt-in möglich. Warum: Auf deinem Rechner ist keine Rust-Werkzeugkette nötig, und jedes Programm bleibt prüfbar. | geplant |
+
+- **Keine fertigen Docker-Images für Targets.** Target-Images werden weiter auf deinem Rechner aus dem Dockerfile des
+  Targets gebaut und nie in eine Registry geladen. Warum: Das Framework teilt Rezepte, keine Images, und ein Image
+  müsste für jedes Update neu gebaut werden.
+- **Kein Go.** Warum: Eine kompilierte Sprache neben Python reicht; eine zweite brächte eine zweite Werkzeugkette.
+- **Die GUI bleibt Qt (PySide6).** Warum: Sie läuft unter Windows und Linux, und Qt selbst ist nativer Code.
 
 ### Später (geplant)
 

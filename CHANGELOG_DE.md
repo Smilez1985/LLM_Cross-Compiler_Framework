@@ -1057,6 +1057,33 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Schnellerer Start: schwere Teile laden erst, wenn sie gebraucht werden** (unveröffentlicht; Entscheidung des
+  Maintainers RG1, Lazy Loading): `llm-cli`, der MCP-Server und die GUI importierten beim Start das ganze Framework.
+  Jetzt importiert ein CLI-Befehl das Framework, die Build-Engine und die Manager erst, wenn er sie nutzt; das
+  Framework importiert seine Manager beim Hochfahren und die Wissensbasis erst, wenn sie eingeschaltet ist; Qt wird
+  außerhalb der GUI nur geladen, wenn ein Signal des Docker-Managers genutzt wird; der Crawler (mit seinen Parsern für
+  HTML und PDF), numpy, die Prüfungen von Mojo, die Anbieterschicht von `orchestrator.llm` und die Teile von
+  `orchestrator.runtime` laden bei ihrer ersten Nutzung, auch bei eingeschalteter Wissensbasis; `--help` lädt kein
+  rich. Die Host-Prüfung, die beim Import der URL-Prüfungen lief, nahm eine CPU-Stichprobe von einer Sekunde und
+  suchte zwei Programme, deren Ergebnisse sie nie zeigte; sie führt jetzt nur die Prüfungen aus, deren Fehler sie
+  meldet (Platte, Speicher, Python, Plattform), daher erscheint ihre Warnung zum Plattenplatz bei der ersten Nutzung
+  der URL-Prüfungen und nicht bei jedem Start. Gemessen auf derselben Maschine mit einem temporären Home, vorher und
+  nachher, in abwechselnden Läufen (Median aus 5): `llm-cli --help` 3,15 s und 140 MB auf 0,25 s und 27 MB;
+  `llm-cli mcp serve`, bis es auf `initialize` antwortet, 4,77 s und 191 MB auf 2,67 s und 118 MB (2,69 s und 118 MB
+  bei eingeschalteter Wissensbasis); das Hauptfenster der GUI 3,97 s und 210 MB auf 2,66 s und 177 MB. Das
+  Hochfahren prüft Docker weiter wie bisher, daher laden `mcp serve` und die GUI weiter das Docker-SDK. Befehle,
+  Ergebnisse und Meldungen bleiben gleich. Ein Teil des Frameworks, der sich nicht importieren lässt (eine kaputte
+  Installation), beendet das Hochfahren jetzt mit seiner Ursache wie andere Fehler beim Hochfahren: Die CLI gibt
+  „Failed to initialize framework: ...“ aus und endet mit 1 statt mit einem Traceback, und `--help` funktioniert
+  weiter. Tests starten die CLI, `mcp serve` (auch bei eingeschalteter Wissensbasis) und die GUI in einem frischen
+  Interpreter und prüfen, dass Crawler, die Bibliotheken für Embeddings, die SDKs der Anbieter, Qt und die Prüfungen
+  von Mojo nicht geladen werden.
+- **Roadmap: Rust dort, wo das Framework auf das Netzwerk oder ein Board trifft** (unveröffentlicht; Entscheidungen
+  des Maintainers RG2 bis RG4): Die Roadmap im Blueprint plant das Netzwerk-Gateway für MCP in Rust mit dem
+  MQTT-Broker rumqttd darin (statt des im Python-Prozess geplanten amqtt-Brokers), den Root-Helfer auf dem Board als
+  statisches Rust-Programm und die Rust-Teile des Frameworks als fertig gebaute, mit Sigstore signierte
+  Release-Dateien, mit ihren Prüfsummen im Repository und selbst bauen als Opt-in. Sie hält außerdem fest: keine
+  fertigen Docker-Images für Targets, kein Go, und die GUI bleibt Qt.
 - **Die Prüfung auf gleiche Builds blockiert das Builder-Fenster nicht mehr** (unveröffentlicht; achte Runde, N11):
   Vor einem Build fragte die Prüfung Hugging Face im Thread des Fensters nach dem aktuellen Commit des Modells, daher
   reagierte das Fenster bei langsamem Netz nicht (bis zu 10 Sekunden). Die Abfrage läuft jetzt im Hintergrund; Start
