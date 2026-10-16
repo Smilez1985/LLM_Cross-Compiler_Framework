@@ -10,7 +10,6 @@ import hashlib
 import importlib
 import json
 import math
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Tuple
@@ -313,6 +312,12 @@ def _looks_absolute(text: str) -> bool:
     return text.startswith(("/", "~")) or bool(_WINDOWS_ABSOLUTE.match(text))
 
 
+def _is_full_path(text: str) -> bool:
+    """A full path of either system, whatever this computer runs: a Windows host lists a board's POSIX paths, and
+    os.path.isabs would refuse them there ("~" is not a full path: it hides whose home it is)."""
+    return text.startswith("/") or bool(_WINDOWS_ABSOLUTE.match(text))
+
+
 class DeletionItem(BaseModel):
     """One thing a call would delete, as the person sees it in the framework's own window: the speaking name, the
     full path (person view only; "" for Docker's own objects), the file name, the size and what it is in framework
@@ -331,7 +336,7 @@ class DeletionItem(BaseModel):
         if self.kind in NO_PATH_KINDS:
             if self.full_path:
                 raise ValueError(f"a {self.kind} has no host path")
-        elif not self.full_path or not os.path.isabs(self.full_path):
+        elif not self.full_path or not _is_full_path(self.full_path):
             raise ValueError(f"a {self.kind} is listed with its full path")
         elif "/" in self.file_name or "\\" in self.file_name:
             raise ValueError("file_name is the item's name, not a path")

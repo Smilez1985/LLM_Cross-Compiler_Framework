@@ -911,7 +911,7 @@ class TestArtifactExtraction:
         engine.build_model(cfg)
         assert finish(engine, "b1").status == BuildStatus.COMPLETED
         assert [b["build_id"] for b in list_builds(tmp_path / "out")] == ["b1"]
-        assert [p.name for p in Path(cfg.output_dir).parent.iterdir()] == ["Q4_K_M", "Q4_K_M.zip"]
+        assert sorted(p.name for p in Path(cfg.output_dir).parent.iterdir()) == ["Q4_K_M", "Q4_K_M.zip"]
 
     def test_a_symlinked_output_folder_is_staged_on_its_own_disk(self, engine, client, tmp_path):
         disk = tmp_path / "bigdisk" / "Q4_K_M"  # the output folder moved to another disk
