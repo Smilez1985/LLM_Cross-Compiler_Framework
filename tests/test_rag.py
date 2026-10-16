@@ -925,7 +925,9 @@ class TestCommunityRoundtrip:
         from orchestrator.Core.community_manager import CommunityManager
 
         rag = make_rag()
-        ingest_all(rag)
+        for source, text in DOCS.items():   # full text in an export only under a licence that allows passing it on
+            assert rag.ingest_document(source, text, {"title": source.rsplit("/", 1)[1], "licence": "CC0-1.0"},
+                                       replace=True), rag.last_error
         framework = SimpleNamespace(config=rag.config, info=SimpleNamespace(installation_path=tmp_path),
                                     get_component=lambda name: rag if name == "rag_manager" else None)
         community = CommunityManager(framework)
@@ -933,7 +935,7 @@ class TestCommunityRoundtrip:
         export = community.export_knowledge_base("pack")
         data = json.loads(open(export, encoding="utf-8").read())
         assert {e["source"] for e in data} == set(DOCS)
-        assert all("chunk_hash" in e["metadata"] for e in data)
+        assert all("chunk_hash" in e["metadata"] and e["metadata"]["shared_as"] == "full_text" for e in data)
 
         rag.clear_knowledge_base()
         assert community.sync_knowledge_base() == len(data)

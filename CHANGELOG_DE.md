@@ -1027,6 +1027,27 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   darunter das Protokoll des Builds live (Geheimnisse geschwärzt, volle Pfade, reiner Text, jede Zeile einmal, höchstens
   20.000 Zeilen in der Ansicht; eine KI, die das Protokoll liest, bekommt die Ordner als Label), mit Suchfeld und einem
   Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert, werden vermerkt.
+- **Ditto ist als experimentell gekennzeichnet** (achte Runde, Q-2; `orchestrator/utils/ditto_notice.py`): Ditto
+  bleibt optional. Der Chat-Bereich und die KI-Einstellungen zeigen ein Abzeichen **Experimentell**, und ein Hinweis
+  sagt einmal je Benutzer, auf Deutsch oder Englisch: „Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller von
+  LLMCF haftet nicht.“ Er wiederholt den Gewährleistungsausschluss aus `LICENSE.txt` und fügt ihm nichts hinzu. In der
+  GUI bleibt er oben im Chat-Bereich, bis du auf **Verstanden** klickst, und blockiert nichts; ein ausgeblendeter
+  Chat-Bereich zeigt sich dafür einmal (ohne den Fokus), weil der Builder und der Modul-Assistent Ditto ohne den
+  Chat-Bereich nutzen. `llm-cli ditto` und `llm-cli module generate-ai` geben ihn an einem Terminal einmal auf stderr
+  aus (ohne Terminal wird nichts ausgegeben oder gespeichert). README und Features sagen dasselbe.
+- **Lizenz und Urheberrecht jeder gecrawlten Seite** (achte Runde, Q-1 und Q-1'; `orchestrator/rag/licences.py`):
+  Deep Ingest hält je Seite fest, bevor die Fußzeile entfernt wird, einen Lizenz-Link (`rel="license"`, den
+  HTTP-Header `Link`), Lizenz-Metadaten (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org
+  `license`; in einem PDF seine XMP-Metadaten), einen Creative-Commons-Link in der Fußzeile oder in einem Satz, der
+  die Seite lizenziert, und einen ausdrücklichen Urheberrechtshinweis; bei Code von GitHub die Lizenzdatei des
+  Repositorys, wenn derselbe Crawl sie gelesen hat (sonst hat der Code keine bekannte Lizenz; sie gilt nie für Issues,
+  Pull Requests, Diskussionen, das Wiki oder Releases). Nur was die eigene Lizenz der Seite nennt, zählt: ihre
+  Adresse, SPDX-ID, ihr eigener Titel mit Version oder ihr üblicher Erlaubnistext, nie eine nebenbei erwähnte Lizenz,
+  ein Bildnachweis, ein Link im Text eines PDFs oder eine andere Version; ein bloßer Link wiegt nie „All rights
+  reserved“ auf. `llm-cli knowledge sources` listet jede Quelle mit ihrer Lizenz, ihrem Hinweis
+  und dem, was ein Wissenspaket von ihr enthielte, und warum; `list_knowledge_sources` gibt KI-Clients die Lizenz-ID,
+  ihren Zustand und die Art der Weitergabe nur in festen Wörtern (der Hinweis ist Text der Website und erreicht nie
+  eine KI).
 
 ### Geändert
 - **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte
@@ -1320,6 +1341,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   der Build-Images des Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine
   Einstellung für `run_doctor` oder `run_mojo_oracle` gilt für beide, und die strengere gewinnt. `make mojo` neben
   `make doctor`.
+- **Wissenspakete enthalten den vollen Text einer Seite nur, wo ihre Lizenz es erlaubt** (achte Runde, Q-1 und
+  Q-1'): Ein Wissenspaket und der Wissens-Snapshot, den der Modul-Assistent einem Target beilegt, behalten den vollen
+  Text einer Seite nur unter einer Lizenz, die die Weitergabe erlaubt (CC0, Gemeinfreiheit, CC BY, CC BY-SA, MIT,
+  Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), mit der verlangten Namensnennung (Titel, Adresse,
+  Urheberrechtshinweis, Lizenz, die vorgenommenen Änderungen). Eine Seite mit Urheberrechtshinweis ohne eine solche
+  Lizenz, Code ohne Lizenz, eine NC-, ND- oder Copyleft-Lizenz, eine nicht erkannte Lizenz und eine Seite ganz ohne
+  kommen als ihre Adresse mit kurzen Fakten hinein (Titel, Abschnittsnamen, Fachbegriffe); wer das Paket bekommt,
+  crawlt sie unter eigenen Prüfungen. Bisher kam jede Seite mit vollem Text hinein. Die Zusammenfassung des Exports
+  führt jede Seite auf, mit dem, was sie enthält, und warum, ein Hinweis zählt beides, und ein Target-Export wendet
+  die Regel auch auf einen älteren Snapshot an. Der einmalige Hinweis vor Deep Ingest sagt das, deshalb erscheint er
+  noch einmal.
 
 ### Veraltet
 - `--password WERT` bei `deploy run`, `scan --device` und `device runtime deploy`: Jeder Benutzer sieht den Wert in

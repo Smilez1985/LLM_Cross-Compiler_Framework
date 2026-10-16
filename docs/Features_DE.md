@@ -483,6 +483,28 @@ installierst du selbst.
 Ditto baut auf der eigenen **Anbieterschicht** des Frameworks auf (`orchestrator/llm`), die die offiziellen SDKs
 `anthropic` und `openai` verwendet (OpenAI-kompatible Server laufen über `openai`).
 
+### Experimentell
+
+Ditto ist optional und als experimentell gekennzeichnet: **Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller
+von LLMCF haftet nicht.** Das wiederholt den Gewährleistungsausschluss in [LICENSE.txt](../LICENSE.txt) und fügt ihm
+nichts hinzu.
+
+- **Abzeichen:** Der Kopf des Chat-Bereichs und die KI-Einstellungen (**Tools > Configure AI Agent (Ditto)...**)
+  zeigen **Experimentell** mit diesem Satz; es bleibt.
+- **Hinweis, einmal je Benutzer:** Wenn der Chat-Bereich zum ersten Mal erscheint, sagt ein Hinweis oben darin, dass
+  Ditto experimentell und optional ist, dass seine Antworten falsch sein können, dass alles, was er tut, weiter über
+  deine Werkzeugrechte und Bestätigungen läuft, und den Satz oben. Er bleibt, bis du auf **Verstanden** klickst. Er
+  blockiert nichts: Der Chat, die wartenden Fragen und jedes andere Fenster funktionieren, während er angezeigt wird.
+  **Ask Ditto for Config** im Builder und der Modul-Assistent nutzen Ditto ohne den Chat-Bereich; ein ausgeblendeter
+  Chat-Bereich zeigt sich deshalb für den Hinweis einmal (ohne den Fokus zu nehmen), bis du ihn gelesen hast; danach
+  bleibt er ausgeblendet, wenn du ihn ausblendest.
+- **Kommandozeile:** Vor dem ersten Befehl `llm-cli ditto ...` oder `llm-cli module generate-ai` an einem Terminal
+  geht derselbe Hinweis einmal auf stderr. Ohne Terminal (ein Skript, ein KI-Client mit Shell) wird nichts ausgegeben
+  oder gespeichert, also gibt ihn der nächste Befehl an einem Terminal aus. Der Befehl läuft immer.
+- Die Zustandsdatei `ditto_notice.json` im benutzereigenen Ordner (`~/.llm-framework`) speichert einen Hash der
+  Hinweistexte in beiden Sprachen, wann er gezeigt wurde und wo (`via`: `gui` oder `cli`). Ein geänderter Text wird
+  erneut gezeigt. Kein Tool, keine Ressource und kein Prompt zeigt oder beantwortet ihn.
+
 ### Aufgaben, Modelle und Aufwand
 
 Dittos vier Arten von Arbeit entsprechen den Aufgabenprofilen der Anbieterschicht; jedes Aufgabenprofil hat pro
@@ -797,7 +819,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `run_mojo_oracle` | lesen | Der Gesundheitscheck (Mojo Oracle): jeder Befund mit Ort (eine Bezeichnung), warum er wichtig ist und was Mojo Miracle dagegen tun kann ([Einzelheiten](#gesundheitscheck-mojo)) |
 | `run_mojo_miracle` | lokal schreiben | Repariert ein Problem, das Mojo Oracle als reparierbar meldet (eine harmlose Reparatur); immer mit Frage, löscht nie, keine Vollmacht |
 | `search_knowledge` | lesen | In der Wissensbasis suchen; jeder Auszug mit Quellen-ID, Adresse oder Pack, Art (`web`, `pack`, `docs`), Vertrauensstufe, Aufnahmedatum und Position; `kind` grenzt die Suche ein |
-| `list_knowledge_sources` | lesen | Was die Wissensbasis enthält: jede Quelle mit ID, Titel, Art, Vertrauensstufe, Aufnahmedatum und Zahl der Auszüge (50 je Seite) |
+| `list_knowledge_sources` | lesen | Was die Wissensbasis enthält: jede Quelle mit ID, Titel, Art, Vertrauensstufe, Aufnahmedatum, Zahl der Auszüge, ihrer Lizenz und dem, was ein Wissenspaket von ihr enthielte (50 je Seite) |
 | `read_knowledge_source` | lesen | Die Auszüge einer Quelle in ihrer Reihenfolge, über die Quellen-ID (höchstens 20 je Aufruf) |
 | `list_packs` | lesen | Community-Packs des signierten Index und die installierten mit Vertrauensstufe; Details, Prüfung installierter Packs ([Details](#packs-für-ki-clients)) |
 | `add_pack_from_index` | extern | Ein Wissens-, Target- oder Rezept-Pack aus dem signierten Index hinzufügen, als Job; immer gefragt mit der geprüften Zusammenfassung und jedem Basis-Image eines Target-Packs |
@@ -1515,8 +1537,9 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   öffentlich erreichbare Seiten ohne Anmeldung, ausgehend von den Adressen, die du eingibst, innerhalb der Seiten-
   und Tiefengrenzen), welche Opt-outs beachtet werden, dass das Wissen auf diesem Rechner bleibt (wenn Ditto
   antwortet, gehen passende Auszüge an den gewählten KI-Anbieter; mit einem lokalen Anbieter verlässt nichts den
-  Rechner) und dass Teilen in einem Target oder einem Community-Pack Quelle und Lizenz jeder Seite behält und deine
-  ausdrückliche Freigabe braucht.
+  Rechner) und dass Teilen in einem Target oder einem Community-Pack Quelle und Lizenz jeder Seite behält, den
+  vollen Text einer Seite nur enthält, wo ihre Lizenz die Weitergabe erlaubt, und deine ausdrückliche Freigabe
+  braucht.
 - Er ist eine Information, keine rechtliche Bestätigung: eine Schaltfläche, **Verstanden** (englische Oberfläche:
   *Understood*, auch Esc), nichts zum Ankreuzen.
 - Er erscheint einmal pro Benutzer und erneut, wenn sich sein Text in einer Sprache ändert. Die Zustandsdatei
@@ -1544,6 +1567,51 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 - Der Crawler nennt sich `LLM-Conversion-Framework-Bot/<Version> (Open Source;
   +https://github.com/Smilez1985/llm_conversion_framework)`, mit der echten Version des Frameworks. Betreiber von
   Websites können ihn unter diesem Namen in der robots.txt und in einem Meta-Tag ansprechen.
+
+### Lizenzen und Urheberrecht
+
+Text- und Data-Mining erlaubt der Wissensbasis, den Text zu behalten, den der Crawl lesen durfte. Diesen Text
+weiterzugeben ist etwas anderes. Deshalb hält der Crawler je Seite fest, was sie über ihre Lizenz und ihr Urheberrecht
+sagt, und ein Export entscheidet je Seite danach (`orchestrator/rag/licences.py`; achte Runde, Q-1 und Q-1').
+
+- **Je Seite festgehalten,** aus der ganzen Seite, bevor ihre Fußzeile entfernt wird: die Quelladresse; ein
+  Lizenz-Link (`rel="license"` an einem `<link>` oder `<a>`, oder im HTTP-Header `Link`); Lizenz-Metadaten
+  (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license` in JSON-LD; in einem PDF
+  `cc:license` oder `xmpRights:WebStatement` in seinen XMP-Metadaten); ein Link auf eine Creative-Commons-Lizenz in
+  der Fußzeile der Seite oder in einem Satz, der sagt, dass die Seite unter ihr lizenziert ist; und ein
+  ausdrücklicher Urheberrechtshinweis („©“, „(c)“ mit Jahr, „Copyright“ mit Jahr, „All rights reserved“). Zeigen sich
+  mehrere Lizenzen, zählt die vorsichtige. Eine Lizenz, die das Framework nicht erkennt, wird als `other` mit ihrem
+  Wortlaut festgehalten.
+- **Nur was die eigene Lizenz der Seite nennt, zählt.** Eine Lizenz wird durch ihre Adresse, ihre SPDX-ID, ihren
+  eigenen Titel mit Version oder ihren üblichen Erlaubnistext genannt. Eine nebenbei erwähnte Lizenz nennt nichts: ein
+  Lizenztext, der andere Lizenzen nennt, „not in the public domain“, eine Liste von Fremdkomponenten, ein Link im
+  Text eines PDFs. Ein Bildnachweis mit Creative-Commons-Link ist nicht die Lizenz der Seite, und ein bloßer Link
+  wiegt nie ein ausdrückliches „All rights reserved“ auf. Eine andere Version einer Lizenz (MPL 1.1, Apache 1.1) gilt
+  nicht als die, die die Weitergabe erlaubt.
+- **Code von GitHub:** Nur die Lizenzdatei des Repositorys entscheidet (`LICENSE`, `LICENCE` oder `COPYING` oben im
+  Repository), und nur wenn derselbe Crawl sie gelesen hat; die Fußzeile von GitHub selbst wird nicht gelesen. Ohne
+  sie gilt der Code als ohne Lizenz, also urheberrechtlich voll geschützt. Die Lizenzdatei gilt für den Code (die
+  Startseite des Repositorys, seine Dateien und Ordner), nicht für seine Issues, Pull Requests, Diskussionen, sein
+  Wiki oder seine Releases: Das sind Worte anderer Leute unter anderen Bedingungen, und sie kommen als Adresse mit
+  kurzen Fakten in ein Paket.
+- **Was ein Paket enthält:** Ein Wissenspaket und der Wissens-Snapshot, den der Modul-Assistent einem neuen Target
+  beilegt, enthalten den vollen Text einer Seite nur, wenn ihre Lizenz die Weitergabe erlaubt: CC0, Gemeinfreiheit,
+  CC BY, CC BY-SA, MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Unlicense, MPL-2.0. Jeder Auszug behält
+  dann die Namensnennung, die die Lizenz verlangt (Titel, Adresse, Urheberrechtshinweis, Lizenz mit ihrer Adresse und
+  die Änderungen: in Auszüge geteilt, persönliche Daten entfernt). Jede andere Seite kommt als ihre Adresse mit kurzen
+  Fakten hinein (Titel, Abschnittsnamen, Fachbegriffe wie Optionen, Bezeichner und Versionen), mit der Lizenz und dem
+  Hinweis, die sie zeigt, und dem Grund: ein Urheberrechtshinweis ohne eine Lizenz, die es erlaubt, Code ohne Lizenz,
+  eine Lizenz, die Änderungen oder kommerzielle Nutzung verbietet (NC, ND), eine Copyleft-Lizenz (GPL, LGPL, AGPL,
+  GFDL: Sie verlangen den ganzen Lizenztext und die Quelle bei jeder Kopie), eine nicht erkannte Lizenz oder gar
+  keine. Wer das Paket bekommt, crawlt diese Seiten unter eigenen Prüfungen.
+- **Du siehst es je Seite:** `llm-cli knowledge sources` listet jede Quelle mit ihrer Lizenz, ihrem
+  Urheberrechtshinweis und dem, was ein Paket enthielte, und warum; `llm-cli zoo export knowledge` führt jede Seite
+  noch einmal auf, mit dem, was das Paket enthält, und warum. Ein Target-Export macht dasselbe für den
+  Wissens-Snapshot des Targets, auch für einen Snapshot von vor dieser Regel (der Target-Ordner selbst bleibt, wie er
+  ist).
+- **Für KI-Clients:** `list_knowledge_sources` nennt für jede Quelle die Lizenz-ID, den Zustand (`open`,
+  `restricted`, `copyright`, `code_without_licence`, `unknown`) und was ein Paket enthielte; der
+  Urheberrechtshinweis selbst ist Text der Website und erreicht nie eine KI.
 
 ### Netzwerkschutz und Grenzen
 
@@ -2732,7 +2800,9 @@ gesperrtes Pack zeigt eine abgeschaltete Schaltfläche **Revoked**.
   `community/contributions/` geschrieben (oder nach `--out`).
 - **Lizenz:** standardmäßig MIT für dein eigenes Target oder Rezept (`--license`; in der GUI eine Liste).
   Wissens-Packs enthalten Seiten anderer Leute: Ihre Lizenz ist `NOASSERTION`, jede Seite behält ihre Quelladresse,
-  und eine Seite ohne Quelle wird nie exportiert.
+  und eine Seite ohne Quelle wird nie exportiert. Der volle Text einer Seite kommt nur hinein, wo ihre Lizenz die
+  Weitergabe erlaubt; jede andere Seite kommt als ihre Adresse mit kurzen Fakten hinein, und die Zusammenfassung führt
+  jede Seite auf, mit dem, was sie enthält, und warum (siehe [Lizenzen und Urheberrecht](#lizenzen-und-urheberrecht)).
 - Ein Target, das du aus einem Community-Pack installiert hast, wird nicht als deins exportiert: Es neu zu
   signieren, würde Autor und Lizenz durch deine ersetzen. Ist das Target eines Rezepts dein eigenes, erinnert ein
   Hinweis daran, das Target ebenfalls zu exportieren. Ein Wissens-Export nimmt die Seiten deiner Wissensbasis mit,

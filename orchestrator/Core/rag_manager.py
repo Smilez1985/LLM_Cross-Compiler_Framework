@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 
 from orchestrator.Core.knowledge_snapshots import (SUFFIX, SnapshotNoRoom, delete_snapshots, list_snapshots,
                                                    require_room, snapshot_files, snapshot_plan, snapshot_room)
+from orchestrator.rag import licences
 from orchestrator.rag.chunking import PREAMBLE_RESERVE_TOKENS, chunk_document, passage_text, point_id
 from orchestrator.rag.embeddings import (DenseEmbedder, EmbeddingModelSpec, FastEmbedDenseEmbedder,
                                          FastEmbedSparseEmbedder, SparseEmbedder, check_vectors, recommend_model,
@@ -70,8 +71,10 @@ _USER_CONFIG_NAMES = frozenset({"config.yml", "framework.yml"})
 SOURCES_TTL = 60.0  # seconds a list of the knowledge sources is reused (cleared at once by every write)
 SOURCE_ID_PREFIX = "ks_"
 SOURCE_KINDS = ("web", "pack", "docs", "other")
-# Payload fields a source listing reads (never the chunk text).
-_SOURCE_FIELDS = ["source", "title", "content_type", "type", "origin_pack", "root_url", "ingested_at"]
+# Payload fields a source listing reads (never the chunk text): provenance, and what the page says about its licence.
+_SOURCE_FIELDS = ["source", "title", "content_type", "type", "origin_pack", "root_url", "ingested_at",
+                  *licences.META_KEYS]
+NOT_EXPORTED = "not_exported"   # a source no knowledge pack carries (an installed pack's page, the framework's docs)
 _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
                      "fused_score", "reranker"}
 
@@ -112,6 +115,26 @@ def source_kind(payload: Dict[str, Any]) -> str:
     if str(payload.get("content_type") or "").lower() in ("html", "pdf") or source.startswith(("http://", "https://")):
         return "web"
     return "other"
+
+
+def licence_view(kind: str, meta: Dict[str, Any], repos: Dict[Tuple[str, str], str]) -> Dict[str, str]:
+    """A source's licence as the knowledge base shows it, and what a knowledge pack would carry of it (rag/licences.py):
+    licence (a recognised id, "other" or ""), copyright (the page's notice, site text), licence_state, pack_share
+    (full_text, link_and_facts or not_exported) and share_reason. A licence a pack's metadata names outside the
+    recognised ones counts as "other"."""
+    licence = str(meta.get("licence") or "")
+    if licence not in licences.LICENCES:
+        licence = licences.OTHER if licence else ""
+    view = {"licence": licence, "copyright": licences.clean(meta.get("copyright") or "")}
+    if kind == "pack":
+        return {**view, "licence_state": "", "pack_share": NOT_EXPORTED,
+                "share_reason": "a page of an installed knowledge pack: its author shares it, it is not exported again"}
+    if kind == "docs":
+        return {**view, "licence_state": "", "pack_share": NOT_EXPORTED,
+                "share_reason": "the framework's own documents: every installation indexes them itself"}
+    plan = licences.plan_for({**meta, "licence": licence}, repos)
+    return {**view, "licence": plan.licence or licence, "licence_state": plan.state, "pack_share": plan.shared_as,
+            "share_reason": plan.reason}
 
 
 def shipped_target(folder: Path) -> bool:
@@ -1015,14 +1038,16 @@ class RAGManager:
     def list_sources(self) -> List[Dict[str, Any]]:
         """Every source of the knowledge base with its provenance: source_id, source (address, pack entry or file
         label), title, kind (web, pack, docs, other), origin_pack, root (the crawl's start address or the pack),
-        ingested_at (the newest chunk) and chunks. Reads payload fields only, never the chunk text; the list is
-        reused for SOURCES_TTL seconds and dropped by every write. Raises KnowledgeBaseError."""
+        ingested_at (the newest chunk) and chunks; and its licence (licence_view: licence, copyright, licence_state,
+        pack_share, share_reason). Reads payload fields only, never the chunk text; the list is reused for
+        SOURCES_TTL seconds and dropped by every write. Raises KnowledgeBaseError."""
         with self._lock:
             cached = self._sources
             if cached is not None and time.monotonic() - cached[0] < SOURCES_TTL:
                 return [dict(s) for s in cached[1]]
             payloads = self._with_store(lambda store: list(store.payloads(_SOURCE_FIELDS)))
             sources: Dict[str, Dict[str, Any]] = {}
+            metas: Dict[str, Dict[str, Any]] = {}
             for payload in payloads:
                 source = str(payload.get("source") or "unknown")
                 entry = sources.get(source)
@@ -1033,12 +1058,20 @@ class RAGManager:
                         "origin_pack": str(payload.get("origin_pack") or ""),
                         "root": str(payload.get("origin_pack") or payload.get("root_url") or ""),
                         "ingested_at": "", "chunks": 0}
+                meta = metas.setdefault(source, {})
+                for key in (*licences.META_KEYS, "root_url"):
+                    if key not in meta and payload.get(key) not in (None, ""):
+                        meta[key] = payload[key]
                 entry["chunks"] += 1
                 if not entry["title"] and payload.get("title"):
                     entry["title"] = str(payload["title"])[:500]
                 stamp = str(payload.get("ingested_at") or "")
                 if stamp > entry["ingested_at"]:
                     entry["ingested_at"] = stamp
+            # Only your own crawls name a repository's licence file: a pack's page could claim one for your code.
+            repos = licences.repo_licences(m for s, m in metas.items() if sources[s]["kind"] != "pack")
+            for source, entry in sources.items():
+                entry.update(licence_view(entry["kind"], metas.get(source, {}), repos))
             listed = sorted(sources.values(), key=lambda e: (e["kind"], e["source"]))
             self._sources = (time.monotonic(), listed)
             return [dict(s) for s in listed]

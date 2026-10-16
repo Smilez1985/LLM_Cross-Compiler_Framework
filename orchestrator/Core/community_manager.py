@@ -22,6 +22,12 @@ not packs.
 
 The framework never uploads anything and never asks for or reads a repository token: a contribution is handed to
 the browser or to an installed GitHub CLI, which keeps its own credentials.
+
+Knowledge leaves this computer only as the licences allow (eighth round, Q-1 and Q-1'; share_pages): a page goes into
+a knowledge pack, or into a target's knowledge snapshot, with its full text only when its licence allows passing the
+text on, and keeps the attribution its licence requires. A page with a copyright notice and no such licence, code
+without a licence, and a page whose licence is unknown go out as their address and short facts; the recipient crawls
+them under their own checks. The export lists every page with what it carries and why.
 """
 
 import difflib
@@ -52,6 +58,8 @@ from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_P
                                               list_files, load_trusted_keys, read_manifest, read_pack, scrub,
                                               sign_manifest, tree_sha256, utc_now, verify_index, verify_manifest,
                                               write_pack)
+from orchestrator.rag import licences
+from orchestrator.rag.licences import FULL_TEXT, LINK_AND_FACTS, SharePlan
 from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import ensure_directory, redact_secrets
@@ -201,6 +209,86 @@ class PreparedInstall:
         return "\n".join(lines + [f"Note: {n}" for n in self.notes])
 
 
+@dataclass(frozen=True)
+class PageShare:
+    """One page of a knowledge export: its (scrubbed) address and title, and how it is shared and why."""
+    source: str
+    title: str
+    plan: SharePlan
+
+    def line(self) -> str:
+        carried = "full text" if self.plan.shared_as == FULL_TEXT else "link and short facts"
+        licence = f", licence {self.plan.licence}" if self.plan.licence else ""
+        return f"{self.source}: {carried}{licence} ({self.plan.reason})"
+
+
+def share_counts(shares: Sequence[PageShare]) -> str:
+    """'N page(s) with their full text, M page(s) as link and short facts'."""
+    full = sum(1 for s in shares if s.plan.shared_as == FULL_TEXT)
+    return (f"{full} page(s) with their full text (their licence allows passing it on), {len(shares) - full} page(s) "
+            "only as their address and short facts (no licence that allows passing the text on)")
+
+
+def _page_meta(records: Sequence[dict]) -> Dict[str, Any]:
+    """The metadata of one page from its chunks: the first value of each field."""
+    meta: Dict[str, Any] = {}
+    for record in records:
+        for key, value in (record.get("metadata") or {}).items():
+            if key not in meta and value not in (None, ""):
+                meta[key] = value
+    return meta
+
+
+def _scrubbed(source: str, content: str, metadata: Dict[str, Any]) -> dict:
+    return {"source": scrub(source), "content": scrub(content),
+            "metadata": {k: scrub(v) if isinstance(v, str) else v for k, v in metadata.items()}}
+
+
+def share_pages(records: Iterable[dict]) -> Tuple[List[dict], List[PageShare]]:
+    """Knowledge entries ({source, content, metadata}, one per chunk) as a pack may carry them, privacy-scrubbed
+    (home folders, addresses, host and user names, secrets), and per page what is carried and why (Q-1'):
+    * full text only when the page's licence allows passing the text on (rag/licences.py), each chunk with its licence
+      and, when the licence requires it, the attribution (title, address, copyright notice, licence, the changes made);
+    * otherwise one entry with the address and short facts (title, section names, technical terms), the licence and
+      copyright notice the page shows, and why; the recipient crawls the page under their own checks.
+    Code takes its repository's licence only from a licence file the same crawl read. A page without its source is
+    never shared. Entries that are already address and short facts (a target's snapshot) stay as they are."""
+    groups: Dict[str, List[dict]] = {}
+    for record in records:
+        source, content = record.get("source"), record.get("content")
+        if isinstance(source, str) and source.strip() and isinstance(content, str) and content.strip():
+            groups.setdefault(source, []).append(record)
+    metas = {source: _page_meta(chunks) for source, chunks in groups.items()}
+    repos = licences.repo_licences(metas.values())
+    pages: List[dict] = []
+    shares: List[PageShare] = []
+    for source, chunks in groups.items():
+        meta = metas[source]
+        title = str(meta.get("title") or "")
+        if meta.get("shared_as") == LINK_AND_FACTS:
+            plan = SharePlan(LINK_AND_FACTS, str(meta.get("licence_state") or "unknown"),
+                             str(meta.get("licence") or ""), str(meta.get("share_reason") or "shared as its link "
+                                                                                              "and short facts"))
+            pages += [_scrubbed(source, c["content"], dict(c.get("metadata") or {})) for c in chunks]
+        else:
+            plan = licences.plan_for(meta, repos)
+            if plan.shared_as == FULL_TEXT:
+                extra: Dict[str, Any] = {"licence": plan.licence, "shared_as": FULL_TEXT, "share_reason": plan.reason}
+                if plan.attribution_required:
+                    extra["attribution"] = licences.attribution(source, title, meta, plan)
+                pages += [_scrubbed(source, c["content"], {**(c.get("metadata") or {}), **extra}) for c in chunks]
+            else:
+                facts = licences.short_facts(source, title, [str((c.get("metadata") or {}).get("section") or "")
+                                                             for c in chunks], [c["content"] for c in chunks], plan)
+                kept = {key: meta[key] for key in ("title", "root_url", "licence", "licence_url", "licence_found",
+                                                   "licence_text", "copyright", "code_repo") if meta.get(key)}
+                kept.update(shared_as=LINK_AND_FACTS, licence_state=plan.state, share_reason=plan.reason)
+                pages.append(_scrubbed(source, facts, kept))
+        shares.append(PageShare(scrub(source), scrub(title), plan))
+    pages = [page for page in pages if page["source"] and page["content"]]
+    return pages, shares
+
+
 @dataclass
 class ExportResult:
     path: Path
@@ -209,6 +297,7 @@ class ExportResult:
     changes: List[Tuple[str, str]]   # (file, diff of what the privacy scrub changed)
     notes: List[str] = field(default_factory=list)
     encrypted: bool = False
+    shares: List[PageShare] = field(default_factory=list)   # a knowledge pack: every page, what it carries and why
 
     def summary(self) -> str:
         m = self.manifest
@@ -219,6 +308,9 @@ class ExportResult:
                      "Privacy scrub: nothing to change.")
         for name, diff in self.changes:
             lines += [f"--- {name}", diff]
+        if self.shares:
+            lines.append("What the pack carries of each page, and why:")
+            lines += [f"- {share.line()}" for share in self.shares]
         return "\n".join(lines + [f"Note: {n}" for n in self.notes])
 
 
@@ -771,23 +863,24 @@ class CommunityManager:
         """A scrubbed pack signed with your key: kind target (source: target id), recipe (source: a build's
         build_info.json) or knowledge (optionally only the pages of root_urls). With recipients or a passphrase
         it is encrypted for private sharing. Nothing is uploaded. The licence defaults to MIT for your own work;
-        knowledge holds other people's pages, so it is NOASSERTION there and every page keeps its source."""
+        knowledge holds other people's pages, so it is NOASSERTION there, every page keeps its source, and a page goes
+        in with its full text only where its licence allows it (share_pages; the result lists every page)."""
         if kind not in KINDS:
             raise PackError(f"Unknown pack kind {kind!r}.")
         license = license or ("NOASSERTION" if kind == "knowledge" else "MIT")
         out_dir = ensure_directory(Path(out_dir) if out_dir else self.contributions_dir)
         staging = Path(tempfile.mkdtemp(prefix=".export-", dir=out_dir))
-        root, notes = staging / "pack", []
+        root, notes, shares = staging / "pack", [], []
         try:
             root.mkdir()
             version = "1.0.0"
             if kind == "target":
-                pack_id, version = self._stage_target(str(source or ""), root, notes)
+                pack_id, version = self._stage_target(str(source or ""), root, notes, shares)
             elif kind == "recipe":
                 pack_id = self._stage_recipe(Path(str(source or "")), root, author, model_license, notes)
             else:
                 pack_id = pack_id or f"knowledge-{datetime.now():%Y%m%d}"
-                pages, left_out = self._knowledge_pages(root_urls)
+                pages, left_out, shares = self.knowledge_share(root_urls)
                 if left_out:
                     notes.append(f"{left_out} page(s) imported from installed community knowledge packs were left "
                                  "out; they are shared by their authors already")
@@ -795,6 +888,7 @@ class CommunityManager:
                     raise PackError("The knowledge base has nothing to export.")
                 (root / KNOWLEDGE_FILE).write_text(json.dumps(pages, indent=2), encoding="utf-8")
                 notes.append("every page keeps its source address; the pages stay under their owners' terms")
+                notes.append(share_counts(shares))
             changes = self._scrub_tree(root)
             manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license=license)
             problems = self._validate(manifest, root, notes)
@@ -811,11 +905,12 @@ class CommunityManager:
             tmp = staging / name
             tmp.write_bytes(data)
             os.replace(tmp, out)
-            return ExportResult(out, manifest, signature.key_id, changes, notes, encrypted)
+            return ExportResult(out, manifest, signature.key_id, changes, notes, encrypted, shares)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
-    def _stage_target(self, target_id: str, root: Path, notes: List[str]) -> Tuple[str, str]:
+    def _stage_target(self, target_id: str, root: Path, notes: List[str],
+                      shares: List[PageShare]) -> Tuple[str, str]:
         folder = self._target_folder(target_id) if re.fullmatch(ID_PATTERN, target_id) else None
         if folder is None:
             raise PackError(f"Target '{target_id}' not found in {self.targets_dir}.")
@@ -830,12 +925,35 @@ class CommunityManager:
             dest = root.joinpath(*rel.split("/"))
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, dest, follow_symlinks=False)  # a link appearing meanwhile is refused below
+        shares += self._share_snapshot(root, notes)
         try:
             meta = (yaml.safe_load((folder / "target.yml").read_text(encoding="utf-8")) or {}).get("metadata") or {}
         except (OSError, yaml.YAMLError, AttributeError):
             meta = {}
         version = str(meta.get("version", ""))
         return folder.name, version if re.fullmatch(VERSION_PATTERN, version) else "1.0.0"
+
+    @staticmethod
+    def _share_snapshot(root: Path, notes: List[str]) -> List[PageShare]:
+        """The knowledge snapshot of a staged target as the licences allow (share_pages): a snapshot made before this
+        rule, with every page's full text, goes out with full text only where a page's licence allows it. Returns
+        every page with what the pack carries of it and why."""
+        from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
+        snapshot = root / KNOWLEDGE_SNAPSHOT
+        if not snapshot.is_file():
+            return []
+        try:
+            entries = json.loads(snapshot.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            raise PackError(f"{KNOWLEDGE_SNAPSHOT} cannot be read; repair or remove it before the export.") from None
+        if not isinstance(entries, list):
+            raise PackError(f"{KNOWLEDGE_SNAPSHOT} is not a list of pages; repair or remove it before the export.")
+        pages, shares = share_pages(e for e in entries if isinstance(e, dict))
+        text = json.dumps(pages, indent=2)
+        if text != snapshot.read_text(encoding="utf-8"):
+            snapshot.write_text(text, encoding="utf-8")
+        notes.append(f"{KNOWLEDGE_SNAPSHOT}: {share_counts(shares)}")
+        return shares
 
     def _stage_recipe(self, build_info: Path, root: Path, author: str, model_license: str,
                       notes: List[str]) -> str:
@@ -954,11 +1072,17 @@ class CommunityManager:
         return imported_count
 
     def _knowledge_pages(self, root_urls: Optional[Iterable[str]] = None) -> Tuple[List[dict], int]:
-        """Your pages of the knowledge base, privacy-scrubbed (home folders, addresses, host and user names,
-        secrets), with root_urls only those crawled from these URLs; and how many pages imported from installed
-        community knowledge packs were left out (re-sharing them would sign them under your name). The framework's
-        own documents are never exported either: every installation indexes them itself (llm-cli knowledge
-        index-docs). The knowledge base keeps a page as several chunks: pages are counted by their source."""
+        """knowledge_share without the list of pages."""
+        pages, left_out, _ = self.knowledge_share(root_urls)
+        return pages, left_out
+
+    def knowledge_share(self, root_urls: Optional[Iterable[str]] = None) -> Tuple[List[dict], int, List[PageShare]]:
+        """Your pages of the knowledge base as a pack may carry them (share_pages: privacy-scrubbed, full text only
+        where a page's licence allows it), with root_urls only those crawled from these URLs; how many pages imported
+        from installed community knowledge packs were left out (re-sharing them would sign them under your name); and
+        every page with what it carries and why. The framework's own documents are never exported either: every
+        installation indexes them itself (llm-cli knowledge index-docs). The knowledge base keeps a page as several
+        chunks: pages are counted by their source."""
         rag_manager = self.framework.get_component("rag_manager") if hasattr(self.framework, "get_component") \
             else None
         try:
@@ -973,15 +1097,9 @@ class CommunityManager:
         records = [r for r in records
                    if source_kind({**(r.get("metadata") or {}), "source": r.get("source", "")}) != "docs"]
         own = [r for r in records if not (r.get("metadata") or {}).get("origin_pack")]
-        pages = []
-        for record in own:
-            content, source = scrub(record.get("content", "")), scrub(record.get("source", ""))
-            meta = {k: scrub(v) if isinstance(v, str) else v
-                    for k, v in (record.get("metadata") or {}).items()}  # e.g. URLs with tokens in the query
-            if content and source:  # a page without its source is never shared
-                pages.append({"source": source, "content": content, "metadata": meta})
+        pages, shares = share_pages(own)   # scrubbed, also URLs with tokens in the query
         left_out = {str(r.get("source") or "") for r in records if (r.get("metadata") or {}).get("origin_pack")}
-        return pages, len(left_out)
+        return pages, len(left_out), shares
 
     def export_knowledge_base(self, output_name_prefix: str = "knowledge_export",
                               root_urls: Optional[Iterable[str]] = None) -> Optional[str]:

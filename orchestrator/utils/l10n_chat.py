@@ -198,6 +198,20 @@ TEXTS = {
         "chat.clear.input_history.empty": "The input history is empty; there is nothing to delete.",
         "chat.clear.input_history.changed": "The input history changed while you were asked; nothing was deleted. "
                                             "Look at the list again.",
+
+        # Ditto is optional and experimental (eighth round, Q-2): the badge, and the notice shown once per person
+        "chat.ditto.badge": "Experimental",
+        "chat.ditto.badge_tip": "Ditto is experimental and optional. Use at your own risk and responsibility. The "
+                                "creator of LLMCF is not liable.",
+        "chat.ditto.notice.title": "Ditto is experimental",
+        "chat.ditto.notice.text": "Ditto, the AI assistant, is experimental and optional. Its answers and proposals "
+                                  "can be wrong. What it does still goes through your tool permissions and "
+                                  "confirmations, and the rest of the framework works without it.\n\nUse at your own "
+                                  "risk and responsibility. The creator of LLMCF is not liable.\n\nThis repeats the "
+                                  "no-warranty terms of the licence (LICENSE.txt) and adds nothing to them.",
+        "chat.ditto.notice.ok": "Understood",
+        "chat.ditto.setup": "Experimental: Ditto is optional. Use at your own risk and responsibility. The creator of "
+                            "LLMCF is not liable.",
     },
     "de": {
         "chat.panel.title": "KI-Chat",
@@ -377,5 +391,19 @@ TEXTS = {
         "chat.clear.input_history.empty": "Der Eingabeverlauf ist leer; es gibt nichts zu löschen.",
         "chat.clear.input_history.changed": "Der Eingabeverlauf hat sich geändert, während du gefragt wurdest; nichts "
                                             "wurde gelöscht. Sieh dir die Liste noch einmal an.",
+
+        "chat.ditto.badge": "Experimentell",
+        "chat.ditto.badge_tip": "Ditto ist experimentell und optional. Nutzung auf eigene Gefahr und Verantwortung. "
+                                "Der Ersteller von LLMCF haftet nicht.",
+        "chat.ditto.notice.title": "Ditto ist experimentell",
+        "chat.ditto.notice.text": "Ditto, der KI-Assistent, ist experimentell und optional. Seine Antworten und "
+                                  "Vorschläge können falsch sein. Was er tut, läuft weiter über deine "
+                                  "Werkzeugrechte und Bestätigungen, und der Rest des Frameworks funktioniert ohne "
+                                  "ihn.\n\nNutzung auf eigene Gefahr und Verantwortung. Der Ersteller von LLMCF "
+                                  "haftet nicht.\n\nDas wiederholt den Gewährleistungsausschluss der Lizenz "
+                                  "(LICENSE.txt) und fügt ihm nichts hinzu.",
+        "chat.ditto.notice.ok": "Verstanden",
+        "chat.ditto.setup": "Experimentell: Ditto ist optional. Nutzung auf eigene Gefahr und Verantwortung. Der "
+                            "Ersteller von LLMCF haftet nicht.",
     },
 }

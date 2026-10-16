@@ -433,6 +433,7 @@ def test_the_chat_tab_is_gone_and_the_panel_has_the_chat(main_window, qapp):
 def test_the_dock_state_survives_a_restart_and_a_question_shows_it_without_focus(main_window, qapp):
     win = main_window()
     qapp.processEvents()
+    win.chat_window.notice.btn_ok.click()   # the notice on Ditto is read (until then a restart shows the panel)
     win.chat_dock.hide()
     win.chat_window.header.set_filter("decisions")
     win.close()
@@ -457,6 +458,27 @@ def test_the_dock_state_survives_a_restart_and_a_question_shows_it_without_focus
     second.approval_notifier.check()
     qapp.processEvents()
     assert second.chat_dock.isHidden()
+
+
+def test_a_hidden_panel_comes_back_once_for_the_unread_notice_on_ditto(main_window, qapp):
+    """Ditto is experimental (eighth round, Q-2): the Builder and the module wizard use Ditto without the panel, so a
+    panel the person hid shows itself at the next start, without the focus, until the notice is read; then it stays
+    hidden."""
+    win = main_window()
+    qapp.processEvents()
+    win.chat_dock.hide()
+    win.close()
+    second = main_window()
+    qapp.processEvents()
+    assert not second.chat_dock.isHidden() and not second.chat_window.notice.isHidden()
+    focus = qapp.focusWidget()
+    assert focus is None or not second.chat_dock.isAncestorOf(focus), "it never takes the focus"
+    second.chat_window.notice.btn_ok.click()
+    second.chat_dock.hide()
+    second.close()
+    third = main_window()
+    qapp.processEvents()
+    assert third.chat_dock.isHidden() and third.chat_window.notice.isHidden(), "once read, hidden stays hidden"
 
 
 # --- the feed ------------------------------------------------------------------------------------------------------

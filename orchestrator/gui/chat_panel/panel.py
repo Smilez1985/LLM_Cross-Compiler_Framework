@@ -178,6 +178,12 @@ class PanelHeader(QWidget):
         font.setBold(True)
         self.title.setFont(font)
         top.addWidget(self.title, stretch=1)
+        # Ditto is optional and experimental (eighth round, Q-2): the badge stays; the notice below is shown once.
+        self.badge = text_label(text("chat.ditto.badge", lang), lang, caption=True)
+        self.badge.setStyleSheet("color: #1e1e1e; background-color: #ffd27f; border-radius: 3px; padding: 0 4px;")
+        self.badge.setToolTip(plain_tooltip(text("chat.ditto.badge_tip", lang)))
+        self.badge.setAccessibleName(text("chat.ditto.badge_tip", lang))
+        top.addWidget(self.badge)
         self.btn_clear = make_button(text("chat.clear.button", lang))
         self.btn_clear.setToolTip(plain_tooltip(text("chat.clear.tip", lang)))
         top.addWidget(self.btn_clear)
@@ -244,6 +250,9 @@ class PanelHeader(QWidget):
     def retranslate(self, lang: str) -> None:
         self.lang = lang
         self.title.setText(text("chat.panel.heading", lang))
+        self.badge.setText(text("chat.ditto.badge", lang))
+        self.badge.setToolTip(plain_tooltip(text("chat.ditto.badge_tip", lang)))
+        self.badge.setAccessibleName(text("chat.ditto.badge_tip", lang))
         self.btn_clear.setText(button_text(text("chat.clear.button", lang)))
         self.btn_clear.setToolTip(plain_tooltip(text("chat.clear.tip", lang)))
         self.btn_menu.setAccessibleName(text("chat.menu.button", lang))
@@ -255,6 +264,69 @@ class PanelHeader(QWidget):
         self.lbl_access.setToolTip(plain_tooltip(text("chat.panel.access_tip", lang)))
         self.lbl_filter.setText(text("chat.filter.label", lang))
         self._filter_texts()
+
+
+class DittoNoticeBanner(QFrame):
+    """The one-time notice that Ditto is experimental (eighth round, Q-2), at the top of the panel until the person
+    clicks "Understood"; then it is stored per person (utils/ditto_notice.py) and not shown again. It blocks nothing:
+    the chat, the questions that wait and every other window work while it is shown."""
+
+    def __init__(self, state_dir: Optional[Path], lang: str = "en", parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        from orchestrator.utils.ditto_notice import DittoNotice
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setStyleSheet("DittoNoticeBanner { border: 1px solid #ffd27f; }")
+        box = QVBoxLayout(self)
+        self.title = text_label("", lang)
+        font = QFont(self.title.font())
+        font.setBold(True)
+        self.title.setFont(font)
+        box.addWidget(self.title)
+        self.text = text_label("", lang)
+        box.addWidget(self.text)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.btn_ok = make_button("")
+        self.btn_ok.clicked.connect(self.acknowledge)
+        row.addWidget(self.btn_ok)
+        box.addLayout(row)
+        self.retranslate(lang)
+        self.notice = None
+        needed = True
+        try:
+            if state_dir is not None:
+                self.notice = DittoNotice(state_dir)
+                needed = self.notice.needed()
+        except OSError as e:  # no per-user folder: the notice is shown every time
+            logger.warning(f"The notice on Ditto cannot be remembered ({e}).")
+        self.setVisible(needed)
+
+    def retranslate(self, lang: str) -> None:
+        from orchestrator.utils.ditto_notice import notice_text
+        title, body = notice_text(lang)
+        self.title.setText(title)
+        self.text.setText(body)
+        self.setAccessibleName(title)
+        self.btn_ok.setText(button_text(text("chat.ditto.notice.ok", lang)))
+
+    def acknowledge(self) -> None:
+        self.setVisible(False)
+        if self.notice is None:
+            return
+        try:
+            self.notice.acknowledge("gui")
+        except OSError as e:
+            logger.warning(f"Could not remember the notice on Ditto ({e}); it is shown again next time.")
+
+
+def show_ditto_notice(dock: Any, panel: "ChatPanel") -> bool:
+    """While the person has not read the notice on Ditto, a hidden chat panel is shown once, without taking the focus:
+    the builder's "Ask Ditto for Config" and the module wizard use Ditto without the panel, and the notice comes before
+    the first use (eighth round, Q-2). Once it is read, the person's choice to hide the panel stays. True when the
+    panel was shown for it."""
+    if panel.notice.isHidden():
+        return False
+    return bool(dock.show_without_focus())
 
 
 class ChatPanel(QWidget):
@@ -315,6 +387,8 @@ class ChatPanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         self.header = PanelHeader(self.lang, self)
         layout.addWidget(self.header)
+        self.notice = DittoNoticeBanner(self.history_file.parent, self.lang, self)
+        layout.addWidget(self.notice)
         self.feed_view = FeedView(self.lang, self.names, self)
         layout.addWidget(self.feed_view, stretch=1)
         self.progress = QProgressBar(self)
@@ -787,6 +861,7 @@ class ChatPanel(QWidget):
     def _language_changed(self, lang: str) -> None:
         self.lang = lang
         self.header.retranslate(lang)
+        self.notice.retranslate(lang)
         self.composer.retranslate(lang)
         self.progress.setAccessibleName(text("chat.panel.thinking", lang))
         self.feed_view.lang = lang

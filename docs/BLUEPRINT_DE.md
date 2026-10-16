@@ -551,7 +551,8 @@ Das musst du nicht selbst beurteilen.
    folgt.
 7. **Speichern.** Eine HTML-Seite wird in Markdown umgewandelt (Überschriften, Codeblöcke und Tabellen bleiben
    erhalten) und nach Sprache gefiltert (`crawler_languages`), ein PDF wird als Text gelesen; jede Seite wird
-   sofort gespeichert und ersetzt ihre frühere Fassung. Ein Stopp oder das Schließen des Assistenten beendet den
+   sofort gespeichert und ersetzt ihre frühere Fassung, mit ihrer Quelladresse und dem, was sie über ihre Lizenz und
+   ihr Urheberrecht sagt (siehe unten). Ein Stopp oder das Schließen des Assistenten beendet den
    Crawl nach der aktuellen Seite; was gespeichert ist, bleibt.
 8. **Ergebnis.** Erst wenn der letzte Schreibvorgang zurückgekehrt ist, nennt das Ergebnis Erfolg (Seiten
    gespeichert; keine schlug fehl oder war von der Website vorbehalten, und der Crawl wurde nicht gestoppt),
@@ -575,6 +576,30 @@ Ein Vorbehalt aus irgendeiner Quelle gewinnt. TDMRep erlaubt einer späteren Que
 früheren aufzuheben; der Crawler weicht davon absichtlich ab und bleibt auf der vorsichtigen Seite: Hat eine
 Quelle eine Seite vorbehalten, hebt nichts das wieder auf. Keine dieser Prüfungen lässt sich abschalten; die alte
 Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es nicht mehr.
+
+**Lizenzen und Urheberrecht** (`orchestrator/rag/licences.py`, achte Runde Q-1 und Q-1'). Text- und Data-Mining
+erlaubt der Wissensbasis, den Text zu behalten, den der Crawl lesen durfte; die Weitergabe wird je Seite entschieden.
+Bevor die Fußzeile entfernt wird, hält der Crawler je Seite fest: einen Lizenz-Link (`rel="license"` an einem Link oder
+im HTTP-Header `Link`), Lizenz-Metadaten (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license`
+in JSON-LD; in einem PDF `cc:license` oder `xmpRights:WebStatement` in seinen XMP-Metadaten), einen Link auf eine
+Creative-Commons-Lizenz in der Fußzeile oder in einem Satz, der die Seite lizenziert, und einen ausdrücklichen
+Urheberrechtshinweis („©“, „(c)“ mit Jahr, „Copyright“ mit Jahr, „All rights reserved“). Nur was die eigene Lizenz
+der Seite nennt, zählt: eine Adresse, eine SPDX-ID, der eigene Titel der Lizenz mit Version oder ihr üblicher
+Erlaubnistext. Eine nebenbei erwähnte Lizenz, ein Bildnachweis, ein Link im Text eines PDFs und eine andere Version
+einer Lizenz nennen nichts, und ein bloßer Link wiegt nie ein ausdrückliches „All rights reserved“ auf. Bei Code von
+GitHub entscheidet nur die Lizenzdatei des Repositorys, und nur wenn derselbe Crawl sie gelesen hat; die Fußzeile der
+Website selbst wird dort nicht gelesen. Sie gilt für den Code (Startseite, Dateien, Ordner), nicht für Issues, Pull
+Requests, Diskussionen, Wiki oder Releases. Ein Wissenspaket und der
+Wissens-Snapshot in einem erzeugten Target enthalten den vollen Text einer Seite nur, wenn ihre Lizenz die Weitergabe
+erlaubt (CC0, Gemeinfreiheit, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), mit der
+Namensnennung, die die Lizenz verlangt (Titel, Adresse, Urheberrechtshinweis, Lizenz, die vorgenommenen Änderungen).
+Jede andere Seite geht als ihre Adresse mit kurzen Fakten hinaus (Titel, Abschnittsnamen, Fachbegriffe): eine Seite
+mit Urheberrechtshinweis ohne eine solche Lizenz, Code ohne Lizenz, eine Lizenz, die Änderungen oder kommerzielle
+Nutzung verbietet, eine Copyleft-Lizenz (sie verlangt den ganzen Lizenztext und die Quelle bei jeder Kopie), eine
+nicht erkannte Lizenz und eine Seite ganz ohne. Wer das Paket bekommt, crawlt diese Seiten unter eigenen Prüfungen.
+`llm-cli knowledge sources` und `list_knowledge_sources` zeigen die Lizenz jeder Quelle und was ein Paket enthielte;
+der Export führt jede Seite auf, mit dem, was sie enthält, und warum. Eine KI sieht nur die festen Wörter
+(Lizenz-ID, Zustand, Art der Weitergabe), nie den Hinweis selbst.
 
 Eine kurze Ansage zum Hinweis und das Ergebnis werden auch **gesprochen**, über die Sprachausgabe des
 Betriebssystems und in der Sprache der Oberfläche: Windows PowerShell 5.1 mit System.Speech (aus dem Systemordner
@@ -779,7 +804,10 @@ Builder-Logs erstellen ein Paket: Seine Dateien werden datenschutzbereinigt (Hom
 E-Mail-Adressen, JWTs, Host- und Benutzername, Schlüssel; die Änderungen werden angezeigt), geprüft und mit deinem
 Schlüssel signiert. Mit `--to` (Dateien mit age-Empfängern) oder `--passphrase` wird das signierte Paket
 zusätzlich zum privaten Teilen verschlüsselt; ein verschlüsseltes Paket wird nie mit `--pr` eingereicht. Die Lizenz
-ist standardmäßig MIT, bei Wissen `NOASSERTION`, und jede Seite behält ihre Quelladresse. Ein Target, das du von
+ist standardmäßig MIT, bei Wissen `NOASSERTION`, und jede Seite behält ihre Quelladresse; der volle Text einer Seite
+kommt nur hinein, wo ihre Lizenz es erlaubt, jede andere Seite als ihre Adresse mit kurzen Fakten (siehe
+[Lizenzen und Urheberrecht](#deep-ingest-von-der-webseite-in-die-wissensbasis-unveröffentlicht)), und der Export führt
+jede Seite auf, mit dem, was sie enthält, und warum. Ein Target, das du von
 jemand anderem installiert hast, wird nicht als deines neu signiert, und Seiten aus installierten
 Community-Wissenspaketen bleiben aus einem Wissens-Export draußen. „Open pull request“ (`--pr`) übergibt das Paket
 an das Community-Repository (`community_repo`): über die GitHub-CLI, wenn sie installiert und angemeldet ist, sonst
@@ -935,6 +963,7 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
 | **Eine Installation liest immer zuerst den aktuellen Index** | Ein Widerruf schützt nur Benutzer, die ihn sehen. Eine Installation braucht ohnehin das Netz, also lädt sie zuerst den Index und installiert ohne ihn nichts. Ein zwischengespeicherter Index dient dem Auflisten und Installationen aus Dateien und wird nie durch einen älteren ersetzt. |
 | **Kein Token im Framework und kein eigener Upload** | Ein Repository-Token im Framework wäre ein wertvolles Geheimnis an einer Stelle mehr, und ein Upload-Knopf schickt Daten ohne Prüfschritt hinaus. Das Framework bereitet ein bereinigtes, signiertes Paket vor und zeigt, was die Bereinigung geändert hat; erst wenn du den Pull-Request öffnest, verschicken die GitHub-CLI oder der Browser es mit ihren eigenen Zugangsdaten. |
 | **`NOASSERTION` für Wissenspakete** | Ein Wissenspaket enthält Seiten anderer Leute. Wer es exportiert, kann sie nicht lizenzieren; das Paket beansprucht deshalb keine Lizenz für sie, und jede Seite behält ihre Quelladresse. |
+| **Voller Text nur, wo die Lizenz es erlaubt** | Text- und Data-Mining erlaubt eine Kopie für den, der auswertet, nicht die Weitergabe des Textes. Ein Paket enthält den Text einer Seite deshalb nur unter einer Lizenz, die es erlaubt, mit der verlangten Namensnennung; jede andere Seite geht als Adresse mit kurzen Fakten, und wer sie bekommt, crawlt sie unter eigenen Prüfungen. Code ohne Lizenz ist urheberrechtlich voll geschützt. |
 | **Rezepte statt geteilter Modelldateien** | Modelldateien sind groß und haben eigene Lizenzen. Ein Rezept legt Modell-Commit, Target-Fingerabdruck und Toolchain-Image fest und nennt die Hashes der Artefakte; so kann jeder das Modell nachbauen und vergleichen, und „verified“ heißt unabhängig nachgebaut. |
 | **Eingabe-Historie je Benutzer und ohne Geheimnisse** | Die gemeinsame `config.yml` kann im Installationsordner liegen und geteilt werden. Zuletzt verwendete Eingaben sind persönlich; sie liegen deshalb im Benutzerordner (Modus 0600), und Werte, die nach Zugangsdaten aussehen, werden nie geschrieben. |
 
@@ -1036,10 +1065,15 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 ### 3.2.0 - Laufzeit auf dem Gerät und die Hardware des Maintainers (geplant)
 
 Die eigene Hardware des Maintainers setzt die Prioritäten: Radxa ZERO 3W (RK3566), NVIDIA RTX 2080 Ti und RTX 3090,
-AMD Ryzen Z1 Extreme, unter Windows und Linux.
+AMD Ryzen Z1 Extreme, unter Windows und Linux. Die Rezepte kommen zuerst; die Rotationsstufe und das allgemeine
+ARM64-Target folgen direkt danach.
 
 | Punkt | Status |
 |---|---|
+| **Rezepte als Target-Vorlagen.** Eine Target-Vorlage enthält den Build-Code; Modell, Quantisierung, Format und Deployment sind Variablen, die du im Build-Menü wählst, und der Builder nutzt alles, was ein Rezept enthält. Warum: Du bist nie an die Wahl der Person gebunden, die die Vorlage gemacht hat. | geplant |
+| **Rotationsstufe vor der Quantisierung** (SpinQuant, QuaRot), direkt nach den Rezepten: Rotationen werden vor Konvertierung und Quantisierung in die Gewichte eingerechnet, nur wo das Zielformat sie unterstützt (eine Fähigkeit des Formats, kein fester Schritt). Warum: 4-Bit-Modelle der Llama-Familie behalten auf kleinen Boards ihre Qualität. | geplant |
+| **Allgemeines ARM64-CPU-Target (GGUF)** mit Board-Vorgaben für den Raspberry Pi 4 und 5, direkt nach den Rezepten. Warum: Rockchip war nur der Anfang, und diese Boards brauchen kein Hersteller-SDK. | geplant |
+| **Targets aus der Hardware-Probe, auf dem Board bewiesen.** Ein neues Target beginnt mit der Probe, die du auf dem Board ausführst (auch ohne Netz, die Datei zurückgetragen), oder, wenn du willst, mit Ditto, der es über SSH prüft; ein bestandener Benchmark auf dem Board ist der Beweis, gezeigt als „getestet auf <Board>“ im Community-Hub und in Paketen mitgegeben. Warum: Der Maintainer besitzt die meisten Boards nicht, und nur ein Lauf auf dem echten Board zeigt, dass ein Target funktioniert. | geplant |
 | **Laufzeit auf dem Gerät, der Rest.** Der erste Lauf der selbst gebauten Board-Laufzeit auf einem echten Radxa ZERO 3W; die Geräte-Laufzeit in Deployment-Paketen; das Laufzeit-Image für Docker-Deployments, lokal aus einem Geräte-Build gebaut (statt des geholten Laufzeit-Images); Benchmarks auf dem Gerät und eine gemessene Quantisierungsempfehlung je Board; ein Build auf dem Board, wenn keine Builder-Basis alt genug für seine C-Bibliothek ist; Vulkan auf Mali erst, wenn llama-bench zeigt, dass es den CPU-Build schlägt; MCP-Tools zum Proben, Deployen und Messen von Geräten. | geplant |
 | **Selbst gebautes llama.cpp, Stufe 2.** CUDA-Builds (die Redist-Archive von NVIDIA, das Toolkit nach Treiber, Compute Capability, Host-Compiler und CMake gewählt), Windows-Builds (Clang für das CPU-Backend, MSVC nur als CUDA-Host-Compiler; bis dahin Dittos lokales Modell unter Windows und macOS nur über den Opt-in `--prebuilt`), macOS (ungetestet), Benchmarks auf dem PC, die Dittos Modellstufe wählen, und MCP-Tools für die Laufzeit. | geplant |
 | **Weitere Rockchip-SoCs für RKLLM** (RK3562, RV1126B) mit einer Tabelle der unterstützten Typen je SoC. | geplant |
@@ -1075,9 +1109,54 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 
 ### Später (geplant)
 
-- **Mehr Hardware** über ein Beitragspaket: Hailo, Qualcomm, Intel NPU, NVIDIA Jetson.
-- **Builds auf einer GPU-Maschine, die du stellst** (gemietet oder eigene): Das Framework bietet die Anbindungen
-  (SSH zu deinem Rechner, Anbieter-APIs mit deinem eigenen Schlüssel); es mietet, startet und bezahlt keine Maschinen.
+- **Mehr Targets und Formate**, als Target-Vorlagen und über ein Beitragspaket:
+  - **Modelle der Llama-Familie in jedem Format.** Warum: Das Framework begann mit RKNN, und Llama-Modelle müssen auf
+    jedem Target laufen.
+  - **ONNX, mit einer Vorstufe von Hugging Face nach ONNX** für NPU-Werkzeugketten (RKNN, Hailo, Intel NPU), in einer
+    eigenen festgelegten Umgebung. Warum: Heute braucht RKNN eine lokale `.onnx`-Datei, die ein Laie nicht erstellen
+    kann.
+  - **NVIDIA Jetson** (das RTX-GPU-Target steht in 3.2.0). Warum: eine verbreitete Edge-Plattform mit eigener
+    Werkzeugkette.
+  - **Hailo.** Warum: eine verbreitete NPU-Erweiterung, etwa für den Raspberry Pi 5.
+  - **Intel** NPU und GPU. Warum: Viele kleine PCs haben eine.
+  - **Qualcomm.** Warum: Viele ARM-Boards und Laptops haben seine NPU.
+  - **Hersteller-SDK-Dateien, die du bereitstellst:** eine Datei, die du hinter einer Hersteller-Anmeldung
+    heruntergeladen hast, geprüft per sha256 und Größe; du nimmst ihre Lizenz an, und Pakete tragen nur einen Verweis,
+    nie die Datei. Warum: Hailo und Qualcomm geben Teile ihrer SDKs nur nach einer Registrierung heraus.
+- **Später nützlich**, aus den Notizen des Maintainers und der Lückenprüfung:
+  - **Versionsbewusstes Wissen:** Auszüge mit Target-, Toolkit- und Treiberversion markiert, Suchen danach gefiltert,
+    und Doku-Quellen mit ihrer SDK-Version in der `target.yml`. Warum: Antworten für verschiedene SDK-Versionen dürfen
+    sich nicht mischen.
+  - **Code-Signatur** für den Windows-Installer und die Skripte, zuerst die kostenlosen Wege für Open Source. Warum:
+    keine Warnung „unbekannter Herausgeber“ und kein `ExecutionPolicy Bypass`.
+  - **„Problem melden“** nach einem unbekannten Build-Fehler: ein vorausgefülltes Issue mit der datenschutzbereinigten
+    Probe, dir zuerst gezeigt und im Browser geöffnet, nie von selbst gesendet. Warum: Der Maintainer kann Boards, die
+    er nicht besitzt, nicht nachstellen.
+  - **Ein Hinweis auf eine neuere llama.cpp-Version** (eine Mojo-Zeile oder ein geplanter CI-Job); die Festlegung
+    verschiebt weiter ein Mensch. Warum: llama.cpp ändert sich schnell, und die Festlegung bleibt eine bewusste Wahl.
+  - **Lint erzeugter Module** (ShellCheck, hadolint), mit den Funden zurück an die KI, die sie erstellt hat. Warum:
+    Fehler werden vor dem ersten Build behoben.
+  - **Trivy-Funde als JSON** (Paket, CVE, Schweregrad, behobene Version) im Ergebnis und im Build-Datensatz. Warum: Du
+    und die KI seht die Funde, nicht nur Log-Zeilen.
+  - **Community-CI-Builds** beigetragener Targets (Image-Build ohne Push, Smoke-Test, Trivy auf dem Archiv). Warum:
+    Ein Beitrag muss funktionieren, nicht nur die Prüfungen bestehen.
+  - **Jedes Fenster übersetzt, mit einem Sprachmenü** (Menüs, Reiter, Dialoge, der Hub, das Deployment-Fenster).
+    Warum: Viele Fenster sind noch nur englisch.
+  - **Ein QEMU-Smoke-Test von Cross-Builds in der CI**, nie auf deinem Rechner. Warum: Ein kaputter Cross-Build fällt
+    auf, bevor er ein Board erreicht.
+  - **Ein Schritt „alle Dateien bearbeiten“ im Modul-Assistenten**, mit Diff und erneuten Prüfungen. Warum:
+    Herstellerpfade und Flags lassen sich fertigstellen, bevor das Modul gespeichert wird.
+  - **Ein Verlauf der Heilungs-Korrekturen** mit ihrer Erfolgsquote in Mojo; eine Korrektur wird nie von selbst
+    angewendet. Warum: Er zeigt, welche Korrekturen wirklich helfen.
+  - **Eine Warnung, bevor einem Build-Container der Speicher ausgeht.** Warum: Ein Build kann den Speicher von Docker
+    oder WSL2 aufbrauchen.
+  - **Ein Feld für den Zweck** (Chat, Code, Zusammenfassungen, Embeddings) für die Quantisierungsempfehlung. Warum:
+    Der beste Typ hängt vom Einsatz ab.
+  - **Eine optionale Ollama-Modelfile** neben einer GGUF. Warum: Ollama kann das Ergebnis dann direkt laden.
+  - **Eine Anleitung für Edge-Einsätze:** dein deploytes Modell in anderen Programmen (seine OpenAI-kompatible API,
+    lokales RAG, Sprache). Warum: Der Schritt nach dem Deployment ist noch nicht beschrieben.
+  - **Boards im Netz finden** (Zeroconf), mit unveränderten Regeln für Host-Schlüssel. Warum: Du musst die Adresse
+    des Boards nicht kennen.
 - **Crawls großer Doku-Seiten mit Fortsetzen**: einen gestoppten Crawl später fortsetzen statt nur eines Seitenlimits.
 - **Eine Reranker-Schwelle für Stichwortsuchen**: die Relevanzschwelle für kurze Anfragen aus Stichwörtern, etwa
   die Suchanfrage des Modulvorschlags, mit der Abruf-Evaluation kalibrieren, damit auch diese Suchen neu geordnet
@@ -1093,6 +1172,9 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
   ein einstellbarer Log-Ordner.
 - **MCP-Apps-Oberfläche.**
 - **Ein MCP-Server auf Edge-Geräten.**
+
+Nicht geplant: Builds in der Cloud (AWS, Azure) oder auf gemieteten Maschinen. Kompilieren auf entfernten Rechnern war
+nie geplant; kommen je Builds auf einem anderen Rechner, baut das Framework sie selbst.
 
 ## Geschichte
 
