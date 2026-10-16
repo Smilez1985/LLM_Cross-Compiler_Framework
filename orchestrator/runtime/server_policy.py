@@ -299,7 +299,9 @@ def write_key_file(folder: Path) -> Tuple[Path, str]:
     folder.mkdir(parents=True, exist_ok=True)
     key = secrets.token_urlsafe(32)
     path = folder / f"{KEY_FILE_PREFIX}{secrets.token_hex(8)}.key"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    # O_BINARY: on Windows a descriptor is in text mode otherwise and the key line ends in \r\n despite newline="\n";
+    # llama-server in a Linux container (the file is mounted into it) would read the CR as part of the key.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
         f.write(key + "\n")
     return path, key

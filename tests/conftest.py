@@ -1,7 +1,10 @@
+import contextlib
+import functools
 import gc
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -27,8 +30,10 @@ def _real_homes():
         homes.add(pwd.getpwuid(os.getuid()).pw_dir)
     except (ImportError, KeyError, OSError):
         pass
-    homes.update(os.environ.get(var, "") for var in ("USERPROFILE",))
-    return sorted(Path(h) for h in homes if h and os.path.isabs(h))
+    homes.update(os.environ.get(var, "") for var in ("USERPROFILE", "HOME"))  # HOME on Windows: Git, OpenSSH
+    if os.environ.get("HOMEDRIVE") and os.environ.get("HOMEPATH"):  # Windows' second way to name the profile
+        homes.add(os.environ["HOMEDRIVE"] + os.environ["HOMEPATH"])
+    return sorted({Path(h) for h in homes if h and os.path.isabs(h)})  # Windows: C:/Users/x is C:\Users\x
 
 
 # Credentials a developer's shell may hold; a test must never use them. Without the session bus no test reaches the
@@ -50,48 +55,66 @@ def session_keyring_backend() -> str:
 
 
 
-def home_variables(home: Path):
-    """Every variable that names a home or per-user folder, pointed into `home` (the layout the defaults have)."""
-    home = Path(home)
-    cache, hf = home / ".cache", home / ".cache" / "huggingface"
+def home_variables(home, pathmod=os.path):
+    """Every variable that names a home or per-user folder, pointed into `home` (the layout the defaults have).
+
+    Windows names the profile three ways: USERPROFILE (what os.path.expanduser and Path.home() read), HOMEDRIVE plus
+    HOMEPATH (their fallback, and what older programs read) and HOME (Git for Windows, OpenSSH); APPDATA and
+    LOCALAPPDATA are the per-user folders below it. HOMEDRIVE is empty where paths have no drive (POSIX): the variable
+    is then removed, and HOMEDRIVE + HOMEPATH is still the home. `pathmod` (ntpath) shows the Windows values on Linux."""
+    home = str(home)
+    join = pathmod.join
+    cache = join(home, ".cache")
+    hf = join(cache, "huggingface")
+    drive, rest = pathmod.splitdrive(home)
     return {
-        "HOME": str(home), "USERPROFILE": str(home),
-        "XDG_CONFIG_HOME": str(home / ".config"), "XDG_CACHE_HOME": str(cache),
-        "XDG_DATA_HOME": str(home / ".local" / "share"), "XDG_STATE_HOME": str(home / ".local" / "state"),
-        "APPDATA": str(home / "AppData" / "Roaming"), "LOCALAPPDATA": str(home / "AppData" / "Local"),
-        "HF_HOME": str(hf), "HF_TOKEN_PATH": str(hf / "token"), "HF_HUB_CACHE": str(hf / "hub"),
-        "HUGGINGFACE_HUB_CACHE": str(hf / "hub"), "HF_XET_CACHE": str(hf / "xet"), "HF_ASSETS_CACHE": str(hf / "assets"),
-        "TRANSFORMERS_CACHE": str(hf / "hub"), "FASTEMBED_CACHE_PATH": str(cache / "fastembed"),
-        "GNUPGHOME": str(home / ".gnupg"), "DOCKER_CONFIG": str(home / ".docker"),
-        "LLM_FRAMEWORK_HOME": str(home / ".llm-framework"),
+        "HOME": home, "USERPROFILE": home, "HOMEDRIVE": drive, "HOMEPATH": rest,
+        "XDG_CONFIG_HOME": join(home, ".config"), "XDG_CACHE_HOME": cache,
+        "XDG_DATA_HOME": join(home, ".local", "share"), "XDG_STATE_HOME": join(home, ".local", "state"),
+        "APPDATA": join(home, "AppData", "Roaming"), "LOCALAPPDATA": join(home, "AppData", "Local"),
+        "HF_HOME": hf, "HF_TOKEN_PATH": join(hf, "token"), "HF_HUB_CACHE": join(hf, "hub"),
+        "HUGGINGFACE_HUB_CACHE": join(hf, "hub"), "HF_XET_CACHE": join(hf, "xet"), "HF_ASSETS_CACHE": join(hf, "assets"),
+        "TRANSFORMERS_CACHE": join(hf, "hub"), "FASTEMBED_CACHE_PATH": join(cache, "fastembed"),
+        "GNUPGHOME": join(home, ".gnupg"), "DOCKER_CONFIG": join(home, ".docker"),
+        "LLM_FRAMEWORK_HOME": join(home, ".llm-framework"),
     }
 
 
 def redirect_home(environ, home: Path) -> None:
     for name, value in home_variables(home).items():
-        environ[name] = value
+        if value:
+            environ[name] = value
+        else:
+            environ.pop(name, None)  # HOMEDRIVE without a drive
     for name in CREDENTIAL_VARIABLES:
         environ.pop(name, None)
     environ["PYTHON_KEYRING_BACKEND"] = session_keyring_backend()
 
 
 # What the guard compares, relative to the real home: SSH and GnuPG keys, the framework's per-user folder, the Hugging
-# Face home (token and model cache), Claude Desktop's configuration, keyring files and other credential folders.
+# Face home (token and model cache), Claude Desktop's configuration, keyring files and other credential folders (on
+# Windows also Claude Desktop's and keyrings.alt's folders below AppData).
 HOME_GUARD_ROOTS = (".ssh", ".gnupg", ".llm-framework", ".cache/huggingface", ".cache/fastembed", ".config/Claude",
                     ".config/llm-framework", ".local/share/python_keyring", ".local/share/keyrings", ".netrc",
-                    ".docker", ".aws", ".kube", ".password-store", ".huggingface")
+                    ".docker", ".aws", ".kube", ".password-store", ".huggingface", "AppData/Roaming/Claude",
+                    "AppData/Local/Python Keyring")
 # Content caches inside those roots that other programs change all the time (no credential lives there).
 HOME_GUARD_SKIP = (".cache/huggingface/xet", ".cache/huggingface/hub/.locks")
 HOME_GUARD_MAX = 50_000  # entries per root
 
 
+def _below(home: Path, relative: str) -> str:
+    return os.path.join(str(home), *relative.split("/"))
+
+
 def home_snapshot(home: Path, roots=HOME_GUARD_ROOTS, skip=HOME_GUARD_SKIP):
     """{relative path: (kind, size, mtime_ns)} for everything below `roots` in `home`, from lstat alone: no file is
-    opened and no link followed. A missing root is recorded as missing, so creating it counts as a change."""
+    opened and no link followed. A missing root is recorded as missing, so creating it counts as a change. Relative
+    paths are written with '/' on every platform (the roots, the skip list and the report use the same form)."""
     found = {}
-    skipped = {os.path.normpath(s) for s in skip}
+    skipped = set(skip)
     for root in roots:
-        top = os.path.join(str(home), root)
+        top = _below(home, root)
         try:
             st = os.lstat(top)
         except FileNotFoundError:
@@ -108,13 +131,13 @@ def home_snapshot(home: Path, roots=HOME_GUARD_ROOTS, skip=HOME_GUARD_SKIP):
         while pending and count < HOME_GUARD_MAX:
             relative = pending.pop()
             try:
-                with os.scandir(os.path.join(str(home), relative)) as entries:
+                with os.scandir(_below(home, relative)) as entries:
                     listing = list(entries)
             except OSError as e:
                 found[relative] = (f"unreadable {type(e).__name__}", 0, 0)
                 continue
             for entry in listing:
-                rel = os.path.normpath(os.path.join(relative, entry.name))
+                rel = f"{relative}/{entry.name}"
                 if rel in skipped:
                     continue
                 count += 1
@@ -141,8 +164,26 @@ def snapshot_changes(before, after):
 
 REAL_HOMES = _real_homes()
 REAL_HOME_SNAPSHOTS = {home: home_snapshot(home) for home in REAL_HOMES}
+# On Windows the temporary folder lies inside the profile (C:\Users\<name>\AppData\Local\Temp): the session's and every
+# test's home are below it, which is not the real home's sensitive folders.
+TEMP_DIR = Path(tempfile.gettempdir())
 SESSION_HOME = Path(tempfile.mkdtemp(prefix="lcf-test-home-"))
 redirect_home(os.environ, SESSION_HOME)
+
+
+def is_inside(path, folder) -> bool:
+    try:
+        return Path(path).resolve().is_relative_to(Path(folder).resolve())
+    except OSError:
+        return False
+
+
+def in_real_home(path, homes=None, temp=None) -> bool:
+    """True when `path` lies in a real home folder outside the temporary folder (where every test home lives, also
+    when the temporary folder is inside the profile, as on Windows)."""
+    homes = REAL_HOMES if homes is None else homes
+    return any(is_inside(path, home) for home in homes) and not is_inside(path, TEMP_DIR if temp is None else temp)
+
 
 # Exported by a git command that runs the tests (a hook, `git rebase --exec`, `git bisect run`): with them, the
 # tests' own git commands (`git init` and `git commit` in a temporary folder) would act on this repository instead.
@@ -183,10 +224,15 @@ def isolated_environment(tmp_path, monkeypatch):
     for var in list(os.environ):
         if var.startswith(("LLM_", "FRAMEWORK_")):
             monkeypatch.delenv(var)
-    # HOME, the XDG folders, the Hugging Face home and token file, ... all point into this test's own home.
+    # HOME, USERPROFILE, HOMEDRIVE/HOMEPATH, APPDATA, the XDG folders, the Hugging Face home and token file, ... all
+    # point into this test's own home.
     for name, value in home_variables(home).items():
-        if name != "LLM_FRAMEWORK_HOME":  # the per-user folder stays unset unless a test sets it (as before)
+        if name == "LLM_FRAMEWORK_HOME":  # the per-user folder stays unset unless a test sets it (as before)
+            continue
+        if value:
             monkeypatch.setenv(name, value)
+        else:
+            monkeypatch.delenv(name, raising=False)  # HOMEDRIVE without a drive
     for name in CREDENTIAL_VARIABLES:
         monkeypatch.delenv(name, raising=False)
     # Without it the installation's configs/ folder (the repository) would be used and written to.
@@ -318,6 +364,80 @@ def qapp():
     gc.collect()
 
 
+# --- Windows hosts --------------------------------------------------------------------------------------------------
+
+# POSIX file modes (0600 files, 0700 folders) do not exist on Windows: os.chmod only sets or clears the read-only flag
+# and st_mode shows 0o666 or 0o444 for a file, 0o777 for a folder. A test of such a mode keeps running on POSIX and
+# names how Windows covers it.
+WINDOWS_FILE_MODES = ("POSIX file modes: Windows keeps only a read-only flag (st_mode shows 0o666 for a file, 0o777 "
+                      "for a folder); there the file is private through the ACL it inherits from the profile (the "
+                      "default state folder "
+                      "%USERPROFILE%\\.llm-framework: the account, SYSTEM and Administrators), and explicit ACLs by "
+                      "SID come with the host-account work (H12/M7)")
+POSIX_MODES_ONLY = pytest.mark.skipif(os.name == "nt", reason=WINDOWS_FILE_MODES)
+
+# pytest puts every test's id into the environment variable PYTEST_CURRENT_TEST; Windows refuses a variable longer
+# than this ("the environment variable is longer than 32767 characters"), so a longer id errors in setup and teardown.
+WINDOWS_ENVIRONMENT_LIMIT = 32767
+
+
+@functools.lru_cache(maxsize=None)
+def posix_shell(name: str = "bash"):
+    """The path of a working POSIX shell called `name` (bash, sh, dash), or None. Every match on PATH is run once:
+    on Windows the first `bash` on PATH is System32's WSL launcher, which runs nothing without an installed Linux
+    distribution, while Git for Windows brings a real bash and dash (also tried next to git.exe)."""
+    folders = os.environ.get("PATH", "").split(os.pathsep)
+    git = shutil.which("git")
+    if os.name == "nt" and git:
+        root = Path(git).resolve().parent.parent  # <Git>\cmd\git.exe or <Git>\bin\git.exe
+        folders += [str(root / "bin"), str(root / "usr" / "bin")]
+    system = os.path.normcase(os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32"))
+    seen = set()
+    for folder in folders:
+        found = shutil.which(name, path=folder) if folder else None
+        if not found or os.path.normcase(found) in seen:
+            continue
+        seen.add(os.path.normcase(found))
+        if os.name == "nt" and os.path.normcase(os.path.dirname(found)) == system:
+            continue  # the WSL launcher (bash.exe) is no shell for files of this host
+        try:
+            probe = subprocess.run([found, "-c", "printf ok"], capture_output=True, timeout=30,
+                                   stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if probe.returncode == 0 and probe.stdout == b"ok":
+            return found
+    return None
+
+
+NO_POSIX_BASH = ("needs a POSIX bash: on Windows `bash` on PATH is the WSL launcher (no distribution on the runner) "
+                 "and no Git for Windows bash was found")
+
+
+@contextlib.contextmanager
+def windows_newlines():
+    """Inside it, text files opened for writing without newline= get CRLF, as on Windows (where the default translates
+    "\\n" to os.linesep): shows on any host which files a Windows host would write with CRLF. Covers open(),
+    Path.write_text/open and os.fdopen (all of them go through io.open). Not shown: a descriptor from os.open()
+    without os.O_BINARY is in text mode on Windows, where the C runtime turns every "\\n" written to it into CRLF once
+    more (newline="\\n" does not help there); such writes need O_BINARY."""
+    import builtins
+    import io
+    real = io.open
+
+    def windows_open(file, mode="r", buffering=-1, encoding=None, errors=None, newline=None, closefd=True,
+                     opener=None):
+        if "b" not in mode and newline is None and any(c in mode for c in "wax+"):
+            newline = "\r\n"
+        return real(file, mode, buffering, encoding, errors, newline, closefd, opener)
+
+    io.open = builtins.open = windows_open
+    try:
+        yield
+    finally:
+        io.open = builtins.open = real
+
+
 def frameworks_left_running(framework_cls):
     """FrameworkManager objects whose background event loop was never stopped. type() instead of isinstance():
     isinstance() reads __class__, which raises ReferenceError for a weakref.proxy whose object is gone."""
@@ -356,7 +476,7 @@ def real_home_changes():
     """Changes below the real home folder's guarded folders since the session started, one line each."""
     lines = []
     for home, before in REAL_HOME_SNAPSHOTS.items():
-        lines += [f"{home}: {change}" for change in snapshot_changes(before, home_snapshot(home))]
+        lines += [f"{Path(home).as_posix()}: {change}" for change in snapshot_changes(before, home_snapshot(home))]
     return lines
 
 

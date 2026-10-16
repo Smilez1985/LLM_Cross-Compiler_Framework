@@ -11,7 +11,7 @@ import zipfile
 
 import pytest
 
-from conftest import REPO_ROOT
+from conftest import NO_POSIX_BASH, REPO_ROOT, posix_shell, windows_newlines
 from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.Core.deployment_manager import DeploymentManager
 
@@ -294,12 +294,15 @@ class TestDockerPackages:
                                                                             tmp_path / "out")
         assert not list((tmp_path / "out").glob("*.zip"))
 
-    @pytest.mark.skipif(not shutil.which("bash"), reason="bash not available")
     @pytest.mark.parametrize("use_docker, rag", [(False, False), (True, False), (True, True)])
     def test_deploy_script_is_valid_bash(self, tmp_path, config, artifact, use_docker, rag):
         config.set("enable_rag_knowledge", rag)
-        pkg = build_package(tmp_path, config, artifact, use_docker=use_docker, docker_client=FakeDockerClient())
-        subprocess.run(["bash", "-n", str(pkg / "deploy.sh")], check=True)
+        with windows_newlines():  # what a Windows host writes
+            pkg = build_package(tmp_path, config, artifact, use_docker=use_docker, docker_client=FakeDockerClient())
+        assert b"\r" not in (pkg / "deploy.sh").read_bytes(), "the board's shell reads LF line endings only"
+        if posix_shell("bash") is None:
+            pytest.skip(NO_POSIX_BASH)
+        subprocess.run([posix_shell("bash"), "-n", str(pkg / "deploy.sh")], check=True)
 
 
 class TestSSHDeployment:
@@ -331,8 +334,10 @@ class TestSSHDeployment:
         script = DeploymentManager(FakeFramework(config))._generate_deploy_script("model.gguf", "", False)
         assert script.startswith("#!/bin/sh\n")
         path = tmp_path / "deploy.sh"
-        path.write_text(script)
-        dash = shutil.which("dash") or shutil.which("sh")
+        path.write_text(script, newline="\n")  # as the package writes it, on every host
+        dash = posix_shell("dash") or posix_shell("sh")
+        if dash is None:
+            pytest.skip("needs a POSIX sh")
         assert subprocess.run([dash, "-n", str(path)]).returncode == 0
 
     def test_system_ssh_fallback_never_prompts_or_accepts_keys(self, config, tmp_path, monkeypatch):

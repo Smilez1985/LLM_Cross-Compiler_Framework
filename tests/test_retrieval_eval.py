@@ -131,7 +131,7 @@ def test_cases_naming_unknown_documents_are_refused():
 def write_doc(folder: Path, name: str, text: str) -> Path:
     folder.mkdir(exist_ok=True)
     path = folder / name
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode("utf-8"))  # exactly these line endings (text mode adds CR on Windows)
     return path
 
 
