@@ -540,11 +540,16 @@ class TestCalibrationData:
 class TestBuildSandbox:
 
     def test_conversion_containers_are_locked_down(self, engine, tmp_path, monkeypatch):
-        monkeypatch.setattr("orchestrator.Core.builder.os.getuid", lambda: 1234)
-        monkeypatch.setattr("orchestrator.Core.builder.os.getgid", lambda: 1234)
+        if sys.platform == "win32":  # no POSIX user ids: the containers run as the fixed fallback user
+            from orchestrator.utils.sandbox import FALLBACK_USER
+            expected = "%d:%d" % FALLBACK_USER
+        else:  # the host user (not root)
+            monkeypatch.setattr("orchestrator.Core.builder.os.getuid", lambda: 1234)
+            monkeypatch.setattr("orchestrator.Core.builder.os.getgid", lambda: 1234)
+            expected = "1234:1234"
         build_temp = tmp_path / "builds" / "b1"
         kwargs, env, vols = engine._sandbox(make_config(), build_temp)
-        assert kwargs["user"] == "1234:1234"
+        assert kwargs["user"] == expected
         assert kwargs["network_mode"] == "none" and kwargs["cap_drop"] == ["ALL"]
         assert kwargs["read_only"] is True and "no-new-privileges:true" in kwargs["security_opt"]
         assert env["HF_HUB_OFFLINE"] == "1" and env["BUILD_SCRATCH_DIR"] == "/build-cache/work"

@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -476,7 +476,7 @@ class TestClientSnippets:
         python = "/home/John Doe/.venv/bin/python3"
         monkeypatch.setattr(sys, "executable", python)
         snippets = mcp_server.client_snippets(Path(app_root), windows=False)
-        root = str(Path(app_root))  # as the platform spells it
+        root = str(PurePosixPath(app_root))  # as a POSIX client spells it, on every host (Windows too)
         assert shlex.split(snippets["claude-code"]) == expected_argv(root, python)
         desktop = json.loads(snippets["claude-desktop"])["mcpServers"][mcp_server.SERVER_NAME]
         vscode = json.loads(snippets["vscode"])["servers"][mcp_server.SERVER_NAME]
@@ -1001,7 +1001,7 @@ class TestSnippetEdges:
         python = "/opt/py\nthon/bin/python3"
         monkeypatch.setattr(sys, "executable", python)
         command = mcp_server.client_snippets(Path("/srv/llm\nframework"), windows=False)["claude-code"]
-        assert shlex.split(command) == expected_argv(str(Path("/srv/llm\nframework")), python)
+        assert shlex.split(command) == expected_argv(str(PurePosixPath("/srv/llm\nframework")), python)
 
     def test_mcp_config_without_quiet_keeps_the_banner_off_stdout(self):
         from click.testing import CliRunner

@@ -151,11 +151,22 @@ def denied_folders(state_dir: Optional[Path], data_folders: Sequence[Path] = (),
     add(hf_stored, "it holds your Hugging Face tokens")
     for system in ("/etc", "/proc", "/sys", "/dev"):
         add(system, "it is a system folder")
+    # Windows: its system folder (the registry hives, the SAM database) and the computer's keys and credentials. The
+    # names come from the environment (a plain mapping is case-sensitive, Windows' own is not).
+    windows = next((env.get(v) for v in ("SYSTEMROOT", "SystemRoot", "WINDIR", "windir") if env.get(v)), None)
+    if windows:
+        add(Path(windows), "it is a system folder")
+    program_data = env.get("PROGRAMDATA") or env.get("ProgramData")
+    if program_data:
+        add(Path(program_data).joinpath("Microsoft", "Crypto"), "it holds the computer's keys")
+        add(Path(program_data).joinpath("Microsoft", "Vault"), "it holds Windows credentials")
     if _identity("/root") != _identity(home):  # another user's home; your own home is covered entry by entry
         add("/root", "it is the administrator's home folder")
     for var, parts, reason in (("APPDATA", ("Microsoft", "Credentials"), "it holds Windows credentials"),
                                ("APPDATA", ("Microsoft", "Protect"), "it holds Windows credential keys"),
                                ("LOCALAPPDATA", ("Microsoft", "Credentials"), "it holds Windows credentials"),
+                               ("LOCALAPPDATA", ("Microsoft", "Vault"), "it holds Windows credentials"),
+                               ("APPDATA", ("Microsoft", "Vault"), "it holds Windows credentials"),
                                ("APPDATA", ("Mozilla", "Firefox"), "it holds a browser profile"),
                                ("LOCALAPPDATA", ("Google", "Chrome", "User Data"), "it holds a browser profile"),
                                ("LOCALAPPDATA", ("Microsoft", "Edge", "User Data"), "it holds a browser profile"),

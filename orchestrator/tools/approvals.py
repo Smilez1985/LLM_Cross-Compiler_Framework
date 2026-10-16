@@ -212,7 +212,9 @@ class ApprovalStore:
                 f.flush()
                 os.fsync(f.fileno())
             os.chmod(tmp, 0o600)
-            os.replace(tmp, self.path)
+            # Windows: while another window or the approval watcher reads the file, replacing it fails for a moment
+            from orchestrator.Core.vault_key import replace_file
+            replace_file(tmp, self.path)
         except BaseException:
             try:
                 os.unlink(tmp)

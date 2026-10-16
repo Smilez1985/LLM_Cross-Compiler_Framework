@@ -284,8 +284,12 @@ def test_the_token_cache_follows_the_files_bytes(tokens):
     import json
     from orchestrator.tools.signing import sign
     # Another framework process's genuine write (signed like the store signs it), in place: same file, same size.
-    body = json.loads(tokens.path.read_text(encoding="utf-8").replace(token_digest(old), token_digest(new)))
+    # The store writes text, so its lines end as this computer's do (CRLF on Windows); the rewrite keeps that.
+    raw = tokens.path.read_bytes()
+    newline = b"\r\n" if b"\r\n" in raw else b"\n"
+    body = json.loads(raw.decode("utf-8").replace(token_digest(old), token_digest(new)))
     data = json.dumps(sign(tokens.KIND, body, tokens.key), indent=2, ensure_ascii=False).encode("utf-8")
+    data = data.replace(b"\n", newline)
     with open(tokens.path, "r+b") as f:  # same file, same size: only the bytes differ
         f.write(data)
     os.utime(tokens.path, ns=(st.st_atime_ns, st.st_mtime_ns))
