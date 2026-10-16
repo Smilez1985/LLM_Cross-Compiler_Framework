@@ -185,11 +185,10 @@ def test_packed_images_are_never_pulled_on_the_device(tmp_path):
     cfg = ConfigManager(tmp_path / "configs")
     cfg.set("image_inference_runtime", "llm-framework/inference:local")
     cfg.set("enable_rag_knowledge", True)
-    cfg.set("image_qdrant", "qdrant/qdrant@sha256:" + "b" * 64)
     script = DeploymentManager(FakeFramework(cfg, None))._generate_deploy_script(
-        "model.gguf", "", True, "llm-framework/inference:local", "qdrant/qdrant:local-copy")
+        "model.gguf", "", True, "llm-framework/inference:local")
     runs = [block.split("\n\n")[0] for block in script.split("docker run ")[1:]]
-    assert len(runs) == 2 and all("--pull never" in block for block in runs)
+    assert len(runs) == 1 and all("--pull never" in block for block in runs)
 
 
 # --- the runtime tools ----------------------------------------------------------------------------------------------

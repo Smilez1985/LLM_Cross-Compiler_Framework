@@ -2,7 +2,7 @@
 """
 LLM Cross-Compiler Framework - RAG Manager (local knowledge base)
 
-Ingests documentation (crawled pages, PDFs, community packs, the framework's own code) and serves
+Ingests documentation (crawled pages, PDFs, community packs, the framework's own documents) and serves
 searches for Ditto and the MCP server. Everything runs locally: FastEmbed/ONNX embeddings, and Qdrant
 embedded in the process with its storage in the user state directory (no Docker, no open port). A Qdrant
 server is used only when the configuration sets qdrant_url.
@@ -55,6 +55,18 @@ RERANK_INPUT_CHARS = 1500  # of each candidate; about what fits next to the quer
 # Windows above about 49 days).
 MAX_MODEL_IDLE_SECONDS = 7 * 24 * 3600.0
 MAX_CODE_FILE_BYTES = 512 * 1024
+# The framework's own documents (DECISIONS round 8, N12): its documentation always, its code and configuration only when
+# asked for. Indexed only by an explicit action of the person or of an AI they confirmed, never by itself.
+FRAMEWORK_DOC_PATTERNS = ("README*.md", "CONTRIBUTING*.md", "docs/*.md")
+_CODE_FOLDERS = ("orchestrator", "targets", "scripts", "configs", "Docker Setup")
+_CODE_SUFFIXES = frozenset({".py", ".sh", ".yml", ".yaml", ".json", ".md"})
+_CODE_NAMES = frozenset({"Dockerfile", "dockerfile"})
+# Tooling caches and generated files (and every file or folder whose name starts with a dot) are never read.
+_CODE_IGNORE = frozenset({"__pycache__", "venv", "node_modules", "dist", "build", "models", "output", "cache", "logs",
+                          "backups"})
+# The person's settings, which the installation's configs/ holds when it is the config folder; of configs/ only the
+# files at its top are read (never the folders the advanced mode keeps there: secrets, audit, backups, ...).
+_USER_CONFIG_NAMES = frozenset({"config.yml", "framework.yml"})
 SOURCES_TTL = 60.0  # seconds a list of the knowledge sources is reused (cleared at once by every write)
 SOURCE_ID_PREFIX = "ks_"
 SOURCE_KINDS = ("web", "pack", "docs", "other")
@@ -100,6 +112,62 @@ def source_kind(payload: Dict[str, Any]) -> str:
     if str(payload.get("content_type") or "").lower() in ("html", "pdf") or source.startswith(("http://", "https://")):
         return "web"
     return "other"
+
+
+def shipped_target(folder: Path) -> bool:
+    """A target the framework ships: the template, or an official target without a pack's provenance file that no AI
+    made. A target the person or an AI created, or an installed pack, is not the framework's own (its licence is its
+    author's, and it can hold the person's own data), so the index never reads it."""
+    if folder.name == "_template":
+        return True
+    import yaml
+    from orchestrator.Core.community_manager import PROVENANCE_NAME, ai_generated_target
+    try:
+        meta = yaml.safe_load((folder / "target.yml").read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    caps = meta.get("capabilities") if isinstance(meta, dict) else None
+    return (isinstance(caps, dict) and caps.get("support_level") == "official"
+            and not (folder / PROVENANCE_NAME).exists() and not ai_generated_target(folder))
+
+
+def framework_documents(root: Union[str, Path], include_code: bool = False) -> Tuple[List[Path], List[Path]]:
+    """(documentation, code) the index of the framework's own documents reads below `root`, each sorted: README*,
+    CONTRIBUTING* and docs/*.md; with include_code also its code and configuration (the shell scripts at the top and
+    the folders of _CODE_FOLDERS, without caches, generated files and names that start with a dot; of targets/ only
+    the targets the framework ships, of configs/ only the files at its top without the person's settings). Files
+    above MAX_CODE_FILE_BYTES and links are left out."""
+    root = Path(root)
+
+    def usable(path: Path) -> bool:
+        try:
+            return path.is_file() and not path.is_symlink() and path.stat().st_size <= MAX_CODE_FILE_BYTES
+        except OSError:
+            return False
+
+    docs = sorted({p for pattern in FRAMEWORK_DOC_PATTERNS for p in root.glob(pattern) if usable(p)})
+    code: List[Path] = []
+    if include_code:
+        code = sorted(p for p in root.glob("*.sh") if usable(p))
+        for top in _CODE_FOLDERS:
+            base = root / top
+            if not base.is_dir() or base.is_symlink():
+                continue
+            if top == "configs":
+                code += sorted(p for p in base.iterdir() if p.suffix in _CODE_SUFFIXES and usable(p)
+                               and p.name not in _USER_CONFIG_NAMES and not p.name.startswith("."))
+                continue
+            for folder, dirs, names in os.walk(base):  # never follows a linked folder
+                here = Path(folder)
+                dirs[:] = sorted(d for d in dirs if d not in _CODE_IGNORE and not d.startswith(".")
+                                 and not d.endswith(".egg-info")
+                                 and not (top == "targets" and here == base and not shipped_target(here / d)))
+                for name in sorted(names):
+                    path = here / name
+                    if (not name.startswith(".") and (path.suffix in _CODE_SUFFIXES or name in _CODE_NAMES)
+                            and usable(path)):
+                        code.append(path)
+    return docs, code
 
 
 @dataclass
@@ -605,51 +673,81 @@ class RAGManager:
         return {"success": outcome != "failure", "outcome": outcome, "message": message, "count": chunks,
                 "documents": pages, "skipped": skipped, "failed": failed, "stopped": stopped}
 
-    # --- CODEBASE INGEST (SELF-AWARENESS) ---
-    def ingest_codebase(self, root_path: Union[str, Path, None] = None) -> Dict[str, Any]:
-        """Indexes the framework's own code and docs, so Ditto can answer questions about the framework."""
+    # --- THE FRAMEWORK'S OWN DOCUMENTS (N12) ---
+    def ingest_codebase(self, root_path: Union[str, Path, None] = None, include_code: bool = False,
+                        stop: Optional[threading.Event] = None,
+                        progress: Optional[Callable[[int, int, str], None]] = None) -> Dict[str, Any]:
+        """Indexes the framework's own documentation (README*, CONTRIBUTING*, docs/*.md) and, with include_code, its
+        code and configuration, so Ditto and every AI caller (search_knowledge, kind docs) can answer questions about
+        the framework itself. An explicit action (GUI, `llm-cli knowledge index-docs`, the tool index_framework_docs),
+        never automatic. A snapshot is taken first, as before a Deep Ingest, so the index can be undone with a restore;
+        a file indexed again replaces its earlier excerpts. When the knowledge base holds excerpts and that snapshot
+        cannot be made, nothing is indexed (snapshot_failed). Every file read but not stored is named with why
+        (not_indexed). Setting stop ends it after the current file and keeps what is stored; progress gets (file,
+        files, relative path)."""
         root = Path(root_path) if root_path else self.app_root
-        if not root.exists():
-            return {"success": False, "message": f"Path not found: {root}"}
+        if not root.is_dir():
+            return {"success": False, "message": "The framework's folder was not found.", "count": 0}
+        docs, code = framework_documents(root, include_code)
+        files = docs + code
+        if not files:
+            return {"success": False, "message": "No documentation was found in the framework's folder.", "count": 0}
         if not self._connect():
-            return {"success": False, "message": f"Knowledge base unavailable: {self.last_error}"}
-        self.create_snapshot(f"pre_codebase_{int(time.time())}")
-        self.logger.info(f"Starting Codebase Ingest from: {root}")
-
-        supported_ext = {'.py', '.sh', '.yml', '.yaml', '.json', '.md', 'Dockerfile'}
-        # Besides tooling caches, the framework's data directories hold large generated files.
-        ignore_dirs = {'.git', '__pycache__', 'venv', '.venv', 'node_modules', 'dist', 'build', 'egg-info',
-                       '.pytest_cache', '.ruff_cache', '.mypy_cache', 'models', 'output', 'cache', 'logs',
-                       'backups'}
-        total_files = success_count = 0
-        for root_dir, dirs, files in os.walk(root):
-            dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.endswith('.egg-info')]
-            for file in files:
-                file_path = Path(root_dir) / file
-                if not (file_path.suffix in supported_ext or file_path.name in supported_ext):
+            return {"success": False, "message": f"Knowledge base unavailable: {self.last_error}", "count": 0}
+        try:
+            held = self.chunk_count()
+        except KnowledgeBaseError as e:
+            self._fail(e)
+            return {"success": False, "message": str(e), "count": 0}
+        snapshot = self.create_snapshot(f"pre_codebase_{int(time.time())}")  # None while the base is empty
+        if held and not snapshot:  # no undo point (a full disk): nothing is written, never "continue anyway"
+            return {"success": False, "count": 0, "chunks": 0, "files": len(files), "snapshot": None,
+                    "snapshot_failed": True, "stopped": False,
+                    "message": "The snapshot of the knowledge base taken first could not be made, so nothing was "
+                               f"indexed ({self.last_error or 'see the log'}). Free disk space and try again."}
+        self.logger.info(f"Indexing the framework's own documents: {len(docs)} documentation files, "
+                         f"{len(code)} code files.")
+        stored = chunks = 0
+        stopped = False
+        not_indexed: List[Dict[str, str]] = []  # every file read but not stored, with why
+        for n, file_path in enumerate(files, 1):
+            if stop is not None and stop.is_set():
+                stopped = True
+                break
+            # POSIX form: the source is part of the point id, which must not depend on the OS.
+            rel_path = file_path.relative_to(root).as_posix()
+            if progress is not None:
+                progress(n, len(files), rel_path)
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+                if not content.strip():
+                    not_indexed.append({"file": rel_path, "reason": "empty"})
                     continue
-                try:
-                    if file_path.stat().st_size > MAX_CODE_FILE_BYTES:
-                        continue
-                    content = file_path.read_text(encoding='utf-8', errors='ignore')
-                    if not content.strip():
-                        continue
-                    # POSIX form: the source is part of the point id, which must not depend on the OS.
-                    rel_path = file_path.relative_to(root).as_posix()
-                    meta = {"type": "internal_code", "filepath": rel_path, "filename": file,
-                            "extension": file_path.suffix, "title": rel_path}
-                    total_files += 1
-                    if self._ingest(f"code:{rel_path}", content, meta, replace=True):
-                        success_count += 1
-                except KnowledgeBaseError as e:
-                    self._fail(e)
-                    return {"success": False, "message": str(e), "count": success_count}
-                except Exception as e:
-                    self.logger.warning(f"Failed to ingest {file}: {e}")
-
-        msg = f"Ingested {success_count}/{total_files} code files from {root}."
+                meta = {"type": "internal_code", "filepath": rel_path, "filename": file_path.name,
+                        "extension": file_path.suffix, "title": rel_path}
+                added = self._ingest(f"code:{rel_path}", content, meta, replace=True)
+                if added:
+                    stored += 1
+                    chunks += added
+                else:
+                    not_indexed.append({"file": rel_path, "reason": "no text to store"})
+            except KnowledgeBaseError as e:
+                self._fail(e)
+                return {"success": False, "message": str(e), "count": stored, "chunks": chunks, "files": len(files),
+                        "snapshot": snapshot, "stopped": False, "not_indexed": not_indexed}
+            except Exception as e:
+                self.logger.warning(f"Failed to index {rel_path}: {type(e).__name__}")
+                not_indexed.append({"file": rel_path, "reason": type(e).__name__})
+        what = "documentation and code files" if include_code else "documentation files"
+        msg = f"Indexed {stored} of {len(files)} {what} ({chunks} excerpts)"
+        if not_indexed:
+            shown = ", ".join(f"{item['file']} ({item['reason']})" for item in not_indexed[:5])
+            msg += f"; not indexed: {shown}" + (f" and {len(not_indexed) - 5} more" if len(not_indexed) > 5 else "")
+        if stopped:
+            msg += f"; then stopped, {len(files) - n + 1} files were not read"
         self.logger.info(msg)
-        return {"success": True, "message": msg, "count": success_count}
+        return {"success": True, "message": msg + ".", "count": stored, "chunks": chunks, "files": len(files),
+                "snapshot": snapshot, "stopped": stopped, "not_indexed": not_indexed}
 
     # --- SNAPSHOT & ROLLBACK ---
 

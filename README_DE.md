@@ -534,18 +534,10 @@ der `config.yml` (oder die Umgebungsvariable `LLM_FRAMEWORK_AI_PROVIDER`).
 Modell gut genug ist; `--kind retrieval` bewertet stattdessen die Suche in der Wissensbasis. Einzelheiten und
 Messungen: [docs/Features_DE.md](docs/Features_DE.md#ditto-evaluation).
 
-**Ditto und das Framework auf einem anderen Computer** (optional): Ist das Framework auch auf einem zweiten
-Computer installiert (ein stärkerer Build-PC, ein Server), kann Ditto es zusätzlich zu den Tools dieses Computers
-über den MCP-Server jener Installation nutzen. Docker ist nicht nötig, SSH genügt. Lege dort ein Token mit `llm-cli mcp token add ditto-laptop --link ditto`
-an und starte dort `llm-cli mcp serve --transport http`; öffne hier einen Tunnel mit
-`ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box` und führe `llm-cli ditto remote set --transport http --url
-http://127.0.0.1:8765/mcp` aus (das Token wird ohne Echo abgefragt). Ditto bietet dann die Tools jenes Computers mit
-denen dieses Computers in einem Chat an, mit seinen eigenen Berechtigungen dort, und schickt jede Aufgabe zu dem
-Computer, auf dem ihr Objekt liegt; Tools und Dateien dieses Computers bleiben, und `llm-cli ditto remote off` lässt
-Ditto wieder mit diesem Computer allein arbeiten. In der GUI wird dasselbe unter Configure AI Agent (Ditto) im Abschnitt „Another computer
-(optional)“ eingestellt (das Token landet im Tresor und wird nie wieder angezeigt). Einzelheiten:
-[docs/Features_DE.md](docs/Features_DE.md#ditto-und-ein-framework-auf-einem-anderen-computer) und
-[docs/CLI_Usage_DE.md](docs/CLI_Usage_DE.md#ditto-remote).
+**Dittos Tools sind die dieses Computers.** Ditto nutzt die eigenen Tools des Frameworks auf diesem Computer,
+dieselben, die ein MCP-Client bekommt, unter Dittos eigenen Berechtigungen. Es verbindet sich nie mit einem Framework
+auf einem anderen Computer (eine frühere Entwicklungsversion konnte das; dieser Modus wurde entfernt, siehe
+[docs/Features_DE.md](docs/Features_DE.md#nur-die-tools-dieses-computers)).
 
 ---
 

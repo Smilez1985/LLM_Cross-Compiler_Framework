@@ -51,7 +51,7 @@ OVERSIGHT = ("audio_announcements", "chat_panel_auto_show", "relay_questions_to_
              "bench_untrusted_sandbox_ok")
 READ_ONLY = ("max_concurrent_builds", "build_timeout", "auto_cleanup", "log_level", "rag_embedding_model",
              "rag_reranker", "rag_rerank_min_score", "healing_approval_timeout", "llama_cpp_version", "image_trivy",
-             "image_qdrant", "image_base_debian", "image_inference_runtime", "gui_auto_refresh",
+             "image_base_debian", "image_inference_runtime", "gui_auto_refresh",
              "gui_refresh_interval", "api_enabled") + OVERSIGHT
 URL_KEYS = ("qdrant_url", "community_index_url", "community_repo", "docker_registry", "source_repositories")
 FOLDER_KEYS = {"targets_dir": "targets", "models_dir": "models", "datasets_dir": "datasets", "output_dir": "output",

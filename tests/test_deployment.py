@@ -17,7 +17,6 @@ from orchestrator.Core.deployment_manager import DeploymentManager
 
 
 INFERENCE_PINNED = "ghcr.io/example/llm-runtime@sha256:" + "a" * 64
-QDRANT_PINNED = "qdrant/qdrant@sha256:" + "b" * 64
 
 
 class FakeImage:
@@ -79,7 +78,6 @@ def config(tmp_path):
     cfg = ConfigManager(tmp_path / "configs")
     # Packages take only digest-pinned images or images built on this computer (MCP design G17).
     cfg.set("image_inference_runtime", INFERENCE_PINNED)
-    cfg.set("image_qdrant", QDRANT_PINNED)
     return cfg
 
 
@@ -125,7 +123,7 @@ class TestPackageCreation:
         entries = dict(reversed(line.split("  ", 1)) for line in raw.decode().splitlines())
         files = {p.relative_to(pkg).as_posix() for p in pkg.rglob("*") if p.is_file() and p.name != "checksums.sha256"}
         assert set(entries) == files
-        assert "data/qdrant/.keep" in entries
+        assert not any(name.startswith("data/qdrant") for name in entries), "no vector database on the device"
         for name, digest in entries.items():
             assert hashlib.sha256((pkg / name).read_bytes()).hexdigest() == digest
 
@@ -218,24 +216,22 @@ class TestBuildHandoff:
 
 class TestDockerPackages:
 
-    def test_rag_enabled_bundles_qdrant_with_empty_storage(self, tmp_path, config, artifact):
+    def test_the_knowledge_base_never_goes_into_a_package(self, tmp_path, config, artifact):
+        """The knowledge base serves Ditto on this computer; nothing on the device used the Qdrant sidecar that
+        packages once shipped with it switched on (N15): no image, no storage folder, no QDRANT_HOST."""
         config.set("enable_rag_knowledge", True)
+        config.set("image_qdrant", "qdrant/qdrant@sha256:" + "b" * 64)   # a setting an older version kept
         client = FakeDockerClient()
 
         pkg = build_package(tmp_path, config, artifact, use_docker=True, docker_client=client)
 
-        inference, qdrant = config.get("image_inference_runtime"), config.get("image_qdrant")
-        assert client.pulled == [inference, qdrant]
-        tarballs = sorted(p.name for p in (pkg / "images").iterdir())
-        assert tarballs == sorted(f"{n.replace('/', '_').replace(':', '_').replace('@', '_')}.tar"
-                                  for n in (inference, qdrant))
-
-        storage = list((pkg / "data" / "qdrant").iterdir())
-        assert [p.name for p in storage] == [".keep"] and storage[0].stat().st_size == 0
-
+        inference = config.get("image_inference_runtime")
+        assert client.pulled == [inference]
+        assert [p.name for p in (pkg / "images").iterdir()] == [
+            f"{inference.replace('/', '_').replace(':', '_').replace('@', '_')}.tar"]
+        assert not (pkg / "data" / "qdrant").exists()
         script = (pkg / "deploy.sh").read_text()
-        assert "qdrant-sidecar" in script and "QDRANT_HOST=qdrant-sidecar" in script
-        assert inference in script and qdrant in script
+        assert "qdrant" not in script.lower() and inference in script
         assert "--device /dev/dri --device /dev/mali0" in script
 
     def test_rag_disabled_has_no_qdrant(self, tmp_path, config, artifact):

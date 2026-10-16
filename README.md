@@ -509,18 +509,10 @@ provider's sign-in methods with Check, Save and Sign out. On a headless machine,
 enough; `--kind retrieval` grades the knowledge-base search instead. Details and measurements:
 [docs/Features.md](docs/Features.md#ditto-evaluation).
 
-**Ditto and the framework on another computer** (optional): if the framework is installed on a second computer
-too (a stronger build PC, a server), Ditto can also use it, next to this computer's tools, through that
-installation's MCP server. Docker is not needed;
-SSH is enough. Create a token there with `llm-cli mcp token add ditto-laptop --link ditto` and start
-`llm-cli mcp serve --transport http` there; here open a tunnel with `ssh -N -L 8765:127.0.0.1:8765 user@build-box`
-and run `llm-cli ditto remote set --transport http --url http://127.0.0.1:8765/mcp` (the token is asked without
-echo). Ditto then offers that computer's tools with this computer's in one chat, with its own permissions there, and
-sends each task to the computer where its object lives; this computer's tools and files stay, and
-`llm-cli ditto remote off` lets Ditto work with this computer alone again. In the GUI the same is set in Configure AI Agent (Ditto) under
-"Another computer (optional)" (the token is stored in the vault and never shown again). Details:
-[docs/Features.md](docs/Features.md#ditto-and-a-framework-on-another-computer) and
-[docs/CLI_Usage.md](docs/CLI_Usage.md#ditto-remote).
+**Ditto's tools are this computer's.** Ditto uses the framework's own tools on this computer, the same ones an MCP
+client gets, under Ditto's own permissions. It never connects to a framework on another computer (an earlier
+development version could; that mode was removed, see
+[docs/Features.md](docs/Features.md#only-this-computers-tools)).
 
 ---
 

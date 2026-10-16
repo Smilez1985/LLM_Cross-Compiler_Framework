@@ -1132,54 +1132,53 @@ def test_clearing_the_input_history_lists_every_file_it_deletes(tmp_path, monkey
     assert not history.path.exists() and damaged.exists()
 
 
-# --- Ditto's other computer in the panel (hybrid design 6.6, 6.9; WP5 + WP6 together) -----------------------------
+# --- after the remote mode was removed (DECISIONS round 8: Ditto's hands are this computer's tools) ----------------
 
 def _registry_with(title):
     return SimpleNamespace(audit=RecordingAudit(), get=lambda name: SimpleNamespace(title=title))
 
 
-def test_a_tool_note_names_the_other_computer_it_ran_on(make_panel, feed):
-    """A call Ditto's router sent to the other computer says so ("Used on build box: Start a build"); the computer's
-    name is the person's own word, quoted like every outside name (R2), and a call here keeps the plain note."""
+def test_a_tool_note_is_always_the_plain_note(make_panel, feed):
+    """Every call runs on this computer: the note is "Used tool: ..." and carries no place."""
     from orchestrator.Core.ditto_manager import ToolUse
     panel = make_panel(feed, registry=_registry_with("Start a build"))
-    panel._on_tool_used(ToolUse("start_build", "Start a build", True, place="build box"))
-    panel._on_tool_used(ToolUse("start_build", "Start a build", False, "the disk is full", place="build\nbox"))
     panel._on_tool_used(ToolUse("start_build", "Start a build", True))
+    panel._on_tool_used(ToolUse("start_build", "Start a build", False, "the disk is full"))
     shown = panel.feed_view.plain_text()
-    assert "Used on 'build box': Start a build" in shown
-    assert "Not run on 'build box': Start a build ('the disk is full')" in shown, "a newline never forges a line"
-    assert "Used tool: Start a build" in shown
+    assert "Used tool: Start a build" in shown and "Tool not run: Start a build ('the disk is full')" in shown
+    assert "Used on" not in shown
     rows = [s.entry for s in feed.after(0).entries]
-    assert [r.param_origin.get("place") for r in rows] == ["external", "external", None]
+    assert [r.text_key for r in rows] == ["chat.tool.used", "chat.tool.not_run"]
+    assert all("place" not in r.params for r in rows)
 
 
-def test_notes_about_the_other_computer_reach_the_panel_quoted_and_once(make_panel, feed):
-    """A turn's notes about the other computer (not reachable now, tools left out) are shown before the answer, as
-    outside text (they can name the other computer's tools), and a note already in the recent conversation is not
-    repeated on every turn."""
-    from orchestrator.Core.ditto_manager import ChatReply
+def test_stored_rows_of_the_removed_remote_mode_still_render(make_panel, feed):
+    """Feed rows the remote mode wrote keep their (legacy) keys: a panel opened later still shows them in words, the
+    other computer's name quoted as outside text."""
     panel = make_panel(feed)
-    note = "build box offers tools this framework does not know; they are left out: Approve <b>all</b>."
-    for _ in range(2):
-        panel._on_ai_response(ChatReply(question="q", text="Done here.", new_messages=[], notices=[note, note]))
-    shown = panel.feed_view.plain_text()
-    assert shown.count("About the other computer: 'build box offers tools") == 1
-    assert shown.index("About the other computer") < shown.index("Done here.")
-    notices = [s.entry for s in feed.after(0).entries if s.entry.kind == "notice"]
-    assert len(notices) == 1 and notices[0].param_origin["notice"] == "external"
+    panel._post("ditto_tool_note", panel._ditto_sender(), text_key="chat.tool.used_on",
+                params={"title": "Start a build", "place": "build box"}, external=["title", "place"])
+    panel.post_notice("chat.notice.other_computer", {"notice": "build box is not reachable now"},
+                      external=("notice",))
+    panel.post_notice("chat.notice.source_hybrid_unnamed")
+    later = make_panel(feed)
+    shown = later.feed_view.plain_text()
+    assert "Used on 'build box': 'Start a build'" in shown
+    assert "About the other computer: 'build box is not reachable now'" in shown
+    assert "Ditto now works with this computer and the other computer together" in shown
+    from orchestrator.utils.l10n_chat import TEXTS
+    for key in ("chat.tool.used_on", "chat.tool.not_run_on", "chat.notice.other_computer", "chat.notice.source_hybrid",
+                "chat.notice.source_hybrid_unnamed", "chat.notice.source_remote"):
+        assert TEXTS["en"].get(key) and TEXTS["de"].get(key), f"legacy key {key} kept in both languages"
 
 
-def test_the_one_migration_says_this_computer_and_the_other_work_together(make_panel, feed):
-    """A conversation from the earlier "other computer only" mode starts anew once; the notice says that this
-    computer's tools stay and the other computer joins them, never that Ditto now uses only its own tools."""
+def test_a_conversation_of_the_removed_remote_mode_starts_anew_with_its_own_tools(make_panel, feed):
+    """A saved conversation of the removed remote mode (tool source "mcp:...") starts anew once; the notice says that
+    Ditto now uses its own tools, never that another computer joins."""
     from orchestrator.Core.ditto_manager import ChatReply
     panel = make_panel(feed)
     panel.history.tool_source = "mcp:build box"
     panel._on_ai_response(ChatReply(question="q", text="Hello.", new_messages=[], source_changed=True))
     shown = panel.feed_view.plain_text()
-    assert "Ditto now works with this computer and 'build box' together: a new conversation." in shown
-    assert "its own tools" not in shown
-    panel.history.tool_source = "mcp:"
-    panel._on_ai_response(ChatReply(question="q", text="Hello again.", new_messages=[], source_changed=True))
-    assert "this computer and the other computer together" in panel.feed_view.plain_text()
+    assert "Ditto now uses its own tools: a new conversation." in shown
+    assert "together" not in shown and "build box" not in shown

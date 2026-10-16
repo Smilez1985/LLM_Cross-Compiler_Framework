@@ -19,9 +19,8 @@ Rules:
 - tool calls go through the user's tool permissions; "ask" needs the confirmation callback's yes;
 - the chat history is append-only: a long conversation is summarized into a new conversation, earlier turns
   of the current one are never rebuilt or edited;
-- this computer's tools always stay (hybrid design 6.1-6.6): a framework on another computer, when the person set one
-  up, adds its tools to the same list (orchestrator/llm/hybrid_tools.py), each call goes to the computer where its
-  object lives, and a connection that fails never stops a turn or resets the conversation.
+- Ditto's hands are the framework's own tools on this computer (DECISIONS round 8): the same registry, permissions
+  and audit log every MCP client gets; Ditto never connects to a framework on another computer.
 """
 
 import json
@@ -40,14 +39,15 @@ from orchestrator.Core.module_generator import ARCHITECTURES, INPUT_LIST_BOUNDS,
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
 from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest, InvalidOutput, LLMClient, LLMError,
                               Message, NotConfigured, PermissionDenied, ProviderTimeout, ProviderUnavailable,
-                              RateLimited, Refused, Truncated, Usage, run_tool_loop,
-                              tool_specs_from_registry)
+                              RateLimited, Refused, Truncated, Usage, make_registry_executor,
+                              run_tool_loop, tool_specs_from_registry)
 from orchestrator.llm.task_prompts import (CANNOT_REASONS, CANNOT_RETRY, CANNOT_RULE, CHAT_INTRO,  # noqa: F401
                                            CHAT_TOOLS, FRAMEWORK, HEALING_SYSTEM, MODULE_SYSTEM, OPTIMIZER_SYSTEM,
-                                           SDK_HINTS, base_image_block, chat_places, format_listing, healing_parts,
+                                           SDK_HINTS, base_image_block, format_listing, healing_parts,
                                            healing_query, is_official_image, knowledge_excerpts, module_parts,
                                            module_query, optimizer_parts)
-from orchestrator.tools.registry import ToolContext
+from orchestrator.tools.registry import ToolContext, ToolDenied, ToolError, ToolInputError
+from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.untrusted import UNTRUSTED_RULE, sanitize_untrusted, wrap_untrusted
 
@@ -405,20 +405,15 @@ class OptimizerRecommendation(BaseModel):
 
 @dataclass
 class ToolUse:
-    """One tool call during a chat turn, for the transcript. `place`: the other computer's label when the call went
-    there ("" for this computer)."""
+    """One tool call during a chat turn, for the transcript."""
     name: str
     title: str
     ok: bool
     detail: str = ""  # why it failed or was not run (the model saw the same text)
-    place: str = ""
 
 
 def tool_note(use: ToolUse) -> str:
-    """The transcript line of a tool use, naming the other computer when it ran there (plain text)."""
-    if use.place:
-        return (f"Used on {use.place}: {use.title}" if use.ok else
-                f"Not run on {use.place}: {use.title} ({use.detail})")
+    """The transcript line of a tool use (plain text)."""
     return f"Used tool: {use.title}" if use.ok else f"Tool not run: {use.title} ({use.detail})"
 
 
@@ -433,20 +428,18 @@ class ChatReply:
     provider: str = ""
     model: str = ""
     usage: Usage = field(default_factory=Usage)
-    # This computer's tools always stay (hybrid design 6.6): tool_source is "local" now and kept for histories of the
-    # earlier version; source_changed is True only once, for such a history from the earlier "other computer only"
-    # mode, whose conversation then starts anew.
-    tool_source: str = "local"
+    # True only once, for a saved conversation of the removed remote mode (a history whose tool source names a
+    # framework on another computer): its tool calls named that computer's objects, so it starts anew.
     source_changed: bool = False
-    places: List[str] = field(default_factory=lambda: ["this computer"])  # the computers this turn's tools reached
-    remote_state: str = "off"         # off | connected | unreachable | not_set_up (the other computer this turn)
-    notices: List[str] = field(default_factory=list)  # framework notes for the person (never sent to the model)
 
 
 class TranscriptEntry(BaseModel):
     role: Literal["user", "assistant", "tool", "notice"]
     text: str
-    place: str = ""   # a tool use: the other computer's label when it ran there
+
+
+# The notice of a conversation of the removed remote mode that starts anew (the chat panel's chat.notice.source_local).
+SOURCE_LOCAL_NOTICE = "Ditto now uses its own tools: a new conversation."
 
 
 class ChatHistory:
@@ -456,10 +449,9 @@ class ChatHistory:
     messages    the current API conversation, append-only, with the providers' own assistant turns
     transcript  what the chat window shows, across conversations (tool uses and notices included)
 
-    The file of earlier versions held a plain [{"role", "content"}] list; it is migrated on load. Version 2 is read
-    as it is; a version-2 conversation of the earlier "other computer only" mode starts anew once (ChatReply
-    source_changed). Where objects live is not kept here but in its own file (hybrid_tools.PlaceIndex), so "Clear
-    chat" keeps it.
+    The file of earlier versions held a plain [{"role", "content"}] list; it is migrated on load. Versions 2 and 3
+    are read as they are; the fields the removed remote mode wrote (a tool source naming another computer, a tool
+    use's place) are read and ignored, and such a conversation starts anew once (ChatReply source_changed).
     """
 
     FILE_NAME = "chat_history.json"
@@ -471,7 +463,7 @@ class ChatHistory:
         self.path = Path(path) if path else None
         self.messages: List[Message] = []
         self.transcript: List[TranscriptEntry] = []
-        self.tool_source = "local"  # the tool source of the current conversation (ChatReply.tool_source)
+        self.tool_source = "local"  # kept in the file for earlier readers; "mcp:..." came from the removed remote mode
 
     @classmethod
     def in_state_dir(cls, state_dir: Path) -> "ChatHistory":
@@ -556,32 +548,26 @@ class ChatHistory:
             logger.warning(f"Could not save the chat history: {e}")
             return False
 
-    def migrating(self) -> Optional[str]:
-        """The other computer's name when this conversation comes from the earlier "other computer only" mode (a
-        version-2 history), else None: its tool calls named only that computer's tools, so it starts anew once."""
+    def migrating(self) -> bool:
+        """Whether this conversation comes from the removed remote mode (its tool source names a framework on another
+        computer): its tool calls named that computer's objects, so it starts anew once."""
         source = self.tool_source if isinstance(self.tool_source, str) else ""
-        return (source[len("mcp:"):] or "the other computer") if source.startswith("mcp:") else None
+        return source.startswith("mcp:")
 
     def apply(self, reply: ChatReply) -> None:
         """Appends a finished turn (only finished turns: an error is not an answer)."""
         if reply.source_changed:
             self.messages = []
-            other = self.migrating() or "the other computer"
-            self.transcript.append(TranscriptEntry(role="notice", text=f"Ditto now works with this computer and "
-                                                                       f"{other} together: a new conversation."))
+            self.transcript.append(TranscriptEntry(role="notice", text=SOURCE_LOCAL_NOTICE))
         elif reply.new_conversation:
             self.messages = []
             self.transcript.append(TranscriptEntry(role="notice", text="The conversation got long: Ditto summarized "
                                                                        "it and continues in a new conversation."))
         self.tool_source = "local"
-        recent = {t.text for t in self.transcript[-20:] if t.role == "notice"}
-        for notice in reply.notices:
-            if notice and notice not in recent:
-                self.transcript.append(TranscriptEntry(role="notice", text=notice))
         self.messages.extend(reply.new_messages)
         self.transcript.append(TranscriptEntry(role="user", text=reply.question))
         for use in reply.tools:
-            self.transcript.append(TranscriptEntry(role="tool", text=tool_note(use), place=use.place))
+            self.transcript.append(TranscriptEntry(role="tool", text=tool_note(use)))
         self.transcript.append(TranscriptEntry(role="assistant", text=reply.text))
         del self.transcript[:-self.MAX_TRANSCRIPT]
 
@@ -616,27 +602,6 @@ SUMMARY_SYSTEM = ("You summarize a conversation between a user and Ditto, the as
                   + UNTRUSTED_RULE)
 
 
-MAX_PROMPT_CONTEXT = 24000  # characters of a remote task prompt's context (the server caps its prompts there too)
-
-
-def remote_board_hint(probe: str) -> str:
-    """The board argument of the remote add_board prompt for a probe that is a file on this computer: names the SoC
-    family the same way the knowledge query does (module_query), so the server finds the same documentation."""
-    lowered = (probe or "").lower()
-    family = next((sdk for marker, sdk in SDK_HINTS if marker in lowered), "")
-    return (f"the board of the hardware probe Ditto sends with this task (SoC family from the probe: {family})"
-            if family else "the board of the hardware probe Ditto sends with this task")
-
-
-def remote_model_name(model: str) -> str:
-    """The model argument of a remote task prompt: a Hugging Face id as it is, a model file on this computer (an
-    absolute path, '~/...' or a Windows drive path) by its file name only, so no host path reaches another framework."""
-    text = str(model or "").strip()
-    if text.startswith(("/", "~", "\\")) or re.match(r"^[A-Za-z]:[\\/]", text):
-        return re.split(r"[/\\]", text.rstrip("/\\"))[-1] or "a local model file"
-    return text
-
-
 def _text_block(text: str) -> Dict[str, str]:
     return {"type": "text", "text": text}
 
@@ -647,8 +612,7 @@ class DittoCoder:
     """Ditto: chat with tools, build-log analysis, module generation and build recommendations."""
 
     def __init__(self, framework_manager: Any = None, *, config_manager: Any = None, secrets_manager: Any = None,
-                 client: Optional[LLMClient] = None, registry: Any = None,
-                 remote_client_factory: Optional[Callable[[Any], Any]] = None):
+                 client: Optional[LLMClient] = None, registry: Any = None):
         self.logger = logger
         self.framework = framework_manager
         self.config = config_manager if config_manager is not None else getattr(framework_manager, "config", None)
@@ -656,12 +620,6 @@ class DittoCoder:
         self._client = client
         self._own_client = client is None  # an injected client (tests, tools) is kept by reload()
         self._registry_override = registry
-        # The framework on another computer (remote_tools): how the SDK client is made (tests pass an in-process
-        # server), the connection kept across turns, where objects live and the cached tool list (hybrid design 6.3)
-        self._remote_client_factory = remote_client_factory
-        self._remote_session = None
-        self._places = None
-        self._listings = None
 
     # --- settings and wiring ------------------------------------------------------------------------------
     def _cfg(self, key: str, default: Any = None) -> Any:
@@ -685,16 +643,9 @@ class DittoCoder:
 
     def reload(self) -> None:
         """Drops the provider clients so changed settings and keys take effect on the next call (the settings
-        themselves are read on every call), and closes the connection to another computer (opened again lazily)."""
+        themselves are read on every call)."""
         if self._own_client:
             self._client = None
-        self.close()
-
-    def close(self) -> None:
-        """Closes the kept connection to the framework on another computer (if any)."""
-        session, self._remote_session = self._remote_session, None
-        if session is not None:
-            session.close()
 
     def _registry(self):
         return self._registry_override if self._registry_override is not None \
@@ -776,25 +727,14 @@ class DittoCoder:
                              "Try again or choose a more capable model.")
         return result.parsed
 
-    def analyze_error_log(self, log_content: str, context_info: str = "",
-                          request_id: Optional[str] = None) -> HealingAnalysis:
-        """A fix proposal for a failed build. Raises DittoError; the proposal is advice, never executed.
-
-        `request_id`: a build of the framework whose tools Ditto uses. In MCP-client mode its build context, the end of
-        its log and the knowledge excerpts come from that framework's task prompt diagnose_build_failure (the same
-        context an external client gets); `log_content` and `context_info` are then not used. Without it (a build of
-        this framework, e.g. its self-healing) the log and context given here are analyzed with this framework's
-        knowledge base, in either mode."""
+    def analyze_error_log(self, log_content: str, context_info: str = "") -> HealingAnalysis:
+        """A fix proposal for a failed build, from the log and context given here and this framework's knowledge
+        base. Raises DittoError; the proposal is advice, never executed."""
         log_content = log_content or ""
-        remote = (self._remote_task("diagnose_build_failure", {"request_id": request_id})
-                  if request_id else None)
-        if remote is not None:
-            parts = [remote]
-        else:
-            # Never reranked: the cross-encoder scores log lines against prose poorly and lost relevant excerpts in
-            # the retrieval evaluation (cases tagged log).
-            known = self._knowledge(healing_query(log_content), limit=3, rerank=False)
-            parts = healing_parts(log_content, context_info, known)
+        # Never reranked: the cross-encoder scores log lines against prose poorly and lost relevant excerpts in the
+        # retrieval evaluation (cases tagged log).
+        known = self._knowledge(healing_query(log_content), limit=3, rerank=False)
+        parts = healing_parts(log_content, context_info, known)
         parts.append("Analyze why the build failed and propose one fix.")
         analysis = self._structured("healing", HEALING_SYSTEM, "\n\n".join(parts), HealingAnalysis)
         danger = dangerous_command(analysis.fix_command, analysis.root_cause, analysis.summary)
@@ -831,15 +771,9 @@ class DittoCoder:
                                            missing="a hardware probe of the board, or the board's name and its SoC",
                                            next_step="Import the board's probe (llm-cli scan, or the GUI), or name "
                                                      "the board and its SoC."), confirmed=True)
-        remote = self._remote_task("add_board", {"board": board or remote_board_hint(probe)})
-        if remote is not None:
-            # The server's add_board context (its documentation excerpts for the same query); the probe is a file on
-            # this computer, so it comes along as its own block.
-            parts = [remote] + (module_parts(probe) if probe.strip() else [])
-        else:
-            # Never reranked either: for this keyword string the floor dropped the relevant excerpts too.
-            docs = self._knowledge(module_query(probe, board), rerank=False)
-            parts = module_parts(probe, board, docs)
+        # Never reranked either: for this keyword string the floor dropped the relevant excerpts too.
+        docs = self._knowledge(module_query(probe, board), rerank=False)
+        parts = module_parts(probe, board, docs)
         parts.append("Propose the module definition for this hardware.")
         return self._task_answer("json", MODULE_SYSTEM, parts, ModuleDefinition)
 
@@ -871,18 +805,10 @@ class DittoCoder:
                                                    json_schema_extra={"enum": formats})),
             quantization=(str, Field(description="A quantization type offered for that format",
                                      json_schema_extra={"enum": quants})))
-        # A local model file goes to the remote framework by its file name only (no host path, no user name).
-        arguments = {"model": remote_model_name(model), "target": target,
-                     "use_knowledge": "yes" if use_knowledge else "no"}
-        remote = self._remote_task("recommend_build_settings", {**arguments, **({"board": board} if board else {})})
-        if remote is not None:
-            # The formats come from the remote framework's target; the answer is still checked against `options`.
-            parts = [remote]
-        else:
-            notes = self._format_notes(target) if notes is None else notes
-            known = (self._knowledge(f"{target} {board or ''} {model} quantization performance", rerank=True)
-                     if use_knowledge else "")
-            parts = optimizer_parts(model, target, board, format_listing(options, notes), known)
+        notes = self._format_notes(target) if notes is None else notes
+        known = (self._knowledge(f"{target} {board or ''} {model} quantization performance", rerank=True)
+                 if use_knowledge else "")
+        parts = optimizer_parts(model, target, board, format_listing(options, notes), known)
         parts.append("Recommend the build settings.")
         # The target offers formats (checked above), so a `cannot` is not confirmed by the framework.
         answer = self._task_answer("json", OPTIMIZER_SYSTEM, parts, schema)
@@ -957,39 +883,50 @@ class DittoCoder:
             return []
         return tool_specs_from_registry(registry, names) if names else []
 
-    @staticmethod
-    def _noter(uses: List[ToolUse], on_tool: Optional[Callable[[ToolUse], None]]):
-        """The router's note callback: each tool use goes into `uses` and to `on_tool` (a failing listener is
-        ignored)."""
-        def note(name: str, title: str, ok: bool, detail: str = "", place: str = "") -> None:
-            use = ToolUse(name, title, ok, detail, place)
+    def _executor(self, registry, confirm: Optional[Confirm], uses: List[ToolUse],
+                  on_tool: Optional[Callable[[ToolUse], None]]):
+        """execute_tool for a chat turn: this computer's registry (validation, permissions, audit). One session per
+        question, for the repeat guard and the example calls after repeated input errors; output and handler errors
+        come back as untrusted blocks, the framework's own refusals as they are."""
+        run = make_registry_executor(registry, ToolContext(actor="ditto", confirm=confirm,  # output: untrusted block
+                                                           session=f"ditto-{secrets.token_hex(6)}"))
+
+        def title_of(name: str) -> str:
+            try:
+                return registry.get(name).title
+            except Exception:  # noqa: BLE001 - an unknown name keeps its own words
+                return str(name)
+
+        def note(use: ToolUse) -> None:
             uses.append(use)
             if on_tool is not None:
                 try:
                     on_tool(use)
                 except Exception:
                     pass
-        return note
 
-    def _executor(self, registry, confirm: Optional[Confirm], uses: List[ToolUse],
-                  on_tool: Optional[Callable[[ToolUse], None]]):
-        """execute_tool for a turn without another computer: this computer's registry only, exactly as before (a thin
-        wrapper of HybridRouter without a remote). One session per question, for the repeat guard and the example
-        calls after repeated input errors; output and handler errors come back as untrusted blocks."""
-        from orchestrator.llm.hybrid_tools import HybridRouter, HybridToolSet
-        ctx = ToolContext(actor="ditto", confirm=confirm, session=f"ditto-{secrets.token_hex(6)}")
-        toolset = HybridToolSet.build(registry, "ditto")
-        return HybridRouter(toolset, registry=registry, ctx=ctx, note=DittoCoder._noter(uses, on_tool)).execute
+        def execute(name: str, arguments: dict) -> str:
+            try:
+                output = run(name, arguments)
+            except (ToolDenied, ToolInputError) as e:  # the framework's own messages
+                note(ToolUse(str(name), title_of(name), False, str(e)))
+                raise
+            except ToolError as e:
+                # Handler errors can carry external text (server replies, log lines): data, not instructions. The
+                # reason code and field stay, so the loop tells a fix from a repeat.
+                note(ToolUse(str(name), title_of(name), False, redact_secrets(str(e))[:300]))
+                raise ToolError(wrap_untrusted(str(e), source=f"tool error:{name}", max_len=4000), code=e.code,
+                                field=e.field) from None
+            note(ToolUse(str(name), title_of(name), True))
+            return output
+
+        return execute
 
     def chat(self, question: str, history: Optional[ChatHistory] = None, *, confirm: Optional[Confirm] = None,
              use_tools: bool = True, on_tool: Optional[Callable[[ToolUse], None]] = None) -> ChatReply:
         """One user turn. `history` is only read: the caller appends the reply with history.apply(reply).
-        `confirm(spec, input)` answers tool calls that need confirmation (None: they are denied).
-
-        This computer's tools are always offered. When the person set up the framework on another computer, its
-        tools join the same list and each call goes where its object lives (hybrid design 6.3); a connection that
-        cannot be made never stops the turn: it goes on with this computer's tools and ChatReply.notices says why.
-        Connecting or disconnecting never resets the conversation."""
+        `confirm(spec, input)` answers tool calls that need confirmation (None: they are denied). The tools are the
+        framework's own on this computer (the same ones an MCP client with the same permissions is offered)."""
         question = (question or "").strip()
         if not question:
             raise DittoError("Please enter a question.")
@@ -997,8 +934,8 @@ class DittoCoder:
         earlier = list(history.messages) if history is not None else []
         blocks: List[Dict[str, str]] = []
         new_conversation = False
-        # A conversation of the earlier "other computer only" mode named only that computer's tools: anew, once.
-        source_changed = bool(history is not None and earlier and getattr(history, "migrating", lambda: None)())
+        # A conversation of the removed remote mode named another computer's objects: anew, once.
+        source_changed = bool(history is not None and earlier and getattr(history, "migrating", lambda: False)())
         if source_changed:
             earlier = []
         if self._too_long(earlier):
@@ -1006,206 +943,26 @@ class DittoCoder:
             earlier, new_conversation = [], True
             blocks.append(_text_block("Summary of our earlier conversation, for context:\n"
                                       + wrap_untrusted(summary, "conversation summary")))
-        remote = self._remote_for_turn(confirm) if use_tools else RemoteTurn(None, "off", [], None, None)
-        try:
-            return self._chat_turn(client, question, earlier, blocks, new_conversation, remote, source_changed,
-                                   confirm, use_tools, on_tool)
-        finally:
-            if remote.session is not None:
-                remote.session.bind(None)   # between turns nobody answers the other computer's questions
-
-    # --- the framework on another computer (hybrid design 6.3-6.8) -----------------------------------------
-    def _state_dir(self) -> Optional[Path]:
-        try:
-            path = getattr(self.config, "user_state_dir", None)
-        except Exception:  # noqa: BLE001 - no per-user folder: kept in memory
-            path = None
-        return Path(path) if isinstance(path, (str, Path)) else None
-
-    def _place_index(self):
-        """Where each object Ditto saw lives (hybrid_tools.PlaceIndex), signed with the key the tool permissions use."""
-        if self._places is None:
-            from orchestrator.llm.hybrid_tools import PLACES_FILE, PlaceIndex
-            state = self._state_dir()
-            store = getattr(self._registry(), "policy_store", None)
-            self._places = PlaceIndex(state / PLACES_FILE if state else None, key=getattr(store, "key", None),
-                                      refuse_unkeyed=getattr(store, "refuse_unkeyed", None))
-        return self._places
-
-    def _listing_cache(self):
-        if self._listings is None:
-            from orchestrator.llm.hybrid_tools import LISTING_FILE, ListingCache
-            state = self._state_dir()
-            self._listings = ListingCache(state / LISTING_FILE if state else None)
-        return self._listings
-
-    def _remote_for_turn(self, confirm: Optional[Confirm]) -> "RemoteTurn":
-        """The other computer for this turn: (session or None, remote_state, notices), with its place and tool list.
-        Never raises for a connection problem: an unreachable computer gives state "unreachable", its tools from the
-        cached list ("Not reachable now"), and the turn goes on with this computer's tools (HF3). The kept connection
-        declares the elicitation capability only for a turn with a person-facing dialog (SEC-H8)."""
-        from orchestrator.llm.hybrid_tools import remote_place
-        from orchestrator.llm.remote_tools import (TOKEN_NEXT, RemoteSession, RemoteSetupError, person_facing,
-                                                   remote_server, server_fingerprint, stored_token)
-        try:
-            server = remote_server(self.config)
-        except (RemoteSetupError, ValueError) as e:  # ValueError: a hand-edited command that cannot be read
-            self.close()
-            return RemoteTurn(None, "not_set_up", [f"The other computer is not used: {e}"], None, None)
-        if server is None:
-            self.close()
-            return RemoteTurn(None, "off", [], None, None)
-        place = remote_place(server)
-        secrets_manager = self._secrets if self._secrets is not None else getattr(self.framework, "secrets_manager",
-                                                                                  None)
-        token = stored_token(secrets_manager)
-        if not token:
-            self.close()
-            return RemoteTurn(None, "not_set_up", [f"{place.label} is not used: no named MCP token is stored. "
-                                                   + TOKEN_NEXT], None, None)
-        # Only a dialog that reaches a person may answer that computer's questions; a prompt without a terminal
-        # (person_facing False) connects without the ability to ask, so nobody's "no" is ever sent from here.
-        elicitation = person_facing(confirm)
-        session = self._remote_session
-        if session is not None and not session.matches(server, token, elicitation):
-            self.close()
-            session = None
-        if session is None:
-            session = RemoteSession(server, token, elicitation=elicitation, client_factory=self._remote_client_factory)
-            self._remote_session = session
-        cache_key = server_fingerprint(server)
-        try:
-            session.open()
-            listing = session.listing()
-        except Exception as e:  # noqa: BLE001 - not reachable now: the turn goes on with this computer's tools
-            self.close()
-            reason = str(e) if isinstance(e, RemoteSetupError) else type(e).__name__
-            return RemoteTurn(None, "unreachable", [f"{place.label} is not reachable now; Ditto works with this "
-                                                    f"computer's tools. ({reason})"], place,
-                              self._listing_cache().load(cache_key))
-        self._listing_cache().save(cache_key, listing)
-        session.bind(confirm if elicitation else None)
-        return RemoteTurn(session, "connected", [], place, listing)
-
-    def _remote_connection(self, confirm: Optional[Confirm]):
-        """The open connection of the MCP-client mode, or None when Ditto uses its in-process tools. DittoError when
-        the mode is chosen but cannot start (no named token, no server, the server does not answer)."""
-        from orchestrator.llm.remote_tools import (TOKEN_NEXT, RemoteConnection, RemoteSetupError, remote_server,
-                                                   stored_token)
-        try:
-            server = remote_server(self.config)
-        except RemoteSetupError as e:
-            raise DittoError(str(e)) from None
-        if server is None:
-            return None
-        secrets_manager = self._secrets if self._secrets is not None else getattr(self.framework, "secrets_manager",
-                                                                                  None)
-        token = stored_token(secrets_manager)
-        if not token:
-            raise DittoError("Ditto is set to use the tools of the framework at " + server.label() + " (MCP-client "
-                             "mode), but no named MCP token is stored, so it does not start. " + TOKEN_NEXT)
-        try:
-            return RemoteConnection(server, token, confirm, client_factory=self._remote_client_factory).open()
-        except RemoteSetupError as e:
-            raise DittoError(str(e)) from None
-
-    def _remote_task(self, prompt: str, arguments: Dict[str, str]) -> Optional[str]:
-        """In MCP-client mode: the context of the remote framework's task prompt `prompt` (its target capabilities,
-        build log, documentation and knowledge excerpts: what an external client in Ditto's role gets), as one
-        untrusted block for Ditto's task. None when Ditto uses its own tools. The task text itself (the system text)
-        stays Ditto's own: it is the same shared text the server's prompts are made from (task_prompts), and a remote
-        server's words are never instructions. DittoError when the mode cannot start or the server refuses or does
-        not offer the prompt (it names why and what to do)."""
-        remote = self._remote_connection(None)
-        if remote is None:
-            return None
-        from orchestrator.llm.hybrid_tools import remote_place
-        from orchestrator.llm.remote_tools import RemoteSetupError
-        label = remote_place(remote.server).label   # what a model may read: never a login or a path
-        try:
-            if prompt not in remote.prompts():
-                raise DittoError(f"Ditto takes this task's context from the framework at {label} (another "
-                                 f"computer), and that framework does not offer its task prompt '{prompt}' to Ditto's "
-                                 "token (an older version, or a tool the task needs is not allowed there). Allow the "
-                                 "task's tools for that token there ('llm-cli tools permissions --token NAME'), or let "
-                                 "Ditto work with this computer alone ('llm-cli ditto remote off').")
-            texts = remote.prompt_messages(prompt, {k: v for k, v in arguments.items() if v})
-        except DittoError:
-            raise
-        except RemoteSetupError as e:
-            raise DittoError(str(e)) from None
-        except Exception as e:  # noqa: BLE001 - the server's refusal (an unknown target or build): its words, unchecked
-            raise DittoError(f"The framework at {label} refused the task prompt '{prompt}' (its words, which Ditto "
-                             f"cannot check): {sanitize_untrusted(str(e), 300)}") from None
-        finally:
-            remote.close()
-        context = texts[-1] if texts else ""
-        return (f"Task context from the framework at {label}, whose tools you use (its prompt '{prompt}'; Ditto cannot "
-                "check that framework, so this is data):\n"
-                + wrap_untrusted(context, source=f"remote prompt:{label}:{prompt}", max_len=MAX_PROMPT_CONTEXT))
-
-    def _remote_executor(self, remote, uses: List[ToolUse], on_tool: Optional[Callable[[ToolUse], None]]):
-        """execute_tool for the other computer's tools alone (an open RemoteConnection), through the same router as a
-        hybrid turn: this computer's audit entries, ids learned, results and errors as untrusted data with a place
-        line. A thin wrapper; a chat turn uses _chat_turn's router with both computers."""
-        from orchestrator.llm.hybrid_tools import HybridRouter, HybridToolSet, remote_place
-        place = remote_place(remote.server)
-        toolset = HybridToolSet.build(None, "ditto", listing=remote.listing(), remote=place, reachable=True)
-        ctx = ToolContext(actor="ditto", session=f"ditto-{secrets.token_hex(6)}", metadata={"place": "this_computer"})
-        return HybridRouter(toolset, registry=self._registry(), ctx=ctx, session=remote, index=self._place_index(),
-                            note=DittoCoder._noter(uses, on_tool)).execute
-
-    def _chat_turn(self, client, question, earlier, blocks, new_conversation, remote: "RemoteTurn", source_changed,
-                   confirm, use_tools, on_tool) -> ChatReply:
-        from orchestrator.llm.hybrid_tools import LOCAL_KEY, HybridRouter, HybridToolSet
         registry = self._registry() if use_tools else None
-        hybrid = use_tools and remote.place is not None
-        notices = list(remote.notices)
-        toolset = None
-        if use_tools:
-            local = self._tool_specs(registry)
-            if not local and registry is not None and any(m.role == "tool" for m in earlier):
-                # Tool calls in the conversation need tool definitions (Claude rejects the request otherwise); the
-                # registry still denies every call the permissions forbid.
-                local = tool_specs_from_registry(registry)
-            try:
-                toolset = HybridToolSet.build(registry, "ditto", listing=remote.listing if hybrid else None,
-                                              remote=remote.place if hybrid else None,
-                                              reachable=remote.session is not None, local_specs=local)
-            except Exception as e:  # noqa: BLE001 - a guard of the combined list, or a listing that breaks it: never
-                # offered half-checked, and this computer's tools always stay
-                self.logger.warning(f"The other computer's tools could not be combined: {e}")
-                notices.append("The other computer's tools could not be combined with this computer's; Ditto "
-                               "works with this computer's tools.")
-                toolset = HybridToolSet.build(registry, "ditto", local_specs=local)
-                hybrid = False
-            notices += toolset.notices
-        tools = toolset.specs if toolset is not None else []
+        tools = self._tool_specs(registry)
+        if not tools and registry is not None and any(m.role == "tool" for m in earlier):
+            # Tool calls in the conversation need tool definitions (Claude rejects the request otherwise); the
+            # registry still denies every call the permissions forbid.
+            tools = tool_specs_from_registry(registry)
         if not tools:
-            # Without tools Ditto cannot search the knowledge base itself, so matching excerpts from this computer's
-            # knowledge base come along, whether or not another computer is set up (HF2).
+            # Without tools Ditto cannot search the knowledge base itself, so matching excerpts come along.
             excerpts = self._knowledge(question)
             if excerpts:
                 blocks.append(_text_block("Possibly relevant knowledge-base excerpts:\n" + excerpts))
         blocks.append(_text_block(question))
         user_turn = Message(role="user", content=blocks if len(blocks) > 1 else question)
-        system = CHAT_INTRO + "\n\n" + (CHAT_TOOLS if tools else CANNOT_RULE)
-        if hybrid and tools:
-            system += "\n\n" + chat_places(remote.place.label, remote.place.key, remote.session is not None)
-        system += "\n\n" + UNTRUSTED_RULE
+        system = CHAT_INTRO + "\n\n" + (CHAT_TOOLS if tools else CANNOT_RULE) + "\n\n" + UNTRUSTED_RULE
         request = ChatRequest(system=system, messages=[*earlier, user_turn], tools=tools, task="chat")
         uses: List[ToolUse] = []
-        router = None
         try:
             if tools:
-                ctx = ToolContext(actor="ditto", confirm=confirm, session=f"ditto-{secrets.token_hex(6)}",
-                                  metadata={"place": LOCAL_KEY} if hybrid else {})
-                router = HybridRouter(toolset, registry=registry, ctx=ctx,
-                                      session=remote.session if hybrid else None,
-                                      index=self._place_index() if hybrid else None,
-                                      note=DittoCoder._noter(uses, on_tool), learn_local=hybrid)
-                loop = run_tool_loop(client, request, router.execute, max_steps=MAX_TOOL_STEPS,
-                                     extra_steps=FIX_EXTRA_STEPS)
+                loop = run_tool_loop(client, request, self._executor(registry, confirm, uses, on_tool),
+                                     max_steps=MAX_TOOL_STEPS, extra_steps=FIX_EXTRA_STEPS)
                 if loop.stop == "refusal":
                     raise self._error(loop.refusal)
                 results, new, text, stop, usage = loop.results, loop.new_messages, loop.text, loop.stop, loop.usage
@@ -1223,27 +980,8 @@ class DittoCoder:
             text = (text + "\n\n" if text else "") + "(The answer was cut off at the length limit.)"
         elif not text:
             text = "(Ditto gave no answer.)"
-        state = remote.state
-        if router is not None:
-            notices += router.notices
-            if router.notices and state == "connected":
-                state = "unreachable"
-        places = ["this computer"] + ([remote.place.label] if hybrid and remote.session is not None else [])
         last = results[-1] if results else None
         return ChatReply(question=question, text=text, new_messages=[user_turn, *new],
                          new_conversation=new_conversation, tools=uses, stop=stop,
                          provider=getattr(last, "provider", ""), model=getattr(last, "model", ""), usage=usage,
-                         tool_source="local", source_changed=source_changed, places=places, remote_state=state,
-                         notices=notices)
-
-
-@dataclass
-class RemoteTurn:
-    """The other computer for one chat turn (DittoCoder._remote_for_turn): the kept connection (None when not set
-    up, off or not reachable), the state for the person (off, connected, unreachable, not_set_up), notices for the
-    person, its place (None: not used in this turn) and its tool list (a cached one while it is not reachable)."""
-    session: Any
-    state: str
-    notices: List[str]
-    place: Any
-    listing: Any
+                         source_changed=source_changed)

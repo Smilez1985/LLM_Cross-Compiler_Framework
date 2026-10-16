@@ -82,10 +82,17 @@ def test_recreated_module_needs_new_confirmation(tmp_path):
     assert not store.confirmed("module", "my-board", definition_sha256=second)
 
 
-def test_a_fetched_model_is_confirmed_for_its_sha256(tmp_path):
+def test_the_removed_remote_modes_artifact_kind_is_never_written_or_matched(tmp_path):
+    """A model fetched from another computer (kind `artifact`) belonged to the removed remote mode: nothing records
+    it any more, and an entry an older version wrote stays in the file but never counts as a confirmation."""
+    from orchestrator.Core import confirmed_builds
     store = ConfirmedBuilds(tmp_path, key=KEY)
+    assert "artifact" not in confirmed_builds.KINDS
     assert not store.record("artifact", "a_0123456789abcdef", channel="framework-gui")
-    assert store.record("artifact", "a_0123456789abcdef", sha256="e" * 64, channel="approval:ap_0123456789abcdef")
-    assert store.confirmed("artifact", "a_0123456789abcdef", sha256="e" * 64)
-    assert not store.confirmed("artifact", "a_0123456789abcdef", sha256="f" * 64)
-    assert not store.record("artifact", "a_1123456789abcdef", sha256="e" * 64, channel="delegation:d_" + "3" * 16)
+    store._save({confirmed_builds._key("artifact", "a_0123456789abcdef"): {
+        "installed_via": "", "pack_sha256": "", "definition_sha256": "", "sha256": "e" * 64, "base_images": [],
+        "channel": "approval:ap_0123456789abcdef", "confirmed": "2026-10-12T00:00:00+00:00"}})
+    assert store.get("artifact", "a_0123456789abcdef") is not None, "the old entry stays and still verifies"
+    assert not store.confirmed("artifact", "a_0123456789abcdef")
+    assert store.record("target", "Rockchip", channel="framework-gui"), "the file stays usable"
+    assert store.confirmed("target", "Rockchip")

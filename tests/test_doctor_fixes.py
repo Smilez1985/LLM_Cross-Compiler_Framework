@@ -561,7 +561,7 @@ def test_cli_lists_every_snapshot_with_full_path_name_size_and_what(booted_frame
     _, out = run_cli(booted_framework, monkeypatch, "knowledge", "snapshots")
     for name in [f"pre_ingest_{i}" for i in range(12)] + ["pre_codebase_1"]:
         assert name in out and str(folder / f"{name}.jsonl.gz") in out
-    assert "1.5 MB" in out and "taken before a Deep Ingest" in out and "own code was indexed" in out
+    assert "1.5 MB" in out and "taken before a Deep Ingest" in out and "own documents were indexed" in out
     assert "no limit" in out and "deletes no snapshot by itself" in out and "(export)" in out
     assert "More than" not in out and "usual" not in out
     _, listed = run_cli(booted_framework, monkeypatch, "knowledge", "snapshots", "list")

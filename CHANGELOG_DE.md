@@ -84,8 +84,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   engeren Regel verfallen. Bis zu diesem ersten bestätigten Build trägt die Frage den Sicherheitshinweis „erster
   Build“ (die Person sieht von einer KI erstellten oder installierten Build-Code einmal selbst, Entwurfsfrage Q1),
   auch für ein Hardware-Modul, das eine KI ohne das Ja der Person erstellt hat (gebunden an das sha256 seiner
-  Definition: unter demselben Namen neu erstellt, wird es erneut gezeigt), und für ein Target von einem anderen
-  Computer.
+  Definition: unter demselben Namen neu erstellt, wird es erneut gezeigt).
 - **Das Ende eines Deployments im Audit-Log**: Endet ein `deploy_to_device`-Job (erledigt, gescheitert oder
   abgebrochen), wird ein eigener Abschlusseintrag mit Job, Gerätenamen und Gerätezustand geschrieben, verknüpft mit dem
   `started`-Eintrag des Aufrufs.
@@ -104,51 +103,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   und löscht keinen Snapshot; sie bleibt außerhalb jeder Dauerfreigabe. `delete_artifact` verschiebt das Modell und
   sein Golden-ZIP in den Papierkorb, wo du sie wiederherstellen kannst (siehe „Löschen mit der vollen Liste, und der
   Papierkorb“).
-- **Ditto kann zusätzlich das Framework auf einem anderen Computer nutzen** (MCP-Entwurf T12; ENTSCHEIDUNGEN Runde 5 d;
-  Hybrid-Entwurf 6.1-6.8): Die Tools dieses Computers bleiben immer, und das Framework, das auf einem zweiten Computer
-  installiert ist (ein Build-PC, ein Server; dasselbe Programm, kein anderes), bringt seine Tools in denselben Chat.
-  `llm-cli ditto remote set` oder der Abschnitt „Another computer (optional)“ in Configure AI Agent (standardmäßig
-  aus; er sagt in einfachen Worten, dass Docker nicht nötig ist) richtet die Verbindung ein: SSH erreicht es, als
-  Tunnel zu seiner Loopback-HTTP-Adresse oder als stdio-Befehl (`ssh -T -o SendEnv=LCF_MCP_TOKEN benutzer@build-box
-  llm-cli mcp serve`); ein Framework-Container, den du selbst gebaut hast, ist eine Alternative (`docker exec -i
-  <container> llm-cli mcp serve`). Dittos Modell bekommt eine Tool-Liste: ein Tool, das beide Computer mit demselben
-  Eingabeschema anbieten, einmal, mit optionalem `place`; ein Katalog-Tool, das nur der andere Computer anbietet, mit
-  Pflichtfeld `place`; das Tool einer anderen Framework-Version als `remote_<name>`. Von dort werden nur Namen aus
-  dem Tool-Katalog dieses Frameworks übernommen, immer mit Titeln und Beschreibungen dieses Computers (die
-  Tool-Beschreibungen des anderen Computers erreichen das Modell nie), und ein Tool, das der Katalog nicht kennt,
-  wird der Person genannt. Jeder Aufruf geht zu dem Computer, auf dem sein Objekt liegt (IDs, nur aus strukturierten
-  Ergebnissen gelernt, stehen in der signierten `ditto_places.json`, die „Clear chat“ behält): Ein Ort, der einer ID
-  widerspricht, wird abgelehnt (`wrong_place`), Objekte auf beiden Computern ebenso (`needs_transfer`); nichts wird
-  von selbst zwischen den Computern kopiert. Jeder entfernte Aufruf bekommt den vorab geschriebenen Eintrag `started`
-  dieses Computers und einen verknüpften Abschlusseintrag (`place`, `remote_server`; nie das Token oder ein Login),
-  und ein Aufruf, der etwas ändert, wird nicht geschickt, wenn dieser Eintrag nicht geschrieben werden kann (was ein
-  Lesezugriff ist, entscheidet der eigene Katalog dieses Computers: Ein Tool, das er nicht hat, zählt als Änderung); ein
-  lokaler Aufruf derselben Runde wird mit `place` `this_computer` festgehalten, und eine Runde, die ein entferntes
-  Ergebnis bekommen hat, wird markiert (`taint`). Registry, Berechtigungen, narrensichere Schicht, Rückfragen und
-  Audit-Log jenes Servers entscheiden jeden Aufruf dort; Dittos Identität dort ist ein benanntes Token, angelegt mit
-  `llm-cli mcp token add NAME --link ditto` (dort Dittos eigene Berechtigungen, Audit-Akteur `mcp:NAME`), das in
-  Dittos Tresor für Zugangsdaten liegt und nur als `LCF_MCP_TOKEN` oder als Bearer-Header gesendet wird; ohne Token
-  wird der andere Computer nicht genutzt. Jedes entfernte Ergebnis beginnt vor seinem nicht vertrauenswürdigen Block
-  mit einer Zeile des Frameworks, und eine Ablehnung von dort wird in Worten des Frameworks mit ihrem Grund-Code
-  genannt. Rückfragen jenes Servers werden nur in Dittos Dialog oder Eingabeaufforderung beantwortet, die den Server
-  nennen; eine Runde ohne beides (auch `llm-cli ditto ask` ohne Terminal) verbindet sich ohne die Fähigkeit zu fragen,
-  und eine Rückfrage, die niemand beantworten konnte (ein Dialog, der fehlschlug, ein geschlossenes Chatfenster), wird
-  abgebrochen, nie als „Nein“ der Person geschickt, und dieser Computer hält sie als abgebrochen und unbeantwortet
-  fest, auch wenn jenes Framework sie als „declined“ meldet; `llm-cli ditto eval` nutzt den anderen Computer nie. Ein
-  nicht erreichbarer Computer hält nie
-  eine Runde an und setzt nie die Unterhaltung zurück (Tools aus der zwischengespeicherten Liste sagen „Not reachable
-  now“; `llm-cli ditto ask` gibt den Hinweis auf stderr aus, der Chat-Bereich zeigt ihn vor der Antwort, als
-  fremden Text in Anführungszeichen und einmal, solange er gleich bleibt, und nennt den Computer, auf dem ein Tool
-  lief), und die Verbindung bleibt über Runden hinweg bis zu 10 Minuten ohne Aufruf offen. Build-Empfehlung, Modulvorschlag und die Analyse eines entfernten
-  Builds über seine Request-ID holen ihren Kontext weiter aus den MCP-Prompts `recommend_build_settings`, `add_board`
-  und `diagnose_build_failure` jenes Frameworks, unter Dittos eigenem Aufgabentext, als nicht vertrauenswürdige Daten;
-  eine Modelldatei auf diesem Rechner erreicht jenes Framework nur mit ihrem Dateinamen. „Allow and ask it to stop
-  asking...“ der GUI für eine entfernte Rückfrage erscheint nur, wenn das Formular jenes Servers es anbietet, mit einer
-  Warnung vorab, und ist nur eine Anfrage, die eine Person im eigenen Freigabefenster jenes Frameworks bestätigt.
-  `llm-cli ditto remote show|test|off` (`test` zählt auch die Tools, die einmal, nur dort und getrennt angeboten
-  werden). `llm-cli mcp serve --transport http --container` bindet nur innerhalb eines Containers dessen
-  Schnittstellen (benanntes Token, Host- und Origin-Prüfung unverändert; den Port auf dem Loopback des Hosts
-  veröffentlichen).
+- **Der MCP-Server in einem Container, den du gebaut hast** (`llm-cli mcp serve --transport http --container`):
+  bindet die Schnittstellen des Containers, und nur innerhalb eines Containers; benanntes Token, Host- und
+  Origin-Prüfung bleiben gleich. Veröffentliche den Port nur auf dem Loopback des Hosts (`-p 127.0.0.1:8765:8765`).
 - **Das Framework in einem Container, auf deinem eigenen Computer gebaut** (Runde 5 h): Kein Framework-Image wird
   veröffentlicht oder geladen. `scripts/build_container_image.sh` (`make build`) prüft Docker, BuildKit und den
   Klon, stellt genau die Dateien bereit, die das Repository ausliefert, und baut `Docker Setup/Dockerfile` mit einem
@@ -727,7 +684,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   gemeinsamen Berechtigungen oder die eigene Vorgabe des Tools verweigern), bis du mit
   `llm-cli tools permissions --token NAME` mehr erlaubst (nicht zusammen mit `--caller`);
   `--policy-from mcp|ditto|<Token>` beginnt mit einer Kopie der Entscheidungen und gesehenen Tools dieses
-  Aufrufers, `--link ditto` nutzt Dittos Berechtigungen per Verweis (für Ditto auf einem anderen Rechner).
+  Aufrufers, `--link ditto` nutzt Dittos Berechtigungen per Verweis (für einen Client, der genau Dittos
+  Berechtigungen haben soll).
   Demselben Namen gehören die Builds und Jobs, die der Client startet; er zählt seine Wartevorgänge und wird beim
   Ende seiner Sitzung protokolliert. Über stdio
   setzt der Server-Eintrag des Clients `LCF_MCP_TOKEN`; der Server liest es einmal, entfernt es aus seiner Umgebung
@@ -939,6 +897,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (der volle Pfad nur im eigenen Fenster des Frameworks), keine dauerhafte Freigabe, keine Vollmacht, nie ein Löschen;
   jedes andere Problem wird vor der Frage mit seinem Grund abgelehnt, und das Ergebnis sagt, ob repariert wurde und,
   wenn nicht, warum. Die Vollmachtsgruppe für harmlose Reparaturen kommt mit den Vollmachten.
+- **Die eigenen Dokumente des Frameworks in der Wissensbasis** (ENTSCHEIDUNGEN Runde 8, N12): **Tools > Index the
+  Framework's Documentation...**, `llm-cli knowledge index-docs [--with-code]` und das MCP-Tool `index_framework_docs`
+  (jedes Mal gefragt, läuft als Job) nehmen die Dokumentation des Frameworks (README, CONTRIBUTING, den Ordner `docs`)
+  und auf Wunsch seinen Code und seine Konfiguration (nur was es mitliefert: nie deine Einstellungen, eigene Targets
+  oder installierte Pakete) als Art `docs` in die Wissensbasis auf, damit Ditto das
+  Innenleben des Frameworks erklären kann. Das passiert nie von selbst (bisher gab es die Indexierung, aber nichts rief
+  sie auf); vorher wird ein Snapshot angelegt (ohne Platz dafür auf der Platte wird nichts aufgenommen, auch beim
+  ersten Snapshot, gemessen an der Wissensbasis selbst; ein Snapshot, der sich nicht schreiben lässt, hält es
+  ebenfalls an; bei wenig übrigem Platz sagen es die Frage oder der Befehl), eine erneut aufgenommene Datei wird
+  ersetzt, eine gelesene, aber nicht aufgenommene Datei wird mit dem Grund genannt, und ein Export als Wissenspaket
+  lässt diese Texte weg.
 
 ### Geändert
 - **Der Builder löscht keine Images mehr** (veröffentlicht in 3.0.0; Runde 7 Punkt 12): Jeder Build endete damit, sein
@@ -975,10 +944,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   „Situation:“ und „Needs you (security / legal):“.
 - **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field",
   "blocker"}}`, nur Fakten des Frameworks, der Text unverändert; `blocker` nennt das harte Hindernis aus dem
-  Faktenkatalog, das den Aufruf vor jeder Rückfrage abgelehnt hat, etwa `disk_full`). Ditto im MCP-Client-Modus liest
-  Code und Feld daraus, statt sie aus den Worten des entfernten Servers zu raten; ein unbekannter Code ist `failed`,
-  ein Feld außerhalb des Schemas des
-  Tools wird verworfen.
+  Faktenkatalog, das den Aufruf vor jeder Rückfrage abgelehnt hat, etwa `disk_full`). Ein Client liest Code und Feld
+  daraus, statt sie aus den Worten zu raten; ein unbekannter Code wird als `failed` gesendet, und ein Feld, das kein
+  einfacher Argumentname ist, wird weggelassen.
 - **`ArtifactStore` (`delete_artifact`) nutzt nur öffentliche Methoden von `BuildService`** (`output_folder`,
   `artifact_entries`, `busy_output_folders`, `ArtifactStore.for_service`).
 - **Der Deep-Ingest-Hinweis hält wieder fest, wer ihn gelesen hat**: Seine Zustandsdatei speichert, wo er bestätigt
@@ -1266,8 +1234,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   enthält, lädt wie bisher; der Wert wird ignoriert und bleibt in der Datei.
 - Reste des entfernten Transformers-Offline-Modus und des Qdrant-Containers: der Download kleiner Modelle im
   Model-Manager (er las `source_repositories['tiny_models']`) und `DockerManager.ensure_qdrant_service` (die
-  Wissensbasis nutzt ein eingebettetes Qdrant). `image_qdrant` bleibt: Deployment-Pakete bringen Qdrant auf das
-  Gerät.
+  Wissensbasis nutzt ein eingebettetes Qdrant), und der Qdrant-Beiwagen der Gerätepakete: Ein Paket mit `--docker`
+  und eingeschalteter Wissensbasis bringt das Qdrant-Image, einen leeren Ordner `data/qdrant` und `QDRANT_HOST` nicht
+  mehr mit, weil nichts auf dem Gerät sie nutzte (die Wissensbasis dient Ditto auf diesem Computer), und das
+  Deployment-Fenster bietet „Qdrant Sidecar“ nicht mehr an. Die Einstellung `image_qdrant` wird mit einer Logzeile
+  ignoriert.
+- Ungenutzter Code: `orchestrator/Core/transparency_manager.py` (RepE: es brauchte ein transformers-Modell im eigenen
+  Prozess des Frameworks, das weder der verwaltete llama-server noch ein Cloud-Anbieter liefert) und
+  `scripts/ci_image_audit.sh` (von nichts aufgerufen; es startete ein nicht festgelegtes `dive`-Image mit
+  eingebundenem Docker-Socket). Der Docker-Workflow schreibt stattdessen die Größe des Rockchip-Images und seine
+  Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
 - **Das „Docker-Aufräumen“ der Selbstheilung löscht nichts mehr** (veröffentlicht in 3.0.0; Runde 5 f): Wer den
@@ -1296,10 +1272,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine Frage, die niemand rechtzeitig beantwortete, die Wiederholungssperre), sagte dem Client nichts davon, sodass
   das Modell den richtigen Argumentnamen nie lernte. Jede Ablehnung und jeder Fehler nach einer Reparatur trägt jetzt
   dieselben Hinweise wie ein erfolgreiches Ergebnis: am Ende des Textes („Notes: ...“) und über MCP im strukturierten
-  Fehler (`{"error": {"code", "field", "notes"}}`), auf Dittos Weg im Prozess und auf Dittos Weg als MCP-Client. Eine
+  Fehler (`{"error": {"code", "field", "notes"}}`), und auf Dittos Weg im Prozess. Eine
   Ablehnung durch den Normalisierer nach einem Alias (ein ungültiger Wert, ein unbekanntes Argument daneben) hält den
   Alias ebenfalls im Audit-Log fest. Ein registerweiter Test schickt jedes Tool mit erklärten Aliasen durch jede Art
-  von Ablehnung auf allen drei Wegen. Die Reparatur, die die Vorabprüfung eines Tools macht (`download_hf_file` mit
+  von Ablehnung auf beiden Wegen. Die Reparatur, die die Vorabprüfung eines Tools macht (`download_hf_file` mit
   einem Dateinamen in anderer Groß- und Kleinschreibung), ist eine Reparatur wie die anderen: über MCP ging ihr
   Hinweis sogar in einem erfolgreichen Ergebnis verloren (die Vorabprüfung läuft vor der Frage mit einem eigenen
   Kontext), eine Ablehnung danach (zu wenig Speicherplatz) nannte sie nie, und das Audit-Log hielt sie nicht fest;
@@ -1590,6 +1566,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   verknüpft mit dem Start-Eintrag des Aufrufs und mit Geräten und Modellen unter ihren Bezeichnungen. Die Deploy- und
   Laufzeit-Tools erreichen gebaute Modelle über die öffentliche Methode `BuildService.artifact_entry` statt über eine
   private.
+- **Der Katalog der Upstream-Projekte ist stimmig** (`configs/detailed_project_sources.yml` und
+  `configs/project_sources.yml`, ausgeliefert in 3.0.0): Jeder Größenfaktor hat eine Bezugsgröße (FP16 = 1.0x,
+  berechnet aus den Bits pro Gewicht) statt FP32 für manche Formate und Q8_0 für andere, und die Beispielgrößen folgen
+  daraus; die Tabelle der Tokens pro Sekunde und die Beschleunigungsfaktoren ohne Quelle sind entfernt; der Hinweis zu
+  Hailo nennt „nicht für LLM-Inferenz“ nicht mehr als Tatsache, sondern sagt, die aktuelle Dokumentation von Hailo zu
+  prüfen; der alte TensorRT-LLM-Stand v0.10.0 ist als nicht gegen aktuelle Releases geprüft markiert.
 
 ### Sicherheit
 - **Kein Löschen ohne deine Bestätigung im Framework** (Runde 5 f; WP7): Jeder Codepfad, der ein gebautes Modell, einen
@@ -1647,13 +1629,6 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Home-Ordner nennen. Meldung und `reason` sind jetzt die eigenen Sätze des Frameworks ohne Pfade des Rechners, und
   was das Gerät oder das Programm ausgegeben hat, kommt in `get_job_status.external_text` zurück, als externer Text
   markiert (auch bei gescheiterten Jobs).
-- **Dittos MCP-Client-Modus läuft nicht mehr als gemeinsamer lokaler Aufrufer, wenn das Token den Server nicht
-  erreicht** (MCP-Entwurf T12): `docker exec` und `podman exec` geben ihre Umgebung nicht in den Container weiter,
-  darum startete das dokumentierte `docker exec -i <Container> llm-cli mcp serve` den Server dort ohne
-  `LCF_MCP_TOKEN`, als Aufrufer `mcp` mit anderen Berechtigungen als Dittos. Ditto ergänzt bei einem solchen Befehl
-  jetzt `-e LCF_MCP_TOKEN` (nur den Namen, nie den Wert) und lehnt einen stdio-Server ab, dessen `get_status` einen
-  anderen Aufrufer als sein Token nennt (zum Beispiel über `ssh`, das die Umgebung verwirft), mit dem nächsten
-  Schritt.
 - **Ein abgebrochener Job von `restore_knowledge_snapshot` ersetzt die Wissensbasis nicht mehr** (MCP-Entwurf T10):
   Ein Abbruch (`cancel_job` oder das Ende der Sitzung) markierte den Job sofort als abgebrochen, während die
   Wiederherstellung weiterlief. Sie prüft den Abbruch jetzt nach der Sicherung und bevor die Wissensbasis ersetzt
@@ -1951,8 +1926,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   zeigt); das Aussehen einer App kommt aus ihrer Aufrufer-Kennung, nie aus ihrem eigenen Namen, und eine App, die sich
   Ditto, das Framework oder das System nennt, wird als „nennt sich so“ gezeigt. Nur Zeilen von Ditto bekommen
   Dittos Bild, und ein Hinweis darauf, was eine App getan hat, steht unter dem vertrauenswürdigen Namen dieser App;
-  ein Werkzeugname, den sich Dittos Modell ausgedacht hat, oder ein Werkzeug des Frameworks auf einem anderen Computer
-  steht in Anführungszeichen, nie als Worte des Frameworks; Guillemets in KI-Text erscheinen als Escape-Folgen, sodass
+  ein Werkzeugname, den sich Dittos Modell ausgedacht hat, steht in Anführungszeichen, nie als Worte des Frameworks; Guillemets in KI-Text erscheinen als Escape-Folgen, sodass
   nur das Framework einen sprechenden Namen «so» schreibt. Meldungsfenster, Tooltips,
   Desktop-Benachrichtigungen und Beschriftungen von Schaltflächen der neuen und geänderten Fenster laufen über
   `gui/plain.py` (Meldungsfenster mit reinem Text, maskierte Tooltips, Benachrichtigungen ohne Markup-Zeichen, kein

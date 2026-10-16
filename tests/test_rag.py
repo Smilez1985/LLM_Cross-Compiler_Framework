@@ -279,15 +279,15 @@ class TestIngestion:
     def test_code_sources_are_the_same_on_every_os(self, make_rag, tmp_path):
         # The source is part of the point id; Windows paths must not produce different ids.
         root = tmp_path / "repo"
-        (root / "pkg" / "sub").mkdir(parents=True)
-        (root / "pkg" / "sub" / "tool.py").write_text("def run():\n    return 'npu'\n", encoding="utf-8")
+        (root / "orchestrator" / "sub").mkdir(parents=True)
+        (root / "orchestrator" / "sub" / "tool.py").write_text("def run():\n    return 'npu'\n", encoding="utf-8")
         rag = make_rag()
 
-        assert rag.ingest_codebase(root)["count"] == 1
+        assert rag.ingest_codebase(root, include_code=True)["count"] == 1
 
         record = next(rag.export_records())
-        assert record["source"] == "code:pkg/sub/tool.py"
-        assert record["metadata"]["filepath"] == "pkg/sub/tool.py"
+        assert record["source"] == "code:orchestrator/sub/tool.py"
+        assert record["metadata"]["filepath"] == "orchestrator/sub/tool.py"
 
 
 class TestCollections:

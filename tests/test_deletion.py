@@ -71,7 +71,6 @@ DELETION_SITES = {
     ("orchestrator/gui/builder_tab.py", "LocalProbeWorker.run"): TEMP,
     ("orchestrator/gui/sign_in.py", "UserConfigSnapshot.restore"): TEMP,   # puts the config back as it was
     ("orchestrator/llm/auth/store.py", "CredentialStore._write"): TEMP,
-    ("orchestrator/llm/hybrid_tools.py", "_write_private"): TEMP,
     ("orchestrator/mcp_server.py", "_write_private"): TEMP,
     ("orchestrator/runtime/llama_server.py", "_write_private"): TEMP,
     ("orchestrator/runtime/build/source.py", "export_source"): TEMP,

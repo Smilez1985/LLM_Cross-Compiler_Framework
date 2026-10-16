@@ -584,9 +584,7 @@ def test_new_extra_fields_and_channel(tmp_path):
                        extra={"confirm_channel": "approval:ap_0123456789abcdef", "answer": "escalated",
                               "answered_by": "ai", "delegation": D_ID, "reason_sha256": "a" * 64,
                               "facts_sha256": "b" * 64, "warnings": ["disk_tight"], "version": 2,
-                              "feed_entry": "fe_" + "1" * 16, "taint": False, "place": "build box",
-                              "remote_server": "build box", "transfer": "tf_" + "2" * 16,
-                              "deletion_sha256": "c" * 64})
+                              "feed_entry": "fe_" + "1" * 16, "deletion_sha256": "c" * 64})
     started = log.record("mcp:laptop", "start_build", "local_write", "ask", "started",
                          extra={"confirm_channel": f"delegation:{D_ID}", "answered_by": "ai", "delegation": D_ID,
                                 "links": [entry]})
@@ -602,7 +600,9 @@ def test_new_extra_fields_and_channel(tmp_path):
     bad = [{"answered_by": "client"}, {"delegation": "d_123"}, {"delegation": "g_" + "0" * 16},
            {"reason_sha256": "not-a-hash"}, {"facts_sha256": "A" * 64}, {"version": 0}, {"version": True},
            {"warnings": "disk_tight"}, {"warnings": ["Disk tight!"]}, {"feed_entry": "fe_1"},
-           {"taint": "yes"}, {"place": "line\nbreak"}, {"confirm_channel": "delegation:d_123"},
+           {"confirm_channel": "delegation:d_123"},
+           # the removed remote mode's fields: no new entry carries them
+           {"taint": False}, {"place": "build box"}, {"remote_server": "build box"}, {"transfer": "tf_" + "2" * 16},
            {"confirm_channel": "delegation:" + "0" * 16}, {"answer": "maybe"},
            # "$" alone also matches before a final newline: a channel is matched as a whole
            {"confirm_channel": f"delegation:{D_ID}\n"}, {"confirm_channel": "grant:g_0123456789abcdef\n"}]
@@ -616,6 +616,24 @@ def test_new_extra_fields_and_channel(tmp_path):
     assert log.delegation_uses("d_" + "f" * 16) == (0, None) and log.delegation_uses("not an id") == (0, None)
 
 
+def test_old_entries_with_the_removed_remote_fields_still_verify_and_show(tmp_path, monkeypatch):
+    """Entries the remote mode wrote (place, taint, remote_server) stay in the chain: they verify and are listed with
+    their fields, while new entries can no longer carry them."""
+    from orchestrator.tools import audit as audit_module
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    old_fields = audit_module.EXTRA_FIELDS | {"place", "taint", "remote_server"}
+    monkeypatch.setattr(audit_module, "EXTRA_FIELDS", old_fields)
+    old = log.record("ditto", "start_build", "local_write", "ask", "ok",
+                     extra={"place": "this_computer", "taint": ["remote_result"], "remote_server": "build box"})
+    monkeypatch.undo()
+    log.record("ditto", "get_status", "read", "allow", "ok")
+    assert log.check().intact
+    row = next(r for r in log.entries(5) if r["id"] == old)
+    assert row["place"] == "this_computer" and row["remote_server"] == "build box"
+    with pytest.raises(ValueError):
+        log.record("ditto", "start_build", "local_write", "ask", "ok", extra={"remote_server": "build box"})
+
+
 def test_warnings_must_be_catalogue_codes_once_the_catalogue_exists(tmp_path, monkeypatch):
     from orchestrator.tools import spec as spec_module
     monkeypatch.setattr(spec_module, "_catalog", lambda: SimpleNamespace(WARNINGS={"disk_tight": object()}))
@@ -627,10 +645,10 @@ def test_warnings_must_be_catalogue_codes_once_the_catalogue_exists(tmp_path, mo
 
 def test_truncation_keeps_delegation_fields(tmp_path):
     """Extra fields too long for an entry are cut, but never what ties it to its decision: who answered, under which
-    delegation, the reason and facts hashes, the feed row, the place and the deletion plan (SEC-M4)."""
+    delegation, the reason and facts hashes, the feed row and the deletion plan (SEC-M4)."""
     log = AuditLog(tmp_path / "audit.db", key=KEY)
     kept = {"answered_by": "ai", "delegation": D_ID, "reason_sha256": "a" * 64, "facts_sha256": "b" * 64,
-            "feed_entry": "fe_" + "1" * 16, "place": "build box", "deletion_sha256": "c" * 64,
+            "feed_entry": "fe_" + "1" * 16, "deletion_sha256": "c" * 64,
             "confirm_channel": f"delegation:{D_ID}", "answer": "accepted"}
     entry = log.record("mcp:laptop", "start_build", "local_write", "ask", "started",
                        extra={**kept, "repairs": [{"field": "x" * 50, "kind": "alias"}] * 60})

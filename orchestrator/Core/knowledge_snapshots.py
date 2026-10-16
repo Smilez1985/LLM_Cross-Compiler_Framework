@@ -36,7 +36,7 @@ KEEPING_NOTE = ("There is no limit: the framework keeps as many snapshots as the
 
 # What a snapshot is, by the prefix the framework gives its name.
 _WHAT = (("pre_ingest_", "backup of the knowledge base taken before a Deep Ingest"),
-         ("pre_codebase_", "backup of the knowledge base taken before the framework's own code was indexed"),
+         ("pre_codebase_", "backup of the knowledge base taken before the framework's own documents were indexed"),
          ("pre_restore_", "backup of the knowledge base taken before an earlier snapshot was restored"))
 
 

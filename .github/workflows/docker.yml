@@ -79,6 +79,18 @@ jobs:
           cache-from: type=gha,scope=rockchip
           cache-to: type=gha,mode=max,scope=rockchip
 
+      - name: Image size report
+        # The size of the image and its layers in the job summary, read from the local image with the runner's own
+        # docker CLI: no extra image, no Docker socket inside a container, no second copy of the image. Report only.
+        run: |
+          size="$(docker image inspect --format '{{.Size}}' llm-framework/rockchip:ci)"
+          {
+            echo "### Rockchip image: $((size / 1000000)) MB"
+            echo '```'
+            docker history --format '{{.Size}}\t{{.CreatedBy}}' llm-framework/rockchip:ci | cut -c1-160 | head -n 30
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Smoke test (toolchain, Python packages, entrypoint)
         run: |
           docker run --rm --pull never llm-framework/rockchip:ci test

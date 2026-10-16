@@ -74,7 +74,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   standing approvals made under the narrower rule lapse. Until that first confirmed build the question carries the
   security warning "first build" (the person sees AI-made or AI-installed build code once, design question Q1), also
   for a hardware module an AI created without the person's yes (bound to its definition's sha256: one recreated under
-  the same name is shown again) and a target from another computer.
+  the same name is shown again).
 - **A deploy's end in the audit log**: when a `deploy_to_device` job ends (done, failed or cancelled), its own end
   entry with the job, the device's label and the device state is written, linked to the call's `started` entry.
 - **Optional tools `delete_artifact` and `restore_knowledge_snapshot`** (MCP design T10): delete one built model
@@ -90,45 +90,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
   outside MCP, and deletes no snapshot; it stays outside every standing approval. `delete_artifact` moves the model
   and its golden ZIP to the trash, where you can restore them (see "Deleting with the full list, and the trash").
-- **Ditto can also use the framework on another computer** (MCP design T12; DECISIONS round 5 d; hybrid design
-  6.1-6.8): this computer's tools always stay, and the framework installed on a second computer (a build PC, a
-  server; the same program, not a different one) adds its tools in the same chat. `llm-cli ditto remote set` or the
-  section "Another computer (optional)" in Configure AI Agent (off by default; it says in plain text that Docker is
-  not needed) sets the connection: SSH reaches it, as a tunnel to its loopback HTTP address or as the stdio command
-  (`ssh -T -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve`); a framework container you built yourself is
-  one alternative (`docker exec -i <container> llm-cli mcp serve`). Ditto's model gets one tool list: a tool both
-  computers offer with the same input schema once, with an optional `place`; a catalogue tool only the other
-  computer offers with `place` required; another framework version's tool as `remote_<name>`. Only names of this
-  framework's tool catalogue are taken from there, always with this computer's titles and descriptions (the other
-  computer's tool descriptions never reach the model), and a tool the catalogue does not know is named for the
-  person. Each call goes to the computer where its object lives (ids learned from structured results only, kept in
-  the signed `ditto_places.json`, which "Clear chat" keeps): a place that contradicts an id is refused
-  (`wrong_place`), objects on both computers too (`needs_transfer`); nothing is copied between the computers by
-  itself. Every remote call gets this computer's write-ahead `started` entry and a linked end entry (`place`,
-  `remote_server`; never the token or a login), and a call that changes something is not sent when that entry cannot
-  be written (this computer's own catalogue decides what is a read: a tool it does not have counts as a change); a
-  local call of the same turn is recorded with `place` `this_computer`, and a turn that received a remote result is
-  marked (`taint`). That server's registry, permissions, fool-proof layer, questions and audit log
-  decide each call there; Ditto's identity there is a named token made with `llm-cli mcp token add NAME --link
-  ditto` (Ditto's own permissions there, audit actor `mcp:NAME`), kept in Ditto's credential vault and sent only as
-  `LCF_MCP_TOKEN` or as bearer header; without it the other computer is not used. Every remote result starts with a
-  framework line before its untrusted block, and a refusal from there is named in framework words with its reason
-  code. That server's questions are answered only in Ditto's dialog or prompt, which names the server; a turn without
-  one (also `llm-cli ditto ask` without a terminal) connects without the ability to ask, and a question nobody could
-  answer (a dialog that failed, a closed chat window) is cancelled, never sent as the person's "no", and this
-  computer records it as cancelled and unanswered, even though that framework reports it as "declined";
-  `llm-cli ditto eval` never uses the other computer. A computer that cannot be reached never stops a turn or resets the conversation (tools from the
-  cached list say "Not reachable now"; `llm-cli ditto ask` prints the note on stderr, the chat panel shows it before
-  the answer, quoted as outside text and once while it stays the same, and names the computer a tool ran on), and
-  the connection is kept across turns for up to 10 idle minutes. Build advice, a module proposal and the analysis of a
-  remote build by its request id still take their context from that framework's MCP prompts
-  `recommend_build_settings`, `add_board` and `diagnose_build_failure`, under Ditto's own task text, as untrusted
-  data; a model file on this computer reaches that framework by its file name only. The GUI's "Allow and ask it to
-  stop asking..." for a remote question appears only when that server's form offers it, with a warning first, and is
-  only a request a person confirms in that framework's own approval window. `llm-cli ditto remote show|test|off`
-  (`test` also counts the tools offered once, only there and separately). `llm-cli mcp serve --transport http
-  --container` binds the container's interfaces inside a container only (named token, Host and Origin checks
-  unchanged; publish the port to the host's loopback).
+- **The MCP server inside a container you built** (`llm-cli mcp serve --transport http --container`): binds the
+  container's interfaces, and only inside a container; the named token, Host and Origin checks stay the same. Publish
+  the port to the host's loopback only (`-p 127.0.0.1:8765:8765`).
 - **The framework in a container, built on your own computer** (round 5 h): no framework image is published or
   pulled. `scripts/build_container_image.sh` (`make build`) checks Docker, BuildKit and the checkout, stages exactly
   the files the repository ships and builds `Docker Setup/Dockerfile` with a local tag (`lcf-framework:local`; a
@@ -634,7 +598,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`mcp:<name>`) and it has its own permissions: a new token can only read (never a tool your shared permissions
   or the tool's own default deny) until you allow more with `llm-cli tools permissions --token NAME` (not together
   with `--caller`); `--policy-from mcp|ditto|<token>` starts with a copy of that caller's decisions and reviewed
-  tools, `--link ditto` uses Ditto's permissions by reference (for Ditto on another computer). The same name owns
+  tools, `--link ditto` uses Ditto's permissions by reference (for a client that should have exactly Ditto's
+  permissions). The same name owns
   the builds and jobs the client starts, counts its waits and is audited when its session ends. Over stdio the client's server entry sets
   `LCF_MCP_TOKEN`; the server reads it once, removes it from its environment and does not start with an invalid
   value. Rotating or revoking takes effect at once, also for a running server (the calls a revoked stdio client
@@ -819,6 +784,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   path only in the framework's own window), no standing approval, no delegation, never a deletion; any other problem
   is refused before the question with its reason, and the result says whether it was repaired, and if not, why. The
   delegation group for harmless repairs comes with the delegations.
+- **The framework's own documents in the knowledge base** (DECISIONS round 8, N12): **Tools > Index the Framework's
+  Documentation...**, `llm-cli knowledge index-docs [--with-code]` and the MCP tool `index_framework_docs` (asked
+  every time, runs as a job) add the framework's documentation (README, CONTRIBUTING, the `docs` folder) and, on
+  request, its code and configuration (only what it ships: never your settings, your own targets or installed packs)
+  to the knowledge base as kind `docs`, so Ditto can explain the framework's
+  internals. It never happens by itself (before, the index existed but nothing called it); a snapshot is taken first
+  (without room for it on the disk nothing is indexed, also for the first snapshot, measured by the knowledge base
+  itself; a snapshot that cannot be written stops it too; with little room left the question or the command says
+  so), a file indexed again is replaced, a file it read but did not index is named with the reason, and a knowledge
+  pack export leaves these texts out.
 
 ### Changed
 - **The builder no longer deletes images** (released in 3.0.0; round 7 item 12): every build ended by removing its
@@ -852,9 +827,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   "Needs you (security / legal):" after the facts it checked.
 - **Refused MCP calls carry their reason code as structured content** (`{"error": {"code", "field", "blocker"}}`,
   framework facts only, the text unchanged; `blocker` names the facts catalogue's hard fact that refused the call
-  before any question, such as `disk_full`). Ditto in MCP-client mode reads the code and field from it instead of
-  guessing them from the remote server's words; an unknown code is `failed`, a field outside the tool's schema is
-  dropped.
+  before any question, such as `disk_full`). A client reads the code and field from it instead of guessing them from
+  the words; an unknown code is sent as `failed`, and a field that is not a plain argument name is left out.
 - **`ArtifactStore` (`delete_artifact`) uses only public `BuildService` methods** (`output_folder`,
   `artifact_entries`, `busy_output_folders`, `ArtifactStore.for_service`).
 - **The Deep Ingest notice records who read it again**: its state file stores where it was acknowledged (`via`:
@@ -1111,7 +1085,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   it loads as before; the value is ignored and kept in the file.
 - Leftovers of the removed Transformers offline mode and of the Qdrant container: the tiny-model download of the
   model manager (it read `source_repositories['tiny_models']`) and `DockerManager.ensure_qdrant_service` (the
-  knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
+  knowledge base uses embedded Qdrant), and the Qdrant sidecar of device packages: a package with `--docker` and the
+  knowledge base on no longer ships the Qdrant image, an empty `data/qdrant` folder and `QDRANT_HOST`, because nothing
+  on the device used them (the knowledge base serves Ditto on this computer), and the deployment window no longer
+  offers "Qdrant Sidecar". The setting `image_qdrant` is ignored with a log line.
+- Unused code: `orchestrator/Core/transparency_manager.py` (RepE: it needed a transformers model in the framework's
+  own process, which neither the managed llama-server nor a cloud provider gives) and `scripts/ci_image_audit.sh`
+  (called by nothing; it ran an unpinned `dive` image with the Docker socket mounted). The Docker workflow writes the
+  Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
 - **The self-healing "Docker cleanup" deletes nothing any more** (released in 3.0.0; round 5 f): approving the
@@ -1136,10 +1117,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   value, a denied permission, a "no", a question nobody answered in time, the repeat guard) told the client nothing
   about it, so the model never learned the right argument name. Every refusal and error after a repair now carries
   the same notes as a successful result: at the end of the text ("Notes: ...") and, over MCP, in the structured
-  error (`{"error": {"code", "field", "notes"}}`), on Ditto's in-process path and on Ditto's MCP-client path. A
+  error (`{"error": {"code", "field", "notes"}}`), and on Ditto's in-process path. A
   refusal of the normalizer after an alias (an invalid value, an unknown argument next to it) records the alias in
   the audit log too. A registry-wide test runs every tool that declares aliases through every kind of refusal on
-  all three paths. The repair a tool's look-up makes (`download_hf_file` with a file name in other letter case) is a
+  both paths. The repair a tool's look-up makes (`download_hf_file` with a file name in other letter case) is a
   repair like the others: over MCP its note was lost even from a successful result (the look-up runs before the
   question with a context of its own), a refusal after it (too little disk space) never named it, and the audit log
   did not record it; now it is named in the result and in every refusal after it on every path and recorded with
@@ -1401,6 +1382,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   reason code, or cancelled), linked to the call's started entry and naming devices and models by their labels. The
   deploy and runtime tools reach built models through the public `BuildService.artifact_entry` instead of a private
   method.
+- **The catalogue of upstream projects is consistent** (`configs/detailed_project_sources.yml` and
+  `configs/project_sources.yml`, shipped in 3.0.0): every size multiplier has one baseline (FP16 = 1.0x, computed from
+  the bits per weight) instead of FP32 for some formats and Q8_0 for others, and the example sizes follow from it; the
+  tokens-per-second table and the speed-up factors without a source are removed; the Hailo note no longer states "not
+  for LLM inference" as a fact but says to check Hailo's current documentation; the old TensorRT-LLM pin v0.10.0 is
+  marked as not checked against current releases.
 
 ### Security
 - **No deletion without your confirmation in the framework** (round 5 f; WP7): every code path that deletes a built
@@ -1448,12 +1435,6 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `reason`; and a packaging or deploy failure could name the build folder, the output folder or the home folder. The
   message and `reason` are now the framework's own sentences without host paths, and what the device or the program
   printed is returned in `get_job_status.external_text`, marked as external text (also for failed jobs).
-- **Ditto's MCP-client mode no longer runs as the shared local caller when the token does not reach the server**
-  (MCP design T12): `docker exec` and `podman exec` do not pass their environment into the container, so the
-  documented `docker exec -i <container> llm-cli mcp serve` started the server there without `LCF_MCP_TOKEN`, as the
-  caller `mcp` with another policy than Ditto's. Ditto now adds `-e LCF_MCP_TOKEN` (the name only, never the value)
-  to such a command, and refuses a stdio server whose `get_status` names a caller other than its token (for example
-  over `ssh`, which drops the environment), with the next step.
 - **A cancelled `restore_knowledge_snapshot` job no longer replaces the knowledge base** (MCP design T10): a cancel
   (`cancel_job`, or the end of the session) marked the job cancelled at once while the restore went on. The restore
   now checks for the cancel after the backup and before the knowledge base is replaced, and leaves it as it was.
@@ -1711,8 +1692,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the framework's own text; nothing is clickable inline (an address opens only after a question showing it whole); an
   app's look comes from its caller id, never from its own name, and an app calling itself Ditto, the framework or the
   system is shown as calling itself so. Only rows from Ditto get Ditto's picture, and a notice about what an app did
-  stands under that app's trusted name; a tool name Ditto's model made up, or a tool of the framework on another
-  computer, is quoted, never shown as the framework's words; guillemets in AI text are shown as escapes, so only the
+  stands under that app's trusted name; a tool name Ditto's model made up is quoted, never shown as the framework's
+  words; guillemets in AI text are shown as escapes, so only the
   framework writes a speaking name «like this». Message boxes, tooltips, desktop notifications and button labels of
   the new and touched windows go through `gui/plain.py` (plain-text boxes, escaped tooltips, notifications without
   markup characters, no keyboard mnemonic from an "&" in a name); no key on a chat entry approves or clicks anything.
