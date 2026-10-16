@@ -3,26 +3,22 @@ before anything imports the framework, each test gets its own home, and the sess
 sensitive folders changed (compared by their listings; no file is ever opened)."""
 
 import builtins
+import ntpath
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 import conftest
-from conftest import (CREDENTIAL_VARIABLES, REAL_HOMES, SESSION_HOME, home_snapshot, home_variables,
-                      snapshot_changes)
+from conftest import (CREDENTIAL_VARIABLES, SESSION_HOME, WINDOWS_ENVIRONMENT_LIMIT, home_snapshot, home_variables,
+                      in_real_home, snapshot_changes)
+from conftest import is_inside as _inside
 
 TESTS = Path(__file__).resolve().parent
-
-
-def _inside(path: str, folder: Path) -> bool:
-    try:
-        return Path(path).resolve().is_relative_to(Path(folder).resolve())
-    except OSError:
-        return False
 
 
 class TestRedirect:
@@ -32,9 +28,39 @@ class TestRedirect:
             if name == "LLM_FRAMEWORK_HOME":
                 assert name not in os.environ, "the per-user folder stays unset unless a test sets it"
                 continue
+            if name == "HOMEDRIVE":
+                continue  # checked with HOMEPATH: together they name the home
             value = os.environ.get(name)
+            if name == "HOMEPATH":
+                value = os.environ.get("HOMEDRIVE", "") + (value or "")
             assert value and _inside(value, tmp_path / "home"), f"{name}={value!r} is not this test's home"
-            assert not any(_inside(value, home) for home in REAL_HOMES), f"{name} points into the real home"
+            assert not in_real_home(value), f"{name} points into the real home"
+        assert Path.home() == tmp_path / "home" and os.path.expanduser("~") == str(tmp_path / "home")
+
+    def test_the_windows_profile_variables_name_the_test_home(self, monkeypatch):
+        """On Windows, os.path.expanduser and Path.home() read USERPROFILE, then HOMEDRIVE + HOMEPATH; Git for Windows
+        and OpenSSH read HOME; programs keep their files in APPDATA and LOCALAPPDATA. All of them point into the test
+        home (shown with ntpath, so this runs on every host)."""
+        home = r"C:\Users\someone\AppData\Local\Temp\pytest-of-someone\pytest-1\test0\home"
+        variables = home_variables(home, pathmod=ntpath)
+        assert variables["HOMEDRIVE"] == "C:" and variables["HOMEDRIVE"] + variables["HOMEPATH"] == home
+        assert variables["APPDATA"] == home + r"\AppData\Roaming"
+        assert variables["LOCALAPPDATA"] == home + r"\AppData\Local"
+        assert all(v.startswith(home) for k, v in variables.items() if k not in ("HOMEDRIVE", "HOMEPATH"))
+        for name, value in variables.items():
+            monkeypatch.setenv(name, value)
+        assert ntpath.expanduser("~") == home
+        monkeypatch.delenv("USERPROFILE")
+        assert ntpath.expanduser("~") == home, "HOMEDRIVE + HOMEPATH name the same home"
+        unc = home_variables(r"\\server\share\t\home", pathmod=ntpath)
+        assert (unc["HOMEDRIVE"], unc["HOMEPATH"]) == (r"\\server\share", r"\t\home")
+
+    @pytest.mark.skipif(os.name == "nt", reason="paths without a drive exist only on POSIX")
+    def test_without_a_drive_homedrive_is_removed_and_homepath_is_the_home(self, tmp_path):
+        variables = home_variables(tmp_path / "home")
+        assert (variables["HOMEDRIVE"], variables["HOMEPATH"]) == ("", str(tmp_path / "home"))
+        assert "HOMEDRIVE" not in os.environ, "a variable without a value is removed, not set to an empty string"
+        assert os.environ["HOMEPATH"] == str(tmp_path / "home")
 
     def test_credentials_of_the_developers_shell_are_removed(self):
         for name in CREDENTIAL_VARIABLES:
@@ -44,7 +70,7 @@ class TestRedirect:
         constants = pytest.importorskip("huggingface_hub.constants")
         for path in (constants.HF_HOME, constants.HF_TOKEN_PATH, constants.HF_STORED_TOKENS_PATH,
                      constants.HF_HUB_CACHE):
-            assert not any(_inside(path, home) for home in REAL_HOMES), path
+            assert not in_real_home(path), path
 
     def test_the_session_redirect_comes_before_any_import(self, tmp_path):
         """A fresh interpreter that imports conftest and then huggingface_hub: the library's token and cache paths are
@@ -65,7 +91,26 @@ class TestRedirect:
             assert _inside(path, Path(session_home)), path
 
     def test_the_session_home_is_a_temporary_folder(self):
-        assert not any(_inside(str(SESSION_HOME), home) for home in REAL_HOMES)
+        assert _inside(SESSION_HOME, tempfile.gettempdir()) and not in_real_home(SESSION_HOME)
+
+    def test_the_temporary_folder_inside_the_profile_is_not_the_real_home(self, tmp_path):
+        """Windows keeps the temporary folder in the profile (AppData\\Local\\Temp): a test home there is not the real
+        home, while the profile's own folders (.ssh, AppData\\Roaming) still are."""
+        profile = tmp_path / "Users" / "someone"
+        temp = profile / "AppData" / "Local" / "Temp"
+        for folder in (temp / "pytest-1" / "home", profile / ".ssh", profile / "AppData" / "Roaming"):
+            folder.mkdir(parents=True)
+        assert not in_real_home(temp / "pytest-1" / "home", homes=[profile], temp=temp)
+        assert in_real_home(profile / ".ssh", homes=[profile], temp=temp)
+        assert in_real_home(profile / "AppData" / "Roaming", homes=[profile], temp=temp)
+        assert not in_real_home(tmp_path / "elsewhere", homes=[profile], temp=temp)
+
+    def test_every_test_id_fits_a_windows_environment_variable(self, request):
+        """pytest puts the running test's id into PYTEST_CURRENT_TEST; Windows refuses a variable over 32767
+        characters, and such a test errors in setup and teardown there (a long parameter needs a short id)."""
+        too_long = [item.nodeid[:80] + "..." for item in request.session.items
+                    if len(f"PYTEST_CURRENT_TEST={item.nodeid} (teardown)") > WINDOWS_ENVIRONMENT_LIMIT]
+        assert not too_long
 
     def test_no_test_reaches_the_operating_systems_keyring(self, tmp_path):
         """Secret Service, the macOS Keychain and the Windows Credential Manager live outside the temporary home: a

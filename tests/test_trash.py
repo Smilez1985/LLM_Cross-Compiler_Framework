@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import POSIX_MODES_ONLY
 from orchestrator.Core import trash as trash_module
 from orchestrator.Core.deletion import AcceptedDeletion, PlanChanged, accept
 from orchestrator.Core.disk_plan import DiskCheck, DiskNeed, InsufficientSpace, ReservationLedger, check_disk, require
@@ -57,6 +58,13 @@ def trashed(state, *names, actor="gui", trash=None):
     return trash, trash.entries()
 
 
+@POSIX_MODES_ONLY
+def test_the_trash_folder_is_private(tmp_path):
+    state = tmp_path / "state"
+    trashed(state, "pre_ingest_1")
+    assert oct((state / ".trash").stat().st_mode & 0o777) == "0o700"
+
+
 def test_delete_moves_to_trash(tmp_path):
     state = tmp_path / "state"
     trash, entries = trashed(state, "pre_ingest_1", "pre_ingest_2")
@@ -67,7 +75,6 @@ def test_delete_moves_to_trash(tmp_path):
         assert entry.deleted_by == "gui" and entry.confirmed_by == "gui" and entry.size == 4 and entry.sha256
         assert datetime.fromisoformat(entry.remind_at) - datetime.fromisoformat(entry.deleted_at) == \
             timedelta(days=14)
-    assert oct((state / ".trash").stat().st_mode & 0o777) == "0o700"
     # The index is signed: a hand edit (or a forged "deleted_by") makes it unusable, nothing is restored from it.
     raw = json.loads((state / "tool_trash.json").read_text())
     raw["entries"][0]["deleted_by"] = "mcp:laptop"

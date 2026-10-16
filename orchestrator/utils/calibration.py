@@ -75,5 +75,6 @@ def build_calibration_text(language: str = "mixed") -> str:
 def write_calibration_dataset(dest: Path, language: str = "mixed") -> Path:
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(build_calibration_text(language), encoding="utf-8")
+    # LF on every host: llama-imatrix reads the same text, and gets the same importance matrix, wherever it was written
+    dest.write_text(build_calibration_text(language), encoding="utf-8", newline="\n")
     return dest

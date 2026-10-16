@@ -38,6 +38,7 @@ from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, cu
 from test_build_tools import GB, MODEL, Cfg, Orchestrator, Service  # noqa: E402
 from test_hf_tools import env  # noqa: E402,F401  (the Hugging Face tools' environment)
 from test_recipes import COMMIT, recipe_data  # noqa: E402
+from conftest import POSIX_MODES_ONLY  # noqa: E402
 from test_zoo import World, pack_bytes  # noqa: E402
 
 BUILD = {"model": MODEL, "target": "demo-board", "format": "gguf", "board": "demo", "quantization": "Q4_K_M"}
@@ -165,6 +166,13 @@ def test_a_reinstall_under_another_standing_approval_needs_a_new_confirmation(tm
     assert not store.confirmed("target", "demo", installed_via="grant:g_" + "2" * 16, pack_sha256="a" * 64)
     assert not store.confirmed("target", "demo", installed_via="grant:g_" + "1" * 16, pack_sha256="b" * 64)
     assert not store.record("target", "other", channel="elicitation"), "nothing is written for an elicitation"
+
+
+@POSIX_MODES_ONLY
+def test_the_confirmed_builds_file_is_private(tmp_path):
+    store = ConfirmedBuilds(tmp_path)
+    assert store.record("target", "Demo", installed_via="grant:g_" + "1" * 16, pack_sha256="a" * 64,
+                        channel="framework-gui")
     assert oct(os.stat(store.path).st_mode & 0o777) == "0o600"
 
 

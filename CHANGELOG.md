@@ -1297,6 +1297,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   data folders `output/`, `cache/` and `models/` are in the per-user folder (`%USERPROFILE%\.llm-framework`).
   The writability check no longer trusts `os.access`, which ignores folder permissions on Windows. The installer
   no longer creates an unused data folder in the public documents folder with a desktop shortcut to it.
+- Windows: a target module made with the module wizard, `llm-cli module create` or `create_target_module`
+  (released in 3.0.0) had Windows line endings (CRLF) in its `modules/build.sh`, its other scripts, its Dockerfiles
+  and its `target.yml`, so bash stopped in the Linux build container at the first line (`$'\r': command not
+  found`). Every file of a generated module is now written with LF on every host. A Windows checkout of the
+  repository also keeps LF in every text file (`.gitattributes`: the build container Dockerfiles, Python scripts,
+  LICENSE files and git hooks were not covered), except the Windows-only `.bat` and `.ps1` scripts.
+- Windows: the calibration text for the importance matrix (released in 3.0.0) was written with Windows line
+  endings, so `llama-imatrix` computed it from other text than on Linux and macOS; it is now written with LF on
+  every host.
 - `install.sh` checks the connection over HTTPS to the package index (`pypi.org` or `PIP_INDEX_URL`) instead of
   pinging 8.8.8.8, which many networks block. It loads one small project page, not the whole index, does not show
   credentials contained in `PIP_INDEX_URL`, and stops with a clear message when started with `sh` instead of bash.

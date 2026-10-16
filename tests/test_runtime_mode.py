@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -361,17 +362,25 @@ class TestImages:
         build = _stored_native(rt)
         for program in build.bin_dir.iterdir():
             program.chmod(0o700)  # built under a strict umask: only its owner may run it
+        stored = {p.name: p.stat().st_mode & 0o777 for p in build.bin_dir.iterdir()}
         modes = {}
         build_stage = client.api.build
 
         def recording(path, **kw):
-            for program in (Path(path) / "bin").iterdir():
-                modes[program.name] = program.stat().st_mode & 0o777
+            # The modes the daemon gets: those of the build context archive the Docker SDK sends (from the file modes
+            # on POSIX; on Windows, which keeps no execute bit, the SDK marks every file 0755).
+            from docker.api.build import process_dockerfile
+            from docker.utils import tar as context_archive
+            sent = context_archive(path, dockerfile=process_dockerfile(kw.get("dockerfile"), path))  # as api.build
+            with tarfile.open(fileobj=sent) as archive:
+                modes.update({m.name[len("bin/"):]: m.mode & 0o777 for m in archive.getmembers()
+                              if m.isfile() and m.name.startswith("bin/")})
             return build_stage(path, **kw)
         client.api.build = recording
         cs.build_runtime_image(rt.docker(), build, BASES["debian-13"], "repackaged", tmp_path / "log")
         assert modes and set(modes.values()) == {0o755}, "COPY keeps the mode; the container runs as another owner"
-        assert {p.stat().st_mode & 0o777 for p in build.bin_dir.iterdir()} == {0o700}, "the build store is unchanged"
+        assert {p.name: p.stat().st_mode & 0o777 for p in build.bin_dir.iterdir()} == stored, \
+            "the build store is unchanged"
 
     def test_a_changed_program_is_never_put_into_an_image(self, tmp_path):
         client = FakeClient()

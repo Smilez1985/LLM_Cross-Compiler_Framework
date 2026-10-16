@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -20,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from conftest import REPO_ROOT
+from conftest import NO_POSIX_BASH, REPO_ROOT, posix_shell
 from orchestrator.Core.builder import BuildProgress, BuildStatus, ModelFormat
 from test_foundation import FakeOrchestrator
 from test_review_capabilities_paths import (HF_MODEL, ROCKCHIP_DIR, FakeDeploymentManager, build_start,
@@ -629,7 +630,7 @@ class TestScan:
         self.fake_probe(monkeypatch, content="PROBE_SCHEMA=2\nOS=linux\nOS=linux\n")
         monkeypatch.chdir(tmp_path)
         result = invoke_plain("scan", "--script")
-        assert result.code == 1 and "cannot read" in result.out
+        assert result.code == 1 and "cannot read" in " ".join(result.out.split())  # wherever the console wraps
 
     def test_the_real_python_probe(self, tmp_path, monkeypatch):
         from orchestrator.runtime.profile import ProfileStore, read_profile
@@ -640,6 +641,9 @@ class TestScan:
         assert profile.get("PROBE_TOOL") == "python" and profile.get("PROBE_SCHEMA") == "2"
         assert ProfileStore(state_dir()).load_local() == profile.stable()
 
+    @pytest.mark.skipif(sys.platform != "linux", reason="hardware_probe.sh probes Linux only and exits 3 elsewhere; "
+                        "Windows and macOS hosts run hardware_probe.py, whose --output is tested in "
+                        "test_hardware_probe.py::TestKeyTable::test_command_line")
     def test_the_probe_script_writes_where_it_is_told(self, tmp_path):
         work, target = tmp_path / "work", tmp_path / "out" / "probe.txt"
         work.mkdir()
@@ -1191,6 +1195,13 @@ def test_build_scripts_do_not_read_imatrix_chunks():
     assert "--chunks 100" in (ROCKCHIP_DIR / "modules" / "build.sh").read_text(encoding="utf-8")
 
 
+def test_changed_shell_scripts_keep_lf_line_endings():
+    """They run on a board or in a Linux container; .gitattributes keeps them LF also in a Windows checkout."""
+    for script in (ROCKCHIP_DIR / "modules" / "build.sh", REPO_ROOT / "scripts" / "hardware_probe.sh"):
+        assert b"\r" not in script.read_bytes(), script
+
+
+@pytest.mark.skipif(posix_shell("bash") is None, reason=NO_POSIX_BASH)
 def test_changed_shell_scripts_parse():
     for script in (ROCKCHIP_DIR / "modules" / "build.sh", REPO_ROOT / "scripts" / "hardware_probe.sh"):
-        assert subprocess.run(["bash", "-n", str(script)], check=False).returncode == 0, script
+        assert subprocess.run([posix_shell("bash"), "-n", str(script)], check=False).returncode == 0, script
