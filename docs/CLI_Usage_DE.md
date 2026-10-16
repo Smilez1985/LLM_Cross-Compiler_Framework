@@ -332,12 +332,13 @@ Unveröffentlicht. Die Wissensbasis liegt in Qdrant Edge (`~/.llm-framework/qdra
 früheren Version (`~/.llm-framework/qdrant`) wird bei ihrer ersten Nutzung umgewandelt; Vektoren und Texte werden
 kopiert und geprüft, nichts wird neu eingebettet. `show` (die Vorgabe) liest den Eintrag dieser Umwandlung und öffnet
 nichts: wann sie umgewandelt wurde, wie viele Auszüge, und den alten Ordner mit vollem Pfad und Größe; oder, wenn die
-Umwandlung fehlschlug, warum und wann sie erneut versucht wird (der alte Speicher arbeitet so lange weiter). `convert`
-versucht die Umwandlung sofort, auch nach einem Fehler, der nicht von selbst erneut versucht wird; dafür muss die
-Wissensbasis eingeschaltet sein. `delete-old` zeigt den alten Ordner nach seiner Umwandlung und löscht ihn erst nach
-deiner Antwort in einem Terminal (Vorgabe Papierkorb, oder endgültig; "Nein" ist die Vorgabe). Ohne Terminal wird
-nichts gelöscht. Vor der Umwandlung oder solange sie fehlschlug, ist der alte Ordner die Wissensbasis selbst und wird
-nicht angeboten.
+Umwandlung fehlschlug, warum und wann sie erneut versucht wird (der alte Speicher arbeitet so lange weiter). Die erste
+Zeile nennt den Speicher, der wirklich genutzt wird. `convert` versucht die Umwandlung sofort, auch nach einem Fehler,
+der nicht von selbst erneut versucht wird; dafür muss die Wissensbasis eingeschaltet sein (in der GUI: **Tools >
+Knowledge Snapshots... > Umwandlung erneut versuchen**). `delete-old` zeigt den alten Ordner nach seiner Umwandlung und
+löscht ihn erst nach deiner Antwort in einem Terminal (Vorgabe Papierkorb, oder endgültig; "Nein" ist die Vorgabe). Ohne
+Terminal wird nichts gelöscht. Vor der Umwandlung oder solange sie fehlschlug, ist der alte Ordner die Wissensbasis
+selbst und wird nicht angeboten.
 
 ```bash
 llm-cli knowledge storage

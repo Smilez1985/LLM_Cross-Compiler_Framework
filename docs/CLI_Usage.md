@@ -321,15 +321,16 @@ llm-cli knowledge storage convert
 llm-cli knowledge storage delete-old
 ```
 
-Unreleased. The knowledge base is stored in Qdrant Edge (`~/.llm-framework/qdrant_edge`). A knowledge base of an
-earlier version (`~/.llm-framework/qdrant`) is converted on its first use; vectors and texts are copied and checked,
-nothing is embedded again. `show` (the default) reads the record of that conversion and opens nothing: when it was
-converted, how many excerpts, and the old folder with its full path and size; or, when the conversion failed, why and
-when it is tried again (the old store keeps working meanwhile). `convert` tries the conversion now, also after a
-failure that is not tried again by itself; it needs the knowledge base switched on. `delete-old` lists the old folder
-after its conversion and deletes it only after your answer at a terminal (trash by default, or for good; "No" is the
-default). Without a terminal nothing is deleted. Before the conversion, or while it failed, the old folder is the
-knowledge base itself and is not offered.
+Unreleased. The knowledge base is stored in Qdrant Edge (`~/.llm-framework/qdrant_edge`). A knowledge base of an earlier
+version (`~/.llm-framework/qdrant`) is converted on its first use; vectors and texts are copied and checked, nothing is
+embedded again. `show` (the default) reads the record of that conversion and opens nothing: when it was converted, how
+many excerpts, and the old folder with its full path and size; or, when the conversion failed, why and when it is tried
+again (the old store keeps working meanwhile). The first line names the storage really in use. `convert` tries the
+conversion now, also after a failure that is not tried again by itself; it needs the knowledge base switched on (in the
+GUI: **Tools > Knowledge Snapshots... > Try the conversion again**). `delete-old` lists the old folder after its
+conversion and deletes it only after your answer at a terminal (trash by default, or for good; "No" is the default).
+Without a terminal nothing is deleted. Before the conversion, or while it failed, the old folder is the knowledge base
+itself and is not offered.
 
 ```bash
 llm-cli knowledge storage

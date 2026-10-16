@@ -1287,9 +1287,12 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   Snapshots... > Delete the old storage...** or `llm-cli knowledge storage delete-old` list it with its full path and
   size and ask you first (trash or for good); nothing deletes it by itself. If the conversion fails, the old store
   keeps working, nothing of the half-made copy stays, and the reason is shown (`llm-cli knowledge storage`, Mojo
-  Oracle, the knowledge snapshots window). A lack of disk space is tried again on the next start; other failures with
-  `llm-cli knowledge storage convert`. Converting 50 000 excerpts took about 2.5 minutes in a test, 5 000 about 15
-  seconds.
+  Oracle, the knowledge snapshots window). A lack of disk space is tried again on the next start; other failures when
+  you ask: **Tools > Knowledge Snapshots... > Try the conversion again** (it runs in the background) or `llm-cli
+  knowledge storage convert`. Converting 50 000 excerpts took between 1 and 2.5 minutes in two tests, 5 000 about 15
+  seconds. Once converted, the old folder never stands in for Qdrant Edge again: if Qdrant Edge cannot be loaded later
+  (a missing or broken package), the knowledge base is not opened and says why, and Mojo Oracle reports it as an error,
+  instead of quietly using the old folder, which lacks what was added since.
 - **Embeddings:** computed locally with FastEmbed on ONNX Runtime; the model is downloaded once into
   `models/embeddings/`. With `rag_embedding_model: auto` (default) an existing knowledge base keeps the model it was
   built with; a new one gets `intfloat/multilingual-e5-small` (384 dimensions, about 100 languages, fast on a CPU),

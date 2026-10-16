@@ -20,9 +20,14 @@ orchestrator/rag/edge_store.py). On the first use of an old store (RAGManager, u
 
 A failed conversion leaves the old store as it was and in use (the knowledge base keeps working), removes its own
 half-built copy, and records why. A failure that would happen again the same way (a check that did not match, an
-error while copying) is not tried again on every start; `llm-cli knowledge storage convert` tries again, and so does a
-new version of the Qdrant Edge engine. A failure of the moment (not enough disk space, the old store in
-use by an older framework) is tried again on the next start.
+error while copying) is not tried again on every start; the person tries again (Tools > Knowledge Snapshots... > Try
+the conversion again in the GUI, `llm-cli knowledge storage convert` in a terminal), and so does a new version of the
+Qdrant Edge engine. A failure of the moment (not enough disk space, the old store in use by an older framework) is
+tried again on the next start.
+
+Once the knowledge base is in Qdrant Edge, the old folder never stands in for it again: when the engine cannot be
+loaded later (a missing or broken package), the knowledge base is refused with the reason (EDGE_UNAVAILABLE) instead of
+quietly using the old folder, which lacks what was added since the conversion.
 """
 
 import json
@@ -56,6 +61,9 @@ DISK_FIXED = 64 * 1024 * 1024
 FREE_AFTER = 512 * 1024 * 1024
 # Failures of the moment, tried again on the next start; every other failure waits for a change or for the person.
 TRANSIENT = ("disk_space", "busy")
+# Where the person tries a failed conversion again: the GUI (DECISIONS W1': never the CLI only) and the terminal.
+GUI_RETRY = "Tools > Knowledge Snapshots... > Try the conversion again in the GUI"
+CLI_RETRY = "'llm-cli knowledge storage convert' in a terminal"
 
 Log = Optional[Callable[[str], None]]
 
@@ -109,6 +117,13 @@ def edge_in_use(state_dir: Path) -> bool:
 
 ENGINE_MISSING = ("Qdrant Edge is not available on this computer (the package qdrant-edge-py has no build for it, for "
                   "example Windows on ARM), so the knowledge base uses the older local storage of qdrant-client")
+# The knowledge base is in Qdrant Edge already, but the engine cannot be loaded (a missing or broken package). The old
+# folder is never used in its place: it lacks what was added since the conversion, and what would be written into it
+# would never reach Qdrant Edge.
+EDGE_UNAVAILABLE = ("The knowledge base is stored in Qdrant Edge, but Qdrant Edge cannot be loaded on this computer "
+                    "(the package qdrant-edge-py is missing or broken). Nothing was changed. The storage of earlier "
+                    "versions is not used in its place: it lacks what was added since the conversion. Install the "
+                    "framework's requirements again (the installer, or pip install -r requirements.txt)")
 
 
 def engine_available() -> bool:
@@ -162,6 +177,15 @@ def should_try(state_dir: Path, force: bool = False) -> Tuple[bool, str]:
     return False, str(record.get("reason") or "the last conversion failed")
 
 
+def retry_sentence(code: str) -> str:
+    """How a failed conversion (its `code`) is tried again, in plain words for the CLI and Mojo (the GUI has its own
+    texts in both languages, l10n_knowledge)."""
+    if code in TRANSIENT:
+        return f"It is tried again on the next start, or now with {GUI_RETRY} or {CLI_RETRY}."
+    return (f"It is not tried again by itself, because it would fail the same way (only a new version of Qdrant Edge "
+            f"tries it again): try it again with {GUI_RETRY} or {CLI_RETRY}.")
+
+
 # --- the conversion ---------------------------------------------------------------------------------------------------
 
 def _check_room(state_dir: Path, need: int, disk_usage: Any = None) -> None:
@@ -199,7 +223,15 @@ def _open_old(folder: Path):
             raise ConversionFailed("The old knowledge base storage is in use by another program (an older framework "
                                    "version?); the conversion is tried again on the next start.",
                                    code="busy") from None
-        raise
+        raise ConversionFailed(_unreadable(e), code="unreadable") from None
+    except Exception as e:  # noqa: BLE001 - a broken old store is a recorded failure, never a crash of run()
+        raise ConversionFailed(_unreadable(e), code="unreadable") from None
+
+
+def _unreadable(error: Exception) -> str:
+    """Why an old store cannot be opened, without its text (it can name host paths): the error's kind only."""
+    return (f"The old knowledge base storage cannot be read ({type(error).__name__}), so it was not converted and was "
+            "not changed. A backup of the folder or a knowledge snapshot can replace it")
 
 
 def _old_collections(client) -> List[Tuple[str, int, Optional[str]]]:
@@ -446,14 +478,29 @@ def _record(state_dir: Path, record: Dict[str, Any], log: Log) -> None:
             log(f"The record of the knowledge base conversion could not be written ({type(e).__name__}).")
 
 
-def current(state_dir: Path) -> Tuple[str, str]:
-    """(storage to use, reason) as things are, without converting anything: what a process uses after it already
-    looked at the conversion once (it is tried again on the next start, or when the person asks)."""
-    state_dir = Path(state_dir)
+def _without_conversion(state_dir: Path) -> Optional[Tuple[str, str]]:
+    """The storage to use when there is nothing to convert, else None. A knowledge base in Qdrant Edge stays there:
+    without the engine it cannot be opened (KnowledgeBaseError), and the old folder never stands in for it. Without the
+    engine and without a Qdrant Edge storage, the older local storage is the knowledge base (Windows on ARM)."""
+    if edge_in_use(state_dir):
+        if not engine_available():
+            raise KnowledgeBaseError(EDGE_UNAVAILABLE + ".")
+        return "edge", ""
     if not engine_available():
         return "old", ENGINE_MISSING
-    if edge_in_use(state_dir) or not old_store_present(state_dir):
+    if not old_store_present(state_dir):
         return "edge", ""
+    return None
+
+
+def current(state_dir: Path) -> Tuple[str, str]:
+    """(storage to use, reason) as things are, without converting anything: what a process uses after it already
+    looked at the conversion once (it is tried again on the next start, or when the person asks). KnowledgeBaseError
+    when the knowledge base is in Qdrant Edge and the engine cannot be loaded."""
+    state_dir = Path(state_dir)
+    settled = _without_conversion(state_dir)
+    if settled is not None:
+        return settled
     record = read_record(state_dir)
     reason = str(record.get("reason") or "") if record.get("state") == "failed" else ""
     return "old", reason or "the old storage has not been converted yet"
@@ -463,12 +510,12 @@ def run(state_dir: Path, force: bool = False, log: Log = None, disk_usage: Any =
     """Converts the old store when it should be (should_try) and records the outcome. Returns (storage to use,
     reason): ("edge", "") or ("old", why the old store is still in use). Never raises for a failed conversion. Without
     the Qdrant Edge engine (no build for this computer) the older local storage is used (and made when there is none),
-    and nothing is recorded: it is converted once the engine is there."""
+    and nothing is recorded: it is converted once the engine is there. A knowledge base that is in Qdrant Edge already
+    is never swapped for the old folder: without the engine it raises KnowledgeBaseError (EDGE_UNAVAILABLE)."""
     state_dir = Path(state_dir)
-    if not engine_available():  # nothing to convert to: the older local storage stays the knowledge base
-        return "old", ENGINE_MISSING
-    if edge_in_use(state_dir) or not old_store_present(state_dir):
-        return "edge", ""
+    settled = _without_conversion(state_dir)
+    if settled is not None:
+        return settled
     go, why_not = should_try(state_dir, force)
     if not go:
         return "old", why_not
@@ -494,7 +541,8 @@ def run(state_dir: Path, force: bool = False, log: Log = None, disk_usage: Any =
     if log:
         log(f"Knowledge base converted to Qdrant Edge: {done.points} points in {len(done.collections)} collections, "
             f"{done.checked_points} points and {done.checked_searches} searches compared, {done.seconds} s. The old "
-            f"folder {old_folder(state_dir)} is kept until you delete it ('llm-cli knowledge storage delete-old').")
+            f"folder {old_folder(state_dir)} is kept until you delete it (Tools > Knowledge Snapshots... > Delete the "
+            "old storage... in the GUI, or 'llm-cli knowledge storage delete-old').")
     return "edge", ""
 
 

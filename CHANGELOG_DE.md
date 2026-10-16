@@ -13,11 +13,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
-  Eintrag. `convert` versucht die Umwandlung sofort erneut. `delete-old` und **Tools > Knowledge Snapshots... > Delete
-  the old storage...** in der GUI zeigen den alten Ordner nach seiner Umwandlung und löschen ihn erst nach deinem Ja
-  (Papierkorb oder endgültig; "Nein" ist die Vorgabe; im Audit-Log als `old_store_deleted`); nichts löscht ihn von
-  selbst, und eine KI kann es nie. Mojo Oracle meldet eine fehlgeschlagene Umwandlung (mit dem Grund) und einen alten
-  Ordner, der noch da ist.
+  Eintrag, und seine erste Zeile nennt den Speicher, der wirklich genutzt wird. `convert` und **Tools > Knowledge
+  Snapshots... > Umwandlung erneut versuchen** in der GUI (im Hintergrund) versuchen die Umwandlung sofort erneut.
+  `delete-old` und **Tools > Knowledge Snapshots... > Delete the old storage...** in der GUI zeigen den alten Ordner
+  nach seiner Umwandlung und löschen ihn erst nach deinem Ja (Papierkorb oder endgültig; "Nein" ist die Vorgabe; im
+  Audit-Log als `old_store_deleted`); nichts löscht ihn von selbst, und eine KI kann es nie. Mojo Oracle meldet eine
+  fehlgeschlagene Umwandlung (mit dem Grund und beiden Wegen zum neuen Versuch) und einen alten Ordner, der noch da
+  ist.
 - **Ein Deployment sagt dir, wenn ein alter Qdrant-Sidecar auf dem Board ist**: Pakete mit Docker-Images früherer
   Versionen starteten den Container `qdrant-sidecar`, den nichts mehr nutzt. Nach einem erfolgreichen Deployment
   (`llm-cli deploy run`, das Deployment-Fenster, das KI-Tool `deploy_to_device`) schaut das Framework mit `docker ps`
@@ -1075,9 +1077,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einen klaren Fehler "in use". Eine ältere Wissensbasis wird bei der ersten Nutzung umgewandelt: Vektoren und Texte
   werden kopiert (nichts wird neu eingebettet), Anzahl und eine Stichprobe von Punkten und Suchen werden gegen den
   alten Speicher geprüft, und die Umwandlung wird in `knowledge_conversion.json` festgehalten; der alte Ordner `qdrant`
-  bleibt, bis du ihn löschst. Eine fehlgeschlagene Umwandlung lässt den alten Speicher arbeiten und sagt, warum.
-  Gemessen mit 50 000 künstlichen Auszügen: eine Suche dauert 12 ms statt 4,9 s, das Öffnen 1,1 s statt 19 s, der
-  Speicher 520 MB statt 2 GB; die Umwandlung dauerte 159 s (5 000 Auszüge: 13,5 s). qdrant-client bleibt für einen
+  bleibt, bis du ihn löschst. Eine fehlgeschlagene Umwandlung lässt den alten Speicher arbeiten und sagt, warum. Nach
+  der Umwandlung springt der alte Ordner nie wieder ein: Lässt sich Qdrant Edge später nicht laden (ein fehlendes oder
+  kaputtes Paket), wird die Wissensbasis mit dem Grund abgelehnt, und Mojo Oracle meldet einen Fehler, statt still den
+  alten Ordner zu nutzen, dem fehlt, was seitdem dazukam. Zweimal gemessen mit 50 000 künstlichen Auszügen: eine Suche
+  dauert 12 bis 14 ms statt 2,5 bis 4,9 s, das Öffnen etwa 1 s statt 11 bis 19 s, der Speicher 410 bis 520 MB statt
+  1,6 bis 2 GB; die Umwandlung dauerte 68 bis 159 s (5 000 Auszüge: 13,5 s). qdrant-client bleibt für einen
   optionalen Qdrant-Server (`qdrant_url`) und um den alten Speicher zu lesen. Qdrant Edge hat keinen Build für
   Windows auf ARM; dort behält die Wissensbasis den lokalen Modus von qdrant-client, und Mojo Oracle sagt es.
 - **Wissens-Schnappschüsse nennen den Speicher, aus dem sie kommen (Format 2)**: Ein Schnappschuss bleibt eine

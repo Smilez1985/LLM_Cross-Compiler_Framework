@@ -18,11 +18,14 @@ change does not fit (eighth round, answer 2), `offer_snapshot_list` says so and 
 It also says where the knowledge base is stored (DECISIONS RG5): in Qdrant Edge, converted from the storage of earlier
 versions on first use, whose old folder is kept until the person deletes it here ([Delete the old storage...] opens
 the deletion dialog with that folder's full path and size; "No" is the default), or still in the old storage when its
-conversion failed, with the reason.
+conversion failed, with the reason. [Try the conversion again] then converts it now (RAGManager.convert_storage, the
+same as `llm-cli knowledge storage convert`; DECISIONS W1': the CLI is never the person's only way), in a worker thread
+that reports through the one WorkerRelay, since a large knowledge base takes minutes.
 
 Every text is plain text.
 """
 
+import threading
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -80,14 +83,19 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.btn_export = QPushButton(self._t("snapshots.export").replace("&", "&&"), self)
         self.open_folder = QPushButton(self._t("snapshots.open").replace("&", "&&"), self)
         self.btn_old = QPushButton(self._t("storage.old.delete").replace("&", "&&"), self)
+        self.btn_convert = QPushButton(self._t("storage.convert").replace("&", "&&"), self)
         for button, slot in ((self.btn_delete, self._delete), (self.btn_export, self._export),
-                             (self.open_folder, self._open_folder), (self.btn_old, self._delete_old_store)):
+                             (self.open_folder, self._open_folder), (self.btn_old, self._delete_old_store),
+                             (self.btn_convert, self._convert)):
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             buttons.addButton(button, QDialogButtonBox.ActionRole)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.snapshots = []
+        self._convert_token: Optional[object] = None  # the running conversion's (one at a time)
+        from orchestrator.gui.worker_relay import worker_relay
+        worker_relay().done.connect(self._converted, Qt.QueuedConnection)
         self.reload()
 
     def _t(self, key: str, **values) -> str:
@@ -125,13 +133,56 @@ class KnowledgeSnapshotsDialog(QDialog):
                            points=int(info.get("points") or 0), folder=str(info.get("old_folder", "")),
                            size=size_text(int(info.get("old_folder_bytes") or 0)))
         elif info.get("state") == "failed" and info.get("old_store"):
-            text = self._t("storage.old.failed", reason=str(info.get("reason", "")),
-                           retry=str(info.get("retry", "")))
+            # How it is tried again, in the window's language (the record's own words are English).
+            retry = "storage.retry.start" if info.get("code") in migration.TRANSIENT else "storage.retry.person"
+            text = self._t("storage.old.failed", reason=str(info.get("reason", "")), retry=self._t(retry))
+        if self._convert_token is not None:
+            text = self._t("storage.converting")
         self.storage.setText(text)
         self.storage.setVisible(bool(text))
         offered = self.framework is not None and migration.old_store_plan(self.state_dir) is not None
         self.btn_old.setVisible(offered)
         self.btn_old.setEnabled(offered)
+        can_convert = (self.framework is not None and callable(getattr(self.framework, "ensure_rag_manager", None))
+                       and info.get("state") == "failed" and bool(info.get("old_store"))
+                       and not migration.edge_in_use(self.state_dir) and migration.engine_available())
+        self.btn_convert.setVisible(can_convert or self._convert_token is not None)
+        self.btn_convert.setEnabled(can_convert and self._convert_token is None)
+
+    def _convert(self) -> None:
+        """[Try the conversion again]: RAGManager.convert_storage in a worker thread (copy and check take minutes for a
+        large knowledge base); the result arrives through the WorkerRelay (_converted). Nothing is deleted."""
+        if self._convert_token is not None:
+            return
+        from orchestrator.gui.worker_relay import worker_relay
+        token, relay, framework = object(), worker_relay(), self.framework
+        self._convert_token = token
+
+        def work() -> None:
+            try:
+                rag = framework.ensure_rag_manager()
+                result = rag.convert_storage() if rag is not None else {"off": True}
+            except Exception as e:  # noqa: BLE001 - shown to the person; the old storage keeps working
+                result = {"error": f"{type(e).__name__}: {e}"}
+            relay.done.emit(token, result)
+
+        threading.Thread(target=work, name="knowledge-conversion", daemon=True).start()
+        self._storage_line()
+
+    def _converted(self, token: object, result: Any) -> None:
+        if token is not self._convert_token:
+            return
+        from orchestrator.gui.plain import one_line
+        self._convert_token = None
+        result = result if isinstance(result, dict) else {}
+        if result.get("off"):
+            self._box("warning", self._t("storage.convert.off"))
+        elif result.get("used") == "qdrant-edge":
+            self._box("information", self._t("storage.convert.done", points=int(result.get("points") or 0)))
+        else:
+            reason = result.get("reason") or result.get("error") or ""
+            self._box("warning", self._t("storage.convert.failed", reason=one_line(str(reason))))
+        self.reload()
 
     def _disk_line(self, total: int) -> str:
         """What the snapshots use against the free space of their disk ("" when it cannot be read)."""

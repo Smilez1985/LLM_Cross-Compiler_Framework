@@ -1409,8 +1409,12 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   mit vollem Pfad und Größe und fragen dich vorher (Papierkorb oder endgültig); nichts löscht ihn von selbst. Schlägt
   die Umwandlung fehl, arbeitet der alte Speicher weiter, von der halben Kopie bleibt nichts, und der Grund wird
   angezeigt (`llm-cli knowledge storage`, Mojo Oracle, das Fenster der Wissens-Snapshots). Fehlender Platz wird beim
-  nächsten Start erneut versucht, andere Fehler mit `llm-cli knowledge storage convert`. 50 000 Auszüge umzuwandeln
-  dauerte in einem Test etwa 2,5 Minuten, 5 000 etwa 15 Sekunden.
+  nächsten Start erneut versucht, andere Fehler, wenn du es willst: **Tools > Knowledge Snapshots... > Umwandlung erneut
+  versuchen** (läuft im Hintergrund) oder `llm-cli knowledge storage convert`. 50 000 Auszüge umzuwandeln dauerte in
+  zwei Tests zwischen 1 und 2,5 Minuten, 5 000 etwa 15 Sekunden. Nach der Umwandlung springt der alte Ordner nie wieder
+  für Qdrant Edge ein: Lässt sich Qdrant Edge später nicht laden (ein fehlendes oder kaputtes Paket), wird die
+  Wissensbasis nicht geöffnet und sagt, warum, und Mojo Oracle meldet es als Fehler, statt still den alten Ordner zu
+  nutzen, dem fehlt, was seitdem dazukam.
 - **Embeddings:** lokal mit FastEmbed auf ONNX Runtime berechnet; das Modell wird einmal nach `models/embeddings/`
   geladen. Mit `rag_embedding_model: auto` (Standard) behält eine vorhandene Wissensbasis das Modell, mit dem sie
   gebaut wurde; eine neue bekommt `intfloat/multilingual-e5-small` (384 Dimensionen, etwa 100 Sprachen, schnell auf
