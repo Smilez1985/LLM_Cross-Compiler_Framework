@@ -506,7 +506,7 @@ class TestDeploymentWindow:
             return {"ok": True, "prompt_ts": 21.5, "gen_ts": 4.25, "recorded_builds": 1,
                     "checks": [{"name": "smoke", "result": "passed"}]}
         monkeypatch.setattr(dev, "device_profile", lambda s, d: BOARD)
-        monkeypatch.setattr(dev, "read_key", lambda d, s: "SHA256:trusted")
+        monkeypatch.setattr(dev, "read_key", lambda d, s, step="": "SHA256:trusted")
         monkeypatch.setattr(dev, "benchmark", benchmark)
         results = []
         worker = BoardBenchWorker(window_framework, device.device_id, "models/smol.gguf", True)

@@ -324,9 +324,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   geht (NVIDIA Container Toolkit, `/dev/dri`), mit einem Hinweis, wo nicht. `--force` wechselt die Art (braucht ein
   Terminal): Die Modelle werden weiter genutzt, nichts wird noch einmal heruntergeladen; der direkte Build wird ins
   Image umgepackt, oder der Build des Images wird zum direkten Build, nachdem er seine Prüfungen auf diesem Rechner
-  bestanden hat; sonst wird neu gebaut und der Grund genannt. Danach werden Build-Ordner, Images und Container der
-  alten Art mit vollständigem Pfad oder Name, ID, Dateiname und Größe aufgelistet, und nur, was du bestätigst, wird
-  entfernt („Nein“ ist vorgewählt; ohne Terminal wird nichts entfernt). Die Installer bekommen einen Ditto-Schritt
+  bestanden hat; sonst wird neu gebaut und der Grund genannt. Direkt und Docker sind zwei Alternativen (W2): Bevor
+  die neue Art neben der alten gebaut wird, wird ihr Platzbedarf geschätzt (was ihr Build beim Bauen braucht und was
+  danach bleibt) und mit dem freien Platz jedes beteiligten Laufwerks verglichen (Dittos Laufzeitordner, Dockers
+  Image-Speicher, der temporäre Ordner des Image-Builds). Passt sie nicht, wird nichts gebaut: Du siehst die Größen
+  und wählst, selbst Platz zu schaffen und noch einmal zu wechseln, oder die alte Art zuerst zu löschen (ihre volle
+  Liste, eine Frage, nur an einem Terminal oder in der GUI; Ditto ist nicht verfügbar, bis die neue Art funktioniert,
+  die Modelle bleiben; scheitert die neue Art danach, erfährst du das und bekommst die alte Art wieder angeboten). Das
+  Löschen zuerst wird nur angeboten, wenn die neue Art danach passt: Sie wird noch einmal geschätzt, ohne den Build
+  der alten Art, der sich dann nicht mehr nutzen lässt, und mit dem Platz, den die Objekte der alten Art freigeben.
+  Sobald die neue Art funktioniert, wird jedes Objekt der alten Art mit
+  vollständigem Pfad oder Name, ID, Dateiname, Größe und was es ist aufgelistet: ihre Build-Ordner, Dittos Images und
+  Container, ihre Einträge in `mode.json` und `active.json` und das Log der Image-Builds. Eine Frage löscht genau diese
+  Liste endgültig, nicht in den Papierkorb („Nein“ ist vorgewählt, keine Auswahl je Objekt; ohne Terminal wird nichts
+  entfernt). Die Installer bekommen einen Ditto-Schritt
   (`install.sh --ditto=auto|bare-metal|docker|skip`, dasselbe für `install.bat`, `LCF_DITTO` für unbeaufsichtigte
   Läufe), der als du läuft, nie als root, im Container-Build des Frameworks nichts tut, Größe und Lizenz eines Modells
   vor dem Download zeigt und die Installation nie scheitern lässt. Die KI-Einstellungen zeigen die Art und bieten den
@@ -939,10 +950,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   fehlgeschlagen), und ein Problem, das danach zum ersten Mal gefunden wird. Speicherplatz freigeben geht nur über
   die Liste der Build-Images des Frameworks im Terminal, nichts angehakt; ohne Terminal laufen nur die harmlosen
   Reparaturen, und nichts wird gelöscht. `--json` fragt nie und löscht nie.
-- **Mojo Oracle prüft die vertrauten Boards und Dittos Image** (achte Runde N6; siebte Runde D): Für jedes vertraute
-  Board liest es die `known_hosts` des Frameworks und öffnet eine Verbindung zum SSH-Port des Boards, ohne Anmeldung,
-  ohne Passwort und ohne den Namen des Gerätekontos, und nennt ein Board, das sich nicht nutzen lässt, mit seinem
-  Grund-Code (`device_host_down`, `device_port_closed`, `device_host_key_changed`) und dem nächsten Schritt. Im
+- **Mojo Oracle meldet die vertrauten Boards und prüft Dittos Image** (achte Runde N6; W1 vom 2026-10-16; siebte
+  Runde D): Ein normaler Lauf nimmt keinen Netzwerkkontakt zu einem Board auf. Er meldet, was aufgezeichnet ist: einen
+  Host-Schlüssel in den `known_hosts` des Frameworks, der sich geändert hat oder fehlt, und das letzte Deployment, das
+  letzte Laufzeit-Deployment, die letzte Prüfung, den letzten Benchmark oder die letzte Hardware-Prüfung, die ein
+  Board nicht erreicht haben, mit dem Grund-Code (`device_host_down`, `device_port_closed`, `device_auth_failed`,
+  `device_host_key_changed`) und dem nächsten Schritt. Jeder Kontakt des Frameworks mit einem Board zeichnet das auf;
+  ein Kontakt, der das Board erreicht und sich anmeldet, beendet die Aufzeichnung. Für ein Board, auf das so ein Fakt
+  zeigt, bietet es die Prüfung an: im Terminal „Check <board> now? [y/N]“, in `--json` und für eine KI den Befehl oder
+  die Anfrage, die es prüft. `llmcf mojo --oracle --board NAME` (Bezeichnung, Geräte-ID oder Adresse) prüft ein Board
+  sofort: eine Verbindung zu seinem SSH-Port, ohne Anmeldung, ohne Passwort und ohne den Namen des Gerätekontos. Im
   Docker-Modus prüft es, dass Dittos Image da ist, auf diesem Rechner gebaut wurde (nie gezogen), vom festgelegten
   Commit ist und das geprüfte ist (`runtime.docker`); es baut, zieht oder entfernt nie ein Image.
 - **`llmcf`, der neue Name der Kommandozeile** (siebte Runde, Punkt 11): ein zweites Konsolenskript neben `llm-cli`,
@@ -953,7 +970,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `run_mojo_miracle` repariert ein Problem, dessen `repair.how` `miracle` ist: Jeder Aufruf wird mit dem Plan gefragt
   (der volle Pfad nur im eigenen Fenster des Frameworks), keine dauerhafte Freigabe, keine Vollmacht, nie ein Löschen;
   jedes andere Problem wird vor der Frage mit seinem Grund abgelehnt, und das Ergebnis sagt, ob repariert wurde und,
-  wenn nicht, warum. Die Vollmachtsgruppe für harmlose Reparaturen kommt mit den Vollmachten.
+  wenn nicht, warum. Die Vollmachtsgruppe für harmlose Reparaturen kommt mit den Vollmachten. `run_mojo_oracle` nimmt
+  keinen Kontakt zu einem Board auf; der Befund eines Boards, auf das ein aufgezeichneter Fakt zeigt, nennt die Anfrage,
+  die es prüft (`check_board`), und `{"board": "<Bezeichnung>"}` prüft dieses eine vertraute Board sofort. Eine KI
+  nennt ein Board mit seiner Bezeichnung oder Geräte-ID, nie mit einer Adresse (ein Board ohne eigenen Namen, dessen
+  Bezeichnung seine Adresse ist, mit seiner Geräte-ID).
 - **Die eigenen Dokumente des Frameworks in der Wissensbasis** (ENTSCHEIDUNGEN Runde 8, N12): **Tools > Index the
   Framework's Documentation...**, `llm-cli knowledge index-docs [--with-code]` und das MCP-Tool `index_framework_docs`
   (jedes Mal gefragt, läuft als Job) nehmen die Dokumentation des Frameworks (README, CONTRIBUTING, den Ordner `docs`)
@@ -1081,12 +1102,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Reparaturhinweise für KI-Aufrufer nennen Mojo** (unveröffentlicht; Runde 7 Punkt 11'): Ablehnungen und Fehler, die
   KI-Aufrufer lesen, schickten sie zu `llm-cli doctor`. Jetzt nennen sie das Tool `run_mojo_oracle` (oder `llmcf mojo`
   im Terminal). Der Hinweis auf fehlende Builder-Images behält `llm-cli doctor --fix --tier 2`, das sie baut.
-- **Dittos alte Laufzeit-Art kommt in den Papierkorb** (unveröffentlicht; WP7, Runde 7 D): Nach einem Wechsel
-  zwischen direkt und Docker wurden die Build-Ordner der alten Art endgültig gelöscht, wenn du die Liste bestätigt
-  hast. Jetzt kommen sie standardmäßig in den Papierkorb (`llm-cli trash` und File > Trash... listen sie und holen
-  einen zurück; ihr Platz bleibt belegt, bis du den Papierkorb leerst). Dockers Images und Container werden weiter
-  gelöscht, weil Docker keinen Papierkorb hat; sie stehen mit Name, ID und Größe in der Liste. Die Liste sagt, wohin
-  jedes Objekt kommt, und eine Frage bestätigt die ganze Liste („Nein“ als Standard).
+- **Dittos alte Laufzeit-Art verschwindet ganz** (unveröffentlicht; W2 vom 2026-10-16, Runde 7 D): Nach einem
+  Wechsel zwischen direkt und Docker standen nur die Build-Ordner, Images und Container der alten Art in der Liste, und
+  die Build-Ordner kamen in den Papierkorb. Jetzt steht jedes Objekt der alten Art in der Liste, auch ihre Einträge in
+  `mode.json` und `active.json` und das Log der Image-Builds, und die Liste wird endgültig gelöscht, nicht in den
+  Papierkorb, sodass von der alten Art nichts bleibt. Sie wird erst angeboten, wenn die neue Art funktioniert, und das
+  Entfernen lehnt ab, solange sie das nicht tut. Eine Frage bestätigt die ganze Liste („Nein“ als Standard).
 - **Die Adressprüfungen sind sich bei IPv6 in Klammern einig** (unveröffentlicht): `deploy run --host [fe80::1]`
   bestand die Prüfung der CLI, aber das Deployment lehnte die Adresse ab. Jetzt lehnt jede Stelle, die eine
   Board-Adresse nimmt (Deployment, `scan --device`, `deploy devices add`, die Prüfung und das Deployment-Fenster der

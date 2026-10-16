@@ -34,6 +34,7 @@ llmcf mojo              # Mojo Oracle (the default): look only
 llmcf mojo --oracle     # the same
 llmcf mojo --miracle    # repair what can be repaired, then report
 llmcf mojo --json       # machine-readable; never asks and never deletes
+llmcf mojo --oracle --board "Kitchen board"   # also check this one board now
 ```
 
 `llmcf` is the framework's command line under its new name. `llm-cli` is the same program and keeps working, so
@@ -71,12 +72,37 @@ the audit log, the chat feed, the calibration data, the community packs, the kno
 space of their disk, the local llama.cpp runtime (in Docker mode: whether Ditto's image is there, built on this
 computer and verified) and the boards you trusted.
 
-For each trusted board Mojo reads the framework's `known_hosts` and opens one connection to the board's SSH port. It
-never logs in, sends no password and names no device account. A board that cannot be used gets its reason code and
-the next step: `device_host_down` (information: nothing answers, the board may be switched off),
-`device_port_closed` or `device_host_key_changed` (warnings). A wrong password or a framework key that is gone
-(`device_auth_failed`) shows only at the next deploy or benchmark, because Mojo does not log in. Mojo checks the 16
-most recently trusted boards.
+### The boards you trusted
+
+Mojo makes no network contact with a board unless you ask it to. A check only makes sense where there is a problem to
+find, so Mojo reports what the framework recorded, from files only:
+
+- a host key in the framework's `known_hosts` that changed (`device_host_key_changed`, a warning) or that is gone (a
+  warning: trust the board again);
+- the last contact with a board that failed: a deploy, a runtime deploy, a verify, a benchmark or a probe that could
+  not reach the board or log in, with its reason code and the next step: `device_host_down` (information: nothing
+  answered, the board may have been switched off), `device_port_closed`, `device_auth_failed` or
+  `device_host_key_changed` (warnings), and when it happened;
+- what the last deploy saw on the board (an old Qdrant sidecar).
+
+Every contact of the framework with a board records what it found; a later contact that reaches the board and logs
+in ends the record, and so does trusting the board again. Boards without a recorded problem get one line that says
+so.
+
+For a board a recorded fact points to, Mojo offers the check. At a terminal it asks:
+
+```
+Check Kitchen board now? (one connection to its SSH port, no login) [y/N]:
+```
+
+With `y` Mojo opens one connection to the board's SSH port and prints the result. No is the default: then nothing
+is contacted, and Mojo prints the command for later. Without a terminal it prints only the command.
+
+`llmcf mojo --oracle --board NAME` checks one board right away. NAME is the board's label, its device ID or its
+address. Mojo never logs in, sends no password and names no device account. A wrong password or a framework key that
+is gone (`device_auth_failed`) shows only at the next deploy or benchmark; when such a failure is recorded and the
+board answers now, Mojo says that it cannot check the login. A checked board keeps its recorded problem until a
+deploy, verify or benchmark reaches it again, because Mojo Oracle only looks and writes nothing.
 
 ## 3. What Mojo Miracle repairs
 
@@ -137,7 +163,11 @@ An AI uses Mojo through the MCP server (and Ditto through the same tools):
 
 - **`run_mojo_oracle`** (read-only): every finding with `where` (a label, never a host path), `why` and `repair`.
   `repair.how` is one of `miracle`, `deletion_list`, `person`, `admin`, `not_automatic`; `repair.summary` says what
-  Mojo Miracle would do or why not; `repair.next` says what the AI does next.
+  Mojo Miracle would do or why not; `repair.next` says what the AI does next. It contacts no board. For a board a
+  recorded fact points to, `check_board` names the request that checks it. `{"board": "Kitchen board"}` checks that
+  one trusted board now: one connection to its SSH port, no login. An AI names a board by its label or device ID
+  (`list_devices` shows both), never by an address. A board you trusted without a name of its own has its address as
+  label; an AI names it by its device ID, and `check_board` does so too.
 - **`run_mojo_miracle`** with `{"code": "state.permissions"}`: repairs one problem whose `repair.how` is `miracle`.
   Every call asks you first; the question shows the plan (the full path only in the framework's own window). There
   is no "do not ask again" and no delegation for it. It never deletes. Any other problem is refused before the
@@ -167,6 +197,8 @@ afterwards.
 `llmcf mojo --json` writes the keys of `llm-cli doctor --json` (`exit_code`, `findings`, `fixed`, `still_present`)
 plus `mode` and `summary`. Each finding also has `where`, `why`, `repair_id` and `cannot`, and each problem has
 `miracle` (`can`, `summary` and the `plan` steps). With `--miracle` it adds `repaired`, `already_gone`,
-`not_repaired` (each with its reason) and `new_problems`, and `findings` are those of the check afterwards. Then
+`not_repaired` (each with its reason) and `new_problems`, and `findings` are those of the check afterwards. A
+finding of a board a recorded fact points to has `check_board` (the board, its device ID and the command that checks
+it); `--json` never contacts a board unless `--board` names one. Then
 `fixed` and `still_present` mean what they mean for `llm-cli doctor --fix --json`: the repairs Mojo Miracle made, and
 those it tried that are still there.

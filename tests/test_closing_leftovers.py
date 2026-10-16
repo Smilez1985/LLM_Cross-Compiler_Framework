@@ -343,7 +343,7 @@ class TestRuntimeEnds:
         monkeypatch.setattr(service, "device_profile", lambda state, d: SimpleNamespace())
         monkeypatch.setattr(service, "deploy_settings", lambda state, d, profile: settings)
         monkeypatch.setattr(service, "plan_facts", lambda state, profile: plan)
-        monkeypatch.setattr(service, "read_key", lambda d, state: d.fingerprint)
+        monkeypatch.setattr(service, "read_key", lambda d, state, step="": d.fingerprint)
         monkeypatch.setattr(service, "deploy", lambda *a, **k: {
             "activated": deployed, "build_id": "d" * 64, "install": "script", "previous": None,
             "checks": [{"name": "version", "result": "passed", "detail": "ok"},

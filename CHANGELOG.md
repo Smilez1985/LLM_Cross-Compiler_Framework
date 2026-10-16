@@ -285,9 +285,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   it can be (NVIDIA Container Toolkit, `/dev/dri`) with a note where not. `--force` switches the mode (needs a
   terminal): the models are reused and nothing is downloaded again; the bare-metal build is repackaged into the image,
   or the image's build becomes the bare-metal build after it passed its checks on this computer; otherwise it builds
-  again and says why. Afterwards the old mode's build folders, images and containers are listed with full path or
-  name, ID, file name and size, and only what you confirm is removed ("No" is the default; without a terminal nothing
-  is removed). The installers get a Ditto step (`install.sh --ditto=auto|bare-metal|docker|skip`, the same for
+  again and says why. Bare metal and Docker are two alternatives (W2): before the new mode is built next to the old
+  one, its space is estimated (what its build needs while it runs and what it keeps) and checked against the free
+  space of each disk involved (Ditto's runtime folder, Docker's image storage, the temporary folder of the image's
+  build). When it does not fit, nothing is built: you see the sizes and choose to free space and switch again, or to
+  delete the old mode first (its full list, one question, only at a terminal or in the GUI; Ditto is unavailable until
+  the new mode works, the models stay; when the new mode then fails, you are told so and offered the old mode again).
+  Deleting it first is offered only when the new mode then fits: it is estimated again without the old mode's build,
+  which can then no longer be reused, and counts what the old mode's objects free. Once the new mode works, every object of the old mode is listed with full path
+  or name, ID, file name, size and what it is: its build folders, Ditto's images and containers, its entries in
+  `mode.json` and `active.json` and the log of the image builds. One question deletes exactly that list for good, not
+  into the trash ("No" is the default, no choice per item; without a terminal nothing is removed). The installers get
+  a Ditto step (`install.sh --ditto=auto|bare-metal|docker|skip`, the same for
   `install.bat`, `LCF_DITTO` for unattended runs) that runs as you, never as root, does nothing in the framework's
   own container build, shows a model's size and licence before it is downloaded, and never fails the installation.
   The AI settings show the mode and offer the switch through the same code path. An AI client reads the mode in
@@ -821,12 +830,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   administrator, not repairable automatically, failed), and a problem found for the first time afterwards. Freeing
   disk space goes only through the list of the framework's build images at a terminal, nothing ticked; without a
   terminal only the harmless repairs run and nothing is deleted. `--json` never asks and never deletes.
-- **Mojo Oracle checks the trusted boards and Ditto's image** (eighth round N6; seventh round D): for each trusted
-  board it reads the framework's `known_hosts` and opens one connection to the board's SSH port, without a login, a
-  password or the device account's name, and names a board that cannot be used with its reason code
-  (`device_host_down`, `device_port_closed`, `device_host_key_changed`) and the next step. In Docker mode it checks
-  that Ditto's image is there, was built on this computer (never pulled), is of the pinned commit and is the one that
-  was verified (`runtime.docker`); it never builds, pulls or removes an image.
+- **Mojo Oracle reports the trusted boards and checks Ditto's image** (eighth round N6; W1 of 2026-10-16; seventh
+  round D): a default run makes no network contact with any board. It reports what was recorded: a host key in the
+  framework's `known_hosts` that changed or is gone, and the last deploy, runtime deploy, verify, benchmark or probe
+  that could not reach a board, with its reason code (`device_host_down`, `device_port_closed`,
+  `device_auth_failed`, `device_host_key_changed`) and the next step. Every contact of the framework with a board
+  records that; a contact that reaches the board and logs in ends the record. For a board such a fact points to, it
+  offers the check: at a terminal "Check <board> now? [y/N]", in `--json` and for an AI the command or request that
+  checks it. `llmcf mojo --oracle --board NAME` (label, device ID or address) checks one board now: one connection to
+  its SSH port, without a login, a password or the device account's name. In Docker mode it checks that Ditto's image
+  is there, was built on this computer (never pulled), is of the pinned commit and is the one that was verified
+  (`runtime.docker`); it never builds, pulls or removes an image.
 - **`llmcf`, the command line's new name** (seventh round, item 11): a second console script next to `llm-cli`, the
   same program; `llm-cli` stays. The framework container has both commands.
 - **The MCP tools `run_mojo_oracle` and `run_mojo_miracle` and the prompt `check_installation`** (seventh round, item
@@ -835,7 +849,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `run_mojo_miracle` repairs one problem whose `repair.how` is `miracle`: every call is asked with the plan (the full
   path only in the framework's own window), no standing approval, no delegation, never a deletion; any other problem
   is refused before the question with its reason, and the result says whether it was repaired, and if not, why. The
-  delegation group for harmless repairs comes with the delegations.
+  delegation group for harmless repairs comes with the delegations. `run_mojo_oracle` contacts no board; a finding of a
+  board a recorded fact points to names the request that checks it (`check_board`), and `{"board": "<label>"}` checks
+  that one trusted board now. An AI names a board by its label or device ID, never by an address (a board without a
+  name of its own, whose label is its address, by its device ID).
 - **The framework's own documents in the knowledge base** (DECISIONS round 8, N12): **Tools > Index the Framework's
   Documentation...**, `llm-cli knowledge index-docs [--with-code]` and the MCP tool `index_framework_docs` (asked
   every time, runs as a job) add the framework's documentation (README, CONTRIBUTING, the `docs` folder) and, on
@@ -953,11 +970,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Repair hints for AI callers name Mojo** (unreleased; round 7 item 11'): refusals and errors that AI callers read
   sent them to `llm-cli doctor`. They now name the tool `run_mojo_oracle` (or `llmcf mojo` in a terminal). The note
   about missing builder images keeps `llm-cli doctor --fix --tier 2`, which builds them.
-- **Ditto's old runtime mode goes to the trash** (unreleased; WP7, round 7 D): after a switch between bare metal and
-  Docker, the old mode's build folders were deleted for good when you confirmed the list. Now they go to the trash by
-  default (`llm-cli trash` and File > Trash... list them and bring one back; their space stays used until you empty
-  the trash). Docker's images and containers are still deleted, since Docker has no trash; they are listed with name,
-  ID and size. The list says where each object goes, and one question confirms the whole list ("No" by default).
+- **Ditto's old runtime mode goes completely** (unreleased; W2 of 2026-10-16, round 7 D): after a switch between
+  bare metal and Docker, only the old mode's build folders, images and containers were listed, and the build folders
+  went to the trash. Now every object of the old mode is listed, also its entries in `mode.json` and `active.json`
+  and the log of the image builds, and the list is deleted for good, not into the trash, so nothing of the old mode
+  stays. It is offered only after the new mode works, and the removal refuses while it does not. One question confirms
+  the whole list ("No" by default).
 - **The address checks agree on IPv6 in brackets** (unreleased): `deploy run --host [fe80::1]` passed the CLI's check,
   but the deploy refused the address. Now every place that takes a board's address (deploy, `scan --device`, `deploy
   devices add`, the GUI's probe and Deployment window) refuses an IPv6 address in brackets before anything is sent.
