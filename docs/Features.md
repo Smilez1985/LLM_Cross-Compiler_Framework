@@ -753,7 +753,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `run_mojo_oracle` | read | The health check (Mojo Oracle): every finding with where (a label), why it matters and what Mojo Miracle can do about it ([details](#health-check-mojo)) |
 | `run_mojo_miracle` | local write | Repairs one problem that Mojo Oracle lists as repairable (a harmless repair); always asked, never deletes, no delegation |
 | `search_knowledge` | read | Search the knowledge base; every excerpt with its source id, address or pack, kind (`web`, `pack`, `docs`), trust, date added and position; `kind` narrows the search |
-| `list_knowledge_sources` | read | What the knowledge base holds: every source with id, title, kind, trust, date added and number of excerpts (50 per page) |
+| `list_knowledge_sources` | read | What the knowledge base holds: every source with id, title, kind, trust, date added, number of excerpts, its licence and what a knowledge pack would carry of it (50 per page) |
 | `read_knowledge_source` | read | One source's excerpts in their order, by source id (at most 20 per call) |
 | `list_packs` | read | Community packs of the signed index and the installed ones with trust; details, verification of installed packs ([details](#packs-for-ai-clients)) |
 | `add_pack_from_index` | external | Add a knowledge, target or recipe pack from the signed index, as a job; always asked with the checked summary and every base image of a target pack |
@@ -1404,7 +1404,8 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   publicly reachable pages, no logins, starting from the addresses you enter, within the page and depth limits),
   which opt-outs are honoured, that the knowledge stays on this computer (when Ditto answers, matching excerpts go to
   the AI provider you selected; with a local provider nothing leaves the computer), and that sharing it in a target
-  or a community pack keeps the source and licence of every page and needs your explicit release.
+  or a community pack keeps the source and licence of every page, carries a page's full text only where its licence
+  allows passing it on, and needs your explicit release.
 - It is information, not a legal confirmation: one button, **Understood** (also Esc), nothing to tick.
 - It is shown once per user and again when its text changes in any language. The state file `crawl_notice.json` in
   the per-user folder (`~/.llm-framework`) stores a hash of its texts, when it was read and where (`via`: `gui`, or
@@ -1431,6 +1432,38 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
 - The crawler names itself `LLM-Conversion-Framework-Bot/<version> (Open Source;
   +https://github.com/Smilez1985/llm_conversion_framework)`, with the real framework version. Site operators can
   address it in robots.txt and in a meta tag with that name.
+
+### Licences and copyright
+
+Text and data mining lets the knowledge base keep the text the crawl was allowed to read. Passing that text on is
+another matter, so the crawler records per page what it says about its licence and copyright, and an export decides
+per page from that (`orchestrator/rag/licences.py`; eighth round, Q-1 and Q-1').
+
+- **Recorded per page,** from the whole page before its footer is dropped: the source address; a licence link
+  (`rel="license"` on a `<link>` or `<a>`, or in the HTTP `Link` header); licence metadata (`<meta name="license">`,
+  `dc.rights`, `dcterms.license`, schema.org `license` in JSON-LD; in a PDF, a Creative Commons or licence address in
+  its metadata); a link to a Creative Commons licence anywhere on the page; and an explicit copyright notice ("©",
+  "(c)" with a year, "Copyright" with a year, "All rights reserved"). When several licences show, the cautious one
+  counts. A licence the framework does not recognise is kept as `other` with its words.
+- **Code from GitHub:** only the repository's licence file decides (`LICENSE`, `LICENCE` or `COPYING` at the top of
+  the repository), and only when the same crawl read it; GitHub's own footer is not read. Without it the code counts
+  as having no licence, which means all rights reserved.
+- **What a pack carries:** a knowledge pack, and the knowledge snapshot the module wizard attaches to a new target,
+  carry a page's full text only when its licence allows passing the text on: CC0, public domain, CC BY, CC BY-SA, MIT,
+  Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Unlicense, MPL-2.0. Each excerpt then keeps the attribution the
+  licence requires (title, address, copyright notice, licence and its address, and the changes: split into excerpts,
+  personal data removed). Every other page goes in as its address and short facts (title, section names, technical
+  terms such as options, identifiers and versions), with the licence and notice it shows and why: a copyright notice
+  and no licence that allows it, code without a licence, a licence that forbids changes or commercial use (NC, ND), a
+  copyleft licence (GPL, LGPL, AGPL, GFDL: they need the whole licence text and the source with every copy), an
+  unrecognised licence, or none at all. The recipient crawls those pages under their own checks.
+- **You see it per page:** `llm-cli knowledge sources` lists every source with its licence, its copyright notice and
+  what a pack would carry and why; `llm-cli zoo export knowledge` lists every page again with what the pack carries
+  and why. A target export does the same for the target's knowledge snapshot, also for a snapshot made before this
+  rule (the target folder itself stays as it is).
+- **For AI clients:** `list_knowledge_sources` gives each source's licence id, state (`open`, `restricted`,
+  `copyright`, `code_without_licence`, `unknown`) and what a pack would carry; the copyright notice itself is site text
+  and never reaches an AI.
 
 ### Network safety and limits
 
@@ -2500,7 +2533,9 @@ encrypted to your key), and **Build** on an installed recipe fills in the Builde
   (or `--out`).
 - **Licence:** MIT by default for your own target or recipe (`--license`; a list in the GUI). Knowledge packs hold
   other people's pages: their licence is `NOASSERTION`, every page keeps its source address, and a page without a
-  source is never exported.
+  source is never exported. A page's full text goes in only where its licence allows passing it on; every other page
+  goes in as its address and short facts, and the summary lists every page with what it carries and why (see
+  [Licences and copyright](#licences-and-copyright)).
 - A target you installed from a community pack is not exported as your own: signing it again would replace its
   author and licence. When a recipe's target is your own, a note reminds you to export the target too. A knowledge
   export takes the pages of your knowledge base, each with its source address; pages imported from installed

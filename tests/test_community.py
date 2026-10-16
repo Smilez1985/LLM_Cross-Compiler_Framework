@@ -60,7 +60,7 @@ class TestSwarmRemoval:
         monkeypatch.setattr("getpass.getuser", lambda: "jenny")
         records = [{"source": "http://10.1.2.3/docs?token=hf_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456",
                     "content": "see /home/jenny/notes and C:\\Users\\jenny\\probe.txt",
-                    "metadata": {"title": "jenny's board"}}]
+                    "metadata": {"title": "jenny's board", "licence": "CC-BY-4.0"}}]   # full text, attribution
         rag = SimpleNamespace(export_records=lambda: iter(records))
         framework = SimpleNamespace(info=SimpleNamespace(installation_path=tmp_path),
                                     get_component=lambda name: rag if name == "rag_manager" else None)

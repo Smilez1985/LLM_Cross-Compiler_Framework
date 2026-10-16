@@ -6,8 +6,9 @@ An external client takes over Ditto's job (DECISIONS round 1 item 5), so it gets
 knowledge base: a search with the provenance of every excerpt (`search_knowledge`), the list of what the knowledge
 base holds (`list_knowledge_sources`) and one source's excerpts in their order (`read_knowledge_source`), plus the
 resource `lcf://knowledge/sources/{source_id}`. Every excerpt, address and title is external text: cleaned, capped
-and marked untrusted by the registry's output filter. Sources are named by ids the framework issued (`ks_` plus 16
-hex characters), never by a path.
+and marked untrusted by the registry's output filter. A source also says what its licence is and what a knowledge
+pack would carry of it (Q-1'), in the fixed words of rag/licences.py only: a page's copyright notice never reaches an
+AI. Sources are named by ids the framework issued (`ks_` plus 16 hex characters), never by a path.
 
 A tool call never downloads a model: the embedding and reranking models are fetched on first use (about a GB), so the
 search runs with `local_models_only()` and refuses with the next step when the embedding model is not on this computer
@@ -114,6 +115,16 @@ class SourceOut(BaseModel):
     root: untrusted_text(500) = ""
     ingested_at: str = ""
     chunks: int
+    licence: str = Field(default="", pattern=r"^[A-Za-z0-9.+-]{0,40}$",
+                         description="The licence the page names (an SPDX-like id such as CC-BY-4.0 or MIT); 'other' "
+                                     "for one the framework does not recognise, empty when none was found")
+    licence_state: Literal["", "open", "restricted", "copyright", "code_without_licence", "unknown"] = Field(
+        default="", description="open: its licence allows passing the text on; restricted, copyright, "
+                                "code_without_licence, unknown: it does not, or it is not known")
+    pack_share: Literal["full_text", "link_and_facts", "not_exported"] = Field(
+        default="link_and_facts", description="What a knowledge pack would carry of it: its full text, only its "
+                                              "address with short facts, or nothing (pack pages, the framework's "
+                                              "own documents)")
 
 
 class ListSourcesOut(ToolOutput):
@@ -174,7 +185,9 @@ def _source_out(entry: Dict[str, Any], packs: Dict[str, str]) -> SourceOut:
     return SourceOut(source_id=entry["source_id"], source=entry["source"], title=entry.get("title", ""),
                      kind=entry["kind"], trust=trust_of(entry["kind"], entry.get("origin_pack", ""), packs),
                      root=entry.get("root", ""), ingested_at=entry.get("ingested_at", ""),
-                     chunks=int(entry.get("chunks", 0)))
+                     chunks=int(entry.get("chunks", 0)), licence=entry.get("licence", ""),
+                     licence_state=entry.get("licence_state", ""),
+                     pack_share=entry.get("pack_share", "link_and_facts"))
 
 
 # --- the tools ----------------------------------------------------------------------------------------------------------
@@ -302,7 +315,8 @@ def register_knowledge_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  summary=_search_summary),
         ToolSpec("list_knowledge_sources", "List knowledge sources",
                  "Lists what the local knowledge base holds: every source with its id, address or pack, title, kind, "
-                 "trust, when it was added and how many excerpts it has (50 per page).",
+                 "trust, when it was added, how many excerpts it has, its licence and what a knowledge pack would "
+                 "carry of it (50 per page).",
                  ToolTier.READ, ListSourcesIn, ListSourcesOut, list_knowledge_sources, idempotent=True,
                  fields={"kind": FieldMeta(kind="choice", choices=KINDS), "page": FieldMeta(kind="value")},
                  examples=({}, {"kind": "web", "query": "rockchip"}),

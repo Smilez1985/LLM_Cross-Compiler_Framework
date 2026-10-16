@@ -639,8 +639,11 @@ crawler blocks private network addresses, limits pages and depth, and honours th
 site: robots.txt, the `X-Robots-Tag` header, robots meta tags (including `noai`) and the TDM Reservation Protocol.
 None of these checks can be switched off. The wizard shows "Page N of M", **Stop** keeps what is already stored, and
 the result says success, partial or failure; the outcome is also spoken by the speech engine of the operating system,
-if there is one, unless you turn that off. Search results are treated as external text, never as instructions. More:
-[knowledge base](docs/Features.md#knowledge-base-rag) and [Deep Ingest](docs/Features.md#deep-ingest).
+if there is one, unless you turn that off. Search results are treated as external text, never as instructions. Each
+page also records its licence and copyright notice: a knowledge pack carries a page's full text only where its licence
+allows passing it on, every other page as its address and short facts (`llm-cli knowledge sources` shows each page).
+More: [knowledge base](docs/Features.md#knowledge-base-rag), [Deep Ingest](docs/Features.md#deep-ingest) and
+[licences and copyright](docs/Features.md#licences-and-copyright).
 
 ---
 
@@ -649,10 +652,11 @@ if there is one, unless you turn that off. Search results are treated as externa
 Targets, recipes (how a model was built for a board) and knowledge can be shared as signed packs:
 `llm-cli zoo list|show|install|verify|export|keys` or **Tools > Open Community Hub**. A pack is installed only after
 checks in a quarantine folder and your confirmation, and it shows a trust level. Your own work is exported
-privacy-scrubbed and signed with your key; a pull request goes through the GitHub CLI or the browser, and the
-framework never asks for a token. Packs can also be encrypted for your own machines or a team, in the age format,
-so the standard age and rage tools open them too. No community repository or index is published yet, so today only
-pack files can be installed. Details: [docs/Features.md](docs/Features.md#community-zoo).
+privacy-scrubbed and signed with your key (knowledge with a page's full text only where its licence allows it, and
+the export lists every page with what it carries and why); a pull request goes through the GitHub CLI or the
+browser, and the framework never asks for a token. Packs can also be encrypted for your own machines or a team, in
+the age format, so the standard age and rage tools open them too. No community repository or index is published yet,
+so today only pack files can be installed. Details: [docs/Features.md](docs/Features.md#community-zoo).
 
 ---
 

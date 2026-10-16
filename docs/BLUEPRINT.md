@@ -520,9 +520,10 @@ judge that yourself.
    for HTML, `<meta name="robots">`, `<meta name="llm-conversion-framework-bot">` and
    `<meta name="tdm-reservation">`, and for a PDF, `tdm:reservation` in its metadata. `noindex`, `none`, `noai`
    and `noimageai` keep the page out; `nofollow` and `none` stop the crawler from following its links.
-7. **Store.** An HTML page is converted to Markdown (headings, code blocks and tables kept) and filtered by
-   language (`crawler_languages`), a PDF is read as text; each page is stored at once, replacing its earlier
-   version. A Stop, or closing the wizard, ends the crawl after the current page; what is stored stays.
+7. **Store.** An HTML page is converted to Markdown (headings, code blocks and tables kept) and filtered by language
+   (`crawler_languages`), a PDF is read as text; each page is stored at once, replacing its earlier version, with its
+   source address and what it says about its licence and copyright (see below). A Stop, or closing the wizard, ends
+   the crawl after the current page; what is stored stays.
 8. **Outcome.** Only after the last write has returned does the result say success (pages stored; none failed
    or was reserved by the site, and the crawl was not stopped), partial (some pages stored; others failed, were
    reserved by the site, or the crawl was stopped) or failure (nothing stored). It is shown, logged and spoken.
@@ -544,6 +545,23 @@ A reservation from any source wins. TDMRep lets a later source lift a reservatio
 crawler deviates from that on purpose and stays on the cautious side: once any source reserves a page, nothing
 lifts it. None of these checks can be switched off; the old *Respect robots.txt* option and the setting
 `crawler_respect_robots` are gone.
+
+**Licences and copyright** (`orchestrator/rag/licences.py`, eighth round Q-1 and Q-1'). Text and data mining lets
+the knowledge base keep the text the crawl was allowed to read; passing it on is decided per page. Before the footer
+is dropped, the crawler records per page: a licence link (`rel="license"` on a link, or in the HTTP `Link` header),
+licence metadata (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license` in JSON-LD; in a PDF
+a Creative Commons or licence address in its metadata), a link to a Creative Commons licence, and an explicit
+copyright notice ("©", "(c)" with a year, "Copyright" with a year, "All rights reserved"). For code from GitHub only
+the repository's licence file decides, and only when the same crawl read it; the site's own footer is not read there.
+A knowledge pack, and the knowledge snapshot in a generated target, carry a page's full text only when its licence
+allows passing the text on (CC0, public domain, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense,
+MPL-2.0), with the attribution the licence requires (title, address, copyright notice, licence, the changes made).
+Every other page goes out as its address and short facts (title, section names, technical terms): a page with a
+copyright notice and no such licence, code without a licence, a licence that forbids changes or commercial use, a
+copyleft licence (it needs the whole licence text and the source with every copy), an unrecognised licence and a page
+without any. The recipient crawls those pages under their own checks. `llm-cli knowledge sources` and
+`list_knowledge_sources` show each source's licence and what a pack would carry; the export lists every page with
+what it carries and why. An AI sees only the fixed words (licence id, state, how it is shared), never the notice.
 
 A short hint with the notice and the outcome are also **spoken**, through the speech engine built into the operating
 system and in the interface language: Windows PowerShell 5.1 with System.Speech (started from the system folder; the
@@ -731,11 +749,13 @@ a pack: its files are privacy-scrubbed (home folders, IP and MAC addresses, e-ma
 user name, keys; the changes are shown), validated and signed with your key. With `--to` (files with age
 recipients) or `--passphrase` the signed pack is also encrypted for private sharing; an encrypted pack is never
 submitted with `--pr`. The licence defaults to MIT, for knowledge to `NOASSERTION`, and every page keeps its source
-address. A target you installed from someone else is not re-signed as yours, and pages imported from installed
-community knowledge packs are left out of a knowledge export. "Open pull request" (`--pr`) hands the pack to the
-community repository (`community_repo`): through the GitHub CLI when it is installed and logged in, otherwise the
-repository's upload page opens in the browser. Both keep their own credentials; the framework never asks for, reads
-or shows a token.
+address; a page's full text goes in only where its licence allows it, every other page as its address and short facts
+(see [Licences and copyright](#deep-ingest-from-a-web-page-to-the-knowledge-base-unreleased)), and the export lists
+every page with what it carries and why. A target you installed from someone else is not re-signed as yours, and
+pages imported from installed community knowledge packs are left out of a knowledge export. "Open pull request"
+(`--pr`) hands the pack to the community repository (`community_repo`): through the GitHub CLI when it is installed
+and logged in, otherwise the repository's upload page opens in the browser. Both keep their own credentials; the
+framework never asks for, reads or shows a token.
 
 **Maintainer tools.** `scripts/zoo_sign_index.py` creates the index key in the OS keyring (`keygen`), checks a pack
 and prints its index entry (`entry`) and signs `index.json` (`sign`; with `--previous` the version must be higher
@@ -879,6 +899,7 @@ These are real limitations of the current state. Most are scheduled in the [road
 | **Installing always reads the current index first** | A revocation only protects users who see it. An install needs the network anyway, so it fetches the index first and installs nothing without it. A cached index serves listing and file installs, and is never replaced by an older one. |
 | **No token in the framework, and no upload of its own** | A repository token in the framework would be a valuable secret in one more place, and an upload button sends data without a review step. The framework prepares a scrubbed, signed pack and shows what the scrub changed; only when you open the pull request do the GitHub CLI or the browser send it, with their own credentials. |
 | **`NOASSERTION` for knowledge packs** | A knowledge pack holds other people's pages. The exporter cannot license them, so the pack claims no licence for them and every page keeps its source address. |
+| **Full text only where the licence allows it** | Text and data mining allows a copy for the miner, not passing the text on. So a pack carries a page's text only under a licence that allows it, with the attribution it requires; every other page goes as its address and short facts, and the recipient crawls it under their own checks. Code without a licence is all rights reserved. |
 | **Recipes instead of shared model files** | Model files are large and come with their own licences. A recipe pins the model commit, the target fingerprint and the toolchain image and lists the artifact hashes, so anyone can rebuild the model and compare; "verified" means reproduced independently. |
 | **Input history per user and without secrets** | The shared `config.yml` may sit in the installation folder and be shared. Recent inputs are personal, so they live in the per-user folder (mode 0600), and values that look like credentials are never written. |
 

@@ -909,6 +909,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   terms of `LICENSE.txt` and adds nothing to them. In the GUI it stays at the top of the chat panel until you click
   **Understood** and blocks nothing; `llm-cli ditto` prints it once on stderr at a terminal (without a terminal
   nothing is printed or stored). README and Features say the same.
+- **Licence and copyright of every crawled page** (eighth round, Q-1 and Q-1'; `orchestrator/rag/licences.py`):
+  Deep Ingest records per page, before the footer is dropped, a licence link (`rel="license"`, the HTTP `Link`
+  header), licence metadata (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license`; in a PDF
+  its metadata), a Creative Commons link and an explicit copyright notice; for code from GitHub the repository's
+  licence file when the same crawl read it (otherwise the code has no known licence). `llm-cli knowledge sources`
+  lists every source with its licence, its notice and what a knowledge pack would carry of it and why;
+  `list_knowledge_sources` gives AI clients the licence id, its state and the share in fixed words only (the notice is
+  site text and never reaches an AI).
 
 ### Changed
 - **The output folder is `~/llmcf/output`; the old output folder is the framework's build folder** (eighth round,
@@ -1171,6 +1179,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   still shows the list of the framework's build images. The tool `run_doctor` stays callable but is no longer listed; a
   setting for `run_doctor` or `run_mojo_oracle` applies to both, and the stricter one wins. `make mojo` next to
   `make doctor`.
+- **Knowledge packs carry a page's full text only where its licence allows it** (eighth round, Q-1 and Q-1'): a
+  knowledge pack and the knowledge snapshot the module wizard attaches to a target keep the full text of a page only
+  under a licence that allows passing it on (CC0, public domain, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD,
+  Unlicense, MPL-2.0), with the attribution it requires (title, address, copyright notice, licence, the changes made).
+  A page with a copyright notice and no such licence, code without a licence, an NC, ND or copyleft licence, an
+  unrecognised licence and a page without any go in as their address and short facts (title, section names,
+  technical terms); the recipient crawls them under their own checks. Before, every page went in with its full text.
+  The export summary lists every page with what it carries and why, a note counts both, and a target export applies
+  the rule to a snapshot made before it too. The one-time Deep Ingest notice says so, so it is shown once more.
 
 ### Deprecated
 - `--password VALUE` on `deploy run`, `scan --device` and `device runtime deploy`: every user sees the value in the

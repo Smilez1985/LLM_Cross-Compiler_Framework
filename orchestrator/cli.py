@@ -3567,7 +3567,7 @@ def _print_deletion_result(result, accepted) -> None:
 
 @cli.group()
 def knowledge():
-    """The knowledge base's files on this computer"""
+    """The knowledge base on this computer: its sources and their licences, snapshots, the framework's documents"""
     pass
 
 
@@ -3743,6 +3743,44 @@ def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
         console.print(f"Snapshot taken first: {escape(str(result['snapshot']))} (llm-cli knowledge snapshots).")
     console.print("Ditto finds these texts in its knowledge base now (search_knowledge with kind docs for AI "
                   "clients).")
+
+
+@knowledge.command('sources')
+@click.option('--kind', type=click.Choice(["web", "pack", "docs", "other", "any"]), default="any", show_default=True,
+              help='Only sources of this kind')
+@pass_context
+def knowledge_sources(ctx: FrameworkContext, kind: str):
+    """What the knowledge base holds: every source with the licence and copyright notice it shows, and what a
+    knowledge pack would carry of it (full text, or only its address and short facts) and why"""
+    from orchestrator.rag.errors import KnowledgeBaseError
+    ctx.require_framework()
+    ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
+    rag = ensure() if callable(ensure) else None
+    if rag is None:
+        console.print("[red]The knowledge base is off (setting enable_rag_knowledge). Switch it on in the GUI's AI "
+                      "settings first.[/red]")
+        sys.exit(1)
+    try:
+        entries = [e for e in rag.list_sources() if kind in ("any", e["kind"])]
+    except KnowledgeBaseError as e:
+        console.print(f"[red]The knowledge base cannot be read: {escape(str(e))}[/red]")
+        sys.exit(1)
+    if not entries:
+        console.print("The knowledge base holds no source" + ("." if kind == "any" else f" of kind {kind}."))
+        return
+    carried = {"full_text": "full text", "link_and_facts": "link and short facts", "not_exported": "not exported"}
+    table = Table(title="Knowledge sources, their licence and what a knowledge pack carries of them")
+    for column in ("Source", "Kind", "Licence", "Copyright notice", "In a pack", "Why"):
+        table.add_column(column, overflow="fold")
+    for e in entries:   # addresses, titles and notices are site text: escaped, never markup
+        table.add_row(escape(e["source"]), e["kind"], escape(e.get("licence") or "-"),
+                      escape(e.get("copyright") or "-"), carried.get(e.get("pack_share", ""), "-"),
+                      escape(e.get("share_reason") or ""))
+    console.print(table)
+    full = sum(1 for e in entries if e.get("pack_share") == "full_text")
+    facts = sum(1 for e in entries if e.get("pack_share") == "link_and_facts")
+    console.print(f"{len(entries)} source(s): a knowledge pack would carry {full} with their full text and {facts} "
+                  "only as their address and short facts (llm-cli zoo export knowledge lists them again).")
 
 
 # ============================================================================
