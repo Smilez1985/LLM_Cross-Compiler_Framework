@@ -44,6 +44,7 @@ from orchestrator.gui.plain import ask, button_text, notify, one_line, plain_box
 from orchestrator.gui.sign_in import STORAGE_CHOICE_CODES, UserConfigSnapshot, choose_storage_at_start
 from orchestrator.gui.deployment_window import DeploymentWindow
 from orchestrator.gui.form_surface import close_gui, open_gui
+from orchestrator.gui.menus import ditto_runtime as menu_ditto_runtime
 
 # ============================================================================
 # DITTO AVATAR WIDGET
@@ -216,6 +217,7 @@ class MainOrchestrator(QMainWindow):
         self.act_clear_history.triggered.connect(self._clear_input_history)
         tools_menu.addAction(self.act_clear_history)
 
+        menu_ditto_runtime.install(self, menubar)  # Ditto > Local Runtime... (before Security)
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About", self)
         about_action.triggered.connect(self._show_about)
