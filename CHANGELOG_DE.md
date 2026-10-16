@@ -1417,17 +1417,30 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   der Build-Images des Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine
   Einstellung für `run_doctor` oder `run_mojo_oracle` gilt für beide, und die strengere gewinnt. `make mojo` neben
   `make doctor`.
-- **Wissenspakete enthalten den vollen Text einer Seite nur, wo ihre Lizenz es erlaubt** (achte Runde, Q-1 und
-  Q-1'): Ein Wissenspaket und der Wissens-Snapshot, den der Modul-Assistent einem Target beilegt, behalten den vollen
-  Text einer Seite nur unter einer Lizenz, die die Weitergabe erlaubt (CC0, Gemeinfreiheit, CC BY, CC BY-SA, MIT,
-  Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), mit der verlangten Namensnennung (Titel, Adresse,
-  Urheberrechtshinweis, Lizenz, die vorgenommenen Änderungen). Eine Seite mit Urheberrechtshinweis ohne eine solche
-  Lizenz, Code ohne Lizenz, eine NC-, ND- oder Copyleft-Lizenz, eine nicht erkannte Lizenz und eine Seite ganz ohne
-  kommen als ihre Adresse mit kurzen Fakten hinein (Titel, Abschnittsnamen, Fachbegriffe); wer das Paket bekommt,
-  crawlt sie unter eigenen Prüfungen. Bisher kam jede Seite mit vollem Text hinein. Die Zusammenfassung des Exports
-  führt jede Seite auf, mit dem, was sie enthält, und warum, ein Hinweis zählt beides, und ein Target-Export wendet
-  die Regel auch auf einen älteren Snapshot an. Der einmalige Hinweis vor Deep Ingest sagt das, deshalb erscheint er
-  noch einmal.
+- **Wissenspakete enthalten den vollen Text einer Seite nur, wo ihre Lizenz es erlaubt, mit den Lizenztexten, die sie
+  verlangt** (achte Runde, Q-1 und Q-1'; W3 vom 16.10.2026): Ein Wissenspaket und der Wissens-Snapshot, den der
+  Modul-Assistent einem Target beilegt, behalten den vollen Text einer Seite nur unter einer Lizenz, die die
+  Weitergabe erlaubt (CC0, Gemeinfreiheit, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), mit
+  der verlangten Namensnennung (Titel, Adresse, Urheberrechtshinweis, Lizenz, die vorgenommenen Änderungen). Eine
+  Seite mit Urheberrechtshinweis ohne eine solche Lizenz, Code ohne Lizenz, eine NC-, ND- oder Copyleft-Lizenz, eine
+  nicht erkannte Lizenz und eine Seite ganz ohne kommen als ihre Adresse mit kurzen Fakten hinein (Titel,
+  Abschnittsnamen, Fachbegriffe); wer das Paket bekommt, crawlt sie unter eigenen Prüfungen. Bisher kam jede Seite mit
+  vollem Text hinein. Seiten mit vollem Text unter einer Lizenz, die ihren Text oder Erlaubnishinweis verlangt (MIT,
+  BSD, ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA), kommen mit dem Text dieser Lizenz in `LICENSES/<SPDX-ID>.txt` und
+  einer `NOTICE` (in einem Target in `knowledge/`). Die Texte kommen unverändert aus der SPDX License List 3.29.0
+  (Daten unter CC0) in `orchestrator/data/licenses/` mit, jeder über seinen sha256 geprüft; die Datenschutzbereinigung
+  ändert sie nie. `NOTICE` führt jede Seite mit ihrer Quelladresse, ihrer Copyright-Zeile wie gefunden und ihrer
+  SPDX-ID auf; bei MIT, BSD und ISC steht die Copyright-Zeile beim Lizenztext (die Lizenzdatei eines Repositorys und
+  Code von GitHub, der seine Zeile daraus bekommt, führen jede Copyright-Zeile dieser Datei auf), und bei Apache-2.0
+  folgen die Hinweise aus der `NOTICE`-Datei des Werks, wenn der Crawl sie gelesen hat. Eine Seite, deren Lizenz ihren
+  Text verlangt und für die das Framework keinen kanonischen Text hat, kommt als ihre Adresse mit kurzen Fakten hinein
+  und sagt warum (Zustand `no_licence_text`). Die Installation, `zoo verify` und die Prüfung des Community-Repositorys
+  lehnen ein Paket ab, dessen Lizenzdateien nicht zu seinen Seiten passen (die Lizenztexte eines Target-Pakets auch
+  ohne Snapshot); ein installiertes Paket behält sie. Ein Target-Export lässt Lizenzdateien draußen, die `knowledge/`
+  ohne Snapshot enthält, und sagt das. Die Zusammenfassung des Exports führt jede Seite auf, mit dem, was sie enthält,
+  und warum, und nennt jeden Lizenztext und warum (CLI, GUI; `export_pack` nennt Lizenz-IDs, Dateien und
+  Seitenzahlen), ein Hinweis zählt beides, und ein Target-Export wendet die Regel auch auf einen älteren Snapshot an.
+  Der einmalige Hinweis vor Deep Ingest sagt das, deshalb erscheint er noch einmal.
 
 ### Veraltet
 - `--password WERT` bei `deploy run`, `scan --device` und `device runtime deploy`: Jeder Benutzer sieht den Wert in

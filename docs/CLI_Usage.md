@@ -1958,14 +1958,14 @@ the Community Hub fills in the Builder, including the model's pinned commit.
 llm-cli zoo verify [PACK_FILE]
 ```
 
-Without an argument it checks every installed community pack against the cached index, without downloading
-anything: revoked, or changed since it was installed. It prints one line per pack (✔, or ✘ with the reason), or
-"No community packs installed.". Exit code 1 if a pack has a problem, otherwise 0.
+Without an argument it checks every installed community pack against the cached index, without downloading anything:
+revoked, changed since it was installed, or licence files that do not match its pages. It prints one line per pack (✔,
+or ✘ with the reason), or "No community packs installed.". Exit code 1 if a pack has a problem, otherwise 0.
 
-With `PACK_FILE` it checks a pack file without installing it: format, file list and hashes, the checks of its
-kind, an included author signature, and that the privacy scrub would not change anything in it. It prints
-"acceptable" or every problem (exit code 1). This form works without a keyring; the community repository's CI runs
-it on every submitted pack.
+With `PACK_FILE` it checks a pack file without installing it: format, file list and hashes, the checks of its kind
+(for knowledge, and a target's knowledge snapshot, also its licence texts and `NOTICE`), an included author signature,
+and that the privacy scrub would not change anything in it. It prints "acceptable" or every problem (exit code 1).
+This form works without a keyring; the community repository's CI runs it on every submitted pack.
 
 ```bash
 llm-cli zoo verify
@@ -2012,7 +2012,11 @@ What goes into the pack:
   packs (a note says how many). A page goes in with its full text only where its licence allows passing the text on,
   with the attribution the licence requires; every other page goes in as its address and short facts (title, section
   names, technical terms). The summary lists every page with what the pack carries of it and why, and a note counts
-  both ([knowledge sources](#knowledge-sources) shows the same before you export).
+  both ([knowledge sources](#knowledge-sources) shows the same before you export). Pages in full under a licence that
+  asks for its text or permission notice (MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA) get the canonical text
+  in `LICENSES/<SPDX id>.txt` and a `NOTICE` that lists every page with its source address, copyright line and
+  licence; the summary names each licence text and why. A target's knowledge snapshot gets the same in
+  `knowledge/`.
 
 The file is called `contribution-<kind>-<id>-<version>.zip`, or `<kind>-<id>-<version>.lcfpack` when it is
 encrypted. Your keys are created in the secrets store on first use (see [zoo keys](#zoo-keys)). The recipient of

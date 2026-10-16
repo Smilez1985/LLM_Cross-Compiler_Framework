@@ -28,6 +28,10 @@ page, files and folders), not its issues, pull requests, discussions, wiki or re
 words under other terms. The site footer of GitHub ("© GitHub") is about the website, not the code, and is not read
 there.
 
+A licence that asks for its text or permission notice with every copy (MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY,
+CC BY-SA) lets a pack carry a page in full only when the framework has the licence's canonical text to ship with it
+(licence_texts.py); otherwise the page goes out as its address and short facts (state no_licence_text).
+
 Everything a page says is site text: the notice and an unrecognised licence name are cleaned and capped, stored as
 metadata of the page and shown to the person as plain text. An AI gets only the fixed vocabulary of this module
 (licence ids, states, how a page is shared).
@@ -42,6 +46,8 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import Comment
 from bs4.element import Declaration, Doctype, ProcessingInstruction
+
+from orchestrator.rag import licence_texts
 
 # The licences the framework recognises: id -> (the text may be passed on in a pack, attribution is required).
 # Copyleft licences (GPL, LGPL, AGPL, GFDL) need the whole licence text and the source with every copy, which a pack
@@ -64,7 +70,8 @@ OTHER = "other"   # the page names a licence the framework does not recognise
 
 # How a page is shared in a pack, and its licence state (both a fixed vocabulary, also for AIs).
 FULL_TEXT, LINK_AND_FACTS = "full_text", "link_and_facts"
-STATES = ("open", "restricted", "copyright", "code_without_licence", "unknown")
+NO_LICENCE_TEXT = "no_licence_text"   # the licence asks for its text and the framework has no canonical text of it
+STATES = ("open", "restricted", "copyright", "code_without_licence", "unknown", NO_LICENCE_TEXT)
 
 # Metadata keys a crawled page carries (strings, and the flags licence_file and repo_content: a page of a GitHub
 # repository that is not its code).
@@ -83,6 +90,7 @@ _GITHUB_RESERVED = frozenset({"about", "features", "pricing", "topics", "orgs", 
                               "login", "join", "explore", "collections", "enterprise", "security", "site", "trending",
                               "customer-stories", "readme", "notifications", "search", "apps", "contact"})
 _LICENCE_FILE = re.compile(r"^(?:licen[cs]e|copying)(?:[.-][\w.-]+)?$", re.I)
+_NOTICE_FILE = re.compile(r"^notice(?:\.(?:txt|md))?$", re.I)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]+")
 
 # Copyright notices: "©" with a year or a name, "(c)" with a year, "Copyright" with a year or "©", and "all rights
@@ -349,12 +357,56 @@ def is_licence_file(url: str) -> bool:
     return False
 
 
+def is_notice_file(url: str) -> bool:
+    """A work's NOTICE file (NOTICE, NOTICE.txt or NOTICE.md), whose notices Apache-2.0 asks to pass on: at the top
+    folder of a GitHub repository (github.com/<o>/<r>/blob/<ref>/NOTICE, or raw.githubusercontent.com), or a page of
+    that name on another site."""
+    try:
+        parsed = urlparse(str(url or ""))
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    parts = [p for p in (parsed.path or "").split("/") if p]
+    if host in ("github.com", "www.github.com"):
+        return len(parts) == 5 and parts[2] in ("blob", "raw") and bool(_NOTICE_FILE.match(parts[4]))
+    if host == "raw.githubusercontent.com":
+        return len(parts) == 4 and bool(_NOTICE_FILE.match(parts[3]))
+    return bool(parts) and bool(_NOTICE_FILE.match(parts[-1]))
+
+
+def work_key(source: str, meta: Mapping[str, Any]) -> Tuple[str, str]:
+    """(crawl start address, the work): the GitHub repository of a page, otherwise its site. A NOTICE file counts for
+    the pages of the same work that the same crawl read, like a repository's licence file."""
+    work = str(meta.get("code_repo") or "") or code_repo(source)
+    if not work:
+        try:
+            work = (urlparse(str(source or "")).hostname or "").lower()
+        except ValueError:
+            work = ""
+    return str(meta.get("root_url") or ""), work
+
+
 def copyright_notice(text: str) -> str:
     """The first copyright notice in the text (the line it is on, cleaned and capped), or ''."""
+    found = copyright_notices(text, 1)
+    return found[0] if found else ""
+
+
+MAX_NOTICES = 20   # copyright lines kept from one licence file
+
+
+def copyright_notices(text: str, limit: int = MAX_NOTICES) -> List[str]:
+    """Every copyright notice in the text, in its order and without repeats (the lines they are on, cleaned and
+    capped), at most `limit`: a licence file may name several holders, and MIT, BSD and ISC ask to keep them all."""
+    found: List[str] = []
     for line in str(text or "").splitlines():
         if _NOTICE.search(line):
-            return clean(line)
-    return ""
+            notice = clean(line)
+            if notice and notice not in found:
+                found.append(notice)
+                if len(found) >= limit:
+                    break
+    return found
 
 
 def _link_header_licence(headers: Optional[Mapping[str, Any]], base: str) -> Optional[str]:
@@ -619,9 +671,14 @@ def share_plan(meta: Mapping[str, Any], repo_licence: Optional[str] = None) -> S
         licence = repo_licence
     if licence in LICENCES:
         shareable, attribution = LICENCES[licence]
+        if shareable and licence_texts.missing_text(licence):
+            return SharePlan(LINK_AND_FACTS, NO_LICENCE_TEXT, licence,
+                             f"the licence {licence} asks for its text with every copy, and the framework has no "
+                             "canonical text of it to ship with the page", attribution)
         if shareable:
             return SharePlan(FULL_TEXT, "open", licence, f"the licence {licence} allows passing the text on"
-                             + (", with attribution" if attribution else ""), attribution)
+                             + (", with attribution" if attribution else "")
+                             + (" and its licence text" if licence_texts.needs_text(licence) else ""), attribution)
         why = ("needs the whole licence text and the source with every copy, which a pack of excerpts does not "
                "promise" if licence.startswith(("GPL", "LGPL", "AGPL", "GFDL")) else
                "does not allow passing changed or commercial copies on")
@@ -654,12 +711,22 @@ def plan_for(meta: Mapping[str, Any], repos: Mapping[Tuple[str, str], str]) -> S
     return share_plan(meta, repos.get((str(meta.get("root_url") or ""), str(meta.get("code_repo") or ""))))
 
 
+COPYRIGHT_FOUND_KEY = "copyright_found"   # where a page's copyright line came from, when not from the page itself
+FROM_LICENCE_FILE = "the licence file of the repository"
+
+
 def attribution(source: str, title: str, meta: Mapping[str, Any], plan: SharePlan) -> str:
-    """What a pack keeps with a page whose licence requires attribution: title, address, the copyright notice, the
-    licence with its address, and the changes made."""
+    """What a pack keeps with a page whose licence requires attribution: title, address, the copyright notice (and
+    where it was found, when not on the page: the repository's licence file), the licence with its address and the
+    file of its text in the pack, and the changes made."""
     licence_url = str(meta.get("licence_url") or "") or canonical_url(plan.licence)
-    parts = [p for p in (clean(title), clean(source, 1000), clean(meta.get("copyright") or "")) if p]
-    parts.append(f"licence {plan.licence}" + (f" ({licence_url})" if licence_url else ""))
+    notice = clean(meta.get("copyright") or "")
+    if notice and meta.get(COPYRIGHT_FOUND_KEY):
+        notice += f" (from {clean(meta[COPYRIGHT_FOUND_KEY])})"
+    parts = [p for p in (clean(title), clean(source, 1000), notice) if p]
+    text_file = clean(meta.get(licence_texts.TEXT_FILE_KEY) or "")
+    parts.append(f"licence {plan.licence}" + (f" ({licence_url})" if licence_url else "")
+                 + (f", its text in {text_file}" if text_file else ""))
     parts.append(f"changes: {CHANGES}")
     return " - ".join(parts)
 

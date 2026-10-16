@@ -1631,14 +1631,36 @@ sagt, und ein Export entscheidet je Seite danach (`orchestrator/rag/licences.py`
   eine Lizenz, die Änderungen oder kommerzielle Nutzung verbietet (NC, ND), eine Copyleft-Lizenz (GPL, LGPL, AGPL,
   GFDL: Sie verlangen den ganzen Lizenztext und die Quelle bei jeder Kopie), eine nicht erkannte Lizenz oder gar
   keine. Wer das Paket bekommt, crawlt diese Seiten unter eigenen Prüfungen.
+- **Lizenztexte und NOTICE:** Manche Lizenzen verlangen ihren Text oder Erlaubnishinweis bei jeder Kopie: MIT,
+  BSD-2-Clause, BSD-3-Clause, ISC, Apache-2.0, MPL-2.0 sowie CC BY und CC BY-SA 1.0 bis 4.0. Enthält ein Paket Seiten
+  unter einer davon mit vollem Text, enthält es auch `LICENSES/<SPDX-ID>.txt` mit dem Text der Lizenz und eine Datei
+  `NOTICE`, neben seiner Wissensdatei (in einem Target in `knowledge/`). Die Texte stammen unverändert aus der SPDX
+  License List 3.29.0 (ihre Daten stehen unter CC0). Sie liegen in `orchestrator/data/licenses/`, jeder wird über
+  seinen sha256 geprüft, und die Datenschutzbereinigung ändert sie nie. `NOTICE` führt jede Seite mit ihrer
+  Quelladresse, ihrer Copyright-Zeile wie gefunden und ihrer SPDX-ID auf, nach Lizenz gruppiert. Bei MIT, BSD und ISC
+  steht jede Copyright-Zeile bei dem Lizenztext, zu dem sie gehört; die Lizenzdatei eines Repositorys und Code von
+  GitHub ohne eigenen Hinweis führen jede Copyright-Zeile dieser Datei auf. Bei Apache-2.0 folgen die Hinweise aus der
+  `NOTICE`-Datei des Werks, wenn derselbe Crawl sie gelesen hat (die `NOTICE` oben im Repository oder eine Seite
+  namens `NOTICE` auf derselben Website); sonst sagt `NOTICE`, dass keine gelesen wurde. CC0, Gemeinfreiheit, 0BSD und
+  die Unlicense verlangen keinen Text. Eine Lizenz, die ihren Text verlangt, deren Text das Framework aber nicht hat
+  (eine fehlende oder geänderte Datei), lässt keine Seite mit vollem Text hinein: Eine solche Seite kommt als ihre
+  Adresse mit kurzen Fakten hinein, und der Grund sagt warum.
+- **Beim Hereinkommen geprüft:** Eine Installation, `llm-cli zoo verify` und die Prüfung des Community-Repositorys
+  lehnen ein Paket ab, dessen Lizenztexte nicht Byte für Byte die kanonischen sind (in einem Target-Paket auch ohne
+  Wissens-Snapshot), das eine Lizenz nennt, für die das Framework keinen Text hat, oder dem ein Text oder die `NOTICE`
+  fehlt, die seine Seiten brauchen. Ein installiertes Paket behält `LICENSES/` und `NOTICE` in seinem Ordner, und jede
+  Seite, die es der Wissensbasis hinzufügt, nennt ihren Lizenztext (`licence_text_file`).
 - **Du siehst es je Seite:** `llm-cli knowledge sources` listet jede Quelle mit ihrer Lizenz, ihrem
   Urheberrechtshinweis und dem, was ein Paket enthielte, und warum; `llm-cli zoo export knowledge` führt jede Seite
-  noch einmal auf, mit dem, was das Paket enthält, und warum. Ein Target-Export macht dasselbe für den
-  Wissens-Snapshot des Targets, auch für einen Snapshot von vor dieser Regel (der Target-Ordner selbst bleibt, wie er
-  ist).
+  noch einmal auf, mit dem, was das Paket enthält, und warum, und nennt jeden Lizenztext im Paket und warum. Ein
+  Target-Export macht dasselbe für den Wissens-Snapshot des Targets, auch für einen Snapshot von vor dieser Regel (der
+  Target-Ordner selbst bleibt, wie er ist); Lizenzdateien, die ohne Snapshot in `knowledge/` liegen, bleiben aus dem
+  Paket draußen, und ein Hinweis sagt das.
 - **Für KI-Clients:** `list_knowledge_sources` nennt für jede Quelle die Lizenz-ID, den Zustand (`open`,
-  `restricted`, `copyright`, `code_without_licence`, `unknown`) und was ein Paket enthielte; der
-  Urheberrechtshinweis selbst ist Text der Website und erreicht nie eine KI.
+  `restricted`, `copyright`, `code_without_licence`, `unknown` oder `no_licence_text`, wenn das Framework keinen Text
+  einer Lizenz hat, die ihn verlangt) und was ein Paket enthielte; `export_pack` nennt jeden Lizenztext mit seiner
+  Datei, der Zahl der Seiten und dem Grund. Der Urheberrechtshinweis selbst ist Text der Website und erreicht nie eine
+  KI.
 
 ### Netzwerkschutz und Grenzen
 
@@ -2558,9 +2580,10 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   Framework teilt Rezepte, keine Binärdateien.
 - **Wissens-Schnappschuss (auf Wunsch):** Auf der letzten Seite des Assistenten schreibt **Attach the knowledge
   crawled for this target** (standardmäßig aus, erst nach einem Deep Ingest im Assistenten wählbar) die Seiten, die
-  von den Deep-Ingest-URLs des Assistenten gecrawlt wurden, bereinigt nach `knowledge/initial_knowledge.json` im
-  neuen Target, mit einer `README.md`, die sagt, was darin steht. Solange ein Deep Ingest noch läuft, bleibt die
-  Schaltfläche *Finish* des Assistenten gesperrt (die Seite sagt, warum), damit der Schnappschuss jede gecrawlte
+  von den Deep-Ingest-URLs des Assistenten gecrawlt wurden, bereinigt nach `knowledge/initial_knowledge.json` im neuen
+  Target, mit einer `README.md`, die sagt, was darin steht, und den Lizenztexten und der `NOTICE`, die seine Seiten
+  brauchen (siehe [Lizenzen und Urheberrecht](#lizenzen-und-urheberrecht)). Solange ein Deep Ingest noch läuft, bleibt
+  die Schaltfläche *Finish* des Assistenten gesperrt (die Seite sagt, warum), damit der Schnappschuss jede gecrawlte
   Seite enthält; stammt keine gespeicherte Seite von diesen URLs, sagt der Assistent, dass kein Schnappschuss
   angehängt wurde. Der Rest deiner Wissensbasis kommt nie in ein Modul, und `llm-cli module create` und
   `module generate-ai` hängen nichts an. Das Framework nimmt einen solchen Schnappschuss nicht in eine Wissensbasis
@@ -2836,7 +2859,9 @@ gesperrtes Pack zeigt eine abgeschaltete Schaltfläche **Revoked**.
   Wissens-Packs enthalten Seiten anderer Leute: Ihre Lizenz ist `NOASSERTION`, jede Seite behält ihre Quelladresse,
   und eine Seite ohne Quelle wird nie exportiert. Der volle Text einer Seite kommt nur hinein, wo ihre Lizenz die
   Weitergabe erlaubt; jede andere Seite kommt als ihre Adresse mit kurzen Fakten hinein, und die Zusammenfassung führt
-  jede Seite auf, mit dem, was sie enthält, und warum (siehe [Lizenzen und Urheberrecht](#lizenzen-und-urheberrecht)).
+  jede Seite auf, mit dem, was sie enthält, und warum. Seiten mit vollem Text unter einer Lizenz, die ihren Text
+  verlangt, bekommen diesen Text in `LICENSES/` und eine `NOTICE`, und die Zusammenfassung nennt jeden Text und warum
+  (siehe [Lizenzen und Urheberrecht](#lizenzen-und-urheberrecht)).
 - Ein Target, das du aus einem Community-Pack installiert hast, wird nicht als deins exportiert: Es neu zu
   signieren, würde Autor und Lizenz durch deine ersetzen. Ist das Target eines Rezepts dein eigenes, erinnert ein
   Hinweis daran, das Target ebenfalls zu exportieren. Ein Wissens-Export nimmt die Seiten deiner Wissensbasis mit,

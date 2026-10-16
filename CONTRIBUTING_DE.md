@@ -495,9 +495,12 @@ gespeicherte Anmeldung, und die Upload-Seite nutzt die GitHub-Sitzung deines Bro
 `community/contributions/`. Bis es das Repository gibt, lässt sich ein Paket als Datei teilen
 (`llm-cli zoo install --file <Paket>` installiert es mit der Vertrauensstufe `local`).
 
-Wissenspakete behalten die Quelladresse jeder Seite und beanspruchen keine Lizenz für die Seiten (`NOASSERTION`);
-die Seiten bleiben unter den Bedingungen ihrer Eigentümer. Ein Target, das mit dem Framework ausgeliefert werden soll
-(Unterstützungsstufe `official`), kommt weiterhin mit einem normalen Pull-Request in dieses Repository.
+Wissenspakete behalten die Quelladresse jeder Seite und beanspruchen keine Lizenz für die Seiten (`NOASSERTION`); die
+Seiten bleiben unter den Bedingungen ihrer Eigentümer. Seiten mit vollem Text unter einer Lizenz, die ihren Text
+verlangt (MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA), kommen mit dem kanonischen Lizenztext in `LICENSES/`
+und einer `NOTICE`; die Prüfung (`llm-cli zoo verify <Datei>`) lehnt ein Paket ab, dessen Lizenzdateien nicht zu
+seinen Seiten passen. Ein Target, das mit dem Framework ausgeliefert werden soll (Unterstützungsstufe `official`),
+kommt weiterhin mit einem normalen Pull-Request in dieses Repository.
 
 ### Das Community-Repository betreuen
 

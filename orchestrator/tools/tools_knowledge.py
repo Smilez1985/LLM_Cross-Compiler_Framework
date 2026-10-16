@@ -139,9 +139,12 @@ class SourceOut(BaseModel):
     licence: str = Field(default="", pattern=r"^[A-Za-z0-9.+-]{0,40}$",
                          description="The licence the page names (an SPDX-like id such as CC-BY-4.0 or MIT); 'other' "
                                      "for one the framework does not recognise, empty when none was found")
-    licence_state: Literal["", "open", "restricted", "copyright", "code_without_licence", "unknown"] = Field(
+    licence_state: Literal["", "open", "restricted", "copyright", "code_without_licence", "unknown",
+                           "no_licence_text"] = Field(
         default="", description="open: its licence allows passing the text on; restricted, copyright, "
-                                "code_without_licence, unknown: it does not, or it is not known")
+                                "code_without_licence, unknown: it does not, or it is not known; no_licence_text: "
+                                "its licence asks for its text with every copy and the framework has no canonical "
+                                "text of it")
     pack_share: Literal["full_text", "link_and_facts", "not_exported"] = Field(
         default="link_and_facts", description="What a knowledge pack would carry of it: its full text, only its "
                                               "address with short facts, or nothing (pack pages, the framework's "

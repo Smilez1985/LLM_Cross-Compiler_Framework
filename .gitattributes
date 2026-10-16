@@ -27,6 +27,9 @@ Makefile          text eol=lf
 *.toml            text eol=lf
 *.cmake           text eol=lf
 
+# The canonical licence texts are compared byte for byte with the sha256 in licenses.json: never converted.
+orchestrator/data/licenses/*.txt -text
+
 # Windows-only scripts keep CRLF.
 *.bat             text eol=crlf
 *.cmd             text eol=crlf
