@@ -1620,7 +1620,7 @@ llm-cli device runtime deploy GERÄT [--user NAME] [--password [WERT] | --passwo
                               [--allow-untrusted-model]
 llm-cli device runtime verify GERÄT [--user NAME] [--bench-model PFAD] [--allow-untrusted-model]
 llm-cli device runtime status GERÄT [--json]
-llm-cli device runtime prune GERÄT
+llm-cli device runtime prune GERÄT [--on-device]
 ```
 
 ### device list
@@ -1689,8 +1689,9 @@ aus `--user`.
    `llama-bench`-Lauf mit diesem Modell.
 5. Nur ein Build, der besteht, wird zu `current`. Ein Build, der scheitert (zum Beispiel mit `SIGILL`, weil die
    CPU-Grundlage nicht zum Board passt), wird wieder entfernt, der vorige Build bleibt aktiv, und sonst ändert sich
-   nichts. Nach dem Umschalten bleibt der vorige Build; ältere werden entfernt, außer ein laufendes Programm nutzt
-   sie.
+   nichts. Nach dem Umschalten bleibt jeder ältere Build auf dem Board (unveröffentlicht; vorher wurden alle außer
+   dem vorigen ohne Frage entfernt). Die Ausgabe sagt, wie viele geblieben sind und wie groß sie sind;
+   `device runtime prune GERÄT --on-device` listet sie, damit du sie entfernst.
 6. Mit der systemd-Einstellung wird die Unit `llm-llama-server.service` mit `sudo -n` geschrieben und aktiviert und
    gestartet, sobald das Modell da ist.
 
@@ -1737,6 +1738,14 @@ Listet die älteren Laufzeit-Pakete des Geräts auf deinem PC mit je einer Numme
 ausgewählt: Du gibst die Nummern der zu löschenden ein, wählst den Papierkorb (Standard) oder endgültiges Löschen und
 bestätigst genau diese (Standard: nein). Das braucht ein Terminal; ohne eines wird nur gelistet. Auf dem Board ändert
 sich nichts.
+
+Mit `--on-device` meldet es sich am Board an (als Benutzer der Deploy-Einstellungen, mit dem Schlüssel des
+Frameworks) und listet stattdessen die älteren Laufzeit-Builds dort: jeden mit vollem Pfad auf dem Board,
+Ordnername, Größe und was er ist (der Build, der vor dem letzten Deployment aktiv war, sagt das). Der aktive Build
+und ein Build, den ein laufendes Programm nutzt, stehen nie in der Liste. Du gibst die Nummern ein, nichts ist
+ausgewählt, und du bestätigst genau diese (Standard: nein). Ein Board hat keinen Papierkorb, sie werden also
+endgültig entfernt. Das Entfernen steht zuerst im Audit-Log, nur mit den Ordnernamen. Keine KI kann das: Die
+KI-Tools sagen nur, wie viele ältere Builds geblieben sind.
 
 Für ein [vertrautes Gerät](#deploy-devices) führen die optionalen MCP-Tools `probe_remote_device`,
 `deploy_device_runtime` und `run_device_benchmark` für einen KI-Client `scan --device`, `device runtime build` mit

@@ -181,6 +181,37 @@ def test_a_board_job_error_never_names_the_deploy_settings_account(fw, monkeypat
     assert DEVICE_ACCOUNT in text, "the AI still reads that the device account could not log in"
 
 
+def test_older_builds_on_the_board_reach_the_ai_as_a_count_and_stay_with_the_person(fw, monkeypatch):  # noqa: F811
+    """Round 5 f: a deploy keeps every older runtime build on the board. The AI reads how many stayed and that only the
+    person removes them; never their folders or the account."""
+    from types import SimpleNamespace
+    from orchestrator.runtime.device import service
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    from orchestrator.runtime.device.settings import DeploySettings
+    from orchestrator.tools.tools_runtime import OLDER_BUILDS_NOTE
+    from orchestrator.utils import ssh_trust
+    device, key = trust(fw, host=ADDRESS, user=ACCOUNT)
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: key)
+    monkeypatch.setattr(service, "device_profile", lambda s, d: SimpleNamespace(arch="aarch64"))
+    monkeypatch.setattr(service, "deploy_settings", lambda s, d, p: DeploySettings(ssh_user=ACCOUNT))
+    monkeypatch.setattr(service, "plan_facts", lambda s, p: service.DevicePlanFacts(
+        "b" * 64, True, True, {"os": "linux", "arch": "aarch64", "libc": "glibc"}, {"base": "debian"}))
+    monkeypatch.setattr(DeviceRuntimeStore, "record", lambda self: {})
+    monkeypatch.setattr(service, "deploy", lambda *a, **k: {
+        "activated": True, "build_id": "b" * 64, "install": "user", "previous": "c" * 16, "older_builds_kept": 2,
+        "checks": [], "notes": [f"2 older runtime build(s) stay on the device (50.0 MB); see /home/{ACCOUNT}/.local"]})
+    from orchestrator.tools.policy import Decision, ToolPolicy
+    fw.tool_registry.policy_store.replace(ToolPolicy(configured=True,
+                                                     overrides={"deploy_device_runtime": Decision.ASK},
+                                                     reviewed=[s.name for s in fw.tool_registry.list()]))
+    started = call(fw, "deploy_device_runtime", {"device_id": device.device_id}, confirm=asking(True))
+    assert wait_job(fw, started.job_id).state == "done"
+    status = fw.tool_registry.call("get_job_status", {"job_id": started.job_id}, ToolContext("ditto"))
+    text = status.model_dump_json()
+    assert '"older_builds_kept":2' in text.replace(" ", "") and OLDER_BUILDS_NOTE[:40] in text
+    assert ACCOUNT not in text and "/home/" not in text, text
+
+
 # --- the source guard ------------------------------------------------------------------------------------------------
 
 ACCOUNT_ATTRS = frozenset({"user", "ssh_user"})

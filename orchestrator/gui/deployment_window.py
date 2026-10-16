@@ -162,7 +162,11 @@ class DeploymentWorker(QThread):
                     self.model_name = name if name.lower().endswith(".gguf") and not docker else None
                 except (OSError, ValueError):
                     self.model_name = None
-                self.finished.emit(True, ui_text("device.deploy.done", name=pkg_path.name))
+                # an old container of an earlier package still on the board: told, never removed (only the person)
+                state = f"device.deploy.state.{result.old_sidecar}"
+                old = ([ui_text("device.deploy.old_sidecar", state=ui_text(state))]
+                       if result.old_sidecar in ("running", "stopped") else [])
+                self.finished.emit(True, "\n\n".join([ui_text("device.deploy.done", name=pkg_path.name), *old]))
             else:
                 self.finished.emit(False, self._failure_text(result))
 

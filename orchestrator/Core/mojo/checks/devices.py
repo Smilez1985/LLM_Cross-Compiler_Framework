@@ -30,6 +30,29 @@ def _reason(device, code: str) -> Tuple[str, str]:
             reasons.person_next(code, "en", address=device.host, port=device.port))
 
 
+def _old_sidecars(store, boards) -> List[Finding]:
+    """Boards where the last deploy still saw the Qdrant sidecar of an earlier package with Docker images (the deploy
+    looked, Mojo does not log in): named with the next step; nothing is stopped or removed."""
+    from orchestrator.Core.deployment_manager import OLD_SIDECAR
+    last = store.last_deploys()
+    findings = []
+    for device in boards:
+        seen = last.get(device.device_id) or {}
+        state = seen.get("old_sidecar")
+        if state not in ("running", "stopped"):
+            continue
+        when = str(seen.get("board_checked_at") or "?")
+        findings.append(Finding(
+            "devices", f"devices.{device.device_id}.old_sidecar", Severity.INFO,
+            f"Board {device.label}: the container {OLD_SIDECAR} from an earlier package with Docker images was still "
+            f"there ({state}) at the last deploy ({when}). Nothing uses it any more; Mojo does not remove it.",
+            f"If you do not need it, remove it on the board: docker rm -f {OLD_SIDECAR} (the data folder data/qdrant "
+            "of that old package stays until you delete it).",
+            where=device.address, why="A container nothing uses any more takes space on the board, and memory while "
+                                      "it runs.", cannot="person"))
+    return findings
+
+
 def check_devices(framework) -> List[Finding]:
     """The trusted boards: host key still trusted, SSH port answering. Changes nothing, logs in nowhere."""
     from orchestrator.runtime.device import reasons
@@ -76,6 +99,7 @@ def check_devices(framework) -> List[Finding]:
         else:
             findings.append(_ok("devices", code, f"Board {device.label} ({device.address}) answers on its SSH port; "
                                                  "its host key is the one you trusted."))
+    findings += _old_sidecars(store, checked)
     if len(boards) > MAX_BOARDS:
         findings.append(Finding("devices", "devices.more", Severity.INFO,
                                 f"{len(boards) - MAX_BOARDS} older trusted boards were not checked (Mojo checks the "

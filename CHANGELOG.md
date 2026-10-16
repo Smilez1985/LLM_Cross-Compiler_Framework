@@ -10,6 +10,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **A deploy tells you about an old Qdrant sidecar on the board**: packages with Docker images from earlier versions
+  started the container `qdrant-sidecar`, which nothing uses any more. After a successful deploy (`llm-cli deploy
+  run`, the Deployment window, the AI tool `deploy_to_device`) the framework looks with `docker ps` whether it is
+  still on the board and, if so, says it is running or stopped and how to remove it there. Mojo Oracle shows a line
+  for that board from the last deploy. The framework never stops or removes the container.
 - **Where finished models go: the output folder and a save dialog** (eighth round, answer 3): finished builds
   (golden artifacts) are saved to the output folder (setting `output_dir`, default `~/llmcf/output`; on Windows in
   your user folder), which you set once with **File > Output Folder...** or `llm-cli config output-folder PATH`, for
@@ -905,6 +910,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   longer returns are noted.
 
 ### Changed
+- **A board deployment keeps every older runtime build** (round 5 f): `llm-cli device runtime deploy` and the AI
+  tool `deploy_device_runtime` removed all older runtime builds on the board except the previous one, without a
+  question. Now every older build stays. The result says how many stayed and their size, and
+  `llm-cli device runtime prune DEVICE --on-device` lists them for you: full path on the board, folder name, size and
+  what each is, nothing ticked, "No" by default. Only the builds you tick are removed, for good (a board has no
+  trash), after an audit entry with the folder names only. The active build and one a running program uses are never
+  listed. An AI only reads how many builds stayed and that only you remove them.
 - **The output folder is `~/llmcf/output`; the old output folder is the framework's build folder** (eighth round,
   answer 3): the setting `output_dir` now names the folder finished models are saved to (default `~/llmcf/output`,
   before the installation's or the per-user folder's `output/`). That old folder is the new setting `build_dir`: GUI

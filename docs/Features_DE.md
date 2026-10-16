@@ -353,6 +353,10 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   `<Repository>:lcf-<erste 12 Hex-Zeichen des Digests>` eingepackt (`docker load` stellt Registry-Digests nicht
   wieder her), und `deploy.sh` startet jedes eingepackte Image mit `--pull never`: Das Board führt genau das
   eingepackte Image aus, und ein Board, auf dem es fehlt, bricht ab, statt eines aus einer Registry zu ziehen.
+  Pakete früherer Versionen starteten außerdem einen Qdrant-Sidecar (`qdrant-sidecar`), den nichts mehr nutzt: Nach
+  einem Deployment schaut das Framework, ob er noch auf dem Board ist, und sagt es dir (im Ergebnis des Deployments
+  und in einer Zeile von Mojo Oracle für dieses Board), mit dem Befehl, um ihn dort zu entfernen. Das Framework
+  stoppt oder entfernt ihn nie.
 - **Vertraute Geräte:** Nach einer erfolgreichen Anmeldung an einem Board, dessen Host-Schlüssel du bestätigt hast
   (ein Deployment in der GUI oder mit `llm-cli deploy run`, eine Prüfung mit `llm-cli scan --device`, ein
   `device runtime deploy`), trägt das Framework es in `~/.llm-framework/devices.json` ein: deinen Namen dafür,
@@ -432,7 +436,11 @@ installierst du selbst.
   Benutzer lesbar gemacht und neben den aktiven Build gelegt. Dann werden die Programme des neuen Builds auf dem
   Board geprüft (unten), und nur ein Build, der besteht, wird zu `current`; einer, der scheitert, wird wieder
   entfernt, und der vorige Build bleibt aktiv (Design 3.8: ein gescheiterter Build wird nie aktiviert). Nach dem
-  Umschalten bleibt der vorige Build; ältere werden entfernt, außer ein laufendes Programm nutzt sie. Den Schlüssel
+  Umschalten bleibt jeder ältere Build auf dem Board: Das Framework entfernt keinen von selbst. Die Ausgabe sagt, wie
+  viele geblieben sind; `llm-cli device runtime prune GERÄT --on-device` listet sie (voller Pfad auf dem Board,
+  Größe, was jeder ist) und entfernt nur die, die du ankreuzt, nach deinem Ja an einem Terminal. Der aktive Build
+  und einer, den ein laufendes Programm nutzt, stehen nie in der Liste, und eine KI erfährt nur, wie viele geblieben
+  sind. Den Schlüssel
   in `~/.config/llm-framework/llama-server.key` erzeugt das Startskript auf dem Board unter umask 077; er verlässt
   das Board nie.
 - **Startskript** (`llama-server.sh serve|start|stop|status|keygen|version`): POSIX-sh, getestet mit dash und bash. Es
