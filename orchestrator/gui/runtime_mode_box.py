@@ -159,12 +159,17 @@ class RuntimeModeBox(QGroupBox):
     def _offer_removal(self, plan: Any) -> None:
         """The old mode's leftovers, each listed; exactly that list is removed after the person's yes."""
         title = ui_text("runtime.mode.title")
+        mode = plan.mode_offered[0]   # one confirmation (round 7 D): build folders to the trash, Docker's objects gone
+        # where the listed objects go, and only for what the list holds (a list of Docker objects names no trash)
+        trashed = [runtime_mode.goes_to_trash(item, mode) for item in plan.items]
+        where = ((ui_text("runtime.mode.leftovers.trash") if any(trashed) else "")
+                 + (ui_text("runtime.mode.leftovers.docker")
+                    if any(i.kind in ("docker_image", "docker_container") for i in plan.items) else ""))
         if not ask(self, title, ui_text("runtime.mode.leftovers.question", n=len(plan.items),
-                                        size=_size(plan.total_bytes), items=leftovers_text(plan))):
+                                        size=_size(plan.total_bytes), where=where, items=leftovers_text(plan))):
             plain_box(self, "information", title, ui_text("runtime.mode.nothing_removed"))
             return
         audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
-        mode = plan.mode_offered[0]   # one confirmation (round 7 D): build folders to the trash, Docker's objects gone
         try:
             removal = runtime_mode.remove_leftovers(self._factory(), plan, actor="gui", audit=audit,
                                                     trash=self._trash() if mode == "trash" else None, mode=mode)

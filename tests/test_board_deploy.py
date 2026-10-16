@@ -11,6 +11,7 @@
 
 import errno
 import hashlib
+import os
 import shlex
 import socket
 import subprocess
@@ -180,7 +181,7 @@ class Board:
         if command == DeploymentManager.REMOTE_MKTEMP:
             self.dirs.add(TARGET)
             return 0, TARGET + "\n"
-        if command.startswith("docker "):
+        if "docker " in command:
             self.docker_commands.append(command)
             if command == dmod.OLD_SIDECAR_CHECK:
                 return 0, self.docker_ps
@@ -580,6 +581,31 @@ class TestOldSidecar:
         device_id = device_id_for_host_key(ssh_trust.fingerprint(board.key))
         row = TrustedDevices(manager._state_dir()).last_deploys()[device_id]
         assert row["old_sidecar"] == state and row["board_checked_at"]
+
+    @pytest.mark.skipif(not os.path.exists("/bin/sh"), reason="needs a POSIX shell")
+    def test_a_docker_that_hangs_on_the_board_never_holds_a_finished_deploy(self, tmp_path):
+        """The look runs after the deploy succeeded: a Docker daemon that does not answer on the board must not keep
+        the deploy (the GUI, the AI's job, the terminal) waiting. It is bounded with `timeout` where the board has
+        it, and runs as before where it does not."""
+        import stat
+        slow = tmp_path / "slow"
+        slow.mkdir()
+        (slow / "docker").write_text("#!/bin/sh\nsleep 30\necho 'qdrant-sidecar|Up 3 days'\n")
+        quick = tmp_path / "quick"
+        quick.mkdir()
+        (quick / "docker").write_text("#!/bin/sh\necho 'qdrant-sidecar|Up 3 days'\n")
+        for script in (slow / "docker", quick / "docker"):
+            script.chmod(script.stat().st_mode | stat.S_IXUSR)
+        check = dmod.old_sidecar_check(1)
+        started = time.monotonic()
+        answer = subprocess.run(["/bin/sh", "-c", check], capture_output=True, text=True, timeout=25,
+                                env={**os.environ, "PATH": f"{slow}{os.pathsep}{os.environ.get('PATH', '')}"}).stdout
+        assert time.monotonic() - started < 15 and dmod.old_sidecar_state(answer) == ""
+        # a board without `timeout` (only the fake docker on PATH): the look still runs
+        answer = subprocess.run(["/bin/sh", "-c", check], capture_output=True, text=True, timeout=25,
+                                env={"PATH": str(quick)}).stdout
+        assert dmod.old_sidecar_state(answer) == "running"
+        assert dmod.OLD_SIDECAR_CHECK == dmod.old_sidecar_check(dmod.OLD_SIDECAR_SECONDS)
 
     @pytest.mark.parametrize("answer", ["", "my-qdrant-sidecar|Up 3 days\n", "qdrant-sidecar-2|Up 1 day\n"])
     def test_no_note_without_exactly_that_container(self, manager, board, package, answer):

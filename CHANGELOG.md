@@ -12,9 +12,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ### Added
 - **A deploy tells you about an old Qdrant sidecar on the board**: packages with Docker images from earlier versions
   started the container `qdrant-sidecar`, which nothing uses any more. After a successful deploy (`llm-cli deploy
-  run`, the Deployment window, the AI tool `deploy_to_device`) the framework looks with `docker ps` whether it is
-  still on the board and, if so, says it is running or stopped and how to remove it there. Mojo Oracle shows a line
-  for that board from the last deploy. The framework never stops or removes the container.
+  run`, the Deployment window, the AI tool `deploy_to_device`) the framework looks with `docker ps` (for at most 20
+  seconds) whether it is still on the board and, if so, says it is running or stopped and how to remove it there.
+  Mojo Oracle shows a line for that board from the last deploy. The framework never stops or removes the container.
 - **Where finished models go: the output folder and a save dialog** (eighth round, answer 3): finished builds
   (golden artifacts) are saved to the output folder (setting `output_dir`, default `~/llmcf/output`; on Windows in
   your user folder), which you set once with **File > Output Folder...** or `llm-cli config output-folder PATH`, for
@@ -916,9 +916,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the form stays usable. The build submits exactly the values that were checked.
 - **Builds in the old default folder keep their id and packages are found there** (unreleased; eighth round, answer
   3): since the output folder setting, the framework's build folder is no longer the output folder, so a build there
-  got a new id and `packages` (and `deploy_package`) no longer saw the deploy packages in it. The id a build had before
-  still reaches it (feed rows, pending approvals and AI callers that kept it), unless another build has that id now.
-  `packages` lists the output folder first, then the build folder and earlier output folders you had set.
+  got a new id, and the AI tool `deploy_to_device` no longer found the deploy packages in it by their id. The id a
+  build had before still reaches it (feed rows, pending approvals and AI callers that kept it), unless another build
+  has that id now. Packages are looked up in the output folder first, then in the build folder and in earlier output
+  folders you had set.
 - **`get_status` names the build folder's disk** (unreleased; eighth round, answer 3): the disk fact named the cache
   and the output folder only, not the build folder where a build is written first. Now it names all three; folders on
   one disk are named together, by label only.
@@ -928,6 +929,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   anything, whether the knowledge base's models are on this computer. Their question says so, with the size and the
   warning when a download is needed or cannot be ruled out. An MCP prompt with knowledge excerpts never starts the
   download: like `search_knowledge` it reads with the models on this computer only and says when they are missing.
+  Ditto's automatic diagnosis of a failed build, which nobody is asked about, reads the same way.
 - **Repair hints for AI callers name Mojo** (unreleased; round 7 item 11'): refusals and errors that AI callers read
   sent them to `llm-cli doctor`. They now name the tool `run_mojo_oracle` (or `llmcf mojo` in a terminal). The note
   about missing builder images keeps `llm-cli doctor --fix --tier 2`, which builds them.
@@ -950,7 +952,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli device runtime prune DEVICE --on-device` lists them for you: full path on the board, folder name, size and
   what each is, nothing ticked, "No" by default. Only the builds you tick are removed, for good (a board has no
   trash), after an audit entry with the folder names only. The active build and one a running program uses are never
-  listed. An AI only reads how many builds stayed and that only you remove them.
+  listed. An AI only reads how many builds stayed and that only you remove them. Deploying a build again that is
+  already on the board keeps it there, also when its checks fail.
 - **The output folder is `~/llmcf/output`; the old output folder is the framework's build folder** (eighth round,
   answer 3): the setting `output_dir` now names the folder finished models are saved to (default `~/llmcf/output`,
   before the installation's or the per-user folder's `output/`). That old folder is the new setting `build_dir`: GUI

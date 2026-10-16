@@ -64,7 +64,17 @@ _REMOTE_DIR = re.compile(r"^/tmp/llm_deploy\.[A-Za-z0-9]{8}$", re.ASCII)
 # qdrant-sidecar --restart unless-stopped`). Nothing uses it any more; after a deploy the framework looks whether it is
 # still there and tells the person, and never removes it (round 5 f: the person removes what they can see).
 OLD_SIDECAR = "qdrant-sidecar"
-OLD_SIDECAR_CHECK = f"docker ps -a --filter name={OLD_SIDECAR} --format '{{{{.Names}}}}|{{{{.Status}}}}' 2>/dev/null"
+OLD_SIDECAR_SECONDS = 20   # the look comes after a finished deploy: a Docker that does not answer never holds it
+
+
+def old_sidecar_check(seconds: int = OLD_SIDECAR_SECONDS) -> str:
+    """The board command that looks for the old sidecar: `docker ps`, bounded with `timeout` where the board has it
+    (coreutils, BusyBox), as before where it does not."""
+    look = f"docker ps -a --filter name={OLD_SIDECAR} --format '{{{{.Names}}}}|{{{{.Status}}}}' 2>/dev/null"
+    return (f"if command -v timeout >/dev/null 2>&1; then timeout {int(seconds)} {look}; else {look}; fi")
+
+
+OLD_SIDECAR_CHECK = old_sidecar_check()
 OLD_SIDECAR_NOTE = ("The board still has the container {name} ({state}) from an earlier package with Docker images. "
                     "Nothing uses it any more: the knowledge base stays on this computer. The framework does not "
                     "remove it. To remove it, run on the board: docker rm -f {name} (the data folder data/qdrant of "

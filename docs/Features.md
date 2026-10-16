@@ -408,7 +408,8 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
   build is never activated). After the switch every older build stays on the board: the framework removes none by
   itself. The output says how many stayed; `llm-cli device runtime prune DEVICE --on-device` lists them (full path
   on the board, size, what each is) and removes only the ones you tick, after your yes at a terminal. The active
-  build and one a running program uses are never listed, and an AI only learns how many stayed. The key in
+  build and one a running program uses are never listed, and an AI only learns how many stayed. A build deployed
+  again that is already on the board stays there, also when its checks fail. The key in
   `~/.config/llm-framework/llama-server.key` is generated on the board by the start script under umask 077 and never
   leaves it.
 - **Start script** (`llama-server.sh serve|start|stop|status|keygen|version`): POSIX sh, tested with dash and bash.
@@ -1295,9 +1296,10 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   refused with the next step (ask Ditto one question in the GUI or with `llm-cli ditto ask`, which loads it once),
   and a reranking model that is not there yet is skipped for that call only. Listing and reading need no model.
   An MCP prompt with knowledge excerpts reads the same way: without the model it leaves the excerpts out and says
-  why. The tools that store text (`crawl_docs_site`, `index_framework_docs` and a knowledge pack from
-  `add_pack_from_index`) load the models first: their question says whether they are on this computer already or
-  are downloaded once first, with the size and the situation warning `embedding_model_download`.
+  why. So does Ditto's automatic diagnosis of a failed build, which nobody is asked about. The tools that store
+  text (`crawl_docs_site`, `index_framework_docs` and a knowledge pack from `add_pack_from_index`) load the models
+  first: their question says whether they are on this computer already or are downloaded once first, with the size
+  and the situation warning `embedding_model_download`.
 - **Adding documentation:** [Deep Ingest](#deep-ingest) in the module wizard, and [knowledge packs](#community-zoo)
   from the community zoo.
 - **The framework's own documents** (unreleased): **Tools > Index the Framework's Documentation...**,

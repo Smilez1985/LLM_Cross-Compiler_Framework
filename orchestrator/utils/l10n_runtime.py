@@ -36,10 +36,12 @@ TEXTS = {
         "runtime.mode.working": "Working… this can take minutes; the window can stay open.",
         "runtime.mode.failed": "Nothing was switched: {reason}",
         "runtime.mode.leftovers.question": "The old mode's files and Docker objects are not needed any more. Remove "
-                                           "exactly these {n} objects ({size})? Build folders go to the trash (File > "
-                                           "Trash... restores them; their space stays used until you empty the "
-                                           "trash); Docker has no trash, so its images and containers are deleted "
-                                           "for good. With No, nothing is removed.\n\n{items}",
+                                           "exactly these {n} objects ({size})? {where}With No, nothing is "
+                                           "removed.\n\n{items}",
+        # {where} of the question: only the sentences for what the list holds
+        "runtime.mode.leftovers.trash": "Build folders go to the trash (File > Trash... restores them; their space "
+                                        "stays used until you empty the trash). ",
+        "runtime.mode.leftovers.docker": "Docker has no trash, so its images and containers are deleted for good. ",
         "runtime.mode.item.id": "ID: {id}",
         "runtime.mode.goes.trash": "Goes to: the trash",
         "runtime.mode.goes.deleted": "Goes to: deleted for good",
@@ -78,11 +80,13 @@ TEXTS = {
         "runtime.mode.working": "Läuft … das kann Minuten dauern; das Fenster kann offen bleiben.",
         "runtime.mode.failed": "Nichts wurde gewechselt: {reason}",
         "runtime.mode.leftovers.question": "Die Dateien und Docker-Objekte der alten Art werden nicht mehr gebraucht. "
-                                           "Genau diese {n} Objekte ({size}) entfernen? Build-Ordner kommen in den "
-                                           "Papierkorb (File > Trash... stellt sie wieder her; ihr Platz bleibt "
-                                           "belegt, bis du den Papierkorb leerst); Docker hat keinen Papierkorb, "
-                                           "seine Images und Container werden also endgültig gelöscht. Mit Nein wird "
-                                           "nichts entfernt.\n\n{items}",
+                                           "Genau diese {n} Objekte ({size}) entfernen? {where}Mit Nein wird nichts "
+                                           "entfernt.\n\n{items}",
+        # {where} der Frage: nur die Sätze für das, was die Liste enthält
+        "runtime.mode.leftovers.trash": "Build-Ordner kommen in den Papierkorb (File > Trash... stellt sie wieder "
+                                        "her; ihr Platz bleibt belegt, bis du den Papierkorb leerst). ",
+        "runtime.mode.leftovers.docker": "Docker hat keinen Papierkorb, seine Images und Container werden also "
+                                         "endgültig gelöscht. ",
         "runtime.mode.item.id": "ID: {id}",
         "runtime.mode.goes.trash": "Kommt: in den Papierkorb",
         "runtime.mode.goes.deleted": "Kommt: endgültig gelöscht",

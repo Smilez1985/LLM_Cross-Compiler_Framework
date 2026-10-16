@@ -440,7 +440,8 @@ installierst du selbst.
   viele geblieben sind; `llm-cli device runtime prune GERÄT --on-device` listet sie (voller Pfad auf dem Board,
   Größe, was jeder ist) und entfernt nur die, die du ankreuzt, nach deinem Ja an einem Terminal. Der aktive Build
   und einer, den ein laufendes Programm nutzt, stehen nie in der Liste, und eine KI erfährt nur, wie viele geblieben
-  sind. Den Schlüssel
+  sind. Ein erneut deployter Build, der schon auf dem Board liegt, bleibt dort, auch wenn seine Prüfungen scheitern.
+  Den Schlüssel
   in `~/.config/llm-framework/llama-server.key` erzeugt das Startskript auf dem Board unter umask 077; er verlässt
   das Board nie.
 - **Startskript** (`llama-server.sh serve|start|stop|status|keygen|version`): POSIX-sh, getestet mit dash und bash. Es
@@ -1419,9 +1420,10 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   in der GUI oder mit `llm-cli ditto ask` fragen, das lädt es einmal), und ein noch fehlendes Reranking-Modell wird
   nur für diesen Aufruf übersprungen. Auflisten und Lesen brauchen kein Modell.
   Ein MCP-Prompt mit Auszügen aus der Wissensbasis liest genauso: Ohne das Modell lässt er die Auszüge weg und sagt,
-  warum. Die Tools, die Text speichern (`crawl_docs_site`, `index_framework_docs` und ein Wissens-Pack über
-  `add_pack_from_index`), laden die Modelle zuerst: Ihre Frage sagt, ob sie schon auf diesem Rechner liegen oder
-  zuerst einmal heruntergeladen werden, mit der Größe und der Situationswarnung `embedding_model_download`.
+  warum. Ebenso Dittos automatische Diagnose eines gescheiterten Builds, nach der niemand gefragt wird. Die Tools,
+  die Text speichern (`crawl_docs_site`, `index_framework_docs` und ein Wissens-Pack über `add_pack_from_index`),
+  laden die Modelle zuerst: Ihre Frage sagt, ob sie schon auf diesem Rechner liegen oder zuerst einmal
+  heruntergeladen werden, mit der Größe und der Situationswarnung `embedding_model_download`.
 - **Dokumentation aufnehmen:** [Deep Ingest](#deep-ingest) im Modul-Assistenten und
   [Wissens-Packs](#community-zoo) aus dem Community-Zoo.
 - **Die eigenen Dokumente des Frameworks** (unveröffentlicht): **Tools > Index the Framework's Documentation...**,

@@ -99,3 +99,24 @@ class TestTheFactAndTheWarning:
     def test_every_tool_that_can_start_the_download_declares_the_warning(self):
         for tool in ("crawl_docs_site", "index_framework_docs", "add_pack_from_index"):
             assert "embedding_model_download" in catalog.TOOL_FACTS[tool].situation, tool
+
+
+class TestNoDownloadWithoutAQuestion:
+    def test_the_automatic_diagnosis_of_a_failed_build_never_starts_the_download(self):
+        """A failed build asks Ditto for a diagnosis by itself, also for a build an AI client started, and nobody is
+        asked about it: its knowledge search reads with the models on this computer only (like search_knowledge),
+        so it never starts the one-time download of about a gigabyte."""
+        from orchestrator.Core.ditto_manager import HealingAnalysis
+        from orchestrator.Core.rag_manager import models_local_only
+        from orchestrator.Core.self_healing_manager import SelfHealingManager
+        seen = []
+
+        class Ditto:
+            def analyze_error_log(self, log, context):
+                seen.append(models_local_only())
+                return HealingAnalysis(summary="s", root_cause="r", fix_command="", confidence=0.1, target="HOST")
+
+        manager = SelfHealingManager(SimpleNamespace(get_component=lambda name: Ditto()))
+        assert manager.analyze_error("an error no heuristic knows: zq-417", "Target: x") is None
+        assert seen == [True]
+        assert not models_local_only(), "only for that diagnosis"

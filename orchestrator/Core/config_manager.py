@@ -291,6 +291,8 @@ class ConfigManager:
             state.parent.mkdir(parents=True, exist_ok=True)
             state.mkdir(mode=0o700)
         except FileExistsError:
+            if not state.is_dir():   # a file of that name is no per-user folder
+                raise
             return state
         if os.name == "posix":
             try:

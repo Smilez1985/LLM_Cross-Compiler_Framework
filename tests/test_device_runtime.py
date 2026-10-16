@@ -886,6 +886,35 @@ class TestDeploy:
         assert any("2 older runtime build(s) stay on the device" in n and "--on-device" in n for n in result.notes)
         assert not any("rm -rf" in c and '"$d"' in c for c in dev.commands), "no clean-up loop runs on the board"
 
+    def test_a_failed_redeploy_of_an_older_build_keeps_that_build_on_the_board(self, tmp_path, source, device_base):
+        """Round 5 f: an older build the person kept on the board is theirs. Deploying it again replaces its files
+        with the same, checked files; when the checks then fail or break off, the build stays (it was there before),
+        and only a build this deployment brought is removed again."""
+        dev = FakeDevice(device_base)
+        old, old_packaged = packaged_build(tmp_path / "old", source)
+        assert deploy(dev, old, old_packaged).activated
+        new, new_packaged = packaged_build(tmp_path / "new", source, profile=changed(RK3566, LIBC_VERSION="2.41"))
+        assert deploy(dev, new, new_packaged).activated
+        kept = dev.root / old.build_id[:16]
+        assert kept.is_dir() and os.readlink(dev.root / "current") == new.build_id[:16]
+
+        def lost_connection(home, folder):
+            raise RemoteError("the SSH connection failed: reset")
+
+        with pytest.raises(RemoteError, match="connection failed"):
+            deploy(dev, old, old_packaged, check=lost_connection)
+        assert (kept / "bin" / "llama-server").is_file(), "the person's older build is never removed by a deploy"
+
+        def failed(home, folder):
+            return verify_on_device(RemoteShell(dev), home=home, folder=folder, plan_verify=old.plan["verify"],
+                                    pin_build=PIN.build_number + 1, pin_commit=PIN.commit, port=8080)
+
+        result = deploy(dev, old, old_packaged, check=failed)
+        assert not result.activated and not result.report.ok
+        assert (kept / "bin" / "llama-server").is_file() and os.readlink(dev.root / "current") == new.build_id[:16]
+        assert any("was on the device before" in n for n in result.notes), result.notes
+        assert not any("was removed from the device" in n for n in result.notes), result.notes
+
     @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="needs /proc")
     def test_a_build_a_running_program_uses_is_kept_and_never_offered(self, tmp_path, source, device_base):
         dev = FakeDevice(device_base)
