@@ -18,7 +18,8 @@ des Projekts liegen.
   Normalisierung und Prüfung. Der Profil-Parser lädt sie und setzt sie durch. Sie ist neu und noch nicht
   veröffentlicht.
 - **`project_sources.yml`** und **`detailed_project_sources.yml`** sind ein Nachschlagekatalog vorgelagerter
-  Projekte und Dokumentationslinks für Entwickler. Das Framework liest sie im Betrieb **nicht**.
+  Projekte und Dokumentationslinks für Entwickler. Im Betrieb liest das Framework nur die Dokumentationslinks für
+  Hardware aus `project_sources.yml` (für Deep Ingest).
 - Deine eigenen Einstellungen landen in **`config.yml`** im Einstellungsordner. Die Datei ist persönlich und wird
   nie committet.
 
@@ -29,7 +30,7 @@ des Projekts liegen.
 | `llm_providers.yml` | Vorlagen der KI-Anbieter, die Ditto nutzen kann | ja | `orchestrator/llm/catalog.py` |
 | `llama_runtime.yml` | Der llama.cpp-Pin (Commit), die vorgebauten llama.cpp-Archive, CUDA-Toolkits und Builder-Basen für selbst gebautes llama.cpp, festgelegte GGUF-Modelle, Servervorgaben, Regeln für das empfohlene Modell | ja | `orchestrator/runtime/catalog.py`; den Pin auch `orchestrator/utils/llama_pin.py` |
 | `hardware_probe_schema.yml` | Schlüssel der Datei der Hardware-Probe (Schema 2): Typ, Prüfung, Quelle und Normalisierung je Betriebssystem, ob ein Schlüssel in den Leistungsschlüssel eingeht | ja, wenn ein Hardware-Profil gelesen wird | `orchestrator/runtime/profile.py` |
-| `project_sources.yml` | Katalog vorgelagerter Projekte: Repositorys, Versionen, Dokumentationslinks, Notizen | nein | Menschen; `scripts/validate_ssot.py`, `scripts/sync_ssot.py` |
+| `project_sources.yml` | Katalog vorgelagerter Projekte: Repositorys, Versionen, Dokumentationslinks, Notizen | nur die `docs_*`-Links von `hardware_targets` | Menschen; `scripts/validate_ssot.py`, `scripts/sync_ssot.py`; `orchestrator/Core/doc_sources.py` (Deep-Ingest-Fenster, Ressource `lcf://knowledge/doc-sources`) |
 | `detailed_project_sources.yml` | Ausführliche Entwicklerreferenz: Anleitungen, Entscheidungsbäume, weitere Herstellerabschnitte | nein | Menschen; `scripts/sync_ssot.py` |
 | `config.yml` (nicht in git) | Deine Einstellungen | ja | `orchestrator/Core/config_manager.py` |
 | `SSOT_ARCHITECTURE.md`, `SSOT_ARCHITECTURE_DE.md` | Dieses Dokument | nein | Menschen |
@@ -240,8 +241,10 @@ inference_backends:
 
 Was die Datei **nicht** ist (ihr Kopfkommentar sagt dasselbe):
 
-- Kein Teil des Frameworks liest sie im Betrieb. Sie wird nicht in Umgebungsvariablen für die Build-Container
-  übersetzt, der Crawler folgt ihren Links nicht, und Ditto nutzt `docs_workflow` nicht.
+- Im Betrieb werden nur die `docs_*`-Links von `hardware_targets` gelesen: Sie füllen das Deep-Ingest-Fenster für
+  Hersteller und SDK einer Probe, und KI-Clients lesen sie über die Ressource `lcf://knowledge/doc-sources`. Nichts
+  wird eingelesen, bevor eine Person es startet. Die Datei wird nicht in Umgebungsvariablen für die Build-Container
+  übersetzt.
 - Ihre Versionen sind nicht die Versionen, mit denen gebaut wird. Builds nutzen, was das Dockerfile des Targets
   festlegt, und den llama.cpp-Pin in `llama_runtime.yml`, nach dessen Commit Target-Images und der lokale
   Modellserver bauen. Ihr llama.cpp-Eintrag wird trotzdem gegen diesen Pin geprüft.

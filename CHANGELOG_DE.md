@@ -866,6 +866,36 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Fenster sie zeigt). Wo der Bereich sitzt, ob er gezeigt wird, sein
   Filter und der neueste gesehene Eintrag stehen in `gui_state.json` im Benutzerordner (nie in QSettings); eine
   beschädigte Datei ergibt die Vorgaben.
+- **Dittos Hände im Fenster: die GUI-Tools** (`read_gui_form`, `fill_gui_form`, `wizard_state`, `wizard_step`,
+  `show_gui`; `orchestrator/tools/tools_gui.py`, `orchestrator/tools/gui_surface.py`, `orchestrator/gui/form_surface.py`):
+  Das Build-Formular, der Assistent für Target-Module (Seite für Seite) und der Dialog der KI-Einstellungen melden ihre
+  Felder an, und Ditto liest, was du eingegeben hast, und füllt Felder sichtbar aus. Geheimnisse sind nur „gesetzt“
+  oder „nicht gesetzt“ und werden nie ausgefüllt; lokale Dateien erreichen die KI als Labels; ein Feld, das du gerade
+  bearbeitest, oder ein Wert, den du gewählt hast, wird nie überschrieben; ein Ausfüllen, das über die Logik des
+  Formulars deine Wahl ändern würde, wird ganz zurückgenommen. Jedes ausgefüllte Feld hat einen lila Rahmen und steht in
+  einer Zeile über dem Formular mit **Dittos Änderungen rückgängig machen** (das Rückgängigmachen steht im Audit-Log).
+  Nichts wird abgeschickt: Start Build, Finish im Assistenten und Save bleiben deine Klicks, und ein Modul, das Ditto
+  ausgefüllt hat, wird als KI-erstellt markiert, sodass du seinen ersten Build einmal siehst. Die KI-Einstellungen
+  lassen eine KI nie den Anbieter, die Adresse, die Datenschutzstufe oder die Ersatzkette ändern. Die Tools gibt es,
+  solange das Fenster offen ist, und nur für Ditto; externe KI-Apps bekommen sie später über den Host-Dienst
+  (`GUI_TOOL_CALLERS`). Jeder Aufruf geht durch die Tool-Registry (Berechtigungen, Grenzen, Audit).
+- **Die Board-Empfehlung aus der Hardware-Probe** (`orchestrator/runtime/board_recommendation.py`): Nach einer Probe
+  empfiehlt der Builder das Board des passenden Targets mit seiner Quelle (der SoC der Probe oder der Board-Name der
+  Probe in der Liste bekannter Boards des Targets) und wie sicher es ist. Nur ein genauer Treffer wird eingetragen;
+  sonst werden die Kandidaten und der Grund gezeigt, und du wählst. Ein Board, das du gewählt hast, ersetzt weder eine
+  spätere Probe noch eine KI. Das Nachschlagen des Board-Namens online öffnet deinen Browser erst, wenn du zustimmst.
+  Passt kein Target, bietet der Builder **Target mit dem Assistenten erstellen** (beginnend mit dieser Probe) und
+  **Ditto fragen** an (eine Frage im Chat, die du abschickst).
+- **Dokumentations-Links für Deep Ingest** (`orchestrator/Core/doc_sources.py`): Die `docs_*`-Links des
+  Quellenkatalogs für den Hersteller der Probe und das SDK füllen das Deep-Ingest-Fenster des Assistenten; du prüfst
+  sie und startest das Einlesen. Sagt Ditto, dass für ein Modul Informationen fehlen, bietet der Assistent Deep Ingest
+  mit diesen Links an. KI-Clients lesen sie über die Ressourcen `lcf://knowledge/doc-sources` und
+  `lcf://knowledge/doc-sources/{probe_id}`, nur lesend. Der Kopf des Katalogs und die Dokumente sagen jetzt, dass diese
+  Links zur Laufzeit gelesen werden.
+- **Build-Fortschritt und Live-Protokoll im Builder** (`orchestrator/gui/builder_parts.py`): ein Fortschrittsbalken mit
+  dem Schritt und dem Prozentwert aus dem Build-Service und darunter das Protokoll des Builds live (Geheimnisse
+  geschwärzt, reiner Text), mit Suchfeld und einem Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht
+  mehr liefert, werden vermerkt.
 
 ### Geändert
 - **Rückfragen zeigen eine Kurzfassung und die Arten der Hinweise** (Delegationsentwurf 4.5, LAY-L2): Eine Rückfrage

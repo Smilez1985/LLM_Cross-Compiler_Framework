@@ -123,7 +123,9 @@ def test_project_sources_header_says_who_reads_it():
     text = (REPO_ROOT / "configs" / "project_sources.yml").read_text(encoding="utf-8")
     header = text.split("metadata:")[0]
     assert "Reads this file" not in header and "Orchestrator: Reads" not in header
-    assert "No part of the framework reads it while it runs" in header
+    # The one reader at run time is named (the documentation links for Deep Ingest, round 8 N10), nothing more
+    assert "At run time only the docs_* links of hardware_targets are read" in header
+    assert "orchestrator/Core/doc_sources.py" in header and "Nothing\n#   is crawled until a person starts it" in header
     assert "scripts/validate_ssot.py" in header and "scripts/sync_ssot.py" in header
     data = yaml.safe_load(text)
     assert "roadmap" not in data, "the roadmap lives in docs/BLUEPRINT.md"
