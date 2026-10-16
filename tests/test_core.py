@@ -20,7 +20,7 @@ class TestConfigManager:
         cfg = ConfigManager(tmp_path)
         assert cfg.log_level == "INFO"
         assert cfg.max_concurrent_builds == 2
-        assert cfg.docker_registry == "ghcr.io"
+        assert cfg.docker_registry == ""  # no registry: the framework publishes no images
         assert cfg.get("enable_rag_knowledge") is False
         assert cfg.get("enable_telemetry") is False
         assert cfg.get("ai_provider") == "OpenAI"

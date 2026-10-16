@@ -109,11 +109,11 @@ $PythonVenv = ".venv\Scripts\python.exe"
 # Pip Upgrade & Dependencies
 & $Pip install --upgrade pip | Out-Null
 Write-Host "Installiere Requirements..."
-if (Test-Path "requirements.txt") {
-    & $Pip install -r requirements.txt | Out-Null
-} else {
-    & $Pip install pyyaml requests psutil pywin32 winshell | Out-Null
-}
+# Exactly the versions in requirements.txt of this checkout (uv export from uv.lock); pip checks every file against
+# its hash. Without the file nothing is installed unchecked.
+if (-not (Test-Path "requirements.txt")) { Write-Error "requirements.txt fehlt; ohne die festgelegten Versionen wird nichts installiert." }
+& $Pip install --require-hashes -r requirements.txt | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Error "Die Pakete aus requirements.txt liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)." }
 
 # 5. LAUNCHER
 Write-Host "[4/5] Erstelle Launcher..." -ForegroundColor Yellow

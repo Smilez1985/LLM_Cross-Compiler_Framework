@@ -922,6 +922,24 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einzelnen Build wird entfernt, nachdem der neue Name am Image zu sehen ist. Das Image, das diesen Namen vorher hatte,
   bleibt ohne Namen und wird dir zum Löschen gelistet (Tools > Framework Build Images..., `llm-cli doctor --fix --tier
   2`). Nichts im Framework prunt Docker-Objekte; Docker-Images werden nur gelöscht, wenn du sie anhakst.
+- **Keine Vorgabe nennt mehr ein Image aus einer Registry** (Runde 5 h, sechste Runde): Das Framework veröffentlicht
+  keine Images, daher nennen die Vorgaben lokale Images. `image_inference_runtime` ist `llm-framework/inference:local`;
+  ein Deployment-Paket nimmt es erst, wenn du es auf diesem Rechner gebaut hast, wie jedes Image ohne Digest.
+  `docker_registry` ist leer (nichts liest es). Das experimentelle Benchmark-Fenster nutzt
+  `llm-framework/builder:local` und hält mit einer Meldung an, wenn dieses Image hier fehlt, statt Docker es ziehen zu
+  lassen. Der Block `docker` in `targets/_template/target.yml` und `targets/Rockchip/target.yml` nennt ein lokales
+  Image ohne Registry (`registry: ""`); Kommentare sagen, dass nichts `registry` oder `tags` liest.
+  `prebuilt_llama.KNOWN_PREBUILT_IMAGES` behält die früheren `ghcr.io`-Namen als Liste zum Erkennen.
+- **uv ersetzt Poetry für die Festlegung der Abhängigkeiten** (sechste Runde, Entscheidung 14): `pyproject.toml`
+  nutzt die Standardtabelle `[project]` (die Entwicklungswerkzeuge in `[dependency-groups]`), `uv.lock` ersetzt
+  `poetry.lock`, und `requirements.txt` und `requirements-dev.txt` sind mit Hashes festgelegte Ausgaben von
+  `uv export`, deren erste Zeilen den Befehl nennen. Keine Version hat sich geändert: Alle 121 Festlegungen sind die
+  der bisherigen `poetry.lock`; die Exporte lassen nur die Hashes von Wheels für Python-Versionen außerhalb von 3.11
+  bis 3.14 weg. Die Installer installieren weiter die mit Hashes festgelegte `requirements.txt` des ausgecheckten
+  Frameworks und bestehen jetzt auf den Hashes (`--require-hashes`, kein Ausweichen auf nicht festgelegte Pakete);
+  `install.bat` bricht ab, wenn pip scheitert, statt weiterzumachen. Dependabot aktualisiert `uv.lock`, der neue
+  CI-Job "Lock files" prüft, dass `uv.lock` und beide Exporte zusammenpassen, und `make test` und die
+  Entwicklungsumgebung nutzen uv (`uv sync`).
 - **Rückfragen zeigen eine Kurzfassung und die Arten der Hinweise** (Delegationsentwurf 4.5, LAY-L2): Eine Rückfrage
   im eigenen Fenster des Frameworks (Dittos Dialog, die CLI-Abfrage, das Freigabefenster) beginnt nach ihrer ersten
   Zeile mit 3 bis 6 Zeilen in der Sprache der Person (Englisch oder Deutsch): was passiert, mit sprechenden Namen, wie
@@ -1185,6 +1203,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `make doctor`.
 
 ### Veraltet
+- `--password WERT` bei `deploy run`, `scan --device` und `device runtime deploy`: Jeder Benutzer sieht den Wert in
+  der Prozessliste, und er bleibt im Shell-Verlauf. Es funktioniert weiter und gibt eine Warnung aus; nimm `--password`
+  ohne Wert (verdeckte Abfrage) oder `--password-stdin`.
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
   Prozessliste. Nutze die verdeckte Abfrage oder `--with-token`.
 - `llm-cli build start --parallel`: Die Option hatte nie eine Wirkung (ein Aufruf startet einen Build). Sie ist in
@@ -1192,6 +1213,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Rockchip-Target die Option nicht auswertet.
 
 ### Entfernt
+- Die veraltete Kopie `Docker Setup/pyproject.toml` (Version 1.6.0, von nichts gelesen): Das Container-Image entsteht
+  aus der `pyproject.toml` und der `requirements.txt` des Repositorys selbst.
 - Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen
   eigenen Datensatz).
 - `litellm` und `tiktoken` und mit ihnen 19 indirekte Pakete (aiohttp, boto3, jinja2 und andere).
@@ -1551,6 +1574,25 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nur in den Papierkorb; den Papierkorb leeren und endgültig löschen bleibt bei dir. Eine Prüfung des Quelltexts listet
   jede Stelle im Code, die löscht, mit ihrer Absicherung; eine neue Stelle lässt sie scheitern, bis über sie entschieden
   ist.
+- **Gerätepasswörter gehören nicht mehr auf die Befehlszeile** (Design der sechsten Runde, 4.3): `deploy run`,
+  `scan --device` und `device runtime deploy` fragen verdeckt, wenn `--password` keinen Wert hat, und
+  `--password-stdin` liest eine Zeile aus einer Weiterleitung (in einem Terminal abgelehnt, wo das Passwort beim Tippen
+  sichtbar wäre). Die Logger von paramiko bleiben während der Anmeldung auf INFO oder höher, sodass ein Passwort nie in
+  ein Log gelangt, auch nicht bei DEBUG.
+- **Der Trivy-Scan bekommt den Docker-Socket nicht mehr** (veröffentlicht in 3.0.0): Der Scanner-Container hatte den
+  Docker-Socket des Rechners, der Root-Rechte auf diesem Rechner gibt, auch schreibgeschützt eingebunden. Der Builder
+  speichert das Image jetzt als Archiv in einem privaten Ordner (0700) des Builds, und Trivy liest nur diese Datei,
+  schreibgeschützt, ohne Capabilities und mit `no-new-privileges`. Das Log sagt, wann das Archiv gespeichert und wieder
+  entfernt wird; ohne Platz dafür auf der Cache-Platte wird der Scan mit einer Warnung übersprungen, die die Größen
+  nennt. Lehnt Docker den Scan ab, nennt die Warnung das Archiv mit der Bezeichnung des Cache-Ordners
+  (`cache:...`), nie mit seinem Pfad auf diesem Rechner.
+- **Der MCP-HTTP-Listener auf Loopback beachtet keine Proxy-Header und schreibt kein Zugriffsprotokoll:** uvicorn
+  vertraute `X-Forwarded-For` und `X-Forwarded-Proto` von 127.0.0.1, sodass jedes lokale Programm eine andere Adresse
+  vorgeben konnte. `mcp serve --transport http` läuft jetzt mit `proxy_headers=False` und `access_log=False`.
+- **Der Installer sagt, was die Gruppe `docker` bedeutet:** `install.sh` nimmt dich weiter ohne Nachfrage in die
+  Gruppe auf (siebte Runde, Punkt 6) und sagt jetzt klar, dass ihre Mitglieder den Docker-Dienst steuern, der als root
+  läuft, sodass jedes Programm, das als dein Benutzer läuft, Root-Rechte bekommen kann; er nennt auch den Befehl, der es
+  rückgängig macht.
 - **`run_doctor` gibt KI-Clients keinen Pfad des Rechners** (veröffentlicht in 3.0.0): die Befunde, die eine KI las,
   nannten den persönlichen Ordner, das Audit-Log, Pack-Ordner, die Ordner der Speicherplatz-Prüfung und jeden Pfad,
   den der Fehler einer abgestürzten Prüfung zitierte, samt Benutzernamen. Was eine KI liest, nennt die Ordner des

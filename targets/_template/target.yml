@@ -29,8 +29,10 @@ supported_boards:
 
 # Docker-Konfiguration
 docker:
+  # Ein lokaler Image-Name: Das Image wird auf diesem Rechner gebaut, nie hoch- oder heruntergeladen.
   image_name: "llm-framework/[ihr-target-name]"
-  registry: "ghcr.io"
+  # Keine Registry: Das Framework veröffentlicht keine Images. Nichts liest dieses Feld.
+  registry: ""
   build_context: "."
   dockerfile: "Dockerfile"
   

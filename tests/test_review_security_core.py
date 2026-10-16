@@ -134,7 +134,7 @@ class TestConfigLocation:
         assert cfg.config_dir == install_configs
         assert cfg.get("source_repositories") == {}
         assert cfg.get("image_base_debian") == "debian:bookworm-slim"
-        assert cfg.get("docker_registry") == "ghcr.io"
+        assert cfg.get("docker_registry") == ""
         assert cfg.get("llama_cpp_version") != "evil-tag"
         assert snapshot(project) == before, "nothing may be written into the working directory"
         assert {"environments", "templates", "backups"} <= {p.name for p in install_configs.iterdir()}

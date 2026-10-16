@@ -103,7 +103,10 @@ A build runs these steps; each one is logged:
    next to it, such as ONNX external data, is given as its folder). A local model or dataset that Ditto or an MCP
    client named is checked again right before each container starts ([Local files for AI clients](#mcp-server)).
 5. **Security scan:** Trivy scans the image for HIGH and CRITICAL vulnerabilities (setting `enable_security_scan`,
-   pinned image `aquasec/trivy:0.75.0`). Findings are a warning in the log, not an error. A scan that does not
+   pinned image `aquasec/trivy:0.75.0`). The scanner never gets the Docker socket: the image is saved to an archive
+   in a private folder of the build, Trivy reads only that file (read-only, without capabilities), and the log
+   says when the archive is saved and removed again. Without room for the archive on the cache disk the scan is
+   skipped with a warning that names the sizes. Findings are a warning in the log, not an error. A scan that does not
    finish within the build's time limit (`build_timeout`) is stopped with a warning.
 6. **Importance matrix** (GGUF only, when chosen).
 7. **Convert and quantize** in sandboxed containers ([Build sandbox](#build-sandbox)).
@@ -255,7 +258,8 @@ Deployment copies a finished build to a board over SSH and installs the model fi
 - **Docker mode** (`--docker`, GUI option): also packs container images and starts them on the board. This mode
   is experimental and not verified in this version. An image goes into a package only when it is pinned by its
   digest (`image_inference_runtime: name@sha256:...`) or was built on this computer (it exists here and was never
-  pulled); an image named only by a tag, such as the default `...:latest`, is refused with the reason before anything
+  pulled); an image named only by a tag that was pulled, and the default `llm-framework/inference:local` (a local
+  name; no framework image is published) until you built it here, are refused with the reason before anything
   is copied. A digest-pinned image that is not here is pulled by its digest, never by a tag, and a failed export
   stops the package instead of leaving the image out. A digest-pinned image is packed under the local name
   `<repository>:lcf-<first 12 hex characters of the digest>` (`docker load` does not restore registry digests), and
@@ -1675,7 +1679,8 @@ framework never sees it.
   `Authorization: Bearer <token>`; a request with an `Origin` header (a web page, also a CORS preflight) is refused,
   the `Host` header must name a loopback address with the server's port (against DNS rebinding), and the server
   keeps at most 8 sessions, at most 4 per token (so one client cannot lock the others out), closes a session after
-  10 minutes without a request, and takes at most 1 MiB per request. A session, and a pending question round of the
+  10 minutes without a request, and takes at most 1 MiB per request. It ignores `X-Forwarded-For` and
+  `X-Forwarded-Proto` and writes no access log. A session, and a pending question round of the
   2026-07-28 protocol, belongs to the token that opened it (after a rotation the client opens a new session). A
   request that is still open (a wait, an event stream, a listen stream) is closed as soon as its token is revoked
   or rotated, and so are that token's sessions, so they hold no slot. Anything that runs outside a request the
@@ -2450,8 +2455,6 @@ What does not work yet, so you are not surprised:
 - **Community zoo:** no community repository, index or maintainer key is published yet (`configs/community_keys.yml`
   is empty, `community_index_url` and `community_repo` are empty), so only pack files can be installed and a pull
   request has no repository to go to.
-- **Security scan:** the Trivy container gets the Docker socket to read the image; scanning without the socket is
-  planned.
 - Smaller CLI gaps are listed in [CLI_Usage.md](CLI_Usage.md#known-limitations).
 
 What is planned: [roadmap](BLUEPRINT.md#roadmap). What changed: [CHANGELOG](../CHANGELOG.md).

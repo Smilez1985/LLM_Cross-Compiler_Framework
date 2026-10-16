@@ -323,12 +323,15 @@ class ConfigManager:
             ConfigSchema("max_concurrent_builds", int, False, 2, "Maximum concurrent builds", ["min:1", "max:10"]),
             ConfigSchema("build_timeout", int, False, 3600, "Build timeout in seconds", ["min:60"]),
             ConfigSchema("auto_cleanup", bool, False, True, "Enable automatic cleanup"),
-            ConfigSchema("docker_registry", str, False, "ghcr.io", "Docker registry URL"),
+            ConfigSchema("docker_registry", str, False, "",
+                         "Docker registry (empty: none; read by nothing: the framework publishes and pulls no "
+                         "images of its own)"),
             ConfigSchema("docker_namespace", str, False, "llm-framework", "Docker namespace"),
             
             # --- SSOT: Centralized Image Definitions (v2.3) ---
             ConfigSchema("image_trivy", str, False, "aquasec/trivy:0.75.0", "Security Scanner Image (pinned: 'latest' was compromised in 2026-03)"),
-            ConfigSchema("enable_security_scan", bool, False, True, "Scan built images with Trivy"),
+            ConfigSchema("enable_security_scan", bool, False, True,
+                         "Scan built images with Trivy (from a saved archive of the image, never the Docker socket)"),
             ConfigSchema("llama_cpp_version", str, False, pinned_tag(),
                          "llama.cpp tag of the pin in llama_runtime.yml; target images build the pin's commit, and "
                          "another value only gives a warning"),
@@ -343,7 +346,9 @@ class ConfigManager:
                          "Qdrant image that deployment packages ship to the device when enable_rag_knowledge is on "
                          "(the knowledge base on this computer uses embedded Qdrant)"),
             ConfigSchema("image_base_debian", str, False, "debian:bookworm-slim", "Base Build Image"),
-            ConfigSchema("image_inference_runtime", str, False, "ghcr.io/smilez1985/llm-runtime:latest", "Inference Image"),
+            ConfigSchema("image_inference_runtime", str, False, "llm-framework/inference:local",
+                         "Inference image of deployment packages: a local image name (built on this computer) "
+                         "or name@sha256:<digest>; the framework pulls no image of its own"),
             
             # --- SSOT: Repositories (v2.3) ---
             ConfigSchema("source_repositories", dict, False, {}, "Map of Git Repositories (llama.cpp, etc.)"),

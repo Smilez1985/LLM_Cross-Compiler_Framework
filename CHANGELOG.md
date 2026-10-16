@@ -805,6 +805,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   dropped, after the new name is seen on the image. The image that had that name before stays without a name and is
   listed for you to delete (Tools > Framework Build Images..., `llm-cli doctor --fix --tier 2`). Nothing in the
   framework prunes Docker objects; Docker images are deleted only when you tick them.
+- **No default names a registry image any more** (round 5 h, sixth round): no framework image is published, so the
+  defaults name local images. `image_inference_runtime` is `llm-framework/inference:local`; a deployment package
+  takes it only once you built it on this computer, as for every image without a digest. `docker_registry` is empty
+  (nothing reads it). The experimental benchmark window uses `llm-framework/builder:local` and stops with a message
+  when that image is not here, instead of letting Docker pull it. The `docker` block of `targets/_template/target.yml`
+  and `targets/Rockchip/target.yml` names a local image without a registry (`registry: ""`); comments say that nothing
+  reads `registry` or `tags`. `prebuilt_llama.KNOWN_PREBUILT_IMAGES` keeps the former `ghcr.io` names as a detection
+  list.
+- **uv replaces Poetry for the dependency lock** (sixth round, decision 14): `pyproject.toml` uses the standard
+  `[project]` table (the dev tools in `[dependency-groups]`), `uv.lock` replaces `poetry.lock`, and `requirements.txt`
+  and `requirements-dev.txt` are hash-pinned `uv export` outputs whose first lines name the command. No version
+  changed: all 121 pins are those of the former `poetry.lock`; the exports only leave out the hashes of wheels for
+  Python versions outside 3.11 to 3.14. The installers keep installing the hash-pinned `requirements.txt` of the
+  checked-out framework and now insist on the hashes (`--require-hashes`, no fallback to unpinned packages);
+  `install.bat` stops when pip fails instead of going on. Dependabot updates `uv.lock`, the new CI job "Lock files"
+  checks that `uv.lock` and both exports match, and `make test` and the development setup use uv (`uv sync`).
 - **Questions show a short summary and the warning classes** (delegation design 4.5, LAY-L2): a question in the
   framework's own window (Ditto's dialog, the CLI prompt, the approval window) starts, after its first line, with 3 to 6
   lines in the person's language (English or German): what happens with speaking names, how much it downloads and how
@@ -1039,12 +1055,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `make doctor`.
 
 ### Deprecated
+- `--password VALUE` on `deploy run`, `scan --device` and `device runtime deploy`: every user sees the value in the
+  process list, and it stays in the shell history. It still works and prints a warning; use `--password` without a
+  value (hidden prompt) or `--password-stdin`.
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
   list. Use the hidden prompt or `--with-token`.
 - `llm-cli build start --parallel`: it never had an effect (one call runs one build). It is hidden from the help
   and prints a warning. `--optimization` stays; its help now says that the Rockchip target ignores it.
 
 ### Removed
+- The stale copy `Docker Setup/pyproject.toml` (version 1.6.0, read by nothing): the container image is built from
+  the repository's own `pyproject.toml` and `requirements.txt`.
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
 - The unused setting `input_history` (the input history is personal and lives in the per-user state directory,
@@ -1366,6 +1387,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   log cannot record it first. An AI's `delete_artifact` only moves to the trash; emptying the trash and deleting for
   good stay with you. A source sweep lists every place in the code that deletes, with how it is covered; a new one
   fails it until it is decided.
+- **Device passwords no longer belong on the command line** (sixth-round design 4.3): `deploy run`, `scan --device`
+  and `device runtime deploy` ask with hidden input when `--password` has no value, and `--password-stdin` reads one
+  line from a pipe (refused on a terminal, where the password would be shown while you type). paramiko's loggers are
+  held at INFO or higher while a login authenticates, so a password never reaches a log, also at DEBUG.
+- **The Trivy scan no longer gets the Docker socket** (released in 3.0.0): the scanner container had the host's Docker
+  socket, which gives root rights on this computer even when mounted read-only. The builder now saves the image to an
+  archive in a private folder (0700) of the build, and Trivy reads only that file, read-only, without capabilities and
+  with `no-new-privileges`. The log says when the archive is saved and removed again; without room for it on the cache
+  disk the scan is skipped with a warning that names the sizes. When Docker refuses the scan, the warning names the
+  archive by the label of the cache folder (`cache:...`), never by its path on this computer.
+- **The loopback MCP HTTP listener ignores proxy headers and writes no access log:** uvicorn trusted
+  `X-Forwarded-For` and `X-Forwarded-Proto` from 127.0.0.1, so every local program could claim another address.
+  `mcp serve --transport http` now runs with `proxy_headers=False` and `access_log=False`.
+- **The installer says what the `docker` group means:** `install.sh` still adds you to the group without asking
+  (seventh round, item 6) and now says plainly that its members control the Docker service, which runs as root, so
+  every program running as your user can get root rights; it also names the command that undoes it.
 - **`run_doctor` gives AI clients no host path** (released in 3.0.0): the findings an AI read named the per-user
   folder, the audit log, pack folders, the disk folders and whatever path a crashed check's error quoted, user name
   included. What an AI reads now names the framework's folders by label (`state:audit.db`, "the state folder",

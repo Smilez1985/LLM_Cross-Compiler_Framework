@@ -51,12 +51,14 @@ python -m orchestrator.cli --help      # Kommandozeile
 python -m orchestrator.main            # GUI
 ```
 
-### Variante B: Poetry 2
+### Variante B: Projektumgebung von uv
+
+Installiert genau die Versionen, die `uv.lock` festlegt:
 
 ```bash
-poetry install                         # Laufzeit- und Entwicklungsabhängigkeiten plus die Befehle llm-cli und llm-gui
-poetry run llm-cli --help
-poetry run llm-gui
+uv sync                                # Laufzeit- und Entwicklungsabhängigkeiten plus die Befehle llm-cli, llmcf und llm-gui
+uv run llm-cli --help
+uv run llm-gui
 ```
 
 ### Entwicklungsumgebung von der echten trennen
@@ -75,9 +77,11 @@ poetry run llm-gui
 
 ## 2. Abhängigkeiten
 
-- `pyproject.toml` legt die erlaubten Versionen fest, `poetry.lock` fixiert sie (Lock-Datei von Poetry 2).
-- `requirements.txt` (Laufzeit) und `requirements-dev.txt` (Entwicklungswerkzeuge) sind Exporte der Lock-Datei mit
-  Hashes. Die Installer und die CI installieren daraus. **Bearbeite sie nie von Hand.**
+- `pyproject.toml` legt die erlaubten Versionen fest (`[project]`, die Entwicklungswerkzeuge in
+  `[dependency-groups]`), `uv.lock` fixiert sie (die Lock-Datei von [uv](https://docs.astral.sh/uv/)).
+- `requirements.txt` (Laufzeit) und `requirements-dev.txt` (Entwicklungswerkzeuge) sind Exporte von `uv.lock` mit
+  Hashes. Ihre ersten Zeilen nennen den Befehl, der sie erzeugt hat. Die Installer und die CI installieren daraus.
+  **Bearbeite sie nie von Hand.**
 - `anthropic`, `openai`, `fastembed` und `mcp` sind absichtlich auf exakte Versionen festgelegt: KI-Werkzeuge sind
   ein Ziel von Angriffen auf die Lieferkette (siehe die Kommentare in `pyproject.toml`). Wenn du eine solche
   Festlegung änderst, begründe es im Pull-Request.
@@ -85,26 +89,26 @@ poetry run llm-gui
 Nach dem Hinzufügen, Entfernen oder Aktualisieren einer Abhängigkeit:
 
 ```bash
-poetry lock                                                    # poetry.lock aktualisieren
-poetry check --lock                                            # pyproject.toml und poetry.lock passen zusammen
-poetry export -f requirements.txt -o requirements.txt          # Laufzeitpakete
-poetry export -f requirements.txt --only dev -o requirements-dev.txt
+uv lock                                         # uv.lock aktualisieren (andere Festlegungen bleiben; ein Paket: --upgrade-package NAME)
+uv lock --check                                 # pyproject.toml und uv.lock passen zusammen
+uv export --frozen --format requirements-txt --no-dev --no-emit-project -o requirements.txt
+uv export --frozen --format requirements-txt --only-group dev --no-emit-project -o requirements-dev.txt
 ```
 
-Poetry 2 braucht dafür das Export-Plugin: `poetry self add poetry-plugin-export`. `poetry check --lock` kann
-Warnungen zu veralteten Feldern in `[tool.poetry]` ausgeben; entscheidend ist der Exit-Code. Danach pip-audit
-([Abschnitt 5](#5-lint--und-sicherheitsprüfungen)) und die Tests ausführen und `pyproject.toml`, `poetry.lock` und
-beide Requirements-Dateien zusammen committen.
+Danach pip-audit ([Abschnitt 5](#5-lint--und-sicherheitsprüfungen)) und die Tests ausführen und `pyproject.toml`,
+`uv.lock` und beide Requirements-Dateien zusammen committen. Der CI-Job "Lock files" führt dieselben Befehle aus und
+schlägt fehl, wenn eine Datei abweicht.
 
-Dependabot öffnet wöchentlich Pull-Requests für Python-Pakete, GitHub Actions und die Dockerfiles der Targets. Prüfe
-bei Python-Updates, ob beide Requirements-Dateien noch zu `poetry.lock` passen; sonst exportiere sie neu.
+Dependabot öffnet wöchentlich Pull-Requests für Python-Pakete (`pyproject.toml` und `uv.lock`), GitHub Actions und
+die Dockerfiles der Targets. Es ändert nur `uv.lock`: Führe die beiden Export-Befehle auf seinem Branch aus und pushe
+die Requirements-Dateien mit.
 
 ---
 
 ## 3. Tests ausführen
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest      # mit Poetry: QT_QPA_PLATFORM=offscreen poetry run pytest
+QT_QPA_PLATFORM=offscreen python -m pytest      # in der Projektumgebung von uv: QT_QPA_PLATFORM=offscreen uv run pytest
 ```
 
 Windows (PowerShell):
@@ -314,7 +318,7 @@ der Builder oder das Makefile ändern, baut die CI das Image des Frameworks mit 
 (ein lokales Tag, nie hochgeladen), prüft sein Dockerfile mit einem Linter und führt Rauchtests aus. `make build`,
 `make up`, `make down`, `make mojo` und `make audit` funktionieren damit lokal
 ([docs/Container_Setup_DE.md](docs/Container_Setup_DE.md)). Kein Workflow, kein Makefile-Ziel, kein Skript und kein
-Dokument lädt ein Framework-Image hoch oder herunter (`tests/test_container_setup.py`). `make test` (Poetry),
+Dokument lädt ein Framework-Image hoch oder herunter (`tests/test_container_setup.py`). `make test` (uv),
 `make hooks` und `make secret-scan` sind unverändert.
 
 ---
