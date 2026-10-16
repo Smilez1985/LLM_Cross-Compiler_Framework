@@ -468,6 +468,7 @@ def test_older_packages_go_through_ask_deletion_with_the_full_list(qapp, window,
     monkeypatch.setattr(deletion_dialog, "ask_deletion", lambda parent, plan, **kw: asked.append((plan, kw)))
     Boxes(monkeypatch)
     window.buttons["btn_boards_prune"].click()
+    wait(qapp, window)   # the list is read in the background (review of wave 5a)
     (plan, kw), = asked
     assert kw["multiple"] is True and kw["title"] == "Runtime packages of ZERO 3W"
     item = next(i for i in plan.items if i.file_name == old.name)
@@ -475,6 +476,8 @@ def test_older_packages_go_through_ask_deletion_with_the_full_list(qapp, window,
     assert old.exists(), "No (or closing the dialog) deletes nothing"
     monkeypatch.setattr(deletion_dialog, "ask_deletion", lambda parent, plan, **kw: accept(plan, "gui", "permanent"))
     window.buttons["btn_boards_prune"].click()
+    wait(qapp, window)
+    wait(qapp, window)   # and the ticked files are deleted (or moved to the trash, hashed there) in the background
     assert not old.exists() and "Deleted for good" in window.output.toPlainText()
     rows = window.framework.tool_registry.audit.rows
     assert rows[0]["actor"] == "gui" and rows[0]["tool"] == "device_runtime"
@@ -693,3 +696,160 @@ def test_no_html_is_built_from_board_data(qapp, window):
     assert window.table.item(0, 0).text() == "<b>bold</b>"
     source = (REPO_ROOT / "orchestrator/gui/boards_window.py").read_text(encoding="utf-8")
     assert not re.search(r"setText\(f?[\"']<", source) and "setHtml" not in source
+
+
+# --- review of wave 5a: the defects found after the build -------------------------------------------------------------
+
+def test_older_packages_are_listed_and_deleted_off_the_gui_thread(qapp, window, monkeypatch):
+    """The list of packages (a folder walk) and the deletion (the trash hashes each file it takes) never run in a
+    slot of the window: both run in the background, the question stays in the GUI thread."""
+    from orchestrator.Core.deletion import accept
+    from orchestrator.gui import deletion_dialog
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    state = state_of(window)
+    stored(state)
+    devices = DeviceRuntimeStore(state, "0123456789abcdef")
+    devices.root.mkdir(parents=True)
+    old = devices.root / "llama-runtime-arm64-aaaaaaaaaaaaaaaa.tar.gz"
+    old.write_bytes(b"x" * 2048)
+    window.reload()
+    window.select("0123456789abcdef")
+    on_gui = {}
+    real_plan, real_delete = DeviceRuntimeStore.cleanup_plan, DeviceRuntimeStore.delete_packages
+
+    def cleanup_plan(self):
+        on_gui.setdefault("plan", []).append(threading.current_thread() is threading.main_thread())
+        return real_plan(self)
+
+    def delete_packages(self, *a, **k):
+        on_gui.setdefault("delete", []).append(threading.current_thread() is threading.main_thread())
+        return real_delete(self, *a, **k)
+
+    def ask(parent, plan, **kw):
+        on_gui.setdefault("ask", []).append(threading.current_thread() is threading.main_thread())
+        return accept(plan, "gui", "permanent")
+
+    monkeypatch.setattr(DeviceRuntimeStore, "cleanup_plan", cleanup_plan)
+    monkeypatch.setattr(DeviceRuntimeStore, "delete_packages", delete_packages)
+    monkeypatch.setattr(deletion_dialog, "ask_deletion", ask)
+    Boxes(monkeypatch)
+    window.buttons["btn_boards_prune"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    assert not old.exists() and "Deleted for good" in window.output.toPlainText()
+    assert on_gui["ask"] == [True], "the person is asked in the GUI thread"
+    assert on_gui["plan"] and not any(on_gui["plan"]), "the folder is read off the GUI thread"
+    assert on_gui["delete"] == [False], "the deletion runs off the GUI thread"
+
+
+def fakes_with_tested_on(monkeypatch, record, on_gui):
+    """runtime_fakes with a short benchmark that ran (a smoke check and the model's sha256), so 'tested on' is
+    recorded; `on_gui` collects the thread of each step of that record."""
+    from orchestrator.Core import artifact_output
+    from orchestrator.runtime.build.verify import Check, VerifyReport
+    from orchestrator.runtime.device import service, steps
+    runtime_fakes(monkeypatch, record)
+    report = VerifyReport([Check("version", True, "b1"), Check("smoke", True, "llama-bench ran")])
+    monkeypatch.setattr(steps, "choose_bench_model", lambda shell, home, model, **kw: steps.BenchChoice(
+        "/home/dietpi/models/q.gguf", True, "c" * 64))
+    monkeypatch.setattr(steps, "install_runtime", lambda shell, **kw: steps.InstallOutcome(SimpleNamespace(
+        root="/home/dietpi/.local/share/x", previous=None, notes=[], unit_started=False), report, True))
+    monkeypatch.setattr(steps, "check_runtime", lambda shell, **kw: report)
+
+    def folders(framework):
+        on_gui.append(("folders", threading.current_thread() is threading.main_thread()))
+        return [Path("output")]
+
+    def record_board_test(output_dirs, device, profile, rep, digest, build_id, source, kv):
+        on_gui.append(("record", threading.current_thread() is threading.main_thread()))
+        assert digest == "c" * 64 and build_id == "b" * 64
+        return [Path("output/build-1")]
+
+    monkeypatch.setattr(artifact_output, "artifact_folders", folders)
+    monkeypatch.setattr(service, "record_board_test", record_board_test)
+
+
+def test_tested_on_is_recorded_off_the_gui_thread(qapp, window, monkeypatch):
+    """'tested on' walks every golden-artifact folder for the builds of the benchmarked model: after a deploy and
+    after a verify it runs in the background, and the window says what was recorded."""
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    record, on_gui = [], []
+    fakes_with_tested_on(monkeypatch, record, on_gui)
+    state = state_of(window)
+    stored(state, ssh_user="dietpi")
+    window.reload()
+    Boxes(monkeypatch, answer="yes")
+    window.deploy(window.entries[0], RK3566, None, None, "models/q.gguf")
+    wait(qapp, window)
+    wait(qapp, window)
+    assert "with 1 build(s) of this model" in window.output.toPlainText()
+    assert on_gui == [("folders", False), ("record", False)], on_gui
+    on_gui.clear()
+    DeviceRuntimeStore(state, "0123456789abcdef").save_record({"build_id": "b" * 64, "install": "user"})
+    window.verify(window.entries[0], RK3566, None, "models/q.gguf")
+    wait(qapp, window)
+    assert on_gui == [("folders", False), ("record", False)], on_gui
+
+
+def test_the_last_deploy_column_names_only_a_deploy(qapp, window):
+    """A board whose only bookkeeping is a recorded contact (a failed verify, Mojo's note) has no last deploy: the
+    column shows the dash, never "None (failed)"."""
+    from orchestrator.runtime.device import reasons
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    state = state_of(window)
+    device = trusted_board(state)
+    TrustedDevices(state).note_reach(device.device_id, "verify", reasons.HOST_DOWN)
+    window.reload()
+    assert window.table.item(0, 7).text() == "-"
+    TrustedDevices(state).note_deploy(device.device_id, True, "pkg")
+    window.reload()
+    assert window.table.item(0, 7).text().endswith("(ok)") and "None" not in window.table.item(0, 7).text()
+
+
+@pytest.mark.parametrize("install, expected", [
+    ("user", "The server listens on 127.0.0.1:9090; its key is in ~/.config/llm-framework/llama-server.key"),
+    ("systemd", "systemd unit: enabled; the server listens on 127.0.0.1:9090; its key is in "
+                "~/.config/llm-framework/llama-server.key")])
+def test_a_deploy_says_where_the_server_listens(qapp, window, monkeypatch, install, expected):
+    """As the CLI: after a deploy the person reads the server's loopback port and where its key is (and, for the
+    systemd unit, whether it was started or only enabled)."""
+    record = []
+    runtime_fakes(monkeypatch, record)
+    extra = {"sudo_confirmed_at": "2026-10-16T10:00:00Z", "model": "models/q.gguf"} if install == "systemd" else {}
+    stored(state_of(window), ssh_user="dietpi", port=9090, install=install, **extra)
+    window.reload()
+    Boxes(monkeypatch)
+    window.deploy(window.entries[0], RK3566, None, None, None)
+    wait(qapp, window)
+    wait(qapp, window)
+    assert expected in window.output.toPlainText()
+
+
+def test_the_source_is_never_fetched_without_the_persons_yes(qapp, window, monkeypatch):
+    """The source was cached when the window looked, so nobody was asked; when the cache is gone by the time the
+    build runs, the build stops and says so instead of fetching about 215 MB unasked."""
+    import orchestrator.runtime.build.source as source_module
+    from orchestrator.gui import boards_window
+    from orchestrator.runtime.device import steps
+    from test_device_runtime import HOST
+    monkeypatch.setattr("orchestrator.runtime.build.toolchain.host_platform", lambda: HOST)
+    monkeypatch.setattr(source_module, "cached_source", lambda pin, state: Path("cached-source"))
+    fetched = []
+
+    def build_runtime(state, device_id, profile, plan, source, **kw):
+        if not kw["may_fetch"]():   # the cache vanished after the look
+            raise steps.SourceDeclined("not allowed")
+        fetched.append(True)
+        raise AssertionError("fetched without a yes")
+
+    monkeypatch.setattr(steps, "build_runtime", build_runtime)
+    monkeypatch.setattr(boards_window, "_exec", lambda dialog: True)
+    stored(state_of(window))
+    window.reload()
+    window.select("0123456789abcdef")
+    boxes = Boxes(monkeypatch, answer="yes")
+    window.buttons["btn_boards_build"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    assert boxes.questions() == [] and fetched == []
+    assert "The build needs the pinned llama.cpp source" in window.output.toPlainText()

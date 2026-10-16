@@ -290,7 +290,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
     the model is loaded. The measurement runs on the board, never on this computer (seventh round 2'); its result is
     recorded with every build of that model below `output_dirs` as "tested on" the board (tested.py, N3)."""
     from orchestrator.runtime.build.store import BuildStore
-    from orchestrator.runtime.catalog import load_catalog
+    from orchestrator.runtime.device import steps
     from orchestrator.runtime.device.package import DeviceRuntimeStore
     from orchestrator.runtime.device.remote import RemoteError, RemoteShell, model_sha256, read_facts, \
         verify_on_device
@@ -325,11 +325,8 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
                 raise DeviceRuntimeError(f"There is no readable model at the path the deploy settings name on "
                                          f"{device.label}.", code="missing_information",
                                          next="Ask the person to copy the model there or change the setting.")
-            catalog = load_catalog()
-            pinned = {m.sha256 for m in catalog.models if m.sha256}
-            if catalog.smoke_model is not None:
-                pinned.add(catalog.smoke_model.sha256)
-            trusted = digest in pinned
+            # the same catalog check as the CLI's and the Boards window's benchmark (steps.choose_bench_model)
+            trusted = digest in steps.catalog_model_digests()
             if not trusted:
                 if not allow_untrusted:
                     raise DeviceRuntimeError("The model on the device is not a catalog model and running it was not "
