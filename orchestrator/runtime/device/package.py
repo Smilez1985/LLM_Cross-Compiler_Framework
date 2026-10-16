@@ -197,7 +197,8 @@ def package_runtime(store: BuildStore, build: StoredBuild, *, licence: Path, out
     finally:
         if tmp.exists():
             tmp.unlink()
-    target.with_name(target.name + ".sha256").write_text(f"{digest}  {target.name}\n", encoding="ascii")
+    target.with_name(target.name + ".sha256").write_text(f"{digest}  {target.name}\n", encoding="ascii",
+                                                        newline="\n")  # sha256sum's format, LF on every host
     return PackagedRuntime(path=target, sha256=digest, build_id=build.build_id, members=tuple(members))
 
 

@@ -61,7 +61,7 @@ def write(root: Path, rel: str, text, mode="w"):
     if isinstance(text, bytes):
         path.write_bytes(text)
     else:
-        path.write_text(text, encoding="utf-8")
+        path.write_bytes(text.encode("utf-8"))  # LF as on a board, also on a Windows host
     return path
 
 
@@ -612,7 +612,8 @@ class TestKeyTable:
             raise FileNotFoundError(cmd[0])
 
         monkeypatch.setattr(probe.subprocess, "run", spy)
-        values = probe.collect(root=str(make_sysroot(tmp_path, "rk3566")))
+        # system: the sysroot is a Linux board on every host (a Windows host would otherwise read its own CPU)
+        values = probe.collect(root=str(make_sysroot(tmp_path, "rk3566")), system="Linux")
         assert values["CPU_MODEL"] == "Cortex-A55" and calls
         assert all(kwargs["stdin"] is subprocess.DEVNULL and kwargs.get("timeout") for _c, kwargs in calls)
 
