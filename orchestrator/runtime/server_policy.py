@@ -6,8 +6,9 @@ Every launcher the framework has takes the forbidden flags, the environment rule
 Ditto's server (llama_server.py: server_command, server_env), the build verification (build/verify.py: check_command,
 cleared_env, server_tools_check_command), the dataset manager's perplexity check (check_command, cleared_env), the
 device runtime's start script and systemd unit (device/launcher.py: SERVER_FIXED, START_SCRIPT_OPTIONS,
-check_server_command, posix_cleared_env) and the checks on a board over SSH (device/remote.py: check_command,
-posix_cleared_env); later the Docker command.
+check_server_command, posix_cleared_env), the checks on a board over SSH (device/remote.py: check_command,
+posix_cleared_env) and Ditto's server in a container (container_server.py: container_server_command,
+check_container_server_command, check_publish).
 
 - FORBIDDEN_FLAGS: llama-server options that give the model its own tools, file or shell access, MCP clients, a web
   UI, remote compute (RPC), state endpoints, downloads (Hugging Face, URLs, Docker Hub), a prompt log on disk,
@@ -31,6 +32,13 @@ posix_cleared_env); later the Docker command.
   --api-key-file, and the options of SERVER_FIXED: no web UI, no /slots, the chat template engine, offline);
   server_command() builds Ditto's, write_key_file() writes its key, and the device start script is generated from
   the same constants and checked with the same function.
+
+- Ditto's server in a container (runtime mode "docker") keeps every one of these rules but one: inside the container's
+  own network namespace it listens on CONTAINER_HOST, because Docker forwards a published port to the container's
+  address, never to its loopback. The port is published on the host's loopback address only (check_publish), so the
+  server is as unreachable from other computers as a server on the host's loopback; the per-start key still guards
+  it against other containers. check_container_server_command() holds that command line to exactly one --host
+  CONTAINER_HOST, the fixed container port, one --api-key-file and SERVER_FIXED.
 
 SERVER_TOOLS_CHECK is the one deliberate exception: the build verification (and the checks on a board) start a
 freshly built llama-server with --tools once, with a model path that does not exist and a cleared environment, and
@@ -211,6 +219,11 @@ def check_server_command(cmd: Sequence[str]) -> None:
         raise PolicyError(f"llama-server must listen on {LOOPBACK} only (found --host {hosts or 'missing'})")
     if len(_values(cmd, "--port")) != 1:
         raise PolicyError("llama-server needs exactly one --port")
+    _check_key_file_and_fixed(cmd)
+
+
+def _check_key_file_and_fixed(cmd: Sequence[str]) -> None:
+    """The rules every server command line shares: exactly one --api-key-file and every option of SERVER_FIXED."""
     keys = _values(cmd, "--api-key-file")
     if len(keys) != 1 or not keys[0]:
         raise PolicyError("llama-server needs exactly one --api-key-file (the key is never given on the command line)")
@@ -218,6 +231,53 @@ def check_server_command(cmd: Sequence[str]) -> None:
     missing = [opt for opt in SERVER_FIXED if opt not in names]
     if missing:
         raise PolicyError(f"llama-server must be started with {', '.join(missing)}")
+
+
+# --- Ditto's server in a container -------------------------------------------------------------------------------------
+
+# Inside the container's own network namespace only; the port is published on LOOPBACK (check_publish), so it is
+# reachable from this computer only.
+CONTAINER_HOST = "0.0.0.0"  # nosec B104
+CONTAINER_PORT = 8080
+
+
+def check_container_server_command(cmd: Sequence[str]) -> None:
+    """Raises PolicyError unless the command line of Ditto's server in a container keeps the policy: the rules of
+    check_server_command, except that the one --host is CONTAINER_HOST (inside the container) and the one --port is
+    CONTAINER_PORT, which check_publish allows to be published on the host's loopback address only."""
+    check_command(cmd)
+    hosts = _values(cmd, "--host")
+    if hosts != [CONTAINER_HOST]:
+        raise PolicyError(f"llama-server in Ditto's container listens on {CONTAINER_HOST} inside the container only "
+                          f"(found --host {hosts or 'missing'})")
+    if _values(cmd, "--port") != [str(CONTAINER_PORT)]:
+        raise PolicyError(f"llama-server in Ditto's container needs exactly one --port {CONTAINER_PORT}")
+    _check_key_file_and_fixed(cmd)
+
+
+def container_server_command(server: str, model: str, *, key_file: str, alias: str,
+                             extra: Sequence[str] = ()) -> List[str]:
+    """The llama-server command line of Ditto's server in a container (paths inside the container): the model and its
+    alias, CONTAINER_HOST and CONTAINER_PORT, the key file and the fixed options, then `extra`. Checked before it is
+    returned."""
+    cmd = [str(server), "-m", str(model), "--alias", str(alias), "--host", CONTAINER_HOST, "--port",
+           str(CONTAINER_PORT), "--api-key-file", str(key_file), *SERVER_FIXED, *[str(a) for a in extra]]
+    check_container_server_command(cmd)
+    return cmd
+
+
+def check_publish(ports: Mapping[str, object]) -> None:
+    """Raises PolicyError unless the published ports of Ditto's server container (docker-py `ports`) are exactly
+    CONTAINER_PORT/tcp on the host's loopback address with a fixed port: nothing else is published, and never on every
+    interface of the host."""
+    want = f"{CONTAINER_PORT}/tcp"
+    if set(ports) != {want}:
+        found = ", ".join(sorted(map(str, ports))) or "none"
+        raise PolicyError(f"Ditto's container publishes only {want} (found {found})")
+    binding = ports[want]
+    if not (isinstance(binding, tuple) and len(binding) == 2 and binding[0] == LOOPBACK
+            and isinstance(binding[1], int) and 0 < binding[1] < 65536):
+        raise PolicyError(f"Ditto's container port is published on {LOOPBACK} with a fixed port only")
 
 
 def server_command(server: Path, model: Path, *, port: int, key_file: Path, alias: str,
