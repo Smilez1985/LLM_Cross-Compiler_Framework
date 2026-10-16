@@ -1172,12 +1172,12 @@ def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for:
     registered tool counts as reviewed afterwards: the questions apply to the tools listed above them. `shown_for`:
     whose tool facts to list (a named token's, whose own policy `current` is), else `caller`'s. Needs a person at a
     terminal: piped answers (an AI client with a shell) are refused."""
-    from orchestrator.tools.policy import TIER_LABELS, CallerPolicy, Decision, ToolTier
+    from orchestrator.tools.policy import TIER_LABELS, Decision, ToolTier, caller_section, with_section
     _require_terminal("llm-cli tools permissions")
-    section = current.callers.get(caller) if caller else None
-    base_tiers = section.tiers if section is not None else current.tiers
     # A caller's new section starts from the shared settings, so creating it never loosens a per-tool setting.
-    overrides = dict((section if section is not None else current).overrides)
+    section = caller_section(current, caller) if caller else current
+    base_tiers = section.tiers
+    overrides = dict(section.overrides)
     rows = registry.permissions(shown_for or caller or "")
     for row in rows:  # what each tool brings, shown before the person decides
         facts = [f"default {row['default']}", f"at most {row['max']}"] + (["new"] if row["new"] else []) + [
@@ -1195,12 +1195,8 @@ def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for:
         answer = click.prompt(f"{label}", type=click.Choice(choices), default=default)
         tiers[tier] = Decision(answer)
     reviewed = sorted(spec.name for spec in registry.list())
-    if caller:
-        callers = dict(current.callers)
-        callers[caller] = CallerPolicy(tiers=tiers, overrides=overrides, reviewed=reviewed)
-        return current.model_copy(update={"configured": True, "callers": callers})
-    return current.model_copy(update={"configured": True, "tiers": tiers, "overrides": overrides,
-                                      "reviewed": reviewed})
+    changed = with_section(current, caller, tiers=tiers, overrides=overrides, reviewed=reviewed)
+    return changed.model_copy(update={"configured": True})
 
 
 def _save_policy(registry, policy=None, change=None):
@@ -1236,7 +1232,7 @@ def _print_grants(registry) -> None:
 
 
 def _set_framework_only(registry, caller: Optional[str], add: Tuple[str, ...], remove: Tuple[str, ...]) -> None:
-    from orchestrator.tools.policy import CallerPolicy
+    from orchestrator.tools.policy import caller_section, with_section
     known = {spec.name for spec in registry.list()}
     unknown = sorted((set(add) | set(remove)) - known)
     if unknown:
@@ -1244,15 +1240,10 @@ def _set_framework_only(registry, caller: Optional[str], add: Tuple[str, ...], r
         sys.exit(2)
 
     def change(current):
-        section = current.callers.get(caller) if caller else current
-        if caller and section is None:  # a caller's first own section starts from the shared permissions
-            section = CallerPolicy(tiers=dict(current.tiers), overrides=dict(current.overrides),
-                                   reviewed=current.reviewed, framework_only=list(current.framework_only))
+        # a caller's first own section starts from the shared permissions
+        section = caller_section(current, caller) if caller else current
         tools = sorted((set(section.framework_only) | set(add)) - set(remove))
-        if caller:
-            return current.model_copy(update={"callers": {**current.callers,
-                                                          caller: section.model_copy(update={"framework_only": tools})}})
-        return current.model_copy(update={"framework_only": tools})
+        return with_section(current, caller, framework_only=tools)
     policy = _save_policy(registry, change=change)
     tools = policy.framework_only_for(caller)
     console.print(f"[green]Asked in the framework only, for {escape(CALLER_LABELS[caller])}: "
@@ -1277,7 +1268,7 @@ def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: 
                       framework_only: Tuple[str, ...] = (), anywhere: Tuple[str, ...] = (), show_grants: bool = False,
                       revoke_grant: Optional[str] = None):
     """Set which tool calls are allowed, need confirmation, or are denied (needs a terminal)"""
-    from orchestrator.tools.policy import ToolPolicy
+    from orchestrator.tools.policy import reset_policy
     registry = _tool_registry(ctx)
     if show_grants:
         _print_grants(registry)
@@ -1308,13 +1299,10 @@ def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: 
         return
     if reset:
         _require_terminal("llm-cli tools permissions --reset")
+        _save_policy(registry, change=lambda current: reset_policy(current, caller))
         if caller:
-            _save_policy(registry, change=lambda current: current.model_copy(update={
-                "callers": {name: section for name, section in current.callers.items() if name != caller},
-                "grants": {name: grants for name, grants in current.grants.items() if name != caller}}))
             console.print(f"[yellow]{CALLER_LABELS[caller]} use the shared tool permissions again.[/yellow]")
             return
-        _save_policy(registry, change=lambda current: ToolPolicy())
         console.print("[yellow]Tool permissions reset to the recommended defaults.[/yellow]")
         return
     console.print(f"Tool permissions for {CALLER_LABELS[caller]}.")
@@ -1331,39 +1319,9 @@ def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: 
 
 
 def _audit_rows(registry, entries, details: bool = False):
-    """The audit view for people: who (the caller in words, the client as it named itself), the tool by its title
-    (and the name the AI wrote, when that was a spelling variant), how the person was asked and what they answered,
-    the reason code; with `details` also the repairs, duration, result, links and session."""
-    from orchestrator.tools.registry import ToolError, caller_label
-
-    def title(name: str) -> str:
-        try:
-            return registry.get(name).title
-        except ToolError:
-            return name
-
-    for entry in entries:
-        who = caller_label(str(entry.get("actor") or ""))
-        if entry.get("client"):
-            who += f"\n{entry['client']} (self-reported)"
-        tool = str(entry.get("tool") or "")
-        shown = title(tool) + (f" ({tool})" if title(tool) != tool else "")
-        if entry.get("name_requested") and entry["name_requested"] != tool:
-            shown += f"\nthe AI wrote {entry['name_requested']}"
-        asked = entry.get("confirm_channel") or ""
-        if entry.get("answer"):
-            asked = f"{asked}: {entry['answer']}" if asked else str(entry["answer"])
-        row = [str(entry.get("ts", "")), who, shown, str(entry.get("decision", "")),
-               {None: "-", 0: "no", 1: "yes"}.get(entry.get("approved"), "?"), str(entry.get("outcome", "")),
-               str(entry.get("reason_code") or ""), asked or "-"]
-        if details:
-            repairs = entry.get("repairs") if isinstance(entry.get("repairs"), list) else []
-            result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
-            row += [", ".join(f"{r.get('kind')}:{r.get('field') or '-'}" for r in repairs if isinstance(r, dict)),
-                    str(entry.get("duration_ms") or ""),
-                    (f"{str(result.get('sha256', ''))[:12]} {result.get('bytes', '')} B" if result else ""),
-                    ", ".join(str(link) for link in entry.get("links") or []), str(entry.get("session") or "")]
-        yield row
+    """The audit view for people (orchestrator/tools/audit_view.py, shared with the GUI's Audit Log window)."""
+    from orchestrator.tools.audit_view import audit_rows
+    return audit_rows(registry, entries, details)
 
 
 @tools.command('audit')
@@ -1380,6 +1338,8 @@ def _audit_rows(registry, entries, details: bool = False):
 def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, archive: bool, summary: bool):
     """Show the audit log of tool calls"""
     import sqlite3
+
+    from orchestrator.tools.audit_view import DETAIL_COLUMNS, ENTRY_COLUMNS, SUMMARY_COLUMNS, SUMMARY_ENTRIES
     registry = _tool_registry(ctx)
     if registry.audit is None:
         console.print("[red]No audit log.[/red]")
@@ -1399,14 +1359,13 @@ def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, 
         return
     if summary:
         try:
-            rows = _audit_summary(registry.audit.entries(100000))
+            rows = _audit_summary(registry.audit.entries(SUMMARY_ENTRIES))
         except (sqlite3.Error, OSError) as e:
             console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be read: "
                           f"{escape(str(e))}[/red]")
             sys.exit(1)
         table = Table(title="Tool calls per caller")
-        for column in ("Who", "Calls", "Refused", "Cannot reported", "confirmed", "contradicted", "premature",
-                       "unchecked"):
+        for column in SUMMARY_COLUMNS:
             table.add_column(column)
         for row in rows:
             table.add_row(*(escape(str(cell)) for cell in row))
@@ -1423,39 +1382,18 @@ def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, 
         console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be read: {escape(str(e))}[/red]")
         sys.exit(1)
     table = Table(title="Tool calls")
-    columns = ["Time", "Who", "Tool", "Decision", "Confirmed", "Outcome", "Reason", "Asked / answer"]
-    if details:
-        columns += ["Repairs", "ms", "Result", "Links", "Session"]
-    for column in columns:
+    for column in ENTRY_COLUMNS + (DETAIL_COLUMNS if details else ()):
         table.add_column(column)
     for row in _audit_rows(registry, entries, details):
         table.add_row(*(escape(cell) for cell in row))
     console.print(table)
 
 
-CANNOT_CHECKS = ("confirmed", "contradicted", "premature", "unchecked")
-REFUSED_OUTCOMES = ("denied", "not_confirmed", "rate_limited", "repeat_refused", "invalid_input", "unknown_tool")
-
-
 def _audit_summary(entries) -> list:
-    """Rows per caller: calls (end entries), refusals, report_cannot_do reports and how they were checked (design
-    6.11 D14: the honest "cannot" in use)."""
-    per: dict = {}
-    for entry in entries:
-        actor = str(entry.get("actor") or "?")
-        row = per.setdefault(actor, {"calls": 0, "refused": 0, "cannot": 0, **{c: 0 for c in CANNOT_CHECKS}})
-        outcome = str(entry.get("outcome") or "")
-        if outcome == "cannot_reported":
-            row["cannot"] += 1
-            check = str(entry.get("detail") or "").split(":")[-1].split("\n")[0].strip()
-            if check in CANNOT_CHECKS:
-                row[check] += 1
-        elif outcome in REFUSED_OUTCOMES:
-            row["refused"] += 1
-        elif outcome in ("ok", "error", "cancelled"):
-            row["calls"] += 1
-    return [[actor, r["calls"], r["refused"], r["cannot"], *(r[c] for c in CANNOT_CHECKS)]
-            for actor, r in sorted(per.items())]
+    """Rows per caller: calls, refusals, report_cannot_do reports and how they were checked
+    (orchestrator/tools/audit_view.py, shared with the GUI's Audit Log window)."""
+    from orchestrator.tools.audit_view import audit_summary
+    return audit_summary(entries)
 
 
 # Pending approvals: questions of AI clients that could not ask you themselves (design 6.9).
@@ -1728,7 +1666,7 @@ def tools_folders_remove(ctx: FrameworkContext, label: str):
 @pass_context
 def tools_crawl_notice(ctx: FrameworkContext):
     """Read the one-time Deep Ingest notice (needs a terminal); AI clients may crawl only after a person read it"""
-    from orchestrator.utils.crawl_notice import CrawlNotice, notice_text
+    from orchestrator.utils.crawl_notice import CrawlNotice, acknowledge_and_audit, notice_text
     from orchestrator.utils.localization import current_language
     _require_terminal("llm-cli tools crawl-notice")
     ctx.require_framework()
@@ -1741,16 +1679,10 @@ def tools_crawl_notice(ctx: FrameworkContext):
     if not click.confirm("I have read the notice", default=False):
         console.print("Not acknowledged: AI clients cannot crawl until a person has read it.")
         sys.exit(1)
-    notice.acknowledge("cli")
     registry = getattr(ctx.framework_manager, "tool_registry", None)
-    audit = getattr(registry, "audit", None)
-    if audit is not None:
-        try:
-            audit.record("cli", "crawl_notice_acknowledged", "framework", "person", "ok", arguments={"via": "cli"},
-                         approved=True)
-        except Exception as e:
-            console.print(f"[yellow]Acknowledged, but the audit log could not record it: {escape(str(e))}"
-                          "[/yellow]")
+    problem = acknowledge_and_audit(notice, "cli", getattr(registry, "audit", None))
+    if problem:
+        console.print(f"[yellow]Acknowledged, but the audit log could not record it: {escape(problem)}[/yellow]")
     console.print("[green]Acknowledged. AI clients may now ask to crawl documentation sites (crawl_docs_site); "
                   "you confirm every crawl.[/green]")
 
@@ -4319,7 +4251,7 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int, conta
 def mcp_config(ctx: FrameworkContext, write_client: Optional[str]):
     """Show how to connect Claude Code, Claude Desktop or VS Code to this framework"""
     from orchestrator import mcp_server
-    app_root = Path(__file__).resolve().parents[1]
+    app_root = mcp_server.installation_root()
     try:
         if write_client == 'claude-desktop':
             path = mcp_server.write_claude_desktop_config(app_root)
@@ -4374,20 +4306,20 @@ def _token_store(registry):
     return registry.tokens
 
 
+def _audit_problem(problem: Optional[str]) -> None:
+    if problem:
+        Console(stderr=True).print(f"[yellow]Done, but the audit log could not record it: {escape(problem)}[/yellow]")
+
+
 def _audit_person(registry, event: str, arguments: dict) -> None:
     """A person's change to who may call the tools, in the audit log (actor cli). Names only, never a token."""
-    if registry.audit is None:
-        return
-    try:
-        registry.audit.record("cli", event, "framework", "person", "ok", arguments=arguments, approved=True)
-    except Exception as e:
-        Console(stderr=True).print(f"[yellow]Done, but the audit log could not record it: {escape(str(e))}[/yellow]")
+    from orchestrator.tools.mcp_tokens import person_change
+    _audit_problem(person_change(registry, "cli", event, arguments))
 
 
 def _policy_summary(policy) -> str:
-    from orchestrator.tools.policy import TIER_LABELS
-    tiers = ", ".join(f"{tier.value}: {policy.tiers[tier].value}" for tier in TIER_LABELS)
-    return tiers + (f" (+{len(policy.overrides)} per tool)" if policy.overrides else "")
+    from orchestrator.tools.mcp_tokens import policy_summary
+    return policy_summary(policy)
 
 
 def _show_new_token(name: str, token: str, what: str) -> None:
@@ -4413,37 +4345,24 @@ def mcp_token():
 @pass_context
 def mcp_token_add(ctx: FrameworkContext, name: str, policy_from: Optional[str], link: Optional[str]):
     """Create a token; it can only read until you allow more (tools permissions --token NAME)"""
-    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStoreError
+    from orchestrator.tools.mcp_tokens import TokenStoreError, UnknownCaller, add_token
     _at_a_terminal("Creating an MCP token", shows_token=True)
     registry = _tool_registry(ctx)
     tokens = _token_store(registry)
-    policy = None
     if policy_from and link:
         console.print("[red]Use either --policy-from or --link.[/red]")
         sys.exit(2)
-    if policy_from:
-        # "mcp:<name>" (a token's audit actor) is always a token, also one named like a caller ("mcp", "ditto").
-        named_token = policy_from.startswith(ACTOR_PREFIX)
-        source = policy_from[len(ACTOR_PREFIX):] if named_token else policy_from
-        if not named_token and source in ("mcp", "ditto"):
-            if registry.policy_store.problem:
-                console.print(f"[red]{escape(registry.policy_store.problem)}[/red]")
-                sys.exit(1)
-            policy = registry.policy(source)
-        elif tokens.get(source) is not None:
-            policy = registry.policy(ACTOR_PREFIX + source)
-        else:
-            console.print(f"[red]Unknown caller '{escape(policy_from)}': use mcp, ditto or a token name.[/red]")
-            sys.exit(2)
-        # A copy (later changes of the source do not apply): the source's decisions and reviewed tools; copied
-        # from ditto or mcp it counts as set by you, so the token is no longer treated as a new, read-only one.
-        policy = policy.model_copy(deep=True, update={"configured": True} if not named_token else {})
+    # --policy-from: "mcp:<name>" (a token's audit actor) is always a token, also one named like a caller ("mcp",
+    # "ditto"); a copy, so later changes of the source do not apply (mcp_tokens.copied_policy).
     try:
-        token = tokens.add(name, policy=policy, link=link)
+        token, problem = add_token(registry, name, "cli", policy_from=policy_from, link=link)
+    except UnknownCaller as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
     except TokenStoreError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    _audit_person(registry, "mcp_token.add", {"token": name, "policy_from": policy_from, "link": link})
+    _audit_problem(problem)
     _show_new_token(name, token, "Token")
     if link:
         click.echo(f"It uses {link}'s permissions; changes to them apply to it at once.")
@@ -4492,7 +4411,7 @@ def mcp_token_rotate(ctx: FrameworkContext, name: str):
 @pass_context
 def mcp_token_revoke(ctx: FrameworkContext, name: str):
     """Delete a token and its permissions; its client loses access at once"""
-    from orchestrator.tools.mcp_tokens import TokenStoreError
+    from orchestrator.tools.mcp_tokens import TokenStoreError, revoke_token
     _at_a_terminal("Revoking an MCP token")
     registry = _tool_registry(ctx)
     tokens = _token_store(registry)
@@ -4501,26 +4420,21 @@ def mcp_token_revoke(ctx: FrameworkContext, name: str):
         sys.exit(1)
     if not click.confirm(f"Revoke the token '{name}'? Its client loses access at once.", default=False):
         return
-    try:
-        tokens.revoke(name)
+    try:  # the token, its permissions and its standing approvals, as the GUI does (mcp_tokens.revoke_token)
+        result = revoke_token(registry, name, "cli")
     except TokenStoreError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    _audit_person(registry, "mcp_token.revoke", {"token": name})
-    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX
-    if registry.policy().grants.get(ACTOR_PREFIX + name):
-        try:  # a new token of the same name would not inherit them anyway (they name the token's creation time)
-            registry.policy_store.update(lambda p: p.model_copy(update={"grants": {
-                c: g for c, g in p.grants.items() if c != ACTOR_PREFIX + name}}), actor="cli")
-        except Exception as e:
-            console.print(f"[yellow]Its standing approvals could not be removed ({escape(str(e))}); they no longer "
-                          "apply.[/yellow]")
+    _audit_problem(result.audit_problem)
+    if result.grants_problem:  # a new token of the same name would not inherit them (they name its creation time)
+        console.print(f"[yellow]Its standing approvals could not be removed ({escape(result.grants_problem)}); they "
+                      "no longer apply.[/yellow]")
     console.print(f"[green]Token '{escape(name)}', its permissions and its standing approvals are deleted.[/green]")
 
 
 def _token_permissions(registry, name: str, reset: bool) -> None:
     """`tools permissions --token NAME`: the same questions, saved as that token's own permissions."""
-    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStoreError, read_only_policy
+    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStoreError, read_only_policy, set_token_policy
     _at_a_terminal("Changing a token's permissions")
     tokens = _token_store(registry)
     record = tokens.get(name)
@@ -4531,15 +4445,15 @@ def _token_permissions(registry, name: str, reset: bool) -> None:
     if record.link and not click.confirm(f"The token '{name}' uses {record.link}'s permissions. Give it its own "
                                          "instead?", default=False):
         return
+    # --reset: a new token again (read only, not configured), as the GUI's "Back to read only" (reset_token_policy)
     policy = read_only_policy() if reset else _ask_tool_policy(registry, before,
                                                                shown_for=ACTOR_PREFIX + name)
     try:
-        tokens.set_policy(name, policy)
+        problem = set_token_policy(registry, name, policy, "cli")
     except TokenStoreError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    _audit_person(registry, "mcp_token.permissions", {"token": name, "before": _policy_summary(before),
-                                                      "after": _policy_summary(policy), "was_linked": record.link})
+    _audit_problem(problem)
     console.print(f"[green]Token '{escape(name)}': {escape(_policy_summary(policy))}[/green]")
 
 

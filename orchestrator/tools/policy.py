@@ -307,6 +307,61 @@ def restrictive_policy() -> ToolPolicy:
                       reviewed=[])
 
 
+# --- a person's change to one caller's permissions (the CLI's `tools permissions` and the GUI's Tool Permissions) ---
+
+PERSON_CALLERS = (CALLER_DITTO, CALLER_MCP)   # callers a person can give permissions of their own (besides tokens)
+SECTION_FIELDS = ("tiers", "overrides", "reviewed", "framework_only")
+
+
+def caller_section(policy: ToolPolicy, caller: str) -> CallerPolicy:
+    """The permissions a change for `caller` (ditto or mcp) starts from: its own section, else a new one copied from
+    the shared permissions (tiers, per-tool settings, reviewed tools and the tools asked in the framework only), so
+    creating it never loosens a setting."""
+    own = policy.callers.get(caller)
+    if own is not None:
+        return own
+    return CallerPolicy(tiers=dict(policy.tiers), overrides=dict(policy.overrides),
+                        reviewed=list(policy.reviewed) if policy.reviewed is not None else None,
+                        framework_only=list(policy.framework_only))
+
+
+def with_section(policy: ToolPolicy, caller: Optional[str], **changes: Any) -> ToolPolicy:
+    """`policy` with the permissions of `caller` changed as given (tiers, overrides, reviewed, framework_only):
+    ditto or mcp get their own section (created from the shared permissions when they have none), None changes the
+    shared permissions. Nothing else changes; the store checks the limits when it saves."""
+    unknown = sorted(set(changes) - set(SECTION_FIELDS))
+    if unknown:
+        raise ValueError(f"not a part of a caller's permissions: {', '.join(unknown)}")
+    if not caller:
+        return policy.model_copy(update=changes)
+    if caller not in PERSON_CALLERS:
+        raise ValueError(f"unknown caller {caller!r} (ditto or mcp; a named token keeps its own permissions)")
+    section = caller_section(policy, caller).model_copy(update=changes)
+    return policy.model_copy(update={"callers": {**policy.callers, caller: section}})
+
+
+def reset_policy(policy: ToolPolicy, caller: Optional[str] = None) -> ToolPolicy:
+    """`tools permissions --reset`: the recommended defaults (ToolPolicy()); every caller's own section and every
+    standing approval go, and the setup asks again at the next start. With `caller` (ditto or mcp): that caller uses
+    the shared permissions again; its own section and its standing approvals go, nothing else changes."""
+    if not caller:
+        return ToolPolicy()
+    if caller not in PERSON_CALLERS:
+        raise ValueError(f"unknown caller {caller!r} (ditto or mcp)")
+    return policy.model_copy(update={
+        "callers": {name: section for name, section in policy.callers.items() if name != caller},
+        "grants": {name: grants for name, grants in policy.grants.items() if name != caller}})
+
+
+def reset_changes(policy: ToolPolicy, caller: Optional[str] = None) -> List[str]:
+    """What reset_policy(policy, caller) would change, one line per change in the words of the audit log; empty when
+    nothing would change. Shown to the person before a reset."""
+    after = reset_policy(policy, caller)
+    if after.model_dump(exclude={"revision", "updated_at"}) == policy.model_dump(exclude={"revision", "updated_at"}):
+        return []
+    return policy_changes(policy, after)
+
+
 class PolicyStoreError(Exception):
     """The permissions could not be saved; the message is safe to show."""
 
