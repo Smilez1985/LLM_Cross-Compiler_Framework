@@ -16,32 +16,97 @@ import re
 import time
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import TYPE_CHECKING, Optional, Dict, Any, List, Tuple
 from datetime import datetime
 
 import click
 import yaml
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.markup import escape
-from rich.prompt import Confirm
 
-from orchestrator.Core.framework import FrameworkManager
-from orchestrator.Core.orchestrator import LLMOrchestrator, BuildRequest, WorkflowType, PriorityLevel, OrchestrationStatus
-from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel, repo_override_names
-from orchestrator.Core.module_generator import ModuleGenerator
-from orchestrator.Core.deployment_manager import DeploymentManager
+from orchestrator.Core.build_formats import ModelFormat
 from orchestrator.llm.sdk_env import guard_sdk_environment
 from orchestrator.utils.helpers import redact_secrets
+from orchestrator.utils.lazy_imports import lazy_attributes, lazy_value
 from orchestrator.utils.logging import get_logger, setup_logging
+
+if TYPE_CHECKING:  # annotations only: imported where first used (see _LAZY)
+    from orchestrator.Core.builder import BuildEngine
+    from orchestrator.Core.deployment_manager import DeploymentManager
+    from orchestrator.Core.framework import FrameworkManager
+    from orchestrator.Core.orchestrator import LLMOrchestrator
 
 # ============================================================================
 # GLOBAL CONFIGURATION
 # ============================================================================
 
-console = Console()
 from orchestrator import __version__  # noqa: E402
+
+# Lazy loading: the framework, the build engine and the other managers are imported where a command first uses
+# them, not here, so `llm-cli --help` and the commands that need no framework start fast. The names stay
+# attributes of this module (cli.FrameworkManager, ...; a test may replace one).
+_LAZY = {
+    "FrameworkManager": "orchestrator.Core.framework",
+    "LLMOrchestrator": "orchestrator.Core.orchestrator", "BuildRequest": "orchestrator.Core.orchestrator",
+    "WorkflowType": "orchestrator.Core.orchestrator", "PriorityLevel": "orchestrator.Core.orchestrator",
+    "OrchestrationStatus": "orchestrator.Core.orchestrator",
+    "BuildEngine": "orchestrator.Core.builder", "OptimizationLevel": "orchestrator.Core.builder",
+    "repo_override_names": "orchestrator.Core.builder",
+    "ModuleGenerator": "orchestrator.Core.module_generator",
+    "DeploymentManager": "orchestrator.Core.deployment_manager",
+}
+
+__getattr__ = lazy_attributes(__name__, _LAZY)
+
+
+def _lazy(name: str) -> Any:
+    """`name` of _LAZY: the value set on this module (imported earlier, or a test's stand-in), else imported now."""
+    return lazy_value(globals(), name, __getattr__)
+
+
+# rich is imported when a command first prints, not for --help.
+def Console(*args, **kwargs):  # noqa: N802 - rich's Console
+    from rich.console import Console as RichConsole
+    return RichConsole(*args, **kwargs)
+
+
+def escape(markup: str, *args, **kwargs) -> str:
+    """rich's markup escape."""
+    from rich.markup import escape as rich_escape
+    return rich_escape(markup, *args, **kwargs)
+
+
+def Table(*args, **kwargs):  # noqa: N802 - rich's Table
+    from rich.table import Table as RichTable
+    return RichTable(*args, **kwargs)
+
+
+def Panel(*args, **kwargs):  # noqa: N802 - rich's Panel
+    from rich.panel import Panel as RichPanel
+    return RichPanel(*args, **kwargs)
+
+
+class _SharedConsole:
+    """The console the commands print to (rich's Console), made at its first use."""
+
+    def __init__(self):
+        self._console = None
+
+    def real(self):
+        """rich's Console itself."""
+        if self._console is None:
+            self._console = Console()
+        return self._console
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.real(), name)
+
+
+console = _SharedConsole()
+
+
+def _rich_console():
+    """The Console behind `console`, for rich APIs that need the object itself (a live display enters it with
+    `with console:`, which a stand-in cannot forward)."""
+    return console.real() if isinstance(console, _SharedConsole) else console
 
 # ============================================================================
 # CLICK CONTEXT UND MANAGER INITIALISIERUNG
@@ -73,7 +138,7 @@ class FrameworkContext:
             
         try:
             # Framework Manager initialisieren
-            self.framework_manager = FrameworkManager(self.config_path, log_level=self.log_level)
+            self.framework_manager = _lazy("FrameworkManager")(self.config_path, log_level=self.log_level)
             
             if not self.framework_manager.initialize():
                 # The cause itself (e.g. the credential storage error with its choices), not just "failed".
@@ -187,7 +252,7 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     """The help text is CLI_HELP (its version comes from orchestrator.__version__)."""
     # The stdio client's MCP token: taken out of the environment before anything else runs, for every command, so
     # no command and no child process ever inherits it; only `mcp serve` gets it, through the context.
-    from orchestrator.tools.mcp_tokens import ENV_VAR
+    from orchestrator.tools.mcp_env import ENV_VAR
     ctx.mcp_token = os.environ.pop(ENV_VAR, None)
     from orchestrator.Core.request_store import set_program
     set_program("cli")  # shown with this process's builds in the shared build state
@@ -360,7 +425,7 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_f
         # The configured targets folder (relative paths: the installation), as builds and the GUI use it.
         config, resolve = _settings(ctx)
         targets_dir = resolve(config.get("targets_dir", "targets"))
-        generator = ModuleGenerator(targets_dir)
+        generator = _lazy("ModuleGenerator")(targets_dir)
 
         output_path = generator.generate_module(module_data, profile=profile)
         
@@ -498,6 +563,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     console.print("\n[bold green]AI analysis finished. Review the proposal:[/bold green]")
     click.echo(json.dumps(definition.model_dump(exclude={"cannot"}), indent=2, ensure_ascii=False))
     click.echo(proposal_facts(definition))
+    from rich.prompt import Confirm
     if not Confirm.ask("Generate module with these settings?"):
         return
     console.print("[dim]cpu_flags and cmake_flags are kept in the module as advisory text; llama.cpp is built by the "
@@ -558,6 +624,8 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: bool, dataset: Optional[str]):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130."""
+    from orchestrator.Core.build_formats import OptimizationLevel
+    from orchestrator.Core.orchestrator import BuildRequest, OrchestrationStatus, PriorityLevel, WorkflowType
     ctx.require_framework()
     if parallel:
         Console(stderr=True).print("[yellow]--parallel is deprecated and has no effect.[/yellow]")
@@ -1739,7 +1807,7 @@ def _local_runtime(ctx: FrameworkContext):
 def _download_progress():
     from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
     bar = Progress(TextColumn("{task.description}"), BarColumn(), DownloadColumn(), TransferSpeedColumn(),
-                   console=console, transient=True)
+                   console=_rich_console(), transient=True)
     tasks = {}
 
     def update(name: str, done: int, total: Optional[int]):
@@ -5700,6 +5768,7 @@ def config_repos(ctx: FrameworkContext, add, remove):
 
     if add:
         name, url = add
+        from orchestrator.Core.builder import repo_override_names
         variables = repo_override_names(name)
         if not variables:  # the build engine could not pass it on under any name
             console.print(f"[red]Invalid name {escape(repr(name))}: it needs ASCII letters or digits (it becomes "

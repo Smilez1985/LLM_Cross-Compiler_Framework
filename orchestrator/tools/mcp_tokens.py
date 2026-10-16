@@ -28,13 +28,13 @@ from typing import Callable, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from orchestrator.tools.mcp_env import ENV_VAR  # noqa: F401 - re-exported: the token of a stdio client
 from orchestrator.tools.policy import Decision, ToolPolicy, ToolTier, restrictive_policy
 from orchestrator.tools.signing import SIGNATURE_FIELD, RevisionAnchor, SignatureError, sign, verify
 from orchestrator.utils.file_lock import file_lock
 
 ACTOR_PREFIX = "mcp:"          # the audit actor of a named token is "mcp:<name>"
 TOKEN_PREFIX = "lcf_mcp_"      # makes a token recognisable in a configuration file
-ENV_VAR = "LCF_MCP_TOKEN"      # the token of a stdio client, read once by `llm-cli mcp serve`
 LINK_TARGETS = ("ditto",)      # callers whose policy a token may use by reference
 NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
 _SHA256_RE = r"^[0-9a-f]{64}$"
