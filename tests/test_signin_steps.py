@@ -96,7 +96,8 @@ class TestSecretEntries:
         by_name = {e.name: e for e in entries}
         assert by_name["hf_token"].stored and by_name["hf_token"].kind == KIND_KNOWN
         assert not by_name["qdrant_api_key"].stored
-        assert by_name["cred/openai/api_key"].kind == KIND_PROVIDER and by_name["cred/openai/api_key"].provider == "openai"
+        provider = by_name["cred/openai/api_key"]
+        assert provider.kind == KIND_PROVIDER and provider.provider == "openai" and provider.stored
         assert by_name["github_token"].kind == KIND_OTHER and by_name["github_token"].stored
         assert stored_names(vault) == vault.list_secrets()
         text = repr(entries) + repr([e.to_dict() for e in entries])

@@ -114,16 +114,21 @@ class SecretInputDialog(QDialog):
             QMessageBox.warning(self, "Error", "Secret cannot be empty.")
             return
             
-        sm = getattr(self.framework, 'secrets_manager', None)
-        if sm:
-            success = sm.set_secret(self.secret_key, val)
-            if success:
-                QMessageBox.information(self, "Success", "Secret stored in the encrypted credential vault.")
-                self.accept()
-            else:
-                QMessageBox.critical(self, "Error", "Failed to store secret via SecretsManager.")
-        else:
+        # The same step as `llmcf secrets set`: in the ephemeral storage nothing is saved, and the dialog says so.
+        from orchestrator.Core.secret_entries import SecretNotStored, SecretsUnavailable, store_secret
+        try:
+            stored = store_secret(getattr(self.framework, 'secrets_manager', None), self.secret_key, val)
+        except SecretsUnavailable:
             QMessageBox.critical(self, "Error", "SecretsManager is not initialized!")
+            return
+        except SecretNotStored:
+            QMessageBox.critical(self, "Error", "Failed to store secret via SecretsManager.")
+            return
+        if stored.memory_only:
+            QMessageBox.warning(self, "Security", ui_text("secrets.memory_only", name=self.secret_key))
+        else:
+            QMessageBox.information(self, "Success", "Secret stored in the encrypted credential vault.")
+        self.accept()
 
 class HealingConfirmDialog(QDialog):
     """
