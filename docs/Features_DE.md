@@ -608,8 +608,21 @@ die Annahmen; seine Unterstützungsstufe ist community.
 
 ### Anmeldung
 
-- **Wo:** **Anmelden...** in den KI-Einstellungen (GUI) und `llm-cli ditto login | logout | auth` (siehe die
-  [CLI-Anleitung](CLI_Usage_DE.md#ditto-login)).
+- **Wo:** **Anmelden...** in den KI-Einstellungen (GUI), **Security > Anmeldeübersicht...** (GUI) und `llm-cli
+  ditto login | logout | auth` (siehe die [CLI-Anleitung](CLI_Usage_DE.md#ditto-login)).
+- **Anmeldeübersicht** (GUI: **Security > Anmeldeübersicht...**): die Anmeldung aller Anbieter auf einmal
+  (Verfahren, Quelle, Konto oder die letzten vier Zeichen eines Schlüssels, Zustand; Dittos Anbieter mit `*`
+  markiert) und wie der Tresor geschützt ist, mit seiner Datei (`ditto auth status`); **Alle prüfen** führt im
+  Hintergrund die kostenlose Prüfung jedes Anbieters mit Zugangsdaten aus (`--check`); der Reiter **Alle
+  Anmeldeverfahren** listet die Verfahren jedes Anbieters mit ihren Umgebungsvariablen und Anmerkungen (`ditto auth
+  methods`). Wer einen Anbieter wählt, sieht sein Anmeldefeld mit einem eigenen Feld **Serveradresse**: Eine dort
+  eingegebene (oder von den KI-Einstellungen übergebene) Adresse wird nur für diesen Anbieter gemerkt und macht ihn
+  nicht zu Dittos Anbieter (`ditto login --base-url`). Das Framework liest, speichert und übergibt nie Zugangsdaten
+  eines Claude-Abos und startet nie den Befehl claude.
+- **Schlüssel aus einer Umgebungsvariable:** Jede Schlüsselkarte nennt die Umgebungsvariablen des Verfahrens und
+  seine Anmerkung und bietet **Den Schlüssel aus <VARIABLE> im Tresor speichern** an, solange eine gesetzt ist
+  (vorher geprüft, außer du nimmst den Haken bei **Vorher prüfen (kostenlos)** weg; `ditto login --from-env`). Der
+  Schlüssel geht im Hintergrund von der Variable in den Tresor und nie in ein Feld.
 - **Karten für die Verfahren:** Der Bereich zeigt die Anmeldeverfahren des Anbieters in der Reihenfolge des
   Katalogs. Das erste, mit dem sich diese Version anmelden kann, ist als „Empfohlen“ markiert, Verfahren nur auf
   Wunsch (das `ant`-Profil) als „Erweitert“, und Verfahren einer späteren Version werden gezeigt, lassen sich aber
@@ -637,12 +650,18 @@ die Annahmen; seine Unterstützungsstufe ist community.
   Beispiel das `ant`-Profil).
 - **Abmelden zuerst lokal:** Der gespeicherte Schlüssel wird gelöscht, und die Schlüsselseite, auf der du den
   Schlüssel selbst widerrufst, wird genannt; ein Schlüssel in einer Umgebungsvariable bleibt in Gebrauch, bis du sie
-  entfernst.
+  entfernst. Ein Server ohne Anmeldung (Ollama, `custom` ohne Schlüssel) hat **Vergessen**, das seine gemerkte
+  Adresse und sein gemerktes Verfahren vergisst (`ditto logout`); beides fragt vorher, „Nein“ ist vorgewählt.
 - **Kein nutzbarer Schlüsselbund:** Der Bereich zeigt die Auswahl für den Schutz (Passphrase, Credential-Helper
   oder die unverschlüsselte Schlüsseldatei nach einer Bestätigung), und die GUI zeigt dieselbe Auswahl beim Start,
   bevor sie aufgibt; eine Passphrase wird in einem Dialog abgefragt. Eine Wahl, die den vorhandenen Tresor nicht
   öffnen kann (einen, den der gesperrte Schlüsselbund schützt), wird nicht behalten. Die CLI endet mit Exit-Code 5
   und nennt `llm-cli ditto auth storage --use ...`. Für dich wird nichts gewählt.
+- **Schlüsselspeicher** (GUI: **Security > Schlüsselspeicher...**): der Schutz des Tresors und seine Datei
+  jederzeit, auch während er funktioniert (`ditto auth storage`); **Anders schützen** wechselt zum Schlüsselbund des
+  Betriebssystems, zu einem Credential-Helper mit seinem Befehl, zu einer Passphrase oder zur unverschlüsselten
+  Schlüsseldatei (nach der Bestätigung und der Frage der CLI, „Nein“ ist vorgewählt; `--use`), und **Schlüssel
+  erneuern...** fragt vorher (`ditto auth rotate-key`).
 - **Reaktionsschnell:** Jeder Zugriff auf Tresor, Schlüsselbund oder Netz aus dem Anmeldebereich und für den Kopf
   des Chats läuft in einem Hintergrund-Thread.
 
@@ -2449,7 +2468,12 @@ Board-Pfade.
   Der Tresor wird atomar unter einer Sperre geschrieben, die GUI, CLI und MCP-Server teilen, ist nur für dich lesbar,
   liegt nie in einer Git-Arbeitskopie, und ein beschädigter Tresor wird nie überschrieben. `llm-cli mojo` warnt
   vor der Schlüsseldatei und vor einem Schlüsselbund, der Geheimnisse nicht schützt. `llm-cli ditto auth
-  rotate-key` ersetzt den Schlüssel des Tresors und verschlüsselt jeden Eintrag neu.
+  rotate-key` ersetzt den Schlüssel des Tresors und verschlüsselt jeden Eintrag neu. GUI: **Security >
+  Geheimnisse...** listet die Namen, die das Framework liest (`hf_token`, `qdrant_api_key`, die Schlüssel der
+  Community-Pakete), und jeden gespeicherten Namen mit „gespeichert“ oder „nicht gespeichert“ und wofür (`secrets
+  list`, nie ein Wert), und setzt jeden Namen mit dem Wert zweimal in verdeckten Feldern (`secrets set`; im Speicher
+  `ephemeral` sagt es, dass nichts gespeichert wurde); **Security > Schlüsselspeicher...** zeigt und wechselt den
+  Schutz und erneuert den Schlüssel des Tresors.
 - **Schwärzen:** Eine Tabelle der Secret-Formate (`orchestrator/security/secret_patterns.py`) teilen sich der
   Secret-Scan des Repositorys und die Schwärzung zur Laufzeit. Zugangsdaten (bekannte Schlüsselformate, Header mit
   Zugangsdaten, Tokens in URLs und Formulardaten, Zeilen wie `HF_TOKEN=...`) werden aus jeder Logzeile und jedem
