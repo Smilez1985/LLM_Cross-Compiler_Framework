@@ -64,11 +64,14 @@ _SYSTEM_TMP = "/tmp"  # nosec B108
 _POSIX_EXACT = ("/", "/home", "/Users", "/mnt", "/media", "/opt", "/srv", "/var", "/root", "/private", _SYSTEM_TMP)
 # Windows: the folders the environment names (the system folder, the program folders, ProgramData with the computer's
 # keys, credentials and installer caches) and everything below them ...
-_WINDOWS_TREE_VARS = ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData")
+_WINDOWS_TREE_VARS = ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramFiles(Arm)", "ProgramW6432",
+                      "ProgramData")
 # ... the same folders where Windows puts them on the system drive (a process started with a reduced environment
-# refuses them too), with the recovery, boot and update folders at its top ...
-_WINDOWS_SYSTEM_DRIVE_TREES = ("Windows", "Program Files", "Program Files (x86)", "ProgramData", "Recovery", "Boot",
-                               "PerfLogs", "Config.Msi", "$WinREAgent", "$Windows.~BT", "$Windows.~WS")
+# refuses them too), with the recovery, boot and update folders at its top (Windows deletes Windows.old and the
+# update folders on its own, with whatever lies in them) ...
+_WINDOWS_SYSTEM_DRIVE_TREES = ("Windows", "Program Files", "Program Files (x86)", "Program Files (Arm)", "ProgramData",
+                               "Recovery", "Boot", "PerfLogs", "Config.Msi", "$WinREAgent", "$Windows.~BT",
+                               "$Windows.~WS", "Windows.old")
 # ... the folders at the top of every disk (the recycle bin, the restore points), and the template profiles next to
 # the users' home folders (what lies there is given to every new user).
 _WINDOWS_VOLUME_TREES = ("$Recycle.Bin", "System Volume Information")
@@ -148,18 +151,33 @@ def _inside(path: Path, folder: Path) -> bool:
     return path == folder or folder in path.parents
 
 
+def windows_plain_path(path: PureWindowsPath) -> PureWindowsPath:
+    """`path` without Windows' device prefix: \\\\?\\C:\\x and \\\\.\\C:\\x are C:\\x, \\\\?\\UNC\\server\\share\\x is
+    \\\\server\\share\\x. ntpath.realpath keeps such a prefix when the path was given with it, and the prefix makes
+    the drive another one for every comparison. A prefixed path without a drive letter (a volume GUID) stays."""
+    text = str(path)
+    if text[:4] not in ("\\\\?\\", "\\\\.\\"):
+        return path
+    rest = text[4:]
+    if rest[:4].casefold() == "unc\\":
+        return PureWindowsPath("\\\\" + rest[4:])
+    plain = PureWindowsPath(rest)
+    return plain if plain.drive and plain.root else path
+
+
 def windows_system_folder(path: PureWindowsPath, env: Mapping[str, str], users: Optional[PureWindowsPath] = None,
                           resolve: Callable[[PureWindowsPath], PureWindowsPath] = lambda p: p) -> str:
     """Why the resolved Windows path `path` is a system folder or lies inside one ("" when it is not): the system
     folder, the program folders and ProgramData (by the environment and at their usual places on the system drive),
     the recovery, boot and update folders, the recycle bin and the restore points of every disk, the template profiles
-    in `users` (the folder that holds the home folders) and the system drive itself. Letter case does not count, as on
-    Windows. `env`: the environment (Windows' own mapping ignores the case of a name, a plain one does not, so the
-    upper-case spelling is read too). `resolve` turns one of these folders into the form `path` has (links followed);
-    both forms count. Pure, so it is tested on every system."""
+    in `users` (the folder that holds the home folders) and the system drive itself. Letter case and a device prefix
+    (\\\\?\\) do not count, as on Windows. `env`: the environment (Windows' own mapping ignores the case of a name, a
+    plain one does not, so the upper-case spelling is read too). `resolve` turns one of these folders into the form
+    `path` has (links followed); both forms count. Pure, so it is tested on every system."""
     def get(name: str) -> str:
         return env.get(name) or env.get(name.upper()) or ""
 
+    path = windows_plain_path(path)
     drive = PureWindowsPath(get("SystemDrive") or "C:").drive or "C:"
     root = PureWindowsPath(drive + "\\")
     trees = [PureWindowsPath(get(var)) for var in _WINDOWS_TREE_VARS if get(var)]
@@ -167,7 +185,7 @@ def windows_system_folder(path: PureWindowsPath, env: Mapping[str, str], users: 
     if users is not None:
         trees += [users / name for name in _WINDOWS_PROFILE_TREES]
     for folder in trees:
-        for form in dict.fromkeys((folder, resolve(folder))):
+        for form in dict.fromkeys(windows_plain_path(f) for f in (folder, resolve(folder))):
             if _inside(path, form):
                 return f"{path} is a system folder or lies inside one ({folder})"
     top = path.parts[1] if path.drive and len(path.parts) > 1 else ""
@@ -185,6 +203,7 @@ def refusal(framework, destination: Path) -> str:
     real = _real(destination)
     home = _real(Path.home())
     if os.name == "nt":
+        real = Path(windows_plain_path(PureWindowsPath(real)))  # \\?\C:\Windows is C:\Windows for every check
         why = windows_system_folder(PureWindowsPath(real), os.environ, PureWindowsPath(home.parent),
                                     lambda folder: PureWindowsPath(_real(Path(folder))))
         if why:
@@ -713,4 +732,4 @@ def remember(framework, folder: Any, root: Any) -> None:
 __all__ = ["BUILDS", "DEFAULT_OUTPUT", "DestinationRefused", "INDEX_FILE", "ListedArtifact", "OUTPUT", "SAVED",
            "SaveResult", "SavedIndex", "WHERE_TEXT", "artifact_folders", "build_folder", "check_destination", "keep_listing",
            "label_for", "list_artifacts", "output_folder", "refusal", "remember", "roots", "save_artifact",
-           "set_output_folder"]
+           "set_output_folder", "windows_plain_path", "windows_system_folder"]
