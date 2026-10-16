@@ -459,10 +459,12 @@ liable.** This repeats the no-warranty terms of [LICENSE.txt](../LICENSE.txt) an
 - **Notice, once per user:** the first time the chat panel is shown, a notice at its top says that Ditto is
   experimental and optional, that its answers can be wrong, that what it does still goes through your tool
   permissions and confirmations, and the sentence above. It stays until you click **Understood**. It blocks nothing:
-  the chat, the questions that wait and every other window work while it is shown.
-- **Command line:** before the first `llm-cli ditto ...` command at a terminal, the same notice goes to stderr once.
-  Without a terminal (a script, an AI client with a shell) nothing is printed or recorded, so the next command at a
-  terminal prints it. The command always runs.
+  the chat, the questions that wait and every other window work while it is shown. The Builder's **Ask Ditto for
+  Config** and the module wizard use Ditto without the panel, so a hidden panel shows itself once for the notice
+  (without taking the focus) until you have read it; after that it stays hidden when you hide it.
+- **Command line:** before the first `llm-cli ditto ...` or `llm-cli module generate-ai` command at a terminal, the
+  same notice goes to stderr once. Without a terminal (a script, an AI client with a shell) nothing is printed or
+  recorded, so the next command at a terminal prints it. The command always runs.
 - The state file `ditto_notice.json` in the per-user folder (`~/.llm-framework`) stores a hash of the notice texts in
   both languages, when it was shown and where (`via`: `gui` or `cli`). A changed text is shown again. No tool,
   resource or prompt shows or answers it.
@@ -1441,13 +1443,22 @@ per page from that (`orchestrator/rag/licences.py`; eighth round, Q-1 and Q-1').
 
 - **Recorded per page,** from the whole page before its footer is dropped: the source address; a licence link
   (`rel="license"` on a `<link>` or `<a>`, or in the HTTP `Link` header); licence metadata (`<meta name="license">`,
-  `dc.rights`, `dcterms.license`, schema.org `license` in JSON-LD; in a PDF, a Creative Commons or licence address in
-  its metadata); a link to a Creative Commons licence anywhere on the page; and an explicit copyright notice ("©",
-  "(c)" with a year, "Copyright" with a year, "All rights reserved"). When several licences show, the cautious one
-  counts. A licence the framework does not recognise is kept as `other` with its words.
+  `dc.rights`, `dcterms.license`, schema.org `license` in JSON-LD; in a PDF, `cc:license` or
+  `xmpRights:WebStatement` in its XMP metadata); a link to a Creative Commons licence in the page's footer or in a
+  sentence that says the page is licensed under it; and an explicit copyright notice ("©", "(c)" with a year,
+  "Copyright" with a year, "All rights reserved"). When several licences show, the cautious one counts. A licence the
+  framework does not recognise is kept as `other` with its words.
+- **Only what names the page's own licence counts.** A licence is named by its address, its SPDX id, its own title
+  with its version or its standard grant text. A licence mentioned in passing names nothing: a licence text that names
+  other licences, "not in the public domain", a list of third-party components, a link in a PDF's text. An image
+  credit with a Creative Commons link is not the page's licence, and a bare link never outweighs an explicit "All
+  rights reserved". Another version of a licence (MPL 1.1, Apache 1.1) is not taken for the one that allows passing
+  the text on.
 - **Code from GitHub:** only the repository's licence file decides (`LICENSE`, `LICENCE` or `COPYING` at the top of
   the repository), and only when the same crawl read it; GitHub's own footer is not read. Without it the code counts
-  as having no licence, which means all rights reserved.
+  as having no licence, which means all rights reserved. The licence file covers the code (the repository's start
+  page, its files and folders), not its issues, pull requests, discussions, wiki or releases: those are other
+  people's words under other terms, and go into a pack as their address and short facts.
 - **What a pack carries:** a knowledge pack, and the knowledge snapshot the module wizard attaches to a new target,
   carry a page's full text only when its licence allows passing the text on: CC0, public domain, CC BY, CC BY-SA, MIT,
   Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Unlicense, MPL-2.0. Each excerpt then keeps the attribution the

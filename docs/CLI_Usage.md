@@ -597,10 +597,10 @@ Ditto is the built-in assistant. Most `ditto` commands use the provider and mode
 **Tools > Configure AI Agent (Ditto)...**, or `ai_provider` and `ai_model` in `config.yml`). Sign in with
 [`llm-cli ditto login`](#ditto-login), or with **Sign in...** in the AI settings.
 
-Ditto is optional and experimental. Before the first `ditto` command at a terminal, a notice goes to stderr once:
-"Use at your own risk and responsibility. The creator of LLMCF is not liable." (the no-warranty terms of
-`LICENSE.txt`, nothing more). It is stored per user and shared with the GUI's notice; without a terminal nothing is
-printed or stored. The command always runs ([details](Features.md#experimental)).
+Ditto is optional and experimental. Before the first `ditto` command (or `module generate-ai`) at a terminal, a
+notice goes to stderr once: "Use at your own risk and responsibility. The creator of LLMCF is not liable." (the
+no-warranty terms of `LICENSE.txt`, nothing more). It is stored per user and shared with the GUI's notice; without a
+terminal nothing is printed or stored. The command always runs ([details](Features.md#experimental)).
 
 ### ditto login
 
@@ -1483,7 +1483,8 @@ generator) in the configured targets folder. Ditto uses the provider's stored si
 ([`llm-cli ditto login`](#ditto-login)); the command never asks for a key itself. Neither `module create` nor
 `module generate-ai` attaches pages from the knowledge base; that is an option on the last page of the GUI wizard.
 When the probe file is a probe profile, the module's `runtime:` block is planned from it; the proposal's CPU and
-CMake flags are kept there as advisory text and never applied.
+CMake flags are kept there as advisory text and never applied. Ditto is experimental: before the first run at a
+terminal the notice on Ditto goes to stderr once ([ditto](#ditto)).
 
 | Option | Meaning |
 |---|---|

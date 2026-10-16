@@ -495,9 +495,12 @@ nichts hinzu.
   Ditto experimentell und optional ist, dass seine Antworten falsch sein können, dass alles, was er tut, weiter über
   deine Werkzeugrechte und Bestätigungen läuft, und den Satz oben. Er bleibt, bis du auf **Verstanden** klickst. Er
   blockiert nichts: Der Chat, die wartenden Fragen und jedes andere Fenster funktionieren, während er angezeigt wird.
-- **Kommandozeile:** Vor dem ersten Befehl `llm-cli ditto ...` an einem Terminal geht derselbe Hinweis einmal auf
-  stderr. Ohne Terminal (ein Skript, ein KI-Client mit Shell) wird nichts ausgegeben oder gespeichert, also gibt ihn
-  der nächste Befehl an einem Terminal aus. Der Befehl läuft immer.
+  **Ask Ditto for Config** im Builder und der Modul-Assistent nutzen Ditto ohne den Chat-Bereich; ein ausgeblendeter
+  Chat-Bereich zeigt sich deshalb für den Hinweis einmal (ohne den Fokus zu nehmen), bis du ihn gelesen hast; danach
+  bleibt er ausgeblendet, wenn du ihn ausblendest.
+- **Kommandozeile:** Vor dem ersten Befehl `llm-cli ditto ...` oder `llm-cli module generate-ai` an einem Terminal
+  geht derselbe Hinweis einmal auf stderr. Ohne Terminal (ein Skript, ein KI-Client mit Shell) wird nichts ausgegeben
+  oder gespeichert, also gibt ihn der nächste Befehl an einem Terminal aus. Der Befehl läuft immer.
 - Die Zustandsdatei `ditto_notice.json` im benutzereigenen Ordner (`~/.llm-framework`) speichert einen Hash der
   Hinweistexte in beiden Sprachen, wann er gezeigt wurde und wo (`via`: `gui` oder `cli`). Ein geänderter Text wird
   erneut gezeigt. Kein Tool, keine Ressource und kein Prompt zeigt oder beantwortet ihn.
@@ -1573,14 +1576,24 @@ sagt, und ein Export entscheidet je Seite danach (`orchestrator/rag/licences.py`
 
 - **Je Seite festgehalten,** aus der ganzen Seite, bevor ihre Fußzeile entfernt wird: die Quelladresse; ein
   Lizenz-Link (`rel="license"` an einem `<link>` oder `<a>`, oder im HTTP-Header `Link`); Lizenz-Metadaten
-  (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license` in JSON-LD; in einem PDF eine
-  Creative-Commons- oder Lizenzadresse in seinen Metadaten); ein Link auf eine Creative-Commons-Lizenz irgendwo auf
-  der Seite; und ein ausdrücklicher Urheberrechtshinweis („©“, „(c)“ mit Jahr, „Copyright“ mit Jahr, „All rights
-  reserved“). Zeigen sich mehrere Lizenzen, zählt die vorsichtige. Eine Lizenz, die das Framework nicht erkennt, wird
-  als `other` mit ihrem Wortlaut festgehalten.
+  (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license` in JSON-LD; in einem PDF
+  `cc:license` oder `xmpRights:WebStatement` in seinen XMP-Metadaten); ein Link auf eine Creative-Commons-Lizenz in
+  der Fußzeile der Seite oder in einem Satz, der sagt, dass die Seite unter ihr lizenziert ist; und ein
+  ausdrücklicher Urheberrechtshinweis („©“, „(c)“ mit Jahr, „Copyright“ mit Jahr, „All rights reserved“). Zeigen sich
+  mehrere Lizenzen, zählt die vorsichtige. Eine Lizenz, die das Framework nicht erkennt, wird als `other` mit ihrem
+  Wortlaut festgehalten.
+- **Nur was die eigene Lizenz der Seite nennt, zählt.** Eine Lizenz wird durch ihre Adresse, ihre SPDX-ID, ihren
+  eigenen Titel mit Version oder ihren üblichen Erlaubnistext genannt. Eine nebenbei erwähnte Lizenz nennt nichts: ein
+  Lizenztext, der andere Lizenzen nennt, „not in the public domain“, eine Liste von Fremdkomponenten, ein Link im
+  Text eines PDFs. Ein Bildnachweis mit Creative-Commons-Link ist nicht die Lizenz der Seite, und ein bloßer Link
+  wiegt nie ein ausdrückliches „All rights reserved“ auf. Eine andere Version einer Lizenz (MPL 1.1, Apache 1.1) gilt
+  nicht als die, die die Weitergabe erlaubt.
 - **Code von GitHub:** Nur die Lizenzdatei des Repositorys entscheidet (`LICENSE`, `LICENCE` oder `COPYING` oben im
   Repository), und nur wenn derselbe Crawl sie gelesen hat; die Fußzeile von GitHub selbst wird nicht gelesen. Ohne
-  sie gilt der Code als ohne Lizenz, also urheberrechtlich voll geschützt.
+  sie gilt der Code als ohne Lizenz, also urheberrechtlich voll geschützt. Die Lizenzdatei gilt für den Code (die
+  Startseite des Repositorys, seine Dateien und Ordner), nicht für seine Issues, Pull Requests, Diskussionen, sein
+  Wiki oder seine Releases: Das sind Worte anderer Leute unter anderen Bedingungen, und sie kommen als Adresse mit
+  kurzen Fakten in ein Paket.
 - **Was ein Paket enthält:** Ein Wissenspaket und der Wissens-Snapshot, den der Modul-Assistent einem neuen Target
   beilegt, enthalten den vollen Text einer Seite nur, wenn ihre Lizenz die Weitergabe erlaubt: CC0, Gemeinfreiheit,
   CC BY, CC BY-SA, MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Unlicense, MPL-2.0. Jeder Auszug behält

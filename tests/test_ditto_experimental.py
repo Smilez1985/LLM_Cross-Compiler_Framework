@@ -97,6 +97,25 @@ def test_the_panel_carries_the_badge_and_the_notice_until_the_person_reads_it(pa
         "once per person; the badge stays"
 
 
+def test_a_hidden_panel_shows_the_notice_once_before_ditto_is_used_anywhere(panel, qapp):
+    """The builder's "Ask Ditto for Config" and the module wizard use Ditto without the panel: a person who hid it
+    still reads the notice once (the panel shows itself without taking the focus), and never again after it."""
+    from orchestrator.gui.chat_panel.dock import ChatDock
+    from orchestrator.gui.chat_panel.panel import show_ditto_notice
+
+    first = panel()
+    dock = ChatDock(first, None, lang="en")
+    try:
+        dock.hide()
+        assert show_ditto_notice(dock, first) and not dock.isHidden() and not first.notice.isHidden()
+        first.notice.btn_ok.click()
+        dock.hide()
+        assert not show_ditto_notice(dock, first) and dock.isHidden(), "once read, the person's choice stays"
+    finally:
+        first.setParent(None)   # the panel fixture closes the panel itself
+        dock.deleteLater()
+
+
 def test_the_panel_speaks_german_too(panel):
     first = panel()
     first._language_changed("de")
@@ -130,6 +149,24 @@ def test_ditto_commands_print_it_once_at_a_terminal(tmp_path, monkeypatch):
     assert DittoNotice(tmp_path / "state").acknowledged_via() == "cli"
     second = runner.invoke(cli_module.cli, ["ditto", "models", "list"])
     assert SENTENCE_EN not in second.output
+
+
+def test_the_module_generator_with_ditto_prints_it_too(tmp_path, monkeypatch):
+    """`llm-cli module generate-ai` is Ditto at work outside the ditto group: the notice comes first there too."""
+    from orchestrator import cli as cli_module
+
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(cli_module, "_notice_terminal", lambda: True)
+
+    def require(self):
+        self.framework_manager = SimpleNamespace(get_component=lambda name: None)
+        return self
+    monkeypatch.setattr(cli_module.FrameworkContext, "require_framework", require)
+    probe = tmp_path / "target_hardware_config.txt"
+    probe.write_text("CPU_MODEL=Cortex-A55\n", encoding="utf-8")
+    result = CliRunner().invoke(cli_module.cli, ["module", "generate-ai", str(probe)])
+    assert SENTENCE_EN in result.output and "not available" in result.output
+    assert DittoNotice(tmp_path / "state").acknowledged_via() == "cli"
 
 
 def test_without_a_terminal_nothing_is_printed_or_recorded(tmp_path, monkeypatch):

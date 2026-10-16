@@ -58,8 +58,8 @@ def test_the_copyright_notice_in_the_footer_is_found_before_the_footer_is_droppe
 
 
 def test_several_licences_choose_the_cautious_one():
-    page = soup('<a href="https://creativecommons.org/licenses/by/4.0/">text</a>'
-                '<a href="https://creativecommons.org/licenses/by-nc-nd/4.0/">images</a>')
+    page = soup('<footer>Text under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY</a>, everything else '
+                'under <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/">CC BY-NC-ND</a>.</footer>')
     assert licences.from_html(page, SITE)["licence"] == "CC-BY-NC-ND-4.0"
 
 
@@ -74,6 +74,115 @@ def test_several_licences_choose_the_cautious_one():
 ])
 def test_licence_names_and_licence_files(text, expected):
     assert licences.licence_from_text(text) == expected
+
+
+PROSE = " ".join(["The terms below apply to every copy of the work."] * 8)   # a licence text longer than a name
+
+
+@pytest.mark.parametrize("text, expected", [
+    # a word in passing never names the licence: "public domain" in the Artistic Licence or in a refusal
+    ('The "Artistic License"\n\nPreamble\n' + PROSE + " You may place your modifications in the Public Domain.",
+     None),
+    ("This work is not in the public domain. All rights reserved.", None),
+    ("Copyright 2024 Vendor Co. All rights reserved.\n" + PROSE + " This product includes components under the MIT "
+     "License (https://opensource.org/licenses/MIT) and the Apache License, Version 2.0.", None),
+    # the licence's own title decides, also when its text names other licences later
+    ("GNU GENERAL PUBLIC LICENSE\nVersion 2, June 1991\n" + PROSE + " If your program is a subroutine library, use "
+     "the GNU Lesser General Public License instead of this License.", "GPL-2.0"),
+    ("GNU GENERAL PUBLIC LICENSE\nVersion 3, 29 June 2007\n" + PROSE + "\n13. Use with the GNU Affero General Public "
+     "License.\n", "GPL-3.0"),
+    ("Mozilla Public License Version 2.0\n" + PROSE + ' "Secondary License" means either the GNU General Public '
+     "License, Version 2.0, the GNU Lesser General Public License, Version 2.1, the GNU Affero General Public "
+     "License, Version 3.0, or any later versions of those licenses.", "MPL-2.0"),
+    ("GNU GENERAL PUBLIC LICENSE\nVersion 1, February 1989\n" + PROSE, "GPL-1.0"),
+    ("GNU LIBRARY GENERAL PUBLIC LICENSE\nVersion 2, June 1991\n" + PROSE, "LGPL-2.0"),
+    ("GNU Free Documentation License\nVersion 1.2, November 2002\n" + PROSE, "GFDL-1.2"),
+    # another version is not upgraded to one that allows passing the text on
+    ("MOZILLA PUBLIC LICENSE\nVersion 1.1\n" + PROSE, None), ("Mozilla Public License 1.1", None),
+    ("Apache License, Version 1.1", None),
+    ("Redistribution and use in source and binary forms, with or without modification, are permitted provided that "
+     "the following conditions are met: 3. All advertising materials mentioning features or use of this software "
+     "must display the following acknowledgement. 4. Neither the name of the University nor the names of its "
+     "contributors may be used to endorse products. " + PROSE, None),
+    ("Copyright (c) 2024 Acme\n\nPermission to use, copy, modify, and/or distribute this software for any purpose "
+     "with or without fee is hereby granted, provided that the above copyright notice and this permission notice "
+     "appear in all copies. " + PROSE, "ISC"),
+    ("SPDX-License-Identifier: GPL-2.0-or-later\n" + PROSE, "GPL-2.0"),
+    # a component's licence bundled into a text that keeps all rights names nothing; a copyright line does not count
+    ("Copyright 2024 Vendor Co. All rights reserved.\n" + PROSE + "\n\nThird-party notices:\n\nMIT License\n\n"
+     "Permission is hereby granted, free of charge, to any person obtaining a copy of this software", None),
+    ("MIT License\n\nCopyright (c) 2013 Example Inc. or its affiliates. All Rights Reserved.\n\nPermission is hereby "
+     "granted, free of charge, to any person obtaining a copy of this software " + PROSE, "MIT"),
+    ("Copyright 2012 Example\n\nLicensed under the Apache License, Version 2.0 (the \"License\"); you may not use "
+     "this file except in compliance with the License. " + PROSE, "Apache-2.0"),
+])
+def test_a_licence_is_named_by_its_title_text_or_address_never_by_a_mention(text, expected):
+    assert licences.licence_from_text(text) == expected
+
+
+def test_an_unrecognised_licence_file_makes_the_code_restricted_not_unknown():
+    url = "https://github.com/acme/tool/blob/main/LICENSE"
+    meta = licences.from_html(soup(f'<pre>The "Artistic License"\n{PROSE} public domain</pre>'), url)
+    assert meta["licence"] == "other" and meta["licence_file"]
+    code = {"code_repo": "github.com/acme/tool", "root_url": "https://github.com/acme/tool"}
+    plan = licences.plan_for(code, licences.repo_licences([{**meta, "root_url": code["root_url"]}]))
+    assert (plan.shared_as, plan.state) == (LINK_AND_FACTS, "restricted")
+    assert "not part of the crawl" not in plan.reason, plan.reason
+
+
+def test_the_repository_licence_covers_its_code_never_its_issues_or_wiki():
+    root = "https://github.com/acme/tool"
+    licence_file = {**licences.from_html(soup(f"<pre>{MIT_TEXT}</pre>"), f"{root}/blob/main/LICENSE"),
+                    "root_url": root}
+    repos = licences.repo_licences([licence_file])
+    page = soup("<p>Bob wrote: here is my long comment about the build.</p><footer>© 2026 GitHub, Inc.</footer>")
+    for url in (f"{root}/issues/12", f"{root}/pull/3", f"{root}/discussions/7", f"{root}/wiki/Home",
+                f"{root}/releases/tag/v1.0", f"{root}/commit/abc123"):
+        plan = licences.plan_for({**licences.from_html(page, url), "root_url": root}, repos)
+        assert (plan.shared_as, plan.licence) == (LINK_AND_FACTS, ""), (url, plan)
+    for url in (root, f"{root}/tree/main/docs", f"{root}/blob/main/README.md",
+                "https://raw.githubusercontent.com/acme/tool/main/src/a.c"):
+        plan = licences.plan_for({**licences.from_html(page, url), "root_url": root}, repos)
+        assert (plan.shared_as, plan.licence) == (FULL_TEXT, "MIT"), (url, plan)
+
+
+@pytest.mark.parametrize("html", [
+    # an image credit is not the page's licence
+    '<article><p>My long article.</p><figure><img src="a.png"><figcaption>Photo by X, <a href="https://creativecommons'
+    '.org/licenses/by-sa/2.0/">CC BY-SA 2.0</a></figcaption></figure></article><footer>© 2024 Jane Doe.</footer>',
+    '<p>My long article. The photo above is by X (<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0'
+    "</a>).</p><footer>© 2024 Jane Doe.</footer>",
+    # a page that says "All rights reserved" keeps them, whatever a bare link elsewhere says
+    '<p>Text.</p><footer>© 2024 Vendor Ltd. All rights reserved. Icons: <a href="https://creativecommons.org/licenses'
+    '/by/4.0/">CC BY 4.0</a></footer>',
+])
+def test_a_creative_commons_link_that_is_not_the_pages_licence_never_opens_it(html):
+    meta = licences.from_html(soup(html), f"{SITE}/post")
+    assert licences.share_plan(meta).shared_as == LINK_AND_FACTS, meta
+
+
+@pytest.mark.parametrize("html, expected", [
+    ('<main><p>Guide.</p></main><footer>Raspberry Pi documentation is copyright © 2012-2024 Raspberry Pi Ltd and is '
+     'licensed under a <a href="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-'
+     "ShareAlike 4.0</a> licence.</footer>", "CC-BY-SA-4.0"),
+    ('<p>This page is licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>',
+     "CC-BY-4.0"),
+    ('<div class="section">Guide.</div><div class="site-footer"><a href="https://creativecommons.org/licenses/by-sa/'
+     '4.0/">CC BY-SA 4.0</a></div>', "CC-BY-SA-4.0"),
+])
+def test_a_creative_commons_link_that_licenses_the_page_counts(html, expected):
+    assert licences.from_html(soup(html), f"{SITE}/guide")["licence"] == expected
+
+
+def test_a_pdf_names_its_licence_in_its_metadata_never_by_a_link_in_its_text():
+    raw = (b"%PDF-1.7 1 0 obj << /A << /S /URI /URI (https://opensource.org/licenses/MIT) >> >> endobj "
+           b"2 0 obj << /URI (https://creativecommons.org/licenses/by/4.0/) >> endobj")
+    meta = licences.from_pdf(raw, "User guide\nCopyright 2023 Vendor Co., Ltd. All rights reserved.\n",
+                             f"{SITE}/guide.pdf")
+    assert "licence" not in meta and licences.share_plan(meta).shared_as == LINK_AND_FACTS
+    xmp = (b"%PDF-1.7 <x:xmpmeta><rdf:Description><xmpRights:WebStatement>https://creativecommons.org/licenses/by-sa/"
+           b"4.0/</xmpRights:WebStatement></rdf:Description></x:xmpmeta>")
+    assert licences.from_pdf(xmp, "Manual", f"{SITE}/m.pdf")["licence"] == "CC-BY-SA-4.0"
 
 
 def test_github_code_counts_only_the_repository_licence_file_and_never_the_site_footer():

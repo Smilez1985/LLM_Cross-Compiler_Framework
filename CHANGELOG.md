@@ -907,13 +907,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   The chat panel and the AI settings show an **Experimental** badge, and a notice says once per user, in English or
   German: "Use at your own risk and responsibility. The creator of LLMCF is not liable." It repeats the no-warranty
   terms of `LICENSE.txt` and adds nothing to them. In the GUI it stays at the top of the chat panel until you click
-  **Understood** and blocks nothing; `llm-cli ditto` prints it once on stderr at a terminal (without a terminal
-  nothing is printed or stored). README and Features say the same.
+  **Understood** and blocks nothing; a hidden panel shows itself once for it (without the focus), because the Builder
+  and the module wizard use Ditto without the panel. `llm-cli ditto` and `llm-cli module generate-ai` print it once
+  on stderr at a terminal (without a terminal nothing is printed or stored). README and Features say the same.
 - **Licence and copyright of every crawled page** (eighth round, Q-1 and Q-1'; `orchestrator/rag/licences.py`):
   Deep Ingest records per page, before the footer is dropped, a licence link (`rel="license"`, the HTTP `Link`
   header), licence metadata (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license`; in a PDF
-  its metadata), a Creative Commons link and an explicit copyright notice; for code from GitHub the repository's
-  licence file when the same crawl read it (otherwise the code has no known licence). `llm-cli knowledge sources`
+  its XMP metadata), a Creative Commons link in the footer or in a sentence that licenses the page, and an explicit
+  copyright notice; for code from GitHub the repository's licence file when the same crawl read it (otherwise the
+  code has no known licence; it never covers issues, pull requests, discussions, the wiki or releases). Only what
+  names the page's own licence counts: its address, SPDX id, own title with version or standard grant text, never a
+  licence named in passing, an image credit, a link in a PDF's text or another version; a bare link never outweighs
+  "All rights reserved". `llm-cli knowledge sources`
   lists every source with its licence, its notice and what a knowledge pack would carry of it and why;
   `list_knowledge_sources` gives AI clients the licence id, its state and the share in fixed words only (the notice is
   site text and never reaches an AI).
