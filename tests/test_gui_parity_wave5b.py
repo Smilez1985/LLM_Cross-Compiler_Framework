@@ -158,3 +158,97 @@ def test_every_command_of_these_areas_has_a_mouse_path_or_a_reason():
 
     walk(cli.cli, "")
     assert missing == []
+
+
+# --- one runtime task at a time in the whole GUI -------------------------------------------------------------------
+# Ditto > Local Runtime... and the AI settings' box run one runtime task at a time (runtime_mode_box.job_begins). A
+# download in Ditto > Local Models... (the same model file the box's model offer downloads) and an evaluation of local
+# tiers in Ditto > Evaluation... (it stops your server and starts its own) are runtime tasks too.
+
+BUSY = "Another task of Ditto's local runtime is running. Wait until it is done (or cancel it), then try again."
+
+
+def test_a_local_models_download_waits_for_another_runtime_task_and_counts_as_one(qapp, tmp_path, monkeypatch):
+    from test_gui_ditto_models import FakeRuntime, wait_until
+    from orchestrator.gui import ditto_models_window as module
+    from orchestrator.gui.runtime_mode_box import job_begins, job_ends, job_running
+    rt = FakeRuntime(tmp_path)
+    shown, answers = [], []
+    monkeypatch.setattr(module, "ask", lambda parent, title, text: answers.pop(0) if answers else False)
+    monkeypatch.setattr(module, "plain_box", lambda parent, kind, title, text, **k: shown.append((kind, text)))
+    win = module.LocalModelsWindow(SimpleNamespace(), runtime_factory=lambda: rt, lang="en")
+    other = object()
+    try:
+        wait_until(qapp, lambda: win.view is not None)
+        assert job_begins(other)   # e.g. Ditto > Local Runtime... builds llama-server
+        assert win.download_recommended() is False
+        assert shown == [("information", BUSY)] and rt.called("download_model") == [] and not win.busy
+        job_ends(other)
+        rt.block = True
+        answers.append(True)
+        assert win.download_recommended() is True
+        assert job_running(), "the download is a runtime task: Local Runtime and the AI settings' box wait for it"
+        win.cancel()
+        wait_until(qapp, lambda: not win.busy)
+        assert not job_running()
+    finally:
+        job_ends(other)
+        if win.busy:
+            win.cancel()
+            wait_until(qapp, lambda: not win.busy)
+        win.close()
+        win.deleteLater()
+
+
+def test_an_evaluation_of_local_tiers_waits_for_another_runtime_task_and_counts_as_one(qapp, tmp_path, monkeypatch):
+    from test_gui_ditto_models import FakeRun, FakeRuntime, tick, wait_until
+    from PySide6.QtCore import Qt
+    from orchestrator.evals import eval_run
+    from orchestrator.gui import ditto_eval_window as module
+    from orchestrator.gui.runtime_mode_box import job_begins, job_ends, job_running
+    from orchestrator.llm import load_catalog
+    rt = FakeRuntime(tmp_path, states={"small": "ready"})
+    run = FakeRun()
+    monkeypatch.setattr(eval_run, "run_evaluation", run)
+    shown, answers = [], []
+    monkeypatch.setattr(module, "ask", lambda parent, title, text: answers.pop(0) if answers else False)
+    monkeypatch.setattr(module, "plain_box", lambda parent, kind, title, text, **k: shown.append((kind, text)))
+    values = {"ai_provider": "anthropic"}
+    config = SimpleNamespace(get=lambda key, default=None: values.get(key, default), config_dir=None,
+                             set=lambda key, value: values.update({key: value}))
+    ditto = SimpleNamespace(config=config, framework=None, client=SimpleNamespace(catalog=load_catalog()),
+                            _secrets=None, _registry_override=None)
+    win = module.EvaluationWindow(SimpleNamespace(config=config, ditto_manager=ditto), runtime_factory=lambda: rt,
+                                  lang="en")
+    other = object()
+    try:
+        win.chk_kinds["healing"].setChecked(True)
+        tick(win.lst_tiers, "small")
+        assert job_begins(other)
+        assert win.start() is False
+        assert shown == [("information", BUSY)] and run.calls == [] and not win.busy
+        job_ends(other)
+        run.block = True
+        answers.append(True)
+        assert win.start() is True
+        assert job_running(), "a tier's server start is a runtime task"
+        win.cancel()
+        wait_until(qapp, lambda: not win.busy)
+        assert not job_running()
+        # without a tier the run starts no server: it is no runtime task, and another one does not hold it up
+        for i in range(win.lst_tiers.count()):
+            win.lst_tiers.item(i).setCheckState(Qt.Unchecked)
+        assert job_begins(other)
+        run.block = False
+        answers.append(True)
+        assert win.start() is True
+        wait_until(qapp, lambda: not win.busy)
+        assert len(run.calls) == 2 and run.calls[-1].kw["tiers"] == ()
+        assert job_running(), "the other task still holds the runtime"
+    finally:
+        job_ends(other)
+        if win.busy:
+            win.cancel()
+            wait_until(qapp, lambda: not win.busy)
+        win.close()
+        win.deleteLater()

@@ -12,7 +12,10 @@ Reading the catalogue probes the hardware, and a download takes minutes: both ru
 progress and result come back on the application's worker relay. "Download the recommended model..." takes the
 recommendation the window shows (read with the list, so no probe runs on the GUI thread) and is off until it is read. Cancel stops a download between two pieces and keeps
 the `.part` file for a later resume. Closing the window hides it; a running download goes on and the window shows it
-again when it is opened. Every text is plain text; the person sees the full models folder; nothing goes to an AI.
+again when it is opened. A download is a task of Ditto's local runtime: it waits while another one runs (a build,
+a server start or a download in Ditto > Local Runtime... or the AI settings), and they wait for it
+(runtime_mode_box.job_begins). Every text is plain text; the person sees the full models folder; nothing goes to
+an AI.
 """
 
 import threading
@@ -24,6 +27,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QDialog, QHBoxLayout, QHeaderV
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label
+from orchestrator.gui.runtime_mode_box import job_begins, job_ends, job_running
 from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.runtime.ditto_models import gib, model_to_download, models_overview
 from orchestrator.utils.localization import current_language, ui_text
@@ -177,6 +181,9 @@ class LocalModelsWindow(QDialog):
         if self._job is not None:
             self._tell("information", self._t("ditto_models.busy"))
             return False
+        if job_running():   # one runtime task in the whole GUI: the same model file, the same folder
+            self._tell("information", self._t("ditto_runtime.busy"))
+            return False
         view = self.view
         if tier is None and view is None:
             self._tell("information", self._t("ditto_models.loading"))
@@ -204,10 +211,13 @@ class LocalModelsWindow(QDialog):
                         else self._t("ditto_models.question", **values))
             if not ask(self, self._t("ditto_models.title"), question):
                 return False
-        self._run_download(rt, model)
-        return True
+        return self._run_download(rt, model)
 
-    def _run_download(self, rt: Any, model: Any) -> None:
+    def _run_download(self, rt: Any, model: Any) -> bool:
+        guard = object()
+        if not job_begins(guard):   # another runtime task began while the question was open
+            self._tell("information", self._t("ditto_runtime.busy"))
+            return False
         self._stop = threading.Event()
         stop, relay = self._stop, worker_relay()
         progress_token = self._progress_token = object()
@@ -219,9 +229,15 @@ class LocalModelsWindow(QDialog):
                 last[0] = now
                 relay.done.emit(progress_token, (name, done, total))
 
+        def download() -> Any:
+            try:
+                return rt.download_model(model.tier, progress=progress, stop=stop)
+            finally:
+                job_ends(guard)   # by the worker thread, also when this window is gone
+
         self._set_busy(True, self._t("ditto_models.downloading", file=one_line(model.file)))
-        self._job = self._start(lambda: rt.download_model(model.tier, progress=progress, stop=stop),
-                                "ditto-models-download")
+        self._job = self._start(download, "ditto-models-download")
+        return True
 
     def cancel(self) -> None:
         if self._job is not None:

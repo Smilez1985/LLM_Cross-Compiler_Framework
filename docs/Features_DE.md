@@ -1064,7 +1064,9 @@ einzelne Fälle, eine andere Falldatei, Läufe pro Fall, mehrere lokale Stufen, 
 diesen Lauf (die gespeicherten KI-Einstellungen bleiben unverändert). Vor einem Lauf sagt es, was aufgerufen wird und ob
 das Geld kostet, auch wenn die Ersatzkette der KI-Einstellungen einen Cloud-Anbieter nennt, und dass Retrieval seine
 Modelle bei der ersten Verwendung herunterlädt („Nein“ ist die Vorgabe); eine Stufe, die noch nicht heruntergeladen
-ist, wird mit einem Hinweis auf **Ditto > Lokale Modelle...** abgelehnt. Der Lauf geht im Hintergrund mit Fortschritt
+ist, wird mit einem Hinweis auf **Ditto > Lokale Modelle...** abgelehnt, und ein Lauf mit lokalen Stufen wartet,
+solange eine andere Aufgabe von Dittos lokaler Laufzeit läuft (er startet seinen eigenen Server). Der Lauf geht im
+Hintergrund mit Fortschritt
 und **Abbrechen** (der Fall, der gerade läuft, wird noch fertig; der Server einer Stufe wird wie nach einem normalen
 Lauf gestoppt, und ein Server von dir, den er ersetzt hat, wird gemeldet), das Fenster zeigt dieselben Tabellen, und
 **Bericht speichern...** schreibt den JSON-Bericht von `--json`.
@@ -1232,7 +1234,9 @@ und dem vollen Modellordner. **Empfohlenes Modell herunterladen...** und **Ausge
 `ditto models download` mit derselben Frage (Repository, Datei, Lizenz, Größe, Ordner; „Nein“ ist die Vorgabe); Liste
 und Download laufen im Hintergrund, mit Fortschritt und **Abbrechen** (der Teil bleibt für die Fortsetzung). Der
 empfohlene Download nimmt die Empfehlung, die das Fenster zeigt, damit keine Hardware-Prüfung läuft, während du auf die
-Frage wartest.
+Frage wartest. Ein Download ist eine Aufgabe von Dittos lokaler Laufzeit: Er wartet, solange in **Ditto > Lokale
+Laufzeit...** oder in den KI-Einstellungen ein Build, ein Serverstart oder ein anderer Download läuft, und diese
+warten auf ihn.
 
 ### Wie der Server läuft
 

@@ -89,13 +89,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   recommended download takes the recommendation the window shows (read with the list in the background), so no
   hardware probe runs on the GUI thread. The catalogue rows and the model a download is for are core functions the CLI
   calls too (its output is unchanged). The runtime install question of the AI settings names this window instead of
-  the CLI command.
+  the CLI command. A download is a task of Ditto's local runtime: it waits while a build, a server start or another
+  download runs in Ditto > Local Runtime... or the AI settings, and they wait for it.
 - **Ditto > Evaluation...: `llm-cli ditto eval` by mouse** (W1'): kinds and retrieval variants (fused, rerank),
   single cases, another cases file, runs per case, several local tiers, or provider, model and reasoning effort for
   this run only (the saved AI settings stay unchanged); a question before the run says what is called and whether it
   costs money, also when the fallback chain of the AI settings names a cloud provider, and that retrieval downloads
   its models on first use ("No" by default); a tier that is not downloaded yet is refused with a pointer to Ditto >
-  Local Models... (starting it would stop your server first); the run goes in the background with progress and
+  Local Models... (starting it would stop your server first); a run of local tiers is a task of Ditto's local
+  runtime and waits while another one runs; the run goes in the background with progress and
   **Cancel** (before the next attempt; Cancel while indexing loads no reranker), the window shows the CLI's tables,
   and **Save report...** writes its JSON report. The run itself (case selection, the tier loop with the server
   restore, the retrieval runs, the tables and the report) moved into `orchestrator/evals/eval_run.py`, which the CLI
