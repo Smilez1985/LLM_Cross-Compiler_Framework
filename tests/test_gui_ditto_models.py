@@ -315,6 +315,42 @@ class TestModelsDownload:
         wait_until(models_ui.qapp, lambda: not win.busy)
         assert models_ui.rt.called("download_model") == [("default", False)]
 
+    def test_a_download_probes_no_hardware_on_the_gui_thread(self, models_ui):
+        """The recommendation is a hardware probe that takes seconds: it is read off the GUI thread with the list, and
+        "Download the recommended model..." asks about the tier the window shows as recommended."""
+        win, rt = models_ui.win, models_ui.rt
+        win.btn_recommended.click()
+        win.table.selectRow(1)
+        win.btn_download.click()
+        assert [q.split("\n")[0] for q, _ in models_ui.asked] == [
+            "Recommended: 8 GiB RAM: the small model fits", "example/Model-GGUF / default.gguf (apache-2.0)"]
+        assert rt.called("choose_tier") == [(None, False)], "only the list's probe, off the GUI thread"
+
+    def test_the_recommended_download_waits_for_the_list(self, qapp, tmp_path, monkeypatch):
+        from orchestrator.gui import ditto_models_window as module
+        from orchestrator.gui.ditto_models_window import LocalModelsWindow
+        shown = []
+        monkeypatch.setattr(module, "plain_box", lambda parent, kind, title, text, **k: shown.append((kind, text)))
+        rt = FakeRuntime(tmp_path)
+        gate = threading.Event()
+
+        def factory():
+            if not on_gui_thread():
+                gate.wait(10)   # the hardware probe is still running
+            return rt
+        win = LocalModelsWindow(SimpleNamespace(), runtime_factory=factory, lang="en")
+        try:
+            assert not win.btn_recommended.isEnabled(), "nothing is recommended before the list is read"
+            assert win.download_recommended() is False and rt.called("choose_tier") == []
+            assert shown == [("information", "Reading the catalogue and this computer's hardware…")]
+            gate.set()
+            wait_until(qapp, lambda: win.view is not None)
+            assert win.btn_recommended.isEnabled()
+        finally:
+            gate.set()
+            win.close()
+            win.deleteLater()
+
     def test_nothing_selected_is_said(self, models_ui):
         models_ui.win.table.clearSelection()
         assert models_ui.win.download_selected() is False
