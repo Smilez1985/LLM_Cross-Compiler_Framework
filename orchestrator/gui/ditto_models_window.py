@@ -9,7 +9,8 @@ pinned: runtime/ditto_models.models_overview, the same call as the CLI. "Downloa
 after the CLI's question with repo, file, licence, size and folder ("No" is the default button).
 
 Reading the catalogue probes the hardware, and a download takes minutes: both run in a plain worker thread whose
-progress and result come back on the application's worker relay. Cancel stops a download between two pieces and keeps
+progress and result come back on the application's worker relay. "Download the recommended model..." takes the
+recommendation the window shows (read with the list, so no probe runs on the GUI thread) and is off until it is read. Cancel stops a download between two pieces and keeps
 the `.part` file for a later resume. Closing the window hides it; a running download goes on and the window shows it
 again when it is opened. Every text is plain text; the person sees the full models folder; nothing goes to an AI.
 """
@@ -76,6 +77,7 @@ class LocalModelsWindow(QDialog):
         row = QHBoxLayout()
         self.btn_recommended = self._button("ditto_models.download_recommended",
                                             "btn_ditto_models_download_recommended", self.download_recommended)
+        self.btn_recommended.setEnabled(False)   # on once the list (with the recommendation) is read
         self.btn_download = self._button("ditto_models.download", "btn_ditto_models_download", self.download_selected)
         self.btn_refresh = self._button("ditto_models.refresh", "btn_ditto_models_refresh", self.refresh)
         self.btn_cancel = self._button("ditto_models.cancel", "btn_ditto_models_cancel", self.cancel)
@@ -150,6 +152,7 @@ class LocalModelsWindow(QDialog):
                 self.table.setItem(index, column, item)
             if m.tier == selected:
                 self.table.selectRow(index)
+        self.btn_recommended.setEnabled(self._job is None)
 
     def selected_tier(self) -> Optional[str]:
         items = self.table.selectedItems()
@@ -169,13 +172,21 @@ class LocalModelsWindow(QDialog):
 
     def _download(self, tier: Optional[str]) -> bool:
         """Asks the CLI's question (repo, file, licence, size, folder; No by default), then downloads in a worker
-        thread. True when the download was started."""
+        thread. True when the download was started. Without a tier it is the recommendation the window shows: the
+        recommendation probes the hardware (seconds), so it is read with the list in a worker thread, never here."""
         if self._job is not None:
             self._tell("information", self._t("ditto_models.busy"))
             return False
+        view = self.view
+        if tier is None and view is None:
+            self._tell("information", self._t("ditto_models.loading"))
+            return False
         try:
             rt = self._factory()
-            model, why = model_to_download(rt, tier)
+            if tier is None:
+                model, why = model_to_download(rt, view.recommended.tier)[0], view.why
+            else:
+                model, why = model_to_download(rt, tier)
             ready = rt.model_ready(model)
         except KeyError as e:   # the catalogue changed since the list was read: the known tiers
             self._tell("warning", self._t("ditto_models.failed", reason=one_line(e.args[0] if e.args else e)))
@@ -218,8 +229,9 @@ class LocalModelsWindow(QDialog):
             self.lbl_busy.setText(self._t("ditto_models.cancelling"))
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
-        for button in (self.btn_recommended, self.btn_download, self.btn_refresh):
+        for button in (self.btn_download, self.btn_refresh):
             button.setEnabled(not busy)
+        self.btn_recommended.setEnabled(not busy and self.view is not None)
         self.btn_cancel.setVisible(busy)
         self.progress.setVisible(busy)
         if busy:
