@@ -61,7 +61,7 @@ def trashed(state, *names, actor="gui", trash=None):
 @POSIX_MODES_ONLY
 def test_the_trash_folder_is_private(tmp_path):
     state = tmp_path / "state"
-    trashed(state, "pre_ingest_1")
+    trashed(state, "pre_ingest_1", "pre_ingest_2")
     assert oct((state / ".trash").stat().st_mode & 0o777) == "0o700"
 
 

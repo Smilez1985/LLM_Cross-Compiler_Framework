@@ -209,3 +209,4 @@ class TestGuard:
         conftest.pytest_sessionfinish(session, 0)
         assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
         assert "added .ssh/id_ed25519" in lines[0] and "x" not in lines[0].split("id_ed25519", 1)[1]
+        assert "\\" not in lines[0], "paths are reported with '/' on every platform"
