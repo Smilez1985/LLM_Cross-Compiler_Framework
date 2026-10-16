@@ -581,10 +581,15 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 erlaubt der Wissensbasis, den Text zu behalten, den der Crawl lesen durfte; die Weitergabe wird je Seite entschieden.
 Bevor die Fußzeile entfernt wird, hält der Crawler je Seite fest: einen Lizenz-Link (`rel="license"` an einem Link oder
 im HTTP-Header `Link`), Lizenz-Metadaten (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license`
-in JSON-LD; in einem PDF eine Creative-Commons- oder Lizenzadresse in seinen Metadaten), einen Link auf eine
-Creative-Commons-Lizenz und einen ausdrücklichen Urheberrechtshinweis („©“, „(c)“ mit Jahr, „Copyright“ mit Jahr,
-„All rights reserved“). Bei Code von GitHub entscheidet nur die Lizenzdatei des Repositorys, und nur wenn derselbe
-Crawl sie gelesen hat; die Fußzeile der Website selbst wird dort nicht gelesen. Ein Wissenspaket und der
+in JSON-LD; in einem PDF `cc:license` oder `xmpRights:WebStatement` in seinen XMP-Metadaten), einen Link auf eine
+Creative-Commons-Lizenz in der Fußzeile oder in einem Satz, der die Seite lizenziert, und einen ausdrücklichen
+Urheberrechtshinweis („©“, „(c)“ mit Jahr, „Copyright“ mit Jahr, „All rights reserved“). Nur was die eigene Lizenz
+der Seite nennt, zählt: eine Adresse, eine SPDX-ID, der eigene Titel der Lizenz mit Version oder ihr üblicher
+Erlaubnistext. Eine nebenbei erwähnte Lizenz, ein Bildnachweis, ein Link im Text eines PDFs und eine andere Version
+einer Lizenz nennen nichts, und ein bloßer Link wiegt nie ein ausdrückliches „All rights reserved“ auf. Bei Code von
+GitHub entscheidet nur die Lizenzdatei des Repositorys, und nur wenn derselbe Crawl sie gelesen hat; die Fußzeile der
+Website selbst wird dort nicht gelesen. Sie gilt für den Code (Startseite, Dateien, Ordner), nicht für Issues, Pull
+Requests, Diskussionen, Wiki oder Releases. Ein Wissenspaket und der
 Wissens-Snapshot in einem erzeugten Target enthalten den vollen Text einer Seite nur, wenn ihre Lizenz die Weitergabe
 erlaubt (CC0, Gemeinfreiheit, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), mit der
 Namensnennung, die die Lizenz verlangt (Titel, Adresse, Urheberrechtshinweis, Lizenz, die vorgenommenen Änderungen).

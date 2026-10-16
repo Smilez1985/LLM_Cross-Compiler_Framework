@@ -550,9 +550,14 @@ lifts it. None of these checks can be switched off; the old *Respect robots.txt*
 the knowledge base keep the text the crawl was allowed to read; passing it on is decided per page. Before the footer
 is dropped, the crawler records per page: a licence link (`rel="license"` on a link, or in the HTTP `Link` header),
 licence metadata (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license` in JSON-LD; in a PDF
-a Creative Commons or licence address in its metadata), a link to a Creative Commons licence, and an explicit
-copyright notice ("©", "(c)" with a year, "Copyright" with a year, "All rights reserved"). For code from GitHub only
-the repository's licence file decides, and only when the same crawl read it; the site's own footer is not read there.
+`cc:license` or `xmpRights:WebStatement` in its XMP metadata), a link to a Creative Commons licence in the footer or in
+a sentence that licenses the page, and an explicit copyright notice ("©", "(c)" with a year, "Copyright" with a year,
+"All rights reserved"). Only what names the page's own licence counts: an address, an SPDX id, the licence's own title
+with its version or its standard grant text. A licence named in passing, an image credit, a link in a PDF's text and
+another version of a licence name nothing, and a bare link never outweighs an explicit "All rights reserved". For code
+from GitHub only the repository's licence file decides, and only when the same crawl read it; the site's own footer
+is not read there. It covers the code (start page, files, folders), not the issues, pull requests, discussions, wiki
+or releases.
 A knowledge pack, and the knowledge snapshot in a generated target, carry a page's full text only when its licence
 allows passing the text on (CC0, public domain, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense,
 MPL-2.0), with the attribution the licence requires (title, address, copyright notice, licence, the changes made).

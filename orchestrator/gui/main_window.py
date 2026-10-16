@@ -314,6 +314,8 @@ class MainOrchestrator(QMainWindow):
             self.restoreState(GuiState.decode(self.gui_state.dock_state))
         self.chat_dock.setVisible(self.gui_state.chat_panel_visible)
         panel.apply_state(self.gui_state)
+        from orchestrator.gui.chat_panel.panel import show_ditto_notice
+        show_ditto_notice(self.chat_dock, panel)   # Ditto is experimental: the notice is read once (round 8, Q-2)
 
     def _chat_language_changed(self, lang: str):
         self.chat_dock.retranslate(lang)

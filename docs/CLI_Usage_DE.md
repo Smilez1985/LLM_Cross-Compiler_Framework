@@ -618,10 +618,10 @@ Ditto ist der eingebaute Assistent. Die meisten `ditto`-Befehle nutzen Anbieter 
 Anmelden kannst du dich mit [`llm-cli ditto login`](#ditto-login) oder mit **Anmelden...** in den
 KI-Einstellungen.
 
-Ditto ist optional und experimentell. Vor dem ersten `ditto`-Befehl an einem Terminal geht einmal ein Hinweis auf
-stderr: „Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller von LLMCF haftet nicht.“ (der
-Gewährleistungsausschluss aus `LICENSE.txt`, nicht mehr). Er wird je Benutzer gespeichert und mit dem Hinweis der GUI
-geteilt; ohne Terminal wird nichts ausgegeben oder gespeichert. Der Befehl läuft immer
+Ditto ist optional und experimentell. Vor dem ersten `ditto`-Befehl (oder `module generate-ai`) an einem Terminal
+geht einmal ein Hinweis auf stderr: „Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller von LLMCF haftet
+nicht.“ (der Gewährleistungsausschluss aus `LICENSE.txt`, nicht mehr). Er wird je Benutzer gespeichert und mit dem
+Hinweis der GUI geteilt; ohne Terminal wird nichts ausgegeben oder gespeichert. Der Befehl läuft immer
 ([Details](Features_DE.md#experimentell)).
 
 ### ditto login
@@ -1541,7 +1541,8 @@ eingestellten Targets-Ordner angelegt (und vom Modulgenerator erneut geprüft). 
 Anmeldung des Anbieters ([`llm-cli ditto login`](#ditto-login)); der Befehl fragt selbst nie nach einem Schlüssel.
 Weder `module create` noch `module generate-ai` hängt Seiten aus der Wissensbasis an; das ist eine Option auf der
 letzten Seite des GUI-Assistenten. Ist die Probe-Datei ein Probe-Profil, wird der Block `runtime:` des Moduls daraus
-geplant; die CPU- und CMake-Flags des Vorschlags stehen dort als Hinweistext und werden nie angewendet.
+geplant; die CPU- und CMake-Flags des Vorschlags stehen dort als Hinweistext und werden nie angewendet. Ditto ist
+experimentell: Vor dem ersten Lauf an einem Terminal geht der Hinweis zu Ditto einmal auf stderr ([ditto](#ditto)).
 
 | Option | Bedeutung |
 |---|---|

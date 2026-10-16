@@ -319,6 +319,16 @@ class DittoNoticeBanner(QFrame):
             logger.warning(f"Could not remember the notice on Ditto ({e}); it is shown again next time.")
 
 
+def show_ditto_notice(dock: Any, panel: "ChatPanel") -> bool:
+    """While the person has not read the notice on Ditto, a hidden chat panel is shown once, without taking the focus:
+    the builder's "Ask Ditto for Config" and the module wizard use Ditto without the panel, and the notice comes before
+    the first use (eighth round, Q-2). Once it is read, the person's choice to hide the panel stays. True when the
+    panel was shown for it."""
+    if panel.notice.isHidden():
+        return False
+    return bool(dock.show_without_focus())
+
+
 class ChatPanel(QWidget):
     counts_changed = Signal(int, int)          # unread rows, questions that wait
     question_arrived = Signal()                # a new pending approval: the dock may show itself (without focus)

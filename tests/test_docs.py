@@ -568,15 +568,18 @@ def test_the_published_image_check_finds_the_old_wording():
 CLOUD_BUILD_WORDING = re.compile(
     r"(cloud|\bAWS\b|azure|rented|gemietet|GPU[- ]machine|GPU-Maschine)[^.|]{0,80}\bbuilds?\b"
     r"|\bbuilds?\b[^.|]{0,80}(cloud|\bAWS\b|azure|rented|gemietet|GPU[- ]machine|GPU-Maschine)", re.I)
-NOT_PLANNED = ("Not planned", "Nicht geplant")
+NOT_PLANNED = re.compile(r"\bnot planned\b|\bnicht geplant\b", re.I)
+# The roadmap's summary in the READMEs: the same rule holds there.
+ROADMAP_SUMMARIES = {"README.md": "what-comes-next", "README_DE.md": "wie-es-weitergeht"}
 
 
-def roadmap_items(rel: str) -> List[str]:
-    """The items of the roadmap section: table rows, list items with their wrapped lines, and paragraphs."""
+def roadmap_items(rel: str, section: str = "roadmap") -> List[str]:
+    """The items of the roadmap section (or of another section, by its anchor): table rows, list items with their
+    wrapped lines, and paragraphs."""
     items, inside = [], False
     for line in _prose_lines(_read(rel)):
         if line.startswith("## "):
-            inside = github_slug(line[3:]) == "roadmap"
+            inside = github_slug(line[3:]) == section
             continue
         if not inside:
             continue
@@ -591,7 +594,11 @@ def roadmap_items(rel: str) -> List[str]:
 
 
 def cloud_builds_planned(items: List[str]) -> List[str]:
-    return [item[:120] for item in items if CLOUD_BUILD_WORDING.search(item) and not item.startswith(NOT_PLANNED)]
+    """The items with a sentence that names builds in the cloud or on rented machines without saying "not
+    planned"."""
+    return [item[:120] for item in items
+            if any(CLOUD_BUILD_WORDING.search(sentence) and not NOT_PLANNED.search(sentence)
+                   for sentence in re.split(r"(?<=[.!?])\s+", item))]
 
 
 def test_the_roadmap_never_plans_cloud_builds():
@@ -599,6 +606,10 @@ def test_the_roadmap_never_plans_cloud_builds():
     for target in ROADMAP_LINKS.values():
         rel = target.partition("#")[0]
         found += [f"{rel}: {item}" for item in cloud_builds_planned(roadmap_items(rel))]
+    for rel, section in ROADMAP_SUMMARIES.items():
+        items = roadmap_items(rel, section)
+        assert items, f"{rel} has no section #{section} with the roadmap's summary"
+        found += [f"{rel}: {item}" for item in cloud_builds_planned(items)]
     assert not found, ("the roadmap plans builds in the cloud or on rented machines (struck in the eighth round, "
                        "Q-3):\n  " + "\n  ".join(found))
 
@@ -610,5 +621,8 @@ def test_the_cloud_build_check_finds_the_old_wording():
     assert cloud_builds_planned(old) == [line[:120] for line in old]
     kept = ["Not planned: builds in the cloud (AWS, Azure) or on rented machines.",
             "Nicht geplant: Builds in der Cloud (AWS, Azure) oder auf gemieteten Maschinen.",
-            "- **Cloud platforms** (AWS, Google Cloud, Azure) through the vendors' own credential chains"]
+            "- **Cloud platforms** (AWS, Google Cloud, Azure) through the vendors' own credential chains",
+            "- **Planned:** recipes as target templates. Builds in the cloud are not planned."]
     assert cloud_builds_planned(kept) == []
+    summary = ["- **Planned:** recipes as target templates, and builds in the cloud on AWS."]
+    assert cloud_builds_planned(summary) == summary, "a README summary that plans them is found too"

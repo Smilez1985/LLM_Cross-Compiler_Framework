@@ -11,9 +11,11 @@ It is shown once per person and again when its text changes: the state file (per
 gui or cli). A missing, damaged or different hash shows it again.
 
 It never blocks the rest of the framework: builds, deployments, the MCP server and every other window work without
-it, and no tool, resource or prompt shows or answers it. The GUI shows it the first time the person uses Ditto (the
-chat, the AI settings, "Ask Ditto"); `llm-cli ditto` prints it on stderr before the first command at a terminal and
-records it then. Without a terminal nothing is printed or recorded, so the next command at a terminal prints it.
+it, and no tool, resource or prompt shows or answers it. The GUI shows it at the top of the chat panel until the
+person clicks "Understood" (a hidden panel is shown once for it, without the focus, because the builder and the module
+wizard use Ditto without the panel; the AI settings show the sentence every time). `llm-cli ditto` and `llm-cli module
+generate-ai` print it on stderr before the first command at a terminal and record it then. Without a terminal nothing
+is printed or recorded, so the next command at a terminal prints it.
 """
 
 import hashlib

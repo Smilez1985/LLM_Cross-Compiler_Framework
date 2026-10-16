@@ -465,6 +465,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     Ditto uses the provider's stored sign-in (llm-cli ditto login <provider>).
     """
     from orchestrator.Core.ditto_manager import DittoError, proposal_facts
+    _ditto_notice_once()   # Ditto at work outside the ditto group: the notice comes first here too
     ctx.require_framework()
     ditto = _ai_override(ctx, provider, model)
     try:
@@ -1702,9 +1703,10 @@ def _notice_terminal() -> bool:
 
 
 def _ditto_notice_once() -> None:
-    """Ditto is optional and experimental (eighth round, Q-2): before the first `llm-cli ditto` command at a terminal
-    the notice goes to stderr and is recorded per person (utils/ditto_notice.py). Without a terminal nothing is
-    printed or recorded, so the next command at a terminal prints it. It never stops the command."""
+    """Ditto is optional and experimental (eighth round, Q-2): before the first command at a terminal that uses Ditto
+    (the `llm-cli ditto` group, `llm-cli module generate-ai`) the notice goes to stderr and is recorded per person
+    (utils/ditto_notice.py). Without a terminal nothing is printed or recorded, so the next command at a terminal
+    prints it. It never stops the command."""
     if not _notice_terminal():
         return
     from orchestrator.Core.config_manager import ConfigManager
