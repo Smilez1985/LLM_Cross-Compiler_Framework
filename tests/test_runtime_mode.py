@@ -206,6 +206,21 @@ def verify_in_container(monkeypatch):
     return runners
 
 
+GB = 1000 ** 3
+
+
+def disks(free):
+    """A fake shutil.disk_usage: `free` bytes free on every disk of 1000 GB (2 % of it is kept free)."""
+    return lambda path: SimpleNamespace(total=1000 * GB, used=1000 * GB - free, free=free)
+
+
+@pytest.fixture(autouse=True)
+def plenty_of_space(monkeypatch):
+    """The space check of a switch (W2) sees plenty of free space, whatever the test machine's disk holds; the tests of
+    the check itself set less."""
+    monkeypatch.setattr(runtime_mode, "_disk_usage", disks(500 * GB))
+
+
 def runtime(tmp_path, client=None, profile=Z1, native=True, engine=None, executor=None, verifier=None, **kw):
     return LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models" / "ditto", catalog=CATALOG,
                            hardware=machine([APU]), profile=profile, toolchain=toolchain(native),
@@ -734,7 +749,9 @@ class TestSwitch:
         assert result.action == "recorded" and any("nothing was built" in line for line in result.lines)
 
 
-# --- the old mode's leftovers --------------------------------------------------------------------------------------------
+
+
+# --- the old mode goes completely (W2) -------------------------------------------------------------------------------
 
 def _switched_to_docker(tmp_path, client):
     rt = runtime(tmp_path, client)
@@ -743,19 +760,32 @@ def _switched_to_docker(tmp_path, client):
     return switched, ensure(switched, mode="docker", force=True).leftovers
 
 
+def _switched_to_bare_metal(tmp_path, client):
+    """Docker mode first (rebuilt in the builder container), then bare metal: the image's build repackaged."""
+    ensure(runtime(tmp_path, client, native=False), mode="docker")
+    back = runtime(tmp_path, client, native=False, executor=Refuses())
+    return back, ensure(back, mode="bare-metal", force=True).leftovers
+
+
+def _exists(item) -> bool:
+    return Path(item.full_path).exists()
+
+
 class TestLeftovers:
 
     @pytest.mark.parametrize("actor", ["ditto", "mcp", "ai", "delegation", "", "client:claude"])
     def test_only_the_person_removes(self, tmp_path, no_source, dri, actor):
         rt, plan = _switched_to_docker(tmp_path, FakeClient())
-        with pytest.raises(PermissionError):
-            remove_leftovers(rt, plan, actor=actor, audit=Audit())
-        assert all(Path(i.full_path).is_dir() for i in plan.items if i.full_path)
+        for before in (False, True):
+            with pytest.raises(PermissionError):
+                remove_leftovers(rt, plan, actor=actor, audit=Audit(), before_switch=before)
+        assert all(_exists(i) for i in plan.items if i.full_path)
 
     def test_a_changed_list_removes_nothing(self, tmp_path, no_source, dri):
         rt, plan = _switched_to_docker(tmp_path, FakeClient())
+        build = next(i for i in plan.items if i.kind == "runtime_build")
         extra = rt.store.builds_dir / ("e" * 16)
-        shutil.copytree(Path(plan.items[0].full_path), extra)
+        shutil.copytree(Path(build.full_path), extra)
         data = json.loads((extra / "build.json").read_text())
         data["build_id"] = "e" * 64
         (extra / "build.json").write_text(json.dumps(data))
@@ -764,64 +794,74 @@ class TestLeftovers:
         (extra / "manifest.json").write_text(json.dumps(manifest))
         with pytest.raises(LeftoversChanged):
             remove_leftovers(rt, plan, actor="cli", audit=Audit())
-        assert all(Path(i.full_path).is_dir() for i in plan.items if i.full_path)
+        assert all(_exists(i) for i in plan.items if i.full_path)
 
-    def test_without_an_audit_or_without_the_trash_nothing_is_removed(self, tmp_path, no_source, dri):
-        from orchestrator.Core.trash import Trash
+    def test_without_an_audit_nothing_is_removed(self, tmp_path, no_source, dri):
         rt, plan = _switched_to_docker(tmp_path, FakeClient())
         for audit in (None, Audit(fail=True)):
             with pytest.raises(RuntimeModeError, match="audit"):
-                remove_leftovers(rt, plan, actor="cli", audit=audit, trash=Trash(tmp_path / "state"))
-        with pytest.raises(RuntimeModeError, match="trash"):
-            remove_leftovers(rt, plan, actor="cli", audit=Audit())   # the trash is the default for build folders
-        assert all(Path(i.full_path).is_dir() for i in plan.items if i.full_path)
+                remove_leftovers(rt, plan, actor="cli", audit=audit)
+        assert all(_exists(i) for i in plan.items if i.full_path)
 
-    def test_build_folders_go_to_the_trash_by_default_with_one_confirmation(self, tmp_path, no_source, dri):
-        """WP7 for the old mode's leftovers: the list offers the trash first when it holds a build folder; the folders
-        are moved there (restorable), Docker's objects are deleted, and the person confirmed the list once."""
+    def test_bare_metal_goes_completely_and_for_good_once_docker_works(self, tmp_path, no_source, dri):
+        """W2, bare metal -> Docker: every bare-metal build folder and bare metal's entries in active.json are listed
+        once and deleted for good (no trash); Docker mode keeps working, the models stay."""
         from orchestrator.Core.trash import Trash
         client = FakeClient()
         rt, plan = _switched_to_docker(tmp_path, client)
+        models = rt.models_dir
+        models.mkdir(parents=True, exist_ok=True)
+        (models / "m.gguf").write_bytes(b"GGUF")
+        assert plan.mode_offered == ("permanent",), "no trash: the old mode goes completely"
         builds = [i for i in plan.items if i.kind == "runtime_build"]
-        assert builds and plan.mode_offered == ("trash", "permanent")
-        trash, audit = Trash(tmp_path / "state"), Audit()
-        removal = remove_leftovers(rt, plan, actor="gui", audit=audit, trash=trash)
-        assert sorted(removal.trashed) == sorted(i.speaking_name for i in builds) and not removal.failed
-        assert removal.freed_bytes == sum(i.size_bytes for i in plan.items if i.kind != "runtime_build")
-        entries = trash.entries()
-        assert len(entries) == len(builds) == len(removal.trash_ids)
-        assert {e.kind for e in entries} == {"runtime_build"} and {e.confirmed_by for e in entries} == {"gui"}
-        assert not any(Path(i.full_path).exists() for i in builds), "moved, not left behind"
-        assert audit.rows[0]["arguments"]["deletion_mode"] == "trash"
+        records = [i for i in plan.items if i.kind == "runtime_record"]
+        assert len(builds) == 2 and [r.file_name for r in records] == ["active.json"]
+        assert "build_id" in records[0].what and "the file stays" in records[0].what
+        audit = Audit()
+        removal = remove_leftovers(rt, plan, actor="gui", audit=audit)
+        assert sorted(removal.deleted) == sorted(i.speaking_name for i in plan.items) and not removal.failed
+        assert removal.freed_bytes == plan.total_bytes and not removal.stopped
+        assert not any(Path(i.full_path).exists() for i in builds), "deleted, not moved"
+        assert Trash(tmp_path / "state").entries() == [], "nothing went to the trash"
+        active = json.loads((rt.root / "active.json").read_text())
+        assert not {"build_id", "fallback_build_id", "use", "variant"} & set(active), active
+        assert rt.installed() is None and runtime_mode.detect(rt).bare_metal is None, "nothing of bare metal is left"
+        assert runtime_mode.detect(rt).docker.verified and rt.mode() == "docker", "Docker mode keeps working"
+        assert (models / "m.gguf").read_bytes() == b"GGUF", "the models stay"
+        assert audit.rows[0]["arguments"]["deletion_mode"] == "permanent"
+        assert audit.rows[0]["arguments"]["removes"] == "bare-metal"
         assert audit.rows[0]["extra"]["deletion_sha256"] == plan.sha256()
-        assert "active" not in rt.store.references(), "a build in the trash is no longer referenced"
+        assert [r["outcome"] for r in audit.rows] == ["started", "ok"]
         assert leftovers(rt, "docker") is None
 
-    def test_exactly_the_confirmed_list_is_removed_and_audited(self, tmp_path, no_source, dri):
+    def test_docker_goes_completely_and_for_good_once_bare_metal_works(self, tmp_path, no_source, dri,
+                                                                      verify_in_container):
+        """W2, Docker -> bare metal: every image and container of Ditto, Docker mode's entries in mode.json and
+        active.json and the log of its image builds are listed once and deleted for good."""
+        client = FakeClient()
+        rt, plan = _switched_to_bare_metal(tmp_path, client)
+        log = Path(rt.data_dir) / "logs" / runtime_mode.IMAGE_LOG
+        assert log.is_file()
+        kinds = {i.kind for i in plan.items}
+        assert {"docker_image", "runtime_record"} <= kinds and plan.mode_offered == ("permanent",)
+        assert {i.file_name for i in plan.items if i.kind == "docker_image"} == set(client.images.items)
+        assert {i.file_name for i in plan.items if i.kind == "runtime_record"} == {"mode.json", "active.json",
+                                                                                   runtime_mode.IMAGE_LOG}
+        removal = remove_leftovers(rt, plan, actor="cli", audit=Audit())
+        assert not removal.failed and client.images.items == {}, "every image of Ditto is gone"
+        assert "docker" not in json.loads(rt.mode_file.read_text()), "Docker mode's record is gone"
+        assert "docker_build_id" not in json.loads((rt.root / "active.json").read_text())
+        assert not log.exists() and rt.mode() == "bare-metal"
+        assert rt.installed() is not None, "bare metal keeps working (the image's build is its build now)"
+        assert leftovers(rt, "bare-metal") is None
+
+    def test_the_old_mode_is_removed_only_while_the_new_one_works(self, tmp_path, no_source, dri):
         client = FakeClient()
         rt, plan = _switched_to_docker(tmp_path, client)
-        audit = Audit()
-        removal = remove_leftovers(rt, plan, actor="gui", audit=audit, mode="permanent")
-        assert len(removal.deleted) == len(plan.items) and not removal.failed and not removal.trashed
-        assert removal.freed_bytes == plan.total_bytes
-        assert not any(Path(i.full_path).exists() for i in plan.items if i.full_path)
-        assert [r["outcome"] for r in audit.rows] == ["started", "ok"]
-        assert audit.rows[0]["extra"]["deletion_sha256"] == plan.sha256()
-        assert audit.rows[0]["extra"]["answered_by"] == "person" and audit.rows[0]["actor"] == "gui"
-        assert "active" not in rt.store.references(), "the removed builds are no longer referenced"
-        assert rt.mode() == "docker" and rt.mode_record()["docker"]["image_id"] in {
-            i.id for i in client.images.items.values()}, "the image in use stays"
-        assert leftovers(rt, "docker") is None
-
-    def test_a_list_of_docker_objects_only_offers_no_trash(self, tmp_path, no_source, dri, verify_in_container):
-        client = FakeClient()
-        ensure(runtime(tmp_path, client, native=False), mode="docker")
-        back = runtime(tmp_path, client, native=False, executor=Refuses())
-        plan = ensure(back, mode="bare-metal", force=True).leftovers
-        assert {i.kind for i in plan.items} <= {"docker_image", "docker_container"}
-        assert plan.mode_offered == ("permanent",), "Docker has no trash"
-        for item in plan.items:
-            assert item.speaking_name.startswith("Ditto ") and item.file_name and item.size_bytes > 0
+        client.images.items.clear()   # Ditto's image is gone: Docker mode does not work
+        with pytest.raises(RuntimeModeError, match="only after the new one works"):
+            remove_leftovers(rt, plan, actor="cli", audit=Audit())
+        assert all(_exists(i) for i in plan.items if i.full_path), "bare metal stays while Docker mode is broken"
 
     def test_images_are_removed_only_through_the_confirmed_list(self):
         sources = {p: p.read_text(encoding="utf-8") for p in (REPO_ROOT / "orchestrator").rglob("*.py")}
@@ -829,9 +869,110 @@ class TestLeftovers:
         assert removers == ["orchestrator/runtime/runtime_mode.py"], removers
         text = sources[REPO_ROOT / "orchestrator" / "runtime" / "runtime_mode.py"]
         assert text.count(".remove_image(") == 1 and "def _remove_item" in text
+        assert "trash" not in text.split("def remove_leftovers", 1)[1].split("def _forget_keys", 1)[0].replace(
+            "not into the trash", "").replace("no trash", ""), "the old mode never goes to the trash"
         for path in ("orchestrator/runtime/container_server.py", "orchestrator/runtime/runtime_mode.py"):
             code = (REPO_ROOT / path).read_text(encoding="utf-8")
             assert ".push(" not in code and ".prune" not in code and "containers.run(" not in code, path
+
+
+# --- the space a switch needs, and removing the old mode first (W2) ----------------------------------------------
+
+def _docker_disk(client, folder):
+    """Docker's image storage as a folder of this computer (DockerRootDir), so the check can measure it."""
+    folder.mkdir(parents=True, exist_ok=True)
+    client.info = lambda: {"Runtimes": {}, "DockerRootDir": str(folder)}
+    return folder
+
+
+class TestSpace:
+
+    def test_a_switch_that_does_not_fit_builds_nothing_and_names_the_sizes_and_the_old_mode(self, tmp_path, no_source,
+                                                                                           dri, monkeypatch):
+        client = FakeClient()
+        newer = with_libc(Z1, "2.42")   # no base fits the native build: Docker mode needs a new build
+        rt = runtime(tmp_path, client, profile=newer)
+        rt.install()
+        before = sorted(p.name for p in rt.store.builds_dir.iterdir())
+        _docker_disk(client, tmp_path / "docker-root")
+        monkeypatch.setattr(runtime_mode, "_disk_usage", disks(3 * GB))   # 20 GB are kept free on 1000 GB
+        switching = runtime(tmp_path, client, profile=newer, executor=Refuses())
+        with pytest.raises(runtime_mode.SpaceShortage) as e:
+            ensure(switching, mode="docker", force=True)
+        shortage = e.value
+        assert client.builds == [] and sorted(p.name for p in rt.store.builds_dir.iterdir()) == before, \
+            "nothing was built"
+        assert rt.mode() == "bare-metal" and rt.installed() is not None, "bare metal stays as it was"
+        estimate = shortage.estimate
+        assert estimate.mode == "docker" and not estimate.fits and estimate.total > 0
+        labels = {label for check in estimate.checks for label in check.labels}
+        assert labels == {runtime_mode.RUNTIME_FOLDER, runtime_mode.DOCKER_STORAGE}
+        text = str(shortage)
+        assert "does not fit next to bare metal" in text and "not enough" in text and "free" in text
+        assert "remove bare metal first" in text and "the models stay" in text
+        assert shortage.old_mode == "bare-metal"
+        assert {i.kind for i in shortage.old_plan.items} == {"runtime_build", "runtime_record"}
+        assert len([i for i in shortage.old_plan.items if i.kind == "runtime_build"]) == 2
+
+    def test_a_switch_that_fits_says_so_and_builds(self, tmp_path, no_source, dri, verify_in_container):
+        client = FakeClient()
+        newer = with_libc(Z1, "2.42")
+        rt = runtime(tmp_path, client, profile=newer)
+        rt.install()
+        _docker_disk(client, tmp_path / "docker-root")
+        result = ensure(runtime(tmp_path, client, profile=newer), mode="docker", force=True)
+        assert result.space is not None and result.space.fits and result.mode == "docker"
+        assert any(line.startswith("Space for Docker") for line in result.lines)
+        assert any("enough" in line for line in result.lines)
+
+    def test_a_disk_that_cannot_be_measured_is_named_and_blocks_nothing(self, tmp_path, no_source, dri,
+                                                                         verify_in_container):
+        client = FakeClient()   # Docker does not say where it keeps its images
+        newer = with_libc(Z1, "2.42")
+        runtime(tmp_path, client, profile=newer).install()
+        result = ensure(runtime(tmp_path, client, profile=newer), mode="docker", force=True)
+        assert result.mode == "docker"
+        assert any("Docker image storage" in line and "could not be read" in line for line in result.lines)
+
+    def test_docker_to_bare_metal_reusing_the_images_build_needs_no_space(self, tmp_path, no_source, dri,
+                                                                          verify_in_container, monkeypatch):
+        client = FakeClient()
+        ensure(runtime(tmp_path, client, native=False), mode="docker")
+        monkeypatch.setattr(runtime_mode, "_disk_usage", disks(1 * GB))
+        back = runtime(tmp_path, client, native=False, executor=Refuses())
+        result = ensure(back, mode="bare-metal", force=True)
+        assert result.space.total == 0 and result.space.fits and back.mode() == "bare-metal"
+
+    def test_the_old_mode_removed_first_then_the_new_one_is_made(self, tmp_path, no_source, dri,
+                                                                 verify_in_container, monkeypatch):
+        """W2: the person chose to remove bare metal first: every object of it (also the build in use) is deleted for
+        good after Ditto's server was stopped; then Docker mode is made and nothing of bare metal is left."""
+        client = FakeClient()
+        newer = with_libc(Z1, "2.42")
+        rt = runtime(tmp_path, client, profile=newer)
+        rt.install()
+        plan = runtime_mode.old_mode_plan(rt, "bare-metal")
+        assert {i.kind for i in plan.items} == {"runtime_build", "runtime_record"}
+        assert any("the active bare-metal build" in i.what for i in plan.items), "also the build in use"
+        stops = []
+        rt.stop = lambda timeout=15: stops.append(1) or 1
+        audit = Audit()
+        removal = remove_leftovers(rt, plan, actor="cli", audit=audit, before_switch=True, removes="bare-metal")
+        assert removal.stopped and stops == [1] and not removal.failed
+        assert rt.installed() is None and runtime_mode.old_mode_plan(rt, "bare-metal") is None
+        assert audit.rows[0]["arguments"]["before_switch"] is True
+        result = ensure(runtime(tmp_path, client, profile=newer), mode="docker", force=True)
+        assert result.mode == "docker" and result.leftovers is None, "nothing of bare metal is left to list"
+
+    def test_removing_first_is_refused_when_the_list_changed(self, tmp_path, no_source, dri):
+        rt = runtime(tmp_path, FakeClient())
+        rt.install()
+        plan = runtime_mode.old_mode_plan(rt, "bare-metal")
+        (rt.root / "b1000-cpu-x64").mkdir()
+        (rt.root / "b1000-cpu-x64" / "runtime.json").write_text("{}")
+        with pytest.raises(LeftoversChanged):
+            remove_leftovers(rt, plan, actor="gui", audit=Audit(), before_switch=True, removes="bare-metal")
+        assert rt.installed() is not None
 
 
 # --- what an AI may do ------------------------------------------------------------------------------------------------
@@ -999,7 +1140,78 @@ class TestCli:
         flat = re.sub(r"[\s│┃|]+", "", result.output)
         for item in plan.items:
             assert re.sub(r"\s+", "", item.file_name) in flat
-        assert "Goesto" in flat and "thetrash" in flat and "Dockerhasnotrash" in flat, "where each object goes"
+        assert "deletedforgood(notintothetrash)" in flat and "themodelsstay" in flat, "what happens to them"
+
+    def _shortage(self, rt, old="bare-metal"):
+        from orchestrator.Core.disk_plan import DiskCheck
+        check = DiskCheck(["Ditto runtime folder"], 2 * GB, GB, 1000 * GB, 20 * GB, 0, "1")
+        estimate = runtime_mode.SpaceEstimate("docker", "a new cpu build in the builder container",
+                                              keeps=GB, checks=[check])
+        return runtime_mode.SpaceShortage(estimate, old, runtime_mode.old_mode_plan(rt, old))
+
+    def _terminal_cli(self, monkeypatch, rt, answers, ensure_steps):
+        """`ditto runtime ensure --mode docker --force` at a terminal: each call of ensure takes the next step (an
+        exception is raised, a result returned); remove_leftovers is recorded."""
+        from orchestrator import cli as cli_module
+        monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+        calls, removed = [], []
+
+        def fake_ensure(rt_, **kw):
+            calls.append((kw["mode"], kw["force"]))
+            step = ensure_steps.pop(0)
+            if isinstance(step, BaseException):
+                raise step
+            return step
+        monkeypatch.setattr(runtime_mode, "ensure", fake_ensure)
+        monkeypatch.setattr(runtime_mode, "remove_leftovers", lambda rt_, plan, **k: removed.append((plan, k))
+                            or runtime_mode.Removal(deleted=[i.speaking_name for i in plan.items], stopped=True))
+        result = _cli(monkeypatch, rt, "ensure", "--mode", "docker", "--force", "--no-model", input=answers)
+        return result, calls, removed
+
+    def test_a_switch_that_does_not_fit_lists_the_old_mode_and_no_removes_and_builds_nothing(self, tmp_path,
+                                                                                           monkeypatch, no_source,
+                                                                                           dri):
+        rt = runtime(tmp_path)
+        rt.install()
+        shortage = self._shortage(rt)
+        result, calls, removed = self._terminal_cli(monkeypatch, rt, "n\n", [shortage])
+        assert result.exit_code == 1 and removed == [] and calls == [("docker", True)], result.output
+        flat = re.sub(r"[\s│┃|]+", "", result.output)
+        assert "doesnotfitnexttobaremetal" in flat and "notenough" in flat
+        assert "unavailableuntilDockerworks" in flat and "themodelsstay" in flat
+        for item in shortage.old_plan.items:
+            assert re.sub(r"\s+", "", item.file_name) in flat
+        assert "Nothingwasdeletedandnothingwasbuilt" in flat
+
+    def test_removing_the_old_mode_first_then_switching(self, tmp_path, monkeypatch, no_source, dri):
+        rt = runtime(tmp_path)
+        rt.install()
+        shortage = self._shortage(rt)
+        done = runtime_mode.EnsureResult("switched", "docker", ["Ditto's runtime mode is now Docker."])
+        result, calls, removed = self._terminal_cli(monkeypatch, rt, "y\n", [shortage, done])
+        assert result.exit_code == 0, result.output
+        (plan, kw), = removed
+        assert plan is shortage.old_plan and kw["actor"] == "cli" and kw["before_switch"] is True
+        assert kw["removes"] == "bare-metal" and calls == [("docker", True), ("docker", True)]
+        assert "server was stopped first" in result.output
+
+    def test_when_the_new_mode_fails_after_the_old_one_was_removed_it_is_said_and_the_old_one_offered(
+            self, tmp_path, monkeypatch, no_source, dri):
+        rt = runtime(tmp_path)
+        rt.install()
+        shortage = self._shortage(rt)
+        back = runtime_mode.EnsureResult("installed", "bare-metal", ["Built for bare metal."])
+        result, calls, removed = self._terminal_cli(monkeypatch, rt, "y\ny\n", [
+            shortage, RuntimeModeError("the build for Ditto's image failed"), back])
+        assert result.exit_code == 1 and len(removed) == 1
+        flat = re.sub(r"\s+", " ", result.output)
+        assert "Docker could not be made: the build for Ditto's image failed" in flat
+        assert "Ditto has no local runtime now: bare metal was deleted before" in flat
+        assert calls == [("docker", True), ("docker", True), ("bare-metal", True)], "the old mode made again"
+        result, calls, removed = self._terminal_cli(monkeypatch, rt, "y\nn\n", [
+            self._shortage(rt), RuntimeModeError("no")])
+        assert calls == [("docker", True), ("docker", True)] and "llm-cli ditto runtime ensure --mode bare-metal" in \
+            result.output
 
     def test_status_shows_the_mode(self, tmp_path, monkeypatch):
         client = FakeClient()
@@ -1030,7 +1242,8 @@ class TestAISettings:
         box.cb_mode.setCurrentIndex(box.cb_mode.findData("bare-metal"))
         box._switch()
         assert calls == [] and box._token is None, "No: nothing happens"
-        assert "not downloaded again" in questions[0] and "you decide what is removed" in questions[0]
+        assert "not downloaded again" in questions[0] and "fits next to the old mode" in questions[0]
+        assert "deleted for good" in questions[0]
 
     def test_the_leftovers_question_lists_every_object_and_no_removes_nothing(self, qapp, tmp_path, monkeypatch,
                                                                             no_source, dri):
@@ -1051,44 +1264,16 @@ class TestAISettings:
         monkeypatch.setattr(box_module.runtime_mode, "remove_leftovers", lambda rt_, plan_, **k: removed.append(k)
                             or runtime_mode.Removal())
         box._offer_removal(plan)
-        assert removed[-1]["actor"] == "gui" and removed[-1]["mode"] == "trash"
+        assert removed[-1] == {"actor": "gui", "audit": None}, "the whole list, for good, no trash"
         assert len([q for q in questions]) == 1, "one question for the whole list (round 7 D)"
 
-    def test_the_question_names_only_where_the_listed_objects_go(self, qapp, tmp_path, monkeypatch, no_source, dri,
-                                                                 verify_in_container):
-        """A list of Docker objects only says nothing about a trash (none of them goes there); a list with build
-        folders says they go to the trash."""
-        from orchestrator.gui import runtime_mode_box as box_module
-        client = FakeClient()
-        ensure(runtime(tmp_path / "a", client, native=False), mode="docker")
-        back = runtime(tmp_path / "a", client, native=False, executor=Refuses())
-        docker_only = ensure(back, mode="bare-metal", force=True).leftovers
-        assert docker_only.mode_offered == ("permanent",)
-        asked = []
-        monkeypatch.setattr(box_module, "ask", lambda parent, title, question: asked.append(question) or False)
-        monkeypatch.setattr(box_module, "plain_box", lambda *a, **k: None)
-        box = box_module.RuntimeModeBox(SimpleNamespace(config=SimpleNamespace(get=lambda k, d=None: d)),
-                                        runtime_factory=lambda: back)
-        box._offer_removal(docker_only)
-        question = asked[-1].split("\n\n")[0]
-        assert "go to the trash" not in question and "File > Trash" not in question, question
-        assert "Docker has no trash, so its images and containers are deleted for good" in question
-        _rt, with_builds = _switched_to_docker(tmp_path / "b", FakeClient())
-        box._offer_removal(with_builds)
-        assert "Build folders go to the trash" in asked[-1].split("\n\n")[0]
-
-    def test_the_question_says_where_each_object_goes_and_the_folders_reach_the_trash(self, qapp, tmp_path,
+    def test_the_question_says_everything_goes_for_good_and_nothing_reaches_the_trash(self, qapp, tmp_path,
                                                                                      monkeypatch, no_source, dri):
-        from types import SimpleNamespace
         from orchestrator.Core.trash import Trash
         from orchestrator.gui import runtime_mode_box as box_module
         client = FakeClient()
         rt, plan = _switched_to_docker(tmp_path, client)
-        text = box_module.leftovers_text(plan)
-        blocks = text.split("\n\n")
-        for item, block in zip(plan.items, blocks):
-            wanted = "Goes to: the trash" if item.kind == "runtime_build" else "Goes to: deleted for good"
-            assert wanted in block, block
+        assert "Goes to" not in box_module.leftovers_text(plan), "no choice and no trash per item"
         asked, shown = [], []
         monkeypatch.setattr(box_module, "ask", lambda parent, title, question: asked.append(question) or True)
         monkeypatch.setattr(box_module, "plain_box", lambda *a, **k: shown.append(a[-1]))
@@ -1097,10 +1282,60 @@ class TestAISettings:
                                     tool_registry=SimpleNamespace(audit=audit, policy_store=None))
         box = box_module.RuntimeModeBox(framework, runtime_factory=lambda: rt)
         box._offer_removal(plan)
-        assert len(asked) == 1 and "trash" in asked[0]
-        entries = Trash(tmp_path / "state").entries()
-        assert len(entries) == len([i for i in plan.items if i.kind == "runtime_build"]) > 0
-        assert "moved to the trash" in shown[-1]
+        question = asked[0].split("\n\n")[0]
+        assert len(asked) == 1 and "for good" in question and "Nothing goes to the trash" in question
+        assert "The models stay" in question
+        assert Trash(tmp_path / "state").entries() == [] and not any(
+            Path(i.full_path).exists() for i in plan.items if i.kind == "runtime_build")
+        assert "deleted for good" in shown[-1]
+
+    def test_a_switch_that_does_not_fit_asks_once_to_delete_the_old_mode_first(self, qapp, tmp_path, monkeypatch,
+                                                                              no_source, dri):
+        from orchestrator.Core.disk_plan import DiskCheck
+        from orchestrator.gui import runtime_mode_box as box_module
+        rt = runtime(tmp_path)
+        rt.install()
+        check = DiskCheck(["Ditto runtime folder"], 2 * GB, GB, 1000 * GB, 20 * GB, 0, "1")
+        estimate = runtime_mode.SpaceEstimate("docker", "a new cpu build", keeps=GB, checks=[check])
+        shortage = runtime_mode.SpaceShortage(estimate, "bare-metal", runtime_mode.old_mode_plan(rt, "bare-metal"))
+        asked, shown, removed, started = [], [], [], []
+        monkeypatch.setattr(box_module, "ask", lambda parent, title, question: asked.append(question) or False)
+        monkeypatch.setattr(box_module, "plain_box", lambda *a, **k: shown.append(a[-1]))
+        monkeypatch.setattr(box_module.runtime_mode, "remove_leftovers", lambda rt_, plan_, **k: removed.append(k)
+                            or runtime_mode.Removal(deleted=["x"]))
+        box = box_module.RuntimeModeBox(None, runtime_factory=lambda: rt)
+        monkeypatch.setattr(box, "_start", lambda *a, **k: started.append((a, k)))
+        box._on_relay(box._token, None)   # nothing pending: ignored
+        box._token, box._pending = object(), ("docker", None)
+        box._on_relay(box._token, ("space", shortage))
+        question = asked[-1]
+        assert "Docker mode does not fit next to bare metal" in question and "not enough" in question
+        assert "Ditto is unavailable until Docker mode works; the models stay" in question
+        for item in shortage.old_plan.items:
+            assert item.file_name in question
+        assert removed == [] and started == [] and "Nothing was deleted and nothing was built" in shown[-1]
+        monkeypatch.setattr(box_module, "ask", lambda parent, title, question: asked.append(question) or True)
+        box._space_shortage(shortage)
+        assert removed == [{"actor": "gui", "audit": None, "before_switch": True, "removes": "bare-metal"}]
+        assert started == [(("docker", True), {"after_removal": "bare-metal"})]
+
+    def test_a_failure_after_the_old_mode_was_deleted_offers_it_again(self, qapp, tmp_path, monkeypatch):
+        from orchestrator.gui import runtime_mode_box as box_module
+        rt = runtime(tmp_path)
+        asked, started, shown = [], [], []
+        monkeypatch.setattr(box_module, "ask", lambda parent, title, question: asked.append(question) or True)
+        monkeypatch.setattr(box_module, "plain_box", lambda *a, **k: shown.append(a[-1]))
+        box = box_module.RuntimeModeBox(None, runtime_factory=lambda: rt)
+        monkeypatch.setattr(box, "_start", lambda *a, **k: started.append((a, k)))
+        box._token, box._pending = object(), ("docker", "bare-metal")
+        box._on_relay(box._token, ("error", "the build for Ditto's image failed"))
+        assert "Docker mode could not be made: the build for Ditto's image failed" in asked[-1]
+        assert "Ditto has no local runtime now: bare metal was deleted before" in asked[-1]
+        assert started == [(("bare-metal", True), {})]
+        monkeypatch.setattr(box_module, "ask", lambda parent, title, question: False)
+        box._token, box._pending = object(), ("docker", "bare-metal")
+        box._on_relay(box._token, ("error", "no"))
+        assert "llm-cli ditto runtime ensure --mode bare-metal" in shown[-1] and len(started) == 1
 
 
 # --- the installers ---------------------------------------------------------------------------------------------------

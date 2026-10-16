@@ -4,9 +4,13 @@ Ditto's local server in the AI settings: where it runs (bare metal or Docker, DE
 
 The switch takes the same code path as `llm-cli ditto runtime ensure --mode ... --force`: runtime_mode.ensure() in a
 worker thread (its progress and its result come back on the application's worker relay), with the person's question
-first ("No" is the default). Afterwards the old mode's leftovers are listed as every deletion the person sees is
-listed (the chat panel's "Clear chat" style: name, full path or ID, file name, size and what it is; "No" by default),
-and runtime_mode.remove_leftovers() removes exactly that list after the person's yes. Every text is plain text.
+first ("No" is the default). Bare metal and Docker are two alternatives (W2): ensure() checks first that the new mode
+fits next to the old one. When it does not, nothing is built, and the person sees the sizes and may delete the old
+mode first (its full list, one question; Ditto is unavailable until the new mode works, the models stay); when the new
+mode then fails, the person is told so and offered the old mode again. Once the new mode works, every object of the
+old mode is listed as every deletion the person sees is listed (the chat panel's "Clear chat" style: name, full path
+or ID, file name, size and what it is; "No" by default, no choice per item), and runtime_mode.remove_leftovers()
+deletes exactly that list for good after the person's yes. Every text is plain text.
 """
 
 import threading
@@ -34,19 +38,16 @@ def _size(size: int) -> str:
 
 
 def leftovers_text(plan: Any) -> str:
-    """The list of the question: for each object its name, full path (or Docker's ID), file name, size, what it is
-    and where it goes (the trash for a build folder, deleted for good for Docker's objects), with the labels of the
-    chat panel's "Clear chat"."""
-    mode = plan.mode_offered[0]
+    """The list of a question: for each object its name, full path (or Docker's ID), file name, size and what it is,
+    with the labels of the chat panel's "Clear chat". Everything on it is deleted for good (W2: no trash)."""
     items = []
     for item in plan.items:
         where = (ui_text("chat.clear.path", path=one_line(item.full_path)) if item.full_path
                  else ui_text("runtime.mode.item.id", id=one_line(item.file_name)))
-        goes = "runtime.mode.goes.trash" if runtime_mode.goes_to_trash(item, mode) else "runtime.mode.goes.deleted"
         items.append("\n".join((one_line(item.speaking_name), where,
                                 ui_text("chat.clear.file", name=one_line(item.file_name)),
                                 ui_text("chat.clear.size", size=_size(item.size_bytes)),
-                                ui_text("chat.clear.what_label", what=one_line(item.what)), ui_text(goes))))
+                                ui_text("chat.clear.what_label", what=one_line(item.what)))))
     return "\n\n".join(items)
 
 
@@ -60,6 +61,7 @@ class RuntimeModeBox(QGroupBox):
         self._factory = runtime_factory or self._runtime
         self._token: Optional[object] = None
         self._progress: Optional[object] = None
+        self._pending: tuple = (None, None)   # (the mode being made, the old mode deleted before it, if any)
         self.installed = False
         self.mode: Optional[str] = None
         layout = QVBoxLayout(self)
@@ -123,9 +125,15 @@ class RuntimeModeBox(QGroupBox):
         question = "runtime.mode.question" if self.installed else "runtime.mode.install_question"
         if not ask(self, ui_text("runtime.mode.title"), ui_text(question, mode=name)):
             return
+        self._start(target, self.installed)
+
+    def _start(self, target: str, force: bool, after_removal: Optional[str] = None) -> None:
+        """runtime_mode.ensure() in a worker thread; `after_removal`: the old mode the person deleted before this
+        mode is made (a failure then offers it again)."""
         self._token, self._progress = object(), object()
+        self._pending = (target, after_removal)
         token, progress = self._token, self._progress
-        relay, factory, force = worker_relay(), self._factory, self.installed
+        relay, factory = worker_relay(), self._factory
         self.btn_switch.setEnabled(False)
         self.lbl_progress.setText(ui_text("runtime.mode.working"))
 
@@ -134,6 +142,8 @@ class RuntimeModeBox(QGroupBox):
                 result = runtime_mode.ensure(factory(), mode=target, force=force, fetch_source=lambda: True,
                                              log=lambda msg: relay.done.emit(progress, msg))
                 relay.done.emit(token, ("ok", result))
+            except runtime_mode.SpaceShortage as e:   # nothing was built: the person decides (W2)
+                relay.done.emit(token, ("space", e))
             except Exception as e:  # noqa: BLE001 - shown to the person as it is (plain text)
                 relay.done.emit(token, ("error", str(e)))
         threading.Thread(target=work, name="ditto-runtime-mode", daemon=True).start()
@@ -146,9 +156,19 @@ class RuntimeModeBox(QGroupBox):
             return
         self._token = self._progress = None
         kind, value = result
+        target, after_removal = self._pending
         self.lbl_progress.setText("")
+        if kind == "space" and after_removal is None:
+            self._space_shortage(value)
+            self.refresh()
+            return
         if kind != "ok":
-            plain_box(self, "warning", ui_text("runtime.mode.title"), ui_text("runtime.mode.failed", reason=value))
+            reason = "\n".join(value.estimate.lines()) if kind == "space" else value
+            if after_removal is not None:
+                self._offer_old_again(target, after_removal, str(reason))
+            else:
+                plain_box(self, "warning", ui_text("runtime.mode.title"), ui_text("runtime.mode.failed",
+                                                                                   reason=reason))
             self.refresh()
             return
         plain_box(self, "information", ui_text("runtime.mode.title"), "\n".join(value.lines))
@@ -156,36 +176,59 @@ class RuntimeModeBox(QGroupBox):
             self._offer_removal(value.leftovers)
         self.refresh()
 
+    def _audit(self) -> Any:
+        return getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+
+    def _removed_text(self, removal: Any) -> str:
+        lines = [ui_text("runtime.mode.removed", n=len(removal.deleted), size=_size(removal.freed_bytes))]
+        lines += [ui_text("runtime.mode.kept", name=name, reason=reason) for name, reason in removal.failed]
+        return "\n".join(lines)
+
     def _offer_removal(self, plan: Any) -> None:
-        """The old mode's leftovers, each listed; exactly that list is removed after the person's yes."""
+        """The new mode works: every object of the old mode, each listed; exactly that list is deleted for good after
+        the person's one yes (round 7 D, W2: no choice per item, no trash)."""
         title = ui_text("runtime.mode.title")
-        mode = plan.mode_offered[0]   # one confirmation (round 7 D): build folders to the trash, Docker's objects gone
-        # where the listed objects go, and only for what the list holds (a list of Docker objects names no trash)
-        trashed = [runtime_mode.goes_to_trash(item, mode) for item in plan.items]
-        where = ((ui_text("runtime.mode.leftovers.trash") if any(trashed) else "")
-                 + (ui_text("runtime.mode.leftovers.docker")
-                    if any(i.kind in ("docker_image", "docker_container") for i in plan.items) else ""))
         if not ask(self, title, ui_text("runtime.mode.leftovers.question", n=len(plan.items),
-                                        size=_size(plan.total_bytes), where=where, items=leftovers_text(plan))):
+                                        size=_size(plan.total_bytes), items=leftovers_text(plan))):
             plain_box(self, "information", title, ui_text("runtime.mode.nothing_removed"))
             return
-        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
         try:
-            removal = runtime_mode.remove_leftovers(self._factory(), plan, actor="gui", audit=audit,
-                                                    trash=self._trash() if mode == "trash" else None, mode=mode)
+            removal = runtime_mode.remove_leftovers(self._factory(), plan, actor="gui", audit=self._audit())
         except (runtime_mode.LeftoversChanged, runtime_mode.RuntimeModeError, PermissionError) as e:
             plain_box(self, "warning", title, str(e))
             return
-        lines = [ui_text("runtime.mode.removed", n=len(removal.deleted), size=_size(removal.freed_bytes))]
-        if removal.trashed:
-            lines.append(ui_text("runtime.mode.trashed", n=len(removal.trashed)))
-        lines += [ui_text("runtime.mode.kept", name=name, reason=reason) for name, reason in removal.failed]
-        plain_box(self, "information", title, "\n".join(lines))
+        plain_box(self, "information", title, self._removed_text(removal))
 
-    def _trash(self) -> Any:
-        """The person's trash (File > Trash...), or None when it cannot be opened (then nothing is removed)."""
-        from orchestrator.Core.trash import Trash
+    def _space_shortage(self, shortage: Any) -> None:
+        """W2: the new mode does not fit next to the old one, so nothing was built: the sizes, and the person may
+        delete the old mode first (its full list, one question, "No" by default); then the new mode is made."""
+        title = ui_text("runtime.mode.title")
+        new, old, plan = shortage.estimate.mode, shortage.old_mode, shortage.old_plan
+        names = {"new": ui_text(f"runtime.mode.what.{new}"), "old": ui_text(f"runtime.mode.what.{old}")}
+        sizes = "\n".join(shortage.estimate.lines())
+        if plan is None:
+            plain_box(self, "warning", title, ui_text("runtime.mode.space.nothing_left", sizes=sizes, **names))
+            return
+        if not ask(self, title, ui_text("runtime.mode.space.question", sizes=sizes, n=len(plan.items),
+                                        size=_size(plan.total_bytes), items=leftovers_text(plan), **names)):
+            plain_box(self, "information", title, ui_text("runtime.mode.space.declined"))
+            return
         try:
-            return Trash.for_framework(self.framework)
-        except Exception:  # noqa: BLE001 - no framework or no per-user folder: remove_leftovers refuses
-            return None
+            removal = runtime_mode.remove_leftovers(self._factory(), plan, actor="gui", audit=self._audit(),
+                                                    before_switch=True, removes=old)
+        except (runtime_mode.LeftoversChanged, runtime_mode.RuntimeModeError, PermissionError) as e:
+            plain_box(self, "warning", title, str(e))
+            return
+        plain_box(self, "information", title, ui_text("runtime.mode.space.removed", **names) + "\n"
+                  + self._removed_text(removal))
+        self._start(new, True, after_removal=old)
+
+    def _offer_old_again(self, new: str, old: str, reason: str) -> None:
+        """The new mode failed after the old one was deleted: Ditto has no local runtime now. Say so and offer the old
+        mode again ("No" by default)."""
+        title = ui_text("runtime.mode.title")
+        names = {"new": ui_text(f"runtime.mode.what.{new}"), "old": ui_text(f"runtime.mode.what.{old}")}
+        if ask(self, title, ui_text("runtime.mode.space.failed", reason=one_line(reason)[:600], **names)):
+            self._start(old, True)
+        else:
+            plain_box(self, "information", title, ui_text("runtime.mode.space.later", mode=old))

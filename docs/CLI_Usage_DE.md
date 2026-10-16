@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-11
+Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-16
 
 [English](CLI_Usage.md) · **Deutsch**
 
@@ -155,7 +155,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 ## mojo
 
 ```
-llm-cli mojo [--oracle | --miracle] [--json]
+llm-cli mojo [--oracle | --miracle] [--json] [--board NAME]
 ```
 
 Der Gesundheitscheck (unveröffentlicht; er hieß `doctor`). **Mojo Oracle** (Standard) schaut nur: Es prüft Python, den
@@ -165,10 +165,16 @@ Tool-Berechtigungen, die MCP-Token, das Audit-Log, den Chat-Verlauf (er lässt s
 stimmen), die mitgelieferten Kalibrierungsdaten, die installierten Community-Pakete (zurückgezogen, verändert oder aus
 einer Datei importiert), die Snapshots der Wissensbasis (wie viele, ihre Größe im Vergleich zum freien Platz ihrer
 Platte und wo; es gibt keine Grenze, ihre Zahl ist also nie eine Warnung), die lokale llama.cpp-Laufzeit (im
-Docker-Modus: Dittos Image) und die Boards, denen du vertraust (Host-Schlüssel und SSH-Port, mit einer Verbindung ohne
-Anmeldung; ein Board, das sich nicht nutzen lässt, bekommt seinen Grund-Code wie `device_host_down`). Es sagt auch, wo
-Docker seine Images ablegt und wie viel die Build-Images des Frameworks belegen (diesen Ordner zu verlegen ist ein
+Docker-Modus: Dittos Image) und die Boards, denen du vertraust. Es sagt auch, wo Docker seine Images ablegt und wie viel die Build-Images des Frameworks belegen (diesen Ordner zu verlegen ist ein
 Schritt für Administratoren, siehe [Container-Einrichtung](Container_Setup_DE.md#10-wo-docker-images-ablegt)).
+
+**Boards:** Mojo nimmt keinen Netzwerkkontakt zu einem Board auf, wenn du es nicht darum bittest. Es meldet, was das
+Framework aufgezeichnet hat: einen Host-Schlüssel in seinen `known_hosts`, der sich geändert hat oder fehlt, und das
+letzte Deployment, Laufzeit-Deployment, die letzte Prüfung, den letzten Benchmark oder die letzte Hardware-Prüfung, die
+ein Board nicht erreicht haben, mit dem Grund-Code (`device_host_down`, `device_port_closed`, `device_auth_failed`,
+`device_host_key_changed`) und dem nächsten Schritt. Für ein Board, auf das so ein Fakt zeigt, fragt es im Terminal
+„Check <board> now? [y/N]“; mit `y` öffnet es eine Verbindung zum SSH-Port des Boards (keine Anmeldung, kein Passwort)
+und zeigt das Ergebnis. Ohne Terminal zeigt es stattdessen den Befehl. `--board NAME` prüft ein Board sofort.
 
 Zu jeder Warnung und jedem Fehler schreibt es, was es gefunden hat, wo (den vollen Pfad oder das Objekt), warum das
 wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann, mit dem Plan einer Reparatur (was sich ändert,
@@ -191,13 +197,15 @@ Problem, das die Prüfung danach zum ersten Mal findet, wird als neu genannt. Ei
 |---|---|
 | `--oracle` | Nur schauen und melden, was gefunden wurde (Standard); im Terminal bietet es danach Mojo Miracle an. |
 | `--miracle` | Reparieren, was sich reparieren lässt, dann melden, was repariert wurde, was nicht und warum. Ohne Terminal (eine Pipe, ein Skript, eine KI-App) laufen nur die harmlosen Reparaturen, und nichts wird gelöscht. |
-| `--json` | Maschinenlesbare Ausgabe: die Schlüssel von `doctor --json` plus `mode`, `summary` und je Befund `where`, `why`, `repair_id`, `cannot` und `miracle`; mit `--miracle` auch `repaired`, `already_gone`, `not_repaired` und `new_problems`. Fragt nie und löscht nie. |
+| `--json` | Maschinenlesbare Ausgabe: die Schlüssel von `doctor --json` plus `mode`, `summary` und je Befund `where`, `why`, `repair_id`, `cannot` und `miracle`, und `check_board` (das Board, seine Geräte-ID und der Befehl, der es prüft) für ein Board, auf das ein aufgezeichneter Fakt zeigt; mit `--miracle` auch `repaired`, `already_gone`, `not_repaired` und `new_problems`. Fragt nie, löscht nie und nimmt keinen Kontakt zu einem Board auf. |
+| `--board NAME` | Dieses eine vertraute Board sofort prüfen: seine Bezeichnung, Geräte-ID oder Adresse (eine Verbindung zu seinem SSH-Port, keine Anmeldung). Nur mit `--oracle`. Ein Name, der zu keinem oder zu mehreren Boards passt, listet die vertrauten Boards auf und endet mit 2. |
 
 Speicherplatz: Unter 20 GB frei gibt es eine Warnung, unter 5 GB einen Fehler.
 
 ```bash
 llmcf mojo
 llmcf mojo --miracle
+llmcf mojo --oracle --board "Kitchen board"
 llm-cli mojo --json > mojo.json
 ```
 
@@ -996,13 +1004,21 @@ Befehl aus.
   Wechsel ist deine Entscheidung). Die Modelle bleiben und werden nicht noch einmal heruntergeladen; nur der Server
   wird neu erzeugt, umgepackt, wo das geht: der direkte Build ins Image, oder der Build des Images in die direkte Art,
   nachdem er seine Prüfungen auf diesem Rechner bestanden hat. Wo das nicht geht, sagt der Befehl warum und baut neu.
-  Der Server der alten Art wird gestoppt. Danach werden die Reste der alten Art aufgelistet: Build-Ordner mit
-  vollständigem Pfad, Ordnername und Build-ID, Docker-Images und -Container mit Name und ID, jeweils mit Größe, was
-  es ist und wohin es kommt. Entfernt wird nur, was du bestätigst, mit einer Frage für die ganze Liste („Nein“ ist
-  vorgewählt): Die Build-Ordner kommen in den Papierkorb (`llm-cli trash` listet sie, `llm-cli trash restore ID` holt
-  einen zurück, und ihr Platz bleibt belegt, bis du den Papierkorb leerst), Dockers Images und Container werden
-  endgültig gelöscht (Docker hat keinen Papierkorb). Ohne Terminal wird nichts entfernt, und die Liste wird
-  angezeigt.
+  Der Server der alten Art wird gestoppt.
+- **Zuerst der Platz:** Direkt und Docker sind zwei Alternativen. Bevor die neue Art neben der alten gebaut wird,
+  schätzt der Befehl, was sie beim Bauen braucht und was danach bleibt, und vergleicht das mit dem freien Platz jedes
+  beteiligten Laufwerks (Dittos Laufzeitordner; Dockers Image-Speicher, wenn Docker einen Ordner dieses Rechners
+  nennt). Die Schätzungen werden angezeigt. Passt sie nicht, wird nichts gebaut. Du siehst die Größen und wählst:
+  selbst Platz schaffen und den Befehl noch einmal ausführen, oder die alte Art zuerst löschen. Dafür listet der
+  Befehl jedes Objekt der alten Art auf und fragt einmal („Nein“ ist vorgewählt); Ditto ist nicht verfügbar, bis die
+  neue Art funktioniert, und die Modelle bleiben. Scheitert die neue Art danach, sagt der Befehl das und bietet an,
+  die alte Art wieder herzustellen.
+- **Die alte Art verschwindet ganz:** Sobald die neue Art funktioniert, wird jedes Objekt der alten Art aufgelistet:
+  ihre Build-Ordner (vollständiger Pfad, Ordnername, Build-ID), Dittos Images und Container (Name und ID), ihre
+  Einträge in `mode.json` und `active.json` und das Log der Image-Builds, jeweils mit Größe und was es ist. Eine Frage
+  löscht genau diese Liste endgültig, nicht in den Papierkorb („Nein“ ist vorgewählt, keine Auswahl je Objekt). Was
+  beide teilen, bleibt: die Modelle, der festgelegte Quellcode, die Builder-Images des Frameworks und die
+  Laufzeit-Builds eines Boards. Ohne Terminal wird nichts entfernt, und die Liste wird angezeigt.
 - **Das Modell:** Ist das Modell der gewählten oder empfohlenen Stufe noch nicht heruntergeladen, werden zuerst
   Quelle, Größe und Lizenz angezeigt. Heruntergeladen wird es nach deinem Ja, oder mit `-y`, wenn seine Lizenz frei
   ist (Apache 2.0, MIT, BSD); jede andere Lizenz nimmst du selbst mit `llm-cli ditto models download` an. Beide Arten
@@ -1012,7 +1028,7 @@ Befehl aus.
 | Option | Bedeutung |
 |---|---|
 | `--mode [auto\|bare-metal\|docker]` | `auto` (Standard): behalten, was installiert ist; ist nichts da, direkt, oder Docker, wenn direkt nicht geht. |
-| `--force` | Zu `--mode` wechseln (bare-metal oder docker). Braucht ein Terminal. |
+| `--force` | Nach der Platzprüfung zu `--mode` wechseln (bare-metal oder docker); sobald die neue Art funktioniert, wird jedes Objekt der alten Art nach deinem einen Ja endgültig gelöscht. Braucht ein Terminal. |
 | `--placement [auto\|native\|container]` | Wo ein Build läuft, wie bei `install`. Im Docker-Modus kommt mit `native` ein nativer Build ins Image. |
 | `--backend [...]` | GPU-Backend, wie bei `install`. |
 | `--jobs INTEGER RANGE` | Parallele Compiler-Jobs eines Builds. |

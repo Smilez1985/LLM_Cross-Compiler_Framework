@@ -476,12 +476,16 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             key = ssh_trust.fetch_host_key(device.host, device.port)
             status = ssh_trust.check_host_key(devices().state_dir, device.host, device.port, key)
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
+            code = reasons.classify(e) or (reasons.HOST_DOWN if isinstance(e, OSError) else "")
+            if code:  # recorded for Mojo, which reads it instead of contacting the board (W1)
+                devices().note_reach(device.device_id, "deploy", code)
             raise unreachable_error(device, e) from None
         fp = ssh_trust.fingerprint(key)
         if status == "unknown":
             raise blocked("host_key_unknown", f"The device {device.label} presents a host key that is not trusted "
                           f"({fp}); nothing was deployed.", PAIR_NEXT, field="device_id")
         if status == "changed" or fp != device.fingerprint:
+            devices().note_reach(device.device_id, "deploy", reasons.HOST_KEY_CHANGED)
             raise blocked(reasons.HOST_KEY_CHANGED, f"The host key of {device.label} has CHANGED ({fp}, trusted was "
                           f"{device.fingerprint}). This can be a reinstalled device, or someone in between; nothing "
                           "was deployed.", reasons.AI_NEXT[reasons.HOST_KEY_CHANGED], field="device_id")

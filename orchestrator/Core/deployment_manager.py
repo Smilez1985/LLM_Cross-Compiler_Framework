@@ -529,11 +529,31 @@ class DeploymentManager:
             self.logger.error(result.reason)
         return result.success
 
-    def deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, password: Optional[str] = None,
-                       pair: bool = True, expect_fingerprint: Optional[str] = None,
-                       expect_sha256: Optional[str] = None, on_client: Optional[Callable[[Any], None]] = None,
-                       cancelled: Optional[Callable[[], bool]] = None, wait_seconds: float = DEPLOY_WAIT_SECONDS,
-                       on_event: Optional[Callable[[DeployEvent], None]] = None) -> DeployResult:
+    def deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, **options: Any) -> DeployResult:
+        """Uploads the package and runs its deploy.sh on the device (_deploy_package says how), and records for Mojo
+        what this contact with the board found (W1): a failure with an SSH reason code is kept with the trusted board
+        at this address, a successful deploy ends a recorded problem. Mojo reads that record instead of contacting the
+        board itself."""
+        result = self._deploy_package(package, host, user, port=port, **options)
+        self._note_reach(host, port, result)
+        return result
+
+    def _note_reach(self, host: str, port: int, result: DeployResult) -> None:
+        from orchestrator.runtime.device import reasons
+        code = result.code if result.code in reasons.REASONS else ("" if result.success else None)
+        if code is None:
+            return  # a failure that is not about reaching the board (the package, deploy.sh): nothing to record
+        try:
+            from orchestrator.runtime.device.trusted import TrustedDevices
+            TrustedDevices(self._state_dir()).note_reach_at(host, port, "deploy", code)
+        except Exception:  # noqa: BLE001 - bookkeeping never fails a deploy
+            pass
+
+    def _deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, password: Optional[str] = None,
+                        pair: bool = True, expect_fingerprint: Optional[str] = None,
+                        expect_sha256: Optional[str] = None, on_client: Optional[Callable[[Any], None]] = None,
+                        cancelled: Optional[Callable[[], bool]] = None, wait_seconds: float = DEPLOY_WAIT_SECONDS,
+                        on_event: Optional[Callable[[DeployEvent], None]] = None) -> DeployResult:
         """
         Uploads the package and runs its deploy.sh on the device; returns what happened with the reason instead of a
         bare bool. `host` is the board's address or host name. The device's host key must be trusted already. With

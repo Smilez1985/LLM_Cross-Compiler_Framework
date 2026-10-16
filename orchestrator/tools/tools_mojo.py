@@ -4,7 +4,9 @@ The Mojo tools (round 6 design 7.8, round 7 item 11'): an AI checks the installa
 
 - `run_mojo_oracle` (read-only): every finding with what it is, where (a label, never a host path), why it matters and
   what Mojo Miracle can do about it (`repair.how`: miracle, deletion_list, person, admin, not_automatic), the same
-  verdicts the person's `llmcf mojo` shows.
+  verdicts the person's `llmcf mojo` shows. It contacts no board (W1); a board a recorded fact points to names the
+  request that checks it (`check_board`), and `{"board": "<label or device id>"}` checks that one trusted board now
+  (one connection to its SSH port, no login). An AI names a board by its label or device ID, never by an address.
 - `run_mojo_miracle`: repairs one problem whose `repair.how` is "miracle" (it only narrows access or switches to an
   intact build). Every call is asked: the person sees the exact plan (the full path in the framework's own window
   only); there is no standing approval and no delegation covers it yet; the handler applies exactly that plan or
@@ -60,6 +62,16 @@ class MojoFinding(DoctorFinding):
     where: UntrustedText = Field(default="", description="What the finding is about, by label (never a host path)")
     why: str = Field(default="", description="Why it matters")
     repair: Optional[MojoRepairOut] = Field(default=None, description="null for findings that are no problem")
+    check_board: Optional[str] = Field(default=None, description="For a board a recorded fact points to, which Mojo "
+                                                                 "did not contact: the request that checks it now")
+
+
+class RunMojoOracleIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    board: Optional[str] = Field(default=None, min_length=1, max_length=64,
+                                 description="Check this one trusted board now: its label or device ID from "
+                                             "list_devices (never an address). One connection to its SSH port, no "
+                                             "login. Leave it out to contact no board")
 
 
 class MojoOracleOut(ToolOutput):
@@ -100,9 +112,21 @@ def mojo_tool_specs(framework) -> List[ToolSpec]:
         return DoctorOut(exit_code=report.exit_code,
                          findings=[DoctorFinding(**row) for row in views.ai_findings(framework, report)])
 
-    def run_mojo_oracle(_inp: NoInput) -> MojoOracleOut:
+    def board_to_check(name: str) -> str:
+        """The device ID of the trusted board an AI named by its label or device ID (never by an address, W1/D0)."""
+        from orchestrator.runtime.device.trusted import TrustedDevices, find_boards
+        found = find_boards(TrustedDevices.for_framework(framework), name, by_address=False)
+        if len(found) == 1:
+            return found[0].device_id
+        if found:
+            raise ToolError(f"{len(found)} trusted boards have the label '{name}'.", code="invalid_value",
+                            field="board", next="Give the board's device ID instead (list_devices shows it).")
+        raise ToolError(f"No trusted board has the label or device ID '{name}'.", code="unknown_id", field="board",
+                        next="Call list_devices and give a board's label or device ID (an address is not taken).")
+
+    def run_mojo_oracle(inp: RunMojoOracleIn) -> MojoOracleOut:
         from orchestrator.Core.mojo import Mojo, offers
-        report = Mojo(framework).run()
+        report = Mojo(framework, contact=(board_to_check(inp.board),) if inp.board else ()).run()
         offered = offers(framework, report)
         return MojoOracleOut(exit_code=report.exit_code,
                              findings=[MojoFinding(**row) for row in views.oracle_rows(framework, report, offered)],
@@ -165,8 +189,13 @@ def mojo_tool_specs(framework) -> List[ToolSpec]:
         ToolSpec("run_mojo_oracle", "Check the installation (Mojo Oracle)",
                  "Runs the framework's health checks (Mojo Oracle) and reports every finding: what it is, where (by "
                  "label), why it matters and whether Mojo Miracle can repair it (repair.how and repair.next). "
-                 "Read-only; it never changes anything.",
-                 ToolTier.READ, NoInput, MojoOracleOut, run_mojo_oracle, idempotent=True,
+                 "Read-only; it never changes anything. It contacts no board: a board a recorded fact points to "
+                 "names the request that checks it (check_board); with board (a trusted board's label or device ID "
+                 "from list_devices) it checks that one board now (one connection to its SSH port, no login). "
+                 'Example: {"board": "Kitchen board"}',
+                 ToolTier.READ, RunMojoOracleIn, MojoOracleOut, run_mojo_oracle, idempotent=True, open_world=True,
+                 fields={"board": FieldMeta(kind="id", list_tool="list_devices")},
+                 examples=({}, {"board": "Kitchen board"}),
                  summary=lambda o: (f"Mojo Oracle: exit code {fact(o.exit_code)}, "
                                     + count(len(o.findings), "finding", "findings") + ".")),
         ToolSpec("run_mojo_miracle", "Repair one problem (Mojo Miracle)",
@@ -189,4 +218,4 @@ def mojo_tool_specs(framework) -> List[ToolSpec]:
 
 
 __all__ = ["DoctorFinding", "DoctorOut", "MojoFinding", "MojoMiracleOut", "MojoOracleOut", "MojoRepairOut",
-           "RunMojoMiracleIn", "mojo_tool_specs"]
+           "RunMojoMiracleIn", "RunMojoOracleIn", "mojo_tool_specs"]
