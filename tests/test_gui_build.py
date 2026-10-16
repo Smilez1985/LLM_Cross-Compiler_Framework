@@ -196,6 +196,27 @@ def test_targets_window_lists_ids_boards_formats_and_support_level(qapp, tmp_pat
     german.close()
 
 
+def test_targets_window_names_an_invalid_capabilities_block(qapp, tmp_path):
+    """Review: a target whose capabilities block fails the schema was listed as "no capabilities declared"; the
+    window names it invalid and points to Check target (the Builder's note says the same)."""
+    from orchestrator.gui.targets_window import TargetsDialog
+    framework, folder = targets_framework(tmp_path)
+    caps = yaml.safe_load(ROCKCHIP_YML.read_text(encoding="utf-8"))["capabilities"]
+    caps["default_board"] = "rk9999"
+    (folder / "Broken").mkdir()
+    (folder / "Broken" / "target.yml").write_text(yaml.safe_dump({"metadata": {"name": "Broken"},
+                                                                  "capabilities": caps}), encoding="utf-8")
+    dialog = TargetsDialog(framework, lang="en")
+    rows = {dialog.table.item(r, 0).text(): dialog.table.item(r, 4).text() for r in range(dialog.table.rowCount())}
+    assert "invalid" in rows["Broken"] and "Check target" in rows["Broken"]
+    assert rows["MyBoard"] == "- (no capabilities declared)"
+    german = TargetsDialog(framework, lang="de")
+    rows = {german.table.item(r, 0).text(): german.table.item(r, 4).text() for r in range(german.table.rowCount())}
+    assert "ungültig" in rows["Broken"]
+    dialog.close()
+    german.close()
+
+
 def test_check_target_calls_the_core_check_and_shows_each_error(qapp, tmp_path, monkeypatch):
     from orchestrator.gui.targets_window import TargetsDialog
     framework, folder = targets_framework(tmp_path)

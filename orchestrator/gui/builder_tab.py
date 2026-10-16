@@ -716,9 +716,8 @@ class BuilderTab(QWidget):
 
     def _declares_capabilities(self, target) -> bool:
         """Whether the target's target.yml has a capabilities block (valid or not), from the loaded targets."""
-        tm = self.framework.get_component("target_manager") if self.framework and hasattr(self.framework, "get_component") else None
-        data = tm.get_target(target) if tm is not None and hasattr(tm, "get_target") else None
-        return isinstance(data, dict) and "capabilities" in data
+        from orchestrator.gui.targets_window import declares_capabilities
+        return bool(self.framework) and declares_capabilities(self.framework, target)
 
     def _apply_target_capabilities(self):
         """Offers exactly the formats the selected target declares. A target that declares none gets what the CLI
