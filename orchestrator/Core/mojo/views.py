@@ -7,6 +7,7 @@ output (the CLI, `--json` included) keeps the full paths. run_doctor reads ai_fi
 oracle_rows (plus where, why and what Mojo Miracle can do) and run_mojo_miracle miracle_row.
 """
 
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -103,9 +104,18 @@ _NOT_REPAIRED = {
 }
 
 
+def board_request(name: str) -> str:
+    """What an AI may ask for a board a recorded fact points to (W1): the check of that one board, by the name
+    run_mojo_oracle takes (its label or device ID, never an address)."""
+    request = json.dumps({"board": name}, ensure_ascii=False)
+    return (f"Mojo did not contact this board. To check it now (one connection to its SSH port, no login), call "
+            f"run_mojo_oracle {request}; tell the person first if they did not ask for it.")
+
+
 def oracle_rows(framework, report: MojoReport, offered) -> List[Dict[str, Any]]:
     """run_mojo_oracle's findings: the fields of ai_findings plus where (a label), why it matters and, for each warning
-    and error, what Mojo Miracle can do about it (offers.Offer)."""
+    and error, what Mojo Miracle can do about it (offers.Offer); a board a recorded fact points to names the request
+    that checks it (check_board)."""
     label = labeller(framework)
     by_finding = {id(o.finding): o for o in offered}
     rows = []
@@ -113,7 +123,8 @@ def oracle_rows(framework, report: MojoReport, offered) -> List[Dict[str, Any]]:
         offer = by_finding.get(id(finding))
         repair = None if offer is None else {"how": offer.verdict, "summary": label(offer.summary),
                                              "next": ai_next(offer.verdict, finding.code)}
-        rows.append({**row, "where": label(finding.where), "why": label(finding.why), "repair": repair})
+        rows.append({**row, "where": label(finding.where), "why": label(finding.why), "repair": repair,
+                     "check_board": board_request(finding.board_name) if finding.board_check else None})
     return rows
 
 

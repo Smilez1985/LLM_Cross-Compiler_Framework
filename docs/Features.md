@@ -1,4 +1,4 @@
-Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-11
+Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-16
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -1175,18 +1175,27 @@ run). The mode is recorded in `~/.llm-framework/runtime/llama.cpp/mode.json`.
   container mounts the same folder. Only the server is made again, by repackaging where possible: the bare-metal build
   into the image, or the image's build into bare metal once it passed its checks on this computer itself (a build
   checked only in the container never runs here before that). Where that is not possible, the reason is shown and
-  the server is built again. The old mode's server is stopped. The build store keeps the build the image was made
-  from, so a switch back needs no new build.
-- **The old mode's leftovers** are listed after the new mode is verified: Ditto's build folders with their full path,
-  folder name, build ID and size, Ditto's images and containers with their name, ID and size, and what each is. Only
-  the exact list you confirm is removed, with one question for the whole list ("No" is the default), in the terminal
-  or the AI settings: the build folders go to the trash (restorable; their space stays used until you empty it), and
-  Docker's images and containers are deleted for good, since Docker has no trash. The list says where each one goes;
-  it is looked up again first and nothing is removed if it changed, and the removal is written to the audit log
-  before anything is removed. Without a terminal nothing is removed and the list is shown. Ditto's images are never
-  deleted otherwise, and a board's builds in the same store are never listed. When Docker cannot be asked after a
-  switch to bare metal, the command says that Ditto's images and containers are not in the list, and how to list them
-  later.
+  the server is built again. The old mode's server is stopped.
+- **Space first:** bare metal and Docker are two alternatives, and a switch builds the new mode next to the old one.
+  Before that, the framework estimates what the new mode needs while it is built (the source, the build tree, the
+  builder and runtime base images) and what it keeps, and checks that against the free space of each disk involved:
+  Ditto's runtime folder, and Docker's image storage when Docker names a folder of this computer (Docker Desktop's
+  own disk cannot be measured; that is said, and it does not block). A disk keeps a reserve free, and the trash never
+  counts as free. When it does not fit, nothing is built. You see the sizes and choose: free space and switch again,
+  or delete the old mode first. Then every object of the old mode is listed and deleted after your one yes; Ditto is
+  unavailable until the new mode works, and the models stay. Deleting it first is offered only when the new mode then
+  fits (estimated again without the old mode's build, counting what its objects free), and only at a terminal or in
+  the GUI. When the new mode then fails, you are told so and offered the old mode again.
+- **The old mode goes completely** once the new mode works: every object of it is listed with its full path or name,
+  ID, size and what it is: Ditto's build folders (path, folder name, build ID), the official archive, Ditto's images
+  and containers (name, ID), the old mode's entries in `mode.json` and `active.json`, and the log of the image builds.
+  One question deletes exactly that list for good, not into the trash ("No" is the default, no choice per item), in
+  the terminal or the AI settings. The removal refuses while the new mode does not work; the list is looked up again
+  first and nothing is removed if it changed, and the removal is written to the audit log before anything is
+  removed. Without a terminal nothing is removed and the list is shown. Shared things stay: the models, the pinned
+  source, the framework's builder images and a board's builds in the same store. Ditto's images are never deleted
+  otherwise. When Docker cannot be asked after a switch to bare metal, the command says that Ditto's images and
+  containers are not in the list, and how to list them later.
 - **The model:** `ensure` offers the model of the chosen or recommended tier when it is missing, with its source,
   size and licence first; with `-y` it downloads only a model under a permissive licence. Any other licence is yours
   to accept.
@@ -2358,7 +2367,7 @@ deterministic checks; nothing asks a model what is wrong. The whole guide: [Mojo
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
 | Knowledge | how many knowledge snapshots there are, their size against the free space of their disk, and their folder; a warning when the next snapshot would not fit, information when it fits but leaves little space (no limit: their number is never a warning; nothing is deleted; unreleased) |
 | Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning), missing (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information); in Docker mode, Ditto's image: there, built on this computer, of the pin and verified (OK), Docker not reachable or the image gone or another one (warning; unreleased) |
-| Boards | each trusted board (unreleased): its host key still in the framework's `known_hosts` and its SSH port answering, by one connection without a login; `device_host_down` (information), `device_port_closed` and `device_host_key_changed` (warnings) with the next step; never the device account |
+| Boards | each trusted board (unreleased), from what was recorded, without any network contact: its host key in the framework's `known_hosts` (changed or gone: warning), and the last deploy, runtime deploy, verify, benchmark or probe that could not reach it (`device_host_down` information; `device_port_closed`, `device_auth_failed`, `device_host_key_changed` warnings) with the next step and the offer to check it; `--board NAME` (or `run_mojo_oracle` with a board's label) checks one board now by one connection to its SSH port, without a login; never the device account |
 
 **Mojo Oracle** (the default) only looks. For every warning and error it says what it found, where (the full path or
 the object), why it matters, a hint and whether Mojo Miracle can repair it; one sentence at the end counts every
@@ -2392,7 +2401,9 @@ What an AI reads: `run_mojo_oracle` gives the same findings with `where` as a la
 named by label (`state:audit.db`, "the state folder", `targets:<pack>`) and any other path by its file name only,
 also in the message of a check that crashed. `run_mojo_miracle` repairs one problem whose `repair.how` is `miracle`:
 every call is asked (the full path only in the framework's own window), it never deletes, refuses every other problem
-before the question and says whether it was repaired, and if not, why. The prompt `check_installation` leads an AI
+before the question and says whether it was repaired, and if not, why. `run_mojo_oracle` contacts no board; for a
+board a recorded fact points to, `check_board` names the request that checks it, and `{"board": "<label>"}` checks
+that one board now (a label or device ID, never an address). The prompt `check_installation` leads an AI
 through both. `run_doctor`, the 3.0.0 name, stays callable but is not listed; a setting for either name applies to
 both, and the stricter one wins. Your own output (`llmcf mojo`, also `--json`) keeps the full paths.
 
