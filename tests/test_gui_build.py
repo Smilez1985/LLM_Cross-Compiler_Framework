@@ -814,11 +814,18 @@ def test_a_community_target_install_is_checked_and_shown(qapp, tmp_path, monkeyp
     dest = tmp_path / "targets" / "demo-board"
     hub = SimpleNamespace(comm_manager=SimpleNamespace(finish_install=lambda prepared: dest),
                           framework_manager=SimpleNamespace(target_manager=tm), status_label=QLabel(),
-                          installed=SimpleNamespace(emit=lambda kind: None), refresh_list=lambda: None)
+                          installed=SimpleNamespace(emit=lambda kind: None), refresh_list=lambda: None, lang="en")
+    # The install runs in the hub's worker (knowledge chain: finish_install off the GUI thread); here the worker's
+    # work and its done slot run in turn, as the hub's _run does with them.
+    window = community_hub.CommunityHubWindow
+    hub._run = lambda work, done, *args: done(work(*args))
+    hub._finish_install = lambda prepared: window._finish_install(hub, prepared)
+    hub._installed = lambda result: window._installed(hub, result)
     prepared = SimpleNamespace(trust="community", summary=lambda: "pack", manifest=SimpleNamespace(kind="target",
                                                                                                 id="demo-board"))
-    community_hub.CommunityHubWindow.confirm_install(hub, prepared)
+    window.confirm_install(hub, prepared)
     assert checks == [("demo-board", "Check of the installed target:")]
+    assert "Installed target demo-board" in hub.status_label.text()
 
 
 # --- the CLI shares the one-run choice -------------------------------------------------------------------------------
