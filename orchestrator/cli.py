@@ -5579,19 +5579,14 @@ def _say_older_packages(devices, build) -> None:
 
 
 def _ensure_package(state_dir: Path, device_id: str, builds, build):
-    from orchestrator.runtime.build.source import cached_source
-    from orchestrator.runtime.device.package import DeviceRuntimeStore, PackageError, package_runtime
-    devices = DeviceRuntimeStore(state_dir, device_id)
-    packaged = devices.tarball(build)
-    if packaged is not None:
-        return devices, packaged
-    src = cached_source(_pinned_llama_source(), state_dir)
-    if src is None:
+    from orchestrator.runtime.device.package import PackageError
+    from orchestrator.runtime.device.steps import PackageNeedsSource, ensure_package
+    try:
+        return ensure_package(state_dir, device_id, builds, build, _pinned_llama_source)
+    except PackageNeedsSource:
         console.print("[red]The tarball must be packaged again, which needs the pinned source (its licence text): "
                       f"run llm-cli device runtime build {device_id}.[/red]")
         sys.exit(1)
-    try:
-        return devices, package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
     except PackageError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)

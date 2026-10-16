@@ -10,7 +10,6 @@ No network, no Docker, no real board: SSH, the build executor and the board are 
 
 import ast
 import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,10 +19,25 @@ from orchestrator.runtime.build.verify import Check, VerifyReport
 from orchestrator.runtime.device import person_steps, steps
 from orchestrator.runtime.device.settings import DeploySettings, SettingsError
 from orchestrator.runtime.profile import ProfileStore
-from test_device_runtime import (DEVUAN, HOST, PIN, POSIX, RK3566, BoardAudit, FakeDevice, FakeDeviceExecutor,
-                                 FakeHostKey, FormatOnlyVerifier, board_builds, plan_for, source, device_base)  # noqa: F401
+from test_device_runtime import (DEVUAN, HOST, LICENCE, PIN, POSIX, RK3566, BoardAudit, FakeDevice,
+                                 FakeDeviceExecutor, FakeHostKey, FormatOnlyVerifier, board_builds, plan_for)
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def source(tmp_path):
+    """The pinned source as git checks it out (its LICENSE travels in the tarball)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "CMakeLists.txt").write_text("project(llama.cpp)\n")
+    (src / "LICENSE").write_bytes(LICENCE.encode("utf-8"))
+    return src
+
+
+@pytest.fixture
+def device_base(tmp_path_factory):
+    return tmp_path_factory.mktemp("board")
 
 
 class Audit:
