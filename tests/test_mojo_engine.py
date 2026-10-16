@@ -337,6 +337,7 @@ def test_no_mojo_module_an_ai_reaches_deletes():
                 assert name not in DELETING_NAMES | DELETING_CALLS, \
                     f"{path.relative_to(REPO)}:{node.lineno} calls {name}"
 
+
 def disk_problem(_fw):
     return [Finding("disk", "disk.cache", Severity.ERROR, "Only 1.0 GB free for the cache folder.", "hint",
                     fix_tier=2, where="/srv/cache", why="a full disk stops a build", cannot="deletion_list")]

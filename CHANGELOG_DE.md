@@ -1180,8 +1180,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `llmcf mojo` nennt. `doctor --fix` macht jetzt die protokollierten harmlosen Reparaturen von Mojo Miracle statt
   einer nicht festgehaltenen Änderung der Rechte des Ordners und sagt, warum ein Problem noch da ist (zum Beispiel:
   Das Audit-Log kann die Reparatur nicht festhalten, also wurde nichts geändert); `--tier 2` zeigt weiter die Liste
-  der Build-Images des Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine Einstellung für
-  `run_doctor` oder `run_mojo_oracle` gilt für beide, und die strengere gewinnt. `make mojo` neben `make doctor`.
+  der Build-Images des Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine
+  Einstellung für `run_doctor` oder `run_mojo_oracle` gilt für beide, und die strengere gewinnt. `make mojo` neben
+  `make doctor`.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der

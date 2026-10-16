@@ -164,4 +164,5 @@ danach.
 `still_present`) plus `mode` und `summary`. Jeder Befund hat außerdem `where`, `why`, `repair_id` und `cannot`, und
 jedes Problem hat `miracle` (`can`, `summary` und die Schritte in `plan`). Mit `--miracle` kommen `repaired`,
 `already_gone`, `not_repaired` (jeweils mit Grund) und `new_problems` dazu, und `findings` sind die der Prüfung
-danach.
+danach. Dann bedeuten `fixed` und `still_present` dasselbe wie bei `llm-cli doctor --fix --json`: die Reparaturen, die
+Mojo Miracle gemacht hat, und die, die es versucht hat und die noch da sind.

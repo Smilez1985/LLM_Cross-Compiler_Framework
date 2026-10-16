@@ -159,4 +159,6 @@ afterwards.
 `llmcf mojo --json` writes the keys of `llm-cli doctor --json` (`exit_code`, `findings`, `fixed`, `still_present`)
 plus `mode` and `summary`. Each finding also has `where`, `why`, `repair_id` and `cannot`, and each problem has
 `miracle` (`can`, `summary` and the `plan` steps). With `--miracle` it adds `repaired`, `already_gone`,
-`not_repaired` (each with its reason) and `new_problems`, and `findings` are those of the check afterwards.
+`not_repaired` (each with its reason) and `new_problems`, and `findings` are those of the check afterwards. Then
+`fixed` and `still_present` mean what they mean for `llm-cli doctor --fix --json`: the repairs Mojo Miracle made, and
+those it tried that are still there.

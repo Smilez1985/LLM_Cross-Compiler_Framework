@@ -164,7 +164,7 @@ NO_TOOL_ACTIONS = [
                     "for any AI."),
     ("empty_trash", "Empty the trash or delete anything for good, Docker images included: only the person, in the "
                     "framework (File > Trash..., Tools > Framework Build Images..., 'llm-cli trash empty' or "
-                    "'llmcf mojo --miracle' in a terminal), always with the full list; no tool does."),
+                    "'llm-cli doctor --fix --tier 2' in a terminal), always with the full list; no tool does."),
 ]
 MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
 

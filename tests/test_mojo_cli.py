@@ -180,6 +180,8 @@ def test_json_never_asks_and_never_deletes(booted_framework, open_state, monkeyp
     result, _ = run_cli(booted_framework, monkeypatch, "mojo", "--miracle", "--json", terminal=True, answer="y\n")
     data = json.loads(result.stdout)
     assert [r["code"] for r in data["repaired"]] == ["state.permissions"] and mode(open_state) == 0o700
+    # The keys of doctor --fix --json mean the same here; before, `fixed` stayed empty after a repair.
+    assert data["fixed"] == ["state.permissions"] and data["still_present"] == []
     reasons = {r["code"]: r for r in data["not_repaired"]}
     assert reasons["disk.cache"]["outcome"] == "not_done" and "your list" in reasons["disk.cache"]["reason"]
     assert set(reasons) == {"disk.cache", "tools.audit", "docker.daemon", "data.calibration"}
@@ -243,6 +245,25 @@ def test_doctor_fix_says_why_a_repair_was_not_made(booted_framework, open_state,
             "changed)") in text
     result, _ = run_cli(booted_framework, monkeypatch, "doctor", "--fix", "--json")
     assert json.loads(result.stdout)["still_present"] == ["state.permissions"], "the 3.0.0 JSON keys stay"
+
+
+def test_the_ai_is_told_a_command_that_always_lists_the_framework_images(booted_framework, monkeypatch):
+    """What an AI tells the person about deleting Docker images names 'llm-cli doctor --fix --tier 2', which always
+    shows the list. 'llmcf mojo --miracle' opens it only for a disk problem; naming it there sent the person to a
+    command that shows no list when the disk is fine."""
+    from orchestrator import cli as cli_module
+    from orchestrator.Core import doctor
+    from orchestrator.tools.framework_tools import NO_TOOL_ACTIONS
+    opened = []
+    monkeypatch.setattr(cli_module, "_doctor_free_space", lambda *a, **k: opened.append(a) or (0, ""))
+    monkeypatch.setattr(runner, "DEFAULT_CHECKS", [check_user_state])
+    monkeypatch.setattr(doctor, "DEFAULT_CHECKS", [check_user_state])
+    run_cli(booted_framework, monkeypatch, "mojo", "--miracle", terminal=True)
+    assert opened == [], "no disk problem: Mojo Miracle opens no list"
+    run_cli(booted_framework, monkeypatch, "doctor", "--fix", "--tier", "2", terminal=True)
+    assert len(opened) == 1, "doctor --fix --tier 2 always opens it"
+    text = dict(NO_TOOL_ACTIONS)["empty_trash"]
+    assert "'llm-cli doctor --fix --tier 2' in a terminal" in text and "mojo --miracle" not in text
 
 
 @POSIX
