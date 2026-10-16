@@ -32,7 +32,7 @@ Back to the [README](../README.md) · All commands: [CLI_Usage.md](CLI_Usage.md)
 - [Input history](#input-history)
 - [Deleting and the trash](#deleting-and-the-trash)
 - [Hardware probe and new targets](#hardware-probe-and-new-targets)
-- [Health check (doctor)](#health-check-doctor)
+- [Health check (Mojo)](#health-check-mojo)
 - [Community zoo](#community-zoo)
 - [Secret scan for contributors](#secret-scan-for-contributors)
 - [Known gaps](#known-gaps)
@@ -583,7 +583,8 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `list_artifacts` | read | Finished builds by id and label (never a host path), with size and hash |
 | `get_artifact_details` | read | Manifest, model card and files of one built model (external text) |
 | `check_build_request` | read | Dry run of `start_build`: commit, download size, disk space, hardware estimate, licence, gating; starts nothing |
-| `run_doctor` | read | The health check, without fixes |
+| `run_mojo_oracle` | read | The health check (Mojo Oracle): every finding with where (a label), why it matters and what Mojo Miracle can do about it ([details](#health-check-mojo)) |
+| `run_mojo_miracle` | local write | Repairs one problem that Mojo Oracle lists as repairable (a harmless repair); always asked, never deletes, no delegation |
 | `search_knowledge` | read | Search the knowledge base; every excerpt with its source id, address or pack, kind (`web`, `pack`, `docs`), trust, date added and position; `kind` narrows the search |
 | `list_knowledge_sources` | read | What the knowledge base holds: every source with id, title, kind, trust, date added and number of excerpts (50 per page) |
 | `read_knowledge_source` | read | One source's excerpts in their order, by source id (at most 20 per call) |
@@ -1517,7 +1518,7 @@ framework never sees it.
   be followed, and that a task it cannot do is reported to you with its specific reason.
 - **Results:** every result goes through the registry's output filter, for Ditto as well. Secrets are redacted in
   every string. Text from outside the framework (build logs and stage names, self-healing proposals, build
-  manifests, knowledge-base excerpts, doctor messages, and the labels, notes and board descriptions of a target's
+  manifests, knowledge-base excerpts, Mojo's messages, and the labels, notes and board descriptions of a target's
   `target.yml`, which a community target pack can install) is cleaned of invisible and bidirectional control
   characters and capped (a log line at 2,000 characters, other external text at 4,000); every other string is capped at 16 KiB,
   and a result over 256 KiB is refused with a hint how to ask for less. Such fields are marked `"untrusted": true`
@@ -1767,7 +1768,7 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   `get_status` lists every tool with its decision and why, also the hidden ones, and the actions no tool does, with
   where you do them, so an AI can tell you the real reason.
 - A damaged or unreadable permission file, or a link to a missing one, denies every tool instead of falling back to
-  looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and
+  looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli mojo`, `llm-cli tools list` and
   `llm-cli mcp serve` say so.
 - **Only you change the permissions.** `tool_policy.json` and the token store `mcp_tokens.json` are signed with a key
   derived from the audit key in your keyring. A file edited by hand, signed with another key or carrying no
@@ -1781,7 +1782,7 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   newest saved revision of both files is kept in the keyring too: an older signed copy put back over a file (it
   would bring back a revoked standing approval, a revoked token or a looser permission) is refused like a hand edit,
   and a removed permission file denies every tool instead of falling back to the defaults. Without a keyring the
-  signature has no key (as for the audit chain) and `llm-cli doctor` warns; such a file is refused while the audit
+  signature has no key (as for the audit chain) and `llm-cli mojo` warns; such a file is refused while the audit
   log is kept with a key.
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
   unknown or revoked token, or a token file that cannot be read, may not even read.
@@ -1839,7 +1840,7 @@ HMAC chain that someone who can only edit the database cannot recompute. After e
 written to an anchor file, so removing the newest entries is detected too. `llm-cli tools audit --verify` checks the
 chain and tells a changed entry apart from a wrong key. Each entry is written in its own transaction, so several
 processes cannot fork the chain. `llm-cli tools audit --archive` moves the log and its anchor aside (kept with a
-timestamp) and starts a new chain, for example after `llm-cli doctor` has reported a problem with the log.
+timestamp) and starts a new chain, for example after `llm-cli mojo` has reported a problem with the log.
 
 **Recorded before it runs.** A call that changes something (every tier except `read`) gets a `started` entry before
 it runs. If that entry cannot be written, the call is refused and nothing runs: calls that change something run only
@@ -1924,7 +1925,7 @@ everything worked) reaches an AI with the account's name, its home folder and bo
   `LLM_SECRET_STORAGE` for one run): `helper` (the command in `secret_helper`, run without a shell), `passphrase`
   (asked once per start), `insecure` (a key file next to the vault, not encrypted at rest) or `ephemeral` (memory
   only). The vault is written atomically under a lock shared by the GUI, the CLI and MCP servers, is readable only
-  by you, never lies inside a git working copy, and a damaged vault is never overwritten. `llm-cli doctor` warns
+  by you, never lies inside a git working copy, and a damaged vault is never overwritten. `llm-cli mojo` warns
   about the key file and about a keyring that does not protect secrets. `llm-cli ditto auth rotate-key` replaces
   the vault key and re-encrypts every entry.
 - **Redaction:** one table of secret formats (`orchestrator/security/secret_patterns.py`) is shared by the
@@ -2099,9 +2100,10 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 
 ---
 
-## Health check (doctor)
+## Health check (Mojo)
 
-`llm-cli doctor` (and the read-only `run_doctor` tool) runs deterministic checks and explains each finding:
+**Mojo** is the health check (it was called the doctor; unreleased). `llmcf mojo` (the same as `llm-cli mojo`) runs
+deterministic checks; nothing asks a model what is wrong. The whole guide: [Mojo.md](Mojo.md).
 
 | Area | Checks |
 |---|---|
@@ -2110,26 +2112,47 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | Disk | free space for the cache and output folders (warning below 20 GB, error below 5 GB) |
 | Targets | targets found, capabilities readable |
 | Security | personal folder private, secrets store usable, keyring protects secrets |
-| AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key); the chat feed can be written and its newest entries verify (changed or foreign entries, no key; unreleased) |
+| AI | tool permissions set up and readable, MCP tokens readable, audit log intact (changed, removed, wrong key, missing anchor, no key); the chat feed can be written and its newest entries verify (changed or foreign entries, no key; unreleased) |
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
 | Knowledge | how many knowledge snapshots there are, their size and folder (no limit: their number is never a warning; nothing is deleted; unreleased) |
-| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
+| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning), missing (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
 
-`--fix` applies the automatic fixes up to `--tier` and checks again. Tier 1 makes the personal folder private. Tier 2
-deletes nothing by itself: it lists every build image of the framework (those left over from earlier builds without
-a name, the named `llm-framework/<target>:last-build` images and the runtime builder images; name, image id, size and
-what each is), nothing ticked. You type the numbers of the ones to delete and then confirm exactly those at a
-terminal (default no; without a terminal, and with `--json`, it only lists them). **Tools > Framework Build
-Images...** in the GUI is the same list. The Docker build cache is never cleared, because it cannot be limited to the framework: before,
-tier 2 cleared the whole build cache of the Docker daemon, other projects' too. Nothing an AI app or Ditto can call
-reaches this deletion. Moving Docker's image storage to another disk is an administrator's step (see [Container
-setup](Container_Setup.md#10-where-docker-keeps-images)); the doctor only shows where it is. Exit codes: 0 OK, 1 warnings,
-2 errors; `--json` for scripts.
+**Mojo Oracle** (the default) only looks. For every warning and error it says what it found, where (the full path or
+the object), why it matters, a hint and whether Mojo Miracle can repair it; one sentence at the end counts every
+problem by what can be done about it. At a terminal it then asks "Run Mojo Miracle now? [y/N]" when Mojo Miracle can
+act; on yes Mojo Miracle runs without the command typed again.
 
-What an AI reads (`run_doctor`): the same findings, with the framework's folders named by label (`state:audit.db`,
-"the state folder", `targets:<pack>`) and any other path by its file name only, also in the message of a check that
-crashed; your own output (`llm-cli doctor`, also `--json`) keeps the full paths.
+**Mojo Miracle** (`llmcf mojo --miracle`) makes only harmless repairs: it narrows the state folder to your user, or
+switches Ditto's server to an intact stored llama.cpp build when the active one is missing. A repair's class comes
+from its steps (a step that deletes, widens access, touches the vault, the permissions or the audit log, or needs the
+system is never harmless). Each repair is a dry-run plan bound to its sha256; right before it runs, Mojo checks again
+and changes nothing when the problem is gone or the plan changed. The audit log records it first (or nothing
+changes), the change is a compare-and-swap on the folder opened without following a link, only one Mojo Miracle runs
+at a time, and the check runs again afterwards. Freeing disk space means deleting, so it is only your list: at a
+terminal Mojo Miracle shows every build image of the framework (those left over from earlier builds without a name,
+the named `llm-framework/<target>:last-build` images and the runtime builder images; name, image id, size and what
+each is), nothing ticked, and deletes exactly the ones you type and confirm (default no). **Tools > Framework Build
+Images...** in the GUI is the same list. The Docker build cache is never cleared, because it cannot be limited to the
+framework. Then Mojo Miracle reports every problem: repaired (checked again), already gone, still there, or not
+repaired with the reason (deleting needs your list, needs you, needs an administrator, not repairable automatically,
+failed); a problem the check afterwards finds for the first time is listed as new. Without a terminal only the
+harmless repairs run and nothing is deleted. Moving Docker's image storage to another disk is an administrator's
+step (see [Container setup](Container_Setup.md#10-where-docker-keeps-images)); Mojo only shows where it is. Exit
+codes: 0 OK, 1 warnings, 2 errors; `--json` for scripts.
+
+`llm-cli doctor` keeps its options (`--fix`, `--tier 1|2`, `--json`), output and exit codes, with a short note that
+names `llmcf mojo`; `--fix` makes the same audited harmless repairs, and `--tier 2` also shows the list of the
+framework's build images.
+
+What an AI reads: `run_mojo_oracle` gives the same findings with `where` as a label, `why` and `repair` (`how`:
+`miracle`, `deletion_list`, `person`, `admin` or `not_automatic`, with what to do next), the framework's folders
+named by label (`state:audit.db`, "the state folder", `targets:<pack>`) and any other path by its file name only,
+also in the message of a check that crashed. `run_mojo_miracle` repairs one problem whose `repair.how` is `miracle`:
+every call is asked (the full path only in the framework's own window), it never deletes, refuses every other problem
+before the question and says whether it was repaired, and if not, why. The prompt `check_installation` leads an AI
+through both. `run_doctor`, the 3.0.0 name, stays callable but is not listed; a setting for either name applies to
+both, and the stricter one wins. Your own output (`llmcf mojo`, also `--json`) keeps the full paths.
 
 ---
 
@@ -2256,7 +2279,7 @@ turned on.
 | `verified` | in the signed index: reviewed and reproduced independently |
 | `community` | in the signed index: reviewed |
 | `local` | a file without an entry in the signed index: nobody reviewed it. Installing always asks, and every build of such a target shows a warning. |
-| `revoked` | in the revoked list of the signed index: installing is blocked. Installed copies are flagged by `llm-cli zoo list`, `zoo verify`, `llm-cli doctor` and the hub and are not built, also after the key that signed the revocation has expired. |
+| `revoked` | in the revoked list of the signed index: installing is blocked. Installed copies are flagged by `llm-cli zoo list`, `zoo verify`, `llm-cli mojo` and the hub and are not built, also after the key that signed the revocation has expired. |
 
 Targets that ship with the framework, such as Rockchip, have no provenance file; they are not packs and have no
 trust level.
@@ -2268,8 +2291,8 @@ trust level.
 - `llm-cli zoo verify <pack file>` checks a file without installing it: format, hashes, the checks of its kind, an
   included author signature and the privacy scrub (no home folders, addresses, host or user names, keys). It needs
   no keyring; the community repository's CI uses it.
-- `llm-cli doctor` reports revoked packs as errors, changed packs as warnings and packs with trust `local` as
-  information ([Health check](#health-check-doctor)).
+- `llm-cli mojo` reports revoked packs as errors, changed packs as warnings and packs with trust `local` as
+  information ([Health check](#health-check-mojo)).
 
 ### Community Hub
 

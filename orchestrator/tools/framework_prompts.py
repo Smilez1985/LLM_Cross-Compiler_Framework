@@ -31,12 +31,26 @@ CLOSING = "\n\n" + CANNOT_RULE + "\n\n" + UNTRUSTED_RULE
 ASK_INSTRUCTIONS = (
     CLIENT_ROLE + "Answer the user's question about the framework. For facts about targets, boards, builds, built "
     "models and this installation, call the framework's read tools (list_targets, get_target_capabilities, "
-    "list_build_requests, get_build_status, read_build_log, list_artifacts, run_doctor, search_knowledge, get_status) "
+    "list_build_requests, get_build_status, read_build_log, list_artifacts, run_mojo_oracle, search_knowledge, "
+    "get_status) "
     "instead of answering from memory, and use the documentation resources listed below. The knowledge base Ditto "
     "uses is yours too: search_knowledge gives excerpts with their source, list_knowledge_sources what it holds, "
     "read_knowledge_source more of one source. You may add your own "
     "knowledge; say which part comes from the framework. Answer in the language of the question, concisely."
     + CLOSING)
+CHECK_INSTRUCTIONS = (
+    CLIENT_ROLE + "Check the framework's installation with run_mojo_oracle (Mojo Oracle, read-only). Tell the user in "
+    "plain words what it found: for each warning and error what it is, where (its label), why it matters and what Mojo "
+    "Miracle can do about it (repair.how and repair.summary). Leave nothing out. Call run_mojo_miracle only for a "
+    "problem whose repair.how is 'miracle', and only when the user asked for the repair; the framework shows them the "
+    "plan first. When a deletion is needed, say that the user chooses what is deleted in the framework (no tool "
+    "deletes); when the user or an administrator must act, give the fix hint and say who; when nothing repairs it "
+    "automatically, say so honestly. Never say a problem is repaired unless run_mojo_miracle returned the outcome "
+    "'repaired'; for any other outcome give its reason."
+    + CLOSING)
+CHECK_CONTEXT = ("Mojo Oracle checks Python, Docker and buildx, free disk space, the targets, the state folder, the "
+                 "secrets store and keyring, the tool permissions, MCP tokens and audit log, the chat feed, the "
+                 "calibration data, community packs, knowledge snapshots and the local llama.cpp runtime.")
 CONVERT_INSTRUCTIONS = (
     CLIENT_ROLE + "Convert a model for a board. 1. Use only the formats, boards and quantization types the target's "
     "capabilities below list (get_target_capabilities shows them again; list_targets shows the other targets). "
@@ -272,8 +286,12 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    ASK_INSTRUCTIONS, (PromptArg("question", "Your question (free text)", required=True,
                                                 max_chars=2000),), ask,
                    tools=("list_targets", "get_target_capabilities", "list_build_requests", "get_build_status",
-                          "read_build_log", "list_artifacts", "run_doctor", "search_knowledge", "get_status",
+                          "read_build_log", "list_artifacts", "run_mojo_oracle", "search_knowledge", "get_status",
                           "list_knowledge_sources", "read_knowledge_source")),
+        PromptSpec("check_installation", "Check the installation",
+                   "Runs Mojo Oracle, explains every problem it found and repairs a harmless one with Mojo Miracle "
+                   "when you ask.", CHECK_INSTRUCTIONS, (), lambda _args, _ctx: CHECK_CONTEXT,
+                   tools=("run_mojo_oracle", "run_mojo_miracle")),
         PromptSpec("convert_model_for_board", "Convert a model for a board",
                    "Checks the target, starts the build, follows it and shows the result.", CONVERT_INSTRUCTIONS,
                    (model, target, board), convert,

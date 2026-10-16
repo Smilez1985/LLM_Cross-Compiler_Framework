@@ -21,5 +21,8 @@ def check_user_state(framework) -> List[Finding]:
             state_dir.chmod(0o700)
         return [Finding("security", "state.permissions", Severity.WARN,
                         f"{state_dir} is readable by other users (mode {oct(mode)}); it holds tool permissions, "
-                        "the audit log and chat history.", "Restrict it to your user.", fix_tier=1, fix=tighten)]
+                        "the audit log and chat history.", "Restrict it to your user.", fix_tier=1, fix=tighten,
+                        where=str(state_dir), why="Other users of this computer could read your tool permissions, "
+                                                  "the audit log and your chat with the AI.",
+                        repair_id="state.tighten")]
     return [_ok("security", "state.permissions", f"User state private ({state_dir})")]

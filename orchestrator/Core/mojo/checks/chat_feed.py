@@ -8,6 +8,10 @@ from typing import List
 from orchestrator.Core.mojo.findings import Finding, Severity, _ok
 
 
+FEED_WHY = ("An AI's decision is recorded in the chat feed before it takes effect, so without it nothing an AI decides "
+            "can run.")
+
+
 def check_chat_feed(framework) -> List[Finding]:
     """The chat feed (delegation design 5.3): it can be written - an AI's decision is recorded there before it takes
     effect, or nothing runs - and its newest rows verify. Reads only; a probe write is rolled back."""
@@ -15,7 +19,8 @@ def check_chat_feed(framework) -> List[Finding]:
     if feed is None:
         return [Finding("ai", "chat_feed.store", Severity.WARN,
                         "The chat feed is not available, so the chat cannot keep messages and AI decisions.",
-                        "Check that the per-user folder exists and is writable ('llm-cli doctor' lists it).")]
+                        "Check that the per-user folder exists and is writable ('llmcf mojo' lists it).",
+                        where="the chat feed in the per-user folder", why=FEED_WHY, cannot="person")]
     result = feed.check()
     # The file by name only: findings also reach AI clients (run_doctor), which never get host paths.
     aside = (f"Move {feed.path.name} (and its -wal and -shm files, if any) out of the per-user folder "
@@ -23,7 +28,8 @@ def check_chat_feed(framework) -> List[Finding]:
              "feed with the next message.")
     if result.problem:
         return [Finding("ai", "chat_feed.store", Severity.ERROR, result.problem,
-                        f"Free disk space or fix the folder's permissions. If the file is damaged: {aside}")]
+                        f"Free disk space or fix the folder's permissions. If the file is damaged: {aside}",
+                        where=str(feed.path), why=FEED_WHY, cannot="person")]
     if not result.exists:
         return [_ok("ai", "chat_feed.store", "Chat feed not started yet (its folder is writable)")]
     findings = [_ok("ai", "chat_feed.store", f"Chat feed writable; {result.checked - result.unverified - result.unknown}"
@@ -32,7 +38,9 @@ def check_chat_feed(framework) -> List[Finding]:
         findings.append(Finding("ai", "chat_feed.rows", Severity.WARN,
                                 f"{result.unverified} chat entries do not verify (changed outside the framework, or "
                                 "written with another key or without the keyring); the chat does not show them.",
-                                f"If the keyring was reset, they stay hidden. To start a clean feed: {aside}"))
+                                f"If the keyring was reset, they stay hidden. To start a clean feed: {aside}",
+                                where=str(feed.path), why="The chat does not show those entries.",
+                                cannot="person"))
     if result.unknown:
         findings.append(Finding("ai", "chat_feed.version", Severity.INFO,
                                 f"{result.unknown} chat entries were written by a newer version of the framework; "
@@ -42,5 +50,6 @@ def check_chat_feed(framework) -> List[Finding]:
                                 "The chat feed is signed without a key (no OS keyring), so an entry changed by anyone "
                                 f"who can write {feed.path.name} is not detected.",
                                 "Make an OS keyring available to the framework; new entries are then signed with a "
-                                "key."))
+                                "key.", where=str(feed.path), why="A changed chat entry would not be detected.",
+                                cannot="admin"))
     return findings

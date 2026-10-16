@@ -889,6 +889,30 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Fenster sie zeigt). Wo der Bereich sitzt, ob er gezeigt wird, sein
   Filter und der neueste gesehene Eintrag stehen in `gui_state.json` im Benutzerordner (nie in QSettings); eine
   beschädigte Datei ergibt die Vorgaben.
+- **Mojo: Der Gesundheitscheck schaut (Mojo Oracle) und repariert (Mojo Miracle)** (sechste Runde, Entscheidung 9;
+  siebte Runde, Punkte 11', M' und T; [docs/Mojo_DE.md](docs/Mojo_DE.md)): `llmcf mojo` (Mojo Oracle, Standard;
+  `--oracle`) schaut nur. Zu jeder Warnung und jedem Fehler sagt es, was es gefunden hat, wo (der volle Pfad; eine KI
+  liest eine Bezeichnung), warum das wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann, und ein Satz
+  zählt jedes Problem danach, was sich tun lässt. Kann Mojo Miracle etwas tun, fragt es danach im Terminal „Run Mojo
+  Miracle now? [y/N]“; bei Ja läuft Mojo Miracle, ohne dass der Befehl noch einmal getippt wird. `llmcf mojo
+  --miracle` macht nur harmlose Reparaturen (der Zustandsordner auf deinen Benutzer eingeschränkt; Dittos Server auf
+  einen intakten gespeicherten llama.cpp-Build umgestellt, wenn der aktive fehlt): jede ein Probelauf, an seinen
+  sha256 gebunden, dessen Art sich aus seinen Schritten ergibt, zuerst im Audit-Log festgehalten, als
+  Vergleichen-und-Tauschen am Ordner angewendet, der geöffnet wird, ohne einem Link zu folgen, immer nur eine, und
+  erneut geprüft. Danach meldet es jedes Problem: repariert, schon weg, noch da oder nicht repariert mit dem Grund
+  (Löschen braucht deine Liste, braucht dich, braucht einen Administrator, nicht automatisch reparierbar,
+  fehlgeschlagen), und ein Problem, das danach zum ersten Mal gefunden wird. Speicherplatz freigeben geht nur über
+  die Liste der Build-Images des Frameworks im Terminal, nichts angehakt; ohne Terminal laufen nur die harmlosen
+  Reparaturen, und nichts wird gelöscht. `--json` fragt nie und löscht nie.
+- **`llmcf`, der neue Name der Kommandozeile** (siebte Runde, Punkt 11): ein zweites Konsolenskript neben `llm-cli`,
+  dasselbe Programm; `llm-cli` bleibt.
+- **Die MCP-Tools `run_mojo_oracle` und `run_mojo_miracle` und der Prompt `check_installation`** (siebte Runde, Punkt
+  11'): `run_mojo_oracle` (nur lesen) liefert jeden Befund mit `where` als Bezeichnung (nie ein Host-Pfad), `why` und
+  `repair` (`how`: `miracle`, `deletion_list`, `person`, `admin` oder `not_automatic`, mit dem nächsten Schritt).
+  `run_mojo_miracle` repariert ein Problem, dessen `repair.how` `miracle` ist: Jeder Aufruf wird mit dem Plan gefragt
+  (der volle Pfad nur im eigenen Fenster des Frameworks), keine dauerhafte Freigabe, keine Vollmacht, nie ein Löschen;
+  jedes andere Problem wird vor der Frage mit seinem Grund abgelehnt, und das Ergebnis sagt, ob repariert wurde und,
+  wenn nicht, warum. Die Vollmachtsgruppe für harmlose Reparaturen kommt mit den Vollmachten.
 
 ### Geändert
 - **Der Builder löscht keine Images mehr** (veröffentlicht in 3.0.0; Runde 7 Punkt 12): Jeder Build endete damit, sein
@@ -1148,6 +1172,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   bevor etwas gelöscht wird. Nichts wird gelöscht ohne Audit-Log (auch ohne Chat-Verlauf), wenn sich der Chat oder
   Dittos Gespräch geändert hat, während du gefragt wurdest, oder wenn das Fenster ein Gespräch hält, das seine Datei
   nicht zeigt.
+- **Der Doctor ist jetzt Mojo** (veröffentlicht in 3.0.0; sechste Runde, Entscheidung 9): Der Code liegt jetzt in
+  `orchestrator/Core/mojo/` (`orchestrator/Core/doctor.py` exportiert jeden Namen weiter, den es hatte); Befundcodes,
+  Exit-Codes und JSON-Schlüssel bleiben, und das JSON nennt je Befund zusätzlich `where`, `why`, `repair_id` und
+  `cannot`. `llm-cli doctor` behält seine Optionen und seine Ausgabe und schreibt einen kurzen Hinweis auf stderr, der
+  `llmcf mojo` nennt. `doctor --fix` macht jetzt die protokollierten harmlosen Reparaturen von Mojo Miracle statt
+  einer nicht festgehaltenen Änderung der Rechte des Ordners; `--tier 2` zeigt weiter die Liste der Build-Images des
+  Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine Einstellung für
+  `run_doctor` oder `run_mojo_oracle` gilt für beide, und die strengere gewinnt. `make mojo` neben `make doctor`.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der

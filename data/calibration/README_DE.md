@@ -38,6 +38,6 @@ Datensatz hat.
   damit schon die ersten Abschnitte, die llama-imatrix liest, jeden Satz enthalten.
 - **Wohin der vorbereitete Text geht.** Der gemischte Text wird in den Cache-Ordner des Frameworks geschrieben
   (`calibration/calibration_<Sprache>.txt`) und von dort an den Build übergeben.
-- **Gesundheitsprüfung.** `llm-cli doctor` prüft die drei Dateien und meldet „Calibration data intact“. Fehlt
+- **Gesundheitsprüfung.** `llm-cli mojo` prüft die drei Dateien und meldet „Calibration data intact“. Fehlt
   eine oder ist sie beschädigt, sagt es dir, wie du sie aus dem Repository wiederherstellst:
   `git checkout -- data/calibration`.

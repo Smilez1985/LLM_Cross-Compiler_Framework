@@ -18,7 +18,8 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [Calling the CLI](#calling-the-cli)
 - [Global options, output and exit codes](#global-options-output-and-exit-codes)
 - [Overview of all commands](#overview-of-all-commands)
-- [doctor](#doctor): health check
+- [mojo](#mojo): health check (Mojo Oracle) and repairs (Mojo Miracle)
+- [doctor](#doctor): the old name of `mojo`
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `status`
@@ -52,7 +53,8 @@ folder, or set `PYTHONPATH`. On Linux this alias works from any folder:
 alias llm-cli='PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv/bin/python -m orchestrator.cli'
 ```
 
-The examples below use `llm-cli`.
+The examples below use `llm-cli`. `llmcf` is the same program under its new name (unreleased): the development
+setup creates both commands, and `llmcf mojo` does exactly what `llm-cli mojo` does.
 
 ### Environment variables
 
@@ -107,8 +109,8 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | 6 | Sign-in: the method is not available in this version, or the provider was removed |
 | 130 | `build start` was interrupted with Ctrl+C (the build was cancelled first) |
 
-`llm-cli doctor` uses 0 (OK), 1 (warnings) and 2 (errors); `llm-cli ditto eval --min-pass` returns 1 when a run
-stays below the given share.
+`llm-cli mojo` and `llm-cli doctor` use 0 (OK), 1 (warnings) and 2 (errors); `llm-cli ditto eval --min-pass` returns
+1 when a run stays below the given share.
 
 ---
 
@@ -116,7 +118,8 @@ stays below the given share.
 
 | Command | What it does |
 |---|---|
-| `doctor` | Check the installation and explain how to fix problems |
+| `mojo` | Check the installation (Mojo Oracle) and repair what can be repaired safely (Mojo Miracle) (unreleased) |
+| `doctor` | The old name of `mojo`, with its options of 3.0.0 |
 | `knowledge snapshots` | List the knowledge base's snapshots with full path, name, size and what each is; delete the ones you pick, or export them (unreleased) |
 | `trash list` / `restore` / `empty` | What deletions moved to the trash; put entries back; delete the ones you pick for good (unreleased) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
@@ -144,28 +147,67 @@ stays below the given share.
 
 ---
 
+## mojo
+
+```
+llm-cli mojo [--oracle | --miracle] [--json]
+```
+
+The health check (unreleased; it was called `doctor`). **Mojo Oracle** (the default) only looks: it checks Python, the
+Docker daemon and buildx, free disk space for the cache and output folders, the targets and their capabilities, the
+privacy of the personal folder, the secrets store and the keyring, the tool permissions, the MCP tokens, the audit
+log, the chat feed (it can be written, its newest entries verify), the shipped calibration data, the installed
+community packs (revoked, changed or imported from a file), the knowledge snapshots (how many, their size and where;
+there is no limit, so their number is never a warning) and the local llama.cpp runtime. It also says where Docker
+keeps its images and how much the framework's build images use (moving that folder is an administrator's step, see
+[Container setup](Container_Setup.md#10-where-docker-keeps-images)).
+
+For every warning and error it prints what it found, where (the full path or the object), why it matters, a hint and
+whether Mojo Miracle can repair it, with the plan of a repair (what changes, before and after, whether it can be
+undone). One sentence at the end counts every problem by what can be done about it. When Mojo Miracle can act on a
+problem, it asks at a terminal "Run Mojo Miracle now? [y/N]"; with `y` Mojo Miracle runs without the command typed
+again, and No (the default) changes nothing.
+
+**Mojo Miracle** makes only harmless repairs: it narrows the state folder to your user, or switches Ditto's server to
+an intact stored llama.cpp build when the active one is missing. Each repair is a plan bound to its hash, recorded in
+the audit log before it runs (or nothing changes), applied only while nothing changed since the plan (a folder is
+opened without following a link), and checked again afterwards; only one Mojo Miracle runs at a time. Freeing disk
+space means deleting: at a terminal Mojo Miracle shows the framework's build images (name, image id, size, what each
+is; nothing ticked) and deletes exactly those you type and confirm (the default answer is no); the Docker build cache
+is never cleared. Then it reports every problem: repaired (checked again), already gone, still there, or not
+repaired with the reason (deleting needs your list, needs you, needs an administrator, not repairable automatically,
+failed). A problem the check afterwards finds for the first time is listed as new. Details: [Mojo.md](Mojo.md).
+
+| Option | Meaning |
+|---|---|
+| `--oracle` | Only look and report what was found (the default); at a terminal it then offers Mojo Miracle. |
+| `--miracle` | Repair what can be repaired, then report what was repaired, what was not and why. Without a terminal (a pipe, a script, an AI app) only the harmless repairs run and nothing is deleted. |
+| `--json` | Machine-readable output: the keys of `doctor --json` plus `mode`, `summary` and, per finding, `where`, `why`, `repair_id`, `cannot` and `miracle`; with `--miracle` also `repaired`, `already_gone`, `not_repaired` and `new_problems`. Never asks and never deletes. |
+
+Disk space: below 20 GB free is a warning, below 5 GB an error.
+
+```bash
+llmcf mojo
+llmcf mojo --miracle
+llm-cli mojo --json > mojo.json
+```
+
+---
+
 ## doctor
 
 ```
 llm-cli doctor [--json] [--fix] [--tier 1|2]
 ```
 
-Checks Python, the Docker daemon and buildx, free disk space for the cache and output folders, the targets and
-their capabilities, the privacy of the personal folder, the secrets store and the keyring, the tool
-permissions, the audit log, the chat feed (unreleased: it can be written, its newest entries verify), the shipped
-calibration data, the installed community packs (revoked, changed or imported from a file) and the knowledge
-snapshots (unreleased: how many, their size and where; there is no limit, so their number is never a warning). It
-also says where Docker keeps its images and how much the framework's build images use (unreleased; moving that folder
-is an administrator's step, see [Container setup](Container_Setup.md#10-where-docker-keeps-images)). Each finding
-comes with a hint how to fix it.
+The old name of [mojo](#mojo); options, output and exit codes stay as in 3.0.0, and a short note on stderr names
+`llmcf mojo`.
 
 | Option | Meaning |
 |---|---|
 | `--json` | Machine-readable output (findings, fixes, exit code). With `--fix --tier 2` it also lists the framework's build images and where Docker keeps them (`framework_images`), but never deletes them. |
-| `--fix` | Apply the automatic fixes up to `--tier`, then check again. |
+| `--fix` | Apply the automatic fixes up to `--tier`, then check again. These are the harmless, audited repairs of Mojo Miracle (unreleased). |
 | `--tier INTEGER RANGE` | `1` (default): harmless fixes (makes the personal folder private). `2`: also lists every build image of the framework (left over from earlier builds without a name, the named `llm-framework/<target>:last-build` images and the runtime builder images; name, image id, size and what each is), nothing picked. You type the numbers of the ones to delete and confirm exactly those at a terminal (the default answer is no). Without a terminal (a pipe, a script, an AI app) it only lists them. The GUI's **Tools > Framework Build Images...** is the same list. The Docker build cache is never cleared: it cannot be limited to the framework. |
-
-Disk space: below 20 GB free is a warning, below 5 GB an error.
 
 ```bash
 llm-cli doctor
@@ -974,11 +1016,12 @@ llm-cli ditto models download small-q2
 
 The framework tools are what Ditto and MCP clients use: 16 read-only tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `search_hf_models`,
-`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`, `list_devices`), 7 that change things on
+`run_mojo_oracle`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `search_hf_models`,
+`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`, `list_devices`), 8 that change things on
 this computer (`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`,
-`download_hf_file`, `create_deploy_package`) and `deploy_to_device`, which reaches a device you trusted (tier
-`external`: always asked).
+`download_hf_file`, `create_deploy_package`, `run_mojo_miracle`) and `deploy_to_device`, which reaches a device you
+trusted (tier `external`: always asked). `run_doctor`, the 3.0.0 name of `run_mojo_oracle`, stays callable but is
+not listed (unreleased).
 
 ### tools list
 
@@ -1032,7 +1075,7 @@ reason code and how the person was asked with their answer (for example `elicita
 | `--details` | Also show what the fool-proof layer repaired (kind and field), the duration, the SHA-256 and size of the result, links to earlier entries and the session hash. |
 | `--verify` | Check the chain instead: changed or removed entries, and removal of the newest entries (anchor file). Exit code 0 if intact, otherwise 1. |
 | `--summary` | Counts per caller instead: calls, refusals, and the reports that a task cannot be done (`report_cannot_do`) by how the framework checked them: confirmed, contradicted, premature, unchecked. |
-| `--archive` | Move the log and its anchor aside (kept as `audit.db.<UTC time>` and `audit.db.<UTC time>.anchor` in the personal folder) and start a new log with the next tool call. Use it when `--verify` or `llm-cli doctor` reports a problem with the log. If the log cannot be moved (for example because it is busy), the command exits with code 1; close the GUI and AI clients and try again. |
+| `--archive` | Move the log and its anchor aside (kept as `audit.db.<UTC time>` and `audit.db.<UTC time>.anchor` in the personal folder) and start a new log with the next tool call. Use it when `--verify` or `llm-cli mojo` reports a problem with the log. If the log cannot be moved (for example because it is busy), the command exits with code 1; close the GUI and AI clients and try again. |
 
 ```bash
 llm-cli tools audit --limit 100
@@ -1624,7 +1667,7 @@ Trust levels:
 | `verified` | In the signed index: reviewed and reproduced independently. |
 | `community` | In the signed index: reviewed. |
 | `local` | A file the signed index does not list. Nobody reviewed it: installing it always asks, and every build of such a target shows a warning. |
-| `revoked` | In the index's list of revoked packs. It is not installed; installed copies are flagged by `zoo list`, `zoo verify`, `llm-cli doctor` and the Community Hub and are not built, also after the key that signed the revocation has expired. |
+| `revoked` | In the index's list of revoked packs. It is not installed; installed copies are flagged by `zoo list`, `zoo verify`, `llm-cli mojo` and the Community Hub and are not built, also after the key that signed the revocation has expired. |
 
 Targets that ship with the framework, such as Rockchip, have no provenance file and do not appear in the zoo.
 

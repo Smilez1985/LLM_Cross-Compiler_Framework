@@ -124,7 +124,7 @@ Built $tag on this computer. Nothing was pushed; no framework image was pulled.
 
 Try it (your data lives in the volume lcf-data, mounted at /data):
   docker run --rm --pull never -v lcf-data:/data $tag llm-cli --version
-  docker run --rm --pull never -v lcf-data:/data $tag llm-cli doctor
+  docker run --rm --pull never -v lcf-data:/data $tag llm-cli mojo
 
 Keep it running for AI clients and for your own commands:
   docker run -d --pull never --name $name --restart unless-stopped --cap-drop ALL \

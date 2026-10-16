@@ -10,7 +10,7 @@ the [README](README.md). How the framework is built is described in the [bluepri
 
 Ways to contribute:
 
-- **Report problems:** describe what you did and what happened, and attach the output of `llm-cli doctor --json`
+- **Report problems:** describe what you did and what happened, and attach the output of `llm-cli mojo --json`
   and the build log. Remove personal data (host names, user names, keys) first.
 - **Add or improve a hardware target** (see [section 7](#7-adding-a-hardware-target)).
 - **Share a target, a recipe or knowledge** as a signed community pack (see
@@ -301,7 +301,7 @@ GitHub Actions are pinned by commit SHA with the version as a comment. Keep it t
 
 **Framework container** (`framework-container.yml`): when `Docker Setup/`, `install.sh`, `requirements.txt`, the
 builder or the Makefile change, the CI builds the framework's image with `scripts/build_container_image.sh` (a local
-tag, never pushed), lints its Dockerfile and runs smoke tests. `make build`, `make up`, `make down`, `make doctor` and
+tag, never pushed), lints its Dockerfile and runs smoke tests. `make build`, `make up`, `make down`, `make mojo` and
 `make audit` work with it locally ([docs/Container_Setup.md](docs/Container_Setup.md)). No workflow, Makefile target,
 script or document pushes or pulls a framework image (`tests/test_container_setup.py`). `make test` (Poetry),
 `make hooks` and `make secret-scan` are unchanged.

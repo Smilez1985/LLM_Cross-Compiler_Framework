@@ -114,7 +114,7 @@ und entzieht alle Capabilities. Danach einmal:
      die mit `docker exec -i` starten. `LLM_SECRET_STORAGE=ephemeral` hält den Tresor für einen einzelnen Befehl im
      Arbeitsspeicher.
 2. **Tool-Berechtigungen:** `docker exec -it lcf-framework llm-cli ditto setup`.
-3. **Gesundheitscheck:** `docker exec -it lcf-framework llm-cli doctor` (oder `make doctor`). Er meldet, dass Docker
+3. **Gesundheitscheck:** `docker exec -it lcf-framework llm-cli mojo` (oder `make mojo`). Er meldet, dass Docker
    nicht erreichbar ist: Der Container baut keine Modelle ([Grenzen](#8-grenzen)).
 
 ## 4. KI-Clients: der MCP-Server
@@ -217,14 +217,14 @@ führe `make up` erneut aus und installiere die Packs wieder.
 | [`Docker Setup/Dockerfile`](../Docker%20Setup/Dockerfile) | Das Image: Debian 13 slim per Digest, `install.sh`, Benutzer `lcf`, `/data`, standardmäßig ohne Oberfläche |
 | [`Docker Setup/Dockerfile.dockerignore`](../Docker%20Setup/Dockerfile.dockerignore) | Hält große und persönliche Ordner aus einem Build-Kontext heraus, der aus dem Repository-Ordner selbst entsteht |
 | [`Docker Setup/docker-compose.yml`](../Docker%20Setup/docker-compose.yml) | Die Dienste `framework` und `gui` (Profil `gui`), das Volume `lcf-data`, `pull_policy: never` |
-| [`Makefile`](../Makefile) | `make build`, `build-gui`, `up`, `gui`, `down`, `kept-files`, `doctor`, `shell`, `clean`, `audit` (Trivy prüft ein Archiv des Images; der Scanner bekommt nie den Docker-Socket) |
+| [`Makefile`](../Makefile) | `make build`, `build-gui`, `up`, `gui`, `down`, `kept-files`, `mojo` (und sein alter Name `doctor`), `shell`, `clean`, `audit` (Trivy prüft ein Archiv des Images; der Scanner bekommt nie den Docker-Socket) |
 | `Docker Setup/pyproject.toml` | Eine alte Kopie der Projektdatei (Version 1.6.0), die nichts nutzt; die Projektdatei ist [`pyproject.toml`](../pyproject.toml) oben im Repository |
 
 ## 10. Wo Docker Images ablegt
 
 Das gilt für jeden Computer, der mit Docker baut, nicht nur für die Container-Einrichtung (unveröffentlicht).
 
-- `llm-cli doctor` zeigt, wo Docker seine Images ablegt (Dockers Datenordner, `DockerRootDir`), wie viel Platz auf
+- `llm-cli mojo` zeigt, wo Docker seine Images ablegt (Dockers Datenordner, `DockerRootDir`), wie viel Platz auf
   dieser Platte frei ist und wie viel die Build-Images des Frameworks belegen.
 - Das Framework löscht nie von selbst ein Image. Der Builder behält das neueste Image jedes Targets als
   `llm-framework/<Target>:last-build`; ältere bleiben ohne Namen. Die nicht mehr gebrauchten löschst du: **Tools >
