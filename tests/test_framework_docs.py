@@ -142,6 +142,42 @@ class TestTheIndex:
         result = rag.ingest_codebase(root, stop=stop, progress=lambda n, total, name: stop.set() if n == 2 else None)
         assert result["success"] and result["stopped"] and result["count"] == 2
 
+    def test_a_snapshot_that_cannot_be_written_stops_the_index(self, make_rag, tmp_path, monkeypatch):  # noqa: F811
+        """No undo point, no index: when the snapshot of a knowledge base that holds excerpts fails (a full disk),
+        nothing is indexed and the result says why; there is no "continue anyway"."""
+        from orchestrator.rag.store import KnowledgeStore
+        root = framework_tree(tmp_path / "fw")
+        rag = make_rag()
+        fill(rag)
+
+        def full(self, path):
+            raise OSError(28, "No space left on device")
+        monkeypatch.setattr(KnowledgeStore, "export_file", full)
+        result = rag.ingest_codebase(root)
+        assert not result["success"] and result["snapshot_failed"] and result["count"] == 0
+        assert "snapshot" in result["message"] and "nothing was indexed" in result["message"]
+        assert "code:README.md" not in {s["source"] for s in rag.list_sources()}
+
+    def test_files_that_were_not_indexed_are_named_with_the_reason(self, make_rag, tmp_path,  # noqa: F811
+                                                                  monkeypatch):
+        """The result never hides a file it read but did not store: each one is named with why (an empty file, an
+        error's kind), in the message and in `not_indexed`."""
+        root = framework_tree(tmp_path / "fw")
+        (root / "docs" / "Empty.md").write_text("  \n", encoding="utf-8")
+        rag = make_rag()
+        real = rag._ingest
+
+        def failing(source, content, metadata, replace):
+            if source == "code:README_DE.md":
+                raise ValueError("cannot embed")
+            return real(source, content, metadata, replace)
+        monkeypatch.setattr(rag, "_ingest", failing)
+        result = rag.ingest_codebase(root)
+        assert result["success"] and result["count"] == 2 and result["files"] == 4
+        assert result["not_indexed"] == [{"file": "README_DE.md", "reason": "ValueError"},
+                                         {"file": "docs/Empty.md", "reason": "empty"}]
+        assert "not indexed: README_DE.md (ValueError), docs/Empty.md (empty)" in result["message"]
+
     def test_indexing_again_replaces_and_never_doubles(self, make_rag, tmp_path):  # noqa: F811
         root = framework_tree(tmp_path / "fw")
         rag = make_rag()
@@ -239,6 +275,52 @@ class TestTheTool:
         roomy = self.registry(tmp_path / "roomy", rag, framework_tree(tmp_path / "fw2"), disk_usage=disk(90))
         spec = roomy.get("index_framework_docs")
         assert roomy.look_up(spec, roomy.validate_input(spec, {}), ToolContext("ditto")).warnings == ()
+
+    def test_without_an_earlier_snapshot_the_knowledge_base_itself_gives_the_size(self, make_rag,  # noqa: F811
+                                                                                  tmp_path):
+        """The first snapshot has no earlier one to go by: the knowledge base's own storage gives its size, so a
+        disk without room refuses before any question here too (DECISIONS round 8, answer 2)."""
+        rag = make_rag()
+        fill(rag)
+        assert not list(Path(rag.snapshot_dir).glob("*.jsonl.gz")), "no earlier snapshot"
+        registry = self.registry(tmp_path, rag, framework_tree(tmp_path / "fw"), disk_usage=disk(1))
+        asked = []
+        with pytest.raises(ToolError) as e:
+            registry.call("index_framework_docs", {},
+                          ToolContext("ditto", confirm=lambda s, i: asked.append(s) or True))
+        assert e.value.blocker == "disk_full" and asked == [] and self.jobs.list() == []
+
+    def test_a_failed_snapshot_fails_the_job_and_says_why(self, make_rag, tmp_path, monkeypatch):  # noqa: F811
+        from orchestrator.rag.store import KnowledgeStore
+        rag = make_rag()
+        fill(rag)
+        registry = self.registry(tmp_path, rag, framework_tree(tmp_path / "fw"), disk_usage=disk(90))
+        monkeypatch.setattr(KnowledgeStore, "export_file",
+                            lambda self, path: (_ for _ in ()).throw(OSError(28, f"No space left: {path}")))
+        out = registry.call("index_framework_docs", {}, ToolContext("ditto", confirm=lambda s, i: True))
+        deadline = time.monotonic() + 30
+        job = self.jobs.get(out.job_id)
+        while not job.finished and time.monotonic() < deadline:
+            job = self.jobs.wait(out.job_id, 1)
+        assert job.state == "failed"
+        assert "snapshot" in str(job.error) and "nothing was indexed" in str(job.error)
+        assert str(tmp_path) not in str(job.error), "the AI gets no host path"
+        assert "code:README.md" not in {s["source"] for s in rag.list_sources()}
+
+    def test_the_job_names_the_files_it_did_not_index(self, make_rag, tmp_path):  # noqa: F811
+        root = framework_tree(tmp_path / "fw")
+        (root / "docs" / "Empty.md").write_text("", encoding="utf-8")
+        registry = self.registry(tmp_path, make_rag(), root)
+        out = registry.call("index_framework_docs", {}, ToolContext("ditto", confirm=lambda s, i: True))
+        deadline = time.monotonic() + 30
+        job = self.jobs.get(out.job_id)
+        while not job.finished and time.monotonic() < deadline:
+            job = self.jobs.wait(out.job_id, 1)
+        assert job.state == "done", job.error
+        assert job.result["not_indexed"] == [{"file": "docs/Empty.md", "reason": "empty"}]
+        ends = [e for e in registry.audit.entries(20) if e["tool"] == "index_framework_docs"
+                and "job end" in str(e.get("detail", ""))]
+        assert ends and "1 not indexed" in ends[0]["detail"]
 
 
 class TestExportsAndDocs:

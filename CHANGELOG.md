@@ -725,8 +725,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   request, its code and configuration (only what it ships: never your settings, your own targets or installed packs)
   to the knowledge base as kind `docs`, so Ditto can explain the framework's
   internals. It never happens by itself (before, the index existed but nothing called it); a snapshot is taken first
-  (without room for it on the disk nothing is indexed, with little room left the question or the command says so), a
-  file indexed again is replaced, and a knowledge pack export leaves these texts out.
+  (without room for it on the disk nothing is indexed, also for the first snapshot, measured by the knowledge base
+  itself; a snapshot that cannot be written stops it too; with little room left the question or the command says
+  so), a file indexed again is replaced, a file it read but did not index is named with the reason, and a knowledge
+  pack export leaves these texts out.
 
 ### Changed
 - **Questions show a short summary and the warning classes** (delegation design 4.5, LAY-L2): a question in the

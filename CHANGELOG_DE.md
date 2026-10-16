@@ -830,9 +830,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   und auf Wunsch seinen Code und seine Konfiguration (nur was es mitliefert: nie deine Einstellungen, eigene Targets
   oder installierte Pakete) als Art `docs` in die Wissensbasis auf, damit Ditto das
   Innenleben des Frameworks erklären kann. Das passiert nie von selbst (bisher gab es die Indexierung, aber nichts rief
-  sie auf); vorher wird ein Snapshot angelegt (ohne Platz dafür auf der Platte wird nichts aufgenommen, bei wenig
-  übrigem Platz sagen es die Frage oder der Befehl), eine erneut aufgenommene Datei wird ersetzt, und ein Export als
-  Wissenspaket lässt diese Texte weg.
+  sie auf); vorher wird ein Snapshot angelegt (ohne Platz dafür auf der Platte wird nichts aufgenommen, auch beim
+  ersten Snapshot, gemessen an der Wissensbasis selbst; ein Snapshot, der sich nicht schreiben lässt, hält es
+  ebenfalls an; bei wenig übrigem Platz sagen es die Frage oder der Befehl), eine erneut aufgenommene Datei wird
+  ersetzt, eine gelesene, aber nicht aufgenommene Datei wird mit dem Grund genannt, und ein Export als Wissenspaket
+  lässt diese Texte weg.
 
 ### Geändert
 - **Rückfragen zeigen eine Kurzfassung und die Arten der Hinweise** (Delegationsentwurf 4.5, LAY-L2): Eine Rückfrage

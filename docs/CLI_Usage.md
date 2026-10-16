@@ -211,8 +211,10 @@ never happens by itself: only this command, **Tools > Index the Framework's Docu
 with "No" as the default and a box for the code) or the MCP tool `index_framework_docs` (asked every time) start it. A
 snapshot is taken first, so it can be undone with a restore; a file indexed before is replaced. When the disk has no
 room for that snapshot, nothing is indexed and the command says how much space is missing (no "continue anyway"); when
-little room is left, it says so and goes on. The knowledge base must be switched on. A knowledge pack you export never
-carries these texts: every installation indexes them itself.
+little room is left, it says so and goes on. The first snapshot is checked against the size of the knowledge base
+itself, and a snapshot that cannot be written stops the index too. A file it read but did not index (an empty file, an
+error) is named with the reason. The knowledge base must be switched on. A knowledge pack you export never carries
+these texts: every installation indexes them itself.
 
 ```bash
 llm-cli knowledge index-docs
