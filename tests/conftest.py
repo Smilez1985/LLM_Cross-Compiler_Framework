@@ -240,6 +240,17 @@ def no_network_build_plan(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def roomy_snapshot_disk(monkeypatch):
+    """The disk checks before a knowledge snapshot (eighth round, answer 2) and before a finished model is copied to
+    another disk (answer 3) read a roomy disk, so the free space of the disk the tests run on never decides a test;
+    tests of the checks pass their own disk_usage or replace this."""
+    from orchestrator.Core import artifact_output, knowledge_snapshots
+    roomy = lambda path: shutil._ntuple_diskusage(1000 * 10 ** 9, 400 * 10 ** 9, 600 * 10 ** 9)  # noqa: E731
+    monkeypatch.setattr(knowledge_snapshots, "_disk_usage", roomy)
+    monkeypatch.setattr(artifact_output, "_disk_usage", roomy)
+
+
+@pytest.fixture(autouse=True)
 def sdk_debug_logging_off():
     """A CLI or GUI test with --debug-http must not leave the SDK loggers at DEBUG, with a stderr handler, for
     the tests after it (the choice is process-wide and kept by later setup_logging() calls)."""

@@ -18,11 +18,12 @@ person restores (blocker trash_not_yours).
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orchestrator.tools.facts_catalog import blocked
+from orchestrator.tools.facts_catalog import blocked, gb_number, warn
 from orchestrator.tools.output import ToolOutput, fact
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
@@ -193,34 +194,36 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
         return rag
 
     def prepare_restore(inp: RestoreSnapshotIn, ctx: ToolContext) -> CallFacts:
-        from orchestrator.Core.disk_plan import DiskNeed, check_disk
+        from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom, newest_size, snapshot_room
         rag = knowledge_base()
         names = rag.list_snapshots()
         if inp.snapshot not in names:
             raise ToolError(f"There is no knowledge base snapshot '{inp.snapshot}'.", code="unknown_id",
                             next="get_status with sections ['knowledge'] lists the snapshots.")
         path = rag.snapshot_dir / f"{inp.snapshot}.jsonl.gz"
-        newest = max((p.stat().st_size for p in rag.snapshot_dir.glob("*.jsonl.gz")), default=0)
-        needed = max(newest, path.stat().st_size)  # the backup taken first is about the size of a snapshot
+        needed = max(newest_size(rag.snapshot_dir), path.stat().st_size)  # the backup is about a snapshot's size
         service = getattr(framework, "build_service", None)
-        checks = check_disk([DiskNeed("knowledge snapshots", rag.snapshot_dir, needed, "backup snapshot")],
-                            disk_usage=getattr(service, "disk_usage", None))
-        short = [c for c in checks if not c.fits]
-        if short:
-            raise ToolError("Not enough disk space for the backup taken before the restore: "
-                            + "; ".join(c.sentence() for c in short) + ".", code="insufficient_resources",
-                            next="Tell the person how much space is missing; they free space first.")
+        state = getattr(getattr(framework, "config", None), "user_state_dir", None)
+        room = snapshot_room(rag.snapshot_dir, needed, Path(state) if isinstance(state, (str, Path)) else None,
+                             disk_usage=getattr(service, "disk_usage", None))
+        if not room.fits:  # eighth round, answer 2: no backup, no restore, no "continue anyway"
+            error = SnapshotNoRoom(room, "the restore")
+            raise blocked("snapshot_no_room", str(error), error.next)
         backup = f"pre_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         # The backup's name (the time of the look-up) and the free space move while a question waits: shown, never
         # part of the decision, which is the snapshot (delegation design 4.4, F3)
         facts = (Fact("Snapshot", f"{inp.snapshot} ({_gb(path.stat().st_size)})"),
                  Fact("Backup", f"the current knowledge base is saved first as the snapshot {backup}; the restore "
                                 "does not start without it (an empty knowledge base needs none)", volatile=True),
-                 Fact("Disk", "; ".join(c.sentence() for c in checks) or "nothing to write", volatile=True))
+                 Fact("Disk", f"backup snapshot: {room.sentence()}", volatile=True))
         consequence = (f"Replaces the whole knowledge base with the snapshot {inp.snapshot}; what was added since is "
                        "removed (kept in the backup snapshot).")
+        warnings = ()
+        if room.verdict == "tight":  # fits, but leaves little free space: a situation warning
+            warnings = (warn("disk_tight", free_after_gb=gb_number(room.check.after),
+                             reserve_gb=gb_number(room.check.reserve)),)
         return CallFacts(consequence=consequence, facts=facts, bound={"snapshot": inp.snapshot, "backup": backup},
-                         digest_keys=("snapshot",), consequence_template=consequence)
+                         warnings=warnings, digest_keys=("snapshot",), consequence_template=consequence)
 
     def restore_knowledge_snapshot(inp: RestoreSnapshotIn, ctx: ToolContext) -> RestoreStartedOut:
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
@@ -237,6 +240,10 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
             handle.check_cancelled()
             if not result:
                 problem = getattr(rag, "last_restore_problem", "") or "the knowledge base could not be restored"
+                if getattr(rag, "last_restore_blocker", "") == "snapshot_no_room":  # the job keeps this message
+                    error = ValueError(f"Restore of {inp.snapshot} not started: {problem}")
+                    error.code = "insufficient_resources"
+                    raise error
                 raise ToolError(f"Restore of {inp.snapshot} failed: {problem}.", code="failed",
                                 next="Tell the person; the knowledge base was left as it was.")
             return {"snapshot": inp.snapshot, "backup": getattr(rag, "last_backup", None) or "",

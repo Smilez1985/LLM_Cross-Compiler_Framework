@@ -15,6 +15,12 @@ free space the person deletes the ones they choose (multiple choice, nothing tic
 - Exporting (`export_snapshots`): copies the chosen snapshots to a folder the person picks (on this computer, a USB
   stick, a network share). Each copy is checked against the original by sha256 before it counts as done; a copy that
   does not match is removed again and reported. Exporting never deletes or changes a snapshot.
+- Room on the disk (`snapshot_room`, DECISIONS, eighth round, answer 2): before a snapshot is made, its size is
+  estimated. When it does not fit on the disk of the snapshot folder (beside the reserve that always stays free and what
+  other calls reserved), no snapshot is made and the change that needed it does not run either: there is no "continue
+  anyway" (`SnapshotNoRoom`, blocker `snapshot_no_room`); the person gets the list to delete or export snapshots. When
+  it fits but leaves little free space, that is a situation warning (`disk_tight`). Nothing is ever deleted to make
+  room.
 
 This module reads the folder only; it never opens the knowledge base itself (no embedding model, no Qdrant).
 """
@@ -27,6 +33,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Tuple
 
+from orchestrator.rag.errors import KnowledgeBaseError
+
 FOLDER = "knowledge_snapshots"
 SUFFIX = ".jsonl.gz"
 # What the person's listings say about keeping and deleting (the CLI and the GUI show the same words).
@@ -37,7 +45,13 @@ KEEPING_NOTE = ("There is no limit: the framework keeps as many snapshots as the
 # What a snapshot is, by the prefix the framework gives its name.
 _WHAT = (("pre_ingest_", "backup of the knowledge base taken before a Deep Ingest"),
          ("pre_codebase_", "backup of the knowledge base taken before the framework's own code was indexed"),
-         ("pre_restore_", "backup of the knowledge base taken before an earlier snapshot was restored"))
+         ("pre_restore_", "backup of the knowledge base taken before an earlier snapshot was restored"),
+         ("pre_pack_", "backup of the knowledge base taken before a knowledge pack was imported"))
+# What the person can do when a snapshot does not fit (the CLI, the GUI and the AI's refusal say the same).
+FREE_SPACE_STEP = ("Free space first: delete or export the knowledge snapshots you no longer need (Tools > Knowledge "
+                   "Snapshots... in the GUI, 'llm-cli knowledge snapshots prune' or 'llm-cli knowledge snapshots "
+                   "export NAME --to FOLDER' in a terminal), or free space on that disk otherwise. Nothing is deleted "
+                   "by itself.")
 
 
 @dataclass(frozen=True)
@@ -93,6 +107,104 @@ def list_snapshots(folder: Path) -> List[SnapshotFile]:
 
 def size_text(n: int) -> str:
     return f"{n / 1000 ** 3:.1f} GB" if n >= 10 ** 9 else f"{n / 1000 ** 2:.1f} MB"
+
+
+# --- room for the next snapshot (DECISIONS, eighth round, answer 2) --------------------------------------------------
+
+@dataclass(frozen=True)
+class SnapshotRoom:
+    """Whether a new snapshot of about `estimate` bytes fits on the disk of the snapshot folder: `check` is the
+    disk_plan.DiskCheck of that disk (free space, the reserve that always stays free, what other calls reserved and what
+    lies in the trash), `folder_bytes` what the snapshots there take now. Every number is an estimate."""
+    estimate: int
+    folder_bytes: int
+    check: Any
+
+    @property
+    def verdict(self) -> str:
+        """enough, tight (fits, but leaves little free space: a situation warning) or does_not_fit (a blocker)."""
+        return self.check.verdict if self.check is not None else "enough"
+
+    @property
+    def fits(self) -> bool:
+        return self.verdict != "does_not_fit"
+
+    @property
+    def free(self) -> int:
+        return int(self.check.free) if self.check is not None else 0
+
+    def sentence(self) -> str:
+        """The numbers in one plain sentence, without a path (it reaches AI callers too)."""
+        if self.check is None:
+            return f"the snapshot needs about {size_text(self.estimate)} (estimate)"
+        c = self.check
+        others = f", {size_text(c.reserved_by_others)} reserved by other calls" if c.reserved_by_others else ""
+        trash = f", {size_text(c.trash_bytes)} of it in the trash" if c.trash_bytes else ""
+        verdict = {"enough": "enough", "tight": "enough, but tight", "does_not_fit": "not enough"}[c.verdict]
+        return (f"the snapshot needs about {size_text(self.estimate)} (estimate); {size_text(c.free)} free on that "
+                f"disk{trash}{others}, {size_text(c.reserve)} must stay free: {verdict}. The snapshots there use "
+                f"{size_text(self.folder_bytes)}")
+
+
+class SnapshotNoRoom(KnowledgeBaseError):
+    """The snapshot taken before a change does not fit on the disk: no snapshot was made and the change does not run
+    (there is no "continue anyway"). Blocker `snapshot_no_room`; the message names no path."""
+    blocker = "snapshot_no_room"
+
+    def __init__(self, room: SnapshotRoom, what: str = "the change"):
+        self.room = room
+        self.next = FREE_SPACE_STEP
+        super().__init__(f"Not enough disk space for the knowledge snapshot taken before {what}: {room.sentence()}. "
+                         f"No snapshot was made and nothing was changed. {FREE_SPACE_STEP}")
+
+
+def folder_bytes(folder: Path) -> int:
+    return sum(s.size_bytes for s in list_snapshots(Path(folder)))
+
+
+def newest_size(folder: Path) -> int:
+    """The size of the newest snapshot (0 without one): the estimate of the next one when the knowledge base itself is
+    not opened (the doctor, a check before a question)."""
+    snapshots = list_snapshots(Path(folder))
+    return snapshots[-1].size_bytes if snapshots else 0
+
+
+def _disk_usage(path: str):
+    """The free space of a disk (tests replace it: the test disk's own free space must never decide a test)."""
+    return shutil.disk_usage(path)
+
+
+def snapshot_room(folder: Path, estimate: int, state_dir: Optional[Path] = None, disk_usage: Any = None) -> SnapshotRoom:
+    """The room for a snapshot of about `estimate` bytes in `folder` (its nearest existing parent's disk), beside the
+    reserve that always stays free (2 GiB or 2 %), what other calls of any process reserved (the ledger in `state_dir`)
+    and the trash, which is never counted as free. Never deletes anything."""
+    from orchestrator.Core.disk_plan import DiskNeed, ReservationLedger, check_disk
+    ledger = ReservationLedger(Path(state_dir)) if state_dir is not None else None
+    needed = max(int(estimate or 0), 1)
+    try:
+        checks = check_disk([DiskNeed("knowledge snapshots", Path(folder), needed, "knowledge snapshot")], ledger,
+                            disk_usage=disk_usage or _disk_usage)
+    except OSError:
+        checks = []
+    check = checks[0] if checks and checks[0].total else None
+    return SnapshotRoom(estimate=int(estimate or 0), folder_bytes=folder_bytes(folder), check=check)
+
+
+def room_before(state_dir: Any, estimate: Optional[int] = None, disk_usage: Any = None) -> Optional[SnapshotRoom]:
+    """The room for the next snapshot as far as it can be told without opening the knowledge base (before a question,
+    in the doctor): the newest snapshot's size is the estimate unless `estimate` is given. None without a per-user
+    folder. The snapshot itself checks again with an estimate from the knowledge base (RAGManager.create_snapshot)."""
+    if state_dir is None:
+        return None
+    folder = snapshot_folder(state_dir)
+    return snapshot_room(folder, newest_size(folder) if estimate is None else estimate, Path(state_dir), disk_usage)
+
+
+def require_room(room: SnapshotRoom, what: str = "the change") -> SnapshotRoom:
+    """SnapshotNoRoom when the snapshot does not fit; the room otherwise (its verdict may be tight)."""
+    if not room.fits:
+        raise SnapshotNoRoom(room, what)
+    return room
 
 
 # --- deleting exactly the snapshots the person chose -----------------------------------------------------------------
@@ -280,6 +392,7 @@ def export_snapshots(folder: Path, names: Iterable[str], destination: Path) -> L
     return results
 
 
-__all__ = ["ExportedSnapshot", "FOLDER", "KEEPING_NOTE", "SUFFIX", "SnapshotDeletion", "SnapshotFile",
-           "delete_snapshots", "export_snapshots", "list_snapshots", "size_text", "snapshot_files",
-           "snapshot_folder", "snapshot_plan"]
+__all__ = ["ExportedSnapshot", "FOLDER", "FREE_SPACE_STEP", "KEEPING_NOTE", "SUFFIX", "SnapshotDeletion",
+           "SnapshotFile", "SnapshotNoRoom", "SnapshotRoom", "delete_snapshots", "export_snapshots", "folder_bytes",
+           "list_snapshots", "newest_size", "require_room", "room_before", "size_text", "snapshot_files",
+           "snapshot_folder", "snapshot_plan", "snapshot_room"]

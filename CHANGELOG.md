@@ -10,6 +10,36 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Where finished models go: the output folder and a save dialog** (eighth round, answer 3): finished builds
+  (golden artifacts) are saved to the output folder (setting `output_dir`, default `~/llmcf/output`; on Windows in
+  your user folder), which you set once with **File > Output Folder...** or `llm-cli config output-folder PATH`, for
+  example to a folder on a big second disk; an AI cannot change it. When a build you started in the GUI has finished,
+  the system's folder dialog opens at the output folder for every golden artifact: OK saves it there or in the folder
+  you pick; Cancel saves nothing elsewhere and deletes nothing, the build stays in the framework's build folder
+  (setting `build_dir`) and **Save...** in the Deployment tab or `llm-cli build save` saves it later. `llm-cli build
+  start --output PATH` (at a terminal without it: a prompt with the output folder as the default, `-` keeps it in the
+  build folder); without a terminal, and for Ditto and MCP clients, builds go to the output folder. Saving renames on
+  the same disk; onto another disk every file is copied, checked by sha256 and only then removed from the build
+  folder; the free space is checked first, taken names get `-2`, and system folders, the program folder, the build
+  folder and the per-user folder are refused. The Deployment tab, `deploy list-artifacts` and `list_artifacts` list
+  the output folder, the build folder (earlier builds stay there), earlier output folders after you changed it and
+  folders you saved to; `start_build` tells an AI where the build will be.
+- **Identical builds are named before building** (eighth round, N11): `check_build_request` (`earlier_builds`, with a
+  note) and the GUI's builder form report a finished build with 100 % the same chosen options: the model and its
+  exact commit (a local model by every weights file's name, size and time), the target and the sha256 of its folder,
+  board, format, quantization, importance matrix and calibration data, optimization, context length, GPU use and
+  task. Other weights or another quantization is never identical. You use it or build again (**Use the existing
+  build** / **Build again** / **Cancel**); `start_build`'s question says when it builds an identical build again.
+  Nothing is skipped by itself. Every build records its options in `build_info.json` (`build_options` with their
+  sha256).
+- **Disk check before every knowledge snapshot, and a snapshot before every knowledge pack import** (eighth round,
+  answer 2, N13): before a snapshot is made, its size is estimated. When it does not fit beside the reserve that
+  always stays free, no snapshot is made and the change does not run (Deep Ingest, a restore, a pack import, the
+  code index); there is no "continue anyway". AI clients get the blocker `snapshot_no_room` with your action before
+  the question; the GUI offers **Knowledge Snapshots...** to delete or export snapshots. When it fits but leaves little
+  space, a situation warning (`disk_tight`). A knowledge pack import now saves the knowledge base first
+  (`pre_pack_<time>`); without room nothing is imported and the pack is imported later. The doctor's knowledge line
+  and `llm-cli knowledge snapshots` show what the snapshots use against the free space. Nothing is deleted by itself.
 - **Deleting with the full list, and the trash** (delegation design 3.10, round 5 f; round 6 10.4): every deletion of
   something you can see asks first in the framework's own window (the GUI's deletion dialog, or a table and a question
   at a terminal) and lists each item with its name, full path or Docker id, file name, size and what it is; "No" is
@@ -85,7 +115,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   a standing approval or a delegation; the registry refuses any tool that deletes and could be confirmed another
   way. That window lists each item (the folder and its golden ZIP) with its speaking name, full path, file name, size
   and what it is; an AI sees labels and sizes only, and Ditto's command line without a terminal prints only the call
-  and its arguments. A deletion is refused outside the output folder, while a build of any
+  and its arguments. A deletion is refused outside the output folder and the framework's build folder (a model you
+  saved to another folder is yours to remove), while a build of any
   framework program writes into the folder or is queued for it, after the build changed, and when the folder is not
   the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
   outside MCP, and deletes no snapshot; it stays outside every standing approval. `delete_artifact` moves the model
@@ -169,7 +200,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   replaced by stable placeholders that are mapped back locally in the answer.
 - **Local knowledge base** on local embeddings (FastEmbed, ONNX on the CPU) and an embedded Qdrant store: no
   vector-database server and no cloud embeddings needed, and it works offline once its models are downloaded.
-  Before every ingest and every restore it saves a snapshot in `knowledge_snapshots/` of the per-user folder. There
+  Before every ingest, every restore and every knowledge pack import it saves a snapshot in `knowledge_snapshots/`
+  of the per-user folder; a snapshot that does not fit on the disk stops the change (see "Disk check before every
+  knowledge snapshot"). There
   is no limit: it keeps as many as the disk holds, deletes none by itself, on any channel (round 5 f), and no number
   of them brings a reminder or a warning. `llm-cli knowledge snapshots` (in the GUI: Tools > Knowledge Snapshots...)
   lists each one with its full path, name, size and what it is, so you delete (to the trash first) or export (copy
@@ -772,6 +805,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   saw are kept in `gui_state.json` in the per-user folder (never in QSettings); a damaged file gives the defaults.
 
 ### Changed
+- **The output folder is `~/llmcf/output`; the old output folder is the framework's build folder** (eighth round,
+  answer 3): the setting `output_dir` now names the folder finished models are saved to (default `~/llmcf/output`,
+  before the installation's or the per-user folder's `output/`). That old folder is the new setting `build_dir`: GUI
+  builds wait there until they are saved, and every earlier build stays there and stays listed. CLI builds without
+  `--output` no longer add a `build_<date>_<time>` folder (a later build goes next to an earlier one instead). The
+  container image sets `LLM_FRAMEWORK_BUILD_DIR=/data/builds`.
 - **The builder no longer deletes images** (released in 3.0.0; round 7 item 12): every build ended by removing its
   image and pruning the framework's dangling images. Now the build's image is named
   `llm-framework/<target>:last-build` (the next build of that target reuses it) and only its per-build name is
@@ -1035,6 +1074,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- **A build no longer replaces an earlier build of the same name**: in 3.0.0 a completed build moved its files into
+  the folder `<target>/<model>/<quantization>` and replaced the files of an earlier build there (for example one for
+  another board), so a finished golden artifact was lost without being asked. A later build now goes next to it
+  (`Q4_K_M-2`, with its own ZIP); the earlier build stays whole.
 - **The self-healing "Docker cleanup" deletes nothing any more** (released in 3.0.0; round 5 f): approving the
   proposal for a full Docker disk (`docker_prune`, in the GUI dialog, at the CLI prompt or through `resolve_healing`)
   removed the framework's dangling images without showing them and cleared the whole build cache of the Docker
@@ -1324,6 +1367,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   method.
 
 ### Security
+- **`get_build_status` and `get_build_log` name finished builds by label, never by host path**: in 3.0.0 the status
+  of a build request, and log lines such as "Golden Artifact created", gave AI clients the full path of each finished
+  build (with the user name in it). The status now gives `output:<target>/<model>/<quantization>` (or `builds:`,
+  `saved:`, a file name elsewhere), and a log line with a path on this computer names the framework's folders by
+  label and any other path by its file name; your own windows keep the full path.
 - **No deletion without your confirmation in the framework** (round 5 f; WP7): every code path that deletes a built
   model, a knowledge snapshot, a trash entry or a framework image takes only the plan you accepted in the GUI or at a
   terminal, builds it again from what is on disk right before, and deletes nothing when it changed or when the audit

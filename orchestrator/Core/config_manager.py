@@ -314,7 +314,15 @@ class ConfigManager:
             ConfigSchema("models_dir", str, True, data_dir("models"), "Directory for model storage"),
             ConfigSchema("datasets_dir", str, False, data_dir("datasets"),
                          "Directory for calibration datasets (label 'datasets' for AI callers)"),
-            ConfigSchema("output_dir", str, True, data_dir("output"), "Directory for build outputs"),
+            # Golden artifacts (eighth round, answer 3): the person's output folder, changed once in the settings (only
+            # the person: an AI cannot), and the framework's build folder, where GUI builds wait to be saved and where
+            # builds went before (they stay listed there)
+            ConfigSchema("output_dir", str, True, "~/llmcf/output",
+                         "Output folder for finished builds (golden artifacts); ~ is your home folder (on Windows "
+                         "C:\\Users\\<name>). The GUI's save dialog opens here, CLI and AI builds go here"),
+            ConfigSchema("build_dir", str, False, data_dir("output"),
+                         "The framework's build folder: GUI builds wait here until they are saved, and earlier builds "
+                         "stay here"),
             ConfigSchema("cache_dir", str, True, data_dir("cache"), "Directory for cache files"),
             ConfigSchema("logs_dir", str, True, "logs", "Directory for log files"),
             ConfigSchema("log_level", str, False, "INFO", "Logging level", ["regex:^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"]),
@@ -679,7 +687,7 @@ class ConfigManager:
                 "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages", "audio_announcements",
                 "chat_panel_auto_show",
-                "trash_retention_days",
+                "trash_retention_days", "output_dir",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
                 "ai_anthropic_workspace_id", "ai_ditto_tool_source", "ai_ditto_mcp_transport", "ai_ditto_mcp_command",
                 "ai_ditto_mcp_url", "ai_ditto_mcp_name",

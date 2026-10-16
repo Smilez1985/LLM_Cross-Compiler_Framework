@@ -10,6 +10,39 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Wohin fertige Modelle kommen: der Ausgabeordner und ein Speichern-Dialog** (achte Runde, Antwort 3): fertige
+  Builds (Golden-Artefakte) werden im Ausgabeordner gespeichert (Einstellung `output_dir`, Standard `~/llmcf/output`;
+  unter Windows in deinem Benutzerordner), den du einmal mit **File > Output Folder...** oder `llm-cli config
+  output-folder PFAD` festlegst, zum Beispiel auf einen Ordner auf einer großen zweiten Platte; eine KI kann ihn nicht
+  ändern. Ist ein Build fertig, den du in der GUI gestartet hast, öffnet sich für jedes Golden-Artefakt der
+  Ordnerdialog des Systems im Ausgabeordner: OK speichert es dort oder in dem Ordner, den du wählst; Abbrechen
+  speichert nichts woanders und löscht nichts, der Build bleibt im Build-Ordner des Frameworks (Einstellung
+  `build_dir`), und **Speichern…** im Tab „Deployment“ oder `llm-cli build save` speichert ihn später. `llm-cli build
+  start --output PFAD` (an einem Terminal ohne diese Angabe: eine Frage mit dem Ausgabeordner als Vorgabe, `-` lässt
+  ihn im Build-Ordner); ohne Terminal, und für Ditto und MCP-Clients, kommen Builds in den Ausgabeordner. Speichern
+  benennt auf derselben Platte um; auf eine andere Platte wird jede Datei kopiert, per sha256 geprüft und erst dann
+  aus dem Build-Ordner entfernt; vorher wird der freie Platz geprüft, belegte Namen bekommen `-2`, und Systemordner,
+  der Programmordner, der Build-Ordner und der persönliche Ordner werden abgelehnt. Der Tab „Deployment“,
+  `deploy list-artifacts` und `list_artifacts` listen den Ausgabeordner, den Build-Ordner (frühere Builds bleiben
+  dort), frühere Ausgabeordner, nachdem du ihn geändert hast, und die Ordner, in die du gespeichert hast;
+  `start_build` sagt einer KI, wohin der Build kommt.
+- **Gleiche Builds werden vor dem Bauen genannt** (achte Runde, N11): `check_build_request` (`earlier_builds`, mit
+  einem Hinweis) und das Build-Formular der GUI melden einen fertigen Build mit zu 100 % denselben gewählten
+  Optionen: das Modell und sein genauer Commit (ein lokales Modell über Name, Größe und Zeit jeder Gewichtsdatei),
+  das Target und der sha256 seines Ordners, Board, Format, Quantisierung, Importance-Matrix und Kalibrierdaten,
+  Optimierung, Kontextlänge, GPU-Nutzung und Aufgabe. Andere Gewichte oder eine andere Quantisierung sind nie gleich.
+  Du nimmst ihn oder baust noch einmal (**Den vorhandenen Build nehmen** / **Noch einmal bauen** / **Abbrechen**);
+  die Frage von `start_build` sagt, wenn sie einen gleichen Build noch einmal baut. Nichts wird von selbst
+  übersprungen. Jeder Build hält seine Optionen in `build_info.json` fest (`build_options` mit ihrem sha256).
+- **Platzprüfung vor jedem Wissens-Snapshot und ein Snapshot vor jedem Import eines Wissens-Packs** (achte Runde,
+  Antwort 2, N13): bevor ein Snapshot angelegt wird, wird seine Größe geschätzt. Passt er neben der Reserve, die
+  immer frei bleibt, nicht hin, wird kein Snapshot angelegt, und die Änderung läuft nicht (Deep Ingest, eine
+  Wiederherstellung, ein Pack-Import, die Code-Indexierung); ein „trotzdem weiter“ gibt es nicht. KI-Clients bekommen
+  vor der Frage den Blocker `snapshot_no_room` mit deiner Handlung; die GUI bietet **Knowledge Snapshots...** an, um
+  Snapshots zu löschen oder zu exportieren. Passt er, lässt aber wenig Platz, eine Lagewarnung (`disk_tight`). Ein
+  Import eines Wissens-Packs sichert die Wissensbasis jetzt zuerst (`pre_pack_<Zeit>`); ohne Platz wird nichts
+  aufgenommen, und das Pack wird später aufgenommen. Die Wissenszeile des Doctors und `llm-cli knowledge snapshots`
+  zeigen, was die Snapshots im Vergleich zum freien Platz belegen. Nichts wird von selbst gelöscht.
 - **Löschen mit der vollen Liste, und der Papierkorb** (Delegationsentwurf 3.10, Runde 5 f; Runde 6 10.4): Jedes
   Löschen von etwas, das du sehen kannst, fragt zuerst im eigenen Fenster des Frameworks (der Lösch-Dialog der GUI oder
   eine Tabelle und eine Frage im Terminal) und nennt jedes Teil mit Namen, vollem Pfad oder Docker-ID, Dateinamen,
@@ -98,7 +131,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   löschende Tool ab, das sich auf anderem Weg bestätigen ließe. Dieses Fenster nennt jedes Teil (den Ordner und sein
   Golden-ZIP) mit sprechendem Namen, vollem Pfad, Dateinamen, Größe und was es ist; eine KI sieht nur Bezeichnungen und
   Größen, und Dittos Kommandozeile ohne Terminal gibt nur den Aufruf und seine Argumente aus. Ein Löschen wird abgelehnt
-  außerhalb des Ausgabeordners, solange ein Build irgendeines Programms des Frameworks in den Ordner schreibt oder
+  außerhalb des Ausgabeordners und des Build-Ordners des Frameworks (ein Modell, das du in einen anderen Ordner
+  gespeichert hast, entfernst du selbst), solange ein Build irgendeines Programms des Frameworks in den Ordner
+  schreibt oder
   dafür wartet, nachdem sich der Build geändert hat und wenn der Ordner nicht der ist, den die Frage nannte. Eine
   Wiederherstellung sichert immer zuerst die aktuelle Wissensbasis (`pre_restore_<Zeit>`), auch außerhalb von MCP,
   und löscht keinen Snapshot; sie bleibt außerhalb jeder Dauerfreigabe. `delete_artifact` verschiebt das Modell und
@@ -197,8 +232,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   werden.
 - **Lokale Wissensbasis** auf lokalen Embeddings (FastEmbed, ONNX auf der CPU) und einem eingebetteten
   Qdrant-Speicher: kein Vektordatenbank-Server und keine Cloud-Embeddings nötig, und sie funktioniert offline,
-  sobald ihre Modelle heruntergeladen sind. Vor jeder Aufnahme und jeder Wiederherstellung sichert sie einen
-  Snapshot in `knowledge_snapshots/` des persönlichen Ordners. Es gibt keine Grenze: Sie behält so viele, wie die
+  sobald ihre Modelle heruntergeladen sind. Vor jeder Aufnahme, jeder Wiederherstellung und jedem Import eines
+  Wissens-Packs sichert sie einen Snapshot in `knowledge_snapshots/` des persönlichen Ordners; passt ein Snapshot nicht
+  auf die Platte, läuft die Änderung nicht (siehe „Platzprüfung vor jedem
+  Wissens-Snapshot“). Es gibt keine Grenze: Sie behält so viele, wie die
   Platte fasst, löscht keinen von selbst, auf keinem Weg (Runde 5 f), und keine Anzahl bringt eine Erinnerung oder
   eine Warnung. `llm-cli knowledge snapshots` (in der GUI: Tools > Knowledge Snapshots...) listet jeden mit vollem
   Pfad, Namen, Größe und was er ist, damit du die, die du anhakst, löschst (zuerst in den Papierkorb) oder
@@ -888,6 +925,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   beschädigte Datei ergibt die Vorgaben.
 
 ### Geändert
+- **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte
+  Runde, Antwort 3): die Einstellung `output_dir` nennt jetzt den Ordner, in dem fertige Modelle gespeichert werden
+  (Standard `~/llmcf/output`, bisher `output/` der Installation oder des persönlichen Ordners). Dieser alte Ordner ist
+  die neue Einstellung `build_dir`: GUI-Builds warten dort, bis sie gespeichert sind, und jeder frühere Build bleibt
+  dort und wird weiter aufgelistet. CLI-Builds ohne `--output` legen keinen Ordner `build_<Datum>_<Uhrzeit>` mehr an
+  (ein späterer Build kommt stattdessen neben einen früheren). Das Container-Image setzt
+  `LLM_FRAMEWORK_BUILD_DIR=/data/builds`.
 - **Der Builder löscht keine Images mehr** (veröffentlicht in 3.0.0; Runde 7 Punkt 12): Jeder Build endete damit, sein
   Image zu entfernen und die verwaisten Images des Frameworks zu prunen. Jetzt heißt das Image des Builds
   `llm-framework/<Target>:last-build` (der nächste Build dieses Targets nutzt es wieder), und nur sein Name für den
@@ -1184,6 +1228,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
+  seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
+  (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein
+  späterer Build kommt jetzt daneben (`Q4_K_M-2`, mit eigenem ZIP); der frühere Build bleibt ganz.
 - **Das „Docker-Aufräumen“ der Selbstheilung löscht nichts mehr** (veröffentlicht in 3.0.0; Runde 5 f): Wer den
   Vorschlag für eine volle Docker-Platte freigab (`docker_prune`, im GUI-Dialog, an der CLI-Abfrage oder über
   `resolve_healing`), ließ die verwaisten Images des Frameworks löschen, ohne dass sie gezeigt wurden, und den ganzen
@@ -1506,6 +1554,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   private.
 
 ### Sicherheit
+- **`get_build_status` und `get_build_log` nennen fertige Builds über ihre Bezeichnung, nie über ihren Pfad**: in
+  3.0.0 gaben der Status einer Build-Anfrage und Log-Zeilen wie „Golden Artifact created“ KI-Clients den vollen Pfad
+  jedes fertigen Builds (mit dem Benutzernamen darin). Jetzt nennt der Status `output:<Target>/<Modell>/<Quantisierung>`
+  (oder `builds:`, `saved:`, sonst einen Dateinamen), und eine Log-Zeile mit einem Pfad auf diesem Computer nennt die
+  Ordner des Frameworks über ihre Bezeichnung und jeden anderen Pfad über seinen Dateinamen; deine eigenen Fenster
+  behalten den vollen Pfad.
 - **Kein Löschen ohne deine Bestätigung im Framework** (Runde 5 f; WP7): Jeder Codepfad, der ein gebautes Modell, einen
   Wissens-Snapshot, einen Papierkorb-Eintrag oder ein Image des Frameworks löscht, nimmt nur den Plan, den du in der GUI
   oder im Terminal bestätigt hast, baut ihn unmittelbar vorher aus dem neu, was auf der Platte liegt, und löscht nichts,

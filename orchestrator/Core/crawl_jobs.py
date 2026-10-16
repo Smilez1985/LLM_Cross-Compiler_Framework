@@ -15,7 +15,8 @@ way an AI caller reaches the crawler:
   (also across framework processes, through a lock file in the per-user folder) and at most 300 stored pages a day
   per caller;
 - a stop (cancel_job) ends the crawl after the current page and keeps what is stored; a snapshot is taken before
-  each start address, so a crawl can be undone;
+  each start address, so a crawl can be undone; when that snapshot does not fit on the disk, nothing more is crawled
+  (blocker snapshot_no_room, checked before the question too; eighth round, answer 2);
 - the result holds counts and the addresses that were skipped or failed with the reason, never page text (the
   client reads pages later through search_knowledge or read_knowledge_source, filtered and marked).
 """
@@ -72,6 +73,8 @@ class CrawlPlan:
     delay: float
     languages: Tuple[str, ...]
     include_pdfs: bool
+    # The room for the snapshot taken first (knowledge_snapshots.SnapshotRoom), as looked up before the question
+    disk: Any = field(default=None, compare=False)
 
     def options(self, pages: int) -> Dict[str, Any]:
         """The crawler options of one start address (only these keys; no opt-out check is among them)."""
@@ -186,6 +189,11 @@ class CrawlJobService:
             raise CrawlRefused("The knowledge base is switched off, so nothing can be stored.", code="not_supported",
                                next="Only the person can switch it on (setting enable_rag_knowledge, in the GUI or "
                                     "with llm-cli).", blocker="knowledge_off")
+        room = self.snapshot_room()
+        if room is not None and not room.fits:  # no snapshot, no crawl: there is no "continue anyway"
+            from orchestrator.Core.knowledge_snapshots import FREE_SPACE_STEP, SnapshotNoRoom
+            raise CrawlRefused(str(SnapshotNoRoom(room, "the Deep Ingest")), code="insufficient_resources",
+                               next=FREE_SPACE_STEP, blocker="snapshot_no_room")
         urls = list(dict.fromkeys(u.strip() for u in start_urls))
         if not 1 <= len(urls) <= MAX_START_URLS:
             raise CrawlRefused(f"A crawl takes 1 to {MAX_START_URLS} different start addresses.",
@@ -222,7 +230,16 @@ class CrawlJobService:
                                     f"{left}.", blocker="crawl_quota")
         langs = tuple(dict.fromkeys(languages)) if languages is not None else self.default_languages()
         pdfs = bool(self._cfg("crawler_download_pdfs", True)) if include_pdfs is None else bool(include_pdfs)
-        return CrawlPlan(tuple(urls), pages, depth, self.delay(), langs, pdfs)
+        return CrawlPlan(tuple(urls), pages, depth, self.delay(), langs, pdfs, disk=room)
+
+    def snapshot_room(self):
+        """The room for the snapshot taken before the crawl, estimated from the newest snapshot (the knowledge base
+        is not opened before the question); None when it cannot be told."""
+        from orchestrator.Core.knowledge_snapshots import room_before
+        try:
+            return room_before(self._state_dir())
+        except OSError:
+            return None
 
     # --- the job ---------------------------------------------------------------------------------------------
 
@@ -288,6 +305,7 @@ class CrawlJobService:
         failed: List[Dict[str, Any]] = []
         outcomes: List[str] = []
         snapshot = None
+        no_room = ""
         total = plan.max_pages * len(plan.start_urls)
         for number, url in enumerate(plan.start_urls):
             if stop.is_set():
@@ -299,6 +317,9 @@ class CrawlJobService:
                 handle.progress(base + page, total, f"page {base + page} of at most {total}")
 
             result = rag.ingest_url(url, plan.options(plan.max_pages), stop=stop, progress=progress)
+            if result.get("blocker") == "snapshot_no_room":  # nothing more is crawled without its snapshot
+                no_room = _no_paths(str(result.get("message") or ""))
+                break
             snapshot = snapshot or result.get("snapshot")
             outcomes.append(str(result.get("outcome") or ("success" if result.get("success") else "failure")))
             if result.get("outcome") != "failure":
@@ -317,6 +338,10 @@ class CrawlJobService:
         with self._lock:
             budget = self._budgets.setdefault(caller, _Budget())
             budget.used.append((self.clock(), pages))
+        if no_room and not pages:
+            from orchestrator.Core.knowledge_snapshots import FREE_SPACE_STEP
+            raise CrawlRefused(no_room, code="insufficient_resources", next=FREE_SPACE_STEP,
+                               blocker="snapshot_no_room")
         if not pages:
             outcome = "failure"
         elif stop.is_set() or len(outcomes) < len(plan.start_urls) or any(o != "success" for o in outcomes):
@@ -327,5 +352,6 @@ class CrawlJobService:
                 "skipped": skipped[:LIST_CAP], "skipped_total": len(skipped),
                 "failed": failed[:LIST_CAP], "failed_total": len(failed),
                 "opt_outs": sum(1 for s in skipped if s["opt_out"]), "snapshot": snapshot,
+                **({"stopped_for": no_room} if no_room else {}),
                 "note": "Page text is not returned: read it with search_knowledge or read_knowledge_source. Pages "
                         "a site reserved (robots.txt, robots directives, TDMRep) were left out."}

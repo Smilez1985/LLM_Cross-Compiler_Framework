@@ -197,7 +197,8 @@ class SelfHealingManager:
         """The framework's data folders by label (never shown as paths)."""
         resolve = getattr(self.framework, "resolve_path", None)
         found = []
-        for label, key in (("model cache", "cache_dir"), ("models folder", "models_dir"), ("output folder", "output_dir")):
+        for label, key in (("model cache", "cache_dir"), ("models folder", "models_dir"), ("output folder", "output_dir"),
+                           ("build folder", "build_dir")):
             value = self._config(key)
             if not value:
                 continue
@@ -205,7 +206,8 @@ class SelfHealingManager:
                 path = Path(resolve(value)) if callable(resolve) else Path(str(value)).expanduser()
             except Exception:
                 continue
-            found.append((label, path))
+            if all(path != seen for _, seen in found):  # the build folder may be the output folder
+                found.append((label, path))
         return found
 
     def _docker_root(self) -> Optional[Path]:

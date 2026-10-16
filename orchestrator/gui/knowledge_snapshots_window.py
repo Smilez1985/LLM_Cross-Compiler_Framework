@@ -11,6 +11,10 @@ nothing is ticked. There is no limit and the framework deletes no snapshot by it
 - [Export ticked...] copies them to a folder the person picks (this computer, a USB stick, a network share), checks
   every copy by sha256 and changes nothing here.
 
+The window also shows what the snapshots use against the free space of their disk. When a snapshot taken before a
+change does not fit (eighth round, answer 2), `offer_snapshot_list` says so and opens this window on the person's
+"Open"; nothing is ticked and nothing is deleted by itself.
+
 Every text is plain text.
 """
 
@@ -20,7 +24,7 @@ from typing import Any, List, Optional
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QHeaderView, QLabel,
-                               QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout)
+                               QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout)
 
 from orchestrator.Core.knowledge_snapshots import (delete_snapshots, export_snapshots, list_snapshots, size_text,
                                                    snapshot_folder, snapshot_plan)
@@ -52,6 +56,8 @@ class KnowledgeSnapshotsDialog(QDialog):
         layout = QVBoxLayout(self)
         self.intro = _plain("")
         layout.addWidget(self.intro)
+        self.disk = _plain("")
+        layout.addWidget(self.disk)
         self.table = QTableWidget(0, len(COLUMNS), self)
         self.table.setHorizontalHeaderLabels([self._t(c) for c in COLUMNS])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -83,6 +89,7 @@ class KnowledgeSnapshotsDialog(QDialog):
         total = sum(s.size_bytes for s in self.snapshots)
         self.intro.setText(self._t("snapshots.intro", n=len(self.snapshots), size=size_text(total),
                                    folder=str(self.folder)))
+        self.disk.setText(self._disk_line(total))
         self.table.setRowCount(len(self.snapshots))
         for row, snap in enumerate(self.snapshots):
             for column, value in enumerate((snap.name, snap.taken, size_text(snap.size_bytes), snap.what,
@@ -96,6 +103,17 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.btn_delete.setEnabled(has and self.framework is not None)
         self.btn_export.setEnabled(has)
         self.open_folder.setEnabled(self.folder.is_dir())
+
+    def _disk_line(self, total: int) -> str:
+        """What the snapshots use against the free space of their disk ("" when it cannot be read)."""
+        from orchestrator.Core.knowledge_snapshots import snapshot_room
+        try:
+            room = snapshot_room(self.folder, 0)
+        except OSError:
+            return ""
+        if room.check is None:
+            return ""
+        return self._t("snapshots.disk", size=size_text(total), free=size_text(room.free))
 
     def ticked(self) -> List[str]:
         return [self.snapshots[r].name for r in range(self.table.rowCount())
@@ -165,3 +183,21 @@ class KnowledgeSnapshotsDialog(QDialog):
 
     def _open_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(self.folder))))
+
+
+def offer_snapshot_list(parent, framework: Any, text: str, lang: Optional[str] = None) -> bool:
+    """A knowledge snapshot taken before a change did not fit on the disk (eighth round, answer 2): `text` says why in
+    plain text, and the person may open the list of snapshots to delete or export the ones they choose (nothing is
+    ticked, nothing is deleted by itself, "Close" is the default). True when the list was opened."""
+    from orchestrator.gui.plain import plain_box
+    lang = lang or current_language()
+    answer = plain_box(parent, "warning", ui_text("snapshots.no_room.title", lang),
+                       f"{text}\n\n{ui_text('snapshots.no_room.offer', lang)}",
+                       buttons=QMessageBox.Open | QMessageBox.Close, default=QMessageBox.Close)
+    if answer != QMessageBox.Open:
+        return False
+    state = getattr(getattr(framework, "config", None), "user_state_dir", None)
+    if state is None:
+        return False
+    KnowledgeSnapshotsDialog(state, parent, framework=framework, lang=lang).exec()
+    return True

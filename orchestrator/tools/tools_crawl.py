@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator.Core.crawl_jobs import (DEPTH_CAP, MAX_START_URLS, MAX_URL_CHARS, PAGE_CAP, CrawlJobService,
                                           CrawlPlan, CrawlRefused)
-from orchestrator.tools.facts_catalog import MANY_PAGES, warn, with_blocker
+from orchestrator.tools.facts_catalog import MANY_PAGES, gb_number, warn, with_blocker
 from orchestrator.tools.output import ToolOutput, fact, untrusted_text
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
@@ -92,15 +92,22 @@ def _plan_facts(plan: CrawlPlan) -> CallFacts:
               Fact("Knowledge base", "a snapshot is taken before each start address, so the crawl can be undone; "
                                      "the pages later reach AI models as reference data"),
               Fact("Embedding model", "downloaded once (about a GB) if it is not on this computer yet")]
+    room = plan.disk
+    if room is not None:  # free space moves while a question waits: shown, never part of the decision
+        facts.append(Fact("Disk", f"knowledge snapshot taken first: {room.sentence()}", volatile=True))
     bound = {"start_urls": list(plan.start_urls), "max_pages": plan.max_pages, "max_depth": plan.max_depth,
              "delay": plan.delay, "languages": list(plan.languages), "include_pdfs": plan.include_pdfs}
-    # A situation warning when the crawl may store many pages; the embedding model's first download is not warned
-    # about yet (whether the model is on this computer is not known before the crawl). The snapshot taken first is
-    # never a warning of its own: snapshots have no limit, none is deleted by itself, and the person deletes or
-    # exports them with the full list (sixth round).
-    warnings = ()
+    # Situation warnings when the crawl may store many pages, and when the snapshot taken first fits but leaves little
+    # free space (eighth round, answer 2: one that does not fit is the blocker snapshot_no_room, before the question).
+    # The embedding model's first download is not warned about yet (whether the model is on this computer is not known
+    # before the crawl). No count of snapshots is ever a warning: they have no limit, none is deleted by itself.
+    warnings = []
     if plan.max_pages * sites >= MANY_PAGES:
-        warnings = (warn("many_pages", max_pages=plan.max_pages * sites, sites=sites),)
+        warnings.append(warn("many_pages", max_pages=plan.max_pages * sites, sites=sites))
+    if room is not None and room.verdict == "tight":
+        warnings.append(warn("disk_tight", free_after_gb=gb_number(room.check.after),
+                             reserve_gb=gb_number(room.check.reserve)))
+    warnings = tuple(warnings)
     return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, warnings=warnings,
                      numbers={"start_urls": sites, "max_pages": plan.max_pages, "max_depth": plan.max_depth},
                      consequence_template=consequence)

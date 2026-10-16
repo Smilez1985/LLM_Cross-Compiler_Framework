@@ -114,8 +114,9 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
    SHA256-Hashes ergänzt, eine `Model_Card.md` mit Hashes und Hinweisen zur Nutzung wird geschrieben, und ein ZIP
    dieser Dateien wird erstellt. All das wird in einem versteckten Ordner neben dem Ausgabeordner vorbereitet und
    erst ganz am Ende hineinverschoben. So hinterlässt ein abgebrochener oder gescheiterter Build keine Dateien im
-   Ausgabeordner, und Dateien eines früheren Builds dort ersetzt nur ein abgeschlossener. Links in der Ausgabe des
-   Builds werden nie verfolgt. Images pro Build werden danach entfernt.
+   Ausgabeordner. Ein früherer fertiger Build in diesem Ordner wird nie ersetzt: ein späterer Build kommt daneben
+   (`Q4_K_M-2`, mit `Q4_K_M-2.zip`). Links in der Ausgabe des Builds werden nie verfolgt. Images pro Build werden
+   danach entfernt.
 
 Weiteres Verhalten:
 
@@ -141,9 +142,67 @@ Weiteres Verhalten:
   Erfolg zu melden.
 - **Zeitlimits:** Jeder Container-Schritt hat ein Zeitlimit (Einstellung `build_timeout`, Standard 3600 s); nur
   ein echtes Überschreiten zählt als Zeitüberschreitung.
-- **Ausgabeordner:** CLI-Builds landen in `output/build_<Datum>_<Uhrzeit>/<Target>/<Modell>/<Quantisierung>/` in der
-  Installation (oder in dem mit `-o` angegebenen Ordner), Builds aus der GUI, von Ditto oder von MCP-Clients in
-  `output/<Target>/<Modell>/<Quantisierung>/`.
+- **Wohin ein Build kommt:** siehe [Wohin fertige Modelle kommen](#wohin-fertige-modelle-kommen) unten. Jeder Build
+  landet in `<Ordner>/<Target>/<Modell>/<Quantisierung>/`, sein Golden-ZIP daneben.
+
+### Wohin fertige Modelle kommen
+
+Ein fertiger Build (ein Golden-Artefakt: die Modelldateien, `build_info.json`, `Model_Card.md` und das ZIP neben dem
+Ordner) wird in einem Ordner deiner Wahl gespeichert (unveröffentlicht; achte Runde, Antwort 3):
+
+- **Der Ausgabeordner** (Einstellung `output_dir`, Standard `~/llmcf/output`; unter Windows
+  `C:\Users\<Name>\llmcf\output`). Du legst ihn einmal fest: **File > Output Folder...** in der GUI (der Ordnerdialog
+  des Systems) oder `llm-cli config output-folder PFAD`, zum Beispiel auf einen Ordner auf einer großen zweiten
+  Platte. Eine KI kann ihn nicht ändern. Builds im alten Ordner bleiben, wo sie sind, und werden weiter aufgelistet.
+- **Der Build-Ordner des Frameworks** (Einstellung `build_dir`, Standard der Ordner `output` im Datenordner, wohin
+  Builds bisher kamen): ein Build, den du in der GUI startest, wartet hier, bis er gespeichert ist. Frühere Builds
+  bleiben hier und werden weiter aufgelistet.
+
+Wer wohin speichert:
+
+- **GUI:** Ist ein Build fertig, den du gestartet hast, öffnet sich für jedes Golden-Artefakt der Ordnerdialog des
+  Systems im Ausgabeordner. **OK** speichert es dort, oder du wählst einen anderen Ordner. **Abbrechen** speichert
+  nichts woanders und löscht nichts: der Build bleibt im Build-Ordner, im Tab „Deployment“ als „noch nicht
+  gespeichert“ markiert, und **Speichern…** dort speichert ihn später.
+- **CLI:** `llm-cli build start --output PFAD` (`-o`, der alte Name `--output-dir` geht weiter). An einem Terminal
+  ohne diese Angabe wirst du gefragt, mit dem Ausgabeordner als Vorgabe (`-` lässt den Build im Build-Ordner;
+  `llm-cli build save` speichert ihn später). Ohne Terminal kommt der Build in den Ausgabeordner.
+- **Ditto und MCP-Clients:** immer der Ausgabeordner; `start_build` sagt das, und `get_build_status` nennt jeden
+  fertigen Build über seine Bezeichnung (`output:<Target>/<Modell>/<Quantisierung>`), nie über seinen Pfad auf dem
+  Rechner. In `get_build_log` nennt eine Zeile mit einem Pfad auf diesem Computer die Ordner des Frameworks über ihre
+  Bezeichnung und jeden anderen Pfad über seinen Dateinamen. Deine eigenen Fenster zeigen den vollen Pfad.
+
+Speichern verschiebt den Build aus dem Build-Ordner. Auf derselben Platte wird er umbenannt, nichts wird kopiert.
+Auf eine andere Platte wird jede Datei kopiert, jede Kopie wird per sha256 mit ihrem Original verglichen (eine
+Modelldatei auch mit dem Hash in ihrem Manifest), und erst dann wird die Kopie im Build-Ordner entfernt. Vor dem
+Kopieren wird der freie Platz geprüft, mit der Reserve, die immer frei bleibt. Schlägt eine Prüfung fehl, bleibt der
+Build, wo er war, und nur die unfertige Kopie wird entfernt. Ein belegter Name wird nie überschrieben (`-2`, `-3`).
+Ein Systemordner, der Programmordner des Frameworks, sein Build-Ordner und sein persönlicher Ordner werden als Ziel
+abgelehnt. Ein Build, den du außerhalb des Ausgabeordners gespeichert hast, bleibt aufgelistet, ebenso jeder Build in
+einem früheren Ausgabeordner, nachdem du ihn geändert hast (`saved_artifacts.json` im persönlichen Ordner).
+`llm-cli deploy list-artifacts`, der Tab „Deployment“ und
+`list_artifacts` zeigen den Ausgabeordner, den Build-Ordner und die Ordner, in die gespeichert wurde; eine KI liest
+die Bezeichnungen `output:`, `builds:` und `saved:`.
+
+### Gleiche Builds
+
+Vor einem Build suchen `check_build_request` und das Build-Formular der GUI einen fertigen Build mit zu 100 %
+denselben gewählten Optionen (unveröffentlicht; achte Runde, N11): das Modell und sein genauer Commit (ein lokales
+Modell: jede Gewichtsdatei mit Name, Größe und Änderungszeit), das Target und der sha256 seines Ordners, Board,
+Format, Quantisierung, Importance-Matrix und der sha256 der Kalibrierdaten, Optimierung, Kontextlänge,
+GPU-Nutzung und Aufgabe. Andere Gewichte oder eine andere Quantisierung sind nie gleich. Jeder Build hält diese
+Optionen in seinem Manifest fest (`build_options`, mit ihrem sha256); frühere Builds haben sie nicht und werden nie
+gemeldet.
+
+- **GUI:** das Build-Formular nennt den früheren Build mit vollem Pfad. **Den vorhandenen Build nehmen** startet
+  nichts, **Noch einmal bauen** baut trotzdem, **Abbrechen** tut keins von beiden. Ist der neueste Commit des Modells
+  noch nicht bekannt, fragt das Formular einmal bei Hugging Face nach dem Commit, nur wenn ein früherer Build gleich
+  sein könnte und nie im Offline-Modus; ohne den Commit sagt das Formular, dass er sich nicht prüfen ließ.
+- **KI-Clients:** `check_build_request` listet solche Builds in `earlier_builds` (`identical`, oder
+  `commit_unchecked`, wenn der Commit nicht nachgeschlagen wurde) mit einem Hinweis; die Frage von `start_build`
+  sagt, dass sie einen gleichen Build noch einmal baut.
+
+Nichts wird je von selbst übersprungen: du entscheidest (oder die KI, nachdem sie es dir gesagt hat).
 
 ### Konvertierungswerkzeuge abgestimmt auf den Build-Rechner
 
@@ -1234,10 +1293,16 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   gespeichert. Wird eine Seite erneut aufgenommen, wird sie an Ort und Stelle aktualisiert, und Abschnitte, die die
   neue Fassung nicht mehr hat, werden entfernt. Codeblöcke und Tabellen bleiben ganz, außer sie sind größer als der
   Kontext des Modells ([Große Codeblöcke und Tabellen](#große-codeblöcke-und-tabellen)).
-- **Schnappschüsse:** Vor jedem Crawl wird die Wissensbasis als Schnappschuss in
-  `~/.llm-framework/knowledge_snapshots` gesichert. Es gibt keine Grenze (unveröffentlicht; bisher blieben auf jedem
-  Weg nur die neuesten 5): Das Framework behält so viele, wie die Platte fasst, löscht keinen von selbst, und keine
-  Anzahl bringt eine Erinnerung oder eine Warnung. **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli
+- **Schnappschüsse:** Vor jedem Crawl, jeder Wiederherstellung und jedem Import eines Wissens-Packs wird die
+  Wissensbasis als Schnappschuss in `~/.llm-framework/knowledge_snapshots` gesichert. Es gibt keine Grenze
+  (unveröffentlicht; bisher blieben auf jedem Weg nur die neuesten 5): Das Framework behält so viele, wie die Platte
+  fasst, löscht keinen von selbst, und keine Anzahl bringt eine Erinnerung oder eine Warnung. Was zählt, ist die
+  Platte (unveröffentlicht; achte Runde, Antwort 2): bevor ein Schnappschuss angelegt wird, wird seine Größe
+  geschätzt. Passt er neben der Reserve, die immer frei bleibt, nicht mehr hin, wird kein Schnappschuss angelegt, und
+  die Änderung läuft auch nicht; ein „trotzdem weiter“ gibt es nicht. Du bekommst die Liste, um Schnappschüsse zu
+  löschen oder zu exportieren (die GUI bietet **Knowledge Snapshots...** an; KI-Clients bekommen den Blocker
+  `snapshot_no_room` mit deiner Handlung). Passt er, lässt aber wenig Platz übrig, ist das eine Lagewarnung
+  (`disk_tight`). **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli
   knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe und was er ist, nichts angehakt. Um Platz zu
   schaffen, hakst du die an, die gelöscht werden sollen (sie kommen zuerst in den Papierkorb; `llm-cli knowledge
   snapshots prune` oder `delete NAME...`), oder kopierst sie woandershin (Export; `llm-cli knowledge snapshots export
@@ -2319,7 +2384,7 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 | KI | Tool-Berechtigungen eingerichtet und lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel; unveröffentlicht) |
 | Daten | mitgelieferte Kalibrierungsdaten intakt (Prüfsummen) |
 | Community | installierte Community-Packs gegen den zwischengespeicherten Index: gesperrt (Fehler), seit der Installation verändert (Warnung), Vertrauensstufe `local` (Information) |
-| Wissen | wie viele Snapshots der Wissensbasis es gibt, ihre Größe und ihr Ordner (keine Grenze: ihre Zahl ist nie eine Warnung; nichts wird gelöscht; unveröffentlicht) |
+| Wissen | wie viele Snapshots der Wissensbasis es gibt, ihre Größe im Vergleich zum freien Platz ihrer Platte und ihr Ordner; eine Warnung, wenn der nächste Snapshot nicht mehr passen würde, eine Information, wenn er passt, aber wenig Platz übrig lässt (keine Grenze: ihre Zahl ist nie eine Warnung; nichts wird gelöscht; unveröffentlicht) |
 | Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
 
 `--fix` wendet die automatischen Korrekturen bis `--tier` an und prüft danach erneut. Stufe 1 macht den
@@ -2467,7 +2532,10 @@ und **Import file...** im Hub:
 
 Targets kommen nach `targets/`, Rezepte nach `community/recipes/`, Wissen nach `community/knowledge/`. Ein
 Wissens-Pack wird direkt nach seiner Installation in die Wissensbasis aufgenommen oder, wenn die Wissensbasis
-ausgeschaltet ist, sobald sie eingeschaltet wird.
+ausgeschaltet ist, sobald sie eingeschaltet wird. Bevor seine erste Seite aufgenommen wird, wird die Wissensbasis als
+Schnappschuss gesichert (`pre_pack_<Zeit>`), damit sich der Import rückgängig machen lässt (unveröffentlicht). Passt
+dieser Schnappschuss nicht mehr auf die Platte, wird nichts aufgenommen: das Pack bleibt installiert und wird
+aufgenommen, sobald Platz da ist.
 
 ### Vertrauensstufen
 
