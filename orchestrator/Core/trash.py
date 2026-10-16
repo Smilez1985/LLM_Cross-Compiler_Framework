@@ -55,9 +55,9 @@ _ENTRY_ID = re.compile(ENTRY_ID)
 # What the trash holds, in the person's words.
 WHAT = {"artifact": "built model", "model_file": "model file", "knowledge_snapshot": "knowledge snapshot",
         "module": "hardware module", "pack": "community pack", "runtime_build": "llama.cpp runtime build",
-        "deploy_package": "device runtime package"}
+        "deploy_package": "device runtime package", "knowledge_store": "old knowledge base storage"}
 EntryKind = Literal["artifact", "model_file", "knowledge_snapshot", "module", "pack", "runtime_build",
-                    "deploy_package"]
+                    "deploy_package", "knowledge_store"]
 # Names that keep their double suffix when a restored copy needs another name.
 _SUFFIXES = (".jsonl.gz", ".tar.gz", ".zip", ".gguf", ".rkllm", ".rknn", ".onnx", ".bin", ".safetensors")
 

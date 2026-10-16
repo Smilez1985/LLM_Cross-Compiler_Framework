@@ -3783,6 +3783,132 @@ def knowledge_snapshots_export(ctx: FrameworkContext, names: Tuple[str, ...], de
         sys.exit(1)
 
 
+@knowledge.group('storage', invoke_without_command=True)
+@click.pass_context
+def knowledge_storage(click_ctx):
+    """Where the local knowledge base is stored (Qdrant Edge), and the old storage of earlier versions"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(knowledge_storage_show)
+
+
+def _print_storage_summary(info: Dict[str, Any], state_dir: Path, used: Optional[str] = None) -> None:
+    """The storage the knowledge base really uses (`used`: qdrant-edge, old-local or server, as an open knowledge base
+    named it; else as the records say, nothing opened), the conversion and the old folder."""
+    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.rag import migration
+    from orchestrator.rag.errors import KnowledgeBaseError
+    reason = ""
+    if not used:
+        try:
+            use, reason = migration.current(state_dir)
+            used = "qdrant-edge" if use == "edge" else "old-local"
+        except KnowledgeBaseError as e:
+            used, reason = "", str(e)
+    state = info.get("state")
+    if used == "qdrant-edge":
+        console.print(f"Storage: Qdrant Edge in {escape(str(migration.edge_folder(state_dir)))}.")
+    elif used == "old-local":
+        console.print("Storage: the storage of earlier versions (qdrant-client's local mode) in "
+                      f"{escape(str(migration.old_folder(state_dir)))}.")
+        if reason and state != "failed":
+            console.print(f"{escape(reason)}.")
+    elif used == "server":
+        console.print("Storage: a Qdrant server (setting qdrant_url); the local storage is not used.")
+    else:
+        console.print(f"[red]{escape(reason)}[/red]")
+    if state == "converted":
+        console.print(f"Converted from the old storage on {escape(str(info.get('converted_at', '')))} "
+                      f"({int(info.get('points') or 0)} excerpts, counts and sample searches checked).")
+    elif state == "failed":
+        console.print(f"[yellow]The old storage is still in use: its conversion failed on "
+                      f"{escape(str(info.get('failed_at', '')))}: {escape(str(info.get('reason', '')))}[/yellow]")
+        console.print(escape(migration.retry_sentence(str(info.get("code") or ""))))
+    if info.get("old_folder"):
+        kept = size_text(int(info.get("old_folder_bytes") or 0))
+        if state == "converted":
+            console.print(f"The old folder {escape(str(info['old_folder']))} ({kept}) is kept until you delete it: "
+                          "'llm-cli knowledge storage delete-old' (or Tools > Knowledge Snapshots... > Delete the old "
+                          "storage... in the GUI) lists it and asks you first.")
+        else:
+            console.print(f"Old storage folder: {escape(str(info['old_folder']))} ({kept}).")
+
+
+@knowledge_storage.command('show')
+@pass_context
+def knowledge_storage_show(ctx: FrameworkContext):
+    """The storage, the conversion of the old storage (when, how many excerpts, what was checked, or why it failed) and
+    the old folder; reads the records only, nothing is opened or changed"""
+    from orchestrator.rag import migration
+    ctx.require_framework()
+    state_dir = Path(ctx.framework_manager.config.user_state_dir)
+    _print_storage_summary(migration.summary(state_dir), state_dir)
+
+
+@knowledge_storage.command('convert')
+@pass_context
+def knowledge_storage_convert(ctx: FrameworkContext):
+    """Convert the old storage to Qdrant Edge now (also after a failed attempt); vectors and texts are copied and
+    checked, nothing is embedded again, and the old folder is kept"""
+    from orchestrator.rag import migration
+    ctx.require_framework()
+    state_dir = Path(ctx.framework_manager.config.user_state_dir)
+    if not migration.old_store_present(state_dir) or migration.edge_in_use(state_dir):
+        console.print("There is no old storage to convert.")
+        _print_storage_summary(migration.summary(state_dir), state_dir)
+        return
+    if not migration.engine_available():
+        console.print(f"[red]{escape(migration.ENGINE_MISSING)}; nothing can be converted.[/red]")
+        sys.exit(1)
+    ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
+    rag = ensure() if callable(ensure) else None
+    if rag is None:
+        console.print("[red]The knowledge base is off (setting enable_rag_knowledge). Switch it on in the GUI's AI "
+                      "settings first.[/red]")
+        sys.exit(1)
+    with console.status("Converting the knowledge base to Qdrant Edge (copy and check)..."):
+        result = rag.convert_storage()
+    _print_storage_summary(result, state_dir, used=result.get("used") or None)
+    if result.get("error"):
+        console.print(f"[red]{escape(str(result['error']))}[/red]")
+    if result.get("used") != "qdrant-edge":
+        sys.exit(1)
+
+
+@knowledge_storage.command('delete-old')
+@pass_context
+def knowledge_storage_delete_old(ctx: FrameworkContext):
+    """Delete the old storage folder after its conversion, once you confirm it in a terminal (trash first)"""
+    from orchestrator.Core.deletion import PlanChanged
+    from orchestrator.rag import migration
+    ctx.require_framework()
+    state_dir = Path(ctx.framework_manager.config.user_state_dir)
+    plan = migration.old_store_plan(state_dir)
+    if plan is None:
+        console.print("There is no old storage folder to delete (it is deleted already, or the knowledge base was not "
+                      "converted to Qdrant Edge yet, so the old folder is still the knowledge base).")
+        return
+    accepted = confirm_deletion(plan, title="The old knowledge base storage", again="llm-cli knowledge storage "
+                                                                                    "delete-old")
+    if accepted is None:
+        return
+    rag = getattr(ctx.framework_manager, "rag_manager", None)
+    if callable(getattr(rag, "close", None)):
+        rag.close()  # this process's own hold on the knowledge base (its lock) is released first
+    try:
+        result = migration.delete_old_store(state_dir, accepted, trash=_cli_trash(ctx), audit=_cli_audit(ctx))
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    if not result.done:
+        console.print(f"[yellow]Kept: the old knowledge base storage ({escape(result.problem)})[/yellow]")
+        return
+    if accepted.mode == "trash":
+        console.print("[green]Moved to the trash: the old knowledge base storage[/green] (restore it with 'llm-cli "
+                      "trash restore ID'; its space stays used until you empty the trash).")
+    else:
+        console.print("[green]Deleted: the old knowledge base storage[/green]")
+
+
 @knowledge.command('index-docs')
 @click.option('--with-code', is_flag=True,
               help="Also index the framework's code and configuration (many more files, takes minutes)")

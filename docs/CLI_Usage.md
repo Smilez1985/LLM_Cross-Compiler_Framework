@@ -122,6 +122,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `doctor` | The old name of `mojo`, with its options of 3.0.0 |
 | `knowledge snapshots` | List the knowledge base's snapshots with full path, name, size and what each is; delete the ones you pick, or export them (unreleased) |
 | `knowledge index-docs` | Add the framework's own documentation (and with `--with-code` its code) to the knowledge base (unreleased) |
+| `knowledge storage` | Where the knowledge base is stored (Qdrant Edge), the conversion of an older one, and its old folder: `convert`, `delete-old` (unreleased) |
 | `trash list` / `restore` / `empty` | What deletions moved to the trash; put entries back; delete the ones you pick for good (unreleased) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
@@ -310,6 +311,30 @@ are shown as plain text. The knowledge base must be switched on.
 ```bash
 llm-cli knowledge sources
 llm-cli knowledge sources --kind web
+```
+
+### knowledge storage
+
+```
+llm-cli knowledge storage [show]
+llm-cli knowledge storage convert
+llm-cli knowledge storage delete-old
+```
+
+Unreleased. The knowledge base is stored in Qdrant Edge (`~/.llm-framework/qdrant_edge`). A knowledge base of an earlier
+version (`~/.llm-framework/qdrant`) is converted on its first use; vectors and texts are copied and checked, nothing is
+embedded again. `show` (the default) reads the record of that conversion and opens nothing: when it was converted, how
+many excerpts, and the old folder with its full path and size; or, when the conversion failed, why and when it is tried
+again (the old store keeps working meanwhile). The first line names the storage really in use. `convert` tries the
+conversion now, also after a failure that is not tried again by itself; it needs the knowledge base switched on (in the
+GUI: **Tools > Knowledge Snapshots... > Try the conversion again**). `delete-old` lists the old folder after its
+conversion and deletes it only after your answer at a terminal (trash by default, or for good; "No" is the default).
+Without a terminal nothing is deleted. Before the conversion, or while it failed, the old folder is the knowledge base
+itself and is not offered.
+
+```bash
+llm-cli knowledge storage
+llm-cli knowledge storage delete-old
 ```
 
 ---
