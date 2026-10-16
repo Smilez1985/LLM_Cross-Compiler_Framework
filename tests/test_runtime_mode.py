@@ -757,19 +757,43 @@ class TestLeftovers:
             remove_leftovers(rt, plan, actor="cli", audit=Audit())
         assert all(Path(i.full_path).is_dir() for i in plan.items if i.full_path)
 
-    def test_without_an_audit_nothing_is_removed(self, tmp_path, no_source, dri):
+    def test_without_an_audit_or_without_the_trash_nothing_is_removed(self, tmp_path, no_source, dri):
+        from orchestrator.Core.trash import Trash
         rt, plan = _switched_to_docker(tmp_path, FakeClient())
         for audit in (None, Audit(fail=True)):
-            with pytest.raises(RuntimeModeError):
-                remove_leftovers(rt, plan, actor="cli", audit=audit)
+            with pytest.raises(RuntimeModeError, match="audit"):
+                remove_leftovers(rt, plan, actor="cli", audit=audit, trash=Trash(tmp_path / "state"))
+        with pytest.raises(RuntimeModeError, match="trash"):
+            remove_leftovers(rt, plan, actor="cli", audit=Audit())   # the trash is the default for build folders
         assert all(Path(i.full_path).is_dir() for i in plan.items if i.full_path)
+
+    def test_build_folders_go_to_the_trash_by_default_with_one_confirmation(self, tmp_path, no_source, dri):
+        """WP7 for the old mode's leftovers: the list offers the trash first when it holds a build folder; the folders
+        are moved there (restorable), Docker's objects are deleted, and the person confirmed the list once."""
+        from orchestrator.Core.trash import Trash
+        client = FakeClient()
+        rt, plan = _switched_to_docker(tmp_path, client)
+        builds = [i for i in plan.items if i.kind == "runtime_build"]
+        assert builds and plan.mode_offered == ("trash", "permanent")
+        trash, audit = Trash(tmp_path / "state"), Audit()
+        removal = remove_leftovers(rt, plan, actor="gui", audit=audit, trash=trash)
+        assert sorted(removal.trashed) == sorted(i.speaking_name for i in builds) and not removal.failed
+        assert removal.freed_bytes == sum(i.size_bytes for i in plan.items if i.kind != "runtime_build")
+        entries = trash.entries()
+        assert len(entries) == len(builds) == len(removal.trash_ids)
+        assert {e.kind for e in entries} == {"runtime_build"} and {e.confirmed_by for e in entries} == {"gui"}
+        assert not any(Path(i.full_path).exists() for i in builds), "moved, not left behind"
+        assert audit.rows[0]["arguments"]["deletion_mode"] == "trash"
+        assert audit.rows[0]["extra"]["deletion_sha256"] == plan.sha256()
+        assert "active" not in rt.store.references(), "a build in the trash is no longer referenced"
+        assert leftovers(rt, "docker") is None
 
     def test_exactly_the_confirmed_list_is_removed_and_audited(self, tmp_path, no_source, dri):
         client = FakeClient()
         rt, plan = _switched_to_docker(tmp_path, client)
         audit = Audit()
-        removal = remove_leftovers(rt, plan, actor="gui", audit=audit)
-        assert len(removal.deleted) == len(plan.items) and not removal.failed
+        removal = remove_leftovers(rt, plan, actor="gui", audit=audit, mode="permanent")
+        assert len(removal.deleted) == len(plan.items) and not removal.failed and not removal.trashed
         assert removal.freed_bytes == plan.total_bytes
         assert not any(Path(i.full_path).exists() for i in plan.items if i.full_path)
         assert [r["outcome"] for r in audit.rows] == ["started", "ok"]
@@ -779,6 +803,16 @@ class TestLeftovers:
         assert rt.mode() == "docker" and rt.mode_record()["docker"]["image_id"] in {
             i.id for i in client.images.items.values()}, "the image in use stays"
         assert leftovers(rt, "docker") is None
+
+    def test_a_list_of_docker_objects_only_offers_no_trash(self, tmp_path, no_source, dri, verify_in_container):
+        client = FakeClient()
+        ensure(runtime(tmp_path, client, native=False), mode="docker")
+        back = runtime(tmp_path, client, native=False, executor=Refuses())
+        plan = ensure(back, mode="bare-metal", force=True).leftovers
+        assert {i.kind for i in plan.items} <= {"docker_image", "docker_container"}
+        assert plan.mode_offered == ("permanent",), "Docker has no trash"
+        for item in plan.items:
+            assert item.speaking_name.startswith("Ditto ") and item.file_name and item.size_bytes > 0
 
     def test_images_are_removed_only_through_the_confirmed_list(self):
         sources = {p: p.read_text(encoding="utf-8") for p in (REPO_ROOT / "orchestrator").rglob("*.py")}
@@ -956,6 +990,7 @@ class TestCli:
         flat = re.sub(r"[\s│┃|]+", "", result.output)
         for item in plan.items:
             assert re.sub(r"\s+", "", item.file_name) in flat
+        assert "Goesto" in flat and "thetrash" in flat and "Dockerhasnotrash" in flat, "where each object goes"
 
     def test_status_shows_the_mode(self, tmp_path, monkeypatch):
         client = FakeClient()
@@ -1007,7 +1042,56 @@ class TestAISettings:
         monkeypatch.setattr(box_module.runtime_mode, "remove_leftovers", lambda rt_, plan_, **k: removed.append(k)
                             or runtime_mode.Removal())
         box._offer_removal(plan)
-        assert removed[-1]["actor"] == "gui"
+        assert removed[-1]["actor"] == "gui" and removed[-1]["mode"] == "trash"
+        assert len([q for q in questions]) == 1, "one question for the whole list (round 7 D)"
+
+    def test_the_question_names_only_where_the_listed_objects_go(self, qapp, tmp_path, monkeypatch, no_source, dri,
+                                                                 verify_in_container):
+        """A list of Docker objects only says nothing about a trash (none of them goes there); a list with build
+        folders says they go to the trash."""
+        from orchestrator.gui import runtime_mode_box as box_module
+        client = FakeClient()
+        ensure(runtime(tmp_path / "a", client, native=False), mode="docker")
+        back = runtime(tmp_path / "a", client, native=False, executor=Refuses())
+        docker_only = ensure(back, mode="bare-metal", force=True).leftovers
+        assert docker_only.mode_offered == ("permanent",)
+        asked = []
+        monkeypatch.setattr(box_module, "ask", lambda parent, title, question: asked.append(question) or False)
+        monkeypatch.setattr(box_module, "plain_box", lambda *a, **k: None)
+        box = box_module.RuntimeModeBox(SimpleNamespace(config=SimpleNamespace(get=lambda k, d=None: d)),
+                                        runtime_factory=lambda: back)
+        box._offer_removal(docker_only)
+        question = asked[-1].split("\n\n")[0]
+        assert "go to the trash" not in question and "File > Trash" not in question, question
+        assert "Docker has no trash, so its images and containers are deleted for good" in question
+        _rt, with_builds = _switched_to_docker(tmp_path / "b", FakeClient())
+        box._offer_removal(with_builds)
+        assert "Build folders go to the trash" in asked[-1].split("\n\n")[0]
+
+    def test_the_question_says_where_each_object_goes_and_the_folders_reach_the_trash(self, qapp, tmp_path,
+                                                                                     monkeypatch, no_source, dri):
+        from types import SimpleNamespace
+        from orchestrator.Core.trash import Trash
+        from orchestrator.gui import runtime_mode_box as box_module
+        client = FakeClient()
+        rt, plan = _switched_to_docker(tmp_path, client)
+        text = box_module.leftovers_text(plan)
+        blocks = text.split("\n\n")
+        for item, block in zip(plan.items, blocks):
+            wanted = "Goes to: the trash" if item.kind == "runtime_build" else "Goes to: deleted for good"
+            assert wanted in block, block
+        asked, shown = [], []
+        monkeypatch.setattr(box_module, "ask", lambda parent, title, question: asked.append(question) or True)
+        monkeypatch.setattr(box_module, "plain_box", lambda *a, **k: shown.append(a[-1]))
+        audit = Audit()
+        framework = SimpleNamespace(config=SimpleNamespace(user_state_dir=tmp_path / "state", get=lambda k, d=None: d),
+                                    tool_registry=SimpleNamespace(audit=audit, policy_store=None))
+        box = box_module.RuntimeModeBox(framework, runtime_factory=lambda: rt)
+        box._offer_removal(plan)
+        assert len(asked) == 1 and "trash" in asked[0]
+        entries = Trash(tmp_path / "state").entries()
+        assert len(entries) == len([i for i in plan.items if i.kind == "runtime_build"]) > 0
+        assert "moved to the trash" in shown[-1]
 
 
 # --- the installers ---------------------------------------------------------------------------------------------------

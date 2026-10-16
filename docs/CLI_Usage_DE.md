@@ -277,8 +277,12 @@ llm-cli knowledge index-docs [--with-code]
 
 Unveröffentlicht. Nimmt die eigene Dokumentation des Frameworks (README, CONTRIBUTING und den Ordner `docs`, in beiden
 Sprachen) in die Wissensbasis auf, damit Ditto Fragen zum Framework selbst beantworten kann und KI-Clients sie mit
-`search_knowledge` (Art `docs`) finden. `--with-code` nimmt auch Code und Konfiguration auf (`orchestrator`,
-`targets`, `scripts`, `configs`, das Container-Setup und die Installationsskripte; viel mehr Dateien, dauert Minuten).
+`search_knowledge` (Art `docs`) finden. `--with-code` nimmt auch Code und Konfiguration auf (viel mehr Dateien, dauert
+Minuten): die Shell-Skripte im obersten Ordner der Installation (`install.sh`, `entrypoint.sh`; nicht `install.bat`),
+die Dateien `.py`, `.sh`, `.yml`, `.yaml`, `.json` und `.md` sowie Dockerfiles in `orchestrator`, `scripts` und
+`Docker Setup`, die Targets, die das Framework mitliefert (`targets/_template` und die offiziellen Targets), und die
+Dateien im obersten Ordner von `configs`. Dateien über 512 KB, Links, Zwischenspeicher und erzeugte Ordner bleiben
+draußen, ebenso Namen, die mit einem Punkt beginnen.
 Gelesen wird nur, was das Framework mitliefert: nie deine Einstellungen (`config.yml`), Targets, die du oder eine KI
 angelegt habt, oder installierte Pakete. Das passiert nie von selbst: Nur dieser Befehl, **Tools > Index the
 Framework's Documentation...** in der GUI (eine Frage mit „Nein“ als Vorgabe und einem Kästchen für den Code) oder das
@@ -993,9 +997,12 @@ Befehl aus.
   wird neu erzeugt, umgepackt, wo das geht: der direkte Build ins Image, oder der Build des Images in die direkte Art,
   nachdem er seine Prüfungen auf diesem Rechner bestanden hat. Wo das nicht geht, sagt der Befehl warum und baut neu.
   Der Server der alten Art wird gestoppt. Danach werden die Reste der alten Art aufgelistet: Build-Ordner mit
-  vollständigem Pfad, Ordnername und Build-ID, Docker-Images und -Container mit Name und ID, jeweils mit Größe und
-  was es ist. Entfernt wird nur, was du bestätigst („Nein“ ist vorgewählt). Ohne Terminal wird nichts entfernt, und
-  die Liste wird angezeigt.
+  vollständigem Pfad, Ordnername und Build-ID, Docker-Images und -Container mit Name und ID, jeweils mit Größe, was
+  es ist und wohin es kommt. Entfernt wird nur, was du bestätigst, mit einer Frage für die ganze Liste („Nein“ ist
+  vorgewählt): Die Build-Ordner kommen in den Papierkorb (`llm-cli trash` listet sie, `llm-cli trash restore ID` holt
+  einen zurück, und ihr Platz bleibt belegt, bis du den Papierkorb leerst), Dockers Images und Container werden
+  endgültig gelöscht (Docker hat keinen Papierkorb). Ohne Terminal wird nichts entfernt, und die Liste wird
+  angezeigt.
 - **Das Modell:** Ist das Modell der gewählten oder empfohlenen Stufe noch nicht heruntergeladen, werden zuerst
   Quelle, Größe und Lizenz angezeigt. Heruntergeladen wird es nach deinem Ja, oder mit `-y`, wenn seine Lizenz frei
   ist (Apache 2.0, MIT, BSD); jede andere Lizenz nimmst du selbst mit `llm-cli ditto models download` an. Beide Arten
@@ -1646,7 +1653,7 @@ llm-cli device runtime deploy GERÄT [--user NAME] [--password [WERT] | --passwo
                               [--allow-untrusted-model]
 llm-cli device runtime verify GERÄT [--user NAME] [--bench-model PFAD] [--allow-untrusted-model]
 llm-cli device runtime status GERÄT [--json]
-llm-cli device runtime prune GERÄT
+llm-cli device runtime prune GERÄT [--on-device]
 ```
 
 ### device list
@@ -1715,8 +1722,9 @@ aus `--user`.
    `llama-bench`-Lauf mit diesem Modell.
 5. Nur ein Build, der besteht, wird zu `current`. Ein Build, der scheitert (zum Beispiel mit `SIGILL`, weil die
    CPU-Grundlage nicht zum Board passt), wird wieder entfernt, der vorige Build bleibt aktiv, und sonst ändert sich
-   nichts. Nach dem Umschalten bleibt der vorige Build; ältere werden entfernt, außer ein laufendes Programm nutzt
-   sie.
+   nichts. Nach dem Umschalten bleibt jeder ältere Build auf dem Board (unveröffentlicht; vorher wurden alle außer
+   dem vorigen ohne Frage entfernt). Die Ausgabe sagt, wie viele geblieben sind und wie groß sie sind;
+   `device runtime prune GERÄT --on-device` listet sie, damit du sie entfernst.
 6. Mit der systemd-Einstellung wird die Unit `llm-llama-server.service` mit `sudo -n` geschrieben und aktiviert und
    gestartet, sobald das Modell da ist.
 
@@ -1763,6 +1771,14 @@ Listet die älteren Laufzeit-Pakete des Geräts auf deinem PC mit je einer Numme
 ausgewählt: Du gibst die Nummern der zu löschenden ein, wählst den Papierkorb (Standard) oder endgültiges Löschen und
 bestätigst genau diese (Standard: nein). Das braucht ein Terminal; ohne eines wird nur gelistet. Auf dem Board ändert
 sich nichts.
+
+Mit `--on-device` meldet es sich am Board an (als Benutzer der Deploy-Einstellungen, mit dem Schlüssel des
+Frameworks) und listet stattdessen die älteren Laufzeit-Builds dort: jeden mit vollem Pfad auf dem Board,
+Ordnername, Größe und was er ist (der Build, der vor dem letzten Deployment aktiv war, sagt das). Der aktive Build
+und ein Build, den ein laufendes Programm nutzt, stehen nie in der Liste. Du gibst die Nummern ein, nichts ist
+ausgewählt, und du bestätigst genau diese (Standard: nein). Ein Board hat keinen Papierkorb, sie werden also
+endgültig entfernt. Das Entfernen steht zuerst im Audit-Log, nur mit den Ordnernamen. Keine KI kann das: Die
+KI-Tools sagen nur, wie viele ältere Builds geblieben sind.
 
 Für ein [vertrautes Gerät](#deploy-devices) führen die optionalen MCP-Tools `probe_remote_device`,
 `deploy_device_runtime` und `run_device_benchmark` für einen KI-Client `scan --device`, `device runtime build` mit

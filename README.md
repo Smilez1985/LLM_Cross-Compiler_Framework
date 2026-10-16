@@ -583,8 +583,9 @@ llm-cli ditto runtime ensure --mode bare-metal --force    # and back
   is put into the image when the base image's C library fits, and the image's build becomes the bare-metal build once
   it passed its checks on this computer. Where that is not possible, `ensure` says why and builds again.
 - **The old mode's files** (build folders with their full path, Docker images and containers with their name and ID,
-  each with its size) are listed after the switch, and only what you confirm is removed ("No" is the default).
-  Without a terminal nothing is removed. Docker images are never deleted otherwise.
+  each with its size) are listed after the switch, and only what you confirm is removed ("No" is the default): the
+  build folders go to the trash, where you can restore them; Docker images and containers are deleted. Without a
+  terminal nothing is removed. Docker images are never deleted otherwise.
 - `llm-cli ditto runtime status` shows the mode. An AI client may read it (`get_status`); switching and removing
   are yours alone.
 

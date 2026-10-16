@@ -14,6 +14,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import re
 import shlex
 import socket
 import tempfile
@@ -27,6 +28,9 @@ except ImportError:  # deployment and remote probing are optional features
     paramiko = None
 
 KEY_NAME = "id_ed25519_llm_framework"
+# A public key line as client_key writes it: key type, base64 key, an optional plain comment.
+PUBLIC_LINE = re.compile(r"^(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) [A-Za-z0-9+/]{16,8192}={0,3}"
+                         r"(?: [A-Za-z0-9._@-]{1,64})?$", re.ASCII)
 
 
 class HostKeyError(Exception):
@@ -200,11 +204,16 @@ def connect(host: str, user: str, state_dir: Path, port: int = 22, password: Opt
 
 
 def install_public_key(client, public_line: str) -> None:
-    """Adds the framework key to the device user's authorized_keys (idempotent)."""
+    """Adds the framework key to the device user's authorized_keys (idempotent). The command is fixed; its only value
+    is the framework's own public key line (client_key), checked against PUBLIC_LINE and shell-quoted, so nothing from
+    a file or a device reaches the device's shell as code."""
+    if not isinstance(public_line, str) or not PUBLIC_LINE.fullmatch(public_line):
+        raise HostKeyError("The framework's public key line is not a plain SSH public key; nothing was installed.")
     q = shlex.quote(public_line)
     command = (f"umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && "
                f"(grep -qxF {q} ~/.ssh/authorized_keys || printf '%s\\n' {q} >> ~/.ssh/authorized_keys)")
-    _, stdout, stderr = client.exec_command(command)
+    # B601: a fixed command whose one value is the checked and quoted public key line, never outside input.
+    _, stdout, stderr = client.exec_command(command)  # nosec B601
     if stdout.channel.recv_exit_status() != 0:
         raise HostKeyError(f"Could not install the framework key: {stderr.read().decode(errors='replace').strip()}")
 

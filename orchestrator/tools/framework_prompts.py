@@ -116,6 +116,8 @@ def _block(label: str, text: str, source: str, max_len: int = 4000) -> str:
 # nothing the read tool search_knowledge may not (framework text, outside any untrusted block).
 NO_KNOWLEDGE = ("Knowledge-base excerpts are left out: your tool permissions do not allow search_knowledge without a "
                 "question.")
+NO_MODEL = ("Knowledge-base excerpts are left out: the knowledge base's search model is not on this computer yet, and "
+            "a prompt never downloads it (about a gigabyte).")
 
 
 def _knowledge_enabled(framework) -> bool:
@@ -167,7 +169,17 @@ def register_framework_prompts(registry: ToolRegistry, framework,
             allowed = False
         if not allowed:
             return "", NO_KNOWLEDGE
-        return knowledge_excerpts(_knowledge_on(framework), query, **kwargs), ""
+        # A prompt never starts the one-time download of the knowledge base's models (about a gigabyte, next-fixes
+        # 119): like search_knowledge it reads with the models on this computer only, and says so when they are not.
+        from orchestrator.Core.rag_manager import local_models_only
+        with local_models_only():
+            rag = _knowledge_on(framework)
+            excerpts = knowledge_excerpts(rag, query, **kwargs)
+        if not excerpts and rag is not None:
+            check = getattr(rag, "embedding_download", None)
+            if callable(check) and check()[0]:
+                return "", NO_MODEL
+        return excerpts, ""
 
     def with_note(parts: List[str], note: str) -> str:
         return "\n\n".join(parts + ([note] if note else []))

@@ -541,4 +541,4 @@ class PolicyStore:
         except Exception as e:
             from orchestrator.utils.helpers import redact_secrets
             raise PolicyStoreError(f"The audit log cannot record the change ({redact_secrets(str(e))}); the tool "
-                                   "permissions were not changed. Run 'llm-cli doctor' to find the cause.") from None
+                                   "permissions were not changed. Run 'llmcf mojo' to find the cause.") from None

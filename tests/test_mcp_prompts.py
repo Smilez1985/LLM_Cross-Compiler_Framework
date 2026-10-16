@@ -344,6 +344,26 @@ def test_add_board_gets_dittos_knowledge_context(framework, registry, monkeypatc
     assert searched and searched[0][1:] == (5, False)
 
 
+def test_a_prompt_never_starts_the_download_of_the_search_model(framework, monkeypatch):
+    """next-fixes 119: a prompt has no question to warn in, so it reads the knowledge base like search_knowledge, with
+    the models on this computer only, and says so when they are not there yet."""
+    from orchestrator.Core.rag_manager import models_local_only
+    local = []
+
+    class Rag:
+        def search(self, query, limit=5, rerank=None):
+            local.append(models_local_only())
+            return []
+
+        def embedding_download(self):
+            return True, 0.48
+    framework.config.set("enable_rag_knowledge", True)
+    monkeypatch.setattr(framework, "ensure_rag_manager", lambda: Rag(), raising=False)
+    text = get(server_for(framework), "ask_about_framework", {"question": "What is RKLLM?"}).messages[1].content.text
+    assert local and all(local), "every search of a prompt runs with the models on this computer only"
+    assert "search model is not on this computer yet" in text
+
+
 def test_the_targets_own_texts_stay_in_untrusted_blocks(framework, monkeypatch):
     """Format labels and notes come from target.yml, which a community target pack installs: in the recommendation
     prompt they are external text like any other."""

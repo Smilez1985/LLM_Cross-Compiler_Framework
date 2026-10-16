@@ -49,6 +49,10 @@ BACKENDS = ("auto", "cpu", "cuda", "vulkan", "rocm", "metal")
 INSTALL_NEXT = ("Ask the person to run 'llm-cli ditto runtime install' in a terminal: it lists the missing parts, "
                 "their sizes and licences, and only the person installs them.")
 BUILD_NEXT = "Build it first with build_local_runtime (or the person runs 'llm-cli ditto runtime install')."
+# Older runtime builds on a board stay there (round 5 f): an AI never removes them and never asks to.
+OLDER_BUILDS_NOTE = ("The older runtime builds stay on the board; the framework removes none by itself. Only the "
+                     "person removes them, from the full list at a terminal: llm-cli device runtime prune DEVICE "
+                     "--on-device. Mention them to the person only if the board runs short of space.")
 SOURCE_SIZE = 300 * 1000 ** 2          # the pinned source with its unpacked tree (estimate)
 BUILD_SIZE = 2 * 1000 ** 3              # one build folder with its intermediate files (estimate)
 GB = 1000 ** 3
@@ -1052,6 +1056,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 # the device's words also on success: its account and paths never reach an AI (D0)
                 lines = [device_text(f"{c['name']}: {c['result']} - {c['detail']}", users, folder_labels())
                          for c in checks] + [device_text(n, users, folder_labels()) for n in notes]
+                if out.get("older_builds_kept"):
+                    out["older_builds_note"] = OLDER_BUILDS_NOTE
                 return {**out, "checks_passed": sum(1 for c in checks if c["result"] == "passed"),
                         "checks_failed": sum(1 for c in checks if c["result"] == "failed"), EXTERNAL_KEY: lines}
 

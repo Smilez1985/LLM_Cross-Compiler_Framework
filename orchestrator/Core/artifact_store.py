@@ -94,20 +94,25 @@ class ArtifactStore:
     """Built models of one output folder. `artifacts()` gives (id, label, manifest) like BuildService.artifact_entries;
     `busy_folders()` the output folders unfinished build requests write into (every process)."""
 
-    def __init__(self, output_dir: Path, artifacts, busy_folders, roots: Optional[List[Tuple[str, Path]]] = None):
+    def __init__(self, output_dir: Path, artifacts, busy_folders, roots: Optional[List[Tuple[str, Path]]] = None,
+                 aliases=None):
         self.output_dir = Path(output_dir)
         self._artifacts = artifacts
         self._busy = busy_folders
         # (label, folder) of every folder a built model may lie in: the output folder, and the framework's build folder
         # (eighth round, answer 3); a model elsewhere (saved by the person to another folder) is never deleted here
         self.roots = list(roots) if roots else [("output", self.output_dir)]
+        # {earlier id: current id} of builds whose id changed with the output folder setting (BuildService)
+        self._aliases = aliases
 
     @classmethod
     def for_service(cls, service: Any) -> "ArtifactStore":
         """The store of a BuildService, through its public methods only (output_folder, artifact_entries,
-        busy_output_folders, artifact_roots), so a change inside the service cannot bypass what the store checks."""
+        busy_output_folders, artifact_roots, artifact_aliases), so a change inside the service cannot bypass what the
+        store checks."""
         roots = service.artifact_roots() if hasattr(service, "artifact_roots") else None
-        return cls(service.output_folder(), service.artifact_entries, service.busy_output_folders, roots)
+        return cls(service.output_folder(), service.artifact_entries, service.busy_output_folders, roots,
+                   getattr(service, "artifact_aliases", None))
 
     def _root_of(self, real: Path) -> Optional[Tuple[str, Path]]:
         """(label, resolved folder) of the data folder `real` lies inside (never the folder itself), or None."""
@@ -121,7 +126,11 @@ class ArtifactStore:
         return None
 
     def resolve(self, artifact_id: str, expect_sha256: Optional[str] = None) -> ArtifactTarget:
-        found = next((item for item in self._artifacts() if item[0] == artifact_id), None)
+        items = self._artifacts()
+        found = next((item for item in items if item[0] == artifact_id), None)
+        if found is None and callable(self._aliases):   # an id from before the output folder setting
+            current = self._aliases().get(artifact_id)
+            found = next((item for item in items if current and item[0] == current), None)
         if found is None:
             raise ArtifactRefused(f"Unknown built model '{artifact_id}'.", code="unknown_id",
                                   next="Call list_artifacts for the ids you can use.")
@@ -198,7 +207,8 @@ class ArtifactStore:
         if accepted.mode == "trash":
             if trash is None:
                 raise ArtifactRefused("The trash is not available; nothing was deleted.", code="failed",
-                                      next="Tell the person; they check 'llm-cli doctor'.")
+                                      next="Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) shows "
+                                           "the cause.")
             from orchestrator.Core.trash import TrashError
             label, root = self._root_of(target.folder) or ("output", self.output_dir.resolve())
             for item, path in zip(current.items, (target.folder, *target.zips)):

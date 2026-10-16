@@ -202,18 +202,48 @@ class TestBuilderForm:
                                      "commit_unchecked")]
         identical = [bi.EarlierBuild("a_" + "2" * 16, "builds:x", {"path": "/srv/x", "created": "2026-10-15"},
                                      "identical")]
-        calls, looked_up, asked = [], [], []
+        import threading
+
+        from PySide6.QtWidgets import QApplication
+        calls, looked_up, asked, threads = [], [], [], []
         monkeypatch.setattr(service, "earlier_builds", lambda request, revision=None, **k: calls.append(revision) or
                             (identical if revision else unchecked))
-        monkeypatch.setattr(service, "model_commit", lambda repo: looked_up.append(repo) or COMMIT_A)
+        monkeypatch.setattr(service, "model_commit", lambda repo: looked_up.append(repo)
+                            or threads.append(threading.current_thread()) or COMMIT_A)
         monkeypatch.setattr(artifact_save, "ask_earlier", lambda parent, found, lang=None: asked.append(found) or
                             "cancel")
         assert submit(tab) is None
+        # Hugging Face is asked in a worker (up to 10 s), never on the GUI thread; the Start button waits meanwhile
+        assert not tab.btn_start.isEnabled() and asked == []
+        tab._commit_worker.wait(10000)
+        QApplication.processEvents()
         assert looked_up == ["HuggingFaceTB/SmolLM2-135M-Instruct"] and calls == [None, COMMIT_A]
-        assert asked[0][0].match == "identical"
+        assert threads and threads[0] is not threading.main_thread()
+        assert asked[0][0].match == "identical" and tab.btn_start.isEnabled()
         monkeypatch.setattr(service, "earlier_builds", lambda *a, **k: [])
         looked_up.clear()
         assert submit(tab) is not None and looked_up == [], "no earlier build: nothing is looked up"
+
+    def test_the_values_checked_are_the_values_submitted_after_the_look_up(self, tab, booted_framework,
+                                                                           monkeypatch):
+        """The form may change while the commit is looked up: the build started is the one that was compared."""
+        from PySide6.QtWidgets import QApplication
+
+        from orchestrator.gui import artifact_save
+        service = booted_framework.build_service
+        unchecked = [bi.EarlierBuild("a_" + "3" * 16, "builds:x", {"path": "/srv/x", "created": "2026-10-15"},
+                                     "commit_unchecked")]
+        monkeypatch.setattr(service, "earlier_builds", lambda request, revision=None, **k: [] if revision else
+                            unchecked)
+        monkeypatch.setattr(service, "model_commit", lambda repo: COMMIT_A)
+        monkeypatch.setattr(artifact_save, "ask_earlier", lambda *a, **k: pytest.fail("no identical build"))
+        before = len(tab.framework.orchestrator.submitted)
+        tab._submit_build()
+        tab.quant_combo.setEditText("Q8_0")   # changed while the look-up runs
+        tab._commit_worker.wait(10000)
+        QApplication.processEvents()
+        submitted = tab.framework.orchestrator.submitted
+        assert len(submitted) == before + 1 and submitted[-1].quantization_options == ["Q4_K_M"]
 
     def test_the_question_names_the_full_path_in_plain_text(self, tab, monkeypatch):
         from PySide6.QtCore import Qt

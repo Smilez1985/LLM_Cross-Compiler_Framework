@@ -206,5 +206,5 @@ class TestFailedRefusalsHaveANextStep:
         assert exc.value.code == "invalid_value" and exc.value.next
         with pytest.raises(BuildServiceError) as exc:
             BuildService(SimpleNamespace(orchestrator=None))._orchestrator
-        assert exc.value.code == "failed" and "llm-cli doctor" in exc.value.next
+        assert exc.value.code == "failed" and "run_mojo_oracle" in exc.value.next and "llmcf mojo" in exc.value.next
         assert Path(tmp_path).exists()

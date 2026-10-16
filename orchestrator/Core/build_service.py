@@ -48,6 +48,8 @@ RECORD_STATUS = {"failed": "error", "queued": "queued", "completed": "completed"
 SHARED_STATUSES = ("queued", "preparing", "building", "healing", "awaiting_approval", "completed", "error",
                    "cancelled", "interrupted")
 INTERRUPTED_TEXT = "The process that ran this build ended before the build finished."
+NOT_READY_NEXT = ("Tell the person the framework is not ready; run_mojo_oracle (or 'llmcf mojo' in a terminal) shows "
+                  "why.")
 
 
 def artifact_id(relative: str) -> str:
@@ -86,13 +88,13 @@ class BuildService:
     def _orchestrator(self):
         orch = getattr(self.framework, "orchestrator", None)
         if orch is None:
-            raise BuildServiceError("The framework is not initialized (no orchestrator).", next="Tell the person the framework is not ready; 'llm-cli doctor' shows why.")
+            raise BuildServiceError("The framework is not initialized (no orchestrator).", next=NOT_READY_NEXT)
         return orch
 
     def _targets(self):
         tm = getattr(self.framework, "target_manager", None)
         if tm is None:
-            raise BuildServiceError("The framework is not initialized (no target registry).", next="Tell the person the framework is not ready; 'llm-cli doctor' shows why.")
+            raise BuildServiceError("The framework is not initialized (no target registry).", next=NOT_READY_NEXT)
         return tm
 
     def _config_get(self, key: str, default=None):
@@ -502,6 +504,26 @@ class BuildService:
         from orchestrator.Core.artifact_output import list_artifacts
         return [(artifact_id(item.key), item.label, item.info) for item in list_artifacts(self.framework)]
 
+    def artifact_aliases(self) -> Dict[str, str]:
+        """{earlier id: current id} for builds in the framework's build folder: before the output folder setting
+        (eighth round, answer 3) that folder was the output folder, and a build's id came from its relative path alone
+        (key <path>, label output:<path>). Feed rows, pending approvals and AI callers that kept such an id still reach
+        the build. An earlier id that is a current id of another build stays that build's."""
+        from orchestrator.Core.artifact_output import BUILDS, list_artifacts
+        framework = getattr(self, "framework", None)
+        if framework is None:   # a service without a framework (a test's stand-in) has no build folder
+            return {}
+        items = list_artifacts(framework)
+        current = {artifact_id(item.key) for item in items}
+        aliases: Dict[str, str] = {}
+        for item in items:
+            prefix = f"{BUILDS}:"
+            if item.where == BUILDS and item.key.startswith(prefix):
+                earlier = artifact_id(item.key[len(prefix):])
+                if earlier not in current:
+                    aliases.setdefault(earlier, artifact_id(item.key))
+        return aliases
+
     def artifact_label(self, path: Any) -> str:
         """A build folder or ZIP as an AI may read it (where:<relative path>, else its file name)."""
         from orchestrator.Core.artifact_output import label_for
@@ -569,11 +591,16 @@ class BuildService:
 
     def artifact_entry(self, aid: str) -> Tuple[str, str, Dict[str, Any]]:
         """(artifact id, output:<relative path>, manifest) of one finished build by its id, as list_artifacts shows it
-        (the manifest is the build engine's, its values untrusted); BuildServiceError (unknown_id) otherwise."""
+        (the manifest is the build engine's, its values untrusted); an earlier id of a build in the build folder
+        (artifact_aliases) gives the build under its current id. BuildServiceError (unknown_id) otherwise."""
         if ARTIFACT_ID.fullmatch(aid or ""):
-            for item in self._artifacts():
-                if item[0] == aid:
-                    return item
+            items = self._artifacts()
+            found = next((item for item in items if item[0] == aid), None)
+            if found is None:
+                current = self.artifact_aliases().get(aid)
+                found = next((item for item in items if current and item[0] == current), None)
+            if found is not None:
+                return found
         raise BuildServiceError(f"Unknown built model '{aid}'.", code="unknown_id",
                                 next="Call list_artifacts for the ids you can use.")
 
@@ -779,7 +806,8 @@ class BuildService:
         cm = getattr(self.framework, "community_manager", None)
         if cm is None:
             raise BuildServiceError("The community zoo is not available here.", code="not_supported",
-                                    next="Tell the person; 'llm-cli doctor' checks the installation.")
+                                    next="Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) checks "
+                                         "the installation.")
         found = next(((folder, prov) for folder, prov in cm.installed()
                       if prov.kind == "recipe" and prov.id.casefold() == str(recipe_id).casefold()), None)
         if found is None:
