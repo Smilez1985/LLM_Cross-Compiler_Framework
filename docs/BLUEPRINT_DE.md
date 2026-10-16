@@ -201,8 +201,9 @@ Der Rockchip-Ordner enthält außerdem noch `source_module.sh`, `config_module.s
 `target_module.sh` aus der Vier-Module-Kette der Version 1.x. Der aktuelle Verteiler `build.sh` ruft sie nicht auf;
 ihre Entfernung ist für 3.4.0 geplant.
 
-`configs/project_sources.yml` ist ein Katalog vorgelagerter Projekte und Dokumentationslinks. Das Framework liest
-ihn zur Laufzeit nicht; wofür jede Datei in `configs/` da ist, steht in
+`configs/project_sources.yml` ist ein Katalog vorgelagerter Projekte und Dokumentationslinks. Zur Laufzeit liest
+das Framework nur seine Dokumentationslinks für Hardware (sie füllen das Deep-Ingest-Fenster für Hersteller und SDK
+einer Probe); wofür jede Datei in `configs/` da ist, steht in
 [SSOT_ARCHITECTURE_DE.md](../configs/SSOT_ARCHITECTURE_DE.md).
 
 ### Wo was liegt
@@ -897,8 +898,9 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
   den das Image prüft.
 - **Image-Builds haben Netzwerk.** Das ist Absicht (sie laden Werkzeugketten); nur die Umwandlungsstufen sind
   offline.
-- **Der Katalog der Projektquellen** (`configs/project_sources.yml`) wird zur Laufzeit nicht gelesen; er ist eine
-  Referenz für Entwickler (siehe [SSOT_ARCHITECTURE_DE.md](../configs/SSOT_ARCHITECTURE_DE.md)).
+- **Der Katalog der Projektquellen** (`configs/project_sources.yml`) ist eine Referenz für Entwickler; zur
+  Laufzeit werden nur seine Dokumentationslinks für Hardware gelesen, für Deep Ingest (siehe
+  [SSOT_ARCHITECTURE_DE.md](../configs/SSOT_ARCHITECTURE_DE.md)).
 
 ## Wichtige Entscheidungen
 

@@ -120,6 +120,10 @@ Further behaviour:
   including a running security scan or image build, and a later step can never undo it; the button and Ctrl+C wait
   until the build has stopped and say so. Once a build has failed or is moving its files into the output folder,
   it can no longer be cancelled and finishes on its own.
+- **Progress and live log:** while the build the Builder tab started runs, a progress bar under the Builder log
+  shows the step and the percent from the build service, and the build's log follows live below it (secrets
+  redacted, plain text). A search box finds lines; a filter shows all lines or only Info, Warnings or Errors. Lines
+  the service no longer returns are noted instead of left out silently.
 - **Build status across programs (shared build state):** every program that builds (the GUI, a CLI call, each MCP
   server) writes a summary of each build request into the per-user folder (`build_requests/`: model as repo id or
   label, target, format, quantization, status, stage, progress, who started it and in which program; no host path,
@@ -561,6 +565,45 @@ gives the defaults).
 
 Answering a question with Yes or No right in the chat, "Why?" and undo come with later work; until then the
 approvals window decides.
+
+### Ditto's hands in the window (GUI tools)
+
+The framework's tools are Ditto's hands, also in the window. While the GUI is open, Ditto (which runs in the GUI
+program) gets five more tools. They work on the open forms: the build form in the Builder tab, the target module
+wizard (page by page) and the AI settings dialog.
+
+| Tool | Tier | What it does |
+|---|---|---|
+| `read_gui_form` | read | What you entered in an open form: each field with its value, whether Ditto filled it, whether you chose it and whether it is read-only. Without a form: the open forms and the windows `show_gui` can open |
+| `fill_gui_form` | local write | Fills fields of an open form, visibly (asks by default, like every new tool that changes something) |
+| `wizard_state` | read | The wizard's current page, all page titles and the fields of this page |
+| `wizard_step` | local write | Opens the wizard, fills the current page, goes to the next or the previous page, or opens Deep Ingest with the framework's documentation links for the hardware |
+| `show_gui` | read | Shows a tab or window: the Builder or Deployment tab, the chat panel, the wizard, the AI settings, the Hugging Face browser, the Community Hub or the knowledge snapshots. It changes nothing |
+
+The rules are the same in every form (`orchestrator/tools/gui_surface.py`):
+
+- **Secrets:** an AI reads a key only as "set" or "not set" and never fills one. The AI settings show the provider,
+  the base URL, the privacy level and the fallback chain to Ditto, but only you change them: they decide where your
+  data goes. Ditto may switch the knowledge base off and offline mode on, never the other way round (the same rule as
+  `update_settings`).
+- **Paths:** a local file reaches the AI as a label (`models:tiny.gguf`) or by its file name, never with the home
+  folder. Ditto names a local file by its id from `list_local_files` (`lf_...`) or as `<label>:<relative path>`.
+- **Your values are yours:** a value you typed, picked or clicked is never overwritten by an AI. Ditto may suggest
+  another one in the chat. A field you are editing (it has the keyboard focus) is never written. A fill that would
+  change a field you chose through the form's own logic (another target resets the board) is undone completely and
+  refused. What can never be filled is refused before you are asked; everything is checked again when filling.
+- **Visible and undoable:** the form comes to the front, every filled field gets a purple frame, and a line above
+  the form names the fields Ditto filled, with **Undo Ditto's changes**. A field you change afterwards keeps your
+  value; the undo is recorded in the audit log.
+- **Nothing is submitted:** no field starts a build, saves a module or saves a setting. **Start Build**, the wizard's
+  **Finish** and **Save** stay your clicks, with their own checks and questions. A module Ditto filled in the wizard
+  is marked AI-generated and untested, and its first build is shown to you once. Sharing choices of the wizard
+  (attaching crawled knowledge, the export for the community) stay yours.
+- **Audit:** every call goes through the tool registry like any other tool: permissions, limits (30 fills per
+  minute) and an audit entry.
+
+Only Ditto gets these tools, and only while the window is open. External AI apps will reach the window later through
+the host service; the tools are ready for that (`GUI_TOOL_CALLERS` in `orchestrator/tools/tools_gui.py`).
 
 ---
 
@@ -1527,7 +1570,10 @@ framework never sees it.
   `lcf://targets`, `lcf://targets/<target>/capabilities`, `lcf://builds/<request id>/status`,
   `lcf://builds/<request id>/log` (the last 200 lines), `lcf://permissions`, `lcf://knowledge/sources/<source id>`
   (the first excerpts of one knowledge source, as `read_knowledge_source`), `lcf://packs/index` (the cached community
-  index and the installed packs, as `list_packs`), and the installation's documents
+  index and the installed packs, as `list_packs`), `lcf://knowledge/doc-sources` and
+  `lcf://knowledge/doc-sources/<probe id>` (the documentation links of the source catalogue, all of them or those for
+  a probe's vendor and SDK; read-only, a crawl stays `crawl_docs_site` with its question), and the installation's
+  documents
   `lcf://docs/<name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` and their German `_DE` twins;
   only the ones that exist are listed). A resource returns what its read tool returns and is read through the tool
   registry: your permission for that tool decides (a resource of a denied tool is neither listed nor readable, and
@@ -2048,6 +2094,21 @@ The GUI's input fields offer what you used recently, newest first.
   into a knowledge base; to share knowledge, export a knowledge pack.
 - **Export for community:** the wizard's last page also offers **Export for community after creating** (see
   [Export for community](#export-for-community)).
+- **Board recommendation:** after a probe, the Builder recommends the board of the matched target, with where the
+  recommendation comes from and how sure it is: the probe's SoC named like a board of the target, or the probe's
+  board name in the target's list of known boards (`examples` in `target.yml`). Only an exact match is sure and is
+  filled in; it is only a recommendation, so the field stays editable. When it is not sure, nothing is filled in:
+  the Builder names the candidates and why it is unsure, and you pick yours with one click. **Look up the board name
+  online...** opens your web browser with a search for the probe's board name, only after you agree. **Ask Ditto**
+  writes a question into the chat for you to send. A board you chose is never replaced by a later probe or by an AI.
+  Ditto probing a board over SSH itself needs the planned tool `probe_remote_device`.
+- **No matching target:** when no target fits the probe, the Builder offers **Create a target with the wizard** (the
+  wizard starts from that probe) and **Ask Ditto**.
+- **Documentation links for Deep Ingest:** the source catalogue (`configs/project_sources.yml`) keeps the vendors'
+  documentation links. The wizard's Deep Ingest window is filled with the links for the probe's vendor and the SDK on
+  the hardware page; you check them and start the crawl. When Ditto says that information is missing for the
+  module, the wizard offers Deep Ingest with these links. AI clients read them through the resource
+  `lcf://knowledge/doc-sources`.
 
 Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 

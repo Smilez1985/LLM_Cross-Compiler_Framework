@@ -24,8 +24,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect
 from PySide6.QtGui import QPixmap, QAction
 
+from orchestrator.gui.builder_parts import BoardAdvice, BuildProgressPanel, after_probe, bind_builder_form, read_probe
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
+from orchestrator.gui.plain import plain_label
 from orchestrator.utils import input_history
+from orchestrator.utils.localization import ui_text
 
 # Optional: Paramiko for SSH (used through orchestrator.utils.ssh_trust)
 PARAMIKO_AVAILABLE = importlib.util.find_spec("paramiko") is not None
@@ -279,6 +282,9 @@ class SpriteAnimationWidget(QLabel):
         self.current_frame = (self.current_frame + 1) % self.frame_count
 
 class BuilderTab(QWidget):
+    create_target_requested = Signal(str)  # no target fits the probe: the wizard with this probe file
+    ask_ditto_requested = Signal(str)      # a question for the chat panel, sent only by the person
+
     def __init__(self, framework_manager, parent=None):
         super().__init__(parent)
         self.framework = framework_manager
@@ -359,6 +365,12 @@ class BuilderTab(QWidget):
         h_layout.addWidget(self.scan_btn)
         
         tgt_layout.addLayout(h_layout)
+        # The probe's board as a recommendation (source, how sure), or the offer when no target fits it
+        self.board_advice = BoardAdvice(self)
+        self.board_advice.create_target.connect(
+            lambda: self.create_target_requested.emit(str(getattr(self, "_last_probe_path", "") or "")))
+        self.board_advice.ask_ditto.connect(self.ask_ditto_requested.emit)
+        tgt_layout.addWidget(self.board_advice)
         tgt_group.setLayout(tgt_layout)
         left_col.addWidget(tgt_group)
         
@@ -459,6 +471,8 @@ class BuilderTab(QWidget):
         self._build_timer.setInterval(1500)
         self._build_timer.timeout.connect(self._poll_build)
         left_col.addStretch()
+        bind_builder_form(self)  # the build form for Ditto's GUI tools, with the banner of what Ditto filled
+        left_col.insertWidget(0, self.fill_banner)
         main_layout.addLayout(left_col, 2)
         
         # RIGHT COLUMN
@@ -479,7 +493,11 @@ class BuilderTab(QWidget):
         self.log_area.setStyleSheet("font-family: Consolas; background: #222; color: #0f0;")
         self.log_area.setContextMenuPolicy(Qt.CustomContextMenu)
         self.log_area.customContextMenuRequested.connect(self._log_context_menu)
-        right_col.addWidget(self.log_area)
+        right_col.addWidget(self.log_area, 1)
+        # The running build: stage and percent, and its live log with search and a level filter
+        right_col.addWidget(plain_label(ui_text("gui.log.title"), self))
+        self.progress_panel = BuildProgressPanel(self)
+        right_col.addWidget(self.progress_panel, 2)
         main_layout.addLayout(right_col, 3)
 
     def _init_avatars(self):
@@ -588,11 +606,12 @@ class BuilderTab(QWidget):
         if tm:
             data = tm.import_hardware_profile(config_path)
             match = tm.find_matching_target(data)
+            self._last_probe_path = config_path
+            profile = read_probe(config_path)
             if not match:  # a schema-2 probe: its SoC, vendor and architecture against the targets
                 try:
                     from orchestrator.runtime.probe_service import match_target
-                    from orchestrator.runtime.profile import read_profile
-                    found = match_target(read_profile(config_path), tm)
+                    found = match_target(profile, tm)
                     match = found.target if found else None
                 except Exception:
                     match = None
@@ -608,9 +627,11 @@ class BuilderTab(QWidget):
                     self._log(f"✅ Auto-Selected Profile: {match}")
                 else:
                     self._log(f"⚠️ Matched ID {match} but not in list.")
+                after_probe(self, profile, match if idx >= 0 else None)
             else:
                 self._set_state("default")
                 self._log("No matching profile found in database.")
+                after_probe(self, profile, None)
 
     # --- STANDARD LOGIC ---
 
@@ -821,6 +842,8 @@ class BuilderTab(QWidget):
             self.quant_combo.setCurrentText(recipe.quantization)
             self._quant_user_set = True
         self.chk_imatrix.setChecked(recipe.options.use_imatrix)
+        # The recipe the person chose to build: its values are the person's (an AI never overwrites them)
+        self.gui_form.person_chose(["model", "target", "format", "board", "quantization", "imatrix"])
         self._log(f"Recipe {recipe.id}: {recipe.model.repo} at commit {recipe.model.revision[:12]}.")
         if recipe.options.dataset:
             self._log(f"The recipe was calibrated with {recipe.options.dataset.name} (sha256 "
@@ -962,6 +985,7 @@ class BuilderTab(QWidget):
         """Follows the submitted build until it ends; Cancel is enabled meanwhile."""
         self._active_request = request_id
         self.btn_cancel.setEnabled(True)
+        self.progress_panel.start(request_id)
         self._build_timer.start()
 
     def _poll_build(self):
@@ -969,10 +993,8 @@ class BuilderTab(QWidget):
         if rid is None or service is None:
             self._build_timer.stop()
             return
-        try:
-            status = service.get_status(rid).status
-        except Exception:  # unknown to the service: nothing to cancel any more
-            status = None
+        # Stage, percent and the new log lines; None when the service does not know the build any more
+        status = self.progress_panel.poll(service, rid)
         if status in (None, "completed", "error", "cancelled"):
             self._build_timer.stop()
             self._active_request = None
