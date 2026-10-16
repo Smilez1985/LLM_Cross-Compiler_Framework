@@ -32,6 +32,7 @@ presents must be the trusted one, and the question shows its fingerprint.
 
 import os
 import re
+import string
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
@@ -147,9 +148,10 @@ class StopOut(ToolOutput):
     stopped_processes: int
 
 
-# Where a path in an error text begins: absolute (POSIX or a Windows drive) or starting with ~/; never inside a word or
-# a URL's "//host/..." (a single slash after a colon is a path: "file:/home/...", "user@board:/home/...").
-_PATH_START = re.compile(r"(?<![\w/.~-])(?:~/|/(?!/)|[A-Za-z]:[\\/])")
+# Where a path in an error text begins: absolute (POSIX, a Windows drive or a Windows share "\\\\server\\...") or starting
+# with ~/; never inside a word or a URL's "//host/..." (a single slash after a colon is a path: "file:/home/...",
+# "user@board:/home/...").
+_PATH_START = re.compile(r"(?<![\w/.~\\-])(?:~/|/(?!/)|[A-Za-z]:[\\/]|\\\\(?=[^\\\s]))")
 # Characters that end a path's run of characters; a single space may still continue it (_path_end).
 _PATH_STOP = frozenset("'\"`,;()[]<>")
 _PATH_TRAILING = ".:!?"
@@ -158,10 +160,83 @@ _PATH_TRAILING = ".:!?"
 _KNOWN_END = frozenset("/\\") | _PATH_STOP | frozenset(_PATH_TRAILING) | frozenset("|=&*^%$#{}")
 _PATH_SEP = re.compile(r"[/\\]")
 # A quoted path ("No such file or directory: '/home/u/My Models/x.gguf'"): the quotes say where it ends.
-_QUOTED_PATH = re.compile("|".join(f"{q}((?:~/|/|[A-Za-z]:[\\\\/])[^{q}\\n]*){q}" for q in ("'", '"', "`")))
+_QUOTED_PATH = re.compile("|".join(f"{q}((?:~/|/|[A-Za-z]:[\\\\/]|\\\\\\\\)[^{q}\\n]*){q}" for q in ("'", '"', "`")))
 # Two plain lower-case words around one slash ("and/or", "os/arch") are prose, not the rest of a path.
 _WORD_PAIR = re.compile(r"[a-z]{1,16}/[a-z]{1,16}")
 _PATH_MAX_SPACES = 8
+# A known folder and a home folder are found in text whatever the computer runs: a Windows host's paths come with '\'
+# or '/' ("C:/Users/Jane Doe" from git or CMake), a board's POSIX paths with '/'. So paths are compared with '/' for
+# '\', and a Windows path (every path on a Windows host) also without regard to ASCII case ("c:\users\..."). Both
+# keep the length, so positions found in the compared form are positions in the text.
+_FOLD_SEPARATORS = str.maketrans("\\", "/")
+_FOLD_CASE = str.maketrans("\\" + string.ascii_uppercase, "/" + string.ascii_lowercase)
+_WINDOWS_STYLE = re.compile(r"^(?:[A-Za-z]:|[\\/]{2})")
+_ABSOLUTE_ANYWHERE = re.compile(r"^(?:[/\\]|[A-Za-z]:[/\\])")
+_ONLY_A_ROOT = re.compile(r"(?:[A-Za-z]:)?[/\\]*")
+# A Windows path as Python's error texts quote it (repr): every '\' doubled ("[WinError 5] Access is denied:
+# 'C:\\Users\\Jane Doe'"). A real Windows path never holds '\\' after its start, so within such a path the pairs are
+# single separators again before anything is compared.
+_DOUBLED_WINDOWS_PATH = re.compile(r"(?<![\w\\])(?:[A-Za-z]:\\\\(?!\\)|\\{4}(?=[^\\\s]))[^'\"`\n]*")
+# A bare home folder of any account, of either system: its last part is the account name ('/home/bob' on a board or
+# another person's here, 'C:\Users\Bob', '/c/Users/bob' from MSYS, '/mnt/c/Users/bob' from WSL, a share's
+# '\\server\Users\bob' or '\\server\home$\bob'), so it is never shown by that part.
+_OTHER_HOME = re.compile(r"(?:/usr|/var|/export)?/home/[^/\\]+"
+                         r"|(?i:(?:[a-z]:|/[a-z]|/mnt/[a-z]|[\\/]{2}[^\\/]+)?[\\/]"
+                         r"(?:users|home\$?|documents and settings)[\\/][^\\/]+)")
+
+
+def _undouble(text: str) -> str:
+    return _DOUBLED_WINDOWS_PATH.sub(lambda m: m.group(0).replace("\\\\", "\\"), text)
+
+
+def _fold(text: str, base: str) -> str:
+    """`text` as it is compared with the folder `base`: separators as '/', for a Windows path also lower case."""
+    return text.translate(_FOLD_CASE if os.name == "nt" or _WINDOWS_STYLE.match(base) else _FOLD_SEPARATORS)
+
+
+def _find(text: str, base: str, start: int, stop: Optional[int] = None) -> int:
+    """Where the folder `base` occurs in `text` from `start` (before `stop`), compared as _fold does; -1 if nowhere."""
+    return _fold(text, base).find(_fold(base, base), start, len(text) if stop is None else stop)
+
+
+def home_folders() -> List[str]:
+    """This computer's home folder in every form text can name it: Path.home(), HOME and USERPROFILE (a Windows host
+    may have a POSIX HOME from Git Bash or MSYS, and Path.home() ignores HOME there), each also as its real path, the
+    longest first. A root folder or a relative value is no home folder."""
+    found = set()
+    for home in (str(Path.home()), os.environ.get("HOME", ""), os.environ.get("USERPROFILE", "")):
+        if not home or not _ABSOLUTE_ANYWHERE.match(home) or _ONLY_A_ROOT.fullmatch(home):
+            continue
+        found.add(home.rstrip("/\\"))
+        if os.path.isabs(home):
+            real = os.path.realpath(home)
+            if real and not _ONLY_A_ROOT.fullmatch(real):
+                found.add(real.rstrip("/\\"))
+    return sorted(found, key=lambda h: (-len(h), h))
+
+
+def replace_folder(text: str, folder: str, new: str) -> str:
+    """Every occurrence of the folder `folder` in `text` replaced by `new`, found as _fold compares (with either
+    separator, a Windows path in any case)."""
+    if not folder:
+        return text
+    target, folded = _fold(folder, folder), _fold(text, folder)
+    out, pos = [], 0
+    k = folded.find(target)
+    while k >= 0:
+        out += [text[pos:k], new]
+        pos = k + len(folder)
+        k = folded.find(target, pos)
+    return "".join(out) + text[pos:]
+
+
+def shorten_home(text: str) -> str:
+    """`text` with this computer's home folder shortened to '~': every name home_folders knows, with either separator,
+    a Windows path in any case, and as Python quotes a Windows path (doubled backslashes)."""
+    text = _undouble(text or "")
+    for home in home_folders():
+        text = replace_folder(text, home, "~")
+    return text
 
 
 def _run_end(text: str, i: int) -> int:
@@ -190,8 +265,8 @@ def _known_at(text: str, at: int, bases: List[str]) -> Optional[str]:
     """The known folder (`bases`, longest first) whose whole name stands at `at` in `text`, if any."""
     n = len(text)
     for base in bases:
-        if text.startswith(base, at):
-            k = at + len(base)
+        k = at + len(base)
+        if k <= n and _fold(text[at:k], base) == _fold(base, base):
             if k == n or text[k].isspace() or text[k] in _KNOWN_END:
                 return base
     return None
@@ -220,7 +295,8 @@ def _path_end(text: str, start: int, bases: List[str], homes: Sequence[str] = ()
             break
         word = text[end + 1:nxt]
         longer = text[start:end] + " " + _PATH_SEP.split(word, maxsplit=1)[0]
-        known = longer.startswith("~/") or any(longer.startswith(b.rstrip("/\\") + c) for b in bases for c in "/\\")
+        known = longer.startswith("~/") or any(_fold(longer, b).startswith(_fold(b.rstrip("/\\"), b) + "/")
+                                               for b in bases)
         if not (_continues(word) or (known and _path_exists(longer))):
             break
         end = nxt
@@ -231,12 +307,12 @@ def _path_end(text: str, start: int, bases: List[str], homes: Sequence[str] = ()
             break
     for home in homes:
         stop = end - 1 + len(home)  # only an occurrence that begins inside this path
-        k = text.find(home, after, stop)
+        k = _find(text, home, after, stop)
         while k >= 0:
             if _known_at(text, k, [home]) is not None:
                 end = k
                 break
-            k = text.find(home, k + 1, stop)
+            k = _find(text, home, k + 1, stop)
     return end
 
 
@@ -245,8 +321,9 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
     folder to its label), any other one, the home folder's ('~/...') included, its file name only. Paths with spaces
     are replaced whole (a quoted path by its quotes, a known folder and the home folder by their real names, a space
     otherwise when the longer path exists or the next word is clearly part of it), so neither a user name nor a piece
-    of a host path is left. Ids and labels instead of paths toward an AI, readable names for the person (design 6.4,
-    DECISIONS round 4 item 1)."""
+    of a host path is left. Paths of both systems are recognised on any computer, with either separator (and a
+    Windows path in any case), and the home folder by every name it has here (home_folders). Ids and labels instead of
+    paths toward an AI, readable names for the person (design 6.4, DECISIONS round 4 item 1)."""
     pairs = set()
     for folder, label in roots.items():
         if folder:
@@ -256,9 +333,7 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
     ordered = sorted(pairs, key=lambda kv: (-len(kv[0]), kv[0]))
     # The home folder as it is set and as its real path (the framework resolves paths, so its errors name a linked
     # home folder by the folder it points to)
-    home = str(Path.home())
-    homes = {home} | ({os.path.realpath(home)} if home and os.path.isabs(home) else set())
-    homes = sorted((h for h in homes if h and h not in ("/", "\\")), key=lambda h: (-len(h), h))
+    homes = home_folders()
     bases = sorted({root for root, _ in ordered} | set(homes), key=lambda b: (-len(b), b))
 
     def one(token: str) -> str:
@@ -266,15 +341,18 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
         while token and token[-1] in _PATH_TRAILING:
             token, tail = token[:-1], token[-1] + tail
         for root, label in ordered:
-            if token == root or token.startswith(root.rstrip("/\\") + os.sep) or token.startswith(root + "/"):
-                rel = token[len(root):].lstrip("/\\").replace("\\", "/")
+            folded, top = _fold(token, root), _fold(root.rstrip("/\\"), root)
+            if folded == top or folded.startswith(top + "/"):
+                rel = token[len(top):].lstrip("/\\").replace("\\", "/")
                 return f"{label}:{rel}" + tail if rel else f"the {label} folder" + tail
-        if token.rstrip("/\\") in homes:
+        if any(_fold(token.rstrip("/\\"), h) == _fold(h, h) for h in homes):
             return "the home folder" + tail
         home_at = _known_at(token, 0, homes)
         if home_at is not None and token[len(home_at):len(home_at) + 1] not in ("/", "\\"):
             # the home folder and then text that is no part of a path ("'/home/Jane Doe)'", "/home/Jane Doe's")
             return "the home folder" + token[len(home_at):] + tail
+        if _OTHER_HOME.fullmatch(token.rstrip("/\\")):
+            return "a home folder" + tail  # its last part would be the account's name
         name = _PATH_SEP.split(token.rstrip("/\\"))[-1]
         return (name or "a folder") + tail
 
@@ -296,18 +374,18 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
     def quoted(m: "re.Match[str]") -> str:
         inner = next(g for g in m.groups() if g is not None)
         q = m.group(0)[0]
-        if _PATH_START.search(inner, 1) is not None or any(inner.find(h, 1) >= 0 for h in homes):
+        if _PATH_START.search(inner, 1) is not None or any(_find(inner, h, 1) >= 0 for h in homes):
             # more than one path between the quotes ("'/home/u/x and /home/u'") or the home folder further in
             # ("'/mnt/home/u'"): path by path, so the home folder's own name is never kept as if it were a file name
             return q + replace(inner, next_start, bases) + q
         return q + one(inner) + q
 
-    text = _QUOTED_PATH.sub(quoted, text or "")
+    text = _QUOTED_PATH.sub(quoted, _undouble(text or ""))
     text = replace(text, next_start, bases)
     # What the start rule cannot see (a "file:///home/..." URL): any path left in the home folder, by its file name.
     if homes:
         def next_home(text: str, pos: int) -> Optional[int]:
-            found = [k for k in (text.find(h, pos) for h in homes) if k >= 0]
+            found = [k for k in (_find(text, h, pos) for h in homes) if k >= 0]
             return min(found) if found else None
         text = replace(text, next_home, homes)
     return text

@@ -732,7 +732,8 @@ class TestCliDeploy:
         result = cli.invoke("deploy", "list-artifacts")
         assert result.code == 0, result.out
         assert f"outputfolder:{self.install_output(cli)}" in self.flat(result.out)
-        assert "Rockchip/SmolLM2/Q4_0" in result.out and "rk3566" in result.out
+        # the folder as a path of this computer (Rockchip\SmolLM2\Q4_0 on Windows), as 'deploy package' takes it
+        assert str(Path("Rockchip", "SmolLM2", "Q4_0")) in result.out and "rk3566" in result.out
         assert "cwd-only" not in result.out
 
     def test_list_artifacts_skips_broken_manifests(self, cli):

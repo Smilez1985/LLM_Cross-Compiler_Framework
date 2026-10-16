@@ -1798,8 +1798,8 @@ framework never sees it.
   `XDG_CONFIG_HOME`), keyrings and keychains, `~/.password-store`, `~/.netrc`, `~/.git-credentials`, `~/.docker`,
   `~/.aws`, `~/.kube`, the AI clients' own sign-ins and settings (`~/.claude`, `~/.claude.json`, `~/.codex`,
   `~/.gemini`, `~/.cursor`), the Hugging Face home folder with its token files (its `hub` subfolder may be added
-  as a folder), browser profiles, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (unless it is your own home) and the
-  Windows credential folders. Inside and outside are decided by file identity, not by comparing names, so a
+  as a folder), browser profiles, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (unless it is your own home) and, on
+  Windows, the system folder (`%SystemRoot%`), the computer's keys and the credential folders and vaults. Inside and outside are decided by file identity, not by comparing names, so a
   case-insensitive file system cannot hide `~/.SSH`. A file with more than one hard link is refused. The file is
   pinned (identity, size, modification time) and checked again right before each build container starts; a file
   replaced meanwhile stops the build. A folder (a Hugging Face model folder) is used only strictly below its label
@@ -1864,7 +1864,10 @@ framework never sees it.
   (`llama-bench` prints the metadata of the model it loads) is returned in `external_text`; paths in such a message
   appear as the framework's folder labels (`state:...`, `output:...`) or as a file name only, never as a host path
   or `~/...`, also when a path holds spaces (a quoted path, the framework's folders and the home folder, also by its
-  real path, are replaced whole, also further on in a path list). When the deploy job ends, the audit log gets its
+  real path, are replaced whole, also further on in a path list). Paths of Linux and Windows are recognised on every
+  computer, with either separator and as Python quotes a Windows path; another account's home folder (`/home/<name>`,
+  `C:\Users\<name>`) appears as "a home folder", never by the account's name. When the deploy job ends, the audit
+  log gets its
   own end entry (done, failed or cancelled, with the job, the device's label and the device state), linked to the
   call's `started` entry; it is written on every way out of
   the job, also when the device list cannot record the deploy (the result then has a `note`). The jobs of

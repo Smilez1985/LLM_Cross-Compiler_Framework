@@ -662,7 +662,7 @@ def mark_created_under(folder: Path, channel: str, definition: str) -> None:
     path = Path(folder) / "target.yml"
     config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     config.setdefault("metadata", {}).update({"created_under": channel[:80], "definition_sha256": definition})
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:  # LF like every file of the module
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 

@@ -714,7 +714,7 @@ class TestExport:
     def test_a_target_with_a_pinned_image_survives_export_and_ci(self, world):
         folder = make_target(world.root / "targets" / "sdk-board")
         dockerfile = "FROM ghcr.io/acme/rk-sdk@sha256:" + "ab" * 32 + "\nRUN echo ok\n"
-        (folder / "Dockerfile").write_text(dockerfile)
+        (folder / "Dockerfile").write_bytes(dockerfile.encode("utf-8"))  # exactly these bytes, on every host
         result = world.cm.export_pack("target", "sdk-board", author="a")
         assert not [name for name, _ in result.changes]
         with zipfile.ZipFile(result.path) as zf:

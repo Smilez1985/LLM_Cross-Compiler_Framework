@@ -85,7 +85,8 @@ def test_credentials_in_unknown_formats_are_redacted_by_context(text, secret):
     "id_token_hint=" * 8000,
     "TOKEN_" * 20000 + "x",
     "Authorization: '" * 8000,
-])
+], ids=["key-prefixes", "scheme-starts", "urls-without-query", "repeated-parameter", "repeated-name",
+        "repeated-header"])  # short ids: the text itself is longer than Windows allows in PYTEST_CURRENT_TEST
 def test_redaction_stays_fast_on_adversarial_text(text):
     # Redaction runs on every log record and on text from servers and build logs: never quadratic.
     start = time.perf_counter()

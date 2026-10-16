@@ -28,6 +28,7 @@ from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.local_files import (LocalFileError, LocalFiles, LocalInputs, is_path, labels_hint,
                                             looks_like_reference, split_reference)
 from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
+from orchestrator.utils.any_path import is_absolute_anywhere, last_part
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
@@ -489,13 +490,13 @@ class BuildService:
         if value is None:
             return None
         text = str(value)
-        if not Path(text).is_absolute():
+        if not is_absolute_anywhere(text):  # a path of either system: a Linux build's on a Windows host, too
             return text
         try:
             label = LocalFiles.for_framework(self.framework).label_for(text)
         except (LocalFileError, OSError, AttributeError, TypeError):
             label = None
-        return label or Path(text).name
+        return label or last_part(text)
 
     def _artifacts(self) -> List[Tuple[str, str, Dict[str, Any]]]:
         """(artifact id, where:<relative path>, manifest) of every finished build: output:<path> in the output folder,
