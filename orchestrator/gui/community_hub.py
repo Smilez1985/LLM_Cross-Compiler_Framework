@@ -210,6 +210,10 @@ class CommunityHubWindow(QMainWindow):
         if prepared.manifest.kind == "target" and tm is not None:
             tm.initialize()
         self.status_label.setText(f"Installed {prepared.manifest.kind} {prepared.manifest.id} in {dest}.")
+        if prepared.manifest.kind == "target" and tm is not None:   # `llm-cli targets validate` on it, shown
+            from orchestrator.gui.targets_window import show_target_check
+            from orchestrator.utils.localization import ui_text
+            show_target_check(self, self.framework_manager, Path(dest).name, intro=ui_text("bld.check.after_install"))
         problem = getattr(self.comm_manager, "last_sync_problem", "") if prepared.manifest.kind == "knowledge" else ""
         if problem:  # installed, but not imported: the snapshot taken first did not fit (N13)
             from orchestrator.gui.knowledge_snapshots_window import offer_snapshot_list
