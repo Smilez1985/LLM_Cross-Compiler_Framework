@@ -992,22 +992,33 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   dem KV-Cache der Messung neben dem, auf den der Server des Boards eingestellt ist. Das Deployment-Fenster zeigt einen
   solchen Build als „getestet auf <Board>“ und trägt nach dem Deployment eines GGUF-Modells Board und Modell für diese
   Messung ein.
-- **Dittos Hände im Fenster: die GUI-Tools** (`read_gui_form`, `fill_gui_form`, `wizard_state`, `wizard_step`,
-  `show_gui`; `orchestrator/tools/tools_gui.py`, `orchestrator/tools/gui_surface.py`,
-  `orchestrator/gui/form_surface.py`): Das Build-Formular, der Assistent für Target-Module (Seite für Seite) und der
-  Dialog der KI-Einstellungen melden ihre Felder an, und Ditto liest, was du eingegeben hast, und füllt Felder
-  sichtbar aus. Geheimnisse sind nur „gesetzt“ oder „nicht gesetzt“ und werden nie ausgefüllt; lokale Dateien
-  erreichen die KI als Labels, und kein Home-Ordner (auch nicht der eines anderen Kontos) erreicht sie mit Namen; ein
-  Feld, das du gerade bearbeitest, oder ein Wert, den du gewählt hast, wird nie überschrieben; ein Ausfüllen, das über
-  die Logik des Formulars deine Wahl ändern würde, wird ganz zurückgenommen. Jedes ausgefüllte Feld hat einen lila
-  Rahmen und steht in einer Zeile über dem Formular mit **Dittos Änderungen rückgängig machen** (das Rückgängigmachen
-  steht im Audit-Log). Nichts wird abgeschickt: Start Build, Finish im Assistenten und Save bleiben deine Klicks, und
-  ein Modul, das Ditto ausgefüllt hat, wird als KI-erstellt markiert, sodass du seinen ersten Build einmal siehst. Die
-  KI-Einstellungen lassen eine KI nie den Anbieter, die Adresse, die Datenschutzstufe oder die Ersatzkette ändern. Die
-  Tools gibt es, solange das Fenster offen ist, und nur für Ditto; externe KI-Apps bekommen sie später über den
-  Host-Dienst (`GUI_TOOL_CALLERS`). Jeder Aufruf geht durch die Tool-Registry (Berechtigungen, Grenzen, Audit). Ein
-  MCP-Client listet weiter nur die Kern-Tools, innerhalb der 40 Tools, die manche Clients nehmen, und `get_status`
-  warnt nur über das, was ein Client listet.
+- **Die Hände der KI im Fenster: das GUI-Tool `gui`, für Ditto und für KI-Apps gleich** (`orchestrator/tools/tools_gui.py`,
+  `orchestrator/tools/gui_surface.py`, `orchestrator/tools/gui_bridge.py`, `orchestrator/gui/form_surface.py`): Das
+  Build-Formular, der Assistent für Target-Module (Seite für Seite) und der Dialog der KI-Einstellungen melden ihre
+  Felder an, und eine KI liest, was du eingegeben hast, und füllt Felder sichtbar aus. Ein Tool mit einem Feld
+  `action` (`read_form`, `fill_form`, `wizard_state`, `wizard_open`, `wizard_fill`, `wizard_next`, `wizard_back`,
+  `wizard_docs`, `show_window`) ersetzt die fünf GUI-Tools der Entwicklungsversion, so listet ein MCP-Client
+  genau 40 Tools, so viele, wie manche Clients höchstens nehmen. Ditto und jeder MCP-Client nutzen dasselbe Tool und
+  denselben Code (`GuiCore`, im GUI-Prozess): Ditto direkt, der Server eines MCP-Clients über eine private Brücke zum
+  offenen Fenster. Nur dieses Konto erreicht die Brücke: ein AF_UNIX-Socket im Ordner `gui_bridge` des Benutzerordners
+  (0700; unter Windows eine Named Pipe mit zufälligem Namen), ein zufälliger Schlüssel in `gui_bridge/bridge.json`
+  (0600), den beide Seiten nachweisen, bevor etwas gesendet wird, unter Linux das Konto der Gegenseite geprüft, und
+  nur JSON-Nachrichten. Ist kein Framework-Fenster offen, wird `gui` mit dem neuen Blocker `gui_not_open` abgelehnt
+  („Das Framework-Fenster öffnen.“; Version 4 der Vollmacht-Regeln); es bleibt aufgeführt. Lesende Aktionen werden wie
+  Lese-Tools entschieden, die anderen wie ein Tool, das etwas ändert (standardmäßig mit Frage); deine Einstellung für
+  `gui` gilt je Aufrufer (Ditto, die lokalen stdio-Clients, jedes benannte Token), ein neues Token kann es nicht
+  nutzen, und eine Frage, die ein Client nicht zeigen kann, wird eine wartende Freigabe. Geheimnisse sind nur
+  „gesetzt“ oder „nicht gesetzt“ und werden nie ausgefüllt; lokale Dateien erreichen die KI als Labels, und kein
+  Home-Ordner (auch nicht der eines anderen Kontos) erreicht sie mit Namen; ein Feld, das du gerade bearbeitest, oder
+  ein Wert, den du gewählt hast, wird nie überschrieben; ein Ausfüllen, das über die Logik des Formulars deine Wahl
+  ändern würde, wird ganz zurückgenommen. Jedes ausgefüllte Feld nennt, wer es ausgefüllt hat: Ditto in Lila, eine
+  KI-App in einer anderen Farbe mit dem Namen ihres MCP-Tokens oder ihrem eigenen Namen in Anführungszeichen als ihre
+  Angabe (eine App sieht nie aus wie Ditto); **KI-Änderungen rückgängig machen** nimmt alle KI-Änderungen zurück und
+  steht im Audit-Log, mit dem, der ausgefüllt hatte. Nichts wird abgeschickt: Start Build, Finish im Assistenten und
+  Save bleiben deine Klicks, und ein Modul, das eine KI ausgefüllt hat, wird als KI-erstellt markiert, sodass du
+  seinen ersten Build einmal siehst. Die KI-Einstellungen lassen eine KI nie den Anbieter, die Adresse, die
+  Datenschutzstufe oder die Ersatzkette ändern. Jeder Aufruf geht durch die Tool-Registry des Aufrufers selbst
+  (Berechtigungen, Grenzen, Audit-Eintrag mit dem Aufrufer).
 - **Die Board-Empfehlung aus der Hardware-Probe** (`orchestrator/runtime/board_recommendation.py`): Nach einer Probe
   empfiehlt der Builder das Board des passenden Targets mit seiner Quelle (der SoC der Probe oder der Board-Name der
   Probe in der Liste bekannter Boards des Targets) und wie sicher es ist. Nur ein genauer Treffer wird eingetragen;

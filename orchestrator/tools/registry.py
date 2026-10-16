@@ -33,7 +33,7 @@ from orchestrator.tools.output import (MAX_RESULT_BYTES, UNTRUSTED_CHARS, Result
                                        filtered_result, has_untrusted, notes_text)
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStore, TokenStoreError
 from orchestrator.tools.policy import (TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier,
-                                       restrictive_policy, stricter)
+                                       call_only_reads, restrictive_policy, stricter)
 from orchestrator.tools.spec import (CHANNELS, DAY, LIMITS, CallerLimits, CallFacts, FieldMeta, GrantRule,
                                      ToolLimits, example_problems)
 from orchestrator.utils.helpers import redact_secrets
@@ -247,6 +247,10 @@ class ToolSpec:
     deletes: bool = False
     # undo(UndoContext) -> UndoPlan | CannotUndo: how the chat panel undoes a call (filled when the registry is built).
     undo: Optional[Callable[[Any], Any]] = None
+    # A tool with reading and changing actions (the GUI tool): reads(input) -> True for a call that only reads. Such a
+    # call is decided by the caller's read tier, counts against the read rate and needs no write-ahead audit entry;
+    # the tool's tier stays the one of its changing actions (lists, annotations, caps, a new token's permissions).
+    reads: Optional[Callable[[BaseModel], bool]] = None
 
     def annotations(self) -> Dict[str, Any]:
         """MCP tool annotations (hints for clients; the registry enforces the policy itself)."""
@@ -1144,12 +1148,15 @@ class ToolRegistry:
         and that runs later (a pending approval the person approved minutes after: their builds may have grown)."""
         spec, limits = prepared.spec, prepared.spec.limits
         problem: Optional[Tuple[str, Optional[float]]] = None
-        rate = (limits.rate or (self.limits.read_rate if spec.tier == ToolTier.READ else None)) if rate_too else None
+        own = limits.rate
+        if spec.tier != ToolTier.READ and call_only_reads(spec, prepared.input):
+            own = None  # a reading call of a tool that can also change things counts with the read tools
+        rate = (own or (self.limits.read_rate if call_only_reads(spec, prepared.input) else None)) if rate_too else None
         if rate is not None:
-            wait = self.limiter.take(("rate", ctx.actor, spec.name if limits.rate else "read"), rate.count,
+            wait = self.limiter.take(("rate", ctx.actor, spec.name if own else "read"), rate.count,
                                      rate.per, rate.burst)
             if wait is not None:
-                noun = f"calls of '{spec.title}'" if limits.rate else "read tool calls"
+                noun = f"calls of '{spec.title}'" if own else "read tool calls"
                 problem = (f"This client made too many {noun} (at most {rate.count} per {rate.per:g} seconds).", wait)
         if problem is None and limits.concurrent and limits.running is not None:
             try:
@@ -1511,7 +1518,7 @@ class ToolRegistry:
             ctx = dataclasses.replace(ctx, confirm_channel="", answer="", question_sha256="")
         if ctx.metadata.get("grant_requested"):
             ctx.notes.append(GRANT_REQUEST_NOTE)
-        writes = spec.tier != ToolTier.READ
+        writes = not call_only_reads(spec, inp)
         channel, answer, question = ctx.confirm_channel, ctx.answer, ctx.question_sha256
         if decision == Decision.ASK and approved is None and not deleting:
             grant = self.matching_grant(spec, inp, ctx)  # read anew right before the handler
