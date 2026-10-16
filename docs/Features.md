@@ -81,12 +81,14 @@ read the same block: they offer exactly these options, fill in the defaults, and
 clear reason before anything runs. The Rockchip values are listed in the [README](../README.md#supported-targets-and-formats).
 
 GUI: **Build > Targets...** lists every target with its ID (the value for `--target`), name, architecture, boards,
-formats and support level, or "no capabilities declared"; **Targets...** next to the Builder's target list opens the
-same window. **Check target** (in that window and next to the Builder's target list) checks the selected target as
-`llm-cli targets validate` does, through the same function (`TargetManager.validate`), with its `target.yml` read
-again, and names each schema error by field. The same check runs after the module wizard created a target and after
-a Community Hub target install, and its result is shown. A target without capabilities gets every format in the
-Builder, as on the command line, with the note that its boards, formats and quantizations are not checked.
+formats and support level, or "no capabilities declared" (or that its capabilities block is invalid); **Targets...**
+next to the Builder's target list opens the same window. **Check target** (in that window and next to the Builder's
+target list) checks the selected target as `llm-cli targets validate` does, through the same function
+(`TargetManager.validate`), with its `target.yml` read again, and names each schema error by field. The same check runs
+after the module wizard created a target and after a Community Hub target install, and its result is shown. A target
+without capabilities gets every format in the Builder, as on the command line, with the note that its boards, formats
+and quantizations are not checked; for a target whose capabilities block is invalid the note says so, and **Check
+target** names each error.
 
 ---
 
@@ -2375,18 +2377,20 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   separators ignored) and never uses a prebuilt llama.cpp. A long definition becomes a pending approval in the
   framework, shown up to 16,000 characters.
 - **New target by questions:** `llm-cli module create` or the wizard under **Tools > Create Hardware Module...**,
-  which also asks for the description (default "Target for <name>"). After **Finish** the wizard checks the new
-  target as `llm-cli targets validate` does and shows the result.
+  which also asks for the description (default "Target for <name>"). Only you fill it in: for a module an AI helped with
+  (through the GUI tools), your description leads and the framework's note that the module is AI-generated and untested
+  follows. After **Finish** the wizard checks the new target as `llm-cli targets validate` does and shows the result.
 - **New target from a probe:** `llm-cli module generate-ai <probe file>` or the wizard's AI analysis. Ditto proposes
   architecture, SDK, base image, packages, vendor sources, pip packages and downloads, CPU and CMake flags, setup
-  commands and the quantization block of `build.sh`; you see the whole proposal first. Both take the same path:
-  the base image is pinned to its digest before you see the proposal (`pin_base_image`; in the wizard off the GUI
-  thread), the module is saved through `DittoManager.save_module`, which refuses a prebuilt `nvidia/cuda` image and
-  an image that is not a Docker Official Image without the AI's reason (also for a base image an AI filled into the
-  wizard through the GUI tools), and both record the saved module in the audit log (`module_saved`, with the
-  definition's sha256 and the base image). The wizard passes on every field of the proposal. Its first page offers
-  provider and model **for this analysis only** (`--provider`, `--model`, `DittoManager.for_run`): the saved AI
-  settings stay unchanged.
+  commands and the quantization block of `build.sh`; you see the whole proposal first. Both take the same path: the base
+  image is pinned to its digest before you see the proposal (`pin_base_image`; in the wizard off the GUI thread), the
+  module is saved through `DittoManager.save_module`, which refuses a prebuilt `nvidia/cuda` image and an image that is
+  not a Docker Official Image without the AI's reason (also for a base image an AI filled into the wizard through the
+  GUI tools), and both record the saved module in the audit log (`module_saved`, with the definition's sha256 and the
+  base image). The wizard passes on every field of the proposal. Its first page offers provider and model **for this
+  analysis only** (`--provider`, `--model`, `DittoManager.for_run`): the saved AI settings stay unchanged. A rule-based
+  probe import after Ditto's proposal replaces every value of the proposal (also its packages, setup commands and
+  quantization logic), so the module is then yours.
 - **The device runtime in the module:** every new `target.yml` gets a `runtime:` block, the build recipe's plan for
   the board's llama.cpp runtime from the target's probe (the wizard's imported probe file, the probe file of
   `module generate-ai`, or `llm-cli module create --probe <file>`): architecture, OS, the C library the cross build

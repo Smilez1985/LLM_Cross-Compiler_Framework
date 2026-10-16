@@ -82,13 +82,14 @@ Block: Sie bieten genau diese Optionen an, ergänzen die Standardwerte und lehne
 ab, bevor etwas läuft. Die Werte für Rockchip stehen in der [README](../README_DE.md#unterstützte-targets-und-formate).
 
 GUI: **Build > Targets…** listet jedes Target mit seiner ID (dem Wert für `--target`), Name, Architektur, Boards,
-Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“; **Targets…** neben der Target-Liste des Builders
-öffnet dasselbe Fenster. **Target prüfen** (in diesem Fenster und neben der Target-Liste des Builders) prüft das
-gewählte Target wie `llm-cli targets validate`, über dieselbe Funktion (`TargetManager.validate`), mit frisch
-gelesener `target.yml`, und nennt jeden Schemafehler mit seinem Feld. Dieselbe Prüfung läuft, nachdem der
-Modul-Assistent ein Target angelegt hat und nach der Installation eines Targets aus dem Community Hub, und ihr
-Ergebnis wird angezeigt. Ein Target ohne Fähigkeiten bekommt im Builder jedes Format, wie auf der Kommandozeile, mit
-dem Hinweis, dass seine Boards, Formate und Quantisierungen nicht geprüft werden.
+Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“ (oder dass sein Fähigkeiten-Block ungültig ist);
+**Targets…** neben der Target-Liste des Builders öffnet dasselbe Fenster. **Target prüfen** (in diesem Fenster und neben
+der Target-Liste des Builders) prüft das gewählte Target wie `llm-cli targets validate`, über dieselbe Funktion
+(`TargetManager.validate`), mit frisch gelesener `target.yml`, und nennt jeden Schemafehler mit seinem Feld. Dieselbe
+Prüfung läuft, nachdem der Modul-Assistent ein Target angelegt hat und nach der Installation eines Targets aus dem
+Community Hub, und ihr Ergebnis wird angezeigt. Ein Target ohne Fähigkeiten bekommt im Builder jedes Format, wie auf der
+Kommandozeile, mit dem Hinweis, dass seine Boards, Formate und Quantisierungen nicht geprüft werden; für ein Target mit
+ungültigem Fähigkeiten-Block sagt der Hinweis das, und **Target prüfen** nennt jeden Fehler.
 
 ---
 
@@ -2619,20 +2620,23 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   Target liest (Groß- und Kleinschreibung und Trennzeichen zählen nicht), und nimmt nie ein vorgefertigtes
   llama.cpp. Eine lange Definition wird zu einer ausstehenden Freigabe im Framework, mit bis zu 16.000 Zeichen
   angezeigt.
-- **Neues Target per Fragen:** `llm-cli module create` oder der Assistent unter **Tools > Create Hardware
-  Module...**, der auch nach der Beschreibung fragt (Vorgabe „Target für <Name>“). Nach **Finish** prüft der
-  Assistent das neue Target wie `llm-cli targets validate` und zeigt das Ergebnis.
+- **Neues Target per Fragen:** `llm-cli module create` oder der Assistent unter **Tools > Create Hardware Module...**,
+  der auch nach der Beschreibung fragt (Vorgabe „Target for <Name>“). Nur du füllst sie aus: Bei einem Modul, an dem
+  eine KI (über die GUI-Werkzeuge) mitgewirkt hat, steht deine Beschreibung vorn, und der Hinweis des Frameworks, dass
+  das Modul KI-generiert und ungetestet ist, folgt. Nach **Finish** prüft der Assistent das neue Target wie `llm-cli
+  targets validate` und zeigt das Ergebnis.
 - **Neues Target aus einer Probe:** `llm-cli module generate-ai <Probe-Datei>` oder die KI-Analyse im Assistenten.
   Ditto schlägt Architektur, SDK, Basis-Image, Pakete, Hersteller-Paketquellen, pip-Pakete und Downloads, CPU- und
   CMake-Flags, Setup-Befehle und den Quantisierungsblock von `build.sh` vor; du siehst zuerst den ganzen Vorschlag.
   Beide gehen denselben Weg: Das Basis-Image wird auf seinen Digest festgelegt, bevor du den Vorschlag siehst
   (`pin_base_image`; im Assistenten außerhalb des GUI-Threads), das Modul wird über `DittoManager.save_module`
   gespeichert, das ein vorgefertigtes `nvidia/cuda`-Image und ein Image, das kein Docker Official Image ist, ohne die
-  Begründung der KI ablehnt (auch für ein Basis-Image, das eine KI über die GUI-Werkzeuge in den Assistenten
-  eingetragen hat), und beide halten das gespeicherte Modul im Audit-Log fest (`module_saved`, mit dem sha256 der
-  Definition und dem Basis-Image). Der Assistent gibt jedes Feld des Vorschlags weiter. Seine erste Seite bietet
-  Anbieter und Modell **nur für diese Analyse** (`--provider`, `--model`, `DittoManager.for_run`): Die gespeicherten
-  KI-Einstellungen bleiben unverändert.
+  Begründung der KI ablehnt (auch für ein Basis-Image, das eine KI über die GUI-Werkzeuge in den Assistenten eingetragen
+  hat), und beide halten das gespeicherte Modul im Audit-Log fest (`module_saved`, mit dem sha256 der Definition und dem
+  Basis-Image). Der Assistent gibt jedes Feld des Vorschlags weiter. Seine erste Seite bietet Anbieter und Modell **nur
+  für diese Analyse** (`--provider`, `--model`, `DittoManager.for_run`): Die gespeicherten KI-Einstellungen bleiben
+  unverändert. Ein regelbasierter Import einer Probe nach Dittos Vorschlag ersetzt jeden Wert des Vorschlags (auch seine
+  Pakete, Setup-Befehle und Quantisierungslogik), sodass das Modul dann deines ist.
 - **Die Geräte-Laufzeit im Modul:** Jede neue `target.yml` bekommt einen Block `runtime:`, den Plan des Build-Rezepts
   für die llama.cpp-Laufzeit des Boards aus der Probe des Targets (die im Assistenten eingelesene Probe-Datei, die
   Probe-Datei von `module generate-ai` oder `llm-cli module create --probe <Datei>`): Architektur, Betriebssystem, die

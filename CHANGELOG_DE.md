@@ -11,12 +11,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 
 ### Hinzugefügt
 - **Build > Targets…** (GUI-Parität, jede CLI-Aktion mit der Maus): jedes Target mit seiner ID (dem Wert für
-  `--target`), Name, Architektur, Boards, Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“, aus der
-  Abfrage von `llm-cli targets list`. **Target prüfen** (dort und neben der Target-Liste des Builders, neben der neuen
-  Schaltfläche **Targets…**) prüft das gewählte Target wie `llm-cli targets validate`, über eine Kernfunktion
-  (`TargetManager.validate`, die jetzt auch die CLI aufruft), mit frisch gelesener `target.yml`, und nennt jeden
-  Schemafehler mit seinem Feld. Dieselbe Prüfung läuft, nachdem der Modul-Assistent ein Target angelegt hat und nach
-  der Installation eines Targets aus dem Community Hub, und ihr Ergebnis wird angezeigt.
+  `--target`), Name, Architektur, Boards, Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“ (oder dass
+  sein Fähigkeiten-Block ungültig ist), aus der Abfrage von `llm-cli targets list`. **Target prüfen** (dort und neben
+  der Target-Liste des Builders, neben der neuen Schaltfläche **Targets…**) prüft das gewählte Target wie `llm-cli
+  targets validate`, über eine Kernfunktion (`TargetManager.validate`, die jetzt auch die CLI aufruft), mit frisch
+  gelesener `target.yml`, und nennt jeden Schemafehler mit seinem Feld. Dieselbe Prüfung läuft, nachdem der
+  Modul-Assistent ein Target angelegt hat und nach der Installation eines Targets aus dem Community Hub, und ihr
+  Ergebnis wird angezeigt.
 - **Build > Build-Verlauf…**: jeder Build jedes Programms (GUI, CLI, MCP-Server), alle wie `llm-cli build status
   --all`, auch gescheiterte, abgebrochene, unterbrochene und wartende; **Details anzeigen** (oder ein Doppelklick)
   zeigt einen Build wie `build status REQUEST_ID`: seine Anfrage mit Fehlern und Hinweisen, jeden Versuch mit seinem
@@ -29,14 +30,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (`orchestrator/Core/settings_view.py`), das jetzt auch die CLI aufruft; ein Speichern, das scheitert, lässt die
   Einstellung auch im laufenden Programm unverändert.
 - **Der Builder bietet, was die CLI bietet**: Ein Target ohne Fähigkeiten bekommt jedes Format von `--format` (nicht
-  nur GGUF, RKLLM und RKNN), mit dem Hinweis, dass seine Boards, Formate und Quantisierungen nicht geprüft werden; die
+  nur GGUF, RKLLM und RKNN), mit dem Hinweis, dass seine Boards, Formate und Quantisierungen nicht geprüft werden (für
+  ein Target mit ungültigem Fähigkeiten-Block sagt der Hinweis das, und **Target prüfen** nennt jeden Fehler); die
   Optimierungsstufe `FAST`; eine Liste **Priorität** (`--priority`, Vorgabe normal; ein fehlgeschlagener kritischer
   Build beendet die Pipeline).
 - **Modul-Assistent: Beschreibung und Anbieter und Modell für eine Analyse**: Die Hardware-Seite hat ein Feld
-  **Beschreibung** (`llm-cli module create` fragt danach; leer ergibt „Target für <Name>“). Die erste Seite bietet
-  Anbieter und Modell **nur für diese Analyse** (`module generate-ai --provider --model`): Ditto läuft damit über
-  `DittoManager.for_run`, das jetzt auch `generate-ai` in der CLI nutzt, und die gespeicherten KI-Einstellungen bleiben
-  unverändert.
+  **Beschreibung** (`llm-cli module create` fragt danach; leer ergibt „Target for <Name>“). Nur du füllst es aus: Bei
+  einem Modul, an dem eine KI mitgewirkt hat, steht deine Beschreibung vorn, und der Hinweis des Frameworks, dass das
+  Modul KI-generiert und ungetestet ist, folgt. Die erste Seite bietet Anbieter und Modell **nur für diese Analyse**
+  (`module generate-ai --provider --model`): Ditto läuft damit über `DittoManager.for_run`, das jetzt auch `generate-ai`
+  in der CLI nutzt, und die gespeicherten KI-Einstellungen bleiben unverändert.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
@@ -1953,7 +1956,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   fest. Jetzt wird das Basis-Image des Vorschlags im Analyse-Worker festgelegt, bevor du ihn siehst (`pin_base_image`,
   die Funktion der CLI), und das Modul wird über `DittoManager.save_module` gespeichert und wie auf der Kommandozeile
   im Audit-Log festgehalten; ein Basis-Image, das eine KI über die GUI-Werkzeuge in den Assistenten eingetragen hat,
-  geht denselben Weg. Ein vorgefertigtes Image, das du selbst wählst, bleibt deine ausdrückliche Wahl.
+  geht denselben Weg. Ein vorgefertigtes Image, das du selbst wählst, bleibt deine ausdrückliche Wahl. Ein
+  regelbasierter Import einer Probe nach Dittos Vorschlag ersetzt jetzt auch Dittos Pakete, Setup-Befehle und
+  Quantisierungslogik: Sie blieben in ihren Feldern und gelangten in ein Modul, das als deines gespeichert wurde, ohne
+  Markierung und ohne Audit-Eintrag.
 - **Das Koppeln eines Boards sendet nur eine geprüfte Schlüsselzeile** (bandit B601): Der Befehl, der den öffentlichen
   Schlüssel des Frameworks in `authorized_keys` des Boards einträgt, ist fest, und sein einziger Wert, die
   Schlüsselzeile, wurde für die Shell maskiert. Jetzt muss die Zeile außerdem ein reiner öffentlicher SSH-Schlüssel
