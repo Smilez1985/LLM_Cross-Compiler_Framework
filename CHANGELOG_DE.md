@@ -10,6 +10,28 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Ditto > Lokale Modelle...: `llm-cli ditto models list` und `download` mit der Maus** (W1'): jede Stufe von
+  Dittos festgelegtem Katalog mit Datei, Größe, Lizenz, ob sie heruntergeladen (und geprüft) ist, und ihrem Hinweis
+  (empfohlen für diesen Computer, gewählt, auf Wunsch, nicht festgelegt), dem Grund der Empfehlung und dem vollen
+  Modellordner; **Empfohlenes Modell herunterladen...** oder **Ausgewähltes herunterladen...** nach der Frage der CLI
+  (Repository, Datei, Lizenz, Größe, Ordner; „Nein“ als Vorgabe), im Hintergrund mit Fortschritt und **Abbrechen** (der
+  Teil bleibt für die Fortsetzung). Die Zeilen des Katalogs und das Modell eines Downloads sind Kernfunktionen, die
+  auch die CLI aufruft (ihre Ausgabe bleibt gleich). Die Installationsfrage der Laufzeit in den KI-Einstellungen nennt
+  dieses Fenster statt des CLI-Befehls.
+- **Ditto > Bewertung...: `llm-cli ditto eval` mit der Maus** (W1'): Arten und Retrieval-Varianten (fused, rerank),
+  einzelne Fälle, eine andere Falldatei, Läufe pro Fall, mehrere lokale Stufen, oder Anbieter, Modell und Denkaufwand
+  nur für diesen Lauf (die gespeicherten KI-Einstellungen bleiben unverändert); eine Frage vor dem Lauf sagt, was
+  aufgerufen wird und ob es Geld kostet („Nein“ als Vorgabe); der Lauf geht im Hintergrund mit Fortschritt und
+  **Abbrechen** (vor dem nächsten Versuch), das Fenster zeigt die Tabellen der CLI, und **Bericht speichern...**
+  schreibt ihren JSON-Bericht. Der Lauf selbst (Auswahl der Fälle, die Schleife über die Stufen mit dem Wiederherstellen des
+  Servers, die Retrieval-Läufe, die Tabellen und der Bericht) liegt jetzt in `orchestrator/evals/eval_run.py`, das auch
+  die CLI aufruft; ihre Ausgabe und Exit-Codes bleiben gleich.
+- **Chat-Bereich: Optionen für eine Frage** (W1', `llm-cli ditto ask --no-tools/--provider/--model` mit der Maus):
+  **Optionen für diese Frage** über dem Nachrichtenfeld bieten **Ohne Werkzeuge antworten**, einen Anbieter und ein
+  Modell nur für die nächste Frage. Die gespeicherten KI-Einstellungen bleiben unverändert (die Frage geht an einen
+  Ditto mit diesen Werten über den Einstellungen, `orchestrator/Core/ai_override.py`, das den Anbieter auch wie die CLI
+  prüft), der Bereich sagt, was die Frage verwendet hat, und die Optionen werden nach dem Senden zurückgesetzt; Feed,
+  Fragen und Freigaben arbeiten wie bisher.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
