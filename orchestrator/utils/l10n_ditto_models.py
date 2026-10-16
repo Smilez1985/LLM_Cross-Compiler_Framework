@@ -128,11 +128,15 @@ TEXTS = {
         "ditto_eval.target.tiers": "the local model tiers {tiers}, one after the other (the local server is started "
                                    "with each one and stopped afterwards; a server you started keeps running, or "
                                    "you are told when it was replaced)",
-        "ditto_eval.target.retrieval": "the knowledge-base search with the local embedding model (no AI model)",
+        "ditto_eval.target.retrieval": "the knowledge-base search with the local embedding model (no AI model; the "
+                                       "embedding model, and for rerank the reranker, are downloaded on first use)",
         "ditto_eval.target.and": "{first}; and {second}",
         "ditto_eval.cost.cloud": "Each case calls the model. This provider runs in the cloud and bills every request "
                                  "(about 20 per run and repeat).",
         "ditto_eval.cost.local": "Each case calls a model on this computer; nothing is billed.",
+        "ditto_eval.cost.local_fallback": "Each case calls a model on this computer. If it declines or cannot be "
+                                          "reached, the calls move on along the fallback chain of the AI settings "
+                                          "({providers}), and a cloud provider there bills them.",
         "ditto_eval.cost.unknown": "Each case calls the model. If it is a cloud provider, every request is billed "
                                    "(about 20 per run and repeat).",
         "ditto_eval.cost.none": "No AI model is called; nothing is billed.",
@@ -286,11 +290,16 @@ TEXTS = {
                                    "mit jeder gestartet und danach gestoppt; ein Server, den du gestartet hast, läuft "
                                    "weiter, oder du erfährst, dass er ersetzt wurde)",
         "ditto_eval.target.retrieval": "der Suche in der Wissensbasis mit dem lokalen Embedding-Modell (kein "
-                                       "KI-Modell)",
+                                       "KI-Modell; das Embedding-Modell und für rerank der Reranker werden bei der "
+                                       "ersten Verwendung heruntergeladen)",
         "ditto_eval.target.and": "{first}; und {second}",
         "ditto_eval.cost.cloud": "Jeder Fall ruft das Modell auf. Dieser Anbieter läuft in der Cloud und berechnet "
                                  "jede Anfrage (etwa 20 pro Lauf und Wiederholung).",
         "ditto_eval.cost.local": "Jeder Fall ruft ein Modell auf diesem Computer auf; nichts wird berechnet.",
+        "ditto_eval.cost.local_fallback": "Jeder Fall ruft ein Modell auf diesem Computer auf. Lehnt es ab oder ist "
+                                          "es nicht erreichbar, gehen die Aufrufe entlang der Ersatzkette der "
+                                          "KI-Einstellungen weiter ({providers}), und ein Cloud-Anbieter dort "
+                                          "berechnet sie.",
         "ditto_eval.cost.unknown": "Jeder Fall ruft das Modell auf. Ist es ein Cloud-Anbieter, wird jede Anfrage "
                                    "berechnet (etwa 20 pro Lauf und Wiederholung).",
         "ditto_eval.cost.none": "Kein KI-Modell wird aufgerufen; nichts wird berechnet.",
