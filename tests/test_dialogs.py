@@ -1280,6 +1280,7 @@ class TestMainWindowWiring:
                                       "Open Community Hub", "Tool Permissions (Ditto / MCP)...",
                                       "Folders the AI May Use...", "Pending Approvals...",
                                       "Fix Proposals from AI Clients...", "Knowledge Snapshots...",
+                                      "Knowledge Sources...",   # wave 5 (W1'): llm-cli knowledge sources by mouse
                                       "Framework Build Images...", "Index the Framework's Documentation...",
                                       "Spoken Announcements", "Clear Input History..."]
             assert menus["File"] == ["Trash...", "Output Folder...", "Exit"]
