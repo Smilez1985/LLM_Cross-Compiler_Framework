@@ -22,11 +22,11 @@ for `stop`/`status`).
 
 import re
 import shlex
-from typing import Dict, List, Mapping, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
-from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, FORBIDDEN_FLAGS, LOOPBACK, POSIX_CLEARED_PATH,
-                                                SERVER_FIXED, START_SCRIPT_OPTIONS, check_command,
-                                                check_server_command, posix_cleared_env)
+from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, FORBIDDEN_FLAGS, KV_CACHE_TYPES, LOOPBACK,
+                                                POSIX_CLEARED_PATH, SERVER_FIXED, START_SCRIPT_OPTIONS, check_command,
+                                                check_server_command, kv_cache_args, posix_cleared_env)
 
 START_SCRIPT = "llama-server.sh"
 UNIT_NAME = "llm-llama-server.service"
@@ -39,7 +39,8 @@ STATE_REL = ".local/state/llm-framework"
 _RE_OPTION = re.compile(r"^-{1,2}[a-z][a-z0-9-]{0,40}$", re.ASCII | re.IGNORECASE)
 _RE_PATH = re.compile(r"^/[A-Za-z0-9._+/-]{1,400}$", re.ASCII)
 _RE_USER = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.ASCII | re.IGNORECASE)
-_KINDS = ("uint", "sint", "hex", "bit", "layers", "switch", "loadmode", "name")
+_KINDS = ("uint", "sint", "hex", "bit", "layers", "switch", "loadmode", "name", "cachetype")
+_RE_CACHE_TYPE = re.compile(r"^[a-z0-9_]{1,16}$", re.ASCII)
 
 
 class LauncherError(ValueError):
@@ -142,6 +143,7 @@ value_ok() {
     switch) case $v in on|off|auto) return 0 ;; esac; return 1 ;;
     loadmode) case $v in auto|none|mmap|mlock|mmap+mlock) return 0 ;; esac; return 1 ;;
     name) case $v in ''|-*|*[!A-Za-z0-9._:-]*) return 1 ;; esac; [ ${#v} -le 64 ] ;;
+    cachetype) case $v in @CACHE_TYPES@) return 0 ;; esac; return 1 ;;
     port) case $v in ''|*[!0-9]*) return 1 ;; esac; [ ${#v} -le 5 ] && [ "$v" -ge 1024 ] && [ "$v" -le 65535 ] ;;
     *) return 1 ;;
   esac
@@ -254,10 +256,13 @@ def render_start_script(default_port: int = DEVICE_DEFAULT_PORT) -> str:
     allowed_names = [n for names in START_SCRIPT_OPTIONS for n in names]
     if set(allowed_names) & FORBIDDEN_FLAGS:  # pragma: no cover - the policy's own constants
         raise LauncherError("an allowed option is on the forbidden list")
+    if not all(_RE_CACHE_TYPE.fullmatch(kind) for kind in KV_CACHE_TYPES):  # pragma: no cover - policy constants
+        raise LauncherError("a KV-cache type is not a plain word")
     text = _SCRIPT
     for token, value in (("@PORT@", str(default_port)), ("@PATH@", POSIX_CLEARED_PATH), ("@KEY_REL@", KEY_REL),
                          ("@STATE_REL@", STATE_REL), ("@FORBIDDEN@", _pattern(FORBIDDEN_FLAGS)),
                          ("@ALLOWED_CASES@", cases), ("@ALLOWED_TEXT@", allowed), ("@ENV@", _env_words()),
+                         ("@CACHE_TYPES@", "|".join(KV_CACHE_TYPES)),
                          ("@SERVER_ARGS@", server_args)):
         text = text.replace(token, value)
     if re.search(r"@[A-Z_]+@", text):  # pragma: no cover - template check
@@ -269,10 +274,11 @@ def install_root(home: str) -> str:
     return f"{home.rstrip('/')}/{INSTALL_REL}"
 
 
-def render_systemd_unit(*, user: str, home: str, model: str, port: int) -> str:
+def render_systemd_unit(*, user: str, home: str, model: str, port: int, kv_cache: Optional[str] = None) -> str:
     """The systemd unit of the deploy setting "systemd": the start script's `serve` as the unprivileged user, the
-    same fixed arguments, no Environment= or EnvironmentFile= (the script clears the environment anyway), and the
-    server limited to loopback by systemd itself. Every value is checked; none comes from the device unchecked."""
+    same fixed arguments (plus the KV-cache type of the deploy settings, checked again by the script), no
+    Environment= or EnvironmentFile= (the script clears the environment anyway), and the server limited to loopback
+    by systemd itself. Every value is checked; none comes from the device unchecked."""
     if not isinstance(user, str) or not _RE_USER.fullmatch(user) or user == "root":
         raise LauncherError("the unit runs as an unprivileged account name, never root")
     for what, path in (("home", home), ("model", model)):
@@ -281,7 +287,7 @@ def render_systemd_unit(*, user: str, home: str, model: str, port: int) -> str:
     if not isinstance(port, int) or isinstance(port, bool) or not 1024 <= port <= 65535:
         raise LauncherError("the port must be from 1024 to 65535")
     script = f"{install_root(home)}/current/{START_SCRIPT}"
-    argv = ["/bin/sh", script, "serve", model, "--port", str(port)]
+    argv = ["/bin/sh", script, "serve", model, "--port", str(port), *kv_cache_args(kv_cache)]
     check_command(argv)
     return "\n".join([
         "# llama-server of the LLM Cross-Compiler Framework (generated; a new deployment replaces it).",

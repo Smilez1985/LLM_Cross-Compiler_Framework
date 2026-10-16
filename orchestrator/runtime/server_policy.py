@@ -37,7 +37,9 @@ freshly built llama-server with --tools once, with a model path that does not ex
 require it to refuse.
 
 The device runtime's start script passes on only the few tuning options of START_SCRIPT_OPTIONS (with checked values);
-it refuses every option of FORBIDDEN_FLAGS by name and every other option that is not in START_SCRIPT_OPTIONS.
+it refuses every option of FORBIDDEN_FLAGS by name and every other option that is not in START_SCRIPT_OPTIONS. The
+KV-cache type (-ctk/-ctv, KV_CACHE_TYPES) is one of them: the deploy settings choose it for a board (eighth round N7),
+and kv_cache_args() writes it out for the systemd unit and the start command the person is shown.
 """
 
 import os
@@ -86,9 +88,15 @@ KEY_FILE_PREFIX = "server-"
 
 # --- the device runtime (start script and systemd unit) ---
 DEVICE_DEFAULT_PORT = 8080
+# The KV-cache types a board's server may get (-ctk/--cache-type-k and -ctv/--cache-type-v at the pin, one type for
+# both): f16 is llama.cpp's own default, q8_0 needs about half its memory and q4_0 about a quarter (with some loss of
+# quality). A quantized V cache needs flash attention, which llama.cpp switches on by itself (-fa auto) where the
+# backend supports it; otherwise the server does not start and says so.
+KV_CACHE_TYPES = ("f16", "q8_0", "q4_0")
 # The tuning options the start script passes on, each with the kind of value it accepts (checked in the script:
 # uint digits, sint optional minus and digits, hex a CPU mask, bit 0 or 1, layers digits/auto/all, switch
-# on/off/auto, loadmode one of llama.cpp's load modes, name letters, digits and ._:-). Names as at the pin
+# on/off/auto, loadmode one of llama.cpp's load modes, name letters, digits and ._:-, cachetype one of
+# KV_CACHE_TYPES). Names as at the pin
 # (common/arg.cpp); everything else is refused, so neither a forbidden option nor a second --host, --api-key-file or
 # -m can be added.
 START_SCRIPT_OPTIONS: Mapping[Tuple[str, ...], str] = {
@@ -106,11 +114,23 @@ START_SCRIPT_OPTIONS: Mapping[Tuple[str, ...], str] = {
     ("-lm", "--load-mode"): "loadmode",
     ("-a", "--alias"): "name",
     ("--sleep-idle-seconds",): "uint",
+    ("-ctk", "--cache-type-k"): "cachetype",
+    ("-ctv", "--cache-type-v"): "cachetype",
 }
 
 
 class PolicyError(ValueError):
     """A command line that breaks the launch policy; the message names the options."""
+
+
+def kv_cache_args(kind: Optional[str]) -> List[str]:
+    """The server options of a KV-cache type: none for f16 (llama.cpp's default) or no type, else -ctk and -ctv with
+    the same type (KV_CACHE_TYPES)."""
+    if kind in (None, "f16"):
+        return []
+    if kind not in KV_CACHE_TYPES:
+        raise PolicyError(f"the KV-cache type must be one of {', '.join(KV_CACHE_TYPES)}")
+    return ["-ctk", kind, "-ctv", kind]
 
 
 def option_name(arg: str) -> str:

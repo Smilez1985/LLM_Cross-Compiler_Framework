@@ -310,9 +310,21 @@ class TestSSHDeployment:
         monkeypatch.setattr(dm, "_check_conn", lambda *a, **k: pytest.fail("network reached despite invalid input"))
         return dm
 
-    @pytest.mark.parametrize("ip", ["999.999.999.999", "not-an-ip", "", "10.0.0.1; reboot"])
+    # N4: a host name such as myboard.local is an address too; a typo in an IP address, a shell character or an
+    # option is refused before anything is sent
+    @pytest.mark.parametrize("ip", ["999.999.999.999", "192.168.1.300", "192.168.1", "not a host", "", "10.0.0.1; reboot",
+                                    "-oProxyCommand=touch", "board..local", "[fe80::1]", "$(reboot)"])
     def test_invalid_ip_is_rejected_before_connecting(self, dm, artifact, ip):
         assert dm.deploy_artifact(artifact, ip, "root") is False
+
+    @pytest.mark.parametrize("host", ["myboard.local", "radxa-zero3", "192.168.1.50", "fe80::1"])
+    def test_an_address_or_a_host_name_reaches_the_board(self, config, artifact, monkeypatch, host):
+        dm = DeploymentManager(FakeFramework(config))
+        reached = []
+        monkeypatch.setattr(dm, "_check_conn", lambda h, p=22: reached.append(h) or False)
+        monkeypatch.setattr("orchestrator.runtime.device.reasons.check_port", lambda *a, **k: "device_host_down")
+        result = dm.deploy_package(artifact, host, "radxa")
+        assert reached == [host] and not result.success and result.code == "device_host_down"
 
     @pytest.mark.parametrize("user", ["-oProxyCommand=touch /tmp/pwned", "root;reboot", "", "a b"])
     def test_invalid_user_is_rejected_before_connecting(self, dm, artifact, user):

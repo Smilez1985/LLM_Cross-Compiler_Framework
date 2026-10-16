@@ -334,8 +334,10 @@ class TestRuntimeEnds:
     def fake_device_service(self, monkeypatch, fm, device, deployed=True):
         from orchestrator.runtime.device import service
         from orchestrator.runtime.device.package import DeviceRuntimeStore
+        from orchestrator.runtime.device.settings import KvChoice
         settings = SimpleNamespace(ssh_user="dietpi", install="script", sudo_confirmed_at=None,
-                                   model="/home/dietpi/My Models/x.gguf")
+                                   model="/home/dietpi/My Models/x.gguf",
+                                   kv_choice=lambda profile: KvChoice("f16", "unknown"))
         plan = SimpleNamespace(built=True, source_cached=True, build_id="d" * 64, builder={"base": "debian"},
                                target={"os": "linux", "arch": "arm64", "libc": "glibc", "libc_version": "2.36"})
         monkeypatch.setattr(service, "device_profile", lambda state, d: SimpleNamespace())
