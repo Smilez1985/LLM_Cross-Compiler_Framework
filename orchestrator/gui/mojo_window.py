@@ -498,6 +498,10 @@ class MojoWindow(QDialog):
             return None
         items = [self._t("mojo.boards.pick_item", label=one_line(d.label), address=one_line(d.address))
                  for d in boards]
+        # A board set up again keeps its address and often its name, but its new host key makes it a second trusted
+        # board (a new device ID): boards that read the same also name their device ID, so each one can be picked.
+        items = [self._t("mojo.boards.pick_item_id", label=one_line(d.label), address=one_line(d.address),
+                         device_id=d.device_id) if items.count(text) > 1 else text for d, text in zip(boards, items)]
         choice, ok = QInputDialog.getItem(self, self._t("mojo.boards.pick_title"), self._t("mojo.boards.pick_text"),
                                           items, 0, False)
         if not ok or choice not in items:

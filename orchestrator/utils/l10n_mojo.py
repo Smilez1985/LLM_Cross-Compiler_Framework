@@ -86,6 +86,7 @@ TEXTS = {
         "mojo.boards.pick_title": "Check a board",
         "mojo.boards.pick_text": "Which trusted board? Mojo makes one connection to its SSH port, no login.",
         "mojo.boards.pick_item": "{label} ({address})",
+        "mojo.boards.pick_item_id": "{label} ({address}, device ID {device_id})",
         "mojo.boards.no_trusted": "No board is trusted yet. A board becomes trusted when you deploy to it or probe "
                                   "it and compare its fingerprint.",
         "mojo.boards.checking": "Checking {label} (one connection to its SSH port, no login)...",
@@ -176,6 +177,7 @@ TEXTS = {
         "mojo.boards.pick_text": "Welches vertraute Board? Mojo baut eine Verbindung zu seinem SSH-Port auf, ohne "
                                  "Anmeldung.",
         "mojo.boards.pick_item": "{label} ({address})",
+        "mojo.boards.pick_item_id": "{label} ({address}, Geräte-ID {device_id})",
         "mojo.boards.no_trusted": "Noch keinem Board wird vertraut. Einem Board wird vertraut, wenn du darauf "
                                   "deployst oder es abfragst und seinen Fingerabdruck vergleichst.",
         "mojo.boards.checking": "Prüfe {label} (eine Verbindung zu seinem SSH-Port, keine Anmeldung)...",
