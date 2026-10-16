@@ -175,6 +175,41 @@ class Removal:
                                                             # before the new one was built)
 
 
+def container_build_requested() -> bool:
+    """Whether this process is the framework's own container build (LCF_CONTAINER_BUILD=1), which has no Docker engine;
+    `ensure` is called with it by the CLI and the GUI alike."""
+    return os.environ.get("LCF_CONTAINER_BUILD") == "1"
+
+
+# --- the model offer after ensure (`ditto runtime ensure`; --no-model turns it off) -----------------------------------
+
+@dataclass
+class ModelOffer:
+    """The model `ensure` offers afterwards: the tier chosen earlier (`start --model`) or the recommendation for this
+    computer, why, and whether it is there. The person sees its source, size and licence before any download; a model
+    without a pinned size and sha256 is never downloaded."""
+    model: Any                           # catalog.ModelEntry
+    why: str
+    state: str                           # ready | unverified | missing (LocalLLMRuntime.model_state)
+    folder: Path                         # the models folder it goes to (shared by both modes)
+
+    @property
+    def needed(self) -> bool:
+        return self.state == "missing"
+
+    @property
+    def permissive(self) -> bool:
+        """Whether its licence allows the download without the person's own yes in an unattended run (--yes)."""
+        return self.model.license.lower() in PERMISSIVE_LICENCES
+
+
+def model_offer(rt: Any) -> ModelOffer:
+    """What `ensure` offers to download after it ran (CLI and GUI): reads only."""
+    preferred = rt.preferred_tier()
+    model, why = (rt.catalog.model(preferred), "chosen earlier") if preferred else rt.choose_tier()
+    return ModelOffer(model=model, why=why, state=rt.model_state(model), folder=Path(rt.models_dir))
+
+
 # --- detection --------------------------------------------------------------------------------------------------------
 
 def docker_problem(rt: Any, container_build: bool = False) -> Optional[str]:

@@ -45,6 +45,7 @@ from orchestrator.gui.sign_in import STORAGE_CHOICE_CODES, UserConfigSnapshot, c
 from orchestrator.gui.deployment_window import DeploymentWindow
 from orchestrator.gui.form_surface import close_gui, open_gui
 from orchestrator.gui.menus import build as menu_build
+from orchestrator.gui.menus import ditto_runtime as menu_ditto_runtime
 
 # ============================================================================
 # DITTO AVATAR WIDGET
@@ -221,7 +222,11 @@ class MainOrchestrator(QMainWindow):
         about_action = QAction("About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+        # GUI parity (W1'): one install line per chain, in the menu order of the design (GUI_PARITY.md); each module
+        # finds or makes its menu and puts it in place (Build after File, Ditto before Security).
         menu_build.install(self, menubar)  # GUI parity: Build > Targets..., Build History...; File > Settings...
+        menu_ditto_runtime.install(self, menubar)  # Ditto > Local Runtime... (before Security)
 
     def _setup_toolbar(self):
         toolbar = QToolBar("Main Toolbar")

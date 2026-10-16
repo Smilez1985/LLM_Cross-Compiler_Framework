@@ -1109,6 +1109,33 @@ Die verwaltete Laufzeit gibt Ditto ein lokales Modell ohne Cloud-Konto. Gesteuer
 Anbieter `local` findet den laufenden Server von selbst (Adresse, Schlüssel und geladenes Modell werden bei jedem
 Aufruf gelesen).
 
+**GUI: Ditto > Lokale Laufzeit...** erledigt jeden Befehl `llm-cli ditto runtime` mit der Maus, mit demselben Code
+wie die Befehle:
+
+- **Status:** was `ditto runtime status` zeigt (Hardware, Betriebsart, der Build in Gebrauch und seine Prüfungen,
+  Probleme und der Rat zum Neubau, der Plan für den eigenen Build, das fertige Archiv, der Server mit Adresse, Modell
+  und Kontext, das empfohlene und das gewählte Modell, die Protokolldatei), in deiner Sprache; **Noch einmal prüfen**
+  liest ihn neu. In **Tools > Configure AI Agent (Ditto)...** öffnet **Status und mehr...** dasselbe Fenster.
+- **Installieren, prüfen oder wechseln:** der Bereich „Dittos lokaler Server“ (auch in **Tools > Configure AI Agent
+  (Ditto)...**) führt `ditto runtime ensure` aus, mit der Betriebsart (Automatisch, Direkt, In Docker), den
+  Build-Optionen (GPU-Backend, wo gebaut wird, Compile-Jobs) und dem Modell-Angebot danach (ohne Haken:
+  `--no-model`). Für die installierte Art heißt der Knopf **Prüfen und reparieren...**: Der Build wird geprüft und
+  nur neu installiert, wenn er sich nicht nutzen lässt (zum Beispiel ein alter llama.cpp-Build nach einem Update);
+  die andere Art ist ein **Wechseln...** mit der Platzprüfung und dem vollständigen Entfernen der alten Art, wie
+  [unten](#direkt-oder-in-docker-art-der-laufzeit) beschrieben.
+- **llama-server bauen...** (`ditto runtime install`, mit denselben Build-Optionen) und **Offizielles fertiges
+  Archiv installieren...** (`--prebuilt`; „Noch einmal herunterladen, auch wenn es installiert ist“ ist `--force`).
+- **Server:** **Starten** mit dem Modell (wie bisher; „Empfohlen für diesen Computer“ vergisst eine frühere Wahl;
+  oder eine Stufe), der Kontextlänge und dem Entladen im Leerlauf; **Stoppen**.
+- **Builds und Quellcode:** **Build importieren...**, **Build exportieren...**, **Ältere Builds entfernen...** (der
+  Lösch-Dialog: voller Pfad, Dateiname, Größe und was es ist, nichts angehakt, „Nein“ als Vorgabe; Papierkorb oder
+  endgültig), **Quellcode exportieren...** (mit optionalem Spiegel) und **Quellcode importieren...** für einen
+  Computer ohne Netz.
+
+Builds, Downloads, Docker und der Serverstart laufen im Hintergrund mit einer Fortschrittszeile; **Abbrechen** hält
+einen Build vor seinem nächsten Schritt an und einen Download zwischen zwei Stücken (das Teilstück bleibt). Jede Frage
+hat „Nein“ als Vorgabe.
+
 ### Was festgelegt ist
 
 [`configs/llama_runtime.yml`](../configs/llama_runtime.yml) ist Daten: Ein neuerer Build oder ein anderes Modell wird
@@ -1356,8 +1383,10 @@ fehlt; die Installer führen den Befehl als ihren Ditto-Schritt aus (`install.sh
   gebaut wurde; `start_local_runtime` startet den Server der aufgezeichneten Art, und sein Ergebnis nennt, was läuft
   (im Docker-Modus den Build des Images). Die Art wechseln und die alte Art entfernen darf nur die Person: Kein Tool
   tut eins davon, und `build_local_runtime` entfernt keinen alten Build.
-- **Die KI-Einstellungen** zeigen, wo der Server läuft, und bieten den Wechsel über denselben Code-Pfad wie der
-  Befehl an, mit derselben Liste der Reste danach.
+- **Die KI-Einstellungen** und **Ditto > Lokale Laufzeit...** zeigen, wo der Server läuft, und führen `ensure`
+  über denselben Code-Pfad wie der Befehl aus, mit seinen Optionen: installieren, die installierte Art prüfen und
+  reparieren (nur neu installiert, wenn sie sich nicht nutzen lässt) oder wechseln, mit derselben Liste der Reste
+  danach.
 
 ### Laufzeit-Tools für KI-Clients (optional)
 
@@ -3074,7 +3103,8 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
 - **Laufzeit auf dem Gerät:** Die selbst gebaute llama.cpp-Laufzeit auf einem Board funktioniert über die
   Kommandozeile und ist mit einem nachgebildeten SSH-Kanal getestet, noch nicht auf einem echten Board; eine GUI oder
   ein MCP-Werkzeug dafür gibt es noch nicht.
-- **GUI:** Die Reiter Auto-Tuning und Models sind Platzhalter; die lokale Laufzeit wird nur über die CLI gesteuert.
+- **GUI:** Die Reiter Auto-Tuning und Models sind Platzhalter (die lokale Laufzeit steht in **Ditto > Lokale
+  Laufzeit...**).
 - **Deep Ingest** läuft nur aus dem Modul-Assistenten in der GUI; einen CLI-Befehl dafür gibt es nicht. Einen
   Schnappschuss der Wissensbasis wiederherstellen kann man über GUI oder CLI nicht.
 - **Reranking** läuft nur bei Build-Empfehlungen; `rag_rerank_default` nimmt den Chat und das MCP-Tool

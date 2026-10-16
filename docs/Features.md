@@ -1012,6 +1012,30 @@ The managed runtime gives Ditto a local model without any cloud account. It is c
 `llm-cli ditto runtime` and `llm-cli ditto models` ([CLI_Usage.md](CLI_Usage.md#ditto-runtime)); Ditto's provider
 `local` finds the running server by itself (address, key and loaded model are read for every call).
 
+**GUI: Ditto > Local Runtime...** does every `llm-cli ditto runtime` command by mouse, with the same code as the
+commands:
+
+- **Status:** what `ditto runtime status` shows (hardware, mode, the build in use and its checks, problems and the
+  rebuild advice, the self-built plan, the prebuilt option, the server with address, model and context, the
+  recommended and the chosen model, the log file), in your language; **Check again** reads it again. In **Tools >
+  Configure AI Agent (Ditto)...**, **Status and more...** opens the same window.
+- **Install, check or switch:** the box "Ditto's local server" (also in **Tools > Configure AI Agent (Ditto)...**)
+  runs `ditto runtime ensure` with the mode (Automatic, Bare metal, In Docker), the build options (GPU backend, where
+  the build runs, compile jobs) and the model offer afterwards (unticked: `--no-model`). For the installed mode the
+  button says **Check and repair...**: the build is checked and installed again only when it cannot be used (an old
+  llama.cpp build after an update, for example); the other mode is a **Switch...** with the space check and the
+  complete removal of the old mode described [below](#bare-metal-or-docker-runtime-mode).
+- **Build llama-server...** (`ditto runtime install`, with the same build options) and **Install the official
+  prebuilt archive...** (`--prebuilt`; "Download it again even if it is installed" is `--force`).
+- **Server:** **Start** with the model (as before; "Recommended for this computer" forgets an earlier choice; or a
+  tier), the context length and the idle unload; **Stop**.
+- **Builds and source:** **Import a build...**, **Export the build...**, **Remove older builds...** (the deletion
+  dialog: full path, file name, size and what each is, nothing ticked, "No" by default; trash or for good), **Export
+  the source...** (with an optional mirror) and **Import the source...** for a computer without network.
+
+Builds, downloads, Docker and the server start run in the background with a progress line; **Cancel** stops a build
+before its next step and a download between two chunks (the part is kept). Every question has "No" as the default.
+
 ### What is pinned
 
 [`configs/llama_runtime.yml`](../configs/llama_runtime.yml) is data: a newer build or another model is added there,
@@ -1239,8 +1263,9 @@ run). The mode is recorded in `~/.llm-framework/runtime/llama.cpp/mode.json`.
   or rebuilt; `start_local_runtime` starts the server of the recorded mode, and its result names what runs (the
   image's build in Docker mode). Switching the mode and removing the old mode are the person's alone: no tool does
   either, and `build_local_runtime` removes no old build.
-- **The AI settings** show where the server runs and offer the switch through the same code path as the command,
-  with the same list of leftovers afterwards.
+- **The AI settings** and **Ditto > Local Runtime...** show where the server runs and run `ensure` through the same
+  code path as the command, with its options: install, check and repair the installed mode (installed again only
+  when it cannot be used), or switch, with the same list of leftovers afterwards.
 
 ### Local runtime tools for AI clients (optional)
 
@@ -2791,7 +2816,7 @@ What does not work yet, so you are not surprised:
   available yet; Ditto signs in with API keys, and local engines need none.
 - **Device runtime:** the self-built llama.cpp runtime on a board works from the command line and is tested with a
   fake SSH channel, not yet on a real board; there is no GUI or MCP tool for it yet.
-- **GUI:** the Auto-Tuning and Models tabs are placeholders; the local runtime is controlled from the CLI only.
+- **GUI:** the Auto-Tuning and Models tabs are placeholders (the local runtime is in **Ditto > Local Runtime...**).
 - **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it. Restoring a
   knowledge-base snapshot is not available from the GUI or the CLI.
 - **Reranking** runs only for build recommendations; `rag_rerank_default` adds the chat and the MCP tool
