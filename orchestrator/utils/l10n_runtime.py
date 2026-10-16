@@ -33,8 +33,8 @@ TEXTS = {
                                  "modes are alternatives, so nothing of the old one stays.\n\nContinue?",
         "runtime.mode.install_question": "Ditto's server will be installed {mode}: built from the pinned llama.cpp "
                                          "source (a few minutes; the source, about 215 MB, is fetched once when it is "
-                                         "not there yet). The model is downloaded separately (llm-cli ditto models "
-                                         "download).\n\nContinue?",
+                                         "not there yet). The model is downloaded separately (Ditto > Local "
+                                         "Models...).\n\nContinue?",
         "runtime.mode.working": "Working… this can take minutes; the window can stay open.",
         "runtime.mode.failed": "Nothing was switched: {reason}",
         "runtime.mode.leftovers.question": "The new mode works. Delete every object of the old mode for good: exactly "
@@ -96,7 +96,7 @@ TEXTS = {
         "runtime.mode.install_question": "Dittos Server wird {mode} installiert: aus dem festgelegten "
                                          "llama.cpp-Quellcode gebaut (einige Minuten; der Quellcode, etwa 215 MB, wird "
                                          "einmal geholt, wenn er noch nicht da ist). Das Modell wird getrennt "
-                                         "heruntergeladen (llm-cli ditto models download).\n\nWeiter?",
+                                         "heruntergeladen (Ditto > Lokale Modelle...).\n\nWeiter?",
         "runtime.mode.working": "Läuft … das kann Minuten dauern; das Fenster kann offen bleiben.",
         "runtime.mode.failed": "Nichts wurde gewechselt: {reason}",
         "runtime.mode.leftovers.question": "Die neue Art funktioniert. Jedes Objekt der alten Art endgültig löschen, "

@@ -88,6 +88,7 @@ class Composer(QWidget):
 
         row = QHBoxLayout()
         self.input = ComposerInput(self)
+        self.input.setObjectName("txt_chat_input")     # `llm-cli ditto ask QUESTION` by mouse (menus/ditto_models)
         self.input.setPlaceholderText(text("chat.composer.placeholder", lang))
         self.input.setAccessibleName(text("chat.composer.input_name", lang))
         self.input.submit.connect(self.send_requested.emit)
@@ -95,6 +96,7 @@ class Composer(QWidget):
         self.input.to_feed.connect(self.to_feed.emit)
         row.addWidget(self.input, stretch=1)
         self.btn_send = make_button(text("chat.composer.send", lang))
+        self.btn_send.setObjectName("btn_chat_send")
         self.btn_send.clicked.connect(self.send_requested.emit)
         self.btn_send.setStyleSheet("background-color: #1565C0; color: white; font-weight: bold;")
         row.addWidget(self.btn_send, alignment=Qt.AlignBottom)

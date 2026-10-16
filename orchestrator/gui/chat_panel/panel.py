@@ -36,12 +36,13 @@ from orchestrator.Core.speaking_names import SpeakingNames
 from orchestrator.gui.chat_panel.bubbles import confirm_open_link, make_button, text, text_label
 from orchestrator.gui.chat_panel.composer import Composer
 from orchestrator.gui.chat_panel.feed_view import PAGE, FeedView, away_summary
+from orchestrator.gui.chat_panel.question_options import QuestionChoice, QuestionOptions
 from orchestrator.gui.chat_panel.watcher import FeedWatcher
 from orchestrator.gui.plain import button_text, one_line, plain_box, plain_tooltip
 from orchestrator.gui.tool_confirmation import ToolConfirmation
 from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.utils.announce import announce
-from orchestrator.utils.localization import current_language
+from orchestrator.utils.localization import current_language, ui_text
 from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.utils.logging import get_logger
 
@@ -399,6 +400,10 @@ class ChatPanel(QWidget):
         self.progress.setStyleSheet("QProgressBar::chunk { background-color: #2196F3; }")
         self.progress.setVisible(False)
         layout.addWidget(self.progress)
+        # `ditto ask --no-tools / --provider / --model` by mouse: for the next question only (W1')
+        self.options = QuestionOptions(self.lang, self._provider_catalog, self)
+        layout.addWidget(self.options)
+        self._choice = QuestionChoice()
         self.composer = Composer(self.lang, self)
         layout.addWidget(self.composer)
 
@@ -663,9 +668,37 @@ class ChatPanel(QWidget):
 
     # --- talking to Ditto ------------------------------------------------------------------------------------------
 
+    def _provider_catalog(self) -> Any:
+        """The provider catalogue Ditto checks a provider against (read when the options are first shown)."""
+        from orchestrator.gui.ai_choice import catalog_of
+        return catalog_of(self.ditto, getattr(self.framework, "config", None))
+
     def _new_worker(self, question: str) -> Any:
+        """The worker of one turn, with this question's options (self._choice): another provider or model asks a Ditto
+        made for this question alone (Core/ai_override.ditto_with; the saved settings stay unchanged), and "Answer
+        without tools" sets use_tools False."""
         from orchestrator.gui import chat_window   # ChatWorker stays where the former chat tab defined it
-        return chat_window.ChatWorker(self.ditto, question, self.history, self.confirmation.confirm)
+        choice = self._choice
+        ditto = self.ditto
+        if choice.provider or choice.model:
+            from orchestrator.Core.ai_override import ditto_with, override_values
+            ditto = ditto_with(self.ditto, override_values(choice.provider, choice.model))
+        worker = chat_window.ChatWorker(ditto, question, self.history, self.confirmation.confirm)
+        worker.use_tools = choice.use_tools
+        return worker
+
+    def _question_choice(self) -> Optional[QuestionChoice]:
+        """This question's options, checked like `ditto ask` checks --provider (None: refused, the person was told)."""
+        choice = self.options.choice()
+        if choice.provider:
+            from orchestrator.Core.ai_override import provider_problem
+            catalog = self.options._catalog
+            problem = provider_problem(catalog, choice.provider) if catalog is not None else None
+            if problem:
+                plain_box(self, "warning", ui_text("ditto_models.chat.options", self.lang),
+                          ui_text("ditto_models.chat.refused", self.lang, reason=one_line(problem)))
+                return None
+        return choice
 
     @staticmethod
     def _ditto_sender() -> FeedSender:
@@ -675,11 +708,19 @@ class ChatPanel(QWidget):
         question = self.txt_input.text().strip()
         if not question or (self.worker is not None and self.worker.isRunning()):
             return
+        choice = self._question_choice()
+        if choice is None:
+            return
         self.txt_input.clear()
         reply_to = self.composer.reply_to
         self.composer.clear_reply()
         self._post("person_message", FeedSender(role="person"), person_text=question,
                    refs=FeedRefs(reply_to=reply_to))
+        self._choice = choice
+        if not choice.is_default:   # said in this window (not saved): what this one question uses
+            self._local_notice(ui_text("ditto_models.chat.notice", self.lang, what=choice.summary(self.lang)),
+                               level="info")
+        self.options.reset()        # the options are for one question
         self._pending_question = question
         self._set_thinking(True)
         # The worker only reads the history; nothing changes it until the reply is back on this thread.
@@ -734,6 +775,7 @@ class ChatPanel(QWidget):
 
     def _set_thinking(self, active: bool) -> None:
         self.composer.set_busy(active)
+        self.options.set_busy(active)
         self.btn_clear.setEnabled(not active)  # the running turn reads the history
         self.header.act_clear.setEnabled(not active)
         self.progress.setVisible(active)
@@ -863,6 +905,7 @@ class ChatPanel(QWidget):
         self.header.retranslate(lang)
         self.notice.retranslate(lang)
         self.composer.retranslate(lang)
+        self.options.retranslate(lang)
         self.progress.setAccessibleName(text("chat.panel.thinking", lang))
         self.feed_view.lang = lang
         self.feed_view.btn_earlier.setText(button_text(text("chat.view.earlier", lang)))
