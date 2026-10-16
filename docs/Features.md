@@ -125,12 +125,13 @@ Further behaviour:
   including a running security scan or image build, and a later step can never undo it; the button and Ctrl+C wait
   until the build has stopped and say so. Once a build has failed or is moving its files into the output folder,
   it can no longer be cancelled and finishes on its own.
-- **Progress and live log:** while the build the Builder tab started runs, a progress bar under the Builder log
-  shows the step and the percent from the build service, and the build's log follows live below it (secrets
-  redacted, plain text, each line once). The step and the percent include the running build's own progress
-  (preparing, image, model, modules, archive), so the bar moves during a build; it says 100 % only when the request
-  has ended. A search box finds lines; a filter shows all lines or only Info, Warnings or Errors. Lines the service
-  no longer returns are noted instead of left out silently, and the view keeps the newest 20,000 lines.
+- **Progress and live log:** while the build the Builder tab started runs, a progress bar under the Builder log shows
+  the step and the percent from the build service, and the build's log follows live below it (secrets redacted, full
+  paths, plain text, each line once; an AI that reads the log gets the folders by label). The step and the percent
+  include the running build's own progress (preparing, image, model, modules, archive), so the bar moves during a build;
+  it says 100 % only when the request has ended. A search box finds lines; a filter shows all lines or only Info,
+  Warnings or Errors. Lines the service no longer returns are noted instead of left out silently, and the view keeps the
+  newest 20,000 lines.
 - **Build status across programs (shared build state):** every program that builds (the GUI, a CLI call, each MCP
   server) writes a summary of each build request into the per-user folder (`build_requests/`: model as repo id or
   label, target, format, quantization, status, stage, progress, who started it and in which program; no host path,

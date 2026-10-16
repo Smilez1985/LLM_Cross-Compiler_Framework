@@ -613,9 +613,12 @@ class BuildService:
                 card = ""
         return ArtifactDetails(artifact_id=aid, label=label, manifest=manifest, model_card=card, files=files)
 
-    def log_tail(self, request_id: str, lines: int = 200, before_line: Optional[int] = None) -> LogTail:
+    def log_tail(self, request_id: str, lines: int = 200, before_line: Optional[int] = None,
+                 for_person: bool = False) -> LogTail:
         """The last `lines` lines (at most 1,000), or those before line `before_line` (paging back). Each line is cut
-        at 2,000 characters and the whole tail at 48,000; `truncated` says older lines exist or lines were cut."""
+        at 2,000 characters and the whole tail at 48,000; `truncated` says older lines exist or lines were cut.
+        Secrets are always redacted. A host path reaches an AI by its label or file name (_log_paths); `for_person`:
+        the Builder's live log, the person's own window, keeps the full paths (round 5 f)."""
         state = self._state(request_id)
         engine = self._orchestrator.build_engine
         collected: List[str] = []
@@ -631,7 +634,7 @@ class BuildService:
         end = total if before_line is None else max(0, min(total, int(before_line) - 1))
         begin = max(0, end - lines)
         chosen, size, cut = [], 0, False
-        clean = self._log_paths()
+        clean = (lambda text: text) if for_person else self._log_paths()
         for line in reversed(collected[begin:end]):  # newest first, so a cut drops the oldest lines
             text = clean(redact_secrets(line))
             if len(text) > LOG_LINE_CHARS:
@@ -647,14 +650,14 @@ class BuildService:
                        truncated=cut or first > 1)
 
     def _log_paths(self):
-        """A log line as an AI reads it (the log reaches AI callers only): a line with a path on this computer, such
-        as the output folder in the home folder, gets the framework's folders by label (output:<path>, builds:,
-        cache:, ...) and any other path by its file name (tools_runtime.label_paths), so no user name is left; a line
-        without one stays as it is, with the paths inside the build container. Folders that hold user names on any
-        system (/home/, /media/ and /run/media/ for removable disks, /Users/, C:\\Users\\) count as paths on this
+        """A log line as an AI reads it (every reader but the Builder's live log): a line with a path on this
+        computer, such as the output folder in the home folder, gets the framework's folders by label (output:<path>,
+        builds:, cache:, ...) and any other path by its file name (tools_runtime.label_paths), so no user name is left;
+        a line without one stays as it is, with the paths inside the build container. Folders that hold user names on
+        any system (/home/, /media/ and /run/media/ for removable disks, /Users/, C:\\Users\\) count as paths on this
         computer too, so a local model on a USB disk or in another user's folder is named by its file name."""
         import os
-        from orchestrator.Core.doctor import ai_folder_labels
+        from orchestrator.Core.mojo.views import ai_folder_labels
         from orchestrator.tools.tools_runtime import label_paths
         roots = ai_folder_labels(self.framework)
         home = str(Path.home())

@@ -6,9 +6,9 @@ Before every Deep Ingest, every index of the framework's own documents, every re
 the knowledge base is saved as a snapshot (`knowledge_snapshots/` in the per-user folder), so the change can be undone.
 There is no limit: the framework keeps as many as the disk holds and deletes none by itself, on any channel, and no
 count of them reminds or warns (DECISIONS, sixth round; round 5 f: deleting always asks the person, with the full
-list). `llm-cli knowledge
-snapshots` and Tools > Knowledge Snapshots... list each one with its full path, file name, size and what it is; to
-free space the person deletes the ones they choose (multiple choice, nothing ticked by default) or exports them.
+list). `llm-cli knowledge snapshots` and Tools > Knowledge Snapshots... list each one with its full path, file name,
+size and what it is; to free space the person deletes the ones they choose (multiple choice, nothing ticked by
+default) or exports them.
 
 - Deleting (`snapshot_plan`, `delete_snapshots`): exactly the snapshots the person ticked, after the person accepted
   that list in the framework's deletion dialog or at a terminal; into the trash (the default: restorable, the space

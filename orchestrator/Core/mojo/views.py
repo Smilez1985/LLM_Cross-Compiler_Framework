@@ -78,12 +78,21 @@ def labeller(framework) -> Callable[[Any], str]:
 AI_NEXT = {
     "miracle": 'When the person wants it repaired, call run_mojo_miracle {{"code": "{code}"}}; the framework shows '
                "them the plan first.",
-    "deletion_list": "No tool deletes: tell the person they choose what is deleted in the framework (Tools > "
-                     "Framework Build Images... in the GUI, or 'llmcf mojo --miracle' in a terminal).",
+    "deletion_list": "No tool deletes: tell the person they choose what is deleted in the framework ({where}).",
     "person": "Tell the person what Mojo Oracle found and the fix hint: only they can do it.",
     "admin": "Tell the person this needs an administrator, with the fix hint.",
     "not_automatic": "Say honestly that nothing repairs it automatically, and give the person the fix hint.",
 }
+# The person's list for a deletion finding (offers.DELETION_LISTS): the framework's build images
+IMAGE_LIST = "Tools > Framework Build Images... in the GUI, or 'llmcf mojo --miracle' in a terminal"
+
+
+def ai_next(verdict: str, code: str) -> str:
+    """What an AI does next about a finding's verdict (AI_NEXT). A deletion finding names the person's list that frees
+    it: the knowledge snapshots their own list (offers.OTHER_LISTS), never the build images, which free no snapshot
+    room."""
+    from orchestrator.Core.mojo.offers import OTHER_LISTS
+    return AI_NEXT[verdict].format(code=code, where=OTHER_LISTS.get(code, IMAGE_LIST))
 # How the summary sentence names each verdict that is no repair: (one, several) for the person and for an AI.
 _NOT_REPAIRED = {
     "deletion_list": (("needs your list of what to delete", "need your list of what to delete"),
@@ -103,7 +112,7 @@ def oracle_rows(framework, report: MojoReport, offered) -> List[Dict[str, Any]]:
     for row, finding in zip(ai_findings(framework, report), report.findings):
         offer = by_finding.get(id(finding))
         repair = None if offer is None else {"how": offer.verdict, "summary": label(offer.summary),
-                                             "next": AI_NEXT[offer.verdict].format(code=finding.code)}
+                                             "next": ai_next(offer.verdict, finding.code)}
         rows.append({**row, "where": label(finding.where), "why": label(finding.why), "repair": repair})
     return rows
 

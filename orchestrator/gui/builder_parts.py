@@ -262,7 +262,7 @@ class BuildProgressPanel(QWidget):
             return None
         self.show_status(status)
         try:
-            tail = service.log_tail(request_id, lines=TAIL_LINES)
+            tail = service.log_tail(request_id, lines=TAIL_LINES, for_person=True)  # the person's window: full paths
         except Exception:  # noqa: BLE001 - the status is shown; the log comes with the next poll
             tail = None
         if tail is not None:

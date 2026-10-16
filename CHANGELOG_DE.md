@@ -37,17 +37,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   die Frage von `start_build` sagt, wenn sie einen gleichen Build noch einmal baut. Nichts wird von selbst
   übersprungen. Jeder Build hält seine Optionen in `build_info.json` fest (`build_options` mit ihrem sha256).
 - **Platzprüfung vor jedem Wissens-Snapshot und ein Snapshot vor jedem Import eines Wissens-Packs** (achte Runde,
-  Antwort 2, N13): bevor ein Snapshot angelegt wird, wird seine Größe geschätzt. Passt er neben der Reserve, die
-  immer frei bleibt, nicht hin, wird kein Snapshot angelegt, und die Änderung läuft nicht (Deep Ingest, eine
-  Wiederherstellung, ein Pack-Import, die Code-Indexierung); ein „trotzdem weiter“ gibt es nicht. KI-Clients bekommen
-  vor der Frage den Blocker `snapshot_no_room` mit deiner Handlung; die GUI bietet **Knowledge Snapshots...** an, um
-  Snapshots zu löschen oder zu exportieren. Passt er, lässt aber wenig Platz, eine Lagewarnung (`disk_tight`). Ein
-  Import eines Wissens-Packs sichert die Wissensbasis jetzt zuerst (`pre_pack_<Zeit>`); ohne Platz wird nichts
-  aufgenommen, und das Pack wird später aufgenommen. Ein Pack, das sich noch nicht aufnehmen lässt, wird beim nächsten
-  Start ohne weiteren Snapshot noch einmal versucht, und ein belegter Name bekommt `-2`, so wird nie ein Snapshot
-  überschrieben. Die Wissenszeile von Mojo Oracle (mit Ort, Grund und dem Hinweis, dass nur deine Liste Platz schafft)
-  und `llm-cli knowledge snapshots` zeigen, was die Snapshots im Vergleich zum freien Platz belegen. Mojo prüft auch den
-  freien Platz des Build-Ordners des Frameworks. Nichts wird von selbst gelöscht.
+  Antwort 2, N13): bevor ein Snapshot angelegt wird, wird seine Größe geschätzt. Passt er neben der Reserve, die immer
+  frei bleibt, nicht hin, wird kein Snapshot angelegt, und die Änderung läuft nicht (Deep Ingest, eine
+  Wiederherstellung, ein Pack-Import, die Aufnahme der eigenen Dokumente des Frameworks); ein „trotzdem weiter“ gibt es
+  nicht. KI-Clients bekommen vor der Frage den Blocker `snapshot_no_room` mit deiner Handlung; die GUI bietet
+  **Knowledge Snapshots...** an, um Snapshots zu löschen oder zu exportieren. Passt er, lässt aber wenig Platz, eine
+  Lagewarnung (`disk_tight`). Ein Import eines Wissens-Packs sichert die Wissensbasis jetzt zuerst (`pre_pack_<Zeit>`);
+  ohne Platz wird nichts aufgenommen, und das Pack wird später aufgenommen. Ein Pack, das sich noch nicht aufnehmen
+  lässt, wird beim nächsten Start ohne weiteren Snapshot noch einmal versucht, und ein belegter Name bekommt `-2`, so
+  wird nie ein Snapshot überschrieben. Die Wissenszeile von Mojo Oracle (mit Ort, Grund und dem Hinweis, dass nur deine
+  Liste Platz schafft) und `llm-cli knowledge snapshots` zeigen, was die Snapshots im Vergleich zum freien Platz
+  belegen. Mojo prüft auch den freien Platz des Build-Ordners des Frameworks. Nichts wird von selbst gelöscht.
 - **Löschen mit der vollen Liste, und der Papierkorb** (Delegationsentwurf 3.10, Runde 5 f; Runde 6 10.4): Jedes
   Löschen von etwas, das du sehen kannst, fragt zuerst im eigenen Fenster des Frameworks (der Lösch-Dialog der GUI oder
   eine Tabelle und eine Frage im Terminal) und nennt jedes Teil mit Namen, vollem Pfad oder Docker-ID, Dateinamen,
@@ -1024,9 +1024,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   werden.
 - **Build-Fortschritt und Live-Protokoll im Builder** (`orchestrator/gui/builder_parts.py`): ein Fortschrittsbalken mit
   dem Schritt und dem Prozentwert aus dem Build-Service (der eigene Schritt des laufenden Builds, siehe Behoben) und
-  darunter das Protokoll des Builds live (Geheimnisse geschwärzt, reiner Text, jede Zeile einmal, höchstens 20.000
-  Zeilen in der Ansicht), mit Suchfeld und einem Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht
-  mehr liefert, werden vermerkt.
+  darunter das Protokoll des Builds live (Geheimnisse geschwärzt, volle Pfade, reiner Text, jede Zeile einmal, höchstens
+  20.000 Zeilen in der Ansicht; eine KI, die das Protokoll liest, bekommt die Ordner als Label), mit Suchfeld und einem
+  Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert, werden vermerkt.
 
 ### Geändert
 - **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte

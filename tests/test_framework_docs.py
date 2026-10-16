@@ -260,7 +260,10 @@ class TestTheTool:
         with pytest.raises(ToolError) as e:
             registry.call("index_framework_docs", {},
                           ToolContext("ditto", confirm=lambda s, i: asked.append(s) or True))
-        assert e.value.blocker == "disk_full" and asked == [], "no question, no 'continue anyway'"
+        # The same blocker as Deep Ingest, a restore and a pack import (eighth round, answer 2): the person's action is
+        # the snapshot list, not "free some disk space"
+        assert e.value.blocker == "snapshot_no_room" and asked == [], "no question, no 'continue anyway'"
+        assert "Knowledge Snapshots" in e.value.next and "Knowledge Snapshots" in e.value.person_action
         assert "knowledge snapshots disk" in str(e.value) and str(tmp_path) not in str(e.value)
         assert self.jobs.list() == [] and not any(s["source"].startswith("code:") for s in rag.list_sources())
 
@@ -288,7 +291,7 @@ class TestTheTool:
         with pytest.raises(ToolError) as e:
             registry.call("index_framework_docs", {},
                           ToolContext("ditto", confirm=lambda s, i: asked.append(s) or True))
-        assert e.value.blocker == "disk_full" and asked == [] and self.jobs.list() == []
+        assert e.value.blocker == "snapshot_no_room" and asked == [] and self.jobs.list() == []
 
     def test_a_failed_snapshot_fails_the_job_and_says_why(self, make_rag, tmp_path, monkeypatch):  # noqa: F811
         from orchestrator.rag.store import KnowledgeStore
@@ -305,6 +308,28 @@ class TestTheTool:
         assert job.state == "failed"
         assert "snapshot" in str(job.error) and "nothing was indexed" in str(job.error)
         assert str(tmp_path) not in str(job.error), "the AI gets no host path"
+        assert "code:README.md" not in {s["source"] for s in rag.list_sources()}
+
+    def test_a_snapshot_without_room_at_the_start_names_the_snapshot_list(self, make_rag, tmp_path,  # noqa: F811
+                                                                         monkeypatch):
+        """The disk filled up between the question and the job: the snapshot is refused for room (SnapshotNoRoom),
+        nothing is indexed, and the job says so with the person's way out (the snapshot list), like the refusal
+        before the question."""
+        from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom, SnapshotRoom
+        rag = make_rag()
+        fill(rag)
+        registry = self.registry(tmp_path, rag, framework_tree(tmp_path / "fw"), disk_usage=disk(90))
+
+        def no_room(*_a, **_k):
+            raise SnapshotNoRoom(SnapshotRoom(estimate=5 * GB, folder_bytes=0, check=None), "the index")
+        monkeypatch.setattr(rag, "create_snapshot", no_room)
+        out = registry.call("index_framework_docs", {}, ToolContext("ditto", confirm=lambda s, i: True))
+        deadline = time.monotonic() + 30
+        job = self.jobs.get(out.job_id)
+        while not job.finished and time.monotonic() < deadline:
+            job = self.jobs.wait(out.job_id, 1)
+        assert job.state == "failed" and "nothing was indexed" in str(job.error)
+        assert "did not fit" in str(job.error) and "Knowledge Snapshots" in str(job.error)
         assert "code:README.md" not in {s["source"] for s in rag.list_sources()}
 
     def test_the_job_names_the_files_it_did_not_index(self, make_rag, tmp_path):  # noqa: F811
