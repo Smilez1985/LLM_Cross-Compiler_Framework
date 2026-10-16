@@ -372,11 +372,18 @@ class CommunityHubWindow(QMainWindow):
             self.comm_manager.discard(prepared)
             self.status_label.setText("Not installed.")
             return
-        try:
-            dest = self.comm_manager.finish_install(prepared)
-        except Exception as e:
-            self.on_error(str(e))
-            return
+        # In the background like the download and the checks: a knowledge pack is imported into the knowledge base
+        # here (a snapshot first, then every page), which takes minutes. A failure arrives in on_error.
+        self.status_label.setText(ui_text("zoo.install.installing", self.lang, kind=prepared.manifest.kind,
+                                          id=one_line(prepared.manifest.id)))
+        self._run(self._finish_install, self._installed, prepared)
+
+    def _finish_install(self, prepared):
+        """In the worker: CommunityManager.finish_install (`llm-cli zoo install` after the person's "Yes")."""
+        return prepared, self.comm_manager.finish_install(prepared)
+
+    def _installed(self, result):
+        prepared, dest = result
         tm = getattr(self.framework_manager, "target_manager", None)
         if prepared.manifest.kind == "target" and tm is not None:
             tm.initialize()
@@ -605,9 +612,15 @@ class CommunityExportDialog(QDialog):
         self.create_btn.setEnabled(True)
 
     def submit(self):
+        """Open pull request: after the summary, the question of `llm-cli zoo export --pr` ("No" is the default):
+        publishing is a release of its own. Then submit_contribution in a worker thread."""
         from orchestrator.Core.community_manager import submit_contribution
+        from orchestrator.gui.plain import ask
         if self.result is None or self.result.encrypted:
             self.output.appendPlainText("\n" + self._t("zoo.export.encrypted_no_pr"))
+            return
+        if not ask(self, self._t("zoo.export.submit.title"), self._t("zoo.export.submit.ask")):
+            self.output.appendPlainText("\n" + self._t("zoo.export.submit.no", path=str(self.result.path)))
             return
         config = getattr(self.framework_manager, "config", None)
         repo = config.get("community_repo", "") if config is not None else ""
@@ -627,6 +640,8 @@ class CommunityExportDialog(QDialog):
         self.pr_btn.setEnabled(True)
 
     def done(self, result):
+        for edit in (self.passphrase_edit, self.passphrase2_edit):   # a typed passphrase never stays in the window
+            edit.clear()
         for task in (self._task, self._export_task):
             if task is not None:
                 task.wait(30000)

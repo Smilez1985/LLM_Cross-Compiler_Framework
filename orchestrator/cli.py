@@ -3942,12 +3942,13 @@ def knowledge_storage(click_ctx):
         click_ctx.invoke(knowledge_storage_show)
 
 
-def _print_storage_summary(info: Dict[str, Any], state_dir: Path, used: Optional[str] = None) -> None:
+def _print_storage_summary(info: Dict[str, Any], state_dir: Path, used: Optional[str] = None,
+                           server: bool = False) -> None:
     """The storage the knowledge base really uses (`used`: qdrant-edge, old-local or server, as an open knowledge base
-    named it; else as the records say, nothing opened), the conversion and the old folder (migration.storage_status:
-    Tools > Knowledge Snapshots... shows the same status)."""
+    named it; else a Qdrant server when `server` (setting qdrant_url), else as the records say, nothing opened), the
+    conversion and the old folder (migration.storage_status: Tools > Knowledge Snapshots... shows the same status)."""
     from orchestrator.rag import migration
-    for style, line in migration.storage_lines(migration.storage_status(state_dir, info, used)):
+    for style, line in migration.storage_lines(migration.storage_status(state_dir, info, used, server=server)):
         console.print(f"[{style}]{escape(line)}[/{style}]" if style else escape(line))
 
 
@@ -3959,7 +3960,8 @@ def knowledge_storage_show(ctx: FrameworkContext):
     from orchestrator.rag import migration
     ctx.require_framework()
     state_dir = Path(ctx.framework_manager.config.user_state_dir)
-    _print_storage_summary(migration.summary(state_dir), state_dir)
+    _print_storage_summary(migration.summary(state_dir), state_dir,
+                           server=migration.server_configured(ctx.framework_manager.config))
 
 
 @knowledge_storage.command('convert')
@@ -3970,11 +3972,15 @@ def knowledge_storage_convert(ctx: FrameworkContext):
     from orchestrator.rag import migration
     ctx.require_framework()
     state_dir = Path(ctx.framework_manager.config.user_state_dir)
-    refusal = migration.convert_refusal(state_dir)   # the GUI's [Convert now] is offered on the same condition
+    server = migration.server_configured(ctx.framework_manager.config)
+    refusal = migration.convert_refusal(state_dir, server)   # the GUI's [Convert now] is offered on the same condition
     if refusal == "nothing":
         console.print("There is no old storage to convert.")
-        _print_storage_summary(migration.summary(state_dir), state_dir)
+        _print_storage_summary(migration.summary(state_dir), state_dir, server=server)
         return
+    if refusal == "server":   # the knowledge base would open the server: nothing would be converted
+        console.print(f"[red]{escape(migration.SERVER_IN_USE)}; nothing was converted.[/red]")
+        sys.exit(1)
     if refusal == "engine_missing":
         console.print(f"[red]{escape(migration.ENGINE_MISSING)}; nothing can be converted.[/red]")
         sys.exit(1)

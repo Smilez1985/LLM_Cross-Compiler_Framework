@@ -128,6 +128,10 @@ EDGE_UNAVAILABLE = ("The knowledge base is stored in Qdrant Edge, but Qdrant Edg
 
 # Why the old storage is still in use before its conversion was tried (migration.current).
 NOT_CONVERTED = "the old storage has not been converted yet"
+# Why the old storage is not converted while a Qdrant server is set: the knowledge base opens the server, never the
+# local storage (RAGManager._open_client), so a conversion would convert nothing.
+SERVER_IN_USE = ("The knowledge base uses the Qdrant server (setting qdrant_url), so the local storage is not "
+                 "converted while it is set")
 
 
 def engine_available() -> bool:
@@ -669,10 +673,10 @@ def summary(state_dir: Path) -> Dict[str, Any]:
 class StorageStatus:
     """The storage of the local knowledge base as the person's status shows it (`storage_status`): the storage really
     in use (`used`: qdrant-edge, old-local, server, or "" when it cannot be opened, with the reason), why the old
-    storage is still in use (`reason`, and `reason_code`: engine_missing, not_converted, failed, edge_unavailable or
-    ""), the folder in use, the conversion record (converted or failed, when, how many excerpts, why it failed), the old
-    folder with its size, and whether `llm-cli knowledge storage convert` would convert now (`can_convert`). Full paths:
-    for the person, never for an AI."""
+    storage is still in use (`reason`, and `reason_code`: engine_missing, not_converted, failed, edge_unavailable,
+    server or ""), the folder in use, the conversion record (converted or failed, when, how many excerpts, why it
+    failed), the old folder with its size, and whether `llm-cli knowledge storage convert` would convert now
+    (`can_convert`). Full paths: for the person, never for an AI."""
     used: str = ""
     reason: str = ""
     reason_code: str = ""
@@ -688,13 +692,28 @@ class StorageStatus:
     can_convert: bool = False
 
 
-def convert_refusal(state_dir: Path) -> str:
+def server_configured(config: Any) -> bool:
+    """A Qdrant server is set (setting qdrant_url, as RAGManager reads it): the knowledge base then uses the server and
+    never the local storage. `config`: the framework's configuration (anything with get(key, default))."""
+    get = getattr(config, "get", None)
+    if not callable(get):
+        return False
+    try:
+        return bool(str(get("qdrant_url", "") or "").strip())
+    except Exception:  # noqa: BLE001 - a configuration that cannot be read names no server
+        return False
+
+
+def convert_refusal(state_dir: Path, server: bool = False) -> str:
     """Why `llm-cli knowledge storage convert` would not convert now: "nothing" (no old store, or Qdrant Edge is in use
-    already), "engine_missing" (no Qdrant Edge for this computer), or "" when it converts (also before any attempt and
-    after a failed one)."""
+    already), "server" (a Qdrant server is set: `server`, see server_configured; the knowledge base opens the server,
+    so nothing would be converted), "engine_missing" (no Qdrant Edge for this computer), or "" when it converts (also
+    before any attempt and after a failed one)."""
     state_dir = Path(state_dir)
     if not old_store_present(state_dir) or edge_in_use(state_dir):
         return "nothing"
+    if server:
+        return "server"
     if not engine_available():
         return "engine_missing"
     return ""
@@ -707,18 +726,26 @@ def _reason_code(reason: str, state: str) -> str:
         return "engine_missing"
     if reason == NOT_CONVERTED:
         return "not_converted"
+    if reason == SERVER_IN_USE:
+        return "server"
     return "failed" if state == "failed" else ""
 
 
 def storage_status(state_dir: Path, info: Optional[Dict[str, Any]] = None, used: Optional[str] = None,
-                   reason: str = "") -> StorageStatus:
+                   reason: str = "", server: bool = False) -> StorageStatus:
     """The storage status of the knowledge base in `state_dir`. `info`: migration.summary (read when not given);
     `used`: the storage an open knowledge base names (RAGManager.storage_format, or convert_storage's "used"), with its
-    `reason`; without it, as the records say (migration.current: nothing is opened or changed)."""
+    `reason`; without it, a Qdrant server when `server` (setting qdrant_url, see server_configured), else as the
+    records say (migration.current: nothing is opened or changed)."""
     state_dir = Path(state_dir)
     info = summary(state_dir) if info is None else info
     state = str(info.get("state") or "")
     code = ""
+    if not used and server:
+        used = "server"
+    server = server or used == "server"
+    if used == "server" and not reason and old_store_present(state_dir) and not edge_in_use(state_dir):
+        reason = SERVER_IN_USE   # the old storage stays as it is while the server is set
     if not used:
         try:
             use, reason = current(state_dir)
@@ -731,7 +758,7 @@ def storage_status(state_dir: Path, info: Optional[Dict[str, Any]] = None, used:
         converted_at=str(info.get("converted_at", "")), points=int(info.get("points") or 0),
         failed_at=str(info.get("failed_at", "")), failure=str(info.get("reason", "")), code=str(info.get("code") or ""),
         old_folder=str(info.get("old_folder") or ""), old_folder_bytes=int(info.get("old_folder_bytes") or 0),
-        can_convert=convert_refusal(state_dir) == "")
+        can_convert=convert_refusal(state_dir, server) == "")
 
 
 def storage_lines(status: StorageStatus) -> List[Tuple[str, str]]:
@@ -748,6 +775,8 @@ def storage_lines(status: StorageStatus) -> List[Tuple[str, str]]:
             lines.append(("", f"{status.reason}."))
     elif status.used == "server":
         lines.append(("", "Storage: a Qdrant server (setting qdrant_url); the local storage is not used."))
+        if status.reason:
+            lines.append(("", f"{status.reason}."))
     else:
         lines.append(("red", status.reason))
     if status.state == "converted":
