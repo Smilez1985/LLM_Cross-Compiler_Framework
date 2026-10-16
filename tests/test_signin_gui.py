@@ -657,3 +657,146 @@ def test_the_windows_build_no_markup_and_never_start_the_claude_command():
     source = (REPO_ROOT / "orchestrator" / "gui" / "signin_windows.py").read_text(encoding="utf-8")
     assert "setToolTip(" not in source and "RichText" not in source and "setHtml" not in source
     assert not re.search(r"subprocess|Popen|os\.system", source)
+
+
+# --- review of the chain (w5-signin-v) ------------------------------------------------------------------------------
+
+class MainStandIn:
+    """The parts of the main window the Security windows use: a widget parent with the framework."""
+
+    def __init__(self, framework):
+        from PySide6.QtWidgets import QWidget
+        self.widget = QWidget()
+        self.widget.framework = framework
+
+
+def gated_check(monkeypatch, gate, seen):
+    """SignIn.check answers only once `gate` is set (a slow network), and notes each provider it checked."""
+
+    def check(self, preset, spec, base_url=None, **kw):
+        seen.append(preset.id)
+        gate.wait(10)
+        return ValidationResult(ok=True, provider=preset.id, method=spec.id, models=3)
+
+    monkeypatch.setattr(SignIn, "check", check)
+
+
+def check_cell(dialog, label="OpenAI (Responses API)"):
+    row = next(r for r in range(dialog.table.rowCount()) if dialog.table.item(r, 0).text().endswith(label))
+    return dialog.table.item(row, 5).text()
+
+
+class TestReviewFindings:
+
+    def test_typing_the_old_address_back_remembers_it(self, qapp, tmp_path, home):
+        """The address the field compares with is the one configured now, not the one that filled it first: after
+        Use this method remembered a new address, typing the old one back and Use again remembers the old one."""
+        vault = open_vault(home)
+        dialog, service = overview(tmp_path, vault)
+        dialog.select_provider("ollama")
+        panel = dialog.panel
+        assert wait_for(qapp, lambda: not panel.busy and panel.txt_base_url.text())
+        first = panel.txt_base_url.text()
+        panel.txt_base_url.setText("http://127.0.0.1:11500/v1")
+        panel.txt_base_url.setModified(True)  # as typed
+        panel.forms["none"].btn_use.click()
+        assert wait_for(qapp, lambda: not panel.busy and not dialog.busy)
+        assert service.config.get("ai_base_url_ollama") == "http://127.0.0.1:11500/v1"
+        panel.txt_base_url.setText(first)
+        panel.txt_base_url.setModified(True)
+        panel.forms["none"].btn_use.click()
+        assert wait_for(qapp, lambda: not panel.busy and not dialog.busy)
+        assert service.config.get("ai_base_url_ollama") == first, "the address in the field is what Ditto uses"
+
+    def test_a_second_click_on_the_menu_entry_keeps_the_running_check_all(self, qapp, tmp_path, home, monkeypatch):
+        import threading as _threading
+        from orchestrator.gui.signin_windows import open_overview
+        vault = open_vault(home)
+        framework = framework_for(tmp_path, vault)
+        service = SignIn(framework.config, vault)
+        openai = service.catalog.get("openai")
+        service.save_key(openai, openai.method("api_key"), OPENAI_KEY)
+        main = MainStandIn(framework)
+        dialog = open_overview(main.widget)
+        assert wait_for(qapp, lambda: not dialog.busy and not dialog.panel.busy)
+        gate, seen = _threading.Event(), []
+        gated_check(monkeypatch, gate, seen)
+        dialog.btn_check_all.click()
+        assert wait_for(qapp, lambda: "openai" in seen)
+        assert open_overview(main.widget) is dialog  # the person clicks Security > Sign-in Overview... again
+        gate.set()
+        assert wait_for(qapp, lambda: not dialog.busy and not dialog.panel.busy)
+        assert check_cell(dialog) == "Valid, 3 models", "the check's result is shown, not thrown away"
+        assert dialog.lbl_state.text().startswith("Checked: ")
+        dialog.close()
+
+    def test_a_change_in_the_panel_during_check_all_keeps_the_check_and_reads_again(self, qapp, tmp_path, home,
+                                                                                    monkeypatch):
+        import threading as _threading
+        vault = open_vault(home)
+        dialog, service = overview(tmp_path, vault)
+        openai = service.catalog.get("openai")
+        service.save_key(openai, openai.method("api_key"), OPENAI_KEY)
+        dialog.select_provider("ollama")
+        assert wait_for(qapp, lambda: not dialog.panel.busy)
+        gate, seen = _threading.Event(), []
+        gated_check(monkeypatch, gate, seen)
+        reads = []
+        real = RecordingService.status_all
+        monkeypatch.setattr(RecordingService, "status_all",
+                            lambda self, check=False: reads.append(check) or real(self, check=check))
+        dialog.btn_check_all.click()
+        assert wait_for(qapp, lambda: "openai" in seen)
+        service.config.set("ai_base_url_ollama", "http://127.0.0.1:11500/v1")
+        dialog.panel.changed.emit()  # the person saved something in the panel while the check runs
+        gate.set()
+        assert wait_for(qapp, lambda: not dialog.busy and reads[-1:] == [False])
+        assert reads == [True, False], "read again after the check, with what changed meanwhile"
+        assert check_cell(dialog) == "Valid, 3 models", "an unchanged credential keeps its check"
+        assert dialog.lbl_state.text().startswith("Checked: ")
+
+    def test_reopening_the_overview_reads_the_shown_provider_again(self, qapp, tmp_path, home, monkeypatch):
+        from orchestrator.gui.signin_windows import open_overview
+        vault = open_vault(home)
+        main = MainStandIn(framework_for(tmp_path, vault))
+        dialog = open_overview(main.widget)
+        assert wait_for(qapp, lambda: not dialog.busy and not dialog.panel.busy)
+        panel = dialog.panel
+        refreshed = []
+        monkeypatch.setattr(panel, "refresh", lambda: refreshed.append(True))
+        assert open_overview(main.widget) is dialog and dialog.panel is panel
+        assert refreshed == [True], "fresh data each time the window is opened, also in the provider's panel"
+        assert wait_for(qapp, lambda: not dialog.busy)
+        dialog.close()
+
+    def test_closing_a_window_forgets_what_was_typed_and_not_stored(self, qapp, tmp_path, home):
+        from orchestrator.gui.signin_windows import SecretsWindow
+        vault = open_vault(home)
+        secrets = SecretsWindow(framework_for(tmp_path, vault))
+        secrets.show()
+        secrets.txt_value.setText(HF_TOKEN)
+        secrets.txt_repeat.setText(HF_TOKEN)
+        secrets.reject()  # Close, Escape or the window's X
+        assert secrets.txt_value.text() == "" and secrets.txt_repeat.text() == ""
+        dialog, _ = overview(tmp_path, vault)
+        dialog.show()
+        dialog.select_provider("openai")
+        assert wait_for(qapp, lambda: not dialog.panel.busy)
+        dialog.panel.forms["api_key"].txt_key.setText(OPENAI_KEY)
+        dialog.reject()
+        assert dialog.panel.forms["api_key"].txt_key.text() == ""
+
+    def test_without_a_vault_the_window_says_so_in_the_persons_language(self, qapp, tmp_path):
+        from orchestrator.gui.signin_windows import SecretsWindow
+        for lang, text in (("en", "The credential vault is not available in this process."),
+                           ("de", "Der Tresor für Zugangsdaten ist in diesem Prozess nicht verfügbar.")):
+            dialog = SecretsWindow(SimpleNamespace(config=None, secrets_manager=None), lang=lang)
+            dialog.reload()
+            assert wait_for(qapp, lambda: not dialog.busy)
+            assert dialog.lbl_count.text().endswith(text), dialog.lbl_count.text()
+            dialog.cb_name.setCurrentText("hf_token")
+            dialog.txt_value.setText("v")
+            dialog.txt_repeat.setText("v")
+            dialog.store()
+            assert wait_for(qapp, lambda: not dialog.busy)
+            assert dialog.lbl_result.text() == text

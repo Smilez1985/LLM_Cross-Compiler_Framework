@@ -31,9 +31,10 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogBut
                                QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from orchestrator.Core.secret_entries import (KIND_KNOWN, KIND_PROVIDER, KNOWN_SECRETS, SecretNotStored,
-                                              secret_entries, store_secret)
+                                              SecretsUnavailable, secret_entries, store_secret)
 from orchestrator.gui.plain import ask, button_text, one_line, plain_label
-from orchestrator.gui.sign_in import ERROR_STYLE, OK_STYLE, SignInPanel, StorageChooser, Worker, error_text
+from orchestrator.gui.sign_in import (ERROR_STYLE, OK_STYLE, KeyForm, SignInPanel, StorageChooser, Worker,
+                                      error_text)
 from orchestrator.llm.auth.signin import STORAGE, SignIn, method_infos, status_line
 from orchestrator.llm.auth.spec import TYPE_LABELS
 from orchestrator.utils.localization import ui_text
@@ -104,6 +105,21 @@ class _Window(QDialog):
 
     def _action_buttons(self) -> List[QPushButton]:
         return []
+
+    def done(self, result: int) -> None:
+        """Close, Escape or the window's X: what was typed into a secret field and not stored is forgotten, so the
+        window (kept for the next click on its menu entry) never holds it while it is hidden."""
+        for edit in self._secret_fields():
+            edit.clear()
+        super().done(result)
+
+    def _secret_fields(self) -> List[QLineEdit]:
+        return []
+
+    def _error(self, error: BaseException) -> str:
+        if isinstance(error, SecretsUnavailable):
+            return self._t("signin.menu.no_vault")
+        return error_text(error)
 
     @staticmethod
     def _show(label, text: str, ok: Optional[bool] = None) -> None:
@@ -181,6 +197,9 @@ class SecretsWindow(_Window):
     def _action_buttons(self) -> List[QPushButton]:
         return [self.btn_store, self.btn_refresh]
 
+    def _secret_fields(self) -> List[QLineEdit]:
+        return [self.txt_value, self.txt_repeat]
+
     def reload(self) -> None:
         """Reads the names in a worker (the vault may wait for its lock or the keyring)."""
         sm = getattr(self.framework, "secrets_manager", None)
@@ -198,7 +217,7 @@ class SecretsWindow(_Window):
         if error is not None:
             self.entries = []
             self.table.setRowCount(0)
-            self.lbl_count.setText(self._t("secrets.list_failed", reason=error_text(error)))
+            self.lbl_count.setText(self._t("secrets.list_failed", reason=self._error(error)))
             return
         self.entries = list(entries)
         self.table.setRowCount(len(self.entries))
@@ -243,7 +262,7 @@ class SecretsWindow(_Window):
             self._show(self.lbl_result, self._t("secrets.failed", name=one_line(error.name)), False)
             return
         if error is not None:
-            self._show(self.lbl_result, error_text(error), False)
+            self._show(self.lbl_result, self._error(error), False)
             return
         self.txt_value.clear()
         self.txt_repeat.clear()
@@ -269,6 +288,10 @@ class SignInOverviewWindow(_Window):
         self.statuses: Dict[str, Any] = {}
         self.panel: Optional[SignInPanel] = None
         self._request = 0
+        self._checking = False          # Check all is running
+        self._read_after_check = False  # something changed meanwhile: read every provider again once it is back
+        self._checked: Dict[str, Any] = {}  # provider -> (its credential, the check's text) of the last Check all
+        self._summary = ""
         layout = QVBoxLayout(self)
         layout.addWidget(plain_label(self._t("signin.overview.intro")))
         self.table = _table(STATUS_COLUMNS, lang, "tbl_signin_status", self)
@@ -309,6 +332,11 @@ class SignInOverviewWindow(_Window):
     def _action_buttons(self) -> List[QPushButton]:
         return [self.btn_check_all, self.btn_refresh]
 
+    def _secret_fields(self) -> List[QLineEdit]:
+        if self.panel is None:
+            return []
+        return [form.txt_key for form in self.panel.forms.values() if isinstance(form, KeyForm)]
+
     # --- the methods (the catalog only: no vault, no network) -----------------------------------------------
     def _fill_methods(self) -> None:
         rows = []
@@ -341,8 +369,14 @@ class SignInOverviewWindow(_Window):
         self._run(True)
 
     def _run(self, check: bool) -> None:
+        if self._checking and not check:
+            # Check all is running and brings every provider's status too: its result is not thrown away; what
+            # changed meanwhile (a key saved in the panel) is read once it is back.
+            self._read_after_check = True
+            return
         service = self.service
         self._request += 1
+        self._checking = check
         self.lbl_state.setText(self._t("signin.overview.checking" if check else "signin.overview.reading"))
         self.worker.run("overview-check" if check else "overview",
                         lambda: (service.status_all(check=check), service.storage()),
@@ -360,9 +394,25 @@ class SignInOverviewWindow(_Window):
             return self._t("signin.source.runtime")
         return "-"
 
+    @staticmethod
+    def _credential(st) -> tuple:
+        """What a check result belongs to: the method, where the credential comes from, its last four characters
+        and the state. A later read keeps the check of a credential that did not change."""
+        return st.method, st.source, st.last4, st.state
+
     def _on_status(self, request: int, check: bool, result, error) -> None:
         if request != self._request:
             return  # an older read that finished late
+        read_again = check and self._read_after_check
+        if check:
+            self._checking = self._read_after_check = False
+        try:
+            self._show_status(check, result, error)
+        finally:
+            if read_again:
+                self._run(False)
+
+    def _show_status(self, check: bool, result, error) -> None:
         if error is not None:
             self.lbl_state.setText(self._t("signin.overview.failed", reason=error_text(error)))
             return
@@ -376,7 +426,13 @@ class SignInOverviewWindow(_Window):
                                          st.fields.get("workspace_id")) if p)
             state = self._t("signin.overview.storage_state") if st.state == STORAGE else status_line(
                 st, self._translate)
-            checked = st.check.message if st.check is not None else "-"
+            credential = self._credential(st)
+            if check:
+                checked = st.check.message if st.check is not None else "-"
+                self._checked[preset.id] = (credential, checked)
+            else:
+                last = self._checked.get(preset.id)
+                checked = last[1] if last is not None and last[0] == credential else "-"
             values = (("* " if st.primary else "") + st.label, st.method_label or "-", self._source(st), key or "-",
                       state, checked)
             for column, value in enumerate(values):
@@ -392,10 +448,13 @@ class SignInOverviewWindow(_Window):
                                            reason=problem.get("message") or problem.get("code") or "-"))
         if check:
             done = [st.check for st in statuses if st.check is not None]
-            self.lbl_state.setText(self._t("signin.overview.checked", ok=sum(1 for c in done if c.ok),
-                                           failed=sum(1 for c in done if not c.ok)))
+            self._summary = self._t("signin.overview.checked", ok=sum(1 for c in done if c.ok),
+                                    failed=sum(1 for c in done if not c.ok))
+            self.lbl_state.setText(self._summary)
         else:
-            self.lbl_state.setText("")
+            kept = any(self.table.item(row, 5) is not None and self.table.item(row, 5).text() != "-"
+                       for row in range(self.table.rowCount()))
+            self.lbl_state.setText(self._summary if kept else "")
 
     # --- the selected provider's sign-in ----------------------------------------------------------------------
     def selected_provider(self) -> Optional[str]:
@@ -549,7 +608,10 @@ def _open(window: Any, which: str):
     if dialog is None:
         dialog = cls(window.framework, window)
         setattr(window, attribute, dialog)
-    dialog.reload()
+    if not dialog.busy:
+        # Fresh data each time it opens; while its own work runs (Check all, Store, Rotate key...), that work
+        # brings fresh data when it is done, and a new read would only throw its result away.
+        dialog.reload()
     dialog.show()
     dialog.raise_()
     return dialog
@@ -566,6 +628,8 @@ def open_overview(window: Any) -> SignInOverviewWindow:
     if dialog.selected_provider() is None and dialog.presets:
         primary = next((p.id for p in dialog.presets if dialog.service.client.is_primary(p)), dialog.presets[0].id)
         dialog.select_provider(primary)
+    elif dialog.panel is not None and not dialog.panel.busy:
+        dialog.panel.refresh()  # the provider shown since the last time: its sign-in may have changed meanwhile
     return dialog
 
 

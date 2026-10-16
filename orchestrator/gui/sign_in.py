@@ -640,8 +640,8 @@ class SignInPanel(QWidget):
 
     def _remember_url(self) -> bool:
         """An address given to the panel (the AI settings' field) or typed in its own field is remembered for this
-        provider only (ai_base_url_<provider>, as `llmcf ditto login --base-url`); the configured address that only
-        filled the field is not written again."""
+        provider only (ai_base_url_<provider>, as `llmcf ditto login --base-url`); the address configured now (the
+        one that filled the field, or the last one remembered) is not written again."""
         if self.txt_base_url is not None:
             text = self.txt_base_url.text().strip()
             return bool(text) and text != self._prefilled_url
@@ -703,8 +703,11 @@ class SignInPanel(QWidget):
             self.lbl_status.setText(error_text(error))
             return
         status, problem, env_names, configured = result
-        if self.txt_base_url is not None and configured and not self.txt_base_url.isModified():
-            self.txt_base_url.setText(configured)
+        if self.txt_base_url is not None:
+            if configured and not self.txt_base_url.isModified():
+                self.txt_base_url.setText(configured)
+            # The address configured now (also after Save remembered a typed one): an address typed in the field is
+            # remembered whenever it differs from it, so typing the previous address back remembers that one again.
             self._prefilled_url = configured
         for method_id, name in env_names.items():
             form = self.forms.get(method_id)
