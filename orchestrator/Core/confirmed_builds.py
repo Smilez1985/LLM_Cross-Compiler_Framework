@@ -18,8 +18,7 @@ An entry names the pack as installed (its `installed_via` and pack sha256): a re
 approval or an updated pack needs a new confirmation. It also keeps the digest-pinned base images of the target's
 Dockerfile at the time of the confirmed build: a build standing approval covers a base image outside the Docker
 Official Images only when the person confirmed a build with exactly that pinned image before. A module an AI created
-is bound to its content (`definition_sha256`): one recreated under the same name needs a new confirmation. A built
-model fetched from another computer is bound to its sha256 (kind `artifact`).
+is bound to its content (`definition_sha256`): one recreated under the same name needs a new confirmation.
 
 The file lives in the per-user folder (`confirmed_builds.json`, mode 0600), written under a lock by framework code
 only, after a confirmed build was accepted; no tool writes it from its arguments. It is signed like the permission
@@ -41,9 +40,10 @@ FILE_NAME = "confirmed_builds.json"
 KIND = "confirmed_builds"   # the signed file kind
 MAX_ENTRIES = 2000
 MAX_IMAGES = 16
-# What can be confirmed: a target or recipe as installed (pack sha256), a module an AI created (its content), and a
-# built model fetched from another computer (its sha256).
-KINDS = ("target", "recipe", "module", "artifact")
+# What can be confirmed: a target or recipe as installed (pack sha256) and a module an AI created (its content). An
+# entry of the kind `artifact` (a model fetched from another computer, planned for the removed remote mode) is never
+# written and never matched.
+KINDS = ("target", "recipe", "module")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 # Confirmation channels where the person answered the framework's own question (registry: ctx.confirm_channel).
 PERSON_CHANNELS = ("framework", "framework-gui", "framework-cli")
@@ -137,16 +137,13 @@ class ConfirmedBuilds:
         return self._load().get(_key(kind, item_id))
 
     def record(self, kind: str, item_id: str, *, installed_via: str = "", pack_sha256: str = "",
-               base_images: Iterable[str] = (), channel: str = "", definition_sha256: str = "",
-               sha256: str = "") -> bool:
-        """Records a confirmed build of a target, a recipe or an AI-made module (bound to `definition_sha256`), or a
-        confirmed deploy of a fetched model (bound to its `sha256`); False (nothing written) unless `channel` is a
-        confirmation by the person in the framework's own window, or the content it binds to is missing."""
+               base_images: Iterable[str] = (), channel: str = "", definition_sha256: str = "") -> bool:
+        """Records a confirmed build of a target, a recipe or an AI-made module (bound to `definition_sha256`); False
+        (nothing written) unless `channel` is a confirmation by the person in the framework's own window, or the
+        content it binds to is missing."""
         if kind not in KINDS or not item_id or not person_confirmed(channel):
             return False
         if kind == "module" and not _SHA256.fullmatch(definition_sha256 or ""):
-            return False
-        if kind == "artifact" and not _SHA256.fullmatch(sha256 or ""):
             return False
         images: List[str] = [i for i in dict.fromkeys(base_images) if pinned(i)][:MAX_IMAGES]
         with file_lock(self.state_dir / f".{FILE_NAME}.lock", timeout=10):
@@ -155,12 +152,11 @@ class ConfirmedBuilds:
             old = items.get(key) or {}
             same = all(old.get(f, "") == (v or "") for f, v in (("installed_via", installed_via),
                                                                   ("pack_sha256", pack_sha256),
-                                                                  ("definition_sha256", definition_sha256),
-                                                                  ("sha256", sha256)))
+                                                                  ("definition_sha256", definition_sha256)))
             if same:  # the same installed pack: keep the images confirmed earlier too
                 images = list(dict.fromkeys(list(old.get("base_images") or []) + images))[-MAX_IMAGES:]
             items[key] = {"installed_via": installed_via or "", "pack_sha256": pack_sha256 or "",
-                          "definition_sha256": definition_sha256 or "", "sha256": sha256 or "",
+                          "definition_sha256": definition_sha256 or "",
                           "base_images": images, "channel": str(channel)[:80],
                           "confirmed": datetime.now(timezone.utc).isoformat(timespec="seconds")}
             if len(items) > MAX_ENTRIES:  # the oldest confirmations go first
@@ -170,21 +166,17 @@ class ConfirmedBuilds:
         return True
 
     def confirmed(self, kind: str, item_id: str, *, installed_via: str = "", pack_sha256: str = "",
-                  definition_sha256: str = "", sha256: str = "") -> bool:
+                  definition_sha256: str = "") -> bool:
         """Whether the person confirmed a build of exactly this installed pack (same standing approval it was
-        installed under, same pack sha256), of exactly this module content, or a deploy of exactly this fetched
-        model."""
-        entry = self.get(kind, item_id)
+        installed under, same pack sha256) or of exactly this module content."""
+        entry = self.get(kind, item_id) if kind in KINDS else None
         if entry is None:
             return False
         if kind == "module" and not definition_sha256:
             return False  # a module is only ever confirmed for its content
-        if kind == "artifact" and not sha256:
-            return False
         return all(entry.get(f, "") == (v or "") for f, v in (("installed_via", installed_via),
                                                                ("pack_sha256", pack_sha256),
-                                                               ("definition_sha256", definition_sha256),
-                                                               ("sha256", sha256)))
+                                                               ("definition_sha256", definition_sha256)))
 
     def image_confirmed(self, target_id: str, image: str, *, installed_via: str = "", pack_sha256: str = "") -> bool:
         """Whether the person confirmed a build of this target with exactly this digest-pinned base image."""

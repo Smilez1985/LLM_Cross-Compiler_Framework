@@ -156,8 +156,9 @@ class TestRemovedSettingsAndCode:
         assert not hasattr(DockerManager, "ensure_qdrant_service")
         for name in ("get_available_tiny_models", "is_tiny_model_installed", "download_tiny_model"):
             assert not hasattr(ModelManager, name), name
-        # image_qdrant stays: deployment packages ship Qdrant to the device (deployment_manager).
-        assert "image_qdrant" in ConfigManager().config_schemas
+        # image_qdrant is retired with the Qdrant sidecar device packages no longer ship (N15).
+        from orchestrator.Core.config_manager import RETIRED_SETTINGS
+        assert "image_qdrant" not in ConfigManager().config_schemas and "image_qdrant" in RETIRED_SETTINGS
 
 
 class TestFeaturesInDevelopment:

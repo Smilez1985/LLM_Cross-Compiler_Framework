@@ -540,8 +540,8 @@ _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 def _coded(error: Exception, code: Optional[str], field: str = "", blocker: str = "") -> Exception:
     """Remembers why a call was refused or failed (a reason code of normalize.CODES, the argument it is about, and the
     facts catalogue's blocker that refused it before any question), so the result carries it as structured content
-    {"error": {"code", "field", "blocker"}} next to the text: a client such as Ditto in MCP-client mode reads the code
-    instead of guessing it from the words. Framework facts only, never external text."""
+    {"error": {"code", "field", "blocker"}} next to the text: a client reads the code instead of guessing it from the
+    words. Framework facts only, never external text."""
     from orchestrator.tools.facts_catalog import BLOCKERS
     from orchestrator.tools.normalize import CODES
     box = _ERROR_FACTS.get()

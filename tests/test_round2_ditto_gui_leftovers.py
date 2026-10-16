@@ -6,6 +6,8 @@
 - A deploy's job writes its own end entry to the audit log, linked to the call's `started` entry.
 - Board and local runtime tool errors name the framework's folders by label and other paths by file name only: no
   host path, no "~/...".
+- The GUI's workers reach the GUI thread through the one WorkerRelay; the Stop texts say a page still arriving is
+  abandoned. (Moved here from the removed remote-mode tests.)
 """
 
 import ast
@@ -219,3 +221,61 @@ class TestNoPathsInRuntimeErrors:
         assert "state:devices/x/probe.txt" in message and "probe.txt" in message
         status = fm.tool_registry.call("get_job_status", {"job_id": started.job_id}, ToolContext("ditto", session="s"))
         assert "~/" not in json.dumps(status.model_dump(mode="json"))
+
+
+# --- one relay for the GUI's workers ---------------------------------------------------------------------------------
+
+def test_no_gui_worker_emits_on_a_qobject_of_its_own():
+    """The module wizard's AI import used a WizardSignals object it created and a plain thread emitted on (a closed
+    wizard could take it with it); the AI settings kept a relay of their own. Both use the one WorkerRelay now."""
+    root = REPO_ROOT / "orchestrator" / "gui"
+    wizards = (root / "wizards.py").read_text(encoding="utf-8")
+    dialogs = (root / "dialogs.py").read_text(encoding="utf-8")
+    assert "WizardSignals" not in wizards and "worker_relay()" in wizards
+    assert "_ModelListRelay" not in dialogs and "worker_relay()" in dialogs
+    tree = ast.parse(dialogs)
+    signals = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "Signal"]
+    assert signals == [], "dialogs.py defines no signal of its own for workers"
+
+
+def test_the_ai_import_answer_reaches_the_gui_thread_through_the_relay(qapp, tmp_path, monkeypatch):
+    import threading
+    import time
+    from orchestrator.gui import wizards
+    arrived = []
+    monkeypatch.setattr(wizards.ModuleCreationWizard, "on_ai_finished",
+                        lambda self, config: arrived.append((threading.current_thread() is threading.main_thread(),
+                                                             config)))
+    monkeypatch.setattr(wizards.ModuleCreationWizard, "on_ai_error", lambda self, err: arrived.append(("error", err)))
+    wizard = wizards.ModuleCreationWizard(tmp_path)
+    other = wizards.ModuleCreationWizard(tmp_path)
+
+    class Ditto:
+        def generate_module(self, path):
+            return SimpleNamespace(model_dump=lambda: {"module_name": "X"})
+    token = wizard._ai_request = object()
+    from orchestrator.gui.worker_relay import worker_relay
+    worker = threading.Thread(target=wizards.ModuleCreationWizard._ai_worker,
+                              args=(Ditto(), tmp_path / "p.txt", token, worker_relay()))
+    worker.start()
+    worker.join(5)
+    deadline = time.monotonic() + 5
+    while len(arrived) < 1 and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    qapp.processEvents()
+    assert arrived == [(True, {"module_name": "X"})], "only the wizard that asked, in the GUI thread"
+    wizard.deleteLater()
+    other.deleteLater()
+
+
+# --- Stop texts ----------------------------------------------------------------------------------------------------
+
+def test_stop_texts_say_a_page_still_arriving_is_abandoned():
+    from orchestrator.utils.localization import ui_text
+    assert "abandoned" in ui_text("crawl.stopping", "en") and "after the current page" not in ui_text(
+        "crawl.stopping", "en")
+    assert "verworfen" in ui_text("crawl.stopping", "de") and "nach der aktuellen Seite" not in ui_text(
+        "crawl.stopping", "de")
+    wizards = (REPO_ROOT / "orchestrator" / "gui" / "wizards.py").read_text(encoding="utf-8")
+    assert "after the current page" not in wizards

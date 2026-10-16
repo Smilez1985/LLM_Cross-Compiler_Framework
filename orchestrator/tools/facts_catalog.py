@@ -30,13 +30,13 @@ from typing import Any, Dict, FrozenSet, List, Literal, Mapping, Optional, Tuple
 from orchestrator.tools.spec import CallWarning
 
 # Raised whenever SECURITY_LEGAL or a blocker's reason code changes (the snapshot test pins it): every delegation made
-# under an older version is outdated and must be renewed by the person.
-DELEGATION_RULES_VERSION = 1
+# under an older version is outdated and must be renewed by the person. 2: the remote mode's codes are gone
+# (artifact_from_other_computer, transfer_unsupported; DECISIONS round 8).
+DELEGATION_RULES_VERSION = 2
 
 # Starting values (design [A7]), tuned with the evals.
 GB = 1000 ** 3
 LARGE_DOWNLOAD_BYTES = 20 * GB
-LARGE_TRANSFER_BYTES = 4 * GB
 MANY_PAGES = 100          # pages a crawl may store in all, from which it says so
 SIZE_CLASSES = (5, 20, 50, 200)
 
@@ -118,7 +118,6 @@ BLOCKERS: Dict[str, BlockerSpec] = {
     "commit_required": BlockerSpec("needs_person", person_action="action.commit_required"),
     "trash_not_yours": BlockerSpec("needs_person", person_action="action.restore_yourself"),
     "file_outside_folders": BlockerSpec("needs_person", person_action="action.add_folder"),
-    "transfer_unsupported": BlockerSpec("not_supported"),
     "file_changed": BlockerSpec("unknown_id"),
 }
 
@@ -164,11 +163,6 @@ WARNINGS: Dict[str, WarningSpec] = {
         "situation", "Replaces the model on the board.", _ASKED),
     "untested_module": WarningSpec(
         "situation", "Nobody has run this module on the board yet; its builds say so.", "yes"),
-    "large_transfer": WarningSpec(
-        "situation", "Copies about {size_gb} GB to the other computer.", _ASKED),
-    "slow_link": WarningSpec(
-        "situation", "The connection to the other computer moved {mbps} MB/s last time: about {minutes} minutes.",
-        _ASKED),
     # security: always the person
     "pickle_weights": WarningSpec(
         "security", "The weights are PyTorch pickle files (.bin/.pt): loading them can run code.",
@@ -181,8 +175,7 @@ WARNINGS: Dict[str, WarningSpec] = {
         "security",
         "{what}: {count} entries, more than the usual {cap} (soft limit; only the person can override it)."),
     "target_unreviewed": WarningSpec(
-        "security", "The target's scripts were not reviewed (imported from a file or transferred from another "
-                    "computer)."),
+        "security", "The target's scripts were not reviewed (imported from a file)."),
     "target_pack_community": WarningSpec(
         "security", "Community target pack: scripts reviewed, not reproduced independently."),
     "first_build_unconfirmed": WarningSpec(
@@ -198,9 +191,6 @@ WARNINGS: Dict[str, WarningSpec] = {
     "facts_unknown": WarningSpec(
         "security", "Could not be checked: {unknown} (for example Hugging Face did not answer); licence, gating or "
                     "file format may be unsafe, so only the person decides."),
-    "artifact_from_other_computer": WarningSpec(
-        "security", "This model was built on another computer; the person confirms it once before it goes onto a "
-                    "board."),
     # legal: always the person; an AI never accepts a licence
     "gated_model": WarningSpec(
         "legal", "Gated model: its conditions were accepted on huggingface.co with the person's account."),
@@ -231,7 +221,6 @@ NUMBER_KEYS: Dict[str, Tuple[FrozenSet[str], FrozenSet[str]]] = {
     "start_recipe_build": _BUILD_NUMBERS,
     "download_hf_file": (frozenset({"size_class"}), frozenset({"size_bytes", "free_after_bytes", "reserve_bytes"})),
     "crawl_docs_site": (frozenset({"start_urls", "max_pages", "max_depth"}), frozenset()),
-    "transfer_object": (frozenset({"size_class", "method"}), frozenset({"size_bytes", "free_after_bytes", "mbps"})),
     "add_pack_from_index": (frozenset({"size_class"}), frozenset({"size_bytes", "free_after_bytes", "reserve_bytes"})),
     "create_deploy_package": (frozenset({"size_class"}),
                               frozenset({"needed_bytes", "free_after_bytes", "reserve_bytes"})),
@@ -294,10 +283,12 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
         "running: stop; done: restore the snapshot taken before (backup first)"),
     "restore_knowledge_snapshot": ToolFacts(_FS({"snapshot_unknown", "knowledge_off", "disk_full"}), _FS(), _FS(),
                                             "knowledge", "restore the backup snapshot"),
+    "index_framework_docs": ToolFacts(_FS({"knowledge_off", "disk_full"}), _FS({"disk_tight"}), _FS(), "knowledge",
+                                      "running: stop; done: restore the snapshot taken before (backup first)"),
     "create_deploy_package": ToolFacts(_FS({"disk_full", "image_problem", "artifact_unknown"}), _FS({"disk_tight"}),
-                                       _FS({"artifact_from_other_computer"}), "builds",
+                                       _FS(), "builds",
                                        "delete the package (deletion dialog)"),
-    "deploy_to_device": ToolFacts(_DEVICE, _FS({"device_model_replaced"}), _FS({"artifact_from_other_computer"}),
+    "deploy_to_device": ToolFacts(_DEVICE, _FS({"device_model_replaced"}), _FS(),
                                   "devices", "cannot: the files are on the board; remove them there"),
     "probe_local_hardware": ToolFacts(delegable="hardware", undo="nothing to undo"),
     "probe_remote_device": ToolFacts(_DEVICE, delegable="devices", undo="nothing to undo"),
@@ -324,16 +315,11 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                                      undo="stop it again"),
     "stop_local_runtime": ToolFacts(delegable="runtime", undo="start it again"),
     "run_benchmark": ToolFacts(_FS({"not_gguf", "artifact_unknown", "model_not_downloaded"}), _FS(),
-                               _FS({"untrusted_model_native", "artifact_from_other_computer"}), "runtime"),
+                               _FS({"untrusted_model_native"}), "runtime"),
     "deploy_device_runtime": ToolFacts(_DEVICE | {"offline_mode"}, _FS({"device_runtime_replaced"}), _FS(),
                                        "devices", "switch back to the previous runtime"),
     "run_device_benchmark": ToolFacts(_DEVICE | {"no_device_runtime", "no_device_model", "device_model_unset"}, _FS(),
-                                      _FS({"untrusted_model_native", "artifact_from_other_computer"}), "devices"),
-    "transfer_object": ToolFacts(_FS({"disk_full", "transfer_unsupported", "file_changed", "file_outside_folders"}),
-                                 _FS({"disk_tight", "large_transfer", "slow_link"}),
-                                 _FS({"pickle_weights", "target_unreviewed", "base_image_unofficial",
-                                      "vendor_soft_cap_exceeded", "facts_unknown", "gated_model"}), "transfers",
-                                 "a fetched model: move it to the trash"),
+                                      _FS({"untrusted_model_native"}), "devices"),
     "answer_approval": ToolFacts(delegable="never"),
 }
 
@@ -447,7 +433,7 @@ def person_words(code: str, numbers: Mapping[str, Any], lang: Optional[str] = No
     return {name: ", ".join(dict.fromkeys(words))}
 
 
-__all__ = ["BLOCKERS", "BlockerSpec", "DELEGATION_RULES_VERSION", "LARGE_DOWNLOAD_BYTES", "LARGE_TRANSFER_BYTES",
+__all__ = ["BLOCKERS", "BlockerSpec", "DELEGATION_RULES_VERSION", "LARGE_DOWNLOAD_BYTES",
            "MANY_PAGES", "NUMBER_KEYS", "PERSON_WORDS", "SECURITY_LEGAL", "TOOL_FACTS", "ToolFacts", "UNKNOWN_FACTS",
            "WARNINGS", "WarningSpec", "blocked", "facts_unknown", "gb_number", "person_action_text", "person_words",
            "size_class", "warn", "warnings_of", "with_blocker"]

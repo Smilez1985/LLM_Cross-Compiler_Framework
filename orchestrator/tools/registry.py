@@ -570,14 +570,6 @@ def repairs_of(error: BaseException) -> List[Repair]:
     return [r for r in (getattr(error, "repairs", None) or ()) if isinstance(r, Repair)]
 
 
-def _hybrid_fields(ctx: "ToolContext", fields: Dict[str, Any]) -> Dict[str, Any]:
-    """Ditto's hybrid turn (hybrid design 6.8, HF8): a local call in a turn with another computer is recorded with
-    `place` this_computer, and a turn that read a result from the other computer with `taint`. Set only by Ditto's
-    router in the context's metadata, never by a client; a field the caller gave itself wins."""
-    metadata = ctx.metadata if isinstance(getattr(ctx, "metadata", None), dict) else {}
-    return {key: metadata[key] for key in ("place", "taint") if metadata.get(key) and key not in fields}
-
-
 def call_repairs(ctx: "ToolContext", extra: Sequence[Repair] = ()) -> List[Repair]:
     """Every repair of a call: the fool-proof layer's (ctx.repairs), then the tool's look-up's (ctx.facts.repairs, a
     file name matched in another letter case), then `extra` (those a refusing look-up carried). The notes of a result
@@ -981,7 +973,6 @@ class ToolRegistry:
             return None
         fields = {"client": ctx.client,
                   "session": f"{ctx.session}:{ctx.request_id}" if ctx.request_id else ctx.session, **extra}
-        fields.update(_hybrid_fields(ctx, fields))
         repairs = call_repairs(ctx)
         if repairs:
             fields.setdefault("repairs", [r.audit() for r in repairs])

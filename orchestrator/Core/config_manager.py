@@ -40,6 +40,14 @@ from orchestrator.utils.llama_pin import pinned_tag
 # Settings per provider that the sign-in (llm-cli ditto login, the GUI's sign-in panel) writes to the user config.
 SIGN_IN_SETTING = re.compile(r"^(ai_auth_[a-z0-9][a-z0-9_.-]{0,63}|ai_base_url_[a-z0-9][a-z0-9_.-]{0,63}|"
                              r"ai_oauth_profile|ai_auth)$")
+# Settings of features that were removed, with the reason: found in an older config file they are ignored (one log line
+# names them) and never become values.
+_REMOTE_MODE = "Ditto's remote mode was removed; Ditto always uses this computer's tools"
+RETIRED_SETTINGS: Dict[str, str] = {
+    **{key: _REMOTE_MODE for key in ("ai_ditto_tool_source", "ai_ditto_mcp_transport", "ai_ditto_mcp_command",
+                                     "ai_ditto_mcp_url", "ai_ditto_mcp_name")},
+    "image_qdrant": "device packages no longer ship a Qdrant sidecar; the knowledge base stays on this computer",
+}
 
 
 # ============================================================================
@@ -339,9 +347,6 @@ class ConfigManager:
             ConfigSchema("build_pids_limit", int, False, 4096, "Process limit for conversion containers", ["min:64"]),
             ConfigSchema("build_jobs", int, False, 0, "Parallel compile jobs in image builds (0 = all cores)", ["min:0", "max:256"]),
             ConfigSchema("healing_approval_timeout", int, False, 900, "Seconds to wait for a decision on a healing proposal", ["min:10", "max:86400"]),
-            ConfigSchema("image_qdrant", str, False, "qdrant/qdrant:v1.16.0",
-                         "Qdrant image that deployment packages ship to the device when enable_rag_knowledge is on "
-                         "(the knowledge base on this computer uses embedded Qdrant)"),
             ConfigSchema("image_base_debian", str, False, "debian:bookworm-slim", "Base Build Image"),
             ConfigSchema("image_inference_runtime", str, False, "ghcr.io/smilez1985/llm-runtime:latest", "Inference Image"),
             
@@ -436,24 +441,6 @@ class ConfigManager:
             ConfigSchema("ai_fallback_chain", list, False, [],
                          "Providers tried when the model declines or the provider is unavailable, as provider or "
                          "provider:model, e.g. local, ollama:qwen3.5:4b"),
-            # Ditto and the framework on another computer (MCP design T12, hybrid design 6.7): this computer's tools
-            # always stay; "mcp" adds the MCP server of the framework installed on a second computer (the named token
-            # is in the credential vault as ditto_mcp_token, never here)
-            ConfigSchema("ai_ditto_tool_source", str, False, "local",
-                         "Ditto's tools: local (this computer only) or mcp (this computer and the framework on "
-                         "another computer, through its MCP server)", ["regex:^(local|mcp)$"]),
-            ConfigSchema("ai_ditto_mcp_transport", str, False, "stdio",
-                         "Another computer: stdio (Ditto starts the server command, for example over SSH) or http",
-                         ["regex:^(stdio|http)$"]),
-            ConfigSchema("ai_ditto_mcp_command", list, False, [],
-                         "Another computer over stdio: the command that starts the server there, e.g. ssh -T -o "
-                         "SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve"),
-            ConfigSchema("ai_ditto_mcp_url", str, False, "",
-                         "Another computer over HTTP: the server address (https, or http on a loopback address)",
-                         ["regex:^(https?://\\S+)?$"]),
-            ConfigSchema("ai_ditto_mcp_name", str, False, "",
-                         "Another computer: your name for it, shown in Ditto's dialogs and given to the AI as its place "
-                         "(a plain short name; anything else is shown as 'the other computer')"),
 
             # v2.0.0: Chat & Brain Settings
             ConfigSchema("chat_context_limit", int, False, 4096, "Max tokens for chat context history"),
@@ -536,7 +523,14 @@ class ConfigManager:
         self._load_config_data(config_data, file_source)
     
     def _load_config_data(self, config_data: Dict[str, Any], source: ConfigSource):
+        retired = sorted(str(k) for k in config_data if k in RETIRED_SETTINGS)
+        if retired:
+            reasons = "; ".join(f"{reason}: {', '.join(k for k in retired if RETIRED_SETTINGS[k] == reason)}"
+                                for reason in dict.fromkeys(RETIRED_SETTINGS[k] for k in retired))
+            self.logger.info(f"Ignoring settings of a removed feature in {source.source_path} ({reasons}).")
         for key, value in config_data.items():
+            if key in RETIRED_SETTINGS:
+                continue
             schema = self.config_schemas.get(key)
             if schema and schema.enterprise_only and not self.advanced_mode.enabled:
                 continue
@@ -677,12 +671,11 @@ class ConfigManager:
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages", "audio_announcements",
                 "chat_panel_auto_show",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
-                "ai_anthropic_workspace_id", "ai_ditto_tool_source", "ai_ditto_mcp_transport", "ai_ditto_mcp_command",
-                "ai_ditto_mcp_url", "ai_ditto_mcp_name",
+                "ai_anthropic_workspace_id",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode",
                 # v2.3
-                "image_trivy", "image_qdrant", "image_base_debian", "image_inference_runtime",
+                "image_trivy", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",
                 "calibration_language", "build_sandbox", "build_memory_limit", "build_pids_limit",
                 # v2.4 (SSOT & IMatrix)

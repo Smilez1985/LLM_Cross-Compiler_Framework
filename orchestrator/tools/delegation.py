@@ -48,10 +48,9 @@ class ToolScope:
 
 
 # Never covered by a delegation, whatever a delegation lists: answering a question (an AI never answers its own
-# delegation away), signing a pack with the person's key, deleting (round 5 f: the person confirms every deletion in
-# the framework's own window) and installing a target transferred from another computer (never reviewed).
-NEVER_DELEGATE: FrozenSet[str] = frozenset({"answer_approval", "export_pack", "delete_artifact",
-                                            "install_transferred_pack"})
+# delegation away), signing a pack with the person's key and deleting (round 5 f: the person confirms every deletion
+# in the framework's own window).
+NEVER_DELEGATE: FrozenSet[str] = frozenset({"answer_approval", "export_pack", "delete_artifact"})
 
 # The scope of each tool (WP11 fills it for every tool that is not a read tool, and the registry refuses a tool without
 # one from then on). Until then an entry is only read to check that a tool which deletes is the person's alone.

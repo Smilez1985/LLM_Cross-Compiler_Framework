@@ -525,9 +525,9 @@ def module_record(target_folder: Optional[Path]) -> Optional[Dict[str, str]]:
 
 def needs_first_confirmation(installed_via: Optional[str]) -> bool:
     """Whether build code reached this computer without the person seeing it ([Q1]): installed or created under a
-    standing approval or a delegation, or transferred from another computer."""
+    standing approval or a delegation."""
     from orchestrator.Core.confirmed_builds import unattended
-    return unattended(installed_via) or str(installed_via or "") == "transferred"
+    return unattended(installed_via)
 
 
 def confirmation_state(framework, record: Dict[str, Any]) -> Tuple[List[Tuple[str, str, str]], List[str]]:
@@ -579,12 +579,9 @@ def grant_scope(plan: "BuildPlan", framework, target_folder: Optional[Path], pin
     except Exception:  # noqa: BLE001 - trust that cannot be read is no trust
         trust = "other"
     record = record or confirm_record(plan, framework, target_folder)
-    # build code installed or made unattended (standing approval, delegation) or transferred counts only after the
-    # person confirmed one build of exactly it ([Q1])
-    from orchestrator.Core.confirmed_builds import unattended
+    # build code installed or made unattended (standing approval, delegation) counts only after the person confirmed
+    # one build of exactly it ([Q1])
     pending, unconfirmed = confirmation_state(framework, record)
-    if pending and not unattended(pending[0][2]):
-        trust = "other"  # transferred: outside every standing approval until the person confirmed a build of it
     images = record["base_images"]
     official = bool(images) and not unconfirmed
     facts = {"target": plan.request.target, "target_trust": trust,

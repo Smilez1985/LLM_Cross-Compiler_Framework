@@ -348,7 +348,6 @@ class AIConfigurationDialog(QDialog):
         form.addRow("", self.chk_offline)
 
         layout.addLayout(form)
-        layout.addWidget(self._remote_section())
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._save_config)
@@ -356,164 +355,6 @@ class AIConfigurationDialog(QDialog):
         layout.addWidget(buttons)
 
         self._load_current_config()
-
-    # --- Ditto and the framework on another computer (design 6.1; MCP design T12) ---
-    REMOTE_INTRO = ("Ditto always works with the framework on this computer. If the framework is installed on a "
-                    "second computer too (for example a stronger build PC or a server), Ditto can also use that one: "
-                    "its tools join this computer's in the same chat, and each task goes to the computer where its "
-                    "object lives. Ditto reaches it through its MCP server, the way Claude Code does. Docker is not "
-                    "needed for this; SSH or a server address is enough.")
-
-    def _remote_section(self) -> QGroupBox:
-        """Optional: Ditto also uses the framework installed on a second computer (a stronger build PC, a server)
-        through that installation's MCP server, next to this computer's tools (which always stay), with a named token
-        stored in the credential vault and never shown again.
-        Docker is not needed: SSH (as the command, or a tunnel to the server address) is enough. The texts are plain
-        text; the section is off (this computer) by default."""
-        box = QGroupBox("Another computer (optional)")
-        form = QFormLayout(box)
-        self.lbl_remote_intro = QLabel(self.REMOTE_INTRO)
-        self.lbl_remote_intro.setWordWrap(True)
-        self.lbl_remote_intro.setTextFormat(Qt.PlainText)
-        form.addRow(self.lbl_remote_intro)
-        self.cb_tool_source = QComboBox()
-        self.cb_tool_source.addItem("This computer (default)", "local")
-        self.cb_tool_source.addItem("This computer and the framework on another computer", "mcp")
-        self.cb_tool_source.setToolTip("With another computer, Ditto also uses the tools of the framework installed "
-                                       "there; its permissions and audit log decide those calls, and this computer "
-                                       "records them too. This computer's tools always stay.")
-        form.addRow("Ditto works with:", self.cb_tool_source)
-        self.cb_mcp_transport = QComboBox()
-        self.cb_mcp_transport.addItem("Command (stdio), for example over SSH", "stdio")
-        self.cb_mcp_transport.addItem("Server address (HTTP), for example through an SSH tunnel", "http")
-        form.addRow("Connection:", self.cb_mcp_transport)
-        self.txt_mcp_command = QLineEdit()
-        self.txt_mcp_command.setPlaceholderText("ssh -T -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve")
-        self.txt_mcp_command.setToolTip("The command that starts the framework's MCP server on the other computer, "
-                                        "for example over SSH (the SSH server there must accept the variable: "
-                                        "AcceptEnv LCF_MCP_TOKEN, and llm-cli must be a command there, not only an "
-                                        "alias). For a framework container you built yourself: "
-                                        "docker exec -i <container> llm-cli mcp serve. The token reaches the server "
-                                        "as the environment variable LCF_MCP_TOKEN, never on the command line.")
-        form.addRow("Command:", self.txt_mcp_command)
-        self.txt_mcp_url = QLineEdit()
-        self.txt_mcp_url.setPlaceholderText("http://127.0.0.1:8765/mcp")
-        self.txt_mcp_url.setToolTip("https, or plain http only to a loopback address: for example the other "
-                                    "computer's server reached through an SSH tunnel (ssh -N -L "
-                                    "8765:127.0.0.1:8765 user@build-box), or a container port published to "
-                                    "127.0.0.1. No user name or password in the address.")
-        form.addRow("Server address:", self.txt_mcp_url)
-        self.txt_mcp_name = QLineEdit()
-        self.txt_mcp_name.setPlaceholderText("e.g. build box (shown in Ditto's questions)")
-        form.addRow("Name:", self.txt_mcp_name)
-        self.txt_mcp_token = QLineEdit()
-        self.txt_mcp_token.setEchoMode(QLineEdit.Password)
-        self.txt_mcp_token.setToolTip("Create it on the other computer with 'llm-cli mcp token add NAME --link "
-                                      "ditto' (Ditto's own permissions then apply there). It is stored in the "
-                                      "credential vault and never shown again.")
-        form.addRow("Named token:", self.txt_mcp_token)
-        self.lbl_mcp = QLabel("")
-        self.lbl_mcp.setWordWrap(True)
-        self.lbl_mcp.setTextFormat(Qt.PlainText)
-        self.lbl_mcp.setStyleSheet("color: #888;")
-        form.addRow("", self.lbl_mcp)
-        self.cb_tool_source.currentIndexChanged.connect(self._remote_enabled_state)
-        self.cb_mcp_transport.currentIndexChanged.connect(self._remote_enabled_state)
-        return box
-
-    def _remote_token_stored(self) -> bool:
-        from orchestrator.llm.remote_tools import stored_token
-        return stored_token(self._secrets()) is not None
-
-    def _remote_enabled_state(self) -> None:
-        remote = self.cb_tool_source.currentData() == "mcp"
-        stdio = self.cb_mcp_transport.currentData() == "stdio"
-        for widget in (self.cb_mcp_transport, self.txt_mcp_name, self.txt_mcp_token):
-            widget.setEnabled(remote)
-        self.txt_mcp_command.setEnabled(remote and stdio)
-        self.txt_mcp_url.setEnabled(remote and not stdio)
-        stored = self._remote_token_stored()
-        # The stored token is never read into the dialog: only whether one is stored.
-        self.txt_mcp_token.setPlaceholderText("******** (stored in the vault; type a new one to replace it)" if stored
-                                              else "Paste the named token (llm-cli mcp token add NAME --link ditto)")
-        self.lbl_mcp.setText("" if not remote else
-                             "While this is on, Ditto works with this computer and the framework on that computer "
-                             "together: this computer's tools, files, targets and settings stay, that computer's "
-                             "tools join them, and each call goes to the computer where its object lives (nothing is "
-                             "copied between them by itself). Its permissions for this token apply there, and its "
-                             "questions are answered here. The conversation goes on when you switch, and a computer "
-                             "that cannot be reached never stops a task here. Build advice and module proposals still "
-                             "take their task context from that computer while this is on." if stored else
-                             "Ditto does not use another computer without a named token.")
-
-    def _load_remote_settings(self) -> None:
-        import shlex
-        from orchestrator.llm.remote_tools import (COMMAND_SETTING, NAME_SETTING, SOURCE_SETTING, TRANSPORT_SETTING,
-                                                   URL_SETTING)
-        source = str(self._config_get(SOURCE_SETTING, "local") or "local").lower()
-        self.cb_tool_source.setCurrentIndex(max(self.cb_tool_source.findData(source), 0))
-        transport = str(self._config_get(TRANSPORT_SETTING, "stdio") or "stdio").lower()
-        self.cb_mcp_transport.setCurrentIndex(max(self.cb_mcp_transport.findData(transport), 0))
-        command = self._config_get(COMMAND_SETTING, []) or []
-        self.txt_mcp_command.setText(shlex.join(str(c) for c in command) if isinstance(command, list)
-                                     else str(command))
-        self.txt_mcp_url.setText(str(self._config_get(URL_SETTING, "") or ""))
-        self.txt_mcp_name.setText(str(self._config_get(NAME_SETTING, "") or ""))
-        self.txt_mcp_token.clear()
-        self._remote_enabled_state()
-
-    def _remote_choice(self) -> Optional[Dict[str, Any]]:
-        """The tool-source settings as typed, checked like 'llm-cli ditto remote set'; None (after a warning) when
-        they cannot be used. The typed token is returned only to be stored, never kept in the dialog."""
-        import shlex
-        from orchestrator.llm.remote_tools import RemoteSetupError, check_url
-        source = self.cb_tool_source.currentData() or "local"
-        transport = self.cb_mcp_transport.currentData() or "stdio"
-        command_text, url = self.txt_mcp_command.text().strip(), self.txt_mcp_url.text().strip()
-        try:
-            argv = shlex.split(command_text) if command_text else []
-        except ValueError as e:
-            QMessageBox.warning(self, "Another Computer", f"The command cannot be read: {e}")
-            return None
-        choice = {"source": source, "transport": transport, "command": argv, "url": url,
-                  "name": self.txt_mcp_name.text().strip()[:80], "token": self.txt_mcp_token.text().strip()}
-        if source != "mcp":
-            return choice
-        if transport == "stdio" and not argv:
-            QMessageBox.warning(self, "Another Computer", "A connection over a command needs the command that starts "
-                                "the framework's MCP server on the other computer, e.g. 'ssh -T -o "
-                                "SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve'.")
-            return None
-        if transport == "http":
-            try:
-                check_url(url)
-            except RemoteSetupError as e:
-                QMessageBox.warning(self, "Another Computer", str(e))
-                return None
-        if not choice["token"] and not self._remote_token_stored():
-            from orchestrator.llm.remote_tools import TOKEN_NEXT
-            QMessageBox.warning(self, "Another Computer", "Ditto does not use another computer without a named "
-                                "token. " + TOKEN_NEXT)
-            return None
-        return choice
-
-    def _save_remote(self, choice: Dict[str, Any], cfg: Any) -> bool:
-        """Stores a typed token in the vault (then clears the field: it is never shown again) and the settings."""
-        from orchestrator.llm.remote_tools import (COMMAND_SETTING, NAME_SETTING, SOURCE_SETTING, TOKEN_SECRET,
-                                                   TRANSPORT_SETTING, URL_SETTING)
-        token = choice.pop("token", "")
-        self.txt_mcp_token.clear()
-        if token:
-            sm = self._secrets()
-            if not sm or not sm.set_secret(TOKEN_SECRET, token):
-                QMessageBox.critical(self, "Error", "The named MCP token could not be stored in the credential vault.")
-                return False
-        if cfg is not None and hasattr(cfg, 'set'):
-            for key, value in ((SOURCE_SETTING, choice["source"]), (TRANSPORT_SETTING, choice["transport"]),
-                               (COMMAND_SETTING, choice["command"]), (URL_SETTING, choice["url"]),
-                               (NAME_SETTING, choice["name"])):
-                cfg.set(key, value)
-        return True
 
     # --- helpers ---
     def _config(self):
@@ -711,7 +552,6 @@ class AIConfigurationDialog(QDialog):
         chain = self._user_value("ai_fallback_chain") or []
         self.txt_fallback.setText(", ".join(chain) if isinstance(chain, list) else str(chain))
         self._on_provider_changed()
-        self._load_remote_settings()
         removed = self._removed_message([saved_provider, *self._parse_fallback(self.txt_fallback.text())])
         if removed:  # a saved provider no longer exists: say why and what to use instead, once per load
             QMessageBox.information(self, "AI Provider Removed", removed)
@@ -769,10 +609,6 @@ class AIConfigurationDialog(QDialog):
             QMessageBox.warning(self, "Missing Model", "Please select or enter a model.")
             return
 
-        remote = self._remote_choice()
-        if remote is None:
-            return
-
         spec = self._key_method(preset)
         key_url = base_url or preset.base_url
         if api_key and preset.secret and plain_http_to_remote(key_url) and not self._confirm_plain_http(key_url):
@@ -812,8 +648,6 @@ class AIConfigurationDialog(QDialog):
             cfg.set("ai_fallback_chain", fallback)
             cfg.set("offline_mode", offline)
             cfg.set("enable_rag_knowledge", enable_rag)
-        if not self._save_remote(remote, cfg):
-            return
         if cfg is not None and hasattr(cfg, 'set') and hasattr(cfg, 'save_user_config') and not cfg.save_user_config():
             QMessageBox.warning(self, "Settings Not Saved", "The AI settings apply until the program ends, but "
                                 "they could not be saved to config.yml. See the log.")
@@ -835,7 +669,6 @@ class AIConfigurationDialog(QDialog):
             "fallback_chain": fallback,
             "offline_mode": offline,
             "enable_rag": enable_rag,
-            "ditto_tool_source": remote["source"],  # never the token
         }
         self.accept()
 
@@ -1122,7 +955,7 @@ class ToolPermissionsDialog(QDialog):
     START_WITH = (("read", "Read only (recommended for a new client)"),
                   ("mcp", "A copy of the local stdio clients' permissions"),
                   ("ditto", "A copy of Ditto's permissions"),
-                  ("link", "Ditto's permissions by reference (Ditto on another computer)"))
+                  ("link", "Ditto's permissions by reference (a change to Ditto's applies at once)"))
 
     def __init__(self, registry, parent=None, first_run: bool = False, token: Optional[str] = None):
         super().__init__(parent)

@@ -21,8 +21,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Tuple
 
-# The framework's ids by kind: one prefix and exactly the length and alphabet the framework generates. A RANDOM_ID of
-# the hybrid design (6.3) is any of these.
+# The framework's ids by kind: one prefix and exactly the length and alphabet the framework generates.
 ID_KINDS: Dict[str, str] = {
     "job": r"job_[a-z0-9]{16}",
     "request": r"req_[0-9a-f]{8}",
@@ -261,12 +260,14 @@ JOB_WORDS: Dict[str, Dict[str, str]] = {
            "probe": "hardware probe", "pack_import": "pack import", "pack_export": "pack export",
            "snapshot_restore": "knowledge base restore", "hf_download": "Hugging Face download",
            "runtime_build": "build of the local model server", "runtime_start": "start of the local model server",
-           "benchmark": "benchmark", "approval": "question waiting for you"},
+           "benchmark": "benchmark", "approval": "question waiting for you",
+           "docs_index": "index of the framework's own documents"},
     "de": {"crawl": "Deep Ingest", "deploy": "Aufspielen auf ein Board", "package": "Bereitstellungspaket",
            "probe": "Hardware-Untersuchung", "pack_import": "Paket-Import", "pack_export": "Paket-Export",
            "snapshot_restore": "Wiederherstellen der Wissensbasis", "hf_download": "Hugging-Face-Download",
            "runtime_build": "Bau des lokalen Modellservers", "runtime_start": "Start des lokalen Modellservers",
-           "benchmark": "Messung", "approval": "Frage, die auf dich wartet"},
+           "benchmark": "Messung", "approval": "Frage, die auf dich wartet",
+           "docs_index": "Aufnahme der eigenen Dokumente des Frameworks"},
 }
 QUESTION_WORDS = {"en": "question '{title}'", "de": "Frage „{title}“"}
 GRANT_WORDS = {"en": "standing approval for '{title}'", "de": "Dauerfreigabe für „{title}“"}

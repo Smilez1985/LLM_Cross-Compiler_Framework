@@ -117,6 +117,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 |---|---|
 | `doctor` | Die Installation prüfen und erklären, wie man Probleme behebt |
 | `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten (unveröffentlicht) |
+| `knowledge index-docs` | Die eigene Dokumentation des Frameworks (und mit `--with-code` seinen Code) in die Wissensbasis aufnehmen (unveröffentlicht) |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
@@ -180,7 +181,8 @@ llm-cli doctor --fix --tier 2
 llm-cli knowledge snapshots [list]
 ```
 
-Unveröffentlicht. Vor jedem Deep Ingest, jeder Indexierung des eigenen Codes des Frameworks und jeder
+Unveröffentlicht. Vor jedem Deep Ingest, jeder Aufnahme der eigenen Dokumente des Frameworks (`knowledge index-docs`)
+und jeder
 Wiederherstellung wird die Wissensbasis als Snapshot in `knowledge_snapshots/` des persönlichen Ordners gesichert,
 damit sich die Änderung rückgängig machen lässt. Der Befehl listet jeden Snapshot, den ältesten zuerst, mit Namen,
 Zeitpunkt, Größe, was er ist (zum Beispiel "backup of the knowledge base taken before a Deep Ingest") und vollem
@@ -193,6 +195,30 @@ nicht mehr brauchst, selbst, zum Beispiel im Dateimanager. Ein Papierkorb und ei
 
 ```bash
 llm-cli knowledge snapshots
+```
+
+### knowledge index-docs
+
+```
+llm-cli knowledge index-docs [--with-code]
+```
+
+Unveröffentlicht. Nimmt die eigene Dokumentation des Frameworks (README, CONTRIBUTING und den Ordner `docs`, in beiden
+Sprachen) in die Wissensbasis auf, damit Ditto Fragen zum Framework selbst beantworten kann und KI-Clients sie mit
+`search_knowledge` (Art `docs`) finden. `--with-code` nimmt auch Code und Konfiguration auf (`orchestrator`,
+`targets`, `scripts`, `configs`, das Container-Setup und die Installationsskripte; viel mehr Dateien, dauert Minuten).
+Gelesen wird nur, was das Framework mitliefert: nie deine Einstellungen (`config.yml`), Targets, die du oder eine KI
+angelegt habt, oder installierte Pakete. Das passiert nie von selbst: Nur dieser Befehl, **Tools > Index the
+Framework's Documentation...** in der GUI (eine Frage mit „Nein“ als Vorgabe und einem Kästchen für den Code) oder das
+MCP-Tool `index_framework_docs` (jedes Mal gefragt) starten es. Vorher wird ein Snapshot angelegt, damit es sich mit
+einer Wiederherstellung rückgängig machen lässt; eine schon aufgenommene Datei wird ersetzt. Hat die Platte keinen
+Platz für diesen Snapshot, wird nichts aufgenommen, und der Befehl sagt, wie viel Platz fehlt (kein „trotzdem
+weiter“); bleibt nur wenig Platz übrig, sagt er das und macht weiter. Die Wissensbasis muss eingeschaltet sein. Ein
+Wissenspaket, das du exportierst, enthält diese Texte nie: Jede Installation nimmt sie selbst auf.
+
+```bash
+llm-cli knowledge index-docs
+llm-cli knowledge index-docs --with-code
 ```
 
 ---
@@ -371,7 +397,7 @@ geschrieben.
 |---|---|
 | `ARTIFACT_NAME` | Ein Build-Ordner, wie ihn `list-artifacts` zeigt (relativ zum Ausgabeordner), oder ein beliebiger vorhandener Pfad zu einem Build-Ordner oder einer Modelldatei. |
 | `--profile TEXT` | **Pflicht.** Das Target, z. B. `Rockchip` (für Geräteoptionen im Docker-Modus). |
-| `--docker / --no-docker` | Zusätzlich Container-Images einpacken (Standard aus). Experimentell und in dieser Version nicht geprüft; für eine Modelldatei aus lassen. Jedes Image (`image_inference_runtime` und mit Wissensdatenbank `image_qdrant`) muss per Digest festgelegt sein (`name@sha256:...`) oder auf diesem Rechner gebaut worden sein; ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte `...:latest`, wird mit Grund abgelehnt, und ein fehlgeschlagener Image-Export bricht das Paket ab. |
+| `--docker / --no-docker` | Zusätzlich Container-Images einpacken (Standard aus). Experimentell und in dieser Version nicht geprüft; für eine Modelldatei aus lassen. Das Image (`image_inference_runtime`; ein Paket enthält nie die Wissensdatenbank) muss per Digest festgelegt sein (`name@sha256:...`) oder auf diesem Rechner gebaut worden sein; ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte `...:latest`, wird mit Grund abgelehnt, und ein fehlgeschlagener Image-Export bricht das Paket ab. |
 
 Ohne Docker werden nur Modelldateien übertragen; Builds mit mehreren Gewichtsdateien werden abgelehnt. Ein Paket,
 das nicht erstellt werden kann, gibt den Grund aus und endet mit 1; das ZIP wird unter einem vorläufigen Namen
@@ -612,10 +638,8 @@ llm-cli ditto ask FRAGE [--no-tools] [--provider TEXT] [--model TEXT]
 
 Stellt Ditto eine Frage. Ditto darf die Tools des Frameworks im Rahmen deiner Berechtigungen nutzen; Tools, die auf
 „ask“ stehen, zeigen das Tool und jedes Argument und brauchen deine Bestätigung im Terminal (ohne Terminal werden sie
-abgelehnt). Ohne Terminal sagt Ditto auch dem Framework auf einem anderen Computer, dass hier niemand seine
-Rückfragen beantworten kann, sodass jenes Framework sie für sein eigenes Freigabefenster behält; nichts wird je als
-dein „Nein“ dorthin geschickt. Die Antwort geht nach stdout, Tool-Hinweise und Fehler nach stderr. Nichts wird im
-Chatverlauf gespeichert.
+abgelehnt). Die Tools sind die eigenen des Frameworks auf diesem Computer. Die Antwort geht nach stdout,
+Tool-Hinweise und Fehler nach stderr. Nichts wird im Chatverlauf gespeichert.
 
 | Option | Bedeutung |
 |---|---|
@@ -631,51 +655,6 @@ llm-cli ditto ask "Erkläre IQ4_XS" --no-tools --provider local
 
 Ohne Einrichtung erklärt der Befehl, was fehlt, zum Beispiel „the local model server is not running. Start it with:
 llm-cli ditto runtime start“.
-
-### ditto remote
-
-```
-llm-cli ditto remote set --transport stdio|http [--command "..."] [--url URL] [--name TEXT] [--with-token]
-llm-cli ditto remote show | test | off
-```
-
-Ditto und das Framework auf einem anderen Computer (optional): Ditto nutzt zusätzlich das Framework, das auf einem
-zweiten Computer installiert ist (ein stärkerer Build-PC, ein Server), über den MCP-Server jener Installation, neben
-den Tools dieses Computers, die immer bleiben; jeder Aufruf geht zu dem Computer, auf dem sein Objekt liegt. Es ist
-dasselbe Programm, kein anderes, und Docker ist nicht nötig: Verbinde dich über SSH,
-entweder mit einem Tunnel zur Adresse des Servers oder mit `ssh` als Befehl
-([Einzelheiten](Features_DE.md#ditto-und-ein-framework-auf-einem-anderen-computer)). Es gelten Registry,
-Berechtigungen, Rückfragen und Audit-Log jenes Frameworks für die Aufrufe, die dort laufen, und das Audit-Log dieses
-Computers hält jeden davon ebenfalls fest (`started` und sein Abschluss, mit `place remote:<Name>`). Lege zuerst auf
-dem anderen Computer das Token mit `llm-cli mcp token add NAME --link ditto` an: Das Token nutzt dort Dittos eigene
-Berechtigungen, und das Audit-Log dort zeigt `mcp:NAME`. `set` speichert das Token im Tresor für
-Zugangsdaten dieses Computers (ohne Echo abgefragt oder mit `--with-token` von stdin gelesen) und die Verbindung in
-Dittos KI-Einstellungen; das Token läuft nie durch ein Tool, ein Ergebnis oder eine Befehlszeile. Über stdio startet
-Ditto `--command` (zum Beispiel `ssh -T -o BatchMode=yes -o SendEnv=LCF_MCP_TOKEN benutzer@build-box llm-cli mcp
-serve`, das `AcceptEnv LCF_MCP_TOKEN` in der Konfiguration des SSH-Servers dort braucht und `llm-cli` dort als Befehl,
-nicht nur als Alias, siehe [`llm-cli` aufrufen](../README_DE.md#llm-cli-aufrufen); oder, für einen
-Framework-Container, den du selbst gebaut hast, `docker exec -i lcf llm-cli mcp serve`) mit dem Token in
-`LCF_MCP_TOKEN`. `docker exec` und `podman exec` geben ihre Umgebung nicht in den Container weiter, darum ergänzt
-Ditto bei einem solchen Befehl `-e LCF_MCP_TOKEN` (nur den Namen, nie den Wert); und nennt der erreichte Server statt
-des Tokens den gemeinsamen lokalen Aufrufer `mcp` (zum Beispiel über `ssh` ohne `SendEnv`, das die Umgebung
-verwirft), nutzt Ditto ihn nicht und sagt, wie die Variable weitergegeben wird. Über HTTP sendet es das Token als
-Bearer-Header an `--url`, das https oder eine Loopback-Adresse sein muss, etwa das lokale Ende eines SSH-Tunnels
-(`ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box`, dann `http://127.0.0.1:8765/mcp`). Ohne Token wird der andere
-Computer nicht genutzt. Ein- oder Ausschalten beginnt nie eine neue Unterhaltung; ein nicht erreichbarer Computer
-hält nie eine Frage an (Ditto macht mit den Tools dieses Computers weiter, und `ditto ask` gibt einen Hinweis auf
-stderr aus). Jedes Ergebnis, jeder Fehler und jede Rückfrage des anderen Frameworks erreicht Dittos Modell als nicht
-vertrauenswürdige Daten, seine Tool-Beschreibungen nie, und Dittos Bestätigung nennt den Server. `test` verbindet
-sich, listet die Tools und Aufgaben-Prompts, die der Server Ditto anbietet, und sagt, wie sie zu denen dieses
-Computers kommen (einmal angeboten, nur dort, getrennt); `show` zeigt die Einstellungen (nie das Token); `off` lässt
-Ditto wieder mit diesem Computer allein arbeiten. Die KI-Einstellungen der GUI („Another computer
-(optional)“) setzen dieselben Werte; auch dort landet das Token im Tresor und wird nie wieder angezeigt.
-
-```bash
-# Auf dem anderen Computer: llm-cli mcp token add ditto-laptop --link ditto, dann llm-cli mcp serve --transport http
-ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box &   # der Tunnel (offen lassen)
-llm-cli ditto remote set --transport http --url http://127.0.0.1:8765/mcp --name "Build-Rechner"
-llm-cli ditto remote test
-```
 
 ### ditto eval
 
@@ -1235,7 +1214,7 @@ dasselbe unter Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens�
 |---|---|
 | `add NAME` | Legt ein Token an, das nur lesen darf, bis du mit `tools permissions --token NAME` mehr erlaubst. |
 | `--policy-from CALLER` | Beginnt mit einer Kopie der Berechtigungen eines anderen Aufrufers: `mcp` (lokale stdio-Clients), `ditto` oder ein Token-Name; `mcp:NAME` meint immer ein Token, auch eins namens `mcp` oder `ditto`. Spätere Änderungen der Quelle gelten nicht. |
-| `--link ditto` | Nutzt Dittos Berechtigungen per Verweis, für Ditto auf einem anderen Rechner: Eine Änderung an Dittos Berechtigungen gilt sofort. |
+| `--link ditto` | Nutzt Dittos Berechtigungen per Verweis, für einen Client, der genau Dittos Berechtigungen haben soll: Eine Änderung an Dittos Berechtigungen gilt sofort. |
 | `list` | Namen, Audit-Akteure, Berechtigungen, Zeit des Anlegens und Rotierens; nie ein Token oder sein Hash. |
 | `rotate NAME` | Ein neues Token für denselben Namen und dieselben Berechtigungen; das alte funktioniert sofort nicht mehr. |
 | `revoke NAME` | Löscht das Token und seine Berechtigungen nach einer Rückfrage; sein Client verliert sofort den Zugang. |
@@ -1243,7 +1222,7 @@ dasselbe unter Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens�
 ```bash
 llm-cli mcp token add laptop                          # nur lesen
 llm-cli tools permissions --token laptop              # mehr erlauben
-llm-cli mcp token add ditto-laptop --link ditto       # Ditto auf einem anderen Rechner
+llm-cli mcp token add helper --link ditto             # genau Dittos Berechtigungen
 claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
 ```
 
