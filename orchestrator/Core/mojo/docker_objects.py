@@ -207,3 +207,57 @@ def delete_framework_images(framework, plan, actor: str) -> ImageDeletion:
     except Exception:  # noqa: BLE001 - the deletion happened and is shown to the person; its start is recorded
         pass
     return result
+
+
+@dataclass
+class ImageListOutcome:
+    """What became of the person's list of the framework's build images (offer_image_list). `listed`: Docker listed
+    them (else `problem` says why not); `root`: where Docker keeps its images ("" when unknown); `plan`: the list shown
+    (None: there was nothing to list); `problem` after a listing: why the chosen images could not be deleted;
+    `result`: what was deleted and kept (None: the person chose nothing, or nothing could be deleted)."""
+    listed: bool = False
+    problem: str = ""
+    root: str = ""
+    plan: Optional[Any] = None
+    result: Optional[ImageDeletion] = None
+
+    @property
+    def count(self) -> int:
+        """How many images were deleted."""
+        return len(self.result.deleted) if self.result is not None else 0
+
+    @property
+    def why(self) -> str:
+        """Why no image was deleted: "" when some were, and when the person chose none (Mojo Miracle's free_space
+        answer, runner.Mojo.miracle)."""
+        if self.problem:
+            return self.problem
+        if self.listed and self.plan is None:
+            return "there are no framework build images to delete"
+        if self.result is not None and not self.result.deleted:
+            return "Docker kept every image you chose (the reasons are above)"
+        return ""
+
+
+def offer_image_list(framework, ask, *, actor: str) -> ImageListOutcome:
+    """The person's list of the framework's build images (the one deletion path for them, WP7) as Mojo Miracle opens
+    it with the person present (the CLI at a terminal, the GUI's Mojo window) and as the doctor's tier 2 does: lists
+    them (Docker), hands the list to `ask(plan, root)`, the person's channel (the terminal's question or the GUI's
+    deletion dialog: nothing ticked, "No" the default; it returns the accepted plan of exactly what the person ticked
+    and confirmed, or None), and deletes exactly that (delete_framework_images: looked up again, audited first, never
+    forced, never a prune). `ask` is called only when there is a list to show. `actor`: "cli" or "gui"."""
+    try:
+        plan = framework_image_plan(framework)
+    except DockerUnavailable as e:
+        return ImageListOutcome(problem=str(e))
+    root = str((docker_storage(framework) or {}).get("root") or "")
+    if plan is None:
+        return ImageListOutcome(listed=True, root=root)
+    accepted = ask(plan, root)
+    if accepted is None:
+        return ImageListOutcome(listed=True, root=root, plan=plan)
+    try:
+        result = delete_framework_images(framework, accepted.plan, actor=actor)
+    except (ImagePlanChanged, DockerUnavailable, RuntimeError) as e:
+        return ImageListOutcome(listed=True, problem=str(e), root=root, plan=plan)
+    return ImageListOutcome(listed=True, root=root, plan=plan, result=result)
