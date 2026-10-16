@@ -873,19 +873,23 @@ class ToolRegistry:
         """Without `actor`: the user's policy file as stored (the shared permissions and a section per caller).
         With an actor: that caller's permissions as one policy, for showing and copying them (`--policy-from`):
         a named MCP token's own (a new token's: read only), the linked caller's for a linked token, nothing for an
-        unknown or revoked token; for ditto and mcp their section, or the shared permissions."""
+        unknown or revoked token; for ditto and mcp their section, or the shared permissions. It carries the tools
+        whose questions are put to that caller's person in the framework only (framework_only, the list that applies
+        to it now), so a copy or a token's first own permissions never drop that list."""
         if not actor:
             return self.policy_store.load()
         policy, section = self._policy_of(actor)
         if not section:  # a token's own policy, or one that denies everything
             return policy
         own = policy.callers.get(section)
+        framework_only = policy.framework_only_for(section)
         if own is None and section.startswith(ACTOR_PREFIX):  # a token without permissions of its own
             from orchestrator.tools.mcp_tokens import read_only_policy
-            return read_only_policy()
+            return read_only_policy().model_copy(update={"framework_only": framework_only})
         source = own if own is not None else policy
         return ToolPolicy(configured=policy.configured, tiers=dict(source.tiers), overrides=dict(source.overrides),
-                          reviewed=list(source.reviewed) if source.reviewed is not None else None)
+                          reviewed=list(source.reviewed) if source.reviewed is not None else None,
+                          framework_only=framework_only)
 
     def _policy_of(self, actor: str) -> Tuple[ToolPolicy, str]:
         """(the policy that decides for `actor`, the caller whose section in it applies). A named MCP token
