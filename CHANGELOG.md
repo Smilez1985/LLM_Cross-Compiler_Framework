@@ -1429,6 +1429,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the shared list, lost it at its first `tools permissions --token NAME` (or Permissions... in the GUI), which started
   from an empty list. Each time, the questions about those tools could reach the AI client's own dialog again. The
   permissions shown and copied for a caller now carry the list that applies to it (`ToolRegistry.policy`).
+- **The token list speaks the window's language, and "Start server" says why it cannot start**: the section "MCP
+  tokens (one per client)" in Security > AI App Connections (MCP)... and in Tools > Tool Permissions (Ditto / MCP)...
+  was English only (title, note, columns, buttons, the questions when adding and rotating); it is English and German
+  now, and Rotate and the question about a linked token are plain text with "No" as the default. An installation path
+  that PYTHONPATH cannot hold made "Start server" fail without any message; the window now says why, and nothing is
+  started.
 - **A build no longer replaces an earlier build of the same name**: in 3.0.0 a completed build moved its files into
   the folder `<target>/<model>/<quantization>` and replaced the files of an earlier build there (for example one for
   another board), so a finished golden artifact was lost without being asked. A later build now goes next to it

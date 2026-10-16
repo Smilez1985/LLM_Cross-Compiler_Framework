@@ -1021,39 +1021,40 @@ class TokenListMixin:
     Rotate, Revoke (the token, its permissions and its standing approvals, as `llm-cli mcp token revoke`), Back to read
     only (`tools permissions --reset --token`) and Permissions.... A token is shown once, right after it is made or
     rotated; the list shows names only. Every change goes through orchestrator.tools.mcp_tokens (the CLI's functions)
-    and is audited with actor gui. The window provides `registry` and may override `_tokens_changed()`.
+    and is audited with actor gui. The window provides `registry` and may override `_tokens_changed()`. Every text is
+    English or German (l10n_tools_mcp), as the window's own language.
     """
     START_WITH = (("read", "Read only (recommended for a new client)"),
                   ("mcp", "A copy of the local stdio clients' permissions"),
                   ("ditto", "A copy of Ditto's permissions"),
                   ("link", "Ditto's permissions by reference (a change to Ditto's applies at once)"))
+    TOKEN_COLUMNS = ("name", "actor", "permissions", "created", "rotated")
 
     def _lang(self) -> str:
         return getattr(self, "lang", None) or current_language()
 
+    def _tt(self, key: str, **values) -> str:
+        return ui_text(key, self._lang(), **values)
+
     def _token_section(self) -> QWidget:
-        box = QGroupBox("MCP tokens (one per client)")
+        box = QGroupBox(self._tt("tmcp.tokens.box"))
         layout = QVBoxLayout(box)
-        note = QLabel("Each client that connects over HTTP, or over stdio with LCF_MCP_TOKEN, gets its own token: "
-                      "its name is the caller in the audit log (mcp:<name>), and it has its own permissions. A new "
-                      "token can only read until you allow more. A token is shown once; revoking or rotating it "
-                      "ends its client's access at once, also its open connections.")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        self.token_table = QTableWidget(0, 5)
+        layout.addWidget(plain_label(self._tt("tmcp.tokens.note")))
+        self.token_table = QTableWidget(0, len(self.TOKEN_COLUMNS))
         self.token_table.setObjectName("table_mcp_tokens")
-        self.token_table.setHorizontalHeaderLabels(["Name", "Audit actor", "Permissions", "Created", "Rotated"])
+        self.token_table.setHorizontalHeaderLabels([self._tt(f"tmcp.tokens.col.{c}") for c in self.TOKEN_COLUMNS])
         self.token_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.token_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.token_table.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self.token_table)
         row = QHBoxLayout()
         self.token_buttons = {}
-        for key, label, action in (("add", "Add...", self._add_token), ("rotate", "Rotate", self._rotate_selected),
-                                   ("revoke", "Revoke", self._revoke_selected),
-                                   ("reset", ui_text("tmcp.token.reset", self._lang()), self._reset_selected_token),
-                                   ("permissions", "Permissions...", self._token_permissions)):
-            button = QPushButton(label.replace("&", "&&"))
+        for key, label, action in (("add", self._tt("tmcp.tokens.add"), self._add_token),
+                                   ("rotate", self._tt("tmcp.tokens.rotate"), self._rotate_selected),
+                                   ("revoke", self._tt("tmcp.tokens.revoke"), self._revoke_selected),
+                                   ("reset", self._tt("tmcp.token.reset"), self._reset_selected_token),
+                                   ("permissions", self._tt("tmcp.tokens.permissions"), self._token_permissions)):
+            button = QPushButton(button_text(label))
             button.setObjectName(f"btn_tokens_{key}")
             button.setAutoDefault(False)
             button.clicked.connect(action)
@@ -1072,15 +1073,19 @@ class TokenListMixin:
 
     def refresh_tokens(self) -> None:
         from orchestrator.tools.mcp_tokens import policy_summary
+        self.token_store_problem = None   # why the store cannot be read: shown in the list instead of tokens
         try:
             records = self._tokens().list()
         except Exception as e:  # a damaged or unreadable store is shown, not hidden
+            self.token_store_problem = str(e)
             self.token_table.setRowCount(1)
-            self.token_table.setItem(0, 0, QTableWidgetItem(f"Token store unusable: {e}"))
+            self.token_table.setItem(0, 0, QTableWidgetItem(self._tt("tmcp.tokens.unusable",
+                                                                     reason=one_line(str(e)))))
             return
         self.token_table.setRowCount(len(records))
         for i, record in enumerate(records):
-            summary = f"linked to {record.link}" if record.link else policy_summary(record.policy)
+            summary = self._tt("tmcp.tokens.linked_to", link=record.link) if record.link \
+                else policy_summary(record.policy)
             for col, text in enumerate((record.name, f"mcp:{record.name}", summary, record.created,
                                         record.rotated or "-")):
                 self.token_table.setItem(i, col, QTableWidgetItem(text))
@@ -1089,26 +1094,28 @@ class TokenListMixin:
         self.refresh_tokens()
 
     def _selected_token(self) -> Optional[str]:
+        if getattr(self, "token_store_problem", None):
+            return None
         row = self.token_table.currentRow()
         item = self.token_table.item(row, 0) if row >= 0 else None
-        return item.text() if item is not None and not item.text().startswith("Token store") else None
+        return item.text() if item is not None else None
 
     def _show_token(self, name: str, token: str) -> None:
         TokenShownOnceDialog(name, token, self).exec()
 
     def _audit_warning(self, problem: Optional[str]) -> None:
         if problem:
-            QMessageBox.warning(self, "MCP tokens", f"Done, but the audit log could not record it: {problem}")
+            plain_box(self, "warning", self._tt("tmcp.token.title"),
+                      self._tt("tmcp.audit_problem", reason=one_line(problem)))
 
     def start_choices(self) -> List[tuple]:
         """What a new token's permissions can start as: the fixed choices, then a copy of each token's own."""
-        choices = list(self.START_WITH)
+        choices = [(key, self._tt(f"tmcp.tokens.start.{key}")) for key, _english in self.START_WITH]
         try:
             names = [record.name for record in self._tokens().list()]
         except Exception:  # noqa: BLE001 - an unusable store offers the fixed choices only
             names = []
-        return choices + [(f"mcp:{name}", ui_text("tmcp.token.start.copy", self._lang(), name=name))
-                          for name in names]
+        return choices + [(f"mcp:{name}", self._tt("tmcp.token.start.copy", name=name)) for name in names]
 
     def add_token(self, name: str, start_with: str = "read") -> bool:
         """Creates a token (start_with: read, mcp, ditto, link, or mcp:<token> for a copy of that token's own
@@ -1119,7 +1126,7 @@ class TokenListMixin:
             token, problem = mcp_tokens.add_token(self.registry, name, "gui", policy_from=start_with if copy else None,
                                                   link="ditto" if start_with == "link" else None, via="gui")
         except Exception as e:
-            QMessageBox.warning(self, "MCP tokens", str(e))
+            QMessageBox.warning(self, self._tt("tmcp.token.title"), str(e))
             return False
         self._tokens_changed()
         self._show_token(name, token)
@@ -1128,14 +1135,14 @@ class TokenListMixin:
 
     def _add_token(self) -> None:
         from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "MCP token", "Name of the client (lower-case letters, digits and "
-                                                           "hyphens, e.g. claude-desktop):")
+        title = self._tt("tmcp.tokens.add.title")
+        name, ok = QInputDialog.getText(self, title, self._tt("tmcp.tokens.add.name"))
         if not ok or not name.strip():
             return
         choices = self.start_choices()
         labels = [label for _, label in choices]
-        choice, ok = QInputDialog.getItem(self, "MCP token", "Its permissions start as:", labels, 0, False)
-        if ok:
+        choice, ok = QInputDialog.getItem(self, title, self._tt("tmcp.tokens.add.start"), labels, 0, False)
+        if ok and choice in labels:
             self.add_token(name.strip(), choices[labels.index(choice)][0])
 
     def rotate_token(self, name: str) -> bool:
@@ -1143,7 +1150,7 @@ class TokenListMixin:
         try:
             token = self._tokens().rotate(name)
         except Exception as e:
-            QMessageBox.warning(self, "MCP tokens", str(e))
+            QMessageBox.warning(self, self._tt("tmcp.token.title"), str(e))
             return False
         problem = person_change(self.registry, "gui", "mcp_token.rotate", {"token": name, "via": "gui"})
         self._tokens_changed()
@@ -1158,7 +1165,7 @@ class TokenListMixin:
         try:
             result = mcp_tokens.revoke_token(self.registry, name, "gui", via="gui")
         except Exception as e:
-            QMessageBox.warning(self, "MCP tokens", str(e))
+            QMessageBox.warning(self, self._tt("tmcp.token.title"), str(e))
             return False
         self._tokens_changed()
         lang = self._lang()
@@ -1204,9 +1211,8 @@ class TokenListMixin:
 
     def _rotate_selected(self) -> None:
         name = self._selected_token()
-        if name and QMessageBox.question(
-                self, "MCP tokens", f"Replace the token '{name}'? The old one stops working at once; its permissions "
-                                    "stay.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+        if name and ask(self, self._tt("tmcp.token.title"), self._tt("tmcp.tokens.rotate.question",
+                                                                      name=one_line(name))):
             self.rotate_token(name)
 
     def _revoke_selected(self) -> None:
@@ -1228,12 +1234,17 @@ class TokenListMixin:
         name = self._selected_token()
         if not name:
             return
-        record = self._tokens().get(name)
-        if record is not None and record.link and QMessageBox.question(
-                self, "MCP tokens", f"The token '{name}' uses {record.link}'s permissions. Give it its own instead?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+        try:
+            record = self._tokens().get(name)
+        except Exception as e:  # noqa: BLE001 - an unusable store: said in plain text, nothing opens
+            plain_box(self, "warning", self._tt("tmcp.token.title"), self._tt("tmcp.tokens.unusable",
+                                                                               reason=one_line(str(e))))
             return
-        if ToolPermissionsDialog(self.registry, self, token=name).exec():
+        if record is not None and record.link and not ask(
+                self, self._tt("tmcp.token.title"), self._tt("tmcp.tokens.link.question", name=one_line(name),
+                                                              link=record.link)):
+            return
+        if ToolPermissionsDialog(self.registry, self, token=name, lang=self._lang()).exec():
             self._tokens_changed()
 
 

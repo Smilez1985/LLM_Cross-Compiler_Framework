@@ -1282,10 +1282,10 @@ geantwortet hast. Eine Berechtigungsdatei, die beschädigt, von Hand bearbeitet 
 
 In der GUI: **Tools > Tool Permissions (Ditto / MCP)...** (dieselben Angaben je Tool, gespeichert mit dem Akteur
 `gui`): **Wessen Berechtigungen** für `--caller`, **Auf die empfohlenen Standards zurücksetzen...** für `--reset`,
-**Wieder die gemeinsamen Berechtigungen nutzen...** für `--reset --caller`, und im Abschnitt „MCP tokens“
-**Permissions...** für `--token` und **Zurück auf nur lesen...** für `--reset --token` (das Token ist wieder ein neues
-Token, keins mit von Hand gesetztem Allow/Deny). Jedes Zurücksetzen nennt, was sich ändert, und fragt zuerst („Nein“
-ist vorgewählt); eine Änderung, die woanders gespeichert wurde, während du liest, wird abgelehnt. Die Spalte **Ask in
+**Wieder die gemeinsamen Berechtigungen nutzen...** für `--reset --caller`, und im Abschnitt „MCP-Tokens (eines je
+Client)“ **Berechtigungen...** für `--token` und **Zurück auf nur lesen...** für `--reset --token` (das Token ist
+wieder ein neues Token, keins mit von Hand gesetztem Allow/Deny). Jedes Zurücksetzen nennt, was sich ändert, und fragt
+zuerst („Nein“ ist vorgewählt); eine Änderung, die woanders gespeichert wurde, während du liest, wird abgelehnt. Die Spalte **Ask in
 the framework** ist `--confirm-in-framework`, die Liste der dauerhaften Freigaben `--grants` und **Revoke selected
 standing approval** `--revoke-grant`.
 
@@ -1522,7 +1522,8 @@ einmal gezeigt, wenn es angelegt oder rotiert wird; das Framework behält nur se
 Aufrufer `mcp:<Name>` im Audit-Log, und es hat eigene Berechtigungen. `add`, `rotate` und `revoke` brauchen einen
 Menschen an einem Terminal (`add` und `rotate` geben außerdem nur auf ein Terminal aus) und werden mit dem Akteur
 `cli` protokolliert, ohne das Token. Kein Tool kann Tokens anlegen, auflisten, ändern oder lesen. Die GUI kann
-dasselbe unter Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens“ (protokolliert mit dem Akteur `gui`).
+dasselbe unter Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP-Tokens (eines je Client)“ (protokolliert mit dem
+Akteur `gui`).
 
 | Befehl / Option | Bedeutung |
 |---|---|
@@ -1541,9 +1542,10 @@ claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --h
 ```
 
 In der GUI: **Security > Verbindungen zu KI-Apps (MCP)...** und **Tools > Tool Permissions (Ditto / MCP)...**,
-Abschnitt „MCP tokens“: **Add...** (nur lesen, eine Kopie der Berechtigungen der lokalen stdio-Clients, Dittos oder
-der eigenen eines anderen Tokens, oder Dittos per Verweis), **Rotate**, **Revoke** (das Token, seine Berechtigungen und
-seine dauerhaften Freigaben, nach einer Rückfrage, die sie zählt), **Zurück auf nur lesen...** und **Permissions...**.
+Abschnitt „MCP-Tokens (eines je Client)“: **Hinzufügen...** (nur lesen, eine Kopie der Berechtigungen der lokalen
+stdio-Clients, Dittos oder der eigenen eines anderen Tokens, oder Dittos per Verweis), **Rotieren**, **Widerrufen** (das
+Token, seine Berechtigungen und seine dauerhaften Freigaben, nach einer Rückfrage, die sie zählt), **Zurück auf nur
+lesen...** und **Berechtigungen...**.
 Ein Token wird einmal gezeigt, direkt nachdem es angelegt oder rotiert wurde; die Liste zeigt nur Namen.
 
 ---

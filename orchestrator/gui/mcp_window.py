@@ -108,7 +108,10 @@ class McpHttpServer(QObject):
         problem = self.refusal(host, container)
         if problem:
             return problem
-        command = self.command(host, port, container)
+        try:
+            command = self.command(host, port, container)
+        except ValueError as e:   # e.g. an installation path that PYTHONPATH cannot hold (launch_command)
+            return str(e)
         env = {k: v for k, v in os.environ.items() if k != ENV_VAR}
         env.update(command.get("env") or {})
         kwargs: Dict[str, Any] = {}
