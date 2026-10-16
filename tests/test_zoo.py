@@ -670,16 +670,19 @@ class TestExport:
         assert any("is your own" in n for n in result.notes)
 
     def test_knowledge_export_only_holds_the_given_sites(self, world):
-        world.rag.records = [{"source": "a", "content": "from docs", "metadata": {"root_url": "https://docs.invalid"}},
-                             {"source": "b", "content": "private", "metadata": {"root_url": "https://mine.invalid"}}]
+        world.rag.records = [{"source": "a", "content": "from docs",
+                              "metadata": {"root_url": "https://docs.invalid", "licence": "CC0-1.0"}},
+                             {"source": "b", "content": "private",
+                              "metadata": {"root_url": "https://mine.invalid", "licence": "CC0-1.0"}}]
         result = world.cm.export_pack("knowledge", author="a", pack_id="board-docs", root_urls=["https://docs.invalid"])
         with zipfile.ZipFile(result.path) as zf:
             assert [e["content"] for e in json.loads(zf.read("knowledge.json"))] == ["from docs"]
 
     def test_pages_from_installed_knowledge_packs_are_not_exported_as_your_own(self, world):
-        world.rag.records = [{"source": "https://docs.invalid/a", "content": "mine", "metadata": {}},
+        world.rag.records = [{"source": "https://docs.invalid/a", "content": "mine",
+                              "metadata": {"licence": "CC0-1.0"}},
                              {"source": "https://docs.invalid/b", "content": "alice's",
-                              "metadata": {"origin_pack": "alice-notes"}}]
+                              "metadata": {"origin_pack": "alice-notes", "licence": "CC0-1.0"}}]
         result = world.cm.export_pack("knowledge", author="mallory", pack_id="docs")
         with zipfile.ZipFile(result.path) as zf:
             assert [e["content"] for e in json.loads(zf.read("knowledge.json"))] == ["mine"]
@@ -945,8 +948,10 @@ class TestGenerator:
         assert validate_target_folder(target) == []
 
     def test_knowledge_snapshot_is_opt_in_and_target_scoped(self, generator, world):
-        world.rag.records = [{"source": "a", "content": "board doc", "metadata": {"root_url": "https://b.invalid"}},
-                             {"source": "b", "content": "unrelated", "metadata": {"root_url": "https://x.invalid"}}]
+        world.rag.records = [{"source": "a", "content": "board doc",
+                              "metadata": {"root_url": "https://b.invalid", "licence": "CC0-1.0"}},
+                             {"source": "b", "content": "unrelated",
+                              "metadata": {"root_url": "https://x.invalid", "licence": "CC0-1.0"}}]
         plain = generator.generate_module(self.data(module_name="Plain"), world.framework)
         assert not (plain / "knowledge").exists(), "nothing of the knowledge base without a request"
         scoped = generator.generate_module(self.data(module_name="Scoped"), world.framework,
@@ -959,7 +964,7 @@ class TestGenerator:
         generation and delete the new target (and would fail its export and install)."""
         from orchestrator.Core.module_generator import validate_target_folder
         world.rag.records = [{"source": "https://b.invalid/dates", "content": "Dates are YYYY-MM-DD; see [MODULE_NAME].",
-                              "metadata": {"root_url": "https://b.invalid"}}]
+                              "metadata": {"root_url": "https://b.invalid", "licence": "CC-BY-4.0"}}]
         target = generator.generate_module(self.data(), world.framework, knowledge_roots=["https://b.invalid"])
         assert "YYYY-MM-DD" in (target / "knowledge" / "initial_knowledge.json").read_text()
         assert validate_target_folder(target) == []

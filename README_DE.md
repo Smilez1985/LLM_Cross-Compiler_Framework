@@ -680,8 +680,11 @@ beachtet diese maschinenlesbaren Opt-outs einer Website: robots.txt, den Header 
 (auch `noai`) und das TDM Reservation Protocol. Keine dieser Prüfungen lässt sich abschalten. Der Assistent zeigt
 „Seite N von M“, **Stoppen** behält, was schon gespeichert ist, und das Ergebnis lautet Erfolg, teilweise oder
 Fehlschlag; das Ergebnis spricht auch die Sprachausgabe des Betriebssystems, wenn es eine gibt, außer du schaltest
-das aus. Suchergebnisse gelten als externer Text, nie als Anweisungen. Mehr dazu:
-[Wissensbasis](docs/Features_DE.md#wissensbasis-rag) und [Deep Ingest](docs/Features_DE.md#deep-ingest).
+das aus. Suchergebnisse gelten als externer Text, nie als Anweisungen. Jede Seite hält auch ihre Lizenz und ihren
+Urheberrechtshinweis fest: Ein Wissenspaket enthält den vollen Text einer Seite nur, wo ihre Lizenz die Weitergabe
+erlaubt, jede andere Seite als ihre Adresse mit kurzen Fakten (`llm-cli knowledge sources` zeigt jede Seite). Mehr
+dazu: [Wissensbasis](docs/Features_DE.md#wissensbasis-rag), [Deep Ingest](docs/Features_DE.md#deep-ingest) und
+[Lizenzen und Urheberrecht](docs/Features_DE.md#lizenzen-und-urheberrecht).
 
 ---
 
@@ -690,11 +693,12 @@ das aus. Suchergebnisse gelten als externer Text, nie als Anweisungen. Mehr dazu
 Targets, Rezepte (wie ein Modell für ein Board gebaut wurde) und Wissen lassen sich als signierte Packs teilen:
 `llm-cli zoo list|show|install|verify|export|keys` oder **Tools > Community Hub öffnen**. Ein Pack wird erst nach
 Prüfungen in einem Quarantäne-Ordner und deiner Bestätigung installiert und zeigt eine Vertrauensstufe. Deine eigene
-Arbeit wird datenschutzbereinigt exportiert und mit deinem Schlüssel signiert; ein Pull Request läuft über die
-GitHub CLI oder den Browser, und das Framework fragt nie nach einem Token. Packs lassen sich auch für deine eigenen
-Rechner oder ein Team verschlüsseln, im Format age, sodass auch die üblichen Werkzeuge age und rage sie öffnen. Ein
-Community-Repository oder ein Index ist noch nicht veröffentlicht; heute lassen sich deshalb nur Pack-Dateien
-installieren. Einzelheiten: [docs/Features_DE.md](docs/Features_DE.md#community-zoo).
+Arbeit wird datenschutzbereinigt exportiert und mit deinem Schlüssel signiert (Wissen mit dem vollen Text einer Seite
+nur, wo ihre Lizenz es erlaubt, und der Export führt jede Seite auf, mit dem, was sie enthält, und warum); ein Pull
+Request läuft über die GitHub CLI oder den Browser, und das Framework fragt nie nach einem Token. Packs lassen sich
+auch für deine eigenen Rechner oder ein Team verschlüsseln, im Format age, sodass auch die üblichen Werkzeuge age und
+rage sie öffnen. Ein Community-Repository oder ein Index ist noch nicht veröffentlicht; heute lassen sich deshalb nur
+Pack-Dateien installieren. Einzelheiten: [docs/Features_DE.md](docs/Features_DE.md#community-zoo).
 
 ---
 

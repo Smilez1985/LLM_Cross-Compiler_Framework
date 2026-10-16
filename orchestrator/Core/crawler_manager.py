@@ -26,6 +26,11 @@ timeout only bounds each socket read. A page over its limit is skipped, one over
 with the reason. A robots.txt over its limit counts up to the limit (its last, cut line left out); one that does not
 arrive in time counts as unreachable (nothing is crawled); a tdmrep.json over its limit is not used.
 
+Every page also records what it says about its licence and copyright (rag/licences.py: a licence link or licence
+metadata, a Creative Commons link, a copyright notice; for code from GitHub the repository's licence file when the crawl
+reads it), read from the whole page before its footer is dropped. The knowledge base keeps the text the crawl was
+allowed to read; what a knowledge pack may pass on is decided from these fields when it is exported.
+
 iter_crawl() yields each page as soon as it is extracted, so the caller can store it right away; a stop event
 ends the crawl cleanly between two pages, also while a slow response is still arriving, and a progress callback
 gets "page N of M" before each request.
@@ -61,6 +66,7 @@ from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from orchestrator import __version__
+from orchestrator.rag import licences
 from orchestrator.rag.html_text import html_to_markdown
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils.logging import get_logger
@@ -557,7 +563,7 @@ class CrawlerManager:
                     elif not reasons and _PDF_TDM_RESERVATION.search(response.content or b""):
                         reasons.append("TDM reservation (tdm:reservation in the PDF metadata)")
                     elif not reasons:
-                        doc = self._process_pdf(response.content, url)
+                        doc = self._process_pdf(response.content, url, response.headers)
                 elif 'text/html' in content_type:
                     if not (reasons and nofollow):
                         soup = BeautifulSoup(response.text, 'html.parser')
@@ -568,7 +574,7 @@ class CrawlerManager:
                             self._strip_boilerplate(soup)
                             new_links = [] if nofollow else self._html_links(soup, url, allowed_hosts)
                         else:
-                            doc, new_links = self._process_html(soup, url, allowed_hosts)
+                            doc, new_links = self._process_html(soup, url, allowed_hosts, response.headers)
                 else:
                     left_out = f"neither HTML nor PDF ({_remote_text(content_type) or 'no content type'})"
 
@@ -761,10 +767,12 @@ class CrawlerManager:
                 links.append(full_url)
         return links
 
-    def _process_html(self, html_content: Any, url: str, allowed_hosts: Set[str]) -> tuple[Optional[Document], List[str]]:
+    def _process_html(self, html_content: Any, url: str, allowed_hosts: Set[str],
+                      headers: Optional[Any] = None) -> tuple[Optional[Document], List[str]]:
         """Extracts the page (HTML text or parsed soup) as Markdown (headings, code blocks, tables kept) and
-        its links."""
+        its links. Its licence and copyright notice are read first, from the whole page (the footer included)."""
         soup = html_content if isinstance(html_content, BeautifulSoup) else BeautifulSoup(html_content, 'html.parser')
+        licence = licences.from_html(soup, url, headers)
         self._strip_boilerplate(soup)
         links = self._html_links(soup, url, allowed_hosts)
         title, text = html_to_markdown(soup)
@@ -777,13 +785,14 @@ class CrawlerManager:
         if not text.strip():
             self._skip(url, "no text")
             return None, links
-        metadata = {"source": url, "content_type": "html", "title": title}
+        metadata = {"source": url, "content_type": "html", "title": title, **licence}
         if lang:
             metadata["language"] = lang
         return Document(page_content=text, metadata=metadata), links
 
-    def _process_pdf(self, pdf_bytes: bytes, url: str) -> Optional[Document]:
-        """The PDF's text; a PDF without text (e.g. scanned) is skipped, an unreadable one failed."""
+    def _process_pdf(self, pdf_bytes: bytes, url: str, headers: Optional[Any] = None) -> Optional[Document]:
+        """The PDF's text with its licence and copyright notice; a PDF without text (e.g. scanned) is skipped, an
+        unreadable one failed."""
         if not PdfReader:
             self._skip(url, "PDF support (pypdf) is not installed", level=logging.WARNING)
             return None
@@ -793,7 +802,7 @@ class CrawlerManager:
             if not text.strip():
                 self._skip(url, "no text in the PDF")
                 return None
-            metadata = {"source": url, "content_type": "pdf"}
+            metadata = {"source": url, "content_type": "pdf", **licences.from_pdf(pdf_bytes, text, url, headers)}
             info_title = getattr(reader.metadata, "title", None) if reader.metadata else None
             if isinstance(info_title, str) and info_title.strip():
                 metadata["title"] = info_title.strip()

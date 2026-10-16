@@ -322,7 +322,8 @@ class TestSecretRedaction:
     def test_knowledge_export_uses_redaction(self):
         from orchestrator.Core.community_manager import CommunityManager
 
-        page = {"source": "s", "content": "token sk-ant-api03-AbCdEf0123456789abcdefghij", "metadata": {}}
+        page = {"source": "s", "content": "token sk-ant-api03-AbCdEf0123456789abcdefghij",
+                "metadata": {"licence": "CC0-1.0"}}   # full text: its licence allows passing it on
         rag = SimpleNamespace(export_records=lambda: iter([page]))
         pages, _ = CommunityManager(SimpleNamespace(get_component=lambda name: rag))._knowledge_pages()
         assert "sk-REDACTED" in pages[0]["content"]
