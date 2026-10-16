@@ -218,7 +218,8 @@ seines Plans, den zusammenfassenden Satz und eine Gesamtzeile mit dem Exit-Code.
 öffnet die Build-Images des Frameworks im Löschdialog (die ganze Liste, nichts angehakt); danach zeigt es, was
 repariert wurde, was nicht und warum. Jedes Board, auf das ein aufgezeichneter Fakt zeigt, bekommt **<Board> jetzt
 prüfen**, und **Ein Board prüfen...** (`--board`) prüft ein beliebiges vertrautes Board, das du auswählst
-(Bezeichnung und Adresse): eine Verbindung zu seinem SSH-Port, keine Anmeldung. **Dieses Board prüfen** im
+(Bezeichnung und Adresse; zwei Boards, die gleich aussehen, etwa ein neu aufgesetztes Board mit neuem
+Host-Schlüssel, zeigen auch ihre Geräte-ID): eine Verbindung zu seinem SSH-Port, keine Anmeldung. **Dieses Board prüfen** im
 Deployment-Tab (Gruppe „Benchmark auf einem Board“) prüft das gewählte Board genauso.
 
 ---

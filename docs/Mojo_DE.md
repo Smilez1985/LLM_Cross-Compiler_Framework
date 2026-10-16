@@ -134,8 +134,9 @@ wieder erreicht, denn Mojo Oracle schaut nur und schreibt nichts.
 
 Auch in der GUI nimmt das Mojo-Fenster von sich aus keinen Kontakt zu einem Board auf: Ein Board, auf das ein
 aufgezeichneter Fakt zeigt, bekommt einen Knopf **<Board> jetzt prüfen**, und **Ein Board prüfen...** prüft ein
-beliebiges vertrautes Board, das du an Bezeichnung und Adresse auswählst. **Dieses Board prüfen** im Deployment-Tab
-(Gruppe „Benchmark auf einem Board“) prüft das dort gewählte Board. Jedes ist dieselbe einzelne Verbindung zum
+beliebiges vertrautes Board, das du an Bezeichnung und Adresse auswählst (zwei Boards, die gleich aussehen, etwa ein
+neu aufgesetztes Board mit neuem Host-Schlüssel, zeigen auch ihre Geräte-ID). **Dieses Board prüfen** im
+Deployment-Tab (Gruppe „Benchmark auf einem Board“) prüft das dort gewählte Board. Jedes ist dieselbe einzelne Verbindung zum
 SSH-Port des Boards, ohne Anmeldung, und zeigt den Befund des Boards mit seinem nächsten Schritt.
 
 ## 3. Was Mojo Miracle repariert

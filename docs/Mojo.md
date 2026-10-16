@@ -126,7 +126,8 @@ board answers now, Mojo says that it cannot check the login. A checked board kee
 deploy, verify or benchmark reaches it again, because Mojo Oracle only looks and writes nothing.
 
 In the GUI the Mojo window contacts no board by itself either: a board a recorded fact points to gets a **Check
-<board> now** button, and **Check a board...** checks any trusted board you pick by its label and address. The
+<board> now** button, and **Check a board...** checks any trusted board you pick by its label and address (two
+boards that read the same, such as a board set up again with a new host key, also show their device ID). The
 Deployment tab's **Check this board** (group "Benchmark on a board") checks the board chosen there. Each is the same
 single connection to the board's SSH port, without a login, and shows the board's finding with its next step.
 

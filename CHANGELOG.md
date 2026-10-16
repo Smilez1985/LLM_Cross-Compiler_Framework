@@ -18,7 +18,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the GUI as your channel: the plans shown bind the repairs, the framework's build images open in the deletion dialog
   with the full list and nothing ticked, and the window shows what was repaired, what was not and why. No board is
   contacted by itself: a board a recorded fact points to gets **Check <board> now**, and **Check a board...** checks
-  any trusted board you pick (one connection to its SSH port, no login). The command and the window share the same
+  any trusted board you pick (by label and address, and also by device ID where two boards read the same; one
+  connection to its SSH port, no login). The command and the window share the same
   core functions (`Core/mojo/boards.py`, the person's view in `Core/mojo/views.py`, `docker_objects.offer_image_list`),
   so the output of `llmcf mojo` stays as it was.
 - **Check this board in the Deployment tab** (group "Benchmark on a board", DECISIONS W1'): checks the chosen board
