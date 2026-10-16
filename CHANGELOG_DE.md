@@ -932,6 +932,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   fehlgeschlagen), und ein Problem, das danach zum ersten Mal gefunden wird. Speicherplatz freigeben geht nur über
   die Liste der Build-Images des Frameworks im Terminal, nichts angehakt; ohne Terminal laufen nur die harmlosen
   Reparaturen, und nichts wird gelöscht. `--json` fragt nie und löscht nie.
+- **Mojo Oracle prüft die vertrauten Boards und Dittos Image** (achte Runde N6; siebte Runde D): Für jedes vertraute
+  Board liest es die `known_hosts` des Frameworks und öffnet eine Verbindung zum SSH-Port des Boards, ohne Anmeldung,
+  ohne Passwort und ohne den Namen des Gerätekontos, und nennt ein Board, das sich nicht nutzen lässt, mit seinem
+  Grund-Code (`device_host_down`, `device_port_closed`, `device_host_key_changed`) und dem nächsten Schritt. Im
+  Docker-Modus prüft es, dass Dittos Image da ist, auf diesem Rechner gebaut wurde (nie gezogen), vom festgelegten
+  Commit ist und das geprüfte ist (`runtime.docker`); es baut, zieht oder entfernt nie ein Image.
 - **`llmcf`, der neue Name der Kommandozeile** (siebte Runde, Punkt 11): ein zweites Konsolenskript neben `llm-cli`,
   dasselbe Programm; `llm-cli` bleibt. Der Framework-Container hat beide Befehle.
 - **Die MCP-Tools `run_mojo_oracle` und `run_mojo_miracle` und der Prompt `check_installation`** (siebte Runde, Punkt

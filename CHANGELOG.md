@@ -815,6 +815,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   administrator, not repairable automatically, failed), and a problem found for the first time afterwards. Freeing
   disk space goes only through the list of the framework's build images at a terminal, nothing ticked; without a
   terminal only the harmless repairs run and nothing is deleted. `--json` never asks and never deletes.
+- **Mojo Oracle checks the trusted boards and Ditto's image** (eighth round N6; seventh round D): for each trusted
+  board it reads the framework's `known_hosts` and opens one connection to the board's SSH port, without a login, a
+  password or the device account's name, and names a board that cannot be used with its reason code
+  (`device_host_down`, `device_port_closed`, `device_host_key_changed`) and the next step. In Docker mode it checks
+  that Ditto's image is there, was built on this computer (never pulled), is of the pinned commit and is the one that
+  was verified (`runtime.docker`); it never builds, pulls or removes an image.
 - **`llmcf`, the command line's new name** (seventh round, item 11): a second console script next to `llm-cli`, the
   same program; `llm-cli` stays. The framework container has both commands.
 - **The MCP tools `run_mojo_oracle` and `run_mojo_miracle` and the prompt `check_installation`** (seventh round, item

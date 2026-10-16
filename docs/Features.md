@@ -2276,7 +2276,8 @@ deterministic checks; nothing asks a model what is wrong. The whole guide: [Mojo
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
 | Knowledge | how many knowledge snapshots there are, their size against the free space of their disk, and their folder; a warning when the next snapshot would not fit, information when it fits but leaves little space (no limit: their number is never a warning; nothing is deleted; unreleased) |
-| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning), missing (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
+| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning), missing (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information); in Docker mode, Ditto's image: there, built on this computer, of the pin and verified (OK), Docker not reachable or the image gone or another one (warning; unreleased) |
+| Boards | each trusted board (unreleased): its host key still in the framework's `known_hosts` and its SSH port answering, by one connection without a login; `device_host_down` (information), `device_port_closed` and `device_host_key_changed` (warnings) with the next step; never the device account |
 
 **Mojo Oracle** (the default) only looks. For every warning and error it says what it found, where (the full path or
 the object), why it matters, a hint and whether Mojo Miracle can repair it; one sentence at the end counts every

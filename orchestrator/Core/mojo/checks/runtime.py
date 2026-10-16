@@ -11,6 +11,55 @@ from orchestrator.Core.mojo.findings import Finding, Severity, _ok
 
 
 RUNTIME_WHY = "Ditto's local model server cannot start without an intact build."
+SWITCH = "llm-cli ditto runtime ensure --mode bare-metal --force"
+
+
+def _ditto_docker():
+    from orchestrator.runtime.container_server import DittoDocker
+    return DittoDocker()
+
+
+def _docker_mode(root: Path, pin) -> List[Finding]:
+    """Ditto's server in Docker mode (DECISIONS round 7 D): the image recorded in mode.json is there, was built on
+    this computer (never pulled), is of the pinned commit and is the build that was verified. Asks Docker only; builds,
+    pulls and removes nothing. Nothing in bare-metal mode."""
+    from orchestrator.runtime import container_server as cs
+    try:
+        record = json.loads((root / "mode.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(record, dict) or record.get("mode") != "docker":
+        return []
+    saved = record.get("docker") if isinstance(record.get("docker"), dict) else {}
+    image_id = str(saved.get("image_id") or "")
+    name = str(saved.get("tag") or image_id[7:19] or "not recorded")
+    try:
+        docker = _ditto_docker()
+        reason = docker.unavailable()
+    except Exception as e:  # noqa: BLE001 - the docker module is missing
+        docker, reason = None, f"Docker cannot be used from the framework ({type(e).__name__})"
+    if reason:
+        return [Finding("runtime", "runtime.docker.unavailable", Severity.WARN,
+                        f"Ditto's server runs in Docker mode (image {name}), but {reason}.",
+                        f"Start Docker, or switch Ditto to bare metal: {SWITCH} (the models stay).", where=name,
+                        why=RUNTIME_WHY, cannot="admin")]
+    try:
+        image = docker.image(image_id) if image_id else None
+    except Exception:  # noqa: BLE001 - the daemon went away meanwhile
+        image = None
+    if (image is None or image.role != "image" or image.pulled or pin is None
+            or image.labels.get(cs.LABEL_COMMIT) != pin.commit
+            or image.labels.get(cs.LABEL_BUILD) != saved.get("build_id")):
+        what = "is no longer there" if image is None else "is not the image that was verified on this computer"
+        return [Finding("runtime", "runtime.docker.image", Severity.WARN,
+                        f"Ditto's server runs in Docker mode, but its image {name} {what}.",
+                        "llm-cli ditto runtime ensure --mode docker --force makes it again on this computer (the "
+                        f"models stay), or switch to bare metal: {SWITCH}.", where=name, why=RUNTIME_WHY,
+                        cannot="not_automatic")]
+    return [_ok("runtime", "runtime.docker",
+                f"Ditto's server runs in Docker mode: image {image.name} ({image.image_id[7:19]}), build "
+                f"{str(saved.get('build_id'))[:16]}, built and verified on this computer "
+                f"({saved.get('verified_at') or 'time not recorded'}); never pulled from a registry.")]
 
 
 def check_runtime(framework) -> List[Finding]:
@@ -55,6 +104,7 @@ def check_runtime(framework) -> List[Finding]:
         findings.append(Finding("runtime", "runtime.build.none", Severity.INFO,
                                 "No self-built llama.cpp runtime is in use" +
                                 (f" ({len(stored)} stored, none active)." if stored else ".")))
+    findings += _docker_mode(store.root, pin)
     prebuilt = sorted(p.parent.name for p in store.root.glob("b*-*/runtime.json"))
     if prebuilt:
         try:

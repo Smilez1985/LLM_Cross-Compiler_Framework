@@ -164,9 +164,11 @@ ihre Capabilities, ob der persönliche Ordner privat ist, den Secrets-Speicher u
 Tool-Berechtigungen, die MCP-Token, das Audit-Log, den Chat-Verlauf (er lässt sich schreiben, seine neuesten Einträge
 stimmen), die mitgelieferten Kalibrierungsdaten, die installierten Community-Pakete (zurückgezogen, verändert oder aus
 einer Datei importiert), die Snapshots der Wissensbasis (wie viele, ihre Größe im Vergleich zum freien Platz ihrer
-Platte und wo; es gibt keine Grenze, ihre Zahl ist also nie eine Warnung) und die lokale llama.cpp-Laufzeit. Es sagt
-auch, wo Docker seine Images ablegt und wie viel die Build-Images des Frameworks belegen (diesen Ordner zu verlegen ist
-ein Schritt für Administratoren, siehe [Container-Einrichtung](Container_Setup_DE.md#10-wo-docker-images-ablegt)).
+Platte und wo; es gibt keine Grenze, ihre Zahl ist also nie eine Warnung), die lokale llama.cpp-Laufzeit (im
+Docker-Modus: Dittos Image) und die Boards, denen du vertraust (Host-Schlüssel und SSH-Port, mit einer Verbindung ohne
+Anmeldung; ein Board, das sich nicht nutzen lässt, bekommt seinen Grund-Code wie `device_host_down`). Es sagt auch, wo
+Docker seine Images ablegt und wie viel die Build-Images des Frameworks belegen (diesen Ordner zu verlegen ist ein
+Schritt für Administratoren, siehe [Container-Einrichtung](Container_Setup_DE.md#10-wo-docker-images-ablegt)).
 
 Zu jeder Warnung und jedem Fehler schreibt es, was es gefunden hat, wo (den vollen Pfad oder das Objekt), warum das
 wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann, mit dem Plan einer Reparatur (was sich ändert,
