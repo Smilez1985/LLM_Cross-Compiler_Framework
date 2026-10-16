@@ -1278,7 +1278,7 @@ class TestMainWindowWiring:
             assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module...",
                                       "Hugging Face Model Browser...",
                                       "Open Community Hub", "Tool Permissions (Ditto / MCP)...",
-                                      "Folders the AI May Use...", "Pending Approvals...",
+                                      "Folders the AI May Use...", "Deep Ingest Notice...", "Pending Approvals...",
                                       "Fix Proposals from AI Clients...", "Knowledge Snapshots...",
                                       "Framework Build Images...", "Index the Framework's Documentation...",
                                       "Spoken Announcements", "Clear Input History..."]
