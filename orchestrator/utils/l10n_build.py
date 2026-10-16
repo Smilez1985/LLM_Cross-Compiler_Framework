@@ -59,6 +59,9 @@ TEXTS = {
         "bld.builder.no_target": "Choose a target first.",
         "bld.builder.no_caps": "This target declares no capabilities: every format is offered, and its boards, "
                                "formats and quantizations are not checked before a build.",
+        "bld.builder.invalid_caps": "This target's capabilities block is invalid (Check target names each error): "
+                                    "every format is offered, and its boards, formats and quantizations are not "
+                                    "checked before a build.",
         "bld.builder.priority": "Priority:",
         "bld.builder.priority.tip": "The build queue orders by it; a failed critical build stops the whole pipeline.",
         "bld.builder.priority.low": "Low",
@@ -216,6 +219,9 @@ TEXTS = {
         "bld.builder.no_target": "Wähle zuerst ein Target.",
         "bld.builder.no_caps": "Dieses Target gibt keine Fähigkeiten an: jedes Format wird angeboten, und seine "
                                "Boards, Formate und Quantisierungen werden vor einem Build nicht geprüft.",
+        "bld.builder.invalid_caps": "Der Fähigkeiten-Block dieses Targets ist ungültig („Target prüfen“ nennt jeden "
+                                    "Fehler): jedes Format wird angeboten, und seine Boards, Formate und "
+                                    "Quantisierungen werden vor einem Build nicht geprüft.",
         "bld.builder.priority": "Priorität:",
         "bld.builder.priority.tip": "Die Build-Warteschlange ordnet danach; ein fehlgeschlagener kritischer Build "
                                     "beendet die ganze Pipeline.",
@@ -322,7 +328,7 @@ TEXTS = {
                                               "nennen.",
 
         "bld.wizard.description": "Beschreibung:",
-        "bld.wizard.description_hint": "Target für {name}",
+        "bld.wizard.description_hint": "Target for {name}",   # the value written into target.yml (not translated)
         "bld.wizard.description_ai": "Vom Framework geschrieben für ein mit Ditto erstelltes Modul: sie sagt, dass das "
                                      "Modul ungetestet ist, und nennt die Werte, die Ditto geraten hat.",
         "bld.field.wizard.description": "Beschreibung",

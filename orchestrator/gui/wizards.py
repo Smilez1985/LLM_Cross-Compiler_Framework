@@ -37,6 +37,9 @@ from orchestrator.utils import input_history
 from orchestrator.utils.announce import announce
 from orchestrator.utils.localization import current_language, tr, ui_text
 
+# The Docker page's packages before anything is imported (a probe import puts them back after Ditto's proposal).
+DEFAULT_PACKAGES = "build-essential cmake git python3-pip"
+
 
 def module_name_hint(raw: str) -> str:
     """A module name the generator accepts, derived from probe data or AI output (e.g. CPU model strings)."""
@@ -247,10 +250,11 @@ class ModuleCreationWizard(QWizard):
         b.line("name", "gui.field.wizard.name", self.name_edit, page=1, hint="letters, digits, '_', '.', '-'")
         b.combo("arch", "gui.field.wizard.arch", self.arch_combo, by_data=False, page=1)
         b.line("sdk", "gui.field.wizard.sdk", self.sdk_edit, page=1, hint="e.g. RKNN, CUDA, OpenVINO, none")
+        # Only the person types a description: the framework writes the untested note of a module an AI helps with
         b.line("description", "bld.field.wizard.description", self.desc_edit, page=1,
-               hint="one line about the target; empty: 'Target for <name>'",
-               read_only=lambda: "the framework writes the description of a module made with Ditto"
-               if self.ai_proposal else "")
+               hint="the person's own line about the target; empty: 'Target for <name>'",
+               read_only=lambda: "only the person writes the description; for a module an AI helps with, the "
+               "framework adds that it is AI-generated and untested")
 
         def base_image():
             if self.rad_debian.isChecked():
@@ -523,6 +527,11 @@ class ModuleCreationWizard(QWizard):
         """The description the person typed, or the CLI's default "Target for <name>"."""
         return self.desc_edit.text().strip() or f"Target for {self.name_edit.text()}"
 
+    def person_description(self) -> str:
+        """What the person typed into Description ("" for none); a module an AI helped with keeps it in front of the
+        framework's untested note."""
+        return "" if self.ai_proposal else self.desc_edit.text().strip()
+
     # --- provider and model for this one analysis ---
 
     def _fill_run_providers(self):
@@ -630,7 +639,7 @@ class ModuleCreationWizard(QWizard):
         
         layout.addWidget(QLabel(tr("wiz.lbl.packages")))
         self.packages_edit = QLineEdit()
-        self.packages_edit.setText("build-essential cmake git python3-pip")
+        self.packages_edit.setText(DEFAULT_PACKAGES)
         layout.addWidget(self.packages_edit)
         
         page.setLayout(layout)
@@ -964,7 +973,14 @@ Setup commands:
 
             self.cpu_flags.setText(" ".join(cpu_flags))
             self.cmake_flags.setText(" ".join(cmake_flags))
-            
+            if self.ai_proposal:
+                # Ditto's values the probe does not set go too: none of them may end up in a module saved as the
+                # person's (unmarked, not audited)
+                self.packages_edit.setText(DEFAULT_PACKAGES)
+                self.setup_commands.setPlainText("")
+                self.quant_logic.setPlainText("")
+                self.custom_os_edit.clear()
+
             self.ai_proposal = None  # the fields now come from the probe, not from Ditto
             self._update_description_hint()
             self._set_avatar_state("success")
@@ -1199,9 +1215,11 @@ Setup commands:
                                                             "cmake_flags", "setup_commands", "quantization_logic")})
         name = self.module_data["module_name"]
         ditto = self._ditto() or DittoCoder(self.framework_manager)
+        lead = self.person_description()
         path = Path(ditto.save_module(definition, self.targets_dir, module_name=name, profile=profile,
-                                      knowledge_roots=roots, generator=ModuleGenerator))
-        record_module_saved(self.framework_manager, "gui", generator_input(definition, name), path, "framework-gui")
+                                      knowledge_roots=roots, generator=ModuleGenerator, description=lead))
+        record_module_saved(self.framework_manager, "gui", generator_input(definition, name, description=lead), path,
+                            "framework-gui")
         return path
 
     def _check_created(self, folder) -> str:
@@ -1251,8 +1269,10 @@ Setup commands:
             "architecture": arch,
             "sdk": self.sdk_edit.text(),
             # A module from Ditto's proposal says it is untested and names Ditto's guesses, as generate-ai's does.
+            # A module an AI helped with keeps the person's own description in front of that note.
             "description": (ai_module_description(self.name_edit.text(),
-                                                  (self.ai_proposal or {}).get("assumptions") or [])
+                                                  (self.ai_proposal or {}).get("assumptions") or [],
+                                                  lead=self.person_description())
                             if ai_made else self.description()),
             "base_os": self.custom_os_edit.text() if self.rad_custom.isChecked() else ("debian:bookworm-slim" if self.rad_debian.isChecked() else "ubuntu:22.04"),
             "packages": packages_list,

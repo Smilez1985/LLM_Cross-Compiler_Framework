@@ -228,6 +228,17 @@ class TestDittoForOneRun:
         assert run.config.get("offline_mode") == config.get("offline_mode"), "every other value is the saved one"
         assert ditto.for_run(None, None) is ditto
 
+    def test_a_value_set_during_the_run_stays_in_the_run(self, tmp_path):
+        """Review: RunSettings handed set() on to the saved settings, so anything that set a value on the run's
+        settings changed the person's own (and a later save wrote it)."""
+        ditto, config = self.ditto(tmp_path)
+        run = ditto.for_run("ollama", "small-model")
+        assert run.config.set("ai_model", "other-model") is True
+        assert run.config.set("ai_temperature", 0.1) is True
+        assert run.config.get("ai_model") == "other-model" and run.config.get("ai_temperature") == 0.1
+        assert config.get("ai_model") != "other-model" and config.get("ai_temperature") != 0.1
+        assert config.get("ai_provider") == "anthropic"
+
     def test_an_unknown_provider_is_refused(self, tmp_path):
         from orchestrator.Core.ditto_manager import DittoError
         ditto, _ = self.ditto(tmp_path)

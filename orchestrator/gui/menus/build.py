@@ -47,6 +47,7 @@ CLI_PATHS: Dict[str, str] = {
     "build start --imatrix": "chk_builder_imatrix",
     "build start --dataset": "combo_builder_dataset",
     "build save": "btn_deploy_save",                          # Deployment tab > Save...
+    "build save --to": "btn_deploy_save",                     # its folder dialog chooses the folder
     "build status": "act_build_history",
     "build status --all": "act_build_history",
     "config show": "act_file_settings",

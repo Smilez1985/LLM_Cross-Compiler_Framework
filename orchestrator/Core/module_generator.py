@@ -326,17 +326,18 @@ AI_DEFINITION_FIELDS = ("architecture", "sdk", "base_os", "packages", "cpu_flags
 
 
 def generator_input(definition: Dict[str, Any], module_name: Optional[str] = None,
-                    boards: Optional[List[str]] = None) -> Dict[str, Any]:
+                    boards: Optional[List[str]] = None, description: str = "") -> Dict[str, Any]:
     """The module generator's input for an AI-proposed module definition, the one mapping for every path (Ditto's
     `llm-cli module generate-ai`, the module wizard's AI proposal and the MCP tool create_target_module): every field
     of the definition is passed on (none is dropped), the module is marked ai-generated and untested, and its
-    description says so with the values the AI guessed."""
+    description says so with the values the AI guessed. `description`: the person's own words for the module (the
+    module wizard's Description field), kept in front of that note; never an AI's."""
     from orchestrator.Core.ditto_manager import ai_module_description
     name = module_name or str(definition.get("module_name") or "") or "Custom_Target"
     data = {key: definition[key] for key in AI_DEFINITION_FIELDS if definition.get(key) is not None}
     packages = data.get("packages", [])
     data.update({"module_name": name, "packages": packages.split() if isinstance(packages, str) else packages,
-                 "description": ai_module_description(name, definition.get("assumptions") or []),
+                 "description": ai_module_description(name, definition.get("assumptions") or [], lead=description),
                  "detection_commands": "lscpu", "supported_boards": list(boards or [name]),
                  "provenance": "ai-generated"})
     return data

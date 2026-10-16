@@ -714,6 +714,12 @@ class BuilderTab(QWidget):
         target = self.target_combo.currentData() if hasattr(self, "target_combo") else None
         return tm.get_capabilities(target) if tm and target and hasattr(tm, "get_capabilities") else None
 
+    def _declares_capabilities(self, target) -> bool:
+        """Whether the target's target.yml has a capabilities block (valid or not), from the loaded targets."""
+        tm = self.framework.get_component("target_manager") if self.framework and hasattr(self.framework, "get_component") else None
+        data = tm.get_target(target) if tm is not None and hasattr(tm, "get_target") else None
+        return isinstance(data, dict) and "capabilities" in data
+
     def _apply_target_capabilities(self):
         """Offers exactly the formats the selected target declares. A target that declares none gets what the CLI
         allows (every format), and the note that its boards, formats and quantizations are not checked."""
@@ -728,7 +734,12 @@ class BuilderTab(QWidget):
             for label, value in UNCHECKED_FORMATS:
                 self.format_combo.addItem(label, value)
         if hasattr(self, "lbl_no_caps"):
-            self.lbl_no_caps.setVisible(caps is None and self.target_combo.currentData() is not None)
+            target = self.target_combo.currentData()
+            if caps is None and target is not None:
+                # A block that fails the schema counts as none for the build, but it is not "none declared"
+                self.lbl_no_caps.setText(ui_text("bld.builder.invalid_caps" if self._declares_capabilities(target)
+                                                 else "bld.builder.no_caps"))
+            self.lbl_no_caps.setVisible(caps is None and target is not None)
         idx = self.format_combo.findData(current)
         self.format_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.format_combo.blockSignals(False)
