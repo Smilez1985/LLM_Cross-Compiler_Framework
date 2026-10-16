@@ -235,9 +235,10 @@ class BuildService:
                                      manual_step_text=str(hp.fix_command),
                                      automatic=strategy in AUTOMATIC_STRATEGIES and not hp.is_ai_generated,
                                      ai_generated=bool(hp.is_ai_generated))
+        stage, percent = self._live_progress(state)
         return BuildStatusOut(
-            request_id=state.request_id, status=state.status.value, stage=state.current_stage,
-            progress_percent=state.progress_percent, total_builds=state.total_builds,
+            request_id=state.request_id, status=state.status.value, stage=stage,
+            progress_percent=percent, total_builds=state.total_builds,
             completed_builds=state.completed_builds, failed_builds=state.failed_builds,
             artifacts=list(state.artifacts), errors=[redact_secrets(e) for e in state.errors],
             warnings=[redact_secrets(w) for w in state.warnings], pending_healing=pending,
@@ -247,6 +248,28 @@ class BuildService:
                 created=p.created) for p in getattr(state, "client_proposals", [])],
             owner=owner_actor(getattr(state, "owner", "")) or None,
             request=RequestSummary(**getattr(state, "summary", {})) if getattr(state, "summary", None) else None)
+
+    _RUNNING = (OrchestrationStatus.PREPARING, OrchestrationStatus.BUILDING, OrchestrationStatus.HEALING)
+
+    def _live_progress(self, state: WorkflowState) -> Tuple[str, int]:
+        """The request's stage and percent with its running build counted in: the build engine's own step and percent
+        (builder.py BuildProgress), so one build of one request moves 10, 20, 40 ... instead of 0 % until it ends.
+        A build that ended adds nothing; a request that still runs never says 100 %."""
+        stage, percent = state.current_stage, state.progress_percent
+        if state.status not in self._RUNNING or not state.total_builds or not state.build_ids:
+            return stage, percent
+        try:
+            build = self._orchestrator.build_engine.get_build_status(state.build_ids[-1])
+        except Exception:  # noqa: BLE001 - no engine progress: the request's own values
+            return stage, percent
+        status = getattr(getattr(build, "status", None), "value", None)
+        if build is None or status in (None, "completed", "failed", "cancelled"):
+            return stage, percent
+        part = max(0, min(99, int(getattr(build, "progress_percent", 0) or 0)))
+        ended = state.completed_builds + state.failed_builds
+        percent = max(percent, min(99, (ended * 100 + part) // state.total_builds))
+        step = str(getattr(build, "current_stage", "") or "")
+        return (f"{stage}: {step}" if stage and step else stage or step), percent
 
     def _state(self, request_id: str) -> WorkflowState:
         state = self._orchestrator._workflows.get(request_id)

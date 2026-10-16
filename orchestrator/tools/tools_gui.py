@@ -254,6 +254,8 @@ def gui_tool_specs(registry: ToolRegistry, framework: Any) -> List[ToolSpec]:
         choices = row.get("choices") or []
         if row["kind"] in ("path", "model"):
             choices = [path_for_ai(c, row["kind"]) for c in choices]
+        else:   # what a list offers is checked like a value (a local server lists its models by their path)
+            choices = [_no_home(str(c)) for c in choices]
         return GuiFieldOut(id=row["id"], label=row["label_en"], kind=row["kind"], value=value_for_ai(row),
                            read_only=row["read_only"], why_read_only=row["why_read_only"],
                            filled_by_ditto=row["filled_by_ditto"], chosen_by_person=row["chosen_by_person"],
@@ -349,19 +351,24 @@ def gui_tool_specs(registry: ToolRegistry, framework: Any) -> List[ToolSpec]:
                             next="Call read_gui_form (or wizard_state) for the field ids.")
         # What can never be filled now is refused before anyone is asked (it is checked again when filling)
         blocked = {}
+        other_page = "this field is not on the wizard's current page"
         for key in values:
             row = rows[key]
             why = (row["why_read_only"] if row["read_only"] else
-                   "this field is not on the wizard's current page" if on_page is not None and key not in on_page
+                   other_page if on_page is not None and key not in on_page
                    else "the person chose this value" if row["chosen_by_person"]
                    else "the person is editing this field now" if row["editing_now"] else "")
             if why:
                 blocked[key] = why
         if len(blocked) == len(values):
+            elsewhere = all(why == other_page for why in blocked.values())   # Ditto can go there itself
             raise ToolError("Nothing can be filled: " + "; ".join(f"{rows[k]['label_en']}: {w}" for k, w in
                                                                     blocked.items()) + ".", code="needs_person",
-                            field="values", next="Do not fill these fields; tell the person your suggestion in the "
-                                                 "chat, and they change the field themselves.")
+                            field="values",
+                            next=("Go to the field's page first: wizard_step with action next or back (read_gui_form "
+                                  "shows each field's page number), then fill it there." if elsewhere else
+                                  "Do not fill these fields; tell the person your suggestion in the chat, and they "
+                                  "change the field themselves."))
 
         def cut(text: str) -> str:
             return text if len(text) <= SHOWN_CHARS else (f"{text[:SHOWN_CHARS]} ... ({len(text)} characters; the "
