@@ -1,13 +1,43 @@
-# Scripts and Dockerfiles run inside Linux containers; CRLF from a Windows checkout breaks them.
-*.sh          text eol=lf
-Dockerfile*   text eol=lf
-dockerfile    text eol=lf
-*.yml         text eol=lf
-*.yaml        text eol=lf
+# Line endings. Git for Windows checks text out with CRLF by default (core.autocrlf=true). Everything this repository
+# ships runs or is read on a board or in a Linux container, or is compared byte for byte by the tests, so every text
+# file keeps LF in every checkout: a CRLF shell script fails ("$'\r': command not found"), a CRLF licence or data file
+# differs from its source. Files committed with CRLF stay as they are (text=auto converts nothing there).
+*                 text=auto eol=lf
+# The targets' files go into the build containers; the fixtures are compared byte for byte.
+targets/**        text=auto eol=lf
+tests/fixtures/** text=auto eol=lf
+
+# Named explicitly as well, so a narrower rule added later cannot turn them into CRLF by accident.
+*.sh              text eol=lf
+Dockerfile*       text eol=lf
+dockerfile        text eol=lf
+*.Dockerfile      text eol=lf
+*.dockerfile      text eol=lf
+entrypoint*       text eol=lf
+*.service         text eol=lf
+*.timer           text eol=lf
+*.socket          text eol=lf
+.githooks/*       text eol=lf
+LICENSE*          text eol=lf
+Makefile          text eol=lf
+*.py              text eol=lf
+*.yml             text eol=lf
+*.yaml            text eol=lf
+*.json            text eol=lf
+*.toml            text eol=lf
+*.cmake           text eol=lf
 
 # Windows-only scripts keep CRLF.
-*.bat         text eol=crlf
-*.ps1         text eol=crlf
+*.bat             text eol=crlf
+*.cmd             text eol=crlf
+*.ps1             text eol=crlf
 
-# Shipped data files
-*.gz          binary
+# Binary files: never converted.
+*.gz              binary
+*.zip             binary
+*.tar             binary
+*.png             binary
+*.ico             binary
+*.gguf            binary
+*.so              binary
+*.whl             binary

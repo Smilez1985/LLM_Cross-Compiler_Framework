@@ -329,8 +329,15 @@ def test_near_misses_of_an_exact_format_behave_as_before(value):
     assert secret_scan.scan_text("f.py", f"{line}  # {secret_scan.ALLOW_PRAGMA}") == []
 
 
+def short_id(text: str) -> str:
+    """A test id for a long adversarial text: its start and length (the text itself is longer than Windows allows in
+    the environment variable PYTEST_CURRENT_TEST)."""
+    return f"{text[:12]}-x{len(text)}"
+
+
 @pytest.mark.parametrize("text", ["glp" + "at-" * 20000, "sk-" + "proj-sk-" * 15000, "xo" + "xb-1234567890-" * 8000,
-                                  "sk-ant-" + "api03-sk-ant-" * 8000, "pypi" + "-pypi" * 20000, "AK" + "IA" * 30000])
+                                  "sk-ant-" + "api03-sk-ant-" * 8000, "pypi" + "-pypi" * 20000, "AK" + "IA" * 30000],
+                         ids=short_id)
 def test_exact_formats_stay_fast_on_adversarial_text(text):
     # The scan reads every line of every commit in CI: never quadratic.
     start = time.perf_counter()
@@ -622,7 +629,7 @@ def test_the_old_lines_with_the_mocks_hold_nothing_else():
 
 
 @pytest.mark.parametrize("text", ["pypi" + "-pypi" * 20000, "glp" + "at-" * 20000, "xo" + "xb-1234567890-" * 8000,
-                                  "sk-ant-" + "api03-sk-ant-" * 8000, "sk-" + "proj-sk-" * 15000])
+                                  "sk-ant-" + "api03-sk-ant-" * 8000, "sk-" + "proj-sk-" * 15000], ids=short_id)
 def test_a_line_with_a_listed_mock_stays_fast(text):
     allowed = frozenset(secret_scan.digest(v) for v in HISTORY_MOCKS.values())
     line = f"{GH_MOCK} {text}-{GH_MOCK}-{HF_MOCK} {text}"

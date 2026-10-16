@@ -850,7 +850,7 @@ class ModuleGenerator:
         if data.get("runtime_block"):
             config["runtime"] = data["runtime_block"]
 
-        with open(dst, "w", encoding="utf-8") as f:
+        with open(dst, "w", encoding="utf-8", newline="\n") as f:  # LF like every file of the module
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
     def _write_build_script(self, target_dir: Path, data: Dict[str, Any]):
@@ -927,7 +927,9 @@ echo "Generated $OUTPUT_FILE"
         self._make_executable(path)
 
     def _write_file(self, path: Path, content: str):
-        with open(path, "w", encoding="utf-8") as f:
+        # LF on every host: the module's scripts and Dockerfiles run in a Linux container, where a Windows host's
+        # CRLF breaks them ("$'\r': command not found").
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(content)
 
     def _make_executable(self, path: Path):
