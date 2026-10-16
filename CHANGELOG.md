@@ -19,8 +19,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   module, a replaced board runtime; never the number of knowledge snapshots, which have no limit) come with a rule
   for an AI; security and legal warnings (pickle weights, a base
   image outside the Docker Official Images or not pinned, vendor downloads above the soft cap, an unreviewed or
-  community target, the first build of AI-made build code, an untrusted model run natively or in the sandbox the
-  person has not allowed for AIs (`bench_untrusted_sandbox_ok`), signing as the person, gated models, licences)
+  community target, the first build of AI-made build code, an untrusted model run natively on a board or in the
+  sandbox the person has not allowed for AIs (`bench_untrusted_sandbox_ok`), signing as the person, gated models,
+  licences)
   always stay with the person, a base image outside the Docker Official Images also after a confirmed build with it,
   and facts that could not be checked are the security warning `facts_unknown`, never "no problem" (the person reads
   in plain words what could not be checked, never an internal code). Builds, recipe builds, downloads, pack imports and exports, Deep Ingest,
@@ -711,9 +712,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   hidden until you enable them, also when the whole tier is allowed. The local server is always self-built from the
   pinned commit (no prebuilt option, no CMake option or command as input); a missing toolchain part is refused with
   `needs_person` and `llm-cli ditto runtime install`; only a verified build is started and no result holds its address
-  or key; a cancelled install is never activated and a cancelled model download keeps its `.part`. An untrusted model
-  is benchmarked natively only after your consent in the framework's own window, written to the audit log first, or in
-  the Docker sandbox. The board tools reach only trusted devices with the trusted host key, are always asked and never
+  or key; a cancelled install is never activated and a cancelled model download keeps its `.part`. Only Ditto's own
+  catalog models are benchmarked natively; a model built for a board never is (seventh round, 2'): `run_benchmark`
+  measures it in the Docker sandbox, and its real values come from the board (`run_device_benchmark`). The board
+  tools reach only trusted devices with the trusted host key, are always asked and never
   covered by a standing approval; their facts, consequences, progress, check results and errors (also on success)
   never name the device account (the paired login nor the account the deploy settings name) or a path on the board
   (the person's window shows the login and the model's path).
@@ -755,6 +757,29 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and German texts name the menus as the window shows them). Where the panel sits, whether it is shown, its filter and the newest entry you
   saw are kept in `gui_state.json` in the per-user folder (never in QSettings); a damaged file gives the defaults.
 
+- **Board deployment over a network that drops** (eighth round, N4 and N5): you name the board by its address or
+  its host name (`myboard.local`; `llm-cli deploy run --host`, `--ip` stays as the old name). When the network drops
+  during a deploy (a board with Wi-Fi only), the deploy waits for the board (300 s by default, `--wait`), shows that
+  it waits with the time and the limit, and can be cancelled (Cancel in the Deployment window, Ctrl+C in the CLI,
+  `cancel_job`). It logs in again with the same host key check and continues: the upload resumes at the bytes that
+  arrived once their sha256 matches, and `deploy.sh` runs on the board on its own and is started once, never twice.
+  `deploy_to_device` results also have `reason_code`, `resumed` and `waited_s`; its progress names the board by its
+  label.
+- **Why a board cannot be reached** (N6): the reason codes `device_host_down`, `device_port_closed`,
+  `device_auth_failed` and `device_host_key_changed` (`orchestrator/runtime/device/reasons.py`) with what happened and
+  the next step for the person in English and German, in the GUI and the CLI. An AI gets the plain code with a next
+  step, without the address or the account; they are the blockers of the board tools and replace
+  `device_unreachable` and `host_key_changed` of the facts catalogue.
+- **KV cache of a board's server** (N7): `f16`, `q8_0` or `q4_0` (`-ctk`/`-ctv`, checked words of the shared launch
+  policy and of the start script). Automatic by default: `q8_0` when little memory is left next to the model on the
+  board (from its probe), otherwise `f16`; you can always choose a type, and `f16` switches it off. Chosen with
+  `llm-cli device settings --kv-cache` or in the Deployment window; the systemd unit, the start command and
+  `deploy.sh` take it from the board's deploy settings, and the question of `deploy_device_runtime` names it.
+- **"Tested on board X"** (N3): a passed benchmark on the board (`llm-cli device runtime verify` or `deploy` with
+  `--bench-model`, `run_device_benchmark`, and the new "Benchmark on a board" part of the Deployment window) is
+  recorded with every build of that model in the output folder (`device_tests.json`, found by the model's sha256).
+  The Deployment window lists such a build as "tested on <board>", and after a deploy of a GGUF model it fills in the
+  board and the model for that measurement.
 ### Changed
 - **Questions show a short summary and the warning classes** (delegation design 4.5, LAY-L2): a question in the
   framework's own window (Ditto's dialog, the CLI prompt, the approval window) starts, after its first line, with 3 to 6
@@ -883,9 +908,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`llm-cli device runtime build` and `deploy`). `llm-cli scan --device` keeps the SSH user as the board's deploy
   user (never root).
 - The perplexity check of the dataset manager runs the self-built `llama-perplexity` of this machine instead of
-  pulling `ghcr.io/smilez1985/llm-runtime`: catalog models natively; every other model natively only after your
-  consent, which is written to the tool audit log first; the Docker sandbox (the build's own locally built image, no
-  network) as the opt-in. A failed measurement is an error with the reason instead of the values 999.99 or 888.88.
+  pulling `ghcr.io/smilez1985/llm-runtime`: catalog models (Ditto's own) natively or in the Docker sandbox; every
+  other model, such as one converted for a board, only in the Docker sandbox (the build's own locally built image, no
+  network), never natively on this computer. A failed measurement is an error with the reason instead of the
+  values 999.99 or 888.88.
 - **MCP results**: the text block of a tool result starts with one sentence built only from framework facts (ids,
   states, counts), followed by the JSON wrapped as untrusted data; output schemas mark every field with external
   text (`"untrusted": true`); results carry `notes` written by the framework (for example "the knowledge base is
@@ -1308,7 +1334,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   keeps the full paths for you.
 - **`run_benchmark` runs the very file it hashed**: the model is opened once, hashed through the open file and
   handed to llama-bench as that open file (an inherited descriptor natively, a private hard link in the sandbox),
-  so a catalog model cannot be swapped for an untrusted one between the check and a native run without consent.
+  so a catalog model cannot be swapped for another model between the check and a native run.
 - **Board and local runtime tool errors name no host path**: paths in their messages appear as the framework's
   folder labels (`state:...`, `cache:...`, `output:...`, `models:...`) or as a file name only, never as a host path
   or `~/...` (also after a colon, as in `file:/...` or `user@board:/...`, and inside a `file:///` URL).

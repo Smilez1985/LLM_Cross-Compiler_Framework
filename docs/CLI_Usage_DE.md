@@ -384,8 +384,8 @@ llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0
 ### deploy run
 
 ```
-llm-cli deploy run PACKAGE_PATH --ip IP --user BENUTZER [--port 22] [--password TEXT] [--trust-fingerprint TEXT]
-                   [--label TEXT]
+llm-cli deploy run PACKAGE_PATH --host HOST --user BENUTZER [--port 22] [--password TEXT] [--trust-fingerprint TEXT]
+                   [--label TEXT] [--wait SEKUNDEN]
 ```
 
 Lädt ein Paket per SSH in einen privaten temporären Ordner auf dem Board, führt dort `deploy.sh` aus und löscht den
@@ -395,12 +395,23 @@ gibt es eine passende `llama-server`-Befehlszeile aus, wenn `llama-server` auf d
 | Argument / Option | Bedeutung |
 |---|---|
 | `PACKAGE_PATH` | Die ZIP-Datei aus `deploy package`, das ihren vollständigen Pfad ausgibt (muss existieren). |
-| `--ip TEXT` | **Pflicht.** Die IP-Adresse des Boards. |
+| `--host TEXT` | **Pflicht.** Die Adresse oder der Hostname des Boards, zum Beispiel `192.168.1.50` oder `myboard.local`. `--ip` ist der alte Name und funktioniert weiter. |
 | `--user TEXT` | **Pflicht.** Benutzer auf dem Board. |
 | `--port INTEGER` | SSH-Port (Standard 22). |
 | `--password TEXT` | Nur für die erste Verbindung: wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu hinterlegen, und nie gespeichert. Ohne Angabe wird interaktiv gefragt. Ein Passwort auf der Befehlszeile landet in deinem Shell-Verlauf. |
 | `--trust-fingerprint TEXT` | Einem neuen Board ohne Nachfrage vertrauen, wenn sein Host-Schlüssel genau diesen SHA256-Fingerabdruck hat (für Skripte). |
 | `--label TEXT` | Dein Name für das Board in den vertrauten Geräten (Standard: der Name, den es schon hat, oder seine Adresse). |
+| `--wait SEKUNDEN` | Wenn das Netzwerk während des Deployments wegbricht, so lange auf das Board warten (Vorgabe 300, 0 bis 86400). |
+
+Bricht das Netzwerk weg (zum Beispiel bei einem Board nur mit WLAN), wartet das Deployment auf das Board und zeigt,
+wie lange es schon wartet und wie lange höchstens; Strg+C bricht ab. Sobald das Board auf seinem SSH-Port wieder
+antwortet, meldet sich die CLI mit derselben Prüfung des Host-Schlüssels neu an, und der Upload geht dort weiter, wo
+er stehen blieb, nachdem die sha256 des Angekommenen gepasst hat. `deploy.sh` läuft auf dem Board für sich und wird
+einmal gestartet, nie zweimal. Ist das Board nicht erreichbar oder lehnt es die Anmeldung ab, sagt die CLI mit einem
+Code, warum, und was zu tun ist: `device_host_down` (nichts antwortet: das Board ist aus, in einem anderen Netzwerk,
+oder der Hostname wird nicht aufgelöst), `device_port_closed` (das Board lehnt SSH auf diesem Port ab),
+`device_auth_failed` (falscher Benutzername oder falsches Passwort, oder der Schlüssel des Frameworks fehlt),
+`device_host_key_changed` (ein anderer Host-Schlüssel als der, dem du vertraut hast).
 
 Erste Verbindung: Die CLI zeigt den Fingerabdruck des Host-Schlüssels und fragt, ob du ihm vertraust. Vergleiche ihn
 mit `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` auf dem Board. Ohne Terminal und ohne `--trust-fingerprint`
@@ -410,10 +421,14 @@ ein KI-Client später dorthin übertragen darf, jedes Mal mit deiner Bestätigun
 paramiko fehlt) bekommen nie die Standardeingabe des Frameworks.
 
 ```bash
-llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --ip 192.168.1.50 --user rock
+llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --host 192.168.1.50 --user rock
+
+# Ein Board im WLAN über seinen Hostnamen, bis zu 10 Minuten Warten, wenn das Netzwerk wegbricht
+llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --host myboard.local --user rock \
+  --wait 600
 
 # In einem Skript, mit vorher geprüftem Fingerabdruck
-llm-cli deploy run output/deploy_model_1791801300.zip --ip 192.168.1.50 --user rock \
+llm-cli deploy run output/deploy_model_1791801300.zip --host 192.168.1.50 --user rock \
   --trust-fingerprint SHA256:AbCdEf...
 ```
 
@@ -1445,6 +1460,7 @@ sie) und einen unprivilegierten Benutzer.
 ```
 llm-cli device list [--json]
 llm-cli device settings GERÄT [--install user|systemd] [--user NAME] [--port N] [--model PFAD] [--confirm-sudo]
+                              [--kv-cache auto|f16|q8_0|q4_0]
 llm-cli device runtime plan GERÄT [--json]
 llm-cli device runtime build GERÄT [--jobs N] [--mirror URL] [--yes]
 llm-cli device runtime deploy GERÄT [--user NAME] [--password TEXT] [--bench-model PFAD] [--allow-untrusted-model]
@@ -1470,6 +1486,7 @@ ein Deployment fragt nie.
 | `--port N` | Der Loopback-Port des Servers der systemd-Unit (1024-65535, Vorgabe 8080). Das Startskript lauscht auf 8080, solange es kein `--port` bekommt; der Startbefehl, den ein Deployment ausgibt, enthält diesen Port. |
 | `--model PFAD` | Die Modelldatei auf dem Board, die die systemd-Unit bereitstellt (relative Pfade liegen im Home des Benutzers). |
 | `--confirm-sudo` | Mit `--install systemd`: ohne Nachfrage bestätigen. |
+| `--kv-cache auto\|f16\|q8_0\|q4_0` | Der KV-Cache des Servers auf dem Board (`-ctk`/`-ctv`): `q8_0` braucht etwa halb so viel Speicher wie `f16`, `q4_0` etwa ein Viertel, mit etwas Qualitätsverlust. `auto` (die Vorgabe) wählt `q8_0`, wenn neben dem Modell auf dem Board wenig Speicher frei bleibt (aus seiner Probe), sonst `f16`. Wähle `f16`, um den quantisierten Cache auszuschalten. Die systemd-Unit startet den Server damit; für das Startskript gibt das Deployment den Startbefehl damit aus. |
 
 Exit-Code 1, wenn das Board kein systemd hat oder die Bestätigung fehlt (dann wird nichts geändert), 2 bei einem
 falschen Wert.
@@ -1532,14 +1549,22 @@ curl -s http://127.0.0.1:8080/health   # braucht keinen Schlüssel; jede andere 
 ```
 
 Es lauscht auf 127.0.0.1 (Vorgabe-Port 8080, `--port` ab 1024) mit der Schlüsseldatei und einer geleerten Umgebung.
-Es reicht `-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`, `-fa`, `-cram`, `-lm`, `-a` und
-`--sleep-idle-seconds` mit geprüften Werten weiter und lehnt jede andere Option ab (Exit-Code 2). `serve` läuft im
-Vordergrund, `keygen` erzeugt den Schlüssel, `version` gibt die Version des Servers aus.
+Es reicht `-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`, `-fa`, `-cram`, `-lm`, `-a`,
+`--sleep-idle-seconds` und `-ctk`/`-ctv` (nur `f16`, `q8_0` oder `q4_0`) mit geprüften Werten weiter und lehnt
+jede andere Option ab (Exit-Code 2). `serve` läuft im Vordergrund, `keygen` erzeugt den Schlüssel, `version`
+gibt die Version des Servers aus.
 
 ### device runtime verify
 
 Führt die Prüfungen aus Schritt 4 erneut für den aktiven Build `current` aus (auch mit `--bench-model`) und
 aktualisiert den Eintrag.
+
+Ein kurzer Benchmark mit `--bench-model` (hier oder mit `device runtime deploy`) ist der Beweis, dass ein Modell auf
+diesem Board läuft. Sein Ergebnis wird bei jedem Build dieses Modells im Ausgabeordner vermerkt: die Datei
+`device_tests.json` im Build-Ordner, gefunden über die sha256 des Modells (auch wenn die Datei auf dem Board anders
+heißt). Sie enthält das Board (deinen Namen dafür, Board- und SoC-Modell aus seiner Probe), den Laufzeit-Build, die
+gemessenen Geschwindigkeiten, den KV-Cache und ob die Prüfungen bestanden. Das Deployment-Fenster zeigt den Build als
+„getestet auf <Board>“. Ein Modell, das kein Build dieses Frameworks gemacht hat, wird nirgends vermerkt.
 
 ### device runtime status
 
