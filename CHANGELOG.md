@@ -15,15 +15,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   this computer, chosen, on request, not pinned), the reason for the recommendation and the full models folder;
   **Download the recommended model...** or **Download selected...** after the CLI's question (repo, file, licence,
   size, folder; "No" by default), in the background with progress and **Cancel** (the part is kept for a resume). The
-  catalogue rows and the model a download is for are core functions the CLI calls too (its output is unchanged). The
-  runtime install question of the AI settings names this window instead of the CLI command.
+  recommended download takes the recommendation the window shows (read with the list in the background), so no
+  hardware probe runs on the GUI thread. The catalogue rows and the model a download is for are core functions the CLI
+  calls too (its output is unchanged). The runtime install question of the AI settings names this window instead of
+  the CLI command.
 - **Ditto > Evaluation...: `llm-cli ditto eval` by mouse** (W1'): kinds and retrieval variants (fused, rerank),
   single cases, another cases file, runs per case, several local tiers, or provider, model and reasoning effort for
   this run only (the saved AI settings stay unchanged); a question before the run says what is called and whether it
-  costs money ("No" by default); the run goes in the background with progress and **Cancel** (before the next
-  attempt), the window shows the CLI's tables, and **Save report...** writes its JSON report. The run itself (case
-  selection, the tier loop with the server restore, the retrieval runs, the tables and the report) moved into
-  `orchestrator/evals/eval_run.py`, which the CLI calls too; its output and exit codes are unchanged.
+  costs money, also when the fallback chain of the AI settings names a cloud provider, and that retrieval downloads
+  its models on first use ("No" by default); a tier that is not downloaded yet is refused with a pointer to Ditto >
+  Local Models... (starting it would stop your server first); the run goes in the background with progress and
+  **Cancel** (before the next attempt; Cancel while indexing loads no reranker), the window shows the CLI's tables,
+  and **Save report...** writes its JSON report. The run itself (case selection, the tier loop with the server
+  restore, the retrieval runs, the tables and the report) moved into `orchestrator/evals/eval_run.py`, which the CLI
+  calls too; its output and exit codes are unchanged, except that a server of yours replaced by a tier is now also
+  reported when the run stops early (a later tier that does not start in the CLI, Cancel in the window).
 - **Chat panel: options for one question** (W1', `llm-cli ditto ask --no-tools/--provider/--model` by mouse):
   **Options for this question** above the message field give **Answer without tools**, a provider and a model for the
   next question only. The saved AI settings stay unchanged (the question goes to a Ditto with these values over the

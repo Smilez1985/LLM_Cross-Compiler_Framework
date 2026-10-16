@@ -15,17 +15,23 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (empfohlen für diesen Computer, gewählt, auf Wunsch, nicht festgelegt), dem Grund der Empfehlung und dem vollen
   Modellordner; **Empfohlenes Modell herunterladen...** oder **Ausgewähltes herunterladen...** nach der Frage der CLI
   (Repository, Datei, Lizenz, Größe, Ordner; „Nein“ als Vorgabe), im Hintergrund mit Fortschritt und **Abbrechen** (der
-  Teil bleibt für die Fortsetzung). Die Zeilen des Katalogs und das Modell eines Downloads sind Kernfunktionen, die
-  auch die CLI aufruft (ihre Ausgabe bleibt gleich). Die Installationsfrage der Laufzeit in den KI-Einstellungen nennt
-  dieses Fenster statt des CLI-Befehls.
+  Teil bleibt für die Fortsetzung). Der empfohlene Download nimmt die Empfehlung, die das Fenster zeigt (mit der Liste
+  im Hintergrund gelesen), damit keine Hardware-Prüfung im GUI-Thread läuft. Die Zeilen des Katalogs und das Modell
+  eines Downloads sind Kernfunktionen, die auch die CLI aufruft (ihre Ausgabe bleibt gleich). Die Installationsfrage
+  der Laufzeit in den KI-Einstellungen nennt dieses Fenster statt des CLI-Befehls.
 - **Ditto > Bewertung...: `llm-cli ditto eval` mit der Maus** (W1'): Arten und Retrieval-Varianten (fused, rerank),
   einzelne Fälle, eine andere Falldatei, Läufe pro Fall, mehrere lokale Stufen, oder Anbieter, Modell und Denkaufwand
   nur für diesen Lauf (die gespeicherten KI-Einstellungen bleiben unverändert); eine Frage vor dem Lauf sagt, was
-  aufgerufen wird und ob es Geld kostet („Nein“ als Vorgabe); der Lauf geht im Hintergrund mit Fortschritt und
-  **Abbrechen** (vor dem nächsten Versuch), das Fenster zeigt die Tabellen der CLI, und **Bericht speichern...**
-  schreibt ihren JSON-Bericht. Der Lauf selbst (Auswahl der Fälle, die Schleife über die Stufen mit dem Wiederherstellen des
-  Servers, die Retrieval-Läufe, die Tabellen und der Bericht) liegt jetzt in `orchestrator/evals/eval_run.py`, das auch
-  die CLI aufruft; ihre Ausgabe und Exit-Codes bleiben gleich.
+  aufgerufen wird und ob es Geld kostet, auch wenn die Ersatzkette der KI-Einstellungen einen Cloud-Anbieter nennt, und
+  dass Retrieval seine Modelle bei der ersten Verwendung herunterlädt („Nein“ als Vorgabe); eine Stufe, die noch nicht
+  heruntergeladen ist, wird mit einem Hinweis auf Ditto > Lokale Modelle... abgelehnt (ihr Start würde zuerst deinen
+  Server stoppen); der Lauf geht im Hintergrund mit Fortschritt und **Abbrechen** (vor dem nächsten Versuch;
+  Abbrechen während der Aufnahme lädt keinen Reranker), das Fenster zeigt die Tabellen der CLI, und **Bericht
+  speichern...** schreibt ihren JSON-Bericht. Der Lauf selbst (Auswahl der Fälle, die Schleife über die Stufen mit dem
+  Wiederherstellen des Servers, die Retrieval-Läufe, die Tabellen und der Bericht) liegt jetzt in
+  `orchestrator/evals/eval_run.py`, das auch die CLI aufruft; ihre Ausgabe und Exit-Codes bleiben gleich, nur wird ein
+  Server von dir, den eine Stufe ersetzt hat, jetzt auch gemeldet, wenn der Lauf früher endet (eine spätere Stufe, die
+  in der CLI nicht startet, Abbrechen im Fenster).
 - **Chat-Bereich: Optionen für eine Frage** (W1', `llm-cli ditto ask --no-tools/--provider/--model` mit der Maus):
   **Optionen für diese Frage** über dem Nachrichtenfeld bieten **Ohne Werkzeuge antworten**, einen Anbieter und ein
   Modell nur für die nächste Frage. Die gespeicherten KI-Einstellungen bleiben unverändert (die Frage geht an einen

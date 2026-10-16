@@ -949,10 +949,12 @@ framework applied and the repeat refusals. Cloud providers bill about 20 request
 
 **GUI: Ditto > Evaluation...** runs the same evaluation by mouse: kinds, retrieval variants (fused, rerank), single
 cases, another cases file, runs per case, several local tiers, or provider, model and effort for this run only (the
-saved AI settings stay unchanged). Before a run it says what is called and whether that costs money ("No" is the
-default); the run goes in the background with progress and **Cancel** (the case that runs finishes first; a tier's
-server is stopped as after a normal run), the window shows the same tables, and **Save report...** writes the JSON
-report of `--json`.
+saved AI settings stay unchanged). Before a run it says what is called and whether that costs money, also when the
+fallback chain of the AI settings names a cloud provider, and that retrieval downloads its models on first use ("No"
+is the default); a tier that is not downloaded yet is refused with a pointer to **Ditto > Local Models...**. The run
+goes in the background with progress and **Cancel** (the case that runs finishes first; a tier's server is stopped as
+after a normal run, and a server of yours that it replaced is reported), the window shows the same tables, and
+**Save report...** writes the JSON report of `--json`.
 
 **First measurement** (for context, not a benchmark): on a CPU-only machine with Qwen3.5 2B, effort `low` (thinking
 off) and the prompts of that time, the 2-bit tier `small-q2` passed 42% of the 19 cases and the 4-bit tier `small`
@@ -1081,7 +1083,8 @@ recommendation.
 and its note (recommended for this computer, chosen, on request, not pinned), with the reason for the
 recommendation and the full models folder. **Download the recommended model...** and **Download selected...** do
 `ditto models download` with the same question (repo, file, licence, size, folder; "No" is the default); the list and
-the download run in the background, with progress and **Cancel** (the part is kept for a resume).
+the download run in the background, with progress and **Cancel** (the part is kept for a resume). The recommended
+download takes the recommendation the window shows, so no hardware probe runs while you wait for the question.
 
 ### How the server runs
 

@@ -1043,9 +1043,12 @@ und die Ablehnungen wiederholter Aufrufe. Cloud-Anbieter berechnen etwa 20 Anfra
 **GUI: Ditto > Bewertung...** führt dieselbe Bewertung mit der Maus aus: Arten, Retrieval-Varianten (fused, rerank),
 einzelne Fälle, eine andere Falldatei, Läufe pro Fall, mehrere lokale Stufen, oder Anbieter, Modell und Aufwand nur für
 diesen Lauf (die gespeicherten KI-Einstellungen bleiben unverändert). Vor einem Lauf sagt es, was aufgerufen wird und ob
-das Geld kostet („Nein“ ist die Vorgabe); der Lauf geht im Hintergrund mit Fortschritt und **Abbrechen** (der Fall, der
-gerade läuft, wird noch fertig; der Server einer Stufe wird wie nach einem normalen Lauf gestoppt), das Fenster zeigt
-dieselben Tabellen, und **Bericht speichern...** schreibt den JSON-Bericht von `--json`.
+das Geld kostet, auch wenn die Ersatzkette der KI-Einstellungen einen Cloud-Anbieter nennt, und dass Retrieval seine
+Modelle bei der ersten Verwendung herunterlädt („Nein“ ist die Vorgabe); eine Stufe, die noch nicht heruntergeladen
+ist, wird mit einem Hinweis auf **Ditto > Lokale Modelle...** abgelehnt. Der Lauf geht im Hintergrund mit Fortschritt
+und **Abbrechen** (der Fall, der gerade läuft, wird noch fertig; der Server einer Stufe wird wie nach einem normalen
+Lauf gestoppt, und ein Server von dir, den er ersetzt hat, wird gemeldet), das Fenster zeigt dieselben Tabellen, und
+**Bericht speichern...** schreibt den JSON-Bericht von `--json`.
 
 **Erste Messung** (zur Einordnung, kein Benchmark): Auf einem Rechner nur mit CPU, mit Qwen3.5 2B, Aufwand `low`
 (Nachdenken aus) und den damaligen Prompts bestand die 2-Bit-Stufe `small-q2` 42 % der 19 Fälle und die 4-Bit-Stufe
@@ -1181,7 +1184,9 @@ deshalb zählt bei ihnen nur der RAM. `runtime start --model <Stufe>` überstimm
 und ihrem Hinweis (empfohlen für diesen Computer, gewählt, auf Wunsch, nicht festgelegt), mit dem Grund der Empfehlung
 und dem vollen Modellordner. **Empfohlenes Modell herunterladen...** und **Ausgewähltes herunterladen...** machen
 `ditto models download` mit derselben Frage (Repository, Datei, Lizenz, Größe, Ordner; „Nein“ ist die Vorgabe); Liste
-und Download laufen im Hintergrund, mit Fortschritt und **Abbrechen** (der Teil bleibt für die Fortsetzung).
+und Download laufen im Hintergrund, mit Fortschritt und **Abbrechen** (der Teil bleibt für die Fortsetzung). Der
+empfohlene Download nimmt die Empfehlung, die das Fenster zeigt, damit keine Hardware-Prüfung läuft, während du auf die
+Frage wartest.
 
 ### Wie der Server läuft
 
