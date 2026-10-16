@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Literal, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
-import numpy as np
 from pydantic import BaseModel, ConfigDict
 
 from orchestrator.rag.errors import EmbeddingError, EmbeddingModelNotCached
@@ -180,6 +179,7 @@ def recommend_model(providers: Optional[Sequence[str]] = None,
 
 def check_vectors(vectors: Iterable, expected: int, dim: int, model_id: str) -> List[List[float]]:
     """Plain float lists, after checking count, dimension and finiteness (a bad model must not poison the store)."""
+    import numpy as np  # with the first embedding, not with the knowledge base (lazy loading)
     out = []
     for vector in vectors:
         arr = np.asarray(vector, dtype=np.float32)
@@ -460,6 +460,7 @@ def expand_identifiers(text: str) -> str:
 
 
 def _sparse(embedding) -> SparseVec:
+    import numpy as np
     return SparseVec(indices=[int(i) for i in np.asarray(embedding.indices).tolist()],
                      values=[float(v) for v in np.asarray(embedding.values).tolist()])
 

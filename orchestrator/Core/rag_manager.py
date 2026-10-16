@@ -41,11 +41,22 @@ from orchestrator.utils.logging import get_logger
 if TYPE_CHECKING:  # qdrant-client (and the FastEmbed it pulls in) loads on first use, not at framework boot
     from orchestrator.rag.store import KnowledgeStore
 
-# Import Crawler (Optional)
-try:
-    from orchestrator.Core.crawler_manager import CrawlerManager
-except ImportError:
-    CrawlerManager = None
+# The crawler (Optional): imported with the first Deep Ingest, not with the knowledge base (lazy loading: BeautifulSoup,
+# pypdf, langdetect). rag_manager.CrawlerManager is None when it cannot be imported.
+def __getattr__(name: str) -> Any:
+    if name != "CrawlerManager":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    try:
+        from orchestrator.Core.crawler_manager import CrawlerManager as crawler_class
+    except ImportError:
+        crawler_class = None
+    globals()["CrawlerManager"] = crawler_class
+    return crawler_class
+
+
+def _crawler_class() -> Any:
+    """CrawlerManager (a value set on this module wins, e.g. a test's stand-in), or None without the crawler."""
+    return globals()["CrawlerManager"] if "CrawlerManager" in globals() else __getattr__("CrawlerManager")
 
 COLLECTION_NAME = "framework_knowledge"  # alias of the active collection (one collection per embedding model)
 MIN_SPARSE_QUERY_TOKENS = 3  # shorter queries use the dense ranking only, unless they hold an identifier
@@ -685,7 +696,8 @@ class RAGManager:
         failed, were reserved by the site, or the crawl was stopped) or "failure" (nothing stored). "skipped"
         and "failed" list pages as {"url", "reason", "opt_out"}.
         """
-        if not CrawlerManager:
+        crawler_class = _crawler_class()
+        if not crawler_class:
             return {"success": False, "outcome": "failure", "message": "Crawler module missing"}
         if not self._connect():
             return {"success": False, "outcome": "failure",
@@ -697,7 +709,7 @@ class RAGManager:
 
         crawler, pages, chunks, error = None, 0, 0, None
         try:
-            crawler = CrawlerManager(self.framework, crawler_options)
+            crawler = crawler_class(self.framework, crawler_options)
             self.logger.info(f"Invoking Crawler for {url}...")
             for doc in crawler.iter_crawl(url, stop=stop, progress=progress):
                 meta = dict(doc.metadata or {})

@@ -131,14 +131,19 @@ class FrameworkManager:
         if self._initialized: return True
 
         # The managers are imported here, at boot (see _LAZY), RAGManager in ensure_rag_manager. A broken
-        # installation (a module that cannot be imported) still stops with its ImportError, as when the managers were
-        # imported with this module.
-        SecretsManager, TelemetryManager, DockerManager, BuildEngine, TargetManager, ModelManager, DittoCoder, \
-            SelfHealingManager, DeploymentManager, CommunityManager, LLMOrchestrator, BuildService, JobService, \
-            UpdateManager, build_tool_registry = map(_component, (
-                "SecretsManager", "TelemetryManager", "DockerManager", "BuildEngine", "TargetManager", "ModelManager",
-                "DittoCoder", "SelfHealingManager", "DeploymentManager", "CommunityManager", "LLMOrchestrator",
-                "BuildService", "JobService", "UpdateManager", "build_tool_registry"))
+        # installation (a module that cannot be imported) stops the boot with that cause as init_error, like every
+        # other boot error: the CLI prints it and exits with 1, the GUI shows it (no traceback).
+        try:
+            SecretsManager, TelemetryManager, DockerManager, BuildEngine, TargetManager, ModelManager, DittoCoder, \
+                SelfHealingManager, DeploymentManager, CommunityManager, LLMOrchestrator, BuildService, JobService, \
+                UpdateManager, build_tool_registry = map(_component, (
+                    "SecretsManager", "TelemetryManager", "DockerManager", "BuildEngine", "TargetManager",
+                    "ModelManager", "DittoCoder", "SelfHealingManager", "DeploymentManager", "CommunityManager",
+                    "LLMOrchestrator", "BuildService", "JobService", "UpdateManager", "build_tool_registry"))
+        except ImportError as e:
+            self.init_error = e
+            self.logger.critical(f"A part of the framework cannot be imported (broken installation?): {e}")
+            return False
 
         try:
             # === PHASE 1: SECURITY & BASE ===
