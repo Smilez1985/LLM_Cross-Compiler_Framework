@@ -589,13 +589,15 @@ The rules are the same in every form (`orchestrator/tools/gui_surface.py`):
   data goes. Ditto may switch the knowledge base off and offline mode on, never the other way round (the same rule as
   `update_settings`).
 - **Paths:** a local file reaches the AI as a label (`models:tiny.gguf`) or by its file name, never with the home
-  folder. Ditto names a local file by its id from `list_local_files` (`lf_...`) or as `<label>:<relative path>`.
+  folder. A home folder in text you typed (also one of another account, `/home/<name>` or `C:\Users\<name>`) reaches
+  the AI as `~`. Ditto names a local file by its id from `list_local_files` (`lf_...`) or as `<label>:<relative
+  path>`.
 - **Your values are yours:** a value you typed, picked or clicked (also a file you chose in a file dialog, and a
   recipe's values) is never overwritten by an AI. Ditto may suggest another one in the chat; **Ask Ditto for Config**
-  in the Builder fills the form by the same rules. A field you are editing (it has the keyboard focus) is never
-  written. A fill that would change a field you chose through the form's own logic (another target resets the board)
-  is undone completely and refused. What can never be filled is refused before you are asked; everything is checked
-  again when filling.
+  in the Builder fills the form by the same rules, and the Builder log names each value it did not fill and why. A
+  field you are editing (it has the keyboard focus) is never written. A fill that would change a field you chose
+  through the form's own logic (another target resets the board) is undone completely and refused. What can never be
+  filled is refused before you are asked; everything is checked again when filling.
 - **Visible and undoable:** the form comes to the front, every filled field gets a purple frame, and a line above
   the form names the fields Ditto filled, with **Undo Ditto's changes**. A field you change afterwards keeps your
   value; the undo is recorded in the audit log.
@@ -2099,22 +2101,23 @@ The GUI's input fields offer what you used recently, newest first.
 - **Export for community:** the wizard's last page also offers **Export for community after creating** (see
   [Export for community](#export-for-community)).
 - **Board recommendation:** after a probe, the Builder recommends the board of the matched target, with where the
-  recommendation comes from and how sure it is: the probe's SoC named like a board of the target, or the probe's
-  board name in the target's list of known boards (`examples` in `target.yml`). Only an exact match is sure and is
-  filled in; it is only a recommendation, so the field stays editable. When it is not sure, nothing is filled in:
-  the Builder names the candidates and why it is unsure, and you pick yours with one click. **Look up the board name
-  online...** opens your web browser with a search for the probe's board name, only after you agree. **Ask Ditto**
-  writes a question into the chat for you to send (a draft you typed there stays). A board you chose is never
-  replaced by a later probe or by an AI. A target you chose (or a recipe's) stays too: when the probe points to
-  another target, the Builder says so and offers **Use <target>**, which then recommends that target's board.
-  Ditto probing a board over SSH itself needs the planned tool `probe_remote_device`.
+  recommendation comes from and how sure it is: the probe's SoC named like a board of the target, or the probe's board
+  name in the target's list of known boards (`examples` in `target.yml`). Only an exact match is sure and is filled
+  in; it is only a recommendation, so the field stays editable. When it is not sure, nothing is filled in: the Builder
+  names the candidates and why it is unsure, and you pick yours with one click. Until you pick one, **Start Build**
+  asks whether the board in the form is yours ("No" is the default). **Look up the board name online...** opens your
+  web browser with a search for the probe's board name, only after you agree. **Ask Ditto** writes a question into the
+  chat for you to send (a draft you typed there stays). A board you chose is never replaced by a later probe or by an
+  AI. A target you chose (also through a board you chose, or a recipe's) stays too: when the probe points to another
+  target, the Builder says so and offers **Use <target>**, which then recommends that target's board. Ditto probing a
+  board over SSH itself needs the planned tool `probe_remote_device`.
 - **No matching target:** when no target fits the probe, the Builder offers **Create a target with the wizard** (the
   wizard starts from that probe) and **Ask Ditto**.
 - **Documentation links for Deep Ingest:** the source catalogue (`configs/project_sources.yml`) keeps the vendors'
   documentation links. The wizard's Deep Ingest window is filled with the links for the probe's vendor and the SDK on
-  the hardware page; you check them and start the crawl. When Ditto says that information is missing for the
-  module, the wizard offers Deep Ingest with these links. AI clients read them through the resource
-  `lcf://knowledge/doc-sources`.
+  the hardware page; you check them and start the crawl. When Ditto says that information is missing for the module,
+  the wizard offers Deep Ingest with these links. AI clients read them through the resource
+  `lcf://knowledge/doc-sources`; the MCP prompt `add_board` points to it when information is missing.
 
 Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 

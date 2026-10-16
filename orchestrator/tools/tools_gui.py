@@ -50,6 +50,10 @@ FINISH_NOTE = ("Only the person clicks Finish: that creates the module (an AI ne
 HF_REPO = re.compile(r"^[A-Za-z0-9][\w.-]{0,95}/[\w.-]{1,96}$")
 FILE_ID = re.compile(r"^lf_[0-9a-f]{16}$")
 FILLS_PER_MINUTE = 30
+# The home folder of any account (/home/<name>, /Users/<name>, C:\Users\<name>): the person typing in the window may
+# use another account than the framework, and the name never reaches the AI
+_ACCOUNT = r"(?:[^/\\\s\"'<>|:]+(?: [^/\\\s\"'<>|:]+)?(?=[/\\])|[^/\\\s\"'<>|:]+)"   # 'Jane Roe\' too
+HOME_FOLDERS = re.compile(r"(?:(?<![\w.])/home|(?<![\w.])/Users|\b[A-Za-z]:[\\/]Users)[\\/]" + _ACCOUNT)
 
 
 class FormIn(BaseModel):
@@ -186,12 +190,12 @@ def _run(surface: gui_surface.GuiSurface, fn) -> Any:
 
 
 def _no_home(text: str) -> str:
-    """Text the person typed, with the home folder (it names the user) as '~'."""
+    """Text the person typed, with every home folder (it names the user) as '~'."""
     home = str(Path.home())
     for form in {home, os.path.realpath(home)}:
         if form and form not in ("/", "\\"):
             text = text.replace(form, "~")
-    return text
+    return HOME_FOLDERS.sub("~", text)
 
 
 def gui_tool_specs(registry: ToolRegistry, framework: Any) -> List[ToolSpec]:
