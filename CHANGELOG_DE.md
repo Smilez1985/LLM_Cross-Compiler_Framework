@@ -39,7 +39,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einem Modul, an dem eine KI mitgewirkt hat, steht deine Beschreibung vorn, und der Hinweis des Frameworks, dass das
   Modul KI-generiert und ungetestet ist, folgt. Die erste Seite bietet Anbieter und Modell **nur für diese Analyse**
   (`module generate-ai --provider --model`): Ditto läuft damit über `DittoManager.for_run`, das jetzt auch `generate-ai`
-  in der CLI nutzt, und die gespeicherten KI-Einstellungen bleiben unverändert.
+  in der CLI nutzt, und die gespeicherten KI-Einstellungen bleiben unverändert. `for_run` nutzt dieselbe Prüfung
+  des Anbieters und dieselbe Überlagerung der Einstellungen wie die Wahl für eine Frage im Chat-Bereich und Ditto >
+  Bewertung... (`orchestrator/Core/ai_override.py`): ein Code-Weg für jede solche Wahl.
 - **Ditto > Lokale Laufzeit...: jeder Befehl `llm-cli ditto runtime` mit der Maus** (W1'): Ein Fenster zeigt, was
   `ditto runtime status` zeigt (Hardware, Betriebsart, der Build in Gebrauch und seine Prüfungen, Probleme und der Rat
   zum Neubau, der Plan für den eigenen Build, das fertige Archiv, der Server mit Adresse, Modell und Kontext, das
@@ -88,6 +90,34 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Speichern.... Jede ruft die Kernfunktion der CLI auf (neu: `CommunityManager.details`, `exportable_targets`,
   `read_public_key_files`, `needs_passphrase`), im Hintergrund; Fragen behalten „Nein“ als Vorgabe, und ein
   verschlüsseltes Paket wird nie eingereicht.
+- **Ditto > Lokale Modelle...: `llm-cli ditto models list` und `download` mit der Maus** (W1'): jede Stufe von
+  Dittos festgelegtem Katalog mit Datei, Größe, Lizenz, ob sie heruntergeladen (und geprüft) ist, und ihrem Hinweis
+  (empfohlen für diesen Computer, gewählt, auf Wunsch, nicht festgelegt), dem Grund der Empfehlung und dem vollen
+  Modellordner; **Empfohlenes Modell herunterladen...** oder **Ausgewähltes herunterladen...** nach der Frage der CLI
+  (Repository, Datei, Lizenz, Größe, Ordner; „Nein“ als Vorgabe), im Hintergrund mit Fortschritt und **Abbrechen** (der
+  Teil bleibt für die Fortsetzung). Der empfohlene Download nimmt die Empfehlung, die das Fenster zeigt (mit der Liste
+  im Hintergrund gelesen), damit keine Hardware-Prüfung im GUI-Thread läuft. Die Zeilen des Katalogs und das Modell
+  eines Downloads sind Kernfunktionen, die auch die CLI aufruft (ihre Ausgabe bleibt gleich). Die Installationsfrage
+  der Laufzeit in den KI-Einstellungen nennt dieses Fenster statt des CLI-Befehls.
+- **Ditto > Bewertung...: `llm-cli ditto eval` mit der Maus** (W1'): Arten und Retrieval-Varianten (fused, rerank),
+  einzelne Fälle, eine andere Falldatei, Läufe pro Fall, mehrere lokale Stufen, oder Anbieter, Modell und Denkaufwand
+  nur für diesen Lauf (die gespeicherten KI-Einstellungen bleiben unverändert); eine Frage vor dem Lauf sagt, was
+  aufgerufen wird und ob es Geld kostet, auch wenn die Ersatzkette der KI-Einstellungen einen Cloud-Anbieter nennt, und
+  dass Retrieval seine Modelle bei der ersten Verwendung herunterlädt („Nein“ als Vorgabe); eine Stufe, die noch nicht
+  heruntergeladen ist, wird mit einem Hinweis auf Ditto > Lokale Modelle... abgelehnt (ihr Start würde zuerst deinen
+  Server stoppen); der Lauf geht im Hintergrund mit Fortschritt und **Abbrechen** (vor dem nächsten Versuch;
+  Abbrechen während der Aufnahme lädt keinen Reranker), das Fenster zeigt die Tabellen der CLI, und **Bericht
+  speichern...** schreibt ihren JSON-Bericht. Der Lauf selbst (Auswahl der Fälle, die Schleife über die Stufen mit dem
+  Wiederherstellen des Servers, die Retrieval-Läufe, die Tabellen und der Bericht) liegt jetzt in
+  `orchestrator/evals/eval_run.py`, das auch die CLI aufruft; ihre Ausgabe und Exit-Codes bleiben gleich, nur wird ein
+  Server von dir, den eine Stufe ersetzt hat, jetzt auch gemeldet, wenn der Lauf früher endet (eine spätere Stufe, die
+  in der CLI nicht startet, Abbrechen im Fenster).
+- **Chat-Bereich: Optionen für eine Frage** (W1', `llm-cli ditto ask --no-tools/--provider/--model` mit der Maus):
+  **Optionen für diese Frage** über dem Nachrichtenfeld bieten **Ohne Werkzeuge antworten**, einen Anbieter und ein
+  Modell nur für die nächste Frage. Die gespeicherten KI-Einstellungen bleiben unverändert (die Frage geht an einen
+  Ditto mit diesen Werten über den Einstellungen, `orchestrator/Core/ai_override.py`, das den Anbieter auch wie die CLI
+  prüft), der Bereich sagt, was die Frage verwendet hat, und die Optionen werden nach dem Senden zurückgesetzt; Feed,
+  Fragen und Freigaben arbeiten wie bisher.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den

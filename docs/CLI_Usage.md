@@ -845,6 +845,11 @@ llm-cli ditto ask "Explain IQ4_XS" --no-tools --provider local
 Without setup the command explains what is missing, for example "the local model server is not running. Start it in
 the GUI with Ditto > Local Runtime... > Start, or with: llm-cli ditto runtime start".
 
+In the GUI: the chat panel on the right (F9, **View > AI Chat Panel**) with **Send**; **Options for this question**
+above the message field gives **Answer without tools** (`--no-tools`), **Provider** (`--provider`) and **Model**
+(`--model`) for the next question only, and the AI settings stay unchanged. Unlike this command, the chat keeps the
+conversation.
+
 ### ditto eval
 
 ```
@@ -873,7 +878,8 @@ and repeat). How it works: [Features.md](Features.md#ditto-evaluation).
 
 With `--tier`, the local runtime must be installed and the tier's model downloaded. The CLI starts `llama-server`
 with each tier in turn and stops the servers it started. A server you started yourself keeps running if it already
-serves the tier; otherwise the evaluation replaces it for that tier and says so at the end.
+serves the tier; otherwise the evaluation replaces it for that tier and says so at the end, also when the run stops
+early (for example when a later tier does not start).
 
 ```bash
 # Compare the 2B model at 4 and 2 bits on this machine, without thinking
@@ -888,6 +894,14 @@ llm-cli ditto eval --provider anthropic --min-pass 0.8
 
 The result is a table per run: passed share, share per kind and average seconds per case. A cases file that
 cannot be read, or filters that match no case, stop with exit code 2.
+
+In the GUI: **Ditto > Evaluation...**: the kinds (and for retrieval the search variants), single cases, **Choose...**
+for another cases file, the runs per case, the local model tiers, and provider, model and reasoning effort for this
+run only. **Run evaluation...** first says what is called and whether it costs money, also when the fallback chain
+of the AI settings names a cloud provider ("No" is the default); a tier that is not downloaded yet is refused with a
+pointer to **Ditto > Local Models...**. The run goes in the background with progress and **Cancel** and shows the same
+tables (a replaced server of yours is reported, also after Cancel); **Save report...** writes the `--json` report to a
+file you choose. `--min-pass` only sets the exit code for scripts.
 
 #### Retrieval evaluation
 
@@ -1228,6 +1242,8 @@ llm-cli ditto models list
 Lists the pinned models: tier, file, size, license, whether it is downloaded (and verified), and notes
 ("recommended", "chosen", "on request").
 
+In the GUI: **Ditto > Local Models...** (the same list, with the recommendation for this computer and why).
+
 #### ditto models download
 
 ```
@@ -1246,6 +1262,10 @@ tier for this machine. Interrupted downloads resume.
 llm-cli ditto models list
 llm-cli ditto models download small-q2
 ```
+
+In the GUI: **Ditto > Local Models...** > **Download the recommended model...** (the recommendation the window
+shows; the button is on once the list is read), or select a tier and **Download selected...**; the question shows repo, file, licence, size and folder ("No" is the default), the download runs in the
+background with progress and **Cancel** (the part downloaded so far is kept for a resume).
 
 ---
 
