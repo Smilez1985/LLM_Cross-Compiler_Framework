@@ -30,11 +30,15 @@ from PySide6.QtGui import QPixmap
 
 from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT, ModuleGenerator
 from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog, show_crawl_notice_once
+from orchestrator.gui.plain import plain_tooltip
 from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils import input_history
 from orchestrator.utils.announce import announce
 from orchestrator.utils.localization import current_language, tr, ui_text
+
+# The Docker page's packages before anything is imported (a probe import puts them back after Ditto's proposal).
+DEFAULT_PACKAGES = "build-essential cmake git python3-pip"
 
 
 def module_name_hint(raw: str) -> str:
@@ -246,6 +250,11 @@ class ModuleCreationWizard(QWizard):
         b.line("name", "gui.field.wizard.name", self.name_edit, page=1, hint="letters, digits, '_', '.', '-'")
         b.combo("arch", "gui.field.wizard.arch", self.arch_combo, by_data=False, page=1)
         b.line("sdk", "gui.field.wizard.sdk", self.sdk_edit, page=1, hint="e.g. RKNN, CUDA, OpenVINO, none")
+        # Only the person types a description: the framework writes the untested note of a module an AI helps with
+        b.line("description", "bld.field.wizard.description", self.desc_edit, page=1,
+               hint="the person's own line about the target; empty: 'Target for <name>'",
+               read_only=lambda: "only the person writes the description; for a module an AI helps with, the "
+               "framework adds that it is AI-generated and untested")
 
         def base_image():
             if self.rad_debian.isChecked():
@@ -368,6 +377,25 @@ class ModuleCreationWizard(QWizard):
         
         import_layout.addLayout(hbox_know)
 
+        # Provider and model for this one analysis (`llm-cli module generate-ai --provider --model`): Ditto runs on
+        # them through DittoManager.for_run, so the saved AI settings stay unchanged.
+        hbox_run = QHBoxLayout()
+        hbox_run.addWidget(QLabel(ui_text("bld.wizard.run_label")))
+        self.combo_run_provider = QComboBox()
+        self.combo_run_provider.setObjectName("combo_wizard_run_provider")
+        self.combo_run_provider.setToolTip(plain_tooltip(ui_text("bld.wizard.run_tip")))
+        self.combo_run_model = QComboBox()
+        self.combo_run_model.setObjectName("combo_wizard_run_model")
+        self.combo_run_model.setEditable(True)
+        self.combo_run_model.setInsertPolicy(QComboBox.NoInsert)
+        self.combo_run_model.lineEdit().setPlaceholderText(ui_text("bld.wizard.run_model_hint"))
+        self.combo_run_model.setToolTip(plain_tooltip(ui_text("bld.wizard.run_tip")))
+        self.combo_run_provider.currentIndexChanged.connect(lambda _i: self._fill_run_models())
+        hbox_run.addWidget(self.combo_run_provider, 1)
+        hbox_run.addWidget(self.combo_run_model, 1)
+        import_layout.addLayout(hbox_run)
+        self._fill_run_providers()
+
         # Progress & Status Area
         self.status_label = QLabel(tr("wiz.status.waiting"))
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -462,6 +490,13 @@ class ModuleCreationWizard(QWizard):
         self.sdk_edit = QLineEdit()
         self.sdk_edit.setPlaceholderText("e.g. CUDA, RKNN, OpenVINO")
         layout.addRow(tr("wiz.lbl.sdk"), self.sdk_edit)
+
+        # The module's description (`llm-cli module create` asks for it); empty: "Target for <name>"
+        self.desc_edit = QLineEdit()
+        self.desc_edit.setObjectName("edit_wizard_description")
+        layout.addRow(ui_text("bld.wizard.description"), self.desc_edit)
+        self.name_edit.textChanged.connect(lambda _text: self._update_description_hint())
+        self._update_description_hint()
         
         # Auto-Detect Button
         self.detect_cb = QCheckBox("Auto-fill from Probe Result")
@@ -473,6 +508,72 @@ class ModuleCreationWizard(QWizard):
         page.setLayout(layout)
         page.registerField("name*", self.name_edit)
         return page
+
+    def _update_description_hint(self):
+        """Empty means "Target for <name>" (the CLI's default). A module made from Ditto's proposal gets the
+        framework's own description (untested, with Ditto's guesses), so the field is read-only then."""
+        if not hasattr(self, "desc_edit"):
+            return
+        ai = bool(self.ai_proposal)
+        self.desc_edit.setReadOnly(ai)
+        if ai:
+            self.desc_edit.clear()
+            self.desc_edit.setPlaceholderText(ui_text("bld.wizard.description_ai"))
+        else:
+            self.desc_edit.setPlaceholderText(ui_text("bld.wizard.description_hint",
+                                                      name=self.name_edit.text().strip() or "..."))
+
+    def description(self) -> str:
+        """The description the person typed, or the CLI's default "Target for <name>"."""
+        return self.desc_edit.text().strip() or f"Target for {self.name_edit.text()}"
+
+    def person_description(self) -> str:
+        """What the person typed into Description ("" for none); a module an AI helped with keeps it in front of the
+        framework's untested note."""
+        return "" if self.ai_proposal else self.desc_edit.text().strip()
+
+    # --- provider and model for this one analysis ---
+
+    def _fill_run_providers(self):
+        """"(AI settings)" first, then every provider of Ditto's catalog (none without Ditto)."""
+        current = self.combo_run_provider.currentData()
+        self.combo_run_provider.blockSignals(True)
+        self.combo_run_provider.clear()
+        self.combo_run_provider.addItem(ui_text("bld.wizard.run_saved"), None)
+        ditto = self._ditto()
+        try:
+            providers = ditto.client.catalog.providers if ditto is not None else {}
+        except Exception:  # noqa: BLE001 - no catalog: only the AI settings
+            providers = {}
+        for pid, preset in providers.items():
+            self.combo_run_provider.addItem(f"{getattr(preset, 'label', pid)} ({pid})", pid)
+        index = self.combo_run_provider.findData(current)
+        self.combo_run_provider.setCurrentIndex(index if index >= 0 else 0)
+        self.combo_run_provider.blockSignals(False)
+        self._run_providers_for = ditto
+        self._fill_run_models()
+
+    def _fill_run_models(self):
+        """The chosen provider's suggested models; the field stays free text (empty: the AI settings' model)."""
+        typed = self.combo_run_model.currentText()
+        self.combo_run_model.clear()
+        ditto, pid = self._ditto(), self.combo_run_provider.currentData()
+        try:
+            preset = ditto.client.catalog.get(pid) if ditto is not None and pid else None
+        except Exception:  # noqa: BLE001
+            preset = None
+        for model in getattr(preset, "suggested_models", None) or []:
+            self.combo_run_model.addItem(str(model))
+        self.combo_run_model.setEditText(typed)
+
+    def run_choice(self):
+        """(provider, model) chosen for this analysis; None for each left at the AI settings."""
+        return self.combo_run_provider.currentData() or None, self.combo_run_model.currentText().strip() or None
+
+    def showEvent(self, event):
+        if getattr(self, "_run_providers_for", None) is not self._ditto():   # the framework came after the pages
+            self._fill_run_providers()
+        super().showEvent(event)
 
     def load_probe_data(self):
         if not self.detect_cb.isChecked(): return
@@ -538,7 +639,7 @@ class ModuleCreationWizard(QWizard):
         
         layout.addWidget(QLabel(tr("wiz.lbl.packages")))
         self.packages_edit = QLineEdit()
-        self.packages_edit.setText("build-essential cmake git python3-pip")
+        self.packages_edit.setText(DEFAULT_PACKAGES)
         layout.addWidget(self.packages_edit)
         
         page.setLayout(layout)
@@ -872,8 +973,16 @@ Setup commands:
 
             self.cpu_flags.setText(" ".join(cpu_flags))
             self.cmake_flags.setText(" ".join(cmake_flags))
-            
+            if self.ai_proposal:
+                # Ditto's values the probe does not set go too: none of them may end up in a module saved as the
+                # person's (unmarked, not audited)
+                self.packages_edit.setText(DEFAULT_PACKAGES)
+                self.setup_commands.setPlainText("")
+                self.quant_logic.setPlainText("")
+                self.custom_os_edit.clear()
+
             self.ai_proposal = None  # the fields now come from the probe, not from Ditto
+            self._update_description_hint()
             self._set_avatar_state("success")
             self.status_label.setText(tr("msg.import_success"))
             QMessageBox.information(self, tr("msg.import_success"), 
@@ -924,12 +1033,30 @@ Setup commands:
     def _ditto(self):
         return getattr(self.framework_manager, "ditto_manager", None) if self.framework_manager else None
 
+    def _run_problem(self, text: str):
+        box = QMessageBox(QMessageBox.Critical, "AI Error", text, QMessageBox.Ok, self)
+        box.setTextFormat(Qt.PlainText)
+        box.exec()
+
     def run_ai_analysis(self):
         ditto = self._ditto()
         if ditto is None:
             QMessageBox.critical(self, tr("status.error"), "The AI assistant (Ditto) is not available.")
             return
-        if not ditto.is_configured("json"):
+        provider, model = self.run_choice()
+        if provider or model:
+            # This analysis only (`generate-ai --provider --model`): the saved AI settings stay as they are
+            from orchestrator.Core.ditto_manager import DittoError
+            try:
+                ditto = ditto.for_run(provider, model)
+            except DittoError as e:
+                self._run_problem(ui_text("bld.wizard.run_refused", reason=str(e)))
+                return
+            if not ditto.is_configured("json"):
+                self._run_problem(ui_text("bld.wizard.run_not_ready", provider=self.combo_run_provider.currentText()
+                                          if provider else ui_text("bld.wizard.run_saved")))
+                return
+        elif not ditto.is_configured("json"):
             # Provider, model and key come from the AI settings; ask for them once when they are missing.
             self.configure_ai()
             if not ditto.is_configured("json"):
@@ -947,16 +1074,28 @@ Setup commands:
         self.status_label.setText(tr("msg.ai_thinking"))
         
         token = self._ai_request = object()
-        threading.Thread(target=self._ai_worker, args=(ditto, Path(path), token, worker_relay()), name="ai-import",
-                         daemon=True).start()
+        offline = bool(getattr(ditto, "offline_mode", False))
+        threading.Thread(target=self._ai_worker, args=(ditto, Path(path), token, worker_relay(), offline),
+                         name="ai-import", daemon=True).start()
 
     @staticmethod
-    def _ai_worker(ditto, path, token, relay):
-        """Runs in a worker thread: touches no Qt object of the wizard, answers on the relay only."""
-        from orchestrator.Core.ditto_manager import DittoError
+    def _ai_worker(ditto, path, token, relay, offline=False):
+        """Runs in a worker thread: touches no Qt object of the wizard, answers on the relay only. The proposal's
+        base image is pinned to its digest here, before the person sees it, as `llm-cli module generate-ai` does
+        (pin_base_image; the registry is asked off the GUI thread)."""
+        from orchestrator.Core.ditto_manager import DittoError, ModuleDefinition, pin_base_image
         from orchestrator.Core.ditto_manager import DittoCannot
+        from orchestrator.utils.image_registry import ImageLookupError
         try:
-            result = ("done", ditto.generate_module(path).model_dump())
+            definition = ditto.generate_module(path)
+            if isinstance(definition, ModuleDefinition):
+                try:
+                    definition = pin_base_image(definition, offline=offline)
+                except ImageLookupError as e:
+                    relay.done.emit(token, ("error", ui_text("bld.wizard.pin_failed", image=definition.base_os,
+                                                             reason=str(e), next=e.next)))
+                    return
+            result = ("done", definition.model_dump())
         except DittoCannot as e:  # its reason code decides whether Deep Ingest is offered
             result = ("cannot", (str(e), e.cannot.reason))
         except (DittoError, OSError) as e:
@@ -1013,6 +1152,7 @@ Setup commands:
             self.on_ai_error("The AI answer is not a JSON object.")
             return
         self.ai_proposal = dict(config)
+        self._update_description_hint()
 
         def text(key):
             value = config.get(key, "")
@@ -1055,6 +1195,46 @@ Setup commands:
         box.exec()
         self.next()
 
+    def _ai_chose_base_image(self) -> bool:
+        """Whether the base image field holds an AI's value now (Ditto or an AI app through the GUI tools)."""
+        form = getattr(self, "gui_form", None)
+        field = form.field("base_image") if form is not None else None
+        return bool(field is not None and field.filled_by_ai())
+
+    def _save_through_ditto(self, roots, profile) -> Path:
+        """An AI-made module takes the path of `llm-cli module generate-ai`: DittoManager.save_module refuses a
+        prebuilt nvidia/cuda image and an image that is not a Docker Official Image without the AI's reason, the
+        module generator checks every value again, and the save is audited like the CLI's (record_module_saved). The
+        values are the ones on the pages (the person may have changed Ditto's); the proposal's fields without a page
+        of their own are passed on."""
+        from orchestrator.Core.ditto_manager import DittoCoder
+        from orchestrator.Core.module_generator import AI_DEFINITION_FIELDS, generator_input
+        from orchestrator.tools.tools_targets import record_module_saved
+        definition = {k: v for k, v in (self.ai_proposal or {}).items() if k in AI_DEFINITION_FIELDS}
+        definition.update({k: self.module_data[k] for k in ("architecture", "sdk", "base_os", "packages", "cpu_flags",
+                                                            "cmake_flags", "setup_commands", "quantization_logic")})
+        name = self.module_data["module_name"]
+        ditto = self._ditto() or DittoCoder(self.framework_manager)
+        lead = self.person_description()
+        path = Path(ditto.save_module(definition, self.targets_dir, module_name=name, profile=profile,
+                                      knowledge_roots=roots, generator=ModuleGenerator, description=lead))
+        record_module_saved(self.framework_manager, "gui", generator_input(definition, name, description=lead), path,
+                            "framework-gui")
+        return path
+
+    def _check_created(self, folder) -> str:
+        """The check of the new target (TargetManager.validate, as `llm-cli targets validate`); "" without a target
+        manager."""
+        tm = getattr(self.framework_manager, "target_manager", None) if self.framework_manager else None
+        if tm is None or not hasattr(tm, "validate"):
+            return ""
+        try:
+            tm.initialize()   # the new folder is read
+            from orchestrator.gui.targets_window import target_check_text
+            return target_check_text(tm.validate(Path(folder).name, reread=True))
+        except Exception:  # noqa: BLE001 - the module exists; the check is information
+            return ""
+
     def accept(self):
         if self._crawl_running():  # Finish is disabled meanwhile; the snapshot must hold every crawled page
             return
@@ -1089,9 +1269,11 @@ Setup commands:
             "architecture": arch,
             "sdk": self.sdk_edit.text(),
             # A module from Ditto's proposal says it is untested and names Ditto's guesses, as generate-ai's does.
+            # A module an AI helped with keeps the person's own description in front of that note.
             "description": (ai_module_description(self.name_edit.text(),
-                                                  (self.ai_proposal or {}).get("assumptions") or [])
-                            if ai_made else f"Target for {self.name_edit.text()}"),
+                                                  (self.ai_proposal or {}).get("assumptions") or [],
+                                                  lead=self.person_description())
+                            if ai_made else self.description()),
             "base_os": self.custom_os_edit.text() if self.rad_custom.isChecked() else ("debian:bookworm-slim" if self.rad_debian.isChecked() else "ubuntu:22.04"),
             "packages": packages_list,
             "cpu_flags": self.cpu_flags.text(),
@@ -1115,18 +1297,25 @@ Setup commands:
             generator = ModuleGenerator(self.targets_dir)
             roots = sorted(self.crawled_roots) if self.chk_knowledge.isChecked() else None
             profile = self._target_profile()
-            if self.framework_manager:
+            if self.ai_proposal or self._ai_chose_base_image():
+                # Ditto's proposal (or a base image an AI filled in) is saved as `llm-cli module generate-ai` saves it
+                output_path = self._save_through_ditto(roots, profile)
+            elif self.framework_manager:
                 output_path = generator.generate_module(self.module_data, self.framework_manager, knowledge_roots=roots,
                                                         profile=profile)
             else:
                 output_path = generator.generate_module(self.module_data, profile=profile)
-            if ai_made:  # a module from an AI's proposal, saved by the person: audited (design 6.7)
+            if ai_made and not (self.ai_proposal or self._ai_chose_base_image()):
+                # fields an AI filled through the GUI tools, saved by the person: audited (design 6.7)
                 from orchestrator.tools.tools_targets import record_module_saved
                 record_module_saved(self.framework_manager, "gui", self.module_data, Path(output_path),
                                     "framework-gui")
             message = f"{tr('msg.module_created')}\n{output_path}"
             if roots and not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
                 message += "\n\n" + ui_text("crawl.snapshot_missing")
+            checked = self._check_created(output_path)   # `llm-cli targets validate` on the new target
+            if checked:
+                message += "\n\n" + ui_text("bld.check.after_create") + "\n" + checked
             QMessageBox.information(self, tr("msg.success"), message)
             if self.chk_export.isChecked():
                 from orchestrator.gui.community_hub import CommunityExportDialog

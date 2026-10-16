@@ -1282,7 +1282,9 @@ class TestMainWindowWiring:
                                       "Fix Proposals from AI Clients...", "Knowledge Snapshots...",
                                       "Framework Build Images...", "Index the Framework's Documentation...",
                                       "Spoken Announcements", "Clear Input History..."]
-            assert menus["File"] == ["Trash...", "Output Folder...", "Exit"]
+            # File > Settings... (GUI parity, wave 5: config show / config repos by mouse) sits above Exit
+            assert menus["File"] == ["Trash...", "Output Folder...", "Settings...", "Exit"]
+            assert menus["Build"] == ["Targets...", "Build History..."]
             # The audio switch is a persisted setting, on by default.
             assert win.act_audio.isCheckable() and win.act_audio.isChecked()
             win.act_audio.setChecked(False)

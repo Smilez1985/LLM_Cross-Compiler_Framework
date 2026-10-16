@@ -10,6 +10,33 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Build > Targets...** (GUI parity, every CLI action by mouse): every target with its ID (the value for `--target`),
+  name, architecture, boards, formats and support level, or "no capabilities declared" (or that its capabilities block
+  is invalid), from the query of `llm-cli targets list`. **Check target** (there and next to the Builder's target list,
+  beside the new **Targets...** button) checks the selected target as `llm-cli targets validate` does, through one core
+  function (`TargetManager.validate`, which the CLI now calls too) with its `target.yml` read again, and names each
+  schema error by field. The same check runs after the module wizard created a target and after a Community Hub target
+  install, and its result is shown.
+- **Build > Build History...**: every build of every program (GUI, CLI, MCP server), all of them as `llm-cli build
+  status --all`, failed, cancelled, interrupted and queued ones included; **Show details** (or a double click) shows
+  one build as `build status REQUEST_ID`: its request with errors and notes, every attempt with its output folder
+  (full path) and error, and the AI clients' fix proposals, marked AI-generated. The CLI and the window read one query
+  (`orchestrator/Core/build_history.py`). The status bar now names this window instead of a command for builds of
+  other programs.
+- **File > Settings...**: the effective settings with where each value comes from, secrets redacted (as `llm-cli config
+  show`), and the source repository overrides with the variable each becomes, to add and remove (as `llm-cli config
+  repos`; removing asks first, "No" is the default). Both use one core module (`orchestrator/Core/settings_view.py`)
+  that the CLI now calls too; a save that fails leaves the setting unchanged in the running program as well.
+- **The Builder offers what the CLI offers**: a target without capabilities gets every format of `--format` (not only
+  GGUF, RKLLM and RKNN), with the note that its boards, formats and quantizations are not checked (for a target whose
+  capabilities block is invalid the note says so, and **Check target** names each error); the optimization level
+  `FAST`; a **Priority** list (`--priority`, default normal; a failed critical build stops the pipeline).
+- **Module wizard: description, and provider and model for one analysis**: the hardware page has a **Description** field
+  (`llm-cli module create` asks for one; empty gives "Target for <name>"). Only you fill it: for a module an AI helped
+  with, your description leads and the framework's note that the module is AI-generated and untested follows. The first
+  page offers provider and model **for this analysis only** (`module generate-ai --provider --model`): Ditto runs on
+  them through `DittoManager.for_run`, which the CLI's `generate-ai` now uses too, and the saved AI settings stay
+  unchanged.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record
@@ -1703,6 +1730,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **The module wizard saves Ditto's proposal the way `llm-cli module generate-ai` does**: it saved an AI-made module
+  through the module generator alone, so DittoManager.save_module's checks were skipped (the refusal of any prebuilt
+  `nvidia/cuda` image in an AI proposal, and the AI's reason required for an image that is not a Docker Official
+  Image), and it did not pin the proposed base image to its digest. Now the proposal's base image is pinned in the
+  analysis worker before you see it (`pin_base_image`, the CLI's function), and the module is saved through
+  `DittoManager.save_module` and audited as on the command line; a base image an AI filled into the wizard through the
+  GUI tools takes the same path. A prebuilt image you choose yourself stays your explicit opt-in. A rule-based probe
+  import after Ditto's proposal now also replaces Ditto's packages, setup commands and quantization logic: they stayed
+  in their fields and went into a module saved as yours, unmarked and not audited.
 - **Pairing a board sends only a checked key line** (bandit B601): the command that adds the framework's public key
   to the board's `authorized_keys` is fixed, and its one value, the key line, was shell-quoted. Now the line must also
   be a plain SSH public key (type, key, an optional simple comment); anything else is refused before the command is
