@@ -88,7 +88,7 @@ MACHINE_ONLY: Dict[str, str] = {
 
 
 def _security_menu(menubar):
-    """The Security menu of the menu bar (by object name, else by title), created after File when there is none."""
+    """The Security menu of the menu bar (by object name, else by title), added at the end when there is none."""
     for action in menubar.actions():
         menu = action.menu()
         if menu is None:
