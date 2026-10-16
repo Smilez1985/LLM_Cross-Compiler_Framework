@@ -218,13 +218,13 @@ class TestDittoForOneRun:
 
     def test_the_saved_settings_stay_unchanged(self, tmp_path):
         ditto, config = self.ditto(tmp_path)
-        run = ditto.for_run("ollama", "qwen3:4b")
+        run = ditto.for_run("ollama", "small-model")
         assert run is not ditto and run.config.get("ai_provider") == "ollama"
-        assert run.config.get("ai_model") == "qwen3:4b"
+        assert run.config.get("ai_model") == "small-model"
         assert run.config.config_values["ai_provider"].value == "ollama"
         assert run.client.primary_provider().id == "ollama"
         assert config.get("ai_provider") == "anthropic" and ditto.client.primary_provider().id == "anthropic"
-        assert config.get("ai_model") != "qwen3:4b"
+        assert config.get("ai_model") != "small-model"
         assert run.config.get("offline_mode") == config.get("offline_mode"), "every other value is the saved one"
         assert ditto.for_run(None, None) is ditto
 

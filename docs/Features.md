@@ -80,6 +80,14 @@ The schema is in `orchestrator/schemas/targets.py`. The GUI, the CLI, the build 
 read the same block: they offer exactly these options, fill in the defaults, and reject everything else with a
 clear reason before anything runs. The Rockchip values are listed in the [README](../README.md#supported-targets-and-formats).
 
+GUI: **Build > Targets...** lists every target with its ID (the value for `--target`), name, architecture, boards,
+formats and support level, or "no capabilities declared"; **Targets...** next to the Builder's target list opens the
+same window. **Check target** (in that window and next to the Builder's target list) checks the selected target as
+`llm-cli targets validate` does, through the same function (`TargetManager.validate`), with its `target.yml` read
+again, and names each schema error by field. The same check runs after the module wizard created a target and after
+a Community Hub target install, and its result is shown. A target without capabilities gets every format in the
+Builder, as on the command line, with the note that its boards, formats and quantizations are not checked.
+
 ---
 
 ## Build pipeline
@@ -138,6 +146,14 @@ Further behaviour:
   no secret) and one record per build into `<cache_dir>/build_records/`. So the GUI status bar, `llm-cli build
   status`, `list_build_requests` and `get_build_status` see the same builds, also a request that still waits in
   another program's queue; a request whose program has ended before it finished is shown as interrupted.
+- **Build History (GUI):** **Build > Build History...** lists every build of every program (as `llm-cli build status
+  --all`: failed, cancelled, interrupted and queued ones too) from the same query (`build_history.read_history`);
+  **Show details** (or a double click) shows one build as `build status REQUEST_ID` does: its request with errors and
+  notes, every attempt with its output folder (full path) and error, and the fix proposals AI clients made for it,
+  marked AI-generated and never run. The status bar names this window for builds of other programs.
+- **Optimization and priority (GUI):** the Builder's **Optimization** list offers every level of `--optimization`
+  (also `FAST`), and **Priority** sets the build priority of `--priority` (default normal; a failed critical build
+  stops the pipeline).
 - **Build slots:** at most `max_concurrent_builds` builds (setting, 1 to 10, default 2) run at the same time in one
   program; a further build waits for a free slot (its stage shows "Waiting for a free build slot") instead of
   failing. A cancelled build keeps its slot until its container has stopped.
@@ -2231,6 +2247,11 @@ everything worked) reaches an AI with the account's name, its home folder and bo
   cached [community index](#the-signed-index) with the pinned author keys, and two random values per installation
   (one for the privacy placeholders, one as an anonymous cache ID for OpenAI). Your key pairs for
   [community packs](#encrypted-packs-for-private-sharing) are kept in the encrypted secrets store.
+- **Settings in the GUI:** **File > Settings...** shows the effective settings with where each value comes from
+  (the defaults, a settings file with its full path, an `LLM_FRAMEWORK_*` variable, or changed while the program
+  runs), secrets redacted, as `llm-cli config show` (`settings_view.effective_settings`), and the source repository
+  overrides with the variable each becomes, to add and remove as with `llm-cli config repos` (removing asks first,
+  "No" is the default). The output folder has its own entry, **File > Output Folder...**.
 - **Settings** are never read from the working directory: `LLM_FRAMEWORK_CONFIG_DIR`, then `configs/` in the
   installation if you may write there, then the personal folder.
 - **Data folders** (`output/`, `cache/`, `models/`) are in the installation if you may write there, otherwise in the
@@ -2353,12 +2374,19 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   you allowed it), never offers "do not ask again", refuses a name that reads like an existing target (case and
   separators ignored) and never uses a prebuilt llama.cpp. A long definition becomes a pending approval in the
   framework, shown up to 16,000 characters.
-- **New target by questions:** `llm-cli module create` or the wizard under **Tools > Create Hardware Module...**.
+- **New target by questions:** `llm-cli module create` or the wizard under **Tools > Create Hardware Module...**,
+  which also asks for the description (default "Target for <name>"). After **Finish** the wizard checks the new
+  target as `llm-cli targets validate` does and shows the result.
 - **New target from a probe:** `llm-cli module generate-ai <probe file>` or the wizard's AI analysis. Ditto proposes
   architecture, SDK, base image, packages, vendor sources, pip packages and downloads, CPU and CMake flags, setup
-  commands and the quantization block of `build.sh`; you see the whole proposal first. `module generate-ai` pins the
-  base image to its digest before it asks, and the wizard passes on every field of the proposal; both record the
-  saved module in the audit log (`module_saved`, with the definition's sha256 and the base image).
+  commands and the quantization block of `build.sh`; you see the whole proposal first. Both take the same path:
+  the base image is pinned to its digest before you see the proposal (`pin_base_image`; in the wizard off the GUI
+  thread), the module is saved through `DittoManager.save_module`, which refuses a prebuilt `nvidia/cuda` image and
+  an image that is not a Docker Official Image without the AI's reason (also for a base image an AI filled into the
+  wizard through the GUI tools), and both record the saved module in the audit log (`module_saved`, with the
+  definition's sha256 and the base image). The wizard passes on every field of the proposal. Its first page offers
+  provider and model **for this analysis only** (`--provider`, `--model`, `DittoManager.for_run`): the saved AI
+  settings stay unchanged.
 - **The device runtime in the module:** every new `target.yml` gets a `runtime:` block, the build recipe's plan for
   the board's llama.cpp runtime from the target's probe (the wizard's imported probe file, the probe file of
   `module generate-ai`, or `llm-cli module create --probe <file>`): architecture, OS, the C library the cross build
@@ -2616,7 +2644,7 @@ trust level.
 trust column, author and status, with a search field and filters for kind and trust. **Refresh** fetches the index
 again, **Install** installs an index entry after its summary, **Import file...** installs a pack file (also one
 encrypted to your key), and **Build** on an installed recipe fills in the Builder. A revoked pack shows a disabled
-**Revoked** button.
+**Revoked** button. An installed target is checked as `llm-cli targets validate` does, and the result is shown.
 
 ### Export for community
 

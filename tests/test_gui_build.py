@@ -611,7 +611,7 @@ def test_the_ai_analysis_runs_with_the_provider_chosen_for_it_only(wizard, tmp_p
     providers = [wizard.combo_run_provider.itemData(i) for i in range(wizard.combo_run_provider.count())]
     assert providers[0] is None and "ollama" in providers and "anthropic" in providers
     wizard.combo_run_provider.setCurrentIndex(providers.index("ollama"))
-    wizard.combo_run_model.setEditText("qwen3:4b")
+    wizard.combo_run_model.setEditText("small-model")
     probe = tmp_path / "probe.txt"
     probe.write_text("CPU_MODEL=Cortex-A76\n")
     monkeypatch.setattr(wizards.QFileDialog, "getOpenFileName", lambda *a, **k: (str(probe), ""))
@@ -630,16 +630,19 @@ def test_the_ai_analysis_runs_with_the_provider_chosen_for_it_only(wizard, tmp_p
     target, args, name = started[-1]
     run = args[0]
     assert name == "ai-import" and target == wizard._ai_worker, "the analysis runs off the GUI thread"
-    assert run is not ditto and run.config.get("ai_provider") == "ollama" and run.config.get("ai_model") == "qwen3:4b"
+    assert run is not ditto and run.config.get("ai_provider") == "ollama"
+    assert run.config.get("ai_model") == "small-model"
     assert config.get("ai_provider") == "anthropic", "the saved AI settings stay unchanged"
-    assert config.get("ai_model") != "qwen3:4b"
+    assert config.get("ai_model") != "small-model"
 
 
 def test_an_unknown_run_provider_is_refused_before_anything_starts(wizard, tmp_path, monkeypatch):
     from orchestrator.Core.ditto_manager import DittoError
     from orchestrator.gui import wizards
-    ditto = SimpleNamespace(for_run=lambda provider, model: (_ for _ in ()).throw(DittoError("Unknown AI provider 'x'")),
-                            is_configured=lambda task: True)
+    def refuse(provider, model):
+        raise DittoError("Unknown AI provider 'x'")
+
+    ditto = SimpleNamespace(for_run=refuse, is_configured=lambda task: True)
     wizard.framework_manager = SimpleNamespace(ditto_manager=ditto)
     wizard.combo_run_provider.addItem("x", "x")
     wizard.combo_run_provider.setCurrentIndex(wizard.combo_run_provider.count() - 1)
@@ -737,9 +740,9 @@ def test_generate_ai_with_provider_leaves_the_settings_unchanged(tmp_path, monke
     probe = tmp_path / "probe.txt"
     probe.write_text("cpu: aarch64\n", encoding="utf-8")
     result = CliRunner().invoke(cli.cli, ["-q", "module", "generate-ai", str(probe), "--provider", "openai",
-                                          "--model", "gpt-x"], input="")
-    assert used == [("openai", "gpt-x")]
+                                          "--model", "other-model"], input="")
+    assert used == [("openai", "other-model")]
     assert result.exit_code == 1   # no key stored for openai in this test: nothing is generated
-    assert config.get("ai_provider") == "anthropic" and config.get("ai_model") != "gpt-x"
+    assert config.get("ai_provider") == "anthropic" and config.get("ai_model") != "other-model"
     refused = CliRunner().invoke(cli.cli, ["-q", "module", "generate-ai", str(probe), "--provider", "nope"])
     assert refused.exit_code == 2 and "Unknown AI provider 'nope'" in " ".join(refused.output.split())
