@@ -3,9 +3,11 @@
 LLM Cross-Compiler Framework - RAG Manager (local knowledge base)
 
 Ingests documentation (crawled pages, PDFs, community packs, the framework's own documents) and serves
-searches for Ditto and the MCP server. Everything runs locally: FastEmbed/ONNX embeddings, and Qdrant
-embedded in the process with its storage in the user state directory (no Docker, no open port). A Qdrant
-server is used only when the configuration sets qdrant_url.
+searches for Ditto and the MCP server. Everything runs locally: FastEmbed/ONNX embeddings, and Qdrant Edge (the Rust
+engine of Qdrant) in the process with its storage in the user state directory (no Docker, no open port). A Qdrant
+server is used only when the configuration sets qdrant_url. A knowledge base in the storage of earlier versions
+(qdrant-client's local mode) is converted to Qdrant Edge on first use and checked; its folder is kept until the person
+deletes it (orchestrator/rag/migration.py).
 
 Search results are plain data from external sources; callers wrap them as untrusted before a model sees them.
 A cross-encoder can rerank them and drop the irrelevant ones; it is quality on top and never a reason to fail.
@@ -38,7 +40,7 @@ from orchestrator.rag.retrieval import FastEmbedReranker, RerankerSpec, select_r
 from orchestrator.utils.helpers import redact_secrets, sanitize_filename
 from orchestrator.utils.logging import get_logger
 
-if TYPE_CHECKING:  # qdrant-client (and the FastEmbed it pulls in) loads on first use, not at framework boot
+if TYPE_CHECKING:  # the storage engine (and FastEmbed) loads on first use, not at framework boot
     from orchestrator.rag.store import KnowledgeStore
 
 # Import Crawler (Optional)
@@ -50,6 +52,12 @@ except ImportError:
 COLLECTION_NAME = "framework_knowledge"  # alias of the active collection (one collection per embedding model)
 MIN_SPARSE_QUERY_TOKENS = 3  # shorter queries use the dense ranking only, unless they hold an identifier
 _IDENTIFIER = re.compile(r"\d|_|[A-Z]{2,}|\w[.-]\w")  # E2041, GGML_CUDA, RKNN, librkllmrt.so
+# How long a process waits for the local storage while another framework process (GUI, CLI, MCP server) holds it; that
+# one releases it after IDLE_CLOSE_SECONDS without use.
+LOCK_WAIT_SECONDS = 5.0
+# Points written or deleted in the local storage after which it is optimized when it is released (segments merged,
+# deleted points dropped; without a graph index this takes moments).
+OPTIMIZE_AFTER_WRITES = 1000
 RERANK_POOL = 20  # most candidates a search reranks (about 1-2.5 s on one free CPU core)
 RERANK_INPUT_CHARS = 1500  # of each candidate; about what fits next to the query into 512 tokens
 # Longest idle time before the models are released (7 days); threading.Timer overflows on huge timeouts (on
@@ -289,6 +297,11 @@ class RAGManager:
         self.client = None
         self._connected = False
         self._server_mode = False
+        self._file_lock = None  # the local storage's cross-process lock while it is open (edge_store.storage_lock)
+        self._convert_now = False  # the person asked to try the conversion of the old storage again
+        self._conversion_checked = False  # the conversion was looked at (and tried when due) in this process
+        self.storage_format = ""  # qdrant-edge, old-local or server, once opened
+        self.storage_reason = ""  # why the old local storage is still in use (its conversion failed)
         self._store: Optional["KnowledgeStore"] = None
         self._embedder = embedder
         self._sparse = sparse_embedder
@@ -336,7 +349,15 @@ class RAGManager:
 
     @property
     def storage_dir(self) -> Path:
-        return self._state_dir() / "qdrant"
+        """The local knowledge base: the Qdrant Edge storage folder."""
+        from orchestrator.rag.migration import EDGE_FOLDER
+        return self._state_dir() / EDGE_FOLDER
+
+    @property
+    def old_storage_dir(self) -> Path:
+        """The storage folder of earlier versions (qdrant-client's local mode), converted on first use."""
+        from orchestrator.rag.migration import OLD_FOLDER
+        return self._state_dir() / OLD_FOLDER
 
     @property
     def snapshot_dir(self) -> Path:
@@ -393,34 +414,95 @@ class RAGManager:
 
     # --- storage lifecycle ---
 
-    def _open_client(self) -> Tuple[Any, bool]:
-        from qdrant_client import QdrantClient
-
+    def _open_client(self) -> Tuple[Any, bool, type]:
+        """(client, server mode, store class): a Qdrant server when qdrant_url is set, else the local storage."""
         url = self._server_url()
         if url:
+            from qdrant_client import QdrantClient
+
+            from orchestrator.rag.client_store import ClientKnowledgeStore
             client = QdrantClient(url=url, api_key=self._server_api_key(url), timeout=10)
             client.get_collections()  # fail now, not on the first search
-            return client, True
-        path = self.storage_dir
-        deadline = time.monotonic() + 5
-        while True:
-            try:
-                # Safe across threads: every access goes through self._lock.
-                return QdrantClient(path=str(path), force_disable_check_same_thread=True), False
-            except RuntimeError as e:
-                if "already accessed" not in str(e):
+            return client, True, ClientKnowledgeStore
+        return self._open_local()
+
+    def _busy_error(self) -> KnowledgeBaseError:
+        return KnowledgeBaseError(
+            f"The knowledge base storage {self.storage_dir} is in use by another framework process (GUI, CLI or MCP "
+            f"server). It is released after {int(self.IDLE_CLOSE_SECONDS)} s without use: try again shortly, or set "
+            "qdrant_url to share a Qdrant server.")
+
+    def _open_local(self) -> Tuple[Any, bool, type]:
+        """The local knowledge base under the storage lock: the Qdrant Edge storage, after converting the old storage
+        the first time (migration.run); the old storage itself while its conversion failed."""
+        from orchestrator.rag import migration
+        from orchestrator.rag.storage_lock import storage_lock, try_lock
+        lock = storage_lock(self.storage_dir)
+        deadline = time.monotonic() + LOCK_WAIT_SECONDS
+        while not try_lock(lock):  # another process holds the storage: it releases it after its idle time
+            if time.monotonic() > deadline:
+                raise self._busy_error()
+            time.sleep(0.25)
+        try:
+            force, self._convert_now = self._convert_now, False
+            if self._conversion_checked and not force:  # tried once in this process; the next start tries again
+                use, reason = migration.current(self._state_dir())
+            else:
+                use, reason = migration.run(self._state_dir(), force=force, log=self.logger.info)
+                self._conversion_checked = True
+            if use == "old":
+                try:
+                    from qdrant_client import QdrantClient
+                except ImportError:
+                    raise KnowledgeBaseError("The knowledge base is in the storage of earlier versions, which needs "
+                                             "the 'qdrant-client' package.") from None
+
+                from orchestrator.rag.client_store import ClientKnowledgeStore
+                try:
+                    client = QdrantClient(path=str(self.old_storage_dir), force_disable_check_same_thread=True)
+                except RuntimeError as e:
+                    if "already accessed" in str(e):
+                        raise self._busy_error() from None
                     raise
-                if time.monotonic() > deadline:
-                    raise KnowledgeBaseError(
-                        f"The knowledge base storage {path} is in use by another framework process (GUI or MCP "
-                        "server). Try again shortly, or set qdrant_url to share a Qdrant server.") from e
-                time.sleep(0.25)
+                self.storage_reason = reason
+                store_cls = ClientKnowledgeStore
+            else:
+                from orchestrator.rag.edge_store import EdgeKnowledgeStore, EdgeStorage
+                client, store_cls = EdgeStorage(self.storage_dir), EdgeKnowledgeStore
+                self.storage_reason = ""
+        except BaseException:
+            lock.release()
+            raise
+        self._file_lock = lock
+        return client, False, store_cls
+
+    def convert_storage(self) -> Dict[str, Any]:
+        """Tries the conversion of the old local storage to Qdrant Edge again now (the person asked: `llm-cli
+        knowledge storage convert`), also after a failure that would not be retried by itself. Returns
+        migration.summary plus "used" (qdrant-edge or old-local) and "error" when the knowledge base cannot be
+        opened."""
+        from orchestrator.rag import migration
+        with self._lock:
+            self._close_client()
+            self._convert_now = True
+            try:
+                self._ensure_store()
+                error = ""
+            except KnowledgeBaseError as e:
+                self._fail(e)
+                error = self.last_error
+            finally:
+                self._convert_now = False
+            result = migration.summary(self._state_dir())
+            result.update(used=self.storage_format, error=error)
+            self._schedule_idle_close()
+            return result
 
     def _choose_model(self, client) -> Tuple[str, str]:
         configured = str(self._cfg("rag_embedding_model", "auto") or "auto").strip()
         if configured.lower() != "auto":
             return configured, "set in the configuration (rag_embedding_model)"
-        from orchestrator.rag.store import KnowledgeStore
+        from orchestrator.rag.store import KnowledgeStore  # its alias look-up works on every backend
 
         target = KnowledgeStore.alias_target(client, COLLECTION_NAME)
         if target:
@@ -437,13 +519,12 @@ class RAGManager:
             if self._store is not None:
                 return self._store
             try:
-                from orchestrator.rag.store import KnowledgeStore
-            except ImportError as e:
-                raise KnowledgeBaseError("The knowledge base needs the 'qdrant-client' package.") from e
-            try:
-                client, server = self._open_client()
+                client, server, store_cls = self._open_client()
             except KnowledgeBaseError:
                 raise
+            except ImportError as e:
+                package = "qdrant-client" if self._server_url() else "qdrant-edge-py"
+                raise KnowledgeBaseError(f"The knowledge base needs the '{package}' package.") from e
             except Exception as e:
                 raise KnowledgeBaseError(f"Could not open the knowledge base: {redact_secrets(str(e))}") from e
             try:
@@ -454,20 +535,23 @@ class RAGManager:
                     self.model_reason = reason
                 if self._sparse is None:
                     self._sparse = create_sparse_embedder(self.models_cache_dir, self._offline)
-                store = KnowledgeStore(client, COLLECTION_NAME, self._embedder.model_id, self._embedder.dim,
-                                       server_mode=server)
+                store = store_cls(client, COLLECTION_NAME, self._embedder.model_id, self._embedder.dim,
+                                  server_mode=server)
                 store.ensure()
             except Exception as e:
                 try:
                     client.close()
                 except Exception:
                     pass
+                self._release_file_lock()
                 if isinstance(e, KnowledgeBaseError):
                     raise
                 raise KnowledgeBaseError(f"Could not prepare the knowledge base: {redact_secrets(str(e))}") from e
             self.client, self._store, self._connected, self._server_mode = client, store, True, server
+            self.storage_format = store.store_format
             self.last_error = ""
-            where = "Qdrant server" if server else f"embedded storage {self.storage_dir}"
+            kind = "Qdrant Edge" if store.store_format == "qdrant-edge" else "old format: " + self.storage_reason
+            where = "Qdrant server" if server else f"embedded storage {self._local_folder()} ({kind})"
             self.logger.info(f"Knowledge base ready: {store.collection} in {where}; "
                              f"model {store.model_id} ({self.model_reason})")
             return store
@@ -495,12 +579,33 @@ class RAGManager:
                 self._close_client()
 
     def _close_client(self) -> None:
+        store = self._store
+        if store is not None and getattr(store, "written", 0) >= OPTIMIZE_AFTER_WRITES:
+            try:  # Qdrant Edge: merge segments and drop deleted points before the storage is released
+                started = time.monotonic()
+                store.optimize()
+                self.logger.info(f"Knowledge base storage optimized in {time.monotonic() - started:.1f} s.")
+            except Exception as e:  # noqa: BLE001 - only housekeeping: the data is written already
+                self.logger.warning(f"Knowledge base: optimizing the storage failed ({type(e).__name__}).")
         if self.client is not None:
             try:
                 self.client.close()
             except Exception:
                 pass
         self.client, self._store, self._connected = None, None, False
+        self._release_file_lock()
+
+    def _release_file_lock(self) -> None:
+        lock, self._file_lock = self._file_lock, None
+        if lock is not None:
+            try:
+                lock.release()
+            except Exception:  # noqa: BLE001 - a lock file that vanished: nothing is held any more
+                pass
+
+    def _local_folder(self) -> Path:
+        """The local storage folder in use: Qdrant Edge's, or the old one while its conversion failed."""
+        return self.old_storage_dir if self.storage_format == "old-local" else self.storage_dir
 
     def close(self) -> None:
         """Releases the storage (the embedded one is locked by this process while open). Models stay loaded
@@ -1146,7 +1251,7 @@ class RAGManager:
         """Where the knowledge base lives, for display: never the userinfo part of a server URL."""
         url = self._server_url()
         if not url:
-            return str(self.storage_dir)
+            return str(self._local_folder())
         parsed = urlparse(url)
         host = parsed.hostname or "?"
         try:
@@ -1162,8 +1267,8 @@ class RAGManager:
         }
 
         def info(store: "KnowledgeStore") -> Dict[str, Any]:
-            return {"connected": True, "vector_count": store.count(),
-                    "status": store.client.get_collection(store.collection).status.name,
+            return {"connected": True, "vector_count": store.count(), "status": store.status(),
+                    "store_format": store.store_format,
                     "collection": store.collection, "embedding_model": store.model_id, "dimensions": store.dim,
                     "other_collections": [c for c in store.knowledge_collections() if c != store.collection]}
 
@@ -1171,5 +1276,11 @@ class RAGManager:
             status.update(self._with_store(info))
         except KnowledgeBaseError as e:
             status["error"] = redact_secrets(str(e))
+        status["storage"] = self._storage_label()
+        if status["mode"] == "embedded":
+            from orchestrator.rag.migration import summary
+            status["conversion"] = summary(self._state_dir())
+            if self.storage_reason:
+                status["old_format_reason"] = self.storage_reason
         status["model_reason"] = self.model_reason
         return status
