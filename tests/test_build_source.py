@@ -96,8 +96,9 @@ class TestFetch:
         if os.name == "posix":
             assert writable_bits(path / "ggml" / "ggml.c") == 0 and writable_bits(path / "ggml") == 0
             assert stat.S_IMODE((path / "run.sh").stat().st_mode) & 0o111, "executable bits are kept"
-        # Second run: the upstream is gone and nothing is fetched.
-        shutil.rmtree(upstream["path"])
+        # Second run: the upstream is gone and nothing is fetched. (git's object files are read-only, which Windows
+        # refuses to delete: remove_tree clears that, as for the source cache.)
+        src.remove_tree(upstream["path"])
         rec2 = Recorder()
         assert fetch_source(source, state, url=upstream["url"], git=Git(rec2)) == path
         assert "fetch" not in rec2.commands() and "ls-remote" not in rec2.commands()
@@ -205,7 +206,7 @@ class TestBundle:
         assert manifest["commit"] == upstream["second"] and manifest["tag"] == "b42"
         assert manifest["bundle_size"] == bundle.stat().st_size and len(manifest["bundle_sha256"]) == 64
         assert "framework_version" in manifest
-        shutil.rmtree(upstream["path"])  # the air-gapped machine has no upstream at all
+        src.remove_tree(upstream["path"])  # the air-gapped machine has no upstream at all (read-only git objects)
         rec = Recorder()
         path = import_source(source, tmp_path / "offline", bundle, git=Git(rec))
         assert (path / "ggml" / "ggml.c").read_text() == "int ggml(void) { return 42; }\n"
@@ -329,8 +330,8 @@ class TestCli:
                                                 "--mirror", upstream["url"], "--yes"])
         assert result.exit_code == 0, result.output
         assert bundle.is_file() and "import-source" in result.output
-        # The air-gapped machine: another user folder, no upstream.
-        shutil.rmtree(upstream["path"])
+        # The air-gapped machine: another user folder, no upstream (read-only git objects: remove_tree).
+        src.remove_tree(upstream["path"])
         monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "offline-home"))
         result = runner.invoke(cli_module.cli, ["-q", "ditto", "runtime", "import-source", str(bundle)])
         assert result.exit_code == 0, result.output

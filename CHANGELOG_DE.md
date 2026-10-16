@@ -1383,6 +1383,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (keine Variable `USER` und kein Eintrag in passwd).
 - Unter Windows scheitert das Speichern eines Geheimnisses nicht mehr, wenn ein anderer Prozess oder ein
   Virenscanner den Speicher kurz geöffnet hat.
+- Unter Windows landet der Build eines lokalen Modells wieder im Ausgabeordner (veröffentlicht in 3.0.0): Der
+  Build-Ordner hieß nach dem Teil des Modells hinter dem letzten `/`, und das ist bei einem Windows-Pfad wie
+  `C:\models\my-model` der ganze Pfad, also ging der Build in den Ordner des Modells selbst
+  (`C:\models\my-model\<quantization>`), und keine Liste fand ihn. Der Ordner heißt jetzt auf jedem System nach
+  dem letzten Teil an `/` oder `\`.
 - `llm-cli secrets set` sagt, wohin das Geheimnis ging (in den verschlüsselten Tresor oder mit `ephemeral` nur in
   den Arbeitsspeicher), statt immer „Keyring“. Auch die GUI nennt den verschlüsselten Tresor für Zugangsdaten (der
   Dialog für Geheimnisse, das Feld für den API-Schlüssel und seine Fehlermeldung in den KI-Einstellungen, das

@@ -1647,8 +1647,8 @@ framework never sees it.
   `XDG_CONFIG_HOME`), keyrings and keychains, `~/.password-store`, `~/.netrc`, `~/.git-credentials`, `~/.docker`,
   `~/.aws`, `~/.kube`, the AI clients' own sign-ins and settings (`~/.claude`, `~/.claude.json`, `~/.codex`,
   `~/.gemini`, `~/.cursor`), the Hugging Face home folder with its token files (its `hub` subfolder may be added
-  as a folder), browser profiles, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (unless it is your own home) and the
-  Windows credential folders. Inside and outside are decided by file identity, not by comparing names, so a
+  as a folder), browser profiles, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (unless it is your own home) and, on
+  Windows, the system folder (`%SystemRoot%`), the computer's keys and the credential folders and vaults. Inside and outside are decided by file identity, not by comparing names, so a
   case-insensitive file system cannot hide `~/.SSH`. A file with more than one hard link is refused. The file is
   pinned (identity, size, modification time) and checked again right before each build container starts; a file
   replaced meanwhile stops the build. A folder (a Hugging Face model folder) is used only strictly below its label
