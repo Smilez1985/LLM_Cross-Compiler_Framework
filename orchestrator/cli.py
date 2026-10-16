@@ -1835,26 +1835,10 @@ def ditto_runtime():
     pass
 
 
-def _installed_json(inst) -> Optional[dict]:
-    if inst is None:
-        return None
-    data = inst.model_dump(mode="json", include={"origin", "build_id", "commit", "backend", "variant", "asset_id",
-                                                 "role", "placement", "built_on", "built_at", "verified_at",
-                                                 "duration_s", "devices", "notes"})
-    data["label"] = inst.label
-    data["path"] = str(inst.path)
-    return data
-
-
 def _installed_line(inst) -> str:
     """origin label, build, backend and commit of the build in use (escaped for rich)."""
-    if inst.build_id:
-        role = ", CPU fallback" if inst.role == "fallback" else ""
-        text = (f"{inst.label}: build {inst.build_id[:16]} ({inst.backend}{role}), llama.cpp {inst.build} commit "
-                f"{(inst.commit or '')[:8]}")
-    else:
-        text = f"{inst.label}: {inst.asset_id} ({inst.backend})"
-    return escape(text)
+    from orchestrator.runtime.runtime_overview import installed_summary
+    return escape(installed_summary(inst))
 
 
 @ditto_runtime.command('status')
@@ -1862,27 +1846,15 @@ def _installed_line(inst) -> str:
 @pass_context
 def runtime_status(ctx: FrameworkContext, as_json: bool):
     """Hardware, the build in use (self-built, imported or prebuilt), the recommended model, and the server"""
+    from orchestrator.runtime.runtime_overview import overview
     rt = _local_runtime(ctx)
     with console.status("Checking the hardware and the builds ..."):
-        status = rt.status(check_rebuild=True)
-        hardware = rt.hardware()
-        backend, backend_reason = rt.recommend_backend()
-        prebuilt = rt.select_backend()
-        model, why = rt.choose_tier()
-    preferred = rt.preferred_tier()
-    inst = status.installed
+        view = overview(rt)   # the same call as the GUI's Ditto > Local Runtime... window
     if as_json:
-        click.echo(json.dumps({
-            "build": status.build, "hardware": hardware.model_dump(mode="json"), "mode": status.mode,
-            "docker": status.docker, "container": status.container,
-            "installed": _installed_json(inst), "problems": status.problems, "rebuild": status.rebuild,
-            "recommended_backend": backend, "backend_reason": backend_reason,
-            "prebuilt_option": prebuilt.asset.id if prebuilt.asset else None, "prebuilt_reason": prebuilt.reason,
-            "running": status.running, "healthy": status.healthy, "base_url": status.base_url, "pid": status.pid,
-            "model": status.model, "tier": status.tier, "ctx": status.ctx,
-            "recommended_tier": model.tier, "tier_reason": why, "preferred_tier": preferred,
-            "log_file": str(status.log_file)}, indent=2))
+        click.echo(json.dumps(view.as_json(), indent=2))
         return
+    status, hardware, prebuilt, model, why = view.status, view.hardware, view.prebuilt, view.model, view.tier_reason
+    backend, backend_reason, preferred, inst = view.backend, view.backend_reason, view.preferred, status.installed
     table = Table(title=f"Local runtime (llama.cpp {escape(status.build)})", show_header=False)
     table.add_column("", style="cyan")
     table.add_column("")
@@ -1892,14 +1864,15 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
         style = "yellow" if inst.origin == "prebuilt" else "green"
         table.add_row("In use" if status.mode != "docker" else "Bare metal",
                       f"[{style}]{_installed_line(inst)}[/{style}]")
-        if inst.build_id:
-            built = [f"{inst.placement or '?'} build"]
-            if inst.duration_s is not None:
-                built.append(f"{inst.duration_s:.0f} s")
-            if inst.built_on and inst.origin == "imported":
-                built.append(f"on {inst.built_on}")
-            if inst.built_at:
-                built.append(inst.built_at)
+        facts = view.build_facts()
+        if facts is not None:
+            built = [f"{facts['placement'] or '?'} build"]
+            if facts["duration_s"] is not None:
+                built.append(f"{facts['duration_s']:.0f} s")
+            if facts["built_on"]:
+                built.append(f"on {facts['built_on']}")
+            if facts["built_at"]:
+                built.append(facts["built_at"])
             table.add_row("Built", escape(", ".join(built)))
             devices = ", ".join(inst.devices) or "CPU only"
             table.add_row("Verified", escape(f"{inst.verified_at or '?'}; devices: {devices}"))
@@ -1907,13 +1880,12 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
             table.add_row("Note", f"[yellow]{escape(note)}[/yellow]")
     else:
         table.add_row("In use", "[yellow]nothing[/yellow] (llm-cli ditto runtime install builds llama-server)")
-    for problem in status.problems:
-        if inst is None or problem not in inst.notes:
-            table.add_row("Problem", f"[red]{escape(problem)}[/red]")
+    for problem in view.extra_problems():
+        table.add_row("Problem", f"[red]{escape(problem)}[/red]")
     if status.rebuild:
         table.add_row("Rebuild", f"[yellow]{escape(status.rebuild)}[/yellow]")
-    table.add_row("Self-built plan", escape(f"{backend}: {backend_reason}" if backend == "cpu" or not backend_reason
-                                            else f"CPU build, then {backend}: {backend_reason}"))
+    table.add_row("Self-built plan", escape(f"CPU build, then {backend}: {backend_reason}" if view.gpu_after_cpu
+                                            else f"{backend}: {backend_reason}"))
     table.add_row("Prebuilt opt-in", escape(f"{prebuilt.asset.id if prebuilt.asset else '-'} (--prebuilt, not "
                                             f"self-built): {prebuilt.reason}"))
     if status.running:
@@ -1924,7 +1896,7 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
     else:
         table.add_row("Server", "stopped")
     table.add_row("Recommended model", escape(f"{model.file} - {why}"))
-    if preferred and preferred != model.tier:
+    if view.chosen_differs:
         table.add_row("Chosen model", escape(f"{preferred} (llm-cli ditto runtime start --model auto resets it)"))
     table.add_row("Log", escape(str(status.log_file)))
     console.print(table)
@@ -2053,7 +2025,7 @@ def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str
                    no_model: bool, yes: bool):
     """Install Ditto's local runtime when it is not there, bare metal or in Docker (running it again does nothing)"""
     from orchestrator.runtime.llama_server import LocalRuntimeError
-    from orchestrator.runtime.runtime_mode import RuntimeModeError, SpaceShortage, ensure
+    from orchestrator.runtime.runtime_mode import RuntimeModeError, SpaceShortage, container_build_requested, ensure
     if force and mode == "auto":
         _usage("--force needs a mode: --mode bare-metal or --mode docker.")
     if force:
@@ -2075,7 +2047,7 @@ def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str
     def run(wanted: str, forced: bool):
         return ensure(rt, mode=wanted, force=forced, placement=placement, backend=backend, jobs=jobs,
                       log=lambda msg: console.print(escape(msg)), fetch_source=fetch_ok,
-                      container_build=os.environ.get("LCF_CONTAINER_BUILD") == "1")
+                      container_build=container_build_requested())
 
     try:
         result = run(mode, force)
@@ -2221,10 +2193,10 @@ def _offer_ditto_model(rt, yes: bool) -> None:
     first, then the download after your yes (with -y only under a permissive licence; any other licence is yours to
     accept with 'llm-cli ditto models download')."""
     from orchestrator.runtime.llama_server import LocalRuntimeError
-    from orchestrator.runtime.runtime_mode import PERMISSIVE_LICENCES
-    preferred = rt.preferred_tier()
-    model, why = (rt.catalog.model(preferred), "chosen earlier") if preferred else rt.choose_tier()
-    if rt.model_state(model) != "missing":
+    from orchestrator.runtime.runtime_mode import model_offer
+    offer = model_offer(rt)   # the same offer as the GUI's after its install
+    model, why = offer.model, offer.why
+    if not offer.needed:
         console.print(f"Model: {escape(model.file)} is there; nothing to download (the models folder is shared by "
                       "both modes).")
         return
@@ -2233,7 +2205,7 @@ def _offer_ditto_model(rt, yes: bool) -> None:
     if not model.pinned:
         console.print("[red]It has no pinned size and sha256, so it is not downloaded.[/red]")
         return
-    if yes and model.license.lower() in PERMISSIVE_LICENCES:
+    if yes and offer.permissive:
         console.print(f"Downloading it into {escape(str(rt.models_dir))} (checked by size and sha256).")
     elif not _interactive():
         console.print(f"Not downloaded without a terminal. Download it yourself: llm-cli ditto models download "
@@ -2358,12 +2330,12 @@ def runtime_stop(ctx: FrameworkContext):
 
 def _pinned_llama_source():
     """The llama.cpp pin of configs/llama_runtime.yml (exits with 1 when the catalog has none)."""
-    from orchestrator.runtime.catalog import load_catalog
-    source = load_catalog().llama_cpp.source
-    if source is None:
-        console.print("[red]configs/llama_runtime.yml has no llama_cpp.source (the pinned commit).[/red]")
+    from orchestrator.runtime.build.source import SourceError, catalog_pin
+    try:
+        return catalog_pin()
+    except SourceError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    return source
 
 
 @ditto_runtime.command('export-source')

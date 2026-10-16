@@ -945,10 +945,12 @@ class LocalLLMRuntime:
 
     # --- the official prebuilt archive (explicit opt-in, decision D1) ------------------------------------------------
     def install_prebuilt(self, prefer: Optional[str] = None, force: bool = False,
-                         progress: Optional[ProgressFn] = None) -> InstalledRuntime:
+                         progress: Optional[ProgressFn] = None, stop: Any = None) -> InstalledRuntime:
         """Downloads, verifies and unpacks the official prebuilt llama.cpp archive for this machine (or the requested
-        backend): only on explicit request (`ditto runtime install --prebuilt`), and always shown as "prebuilt, not
-        self-built". The previous installation of the same variant stays in place until the new one is complete."""
+        backend): only on explicit request (`ditto runtime install --prebuilt`, or the GUI's "Install the official
+        prebuilt archive..."), and always shown as "prebuilt, not self-built". The previous installation of the same
+        variant stays in place until the new one is complete. A set `stop` event (threading.Event, the GUI's Cancel)
+        ends the download with DownloadStopped, keeps the `.part` file for a resume and installs nothing."""
         choice = self.select_backend(prefer)
         asset = choice.asset
         if asset is None:
@@ -974,7 +976,7 @@ class LocalLLMRuntime:
             downloads.mkdir(parents=True, exist_ok=True)
             self._ensure_space(self.root, 2 * asset.download_size, what="unpacking")
             archives = [self._fetch(self.catalog.llama_cpp.base_url + f.name, downloads / f.name, f.size, f.sha256,
-                                    progress) for f in asset.files]
+                                    progress, stop=stop) for f in asset.files]
             staging = self.root / f".staging-{asset.variant}-{secrets.token_hex(4)}"
             old = None
             try:
