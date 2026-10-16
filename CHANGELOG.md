@@ -17,7 +17,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   folder, the old storage with its reason, a Qdrant server, Qdrant Edge that cannot be loaded), and **Convert now** is
   offered also before the first attempt, on the condition of `llm-cli knowledge storage convert`. The CLI and the
   window call the same new core functions (`knowledge_snapshots.snapshot_disk`, `migration.storage_status`,
-  `storage_lines` and `convert_refusal`); the CLI's output is unchanged.
+  `storage_lines` and `convert_refusal`); the CLI's output is unchanged apart from a set Qdrant server (see Fixed).
 - **Tools > Knowledge Sources...: every source of the knowledge base by mouse** (W1'): a new window lists every
   source with its kind, the licence and copyright notice it shows, and what a knowledge pack would carry of it (full
   text, link and short facts, not exported) and why, with a kind filter (web pages, knowledge pack pages, framework
@@ -1410,6 +1410,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **Community Hub and knowledge storage: installs in the background, the pull request question, a Qdrant server**
+  (W1' review): installing a pack (Install, Import file...) moved it into place on the GUI thread after your "Yes",
+  which for a knowledge pack meant a snapshot of the knowledge base and the import of every page with the window
+  frozen; it now runs in the background, and the status line names the snapshot taken first, as `llm-cli zoo install`
+  does. **Open pull request** in the export window handed the pack to a public pull request at once; it now asks the
+  question of `llm-cli zoo export --pr` first ("Submit this pack to the public community repository?", "No" is the
+  default). With a Qdrant server set (`qdrant_url`), `llm-cli knowledge storage` and **Tools > Knowledge
+  Snapshots...** named the local storage and offered to convert it, which opened the server and converted nothing;
+  both now name the server, and the conversion is refused while it is set. A passphrase typed into **Import file...**
+  or the export window no longer stays in the hidden window after Cancel or Close.
 - **A build no longer replaces an earlier build of the same name**: in 3.0.0 a completed build moved its files into
   the folder `<target>/<model>/<quantization>` and replaced the files of an earlier build there (for example one for
   another board), so a finished golden artifact was lost without being asked. A later build now goes next to it

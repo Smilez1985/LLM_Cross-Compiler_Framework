@@ -220,6 +220,8 @@ TEXTS = {
         "zoo.export.submit.ask": "Submit this pack to the public community repository?",
         "zoo.export.submit.no": "Not submitted; the pack is ready at {path}.",
         "zoo.install.installing": "Installing {kind} {id}...",
+        "zoo.install.snapshot": "The knowledge base was saved first as the snapshot {name} (Tools > Knowledge "
+                                "Snapshots... lists it).",
         "storage.reason.server": "The knowledge base uses the Qdrant server (setting qdrant_url), so the local storage "
                                  "is not converted while it is set.",
     },
@@ -450,6 +452,8 @@ TEXTS = {
         "zoo.export.submit.ask": "Dieses Paket beim öffentlichen Community-Repository einreichen?",
         "zoo.export.submit.no": "Nicht eingereicht; das Paket liegt bereit unter {path}.",
         "zoo.install.installing": "{kind} {id} wird installiert...",
+        "zoo.install.snapshot": "Die Wissensdatenbank wurde zuerst als Snapshot {name} gesichert (Tools > Knowledge "
+                                "Snapshots... listet ihn).",
         "storage.reason.server": "Die Wissensdatenbank nutzt den Qdrant-Server (Einstellung qdrant_url), daher wird "
                                  "der lokale Speicher nicht umgewandelt, solange sie gesetzt ist.",
     },

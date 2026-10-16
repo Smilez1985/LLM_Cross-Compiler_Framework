@@ -63,6 +63,7 @@ class CommunityHubWindow(QMainWindow):
         self.all_items = []
         self.shown_items = []   # the table's rows, in order
         self._details_for = ""
+        self._install_note = ""   # what the last install did; kept in the status line after the list is read again
         self._tasks = set()
         self.setWindowTitle(tr("menu.open_hub", "Community Hub"))
         self.resize(1000, 600)
@@ -175,7 +176,8 @@ class CommunityHubWindow(QMainWindow):
     def on_load_finished(self, result):
         self.all_items, note = result
         self.filter_list()
-        self.status_label.setText(note)
+        self.status_label.setText("\n".join(t for t in (self._install_note, note) if t))
+        self._install_note = ""
 
     def on_error(self, err):
         self.status_label.setText(f"Error: {err}")
@@ -387,8 +389,14 @@ class CommunityHubWindow(QMainWindow):
         tm = getattr(self.framework_manager, "target_manager", None)
         if prepared.manifest.kind == "target" and tm is not None:
             tm.initialize()
-        self.status_label.setText(f"Installed {prepared.manifest.kind} {prepared.manifest.id} in {dest}.")
         problem = getattr(self.comm_manager, "last_sync_problem", "") if prepared.manifest.kind == "knowledge" else ""
+        lines = [f"Installed {prepared.manifest.kind} {prepared.manifest.id} in {dest}."]
+        snapshot = getattr(self.comm_manager, "last_sync_snapshot", None) if prepared.manifest.kind == "knowledge" \
+            else None
+        if snapshot and not problem:   # N13, as `llm-cli zoo install` says it: saved first, so it can be undone
+            lines.append(ui_text("zoo.install.snapshot", self.lang, name=one_line(snapshot)))
+        self._install_note = "\n".join(lines)
+        self.status_label.setText(self._install_note)
         if problem:  # installed, but not imported: the snapshot taken first did not fit (N13)
             from orchestrator.gui.knowledge_snapshots_window import offer_snapshot_list
             offer_snapshot_list(self, self.framework_manager, problem)
