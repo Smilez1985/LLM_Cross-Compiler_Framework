@@ -699,6 +699,29 @@ class TestWhatIsShown:
             names = {f for _, f, _, _ in string.Formatter().parse(text) if f}
             assert names == {f for _, f, _, _ in string.Formatter().parse(TEXTS["de"][key]) if f}, key
 
+    def test_the_guides_name_the_storage_buttons_as_the_gui_shows_them_in_their_language(self):
+        """A guide names a button of Tools > Knowledge Snapshots... by the label the GUI shows in the guide's language:
+        a German guide never sends the person to [Delete the old storage...] or [Try the conversion again], which a
+        German window does not show (it shows [Alten Speicher löschen...] and [Umwandlung erneut versuchen]), and an
+        English guide never names the German labels."""
+        import re
+
+        from orchestrator.utils.l10n_knowledge import TEXTS
+        repo = Path(__file__).resolve().parents[1]
+        buttons = ("storage.old.delete", "storage.convert")
+        guides = sorted(repo.glob("*.md")) + sorted((repo / "docs").glob("*.md"))
+        named_somewhere = set()
+        for path in guides:
+            lang = "de" if path.stem.endswith("_DE") else "en"
+            other = "en" if lang == "de" else "de"
+            wrong = tuple(TEXTS[other][k] for k in buttons if TEXTS[other][k] != TEXTS[lang][k])
+            text = " ".join(path.read_text(encoding="utf-8").split())
+            for named in re.findall(r"Knowledge Snapshots\.\.\. > (.{0,40})", text):
+                assert not named.startswith(wrong), f"{path.name} names a button its language's GUI does not show: " \
+                                                    f"{named}"
+                named_somewhere.update(k for k in buttons if named.startswith(TEXTS[lang][k]))
+        assert named_somewhere == set(buttons), "the guides name both storage buttons"
+
     def test_the_cli_shows_the_storage_and_deletes_only_after_the_persons_yes(self, tmp_path, monkeypatch):
         from test_doctor_fixes import run_cli
         state = converted_state(tmp_path)
