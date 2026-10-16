@@ -68,10 +68,11 @@ OLD_SIDECAR_SECONDS = 20   # the look comes after a finished deploy: a Docker th
 
 
 def old_sidecar_check(seconds: int = OLD_SIDECAR_SECONDS) -> str:
-    """The board command that looks for the old sidecar: `docker ps`, bounded with `timeout` where the board has it
-    (coreutils, BusyBox), as before where it does not."""
+    """The board command that looks for the old sidecar: `docker ps`, bounded with `timeout SECONDS` where the board's
+    `timeout` takes that form (coreutils, BusyBox 1.30 and later), as before where it does not (no `timeout`, or an
+    older BusyBox one that wants `-t SECONDS`)."""
     look = f"docker ps -a --filter name={OLD_SIDECAR} --format '{{{{.Names}}}}|{{{{.Status}}}}' 2>/dev/null"
-    return (f"if command -v timeout >/dev/null 2>&1; then timeout {int(seconds)} {look}; else {look}; fi")
+    return f"if timeout 5 true >/dev/null 2>&1; then timeout {int(seconds)} {look}; else {look}; fi"
 
 
 OLD_SIDECAR_CHECK = old_sidecar_check()
@@ -553,7 +554,8 @@ class DeploymentManager:
         # A leading '-' would be parsed by ssh/scp as an option (e.g. -oProxyCommand=...).
         if not isinstance(host, str) or not _HOST.fullmatch(host) or not valid_host(host):
             return DeployResult(False, reason=f"Security/Format Error: Invalid address or host name: "
-                                              f"{str(host)[:64]!r}")
+                                              f"{str(host)[:64]!r} (an IPv6 address is written without brackets, "
+                                              "e.g. fe80::1)")
         if not SSH_USER_PATTERN.match(user or ""):
             return DeployResult(False, reason=f"Security/Format Error: Invalid SSH user name: {user!r}")
         if not Path(package).is_file():

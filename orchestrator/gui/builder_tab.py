@@ -169,7 +169,8 @@ class SSHProbeWorker(QThread):
         from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh, store_address, valid_host
         from orchestrator.utils import ssh_trust
         if not valid_host(self.ip):
-            self.finished.emit(False, "Enter a host name or an IP address.", "")
+            self.finished.emit(False, "Enter a host name or an IP address (an IPv6 address without brackets, e.g. "
+                                      "fe80::1).", "")
             return
         try:
             ssh = ssh_trust.connect(self.ip, self.user, self.state_dir, port=self.port, password=self.password)

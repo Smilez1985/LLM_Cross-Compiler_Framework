@@ -605,6 +605,12 @@ class TestOldSidecar:
         answer = subprocess.run(["/bin/sh", "-c", check], capture_output=True, text=True, timeout=25,
                                 env={"PATH": str(quick)}).stdout
         assert dmod.old_sidecar_state(answer) == "running"
+        # an old BusyBox `timeout` (before 1.30) takes `-t SECONDS` and refuses `timeout 20 ...`: the look still runs
+        (quick / "timeout").write_text("#!/bin/sh\necho \"timeout: can't execute '$1'\" >&2\nexit 127\n")
+        (quick / "timeout").chmod(0o755)
+        answer = subprocess.run(["/bin/sh", "-c", check], capture_output=True, text=True, timeout=25,
+                                env={"PATH": str(quick)}).stdout
+        assert dmod.old_sidecar_state(answer) == "running"
         assert dmod.OLD_SIDECAR_CHECK == dmod.old_sidecar_check(dmod.OLD_SIDECAR_SECONDS)
 
     @pytest.mark.parametrize("answer", ["", "my-qdrant-sidecar|Up 3 days\n", "qdrant-sidecar-2|Up 1 day\n"])
@@ -696,6 +702,7 @@ class TestAddressOrHostName:
         refused = "Invalid address" in (result.reason or "")
         assert valid_host(host) is not refused, (host, result.reason)
         assert refused == (seen == []), "a refused address is never tried"
+        assert not refused or "without brackets" in result.reason, "the person learns how to write an IPv6 address"
 
     def test_the_host_key_is_trusted_per_host_string(self, tmp_path):
         """Trusting the board under its host name does not trust its IP address (and the other way round): the
