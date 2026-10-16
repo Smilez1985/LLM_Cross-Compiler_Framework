@@ -373,6 +373,9 @@ den Quantisierungen je Format.
 |---|---|
 | `-f, --format [table\|json\|yaml]` | Ausgabeformat (Standard `table`). |
 
+In der GUI: **Build > Targets…** (dieselbe Liste, mit dem Unterstützungsgrad jedes Targets) oder **Targets…** neben
+der Target-Liste des Builders.
+
 ### targets validate
 
 ```
@@ -387,6 +390,10 @@ gültig.
 ```bash
 llm-cli targets validate Rockchip
 ```
+
+In der GUI: **Target prüfen** neben der Target-Liste des Builders oder **Build > Targets… > Target prüfen** (dieselbe
+Prüfung; die target.yml wird frisch gelesen). Sie läuft auch, nachdem der Modul-Assistent ein Target angelegt hat, und
+nach der Installation eines Targets aus dem Community Hub.
 
 ---
 
@@ -450,6 +457,12 @@ Verhalten:
   [Ordnern, die die KI nutzen darf](#tools-folders).
 - Der erste Build eines Targets baut zuerst sein Docker-Image und dauert deutlich länger.
 
+In der GUI: der Tab **Builder**: Modell, Target (**Targets…** zeigt jedes Target), Format (ein Target ohne Fähigkeiten
+bietet jedes Format von `--format`, mit dem Hinweis, dass nichts geprüft wird), Board, Quantisierung, **Optimization**
+(alle Stufen, auch `FAST`), **Priorität**, Kalibrierung und GPU, dann **Start Build Pipeline**. Die
+Fortschrittsanzeige folgt dem Build (`--follow`), **Cancel Build** stoppt ihn (Strg+C), und das fertige Modell wird in
+einem Speichern-Dialog am Ausgabeordner angeboten (`--output`; **Datei > Output Folder...** setzt die Vorgabe).
+
 ```bash
 # GGUF für die CPU des RK3566 (Standard-Quantisierung Q4_0 auf diesem Board)
 llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t Rockchip -f gguf -b rk3566 --follow
@@ -500,6 +513,8 @@ $ echo $?
 2
 ```
 
+In der GUI: Tab „Deployment“ > **Speichern…**.
+
 ### build status
 
 ```
@@ -527,6 +542,10 @@ dem Programm, das ihn ausführt. Mit einer Request-ID folgen die Korrekturvorsch
 haben (`propose_healing_fix`), jeder als KI-erzeugt markiert mit dem, der ihn vorgeschlagen hat (der Aufrufer und der
 eigene, selbst angegebene Name des Clients), und seinem manuellen Schritt, den das Framework nie ausführt. Ohne ID
 sagt eine Zeile, für wie viele gescheiterte Builds es solche Vorschläge gibt.
+
+In der GUI: **Build > Build-Verlauf…**: jeder Build (alle, wie `--all`); **Details anzeigen** (oder ein Doppelklick)
+zeigt einen Build wie mit `REQUEST_ID`, mit seinen Fehlern, jedem Versuch und seinem Ausgabeordner und den
+Korrekturvorschlägen der KI-Clients.
 
 ---
 
@@ -1590,6 +1609,11 @@ Befehls nennen `modules/build.sh`, den Dispatcher, den die Build-Engine ausführ
 `config_module.sh` und die übrigen `*_module.sh`-Skripte sind Altlasten, die die Build-Pipeline nicht aufruft
 ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#10-altlasten)).
 
+In der GUI: **Tools > Create Hardware Module...**: Name, Architektur, SDK und **Beschreibung** auf der Hardware-Seite,
+Basis-Image und Pakete auf der Docker-Seite, CPU- und CMake-Flags auf der Flags-Seite; der Standard-Import auf der
+ersten Seite liest eine Probe-Datei (`--probe`). Nach **Finish** wird das neue Target wie mit `targets
+validate` geprüft.
+
 ### module generate-ai
 
 ```
@@ -1614,6 +1638,11 @@ experimentell: Vor dem ersten Lauf an einem Terminal geht der Hinweis zu Ditto e
 llm-cli scan
 llm-cli module generate-ai target_hardware_config.txt --provider local
 ```
+
+In der GUI: **Tools > Create Hardware Module...**, erste Seite: **AI Auto-Discovery (Ditto)**, mit Anbieter und Modell
+**nur für diese Analyse** (`--provider`, `--model`; die gespeicherten KI-Einstellungen bleiben unverändert). Das
+Basis-Image wird auf seinen Digest festgelegt, bevor du den Vorschlag siehst, und das Modul wird über dieselbe
+Funktion wie bei diesem Befehl gespeichert, mit denselben Ablehnungen.
 
 ---
 
@@ -1875,6 +1904,8 @@ Ordner als Labels) und ändern gewöhnliche mit `update_settings`, das dich mit 
 verschärfen; Berechtigungen, Geheimnisse, den Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner änderst
 nur du, hier oder in der GUI.
 
+In der GUI: **Datei > Einstellungen…**, Tab **Wirksame Einstellungen** (nur lesen; Geheimnisse geschwärzt).
+
 ### config output-folder
 
 ```
@@ -1893,6 +1924,8 @@ kann diese Einstellung nicht ändern.
 ```bash
 llm-cli config output-folder /mnt/models/llmcf
 ```
+
+In der GUI: **Datei > Output Folder...** (auch in **Datei > Einstellungen…** angeboten).
 
 ### config repos
 
@@ -1916,6 +1949,9 @@ früherer Versionen weitergereicht, seinem Teil nach dem letzten Punkt (`sources
 
 Die aktuellen Rockchip-Skripte lesen keine dieser Variablen (nur das Altlast-Skript `source_module.sh` liest
 `LLAMA_CPP_REPO_OVERRIDE`), daher wirken sich die Überschreibungen auf Rockchip-Builds nicht aus.
+
+In der GUI: **Datei > Einstellungen…**, Tab **Quell-Repositorys**: die Liste, **Hinzufügen** (Name und URL) und
+**Ausgewählte entfernen…** (fragt zuerst; „Nein“ ist die Vorgabe).
 
 ---
 
