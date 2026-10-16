@@ -340,6 +340,13 @@ class ScrubOut(BaseModel):
     changes: int = Field(description="Lines the privacy scrub changed in this file")
 
 
+class LicenceTextOut(BaseModel):
+    licence: str = Field(pattern=LICENSE_PATTERN, description="SPDX id of the licence")
+    file: str = Field(description="Its canonical text in the pack: LICENSES/<id>.txt (knowledge/LICENSES/ in a target)")
+    pages: int = Field(description="Pages the pack carries in full under this licence")
+    why: str = Field(description="Why the licence text goes with them")
+
+
 class ExportPackOut(ToolOutput):
     path: untrusted_text(300) = Field(description="The file as a label: contributions/<file name>")
     kind: str
@@ -348,6 +355,9 @@ class ExportPackOut(ToolOutput):
     signer_key_id: str
     scrub_summary: List[ScrubOut]
     pack_notes: List[untrusted_text(500)] = Field(default_factory=list)
+    licence_texts: List[LicenceTextOut] = Field(
+        default_factory=list, description="The licence texts the pack ships next to the pages it carries in full, "
+                                          "with a NOTICE that lists every page (empty: no page needs one)")
 
 
 # --- helpers ------------------------------------------------------------------------------------------------------
@@ -842,6 +852,12 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
             facts.append(Fact("Licences", "a page goes in with its full text only where its licence allows passing "
                                           "it on (with the attribution it requires); every other page only as its "
                                           "address and short facts; the result counts both"))
+        if inp.kind in ("knowledge", "target"):
+            facts.append(Fact("Licence texts", "pages carried in full under a licence that asks for its text or "
+                                               "permission notice (MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA) "
+                                               "get the canonical licence text in LICENSES/ and a NOTICE that lists "
+                                               "every page with its source address, copyright line and licence; the "
+                                               "result names each licence text and why"))
         bound = {"kind": inp.kind, "source": source, "author": author, "license": licence,
                  "model_license": inp.model_license, "pack_id": inp.pack_id, "signer": key}
         # always the person: the pack goes out under their name (design 4.3)
@@ -865,7 +881,9 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         m = result.manifest
         return {"path": label(cm, result.path), "kind": m.kind, "pack_id": m.id, "version": m.version,
                 "signer_key_id": result.signer, "scrub_summary": _scrub_counts(result.changes),
-                "pack_notes": [_no_paths(n) for n in result.notes]}
+                "pack_notes": [_no_paths(n) for n in result.notes],
+                "licence_texts": [{"licence": t.licence, "file": t.path, "pages": t.pages, "why": t.reason}
+                                  for t in result.licence_texts]}
 
     def export_pack(inp: ExportPackIn, ctx: ToolContext):
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
@@ -889,7 +907,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         return ExportPackOut(path=data["path"], kind=data["kind"], pack_id=data["pack_id"], version=data["version"],
                              signer_key_id=data["signer_key_id"],
                              scrub_summary=[ScrubOut(**s) for s in data["scrub_summary"]],
-                             pack_notes=data["pack_notes"])
+                             pack_notes=data["pack_notes"],
+                             licence_texts=[LicenceTextOut(**t) for t in data["licence_texts"]])
 
     kind_field = FieldMeta(kind="choice", choices=("target", "recipe", "knowledge"))
     specs = [
@@ -922,7 +941,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         ToolSpec("export_pack", "Export a community pack to a file",
                  "Writes a target, recipe or knowledge pack to a local file in the contributions folder, privacy-"
                  "scrubbed and signed with the person's community key; always asked, and nothing is uploaded. Needs "
-                 "an existing signing key. Returns the file as a label and how many lines the scrub changed per file. "
+                 "an existing signing key. Returns the file as a label, how many lines the scrub changed per file and "
+                 "the licence texts the pack ships (LICENSES/ with a NOTICE) and why. "
                  'Example: {"kind": "target", "source": "MyBoard", "author": "pat"}',
                  ToolTier.LOCAL_WRITE, ExportPackIn, ExportPackOut, export_pack, takes_context=True,
                  prepare=prepare_export, default_decision=Decision.ASK, max_decision=Decision.ASK,

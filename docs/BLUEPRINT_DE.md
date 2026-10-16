@@ -593,6 +593,13 @@ Requests, Diskussionen, Wiki oder Releases. Ein Wissenspaket und der
 Wissens-Snapshot in einem erzeugten Target enthalten den vollen Text einer Seite nur, wenn ihre Lizenz die Weitergabe
 erlaubt (CC0, Gemeinfreiheit, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), mit der
 Namensnennung, die die Lizenz verlangt (Titel, Adresse, Urheberrechtshinweis, Lizenz, die vorgenommenen Änderungen).
+Eine Lizenz, die ihren Text oder Erlaubnishinweis verlangt (MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA), legt
+zusätzlich ihren kanonischen Text ins Paket (`LICENSES/<SPDX-ID>.txt`, unverändert aus der SPDX License List 3.29.0,
+über sha256 geprüft; `orchestrator/rag/licence_texts.py`), und eine `NOTICE` führt jede Seite mit ihrer Quelladresse,
+ihrer Copyright-Zeile wie gefunden und ihrer SPDX-ID auf: bei MIT-, BSD- und ISC-Code von GitHub die Zeile aus der
+Lizenzdatei seines Repositorys, bei Apache-2.0 die Hinweise aus der `NOTICE`-Datei des Werks, wenn der Crawl sie
+gelesen hat (`orchestrator/rag/pack_licences.py`). Ohne den kanonischen Text einer solchen Lizenz geht eine Seite als
+ihre Adresse mit kurzen Fakten hinaus (Zustand `no_licence_text`).
 Jede andere Seite geht als ihre Adresse mit kurzen Fakten hinaus (Titel, Abschnittsnamen, Fachbegriffe): eine Seite
 mit Urheberrechtshinweis ohne eine solche Lizenz, Code ohne Lizenz, eine Lizenz, die Änderungen oder kommerzielle
 Nutzung verbietet, eine Copyleft-Lizenz (sie verlangt den ganzen Lizenztext und die Quelle bei jeder Kopie), eine
@@ -778,7 +785,11 @@ nicht aktualisiert wurde.
    llama.cpp, die Shell-Sperrliste, `bash -n`, keine Vorlagen-Platzhalter, keine Binärdateien); ein Rezept muss zu seinem Schema passen und zu den
    Capabilities seines Targets, wenn dieses installiert ist; Wissen muss eine Liste von Einträgen sein, die jeweils
    ihre Quelle behalten. Ein Rezept- oder Wissenspaket darf nur seine `recipe.yml` oder `knowledge.json` und eine
-   `README.md` enthalten.
+   `README.md` enthalten; ein Wissenspaket außerdem `LICENSES/<SPDX-ID>.txt` und `NOTICE`. Sie müssen zu seinen
+   Seiten passen: Jeder Lizenztext ist Byte für Byte der kanonische, jede Lizenz, die ihren Text verlangt und eine Seite
+   mit vollem Text abdeckt, hat ihren Text dort, und `NOTICE` führt jede solche Seite auf. Der Wissens-Snapshot eines
+   Target-Pakets wird genauso geprüft (`knowledge/LICENSES/`, `knowledge/NOTICE`); `llm-cli zoo verify` prüft
+   installierte Pakete erneut.
 5. Eine Zusammenfassung in reinem Text zeigt Art, ID, Version, Autor, Lizenz, Vertrauensstufe, Quelle, Dateien
    und Ziel, und du bestätigst. `--yes` überspringt die Frage nur, wenn der signierte Index das Paket aufführt
    (Vertrauen `verified` oder `community`), auch bei einer Paketdatei.
@@ -807,7 +818,8 @@ zusätzlich zum privaten Teilen verschlüsselt; ein verschlüsseltes Paket wird 
 ist standardmäßig MIT, bei Wissen `NOASSERTION`, und jede Seite behält ihre Quelladresse; der volle Text einer Seite
 kommt nur hinein, wo ihre Lizenz es erlaubt, jede andere Seite als ihre Adresse mit kurzen Fakten (siehe
 [Lizenzen und Urheberrecht](#deep-ingest-von-der-webseite-in-die-wissensbasis-unveröffentlicht)), und der Export führt
-jede Seite auf, mit dem, was sie enthält, und warum. Ein Target, das du von
+jede Seite auf, mit dem, was sie enthält, und warum. Seiten mit vollem Text unter einer Lizenz, die ihren Text
+verlangt, bekommen diesen Text in `LICENSES/` und eine `NOTICE`, und der Export nennt jeden Lizenztext und warum. Ein Target, das du von
 jemand anderem installiert hast, wird nicht als deines neu signiert, und Seiten aus installierten
 Community-Wissenspaketen bleiben aus einem Wissens-Export draußen. „Open pull request“ (`--pr`) übergibt das Paket
 an das Community-Repository (`community_repo`): über die GitHub-CLI, wenn sie installiert und angemeldet ist, sonst
@@ -963,6 +975,7 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
 | **Eine Installation liest immer zuerst den aktuellen Index** | Ein Widerruf schützt nur Benutzer, die ihn sehen. Eine Installation braucht ohnehin das Netz, also lädt sie zuerst den Index und installiert ohne ihn nichts. Ein zwischengespeicherter Index dient dem Auflisten und Installationen aus Dateien und wird nie durch einen älteren ersetzt. |
 | **Kein Token im Framework und kein eigener Upload** | Ein Repository-Token im Framework wäre ein wertvolles Geheimnis an einer Stelle mehr, und ein Upload-Knopf schickt Daten ohne Prüfschritt hinaus. Das Framework bereitet ein bereinigtes, signiertes Paket vor und zeigt, was die Bereinigung geändert hat; erst wenn du den Pull-Request öffnest, verschicken die GitHub-CLI oder der Browser es mit ihren eigenen Zugangsdaten. |
 | **`NOASSERTION` für Wissenspakete** | Ein Wissenspaket enthält Seiten anderer Leute. Wer es exportiert, kann sie nicht lizenzieren; das Paket beansprucht deshalb keine Lizenz für sie, und jede Seite behält ihre Quelladresse. |
+| **Kanonische Lizenztexte aus der SPDX License List** | MIT, BSD, ISC, Apache-2.0, MPL-2.0, CC BY und CC BY-SA verlangen ihren Text oder Erlaubnishinweis bei jeder Kopie. Die Texte kommen als Daten mit, unverändert aus den Daten der SPDX License List (CC0) in einer festgelegten Version, jeder mit seinem sha256; so schreibt das Framework nie selbst einen Lizenztext. Ohne den Text geht eine Seite unter einer solchen Lizenz als Adresse mit kurzen Fakten hinaus statt ohne ihre Lizenz. |
 | **Voller Text nur, wo die Lizenz es erlaubt** | Text- und Data-Mining erlaubt eine Kopie für den, der auswertet, nicht die Weitergabe des Textes. Ein Paket enthält den Text einer Seite deshalb nur unter einer Lizenz, die es erlaubt, mit der verlangten Namensnennung; jede andere Seite geht als Adresse mit kurzen Fakten, und wer sie bekommt, crawlt sie unter eigenen Prüfungen. Code ohne Lizenz ist urheberrechtlich voll geschützt. |
 | **Rezepte statt geteilter Modelldateien** | Modelldateien sind groß und haben eigene Lizenzen. Ein Rezept legt Modell-Commit, Target-Fingerabdruck und Toolchain-Image fest und nennt die Hashes der Artefakte; so kann jeder das Modell nachbauen und vergleichen, und „verified“ heißt unabhängig nachgebaut. |
 | **Eingabe-Historie je Benutzer und ohne Geheimnisse** | Die gemeinsame `config.yml` kann im Installationsordner liegen und geteilt werden. Zuletzt verwendete Eingaben sind persönlich; sie liegen deshalb im Benutzerordner (Modus 0600), und Werte, die nach Zugangsdaten aussehen, werden nie geschrieben. |
