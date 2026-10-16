@@ -216,6 +216,12 @@ TEXTS = {
                                "encrypting it...",
         "zoo.export.encrypted_no_pr": "This pack is encrypted for private sharing: give the file to the people it is "
                                       "meant for. It is not submitted to the community.",
+        "zoo.export.submit.title": "Open pull request",
+        "zoo.export.submit.ask": "Submit this pack to the public community repository?",
+        "zoo.export.submit.no": "Not submitted; the pack is ready at {path}.",
+        "zoo.install.installing": "Installing {kind} {id}...",
+        "storage.reason.server": "The knowledge base uses the Qdrant server (setting qdrant_url), so the local storage "
+                                 "is not converted while it is set.",
     },
     "de": {
         "storage.used.edge": "Die Wissensdatenbank liegt in Qdrant Edge in {folder}.",
@@ -440,5 +446,11 @@ TEXTS = {
                                "Teilen, verschlüsselt...",
         "zoo.export.encrypted_no_pr": "Dieses Paket ist zum privaten Teilen verschlüsselt: gib die Datei den Leuten, "
                                       "für die sie bestimmt ist. Es wird nicht bei der Community eingereicht.",
+        "zoo.export.submit.title": "Pull Request öffnen",
+        "zoo.export.submit.ask": "Dieses Paket beim öffentlichen Community-Repository einreichen?",
+        "zoo.export.submit.no": "Nicht eingereicht; das Paket liegt bereit unter {path}.",
+        "zoo.install.installing": "{kind} {id} wird installiert...",
+        "storage.reason.server": "Die Wissensdatenbank nutzt den Qdrant-Server (Einstellung qdrant_url), daher wird "
+                                 "der lokale Speicher nicht umgewandelt, solange sie gesetzt ist.",
     },
 }

@@ -142,7 +142,8 @@ class KnowledgeSnapshotsDialog(QDialog):
         from orchestrator.rag import migration
         rag = getattr(self.framework, "rag_manager", None) if self.framework is not None else None
         used = str(getattr(rag, "storage_format", "") or "") or None   # an open knowledge base names its storage
-        status = migration.storage_status(self.state_dir, used=used,
+        server = migration.server_configured(getattr(self.framework, "config", None))   # setting qdrant_url
+        status = migration.storage_status(self.state_dir, used=used, server=server,
                                           reason=str(getattr(rag, "storage_reason", "") or "") if used else "")
         self.storage_status = status
         can_convert = (status.can_convert and self.framework is not None
@@ -181,6 +182,8 @@ class KnowledgeSnapshotsDialog(QDialog):
                 lines.append(self._t("storage.convert.offer"))
         elif status.used == "server":
             lines.append(self._t("storage.used.server"))
+            if status.reason_code == "server":   # an old storage stays as it is while the server is set
+                lines.append(self._t("storage.reason.server"))
         else:
             reason = self._t("storage.reason.edge_unavailable") if status.reason_code == "edge_unavailable" else \
                 one_line(status.reason)

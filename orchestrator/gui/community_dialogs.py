@@ -194,6 +194,13 @@ class ImportPackDialog(_Dialog):
         self.passphrase.clear()
         return Path(self.file_edit.text().strip()), passphrase, list(self.key_files)
 
+    def done(self, result: int) -> None:
+        """Cancel or Close empties the passphrase field: the window lives on (hidden) with the Community Hub, and a
+        typed passphrase never stays in it. After Import, take() reads and empties it."""
+        if int(result) != QDialog.DialogCode.Accepted.value:
+            self.passphrase.clear()
+        super().done(result)
+
 
 def key_file_problem(error: Any, lang: str) -> str:
     """A KeyFileError in the person's language."""
