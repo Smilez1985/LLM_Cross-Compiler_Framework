@@ -169,6 +169,17 @@ def test_a_deletion_plan_lists_full_paths_for_the_person_and_labels_for_an_ai():
         DeletionPlan(items=[], total_bytes=0, mode_offered=("permanent",))
 
 
+def test_a_full_path_of_either_system_is_accepted_on_any_host():
+    """A deletion list names a board's POSIX path also on a Windows host, and a Windows path on a POSIX host; whether
+    a path is full must not depend on the computer the framework runs on (Windows CI refused '/srv/...' before)."""
+    for full in ("/srv/output/Rockchip/qwen/Q4_K_M", "/home/llmcf/runtime/build-1", "C:\\Program Files\\x\\Q4_K_M",
+                 "D:/llmcf/output/Q4_K_M", "\\\\nas\\share\\Q4_K_M"):
+        assert plan(full_path=full).items[0].full_path == full
+    for bad in ("~/output/Q4_K_M", "relative\\Q4_K_M", "C:relative", "Q4_K_M"):
+        with pytest.raises(ValidationError):
+            plan(full_path=bad)
+
+
 def test_the_ai_view_of_a_deletion_can_never_carry_a_path():
     """The speaking name is the only text of an item an AI sees (ai_view): it can never be the item's full path, hold
     it, or be any absolute path, and the file name is a name, not a path (round 5 f: the AI keeps seeing labels)."""
