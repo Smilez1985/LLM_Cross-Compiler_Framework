@@ -266,6 +266,33 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   list|add|remove` shows and manages them ([CLI](CLI_Usage.md#deploy-devices)). These are the only devices an AI
   client or Ditto can name for a deploy, and only while the framework's `known_hosts` still holds that key; no tool
   trusts, pairs or records a device.
+- **Address or host name:** you enter what you know, the board's IP address or its host name (`myboard.local`).
+  The host key is trusted per name you enter: a board you reach by both names is confirmed once for each, and it
+  stays the same trusted device.
+- **When the network drops** (a board with Wi-Fi only, such as the Radxa ZERO 3W): the deploy waits for the board
+  (300 s by default; `--wait` in the CLI) and shows that it waits, how long it has waited and the limit, with Cancel
+  in the GUI and Ctrl+C in the CLI. It tries the SSH port every 5 seconds; once the board answers, it logs in again
+  with the same host key check (a changed key is refused, also now) and continues. The upload goes to `<name>.part`
+  and resumes at the bytes that arrived once their sha256 on the board matches the same bytes here; otherwise it
+  starts again from the beginning. The whole package's sha256 is checked on the board before it is renamed.
+  `deploy.sh` runs on the board on its own (detached, its output in a log file there) and is started once, never
+  twice, even when the connection drops while it runs. A board that restarted (its upload folder is gone) ends the
+  deploy with the reason: deploy again. A failure on the board itself, such as a full disk, ends it at once.
+- **Why a board cannot be reached:** four reason codes, each with what happened and what you can do, in English and
+  German, in the GUI and the CLI: `device_host_down` (nothing answers: switched off, another network, a host name
+  that does not resolve, or a firewall that drops the connection), `device_port_closed` (the board answers but
+  refuses SSH on that port), `device_auth_failed` (the login was refused), `device_host_key_changed` (another host key
+  than the one you trusted). An AI gets the plain code and a next step without the address or the account.
+- **KV cache** (Deployment window, `llm-cli device settings --kv-cache`): `f16`, `q8_0` or `q4_0` for the board's
+  server (`-ctk`/`-ctv`). Automatic by default: `q8_0` when little memory is left next to the model on the board
+  (from its probe), otherwise `f16`; the window says which and why. Your choice is kept in the board's deploy
+  settings, and `f16` switches the quantized cache off. `deploy.sh` names it in the start command it prints.
+- **Benchmark on a board** (Deployment window): models built for a board are measured on the board itself, never
+  on this computer. Choose the board and the model on it (after a deploy both are filled in) and click "Measure on
+  the board": the runtime checks and a short `llama-bench` run there (the board needs the framework's model server,
+  `llm-cli device runtime deploy`). You are asked first, with No preselected, whether a model that is not a catalog
+  model may be loaded there; your yes is written to the audit log. A passed run is recorded with the build of that
+  model, and the build list shows "tested on <board>".
 - **Errors with their reason:** packaging and deploying return why they failed (no Docker, an image not pinned, the
   host key changed, `deploy.sh` exit status) instead of only logging it. A package is written under a temporary name
   and renamed when complete. Without paramiko, `ssh` and `scp` never get the framework's standard input (over MCP
@@ -307,7 +334,8 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
   It starts `llama-server` from its own folder (never from `PATH`) with `env -i` (HOME, a fixed PATH, the C locale),
   `--host 127.0.0.1`, `--api-key-file`, `--no-ui`, `--no-slots`, `--jinja` and `--offline`. It passes on only
   tuning options with checked values (`-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`, `-fa`,
-  `-cram`, `-lm`, `-a`, `--sleep-idle-seconds`, and `--port` from 1024 up); an option of the shared forbidden list is
+  `-cram`, `-lm`, `-a`, `--sleep-idle-seconds`, `-ctk`/`-ctv` with `f16`, `q8_0` or `q4_0`, and `--port` from 1024
+  up); an option of the shared forbidden list is
   refused by name, also in the `--a_b` spelling, and any other option too, so the model never gets tools and the
   server never leaves loopback.
 - **Deploy settings, decided before the deployment** (decision D7, `llm-cli device settings`): the start script in
@@ -317,7 +345,9 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
   passed its checks, the deployment writes `/etc/systemd/system/llm-llama-server.service` with `sudo -n` (which
   fails instead of asking), enables it and starts it once the model is there. The unit runs the start script's `serve` as the user, without `Environment=`,
   with `NoNewPrivileges`, a read-only system and home, and `IPAddressDeny=any` plus `IPAddressAllow=localhost`.
-  Boards with OpenRC or SysV init use the start script. A deployment never asks a question.
+  Boards with OpenRC or SysV init use the start script. The KV cache of the deploy settings (`--kv-cache`, automatic
+  `q8_0` on a board with little memory) goes into the unit's command; with the start script the deployment prints
+  the start command with it. A deployment never asks a question.
 - **Checks on the board** (also `llm-cli device runtime verify`), as the unprivileged user and never with sudo:
   `llama-server --version` and `llama-bench --version` must report the pin, `llama-bench --list-devices` must show
   the planned devices, and `llama-server --tools all` must be refused. With `--bench-model` a short `llama-bench -p
@@ -325,7 +355,9 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
   only after your consent, written to the audit log (decision D23). A `SIGILL` means the build's CPU baseline does
   not fit the board. A deployment runs these checks on the new build before it becomes `current`, so a build that
   fails them never runs as the board's server. The result is kept in `device/<device ID>/deployed.json`; `llm-cli
-  device runtime status` says whether the deployed build is still the one the profile and the pin call for.
+  device runtime status` says whether the deployed build is still the one the profile and the pin call for. A
+  passed short benchmark is the proof "tested on <board>": it is recorded with every build of that model in the
+  output folder (`device_tests.json`, found by the model's sha256) and shown in the Deployment window.
 - **Measured** with real programs instead of a board: `llama-server` and `llama-bench` built natively with the device
   plan's options for an x86-64 machine (GCC 13.3, `-j4`, about 8 minutes on 4 shared cores) gave 30 MB of programs
   and an 11.6 MB tarball; the format check (glibc 2.38 needed, no shared C++ runtime), the deployment to a local
@@ -609,7 +641,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `deploy_to_device` | external | Copy a package to a trusted, paired device and run its `deploy.sh` (always asked; the question shows the host key and the package hash; a job) |
 | `build_local_runtime` | local write | Optional, hidden until enabled: build llama-server for this computer from the pinned commit (a job; never prebuilt) |
 | `start_local_runtime` / `stop_local_runtime` | local write | Optional, hidden until enabled: start (a job) or stop Ditto's local server; never its address or key |
-| `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on a catalog model or a built GGUF model; an untrusted model natively only after consent in the framework, or in the sandbox |
+| `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on Ditto's catalog model (natively or in the sandbox) or a built GGUF model (always in the sandbox: a model built for a board is measured on the board) |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
 | `delete_artifact` | external, optional | Delete one built model (its folder below the output folder and its golden ZIP); hidden until you enable it, always asked |
 | `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |
@@ -1060,11 +1092,12 @@ until you enable it in the tool permissions, also when you allowed the whole tie
   server. Only a build that passed its verification here is started. No result holds the server's address or its
   per-start key.
 - **`run_benchmark`** measures prompt and generation speed and peak memory with the self-built `llama-bench`:
-  `tier_speed` for a downloaded catalog model, `artifact_speed` for a built GGUF model. A catalog model runs natively.
-  Any other model is untrusted (runtime decision D23): it runs natively only after your consent, which is asked in the
-  framework's own window (Ditto's dialog, the pending approvals of the GUI or `llm-cli tools approvals`, never a
-  client's dialog), is asked even when the tool is allowed, and is written to the audit log before the model is
-  loaded; with `sandbox: true` it runs in the Docker sandbox instead. The model file is opened once and hashed
+  `tier_speed` for a downloaded catalog model (Ditto's own model, which really runs on this computer: natively, or
+  in the Docker sandbox with `sandbox: true`), `artifact_speed` for a built GGUF model. A model built for a board is
+  never benchmarked natively on this computer, because that would measure this computer and not the board: it runs
+  in the Docker sandbox (`sandbox: false` is refused), and its real values come from the board itself
+  (`run_device_benchmark` after `deploy_to_device`). An untrusted model in the sandbox is asked in the framework's own
+  window unless you allowed that for AIs (`bench_untrusted_sandbox_ok`). The model file is opened once and hashed
   through that open file; llama-bench reads exactly that file (natively the inherited descriptor, in the sandbox a
   private hard link of it), so it cannot be swapped between the check and the run. The sandbox's private link goes
   next to the model, or, when that folder is read-only, into the framework's cache or state folder on the same file
@@ -1081,7 +1114,10 @@ until you enable it in the tool permissions, also when you allowed the whole tie
   deploy settings you chose beforehand say (as `device runtime build` and `deploy`; activated only when its checks pass
   on the board); `run_device_benchmark` runs the runtime checks with a short `llama-bench` on the model the deploy
   settings name (as `device runtime verify --bench-model`), an untrusted model only with your consent in the
-  framework, written to the audit log first. The board's output comes back as external text.
+  framework, written to the audit log first. This is where a model built for a board is benchmarked; a passed run is
+  recorded with the build of that model as tested on the board (`recorded_builds` in the result). The board's output
+  comes back as external text. A board that cannot be reached is refused with its reason code (`device_host_down`,
+  `device_port_closed`, `device_auth_failed`, `device_host_key_changed`) and the person's next step.
 - The resource `lcf://runtime/catalog` holds the pinned commit and the model tiers; the prompt
   `set_up_offline_assistant` leads a client through building, starting and measuring.
 
@@ -1092,11 +1128,11 @@ with the self-built `llama-perplexity` of this machine, which `ditto runtime ins
 No prebuilt runtime image is pulled and no `llama-perplexity` from `PATH` is used: only a stored build that passed its
 verification here, still matches its manifest and is of the pinned commit.
 
-- **Catalog models** (pinned by sha256) run natively.
-- **Every other model** (your conversions, downloads) is untrusted. It runs natively, without Docker overhead, only
-  after your explicit consent, and that consent is written to the tool audit log (`llm-cli tools audit`) before the
-  run; without consent, or when the audit log cannot be written, nothing runs.
-- **Docker sandbox (opt-in):** the run happens in the build's own builder image (only a build made in the builder
+- **Catalog models** (pinned by sha256: Ditto's own models) run natively, or in the Docker sandbox on request.
+- **Every other model** (a model converted for a board, a download) never runs natively on this computer: models
+  built for a board are measured on the board, or here in the Docker sandbox once the golden artifact is ready. It
+  runs in the sandbox; without a build made in the builder container it does not run at all.
+- **Docker sandbox:** the run happens in the build's own builder image (only a build made in the builder
   container has one; it is built locally and never pulled) without network, without capabilities, with a read-only
   root file system and your user; the program, the model and the text are mounted read-only.
 - Every run uses the shared launch policy (no forbidden option, a cleared environment). Failures are errors with the
@@ -1631,10 +1667,13 @@ framework never sees it.
   the package's name, size and sha256, the built model and the trust of its target. The deploy then runs as a job
   without a password and refuses when the package's sha256 (computed from the same open file that is uploaded) or
   the device's key differs from what you were shown. It is always asked (it can never be set to allow), never covered
-  by a standing approval, one per device at a time and six per hour per client. `cancel_job` closes the SSH session
-  and the job says the device state is unknown; nothing is retried. The job result has `success`, `exit_status`,
-  `device_state` (`ok`, `failed`, `unknown`) and the last 100 lines the device printed in `external_text`, marked as
-  external text; `reason` is always the framework's own sentence, without host paths. When a job of the device or
+  by a standing approval, one per device at a time and six per hour per client. When the network drops, the job waits
+  for the board (its progress says "waiting for the board <label>: N s of at most 300 s") and continues the upload
+  where it stopped; `deploy.sh` is never started twice. `cancel_job` closes the SSH session and ends the wait; once
+  `deploy.sh` runs, the job says the device state is unknown. The job result has `success`, `exit_status`,
+  `device_state` (`ok`, `failed`, `unknown`), `reason_code` (one of the four SSH reason codes, or empty), `resumed`
+  and `waited_s`, and the last 100 lines the device printed in `external_text`, marked as external text; `reason`
+  is always the framework's own sentence, without host paths. When a job of the device or
   runtime tools fails, the error message is the framework's sentence too: what the device or `llama-bench` printed
   (`llama-bench` prints the metadata of the model it loads) is returned in `external_text`; paths in such a message
   appear as the framework's folder labels (`state:...`, `output:...`) or as a file name only, never as a host path
@@ -1873,8 +1912,9 @@ AI:
   none is deleted by itself.
 - **Security and legal warnings** are always yours: model files in an old format that can run hidden code (pickle),
   a build environment from outside Docker's checked collection or not fixed to one exact version, more vendor
-  downloads than usual, an unreviewed or community hardware module, an untrusted model run directly on your
-  computer (or in the sandbox, unless you allowed that for AIs with the setting `bench_untrusted_sandbox_ok`, which no
+  downloads than usual, an unreviewed or community hardware module, an untrusted model run directly on a board
+  as its device account (or in the sandbox of this computer, unless you allowed that for AIs with the setting
+  `bench_untrusted_sandbox_ok`, which no
   AI can change), a pack signed with your key, a gated model, a licence that restricts use or is not on the list of
   known free licences. Facts that could not be checked (Hugging Face did not answer, no licence named, a base model
   that could not be looked up, an unknown file format) are a security warning too: unknown is never "no problem". A
