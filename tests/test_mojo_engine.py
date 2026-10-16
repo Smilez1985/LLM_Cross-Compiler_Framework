@@ -181,6 +181,24 @@ def test_chmod_is_compare_and_swap_on_the_folder(open_state):
 
 
 @POSIX
+def test_miracle_binds_each_repair_to_the_plan_that_was_shown(open_state):
+    """Mojo Miracle gets the offers the person saw and applies exactly their plans: when the problem changed meanwhile,
+    nothing is changed (plan_changed), it never makes a new plan and applies it unseen."""
+    framework = framework_with(open_state)
+    engine = Mojo(framework, [check_user_state])
+    before = engine.run()
+    shown = offers(framework, before)        # the plan 0755 -> 0700, as Mojo Oracle printed it
+    os.chmod(open_state, 0o777)
+    result = engine.miracle(actor="cli", at_terminal=True, before=before, offered=shown)
+    (entry,) = result.entries
+    assert entry.outcome == "plan_changed" and "nothing was changed" in entry.reason
+    assert stat.S_IMODE(open_state.stat().st_mode) == 0o777
+    assert framework.tool_registry.audit.entries == [], "nothing was started"
+    again = engine.miracle(actor="cli", at_terminal=True, before=before, offered=offers(framework, engine.run()))
+    assert again.entries[0].outcome == "repaired" and stat.S_IMODE(open_state.stat().st_mode) == 0o700
+
+
+@POSIX
 def test_repair_refuses_a_linked_state_folder(tmp_path):
     real = tmp_path / "elsewhere"
     real.mkdir()
@@ -290,6 +308,34 @@ def test_switch_intact_moves_to_an_intact_build_only(tmp_path):
 
 
 # --- a deletion is never a repair ------------------------------------------------------------------------------------
+
+# What deletes or opens a deletion: the framework's image deletion and the person's lists, the trash, and the calls that
+# remove a file, a folder or a Docker object.
+DELETING_NAMES = {"delete_framework_images", "_doctor_free_space", "_mojo_free_space", "confirm_deletion",
+                  "free_framework_images", "accept", "accepted_through_registry", "Trash", "remove_tree"}
+DELETING_CALLS = {"remove", "rmtree", "unlink", "rmdir", "removedirs", "prune", "prune_builds", "prune_images",
+                  "prune_containers", "prune_volumes", "remove_tree", "move", "empty", "delete"}
+
+
+def test_no_mojo_module_an_ai_reaches_deletes():
+    """run_mojo_oracle and run_mojo_miracle run Mojo's checks, offers, views, runner and repairs. None of these modules
+    deletes or opens a deletion: deleting stays in docker_objects.py, which only the person's terminal and the
+    framework's own window call (the wave-2 sweep covers tools/, the MCP server and Ditto, not these modules)."""
+    root = REPO / "orchestrator" / "Core" / "mojo"
+    modules = [p for p in root.rglob("*.py") if p.name not in ("docker_objects.py", "__init__.py")
+               or p.parent != root]
+    assert {"runner.py", "offers.py", "views.py", "engine.py", "state.py", "runtime.py"} <= {p.name for p in modules}
+    for path in modules:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                names = {a.name.split(".")[-1] for a in node.names} | {getattr(node, "module", "") or ""}
+                assert not names & (DELETING_NAMES | {"orchestrator.Core.trash"}), \
+                    f"{path.relative_to(REPO)}:{node.lineno} imports a deletion"
+            elif isinstance(node, ast.Call):
+                func = node.func
+                name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+                assert name not in DELETING_NAMES | DELETING_CALLS, \
+                    f"{path.relative_to(REPO)}:{node.lineno} calls {name}"
 
 def disk_problem(_fw):
     return [Finding("disk", "disk.cache", Severity.ERROR, "Only 1.0 GB free for the cache folder.", "hint",

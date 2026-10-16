@@ -56,7 +56,7 @@ Was passiert:
      mit `apt`, kopiert das Programm nach `/opt/llm-conversion-framework`, legt dort `.venv` mit der festgelegten
      `requirements.txt` an und schreibt den Starter `llm-framework`. Nur die Docker-Engine und die Gruppe `docker`
      fallen weg (`LCF_CONTAINER_BUILD=1`);
-   - `llm-cli` liegt im PATH;
+   - `llm-cli` liegt im PATH, und `llmcf`, sein neuer Name (unveröffentlicht);
    - die Quellen sind während des Builds nur lesbar eingebunden und werden nie zu einer Image-Schicht; in keiner
      Schicht steht ein Geheimnis;
    - am Ende prüft der Build die Installation: Die Befehlszeile muss sich importieren lassen, und jede

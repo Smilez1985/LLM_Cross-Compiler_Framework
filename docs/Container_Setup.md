@@ -55,7 +55,7 @@ What happens:
      copies the program to `/opt/llm-conversion-framework`, creates `.venv` there with the pinned
      `requirements.txt` and writes the `llm-framework` launcher. Only the Docker engine and the `docker` group are
      left out (`LCF_CONTAINER_BUILD=1`);
-   - `llm-cli` is put on the PATH;
+   - `llm-cli` is put on the PATH, and `llmcf`, its new name (unreleased);
    - the sources are a read-only mount during the build, so they never become an image layer, and no secret is in
      any layer;
    - at the end the build checks the installation: the command line must import, and every system library Qt loads

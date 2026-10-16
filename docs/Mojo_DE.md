@@ -38,9 +38,10 @@ llmcf mojo --json       # maschinenlesbar; fragt nie und löscht nie
 ```
 
 `llmcf` ist die Kommandozeile des Frameworks unter ihrem neuen Namen. `llm-cli` ist dasselbe Programm und
-funktioniert weiter, `llm-cli mojo` tut also genau dasselbe. Die Entwicklungsumgebung legt beide Befehle an. Mit den
-Installern rufst du die Kommandozeile so auf, wie [Die CLI aufrufen](CLI_Usage_DE.md#die-cli-aufrufen) zeigt. Im
-Container: `make mojo` oder `docker exec -it lcf-framework llm-cli mojo`.
+funktioniert weiter, `llm-cli mojo` tut also genau dasselbe. Die Entwicklungsumgebung und der Framework-Container
+haben beide Befehle. Mit den Installern rufst du die Kommandozeile so auf, wie
+[Die CLI aufrufen](CLI_Usage_DE.md#die-cli-aufrufen) zeigt. Im Container: `make mojo` oder
+`docker exec -it lcf-framework llmcf mojo`.
 
 Wenn Mojo Oracle ein Problem findet, bei dem Mojo Miracle etwas tun kann, fragt es im Terminal:
 
@@ -86,7 +87,7 @@ So läuft eine Reparatur:
 
 1. Jede Reparatur ist zuerst ein Plan (ein Probelauf). Mojo Oracle zeigt ihn.
 2. Direkt vor der Änderung prüft Mojo noch einmal. Ist das Problem weg, wird nichts geändert („already gone“). Ist
-   der Plan jetzt ein anderer, wird nichts geändert („the problem changed“).
+   der Plan nicht mehr der, den Mojo Oracle dir gezeigt hat, wird nichts geändert („the problem changed“).
 3. Der Ordner wird geöffnet, ohne einem Link zu folgen, und sein Modus wird nur geändert, solange er noch der Modus
    aus dem Plan ist.
 4. Das Audit-Log hält die Reparatur fest, bevor sie geschieht. Geht das nicht, wird nichts geändert.
@@ -111,7 +112,7 @@ Eine Reparatur kann auch so enden, immer mit ihrem Grund:
 
 - **Noch da**: Die Änderung wurde gemacht, aber die Prüfung findet das Problem weiter.
 - **Schon weg**: Das Problem war weg, bevor Mojo Miracle etwas geändert hat.
-- **Das Problem hat sich geändert**: Nichts wurde geändert; sieh dir den neuen Plan an.
+- **Das Problem hat sich geändert**: Nichts wurde geändert; `llmcf mojo` zeigt den neuen Plan.
 - **Fehlgeschlagen**: zum Beispiel konnte das Audit-Log sie nicht festhalten, oder der Ordner hat sich inzwischen
   geändert.
 - **Nicht gelöscht**: Du hast nichts aus der Liste gewählt.
@@ -147,8 +148,8 @@ Eine Vollmacht für harmlose Reparaturen kommt später, zusammen mit den Vollmac
 
 - `llm-cli doctor` behält seine Optionen, seine Ausgabe und seine Exit-Codes. Es schreibt einen kurzen Hinweis auf
   stderr, der `llmcf mojo` nennt. `doctor --fix` macht die harmlosen Reparaturen (dieselben protokollierten
-  Reparaturen wie Mojo Miracle); `doctor --fix --tier 2` zeigt wie bisher auch die Liste der Build-Images des
-  Frameworks.
+  Reparaturen wie Mojo Miracle); ein Problem, das danach noch da ist, wird mit dem Grund gezeigt.
+  `doctor --fix --tier 2` zeigt wie bisher auch die Liste der Build-Images des Frameworks.
 - Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet. Eine Einstellung für `run_doctor` gilt
   auch für `run_mojo_oracle` und umgekehrt; die strengere gewinnt.
 - In Python exportiert `orchestrator.Core.doctor` alles aus `orchestrator.Core.mojo` weiter.

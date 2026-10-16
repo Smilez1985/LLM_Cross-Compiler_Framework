@@ -79,6 +79,19 @@ def test_llmcf_is_the_same_program_as_llm_cli():
     assert "mojo" in cli_module.cli.commands and "doctor" in cli_module.cli.commands
 
 
+def test_the_framework_container_has_the_command_mojo_names():
+    """Mojo's hints name 'llmcf mojo --miracle'. The framework container is the one installation that puts the
+    command line on the PATH; before, it had only llm-cli, so the hint it printed named a command it did not have."""
+    import re
+
+    from orchestrator.Core.mojo import FREE_SPACE_HINT
+    from orchestrator.Core.mojo.offers import DELETION_WHERE
+    assert "llmcf mojo --miracle" in DELETION_WHERE and "llmcf mojo --miracle" in FREE_SPACE_HINT
+    text = (REPO / "Docker Setup" / "Dockerfile").read_text(encoding="utf-8")
+    assert "> /usr/local/bin/llm-cli" in text
+    assert re.search(r"\bln -s llm-cli /usr/local/bin/llmcf\b", text), "llmcf: the same program as llm-cli"
+
+
 @POSIX
 def test_oracle_reports_what_where_why_and_what_miracle_can_do(booted_framework, open_state, monkeypatch):
     result, out = run_cli(booted_framework, monkeypatch, "mojo")
@@ -115,6 +128,27 @@ def test_oracle_proposes_miracle_at_a_terminal_and_runs_it_on_yes(booted_framewo
     assert "✘ Not repaired: data (data.calibration): not repairable automatically" in text
     assert "Mojo Miracle repaired 1 of 5 problems; 4 were not repaired (why: above)." in text
     assert result.exit_code == 2, "the exit code is the one of the check afterwards"
+
+
+@POSIX
+def test_miracle_applies_only_the_plan_the_person_saw(booted_framework, open_state, monkeypatch):
+    """The person said yes to the plan Mojo Oracle printed (0755 -> 0700). When the folder changed before Mojo Miracle
+    ran, nothing is changed and the report says so; before, Mojo Miracle made a new plan and applied it unseen."""
+    import click
+    real = click.confirm
+
+    def confirm(text, *args, **kwargs):
+        if "Run Mojo Miracle now?" in text:
+            os.chmod(open_state, 0o777)   # something changed the folder while the person read the plan
+        return real(text, *args, **kwargs)
+    monkeypatch.setattr(click, "confirm", confirm)
+    _, out = run_cli(booted_framework, monkeypatch, "mojo", terminal=True, answer="y\n\n")
+    text = " ".join(out.split())
+    assert f"Plan: the state folder ({open_state}): 0755 → 0700" in text
+    assert mode(open_state) == 0o777, "a plan the person never saw was applied"
+    assert ("✘ Not repaired: security (state.permissions): nothing was changed: the problem changed since the plan "
+            "was shown") in text
+    assert "→ Run 'llmcf mojo' again: it shows the new plan." in text
 
 
 @POSIX
@@ -189,6 +223,26 @@ def test_doctor_fix_uses_the_audited_harmless_repair(booted_framework, open_stat
     assert [a[4] for a, _ in mojo] == ["started", "ok"]
     assert mojo[0][1]["extra"]["repair_id"] == "state.tighten" and mojo[0][1]["extra"]["repair_class"] == "delegable"
     assert "Tier 2" not in out and "Numbers to delete" not in out
+
+
+@POSIX
+def test_doctor_fix_says_why_a_repair_was_not_made(booted_framework, open_state, monkeypatch):
+    """`doctor --fix` goes through Mojo Miracle, which changes nothing without the audit log. 3.0.0 changed the mode
+    anyway; now the alias says why it did not, instead of a bare "still present"."""
+    from orchestrator.Core import doctor
+    monkeypatch.setattr(doctor, "DEFAULT_CHECKS", runner.DEFAULT_CHECKS)
+    audit = booted_framework.tool_registry.audit
+
+    def record(*_args, **_kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr(audit, "record", record)
+    result, out = run_cli(booted_framework, monkeypatch, "doctor", "--fix")
+    text = " ".join(out.split())
+    assert mode(open_state) == 0o755
+    assert ("Still present after the fix: state.permissions (the audit log cannot record the repair, so nothing was "
+            "changed)") in text
+    result, _ = run_cli(booted_framework, monkeypatch, "doctor", "--fix", "--json")
+    assert json.loads(result.stdout)["still_present"] == ["state.permissions"], "the 3.0.0 JSON keys stay"
 
 
 @POSIX
