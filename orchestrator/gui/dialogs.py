@@ -1458,27 +1458,13 @@ class AIFoldersDialog(QDialog):
 
 def confirm_host_key(parent, framework, host: str, port: int = 22) -> bool:
     """Trust on first use, never silently: shows an unknown device's host key fingerprint and stores it
-    only if the user confirms; a changed key is refused."""
-    from pathlib import Path
-    from orchestrator.utils import ssh_trust
-    state_dir = Path(getattr(getattr(framework, "config", None), "user_state_dir", None) or Path.home() / ".llm-framework")
+    only if the user confirms ("No" is the default); a changed key is refused. Reads the key in the calling thread:
+    a window that must not wait uses gui/host_key.HostKeyCheck, which asks the same question after reading the key
+    off the GUI thread."""
+    from orchestrator.gui import host_key
     try:
-        key = ssh_trust.fetch_host_key(host, port)
-        status = ssh_trust.check_host_key(state_dir, host, port, key)
+        key, status = host_key.read_host_key(host_key.state_dir(framework), host, port)
     except Exception as e:
-        QMessageBox.critical(parent, "SSH", f"Could not reach {host}:{port}: {e}")
+        host_key.show_unreachable(parent, framework, host, port, e)
         return False
-    if status == "known":
-        return True
-    if status == "changed":
-        QMessageBox.critical(parent, "SSH host key changed", str(ssh_trust.HostKeyChanged(host, port)))
-        return False
-    answer = QMessageBox.question(
-        parent, "New device",
-        f"First connection to {host}:{port}.\n\nKey type: {key.get_name()}\nFingerprint: {ssh_trust.fingerprint(key)}\n\n"
-        "Compare it with the output of\n  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\non the device. Trust this device?",
-        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-    if answer != QMessageBox.Yes:
-        return False
-    ssh_trust.trust_host_key(state_dir, host, port, key)
-    return True
+    return host_key.ask_trust(parent, framework, host, port, key, status)

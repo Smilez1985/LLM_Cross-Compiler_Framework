@@ -350,17 +350,21 @@ class TestBuilderTab:
             def get_data(self):
                 return "10.0.0.9", "root", ""
 
+            def get_options(self):   # the dialog's Port and Name fields (scan --device --port --label)
+                return 22, None
+
         monkeypatch.setattr(builder_tab, "SSHConnectDialog", Dialog)
-        monkeypatch.setattr(builder_tab, "SSHProbeWorker", lambda *a: SimpleNamespace(
+        monkeypatch.setattr(builder_tab, "SSHProbeWorker", lambda *a, **k: SimpleNamespace(
             finished=SimpleNamespace(connect=lambda slot: None), start=lambda: started.append(a[0])))
         tab = builder_tab.BuilderTab(framework)
 
-        monkeypatch.setattr(builder_tab, "confirm_host_key", lambda *a: trusted.append(a[2]) and False)
+        # The host key is read off the GUI thread (gui/host_key.HostKeyCheck); the person's answer comes back to then.
+        monkeypatch.setattr(tab.host_keys, "start", lambda host, port, then, step="": trusted.append(host) or then(False))
         tab._open_ssh_dialog()
         assert trusted == ["10.0.0.9"] and started == []
         assert user_history(framework).get("device") == ["10.0.0.5", "rock-5b.local"], "an untrusted host is not kept"
 
-        monkeypatch.setattr(builder_tab, "confirm_host_key", lambda *a: True)
+        monkeypatch.setattr(tab.host_keys, "start", lambda host, port, then, step="": then(True))
         tab._open_ssh_dialog()
         assert started == ["10.0.0.9"]
         assert user_history(framework).get("device") == ["10.0.0.9", "10.0.0.5", "rock-5b.local"]
@@ -406,11 +410,12 @@ class TestDeploymentWindow:
         asked = []
         monkeypatch.setattr(deployment_window.QInputDialog, "getText", lambda *a: asked.append(a[2]) or ("", False))
 
-        monkeypatch.setattr(deployment_window, "confirm_host_key", lambda *a: False)
+        # The host key is read off the GUI thread (gui/host_key.HostKeyCheck); the person's answer comes back to then.
+        monkeypatch.setattr(win.host_keys, "start", lambda host, port, then, step="": then(False))
         win._on_deploy()
         assert not user_history(framework).path.exists() and asked == []
 
-        monkeypatch.setattr(deployment_window, "confirm_host_key", lambda *a: True)
+        monkeypatch.setattr(win.host_keys, "start", lambda host, port, then, step="": then(True))
         win._on_deploy()   # cancelled at the password prompt, after the device was trusted
         assert asked and win.worker is None
         recent = user_history(framework)
