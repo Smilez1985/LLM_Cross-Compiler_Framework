@@ -594,8 +594,7 @@ die Vorgaben).
   Framework sie kennt, mit dem Namen, den die App sich selbst gibt, klein darunter (eine App, die sich Ditto, das
   Framework oder das System nennt, wird als „nennt sich so“ gezeigt). Hinweise des Frameworks gehen über die ganze
   Breite und schreiben „Warnung:“ aus; Werte von außerhalb des Frameworks stehen in Anführungszeichen und bleiben in
-  ihrer Zeile (auch ein Werkzeugname, den sich Dittos Modell ausgedacht hat, oder ein Werkzeug des Frameworks auf einem
-  anderen Computer). Ein Hinweis darauf, was eine App getan hat (ein Korrekturvorschlag, die Nutzung einer
+  ihrer Zeile (auch ein Werkzeugname, den sich Dittos Modell ausgedacht hat). Ein Hinweis darauf, was eine App getan hat (ein Korrekturvorschlag, die Nutzung einer
   Dauerfreigabe), steht unter dem Namen dieser App, als „vom Framework geschrieben“ markiert; nur Einträge von Ditto
   bekommen Dittos Bild. KI-Text in einem Eintrag des Frameworks steht in einem Kasten mit der Überschrift „In eigenen Worten
   (KI-Text, vom Framework nicht geprüft)“.
@@ -648,6 +647,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `export_pack` | lokal schreiben | Ein Target-, Rezept- oder Wissens-Pack in eine lokale Datei exportieren, mit deinem Schlüssel signiert; immer gefragt, nichts wird hochgeladen |
 | `start_recipe_build` | lokal schreiben | Ein installiertes Community-Rezept genau wie festgelegt bauen (Modell-Commit, Target, Format, Board, Quantisierung), mit der Frage und den Prüfungen von `start_build` |
 | `crawl_docs_site` | lokal schreiben | Deep Ingest von 1 bis 5 öffentlichen Dokumentations-Websites in die Wissensbasis, als Job; immer gefragt mit jeder Startadresse, erst nachdem eine Person den Hinweis gelesen hat ([Details](#deep-ingest-durch-einen-ki-client)) |
+| `index_framework_docs` | lokal schreiben | Die eigene Dokumentation des Frameworks (mit `include_code` auch Code und Konfiguration) in die Wissensbasis aufnehmen, als Job; immer gefragt, vorher wird ein Snapshot angelegt; danach mit `search_knowledge`, Art `docs`, durchsuchen |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
@@ -757,124 +757,31 @@ was die Tools zurückgegeben haben.
 
 ---
 
-### Ditto und ein Framework auf einem anderen Computer
+### Nur die Tools dieses Computers
 
-**Warum „ein anderes Framework“?** Es ist kein anderes Programm, sondern dasselbe Framework, auf einem zweiten
-Computer installiert, zum Beispiel ein stärkerer Build-PC mit großer Platte und GPU, ein Server oder ein Labor-PC, an
-dem die Boards hängen. Ditto spricht mit dem Framework auf seinem eigenen Computer direkt, im selben Prozess. Die
-zweite Installation erreicht es über deren MCP-Server, dieselbe Tür, die auch Claude Code nutzt. Mit der Verbindung
-kann derselbe Chat dort einen Build starten, ihn verfolgen, sein Log lesen, die dort gekoppelten Boards nutzen und
-dessen Wissensbasis durchsuchen, neben allem auf diesem Computer.
+Dittos Hände sind die eigenen Tools des Frameworks auf diesem Computer: dieselbe Registry, dieselben Berechtigungen,
+Fragen und dasselbe Audit-Log, die jeder MCP-Client bekommt, unter Dittos eigenen Berechtigungen. Ditto verbindet sich
+nie mit einem Framework auf einem anderen Computer.
 
-**Braucht es Docker?** Nein. Die Verbindung ist ein Befehl (stdio) oder eine Serveradresse (HTTP), und keins von
-beiden hängt von Docker ab. SSH erreicht den anderen Computer, so wie es Boards erreicht:
+Eine frühere Entwicklungsversion hatte so einen Fernmodus (`llm-cli ditto remote`, einen Abschnitt „Another computer“
+in den KI-Einstellungen). Er wurde vor jedem Release entfernt. Was er hinterlassen haben kann:
 
-- **Ein SSH-Tunnel zur Serveradresse** (empfohlen; am SSH-Server des anderen Computers ändert sich nichts): Dort läuft
-  `llm-cli mcp serve --transport http` dauerhaft und lauscht nur auf dem Loopback jenes Computers; hier bleibt
-  `ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box` in einem Terminal offen (auf beiden Seiten derselbe Port: der
-  Server prüft ihn), und
-  `llm-cli ditto remote set --transport http --url http://127.0.0.1:8765/mcp --name "Build-Rechner"` richtet Ditto
-  darauf aus.
-- **SSH als Befehl** (der Server startet für jede Unterhaltung):
-  `llm-cli ditto remote set --transport stdio --command "ssh -T -o BatchMode=yes -o SendEnv=LCF_MCP_TOKEN
-  benutzer@build-box llm-cli mcp serve" --name "Build-Rechner"`. Der SSH-Server dort muss die Variable annehmen
-  (`AcceptEnv LCF_MCP_TOKEN` in seiner `sshd_config`), der Befehl muss `llm-cli` dort finden (gib den vollen Pfad an,
-  siehe [`llm-cli` aufrufen](../README_DE.md#llm-cli-aufrufen)), und ssh startet ohne deinen SSH-Agenten (nur `HOME`,
-  `PATH` und wenige andere Variablen erreichen es), braucht also einen Schlüssel, den es ohne Abfrage nutzen kann.
-- **Ein Framework-Container, den du selbst gebaut hast** ([Container-Einrichtung](Container_Setup_DE.md)), ist eine
-  Alternative: `docker exec -i <container> llm-cli mcp serve` auf dem Computer, auf dem er läuft.
+- Die Einstellungen `ai_ditto_tool_source`, `ai_ditto_mcp_transport`, `ai_ditto_mcp_command`, `ai_ditto_mcp_url` und
+  `ai_ditto_mcp_name` in einer älteren `config.yml` werden ignoriert; eine Logzeile nennt sie, wenn die Einstellungen
+  gelesen werden. Du kannst diese Zeilen löschen.
+- Ein dafür gespeichertes benanntes Token (`ditto_mcp_token`, `llm-cli secrets list` zeigt es) bleibt im
+  Anmeldedaten-Tresor und wird nicht mehr gelesen. Widerrufe es auf dem anderen Computer (`llm-cli mcp token revoke
+  NAME`), dann ist es dort nutzlos.
+- `ditto_places.json` und `remote_listing.json` in deinem Benutzerordner werden nicht mehr gelesen; du kannst sie
+  löschen.
+- Ein gespeichertes Gespräch des Fernmodus beginnt einmal neu, mit dem Hinweis „Ditto nutzt jetzt seine eigenen
+  Werkzeuge: ein neues Gespräch.“ Einträge im Chat-Panel, die den anderen Computer nennen, erscheinen weiter so, wie
+  sie geschrieben wurden.
+- Audit-Einträge mit den Feldern `place`, `taint` oder `remote_server` lassen sich weiter prüfen; neue Einträge
+  können sie nicht tragen.
 
-Docker bleibt sonst, was es ist: die Sandbox, in der das Framework auf dem Computer, der baut, Modelle
-cross-kompiliert und konvertiert, dazu ausdrückliche Opt-ins. Kein Framework-Image wird veröffentlicht oder geladen.
-
-**Geht lokal etwas kaputt?** Nein. Mit ausgeschalteter Verbindung (der Standard) arbeitet Ditto genau wie bisher.
-Solange sie an ist, geht lokal nichts weg: Tools, Dateien, Targets, Boards, Einstellungen und Wissensbasis dieses
-Computers bleiben, und die Tools des anderen Computers kommen im selben Chat dazu. Verbinden oder Trennen beginnt nie
-eine neue Unterhaltung (eine Unterhaltung, die die frühere Version gespeichert hat, als sie nur die Tools des anderen
-Computers nutzte, beginnt einmal neu, mit einem Hinweis). Eine Verbindung, die nicht zustande kommt oder abbricht,
-hält nie eine Runde an: Ditto macht mit den Tools dieses Computers weiter, sagt, dass der andere Computer nicht
-erreichbar ist, und `llm-cli ditto ask` gibt diesen Hinweis auf stderr aus.
-
-**Eine Tool-Liste, jedes Tool mit seinem Ort.** Dittos Modell bekommt eine Liste (`orchestrator/llm/hybrid_tools.py`):
-
-- ein Tool, das beide Computer mit demselben Eingabeschema anbieten, wird einmal angeboten, mit einem optionalen Feld
-  `place` (`this_computer`, der Standard, oder der Schlüssel des anderen Computers, gebildet aus deinem Namen dafür:
-  aus „build box“ wird `build_box`);
-- ein Tool, das nur dieser Computer anbietet, bleibt, wie es ist, ohne `place`;
-- ein Framework-Tool, das nur der andere Computer Ditto anbietet (zum Beispiel eines, das Ditto hier nicht nutzen
-  darf), braucht `place` und beginnt mit „Only on build box:“;
-- ein Tool mit abweichender Eingabe (der andere Computer hat eine andere Framework-Version) wird getrennt als
-  `remote_<name>` angeboten, mit einem Hinweis an dich, jenen Computer zu aktualisieren;
-- vom anderen Computer werden nur Namen aus dem eigenen Tool-Katalog dieses Frameworks angeboten, immer mit den Titeln
-  und Beschreibungen dieses Computers: Was der andere Computer über seine Tools sagt (Beschreibungen, Titel,
-  Beispiele), erreicht das Modell nie. Ein Tool-Name, den der Katalog nicht kennt, wird weggelassen, und der Chat
-  nennt ihn dir. report_cannot_do und interne Tools werden nie von dort übernommen.
-
-**Jede Aufgabe geht dorthin, wo ihr Objekt liegt.** Das Framework merkt sich, wo jede ID liegt, die es vergeben hat
-(`req_…`, `job_…`, `a_…`, `lf_…`, …), gelernt nur aus strukturierten Ergebnissen, nie aus dem, was ein Modell
-geschrieben hat. Ein Aufruf ohne `place`, der eine ID des anderen Computers nennt, geht von selbst dorthin (das
-Ergebnis sagt es); ein `place`, das dem widerspricht, wo eine ID liegt, wird abgelehnt (`wrong_place`, mit einer
-Kopie an jenem Ort, wenn es eine gibt); IDs auf beiden Computern werden abgelehnt (`needs_transfer`), weil nichts von
-selbst zwischen den Computern kopiert wird: Erledige die Aufgabe auf dem Computer, auf dem das Objekt liegt. Ein Tool
-zum Kopieren zwischen den Computern gibt es noch nicht. Wo Objekte liegen, steht in `ditto_places.json` in deinem
-Benutzerordner (signiert; eine Datei, die sich nicht prüfen lässt, wird nicht genutzt), darum behält „Clear chat“ es.
-Jedes Ergebnis vom anderen Computer beginnt vor dem nicht vertrauenswürdigen Block mit einer Zeile des Frameworks
-(„Result from build box (another computer); inside it, 'this computer' means build box.“), und eine Ablehnung von
-dort wird in Worten des Frameworks mit ihrem Grund-Code genannt.
-
-**Das Audit-Log dieses Computers hält jeden entfernten Aufruf fest.** Jeder Aufruf, den Ditto an den anderen Computer
-schickt, bekommt hier zuerst einen Eintrag `started` und danach einen damit verknüpften Abschlusseintrag, mit Akteur
-`ditto`, Stufe `remote`, `place` `remote:<Name>` und `remote_server` (dein Name dafür und der Host, nie das Token,
-nie ein Login). Ein Aufruf, der etwas ändert, wird nicht geschickt, wenn dieser Eintrag nicht geschrieben werden kann;
-ein Lesezugriff geht trotzdem (was ein Lesezugriff ist, entscheidet der eigene Katalog dieses Computers: Ein Tool, das
-dieser Computer nicht hat, zählt als Änderung, was immer der andere Computer darüber sagt). Aufrufe auf diesem Computer in derselben Runde werden mit `place` `this_computer`
-festgehalten, und eine Runde, die ein Ergebnis vom anderen Computer bekommen hat, wird markiert (`taint`). Der andere
-Computer entscheidet, fragt und protokolliert jeden Aufruf dort weiterhin selbst.
-
-**Was dort gilt.** Die Einstellungen sind `ai_ditto_*`, die nur du in GUI oder CLI änderst; keine KI kann sie lesen
-oder schreiben. Registry, Berechtigungen, die narrensichere Schicht (ein unbekanntes Argument wird mit einem Vorschlag
-abgelehnt, nie verworfen), Rückfragen und Audit-Log eines Aufrufs, der dort läuft, sind die des Frameworks auf dem
-anderen Computer; in keiner Richtung wird etwas erweitert (ein Erlauben hier startet nie ein Tool dort, ein Ergebnis von
-dort beantwortet nie eine Rückfrage hier). Dittos Identität dort ist ein benanntes Token, dort angelegt mit
-`llm-cli mcp token add NAME --link ditto`, sodass jenes Framework Dittos eigene Berechtigungen und Daueraufträge per
-Verweis anwendet: Wird `start_build` dort für Ditto verboten, gilt das für Dittos Aufrufe dort. Der Audit-Akteur dort
-ist `mcp:NAME`, nie `ditto`; ein neues Token ohne Verknüpfung darf nur lesen. Das Token liegt in Dittos Tresor für
-Zugangsdaten und erreicht den Server nur als `LCF_MCP_TOKEN` des gestarteten Prozesses (stdio; bei `docker exec`
-oder `podman exec` ergänzt Ditto `-e LCF_MCP_TOKEN`, nur den Namen, und es lehnt einen Server ab, der den gemeinsamen
-lokalen Aufrufer `mcp` meldet, das Token also nicht angekommen ist) oder als Bearer-Header (HTTP, nur https oder
-Loopback); ohne Token wird der andere Computer nicht genutzt. Die Verbindung bleibt über mehrere Runden offen und
-schließt nach 10 Minuten ohne Aufruf. Ditto kann den anderen Computer nicht prüfen, darum erreichen jedes Ergebnis,
-jeder Fehlertext und jeder Prompt von dort Dittos Modell als nicht vertrauenswürdige Daten. Seine Rückfragen
-beantwortest nur du, in Dittos Bestätigungsdialog oder -abfrage, die den Server nennt („Question from the framework at
-<Name>“); eine Runde ohne Dialog verbindet sich ohne die Fähigkeit zu fragen, sodass jenes Framework die Rückfrage für
-sein eigenes Freigabefenster behält, und eine Rückfrage, die niemand beantworten konnte, wird abgebrochen, nie als
-dein „Nein“ geschickt (das Audit-Log dieses Computers hält sie als `cancelled` mit der Antwort `unanswered` fest, auch
-wenn jenes Framework eine abgebrochene Rückfrage als „declined“ meldet; `llm-cli ditto ask` ohne Terminal verbindet
-sich ohne die Fähigkeit zu fragen). Ein „nicht mehr fragen“ von dort (CLI-Antwort `r`, GUI-Schaltfläche „Allow and ask it to stop
-asking...“, nur angeboten, wenn die Rückfrage jenes Servers es anbietet, mit einer Warnung vorab) fragt nur jenes
-Framework an, wo die Person es in dessen eigenem Freigabefenster bestätigt. `llm-cli ditto remote test` sagt auch,
-wie seine Tools zu denen dieses Computers kommen (einmal angeboten, nur dort, getrennt).
-
-In der GUI wird die Verbindung unter **Configure AI Agent (Ditto)** im Abschnitt „Another computer (optional)“
-eingestellt, der standardmäßig aus ist und sagt, dass Docker nicht nötig ist: „Ditto works with“ (dieser Computer
-oder dieser Computer und das Framework auf einem anderen Computer), ein Befehl (stdio, zum Beispiel über SSH) oder
-eine Serveradresse (HTTP, nur https oder Loopback, zum Beispiel über einen SSH-Tunnel), ein Name für die Dialoge und
-das benannte Token. Das Token landet im Tresor für Zugangsdaten und wird nie wieder angezeigt (das Feld bleibt leer
-und sagt nur, dass eines gespeichert ist); die Verbindung ohne Token, mit einem nicht lesbaren Befehl oder mit einer
-Adresse zu speichern, die das Token im Klartext senden würde, wird abgelehnt, und nichts wird gespeichert. Der
-Chat-Bereich nennt den Computer, auf dem ein Tool lief („Benutzt auf 'build box': Start a build“), und zeigt die
-Hinweise des Zugs zum anderen Computer (gerade nicht erreichbar, Tools weggelassen, andere Version) vor Dittos
-Antwort, als fremder Text in Anführungszeichen und nicht wiederholt, solange sie gleich bleiben.
-
-Dittos strukturierte Aufgaben holen ihren Kontext weiter vom anderen Computer, solange er eingerichtet ist:
-Build-Empfehlung (`recommend_build_settings`), Modulvorschlag (`add_board`; eine Probe-Datei dieses Rechners kommt als
-eigener Block mit) und die Analyse eines Builds jenes Frameworks über seine Request-ID (`diagnose_build_failure`)
-holen ihren Kontext (die Formate des Targets, das Build-Log, die Auszüge aus Dokumentation und Wissensbasis) aus den
-Aufgaben-Prompts jenes Frameworks, denselben, die ein externer Client bekommt. Dittos Aufgabentext bleibt sein eigener
-(der gemeinsame Text, aus dem diese Prompts gebaut sind), und der Kontext des Servers sind nicht vertrauenswürdige
-Daten. Ein Server, der Dittos Token den Prompt nicht anbietet, wird mit dem nächsten Schritt genannt; das Self-Healing
-eines Builds dieses Frameworks nutzt weiter Log und Wissensbasis dieses Frameworks. Ohne Tools bekommt eine Chat-Runde
-Auszüge aus der Wissensbasis dieses Computers, ob ein anderer Computer eingerichtet ist oder nicht.
+Das Deployment auf Boards über SSH (Kopplung, Deploy, die Laufzeit auf dem Board) ist etwas anderes und bleibt, wie es
+ist.
 
 ---
 
@@ -898,8 +805,7 @@ Fälle brauchen keine Codeänderung):
 (zum Beispiel ein eingeschleuster Befehl), erwartete Felder, Tools, die aufgerufen oder nicht aufgerufen werden
 müssen. Chat-Fälle nutzen die echten Tool-Definitionen über einem Ersatz-Build-Dienst, der gegen die echten
 Target-Capabilities prüft und vorbereitete Builds, Logs und Artefakte zurückgibt. Die Wissensbasis ist während der
-Evaluation aus, damit die Antworten nur aus dem Fall kommen, und das Framework auf einem anderen Computer wird nie
-genutzt (die festen Antworten eines Falls erreichen nie seine Tools oder Rückfragen).
+Evaluation aus, damit die Antworten nur aus dem Fall kommen.
 
 **Ausführen:**
 
@@ -1305,7 +1211,8 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   gespeichert. Wird eine Seite erneut aufgenommen, wird sie an Ort und Stelle aktualisiert, und Abschnitte, die die
   neue Fassung nicht mehr hat, werden entfernt. Codeblöcke und Tabellen bleiben ganz, außer sie sind größer als der
   Kontext des Modells ([Große Codeblöcke und Tabellen](#große-codeblöcke-und-tabellen)).
-- **Schnappschüsse:** Vor jedem Crawl wird die Wissensbasis als Schnappschuss in
+- **Schnappschüsse:** Vor jedem Crawl und jeder Aufnahme der eigenen Dokumente des Frameworks wird die Wissensbasis
+  als Schnappschuss in
   `~/.llm-framework/knowledge_snapshots` gesichert. Es gibt keine Grenze (unveröffentlicht; bisher blieben auf jedem
   Weg nur die neuesten 5): Das Framework behält so viele, wie die Platte fasst, löscht keinen von selbst, und keine
   Anzahl bringt eine Erinnerung oder eine Warnung. **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli
@@ -1335,6 +1242,12 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   nur für diesen Aufruf übersprungen. Auflisten und Lesen brauchen kein Modell.
 - **Dokumentation aufnehmen:** [Deep Ingest](#deep-ingest) im Modul-Assistenten und
   [Wissens-Packs](#community-zoo) aus dem Community-Zoo.
+- **Die eigenen Dokumente des Frameworks** (unveröffentlicht): **Tools > Index the Framework's Documentation...**,
+  `llm-cli knowledge index-docs` oder das Tool `index_framework_docs` nehmen seine Dokumentation (README,
+  CONTRIBUTING, den Ordner `docs`) und auf Wunsch seinen Code und seine Konfiguration als Art `docs` auf, damit Ditto
+  das Innenleben des Frameworks erklären kann (wie ein Wert der Probe ein Build-Skript erreicht, was eine Einstellung
+  bewirkt). Das passiert nie von selbst; vorher wird ein Snapshot angelegt (ohne Platz dafür auf der Platte wird
+  nichts aufgenommen, wenig übriger Platz ist eine Warnung), und ein Export als Wissenspaket enthält diese Texte nie.
 
 ### Reranking
 
@@ -1921,8 +1834,9 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Server startet nicht). Der Name des Tokens ist der Aufrufer im Audit-Log (`mcp:<Name>`),
   und es hat eigene Berechtigungen: Ein neues Token darf nur lesen, bis du mit
   `llm-cli tools permissions --token NAME` mehr erlaubst, es mit einer Kopie der Berechtigungen eines anderen
-  Aufrufers anlegst (`--policy-from mcp`) oder es an Dittos Berechtigungen bindest (`--link ditto`, für Ditto auf
-  einem anderen Rechner; eine Änderung an Dittos Berechtigungen gilt sofort auch dafür). `rotate` ersetzt ein Token,
+  Aufrufers anlegst (`--policy-from mcp`) oder es an Dittos Berechtigungen bindest (`--link ditto`, für einen
+  Client, der genau Dittos Berechtigungen haben soll; eine Änderung an Dittos Berechtigungen gilt sofort auch
+  dafür). `rotate` ersetzt ein Token,
   `revoke` löscht es mit seinen Berechtigungen; beides wirkt sofort, auch für einen laufenden Server, und die
   Aufrufe, die ein widerrufener stdio-Client noch schickt, werden abgelehnt und protokolliert. Ein
   stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag:
@@ -2151,8 +2065,8 @@ sie:
   Docker-Sammlung bleibt bei jedem Build ein Sicherheitshinweis, auch nachdem du einen Build damit einmal bestätigt
   hast (eine Dauerfreigabe, die du gewählt hast, kann diesen Build trotzdem abdecken).
 - **Den ersten Build von Build-Code, den eine KI erstellt oder installiert hat, siehst du einmal selbst.** Ein Target-
-  oder Rezept-Paket, das unter einer Dauerfreigabe (später auch einer Vollmacht) installiert wurde, ein Hardware-Modul,
-  das eine KI ohne dein Ja erstellt hat, und ein Target von einem anderen Computer tragen den Sicherheitshinweis
+  oder Rezept-Paket, das unter einer Dauerfreigabe (später auch einer Vollmacht) installiert wurde, und ein
+  Hardware-Modul, das eine KI ohne dein Ja erstellt hat, tragen den Sicherheitshinweis
   "erster Build", bis du einen Build genau dieses Inhalts bestätigt hast (SHA-256 des Pakets oder Definition des
   Moduls); ein aktualisiertes Paket oder ein unter demselben Namen neu erstelltes Modul wird dir erneut gezeigt.
 

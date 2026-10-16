@@ -412,12 +412,6 @@ def _ditto_confirm(spec, inp) -> bool:
         click.echo(str(e), err=True)
         return False
     if not sys.stdin.isatty():
-        from orchestrator.llm.remote_tools import RemoteAnswer, RemoteQuestion
-        if isinstance(spec, RemoteQuestion):
-            # The other computer's question: nobody can answer it here, so it is cancelled there, never sent as the
-            # person's "no" (SEC-H8). Its text stays out of the output another program may read.
-            click.echo(f"{spec.title}: no terminal to answer it, so it is cancelled there (not declined).", err=True)
-            return RemoteAnswer(False, answered=False)
         # Nobody may sit here and another program (an AI app running this command) may read it: the call and its
         # arguments only, never the facts the framework's question shows the person alone (full paths, logins).
         try:
@@ -431,12 +425,6 @@ def _ditto_confirm(spec, inp) -> bool:
         click.echo_via_pager(text + "\n")
     else:
         click.echo(text, err=True)
-    if getattr(spec, "offers_request", False):  # a remote framework's question (Ditto's MCP-client mode)
-        from orchestrator.llm.remote_tools import RemoteAnswer
-        answer = click.prompt(f"Allow this? y = once, r = and ask the framework at {spec.server} to stop asking "
-                              "(you confirm that there), n = no", type=click.Choice(["y", "r", "n"]), default="n",
-                              err=True)
-        return RemoteAnswer(answer != "n", stop_asking=answer == "r")
     from orchestrator.tools.registry import current_grant_offer, current_registry
     offer = current_grant_offer()
     if offer is None:
@@ -463,22 +451,6 @@ def _ditto_confirm(spec, inp) -> bool:
 
 
 _ditto_confirm.confirm_channel = "framework-cli"  # recorded in the audit log
-
-
-def _ditto_no_terminal(spec, inp) -> bool:
-    """_ditto_confirm for a command run without a terminal: it cannot reach a person (person_facing False), so Ditto
-    connects to the framework on another computer without the ability to ask (that framework keeps its question for
-    its own approval window, or refuses), and a local question is denied as before (SEC-H8)."""
-    return _ditto_confirm(spec, inp)
-
-
-_ditto_no_terminal.confirm_channel = "framework-cli"
-_ditto_no_terminal.person_facing = False
-
-
-def _ditto_dialog():
-    """Ditto's confirmation for this command: the terminal prompt, or the one that cannot reach a person."""
-    return _ditto_confirm if sys.stdin.isatty() else _ditto_no_terminal
 
 
 @module.command('generate-ai')
@@ -1679,156 +1651,6 @@ def _runtime_failure(error) -> None:
     sys.exit(1)
 
 
-@ditto.group('remote')
-def ditto_remote():
-    """Ditto and the framework on another computer (optional): Ditto also uses the framework installed on a second
-    computer (a build PC, a server) through its MCP server, next to this computer's tools, which always stay; each
-    task goes to the computer where its object lives. A named token links Ditto's permissions there. Docker is not
-    needed: connect over SSH (as the command, or a tunnel to the server address)"""
-    pass
-
-
-def _remote_settings_text(config) -> List[str]:
-    from orchestrator.llm.remote_tools import (COMMAND_SETTING, NAME_SETTING, SOURCE_SETTING, TRANSPORT_SETTING,
-                                               URL_SETTING)
-    on = str(config.get(SOURCE_SETTING, 'local') or 'local').lower() == "mcp"
-    return [f"Another computer: {'on (this computer stays)' if on else 'off (this computer only)'}",
-            f"Transport: {config.get(TRANSPORT_SETTING, 'stdio') or 'stdio'}",
-            f"Command (stdio): {' '.join(config.get(COMMAND_SETTING, []) or []) or '-'}",
-            f"Address (http): {config.get(URL_SETTING, '') or '-'}",
-            f"Name: {config.get(NAME_SETTING, '') or '-'}"]
-
-
-@ditto_remote.command('set')
-@click.option('--transport', type=click.Choice(['stdio', 'http']), required=True,
-              help='stdio: Ditto starts the command that runs the MCP server there (with LCF_MCP_TOKEN), for '
-                   'example over SSH; http: Ditto connects to the address with the token as bearer header, for '
-                   'example through an SSH tunnel')
-@click.option('--command', 'command', default=None,
-              help='stdio: the command that starts the MCP server on the other computer, e.g. "ssh -T -o '
-                   'SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve" (the SSH server there needs AcceptEnv '
-                   'LCF_MCP_TOKEN, and llm-cli must be a command there, not only an alias); for a framework '
-                   'container you built yourself "docker exec -i lcf llm-cli mcp '
-                   'serve"')
-@click.option('--url', default=None, help='http: the server address (https, or http on a loopback address such as '
-              'an SSH tunnel: ssh -N -L 8765:127.0.0.1:8765 user@build-box, then http://127.0.0.1:8765/mcp)')
-@click.option('--name', default='', help='Your name for the other computer, shown in Ditto\'s dialogs')
-@click.option('--with-token', is_flag=True, help='Read the named token from stdin instead of asking for it')
-@pass_context
-def ditto_remote_set(ctx: FrameworkContext, transport: str, command: Optional[str], url: Optional[str], name: str,
-                     with_token: bool):
-    """Let Ditto also use the framework on another computer, next to this computer's tools. Create the token on that
-    computer first: llm-cli mcp token add NAME --link ditto (its permissions are then Ditto's own permissions there)."""
-    import shlex
-    from orchestrator.llm.remote_tools import (COMMAND_SETTING, NAME_SETTING, SOURCE_SETTING, TOKEN_SECRET,
-                                               TRANSPORT_SETTING, URL_SETTING, RemoteSetupError, check_url)
-    if not with_token:
-        _require_terminal("llm-cli ditto remote set")
-    argv: List[str] = []
-    try:
-        if transport == 'stdio':
-            argv = shlex.split(command or "")
-            if not argv:
-                _usage("--command is required for --transport stdio.")
-        else:
-            check_url(url or "")
-    except RemoteSetupError as e:
-        _usage(str(e))
-    except ValueError as e:
-        _usage(f"--command cannot be read: {e}")
-    ctx.require_framework()
-    sm = ctx.framework_manager.secrets_manager
-    if sm is None:
-        console.print("[red]The credential vault is not available; the token cannot be stored.[/red]")
-        sys.exit(1)
-    token = sys.stdin.read().strip() if with_token else click.prompt("Named MCP token", hide_input=True)
-    if not token:
-        _usage("No token given.")
-    if not sm.set_secret(TOKEN_SECRET, token):
-        console.print("[red]The token could not be stored.[/red]")
-        sys.exit(1)
-    config = ctx.framework_manager.config
-    for key, value in ((SOURCE_SETTING, "mcp"), (TRANSPORT_SETTING, transport), (COMMAND_SETTING, argv),
-                       (URL_SETTING, url or ""), (NAME_SETTING, name)):
-        config.set(key, value)
-    if not config.save_user_config():
-        console.print("[red]The settings could not be saved.[/red]")
-        sys.exit(1)
-    console.print("[green]Ditto now also uses the tools of the framework on that computer, next to this "
-                  "computer's, and sends each call to the computer where its object lives; the token is in the "
-                  "credential vault. This computer's tools, files and settings stay (this computer alone again "
-                  "with: llm-cli ditto remote off).[/green]")
-    console.print("Check the connection with: llm-cli ditto remote test")
-
-
-@ditto_remote.command('off')
-@pass_context
-def ditto_remote_off(ctx: FrameworkContext):
-    """Ditto works with this computer alone again (the stored token is kept; remove it with
-    llm-cli secrets delete ditto_mcp_token)."""
-    from orchestrator.llm.remote_tools import SOURCE_SETTING
-    config, _ = _settings(ctx)
-    config.set(SOURCE_SETTING, "local")
-    if not config.save_user_config():
-        console.print("[red]The settings could not be saved.[/red]")
-        sys.exit(1)
-    console.print("[green]Ditto works with this computer alone again; the conversation goes on.[/green]")
-
-
-@ditto_remote.command('show')
-@pass_context
-def ditto_remote_show(ctx: FrameworkContext):
-    """Whether Ditto also uses another computer, and the connection settings (never the token)"""
-    config, _ = _settings(ctx)
-    for line in _remote_settings_text(config):
-        console.print(escape(line))
-
-
-@ditto_remote.command('test')
-@pass_context
-def ditto_remote_test(ctx: FrameworkContext):
-    """Connect to the framework on the other computer with the stored token and list the tools and task prompts it
-    offers Ditto, and how they join this computer's tools (offered once, only there, separately)"""
-    from orchestrator.llm.remote_tools import RemoteConnection, RemoteSetupError, TOKEN_NEXT, remote_server, \
-        stored_token
-    ctx.require_framework()
-    try:
-        server = remote_server(ctx.framework_manager.config)
-    except RemoteSetupError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
-    if server is None:
-        console.print("Ditto uses the framework on this computer (no other computer set): llm-cli ditto remote "
-                      "set ...")
-        return
-    token = stored_token(ctx.framework_manager.secrets_manager)
-    if not token:
-        console.print(f"[red]No named MCP token is stored. {escape(TOKEN_NEXT)}[/red]")
-        sys.exit(1)
-    try:
-        with RemoteConnection(server, token, _ditto_confirm) as remote:
-            tools, prompts, listing = remote.tools(), remote.prompts(), remote.listing()
-    except RemoteSetupError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
-    console.print(f"Framework at {escape(server.label())}: {len(tools)} tools Ditto may use there, "
-                  f"{len(prompts)} task prompts.")
-    for spec in tools:
-        console.print(f"  {escape(spec.name)}")
-    from orchestrator.llm.hybrid_tools import HybridToolSet, remote_place
-    try:
-        toolset = HybridToolSet.build(getattr(ctx.framework_manager, "tool_registry", None), "ditto",
-                                      listing=listing, remote=remote_place(server))
-    except ValueError as e:
-        console.print(f"[yellow]The tools could not be combined with this computer's: {escape(str(e))}[/yellow]")
-        return
-    counts = toolset.counts
-    console.print(f"With this computer's tools: {counts.get('once', 0)} offered once, {counts.get('only_there', 0)} "
-                  f"only there, {counts.get('separately', 0)} separately (another framework version).")
-    for notice in toolset.notices:
-        console.print(f"[yellow]{escape(notice)}[/yellow]")
-
-
 @ditto.group('runtime')
 def ditto_runtime():
     """Local model server (llama.cpp) for offline use"""
@@ -2411,16 +2233,10 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
         err.print(f"[dim]{escape(tool_note(use))}[/dim]" if use.ok else f"[yellow]{escape(tool_note(use))}[/yellow]")
 
     try:
-        reply = ditto.chat(question, confirm=_ditto_dialog(), use_tools=not no_tools, on_tool=tool_used)
+        reply = ditto.chat(question, confirm=_ditto_confirm, use_tools=not no_tools, on_tool=tool_used)
     except DittoError as e:
         err.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    finally:
-        closer = getattr(ditto, "close", None)
-        if callable(closer):  # the connection to another computer ends with this command
-            closer()
-    for notice in getattr(reply, "notices", None) or []:   # for the person (stderr), never part of the answer
-        err.print(f"[yellow]{escape(notice)}[/yellow]")
     click.echo(reply.text)
 
 
@@ -3752,6 +3568,51 @@ def knowledge_snapshots_export(ctx: FrameworkContext, names: Tuple[str, ...], de
         sys.exit(1)
 
 
+@knowledge.command('index-docs')
+@click.option('--with-code', is_flag=True,
+              help="Also index the framework's code and configuration (many more files, takes minutes)")
+@pass_context
+def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
+    """Add the framework's own documentation (README, CONTRIBUTING, docs) to the knowledge base, so Ditto can search
+    it; a snapshot is taken first"""
+    from orchestrator.Core.rag_manager import framework_documents
+    ctx.require_framework()
+    ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
+    rag = ensure() if callable(ensure) else None
+    if rag is None:
+        console.print("[red]The knowledge base is off (setting enable_rag_knowledge). Switch it on in the GUI's AI "
+                      "settings first.[/red]")
+        sys.exit(1)
+    docs, code = framework_documents(rag.app_root, with_code)
+    from orchestrator.tools.tools_framework_docs import snapshot_space
+    service = getattr(ctx.framework_manager, "build_service", None)
+    checks = snapshot_space(rag, getattr(service, "disk_usage", None))
+    short = [c for c in checks if not c.fits]
+    if short:  # no snapshot, no index: never "continue anyway"
+        console.print("[red]Not enough disk space for the snapshot taken first, so nothing was indexed: "
+                      f"{escape('; '.join(c.sentence() for c in short))}. Free space first (llm-cli knowledge "
+                      "snapshots lists the snapshots with their sizes).[/red]")
+        sys.exit(1)
+    for check in checks:
+        if check.verdict == "tight":
+            console.print(f"[yellow]Disk space: {escape(check.sentence())}.[/yellow]")
+    console.print(f"Indexing {len(docs)} documentation files"
+                  + (f" and {len(code)} code and configuration files" if with_code else "")
+                  + " into the knowledge base. A snapshot is taken first, so it can be undone.")
+    err = Console(stderr=True)
+    with err.status("Indexing...") as status:
+        result = rag.ingest_codebase(include_code=with_code,
+                                     progress=lambda n, total, name: status.update(f"File {n} of {total}"))
+    if not result.get("success"):
+        console.print(f"[red]{escape(str(result.get('message')))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]{escape(str(result.get('message')))}[/green]")
+    if result.get("snapshot"):
+        console.print(f"Snapshot taken first: {escape(str(result['snapshot']))} (llm-cli knowledge snapshots).")
+    console.print("Ditto finds these texts in its knowledge base now (search_knowledge with kind docs for AI "
+                  "clients).")
+
+
 # ============================================================================
 # TRASH (only the person restores or empties it)
 # ============================================================================
@@ -4011,7 +3872,7 @@ def mcp_token():
               help="Start with a copy of another caller's permissions: mcp (local stdio clients), ditto, or a "
                    "token name (mcp:NAME is always a token). Default: read only")
 @click.option('--link', type=click.Choice(['ditto']),
-              help="Use Ditto's permissions by reference (Ditto on another computer); changes apply at once")
+              help="Use Ditto's permissions by reference; a change to Ditto's applies at once")
 @pass_context
 def mcp_token_add(ctx: FrameworkContext, name: str, policy_from: Optional[str], link: Optional[str]):
     """Create a token; it can only read until you allow more (tools permissions --token NAME)"""

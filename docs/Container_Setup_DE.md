@@ -10,9 +10,7 @@ Image müsste für jedes Update neu gebaut und gepflegt werden; deshalb baust du
 Der Builder führt im Container dieselbe Installation aus wie auf einem Debian-Computer (`install.sh`), aus genau den
 Dateien, die das Repository ausliefert. Nichts wird irgendwohin hochgeladen.
 
-Auf einem Desktop-PC ist die [normale Installation](../README_DE.md#installation) einfacher. Damit Ditto das
-Framework auf einem anderen Computer nutzen kann, braucht es ebenfalls keinen Container ([Ditto und ein Framework auf
-einem anderen Computer](Features_DE.md#ditto-und-ein-framework-auf-einem-anderen-computer)).
+Auf einem Desktop-PC ist die [normale Installation](../README_DE.md#installation) einfacher.
 
 ## Inhalt
 
@@ -131,8 +129,7 @@ Loopback des Containers. KI-Clients erreichen das Framework im Container deshalb
 - **Ein benanntes Token statt des gemeinsamen Aufrufers `mcp`:** Lege es im Container mit
   `docker exec -it lcf-framework llm-cli mcp token add laptop` an und gib es als Umgebungsvariable weiter, nie auf
   der Befehlszeile: `docker exec -i -e LCF_MCP_TOKEN lcf-framework llm-cli mcp serve`, wobei `LCF_MCP_TOKEN` in der
-  Umgebung gesetzt ist, die der Client diesem Befehl mitgibt. Ditto auf einem anderen Computer ergänzt
-  `-e LCF_MCP_TOKEN` bei einem `docker exec`-Befehl selbst.
+  Umgebung gesetzt ist, die der Client diesem Befehl mitgibt.
 - **Stattdessen HTTP** (fortgeschritten): `llm-cli mcp serve --transport http --container` im Container bindet die
   Schnittstellen des Containers; veröffentliche den Port nur auf dem Loopback des Hosts (`-p 127.0.0.1:8765:8765`)
   und erreiche ihn von einem anderen Computer über einen SSH-Tunnel. Jeder Client braucht sein eigenes benanntes

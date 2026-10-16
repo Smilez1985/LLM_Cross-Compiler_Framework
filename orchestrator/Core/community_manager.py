@@ -911,8 +911,9 @@ class CommunityManager:
     def _knowledge_pages(self, root_urls: Optional[Iterable[str]] = None) -> Tuple[List[dict], int]:
         """Your pages of the knowledge base, privacy-scrubbed (home folders, addresses, host and user names,
         secrets), with root_urls only those crawled from these URLs; and how many pages imported from installed
-        community knowledge packs were left out (re-sharing them would sign them under your name). The knowledge
-        base keeps a page as several chunks: pages are counted by their source."""
+        community knowledge packs were left out (re-sharing them would sign them under your name). The framework's
+        own documents are never exported either: every installation indexes them itself (llm-cli knowledge
+        index-docs). The knowledge base keeps a page as several chunks: pages are counted by their source."""
         rag_manager = self.framework.get_component("rag_manager") if hasattr(self.framework, "get_component") \
             else None
         try:
@@ -923,6 +924,9 @@ class CommunityManager:
         if root_urls is not None:
             roots = {str(u) for u in root_urls}
             records = [r for r in records if (r.get("metadata") or {}).get("root_url") in roots]
+        from orchestrator.Core.rag_manager import source_kind
+        records = [r for r in records
+                   if source_kind({**(r.get("metadata") or {}), "source": r.get("source", "")}) != "docs"]
         own = [r for r in records if not (r.get("metadata") or {}).get("origin_pack")]
         pages = []
         for record in own:

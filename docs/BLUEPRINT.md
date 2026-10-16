@@ -185,7 +185,7 @@ flowchart TB
 | Managed local model (unreleased) | `orchestrator/runtime/`, `configs/llama_runtime.yml` | Builds `llama-server` on the machine from the pinned llama.cpp commit (b11429, the same commit as v0.6.0): the CPU build first, then a GPU build (Vulkan in this version), each verified before it is used; imports a build of another machine of the same kind; downloads the official prebuilt archive only on explicit request, labelled not self-built. Downloads pinned GGUF models in tiers (Qwen3.5 9B, 4B and 2B, 2-bit variants for weak hardware, and an IBM Granite 4.2 3B model on request), each checked by size and SHA256. Runs `llama-server` on 127.0.0.1 with a free port and a per-start API key. The `local` provider finds the running server by itself. |
 | Ditto evaluation (unreleased) | `orchestrator/evals/ditto_eval.py`, `evals/ditto/cases.yml`, `evals/retrieval/` | `llm-cli ditto eval`: 19 fixed cases (build-log analysis, build recommendations, module proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local model tier. Nothing is built: chat cases use the real tool definitions over a stand-in build service. With `--kind retrieval`, 42 searches grade the knowledge-base search on a fixed corpus, without an AI model (see [A knowledge-base search](#a-knowledge-base-search-unreleased)). |
 | Self-healing | `orchestrator/Core/self_healing_manager.py` | Recognizes known failures with fixed patterns first and asks Ditto only for unknown ones. Applies only framework-defined fixes, and only after your approval. |
-| Knowledge base and crawler | `orchestrator/Core/rag_manager.py`, `orchestrator/rag/`, `orchestrator/Core/crawler_manager.py` | Optional (`enable_rag_knowledge`). Web pages, PDFs, community knowledge packs and the framework's own code are split into chunks and stored with a local dense embedding (FastEmbed on ONNX Runtime, CPU; model chosen by hardware unless `rag_embedding_model` is set) and a BM25 vector. Searches combine both rankings with Reciprocal Rank Fusion; a local cross-encoder can rerank the results and drop those below a relevance floor (unreleased, see [A knowledge-base search](#a-knowledge-base-search-unreleased)). Qdrant runs embedded in the process with its storage in the per-user folder (unreleased); a Qdrant server is used only when `qdrant_url` is set. The crawler of Deep Ingest honours the sites' machine-readable opt-outs (see [Deep Ingest](#deep-ingest-from-a-web-page-to-the-knowledge-base-unreleased)). |
+| Knowledge base and crawler | `orchestrator/Core/rag_manager.py`, `orchestrator/rag/`, `orchestrator/Core/crawler_manager.py` | Optional (`enable_rag_knowledge`). Web pages, PDFs, community knowledge packs and, when you index them (`llm-cli knowledge index-docs`, the GUI or the tool `index_framework_docs`, never by themselves), the framework's own documentation and code are split into chunks and stored with a local dense embedding (FastEmbed on ONNX Runtime, CPU; model chosen by hardware unless `rag_embedding_model` is set) and a BM25 vector. Searches combine both rankings with Reciprocal Rank Fusion; a local cross-encoder can rerank the results and drop those below a relevance floor (unreleased, see [A knowledge-base search](#a-knowledge-base-search-unreleased)). Qdrant runs embedded in the process with its storage in the per-user folder (unreleased); a Qdrant server is used only when `qdrant_url` is set. The crawler of Deep Ingest honours the sites' machine-readable opt-outs (see [Deep Ingest](#deep-ingest-from-a-web-page-to-the-knowledge-base-unreleased)). |
 | Deep Ingest notice and spoken announcements (unreleased) | `orchestrator/utils/crawl_notice.py`, `orchestrator/utils/announce.py` | The one-time notice before the first Deep Ingest, remembered per user, and short announcements through the speech engine of the operating system. |
 | Community zoo (unreleased) | `orchestrator/Core/community_manager.py`, `orchestrator/Core/community_pack.py`, `orchestrator/schemas/recipes.py`, `orchestrator/gui/community_hub.py`, `configs/community_keys.yml` | Signed and encrypted community packs (targets, recipes, knowledge), the signed community index, installation through a quarantine with trust levels, export with privacy scrub and the hand-over to a pull request (see [Community packs](#community-packs-format-trust-and-exchange-unreleased)). |
 | Input history (unreleased) | `orchestrator/utils/input_history.py` | Recent values of the GUI input fields, per user and without secrets (see [Recent inputs](#recent-inputs-unreleased)). |
@@ -406,23 +406,10 @@ cloud provider, personal details are replaced by placeholders.
    answer.
 6. **History.** The finished turn is appended to `chat_history.json`. A long conversation is summarized and
    continued as a new conversation; earlier turns are never edited.
-7. **This computer and another computer** (`llm-cli ditto remote set`; `orchestrator/llm/hybrid_tools.py`). This
-   computer's tools always stay. When the framework installed on another computer is set up (the same program;
-   Docker is not needed, SSH or a server address is enough, with a named token linked to Ditto's permissions there,
-   `--link ditto`), its tools join the same list: a tool both offer with the same input schema once, with an optional
-   `place`; a catalogue tool only there with `place` required; another framework version's tool as
-   `remote_<name>`. Only catalogue names come from there, always with this computer's titles and descriptions; the
-   remote's own texts never reach the model. A router sends each call where its object lives (ids learned from
-   structured results, kept in the signed `ditto_places.json`): a contradicting place is `wrong_place`, objects on
-   both computers `needs_transfer`, since nothing is copied by itself. A remote call gets this computer's
-   write-ahead `started` entry (tier `remote`, `place remote:<name>`) and a linked end entry, and a change is not
-   sent when that entry cannot be written; that server then decides, asks and audits (actor `mcp:<token name>`).
-   Every remote result starts with a framework line before its untrusted block, and the turn is marked as tainted;
-   Ditto's dialog alone answers that server's questions, and a turn without a dialog connects without the ability to
-   ask. A computer that cannot be reached never stops a turn or resets the conversation (the turn goes on with this
-   computer's tools and a notice for the person). Ditto's tasks (build advice, module proposal, analysis of a remote
-   build) still take their context from that server's task prompts under Ditto's own task text, and a refused
-   call's reason code comes from the server's structured error, never from its words.
+7. **Only this computer's tools.** Ditto's hands are the framework's own tools on this computer: the same registry,
+   permissions, questions and audit log every MCP client gets. Ditto never connects to a framework on another
+   computer. An earlier development version had such a remote mode; it was removed before a release (decision of
+   2026-10-15). Its old settings are ignored with a log line, and a saved conversation of it starts anew once.
 
 ### Self-healing approval
 

@@ -16,10 +16,11 @@ from orchestrator.tools.registry import ToolError
 from orchestrator.tools.spec import CallFacts, CallWarning, Fact
 from test_build_tools import BUILD, GB, env, usage  # noqa: F401  (the build fixture)
 
-# The security and legal codes as reviewed for DELEGATION_RULES_VERSION 1. Changing the catalogue's kinds changes
-# what an AI under a delegation may decide: change this set, the version and the docs together (design 4.1).
-SECURITY_LEGAL_V1 = frozenset({
-    "artifact_from_other_computer", "base_image_unofficial", "base_image_unpinned", "base_model_gated",
+# The security and legal codes as reviewed for DELEGATION_RULES_VERSION 2 (version 1 also had
+# artifact_from_other_computer, a code of the removed remote mode). Changing the catalogue's kinds changes what an AI
+# under a delegation may decide: change this set, the version and the docs together (design 4.1).
+SECURITY_LEGAL_V2 = frozenset({
+    "base_image_unofficial", "base_image_unpinned", "base_model_gated",
     "facts_unknown", "first_build_unconfirmed", "gated_model", "license_restrictive", "license_unknown",
     "pickle_weights", "preflight_error", "signs_as_you", "target_pack_community", "target_unreviewed",
     "untrusted_model_native", "vendor_licence", "vendor_soft_cap_exceeded"})
@@ -54,9 +55,9 @@ def test_kind_from_catalog_only():
 
 
 def test_security_legal_codes_snapshot():
-    assert catalog.SECURITY_LEGAL == SECURITY_LEGAL_V1, (
-        "a warning changed its kind: review it, then update SECURITY_LEGAL_V1 and raise DELEGATION_RULES_VERSION")
-    assert catalog.DELEGATION_RULES_VERSION == 1
+    assert catalog.SECURITY_LEGAL == SECURITY_LEGAL_V2, (
+        "a warning changed its kind: review it, then update SECURITY_LEGAL_V2 and raise DELEGATION_RULES_VERSION")
+    assert catalog.DELEGATION_RULES_VERSION == 2
     assert {c for c, w in catalog.WARNINGS.items() if w.kind == "legal"} == {
         "gated_model", "base_model_gated", "license_restrictive", "license_unknown", "vendor_licence"}
 

@@ -669,9 +669,8 @@ class TestConfirmations:
         result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "--provider", "ollama", "Which targets?"])
         assert result.exit_code == 0, result.output
         assert "Rockchip and more." in result.stdout
-        # CliRunner has no terminal: the prompt that cannot reach a person (it denies as _ditto_confirm does, and lets
-        # no other computer ask; test_ditto_remote.py).
-        assert calls == [("Which targets?", cli._ditto_no_terminal, True)]
+        # CliRunner has no terminal: the terminal prompt, which denies without one.
+        assert calls == [("Which targets?", cli._ditto_confirm, True)]
         assert config.values["ai_provider"] == "ollama"
 
     def test_removed_provider_on_the_command_line_names_the_alternatives(self, monkeypatch):

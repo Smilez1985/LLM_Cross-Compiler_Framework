@@ -169,15 +169,13 @@ NO_TOOL_ACTIONS = [
 MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
 
 # Every tool name of this framework's catalogue (design section 2.1: the core, optional and later tools; pinned by
-# tests/test_tool_catalogue.py). Ditto offers a tool of the framework on another computer only under one of these
-# names, always with this framework's own title and description (hybrid design 6.3 rule 2): a name outside the
-# catalogue, or a remote server's own text, never reaches the model. A new tool joins this set and the test.
+# tests/test_tool_catalogue.py). A new tool joins this set and the test, so the catalogue stays one deliberate list.
 KNOWN_TOOLS = frozenset({
     # core
     "list_build_requests", "get_build_status", "read_build_log", "list_artifacts", "get_artifact_details",
     "check_build_request", "start_build", "cancel_build", "resolve_healing", "propose_healing_fix",
     "get_job_status", "cancel_job", "search_hf_models", "get_hf_model_info", "download_hf_file", "list_local_files",
-    "search_knowledge", "list_knowledge_sources", "read_knowledge_source", "crawl_docs_site",
+    "search_knowledge", "list_knowledge_sources", "read_knowledge_source", "crawl_docs_site", "index_framework_docs",
     "list_targets", "get_target_capabilities", "get_hardware_probe", "probe_local_hardware", "create_target_module",
     "list_devices", "create_deploy_package", "deploy_to_device",
     "list_packs", "add_pack_from_index", "export_pack", "start_recipe_build",
@@ -521,6 +519,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         registry.register(spec)
     # Each group of later tools lives in its own module (design section 8, phase T), registered here.
     register_knowledge_tools(registry, framework)
+    from orchestrator.tools.tools_framework_docs import register_framework_docs_tools  # N12: the own documents
+    register_framework_docs_tools(registry, framework, jobs)
     register_healing_tools(registry, framework, request_id["request_id"])
     register_hf_tools(registry, framework, jobs)
     from orchestrator.tools.tools_crawl import register_crawl_tools  # Deep Ingest (T7)

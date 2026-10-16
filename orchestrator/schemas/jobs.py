@@ -11,7 +11,7 @@ from orchestrator.tools.output import UNTRUSTED_DESCRIPTION, Untrusted, Untruste
 # so they are marked as external text (cleaned, capped and wrapped for the client's model).
 
 JobKind = Literal["crawl", "deploy", "package", "probe", "pack_import", "pack_export", "snapshot_restore",
-                  "hf_download", "runtime_build", "runtime_start", "benchmark", "approval"]
+                  "hf_download", "runtime_build", "runtime_start", "benchmark", "approval", "docs_index"]
 JobState = Literal["queued", "running", "waiting_for_approval", "done", "failed", "cancelled", "expired"]
 
 

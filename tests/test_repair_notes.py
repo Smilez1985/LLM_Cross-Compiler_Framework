@@ -4,9 +4,9 @@ A real Claude Code run (stdio, protocol 2026-07-28) showed that a declared alias
 "quantization") was audited, but a call refused early (a resource check, a limit, an invalid value, a denied
 permission, a "no", a timeout) told the client nothing about it, so the model never learned the right argument name.
 Every refusal and error that follows a repair now carries the same repair notes a successful result carries: over
-MCP in the structured error and at the end of the text, on Ditto's in-process path in the error's text, and on
-Ditto's MCP-client path in the remote error it gets. The registry-wide test runs every tool that declares aliases,
-present and future, through every kind of refusal on all three paths.
+MCP in the structured error and at the end of the text, and on Ditto's in-process path in the error's text. The
+registry-wide test runs every tool that declares aliases, present and future, through every kind of refusal on both
+paths.
 """
 
 import asyncio
@@ -21,7 +21,6 @@ from mcp import Client  # noqa: E402
 from conftest import REPO_ROOT  # noqa: E402
 from orchestrator import mcp_server  # noqa: E402
 from orchestrator.evals.ditto_eval import EvalEnvironment  # noqa: E402
-from orchestrator.llm.remote_tools import RemoteConnection, RemoteServer  # noqa: E402
 from orchestrator.tools.normalize import NormalizeError, normalize_arguments  # noqa: E402
 from orchestrator.tools.output import notes_text  # noqa: E402
 from orchestrator.tools.policy import Decision, ToolPolicy, ToolTier  # noqa: E402
@@ -68,23 +67,6 @@ def mcp_calls(env, calls, callback=None, mode="auto"):
         async with Client(built, elicitation_callback=callback, mode=mode) as client:
             return [await client.call_tool(name, arguments) for name, arguments in calls]
     return asyncio.run(go())
-
-
-def remote_errors(env, calls, confirm=lambda question, inp: True):
-    """The same calls by Ditto in MCP-client mode (a framework elsewhere, here in process): the ToolError each one
-    raised on Ditto's side (None for a call that ran)."""
-    built = server(env, caller="mcp:ditto-box")
-    connection = RemoteConnection(RemoteServer("stdio", command=("lcf",), name="box"), "unused", confirm=confirm,
-                                  client_factory=lambda elicit: Client(built, elicitation_callback=elicit))
-    errors = []
-    with connection:
-        for name, arguments in calls:
-            try:
-                connection.call(name, arguments)
-                errors.append(None)
-            except ToolError as e:
-                errors.append(e)
-    return errors
 
 
 def ditto_error(env, name, arguments, session, confirm=None):
@@ -231,14 +213,6 @@ class TestEveryAliasedToolNamesTheRepairOnEveryRefusal:
             callback = answering("accept", approve=False) if kind == "declined" else None
             results = mcp_calls(env, [(spec.name, call)] * attempts, callback=callback)
             assert_noted(results[-1], notes, f"MCP, {where}")
-
-            # Ditto as an MCP client of a framework elsewhere (the server's text, untrusted on Ditto's side)
-            if kind != "needs_person":  # Ditto's own dialog can always be asked
-                confirm = (lambda q, i: False) if kind == "declined" else (lambda q, i: True)
-                errors = remote_errors(env, [(spec.name, call)] * attempts, confirm=confirm)
-                assert errors[-1] is not None, where
-                assert all(note in str(errors[-1]) for note in notes), (f"remote, {where}", str(errors[-1]))
-                assert "<untrusted_data" in str(errors[-1])
             assert len(env.calls) == ran, f"{where}: the handler ran"
             allow(env)
             monkeypatch.undo()

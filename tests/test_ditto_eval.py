@@ -128,20 +128,6 @@ def test_duplicate_ids_are_refused(tmp_path):
 
 # --- graders ------------------------------------------------------------------------------------------------------
 
-def test_the_eval_never_uses_the_framework_on_another_computer():
-    # Ditto's hybrid adds the other computer's tools to every chat turn when the person set one up. An eval measures
-    # this computer's stand-in registry and answers questions with the case's fixed answer: it must never send calls
-    # (or answer that computer's questions) there (hybrid design 6.7: only the person answers those).
-    from orchestrator.llm.remote_tools import remote_server
-    settings = {"ai_ditto_tool_source": "mcp", "ai_ditto_mcp_transport": "stdio",
-                "ai_ditto_mcp_command": ["ssh", "-T", "build-host", "llm-cli", "mcp", "serve"]}
-    base = SimpleNamespace(get=lambda key, default=None: settings.get(key, default), set=lambda k, v: None)
-    runner = SimpleNamespace(ditto=SimpleNamespace(config=base, framework=None, client=None))
-    isolated = DittoEval._isolated(runner, None)
-    assert remote_server(base) is not None and remote_server(isolated.config) is None
-    assert isolated.config.get("ai_ditto_mcp_command") == settings["ai_ditto_mcp_command"], "other settings stay"
-
-
 def test_healing_grader():
     good = HealingAnalysis(**HEALING_OK)
     assert grade_healing(case("healing-disk-full").expect, good) == []

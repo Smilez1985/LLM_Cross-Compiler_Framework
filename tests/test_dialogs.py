@@ -1280,7 +1280,8 @@ class TestMainWindowWiring:
                                       "Open Community Hub", "Tool Permissions (Ditto / MCP)...",
                                       "Folders the AI May Use...", "Pending Approvals...",
                                       "Fix Proposals from AI Clients...", "Knowledge Snapshots...",
-                                      "Framework Build Images...", "Spoken Announcements", "Clear Input History..."]
+                                      "Framework Build Images...", "Index the Framework's Documentation...",
+                                      "Spoken Announcements", "Clear Input History..."]
             assert menus["File"] == ["Trash...", "Exit"]
             # The audio switch is a persisted setting, on by default.
             assert win.act_audio.isCheckable() and win.act_audio.isChecked()

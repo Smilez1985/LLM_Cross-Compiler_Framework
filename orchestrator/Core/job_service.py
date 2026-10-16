@@ -26,7 +26,7 @@ from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
 JOB_KINDS = ("crawl", "deploy", "package", "probe", "pack_import", "pack_export", "snapshot_restore", "hf_download",
-             "runtime_build", "runtime_start", "benchmark", "approval")
+             "runtime_build", "runtime_start", "benchmark", "approval", "docs_index")
 JOB_STATES = ("queued", "running", "waiting_for_approval", "done", "failed", "cancelled", "expired")
 TERMINAL_STATES = frozenset({"done", "failed", "cancelled", "expired"})
 JOB_ID_RE = re.compile(r"^job_[a-z0-9]{16}$")
