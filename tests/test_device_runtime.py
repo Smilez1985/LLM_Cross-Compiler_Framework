@@ -1552,14 +1552,17 @@ def test_gui_ssh_probe_sends_the_probe_on_stdin_and_stores_the_profile(qapp, tmp
     assert Path(path).parent == tmp_path / "probes"
 
 
-def test_gui_ssh_probe_refuses_a_bad_host(qapp, tmp_path, monkeypatch):
+@pytest.mark.parametrize("host", ["../../etc", "[fe80::1]"])
+def test_gui_ssh_probe_refuses_a_bad_host(qapp, tmp_path, monkeypatch, host):
+    """A bracketed IPv6 address is refused like in the CLI and the deploy, and the message says how to write it."""
     from orchestrator.gui import builder_tab
     monkeypatch.setattr(builder_tab, "PARAMIKO_AVAILABLE", True)
-    worker = builder_tab.SSHProbeWorker("../../etc", "u", None, tmp_path, tmp_path)
+    worker = builder_tab.SSHProbeWorker(host, "u", None, tmp_path, tmp_path)
     emitted = []
     worker.finished.connect(lambda ok, msg, path: emitted.append((ok, msg)))
     worker.run()
-    assert emitted == [(False, "Enter a host name or an IP address.")]
+    assert emitted == [(False, "Enter a host name or an IP address (an IPv6 address without brackets, e.g. "
+                               "fe80::1).")]
 
 
 def test_a_cli_consent_is_written_to_the_real_audit_log(tmp_path, monkeypatch):
