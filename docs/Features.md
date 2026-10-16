@@ -1342,12 +1342,11 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   snapshot is made, its size is estimated. When it does not fit beside the reserve that always stays free, no
   snapshot is made and the change does not run either; there is no "continue anyway". You get the list to delete or
   export snapshots (the GUI offers **Knowledge Snapshots...**; AI clients get the blocker `snapshot_no_room` with your
-  action). When it fits but leaves little free space, that is a situation warning (`disk_tight`). Both windows say
-  beforehand whether the next snapshot fits (GUI: the disk line of **Tools > Knowledge Snapshots...**, in the words of
-  `llm-cli knowledge snapshots`). **Tools > Knowledge Snapshots...** in the GUI or `llm-cli knowledge snapshots` lists
-  each
-  one with its full path, name, size and what it is, nothing ticked. To free space you tick the ones to delete (they
-  go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
+  action). When it fits but leaves little free space, that is a situation warning (`disk_tight`). The CLI and the GUI
+  both say beforehand whether the next snapshot fits (GUI: the disk line of **Tools > Knowledge Snapshots...**, in the
+  words of `llm-cli knowledge snapshots`). **Tools > Knowledge Snapshots...** in the GUI or `llm-cli knowledge
+  snapshots` lists each one with its full path, name, size and what it is, nothing ticked. To free space you tick the
+  ones to delete (they go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
   `llm-cli knowledge snapshots export NAME... --to FOLDER`, each copy checked by sha256). See [Deleting and the
   trash](#deleting-and-the-trash). Restoring a snapshot is not available from the GUI or the CLI yet. A snapshot is a
   portable file; snapshots written by earlier versions (format 1) are converted when they are restored.
@@ -2662,7 +2661,8 @@ installed version and folder, the download address with size and sha256, the des
 
 - **Open pull request** in the export dialog, or `--pr` with `llm-cli zoo export`, hands the pack to the repository
   in the setting `community_repo` (`owner/name`). The CLI first shows the summary and asks "Submit this pack to the
-  public community repository?" unless `--yes` is given; without a terminal nothing is submitted.
+  public community repository?" unless `--yes` is given; without a terminal nothing is submitted. The export window
+  asks the same question after its summary ("No" is the default).
 - If the GitHub CLI (`gh`) and `git` are installed and `gh` is logged in, the framework forks the repository,
   commits the pack as `contributions/<kind>/<file>` on a new branch and opens the pull request with `gh pr create`;
   `gh` and `git` use their own stored credentials. Otherwise, or if that fails, the repository's upload page opens in

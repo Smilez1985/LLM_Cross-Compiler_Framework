@@ -18,7 +18,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Qdrant-Server, Qdrant Edge, das sich nicht laden lässt), und **Jetzt umwandeln** wird auch vor dem ersten Versuch
   angeboten, unter der Bedingung von `llm-cli knowledge storage convert`. CLI und Fenster rufen dieselben neuen
   Kernfunktionen auf (`knowledge_snapshots.snapshot_disk`, `migration.storage_status`, `storage_lines` und
-  `convert_refusal`); die Ausgabe der CLI bleibt gleich.
+  `convert_refusal`); die Ausgabe der CLI bleibt gleich, außer bei einem eingestellten Qdrant-Server (siehe Behoben).
 - **Tools > Wissensquellen...: jede Quelle der Wissensbasis per Maus** (W1'): Ein neues Fenster listet jede Quelle mit
   ihrer Art, der Lizenz und dem Urheberrechtshinweis, die sie zeigt, und was ein Wissenspaket von ihr mitnähme (voller
   Text, Link und kurze Fakten, nicht exportiert) und warum, mit einem Filter nach Art (Webseiten, Seiten aus
@@ -1594,6 +1594,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Community Hub und Speicher der Wissensbasis: Installation im Hintergrund, die Frage vor dem Pull Request, ein
+  Qdrant-Server** (Prüfung von W1'): Ein Paket zu installieren (Install, Import file...) schob es nach deinem „Ja“
+  im GUI-Thread an seinen Platz, was bei einem Wissenspaket einen Snapshot der Wissensbasis und den Import jeder Seite
+  bei eingefrorenem Fenster bedeutete; das läuft jetzt im Hintergrund, und die Statuszeile nennt den zuvor
+  angelegten Snapshot, wie `llm-cli zoo install`. **Open pull request** im Export-Fenster übergab das Paket sofort an
+  einen öffentlichen Pull Request; es stellt jetzt zuerst die Frage von `llm-cli zoo export --pr` („Dieses Paket beim
+  öffentlichen Community-Repository einreichen?“, „Nein“ ist die Vorgabe). Mit einem eingestellten Qdrant-Server
+  (`qdrant_url`) nannten `llm-cli knowledge storage` und **Tools > Knowledge Snapshots...** den lokalen Speicher und
+  boten an, ihn umzuwandeln, was den Server öffnete und nichts umwandelte; beide nennen jetzt den Server, und die
+  Umwandlung wird abgelehnt, solange er eingestellt ist. Eine in **Import file...** oder im Export-Fenster eingegebene
+  Passphrase bleibt nach Abbrechen oder Schließen nicht mehr im verborgenen Fenster.
 - **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
   seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
   (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein

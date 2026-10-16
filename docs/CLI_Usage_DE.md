@@ -349,16 +349,19 @@ früheren Version (`~/.llm-framework/qdrant`) wird bei ihrer ersten Nutzung umge
 kopiert und geprüft, nichts wird neu eingebettet. `show` (die Vorgabe) liest den Eintrag dieser Umwandlung und öffnet
 nichts: wann sie umgewandelt wurde, wie viele Auszüge, und den alten Ordner mit vollem Pfad und Größe; oder, wenn die
 Umwandlung fehlschlug, warum und wann sie erneut versucht wird (der alte Speicher arbeitet so lange weiter). Die erste
-Zeile nennt den Speicher, der wirklich genutzt wird. `convert` wandelt sofort um, vor jedem Versuch oder nach einem
-Fehler, der nicht von selbst erneut versucht wird; dafür muss die Wissensbasis eingeschaltet sein. `delete-old` zeigt den alten Ordner nach seiner Umwandlung und
-löscht ihn erst nach deiner Antwort in einem Terminal (Vorgabe Papierkorb, oder endgültig; "Nein" ist die Vorgabe). Ohne
+Zeile nennt den Speicher, der wirklich genutzt wird: Ist ein Qdrant-Server eingestellt (`qdrant_url`), ist das der
+Server, und der lokale Speicher wird nicht genutzt. `convert` wandelt sofort um, vor jedem Versuch oder nach einem
+Fehler, der nicht von selbst erneut versucht wird; dafür muss die Wissensbasis eingeschaltet sein, und solange ein
+Qdrant-Server eingestellt ist, lehnt es ab (die Wissensbasis würde den Server öffnen und nichts umwandeln).
+`delete-old` zeigt den alten Ordner nach seiner Umwandlung und löscht ihn erst nach deiner Antwort in einem Terminal
+(Vorgabe Papierkorb, oder endgültig; "Nein" ist die Vorgabe). Ohne
 Terminal wird nichts gelöscht. Vor der Umwandlung oder solange sie fehlschlug, ist der alte Ordner die Wissensbasis
 selbst und wird nicht angeboten.
 
 In der GUI: **Tools > Knowledge Snapshots...**: die Zeile zum Speicher in jedem Zustand (`show`: Qdrant Edge, der alte
 Speicher mit seinem Grund, ein Qdrant-Server, oder Qdrant Edge, das sich nicht laden lässt); **Jetzt umwandeln** (noch
 nicht versucht) oder **Umwandlung erneut versuchen** (nach einem Fehler) für `convert`, unter derselben Bedingung
-angeboten; **Alten Speicher löschen...** für `delete-old`.
+angeboten (nicht, solange ein Qdrant-Server eingestellt ist); **Alten Speicher löschen...** für `delete-old`.
 
 ```bash
 llm-cli knowledge storage
@@ -2216,8 +2219,8 @@ In der GUI: **Tools > Community Hub öffnen > Exportieren...**: ein Target (auch
 installiertes; ein Community-Paket wird wie hier abgelehnt), die `build_info.json` eines fertigen Builds, oder die
 Wissensbasis; dann Autor, Lizenz, **Paket-ID** (Wissen, `--id`), **Privat teilen** an die Schlüssel in
 Schlüsseldateien (`--to`) oder mit einer zweimal eingegebenen Passphrase (`--passphrase`), **Ordner** (`--out`),
-**Create pack** und **Open pull request** (`--pr`). Außerdem die letzte Seite des Modul-Assistenten und das
-Kontextmenü des Builder-Logs.
+**Create pack** und **Open pull request** (`--pr`: nach der Zusammenfassung stellt es dieselbe Frage, „Nein“ ist die
+Vorgabe). Außerdem die letzte Seite des Modul-Assistenten und das Kontextmenü des Builder-Logs.
 
 ### zoo keys
 

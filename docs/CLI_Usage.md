@@ -341,16 +341,19 @@ Unreleased. The knowledge base is stored in Qdrant Edge (`~/.llm-framework/qdran
 version (`~/.llm-framework/qdrant`) is converted on its first use; vectors and texts are copied and checked, nothing is
 embedded again. `show` (the default) reads the record of that conversion and opens nothing: when it was converted, how
 many excerpts, and the old folder with its full path and size; or, when the conversion failed, why and when it is tried
-again (the old store keeps working meanwhile). The first line names the storage really in use. `convert` converts now,
-before any attempt or after a failure that is not tried again by itself; it needs the knowledge base switched on. `delete-old` lists the old folder after its
-conversion and deletes it only after your answer at a terminal (trash by default, or for good; "No" is the default).
+again (the old store keeps working meanwhile). The first line names the storage really in use: with a Qdrant server
+set (`qdrant_url`) that is the server, and the local storage is not used. `convert` converts now, before any attempt or
+after a failure that is not tried again by itself; it needs the knowledge base switched on, and it refuses while a
+Qdrant server is set (the knowledge base would open the server and convert nothing). `delete-old` lists the old folder
+after its conversion and deletes it only after your answer at a terminal (trash by default, or for good; "No" is the
+default).
 Without a terminal nothing is deleted. Before the conversion, or while it failed, the old folder is the knowledge base
 itself and is not offered.
 
 In the GUI: **Tools > Knowledge Snapshots...**: the storage line in every state (`show`: Qdrant Edge, the old storage
 with its reason, a Qdrant server, or Qdrant Edge that cannot be loaded); **Convert now** (not tried yet) or **Try the
-conversion again** (after a failure) for `convert`, offered on the same condition; **Delete the old storage...** for
-`delete-old`.
+conversion again** (after a failure) for `convert`, offered on the same condition (not while a Qdrant server is set);
+**Delete the old storage...** for `delete-old`.
 
 ```bash
 llm-cli knowledge storage
@@ -2126,8 +2129,8 @@ llm-cli zoo export target my-board --author "<your name>" --pr
 In the GUI: **Tools > Open Community Hub > Export...**: a target (also one you made or installed; a community pack is
 refused as here), a finished build's `build_info.json`, or the knowledge base; then the author, licence, **Pack id**
 (knowledge, `--id`), **Private sharing** to the keys in key files (`--to`) or with a passphrase typed twice
-(`--passphrase`), **Folder** (`--out`), **Create pack** and **Open pull request** (`--pr`). Also the module wizard's
-last page and the Builder log's context menu.
+(`--passphrase`), **Folder** (`--out`), **Create pack** and **Open pull request** (`--pr`: after the summary it asks
+the same question, "No" is the default). Also the module wizard's last page and the Builder log's context menu.
 
 ### zoo keys
 

@@ -235,3 +235,34 @@ def test_the_export_window_forgets_the_passphrase_when_it_closes(qapp, world):
     dialog.passphrase2_edit.setText("a long enough passphrase")
     dialog.reject()
     assert dialog.passphrase_edit.text() == "" and dialog.passphrase2_edit.text() == ""
+
+
+def test_a_knowledge_pack_installed_by_mouse_names_the_snapshot_taken_first(qapp, world, tmp_path, monkeypatch):
+    """As `llm-cli zoo install` says it: the knowledge base was saved as a snapshot before the pack's pages went in
+    (N13), and the person sees its name; the import itself ran in the background."""
+    import json
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from orchestrator.gui import community_hub
+    from orchestrator.utils.localization import ui_text
+    from test_zoo import pack_bytes
+    root = tmp_path / "k"
+    root.mkdir()
+    (root / "knowledge.json").write_text(json.dumps([{"source": "s", "content": "c", "metadata": {}}]))
+    (tmp_path / "k.zip").write_bytes(pack_bytes(root, kind="knowledge", pack_id="notes", version="1.0.0"))
+    taken = []
+    world.rag.create_snapshot = lambda name, what: taken.append(threading.current_thread().name) or f"{name}.jsonl.gz"
+    monkeypatch.setattr(community_hub.QMessageBox, "exec", lambda self: QMessageBox.Yes)
+    import_dialog_answers(monkeypatch, (tmp_path / "k.zip", "", []))
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.import_btn.click()
+        settle(hub, qapp)
+        assert world.rag.ingested == [("s", "c")]
+        assert taken and taken[0] != threading.current_thread().name, "snapshot and import off the GUI thread"
+        name = world.cm.last_sync_snapshot
+        assert name and ui_text("zoo.install.snapshot", "en", name=name) in hub.status_label.text()
+    finally:
+        hub.close()

@@ -1473,9 +1473,10 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   kein Schnappschuss angelegt, und die Änderung läuft auch nicht; ein „trotzdem weiter“ gibt es nicht. Du bekommst die
   Liste, um Schnappschüsse zu löschen oder zu exportieren (die GUI bietet **Knowledge Snapshots...** an; KI-Clients
   bekommen den Blocker `snapshot_no_room` mit deiner Handlung). Passt er, lässt aber wenig Platz übrig, ist das eine
-  Lagewarnung (`disk_tight`). Beide sagen vorher, ob der nächste Schnappschuss passt (GUI: die Zeile zur Festplatte
-  in **Tools > Knowledge Snapshots...**, mit den Worten von `llm-cli knowledge snapshots`). **Tools > Knowledge
-  Snapshots...** in der GUI oder `llm-cli knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe und was er ist, nichts angehakt. Um Platz zu
+  Lagewarnung (`disk_tight`). CLI und GUI sagen beide vorher, ob der nächste Schnappschuss passt (GUI: die Zeile zur
+  Festplatte in **Tools > Knowledge Snapshots...**, mit den Worten von `llm-cli knowledge snapshots`). **Tools >
+  Knowledge Snapshots...** in der GUI oder `llm-cli knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe
+  und was er ist, nichts angehakt. Um Platz zu
   schaffen, hakst du die an, die gelöscht werden sollen (sie kommen zuerst in den Papierkorb; `llm-cli knowledge
   snapshots prune` oder `delete NAME...`), oder kopierst sie woandershin (Export; `llm-cli knowledge snapshots export
   NAME... --to ORDNER`, jede Kopie per sha256 geprüft). Siehe [Löschen und der Papierkorb](#löschen-und-der-papierkorb).
@@ -2934,7 +2935,8 @@ tun, was `zoo verify`, `zoo verify DATEI`, `zoo export` und `zoo keys` tun; jede
 
 - **Open pull request** im Export-Dialog oder `--pr` bei `llm-cli zoo export` übergibt das Pack an das Repository aus
   der Einstellung `community_repo` (`owner/name`). Die CLI zeigt zuerst die Zusammenfassung und fragt „Submit this
-  pack to the public community repository?“, außer `--yes` ist angegeben; ohne Terminal wird nichts übergeben.
+  pack to the public community repository?“, außer `--yes` ist angegeben; ohne Terminal wird nichts übergeben. Das
+  Export-Fenster stellt nach seiner Zusammenfassung dieselbe Frage („Nein“ ist die Vorgabe).
 - Sind die GitHub CLI (`gh`) und `git` installiert und ist `gh` angemeldet, forkt das Framework das Repository,
   committet das Pack als `contributions/<Art>/<Datei>` auf einem neuen Branch und öffnet den Pull Request mit
   `gh pr create`; `gh` und `git` nutzen ihre eigenen gespeicherten Zugangsdaten. Sonst, oder wenn das scheitert,
