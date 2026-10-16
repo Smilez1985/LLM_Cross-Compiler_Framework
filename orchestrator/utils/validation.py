@@ -24,21 +24,18 @@ Updates v2.3.0:
 """
 
 import os
-import sys
-import json
 import re
 import subprocess
 import platform
 import socket
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union, Tuple, Set, Callable
+from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 import ipaddress
 import urllib.parse
 
-import yaml
 import psutil
 from packaging import version
 
@@ -387,8 +384,8 @@ def _validate_path_security(path: Path) -> ValidationResult:
     """Validate path security (prevent path traversal, etc.)"""
     
     try:
-        # Resolve path to check for traversal
-        resolved_path = path.resolve()
+        # Resolve path to check for traversal (an unresolvable path fails here)
+        path.resolve()
         
         # Check for path traversal attempts
         if ".." in path.parts:
@@ -451,7 +448,6 @@ def validate_directory_writable(directory: Union[str, Path]) -> ValidationResult
     
     try:
         # Attempt to create and delete a test file
-        import tempfile
         import uuid
         
         test_filename = f".test_write_{uuid.uuid4().hex[:8]}"
@@ -1621,7 +1617,16 @@ try:
         supported_platforms=["linux", "windows", "macos"]
     )
     
-    _init_validation = validate_system_requirements(basic_requirements)
+    # validate_system_requirements() without the lookups of the optional commands (cmake, ninja: two child
+    # processes) and the CPU and memory-usage samples: those only give warnings, which are not logged here (a failing
+    # psutil shows in the memory check), and the CPU sample waited one second on every import, i.e. on every start
+    # of the CLI, the GUI and the MCP server.
+    _init_validation = ValidationReport()
+    for _result in (_validate_python_version(basic_requirements.min_python_version),
+                    _validate_memory_requirements(basic_requirements.min_memory_gb),
+                    _validate_disk_space(basic_requirements.min_disk_space_gb),
+                    _validate_platform(basic_requirements.supported_platforms)):
+        _init_validation.add_result(_result)
     if not _init_validation.overall_valid:
         # Log warnings using logger but don't break import
         for error in _init_validation.get_errors():

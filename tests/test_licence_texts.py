@@ -222,6 +222,42 @@ def test_a_knowledge_pack_ships_each_licence_text_and_a_notice_of_every_page(wor
     assert contents.signer, "the author signature covers the licence files"
 
 
+def test_a_knowledge_pack_from_the_qdrant_edge_knowledge_base_ships_the_licence_texts(world, make_rag):  # noqa: F811
+    """The export reads the pages from the knowledge base itself, which keeps them in Qdrant Edge (DECISIONS RG5):
+    the licence, copyright line, licence-file flag and repository of each page come back from the Edge store, and the
+    pack ships the same licence texts and NOTICE as from any other store."""
+    pytest.importorskip("qdrant_edge")
+    rag = make_rag()
+    pages = {}
+    for entry in sorted(full_world_records(), key=lambda e: e["metadata"].get("chunk_index", 0)):
+        meta = {k: v for k, v in entry["metadata"].items() if k != "chunk_index"}
+        text, _ = pages.get(entry["source"], ("", meta))
+        pages[entry["source"]] = (f"{text}\n{entry['content']}".strip(), meta)
+    for source, (text, meta) in pages.items():   # the NOTICE file as one page, as a crawl stores it
+        assert rag.ingest_document(source, text, meta, replace=True), rag.last_error
+    assert rag.get_status()["store_format"] == "qdrant-edge"
+    world.rag = rag
+    result = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+    files = pack_files(result.path)
+    shipped = sorted(n for n in files if n.startswith("LICENSES/"))
+    assert shipped == [f"LICENSES/{x}.txt" for x in ("Apache-2.0", "BSD-3-Clause", "CC-BY-4.0", "ISC", "MIT",
+                                                     "MPL-2.0")]
+    assert all(files[n] == (DATA / n.split("/")[1]).read_bytes() for n in shipped)
+    notice = files["NOTICE"].decode("utf-8")
+    assert (f"Source: {TOOL}/blob/main/src/main.c\nCopyright: Copyright (c) 2024 Acme Tools (from the licence file of "
+            "the repository)\nSPDX id: MIT") in notice, "the licence file's flag and repository survive the store"
+    assert "Source: https://docs.example/bsd\nCopyright: Copyright (c) 2019, Board Makers\nSPDX id: BSD-3-Clause" \
+        in notice
+    assert f"NOTICE file of github.com/acme/lib, as the crawl read it ({LIB}/blob/main/NOTICE):" in notice
+    assert "This product includes software developed at Acme." in notice
+    assert f"Source: {DOCS}/sdk\nCopyright: Copyright 2023 Vendor. All rights reserved.\nSPDX id: none found" in notice
+    entries = json.loads(files["knowledge.json"])
+    code = next(e for e in entries if e["source"].endswith("main.c"))["metadata"]
+    assert code["licence_text_file"] == "LICENSES/MIT.txt" and code["shared_as"] == FULL_TEXT
+    assert next(e for e in entries if e["source"].endswith("/sdk"))["metadata"]["shared_as"] == LINK_AND_FACTS
+    assert read_pack(result.path, world.tmp / "check", keys=[sign_key_of(world)]).signer
+
+
 def sign_key_of(world):
     from orchestrator.Core.community_pack import UserKeys
     return UserKeys(world.secrets).signing_key().public_key()

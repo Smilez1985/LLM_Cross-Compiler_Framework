@@ -123,6 +123,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `doctor` | Der alte Name von `mojo`, mit seinen Optionen aus 3.0.0 |
 | `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten; die ausgewählten löschen oder exportieren (unveröffentlicht) |
 | `knowledge index-docs` | Die eigene Dokumentation des Frameworks (und mit `--with-code` seinen Code) in die Wissensbasis aufnehmen (unveröffentlicht) |
+| `knowledge storage` | Wo die Wissensbasis liegt (Qdrant Edge), die Umwandlung einer älteren und ihr alter Ordner: `convert`, `delete-old` (unveröffentlicht) |
 | `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen (unveröffentlicht) |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
@@ -325,6 +326,31 @@ Wissensbasis muss eingeschaltet sein.
 ```bash
 llm-cli knowledge sources
 llm-cli knowledge sources --kind web
+```
+
+### knowledge storage
+
+```
+llm-cli knowledge storage [show]
+llm-cli knowledge storage convert
+llm-cli knowledge storage delete-old
+```
+
+Unveröffentlicht. Die Wissensbasis liegt in Qdrant Edge (`~/.llm-framework/qdrant_edge`). Eine Wissensbasis einer
+früheren Version (`~/.llm-framework/qdrant`) wird bei ihrer ersten Nutzung umgewandelt; Vektoren und Texte werden
+kopiert und geprüft, nichts wird neu eingebettet. `show` (die Vorgabe) liest den Eintrag dieser Umwandlung und öffnet
+nichts: wann sie umgewandelt wurde, wie viele Auszüge, und den alten Ordner mit vollem Pfad und Größe; oder, wenn die
+Umwandlung fehlschlug, warum und wann sie erneut versucht wird (der alte Speicher arbeitet so lange weiter). Die erste
+Zeile nennt den Speicher, der wirklich genutzt wird. `convert` versucht die Umwandlung sofort, auch nach einem Fehler,
+der nicht von selbst erneut versucht wird; dafür muss die Wissensbasis eingeschaltet sein (in der GUI: **Tools >
+Knowledge Snapshots... > Umwandlung erneut versuchen**). `delete-old` zeigt den alten Ordner nach seiner Umwandlung und
+löscht ihn erst nach deiner Antwort in einem Terminal (Vorgabe Papierkorb, oder endgültig; "Nein" ist die Vorgabe). Ohne
+Terminal wird nichts gelöscht. Vor der Umwandlung oder solange sie fehlschlug, ist der alte Ordner die Wissensbasis
+selbst und wird nicht angeboten.
+
+```bash
+llm-cli knowledge storage
+llm-cli knowledge storage delete-old
 ```
 
 ---

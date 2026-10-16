@@ -44,9 +44,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
-from bs4 import Comment
-from bs4.element import Declaration, Doctype, ProcessingInstruction
-
 from orchestrator.rag import licence_texts
 
 # The licences the framework recognises: id -> (the text may be passed on in a pack, attribution is required).
@@ -563,21 +560,28 @@ def _file_text(soup) -> str:
 
 
 _SKIPPED = frozenset({"script", "style", "noscript", "template", "head", "title"})
-_NOT_TEXT = (Comment, Declaration, Doctype, ProcessingInstruction)
 _BLOCKS = frozenset({"html", "body", "p", "div", "footer", "header", "nav", "main", "section", "article", "aside",
                      "address", "li", "ul", "ol", "dl", "dt", "dd", "table", "tr", "td", "th", "blockquote", "pre",
                      "figure", "figcaption", "form", "center", "h1", "h2", "h3", "h4", "h5", "h6"})
 
 
+def _not_text() -> tuple:
+    """bs4's nodes that are no visible text; bs4 is imported with the page, not with this module (lazy loading)."""
+    from bs4 import Comment
+    from bs4.element import Declaration, Doctype, ProcessingInstruction
+    return Comment, Declaration, Doctype, ProcessingInstruction
+
+
 def _page_text(soup) -> str:
     """The visible text of the whole page (footer included), one line per block (a link inside a sentence stays in
     its line), without scripts, styles and comments."""
+    not_text = _not_text()
     lines: List[str] = []
     parts: List[str] = []
     current = None
     for node in soup.find_all(string=True):
         parent = node.parent
-        if parent is None or parent.name in _SKIPPED or isinstance(node, _NOT_TEXT):
+        if parent is None or parent.name in _SKIPPED or isinstance(node, not_text):
             continue
         block = parent
         while block is not None and block.name not in _BLOCKS:

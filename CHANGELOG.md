@@ -10,6 +10,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
+  knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
+  what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record
+  only, and its first line names the storage really in use. `convert`, and **Tools > Knowledge Snapshots... > Try the
+  conversion again** in the GUI (in the background), try the conversion again now. `delete-old`, and **Tools >
+  Knowledge Snapshots... > Delete the old storage...** in the GUI, list the old folder after its conversion and delete
+  it only after your yes (trash or for good; "No" is the default; audited as `old_store_deleted`); nothing deletes it
+  by itself, and an AI never can. Mojo Oracle reports a failed conversion (with the reason and both ways to try again)
+  and an old folder that is still kept.
 - **A deploy tells you about an old Qdrant sidecar on the board**: packages with Docker images from earlier versions
   started the container `qdrant-sidecar`, which nothing uses any more. After a successful deploy (`llm-cli deploy
   run`, the Deployment window, the AI tool `deploy_to_device`) the framework looks with `docker ps` (for at most 20
@@ -957,6 +966,53 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **Faster start: heavy parts load when they are first used** (unreleased; maintainer decision RG1, lazy loading):
+  `llm-cli`, the MCP server and the GUI imported the whole framework at start. Now a CLI command imports the
+  framework, the build engine and the managers only when it uses them; the framework imports its managers when it
+  boots, and the knowledge base only when it is switched on; Qt is loaded outside the GUI only when a signal of the
+  Docker manager is used; the crawler (with its HTML and PDF parsers), numpy, Mojo's checks, the provider layer of
+  `orchestrator.llm` and the parts of `orchestrator.runtime` load with their first use, also when the knowledge base
+  is on; `--help` loads no rich. The host check that ran when the URL checks were imported took a one-second CPU
+  sample and looked up two programs, results it never showed; it now runs only the checks whose errors it reports
+  (disk, memory, Python, platform), so its disk warning appears when the URL checks are first used, not at every
+  start. Measured on the same machine with a temporary home, before and after, in alternating runs (median of 5):
+  `llm-cli --help` 3.15 s and 140 MB to 0.25 s and 27 MB; `llm-cli mcp serve` until it answers `initialize` 4.77 s
+  and 191 MB to 2.67 s and 118 MB (2.69 s and 118 MB with the knowledge base on); the GUI main window 3.97 s and
+  210 MB to 2.66 s and 177 MB. The boot still checks Docker as before, so `mcp serve` and the GUI still load the
+  Docker SDK. Commands, results and messages are unchanged. A framework part that cannot be imported (a broken
+  installation) now ends the boot with its cause, like other boot errors: the CLI prints "Failed to initialize
+  framework: ..." and exits with 1 instead of a traceback, and `--help` still works. Tests start the CLI,
+  `mcp serve` (also with the knowledge base on) and the GUI in a fresh interpreter and check that the crawler, the
+  embedding libraries, the provider SDKs, Qt, Mojo's checks (its board check too), the knowledge base's storage and
+  the private bridge to the open window are not loaded and that no licence text of the knowledge packs is read; the
+  MCP server loads the bridge with the first call of its `gui` tool, and the GUI starts it with its window.
+- **Roadmap: Rust where the framework meets the network or a board** (unreleased; maintainer decisions RG2 to RG4):
+  the blueprint's roadmap plans the network MCP gateway in Rust with the MQTT broker rumqttd inside it (instead of
+  the amqtt broker planned in the Python process), the board's root helper as a static Rust binary, and the
+  framework's Rust parts as prebuilt release assets signed with Sigstore, with their checksums in the repository and
+  building them yourself as an opt-in. It also records: no prebuilt Docker images for targets, no Go, and the GUI
+  stays Qt.
+- **The local knowledge base is stored in Qdrant Edge** (DECISIONS RG5): the Rust engine of Qdrant runs in the
+  framework process (new dependency `qdrant-edge-py` 0.8.0, Apache-2.0, exact pin; wheels for Linux x86_64 and
+  aarch64, Windows x86_64 and macOS, one wheel for every Python from 3.10) instead of qdrant-client's local mode, a
+  Python re-implementation meant for development. The data moves to `~/.llm-framework/qdrant_edge`. Collections per
+  embedding model, ids, payloads, filters, replacing a source, the reranker, the excerpt budget and the snapshots
+  behave as before; the dense search stays exact and the fused scores stay the same (RRF k = 2). Only one process
+  opens the storage at a time: the framework's lock file `qdrant_edge.lock` keeps the GUI, the CLI and the MCP server
+  from writing it at once, a second process waits up to 5 seconds and then gets a clear "in use" error. An older
+  knowledge base is converted on first use: vectors and texts are copied (nothing is embedded again), counts and a
+  sample of points and searches are checked against the old store, and the conversion is recorded in
+  `knowledge_conversion.json`; the old folder `qdrant` stays until you delete it. A failed conversion leaves the old
+  store working and says why. Once converted, the old folder never stands in again: if Qdrant Edge cannot be loaded
+  later (a missing or broken package), the knowledge base is refused with the reason and Mojo Oracle reports an error,
+  instead of quietly using the old folder, which lacks what was added since. Measured twice with 50 000 synthetic
+  excerpts: a search takes 12 to 14 ms instead of 2.5 to 4.9 s, opening about 1 s instead of 11 to 19 s, memory 410 to
+  520 MB instead of 1.6 to 2 GB; the conversion took 68 to 159 s (5 000 excerpts: 13.5 s).
+  qdrant-client stays for an optional Qdrant server (`qdrant_url`) and to read the old storage. Qdrant Edge has no
+  build for Windows on ARM; there the knowledge base keeps qdrant-client's local mode, and Mojo Oracle says so.
+- **Knowledge snapshots name the storage they came from (format 2)**: a snapshot stays a portable file, the same for
+  every storage. Snapshots of format 1, written by earlier versions, restore into Qdrant Edge and are converted that
+  way; a newer format, a vector of the wrong dimension or a broken keyword vector is refused before anything changes.
 - **The identical-build check no longer blocks the builder window** (unreleased; eighth round, N11): before a build,
   the check asked Hugging Face for the model's current commit on the window's own thread, so the window stopped
   responding on a slow network (up to 10 seconds). The look-up now runs in the background; Start waits meanwhile and
@@ -1451,7 +1507,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   writes one record per build into `<cache_dir>/build_records/` (status, stage, progress, the error redacted), and
   a build whose program ended before it finished is shown as interrupted. The command needs neither the credential
   vault nor Docker; `--all` lists every kept build instead of the 20 newest. On Linux and macOS the records are
-  readable only by the user who built (folder 0700, files 0600).
+  readable only by the user who built (folder 0700, files 0600). A record names the build's outcome before its build
+  slot is free, so whoever sees the build ended reads the outcome there, never the stage before it.
 - Ctrl+C in `llm-cli build start` cancels the build through the build service: its container is stopped, the CLI
   waits until the build has stopped (also when it was still being handed to the build engine), says so and exits
   with code 130. Before, the build and its container kept running.

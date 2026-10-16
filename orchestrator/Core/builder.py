@@ -114,27 +114,8 @@ class BuildStatus(Enum):
     CANCELLED = "cancelled"
     CLEANING = "cleaning"
 
-class ModelFormat(Enum):
-    HUGGINGFACE = "hf"
-    GGUF = "gguf"
-    RKLLM = "rkllm"          # Rockchip NPU LLM (RK3588/RK3576)
-    ONNX = "onnx"
-    TENSORFLOW_LITE = "tflite"
-    PYTORCH_MOBILE = "pytorch_mobile"
-    # Hardware-Specific Formats
-    RKNN = "rknn"           # Rockchip NPU
-    TENSORRT = "tensorrt"   # NVIDIA GPU
-    OPENVINO = "openvino"   # Intel NPU/CPU
-    COREML = "coreml"       # Apple Silicon
-    NCNN = "ncnn"           # Mobile High-Performance
-    MNN = "mnn"             # Alibaba Mobile
-
-class OptimizationLevel(Enum):
-    FAST = "fast"
-    BALANCED = "balanced"
-    SIZE = "size"
-    SPEED = "speed"
-    AGGRESSIVE = "aggressive"
+# ModelFormat and OptimizationLevel live in build_formats (the CLI imports them without this module).
+from orchestrator.Core.build_formats import ModelFormat, OptimizationLevel  # noqa: E402,F401 - re-exported
 
 TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"
@@ -633,14 +614,15 @@ class BuildEngine:
             outcome = self._execute_build_stages(config, prog)
         finally:
             # The outcome becomes visible together with the free slot, so a poller that sees it can submit
-            # its next build right away. A cancel is never undone.
+            # its next build right away. A cancel is never undone. The record names the outcome before the slot is
+            # free: a poller that sees the build ended reads its record next.
             with self._lock:
                 if prog.status != BuildStatus.CANCELLED:
                     prog.status = outcome
+                prog.end_time = prog.end_time or datetime.now()
+                self._save_record(bid)
                 self._running.discard(bid)
                 self._settled.discard(bid)
-            prog.end_time = prog.end_time or datetime.now()
-            self._save_record(bid)
 
     def _execute_build_stages(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
         """Runs the stages and returns the outcome; _execute_build publishes it."""
