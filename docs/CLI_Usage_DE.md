@@ -404,7 +404,8 @@ gibt es eine passende `llama-server`-Befehlszeile aus, wenn `llama-server` auf d
 | `--wait SEKUNDEN` | Wenn das Netzwerk während des Deployments wegbricht, so lange auf das Board warten (Vorgabe 300, 0 bis 86400). |
 
 Bricht das Netzwerk weg (zum Beispiel bei einem Board nur mit WLAN), wartet das Deployment auf das Board und zeigt,
-wie lange es schon wartet und wie lange höchstens; Strg+C bricht ab. Sobald das Board auf seinem SSH-Port wieder
+wie lange es schon wartet und wie lange höchstens. Strg+C bricht ab, und die CLI sagt dann, ob `deploy.sh` auf dem
+Board schon gestartet war (ein zweites Strg+C beendet sofort). Sobald das Board auf seinem SSH-Port wieder
 antwortet, meldet sich die CLI mit derselben Prüfung des Host-Schlüssels neu an, und der Upload geht dort weiter, wo
 er stehen blieb, nachdem die sha256 des Angekommenen gepasst hat. `deploy.sh` läuft auf dem Board für sich und wird
 einmal gestartet, nie zweimal. Ist das Board nicht erreichbar oder lehnt es die Anmeldung ab, sagt die CLI mit einem
@@ -1563,7 +1564,8 @@ Ein kurzer Benchmark mit `--bench-model` (hier oder mit `device runtime deploy`)
 diesem Board läuft. Sein Ergebnis wird bei jedem Build dieses Modells im Ausgabeordner vermerkt: die Datei
 `device_tests.json` im Build-Ordner, gefunden über die sha256 des Modells (auch wenn die Datei auf dem Board anders
 heißt). Sie enthält das Board (deinen Namen dafür, Board- und SoC-Modell aus seiner Probe), den Laufzeit-Build, die
-gemessenen Geschwindigkeiten, den KV-Cache und ob die Prüfungen bestanden. Das Deployment-Fenster zeigt den Build als
+gemessenen Geschwindigkeiten, den KV-Cache der Messung (wie `llama-bench` ihn meldet) neben dem, auf den der Server
+des Boards eingestellt ist, und ob die Prüfungen bestanden. Das Deployment-Fenster zeigt den Build als
 „getestet auf <Board>“. Ein Modell, das kein Build dieses Frameworks gemacht hat, wird nirgends vermerkt.
 
 ### device runtime status

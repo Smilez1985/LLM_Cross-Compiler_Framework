@@ -395,7 +395,8 @@ a matching `llama-server` command if `llama-server` is installed on the board.
 | `--wait SECONDS` | When the network drops during the deploy, wait this long for the board (default 300, 0 to 86400). |
 
 When the network drops (a board with Wi-Fi only, for example), the deploy waits for the board and shows how long
-it has waited and the limit; Ctrl+C cancels. Once the board answers on its SSH port again, the CLI logs in again
+it has waited and the limit. Ctrl+C cancels, and the CLI then says whether `deploy.sh` had already started on the
+board (a second Ctrl+C stops at once). Once the board answers on its SSH port again, the CLI logs in again
 with the same host key check and the upload continues where it stopped, after the sha256 of what arrived matched.
 `deploy.sh` runs on the board on its own and is started once, never twice. When the board cannot be reached or
 refuses the login, the CLI says why with a code and what to do: `device_host_down` (nothing answers: the board is
@@ -1503,7 +1504,8 @@ A short benchmark with `--bench-model` (here or with `device runtime deploy`) is
 that board. Its result is recorded with every build of that model in the output folder: the file
 `device_tests.json` in the build folder, found by the model's sha256 (also when the file on the board has another
 name). It holds the board (your label, the board and SoC model from its probe), the runtime build, the measured
-speeds, the KV cache and whether the checks passed. The Deployment window lists the build as "tested on <board>".
+speeds, the KV cache the measurement used (as `llama-bench` reports it) next to the one the board's server is set
+to, and whether the checks passed. The Deployment window lists the build as "tested on <board>".
 A model that no build of this framework made is recorded nowhere.
 
 ### device runtime status

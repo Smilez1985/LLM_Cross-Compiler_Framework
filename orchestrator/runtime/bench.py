@@ -262,8 +262,8 @@ class BenchRunner:
                              "this computer (that would measure this computer, not the board it was built for).",
                              code="not_supported",
                              next="Benchmark it on the board after deploying it (run_device_benchmark, 'llm-cli device "
-                                  "runtime verify --bench-model', or the GUI's Benchmark window), or here in the "
-                                  "Docker sandbox.")
+                                  "runtime verify --bench-model', or \"Benchmark on a board\" in the Deployment "
+                                  "window), or here in the Docker sandbox.")
         build, binary = self.bench_build(sandbox=sandbox)
         fd = open_pinned(model, sha256, label)
         try:

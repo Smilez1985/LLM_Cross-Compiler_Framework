@@ -285,13 +285,14 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   than the one you trusted). An AI gets the plain code and a next step without the address or the account.
 - **KV cache** (Deployment window, `llm-cli device settings --kv-cache`): `f16`, `q8_0` or `q4_0` for the board's
   server (`-ctk`/`-ctv`). Automatic by default: `q8_0` when little memory is left next to the model on the board
-  (from its probe), otherwise `f16`; the window says which and why. Your choice is kept in the board's deploy
-  settings, and `f16` switches the quantized cache off. `deploy.sh` names it in the start command it prints.
+  (from its probe), otherwise `f16`; the window says which and why. A choice you make in the window is kept in the
+  board's deploy settings; without one, the saved choice stays as it is. `f16` switches the quantized cache off. A
+  package made in the Deployment window names it in the start command its `deploy.sh` prints.
 - **Benchmark on a board** (Deployment window): models built for a board are measured on the board itself, never
   on this computer. Choose the board and the model on it (after a deploy both are filled in) and click "Measure on
   the board": the runtime checks and a short `llama-bench` run there (the board needs the framework's model server,
-  `llm-cli device runtime deploy`). You are asked first, with No preselected, whether a model that is not a catalog
-  model may be loaded there; your yes is written to the audit log. A passed run is recorded with the build of that
+  `llm-cli device runtime deploy`). You are asked first, with No preselected and with the board and the model named,
+  whether a model that is not a catalog model may be loaded there; your yes is written to the audit log. A passed run is recorded with the build of that
   model, and the build list shows "tested on <board>".
 - **Errors with their reason:** packaging and deploying return why they failed (no Docker, an image not pinned, the
   host key changed, `deploy.sh` exit status) instead of only logging it. A package is written under a temporary name
@@ -1096,8 +1097,8 @@ until you enable it in the tool permissions, also when you allowed the whole tie
   in the Docker sandbox with `sandbox: true`), `artifact_speed` for a built GGUF model. A model built for a board is
   never benchmarked natively on this computer, because that would measure this computer and not the board: it runs
   in the Docker sandbox (`sandbox: false` is refused), and its real values come from the board itself
-  (`run_device_benchmark` after `deploy_to_device`). An untrusted model in the sandbox is asked in the framework's own
-  window unless you allowed that for AIs (`bench_untrusted_sandbox_ok`). The model file is opened once and hashed
+  (`run_device_benchmark` after `deploy_to_device`). An untrusted model in the sandbox is a security warning that
+  only you decide, unless you allowed that for AIs (`bench_untrusted_sandbox_ok`). The model file is opened once and hashed
   through that open file; llama-bench reads exactly that file (natively the inherited descriptor, in the sandbox a
   private hard link of it), so it cannot be swapped between the check and the run. The sandbox's private link goes
   next to the model, or, when that folder is read-only, into the framework's cache or state folder on the same file

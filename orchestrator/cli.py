@@ -3626,9 +3626,11 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         password = click.prompt("Password (Enter if the framework key is already installed)",
                                 default="", hide_input=True, show_default=False) or None
         
-    with console.status(f"Deploying to {user}@{host}...", spinner="earth") as shown:
+    import threading
+    stop = threading.Event()
+    with _ctrl_c_cancels(stop), console.status(f"Deploying to {user}@{host}...", spinner="earth") as shown:
         result = dep_mgr.deploy_package(Path(package_path), host, user, port=port, password=password,
-                                        wait_seconds=wait_seconds,
+                                        wait_seconds=wait_seconds, cancelled=stop.is_set,
                                         on_event=lambda event: shown.update(_deploy_event_text(ctx, event, host)))
 
     if result.success:
@@ -3647,6 +3649,35 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         for line in result.output[-20:]:
             console.print(f"  [dim]{escape(line)}[/dim]")
         sys.exit(1)
+
+
+class _ctrl_c_cancels:
+    """While a deploy runs, Ctrl+C sets `stop` (the deploy's own cancel) instead of ending the CLI at once: the wait
+    for the board ends, and the result says what happened on the board (deploy.sh started or not). A second Ctrl+C
+    stops at once. Without a main thread to catch the signal, Ctrl+C keeps its usual meaning."""
+
+    def __init__(self, stop):
+        self.stop, self.before, self.installed = stop, None, False
+
+    def _caught(self, _signum, _frame) -> None:
+        if self.stop.is_set():
+            raise KeyboardInterrupt
+        self.stop.set()
+
+    def __enter__(self):
+        import signal
+        try:
+            self.before = signal.signal(signal.SIGINT, self._caught)
+            self.installed = True
+        except ValueError:  # not the main thread
+            pass
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        import signal
+        if self.installed:
+            signal.signal(signal.SIGINT, self.before if self.before is not None else signal.default_int_handler)
+        return False
 
 
 def _kv_text(ctx: Optional[FrameworkContext], choice) -> str:
@@ -3702,9 +3733,12 @@ def _deploy_event_text(ctx: FrameworkContext, event, host: str) -> str:
         return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
 
     if event.kind == "waiting":
-        return escape(ui_text("device.wait.status", lang, address=host, elapsed=clock(event.elapsed),
-                              limit=clock(event.limit)) + " (Ctrl+C)")
+        key = "device.wait.status_install" if event.step == "install" else "device.wait.status"
+        return escape(ui_text(key, lang, address=host, elapsed=clock(event.elapsed), limit=clock(event.limit))
+                      + " (Ctrl+C)")
     if event.kind == "back":
+        if event.step == "install":
+            return escape(ui_text("device.wait.install", lang))
         return escape(ui_text("device.wait.back", lang, done=size(event.done), total=size(event.total)))
     if event.kind == "uploading":
         return escape(ui_text("device.deploy.uploading", lang, done=size(event.done), total=size(event.total)))
@@ -4180,9 +4214,13 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
         client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
     except Exception as e:  # authentication, network, a host key that changed meanwhile
         from orchestrator.runtime.device import reasons
-        if reasons.classify(e) not in (None, reasons.AUTH_FAILED):
+        code = reasons.classify(e)
+        if code not in (None, reasons.AUTH_FAILED):
             _unreachable(ctx, host, port, e)
-        _print_reason(ctx, reasons.AUTH_FAILED, host, port)
+        if code == reasons.AUTH_FAILED:
+            _print_reason(ctx, reasons.AUTH_FAILED, host, port)
+        else:  # none of the four reasons: shown as it is, never relabelled as a refused login
+            console.print(f"[red]SSH login to {escape(user)}@{escape(host)} failed: {escape(str(e))}[/red]")
         console.print(f"[red]Pair the device once with llm-cli scan --device (it asks for the password one time) or "
                       "pass --password.[/red]")
         sys.exit(1)

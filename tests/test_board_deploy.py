@@ -197,6 +197,8 @@ class Board:
         if words[:1] == ["["]:
             return (0 if words[2] in self.dirs else 1), ""
         if "nohup" in command:
+            if TARGET not in self.dirs:
+                return 1, ""  # cd into the upload folder fails: the board restarted
             marker = f"{TARGET}/{dmod.INSTALL_STARTED}"
             if marker in self.files:
                 return 0, "started=already\n"
@@ -336,7 +338,65 @@ class TestWaitingForTheBoard:
         result, events = run(manager, package)
         assert result.success and board.starts == 1 and result.resumed == 1
         assert [e.step for e in events if e.kind == "waiting"][0] == "install"
+        assert [(e.kind, e.step) for e in events if e.kind == "back"] == [("back", "install")], \
+            "back after the drop: the installation is followed again (the upload had finished)"
         assert "Deployment Complete" in " ".join(result.output)
+
+    @staticmethod
+    def drop_after_the_start_command(board):
+        """The start command reaches the board (its marker is made there), but the answer never comes back."""
+        real_run = board.run
+
+        def on_board(command):
+            answer = real_run(command)
+            if "nohup" in command and board.starts == 1 and not getattr(board, "dropped_once", False):
+                board.dropped_once = True
+                board.go_offline()
+                raise Gone("Socket is closed")
+            return answer
+        board.run = on_board
+
+    def test_a_start_command_without_an_answer_is_never_reported_as_not_installed(self, manager, board, package):
+        """The installation may run on the board although its answer was lost: the device state is unknown, and
+        neither the result nor a cancel says that deploy.sh did not run."""
+        self.drop_after_the_start_command(board)
+        result, events = run(manager, package, wait_seconds=30)
+        assert not result.success and board.starts == 1
+        assert result.device_state == "unknown", "the installation may have started on the board"
+        assert "did not run" not in result.reason and "may still have finished" in result.reason
+        assert [e.step for e in events if e.kind == "waiting"][0] == "install"
+
+        board2_events = []
+        board.online, board.dropped_once, board.starts = True, False, 0
+        board.files.clear()
+        cancel = manager.deploy_package(package, HOST, "radxa", cancelled=lambda: len(board2_events) >= 2,
+                                        on_event=lambda e: board2_events.append(e) if e.kind == "waiting" else None)
+        assert not cancel.success and cancel.device_state == "unknown"
+        assert "nothing was installed" not in cancel.reason and "unknown" in cancel.reason
+
+    def test_a_start_command_without_an_answer_is_not_sent_twice_when_the_board_is_back(self, manager, board,
+                                                                                          package):
+        self.drop_after_the_start_command(board)
+        board.back_at = 15.0
+        result, _events = run(manager, package)
+        assert result.success and board.starts == 1 and result.resumed == 1
+
+    def test_a_board_that_restarted_after_the_start_command_leaves_the_state_unknown(self, manager, board, package):
+        """The start command may have run before the board restarted: when the board is back without its upload
+        folder, the result says the state is unknown, never that nothing was installed."""
+        self.drop_after_the_start_command(board)
+        board.back_at = 15.0
+        real_tick = board.tick
+
+        def tick():
+            was = board.online
+            real_tick()
+            if board.online and not was:
+                board.dirs.clear()
+        board.tick = tick
+        result, _events = run(manager, package)
+        assert not result.success and board.starts == 1
+        assert result.device_state == "unknown" and "may have started" in result.reason
 
     def test_cancel_while_waiting_installs_nothing(self, manager, board, package):
         board.drop_after = 200_000
@@ -568,3 +628,100 @@ class TestTheDeployTool:
         assert "192.168.1.50" not in str(caught.value) and "dietpi" not in str(caught.value)
         assert caught.value.person_action, "the person is told what to do"
 
+
+    def test_the_wait_during_the_installation_never_says_the_upload_continues(self):
+        """The upload had finished: while the installation is followed again, the texts say so (the tool's progress,
+        the GUI, the CLI)."""
+        from orchestrator.Core.deployment_manager import DeployEvent
+        from orchestrator.tools.tools_deploy import event_text
+        from orchestrator import cli as cli_module
+        waiting = DeployEvent("waiting", elapsed=12.0, limit=300.0, step="install")
+        back = DeployEvent("back", step="install")
+        for text in (event_text(waiting, "Living room board"), cli_module._deploy_event_text(None, waiting, HOST)):
+            assert "upload" not in text and "installation" in text, text
+        for text in (event_text(back, "Living room board"), cli_module._deploy_event_text(None, back, HOST)):
+            assert "upload" not in text and "twice" in text, text
+        upload = DeployEvent("waiting", elapsed=12.0, limit=300.0, step="upload")
+        assert "upload" in cli_module._deploy_event_text(None, upload, HOST)
+
+
+# --- the CLI ---------------------------------------------------------------------------------------------------------
+
+class TestTheCli:
+
+    @pytest.fixture(autouse=True)
+    def keep_logger_levels(self):
+        """The CLI's -q sets logger levels; later tests read log records again."""
+        import logging
+        saved = {name: logging.getLogger(name).level for name in list(logging.Logger.manager.loggerDict)}
+        root = logging.getLogger().level
+        yield
+        for name in list(logging.Logger.manager.loggerDict):
+            logging.getLogger(name).setLevel(saved.get(name, logging.NOTSET))
+        logging.getLogger().setLevel(root)
+
+    @staticmethod
+    def context(dep_mgr, tmp_path):
+        from types import SimpleNamespace
+        from orchestrator import cli as cli_module
+        ctx = cli_module.FrameworkContext()
+        ctx._initialized = True
+        ctx.framework_manager = SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None: default,
+                                                                       user_state_dir=str(tmp_path / "state")),
+                                                resolve_path=lambda p: tmp_path / p)
+        ctx.deployment_manager = dep_mgr
+        return ctx
+
+    def test_ctrl_c_cancels_the_deploy_and_says_what_happened_on_the_board(self, tmp_path, monkeypatch, package):
+        """Ctrl+C (SIGINT) ends the wait for the board through the deploy's own cancel, so the person reads the
+        device state instead of a bare "Aborted!"; the handler before the deploy is back afterwards."""
+        import signal
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
+        from orchestrator.Core.deployment_manager import DeployResult
+        from test_cli_builds import quiet_console
+        printed = quiet_console(monkeypatch)
+        before = signal.getsignal(signal.SIGINT)
+
+        class Manager:
+            def host_key_status(self, host, port=22):
+                return "known", paramiko.ECDSAKey.generate()
+
+            def deploy_package(self, path, host, user, *, cancelled=None, on_client=None, **kw):
+                signal.raise_signal(signal.SIGINT)  # the person presses Ctrl+C while the deploy waits for the board
+                assert cancelled is not None and cancelled(), "Ctrl+C reached the deploy's cancel"
+                return DeployResult(False, device_state="unknown",
+                                    reason="The deploy was cancelled; deploy.sh runs on the board on its own and is "
+                                           "never stopped halfway, so the device state is unknown.")
+        result = CliRunner().invoke(cli_module.cli, ["-q", "deploy", "run", str(package), "--host", HOST, "--user",
+                                                     "radxa"], obj=self.context(Manager(), tmp_path))
+        out = printed.getvalue() + result.output
+        assert result.exit_code == 1 and "Aborted" not in out
+        assert "cancelled" in out and "device state is unknown" in out
+        assert signal.getsignal(signal.SIGINT) is before
+
+    def test_a_login_that_fails_for_another_reason_keeps_its_words(self, tmp_path, monkeypatch):
+        """Only a refused login is "device_auth_failed"; any other failure is shown as it is, never relabelled."""
+        from orchestrator import cli as cli_module
+        from orchestrator.runtime.profile import device_id_for_host_key
+        from test_cli_builds import quiet_console
+        printed = quiet_console(monkeypatch)
+        key = paramiko.ECDSAKey.generate()
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: key)
+        monkeypatch.setattr(ssh_trust, "check_host_key", lambda state, host, port, k: "known")
+
+        def connect(*a, **k):
+            raise EOFError("the board closed the connection")
+        monkeypatch.setattr(ssh_trust, "connect", connect)
+        device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+        with pytest.raises(SystemExit):
+            cli_module._connect_device(tmp_path, device_id, HOST, 22, "radxa", None)
+        out = printed.getvalue()
+        assert "the board closed the connection" in out and "refused the login" not in out
+
+        def refused(*a, **k):
+            raise paramiko.AuthenticationException("Authentication failed.")
+        monkeypatch.setattr(ssh_trust, "connect", refused)
+        with pytest.raises(SystemExit):
+            cli_module._connect_device(tmp_path, device_id, HOST, 22, "radxa", None)
+        assert "refused the login" in printed.getvalue() and reasons.AUTH_FAILED in printed.getvalue()

@@ -39,6 +39,9 @@ TEXTS = {
         # --- waiting for the board during a deploy (N5) ---
         "device.wait.status": "Waiting for the board at {address}: {elapsed} of at most {limit}. The upload "
                               "continues where it stopped as soon as the board answers again.",
+        "device.wait.status_install": "Waiting for the board at {address}: {elapsed} of at most {limit}. The "
+                                      "installation runs on the board on its own; it is followed again as soon as "
+                                      "the board answers.",
         "device.wait.back": "The board answers again: the upload continues at {done} of {total}.",
         "device.wait.install": "The board answers again: checking whether the installation on the board has "
                                "finished (it is never started twice).",
@@ -77,8 +80,9 @@ TEXTS = {
         "device.bench.none": "No trusted board yet: pair one in the Deployment window first.",
         "device.bench.start": "Measure on the board",
         "device.bench.running": "Measuring on the board...",
-        "device.bench.untrusted": "A model that is not one of the framework's catalog models (checked by its sha256 on "
-                                  "the board) is loaded by llama-bench on the board as the device account, outside a "
+        "device.bench.untrusted": "Measure {model} on the board {board}. A model that is not one of the framework's "
+                                  "catalog models (checked by its sha256 on the board) is loaded by llama-bench on "
+                                  "the board as the device account, outside a "
                                   "sandbox. Allow that for this run? Your yes is written to the audit log. With No, "
                                   "only a catalog model is measured.",
         "device.bench.missing": "Choose a board and enter the path of the model on the board.",
@@ -121,6 +125,9 @@ TEXTS = {
         # --- warten auf das Board während eines Deployments (N5) ---
         "device.wait.status": "Warte auf das Board unter {address}: {elapsed} von höchstens {limit}. Der Upload "
                               "geht dort weiter, wo er stehen blieb, sobald das Board wieder antwortet.",
+        "device.wait.status_install": "Warte auf das Board unter {address}: {elapsed} von höchstens {limit}. Die "
+                                      "Installation läuft auf dem Board für sich; sie wird wieder verfolgt, sobald "
+                                      "das Board antwortet.",
         "device.wait.back": "Das Board antwortet wieder: der Upload geht bei {done} von {total} weiter.",
         "device.wait.install": "Das Board antwortet wieder: prüfe, ob die Installation auf dem Board fertig ist "
                                "(sie wird nie zweimal gestartet).",
@@ -159,8 +166,9 @@ TEXTS = {
         "device.bench.none": "Noch kein vertrautes Board: erst eines im Deployment-Fenster koppeln.",
         "device.bench.start": "Auf dem Board messen",
         "device.bench.running": "Messe auf dem Board...",
-        "device.bench.untrusted": "Ein Modell, das keines der Katalogmodelle des Frameworks ist (geprüft über seine "
-                                  "sha256 auf dem Board), lädt llama-bench auf dem Board als Gerätekonto, außerhalb "
+        "device.bench.untrusted": "{model} auf dem Board {board} messen. Ein Modell, das keines der Katalogmodelle "
+                                  "des Frameworks ist (geprüft über seine sha256 auf dem Board), lädt llama-bench auf "
+                                  "dem Board als Gerätekonto, außerhalb "
                                   "einer Sandbox. Das für diesen Lauf erlauben? Dein Ja wird ins Audit-Log "
                                   "geschrieben. Mit Nein wird nur ein Katalogmodell gemessen.",
         "device.bench.missing": "Wähle ein Board und gib den Pfad des Modells auf dem Board ein.",

@@ -77,6 +77,8 @@ def event_text(event: Any, label: str) -> str:
         what = "the upload continues" if event.step != "install" else "the installation is followed again"
         return (f"waiting for the board {label}: {int(event.elapsed)} s of at most {int(event.limit)} s (the network "
                 f"dropped; {what} when it answers)")
+    if event.kind == "back" and event.step == "install":
+        return f"{label} answers again: the installation on the board is followed again (it is never started twice)"
     if event.kind == "back":
         return f"{label} answers again: the upload continues at {_size(event.done)} of {_size(event.total)}"
     return f"installing on {label}"

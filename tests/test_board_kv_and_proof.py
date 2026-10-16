@@ -257,9 +257,24 @@ class TestTestedOnBoard:
         assert tested.device_tests(other) == []
         (row,) = tested.device_tests(first)
         assert row["schema"] == tested.SCHEMA and row["board"] == "Radxa ZERO 3" and row["soc"] == "rk3566"
-        assert row["label"] == "Living room board" and row["kv_cache"] == "q8_0"
+        assert row["label"] == "Living room board" and row["server_kv_cache"] == "q8_0"
+        assert row["kv_cache"] is None, "llama-bench did not report the KV cache it used: never the setting instead"
         assert (row["prompt_ts"], row["gen_ts"]) == (21.5, 4.25) and row["smoke_passed"] and row["checks_passed"]
         assert tested.tested_on(first) == ["Radxa ZERO 3"] and tested.tested_on(other) == []
+
+    def test_the_record_names_the_kv_cache_the_measurement_used(self, tmp_path):
+        """The short llama-bench run passes no -ctk/-ctv: it measures with the KV cache llama-bench reports, which
+        need not be the one the board's server is set to. The record keeps both apart."""
+        from orchestrator.runtime.build.verify import parse_bench_json
+        records = parse_bench_json('[{"n_prompt": 64, "n_gen": 0, "avg_ts": 21.5, "type_k": "f16", "type_v": "f16"},'
+                                   ' {"n_prompt": 0, "n_gen": 16, "avg_ts": 4.25, "type_k": "f16", "type_v": "f16"}]')
+        assert records[0]["type_k"] == "f16" and records[0]["type_v"] == "f16"
+        measured = VerifyReport(checks=[Check("smoke", True, "pp 21.5 t/s", {"bench": records})], ran_binaries=True)
+        row = entry_for(b"GGUF model", report=measured, kv_cache="q8_0")
+        assert row["kv_cache"] == "f16" and row["server_kv_cache"] == "q8_0"
+        mixed = [dict(records[0]), dict(records[1], type_v="q8_0")]
+        odd = VerifyReport(checks=[Check("smoke", True, "ran", {"bench": mixed})], ran_binaries=True)
+        assert entry_for(b"GGUF model", report=odd)["kv_cache"] is None, "K and V differ: no single type to name"
 
     def test_only_a_passed_run_counts_as_tested(self, tmp_path):
         output = tmp_path / "output"
@@ -350,11 +365,12 @@ def told(monkeypatch):
 class TestDeploymentWindow:
 
     def test_the_kv_cache_is_automatic_or_the_persons_choice(self, window_framework, told):
+        from orchestrator.gui import deployment_window
         from orchestrator.gui.deployment_window import DeploymentWindow
         win = DeploymentWindow(window_framework)
         assert win.cb_kv.currentData() == "auto"
         assert "f16" in win.cb_kv.itemText(0) and "not known yet" in win.cb_kv.itemText(0)
-        assert win.kv_choice() == ("f16", None), "automatic: nothing is kept in the settings"
+        assert win.kv_choice() == ("f16", deployment_window.KV_KEEP), "not chosen here: the settings stay as they are"
         win.cb_kv.setCurrentIndex(win.cb_kv.findData("q4_0"))
         assert win.kv_choice() == ("q4_0", "q4_0")
         win.cb_kv.setCurrentIndex(win.cb_kv.findData("f16"))
@@ -415,6 +431,8 @@ class TestDeploymentWindow:
         win._on_bench()
         question, default = told[-1]
         assert "outside a sandbox" in question and default == deployment_window.QMessageBox.No
+        assert "Radxa on the shelf" in question and "models/smol-q4_0.gguf" in question, \
+            "the question names the board and the model it is about"
         assert started == [(device.device_id, "models/smol-q4_0.gguf", False)], "No: only a catalog model runs"
 
     def test_the_bench_worker_measures_on_the_board_and_records_the_consent(self, window_framework, monkeypatch):
@@ -453,3 +471,67 @@ class TestDeploymentWindow:
         worker.run()
         ((ok, text),) = results
         assert not ok and "does not answer" in text and "myboard.local" in text
+
+    def test_a_kv_choice_not_made_here_never_replaces_the_boards_saved_one(self, window_framework, told,
+                                                                          monkeypatch):
+        """The board's saved choice (here q4_0 from llm-cli device settings) stays when the window could not show it
+        (the person typed another name of the board) and the person did not choose here; a choice made here is
+        kept, also automatic on purpose."""
+        paramiko = pytest.importorskip("paramiko")
+        from orchestrator.gui import deployment_window
+        from orchestrator.runtime.profile import ProfileStore, device_id_for_host_key
+        from orchestrator.utils import ssh_trust
+        state = Path(window_framework.config.user_state_dir)
+        key = paramiko.ECDSAKey.generate()
+        device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+        store = ProfileStore(state)
+        store.save_deploy_settings(device_id, DeploySettings(kv_cache="q4_0").as_dict())
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: key)
+        monkeypatch.setattr(ssh_trust, "check_host_key", lambda state_dir, host, port, k: "known")
+        win = deployment_window.DeploymentWindow(window_framework)
+        win.cb_device.setEditText("myboard.local")  # the board's profile knows it by another address
+
+        def deploy_and_read():
+            worker = deployment_window.DeploymentWorker(window_framework, Path("x"), "Rockchip", {}, "myboard.local",
+                                                        "radxa", None)
+            worker.kv_cache, worker.kv_setting = win.kv_choice()
+            worker._remember_device()
+            assert worker.device_id == device_id
+            return DeploySettings.from_dict(store.load_deploy_settings(device_id)).kv_cache
+
+        assert win.cb_kv.currentData() == "auto"
+        assert deploy_and_read() == "q4_0", "not chosen here: the saved choice stays"
+        win.cb_kv.setCurrentIndex(win.cb_kv.findData("q8_0"))
+        assert deploy_and_read() == "q8_0", "the person's choice here is kept"
+        win.cb_kv.setCurrentIndex(win.cb_kv.findData("auto"))
+        assert deploy_and_read() is None, "automatic, chosen here on purpose"
+
+    def test_a_docker_deploy_names_no_model_path_on_the_board(self, window_framework, tmp_path, monkeypatch):
+        """deploy.sh copies a GGUF model to models/ only without Docker; after a Docker deploy no path is filled in
+        for the benchmark on the board."""
+        from orchestrator.Core.deployment_manager import DeployResult
+        from orchestrator.gui.deployment_window import DeploymentWorker
+        from orchestrator.utils import ssh_trust
+        build = tmp_path / "build"
+        build.mkdir()
+        (build / "smol-q4_0.gguf").write_bytes(b"GGUF")
+        package = tmp_path / "deploy_smol.zip"
+        package.write_bytes(b"PK")
+        manager = SimpleNamespace(create_deployment_package=lambda **kw: package,
+                                  deploy_package=lambda *a, **kw: DeployResult(True, exit_status=0, device_state="ok"))
+        monkeypatch.setattr(window_framework, "get_component",
+                            lambda name: manager if name == "deployment_manager" else None)
+
+        def offline(*a, **k):
+            raise OSError("offline")
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", offline)
+        names = {}
+        for docker in (False, True):
+            worker = DeploymentWorker(window_framework, build, "Rockchip", {"use_docker": docker}, "myboard.local",
+                                      "radxa", None)
+            done = []
+            worker.finished.connect(lambda ok, msg: done.append(ok))
+            worker.run()
+            names[docker] = (done, worker.model_name)
+        assert names[False] == ([True], "smol-q4_0.gguf")
+        assert names[True] == ([True], None), "the model went into the container, not to models/ on the board"

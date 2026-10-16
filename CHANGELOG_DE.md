@@ -873,7 +873,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   seine Adresse oder seinen Hostnamen (`myboard.local`; `llm-cli deploy run --host`, `--ip` bleibt als alter Name).
   Bricht das Netzwerk während eines Deployments weg (ein Board nur mit WLAN), wartet das Deployment auf das Board
   (Vorgabe 300 s, `--wait`), zeigt mit Zeit und Grenze, dass es wartet, und lässt sich abbrechen („Abbrechen“ im
-  Deployment-Fenster, Strg+C in der CLI, `cancel_job`). Es meldet sich mit derselben Prüfung des Host-Schlüssels neu an
+  Deployment-Fenster, Strg+C in der CLI, `cancel_job`); das Ergebnis sagt dann, ob `deploy.sh` schon gestartet war,
+  auch wenn das Netzwerk genau beim Start wegbrach. Es meldet sich mit derselben Prüfung des Host-Schlüssels neu an
   und macht weiter: Der Upload setzt bei den angekommenen Bytes fort, sobald ihre sha256 passt, und `deploy.sh` läuft
   auf dem Board für sich und wird einmal gestartet, nie zweimal. Ergebnisse von `deploy_to_device` haben zusätzlich
   `reason_code`, `resumed` und `waited_s`; sein Fortschritt nennt das Board über deinen Namen dafür.
@@ -885,13 +886,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **KV-Cache des Servers auf einem Board** (N7): `f16`, `q8_0` oder `q4_0` (`-ctk`/`-ctv`, geprüfte Wörter der
   gemeinsamen Startregel und des Startskripts). Standardmäßig automatisch: `q8_0`, wenn neben dem Modell auf dem Board
   wenig Speicher frei bleibt (aus seiner Probe), sonst `f16`; du kannst immer einen Typ wählen, und `f16` schaltet ihn
-  aus. Gewählt mit `llm-cli device settings --kv-cache` oder im Deployment-Fenster; die systemd-Unit, der Startbefehl
-  und `deploy.sh` nehmen ihn aus den Deploy-Einstellungen des Boards, und die Frage von `deploy_device_runtime` nennt
-  ihn.
+  aus. Gewählt mit `llm-cli device settings --kv-cache` oder im Deployment-Fenster (eine gespeicherte Wahl, die das
+  Fenster nicht zeigt, bleibt, außer du wählst dort); die systemd-Unit und der Startbefehl nehmen ihn aus den
+  Deploy-Einstellungen des Boards, ein im Deployment-Fenster gemachtes Paket nennt ihn im Startbefehl seines
+  `deploy.sh`, und die Frage von `deploy_device_runtime` nennt ihn.
 - **„Getestet auf Board X“** (N3): Ein bestandener Benchmark auf dem Board (`llm-cli device runtime verify` oder
   `deploy` mit `--bench-model`, `run_device_benchmark` und der neue Teil „Benchmark auf einem Board“ im
   Deployment-Fenster) wird bei jedem Build dieses Modells im Ausgabeordner vermerkt (`device_tests.json`, gefunden über
-  die sha256 des Modells). Das Deployment-Fenster zeigt einen solchen Build als „getestet auf <Board>“ und trägt nach
+  die sha256 des Modells), mit dem KV-Cache der Messung neben dem, auf den der Server des Boards eingestellt ist. Das Deployment-Fenster zeigt einen solchen Build als „getestet auf <Board>“ und trägt nach
   dem Deployment eines GGUF-Modells Board und Modell für diese Messung ein.
 ### Geändert
 - **Rückfragen zeigen eine Kurzfassung und die Arten der Hinweise** (Delegationsentwurf 4.5, LAY-L2): Eine Rückfrage

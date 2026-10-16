@@ -88,7 +88,8 @@ class DeployResult:
 class DeployEvent:
     """What a running deploy reports (deploy_package's on_event): "uploading" (bytes on the board of the package's
     total), "waiting" (the network dropped: seconds waited of the limit, and whether the upload or the installation
-    waits), "back" (the board answers again; the upload continues at `done`), "installing"."""
+    waits), "back" (the board answers again: the upload continues at `done`, or with step "install" the installation
+    is followed again), "installing"."""
     kind: str
     done: int = 0
     total: int = 0
@@ -958,23 +959,31 @@ class _BoardSession:
 
     def _install(self, name: str, target_dir: str) -> DeployResult:
         """Starts the installation once (DeploymentManager._remote_start_cmd) and waits for its exit status; after a
-        network drop it waits for the board, logs in again and keeps waiting for the same installation."""
+        network drop it waits for the board, logs in again and keeps waiting for the same installation. Once the start
+        command is on its way, the installation may run on the board even when its answer is lost: from then on the
+        device state is unknown until the board says how deploy.sh ended."""
         d = shlex.quote(target_dir)
         start = DeploymentManager._remote_start_cmd(target_dir, name)
         started_at = self.manager._clock()
         sent = False
+        first = True
         while True:
             try:
                 if not sent:
+                    self.state_after_stop = "unknown"
                     status, out, err = DeploymentManager._run(self.ssh, start)
                     if status != 0 or "started=" not in out:
                         for line in err.splitlines()[-REMOTE_OUTPUT_LINES:]:
                             DeploymentManager._keep(self.lines, line)
-                        return self.result(False, device_state="ok", reason="The installation could not be started "
-                                                                            "on the device (its answer is in the "
-                                                                            "device output).")
+                        if first:
+                            return self.result(False, device_state="ok", reason="The installation could not be "
+                                                                                "started on the device (its answer is "
+                                                                                "in the device output).")
+                        return self.result(False, device_state="unknown",
+                                           reason="The board answers again, but the installation cannot be followed "
+                                                  "(its answer is in the device output). It may have started before "
+                                                  "the connection dropped, so the device state is unknown.")
                     sent = True
-                    self.state_after_stop = "unknown"
                 status, out, _err = DeploymentManager._run(
                     self.ssh, f"cat {d}/{INSTALL_STATUS} 2>/dev/null || {{ [ -d {d} ] && echo running || echo gone; }}")
                 exit_status = out.strip()
@@ -997,15 +1006,18 @@ class _BoardSession:
                     raise _Stopped() from None
                 if self.ssh is None or not DeploymentManager._connection_lost(self.ssh) or \
                         self.resumed >= MAX_RESUMES:
-                    return self.result(False, device_state="unknown" if sent else "ok",
+                    return self.result(False, device_state=self.state_after_stop,
                                        reason=f"The installation on {self.host} could not be followed: {e}")
                 self.logger.warning(f"The connection to {self.host} dropped during the installation; waiting for "
                                     "the board.")
-                failed = self.wait_for_board("install" if sent else "upload")
+                failed = self.wait_for_board("install")
                 if failed is not None:
                     return failed
                 self.resumed += 1
-                self.on_event(DeployEvent("installing"))
+                first = False
+                # the start command is sent again only when its answer never came: the marker on the board makes it
+                # answer started=already instead of starting deploy.sh a second time
+                self.on_event(DeployEvent("back", step="install"))
         _status, log, _err = DeploymentManager._run(self.ssh, f"tail -n {REMOTE_OUTPUT_LINES} {d}/{INSTALL_LOG}")
         for line in log.splitlines():
             self.logger.info(f"[REMOTE] {line.strip()}")

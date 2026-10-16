@@ -302,15 +302,16 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   bekommt den reinen Code und einen nächsten Schritt ohne Adresse und ohne Konto.
 - **KV-Cache** (Deployment-Fenster, `llm-cli device settings --kv-cache`): `f16`, `q8_0` oder `q4_0` für den Server
   des Boards (`-ctk`/`-ctv`). Standardmäßig automatisch: `q8_0`, wenn neben dem Modell auf dem Board wenig Speicher
-  frei bleibt (aus seiner Probe), sonst `f16`; das Fenster sagt, was und warum. Deine Wahl bleibt in den
-  Deploy-Einstellungen des Boards, und `f16` schaltet den quantisierten Cache aus. `deploy.sh` nennt ihn im
-  Startbefehl, den es ausgibt.
+  frei bleibt (aus seiner Probe), sonst `f16`; das Fenster sagt, was und warum. Eine Wahl, die du im Fenster
+  triffst, bleibt in den Deploy-Einstellungen des Boards; ohne sie bleibt die gespeicherte Wahl, wie sie ist. `f16`
+  schaltet den quantisierten Cache aus. Ein im Deployment-Fenster gemachtes Paket nennt ihn im Startbefehl, den sein
+  `deploy.sh` ausgibt.
 - **Benchmark auf einem Board** (Deployment-Fenster): Für ein Board gebaute Modelle werden auf dem Board selbst
   gemessen, nie auf diesem Computer. Wähle das Board und das Modell darauf (nach einem Deployment ist beides
   eingetragen) und klicke „Auf dem Board messen“: die Laufzeitprüfungen und ein kurzer `llama-bench`-Lauf dort (das
   Board braucht den Modellserver des Frameworks, `llm-cli device runtime deploy`). Vorher wirst du gefragt, mit „Nein“
-  vorgewählt, ob ein Modell, das kein Katalogmodell ist, dort geladen werden darf; dein Ja wird ins Audit-Log
-  geschrieben. Ein bestandener Lauf wird beim Build dieses Modells vermerkt, und die Build-Liste zeigt „getestet auf
+  vorgewählt und mit Board und Modell genannt, ob ein Modell, das kein Katalogmodell ist, dort geladen werden darf;
+  dein Ja wird ins Audit-Log geschrieben. Ein bestandener Lauf wird beim Build dieses Modells vermerkt, und die Build-Liste zeigt „getestet auf
   <Board>“.
 - **Fehler mit Grund:** Paketieren und Übertragen melden, warum sie gescheitert sind (kein Docker, ein nicht
   festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`), statt es nur zu protokollieren.
@@ -1195,7 +1196,7 @@ ganze Stufe erlaubt hast.
   GGUF-Modell. Ein für ein Board gebautes Modell wird nie nativ auf diesem Computer gemessen, denn das würde diesen
   Computer messen und nicht das Board: Es läuft in der Docker-Sandbox (`sandbox: false` wird abgelehnt), und seine
   echten Werte kommen vom Board selbst (`run_device_benchmark` nach `deploy_to_device`). Ein nicht vertrauenswürdiges
-  Modell in der Sandbox wird im eigenen Fenster des Frameworks erfragt, außer du hast das für KIs erlaubt
+  Modell in der Sandbox ist ein Sicherheitshinweis, den nur du entscheidest, außer du hast das für KIs erlaubt
   (`bench_untrusted_sandbox_ok`). Die Modelldatei wird einmal geöffnet
   und über diese offene Datei gehasht; llama-bench liest genau diese Datei (nativ über den geerbten Deskriptor, in
   der Sandbox über einen privaten Hardlink darauf), so dass sie zwischen Prüfung und Lauf nicht ausgetauscht werden
