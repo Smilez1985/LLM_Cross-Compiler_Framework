@@ -1300,7 +1300,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Windows: a target module made with the module wizard, `llm-cli module create` or `create_target_module`
   (released in 3.0.0) had Windows line endings (CRLF) in its `modules/build.sh`, its other scripts, its Dockerfiles
   and its `target.yml`, so bash stopped in the Linux build container at the first line (`$'\r': command not
-  found`). Every file of a generated module is now written with LF on every host. A Windows checkout of the
+  found`). Its scripts, Dockerfiles and `target.yml` are now written with LF on every host. A Windows checkout of the
   repository also keeps LF in every text file (`.gitattributes`: the build container Dockerfiles, Python scripts,
   LICENSE files and git hooks were not covered), except the Windows-only `.bat` and `.ps1` scripts.
 - Windows: the calibration text for the importance matrix (released in 3.0.0) was written with Windows line

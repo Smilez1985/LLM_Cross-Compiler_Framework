@@ -321,9 +321,10 @@ class TestVendorFields:
 
 @pytest.mark.skipif(shutil.which("gpg") is None or shutil.which("sh") is None, reason="needs gpg and sh")
 @pytest.mark.skipif(os.name == "nt", reason="the vendor-source step runs under /bin/sh in the Linux build container, "
-                    "never on a Windows host; the test replays it on the host with fake programs on a ':'-separated "
-                    "PATH and a POSIX gpg with its agent, which a Windows host lacks (Git for Windows' gpg exits 2 "
-                    "while making the key)")
+                    "never on a Windows host (a Windows host builds the same image, so this test's Linux run covers "
+                    "the fingerprint check for it too); the test replays the step on the host with fake programs on "
+                    "a ':'-separated PATH and a POSIX gpg with its agent, which a Windows host lacks (Git for "
+                    "Windows' gpg exits 2 while making the key)")
 class TestTheKeyCheckRuns:
     """The vendor-source step of the generated Dockerfile, run on the host with a fake curl and apt-get: a key whose
     fingerprint is not the declared one stops the image build."""

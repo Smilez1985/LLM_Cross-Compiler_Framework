@@ -35,7 +35,9 @@ def test_the_simulation_writes_crlf_where_a_windows_host_would(tmp_path):
         (tmp_path / "lf.txt").write_text("a\nb\n", newline="\n")
         with open(tmp_path / "open.txt", "w", encoding="utf-8") as f:
             f.write("a\n")
-        with os.fdopen(os.open(tmp_path / "fd.txt", os.O_WRONLY | os.O_CREAT, 0o600), "w") as f:
+        # O_BINARY: without it a descriptor is in text mode on Windows and the C runtime adds a second CR (\r\r\n)
+        flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(tmp_path / "fd.txt", flags, 0o600), "w") as f:
             f.write("a\n")
         (tmp_path / "bytes.bin").write_bytes(b"a\n")
     assert (tmp_path / "default.txt").read_bytes() == b"a\r\nb\r\n"
@@ -86,6 +88,27 @@ def test_the_device_tarball_checksum_file_is_lf_on_every_host(tmp_path):
         packaged = package_runtime(store, build, licence=source / "LICENSE", out_dir=tmp_path / "out")
     assert packaged.path.with_name(packaged.path.name + ".sha256").read_bytes() == \
         f"{packaged.sha256}  {packaged.path.name}\n".encode("ascii")
+
+
+def test_the_server_key_file_is_written_through_a_binary_descriptor(tmp_path, monkeypatch):
+    """llama-server reads its API key line by line from this file, in a Linux container also when the host is Windows
+    (the file is mounted into it). os.open() gives a text-mode descriptor on Windows unless O_BINARY is set: the key
+    line ended in \\r\\n despite newline="\\n", the server took the CR as part of the key and refused every request."""
+    from orchestrator.runtime import server_policy
+    binary = getattr(os, "O_BINARY", None)
+    if binary is None:  # POSIX: Windows' flag stands in as a bit no POSIX flag uses (removed before the real open)
+        binary = 1 << 28
+        monkeypatch.setattr(os, "O_BINARY", binary, raising=False)
+    real_open, seen = os.open, []
+
+    def recording(path, flags, mode=0o777, *args, **kwargs):
+        seen.append(flags)
+        return real_open(path, flags & ~(1 << 28), mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", recording)
+    path, key = server_policy.write_key_file(tmp_path)
+    assert seen and all(flags & binary for flags in seen), "a text-mode descriptor on Windows"
+    assert path.read_bytes() == key.encode("ascii") + b"\n"
 
 
 # --- the repository's own files ---------------------------------------------------------------------------------------

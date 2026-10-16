@@ -30,10 +30,10 @@ def _real_homes():
         homes.add(pwd.getpwuid(os.getuid()).pw_dir)
     except (ImportError, KeyError, OSError):
         pass
-    homes.update(os.environ.get(var, "") for var in ("USERPROFILE",))
+    homes.update(os.environ.get(var, "") for var in ("USERPROFILE", "HOME"))  # HOME on Windows: Git, OpenSSH
     if os.environ.get("HOMEDRIVE") and os.environ.get("HOMEPATH"):  # Windows' second way to name the profile
         homes.add(os.environ["HOMEDRIVE"] + os.environ["HOMEPATH"])
-    return sorted(Path(h) for h in homes if h and os.path.isabs(h))
+    return sorted({Path(h) for h in homes if h and os.path.isabs(h)})  # Windows: C:/Users/x is C:\Users\x
 
 
 # Credentials a developer's shell may hold; a test must never use them. Without the session bus no test reaches the
@@ -367,9 +367,11 @@ def qapp():
 # --- Windows hosts --------------------------------------------------------------------------------------------------
 
 # POSIX file modes (0600 files, 0700 folders) do not exist on Windows: os.chmod only sets or clears the read-only flag
-# and st_mode shows 0o666 or 0o444. A test of such a mode keeps running on POSIX and names how Windows covers it.
-WINDOWS_FILE_MODES = ("POSIX file modes: Windows keeps only a read-only flag (st_mode shows 0o666); there the file is "
-                      "private through the ACL it inherits from the profile (the default state folder "
+# and st_mode shows 0o666 or 0o444 for a file, 0o777 for a folder. A test of such a mode keeps running on POSIX and
+# names how Windows covers it.
+WINDOWS_FILE_MODES = ("POSIX file modes: Windows keeps only a read-only flag (st_mode shows 0o666 for a file, 0o777 "
+                      "for a folder); there the file is private through the ACL it inherits from the profile (the "
+                      "default state folder "
                       "%USERPROFILE%\\.llm-framework: the account, SYSTEM and Administrators), and explicit ACLs by "
                       "SID come with the host-account work (H12/M7)")
 POSIX_MODES_ONLY = pytest.mark.skipif(os.name == "nt", reason=WINDOWS_FILE_MODES)
@@ -416,7 +418,9 @@ NO_POSIX_BASH = ("needs a POSIX bash: on Windows `bash` on PATH is the WSL launc
 def windows_newlines():
     """Inside it, text files opened for writing without newline= get CRLF, as on Windows (where the default translates
     "\\n" to os.linesep): shows on any host which files a Windows host would write with CRLF. Covers open(),
-    Path.write_text/open and os.fdopen (all of them go through io.open)."""
+    Path.write_text/open and os.fdopen (all of them go through io.open). Not shown: a descriptor from os.open()
+    without os.O_BINARY is in text mode on Windows, where the C runtime turns every "\\n" written to it into CRLF once
+    more (newline="\\n" does not help there); such writes need O_BINARY."""
     import builtins
     import io
     real = io.open
@@ -472,7 +476,7 @@ def real_home_changes():
     """Changes below the real home folder's guarded folders since the session started, one line each."""
     lines = []
     for home, before in REAL_HOME_SNAPSHOTS.items():
-        lines += [f"{home}: {change}" for change in snapshot_changes(before, home_snapshot(home))]
+        lines += [f"{Path(home).as_posix()}: {change}" for change in snapshot_changes(before, home_snapshot(home))]
     return lines
 
 

@@ -1479,10 +1479,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Windows: Ein Zielmodul aus dem Modul-Assistenten, `llm-cli module create` oder `create_target_module`
   (veröffentlicht in 3.0.0) hatte Windows-Zeilenenden (CRLF) in seinem `modules/build.sh`, seinen anderen Skripten,
   seinen Dockerfiles und seiner `target.yml`, sodass bash im Linux-Build-Container schon an der ersten Zeile abbrach
-  (`$'\r': command not found`). Jede Datei eines erzeugten Moduls wird jetzt auf jedem Rechner mit LF geschrieben.
-  Auch ein Windows-Checkout des Repositorys behält in jeder Textdatei LF (`.gitattributes`: die Dockerfiles der
-  Build-Container, Python-Skripte, LICENSE-Dateien und Git-Hooks waren nicht erfasst), außer in den nur unter
-  Windows laufenden `.bat`- und `.ps1`-Skripten.
+  (`$'\r': command not found`). Seine Skripte, Dockerfiles und `target.yml` werden jetzt auf jedem Rechner mit LF
+  geschrieben. Auch ein Windows-Checkout des Repositorys behält in jeder Textdatei LF (`.gitattributes`: die
+  Dockerfiles der Build-Container, Python-Skripte, LICENSE-Dateien und Git-Hooks waren nicht erfasst), außer in den
+  nur unter Windows laufenden `.bat`- und `.ps1`-Skripten.
 - Windows: Der Kalibriertext für die Importance-Matrix (veröffentlicht in 3.0.0) wurde mit Windows-Zeilenenden
   geschrieben, sodass `llama-imatrix` sie aus anderem Text berechnete als unter Linux und macOS; er wird jetzt auf
   jedem Rechner mit LF geschrieben.

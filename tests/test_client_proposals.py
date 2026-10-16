@@ -175,6 +175,7 @@ class TestShownToThePerson:
     def test_the_store_file_is_private(self, env):
         env.build()
         mcp(env, GOOD)
+        mcp(env, {**GOOD, "summary": "Second idea."}, actor="ditto")  # still private after a rewrite
         assert (Path(env.tmp / "state") / "client_proposals.json").stat().st_mode & 0o777 == 0o600
 
     def test_cli_build_status_shows_the_proposal_and_who_made_it(self, env, monkeypatch):
