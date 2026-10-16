@@ -1678,8 +1678,14 @@ never asks.
 Exit code 1 when the board does not run systemd or the confirmation is missing (nothing is changed), 2 for a bad
 value.
 
+Damaged deploy settings (`device list` shows "damaged; set them again") are never read as the defaults. With an
+option, the command names the file with its full path and size and asks whether to set them again, starting from
+the defaults ("No" is the default; without a terminal nothing is replaced, exit code 1); the file is overwritten
+only when the new settings are saved.
+
 In the GUI: **Boards > Boards and Devices...** **> Settings...** (the current settings in full; install, user, port, model and KV cache; the
-same sudo question with "No" as the default, written to the audit log first).
+same sudo question with "No" as the default, written to the audit log first; for damaged settings the same question
+before the form opens with the defaults).
 
 ### device runtime plan
 

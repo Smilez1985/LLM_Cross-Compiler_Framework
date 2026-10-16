@@ -1742,8 +1742,14 @@ ein Deployment fragt nie.
 Exit-Code 1, wenn das Board kein systemd hat oder die Bestätigung fehlt (dann wird nichts geändert), 2 bei einem
 falschen Wert.
 
+Beschädigte Deploy-Einstellungen (`device list` zeigt "damaged; set them again") werden nie als die Vorgaben gelesen.
+Mit einer Option nennt der Befehl die Datei mit vollem Pfad und Größe und fragt, ob sie neu festgelegt werden sollen,
+ausgehend von den Vorgaben ("Nein" ist die Vorgabe; ohne Terminal wird nichts ersetzt, Exit-Code 1); die Datei wird
+erst überschrieben, wenn die neuen Einstellungen gespeichert werden.
+
 In der GUI: **Boards > Boards und Geräte...** **> Einstellungen...** (die aktuellen Einstellungen vollständig; Installation, Benutzer, Port,
-Modell und KV-Cache; dieselbe sudo-Frage mit "Nein" als Vorgabe, zuerst ins Audit-Log geschrieben).
+Modell und KV-Cache; dieselbe sudo-Frage mit "Nein" als Vorgabe, zuerst ins Audit-Log geschrieben; bei beschädigten
+Einstellungen dieselbe Frage, bevor das Formular mit den Vorgaben öffnet).
 
 ### device runtime plan
 

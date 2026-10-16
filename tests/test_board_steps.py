@@ -312,6 +312,53 @@ class TestSettings:
         assert row["actor"] == "user" and row["tool"] == "device_runtime_untrusted_model" and row["approved"]
         assert row["extra"] == {"answer": "accepted", "confirm_channel": "framework-gui"}
 
+    def test_damaged_settings_are_set_again_from_the_defaults_only_after_a_yes(self, tmp_path):
+        """'damaged; set them again' (review of wave 5a): `device settings` and the Boards window could not set them
+        again, because both read the damaged file first. Now the person is asked, with the file's full path and
+        size; only a yes starts from the defaults (nothing of the damaged file is read as a setting)."""
+        store = self.stored(tmp_path)
+        path = Path(store.deploy_settings_path("0123456789abcdef"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{damaged", encoding="utf-8")
+        asked = []
+        with pytest.raises(person_steps.BoardStepError) as e:
+            person_steps.settings_to_change(store, "0123456789abcdef",
+                                            may_replace=lambda reason, p, size: asked.append((reason, p, size)))
+        assert e.value.kind == "damaged" and "cannot be used" in str(e.value)
+        ((reason, shown, size),) = asked
+        from orchestrator.Core.deletion import size_text
+        assert shown == str(path) and size == size_text(len("{damaged")) and "damaged" in reason
+        assert path.read_text(encoding="utf-8") == "{damaged", "No changes nothing"
+        current, replaced = person_steps.settings_to_change(store, "0123456789abcdef", may_replace=lambda *a: True)
+        assert current == DeploySettings() and replaced is True
+        store.save_deploy_settings("0123456789abcdef", DeploySettings(ssh_user="dietpi").as_dict())
+        current, replaced = person_steps.settings_to_change(
+            store, "0123456789abcdef", may_replace=lambda *a: pytest.fail("valid settings are not asked about"))
+        assert current.ssh_user == "dietpi" and replaced is False
+
+    def test_the_cli_sets_damaged_settings_again_after_its_question(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
+        state = tmp_path / "state"
+        store = self.stored(state)
+        path = Path(store.deploy_settings_path("0123456789abcdef"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{damaged", encoding="utf-8")
+        monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(state))
+        monkeypatch.setenv("COLUMNS", "400")
+        out = CliRunner().invoke(cli_module.cli, ["-q", "device", "settings", "ZERO 3W", "--user", "dietpi"])
+        assert out.exit_code == 1 and "cannot be used" in out.output, "without a terminal nothing is replaced"
+        assert path.read_text(encoding="utf-8") == "{damaged"
+        asked = []
+        monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+        monkeypatch.setattr(cli_module.click, "confirm", lambda text, default=None: asked.append((text, default))
+                            or True)
+        out = CliRunner().invoke(cli_module.cli, ["-q", "device", "settings", "ZERO 3W", "--user", "dietpi"])
+        assert out.exit_code == 0, out.output
+        ((text, default),) = asked
+        assert default is False and str(path) in text and "is overwritten" in text
+        assert person_steps.load_settings(store, "0123456789abcdef") == DeploySettings(ssh_user="dietpi")
+
     def test_the_cli_asks_the_same_sudo_question(self):
         import inspect
         from orchestrator import cli as cli_module
