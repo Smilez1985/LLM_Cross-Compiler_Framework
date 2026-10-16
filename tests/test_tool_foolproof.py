@@ -400,7 +400,8 @@ class TestDittoPath:
     def test_one_cautious_syntax_repair(self, raw, parsed):
         assert parse_arguments(raw) == (parsed, None)
 
-    @pytest.mark.parametrize("raw", ["{not json", "__import__('os').system('true')", "[1, 2]", "x" * 200_000])
+    @pytest.mark.parametrize("raw", ["{not json", "__import__('os').system('true')", "[1, 2]", "x" * 200_000],
+                             ids=["broken-json", "python-code", "a-list", "200000-characters"])
     def test_everything_else_stays_an_error(self, raw):
         args, problem = parse_arguments(raw)
         assert args == {} and problem

@@ -3,6 +3,7 @@ own builds and jobs cancelled without a question and another client's only with 
 thread and stop without touching the build, and a disconnected session that cancels its own work."""
 
 import asyncio
+import os
 import threading
 import time
 from datetime import datetime
@@ -141,7 +142,18 @@ class TestJobService:
         assert summary == {"job_id": job.job_id, "kind": "hf_download", "owner": "mcp", "state": "done",
                            "created": job.created, "updated": job.updated, "error": None}
         path = tmp_path / "jobs" / f"{job.job_id}.json"
-        assert "session-secret" not in path.read_text() and (path.stat().st_mode & 0o077) == 0
+        assert "session-secret" not in path.read_text()
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes: Windows has no group or other bits (os.chmod sets "
+                                                "only the read-only flag there). On Windows the job files lie in the "
+                                                "per-user folder below the profile (~/.llm-framework), whose "
+                                                "inherited ACL keeps other standard users out; explicit ACLs by SID "
+                                                "come with the host-account work (H12/M7).")
+    def test_a_job_file_is_readable_by_its_owner_only(self, tmp_path):
+        jobs = JobService(tmp_path / "jobs")
+        job = jobs.create("hf_download", "mcp#session-secret", state="running")
+        jobs.update(job.job_id, state="done", result={"sha256": "ab" * 32})
+        assert ((tmp_path / "jobs" / f"{job.job_id}.json").stat().st_mode & 0o077) == 0
 
     def test_unknown_ids_name_where_ids_come_from(self):
         with pytest.raises(JobError, match="do not guess"):

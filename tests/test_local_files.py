@@ -157,7 +157,11 @@ class TestDeniedFolders:
         home = isolated_home(tmp_path)
         monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
         paths = {str(d.path) for d in denied_folders(tmp_path / "state")}
-        for expected in ("/etc", "/proc", "/sys", "/dev", str(home / ".ssh"), str(home / ".gnupg"),
+        # The POSIX system folders as paths of this computer ('\etc' on Windows); a Windows host's own system folder
+        # is listed from SystemRoot (test_the_windows_system_folder_and_credential_stores_are_listed).
+        posix_system = [str(Path(p)) for p in ("/etc", "/proc", "/sys", "/dev")]
+        windows_system = [os.environ["SYSTEMROOT"]] if os.name == "nt" and os.environ.get("SYSTEMROOT") else []
+        for expected in (*posix_system, *windows_system, str(home / ".ssh"), str(home / ".gnupg"),
                          str(home / ".config"), str(home / ".netrc"), str(home / ".docker"), str(home / ".aws"),
                          str(home / ".kube"), str(home / ".password-store"), str(home / ".local/share/keyrings"),
                          str(home / ".cache" / "huggingface"), str(home / ".cache" / "huggingface" / "token"),
@@ -165,6 +169,22 @@ class TestDeniedFolders:
                          str(tmp_path / "AppData" / "Roaming" / "Microsoft" / "Credentials"),
                          str(tmp_path / "AppData" / "Roaming" / "Microsoft" / "Protect")):
             assert expected in paths, expected
+
+    def test_the_windows_system_folder_and_credential_stores_are_listed(self, tmp_path):
+        """From the environment, so on any host: a Windows host's system folder (registry hives, SAM), the computer's
+        keys and the credential vaults. Where these variables are not set (Linux), nothing is added."""
+        env = {"SystemRoot": r"C:\Windows", "ProgramData": r"C:\ProgramData",
+               "APPDATA": str(tmp_path / "Roaming"), "LOCALAPPDATA": str(tmp_path / "Local")}
+        found = {str(d.path): d.reason for d in denied_folders(tmp_path / "state", env=env)}
+        assert found[str(Path(r"C:\Windows"))] == "it is a system folder"
+        assert "keys" in found[str(Path(r"C:\ProgramData") / "Microsoft" / "Crypto")]
+        for vault in (Path(r"C:\ProgramData") / "Microsoft" / "Vault", tmp_path / "Local" / "Microsoft" / "Vault",
+                      tmp_path / "Roaming" / "Microsoft" / "Vault"):
+            assert "Windows credentials" in found[str(vault)], vault
+        upper = {str(d.path) for d in denied_folders(tmp_path / "state", env={"WINDIR": r"D:\WINNT"})}
+        assert str(Path(r"D:\WINNT")) in upper
+        assert not any("Windows" in p or "ProgramData" in p
+                       for p in (str(d.path) for d in denied_folders(tmp_path / "state", env={})))
 
 
 class TestHuggingFaceCache:
@@ -179,8 +199,10 @@ class TestHuggingFaceCache:
         write(blobs / "1", b"{}")
         write(blobs / "2", b"weights")
         snapshot.mkdir(parents=True)
-        (snapshot / "config.json").symlink_to("../../blobs/1")
-        (snapshot / "model.safetensors").symlink_to("../../blobs/2")
+        # relative links as huggingface_hub makes them, with this computer's separator: Windows does not resolve a
+        # relative link written with '/' ("../../blobs/1" is a broken link there)
+        (snapshot / "config.json").symlink_to(Path("..", "..", "blobs", "1"))
+        (snapshot / "model.safetensors").symlink_to(Path("..", "..", "blobs", "2"))
         write(home / "token", b"hf_" + b"y" * 20)
         return SimpleNamespace(home=home, hub=home / "hub", snapshot=snapshot, blobs=blobs, area=area)
 
@@ -577,8 +599,11 @@ class TestReviewS6:
         state = tmp_path / "outer" / "state"
         state.mkdir(parents=True)
         outside = write(tmp_path / "outer" / "m.gguf")
+        # the root folder of the file's own drive ('/' on POSIX; on Windows e.g. 'C:\', since '/' is the root of the
+        # current drive, which may be another one)
+        top = Path(outside.resolve().anchor)
         for root, reference in ((home, "models:Documents/tax-return.pdf"), (tmp_path / "outer", "models:m.gguf"),
-                                (Path("/"), "models:" + str(outside.resolve()).lstrip("/"))):
+                                (top, "models:" + outside.resolve().relative_to(top).as_posix())):
             files = LocalFiles(state, {"models": root})
             error = refused(files, reference)
             assert "cannot be used" in str(error), (root, str(error))

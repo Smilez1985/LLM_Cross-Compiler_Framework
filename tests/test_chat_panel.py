@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import POSIX_MODES_ONLY
 from orchestrator.Core.chat_feed import FeedEntry, FeedRefs, FeedSender, FeedStore, FeedWriteError, FeedWriter
 
 pytestmark = pytest.mark.usefixtures("qapp")
@@ -338,6 +339,15 @@ def test_original_words_toggle_shows_unchanged_text(make_panel, feed):
 
 # --- the remembered state ------------------------------------------------------------------------------------------
 
+@POSIX_MODES_ONLY
+def test_the_panel_state_file_is_private(tmp_path):
+    from orchestrator.gui.gui_state import FILE_NAME, GuiState
+    state = GuiState.load(tmp_path)
+    state.chat_panel_visible = False
+    assert state.save()
+    assert (tmp_path / FILE_NAME).stat().st_mode & 0o777 == 0o600
+
+
 def test_panel_state_is_remembered_and_a_broken_file_gives_defaults(tmp_path):
     from orchestrator.gui.gui_state import FILE_NAME, GuiState
     state = GuiState.load(tmp_path)
@@ -346,7 +356,6 @@ def test_panel_state_is_remembered_and_a_broken_file_gives_defaults(tmp_path):
     state.dock_state = GuiState.encode(b"\x00\x01dock")
     assert state.save()
     path = tmp_path / FILE_NAME
-    assert path.stat().st_mode & 0o777 == 0o600
     again = GuiState.load(tmp_path)
     assert (again.chat_panel_visible, again.last_seen_entry, again.filter) == (False, 42, "decisions")
     assert GuiState.decode(again.dock_state) == b"\x00\x01dock"

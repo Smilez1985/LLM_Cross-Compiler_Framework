@@ -497,7 +497,7 @@ def source(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     (src / "CMakeLists.txt").write_text("project(llama.cpp)\n")
-    (src / "LICENSE").write_text(LICENCE)
+    (src / "LICENSE").write_bytes(LICENCE.encode("utf-8"))  # the pinned source as git checks it out: LF
     return src
 
 
