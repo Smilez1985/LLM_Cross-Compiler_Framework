@@ -69,7 +69,8 @@ jobs:
   test:
     name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # The Windows runner needs about an hour for the whole suite (Linux about 12 minutes).
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 30 }}
     strategy:
       fail-fast: false
       matrix:
