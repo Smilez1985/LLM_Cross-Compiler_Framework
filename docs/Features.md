@@ -969,7 +969,8 @@ framework applied and the repeat refusals. Cloud providers bill about 20 request
 cases, another cases file, runs per case, several local tiers, or provider, model and effort for this run only (the
 saved AI settings stay unchanged). Before a run it says what is called and whether that costs money, also when the
 fallback chain of the AI settings names a cloud provider, and that retrieval downloads its models on first use ("No"
-is the default); a tier that is not downloaded yet is refused with a pointer to **Ditto > Local Models...**. The run
+is the default); a tier that is not downloaded yet is refused with a pointer to **Ditto > Local Models...**, and a
+run of local tiers waits while another task of Ditto's local runtime runs (it starts its own server). The run
 goes in the background with progress and **Cancel** (the case that runs finishes first; a tier's server is stopped as
 after a normal run, and a server of yours that it replaced is reported), the window shows the same tables, and
 **Save report...** writes the JSON report of `--json`.
@@ -1126,7 +1127,9 @@ and its note (recommended for this computer, chosen, on request, not pinned), wi
 recommendation and the full models folder. **Download the recommended model...** and **Download selected...** do
 `ditto models download` with the same question (repo, file, licence, size, folder; "No" is the default); the list and
 the download run in the background, with progress and **Cancel** (the part is kept for a resume). The recommended
-download takes the recommendation the window shows, so no hardware probe runs while you wait for the question.
+download takes the recommendation the window shows, so no hardware probe runs while you wait for the question. A
+download is a task of Ditto's local runtime: it waits while a build, a server start or another download runs in
+**Ditto > Local Runtime...** or the AI settings, and they wait for it.
 
 ### How the server runs
 

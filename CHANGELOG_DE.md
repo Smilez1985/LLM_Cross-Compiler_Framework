@@ -98,14 +98,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Teil bleibt für die Fortsetzung). Der empfohlene Download nimmt die Empfehlung, die das Fenster zeigt (mit der Liste
   im Hintergrund gelesen), damit keine Hardware-Prüfung im GUI-Thread läuft. Die Zeilen des Katalogs und das Modell
   eines Downloads sind Kernfunktionen, die auch die CLI aufruft (ihre Ausgabe bleibt gleich). Die Installationsfrage
-  der Laufzeit in den KI-Einstellungen nennt dieses Fenster statt des CLI-Befehls.
+  der Laufzeit in den KI-Einstellungen nennt dieses Fenster statt des CLI-Befehls. Ein Download ist eine Aufgabe von
+  Dittos lokaler Laufzeit: Er wartet, solange in Ditto > Lokale Laufzeit... oder in den KI-Einstellungen ein Build,
+  ein Serverstart oder ein anderer Download läuft, und diese warten auf ihn.
 - **Ditto > Bewertung...: `llm-cli ditto eval` mit der Maus** (W1'): Arten und Retrieval-Varianten (fused, rerank),
   einzelne Fälle, eine andere Falldatei, Läufe pro Fall, mehrere lokale Stufen, oder Anbieter, Modell und Denkaufwand
   nur für diesen Lauf (die gespeicherten KI-Einstellungen bleiben unverändert); eine Frage vor dem Lauf sagt, was
   aufgerufen wird und ob es Geld kostet, auch wenn die Ersatzkette der KI-Einstellungen einen Cloud-Anbieter nennt, und
   dass Retrieval seine Modelle bei der ersten Verwendung herunterlädt („Nein“ als Vorgabe); eine Stufe, die noch nicht
   heruntergeladen ist, wird mit einem Hinweis auf Ditto > Lokale Modelle... abgelehnt (ihr Start würde zuerst deinen
-  Server stoppen); der Lauf geht im Hintergrund mit Fortschritt und **Abbrechen** (vor dem nächsten Versuch;
+  Server stoppen); ein Lauf mit lokalen Stufen ist eine Aufgabe von Dittos lokaler Laufzeit und wartet, solange eine
+  andere läuft; der Lauf geht im Hintergrund mit Fortschritt und **Abbrechen** (vor dem nächsten Versuch;
   Abbrechen während der Aufnahme lädt keinen Reranker), das Fenster zeigt die Tabellen der CLI, und **Bericht
   speichern...** schreibt ihren JSON-Bericht. Der Lauf selbst (Auswahl der Fälle, die Schleife über die Stufen mit dem
   Wiederherstellen des Servers, die Retrieval-Läufe, die Tabellen und der Bericht) liegt jetzt in

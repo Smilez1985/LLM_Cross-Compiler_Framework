@@ -11,7 +11,10 @@ finished case, each started run and each busy step come back on the application'
 the next attempt (the case that runs finishes first; a tier's server is stopped as after a normal run). The results are
 the CLI's tables; "Save report..." writes the CLI's JSON report (`--json FILE`) to a file the person chooses.
 
-Every text is plain text; the person sees full paths; nothing here goes to an AI except the evaluation's own cases.
+A run of local tiers is a task of Ditto's local runtime (it stops your server and starts its own): it waits while
+another one runs in Ditto > Local Runtime..., Ditto > Local Models... or the AI settings, and they wait for it
+(runtime_mode_box.job_begins). Every text is plain text; the person sees full paths; nothing here goes to an AI
+except the evaluation's own cases.
 """
 
 import contextlib
@@ -29,6 +32,7 @@ from orchestrator.evals import eval_run
 from orchestrator.evals.ditto_eval import KINDS, RAG_VARIANTS
 from orchestrator.gui.ai_choice import catalog_of, chosen, fill_models, fill_providers, is_local
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
+from orchestrator.gui.runtime_mode_box import job_begins, job_ends, job_running
 from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.runtime.ditto_models import gib
 from orchestrator.utils.localization import current_language, ui_text
@@ -452,6 +456,10 @@ class EvaluationWindow(QDialog):
         if ai and self.ditto is None:
             self._tell("warning", self._t("ditto_eval.no_ditto"))
             return False
+        local_runs = ai and bool(choice["tiers"])   # a tier's server is started: a task of Ditto's local runtime
+        if local_runs and job_running():
+            self._tell("information", self._t("ditto_runtime.busy"))
+            return False
         missing = self._missing_tiers(choice["tiers"]) if ai else []
         if missing:   # starting one would stop your server first and then name a CLI command
             self._tell("warning", self._t("ditto_eval.tiers_missing", tiers=", ".join(missing)))
@@ -462,6 +470,10 @@ class EvaluationWindow(QDialog):
             self._tell("warning", self._t("ditto_eval.failed", reason=one_line(problem)))
             return False
         if not ask(self, self._t("ditto_eval.title"), self.question(choice, cases)):
+            return False
+        guard = object() if local_runs else None
+        if guard is not None and not job_begins(guard):   # another runtime task began while the question was open
+            self._tell("information", self._t("ditto_runtime.busy"))
             return False
 
         from orchestrator.Core.ai_override import ditto_with
@@ -502,6 +514,9 @@ class EvaluationWindow(QDialog):
                 result: Any = (True, work())
             except BaseException as e:  # noqa: BLE001 - shown to the person as text
                 result = (False, e)
+            finally:
+                if guard is not None:
+                    job_ends(guard)   # by the worker thread, also when this window is gone
             relay.done.emit(job, result)
 
         threading.Thread(target=run, name="ditto-eval", daemon=True).start()
