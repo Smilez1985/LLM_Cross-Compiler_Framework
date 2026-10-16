@@ -536,6 +536,40 @@ class RAGManager:
     def _models(self) -> Tuple[DenseEmbedder, SparseEmbedder]:
         return self._with_store(lambda store: (self._embedder, self._sparse))
 
+    def embedding_download(self) -> Tuple[Optional[bool], float]:
+        """(needed, about how many GB) of the models the next indexing loads first and downloads when they are not on
+        this computer yet: the embedding model and the keyword model. needed is True or False, None when it cannot be
+        told (then the GB are those of all of them). Reads only: never downloads, never loads a model, and never opens
+        the knowledge base for this; a model not created yet is the one first use would choose (the setting
+        rag_embedding_model, the open knowledge base's model, else the one recommended for this computer)."""
+        with self._lock:
+            dense, sparse, store = self._embedder, self._sparse, self._store
+        try:
+            if dense is None:
+                configured = str(self._cfg("rag_embedding_model", "auto") or "auto").strip()
+                model_id = (configured if configured.lower() != "auto" else
+                            store.model_id if store is not None else recommend_model()[0])
+                dense = create_dense_embedder(resolve_spec(model_id), self.models_cache_dir, lambda: True)
+            if sparse is None:
+                sparse = create_sparse_embedder(self.models_cache_dir, lambda: True)
+        except Exception:  # noqa: BLE001 - an unknown model or no fastembed: it cannot be told
+            return None, 0.0
+        missing, unknown, every = 0.0, False, 0.0
+        for model in (dense, sparse):
+            cached = getattr(model, "cached", None)
+            if not callable(cached):
+                continue   # a model the caller gave the knowledge base: it is there
+            size = float(getattr(model, "size_gb", 0) or 0)
+            every += size
+            state = cached()
+            if state is None:
+                unknown = True
+            elif not state:
+                missing += size
+        if missing:
+            return True, missing
+        return (None, every) if unknown else (False, 0.0)
+
     @_uses_models
     def prepare_models(self) -> bool:
         """Downloads (unless offline) and loads the embedding models, and the reranker unless rag_reranker

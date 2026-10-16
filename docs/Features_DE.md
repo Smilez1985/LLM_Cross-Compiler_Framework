@@ -1265,12 +1265,15 @@ fehlt; die Installer führen den Befehl als ihren Ditto-Schritt aus (`install.sh
   Build-Speicher behält den Build, aus dem das Image gemacht wurde, also braucht ein Wechsel zurück keinen neuen Build.
 - **Die Reste der alten Art** werden aufgelistet, nachdem die neue Art geprüft ist: Dittos Build-Ordner mit
   vollständigem Pfad, Ordnername, Build-ID und Größe, Dittos Images und Container mit Name, ID und Größe, und was
-  jedes ist. Entfernt wird nur genau die Liste, die du bestätigst („Nein“ ist vorgewählt), im Terminal oder in den
-  KI-Einstellungen; die Liste wird vorher noch einmal ermittelt, und hat sie sich geändert, wird nichts entfernt, und
-  das Entfernen wird ins Audit-Log geschrieben, bevor etwas entfernt wird. Ohne Terminal wird nichts entfernt, und die
-  Liste wird angezeigt. Dittos Images werden sonst nie gelöscht, und die Builds eines Boards im selben Speicher
-  werden nie aufgelistet. Ist Docker nach einem Wechsel zur direkten Art nicht erreichbar, sagt der Befehl, dass
-  Dittos Images und Container nicht in der Liste stehen, und wie du sie später auflistest.
+  jedes ist. Entfernt wird nur genau die Liste, die du bestätigst, mit einer Frage für die ganze Liste („Nein“ ist
+  vorgewählt), im Terminal oder in den KI-Einstellungen: Die Build-Ordner kommen in den Papierkorb
+  (wiederherstellbar; ihr Platz bleibt belegt, bis du ihn leerst), und Dockers Images und Container werden endgültig
+  gelöscht, weil Docker keinen Papierkorb hat. Die Liste sagt, wohin jedes kommt; sie wird vorher noch einmal
+  ermittelt, und hat sie sich geändert, wird nichts entfernt, und das Entfernen wird ins Audit-Log geschrieben, bevor
+  etwas entfernt wird. Ohne Terminal wird nichts entfernt, und die Liste wird angezeigt. Dittos Images werden sonst
+  nie gelöscht, und die Builds eines Boards im selben Speicher werden nie aufgelistet. Ist Docker nach einem Wechsel
+  zur direkten Art nicht erreichbar, sagt der Befehl, dass Dittos Images und Container nicht in der Liste stehen, und
+  wie du sie später auflistest.
 - **Das Modell:** `ensure` bietet das Modell der gewählten oder empfohlenen Stufe an, wenn es fehlt, zuerst mit
   Quelle, Größe und Lizenz; mit `-y` lädt es nur ein Modell unter freier Lizenz. Jede andere Lizenz nimmst du selbst
   an.
@@ -1415,6 +1418,10 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   Embedding-Modell noch nicht auf diesem Rechner, wird die Suche mit dem nächsten Schritt abgelehnt (Ditto einmal
   in der GUI oder mit `llm-cli ditto ask` fragen, das lädt es einmal), und ein noch fehlendes Reranking-Modell wird
   nur für diesen Aufruf übersprungen. Auflisten und Lesen brauchen kein Modell.
+  Ein MCP-Prompt mit Auszügen aus der Wissensbasis liest genauso: Ohne das Modell lässt er die Auszüge weg und sagt,
+  warum. Die Tools, die Text speichern (`crawl_docs_site`, `index_framework_docs` und ein Wissens-Pack über
+  `add_pack_from_index`), laden die Modelle zuerst: Ihre Frage sagt, ob sie schon auf diesem Rechner liegen oder
+  zuerst einmal heruntergeladen werden, mit der Größe und der Situationswarnung `embedding_model_download`.
 - **Dokumentation aufnehmen:** [Deep Ingest](#deep-ingest) im Modul-Assistenten und
   [Wissens-Packs](#community-zoo) aus dem Community-Zoo.
 - **Die eigenen Dokumente des Frameworks** (unveröffentlicht): **Tools > Index the Framework's Documentation...**,
@@ -1607,7 +1614,8 @@ Mit `crawl_docs_site` kann ein MCP-Client oder Ditto Dokumentation in die Wissen
   wird gedeckelt), und es bietet nie „ja, und nicht mehr fragen“ an. Die erste Zeile der Frage sagt, was passiert (Websites,
   Seiten je Startadresse, Linktiefe, die Pause, dass die Opt-outs beachtet werden und sich nicht abschalten
   lassen), dann eine Zeile je Startadresse (markiert als vom KI-Client angegeben), die behaltenen Sprachen, PDFs, der
-  Snapshot und dass das Embedding-Modell einmal heruntergeladen werden kann.
+  Snapshot und ob das Embedding-Modell schon auf diesem Rechner liegt oder zuerst einmal heruntergeladen wird (dann
+  mit seiner Größe und der Warnung `embedding_model_download`).
 - **Vor der Frage geprüft:** Der Hinweis muss gelesen sein (sonst `needs_person`); Offline-Modus aus und Wissensbasis
   an (`not_supported`); 1 bis 5 Startadressen, jede eine öffentliche `http(s)`-Adresse, die die SSRF-Prüfung besteht
   (`invalid_value` für alles andere); `max_pages` je Startadresse von 1 bis `crawler_max_pages` (nie über 100),

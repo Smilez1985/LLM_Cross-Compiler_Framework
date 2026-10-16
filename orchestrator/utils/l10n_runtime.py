@@ -36,10 +36,15 @@ TEXTS = {
         "runtime.mode.working": "Working… this can take minutes; the window can stay open.",
         "runtime.mode.failed": "Nothing was switched: {reason}",
         "runtime.mode.leftovers.question": "The old mode's files and Docker objects are not needed any more. Remove "
-                                           "exactly these {n} objects ({size})? With No, nothing is removed.\n\n"
-                                           "{items}",
+                                           "exactly these {n} objects ({size})? Build folders go to the trash (File > "
+                                           "Trash... restores them; their space stays used until you empty the "
+                                           "trash); Docker has no trash, so its images and containers are deleted "
+                                           "for good. With No, nothing is removed.\n\n{items}",
         "runtime.mode.item.id": "ID: {id}",
+        "runtime.mode.goes.trash": "Goes to: the trash",
+        "runtime.mode.goes.deleted": "Goes to: deleted for good",
         "runtime.mode.removed": "{n} removed, about {size}.",
+        "runtime.mode.trashed": "{n} moved to the trash (File > Trash... lists them).",
         "runtime.mode.kept": "Kept: {name} ({reason})",
         "runtime.mode.nothing_removed": "Nothing was removed; the objects stay until you remove them.",
     },
@@ -73,10 +78,16 @@ TEXTS = {
         "runtime.mode.working": "Läuft … das kann Minuten dauern; das Fenster kann offen bleiben.",
         "runtime.mode.failed": "Nichts wurde gewechselt: {reason}",
         "runtime.mode.leftovers.question": "Die Dateien und Docker-Objekte der alten Art werden nicht mehr gebraucht. "
-                                           "Genau diese {n} Objekte ({size}) entfernen? Mit Nein wird nichts "
-                                           "entfernt.\n\n{items}",
+                                           "Genau diese {n} Objekte ({size}) entfernen? Build-Ordner kommen in den "
+                                           "Papierkorb (File > Trash... stellt sie wieder her; ihr Platz bleibt "
+                                           "belegt, bis du den Papierkorb leerst); Docker hat keinen Papierkorb, "
+                                           "seine Images und Container werden also endgültig gelöscht. Mit Nein wird "
+                                           "nichts entfernt.\n\n{items}",
         "runtime.mode.item.id": "ID: {id}",
+        "runtime.mode.goes.trash": "Kommt: in den Papierkorb",
+        "runtime.mode.goes.deleted": "Kommt: endgültig gelöscht",
         "runtime.mode.removed": "{n} entfernt, etwa {size}.",
+        "runtime.mode.trashed": "{n} in den Papierkorb gelegt (File > Trash... listet sie).",
         "runtime.mode.kept": "Behalten: {name} ({reason})",
         "runtime.mode.nothing_removed": "Nichts wurde entfernt; die Objekte bleiben, bis du sie entfernst.",
     },

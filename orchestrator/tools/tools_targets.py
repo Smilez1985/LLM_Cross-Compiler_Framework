@@ -267,7 +267,8 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         tm = getattr(framework, "target_manager", None)
         if tm is None:
             raise ToolError("The framework is not initialized (no target registry).", code="failed",
-                            next="Tell the person the framework is not ready; 'llm-cli doctor' shows why.")
+                            next="Tell the person the framework is not ready; run_mojo_oracle (or 'llmcf mojo' in a "
+                                 "terminal) shows why.")
         return tm
 
     def probes() -> HardwareProbes:
@@ -318,7 +319,8 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
             folder = m.get("folder")
             if folder is None:
                 raise ToolError(f"The folder of target {tid} cannot be found.", code="failed",
-                                next="Call list_targets; 'llm-cli doctor' checks the targets folder.")
+                                next="Call list_targets; run_mojo_oracle (or 'llmcf mojo' in a terminal) checks the "
+                                     "targets folder.")
             from orchestrator.Core.module_generator import validate_target_folder
             problems = validate_target_folder(Path(folder))
             out.checked_files, out.problems = True, [p.replace(str(folder), tid) for p in problems[:50]]

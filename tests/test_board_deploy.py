@@ -656,6 +656,21 @@ class TestAddressOrHostName:
         result, _events = run(manager, package)
         assert result.success
 
+    @pytest.mark.parametrize("host", ["fe80::1", "[fe80::1]", "[fe80::1", "fe80::1]", "[[fe80::1]]", "[x]",
+                                      "myboard.local", "192.168.1.50", "[192.168.1.50]"])
+    def test_the_cli_and_gui_check_and_the_deploy_agree_on_every_address(self, manager, board, package, monkeypatch,
+                                                                          host):
+        """valid_host (the CLI's and the GUI's check) accepted [fe80::1], which the deploy then refused. Both now give
+        the same answer for every form: an IPv6 address is written without brackets, and a refused address never
+        reaches the network."""
+        from orchestrator.runtime.remote_probe import valid_host
+        seen = []
+        monkeypatch.setattr(reasons, "check_port", lambda h, port=22, timeout=3.0: seen.append(h) or None)
+        result = manager.deploy_package(package, host, "radxa")
+        refused = "Invalid address" in (result.reason or "")
+        assert valid_host(host) is not refused, (host, result.reason)
+        assert refused == (seen == []), "a refused address is never tried"
+
     def test_the_host_key_is_trusted_per_host_string(self, tmp_path):
         """Trusting the board under its host name does not trust its IP address (and the other way round): the
         person compares the fingerprint once for each string, as before."""

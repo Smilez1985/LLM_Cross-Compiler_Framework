@@ -33,7 +33,8 @@ PYTHON_CHECK = "sh -c " + shlex.quote(
     "command -v python3 >/dev/null 2>&1 && python3 -I -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])'")
 PYTHON_COMMAND = "sh -c " + shlex.quote("exec python3 -I - --output - 2>/dev/null")
 SHELL_COMMAND = "sh -c " + shlex.quote("exec sh -s -- --output - 2>/dev/null")
-_HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[?[0-9A-Fa-f:.]{2,45}\]?)$", re.ASCII)
+# The deploy's own check (deployment_manager._HOST) is the same: an IPv6 address without brackets.
+_HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45})$", re.ASCII)
 
 
 class RemoteProbeError(RuntimeError):
@@ -50,13 +51,14 @@ class RemoteProbeResult:
 def valid_host(host: str) -> bool:
     """A board's address or host name as the person entered it (eighth round N4): an IPv4 or IPv6 address, or a host
     name such as myboard.local; never an option (a leading '-' would read as one) or a shell character. Digits and
-    dots alone must be a valid IPv4 address (192.168.1.300 is a typo, not a name), and a name has no empty part."""
+    dots alone must be a valid IPv4 address (192.168.1.300 is a typo, not a name), and a name has no empty part. An
+    IPv6 address is written without brackets (fe80::1, never [fe80::1]): the port is a field of its own, and the deploy
+    refuses brackets too, so a CLI or GUI check never passes an address the deploy then refuses."""
     if not isinstance(host, str) or not _HOST.fullmatch(host) or host.startswith("-"):
         return False
-    bare = host[1:-1] if host.startswith("[") and host.endswith("]") else host
-    if ":" in bare or bare != host:
+    if ":" in host:
         try:
-            ipaddress.IPv6Address(bare)
+            ipaddress.IPv6Address(host)
         except ValueError:
             return False
         return True

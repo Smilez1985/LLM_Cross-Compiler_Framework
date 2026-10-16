@@ -279,6 +279,30 @@ class _FastEmbedBase:
     def _released(self) -> None:
         """Drops what belongs to the released model (called under the lock)."""
 
+    @property
+    def size_gb(self) -> float:
+        """About how much the model downloads once."""
+        return float(self._size_gb or 0)
+
+    def _source(self) -> Optional[Tuple[str, str]]:
+        """(Hugging Face repository, file) the model is downloaded from, None when that is not known."""
+        return None
+
+    def cached(self) -> Optional[bool]:
+        """Whether the model is on this computer already (loaded, or its file in the cache folder): True or False,
+        None when that cannot be told. Reads only; never downloads or loads anything."""
+        if self._model is not None:
+            return True
+        source = self._source()
+        if source is None:
+            return None
+        try:
+            from huggingface_hub import try_to_load_from_cache
+            found = try_to_load_from_cache(source[0], source[1], cache_dir=str(self.cache_dir))
+        except Exception:  # noqa: BLE001 - no huggingface_hub or an unreadable cache: it cannot be told
+            return None
+        return isinstance(found, str)
+
 
 class FastEmbedDenseEmbedder(_FastEmbedBase):
     """Dense embeddings with FastEmbed; adds the model's query/passage prefixes and caches query vectors."""
@@ -306,6 +330,20 @@ class FastEmbedDenseEmbedder(_FastEmbedBase):
 
     def _released(self) -> None:
         self._tokenizer = None
+
+    def _source(self) -> Optional[Tuple[str, str]]:
+        if self.spec.custom is not None:
+            return self.spec.custom.hf_repo, self.spec.custom.model_file
+        try:
+            from fastembed import TextEmbedding
+            desc = next((d for d in TextEmbedding.list_supported_models()
+                         if str(d.get("model", "")).lower() == self.model_id.lower()), None)
+        except Exception:  # noqa: BLE001 - no fastembed: it cannot be told
+            return None
+        sources = (desc or {}).get("sources") or {}
+        repo = sources.get("hf") if isinstance(sources, dict) else getattr(sources, "hf", None)
+        model_file = (desc or {}).get("model_file")
+        return (str(repo), str(model_file)) if repo and model_file else None
 
     @property
     def _prefixed(self) -> bool:
@@ -365,6 +403,9 @@ class FastEmbedSparseEmbedder(_FastEmbedBase):
         extra = {"specific_model_path": str(model_dir)} if model_dir else {}
         return SparseTextEmbedding(model_name=SPARSE_MODEL, cache_dir=str(self.cache_dir),
                                    local_files_only=offline, language=self.language, **extra)
+
+    def _source(self) -> Optional[Tuple[str, str]]:
+        return SPARSE_MODEL, f"{self.language}.txt"
 
     def _cached_copy(self) -> Optional[Path]:
         """The folder of the downloaded stop word file. FastEmbed 0.8.1 checks its cache for a model file that

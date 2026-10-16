@@ -279,6 +279,21 @@ class TestTheTool:
         spec = roomy.get("index_framework_docs")
         assert roomy.look_up(spec, roomy.validate_input(spec, {}), ToolContext("ditto")).warnings == ()
 
+    def test_the_one_time_model_download_is_in_the_question_with_its_warning(self, make_rag, tmp_path):  # noqa: F811
+        """next-fixes 119: indexing loads the knowledge base's models first; when they are not on this computer the
+        question says so with the declared situation warning (the models already there: a fact, no warning)."""
+        rag = make_rag()
+        rag.embedding_download = lambda: (True, 2.3)
+        registry = self.registry(tmp_path, rag, framework_tree(tmp_path / "fw"), disk_usage=disk(90))
+        spec = registry.get("index_framework_docs")
+        facts = registry.look_up(spec, registry.validate_input(spec, {}), ToolContext("ditto"))
+        assert [(w.code, w.kind, dict(w.numbers)) for w in facts.warnings] == [
+            ("embedding_model_download", "situation", {"size_gb": 2.3})]
+        assert any(f.label == "Embedding model" and "downloaded once first" in f.value for f in facts.facts)
+        rag.embedding_download = lambda: (False, 0.0)
+        facts = registry.look_up(spec, registry.validate_input(spec, {}), ToolContext("ditto"))
+        assert facts.warnings == () and any("nothing is downloaded" in f.value for f in facts.facts)
+
     def test_without_an_earlier_snapshot_the_knowledge_base_itself_gives_the_size(self, make_rag,  # noqa: F811
                                                                                   tmp_path):
         """The first snapshot has no earlier one to go by: the knowledge base's own storage gives its size, so a
@@ -489,3 +504,17 @@ def test_the_cli_command_refuses_without_room_for_the_snapshot(tmp_path, monkeyp
     free["gb"] = 3
     result = CliRunner().invoke(cli.cli, ["-q", "knowledge", "index-docs"])
     assert result.exit_code == 0 and len(calls) == 1 and "enough, but tight" in result.output
+
+
+def test_the_cli_usage_says_what_with_code_really_reads():
+    """CLI_Usage (EN and DE) once said --with-code reads "the install scripts", but only the shell scripts in the top
+    folder are read (install.bat is not). The docs and the reading code agree."""
+    _docs, code = framework_documents(REPO_ROOT, include_code=True)
+    names = {p.relative_to(REPO_ROOT).as_posix() for p in code}
+    assert "install.sh" in names and "install.bat" not in names
+    assert MAX_CODE_FILE_BYTES == 512 * 1024
+    for doc, phrases in (("docs/CLI_Usage.md", ("not `install.bat`", "Files above 512 KB", "`Docker Setup`")),
+                         ("docs/CLI_Usage_DE.md", ("nicht `install.bat`", "Dateien über 512 KB", "`Docker Setup`"))):
+        text = " ".join((REPO_ROOT / doc).read_text(encoding="utf-8").split())
+        for phrase in phrases:
+            assert phrase in text, (doc, phrase)

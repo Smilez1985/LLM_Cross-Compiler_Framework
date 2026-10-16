@@ -1983,18 +1983,25 @@ def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str
 
 
 def _runtime_leftovers(ctx: FrameworkContext, rt, plan) -> None:
-    """The old mode's leftovers: the full list (name, full path or ID, file name, size, what each is), then exactly
-    that list is removed after your yes at a terminal (default no). Without a terminal nothing is removed."""
+    """The old mode's leftovers: the full list (name, full path or ID, file name, size, what each is, where it goes),
+    then exactly that list is removed after your one yes at a terminal (default no): the build folders go to the trash
+    (WP7), Docker's images and containers are deleted. Without a terminal nothing is removed."""
     from orchestrator.Core.knowledge_snapshots import size_text
-    from orchestrator.runtime.runtime_mode import LeftoversChanged, RuntimeModeError, remove_leftovers
+    from orchestrator.runtime.runtime_mode import LeftoversChanged, RuntimeModeError, goes_to_trash, remove_leftovers
+    mode = plan.mode_offered[0]
     table = Table(title=f"Leftovers of the old mode: {len(plan.items)}, {size_text(plan.total_bytes)}")
-    for column in ("Name", "Full path or ID", "File name", "Size", "What it is"):
+    for column in ("Name", "Full path or ID", "File name", "Size", "What it is", "Goes to"):
         table.add_column(column, overflow="fold")
     for item in plan.items:
         table.add_row(escape(item.speaking_name), escape(item.full_path or item.file_name), escape(item.file_name),
-                      size_text(item.size_bytes), escape(item.what))
+                      size_text(item.size_bytes), escape(item.what),
+                      "the trash" if goes_to_trash(item, mode) else "deleted for good")
     console.print(table)
     console.print("Image sizes include layers other images may share, so less space can be freed.")
+    if mode == "trash":
+        console.print("Build folders go to the trash: 'llm-cli trash restore ID' brings them back, and their space "
+                      "stays used until you empty the trash. Docker has no trash: its images and containers are "
+                      "deleted for good.")
     if not _interactive():
         console.print("[yellow]Nothing was removed: run 'llm-cli ditto runtime ensure --mode "
                       f"{escape(rt.mode())} --force' yourself in a terminal to confirm this list.[/yellow]")
@@ -2002,16 +2009,22 @@ def _runtime_leftovers(ctx: FrameworkContext, rt, plan) -> None:
     if not click.confirm(f"Remove exactly these {len(plan.items)} objects?", default=False):
         console.print("Nothing was removed; they stay until you remove them.")
         return
+    state_dir = _state_dir(ctx)
+    trash, audit = _person_trash(ctx, state_dir) if mode == "trash" else (None, _device_audit(ctx, state_dir))
     try:
-        removal = remove_leftovers(rt, plan, actor="cli", audit=_device_audit(ctx, _state_dir(ctx)))
+        removal = remove_leftovers(rt, plan, actor="cli", audit=audit, trash=trash, mode=mode)
     except (LeftoversChanged, RuntimeModeError, PermissionError) as e:
         console.print(f"[yellow]{escape(str(e))}[/yellow]")
         return
+    for name in removal.trashed:
+        console.print(f"[green]Moved to the trash: {escape(name)}[/green]")
     for name in removal.deleted:
         console.print(f"[green]Removed: {escape(name)}[/green]")
     for name, reason in removal.failed:
         console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
-    console.print(f"{len(removal.deleted)} removed, about {size_text(removal.freed_bytes)}.")
+    console.print(f"{len(removal.deleted)} removed, about {size_text(removal.freed_bytes)}."
+                  + (f" {len(removal.trashed)} moved to the trash ('llm-cli trash' lists them)."
+                     if removal.trashed else ""))
 
 
 def _offer_ditto_model(rt, yes: bool) -> None:
@@ -4263,7 +4276,8 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
     from orchestrator.runtime.remote_probe import valid_host
     from orchestrator.utils import ssh_trust
     if not valid_host(host):
-        raise click.UsageError("--host takes an address or a host name, e.g. 192.168.1.50 or myboard.local")
+        raise click.UsageError("--host takes an address or a host name, e.g. 192.168.1.50, fe80::1 (no brackets) or "
+                               "myboard.local")
     password = _device_password(password, password_stdin)  # read before any question: stdin may be the pipe
     ctx.require_framework()
     dep_mgr = ctx.deployment_manager
@@ -4524,8 +4538,8 @@ def deploy_devices_add(ctx: FrameworkContext, host: str, user: str, port: int, l
                       "[/red]")
         sys.exit(1)
     if not valid_host(host) or not SSH_USER_PATTERN.fullmatch(user or ""):
-        raise click.UsageError("HOST must be an address or a host name (e.g. 192.168.1.50 or myboard.local) and "
-                               "--user an account name")
+        raise click.UsageError("HOST must be an address or a host name (e.g. 192.168.1.50, fe80::1 without brackets "
+                               "or myboard.local) and --user an account name")
     if label is not None:
         try:
             label = clean_label(label)
@@ -4631,7 +4645,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     if not user:
         raise click.UsageError("--device needs --user")
     if not valid_host(host):
-        raise click.UsageError("--device takes an address or a host name, e.g. 192.168.1.50 or myboard.local")
+        raise click.UsageError("--device takes an address or a host name, e.g. 192.168.1.50, fe80::1 (no brackets) "
+                               "or myboard.local")
     if not 1 <= port <= 65535:
         raise click.UsageError("--port must be between 1 and 65535")
     if label is not None and not (1 <= len(" ".join(label.split())) <= 64 and label.isprintable()):

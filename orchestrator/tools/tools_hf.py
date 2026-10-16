@@ -220,7 +220,8 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
             folder = LocalFiles.for_framework(framework).builtin["models"]
         except Exception as e:  # noqa: BLE001 - no per-user folder (a stand-in framework)
             raise ToolError("The models folder is not available here.", code="not_supported",
-                            next="Tell the person; 'llm-cli doctor' checks the installation.") from e
+                            next="Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) checks the "
+                                 "installation.") from e
         return Path(folder)
 
     def search_hf_models(inp: SearchHfIn) -> SearchHfOut:

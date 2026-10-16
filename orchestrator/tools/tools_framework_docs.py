@@ -133,19 +133,23 @@ def register_framework_docs_tools(registry: ToolRegistry, framework, jobs) -> To
         what = (f"{len(docs)} documentation files ({_size(files_size(docs))}) and {len(code)} code and configuration "
                 f"files ({_size(files_size(code))})" if inp.include_code else
                 f"{len(docs)} documentation files ({_size(files_size(docs))})")
+        from orchestrator.tools.tools_knowledge import embedding_download
         consequence = (f"Indexes the framework's own {what} into the local knowledge base, so Ditto and AI clients can "
                        "search them (search_knowledge, kind docs). A file indexed before is replaced.")
+        model_fact, model_warnings = embedding_download(rag)
         facts = (Fact("Documentation", f"{len(docs)} files: README, CONTRIBUTING and the docs folder"),
                  Fact("Code and configuration",
                       f"{len(code)} files the framework ships (never the person's settings, own targets or installed "
                       "packs)" if inp.include_code else "not included"),
                  Fact("Knowledge base", "a snapshot is taken first, so the index can be undone with a restore"),
-                 Fact("Embedding model", "downloaded once (about a GB) if it is not on this computer yet"),
+                 *([model_fact] if model_fact is not None else []),
                  Fact("Disk", "; ".join(c.sentence() for c in checks) or "nothing to write", volatile=True))
         bound = {"include_code": inp.include_code, "documentation_files": len(docs), "code_files": len(code)}
-        # little room left after the snapshot: a situation warning (it fits, so nothing is refused)
-        warnings = tuple(warn("disk_tight", free_after_gb=gb_number(c.after), reserve_gb=gb_number(c.reserve))
-                         for c in checks if c.verdict == "tight")
+        # little room left after the snapshot: a situation warning (it fits, so nothing is refused); the one-time
+        # download of the knowledge base's models when the index would start it (next-fixes 119)
+        warnings = model_warnings + tuple(warn("disk_tight", free_after_gb=gb_number(c.after),
+                                               reserve_gb=gb_number(c.reserve)) for c in checks
+                                          if c.verdict == "tight")
         return CallFacts(consequence=consequence, facts=facts, bound=bound, warnings=warnings,
                          digest_keys=("include_code",), consequence_template=consequence)
 
@@ -172,7 +176,8 @@ def register_framework_docs_tools(registry: ToolRegistry, framework, jobs) -> To
                                   "before it is tried again.")
             if not result.get("success"):
                 raise job_failure("The framework's documents could not be indexed: the knowledge base reported a "
-                                  "problem. Next: Tell the person; 'llm-cli doctor' shows what is wrong with the "
+                                  "problem. Next: Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) "
+                                  "shows what is wrong with the "
                                   "knowledge base.")
             # Relative names inside the framework's folder and the framework's own reasons: never a host path.
             not_indexed = [{"file": str(item.get("file", ""))[:200], "reason": str(item.get("reason", ""))[:60]}
