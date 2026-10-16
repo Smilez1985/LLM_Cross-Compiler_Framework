@@ -449,6 +449,24 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
 Ditto is built on the framework's own **provider layer** (`orchestrator/llm`), which uses the official `anthropic`
 and `openai` SDKs (OpenAI-compatible servers go through `openai`).
 
+### Experimental
+
+Ditto is optional and marked experimental: **Use at your own risk and responsibility. The creator of LLMCF is not
+liable.** This repeats the no-warranty terms of [LICENSE.txt](../LICENSE.txt) and adds nothing to them.
+
+- **Badge:** the chat panel's header and the AI settings (**Tools > Configure AI Agent (Ditto)...**) show
+  **Experimental** with this sentence; it stays.
+- **Notice, once per user:** the first time the chat panel is shown, a notice at its top says that Ditto is
+  experimental and optional, that its answers can be wrong, that what it does still goes through your tool
+  permissions and confirmations, and the sentence above. It stays until you click **Understood**. It blocks nothing:
+  the chat, the questions that wait and every other window work while it is shown.
+- **Command line:** before the first `llm-cli ditto ...` command at a terminal, the same notice goes to stderr once.
+  Without a terminal (a script, an AI client with a shell) nothing is printed or recorded, so the next command at a
+  terminal prints it. The command always runs.
+- The state file `ditto_notice.json` in the per-user folder (`~/.llm-framework`) stores a hash of the notice texts in
+  both languages, when it was shown and where (`via`: `gui` or `cli`). A changed text is shown again. No tool,
+  resource or prompt shows or answers it.
+
 ### Tasks, models and effort
 
 Ditto's four kinds of work map to the provider layer's task profiles; each task profile has its own model and

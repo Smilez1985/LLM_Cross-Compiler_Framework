@@ -475,6 +475,12 @@ monatliches API-Guthaben für eine verknüpfte Claude-Console-Organisation).
 
 ## Ditto, der eingebaute Assistent
 
+**Ditto ist optional und experimentell. Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller von LLMCF haftet
+nicht.** Das wiederholt den Gewährleistungsausschluss in [LICENSE.txt](LICENSE.txt) und fügt ihm nichts hinzu. Alles
+andere im Framework funktioniert ohne Ditto. Der Chat-Bereich und die KI-Einstellungen zeigen ein Abzeichen
+**Experimentell**; wenn du Ditto zum ersten Mal nutzt, sagt ein Hinweis das einmal (je Benutzer gespeichert), und
+`llm-cli ditto` gibt ihn an einem Terminal einmal aus.
+
 Ditto beantwortet Fragen, schlägt Build-Einstellungen vor, analysiert gescheiterte Builds und schlägt neue
 Hardware-Module vor. Dabei nutzt es die Tools des Frameworks im Rahmen deiner Tool-Berechtigungen:
 

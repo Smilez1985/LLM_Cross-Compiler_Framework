@@ -1688,8 +1688,39 @@ def tools_crawl_notice(ctx: FrameworkContext):
 
 @cli.group()
 def ditto():
-    """Ditto, the AI assistant: sign-in (login, logout, auth), questions, evaluation and the local model"""
-    pass
+    """Ditto, the AI assistant (experimental): sign-in (login, logout, auth), questions, evaluation and the local
+    model"""
+    _ditto_notice_once()
+
+
+def _notice_terminal() -> bool:
+    """A person reads stderr: only then is the notice on Ditto printed and recorded."""
+    try:
+        return sys.stderr is not None and sys.stderr.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _ditto_notice_once() -> None:
+    """Ditto is optional and experimental (eighth round, Q-2): before the first `llm-cli ditto` command at a terminal
+    the notice goes to stderr and is recorded per person (utils/ditto_notice.py). Without a terminal nothing is
+    printed or recorded, so the next command at a terminal prints it. It never stops the command."""
+    if not _notice_terminal():
+        return
+    from orchestrator.Core.config_manager import ConfigManager
+    from orchestrator.utils.ditto_notice import DittoNotice, notice_text
+    from orchestrator.utils.localization import current_language
+    notice = DittoNotice(ConfigManager.user_state_path())
+    if not notice.needed():
+        return
+    title, text = notice_text(current_language())
+    err = Console(stderr=True)
+    err.print(f"[bold yellow]{escape(title)}[/bold yellow]\n{escape(text)}\n")
+    try:
+        notice.acknowledge("cli")
+    except OSError as e:
+        err.print(f"[yellow]The notice could not be remembered ({escape(str(e))}); it is shown again next time."
+                  "[/yellow]")
 
 
 def _local_runtime(ctx: FrameworkContext):

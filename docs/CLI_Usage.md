@@ -579,6 +579,11 @@ Ditto is the built-in assistant. Most `ditto` commands use the provider and mode
 **Tools > Configure AI Agent (Ditto)...**, or `ai_provider` and `ai_model` in `config.yml`). Sign in with
 [`llm-cli ditto login`](#ditto-login), or with **Sign in...** in the AI settings.
 
+Ditto is optional and experimental. Before the first `ditto` command at a terminal, a notice goes to stderr once:
+"Use at your own risk and responsibility. The creator of LLMCF is not liable." (the no-warranty terms of
+`LICENSE.txt`, nothing more). It is stored per user and shared with the GUI's notice; without a terminal nothing is
+printed or stored. The command always runs ([details](Features.md#experimental)).
+
 ### ditto login
 
 ```

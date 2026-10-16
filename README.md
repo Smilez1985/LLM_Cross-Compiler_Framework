@@ -451,6 +451,11 @@ Console organization).
 
 ## Ditto, the built-in assistant
 
+**Ditto is optional and experimental. Use at your own risk and responsibility. The creator of LLMCF is not liable.**
+This repeats the no-warranty terms of [LICENSE.txt](LICENSE.txt) and adds nothing to them. Everything else in the
+framework works without Ditto. The chat panel and the AI settings show an **Experimental** badge; the first time you
+use Ditto, a notice says this once (stored per user), and `llm-cli ditto` prints it once at a terminal.
+
 Ditto answers questions, suggests build settings, analyzes failed builds and proposes new hardware modules. It
 uses the framework's tools within your tool permissions:
 

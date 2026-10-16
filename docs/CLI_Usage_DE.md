@@ -599,6 +599,12 @@ Ditto ist der eingebaute Assistent. Die meisten `ditto`-Befehle nutzen Anbieter 
 Anmelden kannst du dich mit [`llm-cli ditto login`](#ditto-login) oder mit **Anmelden...** in den
 KI-Einstellungen.
 
+Ditto ist optional und experimentell. Vor dem ersten `ditto`-Befehl an einem Terminal geht einmal ein Hinweis auf
+stderr: „Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller von LLMCF haftet nicht.“ (der
+Gewährleistungsausschluss aus `LICENSE.txt`, nicht mehr). Er wird je Benutzer gespeichert und mit dem Hinweis der GUI
+geteilt; ohne Terminal wird nichts ausgegeben oder gespeichert. Der Befehl läuft immer
+([Details](Features_DE.md#experimentell)).
+
 ### ditto login
 
 ```
