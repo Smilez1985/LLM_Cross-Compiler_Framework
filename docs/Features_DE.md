@@ -1803,7 +1803,8 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   `~/.kube`, der eigenen Anmeldungen und Einstellungen der KI-Clients (`~/.claude`, `~/.claude.json`, `~/.codex`,
   `~/.gemini`, `~/.cursor`), des Hugging-Face-Ordners mit seinen Token-Dateien (sein Unterordner `hub` lässt sich
   als Ordner hinzufügen), Browserprofile, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (außer es ist dein eigenes Home)
-  und der Windows-Ordner für Anmeldedaten. Innen und außen werden über die Identität der Datei entschieden, nicht
+  und unter Windows des Systemordners (`%SystemRoot%`), der Schlüssel des Computers sowie der Ordner und Tresore für
+  Anmeldedaten. Innen und außen werden über die Identität der Datei entschieden, nicht
   über Namensvergleiche, deshalb kann ein Dateisystem ohne Unterscheidung von Groß- und Kleinschreibung `~/.SSH`
   nicht verstecken. Eine Datei mit mehr als einem Hardlink wird abgelehnt. Die Datei wird festgehalten (Identität,
   Größe, Änderungszeit) und unmittelbar vor jedem Start eines Build-Containers erneut geprüft; eine inzwischen
