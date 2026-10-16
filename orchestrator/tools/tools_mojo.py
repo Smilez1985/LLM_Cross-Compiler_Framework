@@ -103,7 +103,8 @@ def _channel(value: str) -> str:
 
 def mojo_tool_specs(framework) -> List[ToolSpec]:
     """run_mojo_oracle, run_mojo_miracle and the hidden run_doctor."""
-    from orchestrator.Core.mojo import views
+    from orchestrator.utils.lazy_imports import LazyModule
+    views = LazyModule("orchestrator.Core.mojo.views")  # with the Mojo checks: imported at the first call
 
     def run_doctor(_inp: NoInput) -> DoctorOut:
         from orchestrator.Core.doctor import Doctor

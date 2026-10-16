@@ -10,6 +10,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
+  knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
+  geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
+  Eintrag, und seine erste Zeile nennt den Speicher, der wirklich genutzt wird. `convert` und **Tools > Knowledge
+  Snapshots... > Umwandlung erneut versuchen** in der GUI (im Hintergrund) versuchen die Umwandlung sofort erneut.
+  `delete-old` und **Tools > Knowledge Snapshots... > Delete the old storage...** in der GUI zeigen den alten Ordner
+  nach seiner Umwandlung und löschen ihn erst nach deinem Ja (Papierkorb oder endgültig; "Nein" ist die Vorgabe; im
+  Audit-Log als `old_store_deleted`); nichts löscht ihn von selbst, und eine KI kann es nie. Mojo Oracle meldet eine
+  fehlgeschlagene Umwandlung (mit dem Grund und beiden Wegen zum neuen Versuch) und einen alten Ordner, der noch da
+  ist.
 - **Ein Deployment sagt dir, wenn ein alter Qdrant-Sidecar auf dem Board ist**: Pakete mit Docker-Images früherer
   Versionen starteten den Container `qdrant-sidecar`, den nichts mehr nutzt. Nach einem erfolgreichen Deployment
   (`llm-cli deploy run`, das Deployment-Fenster, das KI-Tool `deploy_to_device`) schaut das Framework mit `docker ps`
@@ -1090,6 +1100,58 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Schnellerer Start: schwere Teile laden erst, wenn sie gebraucht werden** (unveröffentlicht; Entscheidung des
+  Maintainers RG1, Lazy Loading): `llm-cli`, der MCP-Server und die GUI importierten beim Start das ganze Framework.
+  Jetzt importiert ein CLI-Befehl das Framework, die Build-Engine und die Manager erst, wenn er sie nutzt; das
+  Framework importiert seine Manager beim Hochfahren und die Wissensbasis erst, wenn sie eingeschaltet ist; Qt wird
+  außerhalb der GUI nur geladen, wenn ein Signal des Docker-Managers genutzt wird; der Crawler (mit seinen Parsern für
+  HTML und PDF), numpy, die Prüfungen von Mojo, die Anbieterschicht von `orchestrator.llm` und die Teile von
+  `orchestrator.runtime` laden bei ihrer ersten Nutzung, auch bei eingeschalteter Wissensbasis; `--help` lädt kein
+  rich. Die Host-Prüfung, die beim Import der URL-Prüfungen lief, nahm eine CPU-Stichprobe von einer Sekunde und
+  suchte zwei Programme, deren Ergebnisse sie nie zeigte; sie führt jetzt nur die Prüfungen aus, deren Fehler sie
+  meldet (Platte, Speicher, Python, Plattform), daher erscheint ihre Warnung zum Plattenplatz bei der ersten Nutzung
+  der URL-Prüfungen und nicht bei jedem Start. Gemessen auf derselben Maschine mit einem temporären Home, vorher und
+  nachher, in abwechselnden Läufen (Median aus 5): `llm-cli --help` 3,15 s und 140 MB auf 0,25 s und 27 MB;
+  `llm-cli mcp serve`, bis es auf `initialize` antwortet, 4,77 s und 191 MB auf 2,67 s und 118 MB (2,69 s und 118 MB
+  bei eingeschalteter Wissensbasis); das Hauptfenster der GUI 3,97 s und 210 MB auf 2,66 s und 177 MB. Das
+  Hochfahren prüft Docker weiter wie bisher, daher laden `mcp serve` und die GUI weiter das Docker-SDK. Befehle,
+  Ergebnisse und Meldungen bleiben gleich. Ein Teil des Frameworks, der sich nicht importieren lässt (eine kaputte
+  Installation), beendet das Hochfahren jetzt mit seiner Ursache wie andere Fehler beim Hochfahren: Die CLI gibt
+  „Failed to initialize framework: ...“ aus und endet mit 1 statt mit einem Traceback, und `--help` funktioniert
+  weiter. Tests starten die CLI, `mcp serve` (auch bei eingeschalteter Wissensbasis) und die GUI in einem frischen
+  Interpreter und prüfen, dass Crawler, die Bibliotheken für Embeddings, die SDKs der Anbieter, Qt, die Prüfungen
+  von Mojo (auch seine Prüfung der Boards), der Speicher der Wissensbasis und die private Brücke zum offenen Fenster
+  nicht geladen werden und kein Lizenztext der Wissenspakete gelesen wird; der MCP-Server lädt die Brücke beim ersten
+  Aufruf seines Werkzeugs `gui`, die GUI startet sie mit ihrem Fenster.
+- **Roadmap: Rust dort, wo das Framework auf das Netzwerk oder ein Board trifft** (unveröffentlicht; Entscheidungen
+  des Maintainers RG2 bis RG4): Die Roadmap im Blueprint plant das Netzwerk-Gateway für MCP in Rust mit dem
+  MQTT-Broker rumqttd darin (statt des im Python-Prozess geplanten amqtt-Brokers), den Root-Helfer auf dem Board als
+  statisches Rust-Programm und die Rust-Teile des Frameworks als fertig gebaute, mit Sigstore signierte
+  Release-Dateien, mit ihren Prüfsummen im Repository und selbst bauen als Opt-in. Sie hält außerdem fest: keine
+  fertigen Docker-Images für Targets, kein Go, und die GUI bleibt Qt.
+- **Die lokale Wissensbasis liegt in Qdrant Edge** (DECISIONS RG5): Die Rust-Engine von Qdrant läuft im
+  Framework-Prozess (neue Abhängigkeit `qdrant-edge-py` 0.8.0, Apache-2.0, exakt gepinnt; Wheels für Linux x86_64 und
+  aarch64, Windows x86_64 und macOS, ein Wheel für jedes Python ab 3.10) statt des lokalen Modus von qdrant-client,
+  einer Python-Nachbildung für die Entwicklung. Die Daten liegen jetzt in `~/.llm-framework/qdrant_edge`. Collections
+  je Embedding-Modell, IDs, Payloads, Filter, das Ersetzen einer Quelle, der Reranker, das Budget für Auszüge und die
+  Schnappschüsse verhalten sich wie bisher; die dichte Suche bleibt exakt, und die verbundenen Werte bleiben gleich
+  (RRF k = 2). Den Speicher öffnet immer nur ein Prozess: die Sperrdatei `qdrant_edge.lock` des Frameworks verhindert,
+  dass GUI, CLI und MCP-Server gleichzeitig schreiben; ein zweiter Prozess wartet bis zu 5 Sekunden und bekommt dann
+  einen klaren Fehler "in use". Eine ältere Wissensbasis wird bei der ersten Nutzung umgewandelt: Vektoren und Texte
+  werden kopiert (nichts wird neu eingebettet), Anzahl und eine Stichprobe von Punkten und Suchen werden gegen den
+  alten Speicher geprüft, und die Umwandlung wird in `knowledge_conversion.json` festgehalten; der alte Ordner `qdrant`
+  bleibt, bis du ihn löschst. Eine fehlgeschlagene Umwandlung lässt den alten Speicher arbeiten und sagt, warum. Nach
+  der Umwandlung springt der alte Ordner nie wieder ein: Lässt sich Qdrant Edge später nicht laden (ein fehlendes oder
+  kaputtes Paket), wird die Wissensbasis mit dem Grund abgelehnt, und Mojo Oracle meldet einen Fehler, statt still den
+  alten Ordner zu nutzen, dem fehlt, was seitdem dazukam. Zweimal gemessen mit 50 000 künstlichen Auszügen: eine Suche
+  dauert 12 bis 14 ms statt 2,5 bis 4,9 s, das Öffnen etwa 1 s statt 11 bis 19 s, der Speicher 410 bis 520 MB statt
+  1,6 bis 2 GB; die Umwandlung dauerte 68 bis 159 s (5 000 Auszüge: 13,5 s). qdrant-client bleibt für einen
+  optionalen Qdrant-Server (`qdrant_url`) und um den alten Speicher zu lesen. Qdrant Edge hat keinen Build für
+  Windows auf ARM; dort behält die Wissensbasis den lokalen Modus von qdrant-client, und Mojo Oracle sagt es.
+- **Wissens-Schnappschüsse nennen den Speicher, aus dem sie kommen (Format 2)**: Ein Schnappschuss bleibt eine
+  portable Datei, für jeden Speicher gleich. Schnappschüsse im Format 1, von früheren Versionen geschrieben, lassen
+  sich in Qdrant Edge wiederherstellen und werden so umgewandelt; ein neueres Format, ein Vektor der falschen Dimension
+  oder ein kaputter Stichwort-Vektor wird abgelehnt, bevor sich etwas ändert.
 - **Die Prüfung auf gleiche Builds blockiert das Builder-Fenster nicht mehr** (unveröffentlicht; achte Runde, N11):
   Vor einem Build fragte die Prüfung Hugging Face im Thread des Fensters nach dem aktuellen Commit des Modells, daher
   reagierte das Fenster bei langsamem Netz nicht (bis zu 10 Sekunden). Die Abfrage läuft jetzt im Hintergrund; Start
@@ -1644,7 +1706,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Fehler geschwärzt), und ein Build, dessen Programm endete, bevor er fertig war, erscheint als unterbrochen. Der
   Befehl braucht weder den Tresor für Zugangsdaten noch Docker; `--all` listet jeden aufbewahrten Build statt der
   20 neuesten. Unter Linux und macOS sind die Einträge nur für den Benutzer lesbar, der gebaut hat (Ordner 0700,
-  Dateien 0600).
+  Dateien 0600). Ein Eintrag nennt das Ergebnis des Builds, bevor sein Build-Platz frei wird: Wer sieht, dass der
+  Build zu Ende ist, liest dort das Ergebnis, nie die Stufe davor.
 - Strg+C in `llm-cli build start` bricht den Build über den Build-Service ab: Sein Container wird gestoppt, die CLI
   wartet, bis der Build angehalten hat (auch wenn er gerade noch an die Build-Engine übergeben wurde), sagt das
   und endet mit Exit-Code 130. Vorher liefen Build und Container weiter.

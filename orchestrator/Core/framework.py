@@ -14,30 +14,59 @@ import asyncio
 import threading
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import TYPE_CHECKING, Optional, Any
 
 # Utils
 from orchestrator import __version__
+from orchestrator.utils.lazy_imports import lazy_attributes, lazy_value
 from orchestrator.utils.logging import setup_logging, get_logger
-from orchestrator.utils.telemetry import TelemetryManager
-from orchestrator.utils.updater import UpdateManager
 
-# Managers
+# Managers: imported when the framework boots (initialize), not when this module is imported, so a command that only
+# reads the settings or the paths starts without them; the knowledge base (RAGManager) only once it is enabled. The
+# names stay attributes of this module (framework.RAGManager, ...; a test may replace one).
 from orchestrator.Core.config_manager import ConfigManager
-from orchestrator.Core.secrets_manager import SecretsManager
-from orchestrator.Core.docker_manager import DockerManager
-from orchestrator.Core.builder import BuildEngine
-from orchestrator.Core.target_manager import TargetManager
-from orchestrator.Core.model_manager import ModelManager
-from orchestrator.Core.rag_manager import RAGManager
-from orchestrator.Core.ditto_manager import DittoCoder
-from orchestrator.Core.self_healing_manager import SelfHealingManager
-from orchestrator.Core.deployment_manager import DeploymentManager
-from orchestrator.Core.community_manager import CommunityManager
-from orchestrator.Core.orchestrator import LLMOrchestrator
-from orchestrator.Core.build_service import BuildService
-from orchestrator.Core.job_service import JobService
-from orchestrator.tools.framework_tools import build_tool_registry
+_LAZY = {
+    "TelemetryManager": "orchestrator.utils.telemetry",
+    "UpdateManager": "orchestrator.utils.updater",
+    "SecretsManager": "orchestrator.Core.secrets_manager",
+    "DockerManager": "orchestrator.Core.docker_manager",
+    "BuildEngine": "orchestrator.Core.builder",
+    "TargetManager": "orchestrator.Core.target_manager",
+    "ModelManager": "orchestrator.Core.model_manager",
+    "RAGManager": "orchestrator.Core.rag_manager",
+    "DittoCoder": "orchestrator.Core.ditto_manager",
+    "SelfHealingManager": "orchestrator.Core.self_healing_manager",
+    "DeploymentManager": "orchestrator.Core.deployment_manager",
+    "CommunityManager": "orchestrator.Core.community_manager",
+    "LLMOrchestrator": "orchestrator.Core.orchestrator",
+    "BuildService": "orchestrator.Core.build_service",
+    "JobService": "orchestrator.Core.job_service",
+    "build_tool_registry": "orchestrator.tools.framework_tools",
+}
+
+__getattr__ = lazy_attributes(__name__, _LAZY)
+
+if TYPE_CHECKING:  # annotations only
+    from orchestrator.Core.build_service import BuildService
+    from orchestrator.Core.community_manager import CommunityManager
+    from orchestrator.Core.deployment_manager import DeploymentManager
+    from orchestrator.Core.ditto_manager import DittoCoder
+    from orchestrator.Core.docker_manager import DockerManager
+    from orchestrator.Core.job_service import JobService
+    from orchestrator.Core.model_manager import ModelManager
+    from orchestrator.Core.orchestrator import LLMOrchestrator
+    from orchestrator.Core.rag_manager import RAGManager
+    from orchestrator.Core.secrets_manager import SecretsManager
+    from orchestrator.Core.self_healing_manager import SelfHealingManager
+    from orchestrator.Core.target_manager import TargetManager
+    from orchestrator.utils.telemetry import TelemetryManager
+    from orchestrator.utils.updater import UpdateManager
+
+
+def _component(name: str) -> Any:
+    """`name` of _LAZY: the value set on this module (imported earlier, or a test's stand-in), else imported now."""
+    return lazy_value(globals(), name, __getattr__)
+
 
 APP_ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,7 +103,7 @@ class FrameworkManager:
         
         self.logger.info(f"Booting {self.info.name} v{self.info.version} ({self.info.edition})...")
 
-        # Manager Placeholders
+        # Manager Placeholders (the annotations name the classes of _LAZY; they are not evaluated here)
         self.secrets_manager: Optional[SecretsManager] = None
         self.telemetry: Optional[TelemetryManager] = None
         self.docker_manager: Optional[DockerManager] = None
@@ -100,7 +129,22 @@ class FrameworkManager:
     def initialize(self) -> bool:
         """Führt die Boot-Sequenz durch."""
         if self._initialized: return True
-        
+
+        # The managers are imported here, at boot (see _LAZY), RAGManager in ensure_rag_manager. A broken
+        # installation (a module that cannot be imported) stops the boot with that cause as init_error, like every
+        # other boot error: the CLI prints it and exits with 1, the GUI shows it (no traceback).
+        try:
+            SecretsManager, TelemetryManager, DockerManager, BuildEngine, TargetManager, ModelManager, DittoCoder, \
+                SelfHealingManager, DeploymentManager, CommunityManager, LLMOrchestrator, BuildService, JobService, \
+                UpdateManager, build_tool_registry = map(_component, (
+                    "SecretsManager", "TelemetryManager", "DockerManager", "BuildEngine", "TargetManager",
+                    "ModelManager", "DittoCoder", "SelfHealingManager", "DeploymentManager", "CommunityManager",
+                    "LLMOrchestrator", "BuildService", "JobService", "UpdateManager", "build_tool_registry"))
+        except ImportError as e:
+            self.init_error = e
+            self.logger.critical(f"A part of the framework cannot be imported (broken installation?): {e}")
+            return False
+
         try:
             # === PHASE 1: SECURITY & BASE ===
             self.logger.info("[Boot Phase 1] Security & Infrastructure")
@@ -237,10 +281,10 @@ class FrameworkManager:
         if thread is None or not thread.is_alive():
             loop.close()
 
-    def ensure_rag_manager(self) -> Optional[RAGManager]:
+    def ensure_rag_manager(self) -> Optional["RAGManager"]:
         """Creates the RAG manager on demand once RAG is enabled (also at runtime via GUI)."""
         if self.rag_manager is None and self.config.get("enable_rag_knowledge", False):
-            self.rag_manager = RAGManager(self)
+            self.rag_manager = _component("RAGManager")(self)
             if self.community_manager is not None:  # knowledge packs installed while it was off
                 self.community_manager.sync_knowledge_base(self.rag_manager)
         return self.rag_manager

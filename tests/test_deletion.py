@@ -33,6 +33,9 @@ NAME_ONLY = "never deletes an image: drops the per-build name once the image car
 MOVED = ("a move the person chose (save dialog, Save..., llm-cli build save): the build folder's copy goes only after "
          "every file arrived and matched its original by sha256; the artifact itself is kept (eighth round, answer 3)")
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
+KNOWLEDGE_REPLACED = ("the knowledge base's own storage: a collection replaced by a restore, which saves the current "
+                      "content as a snapshot first (round 5 b); clear_knowledge_base, its other caller, has no caller "
+                      "(OPEN, reported)")
 
 DELETION_SITES = {
     # the person's objects
@@ -52,6 +55,9 @@ DELETION_SITES = {
     ("orchestrator/runtime/container_server.py", "DittoDocker.remove_image"): PERSON,
     ("orchestrator/runtime/container_server.py", "DittoDocker.remove_container"): PERSON,
     ("orchestrator/utils/input_history.py", "InputHistory.clear"): PERSON_LIST,
+    # the old knowledge base storage after its conversion to Qdrant Edge (DECISIONS RG5): the person's list only
+    ("orchestrator/rag/migration.py", "delete_old_store"): PERSON,
+    ("orchestrator/rag/edge_store.py", "EdgeStorage.delete"): KNOWLEDGE_REPLACED,
     # (the chat: FeedStore.clear_conversation and ChatHistory.clear delete rows and messages, not files; see below)
     ("orchestrator/Core/builder.py", "BuildEngine._keep_as_last_build"): NAME_ONLY,
     ("orchestrator/Core/artifact_output.py", "_remove_moved_source"): MOVED,
@@ -105,6 +111,7 @@ DELETION_SITES = {
     ("orchestrator/utils/download.py", "PinnedDownloader.verify"): TEMP,
     ("orchestrator/utils/network.py", "NetworkGuard.download_file"): TEMP,
     ("orchestrator/utils/validation.py", "validate_directory_writable"): TEMP,
+    ("orchestrator/rag/edge_store.py", "EdgeStorage.create"): TEMP,   # the half-made shard of a create that failed
     # old records
     ("orchestrator/Core/build_records.py", "prune"): RECORDS,
     ("orchestrator/Core/builder.py", "BuildEngine.build_model"): RECORDS,
@@ -143,6 +150,12 @@ DELETION_SITES = {
     ("orchestrator/runtime/build/store.py", "BuildStore._commit"): STAGING,
     ("orchestrator/runtime/build/store.py", "BuildStore.import_build"): STAGING,
     ("orchestrator/runtime/build/store.py", "BuildStore.sweep_leftovers"): STAGING,
+    # the conversion of the old knowledge base storage: its own working copy (qdrant_edge.converting), never the old
+    # store, which it only reads
+    ("orchestrator/rag/migration.py", "convert"): STAGING,
+    ("orchestrator/rag/migration.py", "_discard"): STAGING,
+    ("orchestrator/rag/migration.py", "_move_into_place"): STAGING,
+    ("orchestrator/rag/storage_lock.py", "remove_tree"): STAGING,   # the helper; its callers are listed
     # containers the framework started
     ("orchestrator/Core/builder.py", "BuildEngine._run_container"): CONTAINERS,
     ("orchestrator/Core/builder.py", "BuildEngine._scan_image_security"): CONTAINERS,
@@ -293,6 +306,26 @@ def test_every_deletion_path_needs_an_accepted_deletion_plan(tmp_path):
     from orchestrator.runtime.runtime_mode import remove_leftovers
     with pytest.raises(PermissionError):
         remove_leftovers(SimpleNamespace(), plan, actor="mcp", audit=Audit())
+
+    # The old knowledge base storage after its conversion: only the person, in the GUI or at a terminal, only the
+    # unchanged list (tests/test_edge_store.py covers the conversion itself).
+    from orchestrator.rag import migration
+    state = tmp_path / "kb"
+    (state / "qdrant").mkdir(parents=True)
+    (state / "qdrant" / "meta.json").write_text("{}", encoding="utf-8")
+    (state / "qdrant_edge" / "collections").mkdir(parents=True)
+    (state / "qdrant_edge" / "collections" / "c.json").write_text("{}", encoding="utf-8")
+    migration.write_record(state, {"state": "converted", "converted_at": "2026-10-16T10:00:00"})
+    old_plan = migration.old_store_plan(state)
+    with pytest.raises(PermissionError):
+        migration.delete_old_store(state, old_plan, audit=Audit())
+    with pytest.raises(PermissionError):
+        migration.delete_old_store(state, AcceptedDeletion(old_plan, "permanent", "framework"), audit=Audit())
+    accepted = accept(old_plan, "cli", "permanent")
+    (state / "qdrant" / "more").write_bytes(b"x")
+    with pytest.raises(PlanChanged):
+        migration.delete_old_store(state, accepted, audit=Audit())
+    assert (state / "qdrant" / "meta.json").exists()
 
     # The chat: rows and Ditto's conversation (WP6), only the person, only the unchanged list.
     from orchestrator.Core.chat_feed import FeedStore

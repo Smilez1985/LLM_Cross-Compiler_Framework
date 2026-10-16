@@ -418,36 +418,70 @@ class TestCollections:
         assert "fake/model-a" in rag.last_error
 
     def test_idle_storage_is_released_for_other_processes(self, make_rag):
-        from qdrant_client import QdrantClient
+        """After its idle time the storage lock and the Edge shard are free: another process opens them."""
+        import qdrant_edge
+
+        from orchestrator.rag.storage_lock import storage_lock, try_lock
 
         rag = make_rag()
         rag.idle_close_seconds = 0.2
         ingest_all(rag)
+        collection = rag.get_status()["collection"]
         deadline = time.monotonic() + 5
         while rag.client is not None and time.monotonic() < deadline:
             time.sleep(0.05)
         assert rag.client is None
 
-        other = QdrantClient(path=str(rag.storage_dir))  # would raise if the lock were still held
-        other.close()
+        lock = storage_lock(rag.storage_dir)
+        assert try_lock(lock), "the framework's lock was not released"
+        try:
+            shard = qdrant_edge.EdgeShard.load(str(rag.storage_dir / "collections" / collection))  # raises when held
+            shard.close()
+        finally:
+            lock.release()
         assert rag.search("what does E2041 mean")[0].source == "https://docs.example/e2041"
 
     def test_storage_held_by_another_process_is_a_clear_error(self, make_rag, monkeypatch):
+        """A second framework process (here a real one holding the lock, e.g. the MCP server while the GUI asks) never
+        opens the storage at the same time: it waits the retry window and then gets a clear error; once the other
+        process is gone, it opens."""
+        import subprocess
+        import sys
+
         import orchestrator.Core.rag_manager as rm
-        from qdrant_client import QdrantClient
+        from orchestrator.rag.storage_lock import lock_path
 
         rag = make_rag()
-        rag.storage_dir.mkdir(parents=True, exist_ok=True)
-        other = QdrantClient(path=str(rag.storage_dir))  # e.g. the MCP server while the GUI asks
-        clock = iter(range(0, 100))  # the 5 s retry window, without waiting for it
-        monkeypatch.setattr(rm, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=lambda s: None,
-                                                        time=time.time))
+        path = lock_path(rag.storage_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        holder = subprocess.Popen(
+            [sys.executable, "-c", "import sys, filelock; lock = filelock.FileLock(sys.argv[1]); lock.acquire(); "
+             "print('held', flush=True); sys.stdin.read()", str(path)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         try:
+            assert holder.stdout.readline().strip() == "held"
+            clock = iter(range(0, 100))  # the 5 s retry window, without waiting for it
+            monkeypatch.setattr(rm, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=lambda s: None,
+                                                            time=time.time))
             assert rag._connect() is False
             assert "in use by another framework process" in rag.last_error
+            assert rag.client is None and rag._file_lock is None
         finally:
-            other.close()
+            holder.stdin.close()
+            holder.wait(timeout=30)
         assert rag._connect() is True
+
+    def test_the_storage_is_never_open_twice_in_one_process_either(self, make_rag, monkeypatch):
+        """Two knowledge bases on the same folder in one process (the GUI's and an AI tool's) take turns too."""
+        import orchestrator.Core.rag_manager as rm
+
+        rag_a, rag_b = make_rag(), make_rag()
+        ingest_all(rag_a)
+        assert rag_a.client is not None
+        monkeypatch.setattr(rm, "LOCK_WAIT_SECONDS", 0)
+        assert rag_b._connect() is False and "in use by another framework process" in rag_b.last_error
+        rag_a.close()
+        assert rag_b._connect() is True and rag_b.get_status()["vector_count"] > 0
 
 
 class TestServerMode:

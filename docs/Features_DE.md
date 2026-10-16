@@ -50,7 +50,7 @@ Zurück zur [README](../README_DE.md) · Alle Befehle: [CLI_Usage_DE.md](CLI_Usa
   Orchestrator        LLM-Anbieterschicht  (Berechtigungen, Bestätigung, Audit-Log)
   Build-Engine ---> Docker (Konvertierungs-Container in der Sandbox)
        |                   |
-  Target-Capabilities  Wissensbasis (FastEmbed + eingebettetes Qdrant)
+  Target-Capabilities  Wissensbasis (FastEmbed + Qdrant Edge)
   Self-Healing         Lokale Laufzeit (verwalteter llama-server)
   Deployment (SSH)
 ```
@@ -1423,11 +1423,31 @@ Commit ist.
 Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einstellung `enable_rag_knowledge`, GUI:
 **Enable Local Knowledge Base**). Bis zur ersten Nutzung wird nichts geladen.
 
-- **Speicher:** Qdrant läuft eingebettet im Framework-Prozess, mit seinen Daten in `~/.llm-framework/qdrant` (kein
-  Docker, kein offener Port). Der Speicher ist während der Nutzung gesperrt und wird nach 30 Sekunden ohne Zugriff
-  freigegeben, sodass sich GUI und MCP-Server abwechseln können. Wer ihn aus mehreren Prozessen gleichzeitig nutzen
-  will, setzt `qdrant_url` auf einen Qdrant-Server; ein entfernter Server braucht https und den API-Schlüssel als
-  Geheimnis `qdrant_api_key` (nie Zugangsdaten in der URL).
+- **Speicher:** Qdrant Edge, die Rust-Engine von Qdrant, läuft im Framework-Prozess (PyPI `qdrant-edge-py`,
+  Apache-2.0), mit seinen Daten in `~/.llm-framework/qdrant_edge` (kein Docker, kein Server, kein offener Port). Es
+  öffnet ihn immer nur ein Prozess: GUI, CLI und MCP-Server wechseln sich ab. Das Framework hält eine Sperrdatei
+  (`qdrant_edge.lock` neben dem Ordner), solange der Speicher offen ist, und gibt sie nach 30 Sekunden ohne Zugriff
+  frei. Ein zweiter Prozess, der ihn will (auch nur zum Lesen), wartet bis zu 5 Sekunden und bekommt dann einen klaren
+  Fehler "in use by another framework process"; er liest nie einen halb geschriebenen Stand. Wer die Wissensbasis aus
+  mehreren Prozessen gleichzeitig nutzen will, setzt `qdrant_url` auf einen Qdrant-Server; ein entfernter Server
+  braucht https und den API-Schlüssel als Geheimnis `qdrant_api_key` (nie Zugangsdaten in der URL). Suchen sind exakt
+  (kein angenäherter Graph-Index), wie bisher. Auf einem Rechner ohne Build von Qdrant Edge (Windows auf ARM) behält
+  die Wissensbasis den älteren lokalen Speicher von qdrant-client: langsamer, aber vollständig; Mojo Oracle sagt es.
+- **Umwandlung einer älteren Wissensbasis (unveröffentlicht):** Frühere Versionen speicherten sie im lokalen Modus von
+  qdrant-client (`~/.llm-framework/qdrant`, ein reiner Python-Ersatz für Qdrant, gedacht für die Entwicklung). Bei der
+  ersten Nutzung wird sie umgewandelt: Vektoren und Texte werden kopiert (nichts wird neu eingebettet), die Anzahl
+  jeder Collection wird verglichen und eine Stichprobe von Punkten und Suchen gegen den alten Speicher geprüft. Das
+  Ergebnis steht in `~/.llm-framework/knowledge_conversion.json`. Der alte Ordner bleibt, bis du ihn löschst:
+  **Tools > Knowledge Snapshots... > Delete the old storage...** oder `llm-cli knowledge storage delete-old` zeigen ihn
+  mit vollem Pfad und Größe und fragen dich vorher (Papierkorb oder endgültig); nichts löscht ihn von selbst. Schlägt
+  die Umwandlung fehl, arbeitet der alte Speicher weiter, von der halben Kopie bleibt nichts, und der Grund wird
+  angezeigt (`llm-cli knowledge storage`, Mojo Oracle, das Fenster der Wissens-Snapshots). Fehlender Platz wird beim
+  nächsten Start erneut versucht, andere Fehler, wenn du es willst: **Tools > Knowledge Snapshots... > Umwandlung erneut
+  versuchen** (läuft im Hintergrund) oder `llm-cli knowledge storage convert`. 50 000 Auszüge umzuwandeln dauerte in
+  zwei Tests zwischen 1 und 2,5 Minuten, 5 000 etwa 15 Sekunden. Nach der Umwandlung springt der alte Ordner nie wieder
+  für Qdrant Edge ein: Lässt sich Qdrant Edge später nicht laden (ein fehlendes oder kaputtes Paket), wird die
+  Wissensbasis nicht geöffnet und sagt, warum, und Mojo Oracle meldet es als Fehler, statt still den alten Ordner zu
+  nutzen, dem fehlt, was seitdem dazukam.
 - **Embeddings:** lokal mit FastEmbed auf ONNX Runtime berechnet; das Modell wird einmal nach `models/embeddings/`
   geladen. Mit `rag_embedding_model: auto` (Standard) behält eine vorhandene Wissensbasis das Modell, mit dem sie
   gebaut wurde; eine neue bekommt `intfloat/multilingual-e5-small` (384 Dimensionen, etwa 100 Sprachen, schnell auf
@@ -1454,7 +1474,8 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   schaffen, hakst du die an, die gelöscht werden sollen (sie kommen zuerst in den Papierkorb; `llm-cli knowledge
   snapshots prune` oder `delete NAME...`), oder kopierst sie woandershin (Export; `llm-cli knowledge snapshots export
   NAME... --to ORDNER`, jede Kopie per sha256 geprüft). Siehe [Löschen und der Papierkorb](#löschen-und-der-papierkorb).
-  Einen Schnappschuss wiederherstellen kann man über GUI oder CLI noch nicht.
+  Einen Schnappschuss wiederherstellen kann man über GUI oder CLI noch nicht. Ein Schnappschuss ist eine portable
+  Datei; Schnappschüsse früherer Versionen (Format 1) werden beim Wiederherstellen umgewandelt.
 - **Suche:** hybrid. Dichte Vektoren finden die Bedeutung, BM25 findet exakte Begriffe wie Fehlercodes und
   Compiler-Flags; beide Ranglisten werden mit Reciprocal Rank Fusion verbunden. Derselbe Text aus mehreren Quellen
   kommt nur einmal. Danach kann ein Cross-Encoder die Ergebnisse neu bewerten ([Reranking](#reranking)).

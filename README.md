@@ -627,8 +627,9 @@ Turn it on in the AI settings (**Enable Local Knowledge Base**). Everything runs
 
 - embeddings are computed locally with FastEmbed (ONNX Runtime); the model is downloaded once into
   `models/embeddings/` (about 0.5 GB on a machine without CUDA); in offline mode nothing is downloaded,
-- the vectors are stored in an embedded Qdrant database in `~/.llm-framework/qdrant`, without Docker and
-  without an open port,
+- the vectors are stored in Qdrant Edge, the Rust engine of Qdrant inside the framework, in
+  `~/.llm-framework/qdrant_edge`, without Docker, without a server and without an open port; a knowledge base of an
+  earlier version is converted on first use, and its old folder stays until you delete it,
 - searches combine meaning (vectors) with exact words (BM25), so error codes and compiler flags are found too, also
   parts of identifiers such as `GGML_CUDA` in `-DGGML_CUDA=ON`,
 - a local cross-encoder reranks the excerpts for build recommendations and drops irrelevant ones (setting
@@ -752,6 +753,10 @@ The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGE
   and AMD (Ryzen Z1 Extreme); later Llama-family models in every format, ONNX, Hailo, Intel and Qualcomm; LoRA and
   large models, and supply-chain hardening. New targets start from the hardware probe, and a benchmark on the board
   is the proof ("tested on <board>"). Builds in the cloud are not planned.
+- **Rust where the framework meets the network or a board:** the network MCP gateway with the MQTT broker rumqttd
+  inside it, and the board's root helper as a static binary; shipped prebuilt and signed (Sigstore, checksums in the
+  repository), building them yourself stays an opt-in. No prebuilt Docker images for targets, no Go, the GUI stays
+  Qt.
 
 Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
 
@@ -792,8 +797,8 @@ tests and submit changes: [CONTRIBUTING.md](CONTRIBUTING.md).
 - **[Model Context Protocol](https://modelcontextprotocol.io)**: the Python SDK behind the MCP server
 - **[eaddario/imatrix-calibration](https://huggingface.co/datasets/eaddario/imatrix-calibration)**: the shipped
   calibration texts (MIT)
-- **[Qdrant](https://qdrant.tech/)** and **[FastEmbed](https://github.com/qdrant/fastembed)**: the local
-  knowledge base
+- **[Qdrant](https://qdrant.tech/)** (Qdrant Edge, qdrant-client) and **[FastEmbed](https://github.com/qdrant/fastembed)**:
+  the local knowledge base
 - **[rag4ll](https://github.com/Smilez1985/rag4ll)**: the reranker, the excerpt budget, the pack manifest, the
   privacy scrub and the shape of the speech call are adapted from it (MIT, see
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))
