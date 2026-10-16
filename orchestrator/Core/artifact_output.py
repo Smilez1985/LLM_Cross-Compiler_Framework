@@ -290,6 +290,31 @@ def roots(framework) -> List[Tuple[str, Path]]:
     return found
 
 
+def artifact_folders(framework) -> List[Path]:
+    """Every folder that holds golden artifacts, each once: the output folder, the build folder, earlier output
+    folders and the folders artifacts were saved to (what list_artifacts lists). A "tested on" record of a board
+    benchmark (runtime/device/tested.py) looks for the build of its model in these."""
+    found: List[Path] = []
+    seen = set()
+
+    def add(folder) -> None:
+        folder = Path(folder)
+        key = os.path.realpath(folder)
+        if key not in seen:
+            seen.add(key)
+            found.append(folder)
+    for _where, folder in roots(framework):
+        add(folder)
+    state = _state_dir(framework)
+    if state is not None:
+        index = SavedIndex(state)
+        for folder in index.folders():
+            add(folder)
+        for entry in index.entries():
+            add(entry["path"])
+    return found
+
+
 def list_artifacts(framework) -> List[ListedArtifact]:
     """Every finished build in the output folder, the build folder and the folders artifacts were saved to, each
     once (newest first within each folder)."""
@@ -654,6 +679,6 @@ def remember(framework, folder: Any, root: Any) -> None:
 
 
 __all__ = ["BUILDS", "DEFAULT_OUTPUT", "DestinationRefused", "INDEX_FILE", "ListedArtifact", "OUTPUT", "SAVED",
-           "SaveResult", "SavedIndex", "WHERE_TEXT", "build_folder", "check_destination", "keep_listing",
+           "SaveResult", "SavedIndex", "WHERE_TEXT", "artifact_folders", "build_folder", "check_destination", "keep_listing",
            "label_for", "list_artifacts", "output_folder", "refusal", "remember", "roots", "save_artifact",
            "set_output_folder"]

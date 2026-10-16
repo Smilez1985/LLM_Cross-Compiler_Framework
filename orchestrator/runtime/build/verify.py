@@ -273,7 +273,8 @@ def parse_bench_json(text: str) -> List[Dict[str, Any]]:
     if start < 0:
         raise ValueError("no JSON array in the llama-bench output")
     data = json.loads(text[start:text.rfind("]") + 1])
-    keep = ("n_prompt", "n_gen", "avg_ts", "stddev_ts", "backends", "n_threads", "model_size", "model_n_params")
+    keep = ("n_prompt", "n_gen", "avg_ts", "stddev_ts", "backends", "n_threads", "model_size", "model_n_params",
+            "type_k", "type_v")
     if not isinstance(data, list):
         raise ValueError("the llama-bench output is not a list")
     return [{k: rec.get(k) for k in keep if k in rec} for rec in data if isinstance(rec, dict)]

@@ -3,9 +3,10 @@
 Hidden until the person enables them (also when the whole tier is allowed); not registered before their runtime package
 exists; a missing toolchain part refuses with needs_person and the CLI command; no input takes a CMake option or a
 command and none offers a prebuilt archive; an unverified build is never started; a cancelled build is never activated;
-a cancelled model download stops and keeps its part; an untrusted model is benchmarked natively only after the person's
-consent in the framework (written to the audit log first) or in the sandbox; no result holds the server's address or
-key; the board tools reach only trusted devices with the trusted host key, are always asked and never granted.
+a cancelled model download stops and keeps its part; a model built for a board is never benchmarked natively on this
+computer (seventh round 2': in the Docker sandbox here, for real values on the board); no result holds the server's
+address or key; the board tools reach only trusted devices with the trusted host key, are always asked and never
+granted.
 """
 
 import json
@@ -310,25 +311,54 @@ class TestBenchmark:
         assert fw.tool_registry.get("run_benchmark").channels == ("framework",)
         assert fw.tool_registry.get("run_device_benchmark").channels == ("framework",)
 
-    def test_an_untrusted_model_runs_natively_only_after_consent_on_record(self, fw, bench):
+    def test_a_model_built_for_a_board_is_never_benchmarked_natively(self, fw, bench):
+        """Seventh round 2': a built model runs in the Docker sandbox here (the board gives the real values); asking
+        for a native run is refused, and nothing runs."""
         aid = self.gguf_artifact(fw)
         allow(fw, "run_benchmark")
+        with pytest.raises(ToolError) as e:
+            call(fw, "run_benchmark", {"kind": "artifact_speed", "artifact_id": aid, "sandbox": False},
+                 confirm=asking(True))
+        assert e.value.code == "not_supported" and "run_device_benchmark" in str(e.value) and bench == []
+        fw.tool_registry.policy_store.replace(ToolPolicy(configured=True,
+                                                         reviewed=[s.name for s in fw.tool_registry.list()],
+                                                         overrides={"run_benchmark": Decision.ASK}))
         confirm = asking(True)
         started = call(fw, "run_benchmark", {"kind": "artifact_speed", "artifact_id": aid}, confirm=confirm)
         (question,) = confirm.asked
-        assert "UNTRUSTED" in question and "consent" in question
+        assert "UNTRUSTED" in question and "Docker sandbox" in question and "run_device_benchmark" in question
         assert wait_job(fw, started.job_id).state == "done"
         (run,) = bench
-        assert run["trusted"] is False and run["sandbox"] is False
+        assert run["trusted"] is False and run["sandbox"] is True
         rows = fw.tool_registry.audit.entries(limit=50)
-        assert any(r.get("tool") == "benchmark.untrusted_model_native" for r in rows), "consent on record first"
+        assert not any(r.get("tool") == "benchmark.untrusted_model_native" for r in rows)
 
-    def test_an_untrusted_native_run_is_asked_even_when_allowed(self, fw, bench):
+    def test_the_runner_refuses_a_native_run_of_a_model_that_is_not_a_catalog_model(self, tmp_path):
+        """The rule at the root: whatever a caller asks, BenchRunner never runs such a model natively."""
+        from orchestrator.runtime.bench import BenchError, BenchRunner
+        from orchestrator.runtime.catalog import load_catalog
+        model = tmp_path / "board-model.gguf"
+        model.write_bytes(b"GGUF built for a board")
+        started = []
+        runner = BenchRunner(tmp_path / "state", catalog=load_catalog(),
+                             popen=lambda *a, **k: started.append(a) or pytest.fail("llama-bench started"))
+        with pytest.raises(BenchError) as e:
+            runner.run(model, kind="artifact_speed", label="board model", trusted=False, sha256="0" * 64)
+        assert e.value.code == "not_supported" and "never benchmarked natively" in str(e.value)
+        assert "Deployment window" in e.value.next and "Benchmark window" not in e.value.next, \
+            "the next step names the window that measures on a board (the old Benchmark window is not wired)"
+        assert started == []
+
+    def test_an_allowed_benchmark_of_a_built_model_runs_in_the_sandbox_only(self, fw, bench):
+        """Allowed by the person, a built model is measured in the Docker sandbox without a question; a native run is
+        refused even then (before 3.1 it ran natively after the person's consent)."""
         aid = self.gguf_artifact(fw)
         allow(fw, "run_benchmark")
+        started = call(fw, "run_benchmark", {"kind": "artifact_speed", "artifact_id": aid}, confirm=None)
+        assert wait_job(fw, started.job_id).state == "done" and bench[0]["sandbox"] is True
         with pytest.raises(ToolError):
-            call(fw, "run_benchmark", {"kind": "artifact_speed", "artifact_id": aid}, confirm=None)
-        assert bench == []
+            call(fw, "run_benchmark", {"kind": "artifact_speed", "artifact_id": aid, "sandbox": False}, confirm=None)
+        assert len(bench) == 1
 
     def test_the_sandbox_opt_in(self, fw, bench):
         aid = self.gguf_artifact(fw)

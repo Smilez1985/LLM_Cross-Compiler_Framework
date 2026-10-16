@@ -123,9 +123,10 @@ def test_deploy_run_takes_the_password_from_the_prompt_stdin_or_a_warned_value(k
         def host_key_status(self, ip, port):
             return "known", FakeHostKey()
 
-        def deploy_artifact(self, artifact_path, target_ip, user, password, port):
+        def deploy_package(self, package, host, user, *, port, password, **kw):
+            from orchestrator.Core.deployment_manager import DeployResult
             logins.append(password)
-            return False  # stops before the device is remembered
+            return DeployResult(success=False, reason="stopped by the test")  # before the device is remembered
 
     def deploy(*options, input=None):
         ctx = cli_module.FrameworkContext()

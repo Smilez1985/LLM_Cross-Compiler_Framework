@@ -72,6 +72,7 @@ DELETION_SITES = {
     ("orchestrator/Core/hf_hub.py", "HubFetcher._download_range"): TEMP,
     ("orchestrator/Core/hf_hub.py", "HubFetcher.fetch_file"): TEMP,
     ("orchestrator/gui/gui_state.py", "GuiState.save"): TEMP,
+    ("orchestrator/runtime/device/tested.py", "_write"): TEMP,     # the board test record's unfinished temp file
     ("orchestrator/gui/builder_tab.py", "LocalProbeWorker.run"): TEMP,
     ("orchestrator/gui/sign_in.py", "UserConfigSnapshot.restore"): TEMP,   # puts the config back as it was
     ("orchestrator/llm/auth/store.py", "CredentialStore._write"): TEMP,
