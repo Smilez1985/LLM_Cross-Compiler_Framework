@@ -203,6 +203,7 @@ class MainOrchestrator(QMainWindow):
         self._add_knowledge_snapshots_action(tools_menu)
         self._add_framework_images_action(tools_menu)
         self._add_framework_docs_action(tools_menu)
+        __import__("orchestrator.gui.menus.knowledge", fromlist=["install"]).install(self, menubar)  # Knowledge
 
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
         self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
