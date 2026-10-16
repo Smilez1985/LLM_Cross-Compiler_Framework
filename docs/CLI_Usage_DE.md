@@ -840,6 +840,11 @@ llm-cli ditto ask "Erkläre IQ4_XS" --no-tools --provider local
 Ohne Einrichtung erklärt der Befehl, was fehlt, zum Beispiel „the local model server is not running. Start it with:
 llm-cli ditto runtime start“.
 
+In der GUI: der Chat-Bereich rechts (F9, **Ansicht > KI-Chat-Bereich**) mit **Senden**; **Optionen für diese
+Frage** über dem Eingabefeld bietet **Ohne Werkzeuge antworten** (`--no-tools`), **Anbieter** (`--provider`) und
+**Modell** (`--model`) nur für die nächste Frage, die KI-Einstellungen bleiben unverändert. Anders als dieser Befehl
+behält der Chat das Gespräch.
+
 ### ditto eval
 
 ```
@@ -884,6 +889,12 @@ llm-cli ditto eval --provider anthropic --min-pass 0.8
 
 Das Ergebnis ist eine Tabelle pro Lauf: bestandener Anteil, Anteil pro Art und durchschnittliche Sekunden pro Fall.
 Eine Datei mit Fällen, die sich nicht lesen lässt, oder Filter, auf die kein Fall passt, stoppen mit Exit-Code 2.
+
+In der GUI: **Ditto > Bewertung...**: die Arten (und für Retrieval die Suchvarianten), einzelne Fälle, **Auswählen...**
+für eine andere Falldatei, die Läufe pro Fall, die lokalen Modellstufen sowie Anbieter, Modell und Denkaufwand nur für
+diesen Lauf. **Bewertung starten...** sagt zuerst, was aufgerufen wird und ob es Geld kostet („Nein“ ist die Vorgabe),
+läuft im Hintergrund mit Fortschritt und **Abbrechen** und zeigt dieselben Tabellen; **Bericht speichern...** schreibt
+den `--json`-Bericht in eine Datei deiner Wahl. `--min-pass` setzt nur den Exit-Code für Skripte.
 
 #### Retrieval-Evaluation
 
@@ -1204,6 +1215,8 @@ llm-cli ditto models list
 Listet die festgelegten Modelle auf: Stufe, Datei, Größe, Lizenz, ob es heruntergeladen (und geprüft) ist, und
 Hinweise („recommended“, „chosen“, „on request“).
 
+In der GUI: **Ditto > Lokale Modelle...** (dieselbe Liste, mit der Empfehlung für diesen Computer und dem Grund).
+
 #### ditto models download
 
 ```
@@ -1222,6 +1235,11 @@ empfohlene Stufe für diesen Rechner. Unterbrochene Downloads werden fortgesetzt
 llm-cli ditto models list
 llm-cli ditto models download small-q2
 ```
+
+In der GUI: **Ditto > Lokale Modelle...** > **Empfohlenes Modell herunterladen...**, oder eine Stufe auswählen und
+**Ausgewähltes herunterladen...**; die Frage zeigt Repository, Datei, Lizenz, Größe und Ordner („Nein“ ist die
+Vorgabe), der Download läuft im Hintergrund mit Fortschritt und **Abbrechen** (was schon heruntergeladen ist, bleibt
+für die Fortsetzung).
 
 ---
 

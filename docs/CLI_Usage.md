@@ -811,6 +811,11 @@ llm-cli ditto ask "Explain IQ4_XS" --no-tools --provider local
 Without setup the command explains what is missing, for example "the local model server is not running. Start it
 with: llm-cli ditto runtime start".
 
+In the GUI: the chat panel on the right (F9, **View > AI Chat Panel**) with **Send**; **Options for this question**
+above the message field gives **Answer without tools** (`--no-tools`), **Provider** (`--provider`) and **Model**
+(`--model`) for the next question only, and the AI settings stay unchanged. Unlike this command, the chat keeps the
+conversation.
+
 ### ditto eval
 
 ```
@@ -854,6 +859,12 @@ llm-cli ditto eval --provider anthropic --min-pass 0.8
 
 The result is a table per run: passed share, share per kind and average seconds per case. A cases file that
 cannot be read, or filters that match no case, stop with exit code 2.
+
+In the GUI: **Ditto > Evaluation...**: the kinds (and for retrieval the search variants), single cases, **Choose...**
+for another cases file, the runs per case, the local model tiers, and provider, model and reasoning effort for this
+run only. **Run evaluation...** first says what is called and whether it costs money ("No" is the default), runs in
+the background with progress and **Cancel**, and shows the same tables; **Save report...** writes the `--json` report
+to a file you choose. `--min-pass` only sets the exit code for scripts.
 
 #### Retrieval evaluation
 
@@ -1159,6 +1170,8 @@ llm-cli ditto models list
 Lists the pinned models: tier, file, size, license, whether it is downloaded (and verified), and notes
 ("recommended", "chosen", "on request").
 
+In the GUI: **Ditto > Local Models...** (the same list, with the recommendation for this computer and why).
+
 #### ditto models download
 
 ```
@@ -1177,6 +1190,10 @@ tier for this machine. Interrupted downloads resume.
 llm-cli ditto models list
 llm-cli ditto models download small-q2
 ```
+
+In the GUI: **Ditto > Local Models...** > **Download the recommended model...**, or select a tier and **Download
+selected...**; the question shows repo, file, licence, size and folder ("No" is the default), the download runs in the
+background with progress and **Cancel** (the part downloaded so far is kept for a resume).
 
 ---
 

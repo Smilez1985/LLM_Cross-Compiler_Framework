@@ -10,6 +10,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Ditto > Local Models...: `llm-cli ditto models list` and `download` by mouse** (W1'): every tier of Ditto's
+  pinned catalogue with file, size, licence, whether it is downloaded (and verified) and its note (recommended for
+  this computer, chosen, on request, not pinned), the reason for the recommendation and the full models folder;
+  **Download the recommended model...** or **Download selected...** after the CLI's question (repo, file, licence,
+  size, folder; "No" by default), in the background with progress and **Cancel** (the part is kept for a resume). The
+  catalogue rows and the model a download is for are core functions the CLI calls too (its output is unchanged). The
+  runtime install question of the AI settings names this window instead of the CLI command.
+- **Ditto > Evaluation...: `llm-cli ditto eval` by mouse** (W1'): kinds and retrieval variants (fused, rerank),
+  single cases, another cases file, runs per case, several local tiers, or provider, model and reasoning effort for
+  this run only (the saved AI settings stay unchanged); a question before the run says what is called and whether it
+  costs money ("No" by default); the run goes in the background with progress and **Cancel** (before the next
+  attempt), the window shows the CLI's tables, and **Save report...** writes its JSON report. The run itself (case
+  selection, the tier loop with the server restore, the retrieval runs, the tables and the report) moved into
+  `orchestrator/evals/eval_run.py`, which the CLI calls too; its output and exit codes are unchanged.
+- **Chat panel: options for one question** (W1', `llm-cli ditto ask --no-tools/--provider/--model` by mouse):
+  **Options for this question** above the message field give **Answer without tools**, a provider and a model for the
+  next question only. The saved AI settings stay unchanged (the question goes to a Ditto with these values over the
+  settings, `orchestrator/Core/ai_override.py`, which also checks the provider like the CLI), the panel says what the
+  question used, and the options are reset after it is sent; feed, questions and approvals work as before.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record

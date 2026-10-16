@@ -687,6 +687,10 @@ gives the defaults).
   newest entry, Up/Down and Home/End move between entries, Escape goes back to the message field. Every entry has an
   accessible name (sender and time), and new entries are announced to screen readers, questions with priority. No
   key approves anything.
+- **Options for this question** (above the message field; `llm-cli ditto ask --no-tools/--provider/--model`):
+  **Answer without tools**, a provider and a model for the next question only. The saved AI settings stay unchanged
+  (the question goes to a Ditto with these values over your settings), the panel says what the question used, and
+  the options are reset once it is sent. A provider the catalogue does not know is refused like on the command line.
 - **Clear chat…** asks first and lists, for Ditto's conversation (`chat_history.json`, as the file holds it now, also
   when another window or the terminal saved it since) and for the chat messages in the chat feed
   (`chat_feed.sqlite`), the full path, the file name, the size and what it is; **No, keep everything** is the
@@ -943,6 +947,13 @@ tool call the model attempted (also refused ones: unknown names, invalid argumen
 `tool_use` summary: tool calls per task, the share of malformed calls and of unknown tool names, the repairs the
 framework applied and the repeat refusals. Cloud providers bill about 20 requests per run and repeat. All options: [CLI_Usage.md](CLI_Usage.md#ditto-eval).
 
+**GUI: Ditto > Evaluation...** runs the same evaluation by mouse: kinds, retrieval variants (fused, rerank), single
+cases, another cases file, runs per case, several local tiers, or provider, model and effort for this run only (the
+saved AI settings stay unchanged). Before a run it says what is called and whether that costs money ("No" is the
+default); the run goes in the background with progress and **Cancel** (the case that runs finishes first; a tier's
+server is stopped as after a normal run), the window shows the same tables, and **Save report...** writes the JSON
+report of `--json`.
+
 **First measurement** (for context, not a benchmark): on a CPU-only machine with Qwen3.5 2B, effort `low` (thinking
 off) and the prompts of that time, the 2-bit tier `small-q2` passed 42% of the 19 cases and the 4-bit tier `small`
 47%. The evaluation found gaps in Ditto's prompts (attributing failures to host or device, which inputs each format
@@ -1065,6 +1076,12 @@ The first rule whose conditions hold and whose model fits wins:
 the system, plus 95% of a dedicated GPU's memory. Integrated AMD and Intel GPUs share the RAM, so only the RAM counts
 for them. `runtime start --model <tier>` overrides the choice and remembers it; `--model auto` returns to the
 recommendation.
+
+**GUI: Ditto > Local Models...** shows every tier with file, size, licence, whether it is downloaded (and verified)
+and its note (recommended for this computer, chosen, on request, not pinned), with the reason for the
+recommendation and the full models folder. **Download the recommended model...** and **Download selected...** do
+`ditto models download` with the same question (repo, file, licence, size, folder; "No" is the default); the list and
+the download run in the background, with progress and **Cancel** (the part is kept for a resume).
 
 ### How the server runs
 

@@ -750,6 +750,11 @@ die Vorgaben).
   Nachrichtenfeld geht zum neuesten Eintrag, Pfeil hoch/runter und Pos1/Ende gehen zwischen den Einträgen, Escape
   zurück ins Nachrichtenfeld. Jeder Eintrag hat einen zugänglichen Namen (Absender und Zeit), und neue Einträge werden
   Bildschirmlesern angesagt, Fragen mit Vorrang. Keine Taste gibt etwas frei.
+- **Optionen für diese Frage** (über dem Nachrichtenfeld; `llm-cli ditto ask --no-tools/--provider/--model`):
+  **Ohne Werkzeuge antworten**, ein Anbieter und ein Modell nur für die nächste Frage. Die gespeicherten
+  KI-Einstellungen bleiben unverändert (die Frage geht an einen Ditto mit diesen Werten über deinen Einstellungen), der
+  Bereich sagt, was die Frage verwendet hat, und die Optionen werden nach dem Senden zurückgesetzt. Einen Anbieter, den
+  der Katalog nicht kennt, lehnt er ab wie die Kommandozeile.
 - **Chat leeren…** fragt zuerst und nennt für Dittos Gespräch (`chat_history.json`, so wie die Datei es jetzt hält,
   auch wenn ein anderes Fenster oder das Terminal es inzwischen gespeichert hat) und für die Chat-Nachrichten im
   Chat-Verlauf (`chat_feed.sqlite`) den vollständigen Pfad, den Dateinamen, die Größe und was es ist; **Nein, alles
@@ -1035,6 +1040,13 @@ Tool-Aufrufe pro Aufgabe, der Anteil fehlerhafter Aufrufe und unbekannter Tool-N
 und die Ablehnungen wiederholter Aufrufe. Cloud-Anbieter berechnen etwa 20 Anfragen pro Lauf und Wiederholung. Alle Optionen:
 [CLI_Usage_DE.md](CLI_Usage_DE.md#ditto-eval).
 
+**GUI: Ditto > Bewertung...** führt dieselbe Bewertung mit der Maus aus: Arten, Retrieval-Varianten (fused, rerank),
+einzelne Fälle, eine andere Falldatei, Läufe pro Fall, mehrere lokale Stufen, oder Anbieter, Modell und Aufwand nur für
+diesen Lauf (die gespeicherten KI-Einstellungen bleiben unverändert). Vor einem Lauf sagt es, was aufgerufen wird und ob
+das Geld kostet („Nein“ ist die Vorgabe); der Lauf geht im Hintergrund mit Fortschritt und **Abbrechen** (der Fall, der
+gerade läuft, wird noch fertig; der Server einer Stufe wird wie nach einem normalen Lauf gestoppt), das Fenster zeigt
+dieselben Tabellen, und **Bericht speichern...** schreibt den JSON-Bericht von `--json`.
+
 **Erste Messung** (zur Einordnung, kein Benchmark): Auf einem Rechner nur mit CPU, mit Qwen3.5 2B, Aufwand `low`
 (Nachdenken aus) und den damaligen Prompts bestand die 2-Bit-Stufe `small-q2` 42 % der 19 Fälle und die 4-Bit-Stufe
 `small` 47 %. Die Evaluation hat Lücken in Dittos Prompts gefunden (Fehler dem Host oder dem Gerät zuordnen, welche
@@ -1164,6 +1176,12 @@ Es gewinnt die erste Regel, deren Bedingungen zutreffen und deren Modell passt:
 für das System passen, plus 95 % des Speichers einer eigenen GPU. Integrierte AMD- und Intel-GPUs teilen sich den RAM,
 deshalb zählt bei ihnen nur der RAM. `runtime start --model <Stufe>` überstimmt die Wahl und merkt sie sich;
 `--model auto` kehrt zur Empfehlung zurück.
+
+**GUI: Ditto > Lokale Modelle...** zeigt jede Stufe mit Datei, Größe, Lizenz, ob sie heruntergeladen (und geprüft) ist,
+und ihrem Hinweis (empfohlen für diesen Computer, gewählt, auf Wunsch, nicht festgelegt), mit dem Grund der Empfehlung
+und dem vollen Modellordner. **Empfohlenes Modell herunterladen...** und **Ausgewähltes herunterladen...** machen
+`ditto models download` mit derselben Frage (Repository, Datei, Lizenz, Größe, Ordner; „Nein“ ist die Vorgabe); Liste
+und Download laufen im Hintergrund, mit Fortschritt und **Abbrechen** (der Teil bleibt für die Fortsetzung).
 
 ### Wie der Server läuft
 
