@@ -98,7 +98,7 @@ class Mojo:
         entries of each repair (decision "allow": harmless, without a question, e.g. the CLI without a terminal).
         `free_space`: the person's list of what to delete (at a terminal only; returns how many items were deleted
         and, when none was, why: "" when the person chose none), opened once for every finding that shares it."""
-        from orchestrator.Core.mojo.offers import DELETION_LISTS, DELETION_WHERE, offers
+        from orchestrator.Core.mojo.offers import DELETION_LISTS, DELETION_WHERE, OTHER_LISTS, offers
         from orchestrator.Core.mojo.repairs.engine import apply_repair
         before = before if before is not None else self.run()
         entries: List[MiracleEntry] = []
@@ -123,6 +123,8 @@ class Mojo:
                 reason = offer.reason
                 if offer.verdict == "deletion_list" and finding.code in DELETION_LISTS:
                     reason += f"; {DELETION_WHERE}"
+                elif offer.verdict == "deletion_list" and finding.code in OTHER_LISTS:
+                    reason += f"; you choose what is deleted or exported: {OTHER_LISTS[finding.code]}"
                 entries.append(MiracleEntry(finding, offer.verdict, "not_done", "", reason))
         after = self.run()
         problems = {f.code for f in after.findings if f.severity in (Severity.WARN, Severity.ERROR)}

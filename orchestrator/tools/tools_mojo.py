@@ -129,7 +129,7 @@ def mojo_tool_specs(framework) -> List[ToolSpec]:
             # repair_needs_person); new blocker codes change DELEGATION_RULES_VERSION, so they land with delegations.
             raise ToolError(f"Mojo Miracle does not repair '{inp.code}': {label(offer.reason)}. Nothing was changed.",
                             code="not_supported" if offer.verdict == "not_automatic" else "needs_person",
-                            next=views.AI_NEXT[offer.verdict].format(code=inp.code))
+                            next=views.ai_next(offer.verdict, inp.code))
         plan = offer.plan
         facts = [Fact("Problem", f"{problem.code}: {label(problem.message)}")]
         if problem.why:

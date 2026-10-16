@@ -37,6 +37,10 @@ DELETION_LISTS = {"disk.cache": "framework_images", "disk.output": "framework_im
                   "disk.builds": "framework_images"}
 DELETION_WHERE = ("you choose what is deleted: 'llmcf mojo --miracle' in a terminal, or Tools > Framework Build "
                   "Images... in the GUI")
+# Deletion findings Mojo Miracle opens no list for, and the person's own list that frees them (named to the person and
+# to an AI): the knowledge snapshots (eighth round, answer 2), which Mojo never deletes.
+OTHER_LISTS = {"knowledge.snapshots": "Tools > Knowledge Snapshots... in the GUI, or 'llm-cli knowledge snapshots "
+                                      "prune' or 'llm-cli knowledge snapshots export NAME --to FOLDER' in a terminal"}
 _CLASS_VERDICT = {"delegable": "miracle", "person_deletion": "deletion_list", "manual": "admin"}
 
 
@@ -75,4 +79,4 @@ def offers(framework, report: MojoReport) -> List[Offer]:
     return [offer_for(framework, f) for f in report.findings if f.severity in (Severity.WARN, Severity.ERROR)]
 
 
-__all__ = ["DELETION_LISTS", "DELETION_WHERE", "Offer", "REASONS", "VERDICTS", "offer_for", "offers"]
+__all__ = ["DELETION_LISTS", "DELETION_WHERE", "OTHER_LISTS", "Offer", "REASONS", "VERDICTS", "offer_for", "offers"]

@@ -3306,7 +3306,7 @@ def _mojo_lists(offer) -> bool:
 
 def _mojo_miracle_line(offer, terminal: bool) -> str:
     """The person's line about what Mojo Miracle can do for one finding."""
-    from orchestrator.Core.mojo.offers import DELETION_WHERE
+    from orchestrator.Core.mojo.offers import DELETION_WHERE, OTHER_LISTS
     if offer.verdict == "miracle":
         return f"Mojo Miracle can repair it: {offer.plan.summary}."
     if offer.verdict == "deletion_list" and _mojo_lists(offer):
@@ -3314,6 +3314,9 @@ def _mojo_miracle_line(offer, terminal: bool) -> str:
             return ("Mojo Miracle shows you the framework's build images to choose from (name, id, size, what each "
                     "is; nothing is ticked); only what you tick and confirm is deleted.")
         return f"Mojo Miracle cannot repair it here: {offer.reason}; {DELETION_WHERE}."
+    if offer.verdict == "deletion_list" and offer.finding.code in OTHER_LISTS:
+        return (f"Mojo Miracle cannot repair it: {offer.reason}; you choose what is deleted or exported: "
+                f"{OTHER_LISTS[offer.finding.code]}.")
     return f"Mojo Miracle cannot repair it: {offer.reason}."
 
 

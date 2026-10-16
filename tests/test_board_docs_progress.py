@@ -243,7 +243,8 @@ class FakeService:
     def get_status(self, rid):
         return self.status
 
-    def log_tail(self, rid, lines=200, before_line=None):
+    def log_tail(self, rid, lines=200, before_line=None, for_person=False):
+        self.for_person = for_person
         chosen = self.lines[-lines:]
         return SimpleNamespace(lines=chosen, first_line=len(self.lines) - len(chosen) + 1,
                                total_lines=len(self.lines))
@@ -256,6 +257,7 @@ def test_progress_bar_stage_and_live_log(qapp):
     panel.start("req_1")
     service.lines = ["[t] [INFO] one", "[t] [ERROR] ERROR: two <b>bold</b>"]
     assert panel.poll(service, "req_1") == "building"
+    assert service.for_person is True, "the person's window reads the log with its full paths, not an AI's labels"
     assert panel.bar.value() == 40 and "Building Image" in panel.lbl_stage.text() and "40%" in panel.lbl_stage.text()
     service.lines.append("[t] [WARNING] WARNING: three")
     panel.poll(service, "req_1")

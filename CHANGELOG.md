@@ -35,15 +35,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Nothing is skipped by itself. Every build records its options in `build_info.json` (`build_options` with their
   sha256).
 - **Disk check before every knowledge snapshot, and a snapshot before every knowledge pack import** (eighth round,
-  answer 2, N13): before a snapshot is made, its size is estimated. When it does not fit beside the reserve that
-  always stays free, no snapshot is made and the change does not run (Deep Ingest, a restore, a pack import, the
-  code index); there is no "continue anyway". AI clients get the blocker `snapshot_no_room` with your action before
-  the question; the GUI offers **Knowledge Snapshots...** to delete or export snapshots. When it fits but leaves little
-  space, a situation warning (`disk_tight`). A knowledge pack import now saves the knowledge base first
-  (`pre_pack_<time>`); without room nothing is imported and the pack is imported later. A pack that cannot be
-  imported yet is tried again at the next start without another snapshot, and a name that is taken gets `-2`, so no
-  snapshot is ever written over. Mojo Oracle's knowledge line (with where, why and that only your list frees the room)
-  and `llm-cli knowledge snapshots` show what the snapshots use against the free space. Mojo also checks the free space
+  answer 2, N13): before a snapshot is made, its size is estimated. When it does not fit beside the reserve that always
+  stays free, no snapshot is made and the change does not run (Deep Ingest, a restore, a pack import, the index of the
+  framework's own documents); there is no "continue anyway". AI clients get the blocker `snapshot_no_room` with your
+  action before the question; the GUI offers **Knowledge Snapshots...** to delete or export snapshots. When it fits but
+  leaves little space, a situation warning (`disk_tight`). A knowledge pack import now saves the knowledge base first
+  (`pre_pack_<time>`); without room nothing is imported and the pack is imported later. A pack that cannot be imported
+  yet is tried again at the next start without another snapshot, and a name that is taken gets `-2`, so no snapshot is
+  ever written over. Mojo Oracle's knowledge line (with where, why and that only your list frees the room) and
+  `llm-cli knowledge snapshots` show what the snapshots use against the free space. Mojo also checks the free space
   of the framework's build folder. Nothing is deleted by itself.
 - **Deleting with the full list, and the trash** (delegation design 3.10, round 5 f; round 6 10.4): every deletion of
   something you can see asks first in the framework's own window (the GUI's deletion dialog, or a table and a question
@@ -899,9 +899,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   MCP prompt `add_board` points to them when information is missing. The catalogue's header and the documents now say
   that these links are read at run time.
 - **Build progress and the live build log in the Builder** (`orchestrator/gui/builder_parts.py`): a progress bar with
-  the step and the percent from the build service (the running build's own step, see Fixed), and the build's log
-  live below it (secrets redacted, plain text, each line once, at most 20,000 lines in view), with a search box and a
-  filter for Info, Warnings or Errors. Lines the service no longer returns are noted.
+  the step and the percent from the build service (the running build's own step, see Fixed), and the build's log live
+  below it (secrets redacted, full paths, plain text, each line once, at most 20,000 lines in view; an AI that reads the
+  log gets the folders by label), with a search box and a filter for Info, Warnings or Errors. Lines the service no
+  longer returns are noted.
 
 ### Changed
 - **The output folder is `~/llmcf/output`; the old output folder is the framework's build folder** (eighth round,

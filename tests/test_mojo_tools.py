@@ -133,6 +133,41 @@ def test_miracle_tool_changes_nothing_when_the_problem_changed_during_the_questi
     assert mode(open_state) == 0o750
 
 
+def test_a_snapshot_finding_names_the_snapshot_list_never_the_image_list(booted_framework, monkeypatch):
+    """No room for the next knowledge snapshot (eighth round, answer 2) is freed only in the snapshot list: the AI's
+    next step (run_mojo_oracle and run_mojo_miracle) and Mojo Miracle's report name that list. The build image list
+    frees no snapshot room, and Mojo Miracle at a terminal opens no list for it."""
+    from orchestrator.Core.knowledge_snapshots import FREE_SPACE_STEP
+
+    def no_room(_fw):
+        return [Finding("knowledge", "knowledge.snapshots", Severity.WARN, "The next snapshot does not fit.",
+                        FREE_SPACE_STEP, where="knowledge snapshots", why="the change does not run",
+                        cannot="deletion_list")]
+    monkeypatch.setattr(runner, "DEFAULT_CHECKS", [no_room])
+    registry = booted_framework.tool_registry
+    (row,) = [f for f in registry.call("run_mojo_oracle", {}, ToolContext("mcp")).findings
+              if f.code == "knowledge.snapshots"]
+    assert row.repair.how == "deletion_list" and "No tool deletes" in row.repair.next
+    assert "Knowledge Snapshots" in row.repair.next and "Framework Build Images" not in row.repair.next
+    assert "mojo --miracle" not in row.repair.next, "Mojo Miracle opens no snapshot list"
+    with pytest.raises(ToolError) as e:
+        registry.call("run_mojo_miracle", {"code": "knowledge.snapshots"},
+                      ToolContext("mcp", confirm=lambda s, i: True))
+    assert "Knowledge Snapshots" in e.value.next and "Framework Build Images" not in e.value.next
+    (entry,) = runner.Mojo(booted_framework).miracle(actor="cli", at_terminal=True,
+                                                     free_space=lambda: pytest.fail("no image list")).entries
+    assert entry.outcome == "not_done" and "Knowledge Snapshots" in entry.reason
+    from orchestrator.Core.mojo.offers import offer_for
+    from orchestrator.cli import _mojo_miracle_line
+    line = _mojo_miracle_line(offer_for(booted_framework, entry.finding), terminal=True)
+    assert "Knowledge Snapshots" in line and "build images" not in line, "the person's line names the same list"
+    # A finding the image list does free keeps pointing there
+    disk = Finding("disk", "disk.cache", Severity.ERROR, "Only 1.0 GB free.", "a hint", cannot="deletion_list")
+    monkeypatch.setattr(runner, "DEFAULT_CHECKS", [lambda _fw: [disk]])
+    (row,) = registry.call("run_mojo_oracle", {}, ToolContext("mcp")).findings
+    assert "Framework Build Images" in row.repair.next and "mojo --miracle" in row.repair.next
+
+
 def test_miracle_tool_is_never_standing_delegated_or_deleting(booted_framework):
     from orchestrator.tools import delegation, facts_catalog
     registry = booted_framework.tool_registry

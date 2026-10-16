@@ -281,6 +281,11 @@ def test_the_build_log_an_ai_reads_names_the_output_folder_by_label(fw, tmp_path
                      "An earlier build is in output:Rockchip/m/Q4_K_M", "cached in x.bin",
                      "CONT: /workspace/build/llama-quantize done"], "a line without a host path stays as it is"
     assert not any("jane" in line for line in lines)
+    # The Builder's live log is the person's own window (N8): the full paths, as for every other question and
+    # result the person reads (round 5 f); only secrets are redacted there too
+    person = BuildService(fw).log_tail("r1", for_person=True).lines
+    assert person[:3] == [f"Golden Artifact created: {out / 'Q4_K_M-2.zip'}",
+                          f"An earlier build is in {out / 'Q4_K_M'}", f"cached in {home / 'other' / 'x.bin'}"]
 
 
 def test_the_build_log_names_no_user_from_paths_outside_the_home_folder(fw, tmp_path, monkeypatch):

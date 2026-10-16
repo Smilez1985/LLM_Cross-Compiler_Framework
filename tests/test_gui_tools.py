@@ -159,6 +159,17 @@ def test_paths_reach_the_ai_as_labels(fm, builder, tmp_path):
         "Qwen/Qwen3.5-0.8B", "a Hugging Face repo id stays as it is"
 
 
+def test_a_path_in_the_build_folder_reaches_the_ai_by_its_label(fm, builder):
+    """The framework's build folder (eighth round, answer 3) is 'builds' in every other view an AI reads (Mojo, the
+    runtime tools, get_status): a model the person picked from a build waiting there is named by that label too, not by
+    its file name alone."""
+    from orchestrator.Core.artifact_output import build_folder
+    model = build_folder(fm) / "Rockchip" / "m" / "Q4_K_M" / "m.gguf"
+    builder.model_input.setEditText(str(model))
+    values = {f.id: f.value for f in call(fm, "read_gui_form", {"form": "builder"}).form.fields}
+    assert values["model"] == "builds:Rockchip/m/Q4_K_M/m.gguf"
+
+
 # --- fill_gui_form ---------------------------------------------------------------------------------------------------
 
 def test_a_fill_is_visible_marked_and_undone_with_one_click(fm, builder):

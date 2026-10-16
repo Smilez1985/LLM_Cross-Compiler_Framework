@@ -216,7 +216,7 @@ def gui_tool_specs(registry: ToolRegistry, framework: Any) -> List[ToolSpec]:
         resolve = getattr(framework, "resolve_path", None)
         config = getattr(framework, "config", None)
         for key, label in (("models_dir", "models"), ("datasets_dir", "datasets"), ("output_dir", "output"),
-                           ("cache_dir", "cache")):
+                           ("build_dir", "builds"), ("cache_dir", "cache")):
             try:
                 value = config.get(key, None) if config is not None else None
                 if value:

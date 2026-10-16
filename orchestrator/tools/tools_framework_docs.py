@@ -8,8 +8,9 @@ value reaches a build script, what a setting does, which tool to use. It is an e
 
 - The documentation first (README*, CONTRIBUTING*, docs/*.md); the code and configuration only with `include_code`.
 - Two-phase: `prepare` checks that the knowledge base is on and that there is room for the snapshot taken first
-  (snapshot_space, the same check the GUI and the CLI make: no room, nothing is indexed); the question shows how many
-  files and how much text it reads. Default and cap "ask": it writes the knowledge base.
+  (snapshot_space, the same check the GUI and the CLI make: no room, nothing is indexed; the blocker is
+  snapshot_no_room, as before every other snapshot); the question shows how many files and how much text it reads.
+  Default and cap "ask": it writes the knowledge base.
 - A job: get_job_status shows "file n of m"; cancel_job stops after the current file and keeps what is stored. A
   snapshot is taken first, as before a Deep Ingest, so the index can be undone with a restore; when it cannot be made,
   nothing is indexed and the job fails saying so. The result has counts, the snapshot's name and every file it did not
@@ -121,13 +122,14 @@ def register_framework_docs_tools(registry: ToolRegistry, framework, jobs) -> To
         return rag, docs, code
 
     def prepare(inp: IndexDocsIn, ctx: ToolContext) -> CallFacts:
+        from orchestrator.Core.knowledge_snapshots import FREE_SPACE_STEP
         rag, docs, code = plan(inp.include_code)
         checks = snapshot_space(rag, getattr(getattr(framework, "build_service", None), "disk_usage", None))
         short = [c for c in checks if not c.fits]
-        if short:
-            raise blocked("disk_full", "Not enough disk space for the snapshot taken before the index: "
-                          + "; ".join(c.sentence() for c in short) + ".",
-                          "Tell the person how much space is missing; they free space first.")
+        if short:  # the blocker of every snapshot that does not fit (eighth round, answer 2): the person's list
+            raise blocked("snapshot_no_room", "Not enough disk space for the knowledge snapshot taken before the "
+                          "index: " + "; ".join(c.sentence() for c in short) + ". No snapshot was made and nothing "
+                          "was indexed.", "Tell the person how much space is missing. " + FREE_SPACE_STEP)
         what = (f"{len(docs)} documentation files ({_size(files_size(docs))}) and {len(code)} code and configuration "
                 f"files ({_size(files_size(code))})" if inp.include_code else
                 f"{len(docs)} documentation files ({_size(files_size(docs))})")
@@ -160,6 +162,10 @@ def register_framework_docs_tools(registry: ToolRegistry, framework, jobs) -> To
         def work(handle) -> dict:
             result = rag.ingest_codebase(include_code=inp.include_code, stop=stop,
                                          progress=lambda n, total, _name: handle.progress(n, total, "indexing"))
+            if result.get("blocker") == "snapshot_no_room":  # the disk filled up after the question
+                from orchestrator.Core.knowledge_snapshots import FREE_SPACE_STEP
+                raise job_failure("The knowledge snapshot taken first did not fit on the disk, so nothing was "
+                                  f"indexed. Next: Tell the person. {FREE_SPACE_STEP}", code="insufficient_resources")
             if result.get("snapshot_failed"):
                 raise job_failure("The snapshot of the knowledge base taken first could not be made (for example the "
                                   "disk is full), so nothing was indexed. Next: Tell the person; they free disk space "

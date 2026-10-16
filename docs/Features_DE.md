@@ -131,12 +131,13 @@ Weiteres Verhalten:
   sagen das. Ist ein Build gescheitert oder verschiebt er gerade seine Dateien in den Ausgabeordner, lässt er sich
   nicht mehr abbrechen und läuft von selbst zu Ende.
 - **Fortschritt und Live-Protokoll:** Solange der Build läuft, den der Builder-Tab gestartet hat, zeigt ein
-  Fortschrittsbalken unter dem Builder-Log den Schritt und den Prozentwert aus dem Build-Service, und das Protokoll
-  des Builds läuft live darunter mit (Geheimnisse geschwärzt, reiner Text, jede Zeile einmal). Schritt und Prozentwert
-  enthalten den eigenen Fortschritt des laufenden Builds (Vorbereitung, Image, Modell, Module, Archiv), sodass sich der
-  Balken während eines Builds bewegt; 100 % zeigt er erst, wenn die Anfrage beendet ist. Ein Suchfeld findet Zeilen;
-  ein Filter zeigt alle Zeilen oder nur Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert,
-  werden vermerkt statt still weggelassen, und die Ansicht behält die neuesten 20.000 Zeilen.
+  Fortschrittsbalken unter dem Builder-Log den Schritt und den Prozentwert aus dem Build-Service, und das Protokoll des
+  Builds läuft live darunter mit (Geheimnisse geschwärzt, volle Pfade, reiner Text, jede Zeile einmal; eine KI, die das
+  Protokoll liest, bekommt die Ordner als Label). Schritt und Prozentwert enthalten den eigenen Fortschritt des
+  laufenden Builds (Vorbereitung, Image, Modell, Module, Archiv), sodass sich der Balken während eines Builds bewegt;
+  100 % zeigt er erst, wenn die Anfrage beendet ist. Ein Suchfeld findet Zeilen; ein Filter zeigt alle Zeilen oder nur
+  Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert, werden vermerkt statt still weggelassen, und
+  die Ansicht behält die neuesten 20.000 Zeilen.
 - **Build-Status über Programme hinweg (gemeinsamer Build-Zustand):** Jedes Programm, das baut (die GUI, ein
   CLI-Aufruf, jeder MCP-Server), schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner
   (`build_requests/`: Modell als Repo-ID oder Label, Target, Format, Quantisierung, Status, Stufe, Fortschritt, wer
