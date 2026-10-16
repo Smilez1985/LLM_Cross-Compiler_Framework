@@ -670,6 +670,7 @@ class TestEvaluation:
         win.chk_kinds["healing"].setChecked(True)
         win.sp_repeat.setValue(3)
         win.cb_provider.setCurrentIndex(win.cb_provider.findData("openai"))
+        eval_ui.rt.states["default"] = "unverified"   # downloaded, checked when its server starts
         tick(win.lst_tiers, "small")
         tick(win.lst_tiers, "default")
         assert win.cb_provider.currentIndex() == 0 and not win.cb_provider.isEnabled(), "a tier runs the local model"
@@ -697,6 +698,21 @@ class TestEvaluation:
         assert win.tbl_results.item(0, 0).text() == "tier small" and not win.tbl_retrieval.isHidden()
         assert win.tbl_retrieval.item(0, 4).text() == "0.750"
         assert win.btn_save.isEnabled()
+
+    def test_a_tier_that_is_not_downloaded_is_refused_before_the_question(self, eval_ui):
+        """Starting a tier stops the person's own server before it finds the model missing, and the core's message
+        names a CLI command: the window refuses first and names Ditto > Local Models... instead."""
+        win = eval_ui.win
+        win.chk_kinds["healing"].setChecked(True)
+        tick(win.lst_tiers, "small")
+        tick(win.lst_tiers, "default")   # not downloaded
+        assert win.start() is False
+        assert eval_ui.shown == [("warning", "These local model tiers are not downloaded yet: default. Download "
+                                             "them first in Ditto > Local Models..., or untick them.")]
+        assert eval_ui.asked == [] and eval_ui.run.calls == [] and "llm-cli" not in eval_ui.shown[0][1]
+        win.chk_kinds["healing"].setChecked(False)
+        win.chk_kinds["retrieval"].setChecked(True)   # retrieval needs no tier: nothing to refuse
+        assert win.start() is False and len(eval_ui.shown) == 1 and len(eval_ui.asked) == 1
 
     def test_provider_model_and_variants_are_passed(self, eval_ui):
         win = eval_ui.win

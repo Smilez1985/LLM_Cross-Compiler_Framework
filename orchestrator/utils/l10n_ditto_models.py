@@ -106,6 +106,8 @@ TEXTS = {
                             "below):",
         "ditto_eval.tier_item": "{tier} ({file}, {size}, {state})",
         "ditto_eval.tiers_failed": "The local models could not be listed: {reason}",
+        "ditto_eval.tiers_missing": "These local model tiers are not downloaded yet: {tiers}. Download them first in "
+                                    "Ditto > Local Models..., or untick them.",
         "ditto_eval.provider": "Provider:",
         "ditto_eval.model": "Model:",
         "ditto_eval.effort": "Reasoning effort:",
@@ -266,6 +268,8 @@ TEXTS = {
                             "Anbieter unten):",
         "ditto_eval.tier_item": "{tier} ({file}, {size}, {state})",
         "ditto_eval.tiers_failed": "Die lokalen Modelle konnten nicht aufgelistet werden: {reason}",
+        "ditto_eval.tiers_missing": "Diese lokalen Modellstufen sind noch nicht heruntergeladen: {tiers}. Lade sie "
+                                    "zuerst unter Ditto > Lokale Modelle... herunter, oder nimm die Haken weg.",
         "ditto_eval.provider": "Anbieter:",
         "ditto_eval.model": "Modell:",
         "ditto_eval.effort": "Denkaufwand:",

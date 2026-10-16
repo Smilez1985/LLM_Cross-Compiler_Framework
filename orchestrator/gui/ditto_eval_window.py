@@ -387,6 +387,18 @@ class EvaluationWindow(QDialog):
         target = parts[0] if len(parts) == 1 else self._t("ditto_eval.target.and", first=parts[0], second=parts[1])
         return self._t("ditto_eval.question", cases=len(cases), repeat=choice["repeat"], target=target, cost=cost)
 
+    def _missing_tiers(self, tiers: Sequence[str]) -> List[str]:
+        """The chosen tiers whose model file is not there (LocalLLMRuntime.model_state "missing", as in Ditto > Local
+        Models...); a tier that cannot be looked up is left to the run, which reports it."""
+        if not tiers:
+            return []
+        try:
+            rt = self._factory()
+            states = {m.tier: rt.model_state(m) for m in rt.catalog.models}
+        except Exception:  # noqa: BLE001 - the run reports a runtime that cannot be read
+            return []
+        return [one_line(t) for t in tiers if states.get(t) == "missing"]
+
     def _fallback_elsewhere(self, choice: Dict[str, Any]) -> List[str]:
         """The providers of the AI settings' fallback chain (the run's Ditto reads it like every call: LLMClient.
         fallback_targets) that are not known to run on this computer; [] when there are none or it cannot be read."""
@@ -439,6 +451,10 @@ class EvaluationWindow(QDialog):
         ai = any(c.kind != "retrieval" for c in cases)
         if ai and self.ditto is None:
             self._tell("warning", self._t("ditto_eval.no_ditto"))
+            return False
+        missing = self._missing_tiers(choice["tiers"]) if ai else []
+        if missing:   # starting one would stop your server first and then name a CLI command
+            self._tell("warning", self._t("ditto_eval.tiers_missing", tiers=", ".join(missing)))
             return False
         problem = provider_problem(self.catalog, choice["provider"]) if (ai and choice["provider"]
                                                                          and self.catalog is not None) else None
