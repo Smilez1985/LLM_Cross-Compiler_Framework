@@ -2707,6 +2707,18 @@ Docker-Images auf eine andere Platte zu verlegen ist ein Schritt für Administra
 einem kurzen Hinweis, der `llmcf mojo` nennt; `--fix` macht dieselben protokollierten harmlosen Reparaturen, und
 `--tier 2` zeigt auch die Liste der Build-Images des Frameworks.
 
+GUI (unveröffentlicht): **Tools > Mojo-Gesundheitscheck...** erledigt all das mit der Maus, über dieselben Funktionen
+wie der Befehl. Mojo Oracle läuft beim Öffnen des Fensters, außerhalb des GUI-Threads, und zeigt jeden Befund so, wie
+`llmcf mojo` ihn ausgibt (die Schwere als Text mit Zeichen und Symbol, nie nur als Farbe; wo, warum es wichtig ist,
+den nächsten Schritt, was Mojo Miracle tun kann, mit seinem Plan; den zusammenfassenden Satz und eine Gesamtzeile mit
+dem Exit-Code). **Mojo Miracle ausführen...** fragt „Mojo Miracle jetzt ausführen?“ (Nein ist die Vorgabe) und
+repariert so, wie es der Befehl im Terminal tut: Die gezeigten Pläne binden die Reparaturen, die Build-Images des
+Frameworks öffnen sich im Löschdialog mit der ganzen Liste und nichts angehakt, und das Fenster zeigt danach, was
+repariert wurde, was nicht und warum. Das Fenster nimmt von sich aus keinen Kontakt zu einem Board auf: Ein Board, auf
+das ein aufgezeichneter Fakt zeigt, bekommt **<Board> jetzt prüfen**, **Ein Board prüfen...** prüft ein beliebiges
+vertrautes Board, das du auswählst, und **Dieses Board prüfen** im Deployment-Tab (Gruppe „Benchmark auf einem
+Board“) prüft das gewählte Board; jede Prüfung ist eine Verbindung zum SSH-Port des Boards, keine Anmeldung.
+
 Was eine KI liest: `run_mojo_oracle` liefert dieselben Befunde mit `where` als Bezeichnung, `why` und `repair` (`how`:
 `miracle`, `deletion_list`, `person`, `admin` oder `not_automatic`, mit dem nächsten Schritt), die Ordner des
 Frameworks unter ihrer Bezeichnung (`state:audit.db`, "the state folder", `targets:<Pack>`) und jeden anderen Pfad nur

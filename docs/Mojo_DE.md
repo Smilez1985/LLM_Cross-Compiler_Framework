@@ -53,6 +53,11 @@ Run Mojo Miracle now? [y/N]:
 Mit `y` läuft Mojo Miracle sofort; du tippst den Befehl nicht noch einmal. Nein ist die Vorgabe: Dann wird nichts
 geändert.
 
+In der GUI (unveröffentlicht): **Tools > Mojo-Gesundheitscheck...** startet Mojo Oracle beim Öffnen des Fensters und
+zeigt dieselben Befunde mit einer Gesamtzeile für den Exit-Code; **Mojo Miracle ausführen...** stellt dieselbe Frage
+(Nein ist die Vorgabe), öffnet die Build-Images des Frameworks im Löschdialog und zeigt, was repariert wurde, was nicht
+und warum. Fenster und Befehl rufen dieselben Funktionen auf.
+
 ## 2. Was Mojo Oracle meldet
 
 Mojo Oracle schreibt eine Zeile pro Prüfung. Zu jeder Warnung und jedem Fehler schreibt es außerdem:
@@ -126,6 +131,12 @@ ein fehlender Schlüssel des Frameworks (`device_auth_failed`) zeigt sich erst b
 Benchmark; ist so ein Fehler aufgezeichnet und antwortet das Board jetzt, sagt Mojo, dass es die Anmeldung nicht prüfen
 kann. Ein geprüftes Board behält sein aufgezeichnetes Problem, bis ein Deployment, eine Prüfung oder ein Benchmark es
 wieder erreicht, denn Mojo Oracle schaut nur und schreibt nichts.
+
+Auch in der GUI nimmt das Mojo-Fenster von sich aus keinen Kontakt zu einem Board auf: Ein Board, auf das ein
+aufgezeichneter Fakt zeigt, bekommt einen Knopf **<Board> jetzt prüfen**, und **Ein Board prüfen...** prüft ein
+beliebiges vertrautes Board, das du an Bezeichnung und Adresse auswählst. **Dieses Board prüfen** im Deployment-Tab
+(Gruppe „Benchmark auf einem Board“) prüft das dort gewählte Board. Jedes ist dieselbe einzelne Verbindung zum
+SSH-Port des Boards, ohne Anmeldung, und zeigt den Befund des Boards mit seinem nächsten Schritt.
 
 ## 3. Was Mojo Miracle repariert
 

@@ -10,6 +10,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Tools > Mojo-Gesundheitscheck... in der GUI** (DECISIONS W1': jede Aktion der Kommandozeile auch mit der Maus):
+  Das Mojo-Fenster startet Mojo Oracle beim Öffnen, außerhalb des GUI-Threads, und zeigt jeden Befund so, wie
+  `llmcf mojo` ihn ausgibt (die Schwere als Text mit Zeichen und Symbol, nie nur als Farbe; wo mit dem vollen Pfad,
+  warum es wichtig ist, den nächsten Schritt, was Mojo Miracle tun kann, mit den Schritten seines Plans; den
+  zusammenfassenden Satz und eine Gesamtzeile mit dem Exit-Code). **Mojo Miracle ausführen...** fragt „Mojo Miracle
+  jetzt ausführen?“ („Nein“ ist die Vorgabe) und lässt Mojo Miracle mit der GUI als deinem Kanal laufen: Die gezeigten
+  Pläne binden die Reparaturen, die Build-Images des Frameworks öffnen sich im Löschdialog mit der ganzen Liste und
+  nichts angehakt, und das Fenster zeigt, was repariert wurde, was nicht und warum. Kein Board wird von sich aus
+  kontaktiert: Ein Board, auf das ein aufgezeichneter Fakt zeigt, bekommt **<Board> jetzt prüfen**, und **Ein Board
+  prüfen...** prüft ein beliebiges vertrautes Board, das du auswählst (eine Verbindung zu seinem SSH-Port, keine
+  Anmeldung). Befehl und Fenster teilen dieselben Kernfunktionen (`Core/mojo/boards.py`, die Sicht der Person in
+  `Core/mojo/views.py`, `docker_objects.offer_image_list`), die Ausgabe von `llmcf mojo` bleibt also, wie sie war.
+- **Dieses Board prüfen im Deployment-Tab** (Gruppe „Benchmark auf einem Board“, DECISIONS W1'): prüft das gewählte
+  Board so, wie es `llmcf mojo --oracle --board` tut, im Hintergrund (eine Verbindung zu seinem SSH-Port, keine
+  Anmeldung), und zeigt seinen Befund mit dem nächsten Schritt unter der Zeile; ein Problem wird auch in einer Meldung
+  genannt.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den

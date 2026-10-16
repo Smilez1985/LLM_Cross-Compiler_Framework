@@ -2456,6 +2456,17 @@ codes: 0 OK, 1 warnings, 2 errors; `--json` for scripts.
 names `llmcf mojo`; `--fix` makes the same audited harmless repairs, and `--tier 2` also shows the list of the
 framework's build images.
 
+GUI (unreleased): **Tools > Mojo Health Check...** does all of this with the mouse, through the same functions as the
+command. Mojo Oracle runs when the window opens, off the GUI thread, and shows every finding as `llmcf mojo` prints it
+(the severity as text with its mark and icon, never colour alone; where, why it matters, the next step, what Mojo
+Miracle can do with its plan; the summary sentence and an overall line with the exit code). **Run Mojo Miracle...**
+asks "Run Mojo Miracle now?" (No is the default) and repairs as the command does at a terminal: the plans shown bind
+the repairs, the framework's build images open in the deletion dialog with the full list and nothing ticked, and the
+window then shows what was repaired, what was not and why. The window contacts no board by itself: a board a
+recorded fact points to gets **Check <board> now**, **Check a board...** checks any trusted board you pick, and the
+Deployment tab's **Check this board** (group "Benchmark on a board") checks the chosen board; each check is one
+connection to the board's SSH port, no login.
+
 What an AI reads: `run_mojo_oracle` gives the same findings with `where` as a label, `why` and `repair` (`how`:
 `miracle`, `deletion_list`, `person`, `admin` or `not_automatic`, with what to do next), the framework's folders
 named by label (`state:audit.db`, "the state folder", `targets:<pack>`) and any other path by its file name only,
