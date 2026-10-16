@@ -926,7 +926,7 @@ file. Checking the rebuild detects the toolchain (it compiles nothing).
 | `--json` | Machine-readable output (`installed`, `problems`, `rebuild`, `recommended_backend`, `prebuilt_option`, ...). |
 
 In the GUI: **Ditto > Local Runtime...**, box "Status" (the same values as text in your language; "Check again" reads
-them again).
+them again). In **Tools > Configure AI Agent (Ditto)...**, "Status and more..." opens the same window.
 
 #### ditto runtime install
 

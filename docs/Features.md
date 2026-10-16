@@ -999,7 +999,8 @@ commands:
 
 - **Status:** what `ditto runtime status` shows (hardware, mode, the build in use and its checks, problems and the
   rebuild advice, the self-built plan, the prebuilt option, the server with address, model and context, the
-  recommended and the chosen model, the log file), in your language; **Check again** reads it again.
+  recommended and the chosen model, the log file), in your language; **Check again** reads it again. In **Tools >
+  Configure AI Agent (Ditto)...**, **Status and more...** opens the same window.
 - **Install, check or switch:** the box "Ditto's local server" (also in **Tools > Configure AI Agent (Ditto)...**)
   runs `ditto runtime ensure` with the mode (Automatic, Bare metal, In Docker), the build options (GPU backend, where
   the build runs, compile jobs) and the model offer afterwards (unticked: `--no-model`). For the installed mode the

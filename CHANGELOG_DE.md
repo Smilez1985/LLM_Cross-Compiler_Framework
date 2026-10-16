@@ -27,7 +27,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   „Dittos lokaler Server“ (hier und in den KI-Einstellungen) lehnt die installierte Art nicht mehr ab: **Prüfen und
   reparieren...** prüft sie und installiert sie nur neu, wenn sie sich nicht nutzen lässt (zum Beispiel ein alter
   llama.cpp-Build nach einem Update), und Installieren und Wechseln nehmen jetzt die Build-Optionen mit; der Wechsel
-  behält die Platzprüfung und das vollständige Entfernen der alten Art.
+  behält die Platzprüfung und das vollständige Entfernen der alten Art. Sein neuer Knopf **Status und mehr...** öffnet
+  das Fenster aus den KI-Einstellungen.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den

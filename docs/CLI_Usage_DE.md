@@ -960,7 +960,7 @@ neuen Build erkennt die Toolchain (sie kompiliert nichts).
 | `--json` | Maschinenlesbare Ausgabe (`installed`, `problems`, `rebuild`, `recommended_backend`, `prebuilt_option`, ...). |
 
 In der GUI: **Ditto > Lokale Laufzeit...**, Bereich „Status“ (dieselben Werte als Text in deiner Sprache; „Noch einmal
-prüfen“ liest sie neu).
+prüfen“ liest sie neu). In **Tools > Configure AI Agent (Ditto)...** öffnet „Status und mehr...“ dasselbe Fenster.
 
 #### ditto runtime install
 
