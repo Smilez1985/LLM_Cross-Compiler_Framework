@@ -29,8 +29,10 @@ program of the same account could read the key file, but it could also change th
 anyway; every other account is kept out.
 
 The window that opens first serves AI apps; another window of the same person opened while it runs does not start
-a second bridge. When the window closes, the endpoint and `bridge.json` are removed; a process that finds no live
-window gets GuiNotOpen, which the GUI tool turns into the blocker gui_not_open ("open the framework window").
+a second bridge, but checks every RETRY_SECONDS whether the first one still answers and takes over when it has closed
+(BridgeServer.serve_when_free). When the window closes, the endpoint and `bridge.json` are removed; a process that
+finds no live window gets GuiNotOpen, which the GUI tool turns into the blocker gui_not_open ("open the framework
+window").
 """
 
 import json
@@ -63,8 +65,11 @@ HANDSHAKE_SECONDS = 5.0      # to prove the key, both ways
 REQUEST_SECONDS = 10.0       # for the request after the handshake
 ANSWER_SECONDS = 60.0        # for the window's answer (each step on the GUI thread has its own 15 s limit)
 PING_SECONDS = 2.0
+RETRY_SECONDS = 5.0          # a second window checks this often whether the first one still serves AI apps
 MAX_CONNECTIONS = 8          # calls served at the same time
 PROTOCOL = 1
+OTHER_WINDOW = "another framework window of this person already serves AI apps"
+_UCRED = struct.Struct("iII")   # struct ucred (Linux): pid_t pid (signed), uid_t uid and gid_t gid (unsigned)
 
 logger = get_logger("GuiBridge")
 
@@ -172,6 +177,12 @@ def read_info(state_dir: Path) -> Optional[BridgeInfo]:
 
 # --- the window's side ------------------------------------------------------------------------------------------------
 
+def peer_uid_from(raw: bytes) -> int:
+    """The user id in a struct ucred as SO_PEERCRED returns it (unsigned, as os.geteuid() gives it)."""
+    _pid, uid, _gid = _UCRED.unpack(raw)
+    return uid
+
+
 def _peer_uid(conn: Any) -> Optional[int]:
     """The user id of the process at the other end of an AF_UNIX connection (Linux: SO_PEERCRED); None where the
     system does not tell."""
@@ -180,8 +191,7 @@ def _peer_uid(conn: Any) -> Optional[int]:
         return None
     peer = socket.socket(fileno=os.dup(conn.fileno()))
     try:
-        _pid, uid, _gid = struct.unpack("3i", peer.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("3i")))
-        return uid
+        return peer_uid_from(peer.getsockopt(socket.SOL_SOCKET, option, _UCRED.size))
     finally:
         peer.close()
 
@@ -220,21 +230,59 @@ class BridgeServer:
         self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
         # The account this window runs as: a process of any other account is refused (POSIX).
         self._owner_uid = os.geteuid() if hasattr(os, "geteuid") else None
+        # A second window waits for the first one (serve_when_free); stop() ends the wait. Starting and stopping never
+        # run at the same time, so a window that closed never starts its bridge afterwards.
+        self._lifecycle = threading.Lock()
+        self._closed = threading.Event()
+        self._waiter: Optional[threading.Thread] = None
 
     @property
     def running(self) -> bool:
         return self._listener is not None and not self._stop.is_set()
 
+    @property
+    def waiting(self) -> bool:
+        """Whether this window waits for another window of this person to close before it serves AI apps."""
+        waiter = self._waiter
+        return waiter is not None and waiter.is_alive() and not self._closed.is_set()
+
+    def serve_when_free(self, every: float = RETRY_SECONDS) -> bool:
+        """Starts the bridge (True). While another framework window of this person serves AI apps (False, `waiting`),
+        checks every `every` seconds in the background whether that window still answers and takes over once it has
+        closed, until stop(). Never raises."""
+        self._closed.clear()
+        if self.start():
+            return True
+        if self.note != OTHER_WINDOW:
+            return False
+
+        def wait() -> None:
+            while not self._closed.wait(every):
+                with self._lifecycle:
+                    if self._closed.is_set():
+                        return
+                    if self._start() or self.note != OTHER_WINDOW:
+                        return   # serving now, or the bridge cannot start here (logged once by _start)
+        self._waiter = threading.Thread(target=wait, name="gui-bridge-wait", daemon=True)
+        self._waiter.start()
+        return False
+
     def start(self) -> bool:
         """Starts listening and writes bridge.json; False (with `note`) when another window of this person already
         serves AI apps or the bridge cannot start here. Never raises."""
+        with self._lifecycle:
+            return self._start()
+
+    def _start(self) -> bool:
         from orchestrator.utils.file_lock import file_lock
+        if self.running:
+            return True
         try:
             folder = bridge_folder(self.state_dir)
             with file_lock(folder / LOCK_FILE, timeout=10.0):
                 existing = read_info(self.state_dir)
                 if existing is not None and _alive(existing):
-                    self.note = "another framework window of this person already serves AI apps"
+                    self.note = OTHER_WINDOW
                     return False
                 if existing is not None:
                     _remove_stale_endpoint(existing, folder)
@@ -263,13 +311,23 @@ class BridgeServer:
             self._remove_temp_folder()
             return False
         self._stop.clear()
+        self.note = ""
         self._thread = threading.Thread(target=self._serve, name="gui-bridge", daemon=True)
         self._thread.start()
         logger.info("AI apps can reach this framework window (GUI bridge started).")
         return True
 
     def stop(self) -> None:
-        """Stops listening and removes the endpoint and bridge.json (when it is still this window's)."""
+        """Stops listening (or waiting for another window) and removes the endpoint and bridge.json (when it is still
+        this window's)."""
+        self._closed.set()
+        waiter, self._waiter = self._waiter, None
+        if waiter is not None and waiter is not threading.current_thread():
+            waiter.join(timeout=1.0)   # it ends at once, or after the start it is in (then stopped below)
+        with self._lifecycle:
+            self._stop_bridge()
+
+    def _stop_bridge(self) -> None:
         listener, info = self._listener, self._info
         if listener is None or info is None:
             return
@@ -407,6 +465,8 @@ def _connect(info: BridgeInfo, handshake: float) -> Any:
         conn = Client(info.address, family=info.family)
     except (OSError, EOFError) as e:   # no socket or pipe, nobody listening, or not this account's
         raise GuiNotOpen(f"no framework window answers ({type(e).__name__})") from None
+    except ValueError:   # the other system's kind of endpoint (a per-user folder copied over, or shared with WSL)
+        raise GuiNotOpen("no framework window of this system answers") from None
     try:
         if not conn.poll(handshake):
             raise GuiNotOpen("the framework window did not answer")

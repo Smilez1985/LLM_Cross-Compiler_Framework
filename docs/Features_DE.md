@@ -826,8 +826,8 @@ zufälligem Namen (Windows), und beide Seiten weisen einen zufälligen Schlüsse
 lesen kann, bevor etwas gesendet wird. Ein Programm eines anderen Kontos auf demselben Computer bekommt nichts. Ist
 kein Framework-Fenster offen, antwortet `gui` mit dem Blocker `gui_not_open` und bittet dich, das Framework-Fenster zu
 öffnen; das Tool bleibt aufgeführt, damit die App dir sagen kann, warum. Das Fenster, das zuerst geöffnet wird, bedient
-die KI-Apps. Es ist das vierzigste Tool, das ein Client aufführt, so bekommen Clients, die höchstens 40 Tools nehmen,
-trotzdem alle.
+die KI-Apps; wird es geschlossen, übernimmt ein anderes offenes Framework-Fenster innerhalb weniger Sekunden. Es ist
+das vierzigste Tool, das ein Client aufführt, so bekommen Clients, die höchstens 40 Tools nehmen, trotzdem alle.
 
 ---
 

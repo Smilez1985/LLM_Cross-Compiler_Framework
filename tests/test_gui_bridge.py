@@ -225,6 +225,72 @@ def test_a_second_window_of_the_same_person_does_not_start_a_second_bridge(boote
     assert call(booted_framework, "read_form").open_forms, "the first window still serves AI apps"
 
 
+def _until(condition, what: str, seconds: float = 10.0) -> None:
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline, what
+        time.sleep(0.05)
+
+
+def test_a_second_window_takes_over_when_the_first_one_closes(booted_framework, window):
+    """W4: AI apps reach the window while one is open. A second window of the same person waits while the first one
+    serves them, and serves them itself once the first one has closed (here it checks every 0.1 s)."""
+    fm = booted_framework
+    from orchestrator.tools.tools_gui import bridge_handler
+    second = Window()
+    other = gui_bridge.BridgeServer(state_dir(fm), bridge_handler(fm, lambda: second.surface))
+    assert other.serve_when_free(every=0.1) is False and other.waiting and not other.running
+    try:
+        call(fm, "fill_form", form="builder", values={"use_gpu": False})
+        assert window.state["use_gpu"] is False and second.state["use_gpu"] is True, "the first window still serves"
+        window.server.stop()
+        _until(lambda: other.running, "the second window never took over")
+        assert not other.waiting
+        call(fm, "fill_form", form="builder", values={"use_gpu": False})
+        assert second.state["use_gpu"] is False, "the open window serves AI apps now"
+    finally:
+        other.stop()
+    assert not other.running and not other.waiting and gui_bridge.read_info(state_dir(fm)) is None
+
+
+def test_a_closed_second_window_never_starts_the_bridge_later(booted_framework, window):
+    other = gui_bridge.BridgeServer(state_dir(booted_framework), lambda request: {"ok": True})
+    assert other.serve_when_free(every=0.05) is False and other.waiting
+    other.stop()   # the second window closed first
+    assert not other.waiting
+    window.server.stop()
+    time.sleep(0.3)
+    assert not other.running and gui_bridge.read_info(state_dir(booted_framework)) is None
+
+
+def test_a_key_file_of_the_other_system_reads_as_no_window(booted_framework):
+    """A key file that names the other system's kind of endpoint (a per-user folder copied from Windows to Linux, or
+    shared between Windows and WSL): the tool says gui_not_open as for any window that is gone, and the window starts
+    its own bridge over it."""
+    fm = booted_framework
+    from orchestrator.Core.vault_key import write_private
+    from orchestrator.tools.tools_gui import bridge_handler
+    folder = gui_bridge.bridge_folder(state_dir(fm))
+    family, address = (("AF_UNIX", "/tmp/llmcf-gui-gone/gui.sock") if os.name == "nt"
+                       else ("AF_PIPE", gui_bridge.PIPE_PREFIX + "0" * 32))
+    write_private(folder / gui_bridge.INFO_FILE,
+                  gui_bridge.BridgeInfo(family, address, os.urandom(32), 1, "elsewhere").to_json())
+    assert gui_bridge.read_info(state_dir(fm)).family == family
+    assert not gui_bridge.gui_open(state_dir(fm))
+    with pytest.raises(gui_bridge.GuiNotOpen):
+        gui_bridge.call(state_dir(fm), {"op": "ping"}, timeout=2)
+    with pytest.raises(ToolError) as exc:
+        call(fm, "read_form")
+    assert exc.value.blocker == "gui_not_open"
+    win = Window()
+    server = gui_bridge.BridgeServer(state_dir(fm), bridge_handler(fm, lambda: win.surface))
+    assert server.start(), server.note
+    try:
+        assert call(fm, "read_form").open_forms[0].form == "builder"
+    finally:
+        server.stop()
+
+
 # --- nobody but this person ------------------------------------------------------------------------------------------
 
 @POSIX_MODES_ONLY
@@ -296,6 +362,15 @@ def test_a_process_of_another_account_is_refused_by_the_window(booted_framework,
     with pytest.raises(gui_bridge.GuiNotOpen):
         gui_bridge.call(state_dir(booted_framework), {"op": "run"}, timeout=5)
     assert len(handled) == 1, "the connection of another account never reached the window"
+
+
+def test_the_peer_account_is_read_as_an_unsigned_number():
+    """struct ucred holds a signed process id and an unsigned user and group id: an account number above 2**31 is read
+    as itself (as os.geteuid() gives it), so the window of such an account still serves that account's processes."""
+    import struct
+    big = 3_000_000_000
+    assert gui_bridge.peer_uid_from(struct.pack("iII", 4242, big, big)) == big
+    assert gui_bridge.peer_uid_from(struct.pack("iII", 7, 1000, 1000)) == 1000
 
 
 @POSIX_ONLY
@@ -448,6 +523,24 @@ def test_the_window_starts_and_stops_the_bridge_with_the_gui(booted_framework, q
         form_surface.close_gui(surface)
     assert not gui_bridge.gui_open(state_dir(booted_framework))
     assert gui_bridge.read_info(state_dir(booted_framework)) is None
+
+
+def test_a_second_main_window_waits_and_its_close_ends_the_wait(booted_framework, window, qapp):
+    """open_gui of a second window while the first serves AI apps keeps a waiting bridge (it takes over later);
+    close_gui ends the wait, and the first window keeps serving."""
+    from orchestrator.gui import form_surface
+    from PySide6.QtWidgets import QMainWindow, QTabWidget
+    qt = QMainWindow()
+    second = SimpleNamespace(framework=booted_framework, tabs=QTabWidget(qt), raise_=lambda: None,
+                             builder_tab=None, deployment_window=None)
+    surface = form_surface.open_gui(second)
+    bridge = surface.extra.get("bridge")
+    try:
+        assert bridge is not None and bridge.waiting and not bridge.running
+    finally:
+        form_surface.close_gui(surface)
+    assert not bridge.waiting and not bridge.running
+    assert call(booted_framework, "read_form").open_forms[0].form == "builder", "the first window still serves"
 
 
 def test_ditto_in_the_window_never_goes_over_the_bridge(booted_framework, window):

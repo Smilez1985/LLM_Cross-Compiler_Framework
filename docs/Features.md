@@ -755,8 +755,8 @@ same code as for Ditto does the work. Only you can reach this bridge: it is a so
 prove a random key from a file only your account can read before anything is sent. A program of another account on
 the same computer gets nothing. When no framework window is open, `gui` answers with the blocker `gui_not_open` and
 asks you to open the framework window; the tool stays listed, so the app can tell you why. The window that opens
-first serves the AI apps. It is the fortieth tool a client lists, so clients that take at most 40 tools still get all
-of them.
+first serves the AI apps; when it closes, another open framework window takes over within a few seconds. It is the
+fortieth tool a client lists, so clients that take at most 40 tools still get all of them.
 
 ---
 
