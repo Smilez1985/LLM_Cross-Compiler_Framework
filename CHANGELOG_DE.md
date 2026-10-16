@@ -29,8 +29,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   benennt auf derselben Platte um; auf eine andere Platte wird jede Datei kopiert, per sha256 geprüft und erst dann
   aus dem Build-Ordner entfernt (einem Link wird nie gefolgt; fehlt etwas in der Kopie, nennt das Ergebnis es, und
   der Build-Ordner behält seine Kopie); vorher wird der freie Platz geprüft, belegte Namen bekommen `-2`, und
-  Systemordner, der Programmordner, der Build-Ordner und der persönliche Ordner werden abgelehnt (als Ausgabeordner
-  auch ein Ordner, der einen davon enthält, wie dein Home-Ordner). Der Tab „Deployment“,
+  Systemordner (unter Windows auch die Programmordner, ProgramData, die Wiederherstellungs- und Startordner und der
+  Papierkorb jeder Platte), der Programmordner, der Build-Ordner und der persönliche Ordner werden abgelehnt (als
+  Ausgabeordner auch ein Ordner, der einen davon enthält, wie dein Home-Ordner). Der Tab „Deployment“,
   `deploy list-artifacts` und `list_artifacts` listen den Ausgabeordner, den Build-Ordner (frühere Builds bleiben
   dort), frühere Ausgabeordner, nachdem du ihn geändert hast, und die Ordner, in die du gespeichert hast;
   `start_build` sagt einer KI, wohin der Build kommt.

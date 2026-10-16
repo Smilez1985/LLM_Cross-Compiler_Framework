@@ -159,8 +159,12 @@ def framework_documents(root: Union[str, Path], include_code: bool = False) -> T
     CONTRIBUTING* and docs/*.md; with include_code also its code and configuration (the shell scripts at the top and
     the folders of _CODE_FOLDERS, without caches, generated files and names that start with a dot; of targets/ only
     the targets the framework ships, of configs/ only the files at its top without the person's settings). Files
-    above MAX_CODE_FILE_BYTES and links are left out."""
+    above MAX_CODE_FILE_BYTES and links are left out. The order is the same on every system: by the names of the
+    parts below `root`, with letter case (Windows compares paths without it, which put docs/ before README.md)."""
     root = Path(root)
+
+    def by_name(paths) -> List[Path]:
+        return sorted(paths, key=lambda path: path.relative_to(root).parts)
 
     def usable(path: Path) -> bool:
         try:
@@ -168,17 +172,17 @@ def framework_documents(root: Union[str, Path], include_code: bool = False) -> T
         except OSError:
             return False
 
-    docs = sorted({p for pattern in FRAMEWORK_DOC_PATTERNS for p in root.glob(pattern) if usable(p)})
+    docs = by_name({p for pattern in FRAMEWORK_DOC_PATTERNS for p in root.glob(pattern) if usable(p)})
     code: List[Path] = []
     if include_code:
-        code = sorted(p for p in root.glob("*.sh") if usable(p))
+        code = by_name(p for p in root.glob("*.sh") if usable(p))
         for top in _CODE_FOLDERS:
             base = root / top
             if not base.is_dir() or base.is_symlink():
                 continue
             if top == "configs":
-                code += sorted(p for p in base.iterdir() if p.suffix in _CODE_SUFFIXES and usable(p)
-                               and p.name not in _USER_CONFIG_NAMES and not p.name.startswith("."))
+                code += by_name(p for p in base.iterdir() if p.suffix in _CODE_SUFFIXES and usable(p)
+                                and p.name not in _USER_CONFIG_NAMES and not p.name.startswith("."))
                 continue
             for folder, dirs, names in os.walk(base):  # never follows a linked folder
                 here = Path(folder)

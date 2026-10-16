@@ -28,6 +28,7 @@ from orchestrator.runtime.device import reasons  # noqa: E402
 from orchestrator.utils import ssh_trust  # noqa: E402
 
 import test_deploy_tools as dt  # noqa: E402
+from conftest import posix_shell  # noqa: E402
 from test_deployment import FakeFramework, config  # noqa: E402,F401
 
 fw = dt.fw
@@ -455,16 +456,21 @@ class TestWaitingForTheBoard:
         assert not result.success and result.code == reasons.HOST_KEY_CHANGED and board.starts == 0
 
     def test_the_start_command_runs_deploy_sh_once_on_a_real_shell(self, tmp_path):
-        """The installation runs on the board on its own; sending its start command twice starts it once."""
+        """The installation runs on the board on its own; sending its start command twice starts it once. A POSIX sh
+        of this host stands in for the board's (on Windows the one Git for Windows brings). deploy.sh names its counter
+        relative to the folder it runs in, as on a board: sh reads the backslashes of a Windows path as escapes."""
+        sh = posix_shell("sh")
+        if sh is None:
+            pytest.skip("needs a POSIX sh to stand in for the board's shell (on Windows: Git for Windows)")
         board_dir = tmp_path / "board"
         board_dir.mkdir()
         counter = tmp_path / "runs"
         with zipfile.ZipFile(board_dir / "pkg.zip", "w") as z:
-            z.writestr("deploy.sh", f"echo run >> {counter}\necho installed\n")
+            z.writestr("deploy.sh", "echo run >> ../runs\necho installed\n")
         cmd = DeploymentManager._remote_start_cmd(str(board_dir), "pkg.zip")
         assert "./deploy.sh" not in cmd and "sh deploy.sh" in cmd and "nohup" in cmd
-        first = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, timeout=30)
-        second = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, timeout=30)
+        first = subprocess.run([sh, "-c", cmd], capture_output=True, text=True, timeout=30)
+        second = subprocess.run([sh, "-c", cmd], capture_output=True, text=True, timeout=30)
         assert "started=now" in first.stdout and "started=already" in second.stdout
         status = board_dir / dmod.INSTALL_STATUS
         for _ in range(200):

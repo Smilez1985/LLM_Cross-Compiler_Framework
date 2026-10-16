@@ -26,7 +26,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   build folder); without a terminal, and for Ditto and MCP clients, builds go to the output folder. Saving renames on
   the same disk; onto another disk every file is copied, checked by sha256 and only then removed from the build
   folder (a link is never followed; when anything was not copied, the result names it and the build folder keeps its
-  copy); the free space is checked first, taken names get `-2`, and system folders, the program folder, the build
+  copy); the free space is checked first, taken names get `-2`, and system folders (on Windows also the program
+  folders, ProgramData, the recovery and boot folders and every disk's recycle bin), the program folder, the build
   folder and the per-user folder are refused (as the output folder also a folder that holds one of them, such as your
   home folder). The Deployment tab, `deploy list-artifacts` and `list_artifacts` list
   the output folder, the build folder (earlier builds stay there), earlier output folders after you changed it and

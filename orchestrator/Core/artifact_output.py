@@ -40,8 +40,8 @@ import secrets
 import shutil
 import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path, PureWindowsPath
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from orchestrator.utils.file_lock import file_lock
 
@@ -62,6 +62,17 @@ _POSIX_TREES = ("/bin", "/boot", "/dev", "/etc", "/lib", "/lib32", "/lib64", "/l
 # The system's temporary folder is only compared with, never written to.
 _SYSTEM_TMP = "/tmp"  # nosec B108
 _POSIX_EXACT = ("/", "/home", "/Users", "/mnt", "/media", "/opt", "/srv", "/var", "/root", "/private", _SYSTEM_TMP)
+# Windows: the folders the environment names (the system folder, the program folders, ProgramData with the computer's
+# keys, credentials and installer caches) and everything below them ...
+_WINDOWS_TREE_VARS = ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData")
+# ... the same folders where Windows puts them on the system drive (a process started with a reduced environment
+# refuses them too), with the recovery, boot and update folders at its top ...
+_WINDOWS_SYSTEM_DRIVE_TREES = ("Windows", "Program Files", "Program Files (x86)", "ProgramData", "Recovery", "Boot",
+                               "PerfLogs", "Config.Msi", "$WinREAgent", "$Windows.~BT", "$Windows.~WS")
+# ... the folders at the top of every disk (the recycle bin, the restore points), and the template profiles next to
+# the users' home folders (what lies there is given to every new user).
+_WINDOWS_VOLUME_TREES = ("$Recycle.Bin", "System Volume Information")
+_WINDOWS_PROFILE_TREES = ("Default", "Default User", "All Users")
 
 
 class DestinationRefused(ValueError):
@@ -137,33 +148,54 @@ def _inside(path: Path, folder: Path) -> bool:
     return path == folder or folder in path.parents
 
 
-def _windows_refusals() -> Tuple[List[Path], List[Path]]:
-    trees, exact = [], []
-    for var in ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData"):
-        value = os.environ.get(var)
-        if value:
-            trees.append(Path(value))
-    drive = os.environ.get("SystemDrive") or "C:"
-    exact.append(Path(drive + "\\"))
-    trees += [Path(drive + "\\") / "$Recycle.Bin", Path(drive + "\\") / "System Volume Information"]
-    return trees, exact
+def windows_system_folder(path: PureWindowsPath, env: Mapping[str, str], users: Optional[PureWindowsPath] = None,
+                          resolve: Callable[[PureWindowsPath], PureWindowsPath] = lambda p: p) -> str:
+    """Why the resolved Windows path `path` is a system folder or lies inside one ("" when it is not): the system
+    folder, the program folders and ProgramData (by the environment and at their usual places on the system drive),
+    the recovery, boot and update folders, the recycle bin and the restore points of every disk, the template profiles
+    in `users` (the folder that holds the home folders) and the system drive itself. Letter case does not count, as on
+    Windows. `env`: the environment (Windows' own mapping ignores the case of a name, a plain one does not, so the
+    upper-case spelling is read too). `resolve` turns one of these folders into the form `path` has (links followed);
+    both forms count. Pure, so it is tested on every system."""
+    def get(name: str) -> str:
+        return env.get(name) or env.get(name.upper()) or ""
+
+    drive = PureWindowsPath(get("SystemDrive") or "C:").drive or "C:"
+    root = PureWindowsPath(drive + "\\")
+    trees = [PureWindowsPath(get(var)) for var in _WINDOWS_TREE_VARS if get(var)]
+    trees += [root / name for name in _WINDOWS_SYSTEM_DRIVE_TREES]
+    if users is not None:
+        trees += [users / name for name in _WINDOWS_PROFILE_TREES]
+    for folder in trees:
+        for form in dict.fromkeys((folder, resolve(folder))):
+            if _inside(path, form):
+                return f"{path} is a system folder or lies inside one ({folder})"
+    top = path.parts[1] if path.drive and len(path.parts) > 1 else ""
+    for name in _WINDOWS_VOLUME_TREES:
+        if top.casefold() == name.casefold():
+            return f"{path} is a system folder or lies inside one ({PureWindowsPath(path.anchor, top)})"
+    if path == root:
+        return f"{path} is a system folder; choose a folder inside it"
+    return ""
 
 
 def refusal(framework, destination: Path) -> str:
     """Why `destination` may not hold golden artifacts ("" when it may): a system folder, the framework's program
     folder, its build folder or its per-user folder."""
     real = _real(destination)
-    if os.name == "nt":
-        trees, exact = _windows_refusals()
-    else:
-        trees, exact = [Path(p) for p in _POSIX_TREES], [Path(p) for p in _POSIX_EXACT]
-    for folder in trees:
-        if _inside(real, _real(folder)):
-            return f"{real} is a system folder or lies inside one ({folder})"
-    for folder in exact:
-        if real == _real(folder):
-            return f"{real} is a system folder; choose a folder inside it"
     home = _real(Path.home())
+    if os.name == "nt":
+        why = windows_system_folder(PureWindowsPath(real), os.environ, PureWindowsPath(home.parent),
+                                    lambda folder: PureWindowsPath(_real(Path(folder))))
+        if why:
+            return why
+    else:
+        for folder in (Path(p) for p in _POSIX_TREES):
+            if _inside(real, _real(folder)):
+                return f"{real} is a system folder or lies inside one ({folder})"
+        for folder in (Path(p) for p in _POSIX_EXACT):
+            if real == _real(folder):
+                return f"{real} is a system folder; choose a folder inside it"
     if real == home.parent:
         return f"{real} holds the home folders of every user; choose a folder inside your own"
     for program in _program_folders(framework):
