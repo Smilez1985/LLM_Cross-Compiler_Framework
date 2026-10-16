@@ -1127,11 +1127,6 @@ Rust geschrieben; andere Teile wechseln nur, wenn eine Messung einen Gewinn zeig
   müsste für jedes Update neu gebaut werden.
 - **Kein Go.** Warum: Eine kompilierte Sprache neben Python reicht; eine zweite brächte eine zweite Werkzeugkette.
 - **Die GUI bleibt Qt (PySide6).** Warum: Sie läuft unter Windows und Linux, und Qt selbst ist nativer Code.
-- **Qdrant Edge für die Wissensbasis** (vorgeschlagen, wartet auf die Entscheidung des Maintainers): die Rust-Engine
-  von Qdrant im Prozess statt des lokalen Modus von qdrant-client, einer reinen Python-Nachbildung für die
-  Entwicklung. Eine geprüfte Umstellung behält den alten Speicher, bis der neue funktioniert; dann bekommst du die
-  Liste zum Löschen. qdrant-client bleibt nur für einen optionalen Qdrant-Server. Warum: dieselbe Engine wie der
-  Qdrant-Server.
 
 ### Später (geplant)
 

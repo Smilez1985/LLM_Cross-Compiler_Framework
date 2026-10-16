@@ -12,8 +12,8 @@ import pytest
 from conftest import REPO_ROOT
 
 # Third-party libraries that are expensive to import and only needed by some commands.
-HEAVY_LIBRARIES = ("fastembed", "onnxruntime", "qdrant_client", "tokenizers", "huggingface_hub", "docker", "paramiko",
-                   "anthropic", "openai", "PySide6", "bs4", "pypdf", "langdetect", "PIL", "numpy")
+HEAVY_LIBRARIES = ("fastembed", "onnxruntime", "qdrant_client", "qdrant_edge", "tokenizers", "huggingface_hub",
+                   "docker", "paramiko", "anthropic", "openai", "PySide6", "bs4", "pypdf", "langdetect", "PIL", "numpy")
 # Framework parts that pull in those libraries or much code of their own.
 HEAVY_PARTS = ("orchestrator.Core.framework", "orchestrator.Core.builder", "orchestrator.Core.crawler_manager",
                "orchestrator.Core.rag_manager", "orchestrator.Core.ditto_manager", "orchestrator.llm.client",
@@ -73,16 +73,15 @@ def test_importing_the_mcp_server_loads_no_heavy_module(tmp_path):
     assert present(modules, HEAVY_LIBRARIES + HEAVY_PARTS + ("mcp", "rich")) == []
 
 
-def test_mcp_serve_answers_initialize_without_the_heavy_modules(tmp_path):
-    """`llm-cli mcp serve` over stdio: the framework boots, the server answers initialize, the client leaves. Only
-    what the boot itself uses is loaded (BOOT_USES); not the knowledge base, the crawler, the provider SDKs, Qt or
-    Mojo's checks."""
+def served_modules(tmp_path, **extra_env):
+    """`llm-cli mcp serve` over stdio: the framework boots, the server answers initialize, the client leaves. The
+    modules the server had loaded at its end."""
     init = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
             "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}}
     out = tmp_path / "modules.json"
     server = subprocess.Popen([sys.executable, "-c", REPORT + "from orchestrator.cli import cli\ncli()", str(out),
-                               "-q", "mcp", "serve"], cwd=tmp_path, env=environment(tmp_path), stdin=subprocess.PIPE,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                               "-q", "mcp", "serve"], cwd=tmp_path, env=environment(tmp_path, **extra_env),
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         server.stdin.write(json.dumps(init) + "\n")
         server.stdin.flush()
@@ -95,7 +94,24 @@ def test_mcp_serve_answers_initialize_without_the_heavy_modules(tmp_path):
     assert answer["id"] == 1 and answer["result"]["serverInfo"]["name"] == "llm-cross-compiler", errors[-3000:]
     modules = set(json.loads(out.read_text(encoding="utf-8")))
     assert present(modules, ("mcp",)) == ["mcp"], "the check would pass without a server"
+    return modules
+
+
+def test_mcp_serve_answers_initialize_without_the_heavy_modules(tmp_path):
+    """Only what the boot itself uses is loaded (BOOT_USES); not the knowledge base, the crawler, the provider SDKs,
+    Qt or Mojo's checks."""
+    modules = served_modules(tmp_path)
     heavy = [name for name in HEAVY_LIBRARIES + HEAVY_PARTS if name not in BOOT_USES]
+    assert present(modules, heavy) == []
+
+
+def test_mcp_serve_with_the_knowledge_base_on_loads_neither_the_crawler_nor_the_embedding_libraries(tmp_path):
+    """With the knowledge base switched on, the boot creates the RAG manager. The crawler (BeautifulSoup, pypdf,
+    langdetect, Pillow) is needed only by a Deep Ingest, numpy, FastEmbed and the vector store only when a text is
+    embedded or searched; none of them may load with the boot."""
+    modules = served_modules(tmp_path, LLM_FRAMEWORK_ENABLE_RAG_KNOWLEDGE="true")
+    assert "orchestrator.Core.rag_manager" in modules, "the knowledge base was not on: the check would pass anyway"
+    heavy = [name for name in HEAVY_LIBRARIES + HEAVY_PARTS if name not in BOOT_USES + ("orchestrator.Core.rag_manager",)]
     assert present(modules, heavy) == []
 
 
@@ -134,6 +150,42 @@ def test_the_knowledge_base_is_still_created_once_it_is_enabled(monkeypatch):
     assert isinstance(fm.ensure_rag_manager(), FakeRag) and created == [fm]
 
 
+def test_deep_ingest_without_the_crawler_still_says_so(monkeypatch):
+    """The crawler is imported with the first Deep Ingest. When it cannot be imported, the answer is the one of a
+    knowledge base that imported it at start: "Crawler module missing", nothing crawled."""
+    from types import SimpleNamespace
+    from orchestrator.Core import rag_manager as rag_module
+    real = rag_module.CrawlerManager  # resolved now, so the end of the test puts the real class back
+    assert real is not None and real.__name__ == "CrawlerManager"
+    monkeypatch.delattr(rag_module, "CrawlerManager")
+    monkeypatch.setitem(sys.modules, "orchestrator.Core.crawler_manager", None)  # its import fails
+    rag = rag_module.RAGManager(SimpleNamespace(config=None, info=None))
+    rag._connect = lambda: pytest.fail("the knowledge base was opened without a crawler")
+    result = rag.ingest_url("https://docs.example/")
+    assert result == {"success": False, "outcome": "failure", "message": "Crawler module missing"}
+    assert rag_module.CrawlerManager is None
+
+
+def test_a_framework_part_that_cannot_be_imported_stops_the_boot_with_its_cause(tmp_path):
+    """The managers are imported when the framework boots. A broken installation (here: the Docker SDK cannot be
+    imported) ends the boot like every other boot error: initialize() is False and init_error names the cause, so the
+    CLI prints it and exits with 1 and the GUI shows it, instead of a traceback."""
+    code = ("import sys\n"
+            "sys.modules['docker'] = None  # its import fails\n"
+            "from orchestrator.Core.framework import FrameworkManager\n"
+            "fm = FrameworkManager()\n"
+            "assert fm.initialize() is False\n"
+            "assert isinstance(fm.init_error, ImportError) and 'docker' in str(fm.init_error), fm.init_error\n"
+            "from click.testing import CliRunner\n"
+            "from orchestrator.cli import cli\n"
+            "result = CliRunner().invoke(cli, ['-q', 'tools', 'list'])\n"
+            "assert result.exit_code == 1, (result.exit_code, result.output)\n"
+            "assert 'Failed to initialize framework' in result.output and 'docker' in result.output, result.output\n"
+            "assert 'Traceback' not in result.output\n")
+    _, run = loaded_modules(tmp_path, code)
+    assert run.returncode == 0, run.stderr[-3000:]
+
+
 # --- what the lazy names resolve to ---------------------------------------------------------------------------------
 
 def test_lazy_names_are_the_real_objects():
@@ -146,6 +198,9 @@ def test_lazy_names_are_the_real_objects():
     assert framework.build_tool_registry.__module__ == "orchestrator.tools.framework_tools"
     for name in framework._LAZY:
         assert getattr(framework, name).__name__ == name
+    import importlib
+    for name, source in cli._LAZY.items():  # a wrong module or name would only fail when a command runs
+        assert getattr(cli, name) is getattr(importlib.import_module(source), name)
     with pytest.raises(AttributeError):
         cli.no_such_name  # noqa: B018
     with pytest.raises(AttributeError):

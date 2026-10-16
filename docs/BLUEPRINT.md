@@ -1062,10 +1062,6 @@ parts move only when a measurement shows a gain (maintainer decision of 2026-10-
   a rebuild for every update.
 - **No Go.** Why: one compiled language next to Python is enough; a second one adds a second toolchain.
 - **The GUI stays Qt (PySide6).** Why: it runs on Windows and Linux, and Qt itself is native code.
-- **Qdrant Edge for the knowledge base** (proposed, waiting for the maintainer's decision): Qdrant's Rust engine in
-  the process instead of the local mode of qdrant-client, a pure-Python re-implementation meant for development. A
-  checked migration keeps the old store until the new one works; then you get the list to delete. qdrant-client
-  stays only for an optional Qdrant server. Why: the same engine as the Qdrant server.
 
 ### Later (planned)
 

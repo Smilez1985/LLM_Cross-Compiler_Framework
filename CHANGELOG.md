@@ -933,22 +933,26 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli`, the MCP server and the GUI imported the whole framework at start. Now a CLI command imports the
   framework, the build engine and the managers only when it uses them; the framework imports its managers when it
   boots, and the knowledge base only when it is switched on; Qt is loaded outside the GUI only when a signal of the
-  Docker manager is used; the crawler's HTML parser, Mojo's checks, the provider layer of `orchestrator.llm` and the
-  parts of `orchestrator.runtime` load with their first use; `--help` loads no rich. The host check that ran when the
-  URL checks were imported took a one-second CPU sample and looked up two programs, results it never showed; it now
-  runs only the checks whose errors it reports (disk, memory, Python, platform), so its disk warning appears when the
-  URL checks are first used, not at every start. Measured on the same machine with a temporary home, before and
-  after (median of 5): `llm-cli --help` 3.97 s and 143 MB to 0.28 s and 27 MB; `llm-cli mcp serve` until it answers
-  `initialize` 5.68 s and 191 MB to 2.81 s and 118 MB; the GUI main window 4.71 s and 203 MB to 2.38 s and 177 MB.
-  The boot still checks Docker as before, so `mcp serve` and the GUI still load the Docker SDK. Commands, results
-  and messages are unchanged; tests start the CLI, `mcp serve` and the GUI in a fresh interpreter and check that
-  the knowledge base, the crawler, the provider SDKs, Qt and Mojo's checks are not loaded.
-- **Roadmap: Rust where the framework meets the network or a board** (unreleased; maintainer decisions RG2 to RG5):
+  Docker manager is used; the crawler (with its HTML and PDF parsers), numpy, Mojo's checks, the provider layer of
+  `orchestrator.llm` and the parts of `orchestrator.runtime` load with their first use, also when the knowledge base
+  is on; `--help` loads no rich. The host check that ran when the URL checks were imported took a one-second CPU
+  sample and looked up two programs, results it never showed; it now runs only the checks whose errors it reports
+  (disk, memory, Python, platform), so its disk warning appears when the URL checks are first used, not at every
+  start. Measured on the same machine with a temporary home, before and after, in alternating runs (median of 5):
+  `llm-cli --help` 3.15 s and 140 MB to 0.25 s and 27 MB; `llm-cli mcp serve` until it answers `initialize` 4.77 s
+  and 191 MB to 2.67 s and 118 MB (2.69 s and 118 MB with the knowledge base on); the GUI main window 3.97 s and
+  210 MB to 2.66 s and 177 MB. The boot still checks Docker as before, so `mcp serve` and the GUI still load the
+  Docker SDK. Commands, results and messages are unchanged. A framework part that cannot be imported (a broken
+  installation) now ends the boot with its cause, like other boot errors: the CLI prints "Failed to initialize
+  framework: ..." and exits with 1 instead of a traceback, and `--help` still works. Tests start the CLI,
+  `mcp serve` (also with the knowledge base on) and the GUI in a fresh interpreter and check that the crawler, the
+  embedding libraries, the provider SDKs, Qt and Mojo's checks are not loaded.
+- **Roadmap: Rust where the framework meets the network or a board** (unreleased; maintainer decisions RG2 to RG4):
   the blueprint's roadmap plans the network MCP gateway in Rust with the MQTT broker rumqttd inside it (instead of
   the amqtt broker planned in the Python process), the board's root helper as a static Rust binary, and the
   framework's Rust parts as prebuilt release assets signed with Sigstore, with their checksums in the repository and
-  building them yourself as an opt-in. It also records: no prebuilt Docker images for targets, no Go, the GUI stays
-  Qt, and Qdrant Edge for the knowledge base as a proposal.
+  building them yourself as an opt-in. It also records: no prebuilt Docker images for targets, no Go, and the GUI
+  stays Qt.
 - **The identical-build check no longer blocks the builder window** (unreleased; eighth round, N11): before a build,
   the check asked Hugging Face for the model's current commit on the window's own thread, so the window stopped
   responding on a slow network (up to 10 seconds). The look-up now runs in the background; Start waits meanwhile and
