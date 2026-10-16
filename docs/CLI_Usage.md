@@ -526,6 +526,10 @@ saved yet": GUI builds you did not save, and every earlier build, which stay whe
 builds to. Each row shows the folder (relative to its folder), where it is, model, format, quantization, board, size
 and the full path.
 
+In the GUI: the **Deployment** tab's list **1. Select Golden Artifact** (the same builds, "not saved yet" for one in
+the build folder and "tested on" a board after its benchmark there; the tooltip shows the full path); **Refresh**
+reads them again.
+
 ### deploy package
 
 ```
@@ -544,6 +548,12 @@ Creates a ZIP file for the board: the model file, the build's manifest and model
 Only model files are deployed without Docker; builds that produced several weight files are refused. A package that
 cannot be made prints the reason and exits with 1; the ZIP is written under a temporary name and renamed when it is
 complete.
+
+In the GUI: Deployment tab > **Create package only…**: the selected build (with none selected, a model file you
+choose), the tab's **Profile** and **Use Docker Containerization?** for `--docker`. No board is contacted, so this is
+the way for a board without network. A folder dialog opens at the output folder: OK keeps it, another folder is
+checked as for every golden artifact (Cancel makes nothing). The message names the package's full path, or the reason
+and the next step; **Cancel** stops the packaging and no partial file stays.
 
 ```bash
 llm-cli deploy package Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
@@ -589,6 +599,12 @@ First connection: the CLI shows the board's host key fingerprint and asks whethe
 deployment the board is added to the [trusted devices](#deploy-devices) (written to the audit log), so an AI client
 may deploy to it later, each time with your confirmation. `ssh` and `scp` (used when paramiko is missing) never
 get the framework's standard input.
+
+In the GUI: Deployment tab > **Deploy existing package…** (a ZIP from `deploy package` or **Create package only…**),
+or **Deploy to Target**, which packages the selected build first. The board is the **Address or host name** and
+**User** fields; **Port**, **Name** and **Wait for the board** are `--port`, `--label` and `--wait`. The host key is
+read in the background and its fingerprint shown for you to compare (**No** is the default); the password is asked
+with hidden input, used once and never stored. **Cancel** does what Ctrl+C does here.
 
 ```bash
 llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --host 192.168.1.50 --user rock
@@ -1616,8 +1632,15 @@ read, 2 for wrong options.
 | `--import FILE` | Store a board's probe file in the probe store and print its probe id (not together with `--device`). |
 
 A machine without network access runs a probe by hand, and you import its file
-([README](../README.md#probing-the-boards-hardware)). In the GUI, **Scan / Import...** imports a probe file, scans a
-board over SSH (with the same remote probe, so boards with `/tmp` mounted `noexec` work) or scans this PC.
+([README](../README.md#probing-the-boards-hardware)).
+
+In the GUI: Builder tab > **Scan / Import...**: **Scan Local Host** (the Python probe, stored as this computer's
+profile, as `llm-cli scan` does), **Scan Local Host with the Fallback Script** (`--script`), **Scan Local Host and
+Save the Profile As...** (`--output`; a `.json` file gets the JSON view of `--json`), **Remote Scan via SSH...**
+(`--device` with **Port** and **Name** for `--port` and `--label`; the same remote probe, so boards with `/tmp`
+mounted `noexec` work, and the board is added to the trusted devices as by the CLI) and **Import from File
+(USB/Disk)...** (`--import`; asks for the board's name, `--label`). The host key and every probe run in the
+background; the log on the right shows the result, its notes and where the profile was stored.
 
 ```bash
 llm-cli scan                                        # this computer, stored as "local"

@@ -105,8 +105,8 @@ TEXTS = {
         "deploy.port": "Port:",
         "deploy.port.tip": "Der SSH-Port des Boards: 22, außer sein SSH-Server lauscht auf einem anderen Port.",
         "deploy.label": "Name:",
-        "deploy.label.hint": "Ihr Name für das Board (optional)",
-        "deploy.label.tip": "Ihr Name für das Board, für Sie und für KI-Werkzeuge sichtbar. Leer: der Name, den es "
+        "deploy.label.hint": "dein Name für das Board (optional)",
+        "deploy.label.tip": "Dein Name für das Board, für dich und für KI-Werkzeuge sichtbar. Leer: der Name, den es "
                             "schon hat, oder seine Adresse.",
         "deploy.label.bad": "Der Name eines Boards hat 1 bis 64 druckbare Zeichen.",
         "deploy.wait": "Auf das Board warten:",
@@ -114,9 +114,9 @@ TEXTS = {
         "deploy.wait.tip": "Bricht das Netz während des Deployments ab (ein Board im WLAN), so viele Sekunden "
                            "warten, bis das Board wieder antwortet; der Upload geht dann dort weiter, wo er stand. "
                            "0: nicht warten.",
-        "deploy.bad_address": "Geben Sie die Adresse oder den Hostnamen des Boards ein, z. B. 192.168.1.50 oder "
+        "deploy.bad_address": "Gib die Adresse oder den Hostnamen des Boards ein, z. B. 192.168.1.50 oder "
                               "myboard.local (eine IPv6-Adresse ohne Klammern, z. B. fe80::1).",
-        "deploy.bad_user": "Geben Sie den SSH-Benutzer auf dem Board ein (Buchstaben, Ziffern, '.', '_' oder '-'; "
+        "deploy.bad_user": "Gib den SSH-Benutzer auf dem Board ein (Buchstaben, Ziffern, '.', '_' oder '-'; "
                            "er beginnt mit einem Buchstaben oder '_').",
         "deploy.password.title": "SSH-Anmeldung",
         "deploy.password.text": "Passwort für {user}@{address}\n(nur beim ersten Mal: einmal benutzt, um den "
@@ -125,7 +125,7 @@ TEXTS = {
         "deploy.reading_key": "Lese den Host-Schlüssel von {address}:{port}...",
         "deploy.resumed": "Das Netz ist {count}-mal abgebrochen; das Deployment hat {seconds} s auf das Board "
                           "gewartet und dort weitergemacht, wo es stand.",
-        "deploy.trusted": "Vertrauenswürdiges Board {device_id} ({label}): KI-Werkzeuge dürfen mit Ihrer "
+        "deploy.trusted": "Vertrauenswürdiges Board {device_id} ({label}): KI-Werkzeuge dürfen mit deiner "
                           "Bestätigung darauf deployen.",
         "deploy.package_failed": "Das Paket konnte nicht erstellt werden: {reason}",
 
@@ -134,14 +134,14 @@ TEXTS = {
                               "und Prüfsummen; mit Docker auch das Container-Image, für ein Board ohne Netz "
                               "(air-gapped).",
         "deploy.package.title": "Nur Paket erstellen",
-        "deploy.package.choose_model": "Kein Build ausgewählt: wählen Sie die Modelldatei für das Paket",
+        "deploy.package.choose_model": "Kein Build ausgewählt: wähle die Modelldatei für das Paket",
         "deploy.package.models": "Modelldateien ({patterns})",
-        "deploy.package.no_profile": "Wählen Sie zuerst ein Ziel-Hardwareprofil.",
+        "deploy.package.no_profile": "Wähle zuerst ein Ziel-Hardwareprofil.",
         "deploy.package.folder_title": "Wohin soll das Paket von {name}?",
         "deploy.package.no_folder": "Kein Ordner gewählt; es wurde kein Paket erstellt.",
         "deploy.package.running": "Erstelle das Paket von {name} in {folder}...",
-        "deploy.package.done": "Paket erstellt:\n{path}\n\nKopieren Sie es auf das Board (zum Beispiel per "
-                               "USB-Stick) und starten Sie dort deploy.sh, oder deployen Sie es später mit "
+        "deploy.package.done": "Paket erstellt:\n{path}\n\nKopiere es auf das Board (zum Beispiel per "
+                               "USB-Stick) und starte dort deploy.sh, oder deploye es später mit "
                                "\"Vorhandenes Paket deployen…\".",
         "deploy.package.failed": "Es wurde kein Paket erstellt: {reason}",
 
@@ -153,7 +153,7 @@ TEXTS = {
 
         "deploy.hostkey.title": "Neues Gerät",
         "deploy.hostkey.question": "Erste Verbindung zu {address}:{port}.\n\nSchlüsseltyp: {key_type}\n"
-                                   "Fingerabdruck: {fingerprint}\n\nVergleichen Sie ihn mit der Ausgabe von\n  "
+                                   "Fingerabdruck: {fingerprint}\n\nVergleiche ihn mit der Ausgabe von\n  "
                                    "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\nauf dem Gerät. Diesem Gerät "
                                    "vertrauen?",
         "deploy.hostkey.changed_title": "SSH-Host-Schlüssel geändert",
@@ -169,7 +169,7 @@ TEXTS = {
         "deploy.scan.done": "Probe erfolgreich ({how}). Profil geschrieben: {path}",
         "deploy.scan.stored": "Als Profil dieses Rechners gespeichert (Probe-ID local): {path}",
         "deploy.scan.note": "Hinweis: {note}",
-        "deploy.scan.reprobe": "Diesem Profil fehlen Angaben, die ein Build braucht; lassen Sie die Probe vor einem "
+        "deploy.scan.reprobe": "Diesem Profil fehlen Angaben, die ein Build braucht; lass die Probe vor einem "
                                "Build noch einmal laufen.",
         "deploy.scan.failed": "Die Probe ist fehlgeschlagen: {reason}",
         "deploy.scan.write_failed": "Das Profil konnte nicht nach {path} geschrieben werden: {reason}",
@@ -182,14 +182,14 @@ TEXTS = {
         "deploy.remote.probe_failed": "Die Probe auf {address} ist fehlgeschlagen: {reason}",
         "deploy.remote.save_failed": "Das Profil konnte nicht gespeichert werden: {reason}",
         "deploy.import.label_title": "Board benennen",
-        "deploy.import.label_text": "Ihr Name für dieses Board in der Probe-Ablage (optional; leer nimmt das "
+        "deploy.import.label_text": "Dein Name für dieses Board in der Probe-Ablage (optional; leer nimmt das "
                                     "Board-Modell aus der Probe-Datei):",
         "deploy.import.cancelled": "Import abgebrochen; nichts wurde gespeichert.",
         "deploy.import.done": "Als Probe {probe_id} gespeichert ({label}): KI-Clients und Ditto können die Probe "
                               "des Boards unter dieser ID verwenden.",
         "deploy.import.failed": "Nicht als Probe gespeichert: {reason}",
-        "deploy.import.reprobe": "Diese Probe wurde aus einer älteren Probe-Datei umgewandelt und hat Lücken; lassen "
-                                 "Sie die Probe auf dem Board mit dem aktuellen Skript noch einmal laufen, wenn Sie "
-                                 "können.",
+        "deploy.import.reprobe": "Diese Probe wurde aus einer älteren Probe-Datei umgewandelt und hat Lücken; lass "
+                                 "die Probe auf dem Board mit dem aktuellen Skript noch einmal laufen, wenn du "
+                                 "kannst.",
     },
 }
