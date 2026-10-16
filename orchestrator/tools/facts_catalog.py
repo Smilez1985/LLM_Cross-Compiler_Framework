@@ -33,8 +33,9 @@ from orchestrator.tools.spec import CallWarning
 # under an older version is outdated and must be renewed by the person. 2: the remote mode's codes are gone
 # (artifact_from_other_computer, transfer_unsupported; DECISIONS round 8). 3: snapshot_no_room (eighth round, answer
 # 2) and why a board cannot be reached (device_host_down, device_port_closed, device_auth_failed,
-# device_host_key_changed instead of device_unreachable and host_key_changed; N6).
-DELEGATION_RULES_VERSION = 3
+# device_host_key_changed instead of device_unreachable and host_key_changed; N6). 4: gui_not_open (W4: the GUI tool of an
+# AI app when no framework window is open).
+DELEGATION_RULES_VERSION = 4
 
 # Starting values (design [A7]), tuned with the evals.
 GB = 1000 ** 3
@@ -126,6 +127,8 @@ BLOCKERS: Dict[str, BlockerSpec] = {
     "trash_not_yours": BlockerSpec("needs_person", person_action="action.restore_yourself"),
     "file_outside_folders": BlockerSpec("needs_person", person_action="action.add_folder"),
     "file_changed": BlockerSpec("unknown_id"),
+    # the GUI tool when no framework window of the person is open (W4): only the person opens it
+    "gui_not_open": BlockerSpec("needs_person", person_action="action.open_window"),
 }
 
 
@@ -337,6 +340,9 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
     # Only harmless repairs, every call asked. Extension point M3a/M6 (with WP11): the blockers repair_manual,
     # repair_needs_person and wrong_account, and the delegation group "repairs" for harmless repairs only.
     "run_mojo_miracle": ToolFacts(delegable="never", undo="set the folder's mode or the active build back"),
+    # The window's forms (W4): the person is at the window, so a fill is asked or allowed by their own setting for the
+    # caller; whether a delegation group covers it is decided with the delegation package (WP11).
+    "gui": ToolFacts(_FS({"gui_not_open"}), delegable="never", undo="Undo the AI changes above the form (one click)"),
 }
 
 

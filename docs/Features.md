@@ -697,48 +697,66 @@ gives the defaults).
 Answering a question with Yes or No right in the chat, "Why?" and undo come with later work; until then the
 approvals window decides.
 
-### Ditto's hands in the window (GUI tools)
+### The AI's hands in the window (the GUI tool)
 
-The framework's tools are Ditto's hands, also in the window. While the GUI is open, Ditto (which runs in the GUI
-program) gets five more tools. They work on the open forms: the build form in the Builder tab, the target module
-wizard (page by page) and the AI settings dialog.
+The framework's tools are an AI's hands, also in the window. While the framework's window is open, Ditto and every
+AI app that uses the MCP server (Claude Code, Claude Desktop, VS Code, Cursor and others) can work on its open forms
+with one tool, `gui`: the build form in the Builder tab, the target module wizard (page by page) and the AI settings
+dialog. Ditto and the AI apps use the same tool with the same rules.
 
-| Tool | Tier | What it does |
+| Action | Kind | What it does |
 |---|---|---|
-| `read_gui_form` | read | What you entered in an open form: each field with its value, whether Ditto filled it, whether you chose it and whether it is read-only. Without a form: the open forms and the windows `show_gui` can open |
-| `fill_gui_form` | local write | Fills fields of an open form, visibly (asks by default, like every new tool that changes something) |
-| `wizard_state` | read | The wizard's current page, all page titles and the fields of this page |
-| `wizard_step` | local write | Opens the wizard, fills the current page, goes to the next or the previous page, or opens Deep Ingest with the framework's documentation links for the hardware |
-| `show_gui` | read | Shows a tab or window: the Builder or Deployment tab, the chat panel, the wizard, the AI settings, the Hugging Face browser, the Community Hub or the knowledge snapshots. It changes nothing |
+| `read_form` | reads | What you entered in an open form: each field with its value, who filled it (`you`, `ditto`, `another_app` or nobody), whether you chose it and whether it is read-only. Without a form: the open forms and the windows `show_window` can open |
+| `fill_form` | changes | Fills fields of an open form, visibly (asks by default, like every new tool that changes something) |
+| `wizard_state` | reads | The wizard's current page, all page titles and the fields of this page |
+| `wizard_open`, `wizard_fill`, `wizard_next`, `wizard_back` | changes | Opens the wizard, fills the current page, goes to the next or the previous page (filling the current page first when values are given) |
+| `wizard_docs` | changes | Opens Deep Ingest with the framework's documentation links for the hardware; you start the crawl |
+| `show_window` | reads | Shows a tab or window: the Builder or Deployment tab, the chat panel, the wizard, the AI settings, the Hugging Face browser, the Community Hub or the knowledge snapshots. It changes nothing |
+
+The reading actions are decided like read tools (allowed by default); the other actions like a tool that changes
+something on this computer (asked by default). Your setting for `gui` in Tool Permissions covers all its actions, for
+each caller on its own: Ditto, all local stdio clients, or one named MCP token. A new MCP token cannot use the window
+until you set its permissions. A question that a client cannot show waits for you in the framework (pending
+approval), as for every other tool.
 
 The rules are the same in every form (`orchestrator/tools/gui_surface.py`):
 
 - **Secrets:** an AI reads a key only as "set" or "not set" and never fills one. The AI settings show the provider,
-  the base URL, the privacy level and the fallback chain to Ditto, but only you change them: they decide where your
-  data goes. Ditto may switch the knowledge base off and offline mode on, never the other way round (the same rule as
+  the base URL, the privacy level and the fallback chain, but only you change them: they decide where your data goes.
+  An AI may switch the knowledge base off and offline mode on, never the other way round (the same rule as
   `update_settings`).
 - **Paths:** a local file reaches the AI as a label (`models:tiny.gguf`) or by its file name, never with the home
   folder. A home folder in text you typed (also one of another account, `/home/<name>` or `C:\Users\<name>`) reaches
-  the AI as `~`. Ditto names a local file by its id from `list_local_files` (`lf_...`) or as `<label>:<relative
-  path>`.
+  the AI as `~`. An AI names a local file by its id from `list_local_files` (`lf_...`) or as `<label>:<relative
+  path>`, never by a path.
 - **Your values are yours:** a value you typed, picked or clicked (also a file you chose in a file dialog, and a
-  recipe's values) is never overwritten by an AI. Ditto may suggest another one in the chat; **Ask Ditto for Config**
+  recipe's values) is never overwritten by an AI. An AI may suggest another one in the chat; **Ask Ditto for Config**
   in the Builder fills the form by the same rules, and the Builder log names each value it did not fill and why. A
   field you are editing (it has the keyboard focus) is never written. A fill that would change a field you chose
   through the form's own logic (another target resets the board) is undone completely and refused. What can never be
   filled is refused before you are asked; everything is checked again when filling.
-- **Visible and undoable:** the form comes to the front, every filled field gets a purple frame, and a line above
-  the form names the fields Ditto filled, with **Undo Ditto's changes**. A field you change afterwards keeps your
-  value; the undo is recorded in the audit log.
+- **Who filled it, visible and undoable:** the form comes to the front, and every filled field gets a frame and a
+  line above the form that names who filled it. Ditto's fields have a purple frame. An AI app's fields have another
+  colour and its name: the name of its MCP token (you gave it), or the name the app gives itself, in quotes, marked as
+  its own name that nobody checked. An app never looks like Ditto, also when it calls itself "Ditto". **Undo the AI
+  changes** (only Ditto filled: **Undo Ditto's changes**) takes back every AI change; a field you changed afterwards
+  keeps your value. The undo is recorded in the audit log with who had filled.
 - **Nothing is submitted:** no field starts a build, saves a module or saves a setting. **Start Build**, the wizard's
-  **Finish** and **Save** stay your clicks, with their own checks and questions. A module Ditto filled in the wizard
-  is marked AI-generated and untested, and its first build is shown to you once. Sharing choices of the wizard
+  **Finish** and **Save** stay your clicks, with their own checks and questions. A module an AI filled in the wizard is
+  marked AI-generated and untested, and its first build is shown to you once. Sharing choices of the wizard
   (attaching crawled knowledge, the export for the community) stay yours.
-- **Audit:** every call goes through the tool registry like any other tool: permissions, limits (30 fills per
-  minute) and an audit entry.
+- **Audit:** every call goes through the tool registry of the caller's own program like any other tool: permissions,
+  limits (30 fills and wizard steps per minute; reading counts with the read tools) and an audit entry with the caller.
 
-Only Ditto gets these tools, and only while the window is open. External AI apps will reach the window later through
-the host service; the tools are ready for that (`GUI_TOOL_CALLERS` in `orchestrator/tools/tools_gui.py`).
+**How an AI app reaches the window.** An AI app's MCP server runs in its own process. While the window is open, that
+server sends the GUI tool's calls over a private bridge to the window (`orchestrator/tools/gui_bridge.py`), where the
+same code as for Ditto does the work. Only you can reach this bridge: it is a socket in the private folder
+`gui_bridge` of your per-user folder (Linux and macOS) or a named pipe with a random name (Windows), and both sides
+prove a random key from a file only your account can read before anything is sent. A program of another account on
+the same computer gets nothing. When no framework window is open, `gui` answers with the blocker `gui_not_open` and
+asks you to open the framework window; the tool stays listed, so the app can tell you why. The window that opens
+first serves the AI apps; when it closes, another open framework window takes over within a few seconds. It is the
+fortieth tool a client lists, so clients that take at most 40 tools still get all of them.
 
 ---
 

@@ -761,50 +761,73 @@ die Vorgaben).
 Eine Frage direkt im Chat mit Ja oder Nein beantworten, „Warum?“ und Rückgängig kommen mit späterer Arbeit; bis
 dahin entscheidet das Freigabe-Fenster.
 
-### Dittos Hände im Fenster (GUI-Tools)
+### Die Hände der KI im Fenster (das GUI-Tool)
 
-Die Tools des Frameworks sind Dittos Hände, auch im Fenster. Solange die GUI offen ist, bekommt Ditto (das im
-GUI-Programm läuft) fünf weitere Tools. Sie arbeiten auf den offenen Formularen: dem Build-Formular im Builder-Tab,
-dem Assistenten für Target-Module (Seite für Seite) und dem Dialog der KI-Einstellungen.
+Die Tools des Frameworks sind die Hände einer KI, auch im Fenster. Solange das Fenster des Frameworks offen ist,
+können Ditto und jede KI-App, die den MCP-Server nutzt (Claude Code, Claude Desktop, VS Code, Cursor und andere), mit
+einem Tool auf seinen offenen Formularen arbeiten, `gui`: dem Build-Formular im Builder-Tab, dem Assistenten für
+Target-Module (Seite für Seite) und dem Dialog der KI-Einstellungen. Ditto und die KI-Apps nutzen dasselbe Tool mit
+denselben Regeln.
 
-| Tool | Stufe | Was es tut |
+| Aktion | Art | Was sie tut |
 |---|---|---|
-| `read_gui_form` | lesen | Was du in einem offenen Formular eingegeben hast: jedes Feld mit seinem Wert, ob Ditto es ausgefüllt hat, ob du es gewählt hast und ob es schreibgeschützt ist. Ohne Formular: die offenen Formulare und die Fenster, die `show_gui` öffnen kann |
-| `fill_gui_form` | lokal ändern | Füllt Felder eines offenen Formulars sichtbar aus (fragt standardmäßig, wie jedes neue Tool, das etwas ändert) |
-| `wizard_state` | lesen | Die aktuelle Seite des Assistenten, alle Seitentitel und die Felder dieser Seite |
-| `wizard_step` | lokal ändern | Öffnet den Assistenten, füllt die aktuelle Seite aus, geht zur nächsten oder vorigen Seite oder öffnet Deep Ingest mit den Dokumentations-Links des Frameworks für die Hardware |
-| `show_gui` | lesen | Zeigt einen Tab oder ein Fenster: den Builder- oder Deployment-Tab, den Chat-Bereich, den Assistenten, die KI-Einstellungen, den Hugging-Face-Browser, den Community Hub oder die Wissens-Snapshots. Es ändert nichts |
+| `read_form` | liest | Was du in einem offenen Formular eingegeben hast: jedes Feld mit seinem Wert, wer es ausgefüllt hat (`you`, `ditto`, `another_app` oder niemand), ob du es gewählt hast und ob es schreibgeschützt ist. Ohne Formular: die offenen Formulare und die Fenster, die `show_window` öffnen kann |
+| `fill_form` | ändert | Füllt Felder eines offenen Formulars sichtbar aus (fragt standardmäßig, wie jedes neue Tool, das etwas ändert) |
+| `wizard_state` | liest | Die aktuelle Seite des Assistenten, alle Seitentitel und die Felder dieser Seite |
+| `wizard_open`, `wizard_fill`, `wizard_next`, `wizard_back` | ändert | Öffnet den Assistenten, füllt die aktuelle Seite aus, geht zur nächsten oder vorigen Seite (füllt vorher die aktuelle Seite aus, wenn Werte angegeben sind) |
+| `wizard_docs` | ändert | Öffnet Deep Ingest mit den Dokumentations-Links des Frameworks für die Hardware; du startest das Sammeln |
+| `show_window` | liest | Zeigt einen Tab oder ein Fenster: den Builder- oder Deployment-Tab, den Chat-Bereich, den Assistenten, die KI-Einstellungen, den Hugging-Face-Browser, den Community Hub oder die Wissens-Snapshots. Es ändert nichts |
+
+Die lesenden Aktionen werden wie Lese-Tools entschieden (standardmäßig erlaubt), die anderen wie ein Tool, das etwas
+auf diesem Computer ändert (standardmäßig mit Frage). Deine Einstellung für `gui` in Tool Permissions gilt für alle
+seine Aktionen, für jeden Aufrufer einzeln: Ditto, alle lokalen stdio-Clients oder ein benanntes MCP-Token. Ein neues
+MCP-Token kann das Fenster erst nutzen, wenn du seine Berechtigungen festgelegt hast. Eine Frage, die ein Client nicht
+zeigen kann, wartet im Framework auf dich (wartende Freigabe), wie bei jedem anderen Tool.
 
 Die Regeln sind in jedem Formular gleich (`orchestrator/tools/gui_surface.py`):
 
 - **Geheimnisse:** Eine KI liest einen Schlüssel nur als „gesetzt“ oder „nicht gesetzt“ und füllt nie einen aus. Die
-  KI-Einstellungen zeigen Ditto den Anbieter, die Basis-URL, die Datenschutzstufe und die Ersatzkette, aber nur du
-  änderst sie: Sie entscheiden, wohin deine Daten gehen. Ditto darf die Wissensbasis aus- und den Offline-Modus
-  einschalten, nie umgekehrt (dieselbe Regel wie bei `update_settings`).
+  KI-Einstellungen zeigen den Anbieter, die Basis-URL, die Datenschutzstufe und die Ersatzkette, aber nur du änderst
+  sie: Sie entscheiden, wohin deine Daten gehen. Eine KI darf die Wissensbasis aus- und den Offline-Modus einschalten,
+  nie umgekehrt (dieselbe Regel wie bei `update_settings`).
 - **Pfade:** Eine lokale Datei erreicht die KI als Label (`models:tiny.gguf`) oder mit ihrem Dateinamen, nie mit dem
   Home-Ordner. Ein Home-Ordner in Text, den du getippt hast (auch der eines anderen Kontos, `/home/<Name>` oder
-  `C:\Users\<Name>`), erreicht die KI als `~`. Ditto nennt eine lokale Datei mit ihrer ID aus `list_local_files`
-  (`lf_...`) oder als `<Label>:<relativer Pfad>`.
+  `C:\Users\<Name>`), erreicht die KI als `~`. Eine KI nennt eine lokale Datei mit ihrer ID aus `list_local_files`
+  (`lf_...`) oder als `<Label>:<relativer Pfad>`, nie mit einem Pfad.
 - **Deine Werte gehören dir:** Einen Wert, den du getippt, gewählt oder angeklickt hast (auch eine Datei, die du in
-  einem Dateidialog gewählt hast, und die Werte eines Rezepts), überschreibt eine KI nie. Ditto darf im Chat einen
+  einem Dateidialog gewählt hast, und die Werte eines Rezepts), überschreibt eine KI nie. Eine KI darf im Chat einen
   anderen vorschlagen; **Ask Ditto for Config** im Builder füllt das Formular nach denselben Regeln, und das
   Builder-Log nennt jeden Wert, den es nicht eingetragen hat, und warum. Ein Feld, das du gerade bearbeitest (es hat
   den Tastaturfokus), wird nie beschrieben. Würde ein Ausfüllen über die Logik des Formulars ein Feld ändern, das du
   gewählt hast (ein anderes Target setzt das Board zurück), wird es ganz zurückgenommen und abgelehnt. Was nie
   ausgefüllt werden kann, wird abgelehnt, bevor du gefragt wirst; beim Ausfüllen wird alles noch einmal geprüft.
-- **Sichtbar und rückgängig zu machen:** Das Formular kommt nach vorn, jedes ausgefüllte Feld bekommt einen lila
-  Rahmen, und eine Zeile über dem Formular nennt die Felder, die Ditto ausgefüllt hat, mit **Dittos Änderungen
-  rückgängig machen**. Ein Feld, das du danach änderst, behält deinen Wert; das Rückgängigmachen steht im Audit-Log.
+- **Wer es ausgefüllt hat, sichtbar und rückgängig zu machen:** Das Formular kommt nach vorn, und jedes ausgefüllte
+  Feld bekommt einen Rahmen und eine Zeile über dem Formular, die nennt, wer es ausgefüllt hat. Dittos Felder haben
+  einen lila Rahmen. Die Felder einer KI-App haben eine andere Farbe und ihren Namen: den Namen ihres MCP-Tokens (den
+  du vergeben hast) oder den Namen, den die App sich selbst gibt, in Anführungszeichen, als ihr eigener Name markiert,
+  den niemand geprüft hat. Eine App sieht nie aus wie Ditto, auch wenn sie sich „Ditto“ nennt. **KI-Änderungen
+  rückgängig machen** (hat nur Ditto ausgefüllt: **Dittos Änderungen rückgängig machen**) nimmt alle KI-Änderungen
+  zurück; ein Feld, das du danach geändert hast, behält deinen Wert. Das Rückgängigmachen steht im Audit-Log, mit
+  dem, der ausgefüllt hatte.
 - **Nichts wird abgeschickt:** Kein Feld startet einen Build, speichert ein Modul oder eine Einstellung. **Start
   Build**, **Finish** im Assistenten und **Save** bleiben deine Klicks, mit ihren eigenen Prüfungen und Fragen. Ein
-  Modul, das Ditto im Assistenten ausgefüllt hat, wird als KI-erstellt und ungetestet markiert, und seinen ersten
+  Modul, das eine KI im Assistenten ausgefüllt hat, wird als KI-erstellt und ungetestet markiert, und seinen ersten
   Build siehst du einmal. Was der Assistent teilt (angehängtes gesammeltes Wissen, der Export für die Community),
   entscheidest du.
-- **Audit:** Jeder Aufruf geht wie jedes andere Tool durch die Tool-Registry: Berechtigungen, Grenzen (30
-  Ausfüllvorgänge pro Minute) und ein Audit-Eintrag.
+- **Audit:** Jeder Aufruf geht wie jedes andere Tool durch die Tool-Registry des eigenen Programms des Aufrufers:
+  Berechtigungen, Grenzen (30 Ausfüllvorgänge und Assistenten-Schritte pro Minute; Lesen zählt bei den Lese-Tools) und
+  ein Audit-Eintrag mit dem Aufrufer.
 
-Nur Ditto bekommt diese Tools, und nur solange das Fenster offen ist. Externe KI-Apps erreichen das Fenster später über
-den Host-Dienst; die Tools sind dafür vorbereitet (`GUI_TOOL_CALLERS` in `orchestrator/tools/tools_gui.py`).
+**Wie eine KI-App das Fenster erreicht.** Der MCP-Server einer KI-App läuft in einem eigenen Prozess. Solange das
+Fenster offen ist, schickt dieser Server die Aufrufe des GUI-Tools über eine private Brücke an das Fenster
+(`orchestrator/tools/gui_bridge.py`), wo derselbe Code wie für Ditto die Arbeit macht. Nur du erreichst diese Brücke:
+Sie ist ein Socket im privaten Ordner `gui_bridge` deines Benutzerordners (Linux und macOS) oder eine Named Pipe mit
+zufälligem Namen (Windows), und beide Seiten weisen einen zufälligen Schlüssel aus einer Datei nach, die nur dein Konto
+lesen kann, bevor etwas gesendet wird. Ein Programm eines anderen Kontos auf demselben Computer bekommt nichts. Ist
+kein Framework-Fenster offen, antwortet `gui` mit dem Blocker `gui_not_open` und bittet dich, das Framework-Fenster zu
+öffnen; das Tool bleibt aufgeführt, damit die App dir sagen kann, warum. Das Fenster, das zuerst geöffnet wird, bedient
+die KI-Apps; wird es geschlossen, übernimmt ein anderes offenes Framework-Fenster innerhalb weniger Sekunden. Es ist
+das vierzigste Tool, das ein Client aufführt, so bekommen Clients, die höchstens 40 Tools nehmen, trotzdem alle.
 
 ---
 
