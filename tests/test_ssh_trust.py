@@ -65,8 +65,21 @@ class TestHostKeys:
                 seen.append(command)
                 return None, Out(), Out()
 
-        ssh_trust.install_public_key(Client(), "ssh-ed25519 AAAA'; rm -rf ~; echo ' x")
-        assert "grep -qxF" in seen[0] and "'\"'\"'" in seen[0], seen[0]
+        # A line that is not a plain public key never reaches the device's shell (bandit B601: the command is fixed,
+        # its only value checked and quoted).
+        for bad in ("ssh-ed25519 AAAA'; rm -rf ~; echo ' x", "ssh-ed25519 AAAAexampleonlyfortests $(id)",
+                    "ssh-ed25519 AAAAexampleonlyfortests\nrm -rf ~", "", None):
+            with pytest.raises(ssh_trust.HostKeyError):
+                ssh_trust.install_public_key(Client(), bad)
+        assert seen == []
+        line = "ssh-ed25519 AAAAexampleonlyfortests0000 llm-cross-compiler-framework"
+        ssh_trust.install_public_key(Client(), line)
+        assert seen == ["umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && "
+                        f"(grep -qxF '{line}' ~/.ssh/authorized_keys || printf '%s\\n' '{line}' >> "
+                        "~/.ssh/authorized_keys)"], seen
+
+    def test_the_framework_key_line_passes_the_check(self, tmp_path):
+        assert ssh_trust.PUBLIC_LINE.fullmatch(ssh_trust.client_key(tmp_path / "state")[1])
 
 
 class FakeSSHServer(paramiko.ServerInterface):

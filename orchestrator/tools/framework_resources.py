@@ -67,7 +67,8 @@ def register_framework_resources(registry: ToolRegistry, framework) -> ToolRegis
             return path.read_text(encoding="utf-8", errors="replace")
         except OSError:  # the OS message names the file's real path, which never reaches the AI
             raise ToolError(f"The document '{name}' cannot be read in this installation.", code="failed",
-                            next="Tell the person; 'llm-cli doctor' checks the installation.") from None
+                            next="Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) checks the "
+                                 "installation.") from None
 
     service = getattr(framework, "build_service", None)
 

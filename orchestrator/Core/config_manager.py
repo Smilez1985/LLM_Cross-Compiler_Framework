@@ -285,10 +285,16 @@ class ConfigManager:
         """Per-user directory for personal state (chat history, later consent and known hosts), outside the repo.
         LLM_FRAMEWORK_HOME overrides the default ~/.llm-framework."""
         state = self.user_state_path()
-        state.mkdir(parents=True, exist_ok=True)
+        # Private when this call creates it; an existing folder keeps its mode, so a folder others can read is
+        # reported (Mojo's state.permissions) and repaired only with the person's yes (Mojo Miracle), never silently.
+        try:
+            state.parent.mkdir(parents=True, exist_ok=True)
+            state.mkdir(mode=0o700)
+        except FileExistsError:
+            return state
         if os.name == "posix":
             try:
-                state.chmod(0o700)
+                state.chmod(0o700)   # mkdir's mode is narrowed by the umask only, never widened
             except OSError:
                 pass
         return state

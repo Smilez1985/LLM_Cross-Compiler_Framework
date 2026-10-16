@@ -273,9 +273,13 @@ llm-cli knowledge index-docs [--with-code]
 
 Unreleased. Adds the framework's own documentation (README, CONTRIBUTING and the `docs` folder, in both languages) to
 the knowledge base, so Ditto can answer questions about the framework itself, and AI clients find it with
-`search_knowledge` (kind `docs`). `--with-code` also adds its code and configuration (`orchestrator`, `targets`,
-`scripts`, `configs`, the container setup and the install scripts; many more files, takes minutes). Only what the
-framework ships is read: never your settings (`config.yml`), targets you or an AI created, or installed packs. It
+`search_knowledge` (kind `docs`). `--with-code` also adds its code and configuration (many more files, takes
+minutes): the shell scripts in the top folder of the installation (`install.sh`, `entrypoint.sh`; not `install.bat`),
+the `.py`, `.sh`, `.yml`, `.yaml`, `.json` and `.md` files and Dockerfiles in `orchestrator`, `scripts` and
+`Docker Setup`, the targets the framework ships (`targets/_template` and the official targets) and the files in the
+top folder of `configs`. Files above 512 KB, links, caches and generated folders are left out, and so are names that
+start with a dot. Only what the framework ships is read: never your settings (`config.yml`), targets you or an AI
+created, or installed packs. It
 never happens by itself: only this command, **Tools > Index the Framework's Documentation...** in the GUI (a question
 with "No" as the default and a box for the code) or the MCP tool `index_framework_docs` (asked every time) start it. A
 snapshot is taken first, so it can be undone with a restore; a file indexed before is replaced. When the disk has no
@@ -931,8 +935,11 @@ it says what it found and stops. The installers' Ditto step runs this command.
   possible: the bare-metal build into the image, or the image's build into bare metal after it passed its checks on
   this computer. Where that is not possible, the command says why and builds again. The server of the old mode is
   stopped. Then the old mode's leftovers are listed: build folders with their full path, folder name and build ID,
-  Docker images and containers with their name and ID, each with its size and what it is. Only what you confirm is
-  removed ("No" is the default). Without a terminal nothing is removed and the list is shown.
+  Docker images and containers with their name and ID, each with its size, what it is and where it goes. Only what
+  you confirm is removed, with one question for the whole list ("No" is the default): the build folders go to the
+  trash (`llm-cli trash` lists them, `llm-cli trash restore ID` brings one back, and their space stays used until you
+  empty the trash), Docker's images and containers are deleted for good (Docker has no trash). Without a terminal
+  nothing is removed and the list is shown.
 - **The model:** when the model of the chosen or recommended tier is not downloaded yet, its source, size and licence
   are shown first. It is downloaded after your yes, or with `-y` when its licence is permissive (Apache 2.0, MIT,
   BSD); any other licence is yours to accept with `llm-cli ditto models download`. Both modes use the same models

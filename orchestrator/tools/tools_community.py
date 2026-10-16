@@ -384,7 +384,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
             cm = get("community_manager") if callable(get) else None
         if cm is None:
             raise ToolError("The community zoo is not available in this installation.", code="not_supported",
-                            next="Tell the person; 'llm-cli doctor' checks the installation.")
+                            next="Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) checks the "
+                                 "installation.")
         return cm
 
     quarantine = Quarantine(community)
@@ -503,6 +504,11 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         folder = state_dir(framework)
         return ReservationLedger(folder) if folder is not None else None
 
+    def knowledge_base():
+        """The knowledge base a knowledge pack goes into (None when it is off); looked at, never opened for this."""
+        get = getattr(framework, "get_component", None)
+        return get("rag_manager") if callable(get) else getattr(framework, "rag_manager", None)
+
     def knowledge_room():
         """The room for the knowledge snapshot taken before a knowledge pack is imported (N13), estimated from the
         newest snapshot; None when it cannot be told."""
@@ -617,6 +623,12 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                  Fact("Installs to", dest)]
         if room is not None:  # free space moves while a question waits: shown, never part of the decision
             facts.append(Fact("Disk", f"knowledge snapshot taken first: {room.sentence()}", volatile=True))
+        model_warnings: tuple = ()
+        if m.kind == "knowledge":   # its pages are embedded: the first import can download the models (next-fixes 119)
+            from orchestrator.tools.tools_knowledge import embedding_download
+            model_fact, model_warnings = embedding_download(knowledge_base())
+            if model_fact is not None:
+                facts.append(model_fact)
         if entry.title:
             facts.append(Fact("Title", entry.title, INDEX_TEXT))
         if entry.description:
@@ -643,7 +655,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         numbers = {"size_class": size_class(int(entry.size)), "size_bytes": int(entry.size)}
         if disk is not None:
             numbers.update(free_after_bytes=int(disk.after), reserve_bytes=int(disk.reserve))
-        warnings = pack_warnings(m.kind, prepared.trust.value, [i for _, i in images], disk)
+        warnings = pack_warnings(m.kind, prepared.trust.value, [i for _, i in images], disk) + tuple(model_warnings)
         if room is not None and room.verdict == "tight" and not any(w.code == "disk_tight" for w in warnings):
             warnings += (warn("disk_tight", free_after_gb=gb_number(room.check.after),
                               reserve_gb=gb_number(room.check.reserve)),)
@@ -793,7 +805,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         finder = getattr(service, "artifact_entry", None)
         if not callable(finder):
             raise ToolError("Built models cannot be looked up here.", code="not_supported",
-                            next="Tell the person; 'llm-cli doctor' checks the installation.")
+                            next="Tell the person; run_mojo_oracle (or 'llmcf mojo' in a terminal) checks the "
+                                 "installation.")
         try:
             _, art_label, info = finder(inp.source)
         except ValueError as e:

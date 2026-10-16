@@ -277,8 +277,12 @@ llm-cli knowledge index-docs [--with-code]
 
 Unveröffentlicht. Nimmt die eigene Dokumentation des Frameworks (README, CONTRIBUTING und den Ordner `docs`, in beiden
 Sprachen) in die Wissensbasis auf, damit Ditto Fragen zum Framework selbst beantworten kann und KI-Clients sie mit
-`search_knowledge` (Art `docs`) finden. `--with-code` nimmt auch Code und Konfiguration auf (`orchestrator`,
-`targets`, `scripts`, `configs`, das Container-Setup und die Installationsskripte; viel mehr Dateien, dauert Minuten).
+`search_knowledge` (Art `docs`) finden. `--with-code` nimmt auch Code und Konfiguration auf (viel mehr Dateien, dauert
+Minuten): die Shell-Skripte im obersten Ordner der Installation (`install.sh`, `entrypoint.sh`; nicht `install.bat`),
+die Dateien `.py`, `.sh`, `.yml`, `.yaml`, `.json` und `.md` sowie Dockerfiles in `orchestrator`, `scripts` und
+`Docker Setup`, die Targets, die das Framework mitliefert (`targets/_template` und die offiziellen Targets), und die
+Dateien im obersten Ordner von `configs`. Dateien über 512 KB, Links, Zwischenspeicher und erzeugte Ordner bleiben
+draußen, ebenso Namen, die mit einem Punkt beginnen.
 Gelesen wird nur, was das Framework mitliefert: nie deine Einstellungen (`config.yml`), Targets, die du oder eine KI
 angelegt habt, oder installierte Pakete. Das passiert nie von selbst: Nur dieser Befehl, **Tools > Index the
 Framework's Documentation...** in der GUI (eine Frage mit „Nein“ als Vorgabe und einem Kästchen für den Code) oder das
@@ -968,9 +972,12 @@ Befehl aus.
   wird neu erzeugt, umgepackt, wo das geht: der direkte Build ins Image, oder der Build des Images in die direkte Art,
   nachdem er seine Prüfungen auf diesem Rechner bestanden hat. Wo das nicht geht, sagt der Befehl warum und baut neu.
   Der Server der alten Art wird gestoppt. Danach werden die Reste der alten Art aufgelistet: Build-Ordner mit
-  vollständigem Pfad, Ordnername und Build-ID, Docker-Images und -Container mit Name und ID, jeweils mit Größe und
-  was es ist. Entfernt wird nur, was du bestätigst („Nein“ ist vorgewählt). Ohne Terminal wird nichts entfernt, und
-  die Liste wird angezeigt.
+  vollständigem Pfad, Ordnername und Build-ID, Docker-Images und -Container mit Name und ID, jeweils mit Größe, was
+  es ist und wohin es kommt. Entfernt wird nur, was du bestätigst, mit einer Frage für die ganze Liste („Nein“ ist
+  vorgewählt): Die Build-Ordner kommen in den Papierkorb (`llm-cli trash` listet sie, `llm-cli trash restore ID` holt
+  einen zurück, und ihr Platz bleibt belegt, bis du den Papierkorb leerst), Dockers Images und Container werden
+  endgültig gelöscht (Docker hat keinen Papierkorb). Ohne Terminal wird nichts entfernt, und die Liste wird
+  angezeigt.
 - **Das Modell:** Ist das Modell der gewählten oder empfohlenen Stufe noch nicht heruntergeladen, werden zuerst
   Quelle, Größe und Lizenz angezeigt. Heruntergeladen wird es nach deinem Ja, oder mit `-y`, wenn seine Lizenz frei
   ist (Apache 2.0, MIT, BSD); jede andere Lizenz nimmst du selbst mit `llm-cli ditto models download` an. Beide Arten

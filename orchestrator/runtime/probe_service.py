@@ -264,7 +264,8 @@ class HardwareProbes:
             # the full text stays in `detail` for the person's terminal.
             reason = e.strerror if isinstance(e, OSError) and e.strerror else e.__class__.__name__
             raise ProbeError(f"The probe ran, but storing it as this computer's probe failed ({reason}).",
-                             code="failed", next="Check the per-user folder with 'llm-cli doctor'.",
+                             code="failed", next="Check the per-user folder with run_mojo_oracle (or 'llmcf mojo' in "
+                                                 "a terminal).",
                              detail=str(e)[:300]) from None
         return profile, how
 

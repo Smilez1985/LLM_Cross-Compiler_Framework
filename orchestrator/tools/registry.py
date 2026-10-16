@@ -181,7 +181,8 @@ REPEAT_WARN = "This exact call already failed. "
 # The next step of a question too long for the channel that would show it (an MCP form or the framework's windows).
 TOO_LONG_NEXT = "Make the call smaller (fewer or shorter values), or tell the person why it cannot be confirmed."
 # The next step of a failure nobody can fix by changing the call (the framework's or a service's own problem).
-FAILED_NEXT = ("Tell the person what failed and why; 'llm-cli doctor' and the framework log show the cause. Do not "
+FAILED_NEXT = ("Tell the person what failed and why; run_mojo_oracle (or 'llmcf mojo' in a terminal) and the "
+               "framework log show the cause. Do not "
                "retry the same call unchanged.")
 GUARD_SIZE = 512  # failing calls remembered per registry for the repeat guard
 EXAMPLE_AFTER = 3  # input errors in a session before every input error shows an example call
@@ -990,7 +991,8 @@ class ToolRegistry:
                 self.logger.error(f"Audit write failed, '{spec.name}' refused: {reason}")
                 raise AuditUnavailable(
                     f"The audit log cannot be written ({reason}), so '{spec.title}' was not run: calls that change "
-                    "something run only when they are recorded. Run 'llm-cli doctor' to find the cause.") from None
+                    "something run only when they are recorded. Mojo Oracle finds the cause: run_mojo_oracle, or "
+                    "'llmcf mojo' in a terminal.") from None
             self.logger.warning(f"Audit write failed: {reason}")
             return None
 

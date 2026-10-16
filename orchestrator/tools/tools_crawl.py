@@ -18,7 +18,7 @@ with `llm-cli tools crawl-notice`), and the caps of the limits table. The tool r
 """
 
 import re
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -80,8 +80,11 @@ class CrawlStartedOut(ToolOutput):
                  "Read the stored pages with search_knowledge or read_knowledge_source.")
 
 
-def _plan_facts(plan: CrawlPlan) -> CallFacts:
+def _plan_facts(plan: CrawlPlan, rag: Any = None) -> CallFacts:
+    """The question about a crawl. `rag`: the knowledge base the pages go into (for the one-time model download)."""
+    from orchestrator.tools.tools_knowledge import embedding_download
     sites = len(plan.start_urls)
+    model_fact, model_warnings = embedding_download(rag)
     consequence = (f"Crawls {sites} documentation site{'s' if sites != 1 else ''} from this computer into the local "
                    f"knowledge base: up to {plan.max_pages} pages per start address, {plan.max_depth} links deep, at "
                    f"least {plan.delay:g} s between requests. The sites' robots.txt, robots directives and TDMRep "
@@ -90,18 +93,18 @@ def _plan_facts(plan: CrawlPlan) -> CallFacts:
     facts += [Fact("Languages kept", ", ".join(plan.languages) or "every language"),
               Fact("PDF files", "read" if plan.include_pdfs else "left out"),
               Fact("Knowledge base", "a snapshot is taken before each start address, so the crawl can be undone; "
-                                     "the pages later reach AI models as reference data"),
-              Fact("Embedding model", "downloaded once (about a GB) if it is not on this computer yet")]
+                                     "the pages later reach AI models as reference data")]
+    facts += [model_fact] if model_fact is not None else []
     room = plan.disk
     if room is not None:  # free space moves while a question waits: shown, never part of the decision
         facts.append(Fact("Disk", f"knowledge snapshot taken first: {room.sentence()}", volatile=True))
     bound = {"start_urls": list(plan.start_urls), "max_pages": plan.max_pages, "max_depth": plan.max_depth,
              "delay": plan.delay, "languages": list(plan.languages), "include_pdfs": plan.include_pdfs}
-    # Situation warnings when the crawl may store many pages, and when the snapshot taken first fits but leaves little
-    # free space (eighth round, answer 2: one that does not fit is the blocker snapshot_no_room, before the question).
-    # The embedding model's first download is not warned about yet (whether the model is on this computer is not known
-    # before the crawl). No count of snapshots is ever a warning: they have no limit, none is deleted by itself.
-    warnings = []
+    # Situation warnings when the crawl may store many pages, when the snapshot taken first fits but leaves little
+    # free space (eighth round, answer 2: one that does not fit is the blocker snapshot_no_room, before the question),
+    # and when the first stored page downloads the knowledge base's models (next-fixes 119). No count of snapshots is
+    # ever a warning: they have no limit, none is deleted by itself.
+    warnings = list(model_warnings)
     if plan.max_pages * sites >= MANY_PAGES:
         warnings.append(warn("many_pages", max_pages=plan.max_pages * sites, sites=sites))
     if room is not None and room.verdict == "tight":
@@ -128,7 +131,7 @@ def register_crawl_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistr
                                 ctx.actor)
         except CrawlRefused as e:
             raise refusal(e) from None
-        return _plan_facts(plan)
+        return _plan_facts(plan, service.rag())
 
     def crawl_docs_site(inp: CrawlIn, ctx: ToolContext) -> CrawlStartedOut:
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}

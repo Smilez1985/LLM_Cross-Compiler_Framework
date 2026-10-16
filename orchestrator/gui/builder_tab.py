@@ -200,6 +200,25 @@ class SSHProbeWorker(QThread):
         finally:
             ssh.close()
 
+
+class CommitLookupWorker(QThread):
+    """Asks Hugging Face for the commit of a model's default branch (BuildService.model_commit: once, without the
+    file list, never in offline mode) off the GUI thread, for the identical-build check of the Start button."""
+    found = Signal(object)  # the commit, or None when it could not be told
+
+    def __init__(self, service, model):
+        super().__init__()
+        self.service = service
+        self.model = model
+
+    def run(self):
+        try:
+            commit = self.service.model_commit(self.model)
+        except Exception:  # noqa: BLE001 - no answer: the earlier build is shown as "not compared"
+            commit = None
+        self.found.emit(commit)
+
+
 class CancelBuildWorker(QThread):
     """Cancels a build through the build service and waits until it has stopped (off the GUI thread)."""
     finished = Signal(str, str)  # outcome ("cancelled", "finished", "running" or "error"), message
@@ -941,73 +960,111 @@ class BuilderTab(QWidget):
              self._log("Error: Invalid enum selection.")
              return
 
-        model = self.model_input.currentText().strip()
-        dataset = self.dataset_path
-        if not self._decide_about_earlier(model, board, quant, target_fmt, opt_lvl, recipe, dataset):
+        # Exactly the values checked above are compared with earlier builds and submitted, also when the person
+        # changes the form while the model's commit is looked up.
+        values = {"model": self.model_input.currentText().strip(), "target": self.target_combo.currentData(),
+                  "target_fmt": target_fmt, "opt_lvl": opt_lvl, "quant": quant, "board": board,
+                  "dataset": self.dataset_path, "recipe": recipe, "output_dir": output_dir,
+                  "use_gpu": self.chk_gpu.isChecked(), "use_imatrix": self.chk_imatrix.isChecked()}
+        found, lookup = self._earlier_builds(values)
+        if lookup is not None:
+            self._look_up_commit(values, found, lookup)
             return
+        self._start_or_reuse(values, found)
+
+    def _start_or_reuse(self, values, found):
+        """Asks about earlier builds with the same options (if any), then submits exactly `values`."""
+        if found and not self._decide_about_earlier(found):
+            return
+        recipe = values["recipe"]
         req = BuildRequest(
             request_id="",
             workflow_type=WorkflowType.SIMPLE_CONVERSION,
             priority=PriorityLevel.NORMAL,
-            models=[model],
-            targets=[self.target_combo.currentData()],
-            target_formats=[target_fmt],
-            optimization_level=opt_lvl,
-            quantization_options=[quant] if quant else [],
+            models=[values["model"]],
+            targets=[values["target"]],
+            target_formats=[values["target_fmt"]],
+            optimization_level=values["opt_lvl"],
+            quantization_options=[values["quant"]] if values["quant"] else [],
             parallel_builds=True,
-            output_base_dir=output_dir,
+            output_base_dir=values["output_dir"],
             description="Builder Tab Job",
-            use_gpu=self.chk_gpu.isChecked(),
+            use_gpu=values["use_gpu"],
             # NEW v2.4.0: Pass IMatrix config
-            use_imatrix=self.chk_imatrix.isChecked(),
-            dataset_path=dataset,
-            target_board=board,
+            use_imatrix=values["use_imatrix"],
+            dataset_path=values["dataset"],
+            target_board=values["board"],
             # A recipe pins the model commit (and context length) while its model is still selected.
             model_revision=recipe.model.revision if recipe else None,
             max_context_length=recipe.options.max_context_length if recipe else None,
         )
-        
+
         try:
             # The build keeps running on the framework's background loop after this slot returns.
             rid = self.framework.run_coroutine(self.framework.orchestrator.submit_build_request(req), timeout=30)
             self._set_state("success")
             self._log(f"Job Submitted! ID: {rid}")
             self._track_build(rid)
-            self._remember_build(model, self.target_combo.currentData(), board, dataset)
+            self._remember_build(values["model"], values["target"], values["board"], values["dataset"])
             QMessageBox.information(self, "Success", f"Job {rid} started.")
         except Exception as e:
             self._set_state("fail")
             self._log(f"Submission Error: {e}")
 
-    def _earlier_builds(self, model, board, quant, target_fmt, opt_lvl, recipe, dataset):
-        """Finished builds with 100 % the same options (eighth round, N11). The commit of a Hugging Face model's
-        default branch is looked up (once, without the file list, never in offline mode) only when an earlier build
-        could be identical; [] when nothing can be told."""
+    def _earlier_builds(self, values):
+        """(finished builds with 100 % the same options (eighth round, N11), the commit look-up still to do or None).
+        The commit of a Hugging Face model's default branch is looked up (once, without the file list, never in
+        offline mode) only when an earlier build could be identical; that look-up asks the network, so it runs in a
+        worker (_look_up_commit), never on the GUI thread. ([], None) when nothing can be told."""
         service = self._build_service()
         if service is None or not hasattr(service, "earlier_builds"):
-            return []
+            return [], None
         from orchestrator.schemas.build import BuildRequestIn
+        recipe = values["recipe"]
         try:
-            request = BuildRequestIn(model=model, revision=recipe.model.revision if recipe else None,
-                                     target=self.target_combo.currentData(), format=target_fmt.value, board=board,
-                                     quantization=quant, use_imatrix=self.chk_imatrix.isChecked(),
-                                     dataset_path=dataset, use_gpu=self.chk_gpu.isChecked(),
+            request = BuildRequestIn(model=values["model"], revision=recipe.model.revision if recipe else None,
+                                     target=values["target"], format=values["target_fmt"].value,
+                                     board=values["board"], quantization=values["quant"],
+                                     use_imatrix=values["use_imatrix"], dataset_path=values["dataset"],
+                                     use_gpu=values["use_gpu"],
                                      max_context_length=recipe.options.max_context_length if recipe else None)
-            level = getattr(opt_lvl, "value", "balanced")
+            level = getattr(values["opt_lvl"], "value", "balanced")
             found = service.earlier_builds(request, optimization=level, local_paths=True)
             if found and not request.revision and all(b.match == "commit_unchecked" for b in found):
-                commit = service.model_commit(model)
-                if commit:
-                    found = service.earlier_builds(request, revision=commit, optimization=level, local_paths=True)
-            return found
+                return found, (service, request, level)
+            return found, None
         except Exception as e:  # noqa: BLE001 - the look-up never stops a build; the person builds as asked
             self._log(f"Earlier builds not checked: {e}")
-            return []
+            return [], None
 
-    def _decide_about_earlier(self, model, board, quant, target_fmt, opt_lvl, recipe, dataset) -> bool:
+    def _look_up_commit(self, values, found, lookup):
+        """Looks the model's commit up in a worker (up to 10 s on a slow network) while the window stays usable; the
+        Start button waits meanwhile. The answer continues in _on_commit_found on the GUI thread."""
+        service = lookup[0]
+        self.btn_start.setEnabled(False)
+        self._log("Looking up the model's current commit on Hugging Face, to compare it with an earlier build ...")
+        self._pending_build = (values, found, lookup)
+        self._commit_worker = CommitLookupWorker(service, values["model"])
+        self._commit_worker.found.connect(self._on_commit_found)
+        self._commit_worker.start()
+
+    def _on_commit_found(self, commit):
+        pending, self._pending_build = getattr(self, "_pending_build", None), None
+        self.btn_start.setEnabled(True)
+        if pending is None:
+            return
+        values, found, (service, request, level) = pending
+        if commit:
+            try:
+                found = service.earlier_builds(request, revision=commit, optimization=level, local_paths=True)
+            except Exception as e:  # noqa: BLE001 - the look-up never stops a build
+                self._log(f"Earlier builds not checked: {e}")
+                found = []
+        self._start_or_reuse(values, found)
+
+    def _decide_about_earlier(self, found) -> bool:
         """True when the build is to start: no earlier build with the same options, or the person chose to build
         again. "Use the existing build" starts nothing and names it; nothing is skipped without the person."""
-        found = self._earlier_builds(model, board, quant, target_fmt, opt_lvl, recipe, dataset)
         if not found:
             return True
         from orchestrator.gui import artifact_save

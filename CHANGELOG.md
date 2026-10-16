@@ -910,6 +910,40 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   longer returns are noted.
 
 ### Changed
+- **The identical-build check no longer blocks the builder window** (unreleased; eighth round, N11): before a build,
+  the check asked Hugging Face for the model's current commit on the window's own thread, so the window stopped
+  responding on a slow network (up to 10 seconds). The look-up now runs in the background; Start waits meanwhile and
+  the form stays usable. The build submits exactly the values that were checked.
+- **Builds in the old default folder keep their id and packages are found there** (unreleased; eighth round, answer
+  3): since the output folder setting, the framework's build folder is no longer the output folder, so a build there
+  got a new id and `packages` (and `deploy_package`) no longer saw the deploy packages in it. The id a build had before
+  still reaches it (feed rows, pending approvals and AI callers that kept it), unless another build has that id now.
+  `packages` lists the output folder first, then the build folder and earlier output folders you had set.
+- **`get_status` names the build folder's disk** (unreleased; eighth round, answer 3): the disk fact named the cache
+  and the output folder only, not the build folder where a build is written first. Now it names all three; folders on
+  one disk are named together, by label only.
+- **The tools that store text say when the search model is downloaded first** (unreleased; next-fixes 119): the
+  situation warning `embedding_model_download` was declared but never shown. Now `crawl_docs_site`,
+  `index_framework_docs` and a knowledge pack from `add_pack_from_index` check, without downloading or loading
+  anything, whether the knowledge base's models are on this computer. Their question says so, with the size and the
+  warning when a download is needed or cannot be ruled out. An MCP prompt with knowledge excerpts never starts the
+  download: like `search_knowledge` it reads with the models on this computer only and says when they are missing.
+- **Repair hints for AI callers name Mojo** (unreleased; round 7 item 11'): refusals and errors that AI callers read
+  sent them to `llm-cli doctor`. They now name the tool `run_mojo_oracle` (or `llmcf mojo` in a terminal). The note
+  about missing builder images keeps `llm-cli doctor --fix --tier 2`, which builds them.
+- **Ditto's old runtime mode goes to the trash** (unreleased; WP7, round 7 D): after a switch between bare metal and
+  Docker, the old mode's build folders were deleted for good when you confirmed the list. Now they go to the trash by
+  default (`llm-cli trash` and File > Trash... list them and bring one back; their space stays used until you empty
+  the trash). Docker's images and containers are still deleted, since Docker has no trash; they are listed with name,
+  ID and size. The list says where each object goes, and one question confirms the whole list ("No" by default).
+- **The address checks agree on IPv6 in brackets** (unreleased): `deploy run --host [fe80::1]` passed the CLI's check,
+  but the deploy refused the address. Now every place that takes a board's address (deploy, `scan --device`, `deploy
+  devices add`, the GUI's probe and Deployment window) refuses an IPv6 address in brackets before anything is sent.
+  Write it without brackets (`fe80::1`); the port has its own option.
+- **The per-user folder is made private when it is created** (next-fixes 118): every read of the settings set
+  `~/.llm-framework` to mode 0700 without a word, so Mojo's `state.permissions` finding almost never showed. Now the
+  folder gets 0700 when the framework creates it; an existing folder keeps its mode, Mojo Oracle reports one that
+  others can read, and Mojo Miracle repairs it after your yes.
 - **A board deployment keeps every older runtime build** (round 5 f): `llm-cli device runtime deploy` and the AI
   tool `deploy_device_runtime` removed all older runtime builds on the board except the previous one, without a
   question. Now every older build stays. The result says how many stayed and their size, and
@@ -1526,6 +1560,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **Pairing a board sends only a checked key line** (bandit B601): the command that adds the framework's public key
+  to the board's `authorized_keys` is fixed, and its one value, the key line, was shell-quoted. Now the line must also
+  be a plain SSH public key (type, key, an optional simple comment); anything else is refused before the command is
+  sent.
 - **`get_build_status` and `get_build_log` name finished builds by label, never by host path**: in 3.0.0 the status
   of a build request, and log lines such as "Golden Artifact created", gave AI clients the full path of each finished
   build (with the user name in it). The status now gives `output:<target>/<model>/<quantization>` (or `builds:`,

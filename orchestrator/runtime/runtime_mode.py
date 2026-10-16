@@ -22,8 +22,10 @@ ensure`, the installers' Ditto step and the AI settings run, and it is idempoten
 - After the new mode is verified, leftovers() lists the old mode's objects as a DeletionPlan: every build folder with
   its full path, build ID, folder name and size, every image and container with its name, ID and size, and what each
   is. Nothing is removed here: the person confirms exactly that list in the framework's own window (CLI or GUI, "No"
-  by default), and remove_leftovers() removes exactly that list. Without a terminal, and for an AI, nothing is removed
-  and the list is reported. Ditto's images are never deleted otherwise.
+  by default; one confirmation for the whole list, round 7 D), and remove_leftovers() removes exactly that list: the
+  build folders go to the trash (WP7: the person can restore them, and their space stays used until the person empties
+  the trash), Docker's images and containers are deleted (Docker has no trash). Without a terminal, and for an AI,
+  nothing is removed and the list is reported. Ditto's images are never deleted otherwise.
 
 An AI may read the mode (get_status, local_runtime); switching it and removing the old mode are the person's alone:
 no tool calls ensure() or remove_leftovers(), and remove_leftovers() refuses every actor but the person's CLI and GUI.
@@ -120,9 +122,11 @@ class _Told(list):
 
 @dataclass
 class Removal:
-    deleted: List[str] = field(default_factory=list)
-    freed_bytes: int = 0
+    deleted: List[str] = field(default_factory=list)       # deleted for good: Docker's objects, or every item in
+    freed_bytes: int = 0                                    # the mode "permanent"
     failed: List[Tuple[str, str]] = field(default_factory=list)
+    trashed: List[str] = field(default_factory=list)       # build folders moved to the trash (restorable)
+    trash_ids: List[str] = field(default_factory=list)
 
 
 # --- detection --------------------------------------------------------------------------------------------------------
@@ -681,61 +685,85 @@ def _docker_items(rt: Any, mode: str) -> List[Any]:
 
 def leftovers(rt: Any, mode: str) -> Optional[Any]:
     """The objects of the other mode when Ditto runs in `mode`, as a DeletionPlan for the person (None: nothing).
-    Reads only."""
+    With a build folder on the list the trash is offered first (WP7): the folders go there, Docker's objects are
+    deleted. Reads only."""
     from orchestrator.tools.spec import DeletionPlan
     if mode not in MODES:
         raise RuntimeModeError("the mode is bare-metal or docker")
     items = _build_items(rt, mode) + _docker_items(rt, mode)
     if not items:
         return None
-    return DeletionPlan(items=items, total_bytes=sum(i.size_bytes for i in items), mode_offered=("permanent",))
+    modes = ("trash", "permanent") if any(i.kind == "runtime_build" for i in items) else ("permanent",)
+    return DeletionPlan(items=items, total_bytes=sum(i.size_bytes for i in items), mode_offered=modes)
 
 
-def remove_leftovers(rt: Any, plan: Any, *, actor: str, audit: Any) -> Removal:
+def goes_to_trash(item: Any, mode: str) -> bool:
+    """Whether `item` of a confirmed list goes to the trash in `mode` (build folders; Docker has no trash)."""
+    return mode == "trash" and item.kind == "runtime_build"
+
+
+def remove_leftovers(rt: Any, plan: Any, *, actor: str, audit: Any, trash: Any = None,
+                     mode: Optional[str] = None) -> Removal:
     """Removes exactly the objects of `plan`, which the person confirmed in the framework's own window (actor "cli" or
-    "gui"; never an AI, never under a delegation). The list is looked up again first: if it changed, nothing is
-    removed (LeftoversChanged). The removal is audited before anything is removed (nothing is removed when the audit
-    cannot be written); each object is looked at again right before its removal and kept when it changed (a build a
-    running server uses, an image that lost Ditto's label, a container that runs)."""
+    "gui"; never an AI, never under a delegation), in `mode` (default the plan's first: the trash when it lists a build
+    folder). In the mode "trash" the build folders are moved to the person's trash (`trash`,
+    orchestrator/Core/trash.py) and Docker's objects are deleted; in "permanent" everything is deleted. The list is
+    looked up again first: if it changed, nothing is removed (LeftoversChanged). The removal is audited before anything
+    is removed (nothing is removed when the audit cannot be written); each object is looked at again right before its
+    removal and kept when it changed (a build a running server uses, an image that lost Ditto's label, a container that
+    runs)."""
+    from orchestrator.Core.deletion import AcceptedDeletion
     if actor not in PERSON_ACTORS:
         raise PermissionError("Only the person removes the old mode's leftovers, in the GUI or at a terminal.")
+    mode = mode or plan.mode_offered[0]
     current = leftovers(rt, rt.mode())
     if current is None or current.sha256() != plan.sha256():
         raise LeftoversChanged()
+    accepted = AcceptedDeletion(plan, mode, actor)   # a mode the plan did not offer is refused here
+    if mode == "trash" and trash is None:
+        raise RuntimeModeError("The trash is not available, so nothing was removed.")
     if audit is None or not callable(getattr(audit, "record", None)):
         raise RuntimeModeError("The audit log is not available, so nothing was removed.")
-    extra = {"answered_by": "person", "confirm_channel": f"framework-{actor}", "deletion_sha256": plan.sha256()}
+    extra = accepted.audit_extra()
     try:
         audit.record(actor, "ditto_runtime_mode", "framework", "person", "started", approved=True,
-                     arguments={"mode": rt.mode(), "items": len(plan.items), "bytes": plan.total_bytes},
-                     detail=f"removing {len(plan.items)} leftovers of the old runtime mode", extra=extra)
+                     arguments={"mode": rt.mode(), "items": len(plan.items), "bytes": plan.total_bytes,
+                                "deletion_mode": mode},
+                     detail=f"removing {len(plan.items)} leftovers of the old runtime mode"
+                            + (" (build folders to the trash)" if mode == "trash" else ""), extra=extra)
     except Exception:  # noqa: BLE001
         raise RuntimeModeError("The audit log cannot record the removal; nothing was removed.") from None
     result = Removal()
     order = {"docker_container": 0, "docker_image": 1, "runtime_build": 2}
     items = sorted(plan.items, key=lambda i: (order.get(i.kind, 3), cs.BASE_REPO in i.speaking_name))
     for item in items:
+        to_trash = goes_to_trash(item, mode)
         try:
-            kept = _remove_item(rt, item)
-        except Exception as e:  # noqa: BLE001 - e.g. Docker refused: kept and reported
+            kept = _remove_item(rt, item, (trash, accepted, result) if to_trash else None)
+        except Exception as e:  # noqa: BLE001 - e.g. Docker or the trash refused: kept and reported
             from orchestrator.utils.helpers import redact_secrets
             kept = redact_secrets(str(getattr(e, "explanation", "") or e))[:300]
         if kept:
             result.failed.append((item.speaking_name, kept))
-            continue
-        result.deleted.append(item.speaking_name)
-        result.freed_bytes += item.size_bytes
+        elif to_trash:
+            result.trashed.append(item.speaking_name)
+        else:
+            result.deleted.append(item.speaking_name)
+            result.freed_bytes += item.size_bytes
     try:
         audit.record(actor, "ditto_runtime_mode", "framework", "person", "error" if result.failed else "ok",
-                     approved=True, arguments={"deleted": len(result.deleted), "kept": len(result.failed)},
-                     detail=f"{len(result.deleted)} leftovers removed, {len(result.failed)} kept", extra=extra)
+                     approved=True, arguments={"deleted": len(result.deleted), "trashed": len(result.trashed),
+                                               "kept": len(result.failed)},
+                     detail=f"{len(result.deleted)} leftovers deleted, {len(result.trashed)} moved to the trash, "
+                            f"{len(result.failed)} kept", extra=extra)
     except Exception:  # noqa: BLE001 - the removal happened and is shown to the person; its start is recorded
         pass
     return result
 
 
-def _remove_item(rt: Any, item: Any) -> Optional[str]:
-    """Removes one listed object; returns why it was kept, or None."""
+def _remove_item(rt: Any, item: Any, to_trash: Optional[Tuple[Any, Any, Removal]] = None) -> Optional[str]:
+    """Removes one listed object, or moves a build folder to the trash (`to_trash`: the trash, the person's accepted
+    deletion and the result that keeps the trash entry); returns why it was kept, or None."""
     from orchestrator.runtime.build.source import remove_tree
     if item.kind == "runtime_build":
         path = Path(item.full_path)
@@ -745,7 +773,13 @@ def _remove_item(rt: Any, item: Any) -> Optional[str]:
         store = rt.store
         if path.parent.resolve() == (root / "builds") and path.name in {b[:16] for b in store.running_build_ids()}:
             return "kept: a running server uses it"
-        remove_tree(path)
+        if to_trash is not None:
+            trash, accepted, result = to_trash
+            entry = trash.move("runtime_build", path, Path(rt.data_dir), "state", item.speaking_name, accepted,
+                               accepted.actor)
+            result.trash_ids.append(entry.id)
+        else:
+            remove_tree(path)
         if path.parent.resolve() == (root / "builds"):
             store.forget(path.name)
         return None
@@ -768,5 +802,5 @@ def _remove_item(rt: Any, item: Any) -> Optional[str]:
 
 
 __all__ = ["CHOICES", "Detection", "EnsureResult", "Found", "LeftoversChanged", "MODES", "Removal",
-           "RuntimeModeError", "base_for_build", "detect", "docker_problem", "ensure", "image_base", "leftovers",
-           "mode_label", "profile_for_base", "remove_leftovers"]
+           "RuntimeModeError", "base_for_build", "detect", "docker_problem", "ensure", "goes_to_trash", "image_base",
+           "leftovers", "mode_label", "profile_for_base", "remove_leftovers"]

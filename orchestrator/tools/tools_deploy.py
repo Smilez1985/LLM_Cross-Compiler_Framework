@@ -56,6 +56,37 @@ def package_id(name: str) -> str:
     return "pkg_" + hashlib.sha256(name.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
+def package_folders(framework, output_dir: Path) -> List[Path]:
+    """Where packages lie: the output folder (new packages go there), then the framework's build folder (the output
+    folder before the output folder setting, eighth round answer 3) and earlier output folders the person had set,
+    whose packages stay usable by their id."""
+    from orchestrator.Core.artifact_output import SavedIndex, build_folder
+    folders = [Path(output_dir), build_folder(framework)]
+    state = getattr(getattr(framework, "config", None), "user_state_dir", None)
+    if isinstance(state, (str, Path)):
+        folders += SavedIndex(Path(state)).folders()
+    return folders
+
+
+def find_packages(framework, output_dir: Path) -> Dict[str, Path]:
+    """{package id: file} of every package in package_folders(); the output folder comes first, and a package of the
+    same name in a later folder is left out."""
+    found: Dict[str, Path] = {}
+    for folder in package_folders(framework, output_dir):
+        try:
+            entries = sorted(folder.glob(PACKAGE_GLOB))
+        except OSError:
+            continue
+        for path in entries:
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+            except OSError:
+                continue
+            found.setdefault(package_id(path.name), path)
+    return found
+
+
 def hide_paths(text: str, labels: Dict[str, str]) -> str:
     """Framework text for an AI caller with host paths replaced: each folder in `labels` by its label (longest
     first, also resolved), then the home folder by ~ (design 6.4: ids and labels, never paths)."""
@@ -201,20 +232,7 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         return label, info
 
     def packages() -> Dict[str, Path]:
-        out = output_dir()
-        found: Dict[str, Path] = {}
-        try:
-            entries = sorted(out.glob(PACKAGE_GLOB))
-        except OSError:
-            return found
-        for path in entries:
-            try:
-                if path.is_symlink() or not path.is_file():
-                    continue
-            except OSError:
-                continue
-            found[package_id(path.name)] = path
-        return found
+        return find_packages(framework, output_dir())
 
     def package_path(pid: str) -> Path:
         path = packages().get(pid)

@@ -279,7 +279,7 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
     "add_pack_from_index": ToolFacts(
         _FS({"offline_mode", "index_stale", "pack_unknown", "pack_revoked", "pack_rejected", "disk_full",
              "snapshot_no_room"}),
-        _FS({"disk_tight"}),
+        _FS({"disk_tight", "embedding_model_download"}),
         _FS({"target_pack_community", "base_image_unofficial", "base_image_unpinned", "vendor_soft_cap_exceeded"}),
         "downloads", "remove the pack (deletion dialog)"),
     "export_pack": ToolFacts(_FS({"no_signing_key"}), _FS(), _FS({"signs_as_you"}), "never",
@@ -294,7 +294,8 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
     "restore_knowledge_snapshot": ToolFacts(_FS({"snapshot_unknown", "knowledge_off", "disk_full",
                                                  "snapshot_no_room"}), _FS({"disk_tight"}), _FS(),
                                             "knowledge", "restore the backup snapshot"),
-    "index_framework_docs": ToolFacts(_FS({"knowledge_off", "snapshot_no_room"}), _FS({"disk_tight"}), _FS(),
+    "index_framework_docs": ToolFacts(_FS({"knowledge_off", "snapshot_no_room"}),
+                                      _FS({"disk_tight", "embedding_model_download"}), _FS(),
                                       "knowledge",
                                       "running: stop; done: restore the snapshot taken before (backup first)"),
     "create_deploy_package": ToolFacts(_FS({"disk_full", "image_problem", "artifact_unknown"}), _FS({"disk_tight"}),

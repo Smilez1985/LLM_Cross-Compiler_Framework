@@ -34,16 +34,19 @@ def _size(size: int) -> str:
 
 
 def leftovers_text(plan: Any) -> str:
-    """The list of the question: for each object its name, full path (or Docker's ID), file name, size and what it is,
-    with the labels of the chat panel's "Clear chat"."""
+    """The list of the question: for each object its name, full path (or Docker's ID), file name, size, what it is
+    and where it goes (the trash for a build folder, deleted for good for Docker's objects), with the labels of the
+    chat panel's "Clear chat"."""
+    mode = plan.mode_offered[0]
     items = []
     for item in plan.items:
         where = (ui_text("chat.clear.path", path=one_line(item.full_path)) if item.full_path
                  else ui_text("runtime.mode.item.id", id=one_line(item.file_name)))
+        goes = "runtime.mode.goes.trash" if runtime_mode.goes_to_trash(item, mode) else "runtime.mode.goes.deleted"
         items.append("\n".join((one_line(item.speaking_name), where,
                                 ui_text("chat.clear.file", name=one_line(item.file_name)),
                                 ui_text("chat.clear.size", size=_size(item.size_bytes)),
-                                ui_text("chat.clear.what_label", what=one_line(item.what)))))
+                                ui_text("chat.clear.what_label", what=one_line(item.what)), ui_text(goes))))
     return "\n\n".join(items)
 
 
@@ -161,11 +164,23 @@ class RuntimeModeBox(QGroupBox):
             plain_box(self, "information", title, ui_text("runtime.mode.nothing_removed"))
             return
         audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        mode = plan.mode_offered[0]   # one confirmation (round 7 D): build folders to the trash, Docker's objects gone
         try:
-            removal = runtime_mode.remove_leftovers(self._factory(), plan, actor="gui", audit=audit)
+            removal = runtime_mode.remove_leftovers(self._factory(), plan, actor="gui", audit=audit,
+                                                    trash=self._trash() if mode == "trash" else None, mode=mode)
         except (runtime_mode.LeftoversChanged, runtime_mode.RuntimeModeError, PermissionError) as e:
             plain_box(self, "warning", title, str(e))
             return
         lines = [ui_text("runtime.mode.removed", n=len(removal.deleted), size=_size(removal.freed_bytes))]
+        if removal.trashed:
+            lines.append(ui_text("runtime.mode.trashed", n=len(removal.trashed)))
         lines += [ui_text("runtime.mode.kept", name=name, reason=reason) for name, reason in removal.failed]
         plain_box(self, "information", title, "\n".join(lines))
+
+    def _trash(self) -> Any:
+        """The person's trash (File > Trash...), or None when it cannot be opened (then nothing is removed)."""
+        from orchestrator.Core.trash import Trash
+        try:
+            return Trash.for_framework(self.framework)
+        except Exception:  # noqa: BLE001 - no framework or no per-user folder: remove_leftovers refuses
+            return None

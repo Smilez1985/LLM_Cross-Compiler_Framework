@@ -4,10 +4,40 @@ The Doctor's code moved into the package orchestrator.Core.mojo unchanged; orche
 name it had, `Doctor` is Mojo with the tiered `fix(tier_max)`, and finding codes, exit codes and JSON keys stay.
 """
 
+import ast
+from pathlib import Path
+
 import pytest
 
 from orchestrator.Core import doctor, mojo
 from orchestrator.Core.mojo import docker_objects, findings, runner, views
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def _texts(tree):
+    """Every string constant of a module except docstrings (what can reach a person or an AI)."""
+    docstrings = {id(node.body[0].value) for node in ast.walk(tree)
+                  if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                  and node.body and isinstance(node.body[0], ast.Expr)
+                  and isinstance(node.body[0].value, ast.Constant)}
+    return [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and id(node) not in docstrings]
+
+
+def test_hints_name_mojo_where_the_command_exists():
+    """The hints an AI (or the person) reads name Mojo Oracle: the tool run_mojo_oracle and the command 'llmcf mojo'.
+    Only the note on deleting the framework's images keeps 'llm-cli doctor --fix --tier 2', the command that always
+    lists them (as the Mojo review decided); the CLI's own compatibility notes stay in cli.py."""
+    found = []
+    for path in sorted((REPO / "orchestrator").rglob("*.py")):
+        rel = path.relative_to(REPO).as_posix()
+        if rel == "orchestrator/cli.py":
+            continue
+        for text in _texts(ast.parse(path.read_text(encoding="utf-8"))):
+            if "llm-cli doctor" in text and "llm-cli doctor --fix --tier 2" not in text:
+                found.append((rel, text[:80]))
+    assert found == [], found
 
 # Every name orchestrator/Core/doctor.py defined at the wave-2 commit (WP7 included, start of wave 3).
 DOCTOR_NAMES_OF_WAVE_2 = (
