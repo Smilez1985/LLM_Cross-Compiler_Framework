@@ -167,9 +167,6 @@ NO_TOOL_ACTIONS = [
                     "'llm-cli doctor --fix --tier 2' in a terminal), always with the full list; no tool does."),
 ]
 MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
-# Ditto's hands in the open GUI (tools_gui.GUI_TOOLS): registered only while the window is open and offered only to
-# Ditto in the GUI process (DECISIONS round 8); no MCP client lists them, so they do not count against the cap.
-GUI_ONLY_TOOLS = frozenset({"read_gui_form", "fill_gui_form", "wizard_state", "wizard_step", "show_gui"})
 
 # Every tool name of this framework's catalogue (design section 2.1: the core, optional and later tools; pinned by
 # tests/test_tool_catalogue.py). A new tool joins this set and the test, so the catalogue stays one deliberate list.
@@ -183,6 +180,9 @@ KNOWN_TOOLS = frozenset({
     "list_devices", "create_deploy_package", "deploy_to_device",
     "list_packs", "add_pack_from_index", "export_pack", "start_recipe_build",
     "run_mojo_oracle", "run_mojo_miracle", "get_status", "get_settings", "update_settings", "report_cannot_do",
+    # the AI's hands in the open window (DECISIONS round 8, W4): one tool with an action field, the same for Ditto and
+    # MCP clients (orchestrator/tools/tools_gui.py)
+    "gui",
     # hidden: the 3.0.0 name of run_mojo_oracle, callable but never listed
     "run_doctor",
     # optional (default deny until the person enables them)
@@ -190,8 +190,6 @@ KNOWN_TOOLS = frozenset({
     "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
     # later
     "probe_remote_device", "run_device_benchmark",
-    # the GUI tools: only while the GUI is open, only for Ditto
-    *GUI_ONLY_TOOLS,
 })
 
 
@@ -439,8 +437,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         # loaded after permissions(): the damage flag below belongs to this load; a token's own permissions for it
         policy = running.policy(caller) if caller else running.policy()
         listed = sum(1 for r in rows if r["listed"])
-        # The cap is a client's (MCP): the GUI tools are offered only to Ditto in the GUI process, never to a client
-        client_listed = sum(1 for r in rows if r["listed"] and r["tool"] not in GUI_ONLY_TOOLS)
+        # The cap is a client's (MCP): Ditto in the framework's own process has none
+        client_listed = 0 if caller == "ditto" else listed
         grant_caller = running._grant_caller(caller)[0] if caller else ""
         standing = [StandingApprovalOut(id=g["grant"].id, tool=g["grant"].tool, scope=g["grant"].summary,
                                         state=g["state"], created=g["grant"].created,
@@ -522,6 +520,9 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                               BuildHandleOut)
     # Settings and the honest "cannot" path of T2.
     specs += tools_status.status_tool_specs(registry, framework, NO_TOOL_ACTIONS)
+    # The AI's hands in the open window (W4): in the GUI process directly, elsewhere over the per-user bridge.
+    from orchestrator.tools.tools_gui import gui_tool_specs
+    specs += gui_tool_specs(registry, framework)
     for spec in specs:
         registry.register(spec)
     # Each group of later tools lives in its own module (design section 8, phase T), registered here.

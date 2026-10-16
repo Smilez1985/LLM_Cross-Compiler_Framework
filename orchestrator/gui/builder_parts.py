@@ -139,7 +139,7 @@ def person_target(tab: Any) -> Optional[str]:
 
 
 def apply_ditto_settings(tab: Any, config: Dict[str, Any]) -> Any:
-    """Ditto's recommended build settings ('Ask Ditto for Config') through the build form, like fill_gui_form: they
+    """Ditto's recommended build settings ('Ask Ditto for Config') through the build form, like the GUI tool's fill: they
     are marked and undoable, and a value the person chose or is editing stays (the log names Ditto's suggestion)."""
     form = getattr(tab, "gui_form", None)
     values = {key: (str(config[key]).lower() if key == "format" else str(config[key]))

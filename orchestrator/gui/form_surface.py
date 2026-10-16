@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """
 The Qt side of the GUI surface (orchestrator/tools/gui_surface.py): the forms of the window bind their widgets here,
-so Ditto's GUI tools (orchestrator/tools/tools_gui.py) can read and fill them visibly.
+so the GUI tool (orchestrator/tools/tools_gui.py) can read and fill them visibly, for Ditto and for AI apps alike.
 
-- `GuiInvoker` runs a function on the GUI thread for a tool call that runs in Ditto's worker thread, with a time
-  limit; a call that timed out before it started never runs late.
+- `GuiInvoker` runs a function on the GUI thread for a tool call that runs in Ditto's worker thread or in a bridge
+  thread, with a time limit; a call that timed out before it started never runs late.
 - `FormBinding` registers a form's fields (id, label in English and German, kind, secret, getter, setter, read-only)
   and tracks the person's edits: a value the person typed, picked or clicked is theirs and never overwritten by an AI.
-- Every field Ditto filled is marked (a coloured frame and the accessible description) and listed by name in the
-  form's banner (never colour alone), with one "Undo Ditto's changes" button, until the person edits the field.
-- `open_gui(window)` attaches the surface when the main window opens, registers the windows show_gui may open and the
-  GUI tools; `close_gui()` detaches it again.
+- Every field an AI filled is marked (a coloured frame and the accessible description) and listed by name in the
+  form's banner with who filled it (never colour alone), with one undo button, until the person edits the field.
+  Ditto's fields get Ditto's purple; an AI app's fields get another colour and its name in words: its MCP token name,
+  or the name it gives itself in quotes, marked as its own claim. An app is never shown in Ditto's look, whatever it
+  calls itself.
+- `open_gui(window)` attaches the surface when the main window opens, registers the windows show_window may open and
+  starts the per-user bridge for AI apps (orchestrator/tools/gui_bridge.py); `close_gui()` stops the bridge and
+  detaches the surface again.
 
 Every text here is plain text (design 5.2 R1, SEC-M2): labels through plain_label, button labels through button_text.
 """
@@ -23,12 +27,14 @@ from PySide6.QtWidgets import QAbstractButton, QComboBox, QFrame, QHBoxLayout, Q
 
 from orchestrator.gui.plain import button_text, plain_label
 from orchestrator.tools import gui_surface
-from orchestrator.tools.gui_surface import GuiField, GuiForm, GuiSurface, WizardPages
+from orchestrator.tools.gui_surface import Filler, GuiField, GuiForm, GuiSurface, WizardPages
 from orchestrator.utils.localization import current_language, ui_text
 
 MARK_COLOUR = "#8E24AA"   # Ditto's purple; the accessible description and the banner say it in words
+APP_MARK_COLOUR = "#00838F"   # an AI app's fields: never Ditto's colour, whatever the app calls itself
 _STYLE_KEY = "_ditto_style"
 _DESC_KEY = "_ditto_desc"
+_WHO_KEY = "_ai_mark_by"
 
 
 class GuiInvoker(QObject):
@@ -198,10 +204,10 @@ class FormBinding:
         """Markers and banners after a fill, an undo or the person's edit (GUI thread)."""
         if self.form is None:
             return
-        marked = {f.id for f in self.form.marked()}
+        marked = {f.id: f.filler() for f in self.form.marked()}
         for field_id, widgets in self.widgets.items():
             for widget in widgets:
-                _mark(widget, field_id in marked)
+                _mark(widget, marked.get(field_id))
         for banner in list(self.banners):
             banner.update_text()
 
@@ -223,22 +229,38 @@ def _watch_combo(form: GuiForm, field_id: str, combo: QComboBox) -> None:
     combo.editTextChanged.connect(lambda _t: form.person_edited(field_id) if _has_focus(combo) else None)
 
 
-def _mark(widget: QWidget, on: bool) -> None:
-    """Draws or removes Ditto's mark on a widget: a frame in Ditto's colour and an accessible description that says it
-    in words (the form's banner names every marked field too). The widget's own style comes back unchanged."""
+def mark_colour(who: Optional[Filler]) -> str:
+    """Ditto's purple for Ditto's fields, another colour for every AI app's."""
+    return MARK_COLOUR if who is None or who.is_ditto else APP_MARK_COLOUR
+
+
+def field_tip(who: Optional[Filler], lang: Optional[str] = None) -> str:
+    """The accessible description of a marked field: who filled it, in words."""
+    lang = lang or current_language()
+    if who is None or who.is_ditto:
+        return ui_text("gui.field.tip", lang)
+    return ui_text("gui.field.tip_app", lang, who=who.describe(lang))
+
+
+def _mark(widget: QWidget, who: Optional[Filler]) -> None:
+    """Draws or removes an AI's mark on a widget: a frame in the filler's colour (Ditto's purple, or the AI apps'
+    colour) and an accessible description that says who filled it in words (the form's banner names every marked field
+    too). `who` None removes the mark. The widget's own style comes back unchanged."""
     try:
         marked = widget.property(_STYLE_KEY) is not None
-        if on and not marked:
-            widget.setProperty(_STYLE_KEY, widget.styleSheet())
-            widget.setProperty(_DESC_KEY, widget.accessibleDescription())
-            name = type(widget).__name__
-            widget.setStyleSheet(f"{widget.styleSheet()}\n{name} {{ border: 2px solid {MARK_COLOUR}; }}")
-            widget.setAccessibleDescription(ui_text("gui.field.tip", current_language()))
-        elif not on and marked:
+        if marked and (who is None or widget.property(_WHO_KEY) != who.actor + "\n" + who.app):
             widget.setStyleSheet(str(widget.property(_STYLE_KEY) or ""))
             widget.setAccessibleDescription(str(widget.property(_DESC_KEY) or ""))
-            for key in (_STYLE_KEY, _DESC_KEY):
+            for key in (_STYLE_KEY, _DESC_KEY, _WHO_KEY):
                 widget.setProperty(key, None)
+            marked = False
+        if who is not None and not marked:
+            widget.setProperty(_STYLE_KEY, widget.styleSheet())
+            widget.setProperty(_DESC_KEY, widget.accessibleDescription())
+            widget.setProperty(_WHO_KEY, who.actor + "\n" + who.app)
+            name = type(widget).__name__
+            widget.setStyleSheet(f"{widget.styleSheet()}\n{name} {{ border: 2px solid {mark_colour(who)}; }}")
+            widget.setAccessibleDescription(field_tip(who))
     except RuntimeError:  # the widget is gone
         pass
 
@@ -247,9 +269,17 @@ def is_marked(widget: QWidget) -> bool:
     return widget.property(_STYLE_KEY) is not None
 
 
+def marked_by(widget: QWidget) -> str:
+    """The caller whose mark the widget carries ("" when none): ditto, mcp or mcp:<token name>."""
+    value = widget.property(_WHO_KEY)
+    return str(value).split("\n", 1)[0] if value else ""
+
+
 class FillBanner(QFrame):
     """'Ditto filled: Model, Quantization. Change a field to keep your own value.' with one Undo button; hidden while
-    nothing of Ditto's is in the form. The undo is recorded in the audit log (actor gui)."""
+    nothing of an AI's is in the form. With an AI app's fields, each filler is named in words ('Filled by the AI app
+    with the MCP token "laptop": Board.'), and the button undoes the AI changes. The undo is recorded in the audit log
+    (actor gui) with who had filled."""
 
     def __init__(self, binding: FormBinding, parent: Optional[QWidget] = None,
                  audit: Optional[Callable[[str, dict], Any]] = None):
@@ -274,25 +304,36 @@ class FillBanner(QFrame):
         if form is None:
             return
         lang = current_language()
-        marked = form.marked()
-        if marked:
-            names = ", ".join(f.label(lang) for f in marked)
+        groups = form.marked_by()
+        only_ditto = all(who.is_ditto for who in list(groups) + form.undo_fillers())
+        if groups and only_ditto:
+            names = ", ".join(f.label(lang) for fields in groups.values() for f in fields)
             self.label.setText(ui_text("gui.banner.filled", lang, fields=names))
-        self.btn_undo.setText(button_text(ui_text("gui.banner.undo", lang)))
+        elif groups:
+            lines = [ui_text("gui.banner.filled_by", lang, who=who.describe(lang),
+                             fields=", ".join(f.label(lang) for f in fields)) for who, fields in groups.items()]
+            self.label.setText(" ".join(lines + [ui_text("gui.banner.check", lang)]))
+        self.btn_undo.setText(button_text(ui_text("gui.banner.undo" if only_ditto else "gui.banner.undo_ai", lang)))
         self.btn_undo.setEnabled(bool(form.undo_records))
-        self.setVisible(bool(marked) or bool(form.undo_records))
+        colour = MARK_COLOUR if only_ditto else APP_MARK_COLOUR
+        self.setStyleSheet(f"QFrame#dittoFillBanner {{ border: 1px solid {colour}; border-radius: 3px; }}")
+        self.setVisible(bool(groups) or bool(form.undo_records))
 
     def undo(self) -> List[str]:
         form = self.binding.form
         if form is None:
             return []
+        fillers = form.undo_fillers()
         restored = form.undo_all()
         if self._audit is not None:
             try:
-                self._audit("gui_fill_undone", {"form": form.id, "fields": restored})
+                self._audit("gui_fill_undone", {"form": form.id, "fields": restored,
+                                                "filled_by": [who.actor for who in fillers]})
             except Exception:  # noqa: BLE001 - the undo is done; the log is extra here
                 pass
-        self.label.setText(ui_text("gui.banner.undone", current_language()))
+        only_ditto = all(who.is_ditto for who in fillers)
+        self.label.setText(ui_text("gui.banner.undone" if only_ditto else "gui.banner.undone_ai",
+                                   current_language()))
         self.binding.refresh()
         return restored
 
@@ -336,7 +377,7 @@ class QWizardPages(WizardPages):
 # --- the main window ------------------------------------------------------------------------------------------------
 
 def person_audit(registry: Any) -> Callable[[str, dict], Any]:
-    """Records a person's action in the GUI (an undo of Ditto's changes) in the audit log, actor gui."""
+    """Records a person's action in the GUI (an undo of the AI changes) in the audit log, actor gui."""
     def record(event: str, arguments: dict) -> Any:
         from orchestrator.gui.dialogs import audit_person
         return audit_person(registry, event, arguments) if registry is not None else None
@@ -344,8 +385,8 @@ def person_audit(registry: Any) -> Callable[[str, dict], Any]:
 
 
 def open_gui(window: Any) -> GuiSurface:
-    """Attaches the GUI surface of the main window `window`: the GUI tools work on its forms from now on. Registers
-    the windows show_gui may open and the GUI tools in the framework's tool registry (for Ditto)."""
+    """Attaches the GUI surface of the main window `window`: the GUI tool works on its forms from now on, for Ditto in
+    this process and, through the per-user bridge, for AI apps. Registers the windows show_window may open."""
     invoker = GuiInvoker(window if isinstance(window, QObject) else None)
     surface = gui_surface.attach(GuiSurface(invoker.call))
     surface.extra["invoker"] = invoker
@@ -397,8 +438,29 @@ def open_gui(window: Any) -> GuiSurface:
     registry = getattr(framework, "tool_registry", None)
     if registry is not None:
         from orchestrator.tools.tools_gui import register_gui_tools
-        register_gui_tools(registry, framework)
+        register_gui_tools(registry, framework)   # the framework's tools include it already: nothing twice
+    start_bridge(surface, framework)
     return surface
+
+
+def start_bridge(surface: GuiSurface, framework: Any) -> Optional[Any]:
+    """Starts the per-user bridge, so AI apps (MCP clients) reach this window with the same GUI tool as Ditto. The
+    window works without it: when it cannot start (or another window of this person already serves AI apps), AI apps
+    are told the window is not open."""
+    config = getattr(framework, "config", None)
+    if config is None:
+        return None
+    from orchestrator.tools.gui_bridge import BridgeServer
+    from orchestrator.tools.tools_gui import bridge_handler
+    try:
+        state_dir = config.user_state_dir
+    except Exception:  # noqa: BLE001 - no per-user folder: no bridge
+        return None
+    server = BridgeServer(state_dir, bridge_handler(framework, lambda: surface))
+    if server.start():
+        surface.extra["bridge"] = server
+        return server
+    return None
 
 
 def ask_ditto(window: Any, text: str) -> None:
@@ -416,9 +478,13 @@ def ask_ditto(window: Any, text: str) -> None:
 
 
 def close_gui(surface: Optional[GuiSurface]) -> None:
-    """The main window closes: the GUI tools are hidden again."""
+    """The main window closes: the bridge for AI apps stops (they are told the window is not open), and the GUI tool
+    no longer reaches its forms."""
+    bridge = surface.extra.pop("bridge", None) if surface is not None else None
+    if bridge is not None:
+        bridge.stop()
     gui_surface.detach(surface)
 
 
-__all__ = ["FillBanner", "FormBinding", "GuiInvoker", "MARK_COLOUR", "QWizardPages", "close_gui", "is_marked",
-           "open_gui", "person_audit"]
+__all__ = ["APP_MARK_COLOUR", "FillBanner", "FormBinding", "GuiInvoker", "MARK_COLOUR", "QWizardPages", "close_gui",
+           "field_tip", "is_marked", "mark_colour", "marked_by", "open_gui", "person_audit", "start_bridge"]

@@ -1189,7 +1189,10 @@ Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 16 nur l
 etwas ändern (`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`,
 `download_hf_file`, `create_deploy_package`, `run_mojo_miracle`), und `deploy_to_device`, das ein Gerät erreicht, dem
 du vertraust (Stufe `external`: immer mit Frage). `run_doctor`, der Name von `run_mojo_oracle` in 3.0.0, bleibt
-aufrufbar, wird aber nicht aufgelistet (unveröffentlicht).
+aufrufbar, wird aber nicht aufgelistet (unveröffentlicht). `gui` (unveröffentlicht) liest und füllt das offene
+Framework-Fenster (Stufe `local_write`; seine lesenden Aktionen `read_form`, `wizard_state` und `show_window` werden
+wie Lese-Tools entschieden, und deine Einstellung für `gui` gilt für alle seine Aktionen; siehe
+[Funktionen](Features_DE.md)).
 
 ### tools list
 
@@ -1357,6 +1360,12 @@ Betreibt den MCP-Server. Normalerweise startet ihn der KI-Client für dich (sieh
 Protokoll, Logs gehen nach stderr. Sind die Tool-Berechtigungen noch nicht eingerichtet, funktionieren nur lesende
 Tools ohne Nachfrage, alles andere fragt (kann der Client nicht fragen, wartet die Frage im Framework: siehe
 [tools approvals](#tools-approvals)).
+
+Solange das Framework-Fenster (die GUI) offen ist, erreicht das Tool `gui` seine Formulare über eine private Brücke,
+die nur dein Konto nutzen kann (unveröffentlicht): Der Client liest und füllt sie wie Ditto, und jedes Feld, das er
+ausfüllt, wird mit dem Namen seines MCP-Tokens oder mit dem Namen markiert, den der Client sich selbst gibt. Ist kein
+Framework-Fenster offen, antwortet `gui` mit dem Blocker `gui_not_open` („Das Framework-Fenster öffnen.“). Dafür musst
+du nichts einrichten.
 
 | Option | Bedeutung |
 |---|---|

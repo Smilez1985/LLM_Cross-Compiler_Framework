@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Texts of the GUI tools (Ditto's hands in the window), the build progress panel and the board recommendation, English
-and German. LocalizationManager merges them (localization.TEXT_MODULES); a key that exists already is refused there.
+Texts of the GUI tool (the AI's hands in the window: Ditto's and AI apps'), the build progress panel and the board
+recommendation, English and German. LocalizationManager merges them (localization.TEXT_MODULES); a key that exists
+already is refused there.
 
 Every key has the same {placeholders} in both languages (tests/test_gui_tools.py). The field labels are also what
-an AI reads (in English) through read_gui_form. This module imports nothing from the framework.
+an AI reads (in English) through the GUI tool's read_form. This module imports nothing from the framework.
 """
 
 TEXTS = {
@@ -46,14 +47,25 @@ TEXTS = {
         "gui.ai.where_data": "It decides where your data goes, so only the person changes it.",
         "gui.ai.privacy": "A lower level sends more personal data to a cloud provider, so only the person changes it.",
 
-        # Ditto's mark on a field and the banner with the undo
+        # an AI's mark on a field and the banner with the undo
         "gui.field.tip": "Filled by Ditto. Change it to keep your own value, or undo Ditto's changes.",
+        "gui.field.tip_app": "Filled by {who}. Change it to keep your own value, or undo the AI changes.",
         "gui.banner.filled": "Ditto filled: {fields}. Please check them. Change a field to keep your own value. "
                              "Nothing was started or saved.",
+        "gui.banner.filled_by": "Filled by {who}: {fields}.",
+        "gui.banner.check": "Please check them. Change a field to keep your own value. Nothing was started or saved.",
         "gui.banner.undo": "Undo Ditto's changes",
+        "gui.banner.undo_ai": "Undo the AI changes",
         "gui.banner.undone": "Ditto's changes are undone. Fields you changed keep your value.",
+        "gui.banner.undone_ai": "The AI changes are undone. Fields you changed keep your value.",
+        # who filled a field (an AI app's own name is its claim: shown in quotes, never trusted)
+        "gui.filler.ditto": "Ditto",
+        "gui.filler.app": "the AI app \"{app}\" (its own name, not checked)",
+        "gui.filler.token": "the AI app with the MCP token \"{token}\"",
+        "gui.filler.token_app": "the AI app with the MCP token \"{token}\" (it calls itself \"{app}\")",
+        "gui.filler.unnamed": "an AI app that gave no name",
 
-        # what show_gui opens
+        # what show_window opens
         "gui.window.builder": "Builder tab",
         "gui.window.deployment": "Deployment tab",
         "gui.window.chat": "Chat panel",
@@ -177,6 +189,19 @@ TEXTS = {
         "gui.banner.undo": "Dittos Änderungen rückgängig machen",
         "gui.banner.undone": "Dittos Änderungen sind rückgängig gemacht. Felder, die du geändert hast, behalten deinen "
                              "Wert.",
+        "gui.field.tip_app": "Ausgefüllt von {who}. Ändere es, um deinen eigenen Wert zu behalten, oder mache die "
+                             "KI-Änderungen rückgängig.",
+        "gui.banner.filled_by": "Ausgefüllt von {who}: {fields}.",
+        "gui.banner.check": "Bitte prüfe sie. Ändere ein Feld, um deinen eigenen Wert zu behalten. Nichts wurde "
+                            "gestartet oder gespeichert.",
+        "gui.banner.undo_ai": "KI-Änderungen rückgängig machen",
+        "gui.banner.undone_ai": "Die KI-Änderungen sind rückgängig gemacht. Felder, die du geändert hast, behalten "
+                                "deinen Wert.",
+        "gui.filler.ditto": "Ditto",
+        "gui.filler.app": "der KI-App \u201e{app}\u201c (ihr eigener Name, nicht geprüft)",
+        "gui.filler.token": "der KI-App mit dem MCP-Token \u201e{token}\u201c",
+        "gui.filler.token_app": "der KI-App mit dem MCP-Token \u201e{token}\u201c (sie nennt sich \u201e{app}\u201c)",
+        "gui.filler.unnamed": "einer KI-App, die keinen Namen genannt hat",
 
         "gui.window.builder": "Reiter Builder",
         "gui.window.deployment": "Reiter Deployment",

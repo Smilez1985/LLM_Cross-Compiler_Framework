@@ -872,20 +872,29 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   were saved to (`device_tests.json`, found by the model's sha256), with the KV cache the measurement used next to the
   one the board's server is set to. The Deployment window lists such a build as "tested on <board>", and after a
   deploy of a GGUF model it fills in the board and the model for that measurement.
-- **Ditto's hands in the window: the GUI tools** (`read_gui_form`, `fill_gui_form`, `wizard_state`, `wizard_step`,
-  `show_gui`; `orchestrator/tools/tools_gui.py`, `orchestrator/tools/gui_surface.py`,
-  `orchestrator/gui/form_surface.py`): the build form, the target module wizard (page by page) and the AI settings
-  dialog register their fields, and Ditto reads what you entered and fills fields visibly. Secrets are only "set" or
-  "not set" and never filled; local files reach the AI as labels, and no home folder (also not another account's)
-  reaches it by name; a field you are editing or a value you chose is never overwritten; a fill that would change your
-  choice through the form's own logic is undone completely. Every filled field has a purple frame and is named in a
-  line above the form with **Undo Ditto's changes** (the undo is audited). Nothing is submitted: Start Build, the
-  wizard's Finish and Save stay your clicks, and a module Ditto filled is marked AI-generated, so its first build is
-  shown to you once. The AI settings never let an AI change the provider, the address, the privacy level or the
-  fallback chain. The tools exist while the window is open and only for Ditto; external AI apps get them later through
-  the host service (`GUI_TOOL_CALLERS`). Every call goes through the tool registry (permissions, limits, audit). An
-  MCP client still lists only the core tools, inside the 40 tools some clients take, and `get_status` warns only
-  about what a client lists.
+- **The AI's hands in the window: the GUI tool `gui`, for Ditto and for AI apps alike** (`orchestrator/tools/tools_gui.py`,
+  `orchestrator/tools/gui_surface.py`, `orchestrator/tools/gui_bridge.py`, `orchestrator/gui/form_surface.py`): the
+  build form, the target module wizard (page by page) and the AI settings dialog register their fields, and an AI reads
+  what you entered and fills fields visibly. One tool with an `action` field (`read_form`, `fill_form`,
+  `wizard_state`, `wizard_open`, `wizard_fill`, `wizard_next`, `wizard_back`, `wizard_docs`, `show_window`)
+  replaces the five GUI tools of the development version, so an MCP client lists exactly 40 tools, the most some
+  clients take. Ditto and every MCP client use the same tool and the same code (`GuiCore`, in the GUI process): Ditto
+  directly, an MCP client's server over a private bridge to the open window. Only this account reaches the bridge: an
+  AF_UNIX socket in the 0700 folder `gui_bridge` of the per-user folder (on Windows a named pipe with a random name), a
+  random key in `gui_bridge/bridge.json` (0600) that both sides prove before anything is sent, the peer's account
+  checked on Linux, and JSON messages only. When no framework window is open, `gui` is refused with the new blocker
+  `gui_not_open` ("Open the framework window."; delegation rules version 4); it stays listed. Reading actions are
+  decided like read tools, the others like a tool that changes something (asked by default); your setting for `gui`
+  applies per caller (Ditto, the local stdio clients, each named token), a new token cannot use it, and a question a
+  client cannot show becomes a pending approval. Secrets are only "set" or "not set" and never filled; local files reach
+  the AI as labels, and no home folder (also not another account's) reaches it by name; a field you are editing or a
+  value you chose is never overwritten; a fill that would change your choice through the form's own logic is undone
+  completely. Every filled field names who filled it: Ditto in purple, an AI app in another colour with its MCP token's
+  name or its own name in quotes as its claim (an app never looks like Ditto); **Undo the AI changes** takes back every
+  AI change and is audited with who had filled. Nothing is submitted: Start Build, the wizard's Finish and Save stay
+  your clicks, and a module an AI filled is marked AI-generated, so its first build is shown to you once. The AI
+  settings never let an AI change the provider, the address, the privacy level or the fallback chain. Every call goes
+  through the caller's own tool registry (permissions, limits, audit entry with the caller).
 - **The board recommendation from the hardware probe** (`orchestrator/runtime/board_recommendation.py`): after a probe
   the Builder recommends the matched target's board with its source (the probe's SoC, or the probe's board name in the
   target's list of known boards) and how sure it is. Only an exact match is filled in; otherwise the candidates and
