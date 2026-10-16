@@ -132,7 +132,9 @@ def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI cli
     lines += warning_blocks(facts)
     plan = getattr(facts, "deletion", None)
     if plan is not None:
-        lines.append("Would be deleted:")
+        # an AI's request only moves to the trash (WP7); deleting for good is the person's own step
+        lines.append("Would be moved to the trash (it can be restored there):" if tuple(plan.mode_offered) == ("trash",)
+                     else "Would be deleted:")
         for item in plan.items:
             lines.append(f"  {visible(item.speaking_name)}")
             if person_view and item.full_path:

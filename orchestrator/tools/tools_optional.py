@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-The optional tools of MCP design T10: `delete_artifact` and `restore_knowledge_snapshot`.
+The optional tools of MCP design T10: `delete_artifact` and `restore_knowledge_snapshot`; and of the trash
+(delegation design 3.10): `list_trash` and `restore_from_trash`.
 
 Both destroy something (a built model, the current content of the knowledge base), so both are class `external`,
 marked destructive, denied by default and therefore hidden until the person enables them in Tool Permissions (a
@@ -8,7 +9,12 @@ marked destructive, denied by default and therefore hidden until the person enab
 put to the person) and never get a standing approval (design 6.10). Both are two-phase: the question shows what the
 framework looked up (the built model by its label, size and hash; the snapshot and the backup taken first), and the
 handler acts on exactly that. `delete_artifact` deletes (round 5 f): the person alone confirms it, in the framework's
-own window, never through a client's form or under a delegation.
+own window, never through a client's form or under a delegation; it moves the built model into the trash, where the
+person can restore it (the space stays used until the person empties the trash; no tool empties it).
+
+`list_trash` and `restore_from_trash` are optional too (denied by default). An AI sees the trash by speaking names,
+kinds, sizes and dates, never a path, and restores only what it asked to delete itself: what the person deleted, the
+person restores (blocker trash_not_yours).
 """
 
 from datetime import datetime
@@ -16,10 +22,11 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.tools.facts_catalog import blocked
 from orchestrator.tools.output import ToolOutput, fact
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
-from orchestrator.tools.spec import CallFacts, DeletionItem, DeletionPlan, Fact, FieldMeta
+from orchestrator.tools.spec import CallFacts, DeletionPlan, Fact, FieldMeta
 
 SNAPSHOT_PATTERN = r"^[\w.-]{1,120}$"
 
@@ -36,7 +43,10 @@ class DeleteArtifactIn(BaseModel):
 class DeleteArtifactOut(ToolOutput):
     artifact_id: str
     deleted: bool
+    moved_to_trash: bool = False
+    trash_ids: List[str] = Field(default_factory=list)
     freed_bytes: int
+    note: str = ""
 
 
 class RestoreSnapshotIn(BaseModel):
@@ -51,6 +61,44 @@ class RestoreStartedOut(ToolOutput):
     state: str
     note: str = ("Poll get_job_status with wait_seconds=50 until the job ends; its result names the backup taken "
                  "before the restore.")
+
+
+TRASH_ID = r"^tr_[0-9a-f]{16}$"
+
+
+class ListTrashIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    only_yours: bool = Field(default=False, description="Only what you asked to delete (what you can restore)")
+
+
+class TrashItemOut(BaseModel):
+    trash_id: str
+    kind: str
+    label: str
+    size_bytes: int
+    deleted_at: str
+    remind_at: str
+    yours: bool
+
+
+class ListTrashOut(ToolOutput):
+    items: List[TrashItemOut]
+    total_bytes: int
+    note: str = ("Only the person empties the trash (File > Trash... or 'llm-cli trash empty'); no tool does. You can "
+                 "restore an item with restore_from_trash only when 'yours' is true.")
+
+
+class RestoreFromTrashIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    trash_id: str = Field(min_length=19, max_length=19, pattern=TRASH_ID,
+                          description="Id from list_trash, e.g. tr_0123456789abcdef")
+
+
+class RestoredOut(ToolOutput):
+    trash_id: str
+    restored: bool
+    label: str
+    renamed: bool = False
 
 
 def _gb(n: int) -> str:
@@ -78,44 +126,59 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
             target = store().resolve(inp.artifact_id, inp.expect_sha256)
         except ArtifactRefused as e:
             raise refused(e) from None
-        facts = (Fact("Built model", target.label), Fact("Size", _gb(target.size) + " (freed on disk)"),
+        facts = (Fact("Built model", target.label),
+                 Fact("Size", _gb(target.size) + " (moved to the trash: the space stays used until the person "
+                                                 "empties the trash)"),
                  Fact("Model file sha256", target.sha256 or "not listed"),
-                 Fact("Also removed", "its golden ZIP next to it" if target.zips else "nothing else"))
-        return CallFacts(consequence=f"Deletes the built model {target.label} ({_gb(target.size)}) from the output "
-                                     "folder for good; it cannot be undone.",
+                 Fact("Also moved", "its golden ZIP next to it" if target.zips else "nothing else"))
+        return CallFacts(consequence=f"Moves the built model {target.label} ({_gb(target.size)}) from the output "
+                                     "folder to the trash; the person can restore it there.",
                          facts=facts, bound=target.describe(), deletion=deletion_plan(target))
 
     def deletion_plan(target) -> DeletionPlan:
         """Round 5 f: what the person is shown in the framework's own window, item by item with the full path (an AI
-        sees labels and sizes only): exactly the folder and the golden ZIP the handler deletes."""
+        sees labels and sizes only): exactly the folder and the golden ZIP the handler moves. An AI's request only
+        moves to the trash; deleting for good is the person's own step (emptying the trash)."""
         try:
-            zips = [(z, z.stat().st_size) for z in target.zips]
-            folder_bytes = max(0, target.size - sum(s for _, s in zips))
-            items = [DeletionItem(kind="artifact", speaking_name=target.label, full_path=str(target.folder),
-                                  file_name=target.folder.name, size_bytes=folder_bytes,
-                                  what="built model folder (the model files and build record of this build)")]
-            items += [DeletionItem(kind="artifact", speaking_name=f"{target.label} (golden ZIP)", full_path=str(z),
-                                   file_name=z.name, size_bytes=size, what="the build's golden ZIP next to the folder")
-                      for z, size in zips]
-            return DeletionPlan(items=items, total_bytes=sum(i.size_bytes for i in items), mode_offered=("permanent",))
+            return store().plan(target, ("trash",))
         except (OSError, ValueError):  # never the error's own words: they quote host paths
             raise ToolError(f"The built model {target.label} changed while it was looked up; nothing was deleted.",
                             code="failed", next="Call list_artifacts again; the person is asked again.") from None
 
     def delete_artifact(inp: DeleteArtifactIn, ctx: ToolContext) -> DeleteArtifactOut:
         from orchestrator.Core.artifact_store import ArtifactRefused
+        from orchestrator.Core.deletion import PlanChanged, accepted_through_registry
+        from orchestrator.Core.trash import Trash, TrashError
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
-        if bound.get("artifact_id") != inp.artifact_id or not bound.get("identity"):
+        plan = getattr(ctx.facts, "deletion", None)
+        if bound.get("artifact_id") != inp.artifact_id or not bound.get("identity") or plan is None:
             raise ToolError("The deletion is not bound to what the person was shown; nothing was deleted.",
                             code="failed", next="Call delete_artifact again through the framework's tool registry.")
         try:
-            freed = store().delete(inp.artifact_id, bound.get("sha256") or None, bound["identity"])
+            accepted = accepted_through_registry(plan, ctx, "trash")
+        except (PermissionError, ValueError):
+            raise ToolError("Only the person confirms a deletion, in the framework's own window; nothing was "
+                            "deleted.", code="needs_person",
+                            next="Tell the person; the framework asks them when you call it again.") from None
+        try:
+            done = store().delete(inp.artifact_id, bound.get("sha256") or None, bound["identity"], accepted,
+                                  trash=Trash.for_framework(framework), deleted_by=ctx.actor)
         except ArtifactRefused as e:
             raise refused(e) from None
+        except PlanChanged:
+            raise ToolError("The built model changed after the person saw the list; nothing was deleted.",
+                            code="failed", next="Call list_artifacts again; the person is asked again.") from None
+        except TrashError as e:
+            raise ToolError(f"{e}", code=e.code if e.code != "failed" else "failed",
+                            next="Tell the person; nothing was deleted.") from None
         except OSError as e:
-            raise ToolError(f"The built model could not be deleted completely ({type(e).__name__}).", code="failed",
-                            next="Tell the person; they check the output folder.") from None
-        return DeleteArtifactOut(artifact_id=inp.artifact_id, deleted=True, freed_bytes=freed)
+            raise ToolError(f"The built model could not be moved completely ({type(e).__name__}).", code="failed",
+                            next="Tell the person; they check the output folder and the trash.") from None
+        return DeleteArtifactOut(artifact_id=inp.artifact_id, deleted=True, moved_to_trash=bool(done.trash_ids),
+                                 trash_ids=done.trash_ids, freed_bytes=done.freed_bytes,
+                                 note="Moved to the trash: the person can restore it (and you can, with "
+                                      "restore_from_trash, since you asked for it). Its space stays used until the "
+                                      "person empties the trash.")
 
     # -- restore_knowledge_snapshot ------------------------------------------------------------------------------
 
@@ -182,12 +245,80 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
         job = jobs.start("snapshot_restore", ctx.owner, work)
         return RestoreStartedOut(job_id=job.job_id, state=job.state)
 
+    # -- the trash ---------------------------------------------------------------------------------------------------
+
+    def trash():
+        from orchestrator.Core.trash import Trash
+        return Trash.for_framework(framework)
+
+    def trash_entries():
+        from orchestrator.Core.trash import TrashError
+        try:
+            return trash().entries()
+        except TrashError as e:
+            raise ToolError(str(e), code="failed", next="Tell the person; they look at File > Trash... in the "
+                                                        "framework.") from None
+        except (AttributeError, OSError, TypeError):
+            raise ToolError("The trash is not available here.", code="not_supported",
+                            next="Tell the person; 'llm-cli doctor' shows why.") from None
+
+    def list_trash(inp: ListTrashIn, ctx: ToolContext) -> ListTrashOut:
+        from orchestrator.Core.trash import Trash
+        items = []
+        for entry in trash_entries():
+            if not Trash.present(entry):
+                continue
+            view = entry.ai_view(ctx.actor)
+            if inp.only_yours and not view["yours"]:
+                continue
+            items.append(TrashItemOut(**view))
+        return ListTrashOut(items=items, total_bytes=sum(i.size_bytes for i in items))
+
+    def prepare_restore_from_trash(inp: RestoreFromTrashIn, ctx: ToolContext) -> CallFacts:
+        from orchestrator.Core.trash import Trash
+        entry = next((e for e in trash_entries() if e.id == inp.trash_id), None)
+        if entry is None or not Trash.present(entry):
+            raise blocked("trash_unknown", "There is no such item in the trash.",
+                          "Call list_trash for the ids you can use.")
+        if entry.deleted_by != ctx.actor:
+            raise blocked("trash_not_yours", "The person deleted this, so only the person restores it.",
+                          "Tell the person they can restore it in File > Trash... of the framework.")
+        facts = (Fact("Item", f"{entry.label} ({entry.what()})"), Fact("Size", _gb(entry.size)),
+                 Fact("Back to", entry.origin), Fact("Moved to the trash", entry.deleted_at.replace("T", " ")[:16]))
+        consequence = (f"Moves {entry.label} from the trash back to {entry.origin} (next to it with a new name when "
+                       "that place is taken).")
+        return CallFacts(consequence=consequence, facts=facts,
+                         bound={"trash_id": entry.id, "plan_sha256": entry.plan_sha256},
+                         consequence_template=consequence)
+
+    def restore_from_trash(inp: RestoreFromTrashIn, ctx: ToolContext) -> RestoredOut:
+        from orchestrator.Core.trash import TrashError
+        bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
+        if bound.get("trash_id") != inp.trash_id:
+            raise ToolError("The restore is not bound to what the person was shown; nothing was changed.",
+                            code="failed", next="Call restore_from_trash again through the framework's tool registry.")
+        store = trash()
+        entry = store.get(inp.trash_id)
+        if entry is None or entry.plan_sha256 != bound.get("plan_sha256"):
+            raise ToolError("That item changed in the trash; nothing was restored.", code="failed",
+                            next="Call list_trash again.")
+        try:
+            dest = store.restore(inp.trash_id, ctx.actor)
+        except TrashError as e:
+            next_step = "Tell the person; they look at File > Trash... in the framework."
+            if e.code in ("trash_unknown", "trash_not_yours"):
+                raise blocked(e.code, str(e), next_step) from None
+            raise ToolError(str(e), code="failed", next=next_step) from None
+        return RestoredOut(trash_id=inp.trash_id, restored=True, label=entry.label,
+                           renamed=dest.name != entry.name)
+
     specs: List[Any] = [
         ToolSpec("delete_artifact", "Delete a built model",
-                 "Deletes one finished build (its folder below the output folder and its golden ZIP) to free disk "
-                 "space; refused outside the output folder, while a build writes into it, or when its sha256 changed "
-                 "since list_artifacts. Optional and destructive: hidden until the person enables it, and every call "
-                 "is asked.",
+                 "Moves one finished build (its folder below the output folder and its golden ZIP) to the trash; the "
+                 "person can restore it, and its disk space is freed when the person empties the trash. Refused "
+                 "outside the output folder, while a build writes into it, or when its sha256 changed since "
+                 "list_artifacts. Optional and destructive: hidden until the person enables it, and every call is "
+                 "asked.",
                  ToolTier.EXTERNAL, DeleteArtifactIn, DeleteArtifactOut, delete_artifact, takes_context=True,
                  destructive=True, idempotent=True, default_decision=Decision.DENY, max_decision=Decision.ASK,
                  prepare=prepare_delete,
@@ -197,8 +328,8 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
                  fields={"artifact_id": FieldMeta(kind="id", list_tool="list_artifacts"),
                          "expect_sha256": FieldMeta(kind="trust")},
                  examples=({"artifact_id": "a_0123456789abcdef", "expect_sha256": "0" * 64},),
-                 consequence="Deletes a built model from the output folder for good.",
-                 summary=lambda o: f"Built model {fact(o.artifact_id)} deleted, {fact(o.freed_bytes)} bytes freed."),
+                 consequence="Moves a built model from the output folder to the trash.",
+                 summary=lambda o: f"Built model {fact(o.artifact_id)} moved to the trash: {fact(o.moved_to_trash)}."),
         ToolSpec("restore_knowledge_snapshot", "Restore a knowledge snapshot",
                  "Undoes an addition to the knowledge base (imported documentation, a pack): replaces the knowledge base with an earlier snapshot (names in "
                  "get_status, knowledge section). The current content is saved as a backup snapshot first. Runs as a "
@@ -210,6 +341,24 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
                  examples=({"snapshot": "pre_crawl_20261012_101500"},),
                  consequence="Replaces the knowledge base with an earlier snapshot (a backup is taken first).",
                  summary=lambda o: f"Restore job {fact(o.job_id)}: {fact(o.state)}."),
+        ToolSpec("list_trash", "List the trash",
+                 "Lists what is in the framework's trash (speaking name, kind, size, when it was moved there and "
+                 "whether you asked to delete it), never a path. Only the person empties the trash. Optional: hidden "
+                 "until the person enables it.",
+                 ToolTier.READ, ListTrashIn, ListTrashOut, list_trash, takes_context=True, idempotent=True,
+                 default_decision=Decision.DENY,
+                 examples=({}, {"only_yours": True}),
+                 summary=lambda o: f"{fact(len(o.items))} items in the trash, {fact(o.total_bytes)} bytes."),
+        ToolSpec("restore_from_trash", "Restore from the trash",
+                 "Moves an item you asked to delete back from the trash to where it was (next to it with a new name "
+                 "when that place is taken). Only what you asked to delete yourself; what the person deleted, the "
+                 "person restores. Optional: hidden until the person enables it, and every call is asked.",
+                 ToolTier.LOCAL_WRITE, RestoreFromTrashIn, RestoredOut, restore_from_trash, takes_context=True,
+                 default_decision=Decision.DENY, max_decision=Decision.ASK, prepare=prepare_restore_from_trash,
+                 fields={"trash_id": FieldMeta(kind="id", list_tool="list_trash")},
+                 examples=({"trash_id": "tr_0123456789abcdef"},),
+                 consequence="Moves an item back from the trash to where it was.",
+                 summary=lambda o: f"Trash item {fact(o.trash_id)} restored: {fact(o.restored)}."),
     ]
     for spec in specs:
         registry.register(spec)

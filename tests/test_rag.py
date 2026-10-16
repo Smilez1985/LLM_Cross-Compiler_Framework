@@ -375,10 +375,19 @@ class TestCollections:
         assert rag.get_status()["vector_count"] == count
         assert rag.search("what does E2041 mean")[0].source == "https://docs.example/e2041"
 
-    def test_only_the_newest_snapshots_are_kept(self, make_rag):
-        """The clean-up the person chooses (design WP7): nothing calls it by itself, and it has no count of its own
-        (there is no snapshot limit); creating snapshots never deletes one."""
+    def test_only_the_snapshots_the_person_chose_are_deleted(self, make_rag):
+        """The clean-up the person chooses (design WP7): exactly the snapshots of the accepted plan, into the trash or
+        for good; no count, no age, nothing chosen by the framework; creating snapshots never deletes one."""
         import os
+
+        from orchestrator.Core.deletion import accept, choose
+        from orchestrator.Core.trash import Trash
+
+        class Audit:
+            entries = []
+
+            def record(self, *args, **kwargs):
+                self.entries.append((args, kwargs))
 
         rag = make_rag()
         ingest_all(rag)
@@ -388,11 +397,15 @@ class TestCollections:
             os.utime(path, (1_000_000 + i, 1_000_000 + i))  # mtime order without sleeping
         assert len(rag.list_snapshots()) == 7
 
-        rag._prune_snapshots(keep_newest=5)
-
-        assert rag.list_snapshots() == [f"snap_{i}" for i in range(2, 7)]
-        rag._prune_snapshots(keep_newest=0, keep=rag.snapshot_dir / "snap_6.jsonl.gz")
-        assert rag.list_snapshots() == ["snap_6"]
+        plan = rag.snapshot_plan()
+        assert [i.speaking_name for i in plan.items] == [f"snap_{i}" for i in range(7)]
+        audit, trash = Audit(), Trash(rag.snapshot_dir.parent)
+        done = rag.delete_snapshots(accept(choose(plan, [1, 4]), "gui"), trash=trash, audit=audit)
+        assert done.done == ["snap_1", "snap_4"] and len(trash.entries()) == 2
+        assert rag.list_snapshots() == [f"snap_{i}" for i in (0, 2, 3, 5, 6)]
+        done = rag.delete_snapshots(accept(rag.snapshot_plan(["snap_6"]), "cli", "permanent"), audit=audit)
+        assert done.done == ["snap_6"] and rag.list_snapshots() == [f"snap_{i}" for i in (0, 2, 3, 5)]
+        assert [a[4] for a, _ in audit.entries] == ["snapshots_pruned", "snapshots_pruned"]
 
     def test_snapshot_of_another_model_is_refused(self, make_rag):
         rag = make_rag(embedder=FakeEmbedder("fake/model-a"))

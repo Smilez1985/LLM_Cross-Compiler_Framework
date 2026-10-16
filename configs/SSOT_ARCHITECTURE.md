@@ -312,7 +312,7 @@ moment.
 | Settings and their defaults | `ConfigSchema` entries in `orchestrator/Core/config_manager.py`; your values in `config.yml` | schema validation at start |
 | Tools for AI clients and Ditto | `orchestrator/tools/framework_tools.py` | `tests/test_foundation.py`, `tests/test_mcp_server.py` |
 | Ditto's evaluation cases | `evals/ditto/cases.yml` | `tests/test_ditto_eval.py` |
-| Calibration text for importance matrices | `data/calibration/`, SHA256 values in `orchestrator/utils/calibration.py` | `llm-cli doctor` (code `data.calibration`) |
+| Calibration text for importance matrices | `data/calibration/`, SHA256 values in `orchestrator/utils/calibration.py` | `llm-cli mojo` (code `data.calibration`) |
 | llama.cpp version | `llama_cpp.source` in `configs/llama_runtime.yml` (the commit) | `tests/test_build_recipe.py`, `python scripts/llama_cpp_pin.py check` |
 | Other versions inside target images | the target's Dockerfile | hadolint and the image build in `.github/workflows/docker.yml` |
 | What was done | [CHANGELOG.md](../CHANGELOG.md) | `tests/test_versioning.py` (newest version) |

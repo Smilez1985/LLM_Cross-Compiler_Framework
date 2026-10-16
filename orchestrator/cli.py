@@ -2000,8 +2000,9 @@ def runtime_install(ctx: FrameworkContext, backend: str, placement: str, jobs: O
                   (f", CPU fallback {escape(fallback.build_id[:16])}" if fallback.build_id != active.build_id else ""))
     for problem in result.problems:
         console.print(f"[yellow]{escape(problem)}[/yellow]")
-    if result.removed:
-        console.print(f"[dim]Removed {len(result.removed)} old build(s).[/dim]")
+    if result.older:
+        console.print(f"[dim]{len(result.older)} older build(s) kept; the framework deletes none by itself. "
+                      "'llm-cli ditto runtime prune' lists them for you to delete.[/dim]")
     if rt.endpoint() is not None:
         console.print("The running server keeps running; the next start uses the new build "
                       "(llm-cli ditto runtime start).")
@@ -2053,17 +2054,28 @@ def runtime_export(ctx: FrameworkContext, file: Path):
 
 
 @ditto_runtime.command('prune')
-@click.option('--keep', type=click.IntRange(0, 50), default=2, show_default=True,
-              help='Other builds to keep besides the active build, the CPU fallback and the running one')
 @pass_context
-def runtime_prune(ctx: FrameworkContext, keep: int):
-    """Remove old self-built builds (never the active build, the CPU fallback or the running one)"""
-    from orchestrator.runtime.llama_server import LocalRuntimeError
+def runtime_prune(ctx: FrameworkContext):
+    """List old runtime builds and delete the ones you pick, after you confirm them in a terminal (nothing preselected;
+    never the active build, the CPU fallback or the running one)"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    rt = _local_runtime(ctx)
+    plan = rt.cleanup_plan()
+    if plan is None:
+        console.print("No old runtime builds: the active build, the CPU fallback and the running one are never "
+                      "listed.")
+        return
+    accepted = confirm_deletion(plan, title=f"Old runtime builds ({len(plan.items)}, {size_text(plan.total_bytes)})",
+                                multiple=True, again="llm-cli ditto runtime prune")
+    if accepted is None:
+        return
+    trash, audit = _person_trash(ctx, Path(rt.data_dir))
     try:
-        removed = _local_runtime(ctx).prune(keep_last=keep)
-    except LocalRuntimeError as e:
-        _runtime_failure(e)
-    console.print(f"Removed {len(removed)} build(s)." if removed else "Nothing to remove.")
+        result = rt.delete_old_builds(accepted, trash=trash, audit=audit)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    _print_deletion_result(result, accepted)
 
 
 @ditto_runtime.command('start')
@@ -3064,23 +3076,28 @@ def auth_rotate_key(ctx: FrameworkContext):
 
 
 # ============================================================================
-# DOCTOR (deterministic health checks)
+# DOCTOR (the 3.0.0 name of Mojo, kept as an alias with its options, output and exit codes)
 # ============================================================================
+
+DOCTOR_NOTE = ("Note: the health check is Mojo now: 'llmcf mojo' checks (Mojo Oracle) and 'llmcf mojo --miracle' "
+               "repairs (Mojo Miracle); 'llm-cli doctor' keeps working.")
+
 
 @cli.command('doctor')
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @click.option('--fix', is_flag=True, help='Apply automatic fixes up to --tier, then check again')
 @click.option('--tier', default=1, show_default=True, type=click.IntRange(1, 2),
-              help='1: harmless fixes (makes your personal folder private); 2: also lists the dangling framework '
-                   'images (id, size, what each is) and deletes exactly those you confirm in a terminal; the Docker '
-                   'build cache is never cleared')
+              help='1: harmless fixes (makes your personal folder private); 2: also lists the framework\'s build '
+                   'images (name, id, size, what each is; nothing ticked) and deletes exactly those you pick and '
+                   'confirm in a terminal; the Docker build cache is never cleared')
 @pass_context
 def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
     """Check the installation and explain how to fix problems (exit code 0 ok, 1 warnings, 2 errors)"""
     from orchestrator.Core.doctor import Doctor, Severity
+    click.echo(DOCTOR_NOTE, err=True)
     ctx.require_framework()
     doc = Doctor(ctx.framework_manager)
-    report = doc.fix(tier) if fix else doc.run()
+    report, why_not = _doctor_fix(doc) if fix else (doc.run(), {})
     if as_json:
         data = report.to_dict()
         if fix and tier >= 2:  # listed only: a deletion needs the person's yes at a terminal
@@ -3097,69 +3114,378 @@ def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
     for code in report.fixed:
         console.print(f"[green]Fixed: {escape(code)}[/green]")
     for code in report.still_present:
-        console.print(f"[yellow]Still present after the fix: {escape(code)}[/yellow]")
+        why = f" ({why_not[code]})" if why_not.get(code) else ""
+        console.print(f"[yellow]Still present after the fix: {escape(code)}{escape(why)}[/yellow]")
     if fix and tier >= 2:
         _doctor_free_space(ctx.framework_manager)
     sys.exit(report.exit_code)
 
 
+def _doctor_fix(doc):
+    """`--fix` (tier 1 and the first part of tier 2): the harmless repairs of Mojo Miracle (they only narrow access or
+    switch to an intact build; audited, applied only while nothing changed, checked again), reported as the doctor
+    did: `fixed` and `still_present`, plus why each one still present was not repaired (for the person's output)."""
+    terminal = _interactive()
+    asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
+    result = doc.miracle(actor="cli", at_terminal=False, **asked)
+    report = result.after
+    report.fixed, report.still_present, why_not = _miracle_fixed(result)
+    return report, why_not
+
+
+def _miracle_fixed(result) -> Tuple[List[str], List[str], Dict[str, str]]:
+    """The repairs Mojo Miracle tried, as `doctor --fix` reports them: the codes it repaired, the codes still present
+    after it, and why each of those was not repaired."""
+    tried = [e for e in result.entries if e.verdict == "miracle"]
+    still = [e for e in tried if e.outcome not in ("repaired", "already_fixed")]
+    return ([e.finding.code for e in tried if e.outcome == "repaired"], [e.finding.code for e in still],
+            {e.finding.code: e.reason for e in still})
+
+
 def _doctor_image_listing(framework) -> dict:
     """Tier 2 for `--json`: the list only (nothing is deleted without the person's yes at a terminal)."""
-    from orchestrator.Core.doctor import DockerUnavailable, framework_image_plan
+    from orchestrator.Core.mojo.docker_objects import DockerUnavailable, docker_storage, framework_image_plan
     try:
         plan = framework_image_plan(framework)
     except DockerUnavailable as e:
         return {"available": False, "problem": str(e), "images": [], "deleted": False}
     items = plan.items if plan is not None else []
-    return {"available": True, "deleted": False,
-            "note": "Nothing is deleted with --json: run 'llm-cli doctor --fix --tier 2' in a terminal and confirm "
-                    "the list.",
+    storage = docker_storage(framework) or {}
+    return {"available": True, "deleted": False, "docker_root": storage.get("root") or None,
+            "note": "Nothing is deleted with --json: run 'llm-cli doctor --fix --tier 2' in a terminal (or use Tools "
+                    "> Framework Build Images... in the GUI) and tick the images to delete.",
             "images": [{"name": i.speaking_name, "id": i.file_name, "size_bytes": i.size_bytes, "what": i.what}
                        for i in items]}
 
 
-def _doctor_free_space(framework) -> None:
-    """Tier 2: lists the framework's dangling build images (name, id, size, what each is) and deletes exactly that
-    list after the person's yes at a terminal (default no). Docker's build cache is never cleared: it cannot be
-    limited to the framework."""
-    from orchestrator.Core.doctor import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
-                                          framework_image_plan)
+def _doctor_free_space(framework, heading: str = "Tier 2: the framework's build images",
+                       again: str = "llm-cli doctor --fix --tier 2") -> Tuple[int, str]:
+    """Tier 2 (and Mojo Miracle at a terminal): lists every build image of the framework (name, id, size, what each
+    is), nothing ticked, and deletes exactly the images the person picks and then confirms at a terminal (default no).
+    Docker's build cache is never cleared: it cannot be limited to the framework. The same list and deletion as Tools >
+    Framework Build Images... in the GUI: the one deletion path for the framework's Docker images. Returns how many
+    images were deleted and, when none was, why ("" when the person chose none)."""
     from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.mojo.docker_objects import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
+                                                       docker_storage, framework_image_plan)
     cache_note = ("Docker's build cache is not touched: it cannot be limited to the framework ('docker system df' "
                   "shows its size; 'docker builder prune' would clear it for every project on this computer).")
-    console.print("\n[bold]Tier 2: the framework's dangling build images[/bold]")
+    console.print(f"\n[bold]{escape(heading)}[/bold]")
     try:
         plan = framework_image_plan(framework)
     except DockerUnavailable as e:
         console.print(f"[yellow]{escape(str(e))}[/yellow] {escape(cache_note)}")
-        return
+        return 0, str(e)
+    storage = docker_storage(framework) or {}
+    if storage.get("root"):
+        console.print(f"Docker keeps its images in {escape(storage['root'])}.")
     if plan is None:
-        console.print(f"No dangling framework images to delete. {escape(cache_note)}")
-        return
-    table = Table(title=f"{len(plan.items)} dangling framework images, {size_text(plan.total_bytes)}")
-    for column in ("Image", "Id", "Size", "What it is"):
-        table.add_column(column, overflow="fold")
-    for item in plan.items:
-        table.add_row(escape(item.speaking_name), escape(item.file_name), size_text(item.size_bytes), escape(item.what))
-    console.print(table)
+        console.print(f"No framework images to delete. {escape(cache_note)}")
+        return 0, "there are no framework build images to delete"
     console.print("Sizes include layers other images may share, so less space can be freed. " + escape(cache_note))
-    if not _interactive():
-        console.print("[yellow]Nothing was deleted: run 'llm-cli doctor --fix --tier 2' yourself in a terminal to "
-                      "confirm this list.[/yellow]")
-        return
-    if not click.confirm(f"Delete exactly these {len(plan.items)} images?", default=False):
-        console.print("Nothing was deleted.")
-        return
+    accepted = confirm_deletion(plan, title=f"{len(plan.items)} framework build images, {size_text(plan.total_bytes)}",
+                                multiple=True, again=again)
+    if accepted is None:
+        return 0, ""
     try:
-        result = delete_framework_images(framework, plan, actor="cli")
+        result = delete_framework_images(framework, accepted.plan, actor="cli")
     except (ImagePlanChanged, DockerUnavailable, RuntimeError) as e:
         console.print(f"[yellow]{escape(str(e))}[/yellow]")
-        return
+        return 0, str(e)
     for name in result.deleted:
         console.print(f"[green]Deleted: {escape(name)}[/green]")
     for name, reason in result.failed:
         console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
     console.print(f"{len(result.deleted)} images deleted, about {size_text(result.freed_bytes)}.")
+    return len(result.deleted), "" if result.deleted else "Docker kept every image you chose (the reasons are above)"
+
+
+# ============================================================================
+# MOJO (the health check: Mojo Oracle looks, Mojo Miracle repairs; round 6 design 7, round 7 items 11', M', T)
+# ============================================================================
+
+MOJO_ICONS = {"ok": "[green]✔[/green]", "info": "[blue]ℹ[/blue]", "warn": "[yellow]![/yellow]",
+              "error": "[red]✘[/red]"}
+
+
+@cli.command('mojo')
+@click.option('--oracle', 'mode', flag_value='oracle', default=True,
+              help='Only look and report what was found (the default); at a terminal it then offers Mojo Miracle')
+@click.option('--miracle', 'mode', flag_value='miracle',
+              help='Repair what can be repaired, then report what was repaired, what was not and why')
+@click.option('--json', 'as_json', is_flag=True,
+              help='Machine-readable output; never asks and never deletes (with --miracle only the harmless repairs '
+                   'run)')
+@pass_context
+def mojo(ctx: FrameworkContext, mode: str, as_json: bool):
+    """Check the installation (Mojo Oracle) and repair what can be repaired (Mojo Miracle); exit code 0 ok, 1
+    warnings, 2 errors"""
+    from orchestrator.Core.mojo import Mojo, offers
+    ctx.require_framework()
+    framework = ctx.framework_manager
+    engine = Mojo(framework)
+    report = engine.run()
+    offered = offers(framework, report)
+    if as_json:
+        if mode == "miracle":
+            # Without a person at a terminal: only the harmless repairs (round 6 Q11); nothing is deleted.
+            result = engine.miracle(actor="cli", at_terminal=False, before=report)
+            data = {"mode": mode, **_mojo_dict(result.after, offers(framework, result.after)),
+                    **_mojo_miracle_dict(result)}
+        else:
+            data = {"mode": mode, **_mojo_dict(report, offered)}
+        click.echo(json.dumps(data, indent=2))
+        sys.exit(data["exit_code"])
+    terminal = _interactive()
+    _mojo_print_oracle(report, offered, terminal)
+    if mode == "oracle":
+        acts = [o for o in offered if o.verdict == "miracle" or (o.verdict == "deletion_list" and _mojo_lists(o))]
+        if not acts:
+            sys.exit(report.exit_code)
+        if not terminal:
+            console.print("Mojo Miracle can act on " + ("1 of them" if len(acts) == 1 else f"{len(acts)} of them")
+                          + ": run 'llmcf mojo --miracle' (in a terminal it also shows you the list to choose what is "
+                            "deleted).")
+            sys.exit(report.exit_code)
+        if not click.confirm("Run Mojo Miracle now?", default=False):
+            console.print("Mojo Miracle did not run; nothing was changed.")
+            sys.exit(report.exit_code)
+    console.print("\n[bold]Mojo Miracle: repairing what can be repaired[/bold]")
+    asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
+    # The plans printed above bind the repairs: a problem that changed since then is not repaired (plan_changed).
+    result = engine.miracle(actor="cli", at_terminal=terminal, before=report, offered=offered,
+                            free_space=(lambda: _mojo_free_space(framework)) if terminal else None, **asked)
+    _mojo_print_miracle(result)
+    sys.exit(result.exit_code)
+
+
+def _mojo_lists(offer) -> bool:
+    """Whether Mojo Miracle at a terminal opens the person's list for this deletion finding."""
+    from orchestrator.Core.mojo.offers import DELETION_LISTS
+    return offer.finding.code in DELETION_LISTS
+
+
+def _mojo_miracle_line(offer, terminal: bool) -> str:
+    """The person's line about what Mojo Miracle can do for one finding."""
+    from orchestrator.Core.mojo.offers import DELETION_WHERE
+    if offer.verdict == "miracle":
+        return f"Mojo Miracle can repair it: {offer.plan.summary}."
+    if offer.verdict == "deletion_list" and _mojo_lists(offer):
+        if terminal:
+            return ("Mojo Miracle shows you the framework's build images to choose from (name, id, size, what each "
+                    "is; nothing is ticked); only what you tick and confirm is deleted.")
+        return f"Mojo Miracle cannot repair it here: {offer.reason}; {DELETION_WHERE}."
+    return f"Mojo Miracle cannot repair it: {offer.reason}."
+
+
+def _mojo_print_oracle(report, offered, terminal: bool) -> None:
+    """What Mojo Oracle found: every finding; for each problem where (the full path), why it matters, the hint and
+    what Mojo Miracle can do; then one sentence that counts every problem by what can be done about it."""
+    from orchestrator.Core.mojo.views import oracle_summary
+    by_finding = {id(o.finding): o for o in offered}
+    console.print("[bold]Mojo Oracle: checking the installation (read-only, nothing is changed)[/bold]")
+    for finding in report.findings:
+        console.print(f"{MOJO_ICONS[finding.severity.value]} {escape(finding.subsystem)}: {escape(finding.message)}")
+        offer = by_finding.get(id(finding))
+        if offer is None:  # no problem: an information's hint is shown as the doctor showed it
+            if finding.severity.value == "info" and finding.fix_hint:
+                console.print(f"    → {escape(finding.fix_hint)}")
+            continue
+        if finding.where:
+            console.print(f"    Where: {escape(finding.where)}")
+        if finding.why:
+            console.print(f"    Why it matters: {escape(finding.why)}")
+        if finding.fix_hint:
+            console.print(f"    → {escape(finding.fix_hint)}")
+        console.print(f"    {escape(_mojo_miracle_line(offer, terminal))}")
+        if offer.verdict == "miracle":
+            for step in offer.plan.steps:
+                where = f" ({step.full_path})" if step.full_path else ""
+                console.print(f"      Plan: {escape(step.target_label)}{escape(where)}: {escape(step.before)} → "
+                              f"{escape(step.after)}" + (", can be undone" if step.undoable else ""))
+    console.print(escape(oracle_summary(offered, person=True)))
+
+
+def _mojo_print_miracle(result) -> None:
+    """What Mojo Miracle did: every problem, repaired or not, and why not; then the count."""
+    words = {"repaired": "[green]✔ Repaired[/green]", "already_fixed": "[green]✔ Already gone[/green]",
+             "still_present": "[yellow]! Still there[/yellow]", "declined": "[yellow]- Not deleted[/yellow]"}
+    for entry in result.entries:
+        finding = entry.finding
+        head = words.get(entry.outcome, "[red]✘ Not repaired[/red]")
+        if entry.outcome == "repaired":
+            text = f"{entry.summary}. Checked again: the problem is gone."
+        else:
+            text = entry.reason or entry.summary
+        console.print(f"{head}: {escape(finding.subsystem)} ({escape(finding.code)}): {escape(text)}")
+        if entry.outcome == "plan_changed":
+            console.print("    → Run 'llmcf mojo' again: it shows the new plan.")
+        elif entry.outcome not in ("repaired", "already_fixed") and finding.fix_hint:
+            console.print(f"    → {escape(finding.fix_hint)}")
+    for finding in result.new_problems:
+        console.print(f"{MOJO_ICONS[finding.severity.value]} New after Mojo Miracle: {escape(finding.subsystem)} "
+                      f"({escape(finding.code)}): {escape(finding.message)}")
+        if finding.fix_hint:
+            console.print(f"    → {escape(finding.fix_hint)}")
+    total = len(result.entries)
+    if not total:
+        console.print("Mojo Oracle found no problems, so Mojo Miracle had nothing to repair.")
+        return
+    gone, rest = len(result.already_gone), len(result.not_repaired)
+    console.print(f"Mojo Miracle repaired {len(result.repaired)} of {total} problem{'' if total == 1 else 's'}"
+                  + (f"; {gone} {'was' if gone == 1 else 'were'} already gone" if gone else "")
+                  + (f"; {rest} {'was' if rest == 1 else 'were'} not repaired (why: above)" if rest else "")
+                  + (f"; the check afterwards found {len(result.new_problems)} new (above)" if result.new_problems
+                     else "") + ".")
+
+
+def _mojo_free_space(framework) -> Tuple[int, str]:
+    """The person's list of the framework's build images (WP7's deletion path), from Mojo Miracle at a terminal: how
+    many images were deleted, and why none was ("" when the person chose none)."""
+    return _doctor_free_space(framework, heading="Free disk space: the framework's build images",
+                              again="llmcf mojo --miracle")
+
+
+def _mojo_dict(report, offered) -> dict:
+    """Mojo Oracle for --json: the report (the doctor's keys) with what Mojo Miracle can do for each problem."""
+    from orchestrator.Core.mojo.views import oracle_summary
+    by_finding = {id(o.finding): o for o in offered}
+    data = report.to_dict()
+    for row, finding in zip(data["findings"], report.findings):
+        offer = by_finding.get(id(finding))
+        if offer is not None:
+            row["miracle"] = {"can": offer.verdict, "summary": offer.summary,
+                              "plan": [{"target": s.target_label, "path": s.full_path, "before": s.before,
+                                        "after": s.after, "undoable": s.undoable}
+                                       for s in (offer.plan.steps if offer.plan is not None else ())]}
+    data["summary"] = oracle_summary(offered, person=True)
+    return data
+
+
+def _mojo_miracle_dict(result) -> dict:
+    """Mojo Miracle for --json: what was repaired, and what was not and why. `fixed` and `still_present` mean what they
+    mean for `doctor --fix --json`: the repairs Mojo Miracle made, and those it tried that are still there."""
+    fixed, still_present, _ = _miracle_fixed(result)
+    return {"exit_code": result.exit_code, "fixed": fixed, "still_present": still_present,
+            "repaired": [{"code": e.finding.code, "summary": e.summary} for e in result.repaired],
+            "already_gone": [{"code": e.finding.code, "reason": e.reason} for e in result.already_gone],
+            "not_repaired": [{"code": e.finding.code, "outcome": e.outcome, "can": e.verdict, "reason": e.reason}
+                             for e in result.not_repaired],
+            "new_problems": [f.code for f in result.new_problems]}
+
+
+# ============================================================================
+# DELETING (the person's question with the full list; round 5 f)
+# ============================================================================
+
+def _parse_numbers(text: str, count: int) -> Optional[List[int]]:
+    """'1,3' or '2-4' (1-based) as 0-based positions; None for anything else or a number outside 1..count."""
+    picked: List[int] = []
+    for part in (p.strip() for p in str(text or "").split(",")):
+        if not part:
+            continue
+        first, dash, last = part.partition("-")
+        if not first.strip().isdigit() or (dash and not last.strip().isdigit()):
+            return None
+        low, high = int(first), int(last) if dash else int(first)
+        if low < 1 or high > count or low > high:
+            return None
+        picked.extend(range(low - 1, high))
+    return sorted(set(picked))
+
+
+def confirm_deletion(plan, *, title: str, multiple: bool = False, again: str = "",
+                     verb: str = "Delete") -> Optional[Any]:
+    """The person's question before any deletion at the command line (design 3.10, round 5 f): the full list (name,
+    full path or Docker id, file name, size, what it is), then, with `multiple`, the numbers to delete (nothing is
+    ticked by default), the mode when the plan offers the trash, and "Delete exactly N items (size)? [y/N]". Only at a
+    terminal: without one nothing is asked and nothing deleted. Returns the accepted plan (orchestrator.Core.deletion)
+    of exactly the chosen items, or None."""
+    from orchestrator.Core.deletion import accept, choose, size_text
+    table = Table(title=title)
+    for column in ("#", "Item", "Full path or id", "File", "Size", "What it is"):
+        table.add_column(column, overflow="fold")
+    for number, item in enumerate(plan.items, 1):
+        table.add_row(str(number), escape(item.speaking_name), escape(item.full_path or item.file_name),
+                      escape(item.file_name), size_text(item.size_bytes), escape(item.what))
+    console.print(table)
+    if not _interactive():
+        console.print("[yellow]Nothing was deleted: deleting needs your answer at a terminal"
+                      + (f" ('{escape(again)}')" if again else "") + ".[/yellow]")
+        return None
+    chosen = plan
+    if multiple:
+        while True:
+            answer = click.prompt("Numbers to delete (e.g. 1,3 or 2-4), empty for none", default="",
+                                  show_default=False)
+            picked = _parse_numbers(answer, len(plan.items))
+            if picked is not None:
+                break
+            console.print(f"[yellow]Give numbers from 1 to {len(plan.items)}.[/yellow]")
+        chosen = choose(plan, picked)
+        if chosen is None:
+            console.print("Nothing was deleted.")
+            return None
+    mode = chosen.mode_offered[0]
+    if len(chosen.mode_offered) > 1:
+        console.print("trash: moved to the trash, you can restore them, and their space stays used until you empty "
+                      f"the trash; permanent: deleted for good, frees {size_text(chosen.total_bytes)} now.")
+        mode = click.prompt("Move to the trash or delete for good?", type=click.Choice(list(chosen.mode_offered)),
+                            default=chosen.mode_offered[0])
+    what = "Move exactly {n} items ({size}) to the trash?" if mode == "trash" else \
+        verb + " exactly {n} items ({size}) for good?"
+    if not click.confirm(what.format(n=len(chosen.items), size=size_text(chosen.total_bytes)), default=False):
+        console.print("Nothing was deleted.")
+        return None
+    return accept(chosen, "cli", mode)
+
+
+def _cli_trash(ctx: FrameworkContext):
+    from orchestrator.Core.trash import Trash
+    return Trash.for_framework(ctx.framework_manager)
+
+
+def _cli_audit(ctx: FrameworkContext):
+    audit = getattr(getattr(ctx.framework_manager, "tool_registry", None), "audit", None)
+    return audit if callable(getattr(audit, "record", None)) else None
+
+
+def _person_trash(ctx: FrameworkContext, state_dir: Path):
+    """(trash, audit log) for the person's deletion at a terminal, also when the framework is not booted (the runtime
+    commands need neither the secrets store nor Docker): the trash index is signed with the audit key, as the
+    framework's own trash."""
+    from orchestrator.Core.trash import DEFAULT_RETENTION_DAYS, Trash
+    fm = ctx.framework_manager if getattr(ctx, "_initialized", False) else None
+    if fm is not None:
+        return Trash.for_framework(fm), _cli_audit(ctx)
+    audit = _device_audit(ctx, state_dir)
+    try:
+        from orchestrator.tools.framework_tools import _audit_key
+        key = _audit_key(None, state_dir)
+    except Exception:  # noqa: BLE001 - without a keyring the trash index is unkeyed, like the permission file
+        key = None
+    config, _ = _settings(ctx)
+    try:
+        days = int(config.get("trash_retention_days", DEFAULT_RETENTION_DAYS) or DEFAULT_RETENTION_DAYS)
+    except (TypeError, ValueError):
+        days = DEFAULT_RETENTION_DAYS
+    refuse = None if key else getattr(audit, "kept_with_key", None)
+    return Trash(state_dir, key=key, refuse_unkeyed=refuse, audit=audit, retention_days=days), audit
+
+
+def _print_deletion_result(result, accepted) -> None:
+    """What a deletion did (deletion.DeletionResult): every item moved or deleted, every item kept and why."""
+    from orchestrator.Core.deletion import size_text
+    for name in result.done:
+        console.print(f"[green]{'Moved to the trash' if accepted.mode == 'trash' else 'Deleted'}: "
+                      f"{escape(name)}[/green]")
+    for name, reason in result.failed:
+        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    if accepted.mode == "trash" and result.done:
+        console.print("They can be restored with 'llm-cli trash restore ID' ('llm-cli trash' lists them); their space "
+                      "stays used until you empty the trash.")
+    elif result.done:
+        console.print(f"{size_text(result.freed_bytes)} freed.")
 
 
 # ============================================================================
@@ -3199,6 +3525,190 @@ def knowledge_snapshots_list(ctx: FrameworkContext):
         table.add_row(escape(s.name), s.taken, size_text(s.size_bytes), escape(s.what), escape(str(s.path)))
     console.print(table)
     console.print(escape(KEEPING_NOTE))
+
+
+def _delete_snapshots_cli(ctx: FrameworkContext, names: Optional[Tuple[str, ...]]) -> None:
+    """Lists the snapshots (`names`, or every one for the multiple choice) and deletes exactly what the person
+    confirms at a terminal: into the trash by default, or for good."""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    from orchestrator.Core.knowledge_snapshots import delete_snapshots, snapshot_folder, snapshot_plan
+    ctx.require_framework()
+    folder = snapshot_folder(ctx.framework_manager.config.user_state_dir)
+    try:
+        plan = snapshot_plan(folder, names or None)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red] 'llm-cli knowledge snapshots' lists them.")
+        sys.exit(2)
+    if plan is None:
+        console.print(f"No knowledge snapshots in {escape(str(folder))}.")
+        return
+    again = "llm-cli knowledge snapshots " + ("delete " + " ".join(names) if names else "prune")
+    accepted = confirm_deletion(plan, title=f"Knowledge snapshots ({len(plan.items)}, {size_text(plan.total_bytes)}), "
+                                            "oldest first", multiple=not names, again=again)
+    if accepted is None:
+        return
+    try:
+        result = delete_snapshots(folder, accepted, trash=_cli_trash(ctx), audit=_cli_audit(ctx))
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    for name in result.done:
+        console.print(f"[green]{'Moved to the trash' if accepted.mode == 'trash' else 'Deleted'}: "
+                      f"{escape(name)}[/green]")
+    for name, reason in result.failed:
+        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    if accepted.mode == "trash" and result.done:
+        console.print("They can be restored with 'llm-cli trash restore ID' ('llm-cli trash' lists them); their space "
+                      "stays used until you empty the trash.")
+
+
+@knowledge_snapshots.command('delete')
+@click.argument('names', nargs=-1, required=True)
+@pass_context
+def knowledge_snapshots_delete(ctx: FrameworkContext, names: Tuple[str, ...]):
+    """Delete exactly the snapshots NAMES, after you confirm the list in a terminal (trash first)"""
+    _delete_snapshots_cli(ctx, names)
+
+
+@knowledge_snapshots.command('prune')
+@pass_context
+def knowledge_snapshots_prune(ctx: FrameworkContext):
+    """List every snapshot and delete the ones you pick, after you confirm them in a terminal (nothing preselected)"""
+    _delete_snapshots_cli(ctx, None)
+
+
+@knowledge_snapshots.command('export')
+@click.argument('names', nargs=-1, required=True)
+@click.option('--to', 'destination', required=True, type=click.Path(path_type=Path),
+              help='An existing folder: on this computer, a USB stick or a network share')
+@pass_context
+def knowledge_snapshots_export(ctx: FrameworkContext, names: Tuple[str, ...], destination: Path):
+    """Copy the snapshots NAMES to a folder you choose; each copy is checked by sha256. Nothing is deleted."""
+    from orchestrator.Core.knowledge_snapshots import export_snapshots, size_text, snapshot_folder
+    ctx.require_framework()
+    folder = snapshot_folder(ctx.framework_manager.config.user_state_dir)
+    try:
+        results = export_snapshots(folder, names, destination)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    for r in results:
+        if r.ok:
+            note = f" ({r.problem})" if r.problem else ""
+            console.print(f"[green]Copied and checked: {escape(r.name)} -> {escape(r.copy)} "
+                          f"({size_text(r.size_bytes)}, sha256 {r.sha256[:16]}...){escape(note)}[/green]")
+        else:
+            console.print(f"[yellow]Not exported: {escape(r.name)}: {escape(r.problem)}[/yellow]")
+    done = sum(1 for r in results if r.ok)
+    console.print(f"{done} of {len(results)} snapshots exported. The snapshots themselves were not changed; delete "
+                  "them with 'llm-cli knowledge snapshots delete NAME' if you want the space back.")
+    if done < len(results):
+        sys.exit(1)
+
+
+# ============================================================================
+# TRASH (only the person restores or empties it)
+# ============================================================================
+
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def trash(click_ctx):
+    """What deletions moved to the trash (same as 'trash list')"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(trash_list)
+
+
+@trash.command('list')
+@pass_context
+def trash_list(ctx: FrameworkContext):
+    """Every entry with what it is, where it came from, its size and who asked to delete it"""
+    from orchestrator.Core.deletion import size_text
+    from orchestrator.Core.trash import Trash, TrashError, describe
+    ctx.require_framework()
+    try:
+        entries = _cli_trash(ctx).entries()
+    except TrashError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if not entries:
+        console.print("The trash is empty.")
+        return
+    total = sum(e.size for e in entries if Trash.present(e))
+    table = Table(title=f"Trash ({len(entries)} entries, {size_text(total)}; the space stays used until you empty it)")
+    for column in ("Id", "Item", "What it is", "Size", "Moved there", "Asked by", "Reminder", "From (full path)"):
+        table.add_column(column, overflow="fold")
+    for entry in entries:
+        row = describe(entry)
+        gone = "" if Trash.present(entry) else " (gone from the trash folder)"
+        table.add_row(row["id"], escape(row["name"]) + gone, row["what"], row["size"], row["deleted"],
+                      escape(row["by"]), row["remind"], escape(row["from"]))
+    console.print(table)
+    console.print("Nothing leaves the trash by itself. 'llm-cli trash restore ID' puts an entry back; "
+                  "'llm-cli trash empty' deletes for good what you confirm.")
+
+
+@trash.command('restore')
+@click.argument('ids', nargs=-1, required=True)
+@pass_context
+def trash_restore(ctx: FrameworkContext, ids: Tuple[str, ...]):
+    """Put entries back where they were (next to it with a new name when that place is taken)"""
+    from orchestrator.Core.trash import TrashError
+    ctx.require_framework()
+    store = _cli_trash(ctx)
+    failed = False
+    for entry_id in ids:
+        try:
+            dest = store.restore(entry_id, "cli")
+        except TrashError as e:
+            console.print(f"[yellow]{escape(entry_id)}: {escape(str(e))}[/yellow]")
+            failed = True
+            continue
+        console.print(f"[green]Restored {escape(entry_id)} to {escape(str(dest))}[/green]")
+    if failed:
+        sys.exit(1)
+
+
+@trash.command('empty')
+@click.argument('ids', nargs=-1)
+@click.option('--all', 'everything', is_flag=True, help='List every entry (you still pick which ones)')
+@click.option('--due', is_flag=True, help='List the entries past their reminder date (you still pick which ones)')
+@pass_context
+def trash_empty(ctx: FrameworkContext, ids: Tuple[str, ...], everything: bool, due: bool):
+    """Delete trash entries for good, after you confirm the list in a terminal (no AI and no tool does this)"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    from orchestrator.Core.trash import TrashError
+    ctx.require_framework()
+    if bool(ids) + everything + due != 1:
+        console.print("[red]Name the entries (IDS), or use --all or --due.[/red]")
+        sys.exit(2)
+    store = _cli_trash(ctx)
+    try:
+        plan = store.plan(ids if ids else None, due_only=due)
+    except TrashError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    listed = {Path(i.full_path).parent.name for i in plan.items} if plan is not None else set()
+    missing = [i for i in ids if i not in listed]
+    if missing:
+        console.print(f"[red]Not in the trash: {escape(', '.join(missing))}[/red] ('llm-cli trash' lists it).")
+        sys.exit(2)
+    if plan is None:
+        console.print("Nothing to delete.")
+        return
+    accepted = confirm_deletion(plan, title=f"Trash entries ({len(plan.items)}, {size_text(plan.total_bytes)}) to "
+                                            "delete for good", multiple=not ids, again="llm-cli trash empty")
+    if accepted is None:
+        return
+    try:
+        result = store.empty(accepted)
+    except (PlanChanged, PermissionError, RuntimeError, TrashError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    for name in result.deleted:
+        console.print(f"[green]Deleted for good: {escape(name)}[/green]")
+    for name, reason in result.failed:
+        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    console.print(f"{len(result.deleted)} entries deleted, {size_text(result.freed_bytes)} freed.")
 
 
 # ============================================================================
@@ -4369,12 +4879,22 @@ def device_runtime_build(ctx: FrameworkContext, device_name: str, jobs: Optional
     except PackageError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    deployed = devices.record().get("build_id")
-    devices.prune(keep=tuple(b for b in (build.build_id, deployed) if b))
     console.print(f"[bold green]Device runtime ready:[/bold green] {escape(str(packaged.path))}")
+    _say_older_packages(devices, build)
     console.print(f"sha256 {packaged.sha256}; format checked here (ELF, glibc symbol versions, no shared C++ runtime); "
                   "the programs run their checks on the device during the deployment.")
     console.print(f"Next: llm-cli device runtime deploy {device_id}")
+
+
+def _say_older_packages(devices, build) -> None:
+    """Says how many older runtime packages of the device are kept (the framework deletes none by itself)."""
+    plan = devices.cleanup_plan()
+    older = [i for i in (plan.items if plan is not None else []) if i.file_name.endswith(".tar.gz")
+             and build.build_id[:16] not in i.file_name]
+    if older:
+        console.print(f"[dim]{len(older)} older runtime package(s) of this device kept; the framework deletes none "
+                      f"by itself. 'llm-cli device runtime prune {devices.device_id}' lists them for you to delete."
+                      "[/dim]")
 
 
 def _ensure_package(state_dir: Path, device_id: str, builds, build):
@@ -4394,6 +4914,35 @@ def _ensure_package(state_dir: Path, device_id: str, builds, build):
     except PackageError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
+
+
+@device_runtime.command('prune')
+@click.argument('device_name', metavar='DEVICE')
+@pass_context
+def device_runtime_prune(ctx: FrameworkContext, device_name: str):
+    """List the device's older runtime packages and delete the ones you pick, after you confirm them in a terminal
+    (nothing preselected; never the package of the build deployed last)"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    state_dir, _store, device_id, _profile = _device_context(ctx, device_name)
+    devices = DeviceRuntimeStore(state_dir, device_id)
+    plan = devices.cleanup_plan()
+    if plan is None:
+        console.print(f"No older runtime packages of device {device_id}: the one of the build deployed last is never "
+                      "listed.")
+        return
+    accepted = confirm_deletion(plan, title=f"Runtime packages of device {device_id} ({len(plan.items)} files, "
+                                            f"{size_text(plan.total_bytes)})",
+                                multiple=True, again=f"llm-cli device runtime prune {device_id}")
+    if accepted is None:
+        return
+    trash, audit = _person_trash(ctx, state_dir)
+    try:
+        result = devices.delete_packages(accepted, state_dir, trash=trash, audit=audit)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    _print_deletion_result(result, accepted)
 
 
 @device_runtime.command('deploy')
@@ -4486,12 +5035,12 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
                          "ssh_user": settings.ssh_user, "previous": result.previous, "perf_key": profile.perf_key(),
                          "verification": report.as_dict(), "verified_at": now,
                          "unit_started": result.unit_started})
-    devices.prune(keep=(build.build_id,))
     console.print(f"[bold green]Deployed[/bold green] build {build.build_id[:16]} to {escape(result.root)}"
                   + (f" (previous {result.previous} kept)" if result.previous else ""))
     _print_report(report)
     for note in result.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
+    _say_older_packages(devices, build)
     script = start_script_path(result.home)
     if settings.install == "systemd":
         console.print(f"systemd unit: {'started' if result.unit_started else 'enabled'}; the server listens on "

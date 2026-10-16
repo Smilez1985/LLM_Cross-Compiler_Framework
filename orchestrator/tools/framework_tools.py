@@ -20,7 +20,7 @@ from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.mcp_tokens import TokenStore
 from orchestrator.tools import tools_status
-from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact
+from orchestrator.tools.output import ToolOutput, count, fact
 from orchestrator.tools.policy import Decision, PolicyStore, ToolTier
 from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, ToolSpec, current_actor,
                                          current_registry)
@@ -28,6 +28,7 @@ from orchestrator.tools.signing import RevisionAnchor
 from orchestrator.tools.tools_healing import register_healing_tools
 from orchestrator.tools.tools_hf import register_hf_tools
 from orchestrator.tools.tools_knowledge import EMPTY_SEARCH_NOTE, register_knowledge_tools  # noqa: F401
+from orchestrator.tools.tools_mojo import DoctorFinding, DoctorOut, mojo_tool_specs  # noqa: F401 - their old home
 from orchestrator.tools.spec import BUILD_QUOTA, CallFacts, Choices, Fact, FieldMeta, ToolLimits
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import redact_secrets
@@ -55,19 +56,6 @@ class BuildStatusIn(RequestIn):
 
 class ResolveHealingIn(RequestIn):
     approve: bool = Field(description="True applies the proposed automatic fix and retries; False dismisses it")
-
-
-class DoctorFinding(BaseModel):
-    subsystem: str
-    code: str
-    severity: str
-    message: UntrustedText  # can quote program output (Docker, file systems)
-    fix_hint: str = ""
-
-
-class DoctorOut(ToolOutput):
-    exit_code: int
-    findings: List[DoctorFinding]
 
 
 # The tools' output models: the service's models plus the framework's `notes` (output.ToolOutput).
@@ -174,6 +162,9 @@ NO_TOOL_ACTIONS = [
                                "'llm-cli zoo install --file' (unreviewed code an AI could write itself)."),
     ("run_command", "Run shell commands, read or write files by path, download URLs, run Docker images: no tool, "
                     "for any AI."),
+    ("empty_trash", "Empty the trash or delete anything for good, Docker images included: only the person, in the "
+                    "framework (File > Trash..., Tools > Framework Build Images..., 'llm-cli trash empty' or "
+                    "'llm-cli doctor --fix --tier 2' in a terminal), always with the full list; no tool does."),
 ]
 MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
 
@@ -190,10 +181,12 @@ KNOWN_TOOLS = frozenset({
     "list_targets", "get_target_capabilities", "get_hardware_probe", "probe_local_hardware", "create_target_module",
     "list_devices", "create_deploy_package", "deploy_to_device",
     "list_packs", "add_pack_from_index", "export_pack", "start_recipe_build",
-    "run_doctor", "get_status", "get_settings", "update_settings", "report_cannot_do",
+    "run_mojo_oracle", "run_mojo_miracle", "get_status", "get_settings", "update_settings", "report_cannot_do",
+    # hidden: the 3.0.0 name of run_mojo_oracle, callable but never listed
+    "run_doctor",
     # optional (default deny until the person enables them)
     "delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
-    "stop_local_runtime", "run_benchmark", "deploy_device_runtime",
+    "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
     # later
     "probe_remote_device", "run_device_benchmark",
 })
@@ -272,8 +265,9 @@ HEALING_CONSEQUENCES = {
     "retry_build": "Retries build request {rid} once, without changes.",
 }
 # Strategies asked even when the tool is allowed. None is left: no automatic strategy deletes anything (round 5 f); a
-# full Docker disk (docker_prune) is a manual step that points to the person's 'llm-cli doctor --fix --tier 2', and
-# approving a manual step is refused before anything is asked.
+# full Docker disk (docker_prune) is a manual step that points to the person's one deletion path for Docker images
+# (Tools > Framework Build Images... or 'llm-cli doctor --fix --tier 2'), and approving a manual step is refused
+# before anything is asked.
 DESTRUCTIVE_STRATEGIES: frozenset = frozenset()
 
 
@@ -456,13 +450,6 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
             warning=(f"{listed} tools are listed; some clients take at most {MAX_LISTED_TOOLS}."
                      if listed > MAX_LISTED_TOOLS else ""))
 
-    def run_doctor(_inp: NoInput) -> DoctorOut:
-        from orchestrator.Core.doctor import Doctor, ai_findings
-        report = Doctor(framework).run()  # diagnosis only: fixes stay a human decision (llm-cli doctor --fix)
-        # Folders by label, other paths by file name: an AI never reads a host path (the person's CLI keeps them).
-        return DoctorOut(exit_code=report.exit_code,
-                         findings=[DoctorFinding(**row) for row in ai_findings(framework, report)])
-
     specs = [
         ToolSpec("get_build_status", "Build status",
                  "Status, progress, errors and a pending self-healing proposal of a build request. With "
@@ -472,12 +459,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  takes_context=True, summary=_status_summary,
                  fields={**request_id, "wait_seconds": FieldMeta(kind="amount")},
                  long_poll=lambda i, seconds, report: service.wait_for_change_async(i.request_id, seconds, report)),
-        ToolSpec("run_doctor", "Check the installation",
-                 "Runs the framework's health checks (Docker, disk, targets, security, tool permissions) and returns "
-                 "findings with fix hints. Read-only; it never applies fixes.",
-                 ToolTier.READ, NoInput, DoctorOut, run_doctor, idempotent=True,
-                 summary=lambda o: (f"Health check: exit code {fact(o.exit_code)}, "
-                                    + count(len(o.findings), "finding", "findings") + ".")),
+        # Mojo (round 7 item 11'): run_mojo_oracle, run_mojo_miracle and the hidden 3.0.0 name run_doctor
+        *mojo_tool_specs(framework),
         ToolSpec("cancel_build", "Cancel a build",
                  "Stops a running or queued build request. Builds this client started are stopped without a "
                  "question; another client's build needs the user's confirmation.",

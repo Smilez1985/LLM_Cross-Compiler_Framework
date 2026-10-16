@@ -230,17 +230,76 @@ class DeviceRuntimeStore:
             return []
         return sorted(p for p in self.root.iterdir() if _RE_TARBALL.fullmatch(p.name))
 
-    def prune(self, keep: Tuple[str, ...]) -> List[str]:
-        """Removes the tarballs of builds other than `keep` (build IDs or their 16-character prefixes)."""
-        prefixes = {k[:16] for k in keep}
-        removed = []
-        for path in self.tarballs():
-            match = _RE_TARBALL.fullmatch(path.name)
-            if match and match.group(2) not in prefixes:
-                path.unlink(missing_ok=True)
-                path.with_name(path.name + ".sha256").unlink(missing_ok=True)
-                removed.append(path.name)
-        return removed
+    def cleanup_plan(self):
+        """What `llm-cli device runtime prune DEVICE` lists for the person's multiple choice: every tarball of this
+        device (with its .sha256 file) except the one of the build deployed last, each with its full path, size and
+        what it is. None when there is nothing to list. Reads only: the framework deletes no package by itself
+        (round 5 f); a new build or deployment keeps the older ones."""
+        from orchestrator.Core.deletion import plan_of
+        from orchestrator.tools.spec import DeletionItem
+        deployed = str(self.record().get("build_id") or "")[:16]
+        items = []
+        for path in sorted(self.root.iterdir()) if self.root.is_dir() else []:
+            sums = path.name.endswith(".sha256")
+            match = _RE_TARBALL.fullmatch(path.name[:-len(".sha256")] if sums else path.name)
+            if match is None or match.group(2) == deployed:
+                continue
+            what = ("the checksum file of a runtime package" if sums else
+                    f"runtime package of build {match.group(2)} for device {self.device_id}, not the one deployed "
+                    "last; the framework can package the build again")
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                size = path.stat().st_size
+            except OSError:
+                continue
+            items.append(DeletionItem(kind="deploy_package", speaking_name=path.name, full_path=str(path),
+                                      file_name=path.name, size_bytes=size, what=what))
+        return plan_of(items, ("trash", "permanent"))
+
+    def delete_packages(self, accepted: Any, state_dir: Union[str, Path], trash: Any = None, audit: Any = None):
+        """Deletes exactly the files of cleanup_plan() the person ticked and confirmed at a terminal: into the trash
+        of the per-user folder `state_dir` (`trash`) or for good. The list is looked up again first (PlanChanged when
+        a chosen file changed or became the deployed one's); the deletion is audited before anything goes
+        (RuntimeError, nothing deleted, without the audit log). Only the person (PermissionError otherwise). Returns a
+        deletion.DeletionResult."""
+        from orchestrator.Core.deletion import DeletionResult, require_person, require_same, same_items
+        accepted = require_person(accepted)
+        if accepted.actor not in ("gui", "cli"):
+            raise PermissionError("Only the person deletes device runtime packages, in the GUI or at a terminal.")
+        require_same(accepted, same_items(self.cleanup_plan(), accepted.plan), "the list of runtime packages")
+        if accepted.mode == "trash" and trash is None:
+            raise RuntimeError("The trash is not available; nothing was deleted.")
+        if audit is None or not callable(getattr(audit, "record", None)):
+            raise RuntimeError("The audit log is not available, so nothing was deleted.")
+        names = [i.file_name for i in accepted.plan.items]
+        try:
+            audit.record(accepted.actor, "device_runtime", "framework", "person", "started", approved=True,
+                         arguments={"device": self.device_id, "files": names, "bytes": accepted.plan.total_bytes,
+                                    "mode": accepted.mode},
+                         detail=f"{len(names)} runtime package files of device {self.device_id} "
+                                + ("moved to the trash" if accepted.mode == "trash" else "deleted for good"),
+                         extra=accepted.audit_extra())
+        except Exception:  # noqa: BLE001 - the reason could name a host path
+            raise RuntimeError("The audit log cannot record the deletion; nothing was deleted.") from None
+        result = DeletionResult()
+        for item in accepted.plan.items:
+            path = Path(item.full_path)
+            try:
+                if accepted.mode == "trash":
+                    entry = trash.move("deploy_package", path, Path(state_dir), "state", item.speaking_name, accepted,
+                                       accepted.actor)
+                    result.trash_ids.append(entry.id)
+                else:
+                    if path.is_symlink() or not path.is_file():
+                        raise OSError("not a plain file")
+                    path.unlink()
+                    result.freed_bytes += item.size_bytes
+            except Exception as e:  # noqa: BLE001 - a TrashError or an OSError: that file stays and is reported
+                result.failed.append((item.speaking_name, type(e).__name__ if isinstance(e, OSError) else str(e)))
+                continue
+            result.done.append(item.speaking_name)
+        return result
 
     def record(self) -> Dict[str, Any]:
         """The record of the last deployment (empty when there is none or it is damaged)."""

@@ -36,5 +36,5 @@ Text used to compute importance matrices (llama.cpp `--imatrix`) when a build ha
   reads already cover every set.
 - **Where the prepared text goes.** The mixed text is written to the framework's cache folder
   (`calibration/calibration_<language>.txt`) and passed to the build from there.
-- **Health check.** `llm-cli doctor` checks the three files and reports "Calibration data intact". If one is
+- **Health check.** `llm-cli mojo` checks the three files and reports "Calibration data intact". If one is
   missing or damaged, it tells you how to restore it from the repository: `git checkout -- data/calibration`.

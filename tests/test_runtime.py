@@ -736,12 +736,15 @@ class TestInstall:
             rt.install_prebuilt()
         assert session.calls == []
 
-    def test_old_builds_are_pruned_other_variants_stay(self, tmp_path):
+    def test_old_installations_are_kept_and_listed_other_variants_stay(self, tmp_path):
+        """An install deletes no other installation (round 5 f): one of another llama.cpp version is only listed for
+        the person (`ditto runtime prune`); another variant of this version is not even listed."""
         rt, _ = self.setup_runtime(tmp_path)
         (rt.root / "b0-cpu").mkdir(parents=True)
         (rt.root / "b1-vulkan").mkdir(parents=True)
         rt.install_prebuilt()
-        assert not (rt.root / "b0-cpu").exists() and (rt.root / "b1-vulkan").exists()
+        assert (rt.root / "b0-cpu").exists() and (rt.root / "b1-vulkan").exists()
+        assert [i.full_path for i in rt.cleanup_plan().items] == [str(rt.root / "b0-cpu")]
 
     def test_refuses_to_replace_the_installation_the_server_runs_from(self, tmp_path, monkeypatch):
         rt, _ = self.setup_runtime(tmp_path)

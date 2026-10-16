@@ -89,7 +89,7 @@ The GUI, the CLI, Ditto and the MCP server offer exactly these options and rejec
 - **Python 3.11 to 3.14.**
 - **Docker:** on Linux, Docker Engine (the installer sets it up if it is missing); on Windows, **Docker Desktop**
   with the **WSL 2 backend**, installed and running before you install the framework.
-- **Disk space:** at least 20 GB free for the build image, downloaded models and results (`llm-cli doctor` warns
+- **Disk space:** at least 20 GB free for the build image, downloaded models and results (`llm-cli mojo` warns
   below 20 GB and reports an error below 5 GB). Large models need 2 to 3 times their size during conversion.
 - **Internet access** for the installation, the first image build and model downloads.
 
@@ -146,7 +146,7 @@ headless (CLI and MCP server); the GUI is an explicit option.
 ```bash
 make build      # scripts/build_container_image.sh: checks Docker, builds lcf-framework:local here, prints how to run it
 make up         # starts the container lcf-framework; your data lives in the volume lcf-data
-docker exec -it lcf-framework llm-cli doctor
+docker exec -it lcf-framework llm-cli mojo
 ```
 
 AI clients reach its MCP server over stdio (`docker exec -i lcf-framework llm-cli mcp serve`, from another computer
@@ -207,7 +207,7 @@ The installers create no data folders of their own.
 
    Below that you can set single tools differently. Change it later under **Tools > Tool Permissions (Ditto /
    MCP)...** or with `llm-cli tools permissions`.
-4. **Health check (recommended):** `llm-cli doctor` checks Python, Docker, disk space, targets, security
+4. **Health check (recommended):** `llm-cli mojo` checks Python, Docker, disk space, targets, security
    settings, tool permissions and the calibration data, and explains how to fix problems.
 
 **Builder tab:** this is where you convert a model.
@@ -340,8 +340,8 @@ Import... > Import from File (USB/Disk)...** in the GUI, or pass it to `llm-cli 
 
 ```bash
 llm-cli --version
-llm-cli doctor                 # health check; exit code 0 = OK, 1 = warnings, 2 = errors
-llm-cli doctor --fix           # harmless automatic fixes (makes the personal folder private); --tier 2 also lists the dangling framework images and deletes only those you confirm
+llm-cli mojo                   # health check (Mojo Oracle); exit code 0 = OK, 1 = warnings, 2 = errors; at a terminal it offers Mojo Miracle
+llm-cli mojo --miracle         # repair what is harmless (makes the personal folder private), then say what was repaired, what not and why
 llm-cli targets list           # available targets with boards and formats; the --target value is the id (Rockchip)
 ```
 
@@ -544,9 +544,10 @@ tools), and `runtime start` starts nothing else.
   `--prebuilt` takes it without downloading it again), and is always shown as "prebuilt, not self-built". On
   Linux it needs the glibc it was built for (2.35 or 2.39); on musl systems such as Alpine only the self-built server
   runs. Until the Windows and macOS builds land, this is the way to run the local model there.
-- `llm-cli ditto runtime prune` removes old builds; the active build, its CPU fallback and the build a running server
-  uses are always kept, and so are your boards' builds. `runtime status` says when a rebuild is required (the pin changed) or recommended (this
-  machine's build plan changed).
+- `llm-cli ditto runtime prune` lists old builds for you to delete (nothing ticked; the framework deletes no build by
+  itself); the active build, its CPU fallback, the build a running server uses and your boards' builds are never
+  listed. `runtime status` says when a rebuild is required (the pin changed) or recommended (this machine's build plan
+  changed).
 
 Then choose **Local model (managed llama-server)** in the AI settings (provider `local`). Turn on **Offline Mode**
 as well if Ditto should never use a cloud provider. Ditto finds the running server by itself. In this version the
@@ -631,7 +632,7 @@ pack files can be installed. Details: [docs/Features.md](docs/Features.md#commun
 - **Secrets:** API keys and tokens are stored encrypted in a vault in your personal folder; its key is in your
   operating system's keyring. Without a usable keyring nothing is chosen for you: the framework stops and names
   the choices (setting `secret_storage`: a credential helper command, a passphrase, an unencrypted key file or
-  memory only). Credentials are redacted in every log, also with `--debug-http`. `llm-cli doctor` warns when the
+  memory only). Credentials are redacted in every log, also with `--debug-http`. `llm-cli mojo` warns when the
   vault key is not protected.
 - **Untrusted text:** web pages, knowledge-base text, build logs, tool results and probe files are cleaned of
   hidden characters and passed to the AI as marked data, never as instructions. Chat output is escaped, and links
@@ -718,6 +719,7 @@ Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
 | [docs/BLUEPRINT.md](docs/BLUEPRINT.md) | Architecture and roadmap |
 | [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md) | Adding a new hardware target |
 | [docs/Container_Setup.md](docs/Container_Setup.md) | The framework in a container you build yourself (server, NAS, Proxmox) |
+| [docs/Mojo.md](docs/Mojo.md) | The health check: Mojo Oracle looks, Mojo Miracle repairs (formerly the doctor) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, conventions |
 | [configs/SSOT_ARCHITECTURE.md](configs/SSOT_ARCHITECTURE.md) | Project sources (single source of truth) |

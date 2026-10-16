@@ -86,7 +86,9 @@ EXTRA_FIELDS = frozenset({"client", "session", "confirm_channel", "question_sha2
                           "repairs", "reason_code", "duration_ms", "result", "links",
                           # delegations, the chat feed and the hybrid (design 3.11)
                           "answered_by", "delegation", "reason_sha256", "facts_sha256", "warnings", "version",
-                          "feed_entry", "taint", "place", "remote_server", "transfer", "deletion_sha256"})
+                          "feed_entry", "taint", "place", "remote_server", "transfer", "deletion_sha256",
+                          # Mojo Miracle's repairs (round 6 design 7.9): the finding, the repair and its plan's hash
+                          "finding_code", "repair_id", "plan_sha256", "repair_class"})
 # Who answered a question: the person, or an AI under a delegation.
 ANSWERED_BY = frozenset({"person", "ai"})
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -95,7 +97,12 @@ _LABEL = re.compile(r"^[^\x00-\x1f\x7f]{1,120}$")
 # Kept when the extra fields are too long and must be cut: what ties an entry to its question, answer, decision record
 # and deletion plan.
 _KEEP = ("reason_code", "answer", "confirm_channel", "question_sha256", "duration_ms", "links", "answered_by",
-         "delegation", "reason_sha256", "facts_sha256", "feed_entry", "place", "deletion_sha256")
+         "delegation", "reason_sha256", "facts_sha256", "feed_entry", "place", "deletion_sha256", "plan_sha256",
+         "repair_class", "finding_code")
+# The only forms of Mojo Miracle's repair fields (a finding code, a repair id, a class); never a plan's text or a path.
+_FINDING_CODE = re.compile(r"^[A-Za-z0-9_.+-]{1,120}$")
+_REPAIR_ID = re.compile(r"^[a-z][a-z0-9_.]{1,63}$")
+REPAIR_CLASSES = frozenset({"delegable", "person", "person_deletion", "person_here", "manual"})
 _EXTRA_MAX = 2000
 _EXTRA_REF = re.compile(r"\n\[extra sha256:([0-9a-f]{64})\]\Z")
 _EXTRA_TAG = "[extra sha256:"
@@ -104,6 +111,11 @@ _ANCHOR_MAX = 4096  # a real anchor has about 170 bytes
 
 # How an entry verifies for the reader: with its key, unkeyed, with a key it does not have, or not at all.
 _OWN, _PLAIN, _FOREIGN, _BAD = "own", "plain", "foreign", "bad"
+
+
+def confirm_channel_ok(value: Any) -> bool:
+    """Whether `value` is a confirmation channel the audit log records."""
+    return isinstance(value, str) and bool(_CHANNEL.fullmatch(value))
 
 
 class AuditKeyMismatch(RuntimeError):
@@ -432,6 +444,22 @@ class AuditLog:
                 raise ValueError(f"{key} must be a short single-line label")
 
     @staticmethod
+    def _check_repair_fields(fields: Dict[str, Any]) -> None:
+        """The fields of a Mojo Miracle repair take only their documented forms (a code, an id, a sha256, a class);
+        never a plan's text or a path."""
+        if "finding_code" in fields and not (isinstance(fields["finding_code"], str)
+                                             and _FINDING_CODE.fullmatch(fields["finding_code"])):
+            raise ValueError("finding_code must be a finding code")
+        if "repair_id" in fields and not (isinstance(fields["repair_id"], str)
+                                          and _REPAIR_ID.fullmatch(fields["repair_id"])):
+            raise ValueError("repair_id must be a repair id")
+        if "plan_sha256" in fields and not (isinstance(fields["plan_sha256"], str)
+                                            and _HEX64.fullmatch(fields["plan_sha256"])):
+            raise ValueError("plan_sha256 must be a sha256 in hex")
+        if "repair_class" in fields and fields["repair_class"] not in REPAIR_CLASSES:
+            raise ValueError(f"unknown repair class {fields['repair_class']!r}")
+
+    @staticmethod
     def _extra(outcome: str, extra: Optional[Dict[str, Any]]) -> Optional[str]:
         """The extra fields as canonical JSON (redacted), None when there are none. Unknown fields and values
         outside the documented sets are refused: they are a bug in the caller, and an audit entry must not carry
@@ -450,6 +478,7 @@ class AuditLog:
         if "confirm_channel" in fields and not _CHANNEL.fullmatch(str(fields["confirm_channel"])):
             raise ValueError(f"unknown confirmation channel {fields['confirm_channel']!r}")
         AuditLog._check_delegation_fields(fields)
+        AuditLog._check_repair_fields(fields)
         text = json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
         text = _text(redact_secrets(text))
         if len(text) > _EXTRA_MAX:  # never cut JSON in the middle: keep the fields that fit, say what was cut

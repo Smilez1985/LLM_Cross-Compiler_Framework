@@ -66,7 +66,7 @@ targets/Rockchip/
 | File | Needed | What it is for |
 |---|---|---|
 | `target.yml` with a `metadata:` block | yes | Without it the folder is not a target. |
-| `capabilities:` block in `target.yml` | strongly recommended; required to share the target | Without it the GUI and CLI cannot check settings, the MCP tools and Ditto cannot start builds for the target, `llm-cli doctor` warns, and the target cannot be exported or installed as a community pack. |
+| `capabilities:` block in `target.yml` | strongly recommended; required to share the target | Without it the GUI and CLI cannot check settings, the MCP tools and Ditto cannot start builds for the target, `llm-cli mojo` warns, and the target cannot be exported or installed as a community pack. |
 | `Dockerfile` or `dockerfile` | yes | The image all stages run in. |
 | `Dockerfile.gpu` | optional | Used for builds with GPU passthrough (`llm-cli build start --gpu`, or "Use Host GPU for Build Process" in the GUI, which is checked by default on Linux); without it the normal Dockerfile is used. |
 | `modules/build.sh` | yes | Runs in every stage as `/app/modules/build.sh`. |
@@ -636,7 +636,7 @@ find out whether a failure is caused by the sandbox.
 
 ## 8. Testing a target
 
-1. **Is the target loaded and are its capabilities valid?** `llm-cli doctor` reports the code
+1. **Is the target loaded and are its capabilities valid?** `llm-cli mojo` reports the code
    `targets.<id>.capabilities` if the block is missing or invalid; the error itself is in the log. To see the schema
    error directly:
 

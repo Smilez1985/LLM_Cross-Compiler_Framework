@@ -10,7 +10,9 @@ import pytest
 
 from orchestrator.Core import disk_plan, hf_hub, hf_lookup
 
-# Design section 2.1: 37 core tools, 6 optional (default deny) and 2 later ones.
+# Design section 2.1: 37 core tools, 6 optional (default deny) and 2 later ones; the trash (delegation design 3.10)
+# adds two optional tools. Mojo (round 7 item 11') replaces run_doctor by run_mojo_oracle and adds run_mojo_miracle;
+# run_doctor stays registered under its 3.0.0 name, callable but never listed (HIDDEN).
 CORE = {
     "list_build_requests", "get_build_status", "read_build_log", "list_artifacts", "get_artifact_details",
     "check_build_request", "start_build", "cancel_build", "resolve_healing", "propose_healing_fix",
@@ -19,32 +21,33 @@ CORE = {
     "list_targets", "get_target_capabilities", "get_hardware_probe", "probe_local_hardware", "create_target_module",
     "list_devices", "create_deploy_package", "deploy_to_device",
     "list_packs", "add_pack_from_index", "export_pack", "start_recipe_build",
-    "run_doctor", "get_status", "get_settings", "update_settings", "report_cannot_do",
+    "run_mojo_oracle", "run_mojo_miracle", "get_status", "get_settings", "update_settings", "report_cannot_do",
 }
+HIDDEN = {"run_doctor"}
 # deploy_device_runtime (T14): the board's runtime as `llm-cli device runtime deploy` does it (the design expected it
 # inside the deploy package; the device runtime is deployed on its own).
 OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
-            "stop_local_runtime", "run_benchmark", "deploy_device_runtime"}
+            "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash"}
 LATER = {"probe_remote_device", "run_device_benchmark"}
 # Built by phase T (T1-T9, T14): every core tool.
 BUILT = set(CORE)
 
 
 def test_the_catalogue_has_the_designed_size():
-    assert (len(CORE), len(OPTIONAL), len(LATER)) == (37, 7, 2)
+    assert (len(CORE), len(OPTIONAL), len(LATER), len(HIDDEN)) == (38, 9, 2, 1)
 
 
 def test_known_tools_is_exactly_the_pinned_catalogue():
     """Ditto offers a tool of the framework on another computer only under a catalogue name (hybrid design 6.3 rule
     2): framework_tools.KNOWN_TOOLS is that catalogue, one constant, kept equal to the sets pinned here."""
     from orchestrator.tools.framework_tools import KNOWN_TOOLS
-    assert KNOWN_TOOLS == CORE | OPTIONAL | LATER
+    assert KNOWN_TOOLS == CORE | OPTIONAL | LATER | HIDDEN
 
 
 def test_every_registered_tool_has_a_catalogue_name(booted_framework):
     names = [s.name for s in booted_framework.tool_registry.list()]
     assert len(names) == len(set(names)), "a tool is registered twice"
-    assert set(names) <= CORE | OPTIONAL | LATER, sorted(set(names) - CORE - OPTIONAL - LATER)
+    assert set(names) <= CORE | OPTIONAL | LATER | HIDDEN, sorted(set(names) - CORE - OPTIONAL - LATER - HIDDEN)
     from orchestrator.tools.framework_tools import KNOWN_TOOLS
     assert set(names) <= KNOWN_TOOLS, "a registered tool missing from KNOWN_TOOLS is never offered from a remote"
     assert all(len(n) <= 39 for n in names), "names fit the clients' prefix limits (design 2.0)"
@@ -62,7 +65,7 @@ def test_only_the_core_tools_are_listed_by_default(booted_framework):
     """After the round-2 merges: every optional and later tool is registered but hidden (denied) until the person
     enables it, so a client lists exactly the built core tools, inside the 40-tool limit (design 2.1)."""
     rows = {r["tool"]: r for r in booted_framework.tool_registry.permissions("mcp")}
-    assert (OPTIONAL | LATER) <= set(rows), sorted((OPTIONAL | LATER) - set(rows))
+    assert (OPTIONAL | LATER | HIDDEN) <= set(rows), sorted((OPTIONAL | LATER | HIDDEN) - set(rows))
     listed = {n for n, r in rows.items() if r["listed"]}
     assert listed == BUILT, (sorted(listed - BUILT), sorted(BUILT - listed))
     assert len(listed) <= 40

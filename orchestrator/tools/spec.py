@@ -106,7 +106,7 @@ _NUMBER_KEY = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # A closed enum value (a size class, "tight", "does_not_fit", a format), never free text.
 _NUMBER_TEXT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]{0,39}$")
 # What a call's scope may say (design 4.4), matched by a delegation's limits; closed types only, like numbers.
-SCOPE_KEYS = ("device_id", "size_bytes", "pack_kind", "pack_trust", "strategy", "own_work")
+SCOPE_KEYS = ("device_id", "size_bytes", "pack_kind", "pack_trust", "strategy", "own_work", "repair_class")
 
 
 def number_problems(values: Any, what: str = "numbers") -> List[str]:
@@ -300,7 +300,7 @@ class CallFacts:
 # --- deletions (design 3.10, round 5 f) ------------------------------------------------------------------------------
 
 DELETION_KINDS = ("artifact", "model_file", "download", "knowledge_snapshot", "trash_entry", "docker_image",
-                  "build_cache", "pack", "module", "deploy_package", "exported_pack")
+                  "build_cache", "pack", "module", "deploy_package", "exported_pack", "runtime_build")
 # Docker's own objects have no host path; every other item is listed with its full path.
 NO_PATH_KINDS = ("docker_image", "build_cache")
 DeletionKind = Literal[DELETION_KINDS]  # type: ignore[valid-type]

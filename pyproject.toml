@@ -73,3 +73,5 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.scripts]
 llm-gui = "orchestrator.main:main"
 llm-cli = "orchestrator.cli:cli"
+# The command's new name (seventh round, item 11); llm-cli stays as an alias of the same program.
+llmcf = "orchestrator.cli:cli"

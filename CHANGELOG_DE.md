@@ -10,6 +10,24 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Löschen mit der vollen Liste, und der Papierkorb** (Delegationsentwurf 3.10, Runde 5 f; Runde 6 10.4): Jedes
+  Löschen von etwas, das du sehen kannst, fragt zuerst im eigenen Fenster des Frameworks (der Lösch-Dialog der GUI oder
+  eine Tabelle und eine Frage im Terminal) und nennt jedes Teil mit Namen, vollem Pfad oder Docker-ID, Dateinamen,
+  Größe und was es ist; „Nein“ ist die Vorgabe. Wo du aus einer Liste wählst, ist nichts angehakt, die Liste wird aus
+  genau dem Angehakten neu gebaut (ihr Hash wird als `deletion_sha256` auditiert), und die Schaltfläche nennt Anzahl und
+  Größe. Löschen verschiebt Dateien und Ordner zunächst in den Papierkorb (`.trash` in ihrem Datenordner; ein
+  Verschieben auf eine andere Platte wird abgelehnt, nie kopiert). Nichts verlässt den Papierkorb von selbst: Nach
+  `trash_retention_days` (Vorgabe 14, von einer KI nicht änderbar) erinnert er nur. **File > Trash...** und
+  `llm-cli trash list|restore|empty` stellen Einträge wieder her oder löschen die angehakten endgültig; kein Tool leert
+  den Papierkorb, und keine KI erreicht die Papierkorb-Ordner. Die optionalen Tools `list_trash` und
+  `restore_from_trash` (verborgen, bis du sie freigibst) zeigen einer KI den Papierkorb mit Namen und stellen nur
+  wieder her, was sie selbst löschen wollte. Wissens-Snapshots löschst du mit `llm-cli knowledge snapshots
+  prune|delete` oder unter **Tools > Knowledge Snapshots...** (Kästchen zum Anhaken), oder du exportierst sie mit
+  `knowledge snapshots export NAME... --to ORDNER` (jede Kopie per sha256 geprüft; ein Export löscht nie). **Tools >
+  Framework Build Images...** listet die Docker-Images des Frameworks zum Anhaken, wie `llm-cli doctor --fix --tier 2`;
+  der Selbstheilungs-Dialog für eine volle Docker-Platte öffnet es. `llm-cli doctor` sagt, wo Docker seine Images ablegt
+  und wie viel die Images des Frameworks belegen; diesen Ordner zu verlegen ist ein Schritt für Administratoren
+  ([Container-Einrichtung](docs/Container_Setup_DE.md#10-wo-docker-images-ablegt)).
 - **Der Faktenkatalog und die Einordnung je Tool** (Delegationsentwurf 4.1-4.6, `orchestrator/tools/
   facts_catalog.py`, Texte in `orchestrator/utils/l10n_facts.py`): Jeder Befund vor einer Rückfrage hat eine feste
   Art. Harte Hindernisse (volle Platte, Offline-Modus, ein nicht gekoppeltes Board oder ein geänderter Host-Schlüssel,
@@ -83,8 +101,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   außerhalb des Ausgabeordners, solange ein Build irgendeines Programms des Frameworks in den Ordner schreibt oder
   dafür wartet, nachdem sich der Build geändert hat und wenn der Ordner nicht der ist, den die Frage nannte. Eine
   Wiederherstellung sichert immer zuerst die aktuelle Wissensbasis (`pre_restore_<Zeit>`), auch außerhalb von MCP,
-  und löscht keinen Snapshot; sie bleibt außerhalb jeder Dauerfreigabe und Vollmacht, bis es den Papierkorb und den
-  Lösch-Dialog des Frameworks gibt.
+  und löscht keinen Snapshot; sie bleibt außerhalb jeder Dauerfreigabe. `delete_artifact` verschiebt das Modell und
+  sein Golden-ZIP in den Papierkorb, wo du sie wiederherstellen kannst (siehe „Löschen mit der vollen Liste, und der
+  Papierkorb“).
 - **Ditto kann zusätzlich das Framework auf einem anderen Computer nutzen** (MCP-Entwurf T12; ENTSCHEIDUNGEN Runde 5 d;
   Hybrid-Entwurf 6.1-6.8): Die Tools dieses Computers bleiben immer, und das Framework, das auf einem zweiten Computer
   installiert ist (ein Build-PC, ein Server; dasselbe Programm, kein anderes), bringt seine Tools in denselben Chat.
@@ -182,7 +201,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Snapshot in `knowledge_snapshots/` des persönlichen Ordners. Es gibt keine Grenze: Sie behält so viele, wie die
   Platte fasst, löscht keinen von selbst, auf keinem Weg (Runde 5 f), und keine Anzahl bringt eine Erinnerung oder
   eine Warnung. `llm-cli knowledge snapshots` (in der GUI: Tools > Knowledge Snapshots...) listet jeden mit vollem
-  Pfad, Namen, Größe und was er ist, damit du die, die du auswählst, löschst oder exportierst (woandershin kopierst).
+  Pfad, Namen, Größe und was er ist, damit du die, die du anhakst, löschst (zuerst in den Papierkorb) oder
+  exportierst (woandershin kopierst, per sha256 geprüft).
 - **Die Wissensbasis, die Ditto nutzt, für KI-Clients** (MCP-Tools `list_knowledge_sources` und
   `read_knowledge_source`, Ressource `lcf://knowledge/sources/<Quellen-ID>`): Ein Client, der Dittos Aufgabe
   übernimmt, sieht, was die Wissensbasis enthält, und liest die Auszüge einer Quelle der Reihe nach.
@@ -359,10 +379,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `LLAMA_*`-Variablen. Builds liegen unter
   `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` mit `build.json` und `manifest.json` (sha256 jeder Datei,
   Dauer, Prüfung) und werden wiederverwendet, nie neu gestempelt; nur ein auf diesem Rechner geprüfter Build kann
-  aktiv werden, und die Aufbewahrung entfernt nie den aktiven Build, den CPU-Ersatz, den Build, aus dem ein
-  laufender Server gestartet wurde, oder den Build eines Boards (Dittos Builds und die Builds der Boards liegen in
-  diesem einen Speicher). Ein Build von einem deiner anderen Rechner kann importiert werden: Seine Dateien
-  werden gegen das Manifest geprüft, seine Build-ID gegen seinen Bauplan und sein Commit gegen den Pin, und du
+  aktiv werden. Das Framework löscht keinen Build von selbst: Eine Installation behält die älteren Builds und sagt,
+  wie viele (Dittos Builds und die Builds der Boards liegen in diesem einen Speicher). Ein Build von einem deiner
+  anderen Rechner kann importiert werden: Seine Dateien werden gegen das Manifest geprüft, seine Build-ID gegen seinen Bauplan und sein Commit gegen den Pin, und du
   bestätigst, bevor eines seiner Programme läuft; danach muss jedes seiner Programme die Version des Pins melden,
   nicht die, die das Archiv erwartet. `runtime install` von Ditto baut darüber. Ein CPU-Build von `llama-server` und
   `llama-bench` am Pin dauerte auf einer virtuellen Maschine mit 4 Kernen 189 s und ergab 28 MB Programme; Dittos
@@ -373,8 +392,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Build. Ein mit `-march=native` gemachter Build wird abgelehnt, bevor irgendetwas läuft, auf einer CPU eines anderen
   Herstellers oder ohne eine der CPU-Funktionen der CPU, die ihn gebaut hat (er bräche bei der ersten Rechnung mit
   SIGILL ab); `runtime start` und die Perplexity-Prüfung überspringen einen solchen Build ebenso, etwa in einem
-  Benutzerordner, den sich mehrere Rechner teilen. `llm-cli ditto runtime prune` entfernt alte Builds und behält immer
-  den aktiven Build, den CPU-Ersatz und den Build, aus dem ein laufender Server gestartet wurde.
+  Benutzerordner, den sich mehrere Rechner teilen. `llm-cli ditto runtime prune` listet die alten
+  Builds und die Installationen des vorgebauten Archivs einer anderen llama.cpp-Version, jeweils mit vollem Pfad und
+  Größe, nichts angehakt, und löscht nur die, die du am Terminal auswählst und bestätigst (standardmäßig in den
+  Papierkorb). Den aktiven Build, den CPU-Ersatz, den Build, aus dem ein laufender Server gestartet wurde, und die
+  Builds der Boards listet es nie. `llm-cli device runtime prune GERÄT` tut dasselbe für die älteren Laufzeit-Pakete
+  eines Boards auf deinem PC; ein neuer Build oder ein Deployment behält sie.
 - `llm-cli doctor` prüft die lokale llama.cpp-Laufzeit: einen genutzten selbst gebauten Build, der verändert wurde
   (Fehler) oder älter als der Pin ist (Warnung), das genutzte vorgefertigte Archiv (Information: nicht selbst gebaut)
   und ob dieser Rechner Compiler, CMake und Ninja für einen nativen Build hat (Information, mit dem Builder-Container
@@ -866,8 +889,39 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Fenster sie zeigt). Wo der Bereich sitzt, ob er gezeigt wird, sein
   Filter und der neueste gesehene Eintrag stehen in `gui_state.json` im Benutzerordner (nie in QSettings); eine
   beschädigte Datei ergibt die Vorgaben.
+- **Mojo: Der Gesundheitscheck schaut (Mojo Oracle) und repariert (Mojo Miracle)** (sechste Runde, Entscheidung 9;
+  siebte Runde, Punkte 11', M' und T; [docs/Mojo_DE.md](docs/Mojo_DE.md)): `llmcf mojo` (Mojo Oracle, Standard;
+  `--oracle`) schaut nur. Zu jeder Warnung und jedem Fehler sagt es, was es gefunden hat, wo (der volle Pfad; eine KI
+  liest eine Bezeichnung), warum das wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann, und ein Satz
+  zählt jedes Problem danach, was sich tun lässt. Kann Mojo Miracle etwas tun, fragt es danach im Terminal „Run Mojo
+  Miracle now? [y/N]“; bei Ja läuft Mojo Miracle, ohne dass der Befehl noch einmal getippt wird. `llmcf mojo
+  --miracle` macht nur harmlose Reparaturen (der Zustandsordner auf deinen Benutzer eingeschränkt; Dittos Server auf
+  einen intakten gespeicherten llama.cpp-Build umgestellt, wenn der aktive fehlt): jede ein Probelauf, an seinen
+  sha256 gebunden, dessen Art sich aus seinen Schritten ergibt, nur so angewendet, wie Mojo Oracle ihn gezeigt hat
+  (ein Problem, das sich seitdem geändert hat, wird nicht repariert), zuerst im Audit-Log festgehalten, als
+  Vergleichen-und-Tauschen am Ordner angewendet, der geöffnet wird, ohne einem Link zu folgen, immer nur eine, und
+  erneut geprüft. Danach meldet es jedes Problem: repariert, schon weg, noch da oder nicht repariert mit dem Grund
+  (Löschen braucht deine Liste, braucht dich, braucht einen Administrator, nicht automatisch reparierbar,
+  fehlgeschlagen), und ein Problem, das danach zum ersten Mal gefunden wird. Speicherplatz freigeben geht nur über
+  die Liste der Build-Images des Frameworks im Terminal, nichts angehakt; ohne Terminal laufen nur die harmlosen
+  Reparaturen, und nichts wird gelöscht. `--json` fragt nie und löscht nie.
+- **`llmcf`, der neue Name der Kommandozeile** (siebte Runde, Punkt 11): ein zweites Konsolenskript neben `llm-cli`,
+  dasselbe Programm; `llm-cli` bleibt. Der Framework-Container hat beide Befehle.
+- **Die MCP-Tools `run_mojo_oracle` und `run_mojo_miracle` und der Prompt `check_installation`** (siebte Runde, Punkt
+  11'): `run_mojo_oracle` (nur lesen) liefert jeden Befund mit `where` als Bezeichnung (nie ein Host-Pfad), `why` und
+  `repair` (`how`: `miracle`, `deletion_list`, `person`, `admin` oder `not_automatic`, mit dem nächsten Schritt).
+  `run_mojo_miracle` repariert ein Problem, dessen `repair.how` `miracle` ist: Jeder Aufruf wird mit dem Plan gefragt
+  (der volle Pfad nur im eigenen Fenster des Frameworks), keine dauerhafte Freigabe, keine Vollmacht, nie ein Löschen;
+  jedes andere Problem wird vor der Frage mit seinem Grund abgelehnt, und das Ergebnis sagt, ob repariert wurde und,
+  wenn nicht, warum. Die Vollmachtsgruppe für harmlose Reparaturen kommt mit den Vollmachten.
 
 ### Geändert
+- **Der Builder löscht keine Images mehr** (veröffentlicht in 3.0.0; Runde 7 Punkt 12): Jeder Build endete damit, sein
+  Image zu entfernen und die verwaisten Images des Frameworks zu prunen. Jetzt heißt das Image des Builds
+  `llm-framework/<Target>:last-build` (der nächste Build dieses Targets nutzt es wieder), und nur sein Name für den
+  einzelnen Build wird entfernt, nachdem der neue Name am Image zu sehen ist. Das Image, das diesen Namen vorher hatte,
+  bleibt ohne Namen und wird dir zum Löschen gelistet (Tools > Framework Build Images..., `llm-cli doctor --fix --tier
+  2`). Nichts im Framework prunt Docker-Objekte; Docker-Images werden nur gelöscht, wenn du sie anhakst.
 - **Rückfragen zeigen eine Kurzfassung und die Arten der Hinweise** (Delegationsentwurf 4.5, LAY-L2): Eine Rückfrage
   im eigenen Fenster des Frameworks (Dittos Dialog, die CLI-Abfrage, das Freigabefenster) beginnt nach ihrer ersten
   Zeile mit 3 bis 6 Zeilen in der Sprache der Person (Englisch oder Deutsch): was passiert, mit sprechenden Namen, wie
@@ -1119,6 +1173,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   bevor etwas gelöscht wird. Nichts wird gelöscht ohne Audit-Log (auch ohne Chat-Verlauf), wenn sich der Chat oder
   Dittos Gespräch geändert hat, während du gefragt wurdest, oder wenn das Fenster ein Gespräch hält, das seine Datei
   nicht zeigt.
+- **Der Doctor ist jetzt Mojo** (veröffentlicht in 3.0.0; sechste Runde, Entscheidung 9): Der Code liegt jetzt in
+  `orchestrator/Core/mojo/` (`orchestrator/Core/doctor.py` exportiert jeden Namen weiter, den es hatte); Befundcodes,
+  Exit-Codes und JSON-Schlüssel bleiben, und das JSON nennt je Befund zusätzlich `where`, `why`, `repair_id` und
+  `cannot`. `llm-cli doctor` behält seine Optionen und seine Ausgabe und schreibt einen kurzen Hinweis auf stderr, der
+  `llmcf mojo` nennt. `doctor --fix` macht jetzt die protokollierten harmlosen Reparaturen von Mojo Miracle statt
+  einer nicht festgehaltenen Änderung der Rechte des Ordners und sagt, warum ein Problem noch da ist (zum Beispiel:
+  Das Audit-Log kann die Reparatur nicht festhalten, also wurde nichts geändert); `--tier 2` zeigt weiter die Liste
+  der Build-Images des Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine
+  Einstellung für `run_doctor` oder `run_mojo_oracle` gilt für beide, und die strengere gewinnt. `make mojo` neben
+  `make doctor`.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -1162,14 +1226,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Vorschlag für eine volle Docker-Platte freigab (`docker_prune`, im GUI-Dialog, an der CLI-Abfrage oder über
   `resolve_healing`), ließ die verwaisten Images des Frameworks löschen, ohne dass sie gezeigt wurden, und den ganzen
   Build-Cache des Docker-Daemons leeren, auch den anderer Projekte. Jetzt ist es ein manueller Schritt: Der Vorschlag
-  verweist auf `llm-cli doctor --fix --tier 2`, das die verwaisten Build-Images des Frameworks listet und nur die
-  löscht, die du bestätigst, und eine Freigabe wird abgelehnt, bevor etwas gefragt wird. Kein Code des Frameworks
+  verweist auf die Liste der Build-Images des Frameworks (**Free Docker space...** im Dialog, **Tools > Framework Build
+  Images...**, `llm-cli doctor --fix --tier 2`), die nur die Images löscht, die du anhakst und bestätigst, und eine
+  Freigabe wird abgelehnt, bevor etwas gefragt wird. Kein Code des Frameworks
   leert den Docker-Build-Cache mehr.
 - **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte den
   ganzen Build-Cache des Docker-Daemons, auch den anderer Projekte, und löschte die verwaisten Images des Frameworks,
   ohne sie zu zeigen. Der Build-Cache wird nicht mehr angerührt (er lässt sich nicht auf das Framework beschränken).
-  Stufe 2 listet jetzt die verwaisten Build-Images des Frameworks, jedes mit Namen, Image-ID, Größe und was es ist,
-  und löscht genau diese Liste, per Image-ID und ohne Prune, erst nach deinem Ja im Terminal (die Vorgabe ist Nein).
+  Stufe 2 listet jetzt jedes Build-Image des Frameworks (ohne Namen, benannt `llm-framework/<Target>:last-build`,
+  Builder der Laufzeit), jedes mit Namen, Image-ID, Größe und was es ist, nichts ausgewählt, und löscht genau die
+  ausgewählten, per Image-ID oder Name und ohne Prune, erst nach deinem Ja im Terminal (die Vorgabe ist Nein).
   Ohne Terminal und mit `--json` listet es sie nur; das Löschen wird zuerst auditiert und abgelehnt, wenn sich die
   Liste inzwischen geändert hat, und ein Image, das inzwischen einen Namen bekommen hat (ein Build eines anderen
   Framework-Programms), bleibt erhalten. Kein Tool, keine Ressource und kein Prompt erreicht es, eine KI-App oder
@@ -1478,6 +1544,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   private.
 
 ### Sicherheit
+- **Kein Löschen ohne deine Bestätigung im Framework** (Runde 5 f; WP7): Jeder Codepfad, der ein gebautes Modell, einen
+  Wissens-Snapshot, einen Papierkorb-Eintrag, ein Image des Frameworks, einen alten llama.cpp-Laufzeit-Build oder ein
+  Laufzeit-Paket eines Boards löscht, nimmt nur den Plan, den du in der GUI oder im Terminal bestätigt hast, baut ihn unmittelbar vorher aus dem neu, was auf der Platte liegt, und löscht nichts,
+  wenn er sich geändert hat oder das Audit-Log ihn nicht vorher festhalten kann. `delete_artifact` einer KI verschiebt
+  nur in den Papierkorb; den Papierkorb leeren und endgültig löschen bleibt bei dir. Eine Prüfung des Quelltexts listet
+  jede Stelle im Code, die löscht, mit ihrer Absicherung; eine neue Stelle lässt sie scheitern, bis über sie entschieden
+  ist.
 - **`run_doctor` gibt KI-Clients keinen Pfad des Rechners** (veröffentlicht in 3.0.0): die Befunde, die eine KI las,
   nannten den persönlichen Ordner, das Audit-Log, Pack-Ordner, die Ordner der Speicherplatz-Prüfung und jeden Pfad,
   den der Fehler einer abgestürzten Prüfung zitierte, samt Benutzernamen. Was eine KI liest, nennt die Ordner des

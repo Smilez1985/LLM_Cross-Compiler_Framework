@@ -41,16 +41,18 @@ class HealingStrategy(Enum):
 
 # The strategies the framework applies itself after the person's yes (GUI dialog, CLI prompt, MCP resolve_healing).
 # None of them deletes anything: deleting needs the person's question with the full list (round 5 f), so a full
-# Docker disk (docker_prune) is a manual step that points to 'llm-cli doctor --fix --tier 2', which lists the
-# framework's dangling build images and deletes only those the person confirms there. Docker's build cache is never
-# cleared: it belongs to every project on the computer.
+# Docker disk (docker_prune) is a manual step that points to the one deletion path for the framework's Docker images
+# (the GUI's Tools > Framework Build Images..., also a button in the healing dialog, and 'llm-cli doctor --fix --tier
+# 2'): it lists every framework image with name, id, size and what it is, and deletes only those the person ticks and
+# confirms. Docker's build cache is never cleared: it belongs to every project on the computer.
 AUTOMATIC_STRATEGIES = frozenset({HealingStrategy.CONFIG_ADJUSTMENT.value, HealingStrategy.RETRY_BUILD.value})
 
 # What the person does about a full Docker disk (the proposal's manual step).
-DOCKER_DISK_STEP = ("Free space on Docker's disk yourself, then start the build again: 'llm-cli doctor --fix --tier 2' "
-                    "(in a terminal) lists the framework's dangling build images with name, id, size and what each "
-                    "is, and deletes exactly those you confirm. Docker's build cache is not touched by the framework: "
-                    "it belongs to every project on this computer ('docker system df' shows its size).")
+DOCKER_DISK_STEP = ("Free space on Docker's disk yourself, then start the build again: Tools > Framework Build "
+                    "Images... in the GUI or 'llm-cli doctor --fix --tier 2' (in a terminal) lists the framework's "
+                    "build images with name, id, size and what each is, and deletes exactly those you tick and "
+                    "confirm; nothing is ticked by default. Docker's build cache is not touched by the framework: it "
+                    "belongs to every project on this computer ('docker system df' shows its size).")
 
 @dataclass
 class HealingProposal:
@@ -332,6 +334,7 @@ class SelfHealingManager:
             return True
 
         # 3. Everything else (a full Docker disk, AI proposals, code patches, host changes) is a manual step for the
-        #    user. Nothing here deletes: freeing Docker's disk is the person's 'doctor --fix --tier 2' with its list.
+        #    user. Nothing here deletes: freeing Docker's disk is the person's list of the framework's build images
+        #    (Tools > Framework Build Images..., 'doctor --fix --tier 2').
         self.logger.warning(f"⚠️ Manual step required: '{proposal.fix_command}'")
         return False
