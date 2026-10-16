@@ -4,8 +4,8 @@ Texts of the knowledge windows in the GUI, English and German: the knowledge bas
 snapshot fits (Tools > Knowledge Snapshots...: Qdrant Edge, the conversion of the storage of earlier versions and its
 old folder, which only the person deletes; DECISIONS RG5, round 5 f), Tools > Knowledge Sources..., and the Community
 Hub's details, checks, import, export and public keys (DECISIONS W1': every `llmcf knowledge` and `llmcf zoo` action
-also by mouse). LocalizationManager merges them (localization.TEXT_MODULES); a key that exists already is refused there, so
-these never replace another text. Every key has the same {placeholders} in both languages
+also by mouse). LocalizationManager merges them (localization.TEXT_MODULES); a key that exists already is refused
+there, so these never replace another text. Every key has the same {placeholders} in both languages
 (tests/test_edge_store.py). This module imports nothing from the framework.
 """
 

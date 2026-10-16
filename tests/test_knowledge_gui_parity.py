@@ -143,7 +143,8 @@ def test_after_a_failure_the_button_says_try_again(tmp_path, monkeypatch):
     dialog = window.KnowledgeSnapshotsDialog(state, framework=framework, lang="en")
     try:
         assert dialog.btn_convert.text() == ui_text("storage.convert", "en") and dialog.btn_convert.isEnabled()
-        assert "a reason" in dialog.storage.text() and ui_text("storage.convert.offer", "en") not in dialog.storage.text()
+        text = dialog.storage.text()
+        assert "a reason" in text and ui_text("storage.convert.offer", "en") not in text
     finally:
         dialog.close()
 
@@ -352,3 +353,521 @@ def test_the_tools_menu_has_knowledge_sources_below_the_snapshots(qapp, main_win
     action.trigger()
     assert len([d for d in win.findChildren(KnowledgeSourcesDialog) if d.isVisible()]) == 1
     win.knowledge_sources_window.close()
+
+
+# --- Tools > Community Hub -------------------------------------------------------------------------------------------
+
+@pytest.fixture
+def world(tmp_path):
+    from test_zoo import World
+    return World(tmp_path)
+
+
+def hub_for(world, lang="en", monkeypatch=None):
+    from orchestrator.gui import community_hub
+    if monkeypatch is not None:
+        monkeypatch.setattr(community_hub, "current_language", lambda: lang)
+    framework = SimpleNamespace(community_manager=world.cm, target_manager=None, secrets_manager=world.secrets,
+                                config=world.config, resolve_path=world.framework.resolve_path)
+    return community_hub.CommunityHubWindow(framework)
+
+
+def settle(hub, qapp):
+    from test_zoo import wait
+    wait(hub, qapp)
+    qapp.processEvents()
+
+
+def spy(monkeypatch, owner, name):
+    """Wraps owner.name: each call's arguments and thread are remembered, the real function runs."""
+    calls, real = [], getattr(owner, name)
+
+    def wrapper(*args, **kwargs):
+        calls.append((args, kwargs, threading.current_thread().name))
+        return real(*args, **kwargs)
+    monkeypatch.setattr(owner, name, wrapper)
+    return calls
+
+
+def errors(monkeypatch):
+    """The hub's error boxes (on_error: plain text made into a rich-text container), as the person reads them."""
+    from PySide6.QtGui import QTextDocument
+
+    from orchestrator.gui import community_hub
+    shown = []
+
+    def read(parent, title, text):
+        document = QTextDocument()
+        document.setHtml(text)
+        shown.append(document.toPlainText().replace("\xa0", " "))
+    monkeypatch.setattr(community_hub.QMessageBox, "warning", read)
+    return shown
+
+
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_the_hub_has_every_new_button_in_both_languages(qapp, world, monkeypatch, lang):
+    from orchestrator.gui.menus import knowledge as menu_module
+    from orchestrator.utils.localization import ui_text
+    hub = hub_for(world, lang, monkeypatch)
+    try:
+        settle(hub, qapp)
+        found = window_objects(hub, menu_module, menu_module.ACT_HUB)
+        assert found and all(found.values()), found
+        for button, key in ((hub.details_btn, "zoo.details"), (hub.verify_btn, "zoo.verify_installed"),
+                            (hub.verify_file_btn, "zoo.verify_file"), (hub.export_btn, "zoo.export"),
+                            (hub.keys_btn, "zoo.keys")):
+            assert button.text() == ui_text(key, lang).replace("&", "&&")
+            assert ui_text(f"{key}.tip", lang) in button.toolTip()
+    finally:
+        hub.close()
+
+
+def install_recipe(world, tmp_path):
+    import json
+
+    from test_recipes import recipe_data
+    from test_zoo import pack_bytes
+    root = tmp_path / "r"
+    root.mkdir()
+    data = recipe_data()
+    data.update(id="demo-recipe", target={"id": "demo-board", "pack_sha256": "a" * 64}, format="gguf", board="demo",
+                quantization="Q8_0")
+    (root / "recipe.yml").write_text(json.dumps(data))
+    (tmp_path / "r.zip").write_bytes(pack_bytes(root, kind="recipe", pack_id="demo-recipe", version="1.0.0"))
+    return world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "r.zip"))
+
+
+def test_details_show_what_zoo_show_shows(qapp, world, tmp_path, monkeypatch):
+    from orchestrator.gui import community_dialogs
+    from orchestrator.utils.localization import ui_text
+    world.add(world.target_pack())
+    world.publish()
+    folder = install_recipe(world, tmp_path)
+    calls = spy(monkeypatch, world.cm, "details")
+    shown = []
+    monkeypatch.setattr(community_dialogs.PackDetailsDialog, "exec",
+                        lambda self: shown.append((self.fields, [r.toPlainText() for r in self.recipes])) or 0)
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.table.clearSelection()
+        hub.table.setCurrentCell(-1, -1)
+        hub.details_btn.click()
+        assert hub.status_label.text() == ui_text("zoo.choose_first", "en") and calls == []
+        rows = {hub.table.item(r, 0).text(): r for r in range(hub.table.rowCount())}
+        hub.table.setCurrentCell(rows["demo-recipe"], 0)
+        hub.details_btn.click()
+        settle(hub, qapp)
+        args, _, thread = calls[0]
+        assert args == ("demo-recipe", "recipe") and thread != threading.current_thread().name
+        fields, recipes = shown[0]
+        values = dict(fields[0])
+        assert values[ui_text("zoo.field.folder", "en")] == str(folder)
+        assert recipes == [(folder / "recipe.yml").read_text(encoding="utf-8")]
+        hub.table.setCurrentCell(rows["Demo-Board"], 0)
+        hub.table.cellDoubleClicked.emit(rows["Demo-Board"], 0)   # a double click shows the same
+        settle(hub, qapp)
+        entry = world.cm.details("demo-board")[0].item.entry
+        values = dict(shown[1][0][0])
+        assert values[ui_text("zoo.field.download", "en")] == entry.url
+        assert values[ui_text("zoo.field.sha256", "en")] == entry.sha256
+        assert values[ui_text("zoo.field.size", "en")] == ui_text("zoo.value.bytes", "en", size=entry.size)
+        assert values[ui_text("zoo.field.licence", "en")] == "MIT"
+    finally:
+        hub.close()
+
+
+def import_dialog_answers(monkeypatch, *answers):
+    """ImportPackDialog answered like a person, once per entry of `answers`: (file, passphrase, key files)."""
+    from orchestrator.gui import community_dialogs
+    seen = []
+
+    def run(dialog):
+        path, passphrase, key_files = answers[len(seen)]
+        dialog.file_edit.setText(str(path))
+        dialog.passphrase.setText(passphrase or "")
+        dialog.key_files = [str(k) for k in key_files]
+        dialog._check()
+        seen.append(dialog.problem.text())
+        return dialog.result()
+    monkeypatch.setattr(community_dialogs.ImportPackDialog, "exec", run)
+    return seen
+
+
+def test_import_a_passphrase_pack_by_mouse(qapp, world, tmp_path, monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from PySide6.QtWidgets import QMessageBox
+
+    from orchestrator.Core import community_pack as cp
+    from orchestrator.gui import community_hub
+    from orchestrator.utils.localization import ui_text
+    secret = "correct horse battery staple"
+    (tmp_path / "p.lcfpack").write_bytes(cp.encrypt_pack(world.target_pack(), sender=Ed25519PrivateKey.generate(),
+                                                         passphrase=secret))
+    calls = spy(monkeypatch, world.cm, "prepare_install_file")
+    asked = []
+    monkeypatch.setattr(community_hub.QMessageBox, "exec",
+                        lambda self: asked.append((self.text(), self.defaultButton() is self.button(QMessageBox.No)))
+                        or QMessageBox.No)
+    seen = import_dialog_answers(monkeypatch, (tmp_path / "p.lcfpack", "", []), (tmp_path / "p.lcfpack", secret, []))
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.import_btn.click()
+        assert seen == [ui_text("zoo.import.needs_passphrase", "en")] and calls == [], "refused before reading"
+        hub.import_btn.click()
+        settle(hub, qapp)
+        args, kwargs, thread = calls[0]
+        assert args == (tmp_path / "p.lcfpack",) and kwargs == {"passphrase": secret, "trusted_senders": None}
+        assert thread != threading.current_thread().name
+        assert asked and "demo-board" in asked[0][0] and asked[0][1], "the summary asks with No as the default"
+        assert not (world.root / "targets" / "demo-board").exists(), "No installs nothing"
+        assert secret not in repr(vars(hub)), "the passphrase is not kept by the window"
+    finally:
+        hub.close()
+
+
+def test_import_only_from_the_senders_in_key_files(qapp, world, tmp_path, monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+    from PySide6.QtWidgets import QMessageBox
+
+    from orchestrator.Core import community_pack as cp
+    from orchestrator.gui import community_hub
+    from orchestrator.utils.localization import ui_text
+    me = cp.UserKeys(world.secrets).age_identity()
+    sender, stranger = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
+    data = world.target_pack()
+    (tmp_path / "p.lcfpack").write_bytes(cp.encrypt_pack(data, sender=sender, recipients=[me.to_public()]))
+    (tmp_path / "plain.zip").write_bytes(data)
+    (tmp_path / "sender.keys").write_text(cp.public_key_text(sender.public_key()) + "\n", encoding="utf-8")
+    (tmp_path / "stranger.keys").write_text(cp.public_key_text(stranger.public_key()) + "\n", encoding="utf-8")
+    (tmp_path / "bin.keys").write_bytes(b"\xff\xfe\x00\x81")
+    calls = spy(monkeypatch, world.cm, "prepare_install_file")
+    monkeypatch.setattr(community_hub.QMessageBox, "exec", lambda self: QMessageBox.Yes)
+    shown = errors(monkeypatch)
+    seen = import_dialog_answers(monkeypatch, (tmp_path / "plain.zip", "", [tmp_path / "sender.keys"]),
+                                 (tmp_path / "p.lcfpack", "", [tmp_path / "bin.keys"]),
+                                 (tmp_path / "p.lcfpack", "", [tmp_path / "stranger.keys"]),
+                                 (tmp_path / "p.lcfpack", "", [tmp_path / "sender.keys"]))
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.import_btn.click()
+        assert seen[0] == ui_text("zoo.import.not_encrypted", "en") and calls == []
+        hub.import_btn.click()
+        assert ui_text("zoo.keyfile.not_text", "en", file=str(tmp_path / "bin.keys")) in shown[-1] and calls == []
+        hub.import_btn.click()
+        settle(hub, qapp)
+        assert "not one of the trusted senders" in shown[-1]
+        hub.import_btn.click()
+        settle(hub, qapp)
+        (senders,) = calls[-1][1]["trusted_senders"]
+        assert isinstance(senders, Ed25519PublicKey) and calls[-1][1]["passphrase"] is None
+        assert (world.root / "targets" / "demo-board").is_dir()
+    finally:
+        hub.close()
+
+
+def test_check_installed_packs_finds_a_changed_pack(qapp, world, monkeypatch):
+    from orchestrator.gui import community_dialogs
+    from orchestrator.utils.localization import ui_text
+    world.add(world.target_pack())
+    world.publish()
+    folder = world.install()
+    (folder / "modules" / "build.sh").write_text("#!/bin/bash\necho changed\n", encoding="utf-8")
+    calls = spy(monkeypatch, world.cm, "verify_installed")
+    shown = []
+    monkeypatch.setattr(community_dialogs.VerifyResultsDialog, "exec", lambda self: shown.append(
+        (self.summary.text(), [[self.table.item(r, c).text() for c in range(5)]
+                               for r in range(self.table.rowCount())])) or 0)
+    hub = hub_for(world, "de", monkeypatch)
+    try:
+        settle(hub, qapp)
+        hub.verify_btn.click()
+        settle(hub, qapp)
+        assert calls and calls[0][2] != threading.current_thread().name
+        summary, rows = shown[0]
+        assert summary == ui_text("zoo.verify.summary", "de", n=1, bad=1)
+        assert rows[0][:4] == ["target", "demo-board", "1.2.0", str(folder)]
+        assert "changed since it was installed" in rows[0][4]
+    finally:
+        hub.close()
+
+
+def test_check_a_pack_file_before_installing_it(qapp, world, tmp_path, monkeypatch):
+    from orchestrator.gui import community_hub, plain
+    from orchestrator.utils.localization import ui_text
+    (tmp_path / "good.zip").write_bytes(world.target_pack())
+    (tmp_path / "bad.zip").write_bytes(world.target_pack(name="bad", script="wget https://x.invalid/a\n"))
+    calls = spy(monkeypatch, world.cm, "verify_file")
+    told = []
+    monkeypatch.setattr(plain, "_exec", lambda box: told.append(box.text()) or 0)
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        for name in ("good.zip", "bad.zip"):
+            monkeypatch.setattr(community_hub.QFileDialog, "getOpenFileName",
+                                lambda *a, n=name, **k: (str(tmp_path / n), ""))
+            hub.verify_file_btn.click()
+            settle(hub, qapp)
+        assert [c[0] for c in calls] == [(tmp_path / "good.zip",), (tmp_path / "bad.zip",)]
+        assert all(c[2] != threading.current_thread().name for c in calls)
+        assert told[0] == ui_text("zoo.verify_file.ok", "en", kind="target", id="demo-board", version="1.2.0")
+        assert "downloads" in told[1] and "would be rejected" in told[1]
+        assert not (world.root / "targets" / "demo-board").exists(), "checking installs nothing"
+    finally:
+        hub.close()
+
+
+def export_through(monkeypatch, qapp, kind, source, fill):
+    """Export...: ExportSourceDialog answered with `kind` and `source`, then CommunityExportDialog filled by `fill`
+    and Create pack clicked; returns the export dialogs as they ended."""
+    from orchestrator.gui import community_dialogs, community_hub
+    ended = []
+
+    def choose(dialog):
+        dialog.kind.setCurrentIndex(dialog.kind.findData(kind))
+        if kind == "target":
+            dialog.target.setCurrentText(source)
+        elif kind == "recipe":
+            dialog.build_info = source
+        dialog._check()
+        return dialog.result()
+
+    def export(dialog):
+        fill(dialog)
+        dialog.create_btn.click()
+        if dialog._export_task is not None:
+            dialog._export_task.wait(60000)
+        qapp.processEvents()
+        ended.append(dialog)
+        return 0
+    monkeypatch.setattr(community_dialogs.ExportSourceDialog, "exec", choose)
+    monkeypatch.setattr(community_hub.CommunityExportDialog, "exec", export)
+    return ended
+
+
+def test_export_an_existing_target_with_a_passphrase_into_a_chosen_folder(qapp, world, tmp_path, monkeypatch):
+    from test_zoo import make_target
+
+    from orchestrator.Core import community_pack as cp
+    make_target(world.root / "targets" / "my-board")
+    calls = spy(monkeypatch, world.cm, "export_pack")
+    out = tmp_path / "usb"
+    out.mkdir()
+    secret = "a long enough passphrase"
+
+    def fill(dialog):
+        dialog.author_edit.setText("pat")
+        dialog.encrypt_combo.setCurrentIndex(dialog.encrypt_combo.findData("passphrase"))
+        dialog.passphrase_edit.setText(secret)
+        dialog.passphrase2_edit.setText(secret)
+        dialog.out_dir = out
+    ended = export_through(monkeypatch, qapp, "target", "my-board", fill)
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.export_btn.click()
+        args, kwargs, thread = calls[0]
+        assert args == ("target", "my-board") and thread != threading.current_thread().name
+        assert kwargs == {"author": "pat", "license": "MIT", "pack_id": None, "model_license": "unknown",
+                          "recipients": [], "out_dir": out, "passphrase": secret}
+        dialog = ended[0]
+        assert dialog.result.encrypted and dialog.result.path.parent == out and dialog.result.path.suffix == ".lcfpack"
+        assert not dialog.pr_btn.isEnabled(), "an encrypted pack is never submitted"
+        assert dialog.passphrase_edit.text() == "" and dialog.passphrase2_edit.text() == ""
+        data, _ = cp.decrypt_pack(dialog.result.path.read_bytes(), passphrase=secret)
+        assert cp.read_manifest(data).id == "my-board"
+    finally:
+        hub.close()
+
+
+def test_export_refuses_passphrases_that_differ_and_missing_key_files(qapp, world, monkeypatch):
+    from test_zoo import make_target
+
+    from orchestrator.gui import plain
+    from orchestrator.utils.localization import ui_text
+    make_target(world.root / "targets" / "my-board")
+    calls = spy(monkeypatch, world.cm, "export_pack")
+    told = []
+    monkeypatch.setattr(plain, "_exec", lambda box: told.append(box.text()) or 0)
+
+    def differs(dialog):
+        dialog.author_edit.setText("pat")
+        dialog.encrypt_combo.setCurrentIndex(dialog.encrypt_combo.findData("passphrase"))
+        dialog.passphrase_edit.setText("a long enough passphrase")
+        dialog.passphrase2_edit.setText("another long passphrase")
+    export_through(monkeypatch, qapp, "target", "my-board", differs)
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.export_btn.click()
+        assert told[-1] == ui_text("zoo.export.passphrase_differs", "en") and calls == []
+
+        def no_keys(dialog):
+            dialog.author_edit.setText("pat")
+            dialog.encrypt_combo.setCurrentIndex(dialog.encrypt_combo.findData("keys"))
+        export_through(monkeypatch, qapp, "target", "my-board", no_keys)
+        hub.export_btn.click()
+        assert told[-1] == ui_text("zoo.export.no_recipients", "en") and calls == []
+    finally:
+        hub.close()
+
+
+def test_export_the_knowledge_base_with_its_id_to_the_keys_in_a_key_file(qapp, world, tmp_path, monkeypatch):
+    import zipfile
+
+    import pyrage
+
+    from orchestrator.Core import community_pack as cp
+    world.rag.records = [{"source": "https://docs.invalid/a", "content": "a page",
+                          "metadata": {"licence": "MIT", "copyright": "Copyright (c) 2026 Example"}}]
+    friend = pyrage.x25519.Identity.generate()
+    (tmp_path / "friend.keys").write_text(str(friend.to_public()) + "\n", encoding="utf-8")
+    calls = spy(monkeypatch, world.cm, "export_pack")
+
+    def fill(dialog):
+        assert dialog.license_combo.currentText() == "NOASSERTION", "the default of zoo export knowledge"
+        dialog.author_edit.setText("pat")
+        dialog.id_edit.setText("board-notes")
+        dialog.encrypt_combo.setCurrentIndex(dialog.encrypt_combo.findData("keys"))
+        dialog.recipient_files = [str(tmp_path / "friend.keys")]
+    ended = export_through(monkeypatch, qapp, "knowledge", None, fill)
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.export_btn.click()
+        args, kwargs, _ = calls[0]
+        assert args == ("knowledge", None) and kwargs["pack_id"] == "board-notes"
+        assert kwargs["license"] == "NOASSERTION" and len(kwargs["recipients"]) == 1
+        result = ended[0].result
+        assert result.encrypted and result.manifest.id == "board-notes"
+        data, _ = cp.decrypt_pack(result.path.read_bytes(), identity=friend)
+        (tmp_path / "plain.zip").write_bytes(data)
+        with zipfile.ZipFile(tmp_path / "plain.zip") as zf:
+            names = set(zf.namelist())
+        assert "knowledge.json" in names and "NOTICE" in names and any(n.startswith("LICENSES/") for n in names)
+    finally:
+        hub.close()
+
+
+def test_export_a_finished_build_chooses_its_build_info(qapp, tmp_path, monkeypatch):
+    from orchestrator.gui import community_dialogs
+    (tmp_path / "build_info.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(community_dialogs.QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(tmp_path / "build_info.json"), ""))
+    dialog = community_dialogs.ExportSourceDialog(["my-board"], str(tmp_path), lang="de")
+    try:
+        assert dialog.values() == ("target", "my-board")
+        dialog.kind.setCurrentIndex(dialog.kind.findData("recipe"))
+        dialog._check()
+        assert dialog.problem.text() and dialog.result() == 0
+        dialog.findChild(type(dialog.btn_next), "btn_zoo_export_build").click()
+        dialog._check()
+        assert dialog.values() == ("recipe", str(tmp_path / "build_info.json")) and dialog.result() == 1
+        dialog.kind.setCurrentIndex(dialog.kind.findData("knowledge"))
+        assert dialog.values() == ("knowledge", None)
+    finally:
+        dialog.close()
+
+
+def test_my_public_keys_with_copy_and_save(qapp, world, tmp_path, monkeypatch):
+    from PySide6.QtGui import QGuiApplication
+
+    from orchestrator.Core import community_pack as cp
+    from orchestrator.gui import community_dialogs
+    calls = spy(monkeypatch, cp.UserKeys, "export_public")
+    target = tmp_path / "mine.keys"
+    monkeypatch.setattr(community_dialogs.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
+    shown = []
+
+    def run(dialog):
+        dialog.btn_copy.click()
+        dialog.btn_save.click()
+        shown.append((dialog.text, dialog.status.text()))
+        return 0
+    monkeypatch.setattr(community_dialogs.PublicKeysDialog, "exec", run)
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.keys_btn.click()
+        settle(hub, qapp)
+        assert calls and calls[0][2] != threading.current_thread().name
+        text, status = shown[0]
+        assert text.count("ed25519:") == 1 and "\nage1" in text and "AGE-SECRET-KEY" not in text.upper()
+        assert QGuiApplication.clipboard().text() == text
+        assert target.read_text(encoding="utf-8") == text and str(target) in status
+        assert [type(k).__name__ for k in cp.parse_public_keys(text)] == ["Recipient", "Ed25519PublicKey"]
+    finally:
+        hub.close()
+
+
+def test_the_hub_and_the_snapshots_window_open_from_the_menu_bar(qapp, main_window, monkeypatch):
+    from PySide6.QtGui import QAction
+
+    from orchestrator.gui import knowledge_snapshots_window
+    from orchestrator.gui.menus import knowledge as menu_module
+    win = main_window()
+    qapp.processEvents()
+    win.findChild(QAction, menu_module.ACT_HUB).trigger()
+    hub = win.community_hub
+    settle(hub, qapp)
+    found = window_objects(win, menu_module, menu_module.ACT_HUB)
+    assert found and all(found.values()), found
+    hub.close()
+    opened = []
+    monkeypatch.setattr(knowledge_snapshots_window.KnowledgeSnapshotsDialog, "exec",
+                        lambda self: opened.append(window_objects(self, menu_module, menu_module.ACT_SNAPSHOTS)) or 0)
+    win.findChild(QAction, menu_module.ACT_SNAPSHOTS).trigger()
+    assert opened and all(opened[0].values()), opened
+
+
+# --- CLI_PATHS and texts ---------------------------------------------------------------------------------------------
+
+def test_cli_paths_name_every_knowledge_and_zoo_command_and_option():
+    from orchestrator import cli as cli_module
+    from orchestrator.gui.menus import knowledge as menu_module
+
+    def walk(group, path):
+        for name, command in group.commands.items():
+            full = f"{path} {name}".strip()
+            yield full, command
+            if hasattr(command, "commands"):
+                yield from walk(command, full)
+
+    area = {p: c for p, c in walk(cli_module.cli, "") if p.split()[0] in ("knowledge", "zoo")}
+    assert {"knowledge sources", "knowledge storage convert", "zoo show", "zoo verify", "zoo keys"} <= set(area)
+    for path, command in area.items():
+        assert path in menu_module.CLI_PATHS, path
+        for param in command.params:
+            flag = next((o for o in param.opts if o.startswith("--")), None)
+            if flag is None or flag == "--help":
+                continue
+            key = f"{path} {flag}"
+            assert key in menu_module.CLI_PATHS or key in menu_module.MACHINE_ONLY, key
+    for name in list(menu_module.CLI_PATHS.values()) + list(menu_module.ARGUMENT_PATHS.values()):
+        assert name in menu_module.ACTIONS or menu_module.WINDOW_OBJECTS[name] in menu_module.ACTIONS, name
+    assert set(menu_module.CLI_PATHS) & set(menu_module.MACHINE_ONLY) == set()
+
+
+def test_every_text_key_of_the_knowledge_windows_exists_in_english_and_german():
+    import re
+
+    from conftest import REPO_ROOT
+    from orchestrator.utils.localization import LocalizationManager
+    table = LocalizationManager.TRANSLATIONS
+    used = set()
+    for name in ("knowledge_snapshots_window.py", "knowledge_sources_window.py", "community_dialogs.py",
+                 "community_hub.py", "menus/knowledge.py"):
+        source = (REPO_ROOT / "orchestrator" / "gui" / name).read_text(encoding="utf-8")
+        used |= set(re.findall(r'(?:ui_text|_t)\(\s*f?"([a-z_.]+)"', source))
+    used |= {f"{k}.tip" for k in ("zoo.details", "zoo.verify_installed", "zoo.verify_file", "zoo.export", "zoo.keys")}
+    used |= {f"sources.filter.{k}" for k in ("any", "web", "pack", "docs", "other")}
+    used |= {f"sources.carried.{k}" for k in ("full_text", "link_and_facts", "not_exported")}
+    used |= {f"storage.reason.{k}" for k in ("engine_missing", "not_converted")}
+    used |= {f"zoo.export.kind.{k}" for k in ("target", "recipe", "knowledge")}
+    used |= {f"zoo.export.encrypt.{k}" for k in ("none", "keys", "passphrase")}
+    used = {k for k in used if not k.endswith(".")}
+    missing = {lang: sorted(k for k in used if k not in table[lang]) for lang in ("en", "de")}
+    assert missing == {"en": [], "de": []}
+    assert len(used) > 80
