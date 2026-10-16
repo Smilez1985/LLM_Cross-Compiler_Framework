@@ -685,7 +685,6 @@ class LocalLLMRuntime:
             raise LocalRuntimeError(f"{e}{where}") from None
         with self._lock():
             self._update_active(use="self-built")
-            self._prune_old_builds()
         self.logger.info(f"Self-built llama.cpp {self.build}: active build {result.active.build_id[:16]} "
                          f"({result.active.backend}), CPU fallback {result.fallback.build_id[:16]}")
         return result
@@ -743,16 +742,101 @@ class LocalLLMRuntime:
         except StoreError as e:
             raise LocalRuntimeError(str(e)) from None
 
-    def prune(self, keep_last: int = 2) -> List[str]:
-        """Removes old self-built builds of Ditto's server: never the active build, the CPU fallback or the build a
-        running server uses, and never a build of the device runtime (llm-cli device runtime build), which shares the
-        build store."""
+    # --- old builds: listed for the person, deleted only as the person chose (round 5 f) -------------------------
+    def _other_prebuilt(self) -> List[Path]:
+        """Installations of the prebuilt archive of other llama.cpp versions (left after a catalog update), except
+        the one a running server uses."""
+        running = owned_process(_read_json(self.state_file))
+        return [folder for folder in sorted(self.root.glob("b*-*"))
+                if folder.is_dir() and not folder.is_symlink() and not folder.name.startswith(f"{self.build}-")
+                and not (running and self._uses(running, folder))]
+
+    def cleanup_plan(self):
+        """What `llm-cli ditto runtime prune` lists for the person's multiple choice: Ditto's older self-built
+        builds (never the active build, the CPU fallback or the build a running server uses, and never a build of the
+        device runtime, which shares the build store) and installations of the prebuilt archive of other llama.cpp
+        versions, each with its full path, size and what it is. None when there is nothing to list. Reads only: the
+        framework deletes no runtime build by itself."""
+        from orchestrator.Core.deletion import plan_of
+        from orchestrator.Core.trash import tree_size
+        from orchestrator.runtime.build.host import PURPOSE
+        from orchestrator.tools.spec import DeletionItem
+        items = [DeletionItem(kind="runtime_build", speaking_name=f"llama-server build {b.build_id[:16]}",
+                              full_path=str(b.path), file_name=b.path.name, size_bytes=tree_size(b.path),
+                              what=(f"older {b.origin} llama.cpp build of Ditto's server ({b.backend}, commit "
+                                    f"{b.commit[:8]}, built {b.built_at[:10]}); not in use")[:300])
+                 for b in self.store.removable(purpose=PURPOSE)]
+        items += [DeletionItem(kind="runtime_build", speaking_name=f"prebuilt llama.cpp {folder.name}"[:300],
+                               full_path=str(folder), file_name=folder.name, size_bytes=tree_size(folder),
+                               what="installation of the official prebuilt llama.cpp archive of another version "
+                                    "(left after an update); not in use")
+                  for folder in self._other_prebuilt()]
+        return plan_of(items, ("trash", "permanent"))
+
+    def delete_old_builds(self, accepted: Any, trash: Any = None, audit: Any = None):
+        """Deletes exactly the items of cleanup_plan() the person ticked and confirmed at a terminal (orchestrator/
+        Core/deletion.py): into the trash of the per-user folder (`trash`) or for good. The list is looked up again
+        first (PlanChanged when a chosen item changed); the deletion is audited before anything goes (RuntimeError,
+        nothing deleted, without the audit log); each item is checked again under its lock, so a build that became
+        active or that a server started from meanwhile is kept. Only the person (PermissionError otherwise). Returns
+        a deletion.DeletionResult."""
+        from orchestrator.Core.deletion import DeletionResult, require_person, require_same, same_items
         from orchestrator.runtime.build.host import PURPOSE
         from orchestrator.runtime.build.store import StoreError
+        accepted = require_person(accepted)
+        if accepted.actor not in ("gui", "cli"):
+            raise PermissionError("Only the person deletes runtime builds, in the GUI or at a terminal.")
+        require_same(accepted, same_items(self.cleanup_plan(), accepted.plan), "the list of runtime builds")
+        if accepted.mode == "trash" and trash is None:
+            raise RuntimeError("The trash is not available; nothing was deleted.")
+        if audit is None or not callable(getattr(audit, "record", None)):
+            raise RuntimeError("The audit log is not available, so nothing was deleted.")
+        names = [i.speaking_name for i in accepted.plan.items]
         try:
-            return self.store.prune(keep_last=keep_last, purpose=PURPOSE)
-        except StoreError as e:
-            raise LocalRuntimeError(str(e)) from None
+            audit.record(accepted.actor, "ditto_runtime", "framework", "person", "started", approved=True,
+                         arguments={"builds": names, "bytes": accepted.plan.total_bytes, "mode": accepted.mode},
+                         detail=f"{len(names)} old runtime builds "
+                                + ("moved to the trash" if accepted.mode == "trash" else "deleted for good"),
+                         extra=accepted.audit_extra())
+        except Exception:  # noqa: BLE001 - the reason could name a host path
+            raise RuntimeError("The audit log cannot record the deletion; nothing was deleted.") from None
+        result = DeletionResult()
+
+        def take(path: Path, item) -> None:
+            if accepted.mode == "trash":
+                entry = trash.move("runtime_build", path, Path(self.data_dir), "state", item.speaking_name, accepted,
+                                   accepted.actor)
+                result.trash_ids.append(entry.id)
+            else:
+                shutil.rmtree(path)
+                result.freed_bytes += item.size_bytes
+
+        stored = {str(b.path): b.build_id for b in self.store.list_builds()}
+        builds = {stored[i.full_path]: i for i in accepted.plan.items if i.full_path in stored}
+        try:
+            done, kept = self.store.remove(list(builds), purpose=PURPOSE,
+                                           move=lambda b: take(b.path, builds[b.build_id]))
+        except StoreError as e:   # another build or runtime change runs: nothing of the store was deleted
+            done, kept = [], [(build_id, str(e)) for build_id in builds]
+        result.done += [builds[build_id].speaking_name for build_id in done]
+        result.failed += [(builds[build_id].speaking_name, why) for build_id, why in kept]
+        others = [i for i in accepted.plan.items if i.full_path not in stored]
+        if others:
+            with self._lock():   # an installation a server started from meanwhile is kept
+                prebuilt = {str(folder) for folder in self._other_prebuilt()}
+                for item in others:
+                    if item.full_path not in prebuilt:
+                        result.failed.append((item.speaking_name, "it is in use now or no longer there, so it was "
+                                                                  "kept"))
+                        continue
+                    try:
+                        take(Path(item.full_path), item)
+                    except Exception as e:  # noqa: BLE001 - a TrashError or an OSError: kept and reported
+                        result.failed.append((item.speaking_name,
+                                              type(e).__name__ if isinstance(e, OSError) else str(e)))
+                        continue
+                    result.done.append(item.speaking_name)
+        return result
 
     def rebuild_advice(self) -> Optional[str]:
         """Whether the build in use should be built again (pin changed: required; this machine's plan changed:
@@ -829,7 +913,6 @@ class LocalLLMRuntime:
             for archive in archives:
                 archive.unlink(missing_ok=True)
             self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
-            self._prune_old_builds()
         inst = self._read_manifest(target)
         if inst is None:
             raise LocalRuntimeError(f"Installation in {target} is incomplete.")
@@ -889,16 +972,6 @@ class LocalLLMRuntime:
                 continue
             if not p.suffix or ".so" in p.name or p.suffix == ".dylib":
                 p.chmod(p.stat().st_mode | 0o755)
-
-    def _prune_old_builds(self) -> None:
-        """Removes installations of other llama.cpp builds (after a catalog update), unless the server runs there."""
-        running = owned_process(_read_json(self.state_file))
-        for folder in self.root.glob("b*-*"):
-            if not folder.is_dir() or folder.name.startswith(f"{self.build}-"):
-                continue
-            if running and self._uses(running, folder):
-                continue
-            shutil.rmtree(folder, ignore_errors=True)
 
     # --- downloads (orchestrator/utils/download.py) ---------------------------------------------------------
     def _downloads(self) -> _Downloads:

@@ -138,6 +138,9 @@ class OptimizationLevel(Enum):
 
 TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"
+# The stable name of each target's newest build image (llm-framework/<target>:last-build): the next build reuses its
+# layers. The builder never deletes an image (round 7 item 12); older ones are listed for the person.
+LAST_BUILD_TAG = "last-build"
 # owner/name as used on huggingface.co; no path traversal
 HF_REPO_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 TARGET_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -554,6 +557,25 @@ class BuildEngine:
             except Exception:
                 pass
 
+    def _keep_as_last_build(self, tag: str) -> None:
+        """Names the image of a build `llm-framework/<target>:last-build` and then drops its per-build name `tag`.
+        Removing a name never deletes an image here: the per-build name is dropped only once the image is seen to
+        carry the stable name too. The image that had the stable name before keeps its layers without a name; it is
+        listed for the person (Tools > Framework Build Images..., 'llm-cli doctor --fix --tier 2'), who alone deletes
+        it. A running build is not affected: its containers use the image by id. Framework processes that share the
+        cache folder name their images one at a time, so another build cannot move the stable name away between the
+        check and the drop (which would leave the per-build name as the image's last one)."""
+        from orchestrator.utils.file_lock import file_lock
+        repository = tag.rsplit(":", 1)[0]
+        with file_lock(Path(self.cache_dir) / ".image-names.lock", timeout=60):
+            image = self.docker_client.images.get(tag)
+            image.tag(repository, LAST_BUILD_TAG)
+            named = self.docker_client.images.get(f"{repository}:{LAST_BUILD_TAG}")
+            if getattr(named, "id", None) != getattr(image, "id", None) or \
+                    tag not in (getattr(named, "tags", None) or []):
+                raise RuntimeError("the stable name did not land on the build's image")
+            self.docker_client.images.remove(tag, noprune=True)
+
     def cleanup_build(self, build_id: str) -> bool:
         progress = self._builds.get(build_id)
         if not progress: return False
@@ -573,15 +595,14 @@ class BuildEngine:
                         del self._active_containers[build_id]
                 except Exception: pass
 
-            # Drop the per-build image tag (layers stay in the build cache, so the next build is fast),
-            # then dangling framework images, so repeated builds do not fill the disk.
+            # The builder never deletes an image (round 7 item 12): the build's image gets the stable name of its
+            # target, then only the per-build name is dropped.
             tag = self._build_images.pop(build_id, None)
             if tag and self.docker_client:
                 try:
-                    self.docker_client.images.remove(tag)
-                    self.docker_client.images.prune(filters={"dangling": True, "label": IMAGE_LABEL})
+                    self._keep_as_last_build(tag)
                 except Exception as e:
-                    self.logger.debug(f"Image cleanup for {build_id} skipped: {e}")
+                    self.logger.debug(f"The image of {build_id} keeps its per-build name: {e}")
             
             # Remove temp dirs
             build_temp = self.cache_dir / "builds" / build_id

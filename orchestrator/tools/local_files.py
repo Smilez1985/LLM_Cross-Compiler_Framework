@@ -116,6 +116,10 @@ def denied_folders(state_dir: Optional[Path], data_folders: Sequence[Path] = (),
 
     if state_dir is not None:
         add(state_dir, "it is the framework's own folder (permissions, audit log, credentials)", data_folders)
+        # The trash of every data folder (design 3.10): only the person restores or empties it.
+        from orchestrator.Core.trash import trash_folders
+        for folder in trash_folders(state_dir):
+            add(folder, "it is the framework's trash (only you restore or empty it)")
     for name, reason in ((".ssh", "it holds SSH keys"), (".gnupg", "it holds GPG keys"),
                          (".config", "it holds application settings and credentials"),
                          (".local/share/keyrings", "it holds the keyring"),

@@ -30,8 +30,9 @@ Zurück zur [README](../README_DE.md) · Alle Befehle: [CLI_Usage_DE.md](CLI_Usa
 - [Tool-Berechtigungen und Audit-Log](#tool-berechtigungen-und-audit-log)
 - [Geheimnisse und persönlicher Zustand](#geheimnisse-und-persönlicher-zustand)
 - [Eingabeverlauf](#eingabeverlauf)
+- [Löschen und der Papierkorb](#löschen-und-der-papierkorb)
 - [Hardware-Probe und neue Targets](#hardware-probe-und-neue-targets)
-- [Gesundheitscheck (doctor)](#gesundheitscheck-doctor)
+- [Gesundheitscheck (Mojo)](#gesundheitscheck-mojo)
 - [Community-Zoo](#community-zoo)
 - [Secret-Scan für Mitwirkende](#secret-scan-für-mitwirkende)
 - [Bekannte Lücken](#bekannte-lücken)
@@ -220,9 +221,10 @@ das Framework nur feste, eingebaute Korrekturen an:
 Alles andere, auch jeder KI-Vorschlag, wird als manueller Schritt angezeigt und nie ausgeführt. Eine volle Platte ist
 ebenfalls ein solcher manueller Schritt, weil das Framework nichts ohne deine Liste löscht (unveröffentlicht; bisher
 entfernte ein „Ja“ die verwaisten Images des Frameworks und leerte den ganzen Docker-Build-Cache, auch den anderer
-Projekte): Ist Dockers Platte voll, führst du `llm-cli doctor --fix --tier 2` im Terminal aus, das die verwaisten
-Build-Images des Frameworks listet und nur die löscht, die du bestätigst, und startest den Build dann neu. Den
-Docker-Build-Cache leert das Framework nie. Ein erneuter Versuch bekommt eine eigene Build-ID (`<job>_r1`), und beide
+Projekte): Ist Dockers Platte voll, listet die Schaltfläche **Free Docker space...** im Dialog (auch **Tools >
+Framework Build Images...**) oder `llm-cli doctor --fix --tier 2` im Terminal die Build-Images des Frameworks mit
+Name, ID, Größe und was jedes ist; nichts ist angehakt, und nur die, die du anhakst und bestätigst, werden gelöscht.
+Danach startest du den Build neu. Den Docker-Build-Cache leert das Framework nie. Ein erneuter Versuch bekommt eine eigene Build-ID (`<job>_r1`), und beide
 Logs bleiben erhalten.
 
 **Vorschläge von KI-Clients.** Ein MCP-Client, der Dittos Aufgabe übernimmt (Prompt `diagnose_build_failure`), kann
@@ -632,7 +634,8 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `list_artifacts` | lesen | Fertige Builds mit ID und Label (nie ein Host-Pfad), mit Größe und Hash |
 | `get_artifact_details` | lesen | Manifest, Model Card und Dateien eines gebauten Modells (externer Text) |
 | `check_build_request` | lesen | Probelauf von `start_build`: Commit, Downloadgröße, Speicherplatz, Hardware-Schätzung, Lizenz, Zugangsbeschränkung; startet nichts |
-| `run_doctor` | lesen | Der Gesundheitscheck, ohne Korrekturen |
+| `run_mojo_oracle` | lesen | Der Gesundheitscheck (Mojo Oracle): jeder Befund mit Ort (eine Bezeichnung), warum er wichtig ist und was Mojo Miracle dagegen tun kann ([Einzelheiten](#gesundheitscheck-mojo)) |
+| `run_mojo_miracle` | lokal schreiben | Repariert ein Problem, das Mojo Oracle als reparierbar meldet (eine harmlose Reparatur); immer mit Frage, löscht nie, keine Vollmacht |
 | `search_knowledge` | lesen | In der Wissensbasis suchen; jeder Auszug mit Quellen-ID, Adresse oder Pack, Art (`web`, `pack`, `docs`), Vertrauensstufe, Aufnahmedatum und Position; `kind` grenzt die Suche ein |
 | `list_knowledge_sources` | lesen | Was die Wissensbasis enthält: jede Quelle mit ID, Titel, Art, Vertrauensstufe, Aufnahmedatum und Zahl der Auszüge (50 je Seite) |
 | `read_knowledge_source` | lesen | Die Auszüge einer Quelle in ihrer Reihenfolge, über die Quellen-ID (höchstens 20 je Aufruf) |
@@ -662,7 +665,8 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `start_local_runtime` / `stop_local_runtime` | lokal schreiben | Optional, verborgen bis zur Freigabe: Dittos lokalen Server starten (ein Job) oder stoppen; nie seine Adresse oder sein Schlüssel |
 | `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf einem Katalogmodell oder einem gebauten GGUF-Modell; ein nicht vertrauenswürdiges Modell nativ nur nach Zustimmung im Framework, oder in der Sandbox |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
-| `delete_artifact` | extern, optional | Ein gebautes Modell löschen (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP); verborgen, bis du es freigibst, immer mit Frage |
+| `delete_artifact` | extern, optional | Ein gebautes Modell (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP) in den Papierkorb verschieben; verborgen, bis du es freigibst, immer mit Frage |
+| `list_trash` / `restore_from_trash` | lesen / lokal schreiben, optional | Den Papierkorb mit Name, Art und Größe sehen; wiederherstellen, was diese KI selbst löschen wollte (immer mit Frage); verborgen, bis du sie freigibst. Kein Tool leert den Papierkorb |
 | `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |
 
 `delete_artifact` und `restore_knowledge_snapshot` zerstören etwas, darum sind sie standardmäßig verboten und werden nicht angeboten, bis
@@ -671,15 +675,17 @@ Aufruf wird erfragt, und sie bekommen nie einen Dauerauftrag. Über ein Löschen
 Fenster des Frameworks: Dittos Dialog oder Eingabeaufforderung, bei einem MCP-Client eine wartende Freigabe in der GUI
 oder in `llm-cli tools approvals`; das Formular des Clients wird dafür nie benutzt. Die Frage dort nennt jedes Teil
 (den Modellordner und sein Golden-ZIP) mit vollem Pfad, Dateinamen, Größe und was es ist; die KI sieht nur
-Bezeichnungen und Größen. `delete_artifact` nimmt die ID und das sha256, das `list_artifacts` zeigt; abgelehnt wird
+Bezeichnungen und Größen. Das Modell kommt in den Papierkorb, wo du es wiederherstellen kannst (siehe [Löschen und
+der Papierkorb](#löschen-und-der-papierkorb)). `delete_artifact` nimmt die ID und das sha256, das `list_artifacts`
+zeigt; abgelehnt wird
 ein Ordner außerhalb des Ausgabeordners (auch über einen Link), solange ein Build irgendeines Programms des Frameworks
 hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256 der Modelldatei seither geändert hat und
 wenn der Ordner nicht mehr der ist, den die Frage nannte.
 `restore_knowledge_snapshot` sichert die aktuelle Wissensbasis zuerst als Snapshot `pre_restore_<Zeit>` und stellt
 ohne diese Sicherung nichts wieder her; dieselbe Regel gilt jetzt für jede Wiederherstellung eines Snapshots, und
 dabei wird kein Snapshot gelöscht (das Framework löscht keinen Snapshot von selbst, siehe
-[Wissensbasis](#wissensbasis-rag)). Es bleibt außerhalb jeder Dauerfreigabe und Vollmacht, bis es den Papierkorb und
-den Lösch-Dialog des Frameworks gibt.
+[Wissensbasis](#wissensbasis-rag)). Es bleibt außerhalb jeder Dauerfreigabe; ob eine Vollmacht es abdecken darf,
+wird mit den Vollmachten entschieden.
 
 So läuft eine Frage mit Tools ab:
 
@@ -1120,8 +1126,10 @@ self-built“.
 - **Ablage:** `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` enthält die Programme mit `build.json` (der
   Bauplan) und `manifest.json` (sha256 jeder Datei, Dauer, Bau-Rechner, Prüfergebnisse). Die Build-ID ist der Hash
   von allem, was die Programme verändert, also wird ein abgelegter Build wiederverwendet und nie neu gestempelt. Nur
-  ein auf diesem Rechner geprüfter Build kann der aktive werden; die Aufbewahrung behält den aktiven Build, den
-  CPU-Ersatz, den Build, aus dem ein laufender Server gestartet wurde, und die zwei neuesten anderen. Ein Build von
+  ein auf diesem Rechner geprüfter Build kann der aktive werden. Das Framework löscht keinen Build von selbst
+  (unveröffentlicht; vorher behielt es nur die zwei neuesten anderen): `llm-cli ditto runtime prune` listet die alten
+  zum Ankreuzen, nie den aktiven Build, den CPU-Ersatz oder den Build, aus dem ein laufender Server gestartet wurde.
+  Ein Build von
   einem deiner anderen Rechner kann importiert werden: Jede Datei wird gegen sein Manifest geprüft, die Build-ID
   gegen seinen Bauplan und der Commit gegen den Pin, du bestätigst, bevor eines seiner Programme läuft, und danach
   wird er wie ein lokaler Build geprüft. Die Version, die er melden muss, kommt aus dem Pin, nicht aus dem Archiv,
@@ -1233,9 +1241,11 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   `~/.llm-framework/knowledge_snapshots` gesichert. Es gibt keine Grenze (unveröffentlicht; bisher blieben auf jedem
   Weg nur die neuesten 5): Das Framework behält so viele, wie die Platte fasst, löscht keinen von selbst, und keine
   Anzahl bringt eine Erinnerung oder eine Warnung. **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli
-  knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe und was er ist; um Platz zu schaffen, kopierst du
-  die, die du behalten willst, woandershin (Export) oder löschst die, die du auswählst, selbst. Ein Papierkorb und ein
-  Lösch-Dialog im Framework folgen. Einen Schnappschuss wiederherstellen kann man über GUI oder CLI noch nicht.
+  knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe und was er ist, nichts angehakt. Um Platz zu
+  schaffen, hakst du die an, die gelöscht werden sollen (sie kommen zuerst in den Papierkorb; `llm-cli knowledge
+  snapshots prune` oder `delete NAME...`), oder kopierst sie woandershin (Export; `llm-cli knowledge snapshots export
+  NAME... --to ORDNER`, jede Kopie per sha256 geprüft). Siehe [Löschen und der Papierkorb](#löschen-und-der-papierkorb).
+  Einen Schnappschuss wiederherstellen kann man über GUI oder CLI noch nicht.
 - **Suche:** hybrid. Dichte Vektoren finden die Bedeutung, BM25 findet exakte Begriffe wie Fehlercodes und
   Compiler-Flags; beide Ranglisten werden mit Reciprocal Rank Fusion verbunden. Derselbe Text aus mehreren Quellen
   kommt nur einmal. Danach kann ein Cross-Encoder die Ergebnisse neu bewerten ([Reranking](#reranking)).
@@ -1649,7 +1659,7 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   befolgt werden dürfen, und dass er dir eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
 - **Ergebnisse:** Jedes Ergebnis läuft durch den Ausgabefilter der Registry, auch für Ditto. Secrets werden in jeder
   Zeichenkette geschwärzt. Text von außerhalb des Frameworks (Build-Logs und Stufennamen, Self-Healing-Vorschläge,
-  Build-Manifeste, Auszüge aus der Wissensbasis, Doctor-Meldungen sowie die Bezeichnungen, Hinweise und
+  Build-Manifeste, Auszüge aus der Wissensbasis, Meldungen von Mojo sowie die Bezeichnungen, Hinweise und
   Board-Beschreibungen aus der `target.yml` eines Targets, die ein Community-Target-Pack installieren kann) wird von
   unsichtbaren und bidirektionalen Steuerzeichen befreit und gekürzt (eine Log-Zeile auf 2.000 Zeichen, anderer externer Text auf 4.000); jede andere
   Zeichenkette wird auf 16 KiB gekürzt, und ein Ergebnis über 256 KiB wird mit einem Hinweis abgelehnt, wie man
@@ -1936,7 +1946,7 @@ Verfügung.
   den echten Grund nennen kann.
 - Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
   lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
-  `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
+  `llm-cli mojo`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
 - **Nur du änderst die Berechtigungen.** `tool_policy.json` und der Token-Speicher `mcp_tokens.json` sind mit einem
   Schlüssel signiert, der aus dem Audit-Schlüssel in deinem Schlüsselbund abgeleitet ist. Eine von Hand bearbeitete,
   mit einem anderen Schlüssel signierte oder unsignierte Datei (auch eine von 3.0.0 gespeicherte Berechtigungsdatei)
@@ -1951,7 +1961,7 @@ Verfügung.
   zusätzlich im Schlüsselbund: Eine ältere signierte Kopie, die über eine Datei zurückgelegt wird (sie brächte eine
   widerrufene dauerhafte Freigabe, ein widerrufenes Token oder eine lockerere Berechtigung zurück), wird wie eine
   Bearbeitung von Hand abgelehnt, und eine entfernte Berechtigungsdatei verbietet jedes Tool, statt auf die Vorgaben
-  zurückzufallen. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie die Audit-Kette) und `llm-cli doctor`
+  zurückzufallen. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie die Audit-Kette) und `llm-cli mojo`
   warnt; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt wird.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
@@ -2018,7 +2028,7 @@ kann. Nach jedem Eintrag wird der neueste zusätzlich in eine Anker-Datei geschr
 neuesten Einträge auffällt. `llm-cli tools audit --verify` prüft die Kette und unterscheidet einen geänderten Eintrag
 von einem falschen Schlüssel. Jeder Eintrag wird in einer eigenen Transaktion geschrieben, damit mehrere Prozesse die
 Kette nicht aufspalten. `llm-cli tools audit --archive` legt das Log und seinen Anker beiseite (mit Zeitstempel
-aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli doctor` ein Problem mit dem Log gemeldet hat.
+aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli mojo` ein Problem mit dem Log gemeldet hat.
 
 **Festgehalten, bevor er läuft.** Ein Aufruf, der etwas ändert (jede Stufe außer `read`), bekommt einen Eintrag
 `started`, bevor er läuft. Lässt sich dieser Eintrag nicht schreiben, wird der Aufruf abgelehnt und nichts läuft:
@@ -2115,7 +2125,7 @@ Board-Pfade.
   (der Befehl in `secret_helper`, ohne Shell ausgeführt), `passphrase` (einmal je Start abgefragt), `insecure` (eine
   Schlüsseldatei neben dem Tresor, im Ruhezustand nicht verschlüsselt) oder `ephemeral` (nur im Arbeitsspeicher).
   Der Tresor wird atomar unter einer Sperre geschrieben, die GUI, CLI und MCP-Server teilen, ist nur für dich lesbar,
-  liegt nie in einer Git-Arbeitskopie, und ein beschädigter Tresor wird nie überschrieben. `llm-cli doctor` warnt
+  liegt nie in einer Git-Arbeitskopie, und ein beschädigter Tresor wird nie überschrieben. `llm-cli mojo` warnt
   vor der Schlüsseldatei und vor einem Schlüsselbund, der Geheimnisse nicht schützt. `llm-cli ditto auth
   rotate-key` ersetzt den Schlüssel des Tresors und verschlüsselt jeden Eintrag neu.
 - **Schwärzen:** Eine Tabelle der Secret-Formate (`orchestrator/security/secret_patterns.py`) teilen sich der
@@ -2166,6 +2176,50 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
   es aufgezählt hat, und die Felder werden sofort neu gefüllt.
 
 ---
+
+## Löschen und der Papierkorb
+
+Nichts, was das Framework für dich löscht, wird ohne deine Frage gelöscht (unveröffentlicht). Die Frage zählt genau
+auf, was weggeht: zu jedem Teil den Namen, den vollen Pfad (bei einem Image die Docker-ID), den Dateinamen, die Größe
+und was es ist. „Nein“ ist die Vorgabe. Eine KI-App oder Ditto sieht nie die Pfade, nur Namen, Arten und Größen, und
+entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauerfreigabe oder eine Vollmacht.
+
+- **Mehrfachauswahl.** Wo du aus einer Liste wählst (Wissens-Snapshots, Papierkorb, Build-Images des Frameworks), ist
+  nichts angehakt. Das Framework baut die Liste aus genau den angehakten Teilen neu; die Schaltfläche nennt Anzahl und
+  Größe. Hat sich eines davon geändert, während du die Liste gelesen hast, wird nichts gelöscht, und du siehst die
+  neue Liste.
+- **Der Papierkorb.** Ein Löschen verschiebt Dateien und Ordner zunächst in den Papierkorb: `.trash` im Datenordner,
+  in dem sie liegen (der Ausgabeordner für gebaute Modelle, der persönliche Ordner für Snapshots). Du kannst sie
+  wiederherstellen; ihr Platz bleibt belegt, bis du den Papierkorb leerst. Ein Verschieben auf eine andere Platte wird
+  abgelehnt, nie kopiert. Wähle „Endgültig löschen“, um den Platz sofort freizugeben.
+- **Nichts verlässt den Papierkorb von selbst.** Nach `trash_retention_days` (Vorgabe 14; eine KI kann es nicht
+  ändern) erinnert der Papierkorb nur. **File > Trash...** in der GUI und `llm-cli trash` zeigen jeden Eintrag mit
+  Art, Größe, Zeitpunkt, wer ihn angefordert hat und woher er kam. Dort stellst du Einträge wieder her oder löschst
+  die angehakten endgültig. Kein Tool leert den Papierkorb.
+- **KI-Apps.** `delete_artifact` verschiebt ein gebautes Modell nach deinem Ja im eigenen Fenster des Frameworks in
+  den Papierkorb. Die optionalen Tools `list_trash` und `restore_from_trash` (verborgen, bis du sie freigibst) zeigen
+  einer KI den Papierkorb mit Namen und stellen nur wieder her, was sie selbst löschen wollte; was du gelöscht hast,
+  stellst du wieder her.
+- **Keine KI erreicht die Papierkorb-Ordner.** Sie sind Ordner, die keine KI lesen oder einbinden darf, auch nicht
+  über einen Link, und die Listen gebauter Modelle überspringen sie.
+- **Das Audit-Log** hält jedes Löschen, Leeren und Wiederherstellen mit dem Hash der Liste fest, die du bestätigt hast
+  (`deletion_sha256`), bevor etwas gelöscht wird; ohne Audit-Log wird nichts gelöscht.
+- **Wissens-Snapshots** lassen sich auch exportieren: in einen Ordner deiner Wahl kopieren (auf diesem Computer, auf
+  einen USB-Stick oder eine Netzwerkfreigabe). Jede Kopie wird per sha256 mit dem Original verglichen; ein Export
+  löscht nie einen Snapshot.
+- **Alte llama.cpp-Laufzeit-Builds und Geräte-Pakete** bleiben, wenn ein neuer gebaut oder deployt wird (vorher
+  blieben nur die neuesten, ohne Liste). `llm-cli ditto runtime prune` und `llm-cli device runtime prune GERÄT`
+  listen sie; der Build oder das Paket in Gebrauch steht nie in der Liste.
+- **Was das Framework von selbst löscht**, ist nur seine eigene Buchführung, die du nie als Objekt siehst: temporäre
+  und unfertige Dateien seiner eigenen Schreibvorgänge und Downloads, seine Staging-, Quarantäne- und Arbeitsordner
+  eines Builds oder einer Installation, die Container, die es für einen Build gestartet hat, alte Einträge bis zu
+  einer festen Anzahl (Build-Einträge, Anfragen, Jobs) und die Zustands- und Logdateien seines eigenen lokalen
+  Modellservers. Ein Test listet jede Stelle im Code, die löscht.
+- **Die Docker-Images des Frameworks** löscht das Framework nie von selbst. Der Builder behält das neueste Image jedes
+  Targets als `llm-framework/<Target>:last-build` und entfernt nur den Namen des einzelnen Builds; ältere Images
+  bleiben ohne Namen. **Tools > Framework Build Images...** in der GUI und `llm-cli doctor --fix --tier 2` listen
+  jedes Image des Frameworks (Name, ID, Größe, was es ist) und löschen nur die angehakten. Nur auf diesem Weg löscht
+  das Framework Docker-Images.
 
 ## Hardware-Probe und neue Targets
 
@@ -2262,35 +2316,62 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 
 ---
 
-## Gesundheitscheck (doctor)
+## Gesundheitscheck (Mojo)
 
-`llm-cli doctor` (und das nur lesende Tool `run_doctor`) führt feste Prüfungen aus und erklärt jeden Befund:
+**Mojo** ist der Gesundheitscheck (er hieß doctor; unveröffentlicht). `llmcf mojo` (dasselbe wie `llm-cli mojo`) führt
+feste Prüfungen aus; nichts fragt ein Modell, was falsch ist. Die ganze Anleitung: [Mojo_DE.md](Mojo_DE.md).
 
 | Bereich | Prüfungen |
 |---|---|
 | Python | unterstützte Version (3.11 bis 3.14) |
-| Docker | Daemon erreichbar, buildx vorhanden |
+| Docker | Daemon erreichbar, buildx vorhanden; wo Docker seine Images ablegt (`DockerRootDir`, mit dem freien Platz dieser Platte) und wie viel die Build-Images des Frameworks belegen (Information) |
 | Speicherplatz | freier Platz für den Cache- und den Ausgabeordner (Warnung unter 20 GB, Fehler unter 5 GB) |
 | Targets | Targets gefunden, Capabilities lesbar |
 | Sicherheit | persönlicher Ordner privat, Secrets-Speicher nutzbar, Schlüsselbund schützt Geheimnisse |
-| KI | Tool-Berechtigungen eingerichtet und lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel; unveröffentlicht) |
+| KI | Tool-Berechtigungen eingerichtet und lesbar, MCP-Token lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel; unveröffentlicht) |
 | Daten | mitgelieferte Kalibrierungsdaten intakt (Prüfsummen) |
 | Community | installierte Community-Packs gegen den zwischengespeicherten Index: gesperrt (Fehler), seit der Installation verändert (Warnung), Vertrauensstufe `local` (Information) |
 | Wissen | wie viele Snapshots der Wissensbasis es gibt, ihre Größe und ihr Ordner (keine Grenze: ihre Zahl ist nie eine Warnung; nichts wird gelöscht; unveröffentlicht) |
-| Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
+| Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung), fehlt (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
 
-`--fix` wendet die automatischen Korrekturen bis `--tier` an und prüft danach erneut. Stufe 1 macht den
-persönlichen Ordner privat. Stufe 2 löscht nichts von selbst: Sie listet die verwaisten Build-Images des Frameworks
-(Name, Image-ID, Größe und was jedes ist), und nur dein Ja im Terminal löscht genau diese Liste (Vorgabe Nein; ohne
-Terminal und mit `--json` listet sie sie nur). Der Docker-Build-Cache wird nie geleert, weil er sich nicht auf das
-Framework beschränken lässt: Bisher leerte Stufe 2 den ganzen Build-Cache des Docker-Daemons, auch den anderer
-Projekte. Nichts, was eine KI-App oder Ditto aufrufen kann, erreicht dieses Löschen. Exit-Codes: 0 OK, 1 Warnungen,
-2 Fehler; `--json` für Skripte.
+**Mojo Oracle** (Standard) schaut nur. Zu jeder Warnung und jedem Fehler sagt es, was es gefunden hat, wo (den vollen
+Pfad oder das Objekt), warum das wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann; ein Satz am Ende
+zählt jedes Problem danach, was sich tun lässt. Kann Mojo Miracle etwas tun, fragt es danach im Terminal „Run Mojo
+Miracle now? [y/N]“; bei Ja läuft Mojo Miracle, ohne dass der Befehl noch einmal getippt wird.
 
-Was eine KI liest (`run_doctor`): dieselben Befunde, mit den Ordnern des Frameworks unter ihrer Bezeichnung
-(`state:audit.db`, "the state folder", `targets:<Pack>`) und jedem anderen Pfad nur mit seinem Dateinamen, auch in
-der Meldung einer abgestürzten Prüfung; deine eigene Ausgabe (`llm-cli doctor`, auch `--json`) behält die vollen
-Pfade.
+**Mojo Miracle** (`llmcf mojo --miracle`) macht nur harmlose Reparaturen: Es schränkt den Zustandsordner auf deinen
+Benutzer ein, oder es lässt Dittos Server einen intakten gespeicherten llama.cpp-Build starten, wenn der aktive fehlt.
+Die Art einer Reparatur ergibt sich aus ihren Schritten (ein Schritt, der löscht, Zugriff erweitert, den Tresor, die
+Berechtigungen oder das Audit-Log berührt oder das System braucht, ist nie harmlos). Jede Reparatur ist ein Probelauf,
+an seinen sha256 gebunden; direkt bevor sie läuft, prüft Mojo noch einmal und ändert nichts, wenn das Problem weg ist
+oder sich der Plan geändert hat. Das Audit-Log hält sie zuerst fest (sonst ändert sich nichts), die Änderung ist ein
+Vergleichen-und-Tauschen am Ordner, der geöffnet wird, ohne einem Link zu folgen, es läuft immer nur ein Mojo Miracle,
+und danach läuft die Prüfung erneut. Speicherplatz freigeben heißt löschen, also gilt nur deine Liste: Im Terminal
+zeigt Mojo Miracle jedes Build-Image des Frameworks (die ohne Namen aus früheren Builds, die benannten Images
+`llm-framework/<Target>:last-build` und die Builder-Images der Laufzeit; Name, Image-ID, Größe und was jedes ist),
+nichts angehakt, und löscht genau die, deren Nummern du eingibst und bestätigst (Vorgabe Nein). **Tools > Framework
+Build Images...** in der GUI ist dieselbe Liste. Der Docker-Build-Cache wird nie geleert, weil er sich nicht auf das
+Framework beschränken lässt. Danach meldet Mojo Miracle jedes Problem: repariert (erneut geprüft), schon weg, noch da
+oder nicht repariert mit dem Grund (Löschen braucht deine Liste, braucht dich, braucht einen Administrator, nicht
+automatisch reparierbar, fehlgeschlagen); ein Problem, das die Prüfung danach zum ersten Mal findet, wird als neu
+genannt. Ohne Terminal laufen nur die harmlosen Reparaturen, und nichts wird gelöscht. Den Speicherort der
+Docker-Images auf eine andere Platte zu verlegen ist ein Schritt für Administratoren (siehe
+[Container-Einrichtung](Container_Setup_DE.md#10-wo-docker-images-ablegt)); Mojo zeigt nur, wo er liegt. Exit-Codes:
+0 OK, 1 Warnungen, 2 Fehler; `--json` für Skripte.
+
+`llm-cli doctor` behält seine Optionen (`--fix`, `--tier 1|2`, `--json`), seine Ausgabe und seine Exit-Codes, mit
+einem kurzen Hinweis, der `llmcf mojo` nennt; `--fix` macht dieselben protokollierten harmlosen Reparaturen, und
+`--tier 2` zeigt auch die Liste der Build-Images des Frameworks.
+
+Was eine KI liest: `run_mojo_oracle` liefert dieselben Befunde mit `where` als Bezeichnung, `why` und `repair` (`how`:
+`miracle`, `deletion_list`, `person`, `admin` oder `not_automatic`, mit dem nächsten Schritt), die Ordner des
+Frameworks unter ihrer Bezeichnung (`state:audit.db`, "the state folder", `targets:<Pack>`) und jeden anderen Pfad nur
+mit seinem Dateinamen, auch in der Meldung einer abgestürzten Prüfung. `run_mojo_miracle` repariert ein Problem, dessen
+`repair.how` `miracle` ist: Jeder Aufruf wird gefragt (der volle Pfad nur im eigenen Fenster des Frameworks), es löscht
+nie, lehnt jedes andere Problem vor der Frage ab und sagt, ob repariert wurde und, wenn nicht, warum. Der Prompt
+`check_installation` führt eine KI durch beides. `run_doctor`, der Name aus 3.0.0, bleibt aufrufbar, wird aber nicht
+aufgelistet; eine Einstellung für einen der beiden Namen gilt für beide, und die strengere gewinnt. Deine eigene
+Ausgabe (`llmcf mojo`, auch `--json`) behält die vollen Pfade.
 
 ---
 
@@ -2429,7 +2510,7 @@ ausgeschaltet ist, sobald sie eingeschaltet wird.
 | `verified` | im signierten Index: geprüft und unabhängig nachgebaut |
 | `community` | im signierten Index: geprüft |
 | `local` | eine Datei ohne Eintrag im signierten Index: niemand hat sie geprüft. Die Installation fragt immer, und jeder Build eines solchen Targets zeigt eine Warnung. |
-| `revoked` | in der Sperrliste des signierten Index: Die Installation ist blockiert. Installierte Kopien werden von `llm-cli zoo list`, `zoo verify`, `llm-cli doctor` und dem Hub markiert und nicht gebaut, auch nachdem der Schlüssel abgelaufen ist, der die Sperre signiert hat. |
+| `revoked` | in der Sperrliste des signierten Index: Die Installation ist blockiert. Installierte Kopien werden von `llm-cli zoo list`, `zoo verify`, `llm-cli mojo` und dem Hub markiert und nicht gebaut, auch nachdem der Schlüssel abgelaufen ist, der die Sperre signiert hat. |
 
 Targets, die mit dem Framework ausgeliefert werden, etwa Rockchip, haben keine Herkunftsdatei; sie sind keine Packs
 und haben keine Vertrauensstufe.
@@ -2441,8 +2522,8 @@ und haben keine Vertrauensstufe.
 - `llm-cli zoo verify <Pack-Datei>` prüft eine Datei, ohne sie zu installieren: Format, Hashes, die Prüfungen ihrer
   Art, eine enthaltene Signatur des Autors und die Datenschutz-Bereinigung (keine Home-Ordner, Adressen, Host- oder
   Benutzernamen, Schlüssel). Es braucht keinen Schlüsselbund; die CI des Community-Repositorys nutzt es.
-- `llm-cli doctor` meldet gesperrte Packs als Fehler, veränderte Packs als Warnung und Packs mit der Vertrauensstufe
-  `local` als Information ([Gesundheitscheck](#gesundheitscheck-doctor)).
+- `llm-cli mojo` meldet gesperrte Packs als Fehler, veränderte Packs als Warnung und Packs mit der Vertrauensstufe
+  `local` als Information ([Gesundheitscheck](#gesundheitscheck-mojo)).
 
 ### Community Hub
 

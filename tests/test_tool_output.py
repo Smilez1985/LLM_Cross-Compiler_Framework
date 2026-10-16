@@ -215,7 +215,8 @@ class TestFrameworkTools:
         assert "manual_step_text" in schema and "suggested_step" not in schema
         for spec in tools.list():
             if spec.name in ("read_build_log", "get_build_status", "list_build_requests", "list_artifacts",
-                             "search_knowledge", "run_doctor", "cancel_build", "resolve_healing"):
+                             "search_knowledge", "run_doctor", "run_mojo_oracle", "run_mojo_miracle",
+                             "cancel_build", "resolve_healing"):
                 assert has_untrusted(spec.output_model), spec.name
 
     def test_log_lines_are_cleaned_redacted_and_capped(self, tools):

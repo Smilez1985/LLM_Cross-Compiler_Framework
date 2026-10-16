@@ -12,7 +12,7 @@ nur benutzen willst, beginne mit der [README](README_DE.md). Wie das Framework a
 Möglichkeiten mitzuhelfen:
 
 - **Probleme melden:** Beschreibe, was du getan hast und was passiert ist, und hänge die Ausgabe von
-  `llm-cli doctor --json` und das Build-Log an. Entferne vorher persönliche Daten (Hostnamen, Benutzernamen,
+  `llm-cli mojo --json` und das Build-Log an. Entferne vorher persönliche Daten (Hostnamen, Benutzernamen,
   Schlüssel).
 - **Ein Hardware-Target hinzufügen oder verbessern** (siehe [Abschnitt 7](#7-ein-hardware-target-hinzufügen)).
 - **Ein Target, ein Rezept oder Wissen teilen**, als signiertes Community-Paket (siehe
@@ -312,7 +312,7 @@ GitHub Actions sind per Commit-SHA festgelegt, mit der Version als Kommentar. Ha
 **Framework-Container** (`framework-container.yml`): Wenn sich `Docker Setup/`, `install.sh`, `requirements.txt`,
 der Builder oder das Makefile ändern, baut die CI das Image des Frameworks mit `scripts/build_container_image.sh`
 (ein lokales Tag, nie hochgeladen), prüft sein Dockerfile mit einem Linter und führt Rauchtests aus. `make build`,
-`make up`, `make down`, `make doctor` und `make audit` funktionieren damit lokal
+`make up`, `make down`, `make mojo` und `make audit` funktionieren damit lokal
 ([docs/Container_Setup_DE.md](docs/Container_Setup_DE.md)). Kein Workflow, kein Makefile-Ziel, kein Skript und kein
 Dokument lädt ein Framework-Image hoch oder herunter (`tests/test_container_setup.py`). `make test` (Poetry),
 `make hooks` und `make secret-scan` sind unverändert.

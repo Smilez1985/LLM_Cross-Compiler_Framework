@@ -63,11 +63,12 @@ RUN --mount=type=bind,source=.,target=/src \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
 # llm-cli on the PATH (on bare metal the installers leave that to you), started like the MCP client configs do:
-# -P keeps the working directory off sys.path, the installation comes from PYTHONPATH.
+# -P keeps the working directory off sys.path, the installation comes from PYTHONPATH. llmcf is its new name.
 RUN printf '%s\n' '#!/bin/sh' \
         'exec env PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv/bin/python -P -m orchestrator.cli "$@"' \
         > /usr/local/bin/llm-cli \
     && chmod 0755 /usr/local/bin/llm-cli \
+    && ln -s llm-cli /usr/local/bin/llmcf \
     && install -d -o "$LCF_UID" -g "$LCF_GID" -m 0700 /data
 
 # The image counts as built only when the installation works: the framework's command line imports, and every system

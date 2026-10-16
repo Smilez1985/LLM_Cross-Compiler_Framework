@@ -67,7 +67,7 @@ targets/Rockchip/
 | Datei | Nötig | Wofür |
 |---|---|---|
 | `target.yml` mit Block `metadata:` | ja | Ohne ihn ist der Ordner kein Target. |
-| Block `capabilities:` in `target.yml` | dringend empfohlen; Pflicht, um das Target zu teilen | Ohne ihn können GUI und CLI keine Einstellungen prüfen, die MCP-Tools und Ditto keine Builds für das Target starten, `llm-cli doctor` warnt, und das Target lässt sich nicht als Community-Paket exportieren oder installieren. |
+| Block `capabilities:` in `target.yml` | dringend empfohlen; Pflicht, um das Target zu teilen | Ohne ihn können GUI und CLI keine Einstellungen prüfen, die MCP-Tools und Ditto keine Builds für das Target starten, `llm-cli mojo` warnt, und das Target lässt sich nicht als Community-Paket exportieren oder installieren. |
 | `Dockerfile` oder `dockerfile` | ja | Das Image, in dem alle Stufen laufen. |
 | `Dockerfile.gpu` | optional | Für Builds mit durchgereichter GPU (`llm-cli build start --gpu` oder „Use Host GPU for Build Process“ in der GUI, unter Linux standardmäßig angehakt); ohne diese Datei wird das normale Dockerfile genutzt. |
 | `modules/build.sh` | ja | Läuft in jeder Stufe als `/app/modules/build.sh`. |
@@ -655,7 +655,7 @@ nur, um herauszufinden, ob ein Fehler an der Sandbox liegt.
 
 ## 8. Ein Target testen
 
-1. **Ist das Target geladen und sind seine Capabilities gültig?** `llm-cli doctor` meldet den Code
+1. **Ist das Target geladen und sind seine Capabilities gültig?** `llm-cli mojo` meldet den Code
    `targets.<ID>.capabilities`, wenn der Block fehlt oder ungültig ist; der Fehler selbst steht im Log. So siehst du
    den Schemafehler direkt:
 

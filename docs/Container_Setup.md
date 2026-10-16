@@ -25,6 +25,7 @@ computer](Features.md#ditto-and-a-framework-on-another-computer)).
 7. [Updating](#7-updating)
 8. [Limits](#8-limits)
 9. [The files](#9-the-files)
+10. [Where Docker keeps images](#10-where-docker-keeps-images)
 
 ## 1. What you need
 
@@ -54,7 +55,7 @@ What happens:
      copies the program to `/opt/llm-conversion-framework`, creates `.venv` there with the pinned
      `requirements.txt` and writes the `llm-framework` launcher. Only the Docker engine and the `docker` group are
      left out (`LCF_CONTAINER_BUILD=1`);
-   - `llm-cli` is put on the PATH;
+   - `llm-cli` is put on the PATH, and `llmcf`, its new name (unreleased);
    - the sources are a read-only mount during the build, so they never become an image layer, and no secret is in
      any layer;
    - at the end the build checks the installation: the command line must import, and every system library Qt loads
@@ -110,7 +111,7 @@ all capabilities. Then, once:
    - `passphrase` asks at every start of a framework process, so it does not work for MCP sessions started with
      `docker exec -i`. `LLM_SECRET_STORAGE=ephemeral` keeps the vault in memory for a single command.
 2. **Tool permissions:** `docker exec -it lcf-framework llm-cli ditto setup`.
-3. **Health check:** `docker exec -it lcf-framework llm-cli doctor` (or `make doctor`). It reports that Docker is
+3. **Health check:** `docker exec -it lcf-framework llm-cli mojo` (or `make mojo`). It reports that Docker is
    not reachable: the container builds no models ([Limits](#8-limits)).
 
 ## 4. AI clients: the MCP server
@@ -209,5 +210,26 @@ volume first (a target of your own as a pack:
 | [`Docker Setup/Dockerfile`](../Docker%20Setup/Dockerfile) | The image: Debian 13 slim pinned by digest, `install.sh`, user `lcf`, `/data`, headless by default |
 | [`Docker Setup/Dockerfile.dockerignore`](../Docker%20Setup/Dockerfile.dockerignore) | Keeps large and personal folders out of a build context made from the repository folder itself |
 | [`Docker Setup/docker-compose.yml`](../Docker%20Setup/docker-compose.yml) | The services `framework` and `gui` (profile `gui`), the volume `lcf-data`, `pull_policy: never` |
-| [`Makefile`](../Makefile) | `make build`, `build-gui`, `up`, `gui`, `down`, `kept-files`, `doctor`, `shell`, `clean`, `audit` (Trivy scans an archive of the image; the scanner never gets the Docker socket) |
+| [`Makefile`](../Makefile) | `make build`, `build-gui`, `up`, `gui`, `down`, `kept-files`, `mojo` (and its old name `doctor`), `shell`, `clean`, `audit` (Trivy scans an archive of the image; the scanner never gets the Docker socket) |
 | `Docker Setup/pyproject.toml` | An old copy of the project file (version 1.6.0) that nothing uses; the project file is [`pyproject.toml`](../pyproject.toml) at the top of the repository |
+
+## 10. Where Docker keeps images
+
+This holds for every computer that builds with Docker, not only for the container set-up (unreleased).
+
+- `llm-cli mojo` shows where Docker keeps its images (Docker's data folder, `DockerRootDir`), how much space is
+  free on that disk, and how much the framework's build images use.
+- The framework never deletes an image by itself. The builder keeps the newest image of each target as
+  `llm-framework/<target>:last-build`; older ones stay without a name. You delete the ones you no longer need:
+  **Tools > Framework Build Images...** in the GUI or `llm-cli doctor --fix --tier 2` in a terminal. Nothing is ticked;
+  you pick.
+- Docker's build cache is not the framework's. `docker system df` shows its size; `docker builder prune` clears it
+  for every project on this computer. That is your own decision.
+- To keep images on another disk, move Docker's data folder. This is a step for an administrator: it affects every
+  Docker user and project on the computer, and the framework never changes Docker's settings.
+  - Linux with Docker Engine: stop Docker (`sudo systemctl stop docker docker.socket`), copy the folder with its
+    permissions (`sudo rsync -aHAX /var/lib/docker/ /mnt/bigdisk/docker/`), set `"data-root": "/mnt/bigdisk/docker"`
+    in `/etc/docker/daemon.json`, and start Docker again (`sudo systemctl start docker`). Check it with
+    `docker info --format '{{.DockerRootDir}}'`. Remove the old folder only after you checked that everything works.
+  - Docker Desktop (Windows, macOS): Settings > Resources > Advanced > Disk image location.
+  - Rootless Docker keeps the folder in your home folder; Docker's documentation on `data-root` describes the move.

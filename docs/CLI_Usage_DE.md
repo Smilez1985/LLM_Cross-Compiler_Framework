@@ -18,8 +18,9 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [Die CLI aufrufen](#die-cli-aufrufen)
 - [Globale Optionen, Ausgabe und Exit-Codes](#globale-optionen-ausgabe-und-exit-codes)
 - [Überblick über alle Befehle](#überblick-über-alle-befehle)
-- [doctor](#doctor): Gesundheitscheck
-- [knowledge](#knowledge): `snapshots`
+- [mojo](#mojo): Gesundheitscheck (Mojo Oracle) und Reparaturen (Mojo Miracle)
+- [doctor](#doctor): der alte Name von `mojo`
+- [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
@@ -32,6 +33,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [device](#device): `list`, `settings`, `runtime`
 - [config](#config): `show`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
+- [trash](#trash): `list`, `restore`, `empty`
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
 
 ---
@@ -51,7 +53,9 @@ Ordner auf oder setze `PYTHONPATH`. Unter Linux funktioniert dieser Alias aus je
 alias llm-cli='PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv/bin/python -m orchestrator.cli'
 ```
 
-Die Beispiele unten verwenden `llm-cli`.
+Die Beispiele unten verwenden `llm-cli`. `llmcf` ist dasselbe Programm unter seinem neuen Namen (unveröffentlicht):
+Die Entwicklungsumgebung und der Framework-Container haben beide Befehle, und `llmcf mojo` tut genau dasselbe wie
+`llm-cli mojo`.
 
 ### Umgebungsvariablen
 
@@ -106,8 +110,8 @@ stderr aus, und bei `llm-cli mcp serve` trägt stdout das MCP-Protokoll.
 | 6 | Anmeldung: Das Verfahren ist in dieser Version nicht verfügbar, oder der Anbieter wurde entfernt |
 | 130 | `build start` wurde mit Strg+C unterbrochen (der Build wurde vorher abgebrochen) |
 
-`llm-cli doctor` verwendet 0 (OK), 1 (Warnungen) und 2 (Fehler); `llm-cli ditto eval --min-pass` liefert 1, wenn
-ein Lauf unter dem angegebenen Anteil bleibt.
+`llm-cli mojo` und `llm-cli doctor` verwenden 0 (OK), 1 (Warnungen) und 2 (Fehler); `llm-cli ditto eval --min-pass`
+liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 
 ---
 
@@ -115,8 +119,10 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 
 | Befehl | Was er tut |
 |---|---|
-| `doctor` | Die Installation prüfen und erklären, wie man Probleme behebt |
-| `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten (unveröffentlicht) |
+| `mojo` | Die Installation prüfen (Mojo Oracle) und reparieren, was sich sicher reparieren lässt (Mojo Miracle) (unveröffentlicht) |
+| `doctor` | Der alte Name von `mojo`, mit seinen Optionen aus 3.0.0 |
+| `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten; die ausgewählten löschen oder exportieren (unveröffentlicht) |
+| `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen (unveröffentlicht) |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
@@ -142,27 +148,69 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 
 ---
 
+## mojo
+
+```
+llm-cli mojo [--oracle | --miracle] [--json]
+```
+
+Der Gesundheitscheck (unveröffentlicht; er hieß `doctor`). **Mojo Oracle** (Standard) schaut nur: Es prüft Python,
+den Docker-Daemon und buildx, den freien Speicherplatz für den Cache- und den Ausgabeordner, die Targets und ihre
+Capabilities, ob der persönliche Ordner privat ist, den Secrets-Speicher und den Schlüsselbund, die
+Tool-Berechtigungen, die MCP-Token, das Audit-Log, den Chat-Verlauf (er lässt sich schreiben, seine neuesten Einträge
+stimmen), die mitgelieferten Kalibrierungsdaten, die installierten Community-Pakete (zurückgezogen, verändert oder aus
+einer Datei importiert), die Snapshots der Wissensbasis (wie viele, ihre Größe und wo; es gibt keine Grenze, ihre Zahl
+ist also nie eine Warnung) und die lokale llama.cpp-Laufzeit. Es sagt auch, wo Docker seine Images ablegt und wie viel
+die Build-Images des Frameworks belegen (diesen Ordner zu verlegen ist ein Schritt für Administratoren, siehe
+[Container-Einrichtung](Container_Setup_DE.md#10-wo-docker-images-ablegt)).
+
+Zu jeder Warnung und jedem Fehler schreibt es, was es gefunden hat, wo (den vollen Pfad oder das Objekt), warum das
+wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann, mit dem Plan einer Reparatur (was sich ändert,
+vorher und nachher, ob es sich rückgängig machen lässt). Ein Satz am Ende zählt jedes Problem danach, was sich tun
+lässt. Kann Mojo Miracle bei einem Problem etwas tun, fragt es im Terminal „Run Mojo Miracle now? [y/N]“; mit `y` läuft
+Mojo Miracle, ohne dass der Befehl noch einmal getippt wird, und Nein (die Vorgabe) ändert nichts.
+
+**Mojo Miracle** macht nur harmlose Reparaturen: Es schränkt den Zustandsordner auf deinen Benutzer ein, oder es lässt
+Dittos Server einen intakten gespeicherten llama.cpp-Build starten, wenn der aktive fehlt. Jede Reparatur ist ein Plan,
+an seinen Hash gebunden, im Audit-Log festgehalten, bevor sie läuft (sonst ändert sich nichts), nur angewendet,
+solange sich seit dem Plan nichts geändert hat (ein Ordner wird geöffnet, ohne einem Link zu folgen), und danach
+erneut geprüft; es läuft immer nur ein Mojo Miracle. Speicherplatz freigeben heißt löschen: Im Terminal zeigt Mojo
+Miracle die Build-Images des Frameworks (Name, Image-ID, Größe, was jedes ist; nichts ausgewählt) und löscht genau die,
+deren Nummern du eingibst und bestätigst (die Vorgabe ist Nein); der Docker-Build-Cache wird nie geleert. Danach
+meldet es jedes Problem: repariert (erneut geprüft), schon weg, noch da oder nicht repariert mit dem Grund (Löschen
+braucht deine Liste, braucht dich, braucht einen Administrator, nicht automatisch reparierbar, fehlgeschlagen). Ein
+Problem, das die Prüfung danach zum ersten Mal findet, wird als neu genannt. Einzelheiten: [Mojo_DE.md](Mojo_DE.md).
+
+| Option | Bedeutung |
+|---|---|
+| `--oracle` | Nur schauen und melden, was gefunden wurde (Standard); im Terminal bietet es danach Mojo Miracle an. |
+| `--miracle` | Reparieren, was sich reparieren lässt, dann melden, was repariert wurde, was nicht und warum. Ohne Terminal (eine Pipe, ein Skript, eine KI-App) laufen nur die harmlosen Reparaturen, und nichts wird gelöscht. |
+| `--json` | Maschinenlesbare Ausgabe: die Schlüssel von `doctor --json` plus `mode`, `summary` und je Befund `where`, `why`, `repair_id`, `cannot` und `miracle`; mit `--miracle` auch `repaired`, `already_gone`, `not_repaired` und `new_problems`. Fragt nie und löscht nie. |
+
+Speicherplatz: Unter 20 GB frei gibt es eine Warnung, unter 5 GB einen Fehler.
+
+```bash
+llmcf mojo
+llmcf mojo --miracle
+llm-cli mojo --json > mojo.json
+```
+
+---
+
 ## doctor
 
 ```
 llm-cli doctor [--json] [--fix] [--tier 1|2]
 ```
 
-Prüft Python, den Docker-Daemon und buildx, den freien Speicherplatz für den Cache- und den Ausgabeordner,
-die Targets und ihre Capabilities, ob der persönliche Ordner privat ist, den Secrets-Speicher und den
-Schlüsselbund, die Tool-Berechtigungen, das Audit-Log, den Chat-Verlauf (unveröffentlicht: er lässt sich
-schreiben, seine neuesten Einträge stimmen), die mitgelieferten Kalibrierungsdaten und die installierten
-Community-Pakete (zurückgezogen, verändert oder aus einer Datei importiert) und die Snapshots der Wissensbasis
-(unveröffentlicht: wie viele, ihre Größe und wo; es gibt keine Grenze, ihre Zahl ist also nie eine Warnung). Zu jedem
-Befund gibt es einen Hinweis, wie du ihn behebst.
+Der alte Name von [mojo](#mojo); Optionen, Ausgabe und Exit-Codes bleiben wie in 3.0.0, und ein kurzer Hinweis auf
+stderr nennt `llmcf mojo`.
 
 | Option | Bedeutung |
 |---|---|
-| `--json` | Maschinenlesbare Ausgabe (Befunde, Korrekturen, Exit-Code). Mit `--fix --tier 2` listet sie auch die verwaisten Framework-Images (`framework_images`), löscht sie aber nie. |
-| `--fix` | Die automatischen Korrekturen bis `--tier` anwenden, dann erneut prüfen. |
-| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (macht den persönlichen Ordner privat). `2`: listet auch die verwaisten Build-Images des Frameworks (Name, Image-ID, Größe und was jedes ist) und löscht genau diese Liste, nachdem du sie im Terminal bestätigt hast (die Vorgabe ist Nein). Ohne Terminal (eine Pipe, ein Skript, eine KI-App) listet es sie nur. Der Docker-Build-Cache wird nie geleert: Er lässt sich nicht auf das Framework beschränken. |
-
-Speicherplatz: Unter 20 GB frei gibt es eine Warnung, unter 5 GB einen Fehler.
+| `--json` | Maschinenlesbare Ausgabe (Befunde, Korrekturen, Exit-Code). Mit `--fix --tier 2` listet sie auch die Build-Images des Frameworks und wo Docker sie ablegt (`framework_images`), löscht sie aber nie. |
+| `--fix` | Die automatischen Korrekturen bis `--tier` anwenden, dann erneut prüfen. Das sind die harmlosen, protokollierten Reparaturen von Mojo Miracle (unveröffentlicht); ein Problem, das noch da ist, wird mit dem Grund gezeigt. |
+| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (macht den persönlichen Ordner privat). `2`: listet auch jedes Build-Image des Frameworks (die ohne Namen aus früheren Builds, die benannten Images `llm-framework/<Target>:last-build` und die Builder-Images der Laufzeit; Name, Image-ID, Größe und was jedes ist), nichts ausgewählt. Du gibst die Nummern der zu löschenden ein und bestätigst genau diese im Terminal (die Vorgabe ist Nein). Ohne Terminal (eine Pipe, ein Skript, eine KI-App) listet es sie nur. **Tools > Framework Build Images...** in der GUI ist dieselbe Liste. Der Docker-Build-Cache wird nie geleert: Er lässt sich nicht auf das Framework beschränken. |
 
 ```bash
 llm-cli doctor
@@ -178,21 +226,37 @@ llm-cli doctor --fix --tier 2
 
 ```
 llm-cli knowledge snapshots [list]
+llm-cli knowledge snapshots prune
+llm-cli knowledge snapshots delete NAME...
+llm-cli knowledge snapshots export NAME... --to ORDNER
 ```
 
 Unveröffentlicht. Vor jedem Deep Ingest, jeder Indexierung des eigenen Codes des Frameworks und jeder
 Wiederherstellung wird die Wissensbasis als Snapshot in `knowledge_snapshots/` des persönlichen Ordners gesichert,
-damit sich die Änderung rückgängig machen lässt. Der Befehl listet jeden Snapshot, den ältesten zuerst, mit Namen,
-Zeitpunkt, Größe, was er ist (zum Beispiel "backup of the knowledge base taken before a Deep Ingest") und vollem
-Pfad. Er löscht nichts. Die GUI zeigt dieselbe Liste unter **Tools > Knowledge Snapshots...**.
+damit sich die Änderung rückgängig machen lässt. `list` (die Vorgabe) zeigt jeden Snapshot, den ältesten zuerst, mit
+Namen, Zeitpunkt, Größe, was er ist (zum Beispiel "backup of the knowledge base taken before a Deep Ingest") und
+vollem Pfad. Es löscht nichts. Die GUI zeigt dieselbe Liste unter **Tools > Knowledge Snapshots...**, mit einem
+Kästchen für jeden (keines angehakt).
 
 Es gibt keine Grenze: Das Framework behält so viele Snapshots, wie die Platte fasst, löscht keinen von selbst, und
-keine Anzahl bringt eine Erinnerung oder eine Warnung. Um Platz zu schaffen, kopierst du die, die du behalten willst,
-woandershin (Export, zum Beispiel auf einen USB-Datenträger oder eine Netzwerkfreigabe) oder löschst die, die du
-nicht mehr brauchst, selbst, zum Beispiel im Dateimanager. Ein Papierkorb und ein Lösch-Dialog im Framework folgen.
+keine Anzahl bringt eine Erinnerung oder eine Warnung. Um Platz zu schaffen:
+
+- `prune` listet jeden Snapshot mit einer Nummer (nichts ist ausgewählt). Du gibst die Nummern der zu löschenden ein
+  (zum Beispiel `1,3` oder `2-4`), wählst `trash` (die Vorgabe: du kannst sie mit [`trash restore`](#trash)
+  wiederherstellen) oder `permanent` und bestätigst genau diese (die Vorgabe ist Nein).
+- `delete NAME...` listet genau die genannten Snapshots und fragt genauso.
+- `export NAME... --to ORDNER` kopiert die Snapshots in einen vorhandenen Ordner (auf diesem Computer, einen
+  USB-Stick, eine Netzwerkfreigabe) und vergleicht jede Kopie per sha256 mit dem Original. Eine gleichnamige Datei
+  dort wird nie überschrieben; eine Kopie, die nicht stimmt, wird wieder entfernt und gemeldet. Ein Export löscht nie
+  einen Snapshot. Exit-Code 1, wenn ein Snapshot nicht exportiert wurde.
+
+Löschen braucht ein Terminal: Ohne eines (eine Pipe, ein Skript, eine KI-App) wird die Liste ausgegeben und nichts
+gelöscht. Jedes Löschen wird im Audit-Log festgehalten, bevor etwas verschoben oder gelöscht wird.
 
 ```bash
 llm-cli knowledge snapshots
+llm-cli knowledge snapshots prune
+llm-cli knowledge snapshots export pre_ingest_20261001_101500 --to /media/usb/backups
 ```
 
 ---
@@ -866,13 +930,17 @@ Archiv wird nie exportiert.
 #### ditto runtime prune
 
 ```
-llm-cli ditto runtime prune [--keep N]
+llm-cli ditto runtime prune
 ```
 
-Entfernt alte selbst gebaute Builds von Dittos Server. Der aktive Build, der CPU-Ersatz und der Build, aus dem ein
-laufender Server gestartet wurde, bleiben immer erhalten, dazu die `N` neuesten anderen (Standard 2).
-`runtime install` tut dasselbe nach jedem Build. Die Builds deiner Boards (`llm-cli device runtime build`) liegen im
-selben Build-Speicher und werden hier nie entfernt.
+Listet die alten Builds von Dittos Server mit je einer Nummer (unveröffentlicht): ältere selbst gebaute Builds und
+Installationen des vorgebauten Archivs einer anderen llama.cpp-Version, jeweils mit vollem Pfad, Größe und was es
+ist. Nichts ist ausgewählt. Du gibst die Nummern der zu löschenden ein, wählst den Papierkorb (Standard) oder
+endgültiges Löschen und bestätigst genau diese (Standard: nein). Das braucht ein Terminal; ohne eines wird nur
+gelistet. Der aktive Build, der CPU-Ersatz, der Build, aus dem ein laufender Server gestartet wurde, und die Builds
+deiner Boards (`llm-cli device runtime build`, derselbe Build-Speicher) stehen nie in der Liste, und ein Build, der
+nach dem Anzeigen der Liste einer davon wurde, bleibt. `runtime install` löscht nichts: es sagt, wie viele ältere
+Builds es behalten hat (vorher behielt es nur die zwei neuesten).
 
 #### ditto runtime start
 
@@ -988,11 +1056,12 @@ llm-cli ditto models download small-q2
 
 Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 16 nur lesende Tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `search_hf_models`,
-`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`, `list_devices`), 7, die auf diesem Rechner
+`run_mojo_oracle`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `search_hf_models`,
+`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`, `list_devices`), 8, die auf diesem Rechner
 etwas ändern (`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`,
-`download_hf_file`, `create_deploy_package`), und `deploy_to_device`, das ein Gerät erreicht, dem du vertraust
-(Stufe `external`: immer mit Frage).
+`download_hf_file`, `create_deploy_package`, `run_mojo_miracle`), und `deploy_to_device`, das ein Gerät erreicht, dem
+du vertraust (Stufe `external`: immer mit Frage). `run_doctor`, der Name von `run_mojo_oracle` in 3.0.0, bleibt
+aufrufbar, wird aber nicht aufgelistet (unveröffentlicht).
 
 ### tools list
 
@@ -1049,7 +1118,7 @@ Mensch bestätigt hat, das Ergebnis, den Grundcode und wie der Mensch gefragt wu
 | `--details` | Zusätzlich, was die narrensichere Schicht repariert hat (Art und Feld), die Dauer, SHA-256 und Größe des Ergebnisses, Verweise auf frühere Einträge und den Sitzungs-Hash. |
 | `--verify` | Stattdessen die Kette prüfen: geänderte oder entfernte Einträge und das Entfernen der neuesten Einträge (Anker-Datei). Exit-Code 0, wenn intakt, sonst 1. |
 | `--summary` | Stattdessen Zahlen je Aufrufer: Aufrufe, Ablehnungen und die Meldungen, dass eine Aufgabe nicht machbar ist (`report_cannot_do`), nach dem Ergebnis der Prüfung durch das Framework: confirmed, contradicted, premature, unchecked. |
-| `--archive` | Das Log und seinen Anker beiseitelegen (aufbewahrt als `audit.db.<UTC-Zeit>` und `audit.db.<UTC-Zeit>.anchor` im persönlichen Ordner) und mit dem nächsten Tool-Aufruf ein neues Log beginnen. Nutze es, wenn `--verify` oder `llm-cli doctor` ein Problem mit dem Log meldet. Lässt sich das Log nicht beiseitelegen (zum Beispiel, weil es gerade benutzt wird), endet der Befehl mit Exit-Code 1; schließe die GUI und die KI-Clients und versuche es erneut. |
+| `--archive` | Das Log und seinen Anker beiseitelegen (aufbewahrt als `audit.db.<UTC-Zeit>` und `audit.db.<UTC-Zeit>.anchor` im persönlichen Ordner) und mit dem nächsten Tool-Aufruf ein neues Log beginnen. Nutze es, wenn `--verify` oder `llm-cli mojo` ein Problem mit dem Log meldet. Lässt sich das Log nicht beiseitelegen (zum Beispiel, weil es gerade benutzt wird), endet der Befehl mit Exit-Code 1; schließe die GUI und die KI-Clients und versuche es erneut. |
 
 ```bash
 llm-cli tools audit --limit 100
@@ -1450,6 +1519,7 @@ llm-cli device runtime build GERÄT [--jobs N] [--mirror URL] [--yes]
 llm-cli device runtime deploy GERÄT [--user NAME] [--password TEXT] [--bench-model PFAD] [--allow-untrusted-model]
 llm-cli device runtime verify GERÄT [--user NAME] [--bench-model PFAD] [--allow-untrusted-model]
 llm-cli device runtime status GERÄT [--json]
+llm-cli device runtime prune GERÄT
 ```
 
 ### device list
@@ -1490,6 +1560,8 @@ den Bauplan im Builder-Container ohne Netz (`--jobs` setzt die parallelen Jobs; 
 Speicher), prüft das Format der Programme auf deinem PC und packt den Tarball nach
 `~/.llm-framework/runtime/llama.cpp/device/<ID>/llama-runtime-<Arch>-<Build-ID>.tar.gz`. Ein schon abgelegter Build
 wird nur neu gepackt. Exit-Code 1, wenn Docker nicht antwortet, der Build scheitert oder seine Prüfungen scheitern.
+Ältere Pakete des Geräts bleiben (unveröffentlicht; vorher entfernte ein Build oder ein Deployment sie); die Ausgabe
+sagt, wie viele, und `device runtime prune` listet sie, damit du sie löschst.
 
 ### device runtime deploy
 
@@ -1545,6 +1617,14 @@ aktualisiert den Eintrag.
 
 Was deployt ist (Build, Zeit, Startskript oder systemd, Ergebnis der Prüfungen) und ob es noch der Build ist, den
 das Profil des Boards, der Pin und das Rezept verlangen; wenn nicht, erneut bauen und deployen.
+
+### device runtime prune
+
+Listet die älteren Laufzeit-Pakete des Geräts auf deinem PC mit je einer Nummer (jeder Tarball und seine
+`.sha256`-Datei, mit vollem Pfad und Größe). Das Paket des zuletzt deployten Builds steht nie in der Liste. Nichts ist
+ausgewählt: Du gibst die Nummern der zu löschenden ein, wählst den Papierkorb (Standard) oder endgültiges Löschen und
+bestätigst genau diese (Standard: nein). Das braucht ein Terminal; ohne eines wird nur gelistet. Auf dem Board ändert
+sich nichts.
 
 Für ein [vertrautes Gerät](#deploy-devices) führen die optionalen MCP-Tools `probe_remote_device`,
 `deploy_device_runtime` und `run_device_benchmark` für einen KI-Client `scan --device`, `device runtime build` mit
@@ -1657,7 +1737,7 @@ Vertrauensstufen:
 | `verified` | Im signierten Index: geprüft und unabhängig nachgebaut. |
 | `community` | Im signierten Index: geprüft. |
 | `local` | Eine Datei, die der signierte Index nicht aufführt. Niemand hat sie geprüft: Die Installation fragt immer nach, und jeder Build eines solchen Targets zeigt eine Warnung. |
-| `revoked` | In der Liste zurückgezogener Pakete des Index. Es wird nicht installiert; installierte Kopien werden von `zoo list`, `zoo verify`, `llm-cli doctor` und dem Community Hub markiert und nicht gebaut, auch nachdem der Schlüssel abgelaufen ist, der den Rückzug signiert hat. |
+| `revoked` | In der Liste zurückgezogener Pakete des Index. Es wird nicht installiert; installierte Kopien werden von `zoo list`, `zoo verify`, `llm-cli mojo` und dem Community Hub markiert und nicht gebaut, auch nachdem der Schlüssel abgelaufen ist, der den Rückzug signiert hat. |
 
 Targets, die mit dem Framework ausgeliefert werden, etwa Rockchip, haben keine Herkunftsdatei und erscheinen nicht im
 Zoo.
@@ -1895,6 +1975,36 @@ llm-cli zoo keys > my.keys
 # encrypted packs (llm-cli zoo export --to) or check your signed packs.
 age1<58 Zeichen>
 ed25519:<base64>
+```
+
+---
+
+## trash
+
+```
+llm-cli trash [list]
+llm-cli trash restore ID...
+llm-cli trash empty ID... | --all | --due
+```
+
+Unveröffentlicht. Was Löschungen in den Papierkorb verschoben haben: gebaute Modelle (im `.trash` des
+Ausgabeordners) und Wissens-Snapshots (im `.trash` des persönlichen Ordners). `list` (die Vorgabe) zeigt jeden
+Eintrag mit ID, was er ist, Größe, wann er verschoben wurde, wer es angefordert hat (`gui`, `cli` oder eine KI-App wie
+`mcp:laptop`), Erinnerungsdatum und woher er kam. Nichts verlässt den Papierkorb von selbst: Nach
+`trash_retention_days` (Vorgabe 14; eine KI kann es nicht ändern) erinnert er nur.
+
+| Befehl | Bedeutung |
+|---|---|
+| `restore ID...` | Legt Einträge zurück, wo sie waren; ist der Platz belegt, daneben als `<Name>-restored-<Zeit>`. Nie über einen Link. |
+| `empty ID...` | Listet genau diese Einträge und löscht sie endgültig, nachdem du im Terminal bestätigt hast (Vorgabe Nein). |
+| `empty --all` / `--due` | Listet jeden Eintrag oder die, deren Erinnerungsdatum vorbei ist, mit einer Nummer; nichts ist ausgewählt. Du gibst die Nummern ein und bestätigst dann genau diese. |
+
+Kein Tool und keine KI-App leert den Papierkorb. Die GUI zeigt dasselbe unter **File > Trash...**.
+
+```bash
+llm-cli trash
+llm-cli trash restore tr_0123456789abcdef
+llm-cli trash empty --due
 ```
 
 ---
