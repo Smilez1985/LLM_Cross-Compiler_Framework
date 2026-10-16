@@ -378,10 +378,37 @@ class EvaluationWindow(QDialog):
                 local = is_local(self.catalog, provider)
                 cost = self._t({True: "ditto_eval.cost.local", False: "ditto_eval.cost.cloud"}.get(
                     local, "ditto_eval.cost.unknown"))
+            if cost == self._t("ditto_eval.cost.local"):
+                elsewhere = self._fallback_elsewhere(choice)
+                if elsewhere:   # the fallback chain applies to the run too: not free when it moves on
+                    cost = self._t("ditto_eval.cost.local_fallback", providers=", ".join(elsewhere))
         if retrieval:
             parts.append(self._t("ditto_eval.target.retrieval"))
         target = parts[0] if len(parts) == 1 else self._t("ditto_eval.target.and", first=parts[0], second=parts[1])
         return self._t("ditto_eval.question", cases=len(cases), repeat=choice["repeat"], target=target, cost=cost)
+
+    def _fallback_elsewhere(self, choice: Dict[str, Any]) -> List[str]:
+        """The providers of the AI settings' fallback chain (the run's Ditto reads it like every call: LLMClient.
+        fallback_targets) that are not known to run on this computer; [] when there are none or it cannot be read."""
+        from orchestrator.Core.ai_override import ditto_with, override_values
+        if self.ditto is None:
+            return []
+        try:
+            values = override_values("local" if choice["tiers"] else choice["provider"], choice["model"],
+                                     choice["effort"])
+            chain = ditto_with(self.ditto, values).client.fallback_targets("chat")
+        except Exception:  # noqa: BLE001 - no chain to name; the run reports a broken setting itself
+            return []
+        resolve = getattr(self.catalog, "resolve_id", None)
+        names: List[str] = []
+        for provider, _model in chain:
+            try:
+                pid = (resolve(provider) if resolve else None) or provider
+            except Exception:  # noqa: BLE001
+                pid = provider
+            if is_local(self.catalog, pid) is not True and one_line(pid) not in names:
+                names.append(one_line(pid))
+        return names
 
     def _configured_provider(self) -> Optional[str]:
         try:

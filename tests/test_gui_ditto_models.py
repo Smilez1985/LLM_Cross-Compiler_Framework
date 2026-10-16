@@ -633,6 +633,27 @@ class TestEvaluation:
         assert "This provider runs in the cloud and bills every request" in question, "the configured provider"
         assert eval_ui.run.calls == []
 
+    def test_the_question_names_a_cloud_provider_of_the_fallback_chain(self, eval_ui):
+        """A local model is free, but the fallback chain of the AI settings applies to the run too: a provider in it
+        that is not on this computer is named before the run instead of "nothing is billed"."""
+        win = eval_ui.win
+        eval_ui.values["ai_fallback_chain"] = ["local", "openai:model-c"]
+        win.chk_kinds["healing"].setChecked(True)
+        tick(win.lst_tiers, "small")
+        assert win.start() is False
+        question = eval_ui.asked[-1][0]
+        assert "nothing is billed" not in question
+        assert "fallback chain of the AI settings (openai)" in question and "a cloud provider there bills" in question
+        eval_ui.values["ai_fallback_chain"] = ["local"]
+        assert win.start() is False
+        assert "Each case calls a model on this computer; nothing is billed." in eval_ui.asked[-1][0]
+
+    def test_the_question_says_that_retrieval_downloads_its_models_on_first_use(self, eval_ui):
+        win = eval_ui.win
+        win.chk_kinds["retrieval"].setChecked(True)
+        assert win.start() is False
+        assert "downloaded on first use" in eval_ui.asked[-1][0]
+
     def test_the_question_has_no_as_its_default_button(self, eval_ui, monkeypatch):
         from PySide6.QtWidgets import QMessageBox
         from orchestrator.gui import plain
