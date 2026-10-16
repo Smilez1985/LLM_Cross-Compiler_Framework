@@ -126,6 +126,10 @@ EDGE_UNAVAILABLE = ("The knowledge base is stored in Qdrant Edge, but Qdrant Edg
                     "framework's requirements again (the installer, or pip install -r requirements.txt)")
 
 
+# Why the old storage is still in use before its conversion was tried (migration.current).
+NOT_CONVERTED = "the old storage has not been converted yet"
+
+
 def engine_available() -> bool:
     """Qdrant Edge can be loaded here (its package is installed and has a build for this computer)."""
     try:
@@ -503,7 +507,7 @@ def current(state_dir: Path) -> Tuple[str, str]:
         return settled
     record = read_record(state_dir)
     reason = str(record.get("reason") or "") if record.get("state") == "failed" else ""
-    return "old", reason or "the old storage has not been converted yet"
+    return "old", reason or NOT_CONVERTED
 
 
 def run(state_dir: Path, force: bool = False, log: Log = None, disk_usage: Any = None) -> Tuple[str, str]:
@@ -657,3 +661,108 @@ def summary(state_dir: Path) -> Dict[str, Any]:
     if out["old_store"] or old_folder(state_dir).is_dir():
         out.update(old_folder=str(old_folder(state_dir)), old_folder_bytes=folder_bytes(old_folder(state_dir)))
     return out
+
+
+# --- what the person's status shows (llm-cli knowledge storage, Tools > Knowledge Snapshots...) ----------------------
+
+@dataclass
+class StorageStatus:
+    """The storage of the local knowledge base as the person's status shows it (`storage_status`): the storage really
+    in use (`used`: qdrant-edge, old-local, server, or "" when it cannot be opened, with the reason), why the old
+    storage is still in use (`reason`, and `reason_code`: engine_missing, not_converted, failed, edge_unavailable or
+    ""), the folder in use, the conversion record (converted or failed, when, how many excerpts, why it failed), the old
+    folder with its size, and whether `llm-cli knowledge storage convert` would convert now (`can_convert`). Full paths:
+    for the person, never for an AI."""
+    used: str = ""
+    reason: str = ""
+    reason_code: str = ""
+    folder: str = ""
+    state: str = ""
+    converted_at: str = ""
+    points: int = 0
+    failed_at: str = ""
+    failure: str = ""
+    code: str = ""
+    old_folder: str = ""
+    old_folder_bytes: int = 0
+    can_convert: bool = False
+
+
+def convert_refusal(state_dir: Path) -> str:
+    """Why `llm-cli knowledge storage convert` would not convert now: "nothing" (no old store, or Qdrant Edge is in use
+    already), "engine_missing" (no Qdrant Edge for this computer), or "" when it converts (also before any attempt and
+    after a failed one)."""
+    state_dir = Path(state_dir)
+    if not old_store_present(state_dir) or edge_in_use(state_dir):
+        return "nothing"
+    if not engine_available():
+        return "engine_missing"
+    return ""
+
+
+def _reason_code(reason: str, state: str) -> str:
+    if not reason:
+        return ""
+    if reason == ENGINE_MISSING:
+        return "engine_missing"
+    if reason == NOT_CONVERTED:
+        return "not_converted"
+    return "failed" if state == "failed" else ""
+
+
+def storage_status(state_dir: Path, info: Optional[Dict[str, Any]] = None, used: Optional[str] = None,
+                   reason: str = "") -> StorageStatus:
+    """The storage status of the knowledge base in `state_dir`. `info`: migration.summary (read when not given);
+    `used`: the storage an open knowledge base names (RAGManager.storage_format, or convert_storage's "used"), with its
+    `reason`; without it, as the records say (migration.current: nothing is opened or changed)."""
+    state_dir = Path(state_dir)
+    info = summary(state_dir) if info is None else info
+    state = str(info.get("state") or "")
+    code = ""
+    if not used:
+        try:
+            use, reason = current(state_dir)
+            used = "qdrant-edge" if use == "edge" else "old-local"
+        except KnowledgeBaseError as e:
+            used, reason, code = "", str(e), "edge_unavailable"
+    folder = {"qdrant-edge": str(edge_folder(state_dir)), "old-local": str(old_folder(state_dir))}.get(used, "")
+    return StorageStatus(
+        used=used, reason=reason, reason_code=code or _reason_code(reason, state), folder=folder, state=state,
+        converted_at=str(info.get("converted_at", "")), points=int(info.get("points") or 0),
+        failed_at=str(info.get("failed_at", "")), failure=str(info.get("reason", "")), code=str(info.get("code") or ""),
+        old_folder=str(info.get("old_folder") or ""), old_folder_bytes=int(info.get("old_folder_bytes") or 0),
+        can_convert=convert_refusal(state_dir) == "")
+
+
+def storage_lines(status: StorageStatus) -> List[Tuple[str, str]]:
+    """The status in plain English lines for the command line, each with its style ("", "yellow" or "red"): the
+    storage in use, the conversion and the old folder (the GUI says the same in the person's language,
+    l10n_knowledge)."""
+    from orchestrator.Core.knowledge_snapshots import size_text
+    lines: List[Tuple[str, str]] = []
+    if status.used == "qdrant-edge":
+        lines.append(("", f"Storage: Qdrant Edge in {status.folder}."))
+    elif status.used == "old-local":
+        lines.append(("", f"Storage: the storage of earlier versions (qdrant-client's local mode) in {status.folder}."))
+        if status.reason and status.state != "failed":
+            lines.append(("", f"{status.reason}."))
+    elif status.used == "server":
+        lines.append(("", "Storage: a Qdrant server (setting qdrant_url); the local storage is not used."))
+    else:
+        lines.append(("red", status.reason))
+    if status.state == "converted":
+        lines.append(("", f"Converted from the old storage on {status.converted_at} ({status.points} excerpts, counts "
+                          "and sample searches checked)."))
+    elif status.state == "failed":
+        lines.append(("yellow", f"The old storage is still in use: its conversion failed on {status.failed_at}: "
+                                f"{status.failure}"))
+        lines.append(("", retry_sentence(status.code)))
+    if status.old_folder:
+        kept = size_text(status.old_folder_bytes)
+        if status.state == "converted":
+            lines.append(("", f"The old folder {status.old_folder} ({kept}) is kept until you delete it: 'llm-cli "
+                              "knowledge storage delete-old' (or Tools > Knowledge Snapshots... > Delete the old "
+                              "storage... in the GUI) lists it and asks you first."))
+        else:
+            lines.append(("", f"Old storage folder: {status.old_folder} ({kept})."))
+    return lines
