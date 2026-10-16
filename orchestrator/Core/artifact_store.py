@@ -5,8 +5,8 @@ LLM Cross-Compiler Framework - Deleting a built model (MCP design T10, tool dele
 A built model is named by its artifact id (BuildService: `a_` and 16 hex characters of its folder below the output
 folder), never by a path. Deleting it removes exactly that folder and its "golden" ZIP next to it, and only when:
 
-- the folder lies inside the output folder (resolved; a link that points elsewhere is refused, and so is the output
-  folder itself),
+- the folder lies inside the output folder or the framework's build folder (resolved; a link that points elsewhere
+  is refused, and so is a data folder itself; a model the person saved to another folder is theirs to remove),
 - no unfinished build request writes into it (this process's requests, and the shared build state and build records
   of every other framework process),
 - its primary file still has the sha256 the caller saw (the stale-view guard: a build that was rebuilt meanwhile is
@@ -94,16 +94,31 @@ class ArtifactStore:
     """Built models of one output folder. `artifacts()` gives (id, label, manifest) like BuildService.artifact_entries;
     `busy_folders()` the output folders unfinished build requests write into (every process)."""
 
-    def __init__(self, output_dir: Path, artifacts, busy_folders):
+    def __init__(self, output_dir: Path, artifacts, busy_folders, roots: Optional[List[Tuple[str, Path]]] = None):
         self.output_dir = Path(output_dir)
         self._artifacts = artifacts
         self._busy = busy_folders
+        # (label, folder) of every folder a built model may lie in: the output folder, and the framework's build folder
+        # (eighth round, answer 3); a model elsewhere (saved by the person to another folder) is never deleted here
+        self.roots = list(roots) if roots else [("output", self.output_dir)]
 
     @classmethod
     def for_service(cls, service: Any) -> "ArtifactStore":
         """The store of a BuildService, through its public methods only (output_folder, artifact_entries,
-        busy_output_folders), so a change inside the service cannot bypass what the store checks."""
-        return cls(service.output_folder(), service.artifact_entries, service.busy_output_folders)
+        busy_output_folders, artifact_roots), so a change inside the service cannot bypass what the store checks."""
+        roots = service.artifact_roots() if hasattr(service, "artifact_roots") else None
+        return cls(service.output_folder(), service.artifact_entries, service.busy_output_folders, roots)
+
+    def _root_of(self, real: Path) -> Optional[Tuple[str, Path]]:
+        """(label, resolved folder) of the data folder `real` lies inside (never the folder itself), or None."""
+        for label, folder in self.roots:
+            try:
+                out = Path(folder).resolve(strict=True)
+            except OSError:
+                continue
+            if real != out and out in real.parents:
+                return label, out
+        return None
 
     def resolve(self, artifact_id: str, expect_sha256: Optional[str] = None) -> ArtifactTarget:
         found = next((item for item in self._artifacts() if item[0] == artifact_id), None)
@@ -113,14 +128,14 @@ class ArtifactStore:
         aid, label, info = found
         folder = Path(info["path"])
         try:
-            out = self.output_dir.resolve(strict=True)
             real = folder.resolve(strict=True)
         except OSError:
             raise ArtifactRefused(f"The built model {label} is no longer on disk.", code="unknown_id",
                                   next="Call list_artifacts again.") from None
-        if folder.is_symlink() or real == out or out not in real.parents:
-            raise ArtifactRefused(f"The built model {label} does not lie inside the output folder (a link or the "
-                                  "output folder itself); it is not deleted.", code="not_supported",
+        if folder.is_symlink() or self._root_of(real) is None:
+            raise ArtifactRefused(f"The built model {label} does not lie inside the output folder or the "
+                                  "framework's build folder (a link, a folder itself, or a folder the person saved "
+                                  "it to); it is not deleted.", code="not_supported",
                                   next="Tell the person; they remove it themselves if they want.")
         for busy in self._busy():
             try:
@@ -185,10 +200,10 @@ class ArtifactStore:
                 raise ArtifactRefused("The trash is not available; nothing was deleted.", code="failed",
                                       next="Tell the person; they check 'llm-cli doctor'.")
             from orchestrator.Core.trash import TrashError
-            root = self.output_dir.resolve()
+            label, root = self._root_of(target.folder) or ("output", self.output_dir.resolve())
             for item, path in zip(current.items, (target.folder, *target.zips)):
                 try:
-                    entry = trash.move("artifact", path, root, "output", item.speaking_name, accepted, deleted_by)
+                    entry = trash.move("artifact", path, root, label, item.speaking_name, accepted, deleted_by)
                 except TrashError as e:
                     if not result.trash_ids:
                         raise

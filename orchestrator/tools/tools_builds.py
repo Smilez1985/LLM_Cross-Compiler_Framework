@@ -23,6 +23,9 @@ from orchestrator.tools.registry import ToolError
 HF_REPO = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 PREFLIGHT_NOTE = ("The pre-flight check and measured quantization recommendations are not part of this framework "
                   "version yet; fit values are estimates.")
+# Where an AI caller's finished build goes (DECISIONS, eighth round, answer 3): no dialog, the person's output folder
+SAVED_NOTE = ("When it has finished, the model is saved in the person's output folder; get_build_status names it by "
+              "label (output:<target>/<model>/<quantization>, with -2 when an earlier build has that name).")
 
 
 # --- inputs -----------------------------------------------------------------------------------------------------
@@ -128,6 +131,17 @@ class FitPairOut(BaseModel):
     target: FitOut
 
 
+class EarlierBuildOut(BaseModel):
+    """A finished build with 100 % the same options (DECISIONS, eighth round, N11)."""
+    artifact_id: str
+    label: untrusted_text(1000)
+    created: Optional[untrusted_text(64)] = None
+    match: Literal["identical", "commit_unchecked"] = Field(
+        description="identical: every option and the commit are the same; commit_unchecked: the same options, but the "
+                    "commit the new build would fetch was not looked up (it may differ)")
+    sha256: Optional[str] = Field(default=None, description="sha256 of its model file")
+
+
 class CheckBuildOut(ToolOutput):
     normalized: Optional[NormalizedOut] = None
     problems: List[ProblemOut] = Field(default_factory=list)
@@ -144,6 +158,9 @@ class CheckBuildOut(ToolOutput):
     decision: Literal["allow", "ask", "deny"] = Field(description="What your permissions do for start_build with "
                                                                   "these arguments")
     standing_approval: bool = Field(default=False, description="A standing approval covers this build")
+    earlier_builds: List[EarlierBuildOut] = Field(
+        default_factory=list, description="Finished builds with 100 % the same options: use one, or start_build "
+                                          "builds it again; nothing is skipped by itself")
 
 
 # --- the plan as tool output -------------------------------------------------------------------------------------
@@ -177,6 +194,34 @@ def check_out(plan, decision: str, standing: bool) -> CheckBuildOut:
         mounts=plan.mounts, target_trust=plan.target_trust, support_level=plan.support_level,
         image_build=plan.image_build, base_image=plan.base_image or None, base_image_class=plan.base_image_class,
         sandbox=plan.sandbox, decision=decision, standing_approval=standing)
+
+
+def earlier_out(found) -> List[EarlierBuildOut]:
+    """build_identity.EarlierBuild entries as the tool shows them (ids and labels, never a host path)."""
+    out = []
+    for build in found[:10]:
+        primary = build.info.get("primary")
+        entry = next((a for a in build.info.get("artifacts") or [] if isinstance(a, dict) and a.get("file") == primary),
+                     {})
+        sha = entry.get("sha256") if isinstance(entry.get("sha256"), str) else None
+        out.append(EarlierBuildOut(artifact_id=build.artifact_id, label=build.label, created=build.created or None,
+                                   match=build.match, sha256=sha))
+    return out
+
+
+def earlier_note(out: CheckBuildOut) -> List[str]:
+    identical = [b for b in out.earlier_builds if b.match == "identical"]
+    if identical:
+        first = identical[0]
+        return [f"An identical build exists already ({first.artifact_id}, {first.label}): every chosen option is the "
+                "same. Use it (get_artifact_details, create_deploy_package) or call start_build to build it again; "
+                "nothing is skipped by itself. Tell the person which you do."]
+    if out.earlier_builds:
+        first = out.earlier_builds[0]
+        return [f"A build with the same options exists ({first.artifact_id}, {first.label}), but the commit this "
+                "build would fetch was not looked up, so it may differ (call again with include_download_size: true "
+                "to check). Nothing is skipped by itself."]
+    return []
 
 
 def check_summary(out: CheckBuildOut) -> str:
@@ -267,11 +312,32 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
         grant = bound.get("grant")
         return dict(grant) if isinstance(grant, dict) else None
 
+    def earlier_builds(inp, plan):
+        """Finished builds with 100 % the same options (eighth round, N11); [] when they cannot be looked up."""
+        finder = getattr(service, "earlier_builds", None)
+        if not callable(finder):
+            return []
+        try:
+            request = BuildRequestIn(**inp.model_dump(exclude={"optimization", "include_download_size"}))
+            return finder(request, revision=plan.commit, optimization=inp.optimization)
+        except Exception as e:  # noqa: BLE001 - a look-up that fails never stops the check or the build
+            registry.logger.debug(f"Earlier builds not looked up: {e}")
+            return []
+
     def prepare_build(inp, ctx):
         plan = service.plan(inp)
         if plan.problems:
             raise problem_error(plan.problems)
-        return plan.call_facts()
+        facts = plan.call_facts()
+        identical = [b for b in earlier_builds(inp, plan) if b.match == "identical"]
+        if identical:  # the person sees that this builds an identical build again (shown, never part of the decision)
+            import dataclasses
+            from orchestrator.tools.spec import Fact
+            first = identical[0]
+            facts = dataclasses.replace(facts, facts=facts.facts + (Fact(
+                "Identical build", f"{first.label} (built {first.created or 'earlier'}) has every chosen option of "
+                                   "this build; this builds it again (nothing is skipped by itself)", volatile=True),))
+        return facts
 
     def start_build(inp, ctx):
         """Bound to the facts the question showed: the commit, and the sizes the disk reservation is taken for.
@@ -289,7 +355,9 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
         plan = service.plan(inp, look_up_hub=look_up)
         start = registry.get("start_build")
         decision = registry.decide(start, StartBuildIn(**inp.model_dump(exclude={"include_download_size"})), ctx)
-        return check_out(plan, decision.value, False)
+        out = check_out(plan, decision.value, False)
+        out.earlier_builds = earlier_out(earlier_builds(inp, plan))
+        return out
 
     def hub_lookup_allowed(inp, ctx) -> bool:
         """A Hugging Face look-up of a dry run counts toward the client's Hugging Face rate (30 per hour, the limits
@@ -320,6 +388,7 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
                  "check_build_request shows the same without starting anything. Returns a request id.",
                  ToolTier.LOCAL_WRITE, StartBuildIn, handle_out, start_build, takes_context=True, open_world=True,
                  summary=lambda o: f"Build request {fact(o.request_id)} is {fact(o.status)}.",
+                 notes=lambda o: [SAVED_NOTE],
                  arg_aliases=aliases, fields=build_fields, examples=(example,), limits=limits,
                  prepare=prepare_build,
                  # version 2: a digest-pinned base image the person confirmed in a build of the target counts like
@@ -336,11 +405,12 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
         ToolSpec("check_build_request", "Check a build request",
                  "Dry run of start_build: the normalized request, the commit and download size, weights type, "
                  "licence, gating and token access, the disk space per folder with the conversion margin, a "
-                 "hardware estimate for this computer and the board, mounts, target trust, image build, and what "
-                 "your permissions would do. Never starts anything. Problems come with a reason code and a next step.",
+                 "hardware estimate for this computer and the board, mounts, target trust, image build, what "
+                 "your permissions would do, and finished builds with 100 % the same options (use one or build "
+                 "again). Never starts anything. Problems come with a reason code and a next step.",
                  ToolTier.READ, CheckBuildIn, CheckBuildOut, check_build_request, idempotent=True, open_world=True,
                  takes_context=True, arg_aliases=aliases, fields=build_fields, examples=(example,),
-                 notes=lambda o: [PREFLIGHT_NOTE], summary=check_summary),
+                 notes=lambda o: earlier_note(o) + [PREFLIGHT_NOTE], summary=check_summary),
         ToolSpec("list_build_requests", "List build requests",
                  "Lists build requests with their status, 50 per page: every build of this person, whichever "
                  "framework process started it (the GUI, the CLI, an MCP server; from the shared build state). "
@@ -362,8 +432,8 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
                  summary=lambda o: (count(len(o.lines), "log line", "log lines")
                                     + f" of build request {fact(o.request_id)} (external text).")),
         ToolSpec("list_artifacts", "List built models",
-                 "Finished builds on disk with their id, label under the output folder, format, quantization, board, "
-                 "size and hash (from their manifests), 50 per page.",
+                 "Finished builds on disk with their id, label (output:, builds: not saved yet, saved: elsewhere), "
+                 "format, quantization, board, size and hash (from their manifests), 50 per page.",
                  ToolTier.READ, ArtifactListIn, ArtifactPageOut,
                  lambda i: service.list_artifacts(i.target, i.format, i.page), idempotent=True,
                  notes=lambda o: ["More built models: call again with the next page."] if o.more else [],

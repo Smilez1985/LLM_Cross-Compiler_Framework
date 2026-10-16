@@ -371,6 +371,9 @@ class Store:
     def count(self):
         return self._count
 
+    def export_estimate(self):  # what the snapshot would take (the disk check before it, eighth round answer 2)
+        return 6 if self._count else 0
+
     def export_file(self, path):
         if self.export_fails:
             return 0

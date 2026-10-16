@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Mojo check: free disk space for the cache and output folders
+LLM Cross-Compiler Framework - Mojo check: free disk space for the cache, output and build folders
 """
 
 import os
@@ -15,7 +15,8 @@ def check_disk(framework) -> List[Finding]:
     findings = []
     engine = getattr(getattr(framework, "orchestrator", None), "build_engine", None)
     seen = set()
-    for label, path in (("cache", getattr(engine, "cache_dir", None)), ("output", getattr(engine, "output_dir", None))):
+    for label, path in (("cache", getattr(engine, "cache_dir", None)), ("output", getattr(engine, "output_dir", None)),
+                        ("builds", getattr(engine, "build_dir", None))):
         if path is None:
             continue
         path = Path(path)

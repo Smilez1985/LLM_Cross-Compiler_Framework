@@ -415,3 +415,27 @@ def test_an_mcp_question_without_an_answer_removes_the_quarantined_copy(env, mon
     end = [e for e in env.registry.audit.entries(50) if e["tool"] == "add_pack_from_index"][0]
     assert end["outcome"] == "confirmation_timeout"
     assert quarantined(env) == [] and not (env.cm.targets_dir / "demo-board").exists()
+
+
+# --- N13: the knowledge snapshot taken before a knowledge pack import, with its disk check (eighth round) ------------
+
+def test_a_knowledge_pack_is_refused_when_the_snapshot_taken_first_does_not_fit(env, monkeypatch):
+    from orchestrator.Core import knowledge_snapshots
+    folder = Path(env.world.config.user_state_dir) / "knowledge_snapshots"
+    folder.mkdir(parents=True)
+    (folder / "pre_ingest_1.jsonl.gz").write_bytes(b"x" * 1000)
+    url = env.world.add(knowledge_pack(env.world, "rk-docs"), kind="knowledge", pack_id="rk-docs", version="1.0.0")
+    env.world.publish()
+    free = {"bytes": int(2.1 * 10 ** 9)}
+    monkeypatch.setattr(knowledge_snapshots, "_disk_usage",
+                        lambda p: SimpleNamespace(total=100 * 10 ** 9, used=0, free=free["bytes"]))
+    asked = []
+    with pytest.raises(ToolError) as e:
+        call(env, "add_pack_from_index", {"kind": "knowledge", "pack_id": "rk-docs"}, confirm=recording(asked))
+    assert e.value.code == "insufficient_resources" and e.value.blocker == "snapshot_no_room"
+    assert asked == [] and url not in env.world.session.calls, "refused before the question and the download"
+    free["bytes"] = 3 * 10 ** 9   # fits, but tight: a situation warning in the question
+    out = call(env, "add_pack_from_index", {"kind": "knowledge", "pack_id": "rk-docs"}, confirm=recording(asked))
+    assert "snapshot" in asked[0].lower()
+    job = wait_job(env, out.job_id)
+    assert job.state == "done" and "snapshot" in job.result

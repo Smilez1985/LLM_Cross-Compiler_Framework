@@ -503,6 +503,16 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         folder = state_dir(framework)
         return ReservationLedger(folder) if folder is not None else None
 
+    def knowledge_room():
+        """The room for the knowledge snapshot taken before a knowledge pack is imported (N13), estimated from the
+        newest snapshot; None when it cannot be told."""
+        from orchestrator.Core.build_plan import state_dir
+        from orchestrator.Core.knowledge_snapshots import room_before
+        try:
+            return room_before(state_dir(framework))
+        except OSError:
+            return None
+
     def pack_needs(kind: str, size: int):
         from orchestrator.Core.disk_plan import DiskNeed
         return [DiskNeed("packs", Path(community()._install_root(kind)), 2 * int(size),
@@ -562,6 +572,11 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         if revoked is not None:
             raise blocked("pack_revoked", f"The {inp.kind} pack {entry.id} {entry.version} was revoked by the signed "
                           "index.", "Choose another pack; a revoked pack is never installed.")
+        room = knowledge_room() if inp.kind == "knowledge" else None
+        if room is not None and not room.fits:  # N13: no snapshot before the import, no import
+            from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom
+            error = SnapshotNoRoom(room, "the knowledge pack is imported")
+            raise blocked("snapshot_no_room", str(error), error.next)
         disk = pack_disk(inp.kind, entry.size)
         if disk is not None and not disk.fits:
             raise blocked("disk_full", f"Not enough disk space for the pack: {2 * entry.size} bytes needed "
@@ -591,7 +606,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
             consequence += (" It adds build scripts and a Dockerfile to this computer; the image build runs with network "
                             "access the first time the target is built.")
         elif m.kind == "knowledge":
-            consequence += " Its pages are added to the knowledge base and later reach AI models as reference data."
+            consequence += (" The knowledge base is saved as a snapshot first, so the import can be undone; its pages "
+                            "are added to the knowledge base and later reach AI models as reference data.")
         facts = [Fact("Pack", f"{m.kind} {m.id} {m.version} by {m.author} (licence {m.license})", INDEX_TEXT),
                  Fact("Trust", f"{prepared.trust.value} (signed index: "
                                + ("reviewed and reproduced independently)" if prepared.trust.value == "verified"
@@ -599,6 +615,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                  Fact("Download", f"{entry.size} bytes, sha256 {entry.sha256} (checked)"),
                  Fact("Files", f"{len(m.files)} ({sum(f.size for f in m.files)} bytes)"),
                  Fact("Installs to", dest)]
+        if room is not None:  # free space moves while a question waits: shown, never part of the decision
+            facts.append(Fact("Disk", f"knowledge snapshot taken first: {room.sentence()}", volatile=True))
         if entry.title:
             facts.append(Fact("Title", entry.title, INDEX_TEXT))
         if entry.description:
@@ -625,8 +643,12 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         numbers = {"size_class": size_class(int(entry.size)), "size_bytes": int(entry.size)}
         if disk is not None:
             numbers.update(free_after_bytes=int(disk.after), reserve_bytes=int(disk.reserve))
+        warnings = pack_warnings(m.kind, prepared.trust.value, [i for _, i in images], disk)
+        if room is not None and room.verdict == "tight" and not any(w.code == "disk_tight" for w in warnings):
+            warnings += (warn("disk_tight", free_after_gb=gb_number(room.check.after),
+                              reserve_gb=gb_number(room.check.reserve)),)
         return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound,
-                         warnings=pack_warnings(m.kind, prepared.trust.value, [i for _, i in images], disk),
+                         warnings=warnings,
                          numbers=numbers, scope={"size_bytes": int(entry.size), "pack_kind": m.kind,
                                                  "pack_trust": prepared.trust.value},
                          consequence_template=consequence, names={"pack": m.id},
@@ -677,6 +699,10 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                     result["knowledge_pages"] = len(pages) if isinstance(pages, list) else 0
                 except (OSError, ValueError):
                     result["knowledge_pages"] = 0
+                # the snapshot taken before the import (N13), or why nothing was imported yet (no room for it)
+                result["snapshot"] = getattr(cm, "last_sync_snapshot", None) or ""
+                if getattr(cm, "last_sync_problem", ""):
+                    result["not_imported"] = _no_paths(cm.last_sync_problem)
             if nobody_asked:
                 result["installed_via"] = channel
             return result

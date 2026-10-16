@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from orchestrator.utils.localization import get_instance as get_i18n
-from orchestrator.Core.deployment_manager import list_builds
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
 from orchestrator.utils import input_history
 
@@ -132,6 +131,13 @@ class DeploymentWindow(QWidget):
         layout_art = QVBoxLayout()
         self.list_artifacts = QListWidget()
         layout_art.addWidget(self.list_artifacts)
+        # Save...: a build still in the framework's build folder goes to the output folder or another folder
+        # (eighth round, answer 3); the person's save dialog, never by itself
+        from orchestrator.utils.localization import ui_text
+        self.btn_save = QPushButton(ui_text("save.button").replace("&", "&&"))
+        self.btn_save.clicked.connect(self._on_save)
+        layout_art.addWidget(self.btn_save)
+        self._save_workers = []
         grp_artifact.setLayout(layout_art)
         layout.addWidget(grp_artifact)
         
@@ -212,29 +218,33 @@ class DeploymentWindow(QWidget):
     def refresh_data(self):
         # Artifacts
         self.list_artifacts.clear()
-        
-        # Safe config access
-        get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
-        output_dir = Path(get_cfg("output_dir", "output"))
-        if hasattr(self.framework, "resolve_path"):
-            output_dir = self.framework.resolve_path(output_dir)
-        
-        if output_dir.exists():
-            # Every finished build writes build_info.json; list builds, not raw folders or archives.
-            for build in list_builds(output_dir):
-                if not build.get("primary"):
-                    continue
-                label = " · ".join(str(x) for x in (
-                    build.get("model") or Path(str(build.get("model_source", "?"))).name,
-                    str(build.get("format", "?")).upper(),
-                    build.get("quantization") or "default",
-                    build.get("board") or build.get("target") or "?",
-                ))
-                list_item = QListWidgetItem(f"📦 {label}")
-                list_item.setData(Qt.UserRole, build["path"])
-                list_item.setToolTip(f"{build['path']}\n{build.get('primary')}\n{build.get('created', '')}")
-                self.list_artifacts.addItem(list_item)
-        
+
+        # Every finished build writes build_info.json; list builds, not raw folders or archives: in the output
+        # folder, in the framework's build folder (not saved yet, earlier builds) and where the person saved them.
+        from orchestrator.Core.artifact_output import BUILDS, list_artifacts
+        from orchestrator.utils.localization import ui_text
+        try:
+            listed = list_artifacts(self.framework)
+        except Exception:  # noqa: BLE001 - a folder that cannot be read lists nothing
+            listed = []
+        for item in listed:
+            build = item.info
+            if not build.get("primary"):
+                continue
+            label = " · ".join(str(x) for x in (
+                build.get("model") or Path(str(build.get("model_source", "?"))).name,
+                str(build.get("format", "?")).upper(),
+                build.get("quantization") or "default",
+                build.get("board") or build.get("target") or "?",
+            ))
+            if item.where == BUILDS:
+                label += f" ({ui_text('save.not_saved')})"
+            list_item = QListWidgetItem(f"📦 {label}")
+            list_item.setData(Qt.UserRole, build["path"])
+            list_item.setData(Qt.UserRole + 1, item.where)
+            list_item.setToolTip(f"{build['path']}\n{build.get('primary')}\n{build.get('created', '')}")
+            self.list_artifacts.addItem(list_item)
+
         # Profiles (target ids): keep the selection, else preselect the most recently used target
         previous = self.cb_profiles.currentText()
         self.cb_profiles.clear()
@@ -250,6 +260,28 @@ class DeploymentWindow(QWidget):
 
     def _recent(self, field):
         return self.history.get(field) if self.history else []
+
+    def _on_save(self):
+        """Save... for the selected build: only one still in the framework's build folder; the person picks the folder
+        (the output folder is preselected) in the operating system's own dialog."""
+        from orchestrator.Core.artifact_output import BUILDS
+        from orchestrator.gui import artifact_save
+        from orchestrator.gui.plain import plain_box
+        from orchestrator.utils.localization import ui_text
+        item = self.list_artifacts.currentItem()
+        if item is None or item.data(Qt.UserRole + 1) != BUILDS:
+            plain_box(self, "information", ui_text("save.button").rstrip("…"), ui_text("save.only_build_folder"))
+            return
+        worker = artifact_save.ask_and_save(self, self.framework, Path(item.data(Qt.UserRole)), self._on_saved)
+        if worker is not None:
+            self._save_workers.append(worker)
+            worker.finished.connect(lambda w=worker: self._save_workers.remove(w) if w in self._save_workers else None)
+
+    def _on_saved(self, ok: bool, text: str):
+        from orchestrator.gui.plain import plain_box
+        from orchestrator.utils.localization import ui_text
+        plain_box(self, "information" if ok else "warning", ui_text("save.button").rstrip("…"), text)
+        self.refresh_data()
 
     def reload_history(self):
         """Refills the recent devices (after a deployment or after the history was cleared)."""

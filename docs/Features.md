@@ -113,8 +113,9 @@ A build runs these steps; each one is logged:
 8. **Results:** the model file is collected, `build_info.json` is completed with the model files and their SHA256
    hashes, a `Model_Card.md` with hashes and usage notes is written, and a ZIP of these files is made. All of this
    is prepared in a hidden folder next to the output folder and moved into it only at the end, so a cancelled or
-   failed build leaves no files in the output folder, and files of an earlier build there are replaced only by a
-   completed one. Links in the build output are never followed. Per-build images are removed afterwards.
+   failed build leaves no files in the output folder. An earlier finished build in that folder is never replaced: a
+   later build goes next to it (`Q4_K_M-2`, with `Q4_K_M-2.zip`). Links in the build output are never followed.
+   Per-build images are removed afterwards.
 
 Further behaviour:
 
@@ -138,9 +139,69 @@ Further behaviour:
   reporting success.
 - **Timeouts:** each container step has a time limit (setting `build_timeout`, default 3600 s); only a real time-out
   counts as one.
-- **Output folder:** CLI builds go to `output/build_<date>_<time>/<target>/<model>/<quantization>/` in the
-  installation (or the folder given with `-o`), builds started in the GUI, by Ditto or by MCP clients to
-  `output/<target>/<model>/<quantization>/`.
+- **Where a build goes:** see [Where finished models go](#where-finished-models-go) below. Every build lands in
+  `<folder>/<target>/<model>/<quantization>/` with its golden ZIP next to it.
+
+### Where finished models go
+
+A finished build (a golden artifact: the model files, `build_info.json`, `Model_Card.md` and the ZIP next to the
+folder) is saved to a folder you choose (unreleased; eighth round, answer 3):
+
+- **The output folder** (setting `output_dir`, default `~/llmcf/output`; on Windows `C:\Users\<name>\llmcf\output`).
+  You set it once: **File > Output Folder...** in the GUI (the system's own folder dialog) or `llm-cli config
+  output-folder PATH`, for example to a folder on a big second disk. An AI cannot change it. Builds in the old
+  folder stay where they are and stay listed. Everything below the output folder is listed, so a folder that holds
+  the framework's build folder, per-user folder or program folder (for example your home folder) cannot be the
+  output folder.
+- **The framework's build folder** (setting `build_dir`, default the data folder's `output` folder, where builds went
+  before): a build you start in the GUI waits here until it is saved. Earlier builds stay here and stay listed.
+
+Who saves where:
+
+- **GUI:** when a build you started has finished, the system's folder dialog opens at the output folder for every
+  golden artifact. **OK** saves it there, or you pick another folder. **Cancel** saves nothing elsewhere and deletes
+  nothing: the build stays in the build folder, marked "not saved yet" in the Deployment tab, and **Save...** there
+  saves it later.
+- **CLI:** `llm-cli build start --output PATH` (`-o`, the old name `--output-dir` still works). At a terminal without
+  it you are asked, with the output folder as the default (`-` keeps the build in the build folder; `llm-cli build
+  save` saves it later). Without a terminal the build goes to the output folder.
+- **Ditto and MCP clients:** always the output folder; `start_build` says so, and `get_build_status` names each
+  finished build by its label (`output:<target>/<model>/<quantization>`), never by its host path. In `get_build_log`
+  a line with a path on this computer names the framework's folders by label and any other path by its file name;
+  paths below `/home/`, `/media/`, `/run/media/`, `/Users/` and `C:\Users\` count too (a local model on a USB disk).
+  Your own windows show the full path.
+
+Saving moves the build out of the build folder. On the same disk it is renamed and nothing is copied. Onto another
+disk every file is copied, each copy is checked against its original by sha256 (a model file also against the hash
+in its manifest), and only then is the copy in the build folder removed. A link in the build is never followed and
+not copied; when anything was left out, the result names it and the copy in the build folder stays. The free space
+is checked before copying,
+with the reserve that always stays free. If a check fails, the build stays where it was and only the unfinished copy
+is removed. A name that is taken is never overwritten (`-2`, `-3`). A system folder, the framework's program folder,
+its build folder and its per-user folder are refused as destinations. A build you saved outside the output folder
+stays listed, and so does every build in an earlier output folder after you changed it (`saved_artifacts.json` in the
+per-user folder). `llm-cli deploy list-artifacts`, the Deployment tab and
+`list_artifacts` show the output folder, the build folder and the saved folders; an AI reads `output:`, `builds:` and
+`saved:` labels.
+
+### Identical builds
+
+Before a build, `check_build_request` and the GUI's builder form look for a finished build with 100 % the same
+chosen options (unreleased; eighth round, N11): the model and its exact commit (a local model: every weights file by
+name, size and modification time), the target and the sha256 of its folder, board, format, quantization, importance
+matrix and the sha256 of the calibration data, optimization, context length, GPU use and task. Other weights or
+another quantization is never identical. Every build records these options in its manifest (`build_options`, with
+their sha256); builds made before do not have them and are never reported.
+
+- **GUI:** the builder form names the earlier build with its full path. **Use the existing build** starts nothing,
+  **Build again** builds anyway, **Cancel** does neither. When the model's newest commit is not known yet, the form
+  asks Hugging Face once for the commit, only when an earlier build could be identical and never in offline mode;
+  without the commit the form says that it could not be checked.
+- **AI clients:** `check_build_request` lists such builds in `earlier_builds` (`identical`, or `commit_unchecked`
+  when the commit was not looked up) with a note; `start_build`'s question says that it builds an identical build
+  again.
+
+Nothing is ever skipped by itself: you (or the AI after telling you) decide.
 
 ### Conversion tools tuned to the build host
 
@@ -1105,11 +1166,16 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   Re-ingesting a page updates it in place and removes chunks the new version no longer has. Code blocks and tables
   stay whole unless they are larger than the model's context ([Large code blocks and
   tables](#large-code-blocks-and-tables)).
-- **Snapshots:** before every crawl and every index of the framework's own documents the knowledge base is saved as a
-  snapshot in
-  `~/.llm-framework/knowledge_snapshots`. There is no limit (unreleased; before, only the newest 5 were kept, on
-  every channel): the framework keeps as many as the disk holds, deletes none by itself, and no number of them brings
-  a reminder or a warning. **Tools > Knowledge Snapshots...** in the GUI or `llm-cli knowledge snapshots` lists each
+- **Snapshots:** before every crawl, every index of the framework's own documents, every restore and every knowledge
+  pack import the knowledge base is saved as a snapshot in `~/.llm-framework/knowledge_snapshots`; a name that is
+  taken gets `-2`, so no snapshot is ever written over. There is no limit (unreleased; before, only the newest 5 were
+  kept, on every channel): the framework keeps as many as the disk holds, deletes none by itself, and no number of
+  them brings a reminder or a warning. What counts is the disk (unreleased; eighth round, answer 2): before a
+  snapshot is made, its size is estimated. When it does not fit beside the reserve that always stays free, no
+  snapshot is made and the change does not run either; there is no "continue anyway". You get the list to delete or
+  export snapshots (the GUI offers **Knowledge Snapshots...**; AI clients get the blocker `snapshot_no_room` with your
+  action). When it fits but leaves little free space, that is a situation warning (`disk_tight`). **Tools >
+  Knowledge Snapshots...** in the GUI or `llm-cli knowledge snapshots` lists each
   one with its full path, name, size and what it is, nothing ticked. To free space you tick the ones to delete (they
   go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
   `llm-cli knowledge snapshots export NAME... --to FOLDER`, each copy checked by sha256). See [Deleting and the
@@ -2091,13 +2157,13 @@ deterministic checks; nothing asks a model what is wrong. The whole guide: [Mojo
 |---|---|
 | Python | supported version (3.11 to 3.14) |
 | Docker | daemon reachable, buildx available; where Docker keeps its images (`DockerRootDir`, with the free space of that disk) and how much the framework's build images use (information) |
-| Disk | free space for the cache and output folders (warning below 20 GB, error below 5 GB) |
+| Disk | free space for the cache, output and build folders (warning below 20 GB, error below 5 GB) |
 | Targets | targets found, capabilities readable |
 | Security | personal folder private, secrets store usable, keyring protects secrets |
 | AI | tool permissions set up and readable, MCP tokens readable, audit log intact (changed, removed, wrong key, missing anchor, no key); the chat feed can be written and its newest entries verify (changed or foreign entries, no key; unreleased) |
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
-| Knowledge | how many knowledge snapshots there are, their size and folder (no limit: their number is never a warning; nothing is deleted; unreleased) |
+| Knowledge | how many knowledge snapshots there are, their size against the free space of their disk, and their folder; a warning when the next snapshot would not fit, information when it fits but leaves little space (no limit: their number is never a warning; nothing is deleted; unreleased) |
 | Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning), missing (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
 
 **Mojo Oracle** (the default) only looks. For every warning and error it says what it found, where (the full path or
@@ -2252,7 +2318,10 @@ rebuilt, never downloaded as a model.
 
 Targets go to `targets/`, recipes to `community/recipes/`, knowledge to `community/knowledge/`. A knowledge pack is
 imported into the knowledge base right after its installation or, if the knowledge base is off, as soon as it is
-turned on.
+turned on. Before its first page is imported, the knowledge base is saved as a snapshot (`pre_pack_<time>`), so the
+import can be undone (unreleased). When that snapshot does not fit on the disk, nothing is imported: the pack stays
+installed and is imported once there is room. A pack that cannot be imported yet (for example offline without the
+embedding model) is tried again at the next start without another snapshot; a pack installed again gets a new one.
 
 ### Trust levels
 

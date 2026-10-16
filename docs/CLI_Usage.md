@@ -22,7 +22,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [doctor](#doctor): the old name of `mojo`
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
-- [build](#build): `start`, `status`
+- [build](#build): `start`, `save`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
@@ -31,7 +31,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): hardware probe
 - [device](#device): `list`, `settings`, `runtime`
-- [config](#config): `show`, `repos`
+- [config](#config): `show`, `output-folder`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
 - [trash](#trash): `list`, `restore`, `empty`
 - [Known limitations](#known-limitations)
@@ -125,6 +125,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `trash list` / `restore` / `empty` | What deletions moved to the trash; put entries back; delete the ones you pick for good (unreleased) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
+| `build save` | Save a build that waits in the framework's build folder to the output folder or another folder (unreleased) |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
 | `ditto login` / `ditto logout` | Sign Ditto in to a provider (the key from a hidden prompt, stdin or an environment variable, checked before it is stored) / sign out |
 | `ditto auth status/methods/storage/rotate-key` | Sign-in state of every provider / the sign-in methods / how the credential vault is protected / a new vault key |
@@ -143,6 +144,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `device list` / `device settings` | The probed boards / how the runtime is installed on a board (start script or systemd), decided before a deployment |
 | `device runtime plan/build/deploy/verify/status` | The self-built llama.cpp runtime of a board: plan it from the board's profile, cross-build it, install it over SSH and check it there |
 | `config show` / `config repos` | Show the effective settings and where each comes from / manage source repository overrides |
+| `config output-folder` | Show or set the output folder finished models are saved to (unreleased) |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
 | `zoo export` / `zoo keys` | Make a signed pack of your own target, build or knowledge base (and open a pull request) / show your public keys |
@@ -156,13 +158,13 @@ llm-cli mojo [--oracle | --miracle] [--json]
 ```
 
 The health check (unreleased; it was called `doctor`). **Mojo Oracle** (the default) only looks: it checks Python, the
-Docker daemon and buildx, free disk space for the cache and output folders, the targets and their capabilities, the
-privacy of the personal folder, the secrets store and the keyring, the tool permissions, the MCP tokens, the audit
-log, the chat feed (it can be written, its newest entries verify), the shipped calibration data, the installed
-community packs (revoked, changed or imported from a file), the knowledge snapshots (how many, their size and where;
-there is no limit, so their number is never a warning) and the local llama.cpp runtime. It also says where Docker
-keeps its images and how much the framework's build images use (moving that folder is an administrator's step, see
-[Container setup](Container_Setup.md#10-where-docker-keeps-images)).
+Docker daemon and buildx, free disk space for the cache, output and build folders, the targets and their capabilities,
+the privacy of the personal folder, the secrets store and the keyring, the tool permissions, the MCP tokens, the audit
+log, the chat feed (it can be written, its newest entries verify), the shipped calibration data, the installed community
+packs (revoked, changed or imported from a file), the knowledge snapshots (how many, their size against the free space
+of their disk, and where; there is no limit, so their number is never a warning) and the local llama.cpp runtime. It
+also says where Docker keeps its images and how much the framework's build images use (moving that folder is an
+administrator's step, see [Container setup](Container_Setup.md#10-where-docker-keeps-images)).
 
 For every warning and error it prints what it found, where (the full path or the object), why it matters, a hint and
 whether Mojo Miracle can repair it, with the plan of a repair (what changes, before and after, whether it can be
@@ -230,11 +232,15 @@ llm-cli knowledge snapshots delete NAME...
 llm-cli knowledge snapshots export NAME... --to FOLDER
 ```
 
-Unreleased. Before every Deep Ingest, every index of the framework's own documents (`knowledge index-docs`) and
-every restore, the knowledge base is saved as a snapshot in `knowledge_snapshots/` of the personal folder, so the
-change can be undone. `list` (the default) shows every snapshot, oldest first, with its name, when it was taken, its
-size, what it is (for example "backup of the knowledge base taken before a Deep Ingest") and its full path. It deletes
-nothing. The GUI shows the same list under **Tools > Knowledge Snapshots...**, with a check box for each (none ticked).
+Unreleased. Before every Deep Ingest, every index of the framework's own documents (`knowledge index-docs`), every
+restore and every knowledge pack import, the knowledge base is saved as a snapshot in `knowledge_snapshots/` of the
+personal folder, so the change can be undone. Before a snapshot is made, its size is estimated: when it does not fit
+on the disk (beside the reserve that always stays free), no snapshot is made and the change does not run either.
+`list` (the default) shows every snapshot, oldest first, with its name, when it was taken, its size, what it is (for
+example "backup of the knowledge base taken before a Deep Ingest") and its full path. It ends with what the snapshots
+use against the free space of that disk, and says when the next snapshot (about the size of the newest) would not fit
+or would leave little space. It deletes nothing. The GUI shows the same list under **Tools > Knowledge Snapshots...**,
+with a check box for each (none ticked).
 
 There is no limit: the framework keeps as many snapshots as the disk holds, deletes none by itself, and no number of
 them brings a reminder or a warning. To free space:
@@ -336,7 +342,7 @@ quantization are filled with the target's defaults.
 | `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Output format (default `gguf`). The list is longer than what any target supports; Rockchip accepts `gguf`, `rkllm` and `rknn`. |
 | `-b, --board TEXT` | Board of the target family, e.g. `rk3588`, `rk3576`, `rk3566`. Default: the target's default board (Rockchip: `rk3588`). Not case-sensitive. |
 | `-q, --quantization TEXT` | Quantization, e.g. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Default: the format's default for the board. Common spellings such as `INT8` are translated. |
-| `-o, --output-dir TEXT` | Output folder, relative to the current folder. Default: `output/build_<date>_<time>` in the installation. |
+| `-o, --output TEXT` | Folder the finished model (golden artifact) is saved to, relative to the current folder; made when it does not exist. Default: the output folder ([`config output-folder`](#config-output-folder), `~/llmcf/output`). At a terminal without it you are asked, with the output folder as the default; `-` keeps the build in the framework's build folder ([`build save`](#build-save) saves it later). A system folder or the framework's program folder is refused (exit code 2). `--output-dir` is the old name and still works. |
 | `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimization level (default `balanced`), passed to the build scripts as `OPTIMIZATION_LEVEL`. The Rockchip scripts do not use it. |
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in this process's build queue (default `normal`). |
 | `--parallel` | Deprecated and hidden from `--help`: it has no effect (one call runs one build) and prints a warning. |
@@ -357,7 +363,9 @@ Behaviour:
   shown.
 - Results: `<output folder>/<target>/<model>/<quantization>/` with the model file, `build_info.json` and
   `Model_Card.md`, and a ZIP of them next to that folder. They appear there only when the build has completed; a
-  cancelled or failed build leaves no files there.
+  cancelled or failed build leaves no files there. An earlier finished build of that name is never replaced: the
+  new one goes next to it (`Q4_K_M-2`). A folder you chose outside the output folder stays listed by
+  `deploy list-artifacts`.
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token`. Only the token stored in the framework is
   sent; a token in `HF_TOKEN` or from `hf auth login` is never used.
 - A Hugging Face model is downloaded into `<cache_dir>/models/hf/<owner>--<name>/<commit>/`, one folder per commit,
@@ -387,6 +395,28 @@ llm-cli build start -m ./detector.onnx -t Rockchip -f rknn -b rk3588 -q i8 --dat
 
 # Results into a folder of your choice
 llm-cli build start -m ./my-model -t Rockchip -o ./builds -F
+```
+
+### build save
+
+```
+llm-cli build save ARTIFACT [--to FOLDER]
+```
+
+Unreleased. Saves a finished build that waits in the framework's build folder (a GUI build you did not save, or
+`build start -o -`), the same as **Save...** in the GUI's Deployment tab. `ARTIFACT` is its folder as
+`deploy list-artifacts` shows it (`Rockchip/SmolLM2-135M-Instruct/Q4_0`), its full path, or its id (`a_...`).
+Without `--to` it goes to the output folder; at a terminal you are asked, with the output folder as the default.
+
+On the same disk the build is moved (renamed, nothing copied). Onto another disk every file is copied, each copy is
+checked against its original by sha256 (a model file also against the hash in its manifest), and only then is the
+copy in the build folder removed. A link in the build is never followed and not copied; when anything was left out,
+the output names it and the copy in the build folder stays. The free space is checked before copying. A name that
+is taken is never overwritten (`-2`). If a check fails, nothing is moved (exit code 1). A system folder, the
+framework's program folder, its build folder and its per-user folder are refused.
+
+```bash
+llm-cli build save Rockchip/SmolLM2-135M-Instruct/Q4_0 --to /mnt/models
 ```
 
 What a rejected request looks like:
@@ -434,8 +464,10 @@ the framework never runs. Without an ID, a line says for how many failed builds 
 llm-cli deploy list-artifacts
 ```
 
-Lists the finished builds in the configured output folder, read from their manifests: folder (relative to the
-output folder), model, format, quantization, board and size.
+Lists the finished builds, read from their manifests: in the output folder, in the framework's build folder ("not
+saved yet": GUI builds you did not save, and every earlier build, which stay where they are) and in folders you saved
+builds to. Each row shows the folder (relative to its folder), where it is, model, format, quantization, board, size
+and the full path.
 
 ### deploy package
 
@@ -448,7 +480,7 @@ Creates a ZIP file for the board: the model file, the build's manifest and model
 
 | Argument / option | Meaning |
 |---|---|
-| `ARTIFACT_NAME` | A build folder as shown by `list-artifacts` (relative to the output folder), or any existing path to a build folder or model file. |
+| `ARTIFACT_NAME` | A build folder as shown by `list-artifacts` (relative to the output folder or the framework's build folder), or any existing path to a build folder or model file. |
 | `--profile TEXT` | **Required.** The target, e.g. `Rockchip` (used for device options in Docker mode). |
 | `--docker / --no-docker` | Also pack container images (default off). Experimental and not verified in this version; leave it off for a model file. The image (`image_inference_runtime`; a package never carries the knowledge base) must be pinned by its digest (`name@sha256:...`) or built on this computer; an image named only by a tag that was pulled is refused with the reason, and so is the default `llm-framework/inference:local` (a local name) until you have built it here. A failed image export stops the package. |
 
@@ -457,7 +489,7 @@ cannot be made prints the reason and exits with 1; the ZIP is written under a te
 complete.
 
 ```bash
-llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
+llm-cli deploy package Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
 ```
 
 ### deploy run
@@ -1649,6 +1681,23 @@ AI clients read settings with the MCP tool `get_settings` (an explicit list; add
 as labels) and change ordinary ones with `update_settings`, which asks you with the old and new value and saves
 the change in `config.yml`. Settings that limit what an AI may do can only be tightened that way; permissions,
 secrets, the vault, AI provider settings, addresses and folders are changed only by you, here or in the GUI.
+
+### config output-folder
+
+```
+llm-cli config output-folder [FOLDER]
+```
+
+Unreleased. Without `FOLDER` it shows the output folder (setting `output_dir`, default `~/llmcf/output`) and the
+framework's build folder (setting `build_dir`). With `FOLDER` it sets the output folder and saves `config.yml`, for
+example to a folder on a big second disk; the folder is made when it does not exist. A system folder, the
+framework's program folder, its build folder and its per-user folder are refused (exit code 2), and so is a folder
+that holds one of them (such as your home folder), because everything below the output folder is listed. Builds in
+the old folder stay where they are and stay listed. An AI cannot change this setting.
+
+```bash
+llm-cli config output-folder /mnt/models/llmcf
+```
 
 ### config repos
 

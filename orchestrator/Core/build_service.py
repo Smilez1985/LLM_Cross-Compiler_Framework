@@ -18,7 +18,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from orchestrator.Core import job_service
 from orchestrator.Core.builder import HF_REPO_ID, MODEL_FILE_SUFFIXES, ModelFormat, OptimizationLevel
 from orchestrator.Core.job_service import owner_actor
-from orchestrator.Core.deployment_manager import list_builds
 from orchestrator.Core.orchestrator import (BuildQueueFull, BuildRequest, OrchestrationStatus, PriorityLevel,
                                             WorkflowState, WorkflowType)
 from orchestrator.schemas.build import (ArtifactDetails, ArtifactFile, ArtifactList, ArtifactOut, BuildHandle,
@@ -107,9 +106,16 @@ class BuildService:
         """The output folder finished builds are written to (resolved from the settings on every call)."""
         return self._output_dir()
 
+    def artifact_roots(self) -> List[Tuple[str, Path]]:
+        """(label, folder) of the folders built models lie in: the output folder, and the framework's build folder
+        when it is another folder (artifact_output)."""
+        from orchestrator.Core.artifact_output import roots
+        return roots(self.framework)
+
     def artifact_entries(self) -> List[Tuple[str, str, Dict[str, Any]]]:
-        """(artifact id, output:<relative path>, manifest) of every finished build under the output folder, the
-        entries list_artifacts shows (the manifest is the build engine's, its values untrusted)."""
+        """(artifact id, where:<relative path>, manifest) of every finished build in the output folder, the build folder
+        and the folders builds were saved to, the entries list_artifacts shows (the manifest is the build engine's,
+        its values untrusted)."""
         return self._artifacts()
 
     def artifact_store(self):
@@ -239,7 +245,9 @@ class BuildService:
             request_id=state.request_id, status=state.status.value, stage=state.current_stage,
             progress_percent=state.progress_percent, total_builds=state.total_builds,
             completed_builds=state.completed_builds, failed_builds=state.failed_builds,
-            artifacts=list(state.artifacts), errors=[redact_secrets(e) for e in state.errors],
+            # where each finished build lies, by label (output:<relative path>); the person's own windows show the path
+            artifacts=[self.artifact_label(a) for a in state.artifacts],
+            errors=[redact_secrets(e) for e in state.errors],
             warnings=[redact_secrets(w) for w in state.warnings], pending_healing=pending,
             client_proposals=[ClientProposalOut(
                 proposal_id=p.proposal_id, summary=p.summary, root_cause=p.root_cause, manual_step_text=p.manual_step,
@@ -465,16 +473,16 @@ class BuildService:
         return label or Path(text).name
 
     def _artifacts(self) -> List[Tuple[str, str, Dict[str, Any]]]:
-        """(artifact id, output:<relative path>, manifest) of every finished build under the output folder."""
-        out = self._output_dir()
-        found = []
-        for info in list_builds(out):
-            try:
-                relative = Path(info["path"]).resolve().relative_to(out.resolve()).as_posix()
-            except (ValueError, OSError):
-                relative = Path(info["path"]).name  # a linked subfolder elsewhere: its name only
-            found.append((artifact_id(relative), f"output:{relative}", info))
-        return found
+        """(artifact id, where:<relative path>, manifest) of every finished build: output:<path> in the output folder,
+        builds:<path> in the framework's build folder (not saved yet), saved:<path> in a folder the person saved it to
+        (artifact_output.list_artifacts). Never a host path."""
+        from orchestrator.Core.artifact_output import list_artifacts
+        return [(artifact_id(item.key), item.label, item.info) for item in list_artifacts(self.framework)]
+
+    def artifact_label(self, path: Any) -> str:
+        """A build folder or ZIP as an AI may read it (where:<relative path>, else its file name)."""
+        from orchestrator.Core.artifact_output import label_for
+        return label_for(self.framework, path)
 
     def list_artifacts(self, target: Optional[str] = None, format: Optional[str] = None,
                        page: int = 1) -> ArtifactList:
@@ -519,7 +527,7 @@ class BuildService:
             if record.get("status") not in ("completed", "failed", "cancelled", "interrupted") and \
                     record.get("output_dir"):
                 folders.append(str(record["output_dir"]))
-        out = self._output_dir()
+        bases = [folder for _, folder in self.artifact_roots()]
         pending = []
         try:
             for state in list(self._orchestrator._workflows.values()):
@@ -533,7 +541,7 @@ class BuildService:
             target, model = summary.get("target"), str(summary.get("model") or "")
             if target and model:
                 name = model.rsplit(":", 1)[-1].rstrip("/").split("/")[-1]
-                folders.append(str(out / str(target) / name))
+                folders += [str(base / str(target) / name) for base in bases]
         return folders
 
     def artifact_entry(self, aid: str) -> Tuple[str, str, Dict[str, Any]]:
@@ -600,8 +608,9 @@ class BuildService:
         end = total if before_line is None else max(0, min(total, int(before_line) - 1))
         begin = max(0, end - lines)
         chosen, size, cut = [], 0, False
+        clean = self._log_paths()
         for line in reversed(collected[begin:end]):  # newest first, so a cut drops the oldest lines
-            text = redact_secrets(line)
+            text = clean(redact_secrets(line))
             if len(text) > LOG_LINE_CHARS:
                 text, cut = text[:LOG_LINE_CHARS] + " [... cut ...]", True
             if size + len(text) > LOG_TOTAL_CHARS:
@@ -613,6 +622,29 @@ class BuildService:
         first = end - len(chosen) + 1 if chosen else end + 1
         return LogTail(request_id=request_id, lines=chosen, first_line=first, total_lines=total,
                        truncated=cut or first > 1)
+
+    def _log_paths(self):
+        """A log line as an AI reads it (the log reaches AI callers only): a line with a path on this computer, such
+        as the output folder in the home folder, gets the framework's folders by label (output:<path>, builds:,
+        cache:, ...) and any other path by its file name (tools_runtime.label_paths), so no user name is left; a line
+        without one stays as it is, with the paths inside the build container. Folders that hold user names on any
+        system (/home/, /media/ and /run/media/ for removable disks, /Users/, C:\\Users\\) count as paths on this
+        computer too, so a local model on a USB disk or in another user's folder is named by its file name."""
+        import os
+        from orchestrator.Core.doctor import ai_folder_labels
+        from orchestrator.tools.tools_runtime import label_paths
+        roots = ai_folder_labels(self.framework)
+        home = str(Path.home())
+        marks = [r for r in roots if r not in ("", "/", "\\")]
+        marks += [h for h in {home, os.path.realpath(home)} if h not in ("", "/", "\\")]
+        users = ("/home/", "/media/", "/users/", "\\users\\")  # compared without letter case
+
+        def clean(line: str) -> str:
+            lowered = line.lower()
+            if any(m in line for m in marks) or any(u in lowered for u in users):
+                return label_paths(line, roots)
+            return line
+        return clean
 
     # --- the plan of a build (check_build_request, start_build's question) ------------------------------------
 
@@ -628,6 +660,19 @@ class BuildService:
     def hub_facts(self, repo: str, revision: Optional[str]):
         from orchestrator.Core.hf_lookup import look_up
         return look_up(repo, revision, self.hf_token())
+
+    def model_commit(self, repo: str) -> Optional[str]:
+        """The commit a Hugging Face model's default branch points to now: one short look-up without the file list
+        (the GUI's identical-build check). None in offline mode, for anything but a repo id, or when Hugging Face
+        cannot be asked."""
+        if bool(self._config_get("offline_mode", False)) or not HF_REPO_ID.match(str(repo or "")):
+            return None
+        from huggingface_hub import HfApi
+        try:
+            sha = getattr(HfApi().model_info(repo, token=self.hf_token() or False, timeout=10), "sha", None)
+        except Exception:  # noqa: BLE001 - not known: the earlier build is reported as "commit not checked"
+            return None
+        return sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) else None
 
     def host_hardware(self):
         from orchestrator.Core.build_plan import host_hardware
@@ -804,6 +849,55 @@ class BuildService:
         named = recipe.options.dataset
         return self.start_build(request, local_paths=local_paths, owner=owner, disk_reservation=disk_reservation,
                                 dataset_sha256=named.sha256 if named is not None else None)
+
+    # --- identical builds (DECISIONS, eighth round, N11) -------------------------------------------------------
+
+    def request_options(self, req: BuildRequestIn, inputs: Optional[LocalInputs] = None, *,
+                        revision: Optional[str] = None, optimization: str = "balanced",
+                        model_task: str = "LLM") -> Dict[str, Any]:
+        """The chosen options of a validated request (build_identity), as the build engine will record them: the
+        model by its repo id and `revision` (the commit the build would fetch; None when not known yet), a local
+        model by its weights files, the target with the sha256 of its folder, board, format, quantization,
+        importance matrix, calibration data, optimization, context length, GPU use and task."""
+        from orchestrator.Core import build_identity
+        pin = getattr(inputs, "model", None)
+        local = Path(pin.path) if pin is not None else (Path(req.model) if Path(req.model).is_absolute() else None)
+        target_sha = None
+        try:
+            from orchestrator.Core.community_pack import tree_sha256
+            tm = self._targets()
+            folder = tm.folder_of(req.target) if hasattr(tm, "folder_of") else None
+            target_sha = tree_sha256(Path(folder)) if folder is not None else None
+        except Exception:  # noqa: BLE001 - a target that cannot be hashed is never the same as an earlier one
+            target_sha = None
+        imatrix = bool(req.use_imatrix and str(req.format).lower() == "gguf")
+        if req.dataset_path:
+            dataset = build_identity.file_sha256(req.dataset_path)
+        elif imatrix:  # without a dataset of its own, a GGUF build uses the shipped calibration text
+            dataset = build_identity.shipped_calibration_sha256(
+                str(self._config_get("calibration_language", "mixed") or "mixed"))
+        else:
+            dataset = None
+        return build_identity.build_options(
+            model=None if local is not None else req.model,
+            revision=None if local is not None else (revision or req.revision),
+            weights=build_identity.local_weights(local) if local is not None else None,
+            target=req.target, target_sha256=target_sha, board=req.board, fmt=req.format,
+            quantization=req.quantization, imatrix=imatrix, dataset_sha256=dataset,
+            optimization=str(optimization or "balanced").lower(), max_context_length=req.max_context_length,
+            use_gpu=req.use_gpu, model_task=model_task)
+
+    def earlier_builds(self, request: BuildRequestIn, *, revision: Optional[str] = None,
+                       optimization: str = "balanced", local_paths: bool = False, model_task: str = "LLM"):
+        """Finished builds whose recorded options are 100 % those of this request (build_identity.EarlierBuild,
+        identical ones first). `revision`: the commit the build would fetch (looked up by check_build_request); without
+        it a build with the same options is "commit_unchecked", never identical. Nothing is skipped here: the caller
+        tells the person, who uses the earlier build or builds again."""
+        from orchestrator.Core.build_identity import find_earlier
+        req, inputs = self._validated(request, local_paths)
+        options = self.request_options(req, inputs, revision=revision, optimization=optimization,
+                                       model_task=model_task)
+        return find_earlier(self._artifacts(), options)
 
     # --- actions ----------------------------------------------------------------------------
 

@@ -64,9 +64,9 @@ TEXTS = {
         # the knowledge snapshots window (Tools > Knowledge Snapshots...)
         "snapshots.title": "Knowledge Snapshots",
         "snapshots.intro": "{n} snapshots, {size}, oldest first, in {folder}. Before every Deep Ingest, every index "
-                           "of the framework's own code and every restore, the knowledge base is saved as a "
-                           "snapshot, so the change can be undone. Tick the ones to delete or export; nothing is "
-                           "ticked.",
+                           "of the framework's own documents, every restore and every knowledge pack import, the "
+                           "knowledge base is saved as a snapshot, so the change can be undone. Tick the ones to "
+                           "delete or export; nothing is ticked.",
         "snapshots.col.name": "Snapshot",
         "snapshots.col.taken": "Taken",
         "snapshots.col.size": "Size",
@@ -152,10 +152,11 @@ TEXTS = {
         "trash.nothing_ticked": "Hake zuerst mindestens einen Eintrag an.",
 
         "snapshots.title": "Wissens-Snapshots",
-        "snapshots.intro": "{n} Snapshots, {size}, die ältesten zuerst, in {folder}. Vor jedem Deep Ingest, jedem "
-                           "Indizieren des eigenen Codes des Frameworks und jeder Wiederherstellung wird die "
-                           "Wissensbasis als Snapshot gesichert, damit sich die Änderung rückgängig machen lässt. Hake "
-                           "die an, die du löschen oder exportieren willst; nichts ist angehakt.",
+        "snapshots.intro": "{n} Snapshots, {size}, die ältesten zuerst, in {folder}. Vor jedem Deep Ingest, jeder "
+                           "Aufnahme der eigenen Dokumente des Frameworks, jeder Wiederherstellung und jedem Import "
+                           "eines Wissens-Packs wird die Wissensbasis als Snapshot gesichert, damit sich die Änderung "
+                           "rückgängig machen lässt. Hake die an, die du löschen oder exportieren willst; nichts ist "
+                           "angehakt.",
         "snapshots.col.name": "Snapshot",
         "snapshots.col.taken": "Erstellt",
         "snapshots.col.size": "Größe",

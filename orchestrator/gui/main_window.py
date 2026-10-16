@@ -152,6 +152,7 @@ class MainOrchestrator(QMainWindow):
         
         file_menu = menubar.addMenu(self.i18n.t("menu.file", "File"))
         self._add_trash_action(file_menu)
+        self._add_output_folder_action(file_menu)
         exit_action = QAction(self.i18n.t("menu.exit", "Exit"), self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -517,6 +518,7 @@ class MainOrchestrator(QMainWindow):
         # Ideally, Orchestrator should have a thread-safe property. 
         # Accessing private _workflows for GUI speed (Python is single process here usually).
         active_flows = list(orch._workflows.values())
+        self._announce_saved_builds(active_flows)
         
         if not active_flows:
             self.ditto_avatar.set_state("idle")
@@ -560,6 +562,17 @@ class MainOrchestrator(QMainWindow):
         elif latest.status == OrchestrationStatus.ERROR:
             self.ditto_avatar.set_state("fail")
             self.lbl_ditto_status.setText("Error")
+
+    def _announce_saved_builds(self, flows):
+        """A build an AI started went to the output folder without a dialog (eighth round, answer 3): the person's
+        status bar names where, with the full path (the AI read a label)."""
+        announced = self.__dict__.setdefault("_saved_announced", set())
+        for flow in flows:
+            if flow.status == OrchestrationStatus.COMPLETED and getattr(flow, "owner", "") and flow.artifacts \
+                    and flow.request_id not in announced:
+                announced.add(flow.request_id)
+                self.status.showMessage(ui_text("save.ai_saved", paths=", ".join(str(a) for a in flow.artifacts)),
+                                        30000)
 
     def _open_secret_dialog(self, key, name):
         if not getattr(self.framework, 'secrets_manager', None):
@@ -623,6 +636,30 @@ class MainOrchestrator(QMainWindow):
             TrashDialog(Trash.for_framework(self.framework), self).exec()
         except Exception as e:  # e.g. no per-user folder; plain text (SEC-M2)
             plain_box(self, "critical", "Trash", str(e))
+
+    def _add_output_folder_action(self, menu):
+        """File > Output Folder...: where finished models are saved (eighth round, answer 3); set once by the person,
+        never by an AI. Models in the old folder stay where they are and stay listed."""
+        self.act_output_folder = QAction("Output Folder...", self)
+        self.act_output_folder.triggered.connect(self._choose_output_folder)
+        menu.addAction(self.act_output_folder)
+
+    def _choose_output_folder(self):
+        from orchestrator.Core.artifact_output import DestinationRefused, output_folder, set_output_folder
+        from orchestrator.gui.artifact_save import choose_folder
+        current = output_folder(self.framework)
+        chosen = choose_folder(self, ui_text("output.title", path=str(current)), str(current))
+        if not chosen:
+            return
+        try:
+            folder = set_output_folder(self.framework, chosen)
+        except DestinationRefused as e:
+            plain_box(self, "warning", "Output Folder", ui_text("output.refused", reason=f"{e} {e.next}".strip()))
+            return
+        except OSError:
+            plain_box(self, "warning", "Output Folder", ui_text("output.not_saved"))
+            return
+        self.status.showMessage(ui_text("output.set", path=str(folder)), 10000)
 
     def _add_framework_images_action(self, menu):
         """Tools > Framework Build Images...: the framework's Docker images, deleted only as the person ticks them."""

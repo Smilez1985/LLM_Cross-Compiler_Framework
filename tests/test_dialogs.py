@@ -1282,7 +1282,7 @@ class TestMainWindowWiring:
                                       "Fix Proposals from AI Clients...", "Knowledge Snapshots...",
                                       "Framework Build Images...", "Index the Framework's Documentation...",
                                       "Spoken Announcements", "Clear Input History..."]
-            assert menus["File"] == ["Trash...", "Exit"]
+            assert menus["File"] == ["Trash...", "Output Folder...", "Exit"]
             # The audio switch is a persisted setting, on by default.
             assert win.act_audio.isCheckable() and win.act_audio.isChecked()
             win.act_audio.setChecked(False)

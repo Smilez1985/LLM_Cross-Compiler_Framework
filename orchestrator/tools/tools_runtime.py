@@ -407,7 +407,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         except Exception:  # noqa: BLE001
             pass
         resolve = getattr(framework, "resolve_path", None)
-        for key, label in (("cache_dir", "cache"), ("output_dir", "output"), ("models_dir", "models")):
+        for key, label in (("cache_dir", "cache"), ("output_dir", "output"), ("build_dir", "builds"),
+                           ("models_dir", "models")):
             try:
                 value = framework.config.get(key, None)
                 if value:

@@ -218,10 +218,13 @@ is for.
 | Config folder (usually `configs/`) | `config.yml` (user settings); optionally an own `llm_providers.yml` that adds or replaces provider presets. |
 | `chat_feed.sqlite` in the per-user folder (unreleased) | The chat feed: what the chat panel on the right shows (your messages, Ditto's answers, questions that wait, decisions an AI made with its reason, results of work an AI started). Every row is signed; nothing in it is deleted by itself. |
 
-`cache/`, `output/` and `models/` are relative to the installation folder unless the settings `cache_dir`,
-`output_dir` and `models_dir` say otherwise. If the user may not write to the installation folder (for example
-`C:\Program Files`), their defaults are in the per-user folder instead (`ConfigManager.default_data_root`). None of
-them is created at startup; a build, a download or the knowledge base creates what it uses.
+`cache/`, `output/` (the framework's build folder) and `models/` are relative to the installation folder unless the
+settings `cache_dir`, `build_dir` and `models_dir` say otherwise. If the user may not write to the installation
+folder (for example `C:\Program Files`), their defaults are in the per-user folder instead
+(`ConfigManager.default_data_root`). Finished models (golden artifacts) are saved to the output folder, setting
+`output_dir`, default `~/llmcf/output` (unreleased; see [Features](Features.md#where-finished-models-go)); a build
+started in the GUI waits in the build folder until it is saved, and earlier builds stay listed there. None of them is
+created at startup; a build, a download or the knowledge base creates what it uses.
 
 ## Data flows
 

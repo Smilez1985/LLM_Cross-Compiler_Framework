@@ -128,7 +128,9 @@ class ArtifactOut(BaseModel):
     """One finished build, from its manifest (written by the build container first). Named by its id and its label
     under the output folder, never by a host path."""
     artifact_id: str = Field(description="Id of the built model (a_ and 16 hex characters)")
-    label: untrusted_text(1000) = Field(description="Where it lies under the output folder, as output:<relative path>")
+    label: untrusted_text(1000) = Field(description="Where it lies: output:<relative path> in the output folder, "
+                                                    "builds:<relative path> in the framework's build folder (not "
+                                                    "saved yet), saved:<relative path> in a folder the person chose")
     size_bytes: Optional[int] = None
     model: Optional[UntrustedText] = None
     format: Optional[untrusted_text(200)] = None
