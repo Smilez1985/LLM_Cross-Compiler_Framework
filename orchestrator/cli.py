@@ -3129,10 +3129,17 @@ def _doctor_fix(doc):
     asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
     result = doc.miracle(actor="cli", at_terminal=False, **asked)
     report = result.after
+    report.fixed, report.still_present, why_not = _miracle_fixed(result)
+    return report, why_not
+
+
+def _miracle_fixed(result) -> Tuple[List[str], List[str], Dict[str, str]]:
+    """The repairs Mojo Miracle tried, as `doctor --fix` reports them: the codes it repaired, the codes still present
+    after it, and why each of those was not repaired."""
     tried = [e for e in result.entries if e.verdict == "miracle"]
-    report.fixed = [e.finding.code for e in tried if e.outcome == "repaired"]
-    report.still_present = [e.finding.code for e in tried if e.outcome not in ("repaired", "already_fixed")]
-    return report, {e.finding.code: e.reason for e in tried if e.outcome not in ("repaired", "already_fixed")}
+    still = [e for e in tried if e.outcome not in ("repaired", "already_fixed")]
+    return ([e.finding.code for e in tried if e.outcome == "repaired"], [e.finding.code for e in still],
+            {e.finding.code: e.reason for e in still})
 
 
 def _doctor_image_listing(framework) -> dict:
@@ -3356,8 +3363,10 @@ def _mojo_dict(report, offered) -> dict:
 
 
 def _mojo_miracle_dict(result) -> dict:
-    """Mojo Miracle for --json: what was repaired, and what was not and why."""
-    return {"exit_code": result.exit_code,
+    """Mojo Miracle for --json: what was repaired, and what was not and why. `fixed` and `still_present` mean what they
+    mean for `doctor --fix --json`: the repairs Mojo Miracle made, and those it tried that are still there."""
+    fixed, still_present, _ = _miracle_fixed(result)
+    return {"exit_code": result.exit_code, "fixed": fixed, "still_present": still_present,
             "repaired": [{"code": e.finding.code, "summary": e.summary} for e in result.repaired],
             "already_gone": [{"code": e.finding.code, "reason": e.reason} for e in result.already_gone],
             "not_repaired": [{"code": e.finding.code, "outcome": e.outcome, "can": e.verdict, "reason": e.reason}
