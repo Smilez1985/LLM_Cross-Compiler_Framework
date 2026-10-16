@@ -1478,6 +1478,8 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   used, the notice is shown every time.
 - Only a person acknowledges it, in the GUI or with `llm-cli tools crawl-notice` in a terminal. While it is not
   read, `crawl_docs_site` is refused with the reason `needs_person` and these two places.
+- GUI: Tools > Deep Ingest Notice... shows it at any time and asks you to confirm that you read it while it is
+  still needed ("No" is the default); the module wizard's Deep Ingest shows it before the knowledge base check.
 
 ### What the crawler honours
 
@@ -1653,6 +1655,14 @@ same crawler with the same opt-out checks as the GUI, as a job.
 (official Python SDK `mcp` 2.3.0, specification 2026-07-28). AI clients such as Claude Code, Claude Desktop or VS Code
 can then use the [same tools as Ditto](#dittos-tools). You sign in to the client with your own account or key; the
 framework never sees it.
+
+**GUI:** Security > AI App Connections (MCP)... shows how to connect Claude Code, Claude Desktop (with the path of its
+configuration file) and VS Code, each with a Copy button, writes the entry into Claude Desktop's configuration after
+showing the file and the change (Write to Claude Desktop..., the backup as with `mcp config --write`), starts and
+stops the local HTTP server as a child process of the GUI (address, port, container binding; the same refusals as
+`mcp serve --transport http`; its address, state and output shown; the framework asks before it closes while the
+server still serves) and manages the named tokens (Add, also as a copy of another token's permissions, Rotate, Revoke
+with the token's standing approvals, Back to read only). A token is shown once, right after it is made or rotated.
 
 - **Every call goes through the tool registry:** name and argument matching, input schema, your permissions,
   confirmation, audit log (actor `mcp` for local stdio clients, `mcp:<name>` for a named token), exactly as for
@@ -1858,7 +1868,8 @@ framework never sees it.
   `datasets:calib/de.txt`, or by the file id (`lf_` and 16 hex characters) the framework recorded for it. The
   folders are the models folder (`models`, setting `models_dir`), the datasets folder (`datasets`, setting
   `datasets_dir`, next to the models folder by default) and the folders you add with
-  [`llm-cli tools folders add`](CLI_Usage.md#tools-folders) or in the GUI (Tools > Folders the AI May Use...).
+  [`llm-cli tools folders add`](CLI_Usage.md#tools-folders) or in the GUI (Tools > Folders the AI May Use... > Add
+  folder..., which also asks what the folder holds: model files, dataset files or any).
   The models and datasets folders follow the same limits as an added folder: when a setting points at `/`, your
   home folder or a folder that holds the per-user folder, its label cannot be used. The file must lie inside its
   folder (links are followed and checked) and outside every denied folder: the framework's per-user folder (except
@@ -2076,6 +2087,11 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   log is kept with a key.
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
   unknown or revoked token, or a token file that cannot be read, may not even read.
+- **GUI:** Tools > Tool Permissions (Ditto / MCP)... shows per tool what is decided now and why ("Effective now",
+  as `llm-cli tools list`), names the callers with their own permissions, edits the shared permissions or those of
+  Ditto or the local MCP clients ("Whose permissions", `--caller`), and resets them: to the recommended defaults,
+  a caller back to the shared permissions, a token back to read only (`--reset`, `--reset --caller`, `--reset
+  --token`). Each reset lists what changes and asks first ("No" is the default).
 
 **What a question shows** (Ditto's GUI dialog and CLI prompt, an MCP client's form), in this order: the
 consequence in plain words, from what the framework looked up, with ids followed by their speaking names (for example
@@ -2130,7 +2146,10 @@ HMAC chain that someone who can only edit the database cannot recompute. After e
 written to an anchor file, so removing the newest entries is detected too. `llm-cli tools audit --verify` checks the
 chain and tells a changed entry apart from a wrong key. Each entry is written in its own transaction, so several
 processes cannot fork the chain. `llm-cli tools audit --archive` moves the log and its anchor aside (kept with a
-timestamp) and starts a new chain, for example after `llm-cli mojo` has reported a problem with the log.
+timestamp) and starts a new chain, for example after `llm-cli mojo` has reported a problem with the log. GUI:
+Security > Audit Log... shows the same rows page by page (with or without details), checks the chain (Check integrity,
+the result in plain words), archives the log after a question and counts the calls per caller; the check, the archive
+and the counting run in the background.
 
 **Recorded before it runs.** A call that changes something (every tier except `read`) gets a `started` entry before
 it runs. If that entry cannot be written, the call is refused and nothing runs: calls that change something run only

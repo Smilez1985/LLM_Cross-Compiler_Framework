@@ -1205,6 +1205,10 @@ it is new (not reviewed yet: it uses its own default until you review it) and wh
 standing approval. Without `--caller` it shows the shared permissions and names the callers that have their own.
 The title says when the permissions are not set up yet.
 
+In the GUI: **Tools > Tool Permissions (Ditto / MCP)...**: the column **Effective now** shows each tool's decision,
+with its reason as the tooltip, and a note names the callers that have their own permissions; **Whose permissions**
+shows Ditto's or the local MCP clients' (`--caller`).
+
 ### tools permissions
 
 ```
@@ -1227,6 +1231,14 @@ signed (one saved by 3.0.0, too) denies every tool until you run this again; the
 | `--caller ditto\|mcp` | Set the permissions of one caller (Ditto, or local MCP clients over stdio) instead of the shared ones. A caller's first permissions start from the shared ones, including the settings for single tools. |
 | `--token TEXT` | Set the permissions of this [named MCP token](#mcp-token) instead (not together with `--caller`). Needs a terminal; a token linked to Ditto is asked first whether it should get its own. It lists the same tool facts for that token. Audited with actor `cli`. |
 | `--reset` | Back to the recommended defaults (the setup asks again next time). With `--caller`: that caller uses the shared permissions again. With `--token`: back to read only. |
+
+In the GUI: **Tools > Tool Permissions (Ditto / MCP)...** (the same facts per tool, saved with actor `gui`):
+**Whose permissions** for `--caller`, **Reset to recommended defaults...** for `--reset`, **Use the shared permissions
+again...** for `--reset --caller`, and in the "MCP tokens" section **Permissions...** for `--token` and **Back to read
+only...** for `--reset --token` (the token is a new token again, not one with hand-set Allow/Deny). Each reset lists
+what changes and asks first ("No" is the default); a change saved elsewhere while you read it is refused. The column
+**Ask in the framework** is `--confirm-in-framework`, the list of standing approvals `--grants`, and **Revoke selected
+standing approval** `--revoke-grant`.
 
 ### tools audit
 
@@ -1254,6 +1266,11 @@ llm-cli tools audit --summary
 llm-cli tools audit --archive
 ```
 
+In the GUI: **Security > Audit Log...**: the same rows page by page (**Entries per page**, **Newer**, **Older**),
+**Details** for `--details`, **Check integrity** for `--verify` (the result in plain words), **Archive...** for
+`--archive` (asks first; the old log stays next to the new one) and the tab **Summary per caller** for `--summary`.
+The check, the archive and the summary run in the background.
+
 ### tools approvals
 
 ```
@@ -1273,6 +1290,9 @@ the client's caller; the client reads the result with `get_job_status`. Every su
 its client's session has ended, its question changed meanwhile, or the audit log cannot record the decision. On a
 headless machine, such as the Docker image, run it in a terminal there (`docker exec -it <container> llm-cli tools
 approvals`). The GUI shows the same calls under **Tools > Pending Approvals...**.
+
+In the GUI: **Tools > Pending Approvals...** (**Approve once**, **Approve and do not ask again...** for `--always`
+with its scope and duration, **Decline**).
 
 `approve ID --always [--width this|any] [--duration revoke|30d|24h]` approves the call and saves a standing
 approval ("do not ask again") within the scope the framework offered for it, after showing the scope and the
@@ -1324,6 +1344,9 @@ llm-cli tools folders list
 llm-cli tools folders remove mymodels
 ```
 
+In the GUI: **Tools > Folders the AI May Use...**: **Add folder...** asks for the folder, its label and what it holds
+(`--kind`: model files, dataset files or any), then shows the same warning; **Remove** for `remove`.
+
 ### tools crawl-notice
 
 ```
@@ -1336,6 +1359,10 @@ this computer) and asks whether you have read it. AI clients and Ditto can ask t
 needs a terminal (piped answers are refused); the acknowledgement is stored with `via: cli` in
 `~/.llm-framework/crawl_notice.json` and written to the audit log (actor `cli`). When the notice is already read, it
 is shown and nothing changes; after its text changes it must be read again.
+
+In the GUI: **Tools > Deep Ingest Notice...** shows the notice at any time; while it is still needed it asks you to
+confirm that you read it ("No" is the default) and records it with `via: gui` (actor `gui`). The module wizard's Deep
+Ingest shows it before the first crawl, also while the knowledge base is switched off.
 
 ---
 
@@ -1386,6 +1413,12 @@ answering when its token is revoked or rotated.
 llm-cli mcp serve --transport http --port 8765
 ```
 
+In the GUI: **Security > AI App Connections (MCP)...**, box "Local HTTP server": **Address**, **Port** and **Container
+binding** (`--container`), **Start server** and **Stop server**. The GUI runs this command as its own child process,
+refuses what the command refuses before it starts it, shows the address, the state and the server's output, and asks
+before the framework closes while the server still serves ("No" keeps the framework open; "Yes" stops the server as
+Ctrl+C would, after 15 seconds at once). The stdio transport is started by the AI app itself.
+
 ### mcp config
 
 ```
@@ -1408,6 +1441,11 @@ llm-cli mcp config --write claude-desktop
 ```
 
 You sign in to these clients with your own account or key; the framework never sees it.
+
+In the GUI: **Security > AI App Connections (MCP)...** shows the three entries, each with a **Copy** button, and the
+path of Claude Desktop's configuration file. **Write to Claude Desktop...** (`--write claude-desktop`) shows the file,
+whether it exists, the change, the entries that are kept and the backup, asks first ("No" is the default) and writes
+exactly that; a file changed in the meantime is not overwritten.
 
 ### mcp token
 
@@ -1432,7 +1470,7 @@ GUI does the same in Tools > Tool Permissions (Ditto / MCP), section "MCP tokens
 | `--link ditto` | Uses Ditto's permissions by reference, for a client that should have exactly Ditto's permissions: a change to Ditto's permissions applies at once. |
 | `list` | Names, audit actors, permissions, creation and rotation time; never a token or its hash. |
 | `rotate NAME` | A new token for the same name and permissions; the old one stops working at once. |
-| `revoke NAME` | Deletes the token and its permissions after a question; its client loses access at once. |
+| `revoke NAME` | Deletes the token, its permissions and its standing approvals after a question; its client loses access at once. |
 
 ```bash
 llm-cli mcp token add laptop                          # read only
@@ -1440,6 +1478,12 @@ llm-cli tools permissions --token laptop              # allow more
 llm-cli mcp token add helper --link ditto             # exactly Ditto's permissions
 claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
 ```
+
+In the GUI: **Security > AI App Connections (MCP)...** and **Tools > Tool Permissions (Ditto / MCP)...**, section "MCP
+tokens": **Add...** (read only, a copy of the local stdio clients', Ditto's or another token's own permissions, or
+Ditto's by reference), **Rotate**, **Revoke** (the token, its permissions and its standing approvals, after a question
+that counts them), **Back to read only...** and **Permissions...**. A token is shown once, right after it is made or
+rotated; the list shows names only.
 
 ---
 

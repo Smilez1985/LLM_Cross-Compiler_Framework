@@ -10,6 +10,35 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Tools > Tool Permissions (Ditto / MCP)...: every `tools list` and `tools permissions` option by mouse** (W1'):
+  a column "Effective now" shows each tool's decision with its reason (as `tools list` prints them) and a note
+  names the callers that have permissions of their own; "Whose permissions" shows and edits the shared permissions
+  or the own section of Ditto or the local MCP clients (`--caller`); "Reset to recommended defaults..." (`--reset`),
+  "Use the shared permissions again..." (`--reset --caller`) and "Back to read only..." for a token (`--reset
+  --token`: a new token again, not one with hand-set Allow/Deny) list what changes and ask first ("No" is the
+  default; a change saved elsewhere meanwhile is refused). A new token can start as a copy of another token's own
+  permissions (`mcp token add --policy-from TOKEN`). The CLI and the GUI share the core functions
+  (`policy.with_section`, `reset_policy`, `reset_changes`, `mcp_tokens.add_token`, `copied_policy`,
+  `set_token_policy`, `reset_token_policy`, `revoke_token`); the CLI's output is unchanged.
+- **Security > Audit Log...: every `tools audit` option by mouse** (W1'): the audit log's rows as the CLI shows
+  them (shared `tools/audit_view.py`), page by page with "Entries per page", "Newer" and "Older"; "Details"
+  (`--details`); "Check integrity" (`--verify`) with the result in plain words; "Archive..." (`--archive`) after a
+  question, nothing deleted; and the tab "Summary per caller" (`--summary`). The check, the archive and the summary
+  run in the background. `AuditLog.entries` takes an offset and `AuditLog.count` gives the size, for paging.
+- **Security > AI App Connections (MCP)...: every `mcp config`, `mcp serve --transport http` and `mcp token` action
+  by mouse** (W1'): the entries for Claude Code, Claude Desktop (with the path of its configuration file) and VS
+  Code, each with a Copy button; "Write to Claude Desktop..." shows the file, whether it exists, the change, the
+  entries that are kept and the backup, asks first and writes exactly that (`mcp_server.plan_claude_desktop_config`,
+  a file changed meanwhile is refused); the local HTTP server (address, port, container binding) as a child process
+  of the GUI with the CLI's own entry and refusals, its address, state and output shown, stopped on request or when
+  the framework closes after a question ("No" keeps it open); and the token list (Add, also as a copy of another
+  token's permissions, Rotate, Revoke, Back to read only, Permissions). A token is shown once, right after it is
+  made or rotated.
+- **Tools > Deep Ingest Notice... and the kind of an AI folder** (W1'): the Deep Ingest notice has its own entry and
+  can be read at any time (`tools crawl-notice`; acknowledged on the person's yes, "No" is the default, with the
+  CLI's function `crawl_notice.acknowledge_and_audit`); the module wizard shows it before the knowledge base check.
+  Tools > Folders the AI May Use... > Add folder... asks what the folder holds (model files, dataset files or any:
+  `tools folders add --kind`).
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record
@@ -1386,6 +1415,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **Revoking an MCP token in the GUI also removes its standing approvals, and a caller's new own section keeps the
+  tools asked in the framework only**: the GUI's Revoke deleted the token but left its standing approvals (grants of
+  `mcp:NAME`) in the permissions file, listed until revoked one by one (they no longer applied); the token, its
+  permissions and its standing approvals now go in one core function shared with `llm-cli mcp token revoke`.
+  `llm-cli tools permissions --caller ditto|mcp` built a caller's new section without the shared list of tools whose
+  questions are put to you in the framework only, so those questions could reach the AI client's own dialog again for
+  that caller; the new section now starts from that list too, as `--confirm-in-framework` did.
 - **A build no longer replaces an earlier build of the same name**: in 3.0.0 a completed build moved its files into
   the folder `<target>/<model>/<quantization>` and replaced the files of an earlier build there (for example one for
   another board), so a finished golden artifact was lost without being asked. A later build now goes next to it
