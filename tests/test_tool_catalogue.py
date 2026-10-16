@@ -10,12 +10,12 @@ import pytest
 
 from orchestrator.Core import disk_plan, hf_hub, hf_lookup
 
-# Design section 2.1: 37 core tools, 6 optional (default deny) and 2 later ones.
+# Design section 2.1: 37 core tools, 6 optional (default deny) and 2 later ones; plus index_framework_docs (N12).
 CORE = {
     "list_build_requests", "get_build_status", "read_build_log", "list_artifacts", "get_artifact_details",
     "check_build_request", "start_build", "cancel_build", "resolve_healing", "propose_healing_fix",
     "get_job_status", "cancel_job", "search_hf_models", "get_hf_model_info", "download_hf_file", "list_local_files",
-    "search_knowledge", "list_knowledge_sources", "read_knowledge_source", "crawl_docs_site",
+    "search_knowledge", "list_knowledge_sources", "read_knowledge_source", "crawl_docs_site", "index_framework_docs",
     "list_targets", "get_target_capabilities", "get_hardware_probe", "probe_local_hardware", "create_target_module",
     "list_devices", "create_deploy_package", "deploy_to_device",
     "list_packs", "add_pack_from_index", "export_pack", "start_recipe_build",
@@ -31,12 +31,11 @@ BUILT = set(CORE)
 
 
 def test_the_catalogue_has_the_designed_size():
-    assert (len(CORE), len(OPTIONAL), len(LATER)) == (37, 7, 2)
+    assert (len(CORE), len(OPTIONAL), len(LATER)) == (38, 7, 2)
 
 
 def test_known_tools_is_exactly_the_pinned_catalogue():
-    """Ditto offers a tool of the framework on another computer only under a catalogue name (hybrid design 6.3 rule
-    2): framework_tools.KNOWN_TOOLS is that catalogue, one constant, kept equal to the sets pinned here."""
+    """framework_tools.KNOWN_TOOLS is the catalogue, one constant, kept equal to the sets pinned here."""
     from orchestrator.tools.framework_tools import KNOWN_TOOLS
     assert KNOWN_TOOLS == CORE | OPTIONAL | LATER
 
@@ -46,7 +45,7 @@ def test_every_registered_tool_has_a_catalogue_name(booted_framework):
     assert len(names) == len(set(names)), "a tool is registered twice"
     assert set(names) <= CORE | OPTIONAL | LATER, sorted(set(names) - CORE - OPTIONAL - LATER)
     from orchestrator.tools.framework_tools import KNOWN_TOOLS
-    assert set(names) <= KNOWN_TOOLS, "a registered tool missing from KNOWN_TOOLS is never offered from a remote"
+    assert set(names) <= KNOWN_TOOLS, "every registered tool is in the one catalogue"
     assert all(len(n) <= 39 for n in names), "names fit the clients' prefix limits (design 2.0)"
 
 

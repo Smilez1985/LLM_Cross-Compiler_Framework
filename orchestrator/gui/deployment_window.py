@@ -181,7 +181,6 @@ class DeploymentWindow(QWidget):
         
         # Mockup Rows
         self._add_docker_row("Inference Engine", ["Llama.cpp (CPU)", "RKLLM (NPU)", "TensorRT (GPU)"])
-        self._add_docker_row("Knowledge Base", ["Qdrant Sidecar", "None"])
         
         layout_docker.addWidget(self.table_docker)
         self.grp_docker.setLayout(layout_docker)

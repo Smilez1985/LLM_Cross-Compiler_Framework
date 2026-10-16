@@ -32,9 +32,9 @@ from typing import Any, Callable, Dict, Optional
 SIGNATURE_FIELD = "signature"
 UNKEYED = "unkeyed"
 # confirmed_builds: the builds the person confirmed (orchestrator/Core/confirmed_builds.py), which open build standing
-# approvals for packs an AI installed. ditto_places: where each object Ditto saw lives, this computer or another one
-# (orchestrator/llm/hybrid_tools.py PlaceIndex), which routes Ditto's calls between the computers.
-KINDS = ("tool_policy", "mcp_tokens", "tool_approvals", "confirmed_builds", "ditto_places")
+# approvals for packs an AI installed. (ditto_places, the removed remote mode's place index, is no kind any more:
+# nothing reads its old file.)
+KINDS = ("tool_policy", "mcp_tokens", "tool_approvals", "confirmed_builds")
 _UNSEEN = object()
 
 

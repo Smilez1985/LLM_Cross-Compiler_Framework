@@ -72,7 +72,7 @@ def test_all_codes_known(make_framework):
         else:
             assert code in catalog.BLOCKERS, (file, code)
     registered = {s.name for s in make_framework().tool_registry.list()}
-    planned = {"restore_from_trash", "transfer_object", "answer_approval"}  # later packages (WP7, WP13, WP19)
+    planned = {"restore_from_trash", "answer_approval"}  # later packages (WP7, WP13); WP19 transfers were dropped
     for tool, row in catalog.TOOL_FACTS.items():
         assert tool in registered or tool in planned, tool
         assert row.blockers <= set(catalog.BLOCKERS) and row.situation <= set(catalog.WARNINGS), tool
@@ -289,7 +289,6 @@ def test_first_build_unconfirmed_until_the_person_confirmed_exactly_that_content
     assert confirmation_state(framework, pack)[0] == []
     updated = dict(pack, pack_sha256="d" * 64)
     assert confirmation_state(framework, updated)[0], "an updated pack is shown again"
-    assert confirmation_state(framework, dict(pack, installed_via="transferred"))[0], "a transferred target too"
     assert confirmation_state(framework, dict(pack, installed_via=""))[0] == [], "installed by the person"
     # a module an AI created under a delegation: bound to its definition
     folder = tmp_path / "targets" / "jetson_mod"

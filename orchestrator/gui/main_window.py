@@ -197,6 +197,7 @@ class MainOrchestrator(QMainWindow):
         tools_menu.addAction(act_proposals)
 
         self._add_knowledge_snapshots_action(tools_menu)
+        self._add_framework_docs_action(tools_menu)
 
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
         self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
@@ -590,6 +591,15 @@ class MainOrchestrator(QMainWindow):
         self.act_snapshots = QAction("Knowledge Snapshots...", self)
         self.act_snapshots.triggered.connect(self._open_knowledge_snapshots)
         menu.addAction(self.act_snapshots)
+
+    def _add_framework_docs_action(self, menu):
+        """Tools > Index the Framework's Documentation...: the framework's own documents into the knowledge base, after
+        a question (N12)."""
+        from orchestrator.gui.framework_docs_action import FrameworkDocsAction
+        self.framework_docs = FrameworkDocsAction(self, self.framework)
+        self.act_framework_docs = QAction("Index the Framework's Documentation...", self)
+        self.act_framework_docs.triggered.connect(lambda: self.framework_docs.run())
+        menu.addAction(self.act_framework_docs)
 
     def _open_knowledge_snapshots(self):
         from orchestrator.gui.knowledge_snapshots_window import KnowledgeSnapshotsDialog

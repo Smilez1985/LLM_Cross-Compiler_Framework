@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 LLM Cross-Compiler Framework - Deployment Manager (v2.3.1)
-DIREKTIVE: Goldstandard Deployment with Slim-RAG Strategy.
 
 Features:
-- Package Generation with Multi-Container Support.
+- Package Generation (the model, its provenance and deploy.sh; optionally the inference container image).
 - Air-Gap Image Export (Docker Tarballs).
-- Slim-RAG: Target gets empty DB structure, learns locally.
 - Centralized Security Validation.
+
+The knowledge base stays on this computer, where it serves Ditto: a package carries no vector database and no Qdrant
+sidecar (nothing on the device used one).
 """
 
 import importlib.util
@@ -39,7 +40,6 @@ from orchestrator.utils import ssh_trust
 DEFAULT_INFERENCE_IMAGE = "ghcr.io/smilez1985/llm-runtime:latest"
 # The device runtime's start script, relative to the device user's home (orchestrator/runtime/device/launcher.py).
 DEVICE_START_SCRIPT = ".local/share/llm-framework/llama.cpp/current/llama-server.sh"
-DEFAULT_QDRANT_IMAGE = "qdrant/qdrant:v1.16.0"
 SSH_USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
 MODEL_SUFFIXES = MODEL_FILE_SUFFIXES
 # An image reference pinned by its content digest (name@sha256:<64 hex>): the only form pulled for a package.
@@ -199,14 +199,13 @@ class DeploymentManager:
         use_docker = docker_config.get("use_docker", False)
         cfg = self.framework.config
         inference_image = cfg.get("image_inference_runtime", DEFAULT_INFERENCE_IMAGE)
-        qdrant_image = cfg.get("image_qdrant", DEFAULT_QDRANT_IMAGE) if cfg.get("enable_rag_knowledge", False) else None
-        images = ([inference_image] + ([qdrant_image] if qdrant_image else [])) if use_docker else []
+        images = [inference_image] if use_docker else []
         client = self.framework.get_component("docker_client") if images else None
         for image in images:
             problem = image_problem(image, client)
             if problem:
                 raise DeployError(problem[0].upper() + problem[1:] + ".", code="not_supported",
-                                  next="Set image_inference_runtime (and image_qdrant) to an image@sha256:<digest> "
+                                  next="Set image_inference_runtime to an image@sha256:<digest> "
                                        "reference, build the image on this computer, or package without Docker "
                                        "images.")
 
@@ -228,13 +227,8 @@ class DeploymentManager:
             # B. Configs (User Profiles, Prompts)
             self._bundle_user_configs(temp_path / "data" / "configs")
 
-            # C. Docker Images & RAG Setup
+            # C. Docker Images
             if use_docker:
-                if qdrant_image:
-                    # WICHTIG: Slim RAG Strategy
-                    # Wir erstellen nur die Struktur, kopieren aber KEINE Host-Daten.
-                    self._setup_slim_vector_db(temp_path)
-
                 load_names = self._export_docker_images(images, temp_path / "images", client)
                 check_stop()
             else:
@@ -243,7 +237,7 @@ class DeploymentManager:
             # D. Script Generation (Deploy + Compose Logic)
             try:
                 script_content = self._generate_deploy_script(
-                    artifact_path.name, flags_str, use_docker, inference_image, qdrant_image, load_names)
+                    artifact_path.name, flags_str, use_docker, inference_image, load_names)
             except ValueError as e:
                 raise DeployError(str(e), code="not_supported") from None
 
@@ -300,18 +294,6 @@ class DeploymentManager:
             src = src_dir / folder
             if src.exists():
                 shutil.copytree(src, dest_dir / folder, dirs_exist_ok=True)
-
-    def _setup_slim_vector_db(self, temp_path: Path):
-        """
-        Erstellt leere Ordnerstruktur für Qdrant.
-        Verhindert "Knowledge Bloat" durch Nicht-Kopieren der Host-DB.
-        Das Target startet bei Null und lernt lokal.
-        """
-        qdrant_storage = temp_path / "data" / "qdrant"
-        qdrant_storage.mkdir(parents=True, exist_ok=True)
-        # .keep Datei, damit leere Ordner gezippt werden
-        (qdrant_storage / ".keep").touch()
-        self.logger.info("Initialized Slim-RAG storage structure (Clean Slate).")
 
     @staticmethod
     def _load_name(image: str) -> str:
@@ -378,7 +360,6 @@ class DeploymentManager:
 
     def _generate_deploy_script(self, artifact, flags, use_docker,
                                 inference_image: str = DEFAULT_INFERENCE_IMAGE,
-                                qdrant_image: Optional[str] = None,
                                 load_names: Optional[Dict[str, str]] = None) -> str:
         """deploy.sh of a package. The packed images are started by the names their tarballs carry (`load_names`,
         from _export_docker_images) with `--pull never`: the device runs exactly what the package holds, and a device
@@ -402,17 +383,6 @@ class DeploymentManager:
                 "docker network create llm-net || true",
                 ""
             ])
-            if qdrant_image:
-                script.extend([
-                    "# Qdrant Sidecar (Local Long-Term Memory, persisted in ./data/qdrant)",
-                    "docker run -d --name qdrant-sidecar \\",
-                    "  --network llm-net \\",
-                    "  -v \"$(pwd)/data/qdrant:/qdrant/storage\" \\",
-                    "  --restart unless-stopped \\",
-                    "  --pull never \\",
-                    f"  {shlex.quote(names.get(qdrant_image, qdrant_image))}",
-                    ""
-                ])
             node = [
                 "# Inference Node (with Hardware Access)",
                 "docker run -d --name llm-node \\",
@@ -420,8 +390,6 @@ class DeploymentManager:
             ]
             if flags:
                 node.append(f"  {flags} \\")  # Hardware Flags (NPU/GPU) from the target profile
-            if qdrant_image:
-                node.append("  -e QDRANT_HOST=qdrant-sidecar \\")
             node.extend([
                 "  -v \"$(pwd)/data:/app/data\" \\",
                 "  --restart unless-stopped \\",

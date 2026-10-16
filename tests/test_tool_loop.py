@@ -1,9 +1,8 @@
-"""Ditto's tool loop and the codes of the hybrid and the delegation design (WP5).
+"""Ditto's tool loop and the codes of the delegation design (WP5).
 
 - A call that waits for a decision (waiting_for_approval, question_changed; delegation design 3.5) has not failed:
   its result goes back as a plain result, never as an error, and never counts toward the early stop.
-- A call sent to the wrong computer (wrong_place, hybrid design 6.3) is an input error the model fixes by changing
-  the place: while it fixes it, the step budget grows like for any other input error.
+- The remote mode's codes (wrong_place, needs_transfer, place_unreachable) are gone with it.
 """
 
 from orchestrator.llm.tool_loop import INPUT_ERROR_CODES, PENDING_CODES, STOP_TEXT, run_tool_loop
@@ -52,13 +51,6 @@ def test_a_real_failure_still_stops_after_three():
     assert [m for m in loop.new_messages if m.role == "system" and m.text() == STOP_TEXT]
 
 
-def test_wrong_place_counts_as_an_input_error_in_the_tool_loop():
-    assert "wrong_place" in INPUT_ERROR_CODES
-
-    def wrong_place(name, arguments):
-        raise ToolError("lf_... is on this computer, not on build box.", code="wrong_place", field="place")
-    # One step only: a model fixing an input error gets one more step to answer instead of running out.
-    loop = run_tool_loop(Model(1, tool="start_build"), request(), wrong_place, max_steps=1, extra_steps=2)
-    assert loop.stop == "end" and loop.steps == 2
-    results = [m for m in loop.new_messages if m.role == "tool"]
-    assert results[0].is_error, "a wrong place is an error the model sees"
+def test_the_remote_modes_codes_are_gone():
+    assert not {"wrong_place", "needs_transfer", "place_unreachable"} & set(normalize.CODES)
+    assert "wrong_place" not in INPUT_ERROR_CODES

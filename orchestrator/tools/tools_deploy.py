@@ -299,7 +299,7 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                             field="artifact_id", next="Choose another built model (list_artifacts).") from None
 
     def package_facts(inp: CreatePackageIn, ctx: ToolContext) -> CallFacts:
-        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE, DEFAULT_QDRANT_IMAGE, image_problem
+        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE, image_problem
         from orchestrator.Core.hf_hub import disk_check
         label, info = artifact(inp.artifact_id)
         profile = resolve_profile(inp, info)
@@ -317,8 +317,6 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             config = getattr(framework, "config", None)
             get = config.get if config is not None else (lambda k, d=None: d)
             images = [get("image_inference_runtime", DEFAULT_INFERENCE_IMAGE)]
-            if get("enable_rag_knowledge", False):
-                images.append(get("image_qdrant", DEFAULT_QDRANT_IMAGE))
             get_component = getattr(framework, "get_component", None)
             client = get_component("docker_client") if callable(get_component) else None
             for image in images:

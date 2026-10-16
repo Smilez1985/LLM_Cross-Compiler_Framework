@@ -272,11 +272,16 @@ model_formats:
 # QUANTIZATION - COMPLETE REFERENCE
 # ============================================================================
 quantization:
+  # Baseline: size_multiplier is relative to FP16 (16 bits per weight = 1.0x) and is computed as bits / 16 from the
+  # bits per weight below; example_size_7b is 7 billion weights x bits / 8, without metadata (real GGUF files are
+  # larger, because some tensors keep a higher precision). The bits per weight and the quality percentages are rough
+  # rules of thumb without a measured source; the framework's own quality check is the perplexity check of a
+  # converted model.
   # --- FLOATING POINT FORMATS ---
   floating_point:
     fp32:
       bits: 32
-      size_multiplier: "1.0x"
+      size_multiplier: "2.0x"
       quality: "100% (reference baseline)"
       use_case: "Training, validation baseline"
       hardware: "Universal (CPU/GPU)"
@@ -284,7 +289,7 @@ quantization:
     
     fp16:
       bits: 16
-      size_multiplier: "0.5x"
+      size_multiplier: "1.0x"
       quality: "~99.9%"
       use_case: "GPU inference (NVIDIA Tensor Cores, AMD, Apple Metal)"
       hardware: "Modern GPUs, Apple Silicon"
@@ -293,7 +298,7 @@ quantization:
     
     bf16:
       bits: 16
-      size_multiplier: "0.5x"
+      size_multiplier: "1.0x"
       quality: "~99.9%"
       use_case: "Training, TPU inference"
       hardware: "Google TPU, NVIDIA Ampere+, Intel Xeon"
@@ -302,7 +307,7 @@ quantization:
     
     fp8:
       bits: 8
-      size_multiplier: "0.25x"
+      size_multiplier: "0.50x"
       quality: "~99%"
       use_case: "Latest NVIDIA GPUs (H100+)"
       hardware: "NVIDIA H100, H200"
@@ -313,7 +318,7 @@ quantization:
   integer_formats:
     int8:
       bits: 8
-      size_multiplier: "0.25x"
+      size_multiplier: "0.50x"
       quality: "~97-99%"
       use_case: "NPU/GPU inference (production standard)"
       hardware: "TensorRT, RKNN, OpenVINO, CoreML, Hailo"
@@ -323,7 +328,7 @@ quantization:
     
     int4:
       bits: 4
-      size_multiplier: "0.125x"
+      size_multiplier: "0.25x"
       quality: "~93-96%"
       use_case: "Extreme memory constraint"
       hardware: "Modern NPUs, GPTQ/AWQ support"
@@ -332,7 +337,7 @@ quantization:
     
     int16:
       bits: 16
-      size_multiplier: "0.5x"
+      size_multiplier: "1.0x"
       quality: "~99.9%"
       use_case: "Rare (FP16 generally preferred)"
       hardware: "Limited support"
@@ -343,36 +348,36 @@ quantization:
     # K-quants (Recommended)
     q2_k:
       bits: 2.5
-      size_multiplier: "0.28x"
+      size_multiplier: "0.16x"
       quality: "~85-88%"
-      example_size_7b: "~2.8GB"
+      example_size_7b: "~2.2GB"
       recommended: false
       note: "Extreme compression, noticeable quality loss"
     
     q3_k_s:
       bits: 3.5
-      size_multiplier: "0.36x"
+      size_multiplier: "0.22x"
       quality: "~90-92%"
-      example_size_7b: "~3.6GB"
+      example_size_7b: "~3.1GB"
       recommended: false
     
     q3_k_m:
       bits: 3.7
-      size_multiplier: "0.38x"
+      size_multiplier: "0.23x"
       quality: "~91-93%"
-      example_size_7b: "~3.8GB"
+      example_size_7b: "~3.2GB"
       recommended: "Only if 3-bit required"
     
     q3_k_l:
       bits: 3.9
-      size_multiplier: "0.40x"
+      size_multiplier: "0.24x"
       quality: "~92-94%"
-      example_size_7b: "~4.0GB"
+      example_size_7b: "~3.4GB"
       recommended: false
     
     q4_k_s:
       bits: 4.25
-      size_multiplier: "0.53x"
+      size_multiplier: "0.27x"
       quality: "~95-96%"
       example_size_7b: "~3.7GB"
       recommended: "For speed priority"
@@ -380,7 +385,7 @@ quantization:
     
     q4_k_m:
       bits: 4.5
-      size_multiplier: "0.56x"
+      size_multiplier: "0.28x"
       quality: "~96-97%"
       example_size_7b: "~3.9GB"
       recommended: "⭐⭐⭐ BEST GENERAL PURPOSE"
@@ -388,14 +393,14 @@ quantization:
     
     q5_k_s:
       bits: 5.25
-      size_multiplier: "0.66x"
+      size_multiplier: "0.33x"
       quality: "~97.5-98%"
       example_size_7b: "~4.6GB"
       recommended: "For quality priority"
     
     q5_k_m:
       bits: 5.5
-      size_multiplier: "0.69x"
+      size_multiplier: "0.34x"
       quality: "~98-99%"
       example_size_7b: "~4.8GB"
       recommended: "⭐⭐ HIGH QUALITY"
@@ -403,15 +408,15 @@ quantization:
     
     q6_k:
       bits: 6
-      size_multiplier: "0.78x"
+      size_multiplier: "0.38x"
       quality: "~99%"
-      example_size_7b: "~5.5GB"
+      example_size_7b: "~5.2GB"
       recommended: "⭐ NEAR-LOSSLESS"
       use_case: "Memory not constrained"
     
     q8_0:
       bits: 8
-      size_multiplier: "1.00x"
+      size_multiplier: "0.50x"
       quality: "~99.5%"
       example_size_7b: "~7GB"
       recommended: "VALIDATION BASELINE"
@@ -526,7 +531,8 @@ quantization:
       
       ram_4gb:
         recommended: "Q4_K_M"
-        note: "⭐ Sweet spot for 7B models"
+        note: "A 7B model in Q4_K_M is about 3.9 GB alone (see above), which leaves no room for the context and
+          the system: choose a smaller model"
       
       ram_8gb:
         recommended: "Q5_K_M"
@@ -680,6 +686,9 @@ nvidia_jetson:
   tensorrt_llm:
     repo_url: "https://github.com/NVIDIA/TensorRT-LLM"
     commit: "v0.10.0"
+    pin_note: "v0.10.0 is the version this catalogue was written against. It is old and unused (there is no Jetson
+      target yet) and was not checked against current releases: pick and pin a current release when the NVIDIA
+      target is drafted."
     docs_workflow: "https://nvidia.github.io/TensorRT-LLM/quick-start-guide.html"
     docs_architecture: "https://nvidia.github.io/TensorRT-LLM/architecture/workflow.html"
     docs_optimization: "https://nvidia.github.io/TensorRT-LLM/performance.html"
@@ -965,8 +974,9 @@ hailo_ai:
     repo_url: "https://github.com/hailo-ai/hailo_model_zoo"
     docs_workflow: "https://github.com/hailo-ai/hailo_model_zoo/blob/master/docs/public_models/HAILO8/HAILO8_inference_guide.rst"
   
-  note: "⚠️ Hailo primarily for Vision/Voice, NOT LLM inference"
-  use_case: "Computer vision, Whisper STT (not LLM)"
+  note: "Written for Hailo-8/8L with HailoRT 4.17 (vision and voice models). Not checked against Hailo's current
+    documentation: check there whether newer Hailo accelerators run LLMs before a Hailo target is drafted."
+  use_case: "Computer vision and speech (as noted for Hailo-8/8L); LLMs: check Hailo's current documentation"
 
 # --- MEMRYX ---
 memryx:
@@ -1214,8 +1224,8 @@ metadata:
 notes:
   backend_selection:
     universal_cpu: "llama.cpp (works everywhere)"
-    intel_cpu: "OpenVINO (2-3x faster) or llama.cpp (fallback)"
-    intel_gpu: "OpenVINO FP16 (5-10x faster than CPU)"
+    intel_cpu: "OpenVINO or llama.cpp (fallback)"
+    intel_gpu: "OpenVINO FP16"
     intel_npu: "OpenVINO INT8 (low power, always-on)"
     nvidia_gpu: "TensorRT-LLM (best performance)"
     rockchip_npu: "RKNN INT8 (NPU acceleration)"
@@ -1248,9 +1258,6 @@ notes:
     - "Validate model checksums"
   
   performance_expectations:
-    cpu_generic: "5-15 tokens/sec (depends on model size)"
-    cpu_optimized: "15-30 tokens/sec (Intel/AMD with optimizations)"
-    gpu_nvidia: "40-120 tokens/sec (depends on GPU)"
-    gpu_intel: "20-60 tokens/sec (Arc/Iris Xe)"
-    npu_intel: "10-20 tokens/sec (low power <5W)"
-    npu_rockchip: "8-15 tokens/sec (RK3588)"
+    status: "unverified"
+    note: "The tokens-per-second numbers that stood here had no source and no measurement, so they were removed.
+      Real values come from a benchmark on the target device after deploy."

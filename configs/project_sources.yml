@@ -273,7 +273,8 @@ hardware_targets:
       supported_platforms: ["Jetson Orin", "Jetson Xavier", "Jetson Nano"]
       priority: "CRITICAL"
       integration_status: "ACTIVE"
-      note: "TensorRT-LLM for Jetson. FP16/INT8/AWQ quantization. GPU-optimized."
+      note: "TensorRT-LLM for Jetson. FP16/INT8/AWQ quantization. GPU-optimized. The pin v0.10.0 is old and not
+        checked against current releases: pick and pin a current release when the NVIDIA target is drafted."
     
     jetson_inference:
       repo_url: "https://github.com/dusty-nv/jetson-inference"
@@ -362,7 +363,8 @@ hardware_targets:
       supported_platforms: ["Hailo-8", "Hailo-8L", "Raspberry Pi 5 + Hailo"]
       priority: "LOW"
       integration_status: "REFERENCE"
-      note: "⚠️ Vision/Voice only. NOT for LLM inference. Document for completeness."
+      note: "Noted for Hailo-8/8L (HailoRT 4.17): vision and voice models. Not checked against Hailo's current
+        documentation: check there whether newer Hailo accelerators run LLMs before a Hailo target is drafted."
     
     hailo_model_zoo:
       repo_url: "https://github.com/hailo-ai/hailo_model_zoo"
@@ -664,7 +666,7 @@ quality_tools:
 notes:
   backend_selection_logic:
     - "Universal fallback: llama.cpp (works everywhere)"
-    - "Intel hardware: OpenVINO (2-5x faster)"
+    - "Intel hardware: OpenVINO"
     - "NVIDIA GPU: TensorRT-LLM (best performance)"
     - "Rockchip NPU: RKNN (NPU acceleration)"
     - "Mobile: ncnn (lightweight) or llama.cpp"

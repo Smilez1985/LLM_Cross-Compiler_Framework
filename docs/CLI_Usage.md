@@ -117,6 +117,7 @@ stays below the given share.
 |---|---|
 | `doctor` | Check the installation and explain how to fix problems |
 | `knowledge snapshots` | List the knowledge base's snapshots with full path, name, size and what each is (unreleased) |
+| `knowledge index-docs` | Add the framework's own documentation (and with `--with-code` its code) to the knowledge base (unreleased) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
@@ -179,7 +180,8 @@ llm-cli doctor --fix --tier 2
 llm-cli knowledge snapshots [list]
 ```
 
-Unreleased. Before every Deep Ingest, every index of the framework's own code and every restore, the knowledge base
+Unreleased. Before every Deep Ingest, every index of the framework's own documents (`knowledge index-docs`) and
+every restore, the knowledge base
 is saved as a snapshot in `knowledge_snapshots/` of the personal folder, so the change can be undone. The command
 lists every snapshot, oldest first, with its name, when it was taken, its size, what it is (for example "backup of
 the knowledge base taken before a Deep Ingest") and its full path. It deletes nothing. The GUI shows the same list
@@ -192,6 +194,29 @@ trash and a deletion dialog in the framework follow.
 
 ```bash
 llm-cli knowledge snapshots
+```
+
+### knowledge index-docs
+
+```
+llm-cli knowledge index-docs [--with-code]
+```
+
+Unreleased. Adds the framework's own documentation (README, CONTRIBUTING and the `docs` folder, in both languages) to
+the knowledge base, so Ditto can answer questions about the framework itself, and AI clients find it with
+`search_knowledge` (kind `docs`). `--with-code` also adds its code and configuration (`orchestrator`, `targets`,
+`scripts`, `configs`, the container setup and the install scripts; many more files, takes minutes). Only what the
+framework ships is read: never your settings (`config.yml`), targets you or an AI created, or installed packs. It
+never happens by itself: only this command, **Tools > Index the Framework's Documentation...** in the GUI (a question
+with "No" as the default and a box for the code) or the MCP tool `index_framework_docs` (asked every time) start it. A
+snapshot is taken first, so it can be undone with a restore; a file indexed before is replaced. When the disk has no
+room for that snapshot, nothing is indexed and the command says how much space is missing (no "continue anyway"); when
+little room is left, it says so and goes on. The knowledge base must be switched on. A knowledge pack you export never
+carries these texts: every installation indexes them itself.
+
+```bash
+llm-cli knowledge index-docs
+llm-cli knowledge index-docs --with-code
 ```
 
 ---
@@ -362,7 +387,7 @@ Creates a ZIP file for the board: the model file, the build's manifest and model
 |---|---|
 | `ARTIFACT_NAME` | A build folder as shown by `list-artifacts` (relative to the output folder), or any existing path to a build folder or model file. |
 | `--profile TEXT` | **Required.** The target, e.g. `Rockchip` (used for device options in Docker mode). |
-| `--docker / --no-docker` | Also pack container images (default off). Experimental and not verified in this version; leave it off for a model file. Each image (`image_inference_runtime`, and `image_qdrant` with the knowledge base) must be pinned by its digest (`name@sha256:...`) or built on this computer; an image named only by a tag, such as the default `...:latest`, is refused with the reason, and a failed image export stops the package. |
+| `--docker / --no-docker` | Also pack container images (default off). Experimental and not verified in this version; leave it off for a model file. The image (`image_inference_runtime`; a package never carries the knowledge base) must be pinned by its digest (`name@sha256:...`) or built on this computer; an image named only by a tag, such as the default `...:latest`, is refused with the reason, and a failed image export stops the package. |
 
 Only model files are deployed without Docker; builds that produced several weight files are refused. A package that
 cannot be made prints the reason and exits with 1; the ZIP is written under a temporary name and renamed when it is
@@ -593,10 +618,9 @@ llm-cli ditto ask QUESTION [--no-tools] [--provider TEXT] [--model TEXT]
 ```
 
 Asks Ditto one question. Ditto may use the framework tools within your permissions; tools set to "ask" show the
-tool and every argument and need your confirmation in the terminal (without a terminal they are denied). Without a
-terminal Ditto also tells the framework on another computer that nobody can answer its questions here, so that
-framework keeps them for its own approval window; nothing is ever sent there as your "no". The answer goes to stdout,
-tool notes and errors to stderr. Nothing is saved to the chat history.
+tool and every argument and need your confirmation in the terminal (without a terminal they are denied). The
+tools are the framework's own on this computer. The answer goes to stdout, tool notes and errors to stderr. Nothing is
+saved to the chat history.
 
 | Option | Meaning |
 |---|---|
@@ -612,47 +636,6 @@ llm-cli ditto ask "Explain IQ4_XS" --no-tools --provider local
 
 Without setup the command explains what is missing, for example "the local model server is not running. Start it
 with: llm-cli ditto runtime start".
-
-### ditto remote
-
-```
-llm-cli ditto remote set --transport stdio|http [--command "..."] [--url URL] [--name TEXT] [--with-token]
-llm-cli ditto remote show | test | off
-```
-
-Ditto and the framework on another computer (optional): Ditto also uses the framework installed on a second
-computer (a stronger build PC, a server) through that installation's MCP server, next to this computer's tools, which
-always stay; each call goes to the computer where its object lives. It is the same program, not a different one, and Docker is not needed: connect over SSH, either with a tunnel to the server's
-address or with `ssh` as the command ([details](Features.md#ditto-and-a-framework-on-another-computer)). That
-framework's registry, permissions, questions and audit log apply to the calls that run there, and this computer's
-audit log records each of them too (`started` and its end, with `place remote:<name>`). Create the token on the other
-computer first with `llm-cli mcp token add NAME --link ditto`: the token then uses Ditto's own permissions there, and
-the audit log there shows `mcp:NAME`. `set` stores the token in this computer's
-credential vault (asked without echo, or read from stdin with `--with-token`) and the connection in Ditto's AI
-settings; the token never passes through a tool, a result or a command line. Over stdio Ditto starts `--command`
-(for example `ssh -T -o BatchMode=yes -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve`, which needs
-`AcceptEnv LCF_MCP_TOKEN` in the SSH server's configuration there and `llm-cli` as a command there, not only an
-alias, see [Calling `llm-cli`](../README.md#calling-llm-cli); or, for a framework container you built yourself,
-`docker exec -i lcf llm-cli mcp serve`) with the token in `LCF_MCP_TOKEN`. `docker exec` and `podman exec` do not
-pass their environment into the container, so Ditto adds `-e LCF_MCP_TOKEN` (the name only, never the value) to such
-a command; and when the server it reached names the shared local caller `mcp` instead of the token (for example over
-`ssh` without `SendEnv`, which drops the environment), Ditto does not use it and says how to pass the variable on.
-Over HTTP it sends the token as bearer header to `--url`, which must be https or a loopback address, such as the
-local end of an SSH tunnel (`ssh -N -L 8765:127.0.0.1:8765 user@build-box`, then `http://127.0.0.1:8765/mcp`).
-Without a token the other computer is not used. Switching on or off never starts a new conversation; a computer that
-cannot be reached never stops a question (Ditto goes on with this computer's tools, and `ditto ask` prints a note on
-stderr). Every result, error and question of the other framework is shown to Ditto's model as untrusted data, its
-tool descriptions never, and Ditto's confirmation names the server. `test` connects, lists the tools and task prompts
-the server offers Ditto and says how they join this computer's (offered once, only there, separately); `show` prints
-the settings (never the token); `off` lets Ditto work with this computer alone again. The GUI's AI settings ("Another computer (optional)") set the same values; there too the token goes into
-the vault and is never shown again.
-
-```bash
-# On the other computer: llm-cli mcp token add ditto-laptop --link ditto, then llm-cli mcp serve --transport http
-ssh -N -L 8765:127.0.0.1:8765 user@build-box &      # the tunnel (keep it open)
-llm-cli ditto remote set --transport http --url http://127.0.0.1:8765/mcp --name "build box"
-llm-cli ditto remote test
-```
 
 ### ditto eval
 
@@ -1186,7 +1169,7 @@ GUI does the same in Tools > Tool Permissions (Ditto / MCP), section "MCP tokens
 |---|---|
 | `add NAME` | Creates a token that can only read, until you allow more with `tools permissions --token NAME`. |
 | `--policy-from CALLER` | Starts with a copy of another caller's permissions: `mcp` (local stdio clients), `ditto`, or a token name; `mcp:NAME` always names a token, also one called `mcp` or `ditto`. Later changes of the source do not apply. |
-| `--link ditto` | Uses Ditto's permissions by reference, for Ditto running on another computer: a change to Ditto's permissions applies at once. |
+| `--link ditto` | Uses Ditto's permissions by reference, for a client that should have exactly Ditto's permissions: a change to Ditto's permissions applies at once. |
 | `list` | Names, audit actors, permissions, creation and rotation time; never a token or its hash. |
 | `rotate NAME` | A new token for the same name and permissions; the old one stops working at once. |
 | `revoke NAME` | Deletes the token and its permissions after a question; its client loses access at once. |
@@ -1194,7 +1177,7 @@ GUI does the same in Tools > Tool Permissions (Ditto / MCP), section "MCP tokens
 ```bash
 llm-cli mcp token add laptop                          # read only
 llm-cli tools permissions --token laptop              # allow more
-llm-cli mcp token add ditto-laptop --link ditto       # Ditto on another computer
+llm-cli mcp token add helper --link ditto             # exactly Ditto's permissions
 claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
 ```
 

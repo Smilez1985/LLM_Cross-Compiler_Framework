@@ -84,18 +84,18 @@ _CHANNEL = re.compile(r"^(none|elicitation|framework|framework-gui|framework-cli
 # SHA-256 at the end of the chained `detail` column, so adding, removing or editing them is detected.
 EXTRA_FIELDS = frozenset({"client", "session", "confirm_channel", "question_sha256", "answer", "name_requested",
                           "repairs", "reason_code", "duration_ms", "result", "links",
-                          # delegations, the chat feed and the hybrid (design 3.11)
+                          # delegations and the chat feed (design 3.11). The removed remote mode also wrote place,
+                          # taint, remote_server and transfer: old entries keep them (bound by the extra sha256, so
+                          # they still verify and show), new ones cannot carry them.
                           "answered_by", "delegation", "reason_sha256", "facts_sha256", "warnings", "version",
-                          "feed_entry", "taint", "place", "remote_server", "transfer", "deletion_sha256"})
+                          "feed_entry", "deletion_sha256"})
 # Who answered a question: the person, or an AI under a delegation.
 ANSWERED_BY = frozenset({"person", "ai"})
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
-_CODE = re.compile(r"^[a-z][a-z0-9_]{1,47}$")
-_LABEL = re.compile(r"^[^\x00-\x1f\x7f]{1,120}$")
 # Kept when the extra fields are too long and must be cut: what ties an entry to its question, answer, decision record
 # and deletion plan.
 _KEEP = ("reason_code", "answer", "confirm_channel", "question_sha256", "duration_ms", "links", "answered_by",
-         "delegation", "reason_sha256", "facts_sha256", "feed_entry", "place", "deletion_sha256")
+         "delegation", "reason_sha256", "facts_sha256", "feed_entry", "deletion_sha256")
 _EXTRA_MAX = 2000
 _EXTRA_REF = re.compile(r"\n\[extra sha256:([0-9a-f]{64})\]\Z")
 _EXTRA_TAG = "[extra sha256:"
@@ -423,13 +423,6 @@ class AuditLog:
             unknown = sorted(c for c in codes if known is not None and c not in known)
             if unknown:
                 raise ValueError(f"unknown warning codes {unknown}")
-        if "taint" in fields and not (isinstance(fields["taint"], bool) or (
-                isinstance(fields["taint"], list) and all(isinstance(t, str) and _CODE.fullmatch(t)
-                                                          for t in fields["taint"]))):
-            raise ValueError("taint must be true/false or a list of reason codes")
-        for key in ("place", "remote_server", "transfer"):
-            if key in fields and not (isinstance(fields[key], str) and _LABEL.fullmatch(fields[key])):
-                raise ValueError(f"{key} must be a short single-line label")
 
     @staticmethod
     def _extra(outcome: str, extra: Optional[Dict[str, Any]]) -> Optional[str]:

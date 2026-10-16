@@ -13,8 +13,7 @@ answered without running, and the loop ends at most two turns later. A model tha
 while the last result is an input error it is fixing, the step budget grows by up to `extra_steps`.
 
 A call that waits for a decision (reason code waiting_for_approval or question_changed, delegation design 3.5) has not
-failed: its result goes back as a plain result (not an error) and never counts toward the failure streak. A call sent
-to the wrong computer (wrong_place, hybrid design 6.3) is an input error the model fixes by changing the place.
+failed: its result goes back as a plain result (not an error) and never counts toward the failure streak.
 """
 
 from dataclasses import dataclass, field
@@ -31,8 +30,8 @@ ExecuteTool = Callable[[str, dict], Any]
 STOP_TEXT = ("Several tool calls failed. Do not call more tools. Answer the user now: what you tried, what failed and "
              "why, and what they can do.")
 NOT_RUN_TEXT = "Not run: several tool calls failed before. Answer the user now without calling more tools."
-# Errors the model removes by changing its call (a missing, unknown or invalid argument, or the wrong computer).
-INPUT_ERROR_CODES = frozenset({"unknown_argument", "missing_argument", "invalid_value", "wrong_place"})
+# Errors the model removes by changing its call (a missing, unknown or invalid argument).
+INPUT_ERROR_CODES = frozenset({"unknown_argument", "missing_argument", "invalid_value"})
 # A call that waits for a decision: not a failure (normalize.PENDING_CODES, the one list of them).
 PENDING_CODES = frozenset(_PENDING)
 

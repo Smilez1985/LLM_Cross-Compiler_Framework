@@ -617,8 +617,7 @@ class ChatPanel(QWidget):
 
     def _framework_title(self, use: Any) -> bool:
         """Whether a tool note's title is the framework's own: the title of a tool registered here. A name the model
-        made up (an unknown tool) or a tool of the framework on another computer is the AI's or that framework's
-        word, never this framework's."""
+        made up (an unknown tool) is the AI's word, never this framework's."""
         registry = getattr(self.framework, "tool_registry", None)
         try:
             return bool(use.title) and registry.get(use.name).title == use.title
@@ -626,44 +625,21 @@ class ChatPanel(QWidget):
             return False
 
     def _on_tool_used(self, use: Any) -> None:
-        # A call that went to the other computer names it (hybrid design 6.9: "Used on build box: Start a build").
-        place = getattr(use, "place", "") or ""
-        if place:
-            key = "chat.tool.used_on" if use.ok else "chat.tool.not_run_on"
-        else:
-            key = "chat.tool.used" if use.ok else "chat.tool.not_run"
-        # Why it did not run can quote a handler's error, and a title the framework did not give is the model's or
-        # another framework's word: both outside text, quoted on the framework's line (design 5.2 R2). So is the
-        # other computer's name, which the person typed (an external name).
+        key = "chat.tool.used" if use.ok else "chat.tool.not_run"
+        # Why it did not run can quote a handler's error, and a title the framework did not give is the model's word:
+        # both outside text, quoted on the framework's line (design 5.2 R2).
         external = ["detail"] if self._framework_title(use) else ["title", "detail"]
         params = {"title": use.title, "detail": use.detail or "-"}
-        if place:
-            params["place"] = place
-            external.append("place")
         self._post("ditto_tool_note", self._ditto_sender(), text_key=key, params=params, external=external)
 
     def _on_ai_response(self, reply: Any) -> None:
         self._set_thinking(False)
         self._pending_question = None
         if getattr(reply, "source_changed", False):
-            # The one migration of a conversation from the earlier "other computer only" mode (hybrid design 6.6):
-            # this computer's tools stay and the other computer joins them, so the conversation starts anew once.
-            source = getattr(self.history, "tool_source", "") or ""
-            name = source[len("mcp:"):] if isinstance(source, str) and source.startswith("mcp:") else ""
-            if name:
-                self.post_notice("chat.notice.source_hybrid", {"name": name}, external=("name",))
-            else:
-                self.post_notice("chat.notice.source_hybrid_unnamed")
+            # A saved conversation of the removed remote mode named another computer's objects: it starts anew once.
+            self.post_notice("chat.notice.source_local")
         elif reply.new_conversation:
             self.post_notice("chat.notice.new_conversation")
-        # The turn's notes about the other computer (not reachable now, tools left out, another version): framework
-        # notes for the person, never sent to the model. They can name remote tools, so they are quoted as outside
-        # text; one already in the recent conversation is not repeated (as Ditto's transcript does).
-        recent = {t.text for t in list(getattr(self.history, "transcript", None) or [])[-20:]
-                  if getattr(t, "role", "") == "notice"}
-        for notice in dict.fromkeys(getattr(reply, "notices", None) or []):
-            if notice and notice not in recent:
-                self.post_notice("chat.notice.other_computer", {"notice": notice}, external=("notice",))
         if reply.text:
             self._post("ditto_answer", self._ditto_sender(), ai_text=reply.text, ai_text_kind="answer",
                        announce_row=True)
@@ -824,7 +800,7 @@ class ChatPanel(QWidget):
         self._place_separator()
 
     def closeEvent(self, event: Any) -> None:
-        self.confirmation.close()  # a waiting call here is answered "no"; one of the other computer is cancelled
+        self.confirmation.close()  # a waiting call is answered "no"
         if self.watcher is not None:
             self.watcher.stop()
         super().closeEvent(event)

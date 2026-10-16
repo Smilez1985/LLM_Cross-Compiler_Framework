@@ -10,9 +10,7 @@ maintained for every update, so you build the image on your own computer instead
 installation inside the container as on a Debian computer (`install.sh`), from exactly the files the repository
 ships. Nothing is pushed anywhere.
 
-On a desktop PC the [normal installation](../README.md#installation) is simpler. A container is not needed for Ditto
-to use the framework on another computer either ([Ditto and a framework on another
-computer](Features.md#ditto-and-a-framework-on-another-computer)).
+On a desktop PC the [normal installation](../README.md#installation) is simpler.
 
 ## Contents
 
@@ -127,8 +125,7 @@ own loopback. AI clients therefore reach the containerized framework over **stdi
 - **A named token instead of the shared caller `mcp`:** create it in the container with
   `docker exec -it lcf-framework llm-cli mcp token add laptop` and pass it as an environment variable, never on the
   command line: `docker exec -i -e LCF_MCP_TOKEN lcf-framework llm-cli mcp serve`, with `LCF_MCP_TOKEN` set in the
-  environment the client gives that command. Ditto on another computer adds `-e LCF_MCP_TOKEN` to a `docker exec`
-  command by itself.
+  environment the client gives that command.
 - **HTTP instead** (advanced): `llm-cli mcp serve --transport http --container` inside the container binds the
   container's interfaces; publish the port to the host's loopback only (`-p 127.0.0.1:8765:8765`) and reach it from
   another computer through an SSH tunnel. Every client needs its own named token; the compose file publishes no port.

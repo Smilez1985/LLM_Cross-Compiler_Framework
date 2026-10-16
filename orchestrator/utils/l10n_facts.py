@@ -35,8 +35,6 @@ TEXTS = {
                                            "fallback.",
         "warning.device_model_replaced": "Replaces the model on the board.",
         "warning.untested_module": "Nobody has tried this hardware module on the board yet.",
-        "warning.large_transfer": "Copies about {size_gb} GB to the other computer.",
-        "warning.slow_link": "The connection to the other computer is slow ({mbps} MB/s): about {minutes} minutes.",
         # --- security warnings ---
         "warning.pickle_weights": "The model files are in an old format (.bin/.pt) that can run hidden code when "
                                   "loaded.",
@@ -55,7 +53,6 @@ TEXTS = {
         "warning.signs_as_you": "The pack is signed with your personal key.",
         "warning.facts_unknown": "Some facts could not be checked ({unknown}), so the model may be unsafe or "
                                  "restricted.",
-        "warning.artifact_from_other_computer": "This model was built on another computer.",
         # --- legal warnings ---
         "warning.gated_model": "This model has conditions you accepted on huggingface.co with your account.",
         "warning.base_model_gated": "The model it is based on has conditions of use.",
@@ -108,7 +105,6 @@ TEXTS = {
         "blocker.commit_required": "The exact model version could not be found out.",
         "blocker.trash_not_yours": "You deleted this yourself, so only you can restore it.",
         "blocker.file_outside_folders": "The file is outside the folders you shared.",
-        "blocker.transfer_unsupported": "This cannot be copied to the other computer.",
         "blocker.file_changed": "The file changed in the meantime.",
         # --- what the person can do ---
         "action.free_disk": "Free disk space (old builds, the model cache, the trash), or choose a smaller model.",
@@ -198,8 +194,6 @@ TEXTS = {
         "warning.device_runtime_replaced": "Ersetzt den Modellserver auf dem Board; der bisherige bleibt als Reserve.",
         "warning.device_model_replaced": "Ersetzt das Modell auf dem Board.",
         "warning.untested_module": "Niemand hat dieses Hardware-Modul schon auf dem Board ausprobiert.",
-        "warning.large_transfer": "Kopiert etwa {size_gb} GB auf den anderen Computer.",
-        "warning.slow_link": "Die Verbindung zum anderen Computer ist langsam ({mbps} MB/s): etwa {minutes} Minuten.",
         # --- Sicherheitshinweise ---
         "warning.pickle_weights": "Die Modelldateien haben ein altes Format (.bin/.pt), das beim Laden versteckten "
                                   "Code ausführen kann.",
@@ -221,7 +215,6 @@ TEXTS = {
         "warning.signs_as_you": "Das Paket wird mit deinem persönlichen Schlüssel signiert.",
         "warning.facts_unknown": "Einiges konnte nicht geprüft werden ({unknown}); das Modell könnte unsicher oder "
                                  "eingeschränkt sein.",
-        "warning.artifact_from_other_computer": "Dieses Modell wurde auf einem anderen Computer gebaut.",
         # --- rechtliche Hinweise ---
         "warning.gated_model": "Für dieses Modell hast du auf huggingface.co mit deinem Konto Bedingungen "
                                "akzeptiert.",
@@ -277,7 +270,6 @@ TEXTS = {
         "blocker.commit_required": "Die genaue Modellversion ließ sich nicht feststellen.",
         "blocker.trash_not_yours": "Du hast das selbst gelöscht, deshalb kannst nur du es wiederherstellen.",
         "blocker.file_outside_folders": "Die Datei liegt außerhalb der Ordner, die du freigegeben hast.",
-        "blocker.transfer_unsupported": "Das lässt sich nicht auf den anderen Computer kopieren.",
         "blocker.file_changed": "Die Datei hat sich inzwischen geändert.",
         # --- was die Person tun kann ---
         "action.free_disk": "Speicherplatz freigeben (alte Builds, den Modell-Cache, den Papierkorb) oder ein "

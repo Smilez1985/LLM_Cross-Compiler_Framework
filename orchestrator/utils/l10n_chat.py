@@ -111,14 +111,16 @@ TEXTS = {
         "chat.notice.new_conversation": "The conversation got long: Ditto summarized it and continues in a new "
                                         "conversation.",
         "chat.notice.source_local": "Ditto now uses its own tools: a new conversation.",
+        # LEGACY: the removed remote mode wrote these keys into feed rows; they stay so stored rows still render.
+        # Nothing writes them any more.
         "chat.notice.source_remote": "Ditto now uses the tools of the framework at {name}: a new conversation.",
-        # the hybrid (design 6.6): a tool that ran on the other computer, notes about that computer, the one migration
         "chat.tool.used_on": "Used on {place}: {title}",
         "chat.tool.not_run_on": "Not run on {place}: {title} ({detail})",
         "chat.notice.other_computer": "About the other computer: {notice}",
         "chat.notice.source_hybrid": "Ditto now works with this computer and {name} together: a new conversation.",
         "chat.notice.source_hybrid_unnamed": "Ditto now works with this computer and the other computer together: a "
                                              "new conversation.",
+        # (end of the legacy keys)
         "chat.notice.error": "Ditto could not answer: {error}",
         "chat.notice.proposal": "{who} proposed a fix for the build {build} (AI-generated). Read it in Tools > Fix "
                                 "Proposals from AI Clients.",
@@ -290,6 +292,7 @@ TEXTS = {
         "chat.notice.new_conversation": "Das Gespräch wurde lang: Ditto hat es zusammengefasst und macht in einem "
                                         "neuen Gespräch weiter.",
         "chat.notice.source_local": "Ditto nutzt jetzt seine eigenen Werkzeuge: ein neues Gespräch.",
+        # LEGACY (see the English block): stored rows of the removed remote mode still render.
         "chat.notice.source_remote": "Ditto nutzt jetzt die Werkzeuge des Frameworks auf {name}: ein neues Gespräch.",
         "chat.tool.used_on": "Benutzt auf {place}: {title}",
         "chat.tool.not_run_on": "Nicht ausgeführt auf {place}: {title} ({detail})",
@@ -298,6 +301,7 @@ TEXTS = {
                                      "Gespräch.",
         "chat.notice.source_hybrid_unnamed": "Ditto arbeitet jetzt mit diesem Computer und dem anderen Computer "
                                              "zusammen: ein neues Gespräch.",
+        # (end of the legacy keys)
         "chat.notice.error": "Ditto konnte nicht antworten: {error}",
         "chat.notice.proposal": "{who} hat eine Korrektur für den Build {build} vorgeschlagen (KI-erzeugt). Lies sie "
                                 "unter Tools > Fix Proposals from AI Clients.",
