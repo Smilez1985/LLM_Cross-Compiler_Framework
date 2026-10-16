@@ -42,6 +42,7 @@ RKLLM und RKNN installierst du selbst (siehe [Das Board](#das-board)).
 |---|---|---|---|
 | Rockchip | offiziell | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
 | NVIDIA-GPUs, AMD (Ryzen Z1 Extreme) | geplant ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)) | – | – |
+| Allgemeine ARM64-CPU (Raspberry Pi 4 und 5) | geplant ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)) | – | GGUF |
 
 Andere Hardware kannst du selbst ergänzen: [docs/Module_Developer_Guide_DE.md](docs/Module_Developer_Guide_DE.md).
 
@@ -780,8 +781,11 @@ Die Roadmap führt auf, was geplant ist; Erledigtes wandert beim Release in den 
   (API-Schlüssel, lokale Engines und das `ant`-Profil funktionieren in der GUI und mit `llm-cli ditto login`; der
   Claude-Abo-Anbieter ist entfernt, und Claude-Abonnenten nutzen MCP oder einen API-Schlüssel); eine neue Ditto-Evaluation mit den verbesserten Prompts; die selbst gebaute llama.cpp-Laufzeit auf dem
   Board (die Kommandozeile funktioniert; die GUI, die MCP-Werkzeuge und ein Lauf auf einem echten Board folgen).
-- **Geplant:** Targets für NVIDIA-GPUs und AMD (Ryzen Z1 Extreme), weitere Formate, LoRA und große Modelle sowie
-  eine gehärtete Lieferkette.
+- **Geplant:** Rezepte als Target-Vorlagen, direkt danach eine Rotationsstufe vor der Quantisierung (SpinQuant,
+  QuaRot; nur wo das Format sie unterstützt) und ein allgemeines ARM64-Target für den Raspberry Pi; Targets für
+  NVIDIA-GPUs und AMD (Ryzen Z1 Extreme); später Modelle der Llama-Familie in jedem Format, ONNX, Hailo, Intel und
+  Qualcomm; LoRA und große Modelle sowie eine gehärtete Lieferkette. Neue Targets beginnen mit der Hardware-Probe, und
+  ein Benchmark auf dem Board ist der Beweis („getestet auf <Board>“). Builds in der Cloud sind nicht geplant.
 
 Vollständige Liste: [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap).
 
