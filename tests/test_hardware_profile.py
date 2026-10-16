@@ -430,6 +430,16 @@ class TestSchema2Rejections:
         with pytest.raises(ProfileError, match="deep.json: not valid JSON"):
             read_profile(tmp_path / "deep.json")
 
+    def test_nesting_is_refused_the_same_on_every_python(self):
+        """The JSON view is one flat object: a few levels of nesting are refused before parsing, with the same answer
+        on every Python version (3.14's decoder parses 60 000 levels without a RecursionError)."""
+        for deep in ('{"PROBE_SCHEMA": "2", "X": [[[[[[]]]]]]}', '{"PROBE_SCHEMA": "2", "X": {"a": {"b": {"c": {}}}}}'):
+            with pytest.raises(ProfileError, match="not valid JSON: nested too deeply"):
+                parse_profile_json(deep)
+        # brackets inside strings are text, not nesting
+        text = json.dumps(dict(board().as_dict(), CPU_MODEL='Cortex [[[[[[{{{{{{ "x" \\ ]]]]'))
+        assert parse_profile_json(text).get("CPU_MODEL") == 'Cortex [[[[[[{{{{{{ "x" \\ ]]]]'
+
     @pytest.mark.parametrize("node", ["/dev/rknpu", "/dev/dri/renderD129", "/dev/dri/card1", "/dev/accel/accel0",
                                       "/dev/hailo0", "/dev/apex_0"])
     def test_npu_device_accelerator_nodes(self, node):

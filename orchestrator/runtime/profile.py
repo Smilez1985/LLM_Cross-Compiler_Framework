@@ -570,11 +570,31 @@ def parse_profile(data: Union[str, bytes], *, schema: Optional[ProbeSchema] = No
     return _from_schema2(pairs, schema)
 
 
+_JSON_STRING = re.compile(r'"(?:\\.|[^"\\])*"', re.DOTALL)
+_MAX_JSON_DEPTH = 4  # the JSON view is one flat object; anything nested deeper is no probe file
+
+
+def _nested_too_deeply(text: Union[str, bytes]) -> bool:
+    """True when brackets outside JSON strings nest deeper than _MAX_JSON_DEPTH. Checked before json.loads, so a
+    hostile file never builds deep structures and every Python version gives the same answer (3.14's decoder no
+    longer raises RecursionError for 60 000 levels)."""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    depth = 0
+    for bracket in re.findall(r"[\[\]{}]", _JSON_STRING.sub("", text)):
+        depth += 1 if bracket in "[{" else -1
+        if depth > _MAX_JSON_DEPTH:
+            return True
+    return False
+
+
 def parse_profile_json(text: Union[str, bytes], *, schema: Optional[ProbeSchema] = None) -> HardwareProfile:
     """Parses the JSON view (hardware_probe.py --json): one object of string values, schema 2 rules."""
     schema = schema or load_schema()
     if len(text) > schema.max_bytes:
         raise ProfileError(f"larger than {schema.max_bytes} bytes")
+    if _nested_too_deeply(text):
+        raise ProfileError("not valid JSON: nested too deeply")
 
     def unique(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
         seen: Dict[str, Any] = {}
