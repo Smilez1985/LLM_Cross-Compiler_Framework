@@ -44,7 +44,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 |---|---|
 | Linux installer (`install.sh`) | `cd /opt/llm-conversion-framework` and then `.venv/bin/python -m orchestrator.cli ...` |
 | Windows installer (`install.bat`) | `cd /d "C:\Program Files\LLM-Conversion-Framework"` and then `.venv\Scripts\python.exe -m orchestrator.cli ...` |
-| Development setup (`poetry install`) | `llm-cli ...` |
+| Development setup (`uv sync`) | `llm-cli ...` |
 
 `python -m orchestrator.cli` needs the installation folder on Python's search path. Either run it from that
 folder, or set `PYTHONPATH`. On Linux this alias works from any folder:
@@ -423,7 +423,7 @@ Creates a ZIP file for the board: the model file, the build's manifest and model
 |---|---|
 | `ARTIFACT_NAME` | A build folder as shown by `list-artifacts` (relative to the output folder), or any existing path to a build folder or model file. |
 | `--profile TEXT` | **Required.** The target, e.g. `Rockchip` (used for device options in Docker mode). |
-| `--docker / --no-docker` | Also pack container images (default off). Experimental and not verified in this version; leave it off for a model file. Each image (`image_inference_runtime`, and `image_qdrant` with the knowledge base) must be pinned by its digest (`name@sha256:...`) or built on this computer; an image named only by a tag, such as the default `...:latest`, is refused with the reason, and a failed image export stops the package. |
+| `--docker / --no-docker` | Also pack container images (default off). Experimental and not verified in this version; leave it off for a model file. Each image (`image_inference_runtime`, and `image_qdrant` with the knowledge base) must be pinned by its digest (`name@sha256:...`) or built on this computer; an image named only by a tag that was pulled is refused with the reason, and so is the default `llm-framework/inference:local` (a local name) until you have built it here. A failed image export stops the package. |
 
 Only model files are deployed without Docker; builds that produced several weight files are refused. A package that
 cannot be made prints the reason and exits with 1; the ZIP is written under a temporary name and renamed when it is
@@ -436,7 +436,8 @@ llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0
 ### deploy run
 
 ```
-llm-cli deploy run PACKAGE_PATH --ip IP --user USER [--port 22] [--password TEXT] [--trust-fingerprint TEXT]
+llm-cli deploy run PACKAGE_PATH --ip IP --user USER [--port 22] [--password [VALUE] | --password-stdin]
+                   [--trust-fingerprint TEXT]
                    [--label TEXT]
 ```
 
@@ -450,7 +451,8 @@ a matching `llama-server` command if `llama-server` is installed on the board.
 | `--ip TEXT` | **Required.** The board's IP address. |
 | `--user TEXT` | **Required.** User on the board. |
 | `--port INTEGER` | SSH port (default 22). |
-| `--password TEXT` | Only for the first connection: used once to install the framework's SSH key, never stored. Asked interactively when omitted. A password on the command line ends up in your shell history. |
+| `--password` | Only for the first connection: used once to install the framework's SSH key, never stored. Without a value it is asked with hidden input; when you give nothing on a terminal it is asked too (Enter if the key is already installed). `--password VALUE` still works for scripts but is deprecated and prints a warning: every user sees the value in the process list, and it stays in your shell history. A value that starts with `-` is read as another option: give such a password at the prompt or with `--password-stdin`. |
+| `--password-stdin` | Reads the password from standard input (one line), for example piped from a password manager. Refused on a terminal, where it would be shown while you type; use `--password` there. |
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has exactly this SHA256 fingerprint (for scripts). |
 | `--label TEXT` | Your name for the board in the trusted devices (default: the label it already has, or its address). |
 
@@ -1195,6 +1197,8 @@ to another user. Requests with an `Origin` header (web pages, CORS preflights) a
 the `Host` header must be `127.0.0.1`, `localhost` or `[::1]` with the server's port, and the server keeps at most
 8 sessions, at most 4 of them per token (so one client cannot lock the others out; beyond that a new session is
 refused with status 503), closes a session after 10 minutes without a request, and takes at most 1 MiB per request.
+It ignores `X-Forwarded-For` and `X-Forwarded-Proto` (no local program can claim another address) and writes no
+access log.
 A request that is still open (a wait, an event stream) is closed as soon as its token is revoked or rotated, and so
 are that token's sessions (a session belongs to the token value that opened it; after `rotate` the client opens a
 new one). The old shared token file `mcp_http_token` is no longer accepted.
@@ -1383,7 +1387,8 @@ llm-cli module generate-ai target_hardware_config.txt --provider local
 
 ```
 llm-cli scan [--output TEXT] [--json] [--script]
-llm-cli scan --device HOST --user TEXT [--port N] [--password TEXT] [--trust-fingerprint TEXT] [--label TEXT]
+llm-cli scan --device HOST --user TEXT [--port N] [--password [VALUE] | --password-stdin]
+             [--trust-fingerprint TEXT] [--label TEXT]
              [--output TEXT] [--json]
 llm-cli scan --import FILE [--label TEXT]
 ```
@@ -1431,7 +1436,7 @@ read, 2 for wrong options.
 | `--device HOST` | Probe this board over SSH (host name or IP address) instead of this computer. |
 | `--user TEXT` | SSH user on the board (needed with `--device`). |
 | `--port N` | SSH port of the board (default 22). |
-| `--password TEXT` | Only for the first connection: used once to install the framework's SSH key, never stored (asked interactively when omitted). |
+| `--password`, `--password-stdin` | Only for the first connection: used once to install the framework's SSH key, never stored. As for [deploy run](#deploy-run): without a value asked with hidden input (also when you give nothing on a terminal), or one line from a pipe; `--password VALUE` is deprecated and warns. |
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has this SHA256 fingerprint. |
 | `--label TEXT` | Your name for the board in the profile store (with `--device` or `--import`). |
 | `--import FILE` | Store a board's probe file in the probe store and print its probe id (not together with `--device`). |
@@ -1460,7 +1465,8 @@ llm-cli device list [--json]
 llm-cli device settings DEVICE [--install user|systemd] [--user NAME] [--port N] [--model PATH] [--confirm-sudo]
 llm-cli device runtime plan DEVICE [--json]
 llm-cli device runtime build DEVICE [--jobs N] [--mirror URL] [--yes]
-llm-cli device runtime deploy DEVICE [--user NAME] [--password TEXT] [--bench-model PATH] [--allow-untrusted-model]
+llm-cli device runtime deploy DEVICE [--user NAME] [--password [VALUE] | --password-stdin] [--bench-model PATH]
+                              [--allow-untrusted-model]
 llm-cli device runtime verify DEVICE [--user NAME] [--bench-model PATH] [--allow-untrusted-model]
 llm-cli device runtime status DEVICE [--json]
 llm-cli device runtime prune DEVICE
@@ -1510,8 +1516,9 @@ and `device runtime prune` lists them for you to delete.
 
 Installs the built runtime on the board as the deploy settings say, then checks it there. The board must be the one
 the profile was made with (same host key; a new board at the old address is refused) and already trusted;
-`--password` pairs a board that has no framework key yet (used once, never stored). The SSH user comes from the
-deploy settings or `--user`.
+`--password` pairs a board that has no framework key yet (used once, never stored; without a value it is asked with
+hidden input, `--password-stdin` reads it from a pipe, and `--password VALUE` is deprecated and warns). The SSH user
+comes from the deploy settings or `--user`.
 
 1. The board is inspected: user ID (root is refused), home folder, architecture (it must match the build), init
    system, and the tools the deployment needs. With the systemd setting, `sudo -n true` must work; otherwise nothing

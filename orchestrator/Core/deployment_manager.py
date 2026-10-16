@@ -36,7 +36,9 @@ from orchestrator.utils.validation import validate_ip_address
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
 from orchestrator.utils import ssh_trust
 
-DEFAULT_INFERENCE_IMAGE = "ghcr.io/smilez1985/llm-runtime:latest"
+# A local image name: a package takes it only once it was built on this computer (image_problem); no framework image
+# is published or pulled.
+DEFAULT_INFERENCE_IMAGE = "llm-framework/inference:local"
 # The device runtime's start script, relative to the device user's home (orchestrator/runtime/device/launcher.py).
 DEVICE_START_SCRIPT = ".local/share/llm-framework/llama.cpp/current/llama-server.sh"
 DEFAULT_QDRANT_IMAGE = "qdrant/qdrant:v1.16.0"

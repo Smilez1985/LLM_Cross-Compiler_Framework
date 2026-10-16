@@ -44,7 +44,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 |---|---|
 | Linux-Installer (`install.sh`) | `cd /opt/llm-conversion-framework`, dann `.venv/bin/python -m orchestrator.cli ...` |
 | Windows-Installer (`install.bat`) | `cd /d "C:\Program Files\LLM-Conversion-Framework"`, dann `.venv\Scripts\python.exe -m orchestrator.cli ...` |
-| Entwicklungsumgebung (`poetry install`) | `llm-cli ...` |
+| Entwicklungsumgebung (`uv sync`) | `llm-cli ...` |
 
 `python -m orchestrator.cli` braucht den Installationsordner im Suchpfad von Python. Ruf es entweder in diesem
 Ordner auf oder setze `PYTHONPATH`. Unter Linux funktioniert dieser Alias aus jedem Ordner:
@@ -435,7 +435,7 @@ geschrieben.
 |---|---|
 | `ARTIFACT_NAME` | Ein Build-Ordner, wie ihn `list-artifacts` zeigt (relativ zum Ausgabeordner), oder ein beliebiger vorhandener Pfad zu einem Build-Ordner oder einer Modelldatei. |
 | `--profile TEXT` | **Pflicht.** Das Target, z. B. `Rockchip` (für Geräteoptionen im Docker-Modus). |
-| `--docker / --no-docker` | Zusätzlich Container-Images einpacken (Standard aus). Experimentell und in dieser Version nicht geprüft; für eine Modelldatei aus lassen. Jedes Image (`image_inference_runtime` und mit Wissensdatenbank `image_qdrant`) muss per Digest festgelegt sein (`name@sha256:...`) oder auf diesem Rechner gebaut worden sein; ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte `...:latest`, wird mit Grund abgelehnt, und ein fehlgeschlagener Image-Export bricht das Paket ab. |
+| `--docker / --no-docker` | Zusätzlich Container-Images einpacken (Standard aus). Experimentell und in dieser Version nicht geprüft; für eine Modelldatei aus lassen. Jedes Image (`image_inference_runtime` und mit Wissensdatenbank `image_qdrant`) muss per Digest festgelegt sein (`name@sha256:...`) oder auf diesem Rechner gebaut worden sein; ein gezogenes Image, das nur über ein Tag benannt ist, wird mit Grund abgelehnt, und ebenso das voreingestellte `llm-framework/inference:local` (ein lokaler Name), bis du es hier gebaut hast. Ein fehlgeschlagener Image-Export bricht das Paket ab. |
 
 Ohne Docker werden nur Modelldateien übertragen; Builds mit mehreren Gewichtsdateien werden abgelehnt. Ein Paket,
 das nicht erstellt werden kann, gibt den Grund aus und endet mit 1; das ZIP wird unter einem vorläufigen Namen
@@ -448,7 +448,8 @@ llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0
 ### deploy run
 
 ```
-llm-cli deploy run PACKAGE_PATH --ip IP --user BENUTZER [--port 22] [--password TEXT] [--trust-fingerprint TEXT]
+llm-cli deploy run PACKAGE_PATH --ip IP --user BENUTZER [--port 22] [--password [WERT] | --password-stdin]
+                   [--trust-fingerprint TEXT]
                    [--label TEXT]
 ```
 
@@ -462,7 +463,8 @@ gibt es eine passende `llama-server`-Befehlszeile aus, wenn `llama-server` auf d
 | `--ip TEXT` | **Pflicht.** Die IP-Adresse des Boards. |
 | `--user TEXT` | **Pflicht.** Benutzer auf dem Board. |
 | `--port INTEGER` | SSH-Port (Standard 22). |
-| `--password TEXT` | Nur für die erste Verbindung: wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu hinterlegen, und nie gespeichert. Ohne Angabe wird interaktiv gefragt. Ein Passwort auf der Befehlszeile landet in deinem Shell-Verlauf. |
+| `--password` | Nur für die erste Verbindung: wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu hinterlegen, und nie gespeichert. Ohne Wert wird es verdeckt abgefragt; gibst du in einem Terminal nichts an, wird ebenfalls gefragt (Enter, wenn der Schlüssel schon hinterlegt ist). `--password WERT` funktioniert für Skripte weiter, ist aber veraltet und gibt eine Warnung aus: Jeder Benutzer sieht den Wert in der Prozessliste, und er bleibt in deinem Shell-Verlauf. Ein Wert, der mit `-` beginnt, wird als weitere Option gelesen: Gib ein solches Passwort bei der Abfrage oder mit `--password-stdin` ein. |
+| `--password-stdin` | Liest das Passwort von der Standardeingabe (eine Zeile), etwa aus einem Passwortmanager weitergeleitet. In einem Terminal abgelehnt, weil es dort beim Tippen sichtbar wäre; nimm dort `--password`. |
 | `--trust-fingerprint TEXT` | Einem neuen Board ohne Nachfrage vertrauen, wenn sein Host-Schlüssel genau diesen SHA256-Fingerabdruck hat (für Skripte). |
 | `--label TEXT` | Dein Name für das Board in den vertrauten Geräten (Standard: der Name, den es schon hat, oder seine Adresse). |
 
@@ -1244,7 +1246,9 @@ und kein Token wird angenommen (und der Server startet nicht), solange andere Be
 werden abgelehnt, der `Host`-Header muss `127.0.0.1`, `localhost` oder `[::1]` mit dem Port des Servers sein, und der
 Server hält höchstens 8 Sitzungen, davon höchstens 4 je Token (damit ein Client die anderen nicht aussperren kann;
 darüber hinaus wird eine neue Sitzung mit Status 503 abgelehnt), schließt eine Sitzung nach 10 Minuten ohne Anfrage
-und nimmt höchstens 1 MiB pro Anfrage an. Eine noch offene Anfrage (ein Warten, ein Ereignisstrom) wird geschlossen,
+und nimmt höchstens 1 MiB pro Anfrage an. Er beachtet `X-Forwarded-For` und `X-Forwarded-Proto` nicht (kein lokales
+Programm kann eine andere Adresse vorgeben) und schreibt kein Zugriffsprotokoll. Eine noch offene Anfrage (ein
+Warten, ein Ereignisstrom) wird geschlossen,
 sobald ihr Token widerrufen oder rotiert wird, und ebenso die Sitzungen dieses Tokens (eine Sitzung gehört dem
 Token-Wert, der sie geöffnet hat; nach `rotate` öffnet der Client eine neue). Die alte gemeinsame Token-Datei
 `mcp_http_token` wird nicht mehr akzeptiert.
@@ -1436,7 +1440,8 @@ llm-cli module generate-ai target_hardware_config.txt --provider local
 
 ```
 llm-cli scan [--output TEXT] [--json] [--script]
-llm-cli scan --device HOST --user TEXT [--port N] [--password TEXT] [--trust-fingerprint TEXT] [--label TEXT]
+llm-cli scan --device HOST --user TEXT [--port N] [--password [WERT] | --password-stdin]
+             [--trust-fingerprint TEXT] [--label TEXT]
              [--output TEXT] [--json]
 llm-cli scan --import DATEI [--label TEXT]
 ```
@@ -1485,7 +1490,7 @@ scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
 | `--device HOST` | Dieses Board per SSH untersuchen (Hostname oder IP-Adresse) statt dieses Rechners. |
 | `--user TEXT` | SSH-Benutzer auf dem Board (nötig mit `--device`). |
 | `--port N` | SSH-Port des Boards (Standard 22). |
-| `--password TEXT` | Nur für die erste Verbindung: wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu installieren, und nie gespeichert (wird abgefragt, wenn es fehlt). |
+| `--password`, `--password-stdin` | Nur für die erste Verbindung: wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu installieren, und nie gespeichert. Wie bei [deploy run](#deploy-run): ohne Wert verdeckt abgefragt (auch wenn du in einem Terminal nichts angibst) oder eine Zeile aus einer Weiterleitung; `--password WERT` ist veraltet und warnt. |
 | `--trust-fingerprint TEXT` | Einem neuen Board ohne Nachfrage vertrauen, wenn sein Hostschlüssel diesen SHA256-Fingerabdruck hat. |
 | `--label TEXT` | Deine Bezeichnung für das Board im Profilspeicher (mit `--device` oder `--import`). |
 | `--import DATEI` | Die Probe-Datei eines Boards im Probe-Speicher ablegen und ihre Probe-ID zeigen (nicht zusammen mit `--device`). |
@@ -1516,7 +1521,8 @@ llm-cli device list [--json]
 llm-cli device settings GERÄT [--install user|systemd] [--user NAME] [--port N] [--model PFAD] [--confirm-sudo]
 llm-cli device runtime plan GERÄT [--json]
 llm-cli device runtime build GERÄT [--jobs N] [--mirror URL] [--yes]
-llm-cli device runtime deploy GERÄT [--user NAME] [--password TEXT] [--bench-model PFAD] [--allow-untrusted-model]
+llm-cli device runtime deploy GERÄT [--user NAME] [--password [WERT] | --password-stdin] [--bench-model PFAD]
+                              [--allow-untrusted-model]
 llm-cli device runtime verify GERÄT [--user NAME] [--bench-model PFAD] [--allow-untrusted-model]
 llm-cli device runtime status GERÄT [--json]
 llm-cli device runtime prune GERÄT
@@ -1568,7 +1574,8 @@ sagt, wie viele, und `device runtime prune` listet sie, damit du sie löschst.
 Installiert die gebaute Laufzeit auf dem Board, wie die Deploy-Einstellungen es sagen, und prüft sie dort. Das Board
 muss das sein, mit dem das Profil erstellt wurde (derselbe Hostschlüssel; ein neues Board unter der alten Adresse
 wird abgelehnt), und ihm muss schon vertraut werden; `--password` koppelt ein Board, das noch keinen
-Framework-Schlüssel hat (einmal genutzt, nie gespeichert). Der SSH-Benutzer kommt aus den Deploy-Einstellungen oder
+Framework-Schlüssel hat (einmal genutzt, nie gespeichert; ohne Wert verdeckt abgefragt, `--password-stdin` liest es aus
+einer Weiterleitung, und `--password WERT` ist veraltet und warnt). Der SSH-Benutzer kommt aus den Deploy-Einstellungen oder
 aus `--user`.
 
 1. Das Board wird untersucht: Benutzer-ID (root wird abgelehnt), Home-Ordner, Architektur (sie muss zum Build

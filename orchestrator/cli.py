@@ -4064,8 +4064,9 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
     
     docker_config = {"use_docker": docker}
     if docker:
-        # TODO: Get real image name from config/profile logic
-        docker_config["image_name"] = "ghcr.io/llm-framework/inference-node:latest"
+        # TODO: Get real image name from config/profile logic (the package itself takes image_inference_runtime)
+        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE
+        docker_config["image_name"] = DEFAULT_INFERENCE_IMAGE
     
     from orchestrator.Core.deployment_manager import DeployError
     try:
@@ -4079,23 +4080,69 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
     console.print(f"[bold green]Package created successfully![/bold green]")
     console.print(f"Path: {pkg_path}")
 
+
+# `--password` without a value: asked with hidden input. A value on the command line still works for scripts, but
+# every user sees it in the process list, and it stays in the shell history.
+ASK_PASSWORD = "\0ask"
+
+
+def device_password_options(what: str):
+    """--password [VALUE] and --password-stdin of the three commands that log in to a device once with a password."""
+    def add(command):
+        command = click.option('--password-stdin', 'password_stdin', is_flag=True,
+                               help="Read the password from standard input (one line, e.g. piped from a password "
+                                    "manager)")(command)
+        return click.option('--password', default=None, is_flag=False, flag_value=ASK_PASSWORD, metavar='[VALUE]',
+                            help=f"{what}: used once to install the framework's SSH key, never stored. Without a "
+                                 "value it is asked with hidden input; a value here is deprecated (visible in the "
+                                 "process list and your shell history)")(command)
+    return add
+
+
+def _device_password(password: Optional[str], from_stdin: bool, ask_when_omitted: bool = False) -> Optional[str]:
+    """The one-time device password, or None (the framework's key logs in). Asked with hidden input for --password
+    without a value (and, with ask_when_omitted, on a terminal when nothing was given); one line of a piped stdin
+    for --password-stdin; a value on the command line still works but warns."""
+    if from_stdin:
+        if password is not None:
+            raise click.UsageError("Use either --password or --password-stdin, not both.")
+        if sys.stdin.isatty():
+            raise click.UsageError("--password-stdin reads the password from a pipe; on a terminal use --password "
+                                   "without a value (it is asked with hidden input).")
+        line = sys.stdin.readline().rstrip("\r\n")
+        if not line:
+            raise click.UsageError("No password on standard input.")
+        return line
+    if password == ASK_PASSWORD:
+        return click.prompt("Password", hide_input=True)
+    if password is None:
+        if ask_when_omitted and sys.stdin.isatty():
+            return click.prompt("Password (Enter if the framework key is already installed)",
+                                default="", hide_input=True, show_default=False) or None
+        return None
+    _say("The password is visible in the process list and your shell history; use --password without a value or "
+         "--password-stdin.", err=True, fg="yellow")
+    return password
+
+
 @deploy.command('run')
 @click.argument('package_path', type=click.Path(exists=True))
 @click.option('--ip', required=True, help="Target IP")
 @click.option('--user', required=True, help="Target Username")
 @click.option('--port', default=22, show_default=True, type=int)
-@click.option('--password', default=None, help="Only for the first connection: used once to install the "
-              "framework's SSH key, never stored (asked interactively when omitted)")
+@device_password_options("Only for the first connection (asked when omitted on a terminal)")
 @click.option('--trust-fingerprint', default=None,
               help="Trust a new device non-interactively if its host key has this SHA256 fingerprint")
 @click.option('--label', default=None, help="Your name for the device (shown to you and to AI tools; default: the "
               "label it already has, or its address)")
 @pass_context
-def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, trust_fingerprint, label):
+def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, password_stdin, trust_fingerprint,
+               label):
     """
     Upload and execute a deployment package on the target.
     """
     from orchestrator.utils import ssh_trust
+    password = _device_password(password, password_stdin)  # read before any question: stdin may be the pipe
     ctx.require_framework()
     dep_mgr = ctx.deployment_manager
     if not dep_mgr:
@@ -4123,10 +4170,9 @@ def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, tr
             console.print("[red]Device not trusted; nothing was deployed.[/red]")
             sys.exit(1)
         dep_mgr.trust_host(ip, key, port)
-    if password is None and sys.stdin.isatty():
-        password = click.prompt("Password (Enter if the framework key is already installed)",
-                                default="", hide_input=True, show_default=False) or None
-        
+    if password is None and not password_stdin:
+        password = _device_password(None, False, ask_when_omitted=True)
+
     with console.status(f"Deploying to {user}@{ip}...", spinner="earth"):
         success = dep_mgr.deploy_artifact(
             artifact_path=Path(package_path),
@@ -4369,9 +4415,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
         console.print("[red]Probing a device needs the 'paramiko' package.[/red]")
         sys.exit(1)
     key = _trust_device(state_dir, host, port, trust_fingerprint)
-    if password is None and sys.stdin.isatty():
-        password = click.prompt("Password (Enter if the framework key is already installed)",
-                                default="", hide_input=True, show_default=False) or None
+    if password is None:
+        password = _device_password(None, False, ask_when_omitted=True)
     try:
         client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
     except Exception as e:  # authentication, network, a host key that changed meanwhile
@@ -4418,8 +4463,7 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
 @click.option('--device', default=None, help="Probe this device over SSH instead of this computer (host or IP)")
 @click.option('--user', default=None, help="SSH user on the device (with --device)")
 @click.option('--port', default=22, show_default=True, type=int, help="SSH port of the device (with --device)")
-@click.option('--password', default=None, help="Only for the first connection: used once to install the "
-              "framework's SSH key, never stored (asked interactively when omitted)")
+@device_password_options("With --device, only for the first connection (asked when omitted on a terminal)")
 @click.option('--trust-fingerprint', default=None,
               help="Trust a new device non-interactively if its host key has this SHA256 fingerprint")
 @click.option('--label', default=None, help="Your name for the device in the profile store (with --device or "
@@ -4428,8 +4472,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
               help="Import a board's probe file (target_hardware_config.txt copied from the board) into the probe "
                    "store and print its probe id, which AI clients and Ditto use")
 @pass_context
-def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, port, password, trust_fingerprint,
-             label, import_file):
+def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, port, password, password_stdin,
+             trust_fingerprint, label, import_file):
     """Run the hardware probe on this computer, or with --device on a board over SSH, and store the profile
     (exit code 1 if the probe fails or writes no file). With --import, store a board's probe file instead."""
     from orchestrator.runtime.probe_service import HardwareProbes, ProbeError
@@ -4445,6 +4489,7 @@ def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, p
         _scan_import(ctx, probes, import_file, label)
         return
     if device:
+        password = _device_password(password, password_stdin)
         _scan_device(store, state_dir, output_file, as_json, device, user, port, password, trust_fingerprint, label,
                      ctx=ctx)
         return
@@ -4948,16 +4993,16 @@ def device_runtime_prune(ctx: FrameworkContext, device_name: str):
 @device_runtime.command('deploy')
 @click.argument('device_name', metavar='DEVICE')
 @click.option('--user', 'ssh_user', default=None, help='SSH user for this deployment (default: the deploy settings)')
-@click.option('--password', default=None, help="Only for a device that is not paired yet: used once to install the "
-              "framework's SSH key, never stored")
+@device_password_options("Only for a device that is not paired yet")
 @click.option('--bench-model', default=None, metavar='PATH',
               help='A model file on the device for the short llama-bench check (relative: in the home folder)')
 @click.option('--allow-untrusted-model', is_flag=True,
               help='Run the short benchmark also with a model that is not a catalog model (written to the audit log)')
 @pass_context
 def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Optional[str], password: Optional[str],
-                          bench_model: Optional[str], allow_untrusted_model: bool):
+                          password_stdin: bool, bench_model: Optional[str], allow_untrusted_model: bool):
     """Install the built runtime on the device over SSH as the deploy settings say, then check it there"""
+    password = _device_password(password, password_stdin)
     from orchestrator.runtime.build.store import BuildStore
     from orchestrator.runtime.device.devices import split_address
     from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, deploy_runtime, read_facts,

@@ -69,11 +69,10 @@ def mode(path) -> int:
 
 
 def test_llmcf_is_the_same_program_as_llm_cli():
-    """Round 7 item 11: the console script llmcf next to llm-cli, both the same CLI group (in the PEP 621 table or in
-    Poetry's, whichever the project file uses)."""
+    """Round 7 item 11: the console script llmcf next to llm-cli, both the same CLI group (PEP 621 [project.scripts])."""
     import tomllib
     data = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
-    scripts = data.get("project", {}).get("scripts") or data["tool"]["poetry"]["scripts"]
+    scripts = data["project"]["scripts"]
     assert scripts["llmcf"] == scripts["llm-cli"] == "orchestrator.cli:cli"
     from orchestrator import cli as cli_module
     assert "mojo" in cli_module.cli.commands and "doctor" in cli_module.cli.commands
