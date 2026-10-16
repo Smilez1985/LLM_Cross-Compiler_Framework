@@ -8,6 +8,7 @@ Liest YAML-Definitionen und importiert Hardware-Probes.
 """
 
 import yaml
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -55,6 +56,49 @@ def resolve_target_name(name: Optional[str], folders: Dict[str, Path]) -> Option
             if matches(folder.name, name):
                 return tid
     return None
+
+
+@dataclass(frozen=True)
+class TargetCheck:
+    """The result of checking one target (`llm-cli targets validate`, the GUI's Check target): whether it loads, and
+    whether its capabilities block passes the schema. `errors` are (field, message) pairs, the field written as in
+    target.yml (capabilities.formats.gguf...). A target without a capabilities block loads but its boards, formats
+    and quantizations are not checked before a build (`declared` False)."""
+    name: str                              # as asked
+    target_id: Optional[str] = None        # the registered id; None when no loadable target has that name
+    declared: bool = False                 # it has a capabilities block
+    errors: Tuple[Tuple[str, str], ...] = ()
+    boards: int = 0                        # boards of a valid capabilities block
+    formats: Tuple[str, ...] = ()          # formats of a valid capabilities block
+
+    @property
+    def found(self) -> bool:
+        return self.target_id is not None
+
+    @property
+    def valid(self) -> bool:
+        """It loads and nothing in it fails the schema (also true without a capabilities block)."""
+        return self.found and not self.errors
+
+    @property
+    def no_capabilities(self) -> bool:
+        return self.found and not self.declared
+
+
+def check_capabilities(name: str, target_id: str, data: Dict[str, Any]) -> TargetCheck:
+    """Checks the capabilities block of a target's data (target.yml) against the schema."""
+    from pydantic import ValidationError
+    if "capabilities" not in data:
+        return TargetCheck(name, target_id)
+    try:
+        caps = TargetCapabilities.model_validate(data["capabilities"])
+    except ValidationError as e:
+        errors = []
+        for err in e.errors():
+            where = ".".join(str(part) for part in err.get("loc", ())) or "capabilities"
+            errors.append((f"capabilities.{where}", str(err.get("msg", ""))))
+        return TargetCheck(name, target_id, declared=True, errors=tuple(errors))
+    return TargetCheck(name, target_id, declared=True, boards=len(caps.boards), formats=tuple(caps.formats))
 
 
 class TargetManager:
@@ -127,6 +171,25 @@ class TargetManager:
         """Validated capabilities of a target (None if it declares none or they are invalid)."""
         if not self._initialized: self.initialize()
         return self._capabilities.get(target_id)
+
+    def validate(self, name: str, reread: bool = False) -> TargetCheck:
+        """Checks that the target `name` (id or folder name, any letter case) loads and that its capabilities block
+        passes the schema: the one check of `llm-cli targets validate` and the GUI. reread: its target.yml is read
+        from disk again first (the GUI checks a file the person may have just edited); a file that no longer loads
+        then counts as not found."""
+        if not self._initialized: self.initialize()
+        tid = self.resolve(name)
+        if tid is None:
+            return TargetCheck(name)
+        data = self._targets.get(tid) or {}
+        if reread:
+            folder = self._folders.get(tid)
+            fresh = read_target_folders(folder.parent, self.logger) if folder is not None else {}
+            match = next((d for f, d in fresh.values() if f == folder), None)
+            if match is None:
+                return TargetCheck(name)
+            data = match
+        return check_capabilities(name, tid, data)
 
     def list_hardware_profiles(self) -> List[str]:
         """Target IDs selectable as deployment profiles (see get_docker_flags_for_profile)."""
