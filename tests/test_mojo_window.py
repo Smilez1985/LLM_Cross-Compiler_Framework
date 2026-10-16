@@ -441,6 +441,42 @@ def test_check_a_board_lets_the_person_pick_any_trusted_board(qapp, tmp_path, mo
         window.close()
 
 
+def test_check_a_board_lets_the_person_pick_each_of_two_boards_that_read_the_same(qapp, tmp_path, monkeypatch,
+                                                                                  engine):
+    """A board set up again keeps its address and often its name but has a new host key, so a second trusted record
+    (a new device ID) reads the same as the first. `llmcf mojo --board` then lists both with their device IDs; the GUI
+    names the device ID too, so the person can pick each one by mouse (the list is not the first one twice)."""
+    from PySide6.QtWidgets import QInputDialog
+
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    engine.report, engine.offered = MojoReport([]), []
+    state = tmp_path / "state"
+    state.mkdir()
+    board(state, "192.0.2.11", label="Garage board")
+    board(state, "192.0.2.11", label="Garage board")   # set up again: a new host key, the same name and address
+    board(state, "192.0.2.12", label="Desk")
+    first, second = [d for d in TrustedDevices(state).list() if d.label == "Garage board"]
+    offered = []
+
+    def get_item(parent, title, text, items, current=0, editable=True):
+        offered.append(list(items))
+        return items[pick], True
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(get_item))
+    window = opened(qapp, framework_at(state))
+    started = []
+    monkeypatch.setattr(window, "check_board", lambda device_id, label: started.append((device_id, label)) or True)
+    try:
+        for pick, device in ((1, first), (2, second)):
+            assert window.pick_board() == device.device_id
+        items = offered[0]
+        assert len(set(items)) == len(items) == 3, "each trusted board can be told apart"
+        assert items[0] == "Desk (192.0.2.12)", "a board that reads like no other keeps its label and address"
+        assert items[1] == f"Garage board (192.0.2.11, device ID {first.device_id})"
+        assert started == [(first.device_id, "Garage board"), (second.device_id, "Garage board")]
+    finally:
+        window.close()
+
+
 def test_the_deployment_tabs_check_this_board(qapp, window_framework, answers, monkeypatch):
     paramiko = pytest.importorskip("paramiko")
     from orchestrator.gui.deployment_window import DeploymentWindow
