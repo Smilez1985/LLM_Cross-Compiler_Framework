@@ -9,6 +9,7 @@ vector (Qdrant applies the IDF), and queries fuse both rankings with Reciprocal 
 
 import base64
 import gzip
+import io
 import json
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,10 @@ DENSE = "dense"
 SPARSE = "bm25"
 SCHEMA_VERSION = 2
 SNAPSHOT_FORMAT = "llm-framework-knowledge-snapshot"
+# The size estimate of a snapshot before it is written (DECISIONS, eighth round, answer 2): this many points are
+# compressed as the file holds them and scaled to the whole collection, plus a margin for points that compress worse.
+EXPORT_SAMPLE = 64
+EXPORT_MARGIN = 1.2
 
 
 class KnowledgeStore:
@@ -204,26 +209,49 @@ class KnowledgeStore:
 
     # --- snapshots (portable files; local Qdrant has no snapshot API) ---
 
+    def _snapshot_header(self) -> str:
+        return json.dumps({"format": SNAPSHOT_FORMAT, "version": 1, "collection": self.collection,
+                           "embedding_model": self.model_id, "dim": self.dim,
+                           "created": datetime.now().isoformat()}) + "\n"
+
+    @staticmethod
+    def _snapshot_line(record) -> str:
+        vectors = record.vector if isinstance(record.vector, dict) else {}
+        item = {"id": str(record.id), "payload": record.payload or {}}
+        if vectors.get(DENSE) is not None:
+            item["dense"] = base64.b64encode(np.asarray(vectors[DENSE], dtype="<f4").tobytes()).decode()
+        if vectors.get(SPARSE) is not None:
+            item["sparse"] = {"indices": list(vectors[SPARSE].indices), "values": list(vectors[SPARSE].values)}
+        return json.dumps(item) + "\n"
+
     def export_file(self, path: Path) -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
         count = 0
         with gzip.open(tmp, "wt", encoding="utf-8") as f:
-            f.write(json.dumps({"format": SNAPSHOT_FORMAT, "version": 1, "collection": self.collection,
-                                "embedding_model": self.model_id, "dim": self.dim,
-                                "created": datetime.now().isoformat()}) + "\n")
+            f.write(self._snapshot_header())
             for record in self.records(with_vectors=True):
-                vectors = record.vector if isinstance(record.vector, dict) else {}
-                item = {"id": str(record.id), "payload": record.payload or {}}
-                if vectors.get(DENSE) is not None:
-                    item["dense"] = base64.b64encode(np.asarray(vectors[DENSE], dtype="<f4").tobytes()).decode()
-                if vectors.get(SPARSE) is not None:
-                    item["sparse"] = {"indices": list(vectors[SPARSE].indices),
-                                      "values": list(vectors[SPARSE].values)}
-                f.write(json.dumps(item) + "\n")
+                f.write(self._snapshot_line(record))
                 count += 1
         tmp.replace(path)
         return count
+
+    def export_estimate(self, sample: int = EXPORT_SAMPLE) -> int:
+        """The bytes export_file would write, estimated before anything is written: the first `sample` points are
+        compressed exactly as the file holds them, scaled to every point, plus a margin (EXPORT_MARGIN). 0 when the
+        collection is empty."""
+        count = self.count()
+        if not count:
+            return 0
+        buffer, seen = io.BytesIO(), 0
+        with gzip.GzipFile(fileobj=buffer, mode="wb") as f:
+            for record in self.records(with_vectors=True):
+                f.write(self._snapshot_line(record).encode("utf-8"))
+                seen += 1
+                if seen >= sample:
+                    break
+        per_point = len(buffer.getvalue()) / max(seen, 1)
+        return int(per_point * count * EXPORT_MARGIN) + len(self._snapshot_header()) + 4096
 
     def restore_file(self, path: Path) -> int:
         """Replaces the collection with a snapshot; the whole file is checked before anything is deleted."""

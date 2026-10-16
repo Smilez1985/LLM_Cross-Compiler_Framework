@@ -297,6 +297,8 @@ class CommunityManager:
         self.targets_dir = resolve(targets) if callable(resolve) else self.app_root / str(targets)
         self._session = session
         self._keys = keys  # tests pass their own; otherwise configs/community_keys.yml
+        # The last knowledge pack import (sync_knowledge_base): the snapshot taken first, or why nothing was imported
+        self.last_sync_problem, self.last_sync_snapshot = "", None
         # Directories are created when something is written, not at every CLI/GUI start.
 
     def _cfg(self, key: str, default: Any = None) -> Any:
@@ -862,7 +864,13 @@ class CommunityManager:
     # --- knowledge base ---------------------------------------------------------------------------------------
     def sync_knowledge_base(self, rag_manager=None) -> int:
         """Imports the knowledge packs not imported yet (also those installed while the knowledge base was off;
-        the framework calls this when the knowledge base starts). Returns the number of pages imported."""
+        the framework calls this when the knowledge base starts). Returns the number of pages imported.
+
+        Before the first page is imported, the knowledge base is saved as a snapshot (pre_pack_<time>), so the import
+        can be undone (eighth round, N13). When that snapshot does not fit on the disk, nothing is imported (the packs
+        stay installed and are imported once there is room); `last_sync_problem` says why, `last_sync_snapshot` names
+        the snapshot taken."""
+        self.last_sync_problem, self.last_sync_snapshot = "", None
         if rag_manager is None and hasattr(self.framework, "get_component"):
             rag_manager = self.framework.get_component("rag_manager")
         if not rag_manager:
@@ -870,10 +878,20 @@ class CommunityManager:
 
         imported_count = 0
         files = sorted(self.knowledge_dir.glob("*.json")) + sorted(self.knowledge_dir.glob(f"*/{KNOWLEDGE_FILE}"))
-        for json_file in files:
-            # An installed pack folder stays unchanged (its content is verified); its marker lives next to it.
-            marker = json_file.with_suffix(".imported") if json_file.parent == self.knowledge_dir else \
-                self.knowledge_dir / f"{json_file.parent.name}.imported"
+        # An installed pack folder stays unchanged (its content is verified); its marker lives next to it.
+        pending = [(f, f.with_suffix(".imported") if f.parent == self.knowledge_dir else
+                    self.knowledge_dir / f"{f.parent.name}.imported") for f in files]
+        pending = [(f, marker) for f, marker in pending if not marker.exists()]
+        if pending and callable(getattr(rag_manager, "create_snapshot", None)):
+            from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom
+            try:
+                self.last_sync_snapshot = rag_manager.create_snapshot(f"pre_pack_{int(time.time())}",
+                                                                      "a knowledge pack is imported")
+            except SnapshotNoRoom as e:  # no snapshot, no import: there is no "continue anyway"
+                self.last_sync_problem = str(e)
+                self.logger.warning(f"Knowledge packs not imported: {e}")
+                return 0
+        for json_file, marker in pending:
             try:
                 if marker.exists():
                     continue

@@ -142,7 +142,7 @@ Everything personal lives in the Docker volume `lcf-data`, mounted at `/data`:
 |---|---|---|
 | `/data/home` | Personal state: tool permissions, audit log, credential vault, SSH key and known devices, MCP tokens, chat history, knowledge base | `LLM_FRAMEWORK_HOME` |
 | `/data/config` | `config.yml` | `LLM_FRAMEWORK_CONFIG_DIR` |
-| `/data/output`, `/data/cache`, `/data/models` | Builds, cache, downloaded models | `LLM_FRAMEWORK_OUTPUT_DIR`, `..._CACHE_DIR`, `..._MODELS_DIR` |
+| `/data/output`, `/data/builds`, `/data/cache`, `/data/models` | Finished models (the output folder), builds not saved yet, cache, downloaded models | `LLM_FRAMEWORK_OUTPUT_DIR`, `..._BUILD_DIR`, `..._CACHE_DIR`, `..._MODELS_DIR` |
 | `/data/datasets`, `/data/logs` | Calibration datasets, log files | `LLM_FRAMEWORK_DATASETS_DIR`, `..._LOGS_DIR` |
 | `/data/huggingface`, `/data/xdg-cache` | Hugging Face downloads and other caches | `HF_HOME`, `XDG_CACHE_HOME` |
 

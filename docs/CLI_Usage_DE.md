@@ -21,7 +21,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [doctor](#doctor): Gesundheitscheck
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
-- [build](#build): `start`, `status`
+- [build](#build): `start`, `save`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
@@ -30,7 +30,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): Hardware-Probe
 - [device](#device): `list`, `settings`, `runtime`
-- [config](#config): `show`, `repos`
+- [config](#config): `show`, `output-folder`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
 - [trash](#trash): `list`, `restore`, `empty`
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
@@ -121,6 +121,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen (unveröffentlicht) |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
+| `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern (unveröffentlicht) |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
 | `ditto login` / `ditto logout` | Ditto bei einem Anbieter anmelden (der Schlüssel verdeckt abgefragt, von stdin oder aus einer Umgebungsvariable, vor dem Speichern geprüft) / abmelden |
 | `ditto auth status/methods/storage/rotate-key` | Anmeldestand aller Anbieter / die Anmeldeverfahren / wie der Tresor geschützt ist / ein neuer Schlüssel für den Tresor |
@@ -138,6 +139,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `device list` / `device settings` | Die untersuchten Boards / wie die Laufzeit auf einem Board installiert wird (Startskript oder systemd), vor einem Deployment entschieden |
 | `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
+| `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden (unveröffentlicht) |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
 | `zoo export` / `zoo keys` | Ein signiertes Paket aus deinem Target, Build oder deiner Wissensbasis machen (und einen Pull-Request öffnen) / deine öffentlichen Schlüssel zeigen |
@@ -188,9 +190,13 @@ llm-cli knowledge snapshots delete NAME...
 llm-cli knowledge snapshots export NAME... --to ORDNER
 ```
 
-Unveröffentlicht. Vor jedem Deep Ingest, jeder Indexierung des eigenen Codes des Frameworks und jeder
-Wiederherstellung wird die Wissensbasis als Snapshot in `knowledge_snapshots/` des persönlichen Ordners gesichert,
-damit sich die Änderung rückgängig machen lässt. `list` (die Vorgabe) zeigt jeden Snapshot, den ältesten zuerst, mit
+Unveröffentlicht. Vor jedem Deep Ingest, jeder Indexierung des eigenen Codes des Frameworks, jeder
+Wiederherstellung und jedem Import eines Wissens-Packs wird die Wissensbasis als Snapshot in `knowledge_snapshots/`
+des persönlichen Ordners gesichert, damit sich die Änderung rückgängig machen lässt. Bevor ein Snapshot angelegt
+wird, wird seine Größe geschätzt: passt er nicht auf die Platte (neben der Reserve, die immer frei bleibt), wird kein
+Snapshot angelegt, und die Änderung läuft auch nicht. `list` endet mit dem, was die Snapshots im Vergleich zum
+freien Platz dieser Platte belegen, und sagt, wenn der nächste Snapshot (etwa so groß wie der neueste) nicht mehr
+passen oder wenig Platz übrig lassen würde. `list` (die Vorgabe) zeigt jeden Snapshot, den ältesten zuerst, mit
 Namen, Zeitpunkt, Größe, was er ist (zum Beispiel "backup of the knowledge base taken before a Deep Ingest") und
 vollem Pfad. Es löscht nichts. Die GUI zeigt dieselbe Liste unter **Tools > Knowledge Snapshots...**, mit einem
 Kästchen für jeden (keines angehakt).
@@ -272,7 +278,7 @@ Fehlendes Board und fehlende Quantisierung werden mit den Standardwerten des Tar
 | `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Ausgabeformat (Standard `gguf`). Die Liste ist länger als das, was ein Target unterstützt; Rockchip nimmt `gguf`, `rkllm` und `rknn`. |
 | `-b, --board TEXT` | Board der Target-Familie, z. B. `rk3588`, `rk3576`, `rk3566`. Standard: das Standard-Board des Targets (Rockchip: `rk3588`). Groß- und Kleinschreibung spielt keine Rolle. |
 | `-q, --quantization TEXT` | Quantisierung, z. B. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Standard: der Standard des Formats für das Board. Gängige Schreibweisen wie `INT8` werden übersetzt. |
-| `-o, --output-dir TEXT` | Ausgabeordner, relativ zum aktuellen Ordner. Standard: `output/build_<Datum>_<Uhrzeit>` in der Installation. |
+| `-o, --output TEXT` | Ordner, in dem das fertige Modell (Golden-Artefakt) gespeichert wird, relativ zum aktuellen Ordner; er wird angelegt, wenn es ihn noch nicht gibt. Standard: der Ausgabeordner ([`config output-folder`](#config-output-folder), `~/llmcf/output`). An einem Terminal ohne diese Angabe wirst du gefragt, mit dem Ausgabeordner als Vorgabe; `-` lässt den Build im Build-Ordner des Frameworks ([`build save`](#build-save) speichert ihn später). Ein Systemordner oder der Programmordner des Frameworks wird abgelehnt (Exit-Code 2). `--output-dir` ist der alte Name und geht weiter. |
 | `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimierungsstufe (Standard `balanced`), wird den Build-Skripten als `OPTIMIZATION_LEVEL` übergeben. Die Rockchip-Skripte werten sie nicht aus. |
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in der Build-Warteschlange dieses Prozesses (Standard `normal`). |
 | `--parallel` | Veraltet und in `--help` ausgeblendet: Hat keine Wirkung (ein Aufruf startet einen Build) und gibt eine Warnung aus. |
@@ -293,7 +299,9 @@ Verhalten:
   Manuelle Schritte werden nur angezeigt.
 - Ergebnisse: `<Ausgabeordner>/<Target>/<Modell>/<Quantisierung>/` mit der Modelldatei, `build_info.json` und
   `Model_Card.md`, dazu ein ZIP davon neben diesem Ordner. Sie erscheinen dort erst, wenn der Build abgeschlossen
-  ist; ein abgebrochener oder gescheiterter Build hinterlässt dort keine Dateien.
+  ist; ein abgebrochener oder gescheiterter Build hinterlässt dort keine Dateien. Ein früherer fertiger Build mit
+  diesem Namen wird nie ersetzt: der neue kommt daneben (`Q4_K_M-2`). Ein Ordner, den du außerhalb des
+  Ausgabeordners gewählt hast, bleibt in `deploy list-artifacts` aufgelistet.
 - Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token`. Gesendet wird nur das
   im Framework gespeicherte Token; ein Token in `HF_TOKEN` oder aus `hf auth login` wird nie verwendet.
 - Ein Hugging-Face-Modell wird nach `<cache_dir>/models/hf/<owner>--<name>/<commit>/` heruntergeladen, ein Ordner pro
@@ -326,6 +334,28 @@ llm-cli build start -m ./detector.onnx -t Rockchip -f rknn -b rk3588 -q i8 --dat
 
 # Ergebnisse in einen Ordner deiner Wahl
 llm-cli build start -m ./my-model -t Rockchip -o ./builds -F
+```
+
+### build save
+
+```
+llm-cli build save ARTIFACT [--to ORDNER]
+```
+
+Unveröffentlicht. Speichert einen fertigen Build, der im Build-Ordner des Frameworks wartet (ein GUI-Build, den du nicht
+gespeichert hast, oder `build start -o -`), genau wie **Speichern…** im Tab „Deployment“ der GUI. `ARTIFACT` ist sein
+Ordner, wie ihn `deploy list-artifacts` zeigt (`Rockchip/SmolLM2-135M-Instruct/Q4_0`), sein voller Pfad oder seine ID
+(`a_...`). Ohne `--to` kommt er in den Ausgabeordner; an einem Terminal wirst du gefragt, mit dem Ausgabeordner als
+Vorgabe.
+
+Auf derselben Platte wird der Build verschoben (umbenannt, nichts kopiert). Auf eine andere Platte wird jede Datei
+kopiert, jede Kopie wird per sha256 mit ihrem Original verglichen (eine Modelldatei auch mit dem Hash in ihrem
+Manifest), und erst dann wird die Kopie im Build-Ordner entfernt. Vor dem Kopieren wird der freie Platz geprüft. Ein
+belegter Name wird nie überschrieben (`-2`). Schlägt eine Prüfung fehl, wird nichts verschoben (Exit-Code 1). Ein
+Systemordner, der Programmordner des Frameworks, sein Build-Ordner und sein persönlicher Ordner werden abgelehnt.
+
+```bash
+llm-cli build save Rockchip/SmolLM2-135M-Instruct/Q4_0 --to /mnt/models
 ```
 
 So sieht eine abgelehnte Anfrage aus:
@@ -375,8 +405,10 @@ sagt eine Zeile, für wie viele gescheiterte Builds es solche Vorschläge gibt.
 llm-cli deploy list-artifacts
 ```
 
-Listet die fertigen Builds im eingestellten Ausgabeordner auf, gelesen aus ihren Manifesten: Ordner (relativ zum
-Ausgabeordner), Modell, Format, Quantisierung, Board und Größe.
+Listet die fertigen Builds auf, gelesen aus ihren Manifesten: im Ausgabeordner, im Build-Ordner des Frameworks („noch
+nicht gespeichert“: GUI-Builds, die du nicht gespeichert hast, und jeder frühere Build, der bleibt, wo er ist) und in
+Ordnern, in die du Builds gespeichert hast. Jede Zeile zeigt den Ordner (relativ zu seinem Ordner), wo er liegt, Modell,
+Format, Quantisierung, Board, Größe und den vollen Pfad.
 
 ### deploy package
 
@@ -390,7 +422,7 @@ geschrieben.
 
 | Argument / Option | Bedeutung |
 |---|---|
-| `ARTIFACT_NAME` | Ein Build-Ordner, wie ihn `list-artifacts` zeigt (relativ zum Ausgabeordner), oder ein beliebiger vorhandener Pfad zu einem Build-Ordner oder einer Modelldatei. |
+| `ARTIFACT_NAME` | Ein Build-Ordner, wie ihn `list-artifacts` zeigt (relativ zum Ausgabeordner oder zum Build-Ordner des Frameworks), oder ein beliebiger vorhandener Pfad zu einem Build-Ordner oder einer Modelldatei. |
 | `--profile TEXT` | **Pflicht.** Das Target, z. B. `Rockchip` (für Geräteoptionen im Docker-Modus). |
 | `--docker / --no-docker` | Zusätzlich Container-Images einpacken (Standard aus). Experimentell und in dieser Version nicht geprüft; für eine Modelldatei aus lassen. Jedes Image (`image_inference_runtime` und mit Wissensdatenbank `image_qdrant`) muss per Digest festgelegt sein (`name@sha256:...`) oder auf diesem Rechner gebaut worden sein; ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte `...:latest`, wird mit Grund abgelehnt, und ein fehlgeschlagener Image-Export bricht das Paket ab. |
 
@@ -399,7 +431,7 @@ das nicht erstellt werden kann, gibt den Grund aus und endet mit 1; das ZIP wird
 geschrieben und erst umbenannt, wenn es vollständig ist.
 
 ```bash
-llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
+llm-cli deploy package Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
 ```
 
 ### deploy run
@@ -1607,6 +1639,23 @@ Ordner als Labels) und ändern gewöhnliche mit `update_settings`, das dich mit 
 Änderung in der `config.yml` speichert. Einstellungen, die begrenzen, was eine KI darf, lassen sich so nur
 verschärfen; Berechtigungen, Geheimnisse, den Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner änderst
 nur du, hier oder in der GUI.
+
+### config output-folder
+
+```
+llm-cli config output-folder [ORDNER]
+```
+
+Unveröffentlicht. Ohne `ORDNER` zeigt es den Ausgabeordner (Einstellung `output_dir`, Standard `~/llmcf/output`) und
+den Build-Ordner des Frameworks (Einstellung `build_dir`). Mit `ORDNER` legt es den Ausgabeordner fest und speichert
+`config.yml`, zum Beispiel auf einen Ordner auf einer großen zweiten Platte; der Ordner wird angelegt, wenn es ihn
+noch nicht gibt. Ein Systemordner, der Programmordner des Frameworks, sein Build-Ordner und sein persönlicher Ordner
+werden abgelehnt (Exit-Code 2). Builds im alten Ordner bleiben, wo sie sind, und werden weiter aufgelistet. Eine KI
+kann diese Einstellung nicht ändern.
+
+```bash
+llm-cli config output-folder /mnt/models/llmcf
+```
 
 ### config repos
 

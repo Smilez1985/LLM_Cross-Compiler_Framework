@@ -400,9 +400,17 @@ class TestBuildServiceValidate:
         work = tmp_path / "elsewhere"
         work.mkdir()
         monkeypatch.chdir(work)
+        service.framework.config.set("output_dir", "output")  # a relative output folder: the installation's
         service.start_build(build_in(board="rk3588"))
         req = service.framework.orchestrator.submitted[0]
         assert Path(req.output_base_dir) == Path(service.framework.info.installation_path) / "output"
+
+    def test_an_ai_callers_build_goes_to_the_persons_output_folder(self, service):
+        """Eighth round, answer 3: without a person at the GUI the golden artifact goes to the output folder (default
+        ~/llmcf/output), never to the framework's build folder."""
+        service.start_build(build_in(board="rk3588"))
+        req = service.framework.orchestrator.submitted[0]
+        assert Path(req.output_base_dir) == Path(os.environ["HOME"]) / "llmcf" / "output"
 
     def test_start_build_expands_home_in_output_dir(self, service):
         service.framework.config.set("output_dir", "~/llm-builds")
@@ -630,19 +638,32 @@ class TestCliBuildStart:
         assert first.output_base_dir == str((cli.work / "results").resolve())
         assert second.output_base_dir == str(Path(os.environ["HOME"]) / "llm-out")
 
-    def test_default_output_lies_under_the_installations_output_dir(self, cli):
+    def test_default_output_is_the_output_folder(self, cli):
+        """Eighth round, answer 3: without --output and without a terminal the golden artifact goes to the output
+        folder (default ~/llmcf/output); a later build next to an earlier one gets its own folder (the builder)."""
         result = build_start(cli)
         assert result.code == 0, result.out
         out = Path(cli.submitted[0].output_base_dir)
-        install_output = Path(cli.framework.info.installation_path) / "output"
-        assert out.parent == install_output and out.name.startswith("build_")
+        assert out == Path(os.environ["HOME"]) / "llmcf" / "output"
         assert not out.is_relative_to(cli.work)
+
+    def test_a_relative_output_folder_is_the_installations(self, cli):
+        cli.framework.config.set("output_dir", "output")
+        assert build_start(cli).code == 0
+        assert Path(cli.submitted[0].output_base_dir) == Path(cli.framework.info.installation_path) / "output"
 
     def test_default_output_with_home_in_the_config(self, cli):
         cli.framework.config.set("output_dir", "~/llm-builds")
         assert build_start(cli).code == 0
-        out = Path(cli.submitted[0].output_base_dir)
-        assert out.parent == Path(os.environ["HOME"]) / "llm-builds" and out.name.startswith("build_")
+        assert Path(cli.submitted[0].output_base_dir) == Path(os.environ["HOME"]) / "llm-builds"
+
+    def test_output_into_a_system_folder_is_refused(self, cli):
+        result = build_start(cli, "-o", "/etc/llm")
+        assert result.code == 2 and "system folder" in result.out and cli.submitted == []
+
+    def test_a_dash_keeps_the_build_in_the_build_folder(self, cli):
+        assert build_start(cli, "-o", "-").code == 0
+        assert Path(cli.submitted[0].output_base_dir) == Path(cli.framework.info.installation_path) / "output"
 
     @pytest.mark.parametrize("name", ["rockchip", "ROCKCHIP"])
     def test_target_name_in_another_case_is_validated_and_canonical(self, cli, name):
@@ -689,7 +710,13 @@ class TestCliBuildStartSubprocess:
 class TestCliDeploy:
 
     def install_output(self, cli):
+        """The framework's build folder (setting build_dir, the installation's output folder); the person's output
+        folder for the tests is set to it, so both are listed as one folder."""
         return Path(cli.framework.info.installation_path) / "output"
+
+    @pytest.fixture(autouse=True)
+    def output_is_the_build_folder(self, cli):
+        cli.framework.config.set("output_dir", "output")
 
     @staticmethod
     def flat(text):
@@ -704,7 +731,7 @@ class TestCliDeploy:
                        {"model": "cwd-only", "format": "gguf", "primary": "c.gguf"})
         result = cli.invoke("deploy", "list-artifacts")
         assert result.code == 0, result.out
-        assert f"Buildsin{self.install_output(cli)}" in self.flat(result.out)
+        assert f"outputfolder:{self.install_output(cli)}" in self.flat(result.out)
         assert "Rockchip/SmolLM2/Q4_0" in result.out and "rk3566" in result.out
         assert "cwd-only" not in result.out
 
@@ -721,13 +748,25 @@ class TestCliDeploy:
         assert result.code == 0, result.out
         assert f"Nofinishedbuildsin{self.install_output(cli)}" in self.flat(result.out)
 
+    def test_list_artifacts_shows_the_build_folder_and_the_output_folder(self, cli):
+        cli.framework.config.set("output_dir", "~/llm-builds")
+        write_manifest(self.install_output(cli) / "Rockchip" / "old" / "Q4_0", {"model": "old-build",
+                                                                               "primary": "o.gguf"})
+        write_manifest(Path(os.environ["HOME"]) / "llm-builds" / "Rockchip" / "new" / "Q4_0",
+                       {"model": "new-build", "primary": "n.gguf"})
+        result = cli.invoke("deploy", "list-artifacts")
+        assert result.code == 0, result.out
+        flat = self.flat(result.out)
+        assert "old-build" in result.out and "new-build" in result.out, "earlier builds stay listed"
+        assert "notsavedyet" in flat and "intheoutputfolder" in flat
+
     def test_list_artifacts_expands_home(self, cli):
         cli.framework.config.set("output_dir", "~/llm-builds")
         home_out = Path(os.environ["HOME"]) / "llm-builds"
         write_manifest(home_out / "Rockchip" / "m" / "Q4_0", {"model": "home-model", "primary": "m.gguf"})
         result = cli.invoke("deploy", "list-artifacts")
         assert result.code == 0, result.out
-        assert "home-model" in result.out and f"Buildsin{home_out}" in self.flat(result.out), result.out
+        assert "home-model" in result.out and f"outputfolder:{home_out}" in self.flat(result.out), result.out
 
     def test_package_takes_the_folder_shown_by_list_artifacts(self, cli):
         folder = write_manifest(self.install_output(cli) / "Rockchip" / "SmolLM2" / "Q4_0",
@@ -787,6 +826,8 @@ class TestHomeInOutputDir:
         (tmp_path / "work").mkdir()
         monkeypatch.chdir(tmp_path / "work")
         assert fm.resolve_path("output") == tmp_path / "output"
+        assert BuildEngine(fm).build_dir == tmp_path / "output", "the build folder: relative to the installation"
+        fm.config.set("output_dir", "output")
         assert BuildEngine(fm).output_dir == tmp_path / "output"
 
     @pytest.fixture
@@ -944,13 +985,18 @@ class TestBuilderTabSubmission:
         assert submit(tab) is None
         assert gui_messages and gui_messages[0][0] == "warning" and "w4a16" in gui_messages[0][1]
 
-    def test_output_dir_is_resolved_like_the_deployment_window(self, tab):
+    def test_a_gui_build_waits_in_the_build_folder(self, tab):
+        """Eighth round, answer 3: a build the person starts in the GUI lands in the framework's build folder (listed
+        by the deployment window); the save dialog moves it to the output folder once it has finished."""
         req = submit(tab)
         assert Path(req.output_base_dir) == tab.framework.resolve_path("output")
         assert Path(req.output_base_dir).is_absolute()
         tab.framework.config.set("output_dir", "~/llm-builds")
         req = submit(tab)
-        assert Path(req.output_base_dir) == Path(os.environ["HOME"]) / "llm-builds"
+        assert Path(req.output_base_dir) == tab.framework.resolve_path("output"), "the output folder is not used"
+        tab.framework.config.set("build_dir", "~/lcf-builds")
+        req = submit(tab)
+        assert Path(req.output_base_dir) == Path(os.environ["HOME"]) / "lcf-builds"
 
 
 @pytest.mark.usefixtures("qapp", "gui_messages")

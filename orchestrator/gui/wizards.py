@@ -126,6 +126,8 @@ class CrawlWorker(QThread):
         self.announcer = announcer
         self.lang = lang or current_language()
         self._stop = threading.Event()
+        # Why the crawl stopped when the knowledge snapshot taken first did not fit (eighth round, answer 2)
+        self.no_room = ""
 
     def run(self):
         pages = chunks = 0
@@ -137,6 +139,15 @@ class CrawlWorker(QThread):
                     break
                 self.progress.emit(f"Crawling root: {url}...")
                 result = self.rag_manager.ingest_url(url, self.options, stop=self._stop, progress=self.page.emit)
+                if result.get("blocker") == "snapshot_no_room":  # no snapshot, no crawl: nothing more is read
+                    self.no_room = str(result.get("message") or "")
+                    outcomes.append("failure")
+                    break
+                room = getattr(self.rag_manager, "last_snapshot_room", None)
+                if room is not None and getattr(room, "verdict", "") == "tight":
+                    from orchestrator.Core.knowledge_snapshots import size_text
+                    self.progress.emit("  -> " + ui_text("snapshots.tight", self.lang, size=size_text(room.estimate),
+                                                         free=size_text(max(0, room.check.after))))
                 for item in result.get("skipped", []):
                     self.progress.emit(f"  -> Skipped {item['url']}: {item['reason']}")
                 for item in result.get("failed", []):
@@ -659,6 +670,12 @@ Setup commands:
         self.status_label.setText(msg)
         icon = {"success": "✅", "partial": "⚠️"}.get(outcome, "❌")
         self.crawl_log.appendPlainText(f"\n{icon} {msg}")
+        no_room = getattr(self.crawl_worker, "no_room", "")
+        if no_room:  # the snapshot taken first did not fit: the person's list to delete or export snapshots
+            from orchestrator.gui.knowledge_snapshots_window import offer_snapshot_list
+            self.crawl_log.appendPlainText(no_room)
+            offer_snapshot_list(self, self.framework_manager, no_room)
+            return
         show = {"success": QMessageBox.information, "partial": QMessageBox.warning}.get(outcome, QMessageBox.critical)
         show(self, "Deep Ingest", msg)  # the message and the kind of box tell the outcome
 

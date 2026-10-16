@@ -20,7 +20,8 @@ import yaml
 from conftest import REPO_ROOT
 from orchestrator.Core.config_manager import ConfigManager
 
-DATA_KEYS = ("models_dir", "output_dir", "cache_dir")
+DATA_KEYS = ("models_dir", "build_dir", "cache_dir")
+FOLDER_OF = {"models_dir": "models", "build_dir": "output", "cache_dir": "cache"}
 
 
 @pytest.fixture
@@ -56,9 +57,11 @@ class TestReadOnlyInstallation:
 
         assert cfg.config_dir == tmp_path / "state"
         for key in DATA_KEYS:
-            assert cfg.get(key) == str(tmp_path / "state" / key[:-4]), key
-            assert not (tmp_path / "state" / key[:-4]).exists(), "created only when it is used"
+            assert cfg.get(key) == str(tmp_path / "state" / FOLDER_OF[key]), key
+            assert not (tmp_path / "state" / FOLDER_OF[key]).exists(), "created only when it is used"
         assert not any((installation / name).exists() for name in ("models", "output", "cache"))
+        # the person's output folder for golden artifacts is in the home folder (eighth round, answer 3)
+        assert cfg.get("output_dir") == "~/llmcf/output"
 
     def test_a_writable_installation_keeps_relative_defaults(self, installation, tmp_path, monkeypatch):
         monkeypatch.delenv("LLM_FRAMEWORK_CONFIG_DIR")
@@ -66,6 +69,7 @@ class TestReadOnlyInstallation:
         cfg = ConfigManager()
         assert cfg.config_dir == installation / "configs"
         assert [cfg.get(k) for k in DATA_KEYS] == ["models", "output", "cache"]
+        assert cfg.get("output_dir") == "~/llmcf/output"
 
     def test_configured_folders_win_over_the_default(self, installation, tmp_path, monkeypatch):
         read_only_like_program_files(monkeypatch, installation, installation / "configs")
@@ -88,8 +92,10 @@ class TestNoFoldersAtStartup:
 
     def test_framework_boot_creates_no_data_folders(self, make_framework, tmp_path):
         fm = make_framework()
-        assert fm.orchestrator.build_engine.output_dir == tmp_path / "output"
+        assert fm.orchestrator.build_engine.build_dir == tmp_path / "output"
+        assert fm.orchestrator.build_engine.output_dir == Path.home() / "llmcf" / "output"
         assert not any((tmp_path / name).exists() for name in ("models", "output", "cache", "logs"))
+        assert not (Path.home() / "llmcf").exists(), "the output folder is made by the first build that uses it"
 
     def test_a_build_creates_the_folders_it_mounts(self, tmp_path):
         from orchestrator.Core.builder import BuildEngine
