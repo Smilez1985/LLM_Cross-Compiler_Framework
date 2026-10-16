@@ -721,6 +721,63 @@ class TestEvaluation:
         assert win.lbl_busy.text().startswith("Cancelled.") and len(win.runs) == 1 and win.btn_save.isEnabled()
         assert win.tbl_results.rowCount() == 1
 
+    def test_cancel_after_a_tier_replaced_your_server_says_so(self, qapp, tmp_path, monkeypatch):
+        """The real run (evals/eval_run.run_evaluation): Cancel while a tier runs stops the eval's server, and the log
+        says that the person's own server was replaced and is not running now (the question promised it)."""
+        from orchestrator.Core import ai_override
+        from orchestrator.evals import ditto_eval
+        from orchestrator.evals.ditto_eval import Attempt
+        from orchestrator.gui import ditto_eval_window as module
+        waiting = threading.Event()
+
+        class Eval:
+            def __init__(self, ditto, targets_dir):
+                pass
+
+            def run(self, cases, repeat=1, on_result=None, stop=None):
+                def run_case(case):
+                    waiting.set()
+                    stop.wait(10)   # a model answer that takes a while
+                    return Attempt(True, 0.1)
+                return ditto_eval.run_cases(run_case, cases, repeat, on_result, stop=stop)
+
+        class ServerRuntime(FakeRuntime):
+            pid = 42   # the person's own server (serving "mine")
+
+            def endpoint(self):
+                return SimpleNamespace(pid=self.pid, port=8080, model="mine") if self.pid else None
+
+            def start(self, tier=None, remember=True):
+                self.calls.append(("start", tier, on_gui_thread()))
+                self.pid = 1001   # the tier's server replaces it
+
+            def stop(self):
+                self.calls.append(("stop", None, on_gui_thread()))
+                self.pid = None
+
+        rt = ServerRuntime(tmp_path, states={"small": "ready"})
+        ditto = SimpleNamespace(reload=lambda: None, describe=lambda task: {"label": "Local", "model": "small.gguf",
+                                                                            "provider": "local"})
+        monkeypatch.setattr(ditto_eval, "DittoEval", Eval)
+        monkeypatch.setattr(ai_override, "ditto_with", lambda base, values: ditto)
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: True)
+        config = SimpleNamespace(get=lambda key, default=None: default, config_dir=None)
+        framework = SimpleNamespace(config=config, ditto_manager=ditto, resolve_path=lambda p: tmp_path / str(p))
+        win = module.EvaluationWindow(framework, runtime_factory=lambda: rt, lang="en")
+        try:
+            win.chk_kinds["healing"].setChecked(True)
+            tick(win.lst_tiers, "small")
+            assert win.start() is True
+            wait_until(qapp, waiting.is_set)
+            win.btn_cancel.click()
+            wait_until(qapp, lambda: not win.busy)
+            assert rt.called("start") == [("small", False)] and rt.called("stop") == [(None, False)]
+            assert "Your local server (mine) was replaced for the evaluation" in win.log.toPlainText()
+            assert win.lbl_busy.text().startswith("Cancelled.")
+        finally:
+            win.close()
+            win.deleteLater()
+
     def test_a_failed_run_is_said(self, eval_ui):
         from orchestrator.evals.eval_run import EvalRunError
         eval_ui.run.error = EvalRunError("The rerank variant needs a reranker: turned off.", 2, "no_reranker")

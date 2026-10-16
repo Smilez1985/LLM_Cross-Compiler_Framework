@@ -8,7 +8,8 @@ action by mouse). The CLI prints what happens and exits with its codes; the GUI 
   kind or a case id asks for them), filtered by kind and case id.
 - run_evaluation(): AI cases against the configured or chosen provider/model, or against the managed local model of
   each chosen tier (the server is started and stopped per tier; a server the person started keeps running, a replaced
-  one is reported); then retrieval cases against a temporary knowledge base, one report per search variant.
+  one is reported, also when the run ends early through Cancel or an error); then retrieval cases against a temporary
+  knowledge base, one report per search variant.
 - summary_table() / retrieval_table(): the result tables (columns and cells, the same strings in both).
 - report_json() / write_report(): the full report (`--json FILE`; the GUI's "Save report...").
 
@@ -163,19 +164,26 @@ def _run_ai(framework, ai_cases, runs, make_ditto, make_runtime, tiers, provider
         return
     rt = make_runtime()
     before = rt.endpoint()  # a server the person started keeps running
-    for tier in tiers:
-        de._check_stop(stop)
-        try:
-            with events.busy("start_tier", tier=tier):
-                rt.start(tier=tier, remember=False)
-            run_once(f"tier {tier}")
-        finally:
-            running = rt.endpoint()
-            if before is None or running is None or not _same_server(running, before):
-                rt.stop()  # the eval's own server (or what is left of a failed start)
-    after = rt.endpoint()
-    if before is not None and (after is None or not _same_server(after, before)):
-        events.server_replaced(before.model)
+    try:
+        for tier in tiers:
+            de._check_stop(stop)
+            try:
+                with events.busy("start_tier", tier=tier):
+                    rt.start(tier=tier, remember=False)
+                run_once(f"tier {tier}")
+            finally:
+                running = rt.endpoint()
+                if before is None or running is None or not _same_server(running, before):
+                    rt.stop()  # the eval's own server (or what is left of a failed start)
+    finally:
+        # Also when the run ends early (Cancel, a failed start): the person learns that their server is gone.
+        if before is not None:
+            try:
+                after = rt.endpoint()
+            except Exception:  # noqa: BLE001 - the run's own outcome (or error) is what counts
+                after = None
+            if after is None or not _same_server(after, before):
+                events.server_replaced(before.model)
 
 
 def run_retrieval(framework: Any, cases: Sequence[Any], source: Path, variants: Sequence[str], repeat: int = 1,
@@ -198,6 +206,7 @@ def run_retrieval(framework: Any, cases: Sequence[Any], source: Path, variants: 
                 ev.ingest()
         except de.RetrievalEvalError as e:
             raise EvalRunError(str(e), 1, "index_failed") from None
+        de._check_stop(stop)   # Cancel while indexing: no reranker is loaded (downloaded on first use)
         index_seconds = round(time.monotonic() - start, 1)
         embedding = str(knowledge.get_status().get("embedding_model", ""))
         reranker = knowledge.reranker() if "rerank" in variants else None
