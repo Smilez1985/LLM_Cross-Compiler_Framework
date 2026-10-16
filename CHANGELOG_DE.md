@@ -1003,7 +1003,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   offenen Fenster. Nur dieses Konto erreicht die Brücke: ein AF_UNIX-Socket im Ordner `gui_bridge` des Benutzerordners
   (0700; unter Windows eine Named Pipe mit zufälligem Namen), ein zufälliger Schlüssel in `gui_bridge/bridge.json`
   (0600), den beide Seiten nachweisen, bevor etwas gesendet wird, unter Linux das Konto der Gegenseite geprüft, und
-  nur JSON-Nachrichten. Ist kein Framework-Fenster offen, wird `gui` mit dem neuen Blocker `gui_not_open` abgelehnt
+  nur JSON-Nachrichten. Das erste Framework-Fenster bedient die KI-Apps; ein anderes offenes Fenster übernimmt, wenn
+  es geschlossen wird. Ist kein Framework-Fenster offen, wird `gui` mit dem neuen Blocker `gui_not_open` abgelehnt
   („Das Framework-Fenster öffnen.“; Version 4 der Vollmacht-Regeln); es bleibt aufgeführt. Lesende Aktionen werden wie
   Lese-Tools entschieden, die anderen wie ein Tool, das etwas ändert (standardmäßig mit Frage); deine Einstellung für
   `gui` gilt je Aufrufer (Ditto, die lokalen stdio-Clients, jedes benannte Token), ein neues Token kann es nicht

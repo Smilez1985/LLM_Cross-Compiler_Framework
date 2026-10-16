@@ -882,7 +882,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   directly, an MCP client's server over a private bridge to the open window. Only this account reaches the bridge: an
   AF_UNIX socket in the 0700 folder `gui_bridge` of the per-user folder (on Windows a named pipe with a random name), a
   random key in `gui_bridge/bridge.json` (0600) that both sides prove before anything is sent, the peer's account
-  checked on Linux, and JSON messages only. When no framework window is open, `gui` is refused with the new blocker
+  checked on Linux, and JSON messages only. The first framework window serves AI apps; another open window takes over
+  when it closes. When no framework window is open, `gui` is refused with the new blocker
   `gui_not_open` ("Open the framework window."; delegation rules version 4); it stays listed. Reading actions are
   decided like read tools, the others like a tool that changes something (asked by default); your setting for `gui`
   applies per caller (Ditto, the local stdio clients, each named token), a new token cannot use it, and a question a

@@ -444,9 +444,9 @@ def open_gui(window: Any) -> GuiSurface:
 
 
 def start_bridge(surface: GuiSurface, framework: Any) -> Optional[Any]:
-    """Starts the per-user bridge, so AI apps (MCP clients) reach this window with the same GUI tool as Ditto. The
-    window works without it: when it cannot start (or another window of this person already serves AI apps), AI apps
-    are told the window is not open."""
+    """Starts the per-user bridge, so AI apps (MCP clients) reach this window with the same GUI tool as Ditto. While
+    another window of this person serves AI apps, this one takes over when that one closes. The window works without
+    the bridge: when it cannot start, AI apps are told the window is not open."""
     config = getattr(framework, "config", None)
     if config is None:
         return None
@@ -457,8 +457,8 @@ def start_bridge(surface: GuiSurface, framework: Any) -> Optional[Any]:
     except Exception:  # noqa: BLE001 - no per-user folder: no bridge
         return None
     server = BridgeServer(state_dir, bridge_handler(framework, lambda: surface))
-    if server.start():
-        surface.extra["bridge"] = server
+    if server.serve_when_free() or server.waiting:
+        surface.extra["bridge"] = server   # close_gui stops it (or its wait for the other window)
         return server
     return None
 

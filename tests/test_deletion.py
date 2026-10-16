@@ -154,7 +154,7 @@ DELETION_SITES = {
     # the framework's own GUI bridge for AI apps
     ("orchestrator/tools/gui_bridge.py", "_clear_socket_path"): OWN_BRIDGE,
     ("orchestrator/tools/gui_bridge.py", "_remove_stale_endpoint"): OWN_BRIDGE,
-    ("orchestrator/tools/gui_bridge.py", "BridgeServer.stop"): OWN_BRIDGE,
+    ("orchestrator/tools/gui_bridge.py", "BridgeServer._stop_bridge"): OWN_BRIDGE,
     ("orchestrator/tools/gui_bridge.py", "BridgeServer._remove_temp_folder"): OWN_BRIDGE,
     # open, reported
     ("orchestrator/runtime/profile.py", "ProfileStore.remove_device"): UNUSED,
