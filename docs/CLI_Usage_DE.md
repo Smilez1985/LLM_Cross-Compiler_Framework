@@ -874,7 +874,7 @@ wird gebaut oder geändert: Chat-Fälle laufen gegen einen Ersatz-Build-Dienst. 
 Mit `--tier` muss die lokale Laufzeit installiert und das Modell der Stufe heruntergeladen sein. Die CLI startet
 `llama-server` nacheinander mit jeder Stufe und stoppt die Server, die sie gestartet hat. Ein Server, den du selbst
 gestartet hast, läuft weiter, wenn er die Stufe schon bedient; sonst ersetzt die Evaluation ihn für diese Stufe und
-sagt das am Ende.
+sagt das am Ende, auch wenn der Lauf früher endet (zum Beispiel, wenn eine spätere Stufe nicht startet).
 
 ```bash
 # Das 2B-Modell mit 4 und 2 Bit auf diesem Rechner vergleichen, ohne Nachdenken
@@ -892,9 +892,12 @@ Eine Datei mit Fällen, die sich nicht lesen lässt, oder Filter, auf die kein F
 
 In der GUI: **Ditto > Bewertung...**: die Arten (und für Retrieval die Suchvarianten), einzelne Fälle, **Auswählen...**
 für eine andere Falldatei, die Läufe pro Fall, die lokalen Modellstufen sowie Anbieter, Modell und Denkaufwand nur für
-diesen Lauf. **Bewertung starten...** sagt zuerst, was aufgerufen wird und ob es Geld kostet („Nein“ ist die Vorgabe),
-läuft im Hintergrund mit Fortschritt und **Abbrechen** und zeigt dieselben Tabellen; **Bericht speichern...** schreibt
-den `--json`-Bericht in eine Datei deiner Wahl. `--min-pass` setzt nur den Exit-Code für Skripte.
+diesen Lauf. **Bewertung starten...** sagt zuerst, was aufgerufen wird und ob es Geld kostet, auch wenn die
+Ersatzkette der KI-Einstellungen einen Cloud-Anbieter nennt („Nein“ ist die Vorgabe); eine Stufe, die noch nicht
+heruntergeladen ist, wird mit einem Hinweis auf **Ditto > Lokale Modelle...** abgelehnt. Der Lauf geht im Hintergrund
+mit Fortschritt und **Abbrechen** und zeigt dieselben Tabellen (ein ersetzter Server von dir wird gemeldet, auch nach
+**Abbrechen**); **Bericht speichern...** schreibt den `--json`-Bericht in eine Datei deiner Wahl. `--min-pass` setzt
+nur den Exit-Code für Skripte.
 
 #### Retrieval-Evaluation
 
@@ -1236,8 +1239,9 @@ llm-cli ditto models list
 llm-cli ditto models download small-q2
 ```
 
-In der GUI: **Ditto > Lokale Modelle...** > **Empfohlenes Modell herunterladen...**, oder eine Stufe auswählen und
-**Ausgewähltes herunterladen...**; die Frage zeigt Repository, Datei, Lizenz, Größe und Ordner („Nein“ ist die
+In der GUI: **Ditto > Lokale Modelle...** > **Empfohlenes Modell herunterladen...** (die Empfehlung, die das Fenster
+zeigt; der Knopf ist an, sobald die Liste gelesen ist), oder eine Stufe auswählen und **Ausgewähltes
+herunterladen...**; die Frage zeigt Repository, Datei, Lizenz, Größe und Ordner („Nein“ ist die
 Vorgabe), der Download läuft im Hintergrund mit Fortschritt und **Abbrechen** (was schon heruntergeladen ist, bleibt
 für die Fortsetzung).
 

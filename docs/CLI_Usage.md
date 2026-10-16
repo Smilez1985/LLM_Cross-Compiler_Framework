@@ -844,7 +844,8 @@ and repeat). How it works: [Features.md](Features.md#ditto-evaluation).
 
 With `--tier`, the local runtime must be installed and the tier's model downloaded. The CLI starts `llama-server`
 with each tier in turn and stops the servers it started. A server you started yourself keeps running if it already
-serves the tier; otherwise the evaluation replaces it for that tier and says so at the end.
+serves the tier; otherwise the evaluation replaces it for that tier and says so at the end, also when the run stops
+early (for example when a later tier does not start).
 
 ```bash
 # Compare the 2B model at 4 and 2 bits on this machine, without thinking
@@ -862,9 +863,11 @@ cannot be read, or filters that match no case, stop with exit code 2.
 
 In the GUI: **Ditto > Evaluation...**: the kinds (and for retrieval the search variants), single cases, **Choose...**
 for another cases file, the runs per case, the local model tiers, and provider, model and reasoning effort for this
-run only. **Run evaluation...** first says what is called and whether it costs money ("No" is the default), runs in
-the background with progress and **Cancel**, and shows the same tables; **Save report...** writes the `--json` report
-to a file you choose. `--min-pass` only sets the exit code for scripts.
+run only. **Run evaluation...** first says what is called and whether it costs money, also when the fallback chain
+of the AI settings names a cloud provider ("No" is the default); a tier that is not downloaded yet is refused with a
+pointer to **Ditto > Local Models...**. The run goes in the background with progress and **Cancel** and shows the same
+tables (a replaced server of yours is reported, also after Cancel); **Save report...** writes the `--json` report to a
+file you choose. `--min-pass` only sets the exit code for scripts.
 
 #### Retrieval evaluation
 
@@ -1191,8 +1194,8 @@ llm-cli ditto models list
 llm-cli ditto models download small-q2
 ```
 
-In the GUI: **Ditto > Local Models...** > **Download the recommended model...**, or select a tier and **Download
-selected...**; the question shows repo, file, licence, size and folder ("No" is the default), the download runs in the
+In the GUI: **Ditto > Local Models...** > **Download the recommended model...** (the recommendation the window
+shows; the button is on once the list is read), or select a tier and **Download selected...**; the question shows repo, file, licence, size and folder ("No" is the default), the download runs in the
 background with progress and **Cancel** (the part downloaded so far is kept for a resume).
 
 ---
