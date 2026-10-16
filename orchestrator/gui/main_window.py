@@ -46,6 +46,7 @@ from orchestrator.gui.deployment_window import DeploymentWindow
 from orchestrator.gui.form_surface import close_gui, open_gui
 from orchestrator.gui.menus import build as menu_build
 from orchestrator.gui.menus import ditto_runtime as menu_ditto_runtime
+from orchestrator.gui.menus import knowledge as menu_knowledge
 
 # ============================================================================
 # DITTO AVATAR WIDGET
@@ -227,6 +228,7 @@ class MainOrchestrator(QMainWindow):
         # finds or makes its menu and puts it in place (Build after File, Ditto before Security).
         menu_build.install(self, menubar)  # GUI parity: Build > Targets..., Build History...; File > Settings...
         menu_ditto_runtime.install(self, menubar)  # Ditto > Local Runtime... (before Security)
+        menu_knowledge.install(self, menubar)  # Tools > Knowledge Sources... (below Knowledge Snapshots...)
 
     def _setup_toolbar(self):
         toolbar = QToolBar("Main Toolbar")

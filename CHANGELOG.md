@@ -56,6 +56,30 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   now take the build options; the switch keeps the space check and the complete removal of the old mode. Its new
   button **Status and more...** opens the window from the AI settings. A stopped local server and a declined source
   fetch now name the GUI path next to the command.
+- **Tools > Knowledge Snapshots... says beforehand whether the next snapshot fits, and shows the storage in every
+  state** (W1'): the disk line now says, in the words of `llm-cli knowledge snapshots`, when the next snapshot (about
+  the size of the newest) would not fit, so Deep Ingest, a restore and a pack import would be refused, or would leave
+  little space. The storage line is shown in every state, as `llm-cli knowledge storage` shows it (Qdrant Edge with its
+  folder, the old storage with its reason, a Qdrant server, Qdrant Edge that cannot be loaded), and **Convert now** is
+  offered also before the first attempt, on the condition of `llm-cli knowledge storage convert`. The CLI and the
+  window call the same new core functions (`knowledge_snapshots.snapshot_disk`, `migration.storage_status`,
+  `storage_lines` and `convert_refusal`); the CLI's output is unchanged apart from a set Qdrant server (see Fixed).
+- **Tools > Knowledge Sources...: every source of the knowledge base by mouse** (W1'): a new window lists every
+  source with its kind, the licence and copyright notice it shows, and what a knowledge pack would carry of it (full
+  text, link and short facts, not exported) and why, with a kind filter (web pages, knowledge pack pages, framework
+  documents, other). It reads the list in the background through the new `knowledge_sources` core module, which
+  `llm-cli knowledge sources` uses too, so both show the same words. The menu wiring lives in
+  `orchestrator/gui/menus/knowledge.py`, whose `CLI_PATHS` names the mouse path of every `knowledge` and `zoo`
+  command.
+- **Community Hub: every `llm-cli zoo` action by mouse** (W1'): **Details...** (or a double click) shows what `zoo
+  show` shows (licence, trust, installed folder, download address, size, sha256, an installed recipe's `recipe.yml`);
+  **Import file...** takes a passphrase (never stored or shown) and the key files of the only senders to accept, as
+  `zoo install --file --passphrase / --from` does; **Check installed packs** and **Check a pack file...** run `zoo
+  verify` with and without a file; **Export...** exports any target folder (also an existing or installed one), a
+  finished build or the knowledge base with its pack id, plain or encrypted to the keys in key files or with a
+  passphrase, into a folder you choose; **My public keys...** shows `zoo keys` with Copy and Save.... Each calls the
+  core function of the CLI (new: `CommunityManager.details`, `exportable_targets`, `read_public_key_files`,
+  `needs_passphrase`) in the background; questions keep "No" as the default, and an encrypted pack is never submitted.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record
@@ -1432,6 +1456,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **Community Hub and knowledge storage: installs in the background, the pull request question, a Qdrant server**
+  (W1' review): installing a pack (Install, Import file...) moved it into place on the GUI thread after your "Yes",
+  which for a knowledge pack meant a snapshot of the knowledge base and the import of every page with the window
+  frozen; it now runs in the background, and the status line names the snapshot taken first, as `llm-cli zoo install`
+  does. **Open pull request** in the export window handed the pack to a public pull request at once; it now asks the
+  question of `llm-cli zoo export --pr` first ("Submit this pack to the public community repository?", "No" is the
+  default). With a Qdrant server set (`qdrant_url`), `llm-cli knowledge storage` and **Tools > Knowledge
+  Snapshots...** named the local storage and offered to convert it, which opened the server and converted nothing;
+  both now name the server, and the conversion is refused while it is set. A passphrase typed into **Import file...**
+  or the export window no longer stays in the hidden window after Cancel or Close.
 - **A build no longer replaces an earlier build of the same name**: in 3.0.0 a completed build moved its files into
   the folder `<target>/<model>/<quantization>` and replaced the files of an earlier build there (for example one for
   another board), so a finished golden artifact was lost without being asked. A later build now goes next to it

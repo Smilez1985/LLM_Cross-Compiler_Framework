@@ -1359,7 +1359,10 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   keeps working, nothing of the half-made copy stays, and the reason is shown (`llm-cli knowledge storage`, Mojo
   Oracle, the knowledge snapshots window). A lack of disk space is tried again on the next start; other failures when
   you ask: **Tools > Knowledge Snapshots... > Try the conversion again** (it runs in the background) or `llm-cli
-  knowledge storage convert`. Converting 50 000 excerpts took between 1 and 2.5 minutes in two tests, 5 000 about 15
+  knowledge storage convert`. GUI: **Tools > Knowledge Snapshots...** shows the storage in every state, like `llm-cli
+  knowledge storage` (Qdrant Edge with its folder, the old storage with its reason, a Qdrant server, Qdrant Edge that
+  cannot be loaded), and offers **Convert now** also before the first attempt, on the condition of `llm-cli knowledge
+  storage convert`. Converting 50 000 excerpts took between 1 and 2.5 minutes in two tests, 5 000 about 15
   seconds. Once converted, the old folder never stands in for Qdrant Edge again: if Qdrant Edge cannot be loaded later
   (a missing or broken package), the knowledge base is not opened and says why, and Mojo Oracle reports it as an error,
   instead of quietly using the old folder, which lacks what was added since.
@@ -1382,10 +1385,11 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   snapshot is made, its size is estimated. When it does not fit beside the reserve that always stays free, no
   snapshot is made and the change does not run either; there is no "continue anyway". You get the list to delete or
   export snapshots (the GUI offers **Knowledge Snapshots...**; AI clients get the blocker `snapshot_no_room` with your
-  action). When it fits but leaves little free space, that is a situation warning (`disk_tight`). **Tools >
-  Knowledge Snapshots...** in the GUI or `llm-cli knowledge snapshots` lists each
-  one with its full path, name, size and what it is, nothing ticked. To free space you tick the ones to delete (they
-  go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
+  action). When it fits but leaves little free space, that is a situation warning (`disk_tight`). The CLI and the GUI
+  both say beforehand whether the next snapshot fits (GUI: the disk line of **Tools > Knowledge Snapshots...**, in the
+  words of `llm-cli knowledge snapshots`). **Tools > Knowledge Snapshots...** in the GUI or `llm-cli knowledge
+  snapshots` lists each one with its full path, name, size and what it is, nothing ticked. To free space you tick the
+  ones to delete (they go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
   `llm-cli knowledge snapshots export NAME... --to FOLDER`, each copy checked by sha256). See [Deleting and the
   trash](#deleting-and-the-trash). Restoring a snapshot is not available from the GUI or the CLI yet. A snapshot is a
   portable file; snapshots written by earlier versions (format 1) are converted when they are restored.
@@ -1593,7 +1597,7 @@ per page from that (`orchestrator/rag/licences.py`; eighth round, Q-1 and Q-1').
   `LICENSES/` and `NOTICE` in its folder, and each page it adds to the knowledge base names its licence text
   (`licence_text_file`).
 - **You see it per page:** `llm-cli knowledge sources` lists every source with its licence, its copyright notice and
-  what a pack would carry and why; `llm-cli zoo export knowledge` lists every page again with what the pack carries
+  what a pack would carry and why (GUI: **Tools > Knowledge Sources...**, with a kind filter); `llm-cli zoo export knowledge` lists every page again with what the pack carries
   and why, and names each licence text in the pack and why. A target export does the same for the target's knowledge
   snapshot, also for a snapshot made before this rule (the target folder itself stays as it is); licence files left in
   `knowledge/` without a snapshot stay out of the pack, and a note says so.
@@ -2580,8 +2584,9 @@ file>` or `--passphrase`):
 - **Receiving:** `llm-cli zoo install --file <pack>.lcfpack` decrypts with your key, or with `--passphrase`.
   `--from <key file>` (repeatable) accepts only these senders; otherwise the summary names the sender's key id. A
   passphrase pack whose scrypt work factor is above 2^20 (1 GiB of memory) is refused before anything is decrypted.
-  The hub's **Import file...** opens packs encrypted to your key; a passphrase pack needs the CLI. An encrypted pack
-  is never submitted to the community.
+  The hub's **Import file...** opens both (GUI: a passphrase field, never stored or shown, and **Only accept these
+  senders** with key files); **My public keys...** in the hub shows your public keys with **Copy** and **Save...**. An
+  encrypted pack is never submitted to the community.
 
 ### Recipes
 
@@ -2660,10 +2665,11 @@ trust level.
 ### Checking installed packs
 
 - `llm-cli zoo verify` checks every installed pack against the cached index: revoked, or changed since it was
-  installed. The exit code is 1 when it finds a problem.
+  installed. The exit code is 1 when it finds a problem. GUI: **Tools > Open Community Hub > Check installed packs**.
 - `llm-cli zoo verify <pack file>` checks a file without installing it: format, hashes, the checks of its kind, an
   included author signature and the privacy scrub (no home folders, addresses, host or user names, keys). It needs
-  no keyring; the community repository's CI uses it.
+  no keyring; the community repository's CI uses it. GUI: **Tools > Open Community Hub > Check a pack file...**,
+  before you install or share a file.
 - `llm-cli mojo` reports revoked packs as errors, changed packs as warnings and packs with trust `local` as
   information ([Health check](#health-check-mojo)).
 
@@ -2672,15 +2678,23 @@ trust level.
 **Tools > Open Community Hub** lists the index entries and the installed packs with name, kind, version, a coloured
 trust column, author and status, with a search field and filters for kind and trust. **Refresh** fetches the index
 again, **Install** installs an index entry after its summary, **Import file...** installs a pack file (also one
-encrypted to your key), and **Build** on an installed recipe fills in the Builder. A revoked pack shows a disabled
-**Revoked** button. An installed target is checked as `llm-cli targets validate` does, and the result is shown.
+encrypted to your key or protected with a passphrase, and only from the senders in key files if you choose them), and
+**Build** on an installed recipe fills in the Builder. A revoked pack shows a disabled **Revoked** button. An installed
+target is checked as `llm-cli targets validate` does, and the result is shown.
+**Details...** (or a double click on a row) shows what `llm-cli zoo show` shows: licence, trust and revocation, the
+installed version and folder, the download address with size and sha256, the description and an installed recipe's
+`recipe.yml`. **Check installed packs**, **Check a pack file...**, **Export...** and **My public keys...** do what
+`zoo verify`, `zoo verify FILE`, `zoo export` and `zoo keys` do; each runs in the background.
 
 ### Export for community
 
 - **Where:** the module wizard's last page (**Export for community after creating**: the new target), the Builder
   log's context menu (**Export a finished build for the community...**: a finished build's `build_info.json` becomes
   a recipe), and `llm-cli zoo export target <id>`, `zoo export recipe <build folder>` or `zoo export knowledge`,
-  each with `--author <name>` (a pseudonym is fine). Knowledge packs are exported with the CLI only.
+  each with `--author <name>` (a pseudonym is fine). GUI: **Tools > Open Community Hub > Export...** exports any
+  target folder (also an existing or installed one; a community pack is refused, see below), a finished build or the
+  knowledge base, with the pack id of a knowledge pack, private sharing to the keys in key files or with a passphrase,
+  and the folder.
 - **Privacy scrub:** every file is scrubbed on this computer. Home folders become `~`, IP and MAC addresses `<ip>`
   and `<mac>`, e-mail addresses `<email>`, JWTs `<jwt>`, the host name `<host>`, the user name `<user>`, and API
   keys are redacted. Loopback addresses, image digests, `git@` remotes and default accounts such as `root` or
@@ -2705,7 +2719,8 @@ encrypted to your key), and **Build** on an installed recipe fills in the Builde
 
 - **Open pull request** in the export dialog, or `--pr` with `llm-cli zoo export`, hands the pack to the repository
   in the setting `community_repo` (`owner/name`). The CLI first shows the summary and asks "Submit this pack to the
-  public community repository?" unless `--yes` is given; without a terminal nothing is submitted.
+  public community repository?" unless `--yes` is given; without a terminal nothing is submitted. The export window
+  asks the same question after its summary ("No" is the default).
 - If the GitHub CLI (`gh`) and `git` are installed and `gh` is logged in, the framework forks the repository,
   commits the pack as `contributions/<kind>/<file>` on a new branch and opens the pull request with `gh pr create`;
   `gh` and `git` use their own stored credentials. Otherwise, or if that fails, the repository's upload page opens in

@@ -1491,7 +1491,11 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   die Umwandlung fehl, arbeitet der alte Speicher weiter, von der halben Kopie bleibt nichts, und der Grund wird
   angezeigt (`llm-cli knowledge storage`, Mojo Oracle, das Fenster der Wissens-Snapshots). Fehlender Platz wird beim
   nächsten Start erneut versucht, andere Fehler, wenn du es willst: **Tools > Knowledge Snapshots... > Umwandlung erneut
-  versuchen** (läuft im Hintergrund) oder `llm-cli knowledge storage convert`. 50 000 Auszüge umzuwandeln dauerte in
+  versuchen** (läuft im Hintergrund) oder `llm-cli knowledge storage convert`. GUI: **Tools > Knowledge
+  Snapshots...** zeigt den Speicher in jedem Zustand wie `llm-cli knowledge storage` (Qdrant Edge mit seinem Ordner,
+  der alte Speicher mit seinem Grund, ein Qdrant-Server, Qdrant Edge, das sich nicht laden lässt) und bietet **Jetzt
+  umwandeln** auch vor dem ersten Versuch an, unter der Bedingung von `llm-cli knowledge storage convert`. 50 000
+  Auszüge umzuwandeln dauerte in
   zwei Tests zwischen 1 und 2,5 Minuten, 5 000 etwa 15 Sekunden. Nach der Umwandlung springt der alte Ordner nie wieder
   für Qdrant Edge ein: Lässt sich Qdrant Edge später nicht laden (ein fehlendes oder kaputtes Paket), wird die
   Wissensbasis nicht geöffnet und sagt, warum, und Mojo Oracle meldet es als Fehler, statt still den alten Ordner zu
@@ -1517,8 +1521,10 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   kein Schnappschuss angelegt, und die Änderung läuft auch nicht; ein „trotzdem weiter“ gibt es nicht. Du bekommst die
   Liste, um Schnappschüsse zu löschen oder zu exportieren (die GUI bietet **Knowledge Snapshots...** an; KI-Clients
   bekommen den Blocker `snapshot_no_room` mit deiner Handlung). Passt er, lässt aber wenig Platz übrig, ist das eine
-  Lagewarnung (`disk_tight`). **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli
-  knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe und was er ist, nichts angehakt. Um Platz zu
+  Lagewarnung (`disk_tight`). CLI und GUI sagen beide vorher, ob der nächste Schnappschuss passt (GUI: die Zeile zur
+  Festplatte in **Tools > Knowledge Snapshots...**, mit den Worten von `llm-cli knowledge snapshots`). **Tools >
+  Knowledge Snapshots...** in der GUI oder `llm-cli knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe
+  und was er ist, nichts angehakt. Um Platz zu
   schaffen, hakst du die an, die gelöscht werden sollen (sie kommen zuerst in den Papierkorb; `llm-cli knowledge
   snapshots prune` oder `delete NAME...`), oder kopierst sie woandershin (Export; `llm-cli knowledge snapshots export
   NAME... --to ORDNER`, jede Kopie per sha256 geprüft). Siehe [Löschen und der Papierkorb](#löschen-und-der-papierkorb).
@@ -1743,7 +1749,8 @@ sagt, und ein Export entscheidet je Seite danach (`orchestrator/rag/licences.py`
   fehlt, die seine Seiten brauchen. Ein installiertes Paket behält `LICENSES/` und `NOTICE` in seinem Ordner, und jede
   Seite, die es der Wissensbasis hinzufügt, nennt ihren Lizenztext (`licence_text_file`).
 - **Du siehst es je Seite:** `llm-cli knowledge sources` listet jede Quelle mit ihrer Lizenz, ihrem
-  Urheberrechtshinweis und dem, was ein Paket enthielte, und warum; `llm-cli zoo export knowledge` führt jede Seite
+  Urheberrechtshinweis und dem, was ein Paket enthielte, und warum (GUI: **Tools > Wissensquellen...**, mit einem
+  Filter nach Art); `llm-cli zoo export knowledge` führt jede Seite
   noch einmal auf, mit dem, was das Paket enthält, und warum, und nennt jeden Lizenztext im Paket und warum. Ein
   Target-Export macht dasselbe für den Wissens-Snapshot des Targets, auch für einen Snapshot von vor dieser Regel (der
   Target-Ordner selbst bleibt, wie er ist); Lizenzdateien, die ohne Snapshot in `knowledge/` liegen, bleiben aus dem
@@ -2846,8 +2853,9 @@ Für deine eigenen Rechner oder ein Team lässt sich ein Pack verschlüsseln, st
   `--passphrase`. `--from <Schlüsseldatei>` (mehrfach möglich) nimmt nur diese Absender an; sonst nennt die
   Zusammenfassung die Schlüssel-ID des Absenders. Ein Pack mit Passphrase, dessen scrypt-Arbeitsfaktor über 2^20
   liegt (1 GiB Speicher), wird abgelehnt, bevor irgendetwas entschlüsselt wird. **Import file...** im Hub öffnet
-  Packs, die für deinen Schlüssel verschlüsselt sind; ein Pack mit Passphrase braucht die CLI. Ein verschlüsseltes
-  Pack wird nie an die Community übergeben.
+  beide (GUI: ein Feld für die Passphrase, die nie gespeichert oder angezeigt wird, und **Nur diese Absender
+  annehmen** mit Schlüsseldateien); **Meine öffentlichen Schlüssel...** im Hub zeigt deine öffentlichen Schlüssel mit
+  **Kopieren** und **Speichern...**. Ein verschlüsseltes Pack wird nie an die Community übergeben.
 
 ### Rezepte
 
@@ -2932,10 +2940,12 @@ und haben keine Vertrauensstufe.
 ### Installierte Packs prüfen
 
 - `llm-cli zoo verify` prüft jedes installierte Pack gegen den zwischengespeicherten Index: gesperrt oder seit der
-  Installation verändert. Der Exit-Code ist 1, wenn es ein Problem findet.
+  Installation verändert. Der Exit-Code ist 1, wenn es ein Problem findet. GUI: **Tools > Community Hub öffnen >
+  Installierte Pakete prüfen**.
 - `llm-cli zoo verify <Pack-Datei>` prüft eine Datei, ohne sie zu installieren: Format, Hashes, die Prüfungen ihrer
   Art, eine enthaltene Signatur des Autors und die Datenschutz-Bereinigung (keine Home-Ordner, Adressen, Host- oder
-  Benutzernamen, Schlüssel). Es braucht keinen Schlüsselbund; die CI des Community-Repositorys nutzt es.
+  Benutzernamen, Schlüssel). Es braucht keinen Schlüsselbund; die CI des Community-Repositorys nutzt es. GUI:
+  **Tools > Community Hub öffnen > Paketdatei prüfen...**, bevor du eine Datei installierst oder weitergibst.
 - `llm-cli mojo` meldet gesperrte Packs als Fehler, veränderte Packs als Warnung und Packs mit der Vertrauensstufe
   `local` als Information ([Gesundheitscheck](#gesundheitscheck-mojo)).
 
@@ -2945,17 +2955,24 @@ und haben keine Vertrauensstufe.
 installierten Packs mit Name, Art, Version, einer farbigen Spalte für die Vertrauensstufe, Autor und Status, mit
 einem Suchfeld und Filtern nach Art und Vertrauensstufe. **Refresh** holt den Index neu, **Install** installiert einen
 Eintrag des Index nach seiner Zusammenfassung, **Import file...** installiert eine Pack-Datei (auch eine, die für
-deinen Schlüssel verschlüsselt ist), und **Build** bei einem installierten Rezept füllt den Builder aus. Ein
+deinen Schlüssel verschlüsselt oder mit einer Passphrase geschützt ist, und nur von den Absendern in
+Schlüsseldateien, wenn du sie wählst), und **Build** bei einem installierten Rezept füllt den Builder aus. Ein
 gesperrtes Pack zeigt eine abgeschaltete Schaltfläche **Revoked**. Ein installiertes Target wird wie mit `llm-cli
-targets validate` geprüft, und das Ergebnis wird angezeigt.
+targets validate` geprüft, und das Ergebnis wird angezeigt. **Details...** (oder ein Doppelklick auf eine
+Zeile) zeigt, was `llm-cli zoo show` zeigt: Lizenz, Vertrauensstufe und Sperre, die installierte Version und den
+Ordner, die Download-Adresse mit Größe und sha256, die Beschreibung und die `recipe.yml` eines installierten Rezepts.
+**Installierte Pakete prüfen**, **Paketdatei prüfen...**, **Exportieren...** und **Meine öffentlichen Schlüssel...**
+tun, was `zoo verify`, `zoo verify DATEI`, `zoo export` und `zoo keys` tun; jedes läuft im Hintergrund.
 
 ### Export für die Community
 
 - **Wo:** auf der letzten Seite des Modul-Assistenten (**Export for community after creating**: das neue Target), im
   Kontextmenü des Builder-Logs (**Export a finished build for the community...**: die `build_info.json` eines
   fertigen Builds wird zum Rezept) und mit `llm-cli zoo export target <ID>`, `zoo export recipe <Build-Ordner>` oder
-  `zoo export knowledge`, jeweils mit `--author <Name>` (ein Pseudonym genügt). Wissens-Packs werden nur mit der CLI
-  exportiert.
+  `zoo export knowledge`, jeweils mit `--author <Name>` (ein Pseudonym genügt). GUI: **Tools > Community Hub
+  öffnen > Exportieren...** exportiert jeden Target-Ordner (auch einen vorhandenen oder installierten; ein
+  Community-Pack wird abgelehnt, siehe unten), einen fertigen Build oder die Wissensbasis, mit der Paket-ID eines
+  Wissens-Packs, privatem Teilen an die Schlüssel in Schlüsseldateien oder mit einer Passphrase, und dem Ordner.
 - **Datenschutz-Bereinigung:** Jede Datei wird auf diesem Rechner bereinigt. Home-Ordner werden zu `~`, IP- und
   MAC-Adressen zu `<ip>` und `<mac>`, E-Mail-Adressen zu `<email>`, JWTs zu `<jwt>`, der Hostname zu `<host>`, der
   Benutzername zu `<user>`, und API-Schlüssel werden geschwärzt. Loopback-Adressen, Image-Digests, `git@`-Remotes und
@@ -2982,7 +2999,8 @@ targets validate` geprüft, und das Ergebnis wird angezeigt.
 
 - **Open pull request** im Export-Dialog oder `--pr` bei `llm-cli zoo export` übergibt das Pack an das Repository aus
   der Einstellung `community_repo` (`owner/name`). Die CLI zeigt zuerst die Zusammenfassung und fragt „Submit this
-  pack to the public community repository?“, außer `--yes` ist angegeben; ohne Terminal wird nichts übergeben.
+  pack to the public community repository?“, außer `--yes` ist angegeben; ohne Terminal wird nichts übergeben. Das
+  Export-Fenster stellt nach seiner Zusammenfassung dieselbe Frage („Nein“ ist die Vorgabe).
 - Sind die GitHub CLI (`gh`) und `git` installiert und ist `gh` angemeldet, forkt das Framework das Repository,
   committet das Pack als `contributions/<Art>/<Datei>` auf einem neuen Branch und öffnet den Pull Request mit
   `gh pr create`; `gh` und `git` nutzen ihre eigenen gespeicherten Zugangsdaten. Sonst, oder wenn das scheitert,

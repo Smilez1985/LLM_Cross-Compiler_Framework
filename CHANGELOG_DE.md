@@ -61,6 +61,33 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   behält die Platzprüfung und das vollständige Entfernen der alten Art. Sein neuer Knopf **Status und mehr...** öffnet
   das Fenster aus den KI-Einstellungen. Ein gestoppter lokaler Server und ein abgelehntes Holen des Quellcodes nennen
   jetzt neben dem Befehl auch den Weg in der GUI.
+- **Tools > Knowledge Snapshots... sagt vorher, ob der nächste Snapshot passt, und zeigt den Speicher in jedem
+  Zustand** (W1'): Die Zeile zur Festplatte sagt jetzt mit den Worten von `llm-cli knowledge snapshots`, wenn der
+  nächste Snapshot (etwa so groß wie der neueste) nicht passen würde, sodass Deep Ingest, eine Wiederherstellung und ein
+  Paket-Import abgelehnt würden, oder nur wenig Platz ließe. Die Zeile zum Speicher erscheint in jedem Zustand, so wie
+  `llm-cli knowledge storage` ihn zeigt (Qdrant Edge mit seinem Ordner, der alte Speicher mit seinem Grund, ein
+  Qdrant-Server, Qdrant Edge, das sich nicht laden lässt), und **Jetzt umwandeln** wird auch vor dem ersten Versuch
+  angeboten, unter der Bedingung von `llm-cli knowledge storage convert`. CLI und Fenster rufen dieselben neuen
+  Kernfunktionen auf (`knowledge_snapshots.snapshot_disk`, `migration.storage_status`, `storage_lines` und
+  `convert_refusal`); die Ausgabe der CLI bleibt gleich, außer bei einem eingestellten Qdrant-Server (siehe Behoben).
+- **Tools > Wissensquellen...: jede Quelle der Wissensbasis per Maus** (W1'): Ein neues Fenster listet jede Quelle mit
+  ihrer Art, der Lizenz und dem Urheberrechtshinweis, die sie zeigt, und was ein Wissenspaket von ihr mitnähme (voller
+  Text, Link und kurze Fakten, nicht exportiert) und warum, mit einem Filter nach Art (Webseiten, Seiten aus
+  Wissenspaketen, Dokumente des Frameworks, sonstige). Es liest die Liste im Hintergrund über das neue Kernmodul
+  `knowledge_sources`, das auch `llm-cli knowledge sources` nutzt, sodass beide dieselben Worte zeigen. Die Verdrahtung
+  des Menüs liegt in `orchestrator/gui/menus/knowledge.py`, dessen `CLI_PATHS` den Mausweg jedes `knowledge`- und
+  `zoo`-Befehls nennt.
+- **Community Hub: jede Aktion von `llm-cli zoo` per Maus** (W1'): **Details...** (oder ein Doppelklick) zeigt, was
+  `zoo show` zeigt (Lizenz, Vertrauensstufe, installierter Ordner, Download-Adresse, Größe, sha256, die `recipe.yml`
+  eines installierten Rezepts); **Import file...** nimmt eine Passphrase (nie gespeichert oder angezeigt) und die
+  Schlüsseldateien der einzigen Absender, die angenommen werden, wie `zoo install --file --passphrase / --from`;
+  **Installierte Pakete prüfen** und **Paketdatei prüfen...** führen `zoo verify` ohne und mit Datei aus;
+  **Exportieren...** exportiert jeden Target-Ordner (auch einen vorhandenen oder installierten), einen fertigen Build
+  oder die Wissensbasis mit ihrer Paket-ID, offen oder an die Schlüssel in Schlüsseldateien bzw. mit einer Passphrase
+  verschlüsselt, in einen Ordner deiner Wahl; **Meine öffentlichen Schlüssel...** zeigt `zoo keys` mit Kopieren und
+  Speichern.... Jede ruft die Kernfunktion der CLI auf (neu: `CommunityManager.details`, `exportable_targets`,
+  `read_public_key_files`, `needs_passphrase`), im Hintergrund; Fragen behalten „Nein“ als Vorgabe, und ein
+  verschlüsseltes Paket wird nie eingereicht.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
@@ -1618,6 +1645,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Community Hub und Speicher der Wissensbasis: Installation im Hintergrund, die Frage vor dem Pull Request, ein
+  Qdrant-Server** (Prüfung von W1'): Ein Paket zu installieren (Install, Import file...) schob es nach deinem „Ja“
+  im GUI-Thread an seinen Platz, was bei einem Wissenspaket einen Snapshot der Wissensbasis und den Import jeder Seite
+  bei eingefrorenem Fenster bedeutete; das läuft jetzt im Hintergrund, und die Statuszeile nennt den zuvor
+  angelegten Snapshot, wie `llm-cli zoo install`. **Open pull request** im Export-Fenster übergab das Paket sofort an
+  einen öffentlichen Pull Request; es stellt jetzt zuerst die Frage von `llm-cli zoo export --pr` („Dieses Paket beim
+  öffentlichen Community-Repository einreichen?“, „Nein“ ist die Vorgabe). Mit einem eingestellten Qdrant-Server
+  (`qdrant_url`) nannten `llm-cli knowledge storage` und **Tools > Knowledge Snapshots...** den lokalen Speicher und
+  boten an, ihn umzuwandeln, was den Server öffnete und nichts umwandelte; beide nennen jetzt den Server, und die
+  Umwandlung wird abgelehnt, solange er eingestellt ist. Eine in **Import file...** oder im Export-Fenster eingegebene
+  Passphrase bleibt nach Abbrechen oder Schließen nicht mehr im verborgenen Fenster.
 - **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
   seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
   (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein

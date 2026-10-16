@@ -193,6 +193,28 @@ class ZooItem:
 
 
 @dataclass
+class ZooDetails:
+    """One zoo entry as `llm-cli zoo show` and the Community Hub's Details... show it: the item (licence, trust and
+    revocation, installed version and folder, download URL, size and sha256, description) and an installed recipe's
+    recipe.yml as written."""
+    item: ZooItem
+    recipe_text: Optional[str] = None
+
+    def lines(self) -> List[str]:
+        i = self.item
+        lines = [f"{i.kind} {i.id} {i.version} by {i.author} ({i.license or 'licence unknown'})",
+                 f"Trust: {i.trust.value}" + (f" - revoked: {i.revoked}" if i.revoked else ""),
+                 f"Installed: {i.installed_version or 'no'}" + (f" in {i.path}" if i.path else "")]
+        if i.entry:
+            lines += [f"Download: {i.entry.url} ({i.entry.size} bytes, sha256 {i.entry.sha256})"]
+        if i.description:
+            lines.append(i.description)
+        if self.recipe_text is not None:
+            lines += ["", self.recipe_text]
+        return lines
+
+
+@dataclass
 class PreparedInstall:
     """A pack extracted and validated in quarantine, waiting for the user's decision (finish or discard)."""
     manifest: PackManifest
@@ -591,6 +613,29 @@ class CommunityManager:
             if trust == TrustLevel.REVOKED:
                 item.trust, item.revoked = trust, reason
         return sorted(items.values(), key=lambda i: (i.kind, i.id.casefold()))
+
+    def details(self, pack_id: str, kind: Optional[str] = None) -> List[ZooDetails]:
+        """Every entry `pack_id` (any case) of the cached index and the installed packs, only of `kind` when given,
+        with an installed recipe's recipe.yml (`llm-cli zoo show`, the Community Hub's Details...). Reads only; an
+        empty list when there is none."""
+        found = []
+        for item in self.list_items(self.cached_index()):
+            if item.id.casefold() != str(pack_id).casefold() or (kind and item.kind != kind):
+                continue
+            recipe = item.path / RECIPE_FILE if item.kind == "recipe" and item.path else None
+            text = recipe.read_text(encoding="utf-8") if recipe is not None and recipe.is_file() else None
+            found.append(ZooDetails(item, text))
+        return found
+
+    def exportable_targets(self) -> List[str]:
+        """The target ids in the targets folder that `llm-cli zoo export target` can be asked for (a folder with a
+        target.yml; the template and hidden folders left out), sorted. An installed community pack is listed too: the
+        export refuses it with the reason (its author shares it already)."""
+        if not self.targets_dir.is_dir():
+            return []
+        return sorted((p.name for p in self.targets_dir.iterdir()
+                       if p.is_dir() and not p.is_symlink() and not p.name.startswith((".", "_"))
+                       and re.fullmatch(ID_PATTERN, p.name) and (p / "target.yml").is_file()), key=str.casefold)
 
     # --- install ----------------------------------------------------------------------------------------------
     def _new_quarantine(self, kind: str, pack_id: str) -> Path:

@@ -294,6 +294,34 @@ def parse_public_keys(text: str) -> List[Union[Ed25519PublicKey, "pyrage.x25519.
     return keys
 
 
+class KeyFileError(PackError):
+    """A key file that gives no public key: `code` not_text (not a text file) or no_keys (no usable key of the kind
+    asked for in any of the files); `file` names the file for not_text."""
+
+    def __init__(self, message: str, code: str, file: str = ""):
+        super().__init__(message)
+        self.code, self.file = code, file
+
+
+def read_public_key_files(files: Iterable[Union[str, Path]], kind: type) -> list:
+    """The public keys of `kind` (Ed25519PublicKey: senders of encrypted packs; pyrage.x25519.Recipient: recipients)
+    in the key files, as `llm-cli zoo keys` or the Community Hub's My public keys... wrote them on another computer.
+    KeyFileError for a file that is not text, or when files were given but none holds a key of that kind; PackError
+    for a key that is not valid."""
+    files = list(files)
+    keys = []
+    for f in files:
+        try:
+            text = Path(f).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise KeyFileError(f"{f} is not a text file with public keys (see 'llm-cli zoo keys').", "not_text",
+                               str(f)) from None
+        keys += [k for k in parse_public_keys(text) if isinstance(k, kind)]
+    if files and not keys:
+        raise KeyFileError("The key files contain no usable public key (see 'llm-cli zoo keys').", "no_keys")
+    return keys
+
+
 class PackSignature(Strict):
     v: Literal[1] = 1
     alg: Literal["Ed25519"] = "Ed25519"
@@ -563,6 +591,24 @@ def is_encrypted_pack(source: Union[Path, bytes]) -> bool:
                 names = zf.namelist()
                 return AGE_NAME in names and MANIFEST_NAME not in names  # a pack with a manifest is a plain pack
     except (OSError, ValueError, EOFError, zipfile.BadZipFile):
+        return False
+
+
+def needs_passphrase(source: Union[Path, bytes]) -> bool:
+    """True for an encrypted pack protected with a passphrase (not one encrypted to keys), read from its age header
+    without decrypting anything; False for a plain pack and for one that cannot be read (opening it says why)."""
+    if not is_encrypted_pack(source):
+        return False
+    try:
+        with io.BytesIO(source) if isinstance(source, bytes) else open(source, "rb") as f:
+            with zipfile.ZipFile(f) as zf:
+                info = zf.getinfo(AGE_NAME)
+                if info.file_size > _MAX_ENCRYPTED:
+                    return False
+                with zf.open(info) as member:
+                    head = member.read(_MAX_AGE_HEADER)
+        return _age_header(head)
+    except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile, PackError):
         return False
 
 
