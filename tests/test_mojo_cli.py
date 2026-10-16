@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.Core.mojo import Finding, Severity, runner
+from orchestrator.Core.mojo import Finding, Severity, docker_objects, runner
 from orchestrator.Core.mojo.checks import check_user_state
 
 REPO = Path(__file__).resolve().parent.parent
@@ -61,6 +61,8 @@ def open_state(booted_framework, monkeypatch):
                         why="damaged data", cannot="not_automatic"),
                 Finding("python", "python.version", Severity.OK, "Python 3.13")]
     monkeypatch.setattr(runner, "DEFAULT_CHECKS", [check_user_state, others])
+    # No Docker, whatever the test machine has (CI runners do): the image list for disk.cache cannot be shown
+    monkeypatch.setattr(docker_objects, "_docker_client", lambda _framework: None)
     return state
 
 
