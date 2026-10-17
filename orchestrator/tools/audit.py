@@ -582,15 +582,25 @@ class AuditLog:
         from orchestrator.utils.logging import get_logger
         get_logger("AuditLog").warning(message)
 
-    def entries(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """The newest entries, newest first. The extra fields are also given as keys of their own (they never
-        replace a column); `detail` is shown without their binding."""
+    def entries(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """The newest entries, newest first, after skipping the `offset` newest (a page of the log). The extra fields
+        are also given as keys of their own (they never replace a column); `detail` is shown without their
+        binding."""
         db = self._connect()
         try:
-            rows = _dicts(db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(limit),)))
+            rows = _dicts(db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ? OFFSET ?",
+                                     (int(limit), max(0, int(offset)))))
         finally:
             db.close()
         return _shown(rows)
+
+    def count(self) -> int:
+        """How many entries the log holds (for paging through it)."""
+        db = self._connect()
+        try:
+            return int(db.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+        finally:
+            db.close()
 
     def check(self) -> AuditCheck:
         """Walks the whole chain and compares its head with the anchor file. Writers wait meanwhile, so the

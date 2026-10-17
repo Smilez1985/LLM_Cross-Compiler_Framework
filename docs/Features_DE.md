@@ -1633,6 +1633,9 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   sich dieser Ordner nicht nutzen, erscheint der Hinweis jedes Mal.
 - Nur eine Person bestätigt ihn, in der GUI oder mit `llm-cli tools crawl-notice` in einem Terminal. Solange er nicht
   gelesen ist, wird `crawl_docs_site` mit dem Grund `needs_person` und diesen beiden Orten abgelehnt.
+- GUI: Tools > Hinweis zu Deep Ingest... zeigt ihn jederzeit und bittet dich, solange er noch nötig ist, zu
+  bestätigen, dass du ihn gelesen hast („Nein“ ist vorgewählt); der Deep Ingest des Modul-Assistenten zeigt ihn vor
+  der Prüfung der Wissensdatenbank.
 
 ### Was der Crawler beachtet
 
@@ -1824,6 +1827,16 @@ Mit `crawl_docs_site` kann ein MCP-Client oder Ditto Dokumentation in die Wissen
 bereit (offizielles Python-SDK `mcp` 2.3.0, Spezifikation 2026-07-28). KI-Clients wie Claude Code, Claude Desktop oder
 VS Code können dann [dieselben Tools wie Ditto](#dittos-tools) nutzen. Am Client meldest du dich mit deinem eigenen
 Konto oder Schlüssel an; das Framework sieht das nie.
+
+**GUI:** Security > Verbindungen zu KI-Apps (MCP)... zeigt, wie du Claude Code, Claude Desktop (mit dem Pfad seiner
+Konfigurationsdatei) und VS Code verbindest, jeweils mit einer Schaltfläche zum Kopieren, trägt den Eintrag in die
+Konfiguration von Claude Desktop ein, nachdem es Datei und Änderung gezeigt hat (In Claude Desktop eintragen..., die
+Sicherung wie bei `mcp config --write`), startet und stoppt den lokalen HTTP-Server als Kindprozess der GUI (Adresse,
+Port, Container-Bindung; dieselben Ablehnungen wie `mcp serve --transport http`; Adresse, Zustand und Ausgabe zu
+sehen; das Framework fragt vor dem Schließen, solange der Server noch läuft) und verwaltet die benannten Tokens
+(Hinzufügen, auch als Kopie der Berechtigungen eines anderen Tokens, Rotieren, Widerrufen samt den dauerhaften
+Freigaben des Tokens, Zurück auf nur lesen). Ein Token wird einmal gezeigt, direkt nachdem es angelegt oder rotiert
+wurde.
 
 - **Jeder Aufruf läuft durch die Tool-Registry:** Abgleich von Namen und Argumenten, Eingabeschema, deine
   Berechtigungen, Bestätigung, Audit-Log (Akteur `mcp` für lokale stdio-Clients, `mcp:<Name>` für ein benanntes
@@ -2052,7 +2065,8 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Hex-Zeichen), die das Framework dafür festgehalten hat. Die Ordner sind der Modellordner (`models`, Einstellung
   `models_dir`), der Datensatzordner (`datasets`, Einstellung `datasets_dir`, standardmäßig neben dem Modellordner)
   und die Ordner, die du mit [`llm-cli tools folders add`](CLI_Usage_DE.md#tools-folders) oder in der GUI (Tools >
-  Folders the AI May Use...) hinzufügst. Für den Modell- und den Datensatzordner gelten dieselben Grenzen wie für
+  Folders the AI May Use... > Add folder..., das auch fragt, was im Ordner liegt: Modell-Dateien, Datensatz-Dateien
+  oder beides) hinzufügst. Für den Modell- und den Datensatzordner gelten dieselben Grenzen wie für
   einen hinzugefügten Ordner: Zeigt eine Einstellung auf `/`, dein Home oder einen Ordner, der den persönlichen
   Ordner enthält, ist ihr Label nicht nutzbar. Die Datei muss in ihrem Ordner liegen (Links werden verfolgt und
   geprüft) und außerhalb jedes gesperrten Ordners: des persönlichen Ordners des Frameworks (außer den Datenordnern,
@@ -2195,9 +2209,9 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   `llm-cli` nimmt sie aus seiner Umgebung, bevor irgendein Befehl läuft (kein Befehl und kein Kindprozess erbt sie),
   und gibt sie nur an `mcp serve` weiter, das nicht mit einem Wert startet, der kein gültiges Token ist. Ohne sie
   teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen Berechtigungen. Tokens verwaltet nur
-  ein Mensch, an einem Terminal oder in der GUI (Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens“:
-  auflisten, anlegen mit einmal gezeigtem Token, rotieren, widerrufen und die eigenen Berechtigungen jedes Tokens;
-  protokolliert mit dem Akteur `gui`): Kein Tool kann sie anlegen, lesen oder ändern, und kein Token erscheint in
+  ein Mensch, an einem Terminal oder in der GUI (Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP-Tokens
+  (eines je Client)“: auflisten, anlegen mit einmal gezeigtem Token, rotieren, widerrufen und die eigenen
+  Berechtigungen jedes Tokens; protokolliert mit dem Akteur `gui`): Kein Tool kann sie anlegen, lesen oder ändern, und kein Token erscheint in
   einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag. Der Server liest den Token-Speicher bei jeder Prüfung
   und merkt ihn sich anhand des SHA-256 der Dateibytes, sodass er eine Änderung auch dann sieht, wenn sie Größe und
   Zeitstempel der Datei beibehält.
@@ -2301,6 +2315,12 @@ Verfügung.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
   nicht lesen lässt, darf nicht einmal lesen.
+- **GUI:** Tools > Tool Permissions (Ditto / MCP)... zeigt je Tool, was jetzt gilt und warum („Gilt jetzt“, wie
+  `llm-cli tools list`), nennt die Aufrufer mit eigenen Berechtigungen, bearbeitet die gemeinsamen Berechtigungen
+  oder die von Ditto oder den lokalen MCP-Clients („Wessen Berechtigungen“, `--caller`) und setzt sie zurück: auf die
+  empfohlenen Standards, einen Aufrufer zurück auf die gemeinsamen, ein Token zurück auf nur lesen (`--reset`,
+  `--reset --caller`, `--reset --token`). Jedes Zurücksetzen nennt, was sich ändert, und fragt zuerst („Nein“ ist
+  vorgewählt).
 
 **Was eine Rückfrage zeigt** (Dittos GUI-Dialog und CLI-Abfrage, das Formular eines MCP-Clients), in dieser
 Reihenfolge: die Folge in einfachen Worten, aus dem, was das Framework nachgeschlagen hat, mit IDs, denen ihr
@@ -2364,6 +2384,9 @@ neuesten Einträge auffällt. `llm-cli tools audit --verify` prüft die Kette un
 von einem falschen Schlüssel. Jeder Eintrag wird in einer eigenen Transaktion geschrieben, damit mehrere Prozesse die
 Kette nicht aufspalten. `llm-cli tools audit --archive` legt das Log und seinen Anker beiseite (mit Zeitstempel
 aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli mojo` ein Problem mit dem Log gemeldet hat.
+GUI: Security > Prüfprotokoll... zeigt dieselben Zeilen Seite für Seite (mit oder ohne Details), prüft die Kette
+(Unversehrtheit prüfen, das Ergebnis in einfachen Worten), archiviert das Log nach einer Rückfrage und zählt die
+Aufrufe je Aufrufer; Prüfung, Archivieren und Zählen laufen im Hintergrund.
 
 **Festgehalten, bevor er läuft.** Ein Aufruf, der etwas ändert (jede Stufe außer `read`), bekommt einen Eintrag
 `started`, bevor er läuft. Lässt sich dieser Eintrag nicht schreiben, wird der Aufruf abgelehnt und nichts läuft:

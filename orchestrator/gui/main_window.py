@@ -217,6 +217,7 @@ class MainOrchestrator(QMainWindow):
         self.act_clear_history = QAction(self.i18n.t("menu.clear_history", "Clear Input History..."), self)
         self.act_clear_history.triggered.connect(self._clear_input_history)
         tools_menu.addAction(self.act_clear_history)
+        __import__("orchestrator.gui.menus.tools_mcp", fromlist=["install"]).install(self, menubar)  # Audit Log, MCP
 
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About", self)
