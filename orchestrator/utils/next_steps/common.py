@@ -5,7 +5,8 @@ the main window's menu structure, MENU_LAYOUT (wave 6, chain a0; DECISIONS round
 
 MENU_LAYOUT names every menu by its objectName and title key, and every entry by its objectName and label key, in
 the order the person sees them: (objectName, title key, entries) for a menu or submenu, (objectName, label key) for
-an entry, "-" for a separator. The main window arranges its menus after it (orchestrator/gui/menus/layout.py) and
+an entry, "-" for a separator. The main window arranges its menus after it (orchestrator/gui/menus/place.py
+arrange()) and
 the mouse paths of the next steps follow from it, so a path is always the one on screen, in the person's language.
 An entry an area module adds that is not listed stays where that module put it (its MOUSE_LABELS name its place).
 """
