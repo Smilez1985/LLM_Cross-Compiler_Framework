@@ -125,8 +125,9 @@ clean:
 
 test:
 	@echo "Running Tests (Local Environment)..."
-	# Requires uv on the host: the environment comes from uv.lock (--locked stops when it no longer matches pyproject.toml)
-	QT_QPA_PLATFORM=offscreen uv run --locked pytest tests/
+	# Requires uv on the host: the environment comes from uv.lock (--locked stops when it no longer matches pyproject.toml),
+	# with the optional extra gui (PySide6), so the GUI tests run too
+	QT_QPA_PLATFORM=offscreen uv run --locked --extra gui pytest tests/
 
 # The image is saved to an archive and scanned from there: the scanner never gets the Docker socket.
 audit:

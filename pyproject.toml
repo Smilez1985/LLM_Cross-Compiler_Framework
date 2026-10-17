@@ -16,9 +16,7 @@ dependencies = [
     # --- 2. Docker Orchestration ---
     "docker>=7.1.0,<8",
 
-    # --- 3. GUI & CLI ---
-    # Only QtCore/QtGui/QtWidgets are used; the essentials wheel skips WebEngine, Pdf and the add-ons.
-    "pyside6-essentials>=6.11,<6.13",
+    # --- 3. CLI (the GUI's Qt is the optional extra 'gui' below) ---
     "click>=8.3,<9",
     "rich>=13.9,<16",
 
@@ -58,6 +56,15 @@ dependencies = [
 
     # --- 7. Deployment (SSH) ---
     "paramiko>=3.5.1,<6",
+]
+
+[project.optional-dependencies]
+# The desktop GUI (DECISIONS round 11, A3): the installers install it (requirements-gui.txt); a headless or server
+# install, the framework image without --gui and the CLI and MCP server work without it (orchestrator/gui is the only
+# code that imports Qt). Only QtCore/QtGui/QtWidgets are used; the essentials wheel skips WebEngine, Pdf and the
+# add-ons.
+gui = [
+    "pyside6-essentials>=6.11,<6.13",
 ]
 
 [project.scripts]

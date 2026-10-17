@@ -124,11 +124,12 @@ $PythonVenv = ".venv\Scripts\python.exe"
 # Pip Upgrade & Dependencies
 & $Pip install --upgrade pip | Out-Null
 Write-Host "Installiere Requirements..."
-# Exactly the versions in requirements.txt of this checkout (uv export from uv.lock); pip checks every file against
-# its hash. Without the file nothing is installed unchecked.
-if (-not (Test-Path "requirements.txt")) { Write-Error "requirements.txt fehlt; ohne die festgelegten Versionen wird nichts installiert." }
-& $Pip install --require-hashes -r requirements.txt | Out-Null
-if ($LASTEXITCODE -ne 0) { Write-Error "Die Pakete aus requirements.txt liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)." }
+# Exactly the versions in requirements-gui.txt of this checkout (uv export from uv.lock, the base packages plus the
+# optional extra 'gui', PySide6: this installer sets up the desktop GUI); pip checks every file against its hash.
+# Without the file nothing is installed unchecked.
+if (-not (Test-Path "requirements-gui.txt")) { Write-Error "requirements-gui.txt fehlt; ohne die festgelegten Versionen wird nichts installiert." }
+& $Pip install --require-hashes -r requirements-gui.txt | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Error "Die Pakete aus requirements-gui.txt liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)." }
 
 # 5. LAUNCHER
 Write-Host "[4/5] Erstelle Launcher..." -ForegroundColor Yellow
