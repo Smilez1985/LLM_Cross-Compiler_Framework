@@ -116,8 +116,9 @@ def calculate_file_checksum(path: Path, algorithm="sha256") -> str:
 # Every file sha256 of the framework runs through _digest: whole files (sha256_file, try_sha256_file), open handles
 # and their first N bytes (sha256_fileobj, sha256_fd), and copies hashed while they are written (copy_hashed), so the
 # bytes that are hashed are the bytes that are used. Old names elsewhere are one-line delegates. Standard library only.
-# Not here on purpose: runtime/hardware_probe.py (runs standalone on boards), the sha256sum calls that run on a device,
-# and digests of small byte strings already in memory (sha256_bytes covers those that want a name).
+# Not here on purpose: runtime/hardware_probe.py stays standalone (it runs on boards without the package), the
+# sha256sum calls that run on a device, and digests of small byte strings already in memory (sha256_bytes covers
+# those that want a name).
 
 HASH_CHUNK = 1 << 20
 
