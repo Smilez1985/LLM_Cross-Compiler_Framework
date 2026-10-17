@@ -114,6 +114,13 @@ def open_pinned(model: Path, sha256: str, label: str) -> int:
     return fd
 
 
+def _read_at(fd: int, offset: int) -> bytes:
+    """1 MiB of `fd` from `offset`; a delegate of the one read by offset in utils/helpers.py (pread, or seek and read
+    where the system has no pread)."""
+    from orchestrator.utils import helpers
+    return helpers._read_at(fd, offset, 1 << 20)
+
+
 def fd_path(fd: int) -> Optional[str]:
     """A path a child process opens to reach exactly the open file `fd` it inherited (Linux /proc/self/fd, other
     Unix systems /dev/fd); None where there is none (Windows)."""
