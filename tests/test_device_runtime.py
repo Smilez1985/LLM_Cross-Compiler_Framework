@@ -1123,10 +1123,16 @@ class TestOlderBuildsOnTheBoard:
         assert (dev.root / self.A).is_dir() and (dev.root / self.B).is_dir()
 
     def test_no_tool_and_no_deployment_removes_a_build_from_a_board(self):
-        """Only the person's prune command calls the removal; no tool module, no deployment, no GUI worker."""
-        callers = [p.relative_to(ROOT).as_posix() for p in (ROOT / "orchestrator").rglob("*.py")
-                   if "remove_older_builds(" in p.read_text(encoding="utf-8")]
-        assert sorted(callers) == ["orchestrator/cli.py", "orchestrator/runtime/device/remote.py"], callers
+        """Only the person removes builds from a board: the removal is reached through the person's own step
+        (person_steps.remove_board_builds), which only the prune command and the GUI's Boards window call after the
+        person's yes to the full list (W1'); no tool module, no deployment."""
+        def callers(name):
+            return sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "orchestrator").rglob("*.py")
+                          if name in p.read_text(encoding="utf-8"))
+        assert callers("remove_older_builds(") == ["orchestrator/runtime/device/person_steps.py",
+                                                   "orchestrator/runtime/device/remote.py"]
+        assert set(callers("remove_board_builds(")) <= {"orchestrator/cli.py", "orchestrator/gui/boards_window.py",
+                                                        "orchestrator/runtime/device/person_steps.py"}
         import inspect
         from orchestrator.runtime.device import remote
         source = inspect.getsource(remote.deploy_runtime)

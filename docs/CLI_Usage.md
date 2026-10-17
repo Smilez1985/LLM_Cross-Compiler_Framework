@@ -207,6 +207,17 @@ llmcf mojo --oracle --board "Kitchen board"
 llm-cli mojo --json > mojo.json
 ```
 
+In the GUI: **Tools > Mojo Health Check...** runs Mojo Oracle when it opens (**Check again** runs it once more) and
+shows every finding as the command prints it: the severity as text with its mark and icon, the area, the message,
+where, why it matters, the next step, what Mojo Miracle can do with the steps of its plan, the summary sentence and an
+overall line with the exit code. **Run Mojo Miracle...** (`--miracle`) asks "Run Mojo Miracle now?" (No is the
+default), applies exactly the plans shown and opens the framework's build images in the deletion dialog (the full
+list, nothing ticked), then shows what was repaired, what was not and why. Each board a recorded fact points to gets
+**Check <board> now**, and **Check a board...** (`--board`) checks any trusted board you pick (label and address;
+two boards that read the same, such as a board set up again with a new host key, also show their device ID): one
+connection to its SSH port, no login. The Deployment tab's **Check this board** (group "Benchmark on a board")
+checks the chosen board the same way.
+
 ---
 
 ## doctor
@@ -229,6 +240,9 @@ llm-cli doctor
 llm-cli doctor --json > doctor.json
 llm-cli doctor --fix --tier 2
 ```
+
+In the GUI: **Tools > Mojo Health Check...** (the check; **Run Mojo Miracle...** makes the repairs of `--fix`) and
+**Tools > Framework Build Images...** (the list of `--tier 2`).
 
 ---
 
@@ -526,6 +540,10 @@ saved yet": GUI builds you did not save, and every earlier build, which stay whe
 builds to. Each row shows the folder (relative to its folder), where it is, model, format, quantization, board, size
 and the full path.
 
+In the GUI: the **Deployment** tab's list **1. Select Golden Artifact** (the same builds, "not saved yet" for one in
+the build folder and "tested on" a board after its benchmark there; the tooltip shows the full path); **Refresh**
+reads them again.
+
 ### deploy package
 
 ```
@@ -544,6 +562,14 @@ Creates a ZIP file for the board: the model file, the build's manifest and model
 Only model files are deployed without Docker; builds that produced several weight files are refused. A package that
 cannot be made prints the reason and exits with 1; the ZIP is written under a temporary name and renamed when it is
 complete.
+
+In the GUI: Deployment tab > **Create package only…**: the selected build, the tab's **Profile** and **Use Docker
+Containerization?** for `--docker`. Any other build folder or model file (`ARTIFACT` takes any path) joins the list
+with **Other build or model file…** > **Build Folder…** or **Model File…**, for this button and for **Deploy to
+Target**; with no build selected, the button asks for a model file. No board is contacted, so this is
+the way for a board without network. A folder dialog opens at the output folder: OK keeps it, another folder is
+checked as for every golden artifact (Cancel makes nothing). The message names the package's full path, or the reason
+and the next step; **Cancel** stops the packaging and no partial file stays.
 
 ```bash
 llm-cli deploy package Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
@@ -590,6 +616,12 @@ deployment the board is added to the [trusted devices](#deploy-devices) (written
 may deploy to it later, each time with your confirmation. `ssh` and `scp` (used when paramiko is missing) never
 get the framework's standard input.
 
+In the GUI: Deployment tab > **Deploy existing package…** (a ZIP from `deploy package` or **Create package only…**),
+or **Deploy to Target**, which packages the selected build first. The board is the **Address or host name** and
+**User** fields; **Port**, **Name** and **Wait for the board** are `--port`, `--label` and `--wait`. The host key is
+read in the background and its fingerprint shown for you to compare (**No** is the default); the password is asked
+with hidden input, used once and never stored. **Cancel** does what Ctrl+C does here.
+
 ```bash
 llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --host 192.168.1.50 --user rock
 
@@ -625,6 +657,12 @@ deployment, and by `deploy devices add`. No tool writes, changes or removes one.
 
 A record is usable only while the framework's `known_hosts` holds exactly the key it names: after you removed a
 changed key there (to trust a reinstalled board again), trust the board again with `deploy run` or `scan --device`.
+
+In the GUI: **Boards > Boards and Devices...**: the table lists every trusted board (label, address, user, the host key with its full
+fingerprint and its state in `known_hosts`, paired, since when and how it was trusted, the last deploy), next to
+the probed boards. **Add a trusted board...** does `add` (address, user, port, label; the fingerprint is shown and
+asked, "No" is the default) and **Remove trust...** does `remove` (it names exactly what goes, "No" is the
+default, and it writes the same audit record).
 
 ---
 
@@ -695,6 +733,15 @@ llm-cli ditto login anthropic --method ant_profile --profile work
 
 `ditto login` signs in; it does not change which provider Ditto uses (`ai_provider`, set in the AI settings).
 
+In the GUI: **Security > Sign-in Overview...**, then select the provider: its sign-in panel has one card per method
+(`--method`) with **Check** and **Save** (Save stores without the check, as `--no-check`) and the extra fields
+(`--workspace-id`, `--organization`, `--project`); **Use this profile** on the `ant` profile card (`--profile`);
+**Store the key from <VARIABLE> in the vault** while that variable is set (`--from-env`; **Check it first (free)**
+is ticked); and, for providers whose address you set, its own **Server address** field (`--base-url`: remembered
+for that provider only, it does not make it Ditto's provider). Without a usable keyring the panel offers the storage
+choices (`--insecure-storage`). The same panel opens from **Tools > Configure AI Agent (Ditto)... > Sign in...** for
+the address typed there.
+
 ### ditto logout
 
 ```
@@ -711,6 +758,11 @@ also sign out the other tools that use it, so the command leaves that to you.
 |---|---|
 | `--method ID` | Method to sign out of (default: the one in use). |
 | `--base-url URL` | Address whose key is deleted (default: the configured one). |
+
+In the GUI: **Security > Sign-in Overview...**, then the provider: **Sign out** on its key card or **Stop using** on
+the `ant` profile card (both ask first, "No" is the default; the address is the panel's **Server address**). For a
+server without sign-in (Ollama, `custom` without a key) **Forget** forgets the remembered server address and method
+(it asks first).
 
 ### ditto auth status
 
@@ -731,6 +783,9 @@ A key is never shown.
 Exit code 5 when the credential vault cannot be used; with `--check` the code of the first failed check (3 or 4);
 otherwise 0.
 
+In the GUI: **Security > Sign-in Overview...** (every provider at once, Ditto's provider marked with `*`, and how
+the credential vault is protected with its file); **Check all** does `--check` in the background.
+
 ### ditto auth methods
 
 ```
@@ -740,6 +795,10 @@ llm-cli ditto auth methods [PROVIDER] [--json]
 The sign-in methods of every provider (or of one) in the order they are preferred: the recommended one, opt-in
 methods, methods that come in a later version, the key page, the environment variables, the extra options
 (`--workspace-id`, `--organization`, `--project`) and policy notes. Needs neither the vault nor the network.
+
+In the GUI: **Security > Sign-in Overview...**, tab **All sign-in methods** (every provider's methods with their
+tags, environment variables, key page, where to find the key, options and notes); each key card names its
+environment variables and note too.
 
 ### ditto auth storage
 
@@ -759,6 +818,11 @@ llm-cli ditto auth storage --use passphrase
 llm-cli ditto auth storage --use helper --helper "pass show llmcc/vault-key"
 ```
 
+In the GUI: **Security > Key Storage...** shows the protection and the vault file, also while the vault works.
+**Protect it another way** offers the OS keyring, a credential helper with its command (`--helper`), a passphrase
+and the unencrypted key file (only after the acknowledgement and the CLI's question, "No" is the default); **Use
+this storage** switches (`--use`).
+
 ### ditto auth rotate-key
 
 ```
@@ -767,6 +831,8 @@ llm-cli ditto auth rotate-key
 
 Creates a new vault key, re-encrypts every stored credential with it and removes the old key. Exit code 5 when
 the vault cannot be used.
+
+In the GUI: **Security > Key Storage... > Rotate key...** (it asks first; "No" is the default).
 
 ### ditto setup
 
@@ -1205,6 +1271,10 @@ it is new (not reviewed yet: it uses its own default until you review it) and wh
 standing approval. Without `--caller` it shows the shared permissions and names the callers that have their own.
 The title says when the permissions are not set up yet.
 
+In the GUI: **Tools > Tool Permissions (Ditto / MCP)...**: the column **Effective now** shows each tool's decision,
+with its reason as the tooltip, and a note names the callers that have their own permissions; **Whose permissions**
+shows Ditto's or the local MCP clients' (`--caller`).
+
 ### tools permissions
 
 ```
@@ -1227,6 +1297,14 @@ signed (one saved by 3.0.0, too) denies every tool until you run this again; the
 | `--caller ditto\|mcp` | Set the permissions of one caller (Ditto, or local MCP clients over stdio) instead of the shared ones. A caller's first permissions start from the shared ones, including the settings for single tools. |
 | `--token TEXT` | Set the permissions of this [named MCP token](#mcp-token) instead (not together with `--caller`). Needs a terminal; a token linked to Ditto is asked first whether it should get its own. It lists the same tool facts for that token. Audited with actor `cli`. |
 | `--reset` | Back to the recommended defaults (the setup asks again next time). With `--caller`: that caller uses the shared permissions again. With `--token`: back to read only. |
+
+In the GUI: **Tools > Tool Permissions (Ditto / MCP)...** (the same facts per tool, saved with actor `gui`):
+**Whose permissions** for `--caller`, **Reset to recommended defaults...** for `--reset`, **Use the shared permissions
+again...** for `--reset --caller`, and in the "MCP tokens" section **Permissions...** for `--token` and **Back to read
+only...** for `--reset --token` (the token is a new token again, not one with hand-set Allow/Deny). Each reset lists
+what changes and asks first ("No" is the default); a change saved elsewhere while you read it is refused. The column
+**Ask in the framework** is `--confirm-in-framework`, the list of standing approvals `--grants`, and **Revoke selected
+standing approval** `--revoke-grant`.
 
 ### tools audit
 
@@ -1254,6 +1332,11 @@ llm-cli tools audit --summary
 llm-cli tools audit --archive
 ```
 
+In the GUI: **Security > Audit Log...**: the same rows page by page (**Entries per page**, **Newer**, **Older**),
+**Details** for `--details`, **Check integrity** for `--verify` (the result in plain words), **Archive...** for
+`--archive` (asks first; the old log stays next to the new one) and the tab **Summary per caller** for `--summary`.
+The check, the archive and the summary run in the background.
+
 ### tools approvals
 
 ```
@@ -1273,6 +1356,9 @@ the client's caller; the client reads the result with `get_job_status`. Every su
 its client's session has ended, its question changed meanwhile, or the audit log cannot record the decision. On a
 headless machine, such as the Docker image, run it in a terminal there (`docker exec -it <container> llm-cli tools
 approvals`). The GUI shows the same calls under **Tools > Pending Approvals...**.
+
+In the GUI: **Tools > Pending Approvals...** (**Approve once**, **Approve and do not ask again...** for `--always`
+with its scope and duration, **Decline**).
 
 `approve ID --always [--width this|any] [--duration revoke|30d|24h]` approves the call and saves a standing
 approval ("do not ask again") within the scope the framework offered for it, after showing the scope and the
@@ -1324,6 +1410,9 @@ llm-cli tools folders list
 llm-cli tools folders remove mymodels
 ```
 
+In the GUI: **Tools > Folders the AI May Use...**: **Add folder...** asks for the folder, its label and what it holds
+(`--kind`: model files, dataset files or any), then shows the same warning; **Remove** for `remove`.
+
 ### tools crawl-notice
 
 ```
@@ -1336,6 +1425,10 @@ this computer) and asks whether you have read it. AI clients and Ditto can ask t
 needs a terminal (piped answers are refused); the acknowledgement is stored with `via: cli` in
 `~/.llm-framework/crawl_notice.json` and written to the audit log (actor `cli`). When the notice is already read, it
 is shown and nothing changes; after its text changes it must be read again.
+
+In the GUI: **Tools > Deep Ingest Notice...** shows the notice at any time; while it is still needed it asks you to
+confirm that you read it ("No" is the default) and records it with `via: gui` (actor `gui`). The module wizard's Deep
+Ingest shows it before the first crawl, also while the knowledge base is switched off.
 
 ---
 
@@ -1386,6 +1479,12 @@ answering when its token is revoked or rotated.
 llm-cli mcp serve --transport http --port 8765
 ```
 
+In the GUI: **Security > AI App Connections (MCP)...**, box "Local HTTP server": **Address**, **Port** and **Container
+binding** (`--container`), **Start server** and **Stop server**. The GUI runs this command as its own child process,
+refuses what the command refuses before it starts it, shows the address, the state and the server's output, and asks
+before the framework closes while the server still serves ("No" keeps the framework open; "Yes" stops the server as
+Ctrl+C would, after 15 seconds at once). The stdio transport is started by the AI app itself.
+
 ### mcp config
 
 ```
@@ -1408,6 +1507,11 @@ llm-cli mcp config --write claude-desktop
 ```
 
 You sign in to these clients with your own account or key; the framework never sees it.
+
+In the GUI: **Security > AI App Connections (MCP)...** shows the three entries, each with a **Copy** button, and the
+path of Claude Desktop's configuration file. **Write to Claude Desktop...** (`--write claude-desktop`) shows the file,
+whether it exists, the change, the entries that are kept and the backup, asks first ("No" is the default) and writes
+exactly that; a file changed in the meantime is not overwritten.
 
 ### mcp token
 
@@ -1432,7 +1536,7 @@ GUI does the same in Tools > Tool Permissions (Ditto / MCP), section "MCP tokens
 | `--link ditto` | Uses Ditto's permissions by reference, for a client that should have exactly Ditto's permissions: a change to Ditto's permissions applies at once. |
 | `list` | Names, audit actors, permissions, creation and rotation time; never a token or its hash. |
 | `rotate NAME` | A new token for the same name and permissions; the old one stops working at once. |
-| `revoke NAME` | Deletes the token and its permissions after a question; its client loses access at once. |
+| `revoke NAME` | Deletes the token, its permissions and its standing approvals after a question; its client loses access at once. |
 
 ```bash
 llm-cli mcp token add laptop                          # read only
@@ -1440,6 +1544,12 @@ llm-cli tools permissions --token laptop              # allow more
 llm-cli mcp token add helper --link ditto             # exactly Ditto's permissions
 claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
 ```
+
+In the GUI: **Security > AI App Connections (MCP)...** and **Tools > Tool Permissions (Ditto / MCP)...**, section "MCP
+tokens": **Add...** (read only, a copy of the local stdio clients', Ditto's or another token's own permissions, or
+Ditto's by reference), **Rotate**, **Revoke** (the token, its permissions and its standing approvals, after a question
+that counts them), **Back to read only...** and **Permissions...**. A token is shown once, right after it is made or
+rotated; the list shows names only.
 
 ---
 
@@ -1489,6 +1599,10 @@ llm-cli secrets set hf_token
 printf %s "$GITHUB_TOKEN" | llm-cli secrets set github_token --with-token
 ```
 
+In the GUI: **Security > Secrets...**, **Set a secret**: a name from the list (`hf_token`, `qdrant_api_key`, the
+community pack keys) or any other name, the value twice in masked fields, **Store**. In the ephemeral storage the
+window says that nothing was saved.
+
 ### secrets list
 
 ```
@@ -1497,6 +1611,9 @@ llm-cli secrets list
 
 Lists the stored names, never the values. Ditto's provider keys are listed under their vault names, for example
 `cred/anthropic/api_key` for `anthropic_api_key`; `secrets set` accepts both forms.
+
+In the GUI: **Security > Secrets...** (the known and the stored names, each with "stored" or "not stored" and what
+it is for; never a value).
 
 ---
 
@@ -1616,8 +1733,16 @@ read, 2 for wrong options.
 | `--import FILE` | Store a board's probe file in the probe store and print its probe id (not together with `--device`). |
 
 A machine without network access runs a probe by hand, and you import its file
-([README](../README.md#probing-the-boards-hardware)). In the GUI, **Scan / Import...** imports a probe file, scans a
-board over SSH (with the same remote probe, so boards with `/tmp` mounted `noexec` work) or scans this PC.
+([README](../README.md#probing-the-boards-hardware)).
+
+In the GUI: Builder tab > **Scan / Import...**: **Scan Local Host** (the Python probe, stored as this computer's
+profile, as `llm-cli scan` does), **Scan Local Host with the Fallback Script** (`--script`), **Scan Local Host and
+Save the Profile As...** (`--output`; a `.json` file gets the JSON view of `--json`), **Scan Local Host with the
+Fallback Script and Save the Profile As...** (`--script --output`), **Remote Scan via SSH...**
+(`--device` with **Port** and **Name** for `--port` and `--label`; the same remote probe, so boards with `/tmp`
+mounted `noexec` work, and the board is added to the trusted devices as by the CLI) and **Import from File
+(USB/Disk)...** (`--import`; asks for the board's name, `--label`). The host key and every probe run in the
+background; the log on the right shows the result, its notes and where the profile was stored.
 
 ```bash
 llm-cli scan                                        # this computer, stored as "local"
@@ -1652,6 +1777,8 @@ llm-cli device runtime prune DEVICE [--on-device]
 The stored boards: ID, label, address, system (OS, version, architecture, C library and version, init system),
 deploy settings and the deployed runtime. `--json` for scripts.
 
+In the GUI: **Boards > Boards and Devices...** (the same rows, merged with the trusted boards).
+
 ### device settings
 
 Shows or changes how the runtime is installed on the board. This is decided here, before a deployment; a deployment
@@ -1670,12 +1797,23 @@ never asks.
 Exit code 1 when the board does not run systemd or the confirmation is missing (nothing is changed), 2 for a bad
 value.
 
+Damaged deploy settings (`device list` shows "damaged; set them again") are never read as the defaults. With an
+option, the command names the file with its full path and size and asks whether to set them again, starting from
+the defaults ("No" is the default; without a terminal nothing is replaced, exit code 1); the file is overwritten
+only when the new settings are saved.
+
+In the GUI: **Boards > Boards and Devices...** **> Settings...** (the current settings in full; install, user, port, model and KV cache; the
+same sudo question with "No" as the default, written to the audit log first; for damaged settings the same question
+before the form opens with the defaults).
+
 ### device runtime plan
 
 Shows the cross build planned from the board's own profile: architecture, C library and version, the builder base
 and its GCC, `GGML_CPU_ARM_ARCH` or the x86 features, OpenMP and `libgomp.so.1`, the programs, the build ID, and
 whether it is built. `--json` prints the whole plan. Exit code 1 when no plan can be made (for example a board whose
 glibc is older than every builder base, or a profile without `LIBC_VERSION`: probe it again).
+
+In the GUI: **Boards > Boards and Devices...** **> Runtime plan**.
 
 ### device runtime build
 
@@ -1687,6 +1825,9 @@ format of the programs on your PC and packs the tarball into
 stored is only packed again. Exit code 1 when Docker does not answer, the build fails or its checks fail. Older
 packages of the device are kept (unreleased; before, a build or a deployment removed them); the output says how many,
 and `device runtime prune` lists them for you to delete.
+
+In the GUI: **Boards > Boards and Devices...** **> Build runtime...** (parallel jobs, a source mirror and the same source question with "No"
+as the default; it runs in the background with its progress, and Cancel stops it after the current step).
 
 ### device runtime deploy
 
@@ -1718,6 +1859,10 @@ comes from the deploy settings or `--user`.
 The result is kept in `device/<ID>/deployed.json` (a failed deployment does not change it). Exit code 1 when a step
 or a check fails.
 
+In the GUI: **Boards > Boards and Devices...** **> Deploy runtime...** (the SSH user, the password asked each time and never stored, a model
+for the short benchmark; a model that is not a catalog model runs only after an explicit warning with "No" as
+the default, and the consent is written to the audit log before it is loaded).
+
 On the board, the start script runs the server:
 
 ```bash
@@ -1737,6 +1882,8 @@ server's version.
 
 Runs the checks of step 4 again on the active build, `current` (also with `--bench-model`), and updates the record.
 
+In the GUI: **Boards > Boards and Devices...** **> Verify...** (also without a model; another SSH user for this check).
+
 A short benchmark with `--bench-model` (here or with `device runtime deploy`) is the proof that a model works on
 that board. Its result is recorded with every build of that model in the output folder: the file
 `device_tests.json` in the build folder, found by the model's sha256 (also when the file on the board has another
@@ -1749,6 +1896,8 @@ A model that no build of this framework made is recorded nowhere.
 
 What is deployed (build, time, start script or systemd, result of the checks) and whether it is still the build the
 board's profile, the pin and the recipe call for; if not, build and deploy again.
+
+In the GUI: **Boards > Boards and Devices...** **> Status**.
 
 ### device runtime prune
 
@@ -1763,6 +1912,10 @@ build active before the last deployment says so). The active build and a build a
 listed. You type the numbers, nothing is picked, and you confirm exactly those (default no). A board has no trash,
 so they are removed for good. The removal is written to the audit log first, with the folder names only. No AI
 can do this: the AI tools only say how many older builds stayed.
+
+In the GUI: **Boards > Boards and Devices...** **> Remove older runtime packages...** and **> Remove older builds on the board...** (the
+deletion dialog with the full list, nothing ticked, "No" is the default; the board's list is read in the
+background).
 
 For a [trusted device](#deploy-devices), the optional MCP tools `probe_remote_device`, `deploy_device_runtime` and
 `run_device_benchmark` run `scan --device`, `device runtime build` with `deploy`, and `device runtime verify

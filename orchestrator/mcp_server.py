@@ -1974,9 +1974,28 @@ def _write_private(path: Path, data: bytes) -> None:
         raise
 
 
-def write_claude_desktop_config(app_root: Path, path: Optional[Path] = None) -> Path:
-    """Adds this server to Claude Desktop's config, keeping every other entry; the old file is backed up.
-    A symlinked config (dotfile managers) is updated at its target, so the link stays."""
+@dataclass
+class DesktopConfigPlan:
+    """What `mcp config --write claude-desktop` would change, shown to the person before it is written."""
+    path: Path                      # the configuration file as named (a link stays a link)
+    target: Path                    # where it is written: the file itself, or a link's target
+    original: Optional[bytes]       # its content now; None when it does not exist yet (it is created)
+    data: Dict[str, Any]            # the new content
+    entry: Dict[str, Any]           # this server's entry (how Claude Desktop starts it)
+    replaces: bool                  # an entry of this server exists already and is replaced
+    unchanged: bool                 # the entry is there exactly like this already
+    others: List[str]               # the other servers' entries, kept as they are
+
+    @property
+    def backup(self) -> Optional[Path]:
+        """The backup of the current file (replaces an older backup); None when there is no file yet."""
+        return self.target.with_name(self.target.name + ".bak") if self.original is not None else None
+
+
+def plan_claude_desktop_config(app_root: Path, path: Optional[Path] = None) -> DesktopConfigPlan:
+    """Reads Claude Desktop's config and works out the change that adds this server, keeping every other entry;
+    writes nothing. ValueError when the file cannot be changed safely (not JSON, not an object), OSError when it
+    cannot be read."""
     path = Path(path or claude_desktop_config_path())
     target = Path(os.path.realpath(path)) if path.is_symlink() else path
     data: Dict[str, Any] = {}
@@ -1992,10 +2011,68 @@ def write_claude_desktop_config(app_root: Path, path: Optional[Path] = None) -> 
     servers = data.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
         raise ValueError(f"'mcpServers' in {path} is not an object.")
-    servers[SERVER_NAME] = launch_command(app_root)
+    entry = launch_command(app_root)
+    previous = servers.get(SERVER_NAME)
+    servers[SERVER_NAME] = entry
+    return DesktopConfigPlan(path=path, target=target, original=original, data=data, entry=entry,
+                             replaces=previous is not None, unchanged=previous == entry,
+                             others=sorted(str(name) for name in servers if name != SERVER_NAME))
+
+
+def write_claude_desktop_config(app_root: Path, path: Optional[Path] = None,
+                                plan: Optional[DesktopConfigPlan] = None) -> Path:
+    """Adds this server to Claude Desktop's config, keeping every other entry; the old file is backed up.
+    A symlinked config (dotfile managers) is updated at its target, so the link stays. With `plan` (what the person
+    was shown), the file must still be as it was then: a file changed meanwhile is refused (ValueError) instead of
+    being overwritten with a change nobody saw."""
+    if plan is None:
+        plan = plan_claude_desktop_config(app_root, path)
+    else:
+        current = plan.target.read_bytes() if plan.target.exists() else None
+        if current != plan.original:
+            raise ValueError(f"{plan.path} was changed since it was shown; nothing was written. Look at it again.")
+    target = plan.target
     # Everything is checked: only now replace the backup.
     target.parent.mkdir(parents=True, exist_ok=True)
-    if original is not None:
-        _write_private(target.with_name(target.name + ".bak"), original)
-    _write_private(target, json.dumps(data, indent=2).encode("utf-8"))
-    return path
+    if plan.original is not None:
+        _write_private(target.with_name(target.name + ".bak"), plan.original)
+    _write_private(target, json.dumps(plan.data, indent=2).encode("utf-8"))
+    return plan.path
+
+
+def installation_root() -> Path:
+    """The framework's installation (the folder that holds orchestrator/): what the client snippets put on
+    PYTHONPATH, for the CLI and the GUI alike."""
+    return Path(__file__).resolve().parents[1]
+
+
+# --- the HTTP server as a child process of the GUI (Security > AI App Connections (MCP)...) -----------------------
+
+def http_refusal(tokens: TokenStore, state_dir: Path, host: str, container: bool,
+                 inside: Optional[bool] = None) -> Optional[str]:
+    """Why `mcp serve --transport http` with this host and container binding would refuse to start (the same checks
+    as serve(): loopback or the container's interfaces only, then a usable token store with at least one named
+    token), or None."""
+    try:
+        http_bind(host, container, inside)
+    except ValueError as e:
+        return str(e)
+    return http_problem(tokens, state_dir)
+
+
+def http_url(host: str, port: int, container: bool = False) -> str:
+    """The address a client on this computer connects to (in container mode: the port published on the host's
+    loopback)."""
+    shown = "127.0.0.1" if container else host
+    return f"http://{'[' + shown + ']' if ':' in shown else shown}:{int(port)}/mcp"
+
+
+def http_serve_command(app_root: Path, host: str, port: int, container: bool = False) -> Dict[str, Any]:
+    """The command that runs `llm-cli mcp serve --transport http` with these settings as its own process (the same
+    entry as the CLI and the client snippets: the current interpreter with -P, the installation on PYTHONPATH):
+    command, args, cwd and the PYTHONPATH entry."""
+    launch = launch_command(app_root)
+    args = [*launch["args"], "--transport", "http", "--host", str(host), "--port", str(int(port))]
+    if container:
+        args.append("--container")
+    return {**launch, "args": args}

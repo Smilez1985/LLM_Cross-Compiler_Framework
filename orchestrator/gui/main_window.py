@@ -158,11 +158,13 @@ class MainOrchestrator(QMainWindow):
         exit_action = QAction(self.i18n.t("menu.exit", "Exit"), self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        __import__("orchestrator.gui.menus.boards", fromlist=["install"]).install(self, menubar)  # Boards menu
         
         sec_menu = menubar.addMenu("Security")
         act_openai = QAction("Set OpenAI API Key", self)
         act_openai.triggered.connect(lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))
         sec_menu.addAction(act_openai)
+        __import__("orchestrator.gui.menus.signin", fromlist=["install"]).install(self, menubar)  # Security entries
         
 
         self.view_menu = menubar.addMenu(ui_text("chat.view.menu"))  # filled by _setup_chat_dock
@@ -203,6 +205,7 @@ class MainOrchestrator(QMainWindow):
         self._add_knowledge_snapshots_action(tools_menu)
         self._add_framework_images_action(tools_menu)
         self._add_framework_docs_action(tools_menu)
+        __import__("orchestrator.gui.menus.mojo", fromlist=["install"]).install(self, menubar)  # Mojo Health Check...
 
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
         self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
@@ -215,6 +218,7 @@ class MainOrchestrator(QMainWindow):
         self.act_clear_history = QAction(self.i18n.t("menu.clear_history", "Clear Input History..."), self)
         self.act_clear_history.triggered.connect(self._clear_input_history)
         tools_menu.addAction(self.act_clear_history)
+        __import__("orchestrator.gui.menus.tools_mcp", fromlist=["install"]).install(self, menubar)  # Audit Log, MCP
 
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About", self)

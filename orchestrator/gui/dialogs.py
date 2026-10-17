@@ -22,13 +22,14 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
+from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
 from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.llm.auth.signin import plain_http_to_remote
 from orchestrator.llm.auth.spec import KEY_TYPES
 from orchestrator.llm.auth.store import CredentialStore, display_origin
 from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, LLMError, rejected_key_error
 from orchestrator.llm.providers.anthropic import WORKSPACE_ID, takes_workspace_id
-from orchestrator.utils.crawl_notice import CrawlNotice, notice_text
+from orchestrator.utils.crawl_notice import CrawlNotice, acknowledge_and_audit, notice_text
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import current_language, get_instance as get_i18n, ui_text
 
@@ -114,16 +115,21 @@ class SecretInputDialog(QDialog):
             QMessageBox.warning(self, "Error", "Secret cannot be empty.")
             return
             
-        sm = getattr(self.framework, 'secrets_manager', None)
-        if sm:
-            success = sm.set_secret(self.secret_key, val)
-            if success:
-                QMessageBox.information(self, "Success", "Secret stored in the encrypted credential vault.")
-                self.accept()
-            else:
-                QMessageBox.critical(self, "Error", "Failed to store secret via SecretsManager.")
-        else:
+        # The same step as `llmcf secrets set`: in the ephemeral storage nothing is saved, and the dialog says so.
+        from orchestrator.Core.secret_entries import SecretNotStored, SecretsUnavailable, store_secret
+        try:
+            stored = store_secret(getattr(self.framework, 'secrets_manager', None), self.secret_key, val)
+        except SecretsUnavailable:
             QMessageBox.critical(self, "Error", "SecretsManager is not initialized!")
+            return
+        except SecretNotStored:
+            QMessageBox.critical(self, "Error", "Failed to store secret via SecretsManager.")
+            return
+        if stored.memory_only:
+            QMessageBox.warning(self, "Security", ui_text("secrets.memory_only", name=self.secret_key))
+        else:
+            QMessageBox.information(self, "Success", "Secret stored in the encrypted credential vault.")
+        self.accept()
 
 class HealingConfirmDialog(QDialog):
     """
@@ -967,11 +973,9 @@ def show_crawl_notice_once(parent, config, announcer: Optional[Callable[[str], A
     CrawlNoticeDialog(parent, announcer).exec()
     try:
         if notice is not None:
-            notice.acknowledge("gui")
-            if registry is not None:
-                problem = audit_person(registry, "crawl_notice_acknowledged", {"via": "gui"})
-                if problem:
-                    logging.getLogger(__name__).warning(f"The Deep Ingest notice was not audited ({problem}).")
+            problem = acknowledge_and_audit(notice, "gui", getattr(registry, "audit", None))
+            if problem:
+                logging.getLogger(__name__).warning(f"The Deep Ingest notice was not audited ({problem}).")
     except OSError as e:
         logging.getLogger(__name__).warning(f"Could not remember the Deep Ingest notice ({e}); it is shown again.")
 
@@ -979,14 +983,8 @@ def show_crawl_notice_once(parent, config, announcer: Optional[Callable[[str], A
 def audit_person(registry, event: str, arguments: dict) -> Optional[str]:
     """A person's change in the GUI to who may call the tools, in the audit log (actor gui). Names only, never a
     token. Returns why it could not be recorded, or None."""
-    audit = getattr(registry, "audit", None)
-    if audit is None:
-        return None
-    try:
-        audit.record("gui", event, "framework", "person", "ok", arguments=arguments, approved=True)
-    except Exception as e:  # the change is done; the person is told it is not recorded
-        return redact_secrets(str(e)) or type(e).__name__
-    return None
+    from orchestrator.tools.mcp_tokens import person_change
+    return person_change(registry, "gui", event, arguments)
 
 
 class TokenShownOnceDialog(QDialog):
@@ -1021,30 +1019,270 @@ class TokenShownOnceDialog(QDialog):
         QGuiApplication.clipboard().setText(self.field.text())
 
 
-class ToolPermissionsDialog(QDialog):
+class TokenListMixin:
     """
-    Ditto setup: what Ditto and connected AI clients (MCP) may do on their own.
-    Asked once at the first start (and from the Tools menu); stored per user. The named MCP tokens are managed
-    here as well (list, add with the token shown once, rotate, revoke, each token's own permissions); with `token`
-    the dialog edits that token's own permissions.
+    The named MCP tokens of a window (Tool Permissions and Security > AI App Connections (MCP)...): list, Add (read
+    only, a copy of the local stdio clients', Ditto's or another token's own permissions, or linked to Ditto's),
+    Rotate, Revoke (the token, its permissions and its standing approvals, as `llm-cli mcp token revoke`), Back to read
+    only (`tools permissions --reset --token`) and Permissions.... A token is shown once, right after it is made or
+    rotated; the list shows names only. Every change goes through orchestrator.tools.mcp_tokens (the CLI's functions)
+    and is audited with actor gui. The window provides `registry` and may override `_tokens_changed()`. Every text is
+    English or German (l10n_tools_mcp), as the window's own language.
     """
     START_WITH = (("read", "Read only (recommended for a new client)"),
                   ("mcp", "A copy of the local stdio clients' permissions"),
                   ("ditto", "A copy of Ditto's permissions"),
                   ("link", "Ditto's permissions by reference (a change to Ditto's applies at once)"))
+    TOKEN_COLUMNS = ("name", "actor", "permissions", "created", "rotated")
 
-    def __init__(self, registry, parent=None, first_run: bool = False, token: Optional[str] = None):
+    def _lang(self) -> str:
+        return getattr(self, "lang", None) or current_language()
+
+    def _tt(self, key: str, **values) -> str:
+        return ui_text(key, self._lang(), **values)
+
+    def _token_section(self) -> QWidget:
+        box = QGroupBox(self._tt("tmcp.tokens.box"))
+        layout = QVBoxLayout(box)
+        layout.addWidget(plain_label(self._tt("tmcp.tokens.note")))
+        self.token_table = QTableWidget(0, len(self.TOKEN_COLUMNS))
+        self.token_table.setObjectName("table_mcp_tokens")
+        self.token_table.setHorizontalHeaderLabels([self._tt(f"tmcp.tokens.col.{c}") for c in self.TOKEN_COLUMNS])
+        self.token_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.token_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.token_table.setSelectionBehavior(QTableWidget.SelectRows)
+        layout.addWidget(self.token_table)
+        row = QHBoxLayout()
+        self.token_buttons = {}
+        for key, label, action in (("add", self._tt("tmcp.tokens.add"), self._add_token),
+                                   ("rotate", self._tt("tmcp.tokens.rotate"), self._rotate_selected),
+                                   ("revoke", self._tt("tmcp.tokens.revoke"), self._revoke_selected),
+                                   ("reset", self._tt("tmcp.token.reset"), self._reset_selected_token),
+                                   ("permissions", self._tt("tmcp.tokens.permissions"), self._token_permissions)):
+            button = QPushButton(button_text(label))
+            button.setObjectName(f"btn_tokens_{key}")
+            button.setAutoDefault(False)
+            button.clicked.connect(action)
+            row.addWidget(button)
+            self.token_buttons[key] = button
+        row.addStretch()
+        layout.addLayout(row)
+        self.refresh_tokens()
+        return box
+
+    def _tokens(self):
+        tokens = getattr(self.registry, "tokens", None)
+        if tokens is None:
+            raise RuntimeError("The MCP token store is not available.")
+        return tokens
+
+    def refresh_tokens(self) -> None:
+        from orchestrator.tools.mcp_tokens import policy_summary
+        self.token_store_problem = None   # why the store cannot be read: shown in the list instead of tokens
+        try:
+            records = self._tokens().list()
+        except Exception as e:  # a damaged or unreadable store is shown, not hidden
+            self.token_store_problem = str(e)
+            self.token_table.setRowCount(1)
+            self.token_table.setItem(0, 0, QTableWidgetItem(self._tt("tmcp.tokens.unusable",
+                                                                     reason=one_line(str(e)))))
+            return
+        self.token_table.setRowCount(len(records))
+        for i, record in enumerate(records):
+            summary = self._tt("tmcp.tokens.linked_to", link=record.link) if record.link \
+                else policy_summary(record.policy)
+            for col, text in enumerate((record.name, f"mcp:{record.name}", summary, record.created,
+                                        record.rotated or "-")):
+                self.token_table.setItem(i, col, QTableWidgetItem(text))
+
+    def _tokens_changed(self) -> None:
+        self.refresh_tokens()
+
+    def _selected_token(self) -> Optional[str]:
+        if getattr(self, "token_store_problem", None):
+            return None
+        row = self.token_table.currentRow()
+        item = self.token_table.item(row, 0) if row >= 0 else None
+        return item.text() if item is not None else None
+
+    def _show_token(self, name: str, token: str) -> None:
+        TokenShownOnceDialog(name, token, self).exec()
+
+    def _audit_warning(self, problem: Optional[str]) -> None:
+        if problem:
+            plain_box(self, "warning", self._tt("tmcp.token.title"),
+                      self._tt("tmcp.audit_problem", reason=one_line(problem)))
+
+    def start_choices(self) -> List[tuple]:
+        """What a new token's permissions can start as: the fixed choices, then a copy of each token's own."""
+        choices = [(key, self._tt(f"tmcp.tokens.start.{key}")) for key, _english in self.START_WITH]
+        try:
+            names = [record.name for record in self._tokens().list()]
+        except Exception:  # noqa: BLE001 - an unusable store offers the fixed choices only
+            names = []
+        return choices + [(f"mcp:{name}", self._tt("tmcp.token.start.copy", name=name)) for name in names]
+
+    def add_token(self, name: str, start_with: str = "read") -> bool:
+        """Creates a token (start_with: read, mcp, ditto, link, or mcp:<token> for a copy of that token's own
+        permissions, as `llm-cli mcp token add --policy-from`), shows it once and audits the change."""
+        from orchestrator.tools import mcp_tokens
+        copy = start_with in ("mcp", "ditto") or start_with.startswith(mcp_tokens.ACTOR_PREFIX)
+        try:
+            token, problem = mcp_tokens.add_token(self.registry, name, "gui", policy_from=start_with if copy else None,
+                                                  link="ditto" if start_with == "link" else None, via="gui")
+        except Exception as e:
+            QMessageBox.warning(self, self._tt("tmcp.token.title"), str(e))
+            return False
+        self._tokens_changed()
+        self._show_token(name, token)
+        self._audit_warning(problem)
+        return True
+
+    def _add_token(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        title = self._tt("tmcp.tokens.add.title")
+        name, ok = QInputDialog.getText(self, title, self._tt("tmcp.tokens.add.name"))
+        if not ok or not name.strip():
+            return
+        choices = self.start_choices()
+        labels = [label for _, label in choices]
+        choice, ok = QInputDialog.getItem(self, title, self._tt("tmcp.tokens.add.start"), labels, 0, False)
+        if ok and choice in labels:
+            self.add_token(name.strip(), choices[labels.index(choice)][0])
+
+    def rotate_token(self, name: str) -> bool:
+        from orchestrator.tools.mcp_tokens import person_change
+        try:
+            token = self._tokens().rotate(name)
+        except Exception as e:
+            QMessageBox.warning(self, self._tt("tmcp.token.title"), str(e))
+            return False
+        problem = person_change(self.registry, "gui", "mcp_token.rotate", {"token": name, "via": "gui"})
+        self._tokens_changed()
+        self._show_token(name, token)
+        self._audit_warning(problem)
+        return True
+
+    def revoke_token(self, name: str) -> bool:
+        """Revokes the token completely: the token, its permissions and its standing approvals (mcp:<name>), in one
+        core function with the CLI (mcp_tokens.revoke_token); audited with actor gui."""
+        from orchestrator.tools import mcp_tokens
+        try:
+            result = mcp_tokens.revoke_token(self.registry, name, "gui", via="gui")
+        except Exception as e:
+            QMessageBox.warning(self, self._tt("tmcp.token.title"), str(e))
+            return False
+        self._tokens_changed()
+        lang = self._lang()
+        if result.grants_problem:
+            plain_box(self, "warning", ui_text("tmcp.token.title", lang),
+                      ui_text("tmcp.token.revoked.grants_failed", lang, name=one_line(name),
+                              reason=one_line(result.grants_problem)))
+        elif result.grants_removed:
+            plain_box(self, "information", ui_text("tmcp.token.title", lang),
+                      ui_text("tmcp.token.revoked.grants", lang, name=one_line(name), n=result.grants_removed))
+        self._audit_warning(result.audit_problem)
+        return True
+
+    def reset_token(self, name: str) -> bool:
+        """`tools permissions --reset --token NAME`: after the person's yes ("No" is the default), the token is a new
+        token again (read only, not configured), not one with hand-set Allow/Deny."""
+        from orchestrator.tools import mcp_tokens
+        lang = self._lang()
+        title = ui_text("tmcp.token.title", lang)
+        try:
+            record = self._tokens().get(name)
+            if record is None:
+                raise mcp_tokens.TokenStoreError(f"There is no token named '{name}'.")
+        except Exception as e:  # noqa: BLE001 - shown as plain text
+            plain_box(self, "warning", title, ui_text("tmcp.perm.failed", lang, reason=one_line(str(e))))
+            return False
+        if record.link is None and record.policy == mcp_tokens.read_only_policy():
+            plain_box(self, "information", title, ui_text("tmcp.token.reset.nothing", lang, name=one_line(name)))
+            return False
+        before = (ui_text("tmcp.token.linked", lang, link=record.link) if record.link
+                  else mcp_tokens.policy_summary(record.policy))
+        if not ask(self, title, ui_text("tmcp.token.reset.question", lang, name=one_line(name), before=before)):
+            return False
+        try:
+            problem = mcp_tokens.reset_token_policy(self.registry, name, "gui", via="gui")
+        except Exception as e:  # noqa: BLE001
+            plain_box(self, "warning", title, ui_text("tmcp.perm.failed", lang, reason=one_line(str(e))))
+            return False
+        self._tokens_changed()
+        plain_box(self, "information", title, ui_text("tmcp.token.reset.done", lang, name=one_line(name)))
+        self._audit_warning(problem)
+        return True
+
+    def _rotate_selected(self) -> None:
+        name = self._selected_token()
+        if name and ask(self, self._tt("tmcp.token.title"), self._tt("tmcp.tokens.rotate.question",
+                                                                      name=one_line(name))):
+            self.rotate_token(name)
+
+    def _revoke_selected(self) -> None:
+        name = self._selected_token()
+        if not name:
+            return
+        grants = sum(1 for row in self.registry.grant_rows(f"mcp:{name}"))
+        lang = self._lang()
+        if ask(self, ui_text("tmcp.token.title", lang),
+               ui_text("tmcp.token.revoke.question", lang, name=one_line(name), n=grants)):
+            self.revoke_token(name)
+
+    def _reset_selected_token(self) -> None:
+        name = self._selected_token()
+        if name:
+            self.reset_token(name)
+
+    def _token_permissions(self) -> None:
+        name = self._selected_token()
+        if not name:
+            return
+        try:
+            record = self._tokens().get(name)
+        except Exception as e:  # noqa: BLE001 - an unusable store: said in plain text, nothing opens
+            plain_box(self, "warning", self._tt("tmcp.token.title"), self._tt("tmcp.tokens.unusable",
+                                                                               reason=one_line(str(e))))
+            return
+        if record is not None and record.link and not ask(
+                self, self._tt("tmcp.token.title"), self._tt("tmcp.tokens.link.question", name=one_line(name),
+                                                              link=record.link)):
+            return
+        if ToolPermissionsDialog(self.registry, self, token=name, lang=self._lang()).exec():
+            self._tokens_changed()
+
+
+CALLER_CHOICES = ((None, "tmcp.perm.whose.shared"), ("ditto", "tmcp.perm.whose.ditto"),
+                  ("mcp", "tmcp.perm.whose.mcp"))
+
+
+class ToolPermissionsDialog(QDialog, TokenListMixin):
+    """
+    Ditto setup: what Ditto and connected AI clients (MCP) may do on their own.
+    Asked once at the first start (and from the Tools menu); stored per user. "Whose permissions" chooses the shared
+    permissions or the own section of Ditto or the local stdio MCP clients (`llm-cli tools permissions --caller`); the
+    per-tool table shows what each tool's decision is now and why (`tools list`). Resets: the recommended defaults
+    (`--reset`), a caller back to the shared permissions (`--reset --caller`), a token back to read only (`--reset
+    --token`), each after a question that lists what changes ("No" is the default). The named MCP tokens are managed
+    here as well (TokenListMixin); with `token` the dialog edits that token's own permissions.
+    """
+
+    def __init__(self, registry, parent=None, first_run: bool = False, token: Optional[str] = None,
+                 caller: Optional[str] = None, lang: Optional[str] = None):
         super().__init__(parent)
         from orchestrator.tools.policy import Decision, TIER_LABELS, ToolTier
         self._Decision, self._ToolTier = Decision, ToolTier
         self.registry = registry
         self.token = token
+        self.lang = lang or current_language()
+        self.caller = None if token else (caller if caller in ("ditto", "mcp") else None)
         # What this window shows and changes: saving the shared permissions refuses when they changed meanwhile
         # (another window or process), so a change made elsewhere is never undone silently.
-        self.loaded = policy = registry.policy(f"mcp:{token}") if token else registry.policy()
+        self.loaded = registry.policy(f"mcp:{token}") if token else registry.policy()
         self.setWindowTitle(f"Tool permissions - MCP token '{token}'" if token else
                             "Ditto setup - tool permissions" if first_run else "Tool permissions")
-        self.resize(720, 620 if token else 780)
+        self.resize(760, 620 if token else 820)
         layout = QVBoxLayout(self)
 
         intro = QLabel(
@@ -1063,6 +1301,25 @@ class ToolPermissionsDialog(QDialog):
             warning.setStyleSheet("color: #b00020;")
             layout.addWidget(warning)
 
+        if not token:
+            whose = QHBoxLayout()
+            whose.addWidget(plain_label(self._t("tmcp.perm.whose"), wrap=False, selectable=False))
+            self.caller_combo = QComboBox()
+            self.caller_combo.setObjectName("combo_permissions_caller")
+            for value, key in CALLER_CHOICES:
+                self.caller_combo.addItem(self._t(key), value)
+            self.caller_combo.setCurrentIndex(self.caller_combo.findData(self.caller))
+            self.caller_combo.currentIndexChanged.connect(self._caller_chosen)
+            whose.addWidget(self.caller_combo, 1)
+            self.btn_reset_caller = QPushButton(button_text(self._t("tmcp.perm.reset_caller")))
+            self.btn_reset_caller.setObjectName("btn_permissions_reset_caller")
+            self.btn_reset_caller.setAutoDefault(False)
+            self.btn_reset_caller.clicked.connect(lambda: self.reset_caller(self.caller))
+            whose.addWidget(self.btn_reset_caller)
+            layout.addLayout(whose)
+            self.caller_note = plain_label("")
+            layout.addWidget(self.caller_note)
+
         tier_box = QGroupBox("Per category")
         form = QFormLayout(tier_box)
         self.tier_combos = {}
@@ -1071,46 +1328,38 @@ class ToolPermissionsDialog(QDialog):
             choices = [Decision.ASK, Decision.DENY] if tier == ToolTier.EXTERNAL else [Decision.ALLOW, Decision.ASK, Decision.DENY]
             for choice in choices:
                 combo.addItem(choice.value.capitalize(), choice.value)
-            idx = combo.findData(policy.tiers.get(tier, Decision.ASK).value)
-            combo.setCurrentIndex(idx if idx >= 0 else combo.findData(Decision.ASK.value))
             form.addRow(label + ":", combo)
             self.tier_combos[tier] = combo
         layout.addWidget(tier_box)
 
         layout.addWidget(QLabel("Per tool (optional, overrides the category):"))
         tools = registry.list()
-        facts = {row["tool"]: row for row in registry.permissions(f"mcp:{token}" if token else "")}
-        self.table = QTableWidget(len(tools), 6)
+        self.table = QTableWidget(len(tools), 7)
         self.table.setHorizontalHeaderLabels(["Tool", "Category", "Default / max / standing approval", "New",
-                                              "Permission", "Ask in the framework"])
+                                              "Permission", "Ask in the framework",
+                                              self._t("tmcp.perm.col.effective")])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.override_combos = {}
         self.framework_checks = {}  # questions always shown here (approval window), never in the client's dialog
         for row, spec in enumerate(tools):
             name_item = QTableWidgetItem(spec.title)
-            name_item.setToolTip(spec.description)
+            name_item.setToolTip(plain_tooltip(spec.description))
             self.table.setItem(row, 0, name_item)
             self.table.setItem(row, 1, QTableWidgetItem(spec.tier.value))
-            fact = facts.get(spec.name, {})
-            grant = "standing approval possible" if fact.get("standing_approval") else "no standing approval"
-            self.table.setItem(row, 2, QTableWidgetItem(f"{fact.get('default', '')} / {fact.get('max', '')} / {grant}"))
-            self.table.setItem(row, 3, QTableWidgetItem("new" if fact.get("new") else ""))
             combo = QComboBox()
             combo.addItem("Category default", "")
             for choice in (Decision.ALLOW, Decision.ASK, Decision.DENY):
                 combo.addItem(choice.value.capitalize(), choice.value)
-            current = policy.overrides.get(spec.name)
-            combo.setCurrentIndex(combo.findData(current.value) if current else 0)
             self.table.setCellWidget(row, 4, combo)
             self.override_combos[spec.name] = combo
-            from PySide6.QtWidgets import QCheckBox
             check = QCheckBox()
-            check.setChecked(spec.name in policy.framework_only)
-            check.setToolTip("Always put this tool's questions to you in the framework's approval window, never in "
-                             "the AI client's own dialog")
+            check.setToolTip(plain_tooltip("Always put this tool's questions to you in the framework's approval "
+                                           "window, never in the AI client's own dialog"))
             self.table.setCellWidget(row, 5, check)
             self.framework_checks[spec.name] = check
         layout.addWidget(self.table)
+        self.callers_note = plain_label("")
+        layout.addWidget(self.callers_note)
         if not token:
             layout.addWidget(self._token_section())
 
@@ -1128,9 +1377,105 @@ class ToolPermissionsDialog(QDialog):
         self.refresh_grants()
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        reset_key = "tmcp.token.reset" if token else "tmcp.perm.reset"
+        self.btn_reset = buttons.addButton(button_text(self._t(reset_key)), QDialogButtonBox.ResetRole)
+        self.btn_reset.setObjectName("btn_permissions_reset_token" if token else "btn_permissions_reset")
+        self.btn_reset.setAutoDefault(False)
+        self.btn_reset.clicked.connect(lambda: self.reset_token(token) if token else self.reset_shared())
         buttons.accepted.connect(self.save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self._fill()
+
+    def _t(self, key: str, **values) -> str:
+        return ui_text(key, self.lang, **values)
+
+    def _who(self, caller: Optional[str]) -> str:
+        return self._t(dict(CALLER_CHOICES)[caller])
+
+    def _actor(self) -> str:
+        return f"mcp:{self.token}" if self.token else (self.caller or "")
+
+    def _section(self):
+        """The permissions shown: a token's own, the shared ones, or the caller's own section (created from the shared
+        ones when it has none, as a save would)."""
+        from orchestrator.tools.policy import caller_section
+        if self.caller:
+            return caller_section(self.loaded, self.caller)
+        return self.loaded
+
+    def _fill(self) -> None:
+        """Shows the chosen section in the combos and check boxes, and per tool what is decided now and why (the
+        stored permissions, as `llm-cli tools list [--caller]` prints them)."""
+        section = self._section()
+        Decision = self._Decision
+        for tier, combo in self.tier_combos.items():
+            idx = combo.findData(section.tiers.get(tier, Decision.ASK).value)
+            combo.setCurrentIndex(idx if idx >= 0 else combo.findData(Decision.ASK.value))
+        for name, combo in self.override_combos.items():
+            current = section.overrides.get(name)
+            combo.setCurrentIndex(combo.findData(current.value) if current else 0)
+        for name, check in self.framework_checks.items():
+            check.setChecked(name in section.framework_only)
+        facts = {row["tool"]: row for row in self.registry.permissions(self._actor())}
+        for row, spec in enumerate(self.registry.list()):
+            fact = facts.get(spec.name, {})
+            grant = "standing approval possible" if fact.get("standing_approval") else "no standing approval"
+            self.table.setItem(row, 2, QTableWidgetItem(f"{fact.get('default', '')} / {fact.get('max', '')} / {grant}"))
+            self.table.setItem(row, 3, QTableWidgetItem("new" if fact.get("new") else ""))
+            decision = fact.get("decision", "")
+            effective = QTableWidgetItem(self._t(f"tmcp.decision.{decision}") if decision else "")
+            effective.setData(Qt.UserRole, decision)
+            effective.setToolTip(plain_tooltip(fact.get("why", "")))
+            self.table.setItem(row, 6, effective)
+        if not self.token:
+            own = self.caller in self.loaded.callers
+            who = self._who(self.caller)
+            self.caller_note.setText("" if not self.caller else
+                                     self._t("tmcp.perm.own" if own else "tmcp.perm.uses_shared", who=who))
+            self.caller_note.setVisible(bool(self.caller))
+            self.btn_reset_caller.setVisible(bool(self.caller))
+            self.btn_reset_caller.setEnabled(bool(self.caller) and (own or bool(self.loaded.grants.get(self.caller))))
+            self.btn_reset.setVisible(not self.caller)
+        names = [self._who(name) if name in ("ditto", "mcp") else name for name in sorted(self.loaded.callers)]
+        self.callers_note.setText(self._t("tmcp.perm.callers_note", names=", ".join(names))
+                                  if names and not self.token and not self.caller else "")
+        self.callers_note.setVisible(bool(self.callers_note.text()))
+        self._shown = self._values()
+
+    def _values(self):
+        return ({tier: combo.currentData() for tier, combo in self.tier_combos.items()},
+                {name: combo.currentData() for name, combo in self.override_combos.items()},
+                {name for name, check in self.framework_checks.items() if check.isChecked()})
+
+    def effective(self, tool: str) -> str:
+        """The decision shown in the "Effective now" column for `tool` (allow, ask or deny)."""
+        row = [spec.name for spec in self.registry.list()].index(tool)
+        return self.table.item(row, 6).data(Qt.UserRole)
+
+    def set_caller(self, caller: Optional[str]) -> bool:
+        """Shows the permissions of `caller` (None: the shared ones). Unsaved changes are kept only on the person's
+        "No" to discarding them; returns whether the view changed."""
+        if caller == self.caller:
+            return True
+        if self._values() != self._shown and not ask(self, self.windowTitle(),
+                                                     self._t("tmcp.perm.discard", who=self._who(self.caller))):
+            return False
+        self.caller = caller
+        self._fill()
+        return True
+
+    def _caller_chosen(self, _index: int) -> None:
+        wanted = self.caller_combo.currentData()
+        if not self.set_caller(wanted):
+            self.caller_combo.blockSignals(True)
+            self.caller_combo.setCurrentIndex(self.caller_combo.findData(self.caller))
+            self.caller_combo.blockSignals(False)
+
+    def _reload(self) -> None:
+        self.loaded = self.registry.policy(f"mcp:{self.token}") if self.token else self.registry.policy()
+        self._fill()
+        self.refresh_grants()
 
     def refresh_grants(self):
         from orchestrator.tools.approvals import caller_label, tool_title
@@ -1149,6 +1494,15 @@ class ToolPermissionsDialog(QDialog):
         item = self.grant_table.item(row, 0) if row >= 0 else None
         return item.text() if item is not None else ""
 
+    def _carry_on_after_grants(self) -> None:
+        """Carry on from the new revision only when nothing but standing approvals changed since this window opened;
+        otherwise its save stays based on what it showed and is refused, so a change made elsewhere is not undone.
+        (A token's own permissions live in the token store; revoking changes only the shared file.)"""
+        fresh = self.registry.policy()
+        ignored = {"revision", "updated_at", "grants"}
+        if not self.token and fresh.model_dump(exclude=ignored) == self.loaded.model_dump(exclude=ignored):
+            self.loaded = fresh
+
     def revoke_grant(self, grant_id: str) -> bool:
         """Revokes at once (audited); the window's other settings are then saved on top of the new state."""
         if not grant_id:
@@ -1158,33 +1512,37 @@ class ToolPermissionsDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Tool permissions", f"Could not revoke the standing approval:\n{e}")
             return False
-        # Carry on from the new revision only when nothing but standing approvals changed since this window opened;
-        # otherwise its save stays based on what it showed and is refused, so a change made elsewhere is not undone.
-        # (A token's own permissions live in the token store; revoking changes only the shared file.)
-        fresh = self.registry.policy()
-        ignored = {"revision", "updated_at", "grants"}
-        if not self.token and fresh.model_dump(exclude=ignored) == self.loaded.model_dump(exclude=ignored):
-            self.loaded = fresh
+        self._carry_on_after_grants()
         self.refresh_grants()
         return revoked
 
+    def _tokens_changed(self) -> None:
+        """A token's revoke also removes its standing approvals from the shared file: the list of standing approvals
+        and this window's base follow."""
+        if hasattr(self, "token_table"):   # a token's own permissions have no token list
+            self.refresh_tokens()
+        self._carry_on_after_grants()
+        self.refresh_grants()
+
     def build_policy(self):
         """The permissions as set here; every listed tool counts as reviewed. For the shared permissions, callers
-        with permissions of their own (llm-cli tools permissions --caller) keep them; for a token, they become its
-        own permissions."""
+        with permissions of their own keep them; for Ditto or the local MCP clients, their own section (created from
+        the shared permissions); for a token, they become its own permissions."""
+        from orchestrator.tools.policy import with_section
         tiers = {tier: self._Decision(combo.currentData()) for tier, combo in self.tier_combos.items()}
         overrides = {name: self._Decision(combo.currentData())
                      for name, combo in self.override_combos.items() if combo.currentData()}
-        return self.loaded.model_copy(update={
-            "configured": True, "tiers": tiers, "overrides": overrides,
-            "reviewed": sorted(self.override_combos),
-            "framework_only": sorted(n for n, check in self.framework_checks.items() if check.isChecked())})
+        changed = with_section(self.loaded, self.caller, tiers=tiers, overrides=overrides,
+                               reviewed=sorted(self.override_combos),
+                               framework_only=sorted(n for n, check in self.framework_checks.items()
+                                                     if check.isChecked()))
+        return changed.model_copy(update={"configured": True})
 
     def save(self):
         try:
             if self.token:
-                self.registry.tokens.set_policy(self.token, self.build_policy())
-                problem = audit_person(self.registry, "mcp_token.permissions", {"token": self.token, "via": "gui"})
+                from orchestrator.tools.mcp_tokens import set_token_policy
+                problem = set_token_policy(self.registry, self.token, self.build_policy(), "gui", via="gui")
                 if problem:
                     QMessageBox.warning(self, "Tool permissions", f"Saved, but the audit log could not record it: "
                                                                   f"{problem}")
@@ -1195,152 +1553,52 @@ class ToolPermissionsDialog(QDialog):
             return
         self.accept()
 
-    # --- named MCP tokens: managed by a person, here or with llm-cli mcp token ----------------------------------------
+    # --- resets: `llm-cli tools permissions --reset [--caller C | --token NAME]` --------------------------------------
 
-    def _token_section(self) -> QWidget:
-        box = QGroupBox("MCP tokens (one per client)")
-        layout = QVBoxLayout(box)
-        note = QLabel("Each client that connects over HTTP, or over stdio with LCF_MCP_TOKEN, gets its own token: "
-                      "its name is the caller in the audit log (mcp:<name>), and it has its own permissions. A new "
-                      "token can only read until you allow more. A token is shown once; revoking or rotating it "
-                      "ends its client's access at once, also its open connections.")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        self.token_table = QTableWidget(0, 5)
-        self.token_table.setHorizontalHeaderLabels(["Name", "Audit actor", "Permissions", "Created", "Rotated"])
-        self.token_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.token_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.token_table.setSelectionBehavior(QTableWidget.SelectRows)
-        layout.addWidget(self.token_table)
-        row = QHBoxLayout()
-        for label, action in (("Add...", self._add_token), ("Rotate", self._rotate_selected),
-                              ("Revoke", self._revoke_selected), ("Permissions...", self._token_permissions)):
-            button = QPushButton(label)
-            button.clicked.connect(action)
-            row.addWidget(button)
-        row.addStretch()
-        layout.addLayout(row)
-        self.refresh_tokens()
-        return box
-
-    def _tokens(self):
-        tokens = getattr(self.registry, "tokens", None)
-        if tokens is None:
-            raise RuntimeError("The MCP token store is not available.")
-        return tokens
-
-    def refresh_tokens(self) -> None:
-        from orchestrator.tools.policy import TIER_LABELS
-        try:
-            records = self._tokens().list()
-        except Exception as e:  # a damaged or unreadable store is shown, not hidden
-            self.token_table.setRowCount(1)
-            self.token_table.setItem(0, 0, QTableWidgetItem(f"Token store unusable: {e}"))
-            return
-        self.token_table.setRowCount(len(records))
-        for i, record in enumerate(records):
-            if record.link:
-                summary = f"linked to {record.link}"
-            else:
-                summary = ", ".join(f"{t.value}: {record.policy.tiers[t].value}" for t in TIER_LABELS)
-                summary += f" (+{len(record.policy.overrides)} per tool)" if record.policy.overrides else ""
-            for col, text in enumerate((record.name, f"mcp:{record.name}", summary, record.created,
-                                        record.rotated or "-")):
-                self.token_table.setItem(i, col, QTableWidgetItem(text))
-
-    def _selected_token(self) -> Optional[str]:
-        row = self.token_table.currentRow()
-        item = self.token_table.item(row, 0) if row >= 0 else None
-        return item.text() if item is not None and not item.text().startswith("Token store") else None
-
-    def _show_token(self, name: str, token: str) -> None:
-        TokenShownOnceDialog(name, token, self).exec()
-
-    def add_token(self, name: str, start_with: str = "read") -> bool:
-        """Creates a token (start_with: read, mcp, ditto or link), shows it once and audits the change."""
-        policy, link = None, None
-        if start_with in ("mcp", "ditto"):
-            if self.registry.policy_store.problem:
-                QMessageBox.critical(self, "MCP tokens", self.registry.policy_store.problem)
-                return False
-            policy = self.registry.policy(start_with).model_copy(deep=True, update={"configured": True})
-        elif start_with == "link":
-            link = "ditto"
-        try:
-            token = self._tokens().add(name, policy=policy, link=link)
-        except Exception as e:
-            QMessageBox.warning(self, "MCP tokens", str(e))
+    def _reset(self, caller: Optional[str]) -> bool:
+        from orchestrator.tools.policy import PolicyConflict, reset_changes, reset_policy
+        title = self.windowTitle()
+        changes = reset_changes(self.registry.policy(), caller)
+        if not changes:
+            plain_box(self, "information", title, self._t("tmcp.perm.reset.nothing"))
             return False
-        problem = audit_person(self.registry, "mcp_token.add",
-                               {"token": name, "policy_from": start_with if policy is not None else None,
-                                "link": link, "via": "gui"})
-        self.refresh_tokens()
-        self._show_token(name, token)
-        if problem:
-            QMessageBox.warning(self, "MCP tokens", f"Done, but the audit log could not record it: {problem}")
+        listed = "\n".join(f"- {line}" for line in changes)
+        question = (self._t("tmcp.perm.reset_caller.question", who=self._who(caller), changes=listed) if caller
+                    else self._t("tmcp.perm.reset.question", changes=listed))
+        if not ask(self, title, question):
+            return False
+
+        def change(current):  # exactly the change the person was shown, or nothing
+            if reset_changes(current, caller) != changes:
+                raise PolicyConflict("changed meanwhile")
+            return reset_policy(current, caller)
+        try:
+            self.registry.policy_store.update(change, actor="gui")
+        except PolicyConflict:
+            plain_box(self, "warning", title, self._t("tmcp.perm.changed"))
+            self._reload()
+            return False
+        except Exception as e:  # noqa: BLE001 - e.g. the audit log cannot record it: nothing changed
+            plain_box(self, "warning", title, self._t("tmcp.perm.failed", reason=one_line(redact_secrets(str(e)))))
+            return False
+        plain_box(self, "information", title, self._t("tmcp.perm.reset_caller.done", who=self._who(caller)) if caller
+                  else self._t("tmcp.perm.reset.done"))
+        self._reload()
         return True
 
-    def _add_token(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "MCP token", "Name of the client (lower-case letters, digits and "
-                                                           "hyphens, e.g. claude-desktop):")
-        if not ok or not name.strip():
-            return
-        labels = [label for _, label in self.START_WITH]
-        choice, ok = QInputDialog.getItem(self, "MCP token", "Its permissions start as:", labels, 0, False)
-        if ok:
-            self.add_token(name.strip(), self.START_WITH[labels.index(choice)][0])
+    def reset_shared(self) -> bool:
+        """`--reset`: the recommended defaults; every caller's own section and every standing approval go."""
+        return self._reset(None)
 
-    def rotate_token(self, name: str) -> bool:
-        try:
-            token = self._tokens().rotate(name)
-        except Exception as e:
-            QMessageBox.warning(self, "MCP tokens", str(e))
-            return False
-        problem = audit_person(self.registry, "mcp_token.rotate", {"token": name, "via": "gui"})
-        self.refresh_tokens()
-        self._show_token(name, token)
-        if problem:
-            QMessageBox.warning(self, "MCP tokens", f"Done, but the audit log could not record it: {problem}")
-        return True
+    def reset_caller(self, caller: Optional[str]) -> bool:
+        """`--reset --caller C`: that caller uses the shared permissions again."""
+        return bool(caller) and self._reset(caller)
 
-    def revoke_token(self, name: str) -> bool:
-        try:
-            self._tokens().revoke(name)
-        except Exception as e:
-            QMessageBox.warning(self, "MCP tokens", str(e))
-            return False
-        problem = audit_person(self.registry, "mcp_token.revoke", {"token": name, "via": "gui"})
-        self.refresh_tokens()
-        if problem:
-            QMessageBox.warning(self, "MCP tokens", f"Done, but the audit log could not record it: {problem}")
-        return True
-
-    def _rotate_selected(self) -> None:
-        name = self._selected_token()
-        if name and QMessageBox.question(
-                self, "MCP tokens", f"Replace the token '{name}'? The old one stops working at once; its permissions "
-                                    "stay.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
-            self.rotate_token(name)
-
-    def _revoke_selected(self) -> None:
-        name = self._selected_token()
-        if name and QMessageBox.question(
-                self, "MCP tokens", f"Revoke the token '{name}'? Its client loses access at once, and its permissions "
-                                    "are deleted.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
-            self.revoke_token(name)
-
-    def _token_permissions(self) -> None:
-        name = self._selected_token()
-        if not name:
-            return
-        record = self._tokens().get(name)
-        if record is not None and record.link and QMessageBox.question(
-                self, "MCP tokens", f"The token '{name}' uses {record.link}'s permissions. Give it its own instead?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
-            return
-        if ToolPermissionsDialog(self.registry, self, token=name).exec():
-            self.refresh_tokens()
+    def reset_token(self, name: str) -> bool:
+        done = TokenListMixin.reset_token(self, name)
+        if done and self.token:
+            self._reload()
+        return done
 
 
 class AIFoldersDialog(QDialog):
@@ -1370,8 +1628,10 @@ class AIFoldersDialog(QDialog):
         layout.addWidget(self.table)
         row = QHBoxLayout()
         self.add_button = QPushButton("Add folder...")
+        self.add_button.setObjectName("btn_ai_folders_add")
         self.add_button.clicked.connect(self._choose_folder)
         self.remove_button = QPushButton("Remove")
+        self.remove_button.setObjectName("btn_ai_folders_remove")
         self.remove_button.clicked.connect(self._remove_selected)
         row.addWidget(self.add_button)
         row.addWidget(self.remove_button)
@@ -1390,14 +1650,22 @@ class AIFoldersDialog(QDialog):
             for col, text in enumerate((folder.label, folder.kind, str(folder.path), status)):
                 self.table.setItem(i, col, QTableWidgetItem(text))
 
+    KINDS = ("any", "model", "dataset")   # `llm-cli tools folders add --kind`; AI clients are shown it
+
     def _choose_folder(self) -> None:
         from PySide6.QtWidgets import QFileDialog, QInputDialog
         path = QFileDialog.getExistingDirectory(self, "Folder the AI may use")
         if not path:
             return
         label, ok = QInputDialog.getText(self, "Label", "Short name AI clients use for this folder (lowercase):")
-        if ok and label:
-            self.add_folder(path, label.strip())
+        if not ok or not label:
+            return
+        lang = current_language()
+        labels = [ui_text(f"tmcp.folders.kind.{kind}", lang) for kind in self.KINDS]
+        choice, ok = QInputDialog.getItem(self, ui_text("tmcp.folders.kind.title", lang),
+                                          ui_text("tmcp.folders.kind.question", lang), labels, 0, False)
+        if ok and choice in labels:
+            self.add_folder(path, label.strip(), self.KINDS[labels.index(choice)])
 
     def add_folder(self, path: str, label: str, kind: str = "any") -> bool:
         """Checks the folder, shows what sharing it means, and adds it on "Yes" (audited)."""
@@ -1411,8 +1679,8 @@ class AIFoldersDialog(QDialog):
             return False
         answer = QMessageBox.question(
             self, "Folders the AI may use",
-            f"Folder: {real}\nLabel: {label}\n\n{FOLDER_WARNING}\n\nLet AI clients and Ditto use the files in this "
-            "folder?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            f"Folder: {real}\nLabel: {label}\nKind: {kind}\n\n{FOLDER_WARNING}\n\nLet AI clients and Ditto use the "
+            "files in this folder?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if answer != QMessageBox.Yes:
             return False
         try:
@@ -1458,27 +1726,13 @@ class AIFoldersDialog(QDialog):
 
 def confirm_host_key(parent, framework, host: str, port: int = 22) -> bool:
     """Trust on first use, never silently: shows an unknown device's host key fingerprint and stores it
-    only if the user confirms; a changed key is refused."""
-    from pathlib import Path
-    from orchestrator.utils import ssh_trust
-    state_dir = Path(getattr(getattr(framework, "config", None), "user_state_dir", None) or Path.home() / ".llm-framework")
+    only if the user confirms ("No" is the default); a changed key is refused. Reads the key in the calling thread:
+    a window that must not wait uses gui/host_key.HostKeyCheck, which asks the same question after reading the key
+    off the GUI thread."""
+    from orchestrator.gui import host_key
     try:
-        key = ssh_trust.fetch_host_key(host, port)
-        status = ssh_trust.check_host_key(state_dir, host, port, key)
+        key, status = host_key.read_host_key(host_key.state_dir(framework), host, port)
     except Exception as e:
-        QMessageBox.critical(parent, "SSH", f"Could not reach {host}:{port}: {e}")
+        host_key.show_unreachable(parent, framework, host, port, e)
         return False
-    if status == "known":
-        return True
-    if status == "changed":
-        QMessageBox.critical(parent, "SSH host key changed", str(ssh_trust.HostKeyChanged(host, port)))
-        return False
-    answer = QMessageBox.question(
-        parent, "New device",
-        f"First connection to {host}:{port}.\n\nKey type: {key.get_name()}\nFingerprint: {ssh_trust.fingerprint(key)}\n\n"
-        "Compare it with the output of\n  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\non the device. Trust this device?",
-        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-    if answer != QMessageBox.Yes:
-        return False
-    ssh_trust.trust_host_key(state_dir, host, port, key)
-    return True
+    return host_key.ask_trust(parent, framework, host, port, key, status)

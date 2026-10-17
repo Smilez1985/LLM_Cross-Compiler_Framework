@@ -9,8 +9,9 @@ permissions (`llm-cli tools permissions --token NAME`), copies another caller's 
 (`--policy-from`), or links it to Ditto's policy (`--link ditto`, by reference, so a change to Ditto's
 permissions applies to it at once). Revoking a token removes its policy with it.
 
-Tokens are created, listed, rotated and revoked only by a person, with `llm-cli mcp token`: no tool, resource
-or prompt can reach this store, and no token ever appears in a tool argument, result, log line or audit entry.
+Tokens are created, listed, rotated and revoked only by a person, with `llm-cli mcp token` or in the GUI (both through
+the functions at the end of this module): no tool, resource or prompt can reach this store, and no token ever appears
+in a tool argument, result, log line or audit entry.
 """
 
 import hashlib
@@ -22,6 +23,7 @@ import secrets
 import stat
 import tempfile
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Literal, Optional, Tuple
@@ -342,3 +344,122 @@ class TokenStore:
         if name not in records:
             raise TokenStoreError(f"There is no token named '{name}' ('llm-cli mcp token list' shows them).")
         return records[name]
+
+
+# --- a person's changes to the tokens: one code path for `llm-cli mcp token` and the GUI ---------------------------
+# Every function takes the tool registry (its token store, policy store and audit log) and the person's window as the
+# audit actor (cli or gui); none of them is reachable from a tool, a resource or a prompt.
+
+class UnknownCaller(TokenStoreError):
+    """--policy-from names neither mcp, ditto nor an existing token."""
+
+
+def policy_summary(policy: ToolPolicy) -> str:
+    """A token's permissions in one line: the decision per tier and how many per-tool settings it has."""
+    from orchestrator.tools.policy import TIER_LABELS
+    tiers = ", ".join(f"{tier.value}: {policy.tiers[tier].value}" for tier in TIER_LABELS)
+    return tiers + (f" (+{len(policy.overrides)} per tool)" if policy.overrides else "")
+
+
+def person_change(registry, actor: str, event: str, arguments: Dict) -> Optional[str]:
+    """Records a person's change to who may call the tools in the audit log (`actor`: cli or gui). Names only, never a
+    token. Returns why it could not be recorded (the change is done), or None (also without an audit log)."""
+    audit = getattr(registry, "audit", None)
+    if audit is None:
+        return None
+    try:
+        audit.record(actor, event, "framework", "person", "ok", arguments=arguments, approved=True)
+    except Exception as e:  # noqa: BLE001 - the change is done; the person is told it is not recorded
+        from orchestrator.utils.helpers import redact_secrets
+        return redact_secrets(str(e)) or type(e).__name__
+    return None
+
+
+def copied_policy(registry, source: str) -> ToolPolicy:
+    """`--policy-from SOURCE`: a copy of another caller's permissions for a new token. `mcp` (local stdio clients) and
+    `ditto` are those callers (their own section or the shared permissions; the copy counts as set by the person, so
+    the token is no longer treated as a new, read-only one); any other name, and `mcp:NAME` always, is a token whose
+    own permissions are copied as they are. Later changes of the source do not apply to the copy. UnknownCaller for
+    a name that is neither; TokenStoreError when the stored permissions cannot be used."""
+    named_token = source.startswith(ACTOR_PREFIX)
+    name = source[len(ACTOR_PREFIX):] if named_token else source
+    if not named_token and name in ("mcp", "ditto"):
+        policy = registry.policy(name)
+        problem = getattr(registry.policy_store, "problem", None)
+        if problem:
+            raise TokenStoreError(problem)
+    elif registry.tokens is not None and registry.tokens.get(name) is not None:
+        policy = registry.policy(ACTOR_PREFIX + name)
+    else:
+        raise UnknownCaller(f"Unknown caller '{source}': use mcp, ditto or a token name.")
+    return policy.model_copy(deep=True, update={"configured": True} if not named_token else {})
+
+
+def _via(via: Optional[str]) -> Dict[str, str]:
+    return {"via": via} if via else {}
+
+
+def add_token(registry, name: str, actor: str, policy_from: Optional[str] = None, link: Optional[str] = None,
+              via: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    """Creates the token `name` (read only, a copy of `policy_from`'s permissions, or `link`ed to Ditto's) and audits
+    it as mcp_token.add. Returns (the token, which is shown only now; why the audit could not record it, or None).
+    TokenStoreError (UnknownCaller for an unknown --policy-from) when nothing was created."""
+    if policy_from and link:
+        raise TokenStoreError("Use either --policy-from or --link.")
+    policy = copied_policy(registry, policy_from) if policy_from else None
+    token = registry.tokens.add(name, policy=policy, link=link)
+    problem = person_change(registry, actor, "mcp_token.add",
+                            {"token": name, "policy_from": policy_from, "link": link, **_via(via)})
+    return token, problem
+
+
+def set_token_policy(registry, name: str, policy: ToolPolicy, actor: str, via: Optional[str] = None) -> Optional[str]:
+    """Gives the token `name` its own permissions `policy` (a linked token stops using the other caller's), audited
+    as mcp_token.permissions with the permissions before and after. Returns why the audit could not record it, or
+    None. TokenStoreError when there is no such token (nothing changed)."""
+    record = registry.tokens.get(name)
+    if record is None:
+        raise TokenStoreError(f"There is no token named '{name}' ('llm-cli mcp token list').")
+    before = registry.policy(ACTOR_PREFIX + name)
+    registry.tokens.set_policy(name, policy)
+    return person_change(registry, actor, "mcp_token.permissions",
+                         {"token": name, "before": policy_summary(before), "after": policy_summary(policy),
+                          "was_linked": record.link, **_via(via)})
+
+
+def reset_token_policy(registry, name: str, actor: str, via: Optional[str] = None) -> Optional[str]:
+    """`tools permissions --reset --token NAME`: the token is a new token again (read_only_policy, not configured: it
+    may read and never more than your shared setting for a tool or the tool's own default), not a token with
+    hand-set Allow/Deny. Returns why the audit could not record it, or None."""
+    return set_token_policy(registry, name, read_only_policy(), actor, via)
+
+
+@dataclass
+class TokenRevoked:
+    """What revoke_token did: the token and its permissions are gone; its standing approvals too, unless
+    `grants_problem` says why not (they no longer apply: a new token of the same name never inherits them)."""
+    name: str
+    grants_removed: int = 0
+    grants_problem: Optional[str] = None
+    audit_problem: Optional[str] = None
+
+
+def revoke_token(registry, name: str, actor: str, via: Optional[str] = None) -> TokenRevoked:
+    """Revokes the token `name` completely: the token and its own permissions (its client loses access at once,
+    also its open connections), audited as mcp_token.revoke, then its standing approvals (grants of mcp:NAME) in the
+    shared permissions, audited with that save. TokenStoreError when there is no such token or the token store
+    cannot be changed (then nothing changed)."""
+    registry.tokens.revoke(name)
+    result = TokenRevoked(name, audit_problem=person_change(registry, actor, "mcp_token.revoke",
+                                                            {"token": name, **_via(via)}))
+    owner = ACTOR_PREFIX + name
+    grants = registry.policy().grants.get(owner)
+    if grants:
+        try:
+            registry.policy_store.update(lambda p: p.model_copy(update={"grants": {
+                caller: items for caller, items in p.grants.items() if caller != owner}}), actor=actor)
+            result.grants_removed = len(grants)
+        except Exception as e:  # noqa: BLE001 - reported; they no longer apply
+            from orchestrator.utils.helpers import redact_secrets
+            result.grants_problem = redact_secrets(str(e)) or type(e).__name__
+    return result

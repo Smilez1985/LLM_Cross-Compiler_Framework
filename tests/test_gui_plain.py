@@ -22,7 +22,9 @@ GUI = REPO_ROOT / "orchestrator" / "gui"
 SCANNED = sorted((GUI / "chat_panel").glob("*.py")) + [GUI / n for n in ("plain.py", "gui_state.py", "chat_window.py",
                                                                          "main_window.py",
                                                                          "knowledge_snapshots_window.py",
-                                                                         "form_surface.py", "builder_parts.py")]
+                                                                         "form_surface.py", "builder_parts.py",
+                                                                         "audit_window.py", "mcp_window.py",
+                                                                         "menus/tools_mcp.py")]
 STATIC_BOXES = {"question", "information", "warning", "critical", "about"}
 TRANSLATION_CALLS = {"t", "ui_text", "tr", "text", "feed_text"}
 MARKUP = '<b>bold</b> & <a href="https://evil.example">link</a><img src=x>'

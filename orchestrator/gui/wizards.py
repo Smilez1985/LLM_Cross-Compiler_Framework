@@ -643,6 +643,18 @@ Setup commands:
             QMessageBox.critical(self, "Error", "Framework Manager not linked.")
             return
 
+        cfg = self.framework_manager.config
+        lang = current_language()
+
+        def speak(text: str):
+            announce(text, lang=lang, config=cfg)
+
+        # before the first crawl, again when its text changes; audited, since AI clients may crawl only after it. It
+        # comes before the knowledge base check: the notice is information, readable also while the base is off
+        # (and any time from Tools > Deep Ingest Notice...).
+        show_crawl_notice_once(self, cfg, announcer=speak,
+                               registry=getattr(self.framework_manager, "tool_registry", None))
+
         rag = self.framework_manager.get_component("rag_manager")
         if not rag:
             QMessageBox.critical(self, "Error", "Local Knowledge Base (RAG) is not active.\nPlease enable it in 'Configure AI Agent' first.")
@@ -653,15 +665,6 @@ Setup commands:
              QMessageBox.critical(self, "Error", "URLInputDialog not available.")
              return
 
-        cfg = self.framework_manager.config
-        lang = current_language()
-
-        def speak(text: str):
-            announce(text, lang=lang, config=cfg)
-
-        # before the first crawl, again when its text changes; audited, since AI clients may crawl only after it
-        show_crawl_notice_once(self, cfg, announcer=speak,
-                               registry=getattr(self.framework_manager, "tool_registry", None))
         history = input_history.for_config(cfg)
         links = self.documentation_links()   # filled in for the person to check (N10)
         dlg = URLInputDialog(self, recent=history.get("url") if history else (), config=cfg,

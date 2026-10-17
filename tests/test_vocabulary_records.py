@@ -303,4 +303,9 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
     assert set(localization.TEXT_MODULES) == {"orchestrator.utils.l10n_facts", "orchestrator.utils.l10n_chat",
                                              "orchestrator.utils.l10n_deletion", "orchestrator.utils.l10n_runtime",
                                              "orchestrator.utils.l10n_artifacts", "orchestrator.utils.l10n_device",
-                                             "orchestrator.utils.l10n_gui", "orchestrator.utils.l10n_knowledge"}
+                                             "orchestrator.utils.l10n_gui", "orchestrator.utils.l10n_knowledge",
+                                             "orchestrator.utils.l10n_mojo",
+                                             "orchestrator.utils.l10n_boards",
+                                             "orchestrator.utils.l10n_tools_mcp",
+                                             "orchestrator.utils.l10n_signin",
+                                             "orchestrator.utils.l10n_deploy"}
