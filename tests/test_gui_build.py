@@ -692,6 +692,91 @@ def test_the_person_s_own_prebuilt_cuda_choice_stays_possible(wizard):
     assert wizard.generated and wizard.generated[-1][0]["base_os"].startswith("nvidia/cuda:")
 
 
+@pytest.fixture
+def pin_lookup(monkeypatch):
+    """The registry lookup of a base image's digest (recorded; None: it fails) and the wizard's worker thread run in
+    place, so the answer comes back through the relay as it would from a worker; the person's answers are recorded."""
+    from PySide6.QtWidgets import QMessageBox
+    from orchestrator.gui import plain, wizards
+    from orchestrator.utils import image_registry
+    state = SimpleNamespace(asked=[], threads=[], boxes=[], answer=QMessageBox.Yes, fail=None)
+
+    def inspect(reference, offline=False, client=None):
+        state.asked.append((reference, offline))
+        if state.fail is not None:
+            raise state.fail
+        return SimpleNamespace(pinned=f"{reference}@{DIGEST}")
+
+    class Thread:
+        def __init__(self, target=None, args=(), name=None, daemon=None):
+            self.target, self.args = target, args
+            state.threads.append(name)
+
+        def start(self):
+            self.target(*self.args)
+
+    def answer(box):
+        state.boxes.append((box.icon(), box.text()))
+        return state.answer
+
+    monkeypatch.setattr(image_registry, "inspect_image", inspect)
+    monkeypatch.setattr(wizards.threading, "Thread", Thread)
+    monkeypatch.setattr(plain, "_exec", answer)
+    return state
+
+
+def test_an_unpinned_base_image_an_ai_filled_is_pinned_before_the_module_is_saved(qapp, wizard, pin_lookup):
+    """Final review of wave 5: `llm-cli module generate-ai` and create_target_module write an AI's base image with the
+    digest its tag points at now; a base image an AI filled into the wizard through the GUI tools was saved as a bare
+    tag (ubuntu:24.04). Finish now looks the digest up off the GUI thread, shows the pinned image and asks ("No" is
+    the default); only then is the module saved through save_module, with exactly the reference shown."""
+    assert wizard.gui_form.fill({"base_image": "ubuntu:24.04"}).filled == ["base_image"]
+    wizard.name_edit.setText("Board_P")
+    wizard.accept()
+    assert wizard.generated == [], "nothing is saved before the digest is known and the person said yes"
+    assert pin_lookup.threads == ["ai-image-pin"] and pin_lookup.asked == [("ubuntu:24.04", False)]
+    qapp.processEvents()
+    assert pin_lookup.boxes and f"ubuntu:24.04@{DIGEST}" in pin_lookup.boxes[-1][1]
+    data = wizard.generated[-1][0]
+    assert data["base_os"] == f"ubuntu:24.04@{DIGEST}" and data["provenance"] == "ai-generated"
+    assert wizard.custom_os_edit.text() == "ubuntu:24.04", "the field keeps the AI's value and its mark"
+
+
+def test_no_to_the_pinned_image_saves_nothing(qapp, wizard, pin_lookup):
+    from PySide6.QtWidgets import QMessageBox
+    pin_lookup.answer = QMessageBox.No
+    assert wizard.gui_form.fill({"base_image": "python:3.12-slim"}).filled == ["base_image"]
+    wizard.name_edit.setText("Board_N")
+    wizard.accept()
+    qapp.processEvents()
+    assert pin_lookup.boxes and wizard.generated == []
+
+
+def test_a_base_image_whose_digest_cannot_be_looked_up_is_not_saved(qapp, wizard, pin_lookup):
+    """As `module generate-ai` refuses a proposal whose image cannot be pinned (offline mode, no registry)."""
+    from orchestrator.utils.image_registry import ImageLookupError
+    pin_lookup.fail = ImageLookupError("offline mode is on", code="offline", next="Turn offline mode off.")
+    assert wizard.gui_form.fill({"base_image": "ubuntu:24.04"}).filled == ["base_image"]
+    wizard.name_edit.setText("Board_O")
+    wizard.accept()
+    qapp.processEvents()
+    assert wizard.generated == []
+    text = pin_lookup.boxes[-1][1]
+    assert "ubuntu:24.04" in text and "offline mode is on" in text and "Turn offline mode off." in text
+
+
+def test_a_pinned_ai_image_and_the_person_s_own_image_are_saved_without_a_lookup(qapp, wizard, pin_lookup):
+    assert wizard.gui_form.fill({"base_image": f"ubuntu:24.04@{DIGEST}"}).filled == ["base_image"]
+    wizard.name_edit.setText("Board_R")
+    wizard.accept()
+    assert wizard.generated[-1][0]["base_os"] == f"ubuntu:24.04@{DIGEST}"
+    wizard.rad_custom.click()   # the person's own choice: no AI value, no lookup
+    wizard.custom_os_edit.setText("ubuntu:24.04")
+    wizard.custom_os_edit.textEdited.emit("ubuntu:24.04")
+    wizard.accept()
+    assert wizard.generated[-1][0]["base_os"] == "ubuntu:24.04" and pin_lookup.asked == []
+
+
 def test_the_new_target_is_checked_and_the_result_shown(wizard, tmp_path):
     from orchestrator.Core.target_manager import TargetCheck
     asked = []

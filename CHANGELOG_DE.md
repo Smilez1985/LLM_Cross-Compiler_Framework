@@ -2201,6 +2201,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
+  `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
+  auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI
+  über die GUI-Werkzeuge eingetragen hatte (Ditto im Chat oder eine KI-App), wurde als bloßes Tag wie `ubuntu:24.04`
+  gespeichert. **Finish** schlägt den Digest jetzt außerhalb des GUI-Threads nach (dieselbe Abfrage,
+  `ditto_manager.pin_reference`), zeigt das festgelegte Image und fragt zuerst („Nein“ ist die Vorgabe); das Modul
+  wird über `DittoManager.save_module` mit genau diesem Image gespeichert. Lässt sich der Digest nicht nachschlagen
+  (Offline-Modus, keine Registry), wird nichts gespeichert, und das Fenster sagt, warum und was zu tun ist. Das Feld
+  behält den Wert der KI und ihre Markierung.
 - **Eine URL für ein Quell-Repository nimmt kein Passwort und kein Token mehr auf**: `llm-cli config repos --add` und
   **Datei > Einstellungen… > Hinzufügen** speicherten eine URL genau wie eingegeben, deshalb landeten
   `https://user:passwort@...`, ein Token als Benutzername oder ein Parameter wie `?private_token=` als reiner Text in

@@ -182,6 +182,12 @@ TEXTS = {
         "bld.wizard.run_not_ready": "{provider} is not set up for this analysis. Sign in under Tools > Configure AI "
                                     "Agent (Ditto)... or choose another provider.",
         "bld.wizard.pin_failed": "The base image {image} cannot be pinned: {reason} {next}",
+        "bld.wizard.pin_title": "Base image chosen by an AI",
+        "bld.wizard.pin_question": "An AI chose the base image {image} for this module. Like every module an AI "
+                                   "helps with, it is written with the digest this image points at now, so every "
+                                   "build uses exactly this image:\n\n{pinned}\n\nSave the module with this image?",
+        "bld.wizard.pin_not_saved": "The module was not saved: the base image {image}, which an AI chose, cannot be "
+                                    "pinned to its digest ({reason}). {next}",
     },
     "de": {
         "bld.menu": "Build",
@@ -355,5 +361,12 @@ TEXTS = {
         "bld.wizard.run_not_ready": "{provider} ist für diese Analyse nicht eingerichtet. Melde dich unter Tools > "
                                     "Configure AI Agent (Ditto)... an oder wähle einen anderen Anbieter.",
         "bld.wizard.pin_failed": "Das Basis-Image {image} lässt sich nicht festlegen: {reason} {next}",
+        "bld.wizard.pin_title": "Von einer KI gewähltes Basis-Image",
+        "bld.wizard.pin_question": "Eine KI hat für dieses Modul das Basis-Image {image} gewählt. Wie jedes Modul, "
+                                   "bei dem eine KI hilft, wird es mit dem Digest geschrieben, auf den dieses Image "
+                                   "jetzt zeigt, damit jeder Build genau dieses Image verwendet:\n\n{pinned}\n\n"
+                                   "Das Modul mit diesem Image speichern?",
+        "bld.wizard.pin_not_saved": "Das Modul wurde nicht gespeichert: Das Basis-Image {image}, das eine KI gewählt "
+                                    "hat, lässt sich nicht auf seinen Digest festlegen ({reason}). {next}",
     },
 }
