@@ -40,6 +40,7 @@ from orchestrator.tools.output import ToolOutput, count, fact, untrusted_text
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
 from orchestrator.tools.spec import CallFacts, Fact, FieldMeta, GrantRule, Rate, ToolLimits
+from orchestrator.utils.lazy_imports import lazy_attributes
 
 PACK_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 LICENSE_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$"
@@ -53,85 +54,10 @@ Kind = Literal["target", "recipe", "knowledge"]
 
 
 # --- base images of a target pack ---------------------------------------------------------------------------------
-
-def _logical_lines(text: str) -> List[str]:
-    lines, current = [], ""
-    for raw in text.splitlines():
-        stripped = raw.strip()
-        if not current and (not stripped or stripped.startswith("#")):
-            continue
-        if stripped.endswith("\\"):
-            current += stripped[:-1] + " "
-            continue
-        lines.append(current + stripped)
-        current = ""
-    if current:
-        lines.append(current)
-    return lines
-
-
-def dockerfile_bases(text: str) -> List[str]:
-    """The base images a Dockerfile's FROM lines name, and the images COPY/ADD --from and RUN --mount=...,from= pull,
-    in order: build stages named with AS are left out, `scratch` too; a build argument with a default declared before
-    the first FROM is filled in, any other stays as written."""
-    args: Dict[str, str] = {}
-    stages, images = set(), []
-    seen_from = False
-    for line in _logical_lines(text):
-        word, _, rest = line.partition(" ")
-        word = word.upper()
-        if word == "ARG" and not seen_from:
-            name, eq, value = rest.strip().partition("=")
-            if eq:
-                args[name.strip()] = value.strip().strip('"').strip("'")
-        if word in ("COPY", "ADD", "RUN"):
-            # COPY --from=<image> and RUN --mount=...,from=<image> pull a prebuilt image just like FROM does (a stage
-            # name or a stage number is not an image)
-            for flag in (t for t in rest.split() if t.startswith("--")):
-                name, _, value = flag[2:].partition("=")
-                sources = [value] if name.lower() == "from" else [
-                    part.partition("=")[2] for part in value.split(",")
-                    if name.lower() == "mount" and part.partition("=")[0].strip().lower() == "from"]
-                for source in sources:
-                    source = source.strip().strip('"').strip("'")
-                    if source and not source.isdigit() and source.lower() not in stages and source not in images:
-                        images.append(source)
-            continue
-        if word != "FROM":
-            continue
-        seen_from = True
-        tokens = [t for t in rest.split() if not t.startswith("--")]
-        if not tokens:
-            continue
-        image = re.sub(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", lambda m: args.get(m.group(1), m.group(0)), tokens[0])
-        if len(tokens) >= 3 and tokens[1].upper() == "AS":
-            stages.add(tokens[2].lower())
-        if image.lower() in stages or image.lower() == "scratch":
-            continue
-        if image not in images:
-            images.append(image)
-    return images
-
-
-def pack_base_images(folder: Path) -> List[Tuple[str, str]]:
-    """(file, image) for every base image of every Dockerfile in a pack folder (Dockerfile, *.dockerfile,
-    Dockerfile.*, Containerfile), never following a link."""
-    found = []
-    for path in sorted(Path(folder).rglob("*")):
-        name = path.name.lower()
-        if path.is_symlink() or not path.is_file():
-            continue
-        if not (name in ("dockerfile", "containerfile") or name.endswith(".dockerfile")
-                or name.startswith("dockerfile.")):
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        rel = path.relative_to(folder).as_posix()
-        found += [(rel, image) for image in dockerfile_bases(text)]
-    return found
-
+# Read in Core/community_pack.py (consolidation chain c1-imports: the build plan and the pack tools share them). The
+# old names stay attributes of this module, imported on first use like the pack code itself (RG1).
+__getattr__ = lazy_attributes(__name__, {name: "orchestrator.Core.community_pack" for name in (
+    "_logical_lines", "base_image_line", "dockerfile_bases", "pack_base_images")})
 
 def pack_warnings(kind: str, trust: str, images: List[str], disk: Any) -> tuple:
     """The warnings before a pack import (design 4.3): a tight disk (situation); for a target pack its community
@@ -150,24 +76,6 @@ def pack_warnings(kind: str, trust: str, images: List[str], disk: Any) -> tuple:
             if any(not pinned(i) for i in outside):
                 found.append(warn("base_image_unpinned"))
     return tuple(found)
-
-
-def base_image_line(image: str) -> str:
-    """One base image, plainly (DECISIONS round 3): registry, image, tag, digest, and whether it is a Docker Official
-    Image or a prebuilt image from another registry."""
-    from orchestrator.utils.image_ref import split_image
-    if "$" in image:
-        return (f"{image}: names a build argument; the image is decided when the target is built. The image build runs "
-                "with network access on this computer, outside the build sandbox.")
-    info = split_image(image)
-    parts = [f"{image}: registry {info['registry']}, image {info['repository']}"
-             + (f", tag {info['tag']}" if info["tag"] else "")]
-    parts.append(f"digest {info['digest']}" if info["digest"] else
-                 "not pinned by digest: its publisher can later point the tag at another image")
-    parts.append("Docker Official Image" if info["official"] else
-                 f"other registry: {info['registry']}; prebuilt image made by its publisher, not checked by the framework")
-    parts.append("the image build runs with network access on this computer, outside the build sandbox")
-    return "; ".join(parts) + "."
 
 
 # --- quarantined copies -------------------------------------------------------------------------------------------
@@ -647,6 +555,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
             facts.append(Fact("Note", n, PACK_TEXT))
         images = []
         if m.kind == "target":
+            from orchestrator.Core.community_pack import base_image_line, pack_base_images
             images = pack_base_images(Path(prepared.quarantine) / "pack")
             if not images:
                 facts.append(Fact("Base image", "no Dockerfile with a base image found in the pack"))
@@ -958,4 +867,4 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
     return registry
 
 
-__all__ = ["register_community_tools", "dockerfile_bases", "pack_base_images", "base_image_line", "Quarantine"]
+__all__ = ["register_community_tools", "Quarantine"]   # the pack image helpers: Core/community_pack (lazy names above)
