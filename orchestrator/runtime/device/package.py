@@ -317,7 +317,7 @@ class DeviceRuntimeStore:
         return data
 
     def save_record(self, data: Mapping[str, Any]) -> Path:
-        from orchestrator.Core.vault_key import write_private
+        from orchestrator.utils.atomic import write_private
         record = {"format": RECORD_FORMAT, **dict(data)}
         if not _RE_ID.fullmatch(str(record.get("build_id") or "")):
             raise PackageError("a deployment record needs the build ID")

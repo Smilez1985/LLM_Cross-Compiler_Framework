@@ -36,7 +36,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import yaml
 
-from orchestrator.Core.vault_key import write_private
+from orchestrator.utils.atomic import write_private
 
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "configs" / "hardware_probe_schema.yml"
 PROFILE_FILE_NAME = "target_hardware_config.txt"

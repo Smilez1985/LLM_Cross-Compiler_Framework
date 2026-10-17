@@ -61,6 +61,7 @@ from orchestrator.runtime.server_policy import (LOOPBACK, PolicyError, check_ser
                                                 write_key_file)
 from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloader
 from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
+from orchestrator.utils.atomic import write_private_exclusive
 from orchestrator.utils.helpers import redact_secrets, safe_extract_archive
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.next_steps import WithSteps
@@ -189,17 +190,8 @@ def runtime_root(data_dir: Path) -> Path:
     return Path(data_dir) / "runtime" / "llama.cpp"
 
 
-def _write_private(path: Path, text: str) -> None:
-    """Writes a file only the current user can read (created 0600, replaced atomically)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
+# The runtime's private state files are written by orchestrator/utils/atomic.py (consolidation chain c1-imports).
+_write_private = write_private_exclusive
 
 
 def _read_json(path: Path) -> Optional[dict]:

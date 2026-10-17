@@ -18,14 +18,11 @@ import getpass
 import hashlib
 import json
 import os
-import platform
 import secrets
 import shlex
 import subprocess
 import sys
-import tempfile
 import threading
-import time
 import unicodedata
 import weakref
 from dataclasses import dataclass, field
@@ -40,6 +37,9 @@ except ImportError:  # SecretsManager reports the missing package (SecurityError
     class InvalidToken(Exception):
         pass
 
+# The private atomic writer and the Windows replace retry live in orchestrator/utils/atomic.py (consolidation chain
+# c1-imports); the old names stay importable here.
+from orchestrator.utils.atomic import REPLACE_RETRIES, replace_file, write_private  # noqa: F401
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
@@ -56,8 +56,6 @@ PREVIOUS_SUFFIX = ".prev"
 PROBE_SERVICE = KEYRING_SERVICE + "-probe"
 PROBE_TIMEOUT = 3.0
 HELPER_TIMEOUT = 30.0
-# Windows: a reader or a virus scanner holding the target open makes os.replace fail for a moment.
-REPLACE_RETRIES = 10 if os.name == "nt" else 0
 
 STORAGE_MODES = ("keyring", "helper", "passphrase", "insecure", "ephemeral")
 STORAGE_CHOICES = {
@@ -158,39 +156,6 @@ def check_matches(keys: List[VaultKey], token: str) -> bool:
         except (InvalidToken, ValueError, TypeError, AttributeError):
             continue
     return False
-
-
-def replace_file(src, dst) -> None:
-    """os.replace, tried again for a moment on Windows while another process has the target open."""
-    for attempt in range(REPLACE_RETRIES + 1):
-        try:
-            os.replace(src, dst)
-            return
-        except PermissionError:
-            if attempt >= REPLACE_RETRIES:
-                raise
-            time.sleep(0.05 * (attempt + 1))
-
-
-def write_private(path: Path, text: str) -> None:
-    """Atomic write with mode 0600 (temp file in the same folder, then rename)."""
-    path = Path(os.path.realpath(path))
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        if platform.system() != "Windows":
-            os.chmod(tmp, 0o600)
-        replace_file(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 # ----------------------------------------------------------------------------------------------------------

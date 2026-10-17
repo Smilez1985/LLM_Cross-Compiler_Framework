@@ -290,7 +290,7 @@ class TrustedDevices:
             self.note_reach(device.device_id, step, code)
 
     def _write(self, path: Path, rows: Dict[str, Any]) -> None:
-        from orchestrator.Core.vault_key import write_private
+        from orchestrator.utils.atomic import write_private
         text = json.dumps(rows, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
         if len(text) > MAX_BYTES:
             raise DeviceStoreError("the device records are too large")

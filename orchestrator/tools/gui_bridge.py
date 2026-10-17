@@ -298,7 +298,7 @@ class BridgeServer:
                 if family == "AF_UNIX":
                     os.chmod(address, 0o600)
                 info = BridgeInfo(family, address, secrets.token_bytes(KEY_BYTES), os.getpid(), secrets.token_hex(8))
-                from orchestrator.Core.vault_key import write_private
+                from orchestrator.utils.atomic import write_private
                 try:
                     write_private(folder / INFO_FILE, info.to_json())
                 except BaseException:

@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
-from orchestrator.Core.vault_key import write_private
+from orchestrator.utils.atomic import write_private
 from orchestrator.utils.localization import texts_in_every_form, ui_text
 
 TEXT_KEYS = ("crawl.notice.title", "crawl.notice.text")
