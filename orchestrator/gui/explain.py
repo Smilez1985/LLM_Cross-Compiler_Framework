@@ -276,6 +276,10 @@ class _HoverController(QObject):
             return False
         if not isinstance(obj, QWidget):
             return False
+        if kind == QEvent.ShortcutOverride and event.key() == Qt.Key_F1 \
+                and (_terms_of(obj) or _terms_of(obj, F1_PROPERTY)):
+            event.accept()   # a marked field keeps F1 for its card, even when a window action (Help) uses F1
+            return True
         if kind == QEvent.KeyPress and event.key() == Qt.Key_F1:
             terms = _terms_of(obj) or _terms_of(obj, F1_PROPERTY)
             if terms:

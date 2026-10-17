@@ -222,6 +222,85 @@ def test_f1_and_the_help_button_open_a_pinned_card_for_the_keyboard(opened):
     button.close()
 
 
+def test_f1_on_a_marked_field_wins_over_a_windows_f1_shortcut(opened):
+    """Review fix: F1 is the usual shortcut for Help; with a window action on F1 (the shell chain's Help menu) the
+    shortcut took the key and the field's card never opened. A marked field claims F1 for itself; elsewhere in the
+    window F1 still triggers the action."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QAction, QKeySequence
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QComboBox, QLineEdit, QVBoxLayout, QWidget
+    window = QWidget()
+    layout = QVBoxLayout(window)
+    combo, other = QComboBox(), QLineEdit()
+    layout.addWidget(combo)
+    layout.addWidget(other)
+    label = explain.term_label("Quantization:", "quantization", parent=window, buddy=combo)
+    layout.addWidget(label)
+    helped = []
+    action = QAction("Manual", window)
+    action.setShortcut(QKeySequence(Qt.Key_F1))
+    action.setShortcutContext(Qt.WindowShortcut)
+    action.triggered.connect(lambda: helped.append("manual"))
+    window.addAction(action)
+    window.show()
+    window.activateWindow()
+    QTest.qWaitForWindowActive(window, 2000)   # a window shortcut needs the active window
+    other.setFocus()
+    QTest.keyClick(other, Qt.Key_F1)
+    if helped != ["manual"]:
+        window.close()
+        pytest.skip("this platform plugin does not deliver window shortcuts to an offscreen window")
+    combo.setFocus()
+    QTest.keyClick(combo, Qt.Key_F1)
+    card = explain.hover_controller().card
+    assert card is not None and card.pinned and card.terms == ["quantization"], "the field's F1 opens its card"
+    assert helped == ["manual"], "and the Help shortcut did not fire for it"
+    explain.hover_controller().close_card()
+    window.close()
+
+
+def test_the_keyboard_reaches_a_marked_group_box_and_the_lint_finds_unreachable_labels(opened):
+    """A group box (mark_terms_in marks its title) takes no focus: F1 in a field inside it reaches the group's card,
+    because the field leaves F1 to its parents; a field marked itself opens its own card. Review fix: a marked label
+    that no key reaches (no buddy, no "?" button for its terms) was not found by accessibility_problems."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication, QGroupBox, QLabel, QLineEdit, QVBoxLayout, QWidget
+    from orchestrator.gui import accessible
+    window = QWidget()
+    outer = QVBoxLayout(window)
+    box = QGroupBox("Confirm the SSH host key")
+    inner = QVBoxLayout(box)
+    field = QLineEdit()
+    field.setAccessibleName("Fingerprint shown by the board")
+    own = QLineEdit()
+    own.setAccessibleName("Address")
+    explain.explain(own, "port")
+    inner.addWidget(field)
+    inner.addWidget(own)
+    outer.addWidget(box)
+    loose = QLabel("Uses the KV cache")
+    loose.setObjectName("lbl_loose")
+    outer.addWidget(loose)
+    assert explain.mark_terms_in(window) == 2
+    window.show()
+    QApplication.sendEvent(field, QKeyEvent(QEvent.KeyPress, Qt.Key_F1, Qt.NoModifier))
+    card = explain.hover_controller().card
+    assert card is not None and card.pinned and card.terms == ["ssh_host_key"]
+    explain.hover_controller().close_card()
+    QApplication.sendEvent(own, QKeyEvent(QEvent.KeyPress, Qt.Key_F1, Qt.NoModifier))
+    assert explain.hover_controller().card.terms == ["port"], "a field marked itself: its own card"
+    explain.hover_controller().close_card()
+    assert field.accessibleDescription() == "", "the group's explanation is not read again for every field"
+    problems = accessible.accessibility_problems(window)
+    assert [p for p in problems if p.startswith("lbl_loose:")] == \
+        ["lbl_loose: a marked label that no key reaches needs a buddy or a help button (kv_cache)"]
+    outer.addWidget(explain.help_button("kv_cache"))
+    assert not [p for p in accessible.accessibility_problems(window) if p.startswith("lbl_loose:")]
+    window.close()
+
+
 def test_explain_marks_the_widget_for_screen_readers_and_refuses_unknown_terms():
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QLabel
