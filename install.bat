@@ -214,6 +214,9 @@ if (Test-Path $OldInstallDir) {
     Write-Host "Dieser Installer hat sie nicht veraendert und loescht sie nicht. Die neue Installation liegt in $InstallDir,"
     Write-Host "ihre Verknuepfung auf dem Desktop heisst '$AppName'. Die alte Verknuepfung '$OldAppName' startet weiter die alte."
     Write-Host "Deine Einstellungen, Zugangsdaten und Builds in $UserDataHint gelten fuer beide und bleiben, wie sie sind."
+    Write-Host "KI-Apps, die du ueber MCP verbunden hast (Claude Desktop, VS Code, Claude Code), starten noch die alte Installation."
+    Write-Host "Vor dem Entfernen aus der neuen einrichten (llm-cli mcp config, siehe README), im Ordner $InstallDir:"
+    Write-Host "  .venv\Scripts\python.exe -m orchestrator.cli mcp config"
     Write-Host "Entfernen: scripts\Uninstall-LLM-Cross-Compiler-Framework.bat ausfuehren. Es findet beide Installationen,"
     Write-Host "zeigt fuer jede, was es entfernt, und fragt vorher (ohne Antwort: Nein)."
 }
