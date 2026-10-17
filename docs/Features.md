@@ -576,8 +576,20 @@ its support level is community.
 
 ### Sign-in
 
-- **Where:** **Sign in...** in the AI settings (GUI) and `llm-cli ditto login | logout | auth` (see the
-  [CLI guide](CLI_Usage.md#ditto-login)).
+- **Where:** **Sign in...** in the AI settings (GUI), **Security > Sign-in Overview...** (GUI) and `llm-cli ditto
+  login | logout | auth` (see the [CLI guide](CLI_Usage.md#ditto-login)).
+- **Sign-in Overview** (GUI: **Security > Sign-in Overview...**): every provider's sign-in at once (method, source,
+  account or the last four characters of a key, status; Ditto's provider marked with `*`) and how the credential
+  vault is protected with its file (`ditto auth status`); **Check all** runs the free check of every provider with a
+  credential in the background (`--check`); the tab **All sign-in methods** lists every provider's methods with their
+  environment variables and notes (`ditto auth methods`). Selecting a provider shows its sign-in panel with its own
+  **Server address** field: an address typed there (or given by the AI settings) is remembered for that provider only
+  and does not make it Ditto's provider (`ditto login --base-url`). The framework never reads, stores or forwards
+  Claude subscription credentials and never starts the claude command.
+- **Key from an environment variable:** each key card names the method's environment variables and its note, and
+  offers **Store the key from <VARIABLE> in the vault** while one is set (checked first unless you untick **Check it
+  first (free)**; `ditto login --from-env`). The key goes from the variable to the vault in the background and never
+  into a field.
 - **Method cards:** the panel shows the provider's sign-in methods in the catalog's order. The first one this
   version can sign in with is marked "Recommended", opt-in methods (the `ant` profile) "Advanced", and methods of a
   later version are shown but cannot be chosen. Each type has its own form: a key form (key page, password field,
@@ -598,11 +610,17 @@ its support level is community.
   and a typed key goes over plain `http://` to another computer only after you confirm it (CLI: `--yes`). A key typed
   in the AI settings' own key field replaces a method a sign-in remembered (for example the `ant` profile).
 - **Sign-out is local first:** the stored key is deleted, and the key page where you revoke the key itself is named;
-  a key in an environment variable stays in use until you unset it.
+  a key in an environment variable stays in use until you unset it. A server without sign-in (Ollama, `custom`
+  without a key) has **Forget**, which forgets its remembered address and method (`ditto logout`); both ask first,
+  "No" is the default.
 - **No usable keyring:** the panel shows the storage chooser (passphrase, credential helper, or the unencrypted key
   file after a confirmation), and the GUI shows the same chooser at startup before it gives up; a passphrase is asked
   in a dialog. A choice that cannot open the existing vault (one protected by the locked keyring) is not kept. The
   CLI exits with code 5 and names `llm-cli ditto auth storage --use ...`. Nothing is picked for you.
+- **Key Storage** (GUI: **Security > Key Storage...**): the vault's protection and its file at any time, also while
+  it works (`ditto auth storage`); **Protect it another way** switches to the OS keyring, a credential helper with
+  its command, a passphrase or the unencrypted key file (after the acknowledgement and the CLI's question, "No" is
+  the default; `--use`), and **Rotate key...** asks first (`ditto auth rotate-key`).
 - **Responsive:** every vault, keyring or network call of the panel and of the chat header runs in a worker thread.
 
 ### Calls, retries and fallback
@@ -2250,7 +2268,11 @@ everything worked) reaches an AI with the account's name, its home folder and bo
   only). The vault is written atomically under a lock shared by the GUI, the CLI and MCP servers, is readable only
   by you, never lies inside a git working copy, and a damaged vault is never overwritten. `llm-cli mojo` warns
   about the key file and about a keyring that does not protect secrets. `llm-cli ditto auth rotate-key` replaces
-  the vault key and re-encrypts every entry.
+  the vault key and re-encrypts every entry. GUI: **Security > Secrets...** lists the names the framework reads
+  (`hf_token`, `qdrant_api_key`, the community pack keys) and every stored name with "stored" or "not stored" and
+  what it is for (`secrets list`, never a value), and sets any name with the value twice in masked fields (`secrets
+  set`; in the ephemeral storage it says that nothing was saved); **Security > Key Storage...** shows and switches
+  the protection and rotates the vault key.
 - **Redaction:** one table of secret formats (`orchestrator/security/secret_patterns.py`) is shared by the
   repository's secret scan and the runtime redaction. Credentials (known key formats, credential headers, tokens
   in URLs and form bodies, `HF_TOKEN=...` lines) are removed from every log line and traceback (the framework's own

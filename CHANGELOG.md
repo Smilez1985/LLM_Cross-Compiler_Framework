@@ -67,6 +67,31 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   CLI's function `crawl_notice.acknowledge_and_audit`); the module wizard shows it before the knowledge base check.
   Tools > Folders the AI May Use... > Add folder... asks what the folder holds (model files, dataset files or any:
   `tools folders add --kind`).
+- **Security > Sign-in Overview...: every `ditto login`, `ditto logout` and `ditto auth status|methods` path by
+  mouse** (W1'): one window shows every provider's sign-in at once (method, source, account or the last four
+  characters of a key, status, Ditto's provider marked) and how the credential vault is protected with its file;
+  **Check all** runs the free check of every provider with a credential (`--check`) in the background; the tab
+  **All sign-in methods** lists every provider's methods with their environment variables and notes. Selecting a
+  provider shows its sign-in panel with its own **Server address** field: an address typed there (or given by the AI
+  settings) is remembered for that provider only and no longer only through the AI settings, which also made the
+  provider Ditto's (`login --base-url`). The key card names the method's environment variables and note and offers
+  **Store the key from <VARIABLE> in the vault** while one is set (`login --from-env`, checked first unless you
+  untick it; new `SignIn.env_variable()` / `SignIn.env_key()`, which the CLI calls too); a server without sign-in
+  (Ollama, `custom` without a key) has **Forget** (`logout`: the remembered address and method). It asks before
+  signing out or forgetting ("No" is the default). The framework never reads, stores or forwards Claude subscription
+  credentials and never starts the claude command.
+- **Security > Key Storage...: `ditto auth storage` and `ditto auth rotate-key` by mouse** (W1'): how the vault is
+  protected and its file, also while it works (until now the GUI showed it only when it failed); **Protect it another
+  way** switches between the OS keyring (new as a GUI choice, so the way back to the keyring no longer needs the
+  CLI), a credential helper with its command, a passphrase and the unencrypted key file (after the acknowledgement
+  and the CLI's question, "No" is the default); **Rotate key...** asks first ("No" is the default). The vault is
+  re-encrypted in the background with the same core functions as the CLI.
+- **Security > Secrets...: `secrets list` and `secrets set` by mouse** (W1'): the names the framework reads
+  (`hf_token`, `qdrant_api_key`, the community pack keys) and every stored name with "stored" or "not stored" and
+  what it is for, never a value; **Set a secret** takes a name from the list or any other name and the value twice
+  in masked fields. The CLI and the window call the same new `Core/secret_entries.py` (`store_secret`,
+  `secret_entries`; the CLI's output is unchanged): in the ephemeral storage both say that nothing was saved, and so
+  does Security > Set OpenAI API Key, which said "stored" there.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record

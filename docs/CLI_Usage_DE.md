@@ -743,6 +743,15 @@ llm-cli ditto login anthropic --method ant_profile --profile work
 
 `ditto login` meldet an; welchen Anbieter Ditto nutzt (`ai_provider`, in den KI-Einstellungen), ändert es nicht.
 
+In der GUI: **Security > Anmeldeübersicht...**, dann den Anbieter wählen: Sein Anmeldefeld hat eine Karte pro
+Verfahren (`--method`) mit **Prüfen** und **Speichern** (Speichern speichert ohne Prüfung, wie `--no-check`) und den
+zusätzlichen Feldern (`--workspace-id`, `--organization`, `--project`); **Dieses Profil verwenden** auf der Karte des
+`ant`-Profils (`--profile`); **Den Schlüssel aus <VARIABLE> im Tresor speichern**, solange die Variable gesetzt ist
+(`--from-env`; **Vorher prüfen (kostenlos)** ist angehakt); und bei Anbietern, deren Adresse du festlegst, ein
+eigenes Feld **Serveradresse** (`--base-url`: nur für diesen Anbieter gemerkt, er wird dadurch nicht zu Dittos
+Anbieter). Ohne nutzbaren Schlüsselbund bietet das Feld die Wahl des Schutzes an (`--insecure-storage`). Dasselbe
+Feld öffnet **Tools > Configure AI Agent (Ditto)... > Sign in...** für die dort eingegebene Adresse.
+
 ### ditto logout
 
 ```
@@ -760,6 +769,11 @@ die es nutzen, deshalb überlässt der Befehl das dir.
 |---|---|
 | `--method ID` | Verfahren, von dem abgemeldet wird (Standard: das genutzte). |
 | `--base-url URL` | Adresse, deren Schlüssel gelöscht wird (Standard: die eingestellte). |
+
+In der GUI: **Security > Anmeldeübersicht...**, dann der Anbieter: **Abmelden** auf seiner Schlüsselkarte oder
+**Nicht mehr verwenden** auf der Karte des `ant`-Profils (beide fragen vorher, „Nein“ ist vorgewählt; die Adresse ist
+die **Serveradresse** des Felds). Bei einem Server ohne Anmeldung (Ollama, `custom` ohne Schlüssel) vergisst
+**Vergessen** die gemerkte Serveradresse und das gemerkte Verfahren (es fragt vorher).
 
 ### ditto auth status
 
@@ -780,6 +794,9 @@ markiert. Ein Schlüssel wird nie gezeigt.
 Exit-Code 5, wenn sich der Tresor nicht nutzen lässt; mit `--check` der Code der ersten gescheiterten Prüfung (3
 oder 4); sonst 0.
 
+In der GUI: **Security > Anmeldeübersicht...** (alle Anbieter auf einmal, Dittos Anbieter mit `*` markiert, und wie
+der Tresor geschützt ist, mit seiner Datei); **Alle prüfen** macht `--check` im Hintergrund.
+
 ### ditto auth methods
 
 ```
@@ -790,6 +807,10 @@ Die Anmeldeverfahren aller Anbieter (oder eines Anbieters) in der Reihenfolge, i
 empfohlene, Verfahren, die nur auf Wunsch gelten, Verfahren, die in einer späteren Version kommen, die
 Schlüsselseite, die Umgebungsvariablen, die zusätzlichen Optionen (`--workspace-id`, `--organization`, `--project`)
 und Hinweise zu den Nutzungsbedingungen. Braucht weder den Tresor noch das Netz.
+
+In der GUI: **Security > Anmeldeübersicht...**, Reiter **Alle Anmeldeverfahren** (die Verfahren jedes Anbieters mit
+ihren Hinweisen, Umgebungsvariablen, Schlüsselseite, wo du den Schlüssel findest, Optionen und Anmerkungen); jede
+Schlüsselkarte nennt ihre Umgebungsvariablen und ihre Anmerkung ebenfalls.
 
 ### ditto auth storage
 
@@ -810,6 +831,11 @@ llm-cli ditto auth storage --use passphrase
 llm-cli ditto auth storage --use helper --helper "pass show llmcc/vault-key"
 ```
 
+In der GUI: **Security > Schlüsselspeicher...** zeigt den Schutz und die Tresordatei, auch während der Tresor
+funktioniert. **Anders schützen** bietet den Schlüsselbund des Betriebssystems, einen Credential-Helper mit seinem
+Befehl (`--helper`), eine Passphrase und die unverschlüsselte Schlüsseldatei an (nur nach der Bestätigung und der
+Frage der CLI, „Nein“ ist vorgewählt); **Diesen Schutz verwenden** wechselt (`--use`).
+
 ### ditto auth rotate-key
 
 ```
@@ -818,6 +844,8 @@ llm-cli ditto auth rotate-key
 
 Erzeugt einen neuen Schlüssel für den Tresor, verschlüsselt alle gespeicherten Zugangsdaten damit neu und entfernt
 den alten Schlüssel. Exit-Code 5, wenn sich der Tresor nicht nutzen lässt.
+
+In der GUI: **Security > Schlüsselspeicher... > Schlüssel erneuern...** (es fragt vorher; „Nein“ ist vorgewählt).
 
 ### ditto setup
 
@@ -1618,6 +1646,10 @@ llm-cli secrets set hf_token
 printf %s "$GITHUB_TOKEN" | llm-cli secrets set github_token --with-token
 ```
 
+In der GUI: **Security > Geheimnisse...**, **Ein Geheimnis setzen**: ein Name aus der Liste (`hf_token`,
+`qdrant_api_key`, die Schlüssel der Community-Pakete) oder ein anderer Name, der Wert zweimal in verdeckten Feldern,
+**Speichern**. Im Speicher `ephemeral` sagt das Fenster, dass nichts gespeichert wurde.
+
 ### secrets list
 
 ```
@@ -1626,6 +1658,9 @@ llm-cli secrets list
 
 Listet die gespeicherten Namen auf, nie die Werte. Die Schlüssel für Dittos Anbieter erscheinen unter ihren
 Namen im Tresor, z. B. `cred/anthropic/api_key` für `anthropic_api_key`; `secrets set` nimmt beide Formen an.
+
+In der GUI: **Security > Geheimnisse...** (die bekannten und die gespeicherten Namen, jeweils mit „gespeichert“ oder
+„nicht gespeichert“ und wofür; nie ein Wert).
 
 ---
 
