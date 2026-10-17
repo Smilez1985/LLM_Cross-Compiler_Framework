@@ -237,6 +237,20 @@ def test_a_line_is_its_text_and_carries_steps():
     assert again == line and again.steps == line.steps
 
 
+def test_one_step_is_read_like_a_list_of_one():
+    """Wave-6 base: the API says steps_of (and so render, rendered and StepsRow) takes step ids and NextStep objects,
+    but one id or one NextStep on its own rendered nothing (only a list worked); the error box of f-words hands on
+    whatever it is given."""
+    one = NextStep("trash.empty")
+    assert ns.steps_of("trash.empty") == ns.steps_of(one) == ns.steps_of(["trash.empty"]) == (one,)
+    assert ns.steps_of(("board.check", {"device": "rk3566"})) == (NextStep("board.check", {"device": "rk3566"}),)
+    assert ns.render("trash.empty", "gui", "en") == ns.render(["trash.empty"], "gui", "en") != ""
+    assert ns.render(one, "cli", "en").endswith("llmcf trash empty")
+    assert ns.steps_of("Free some disk space.") == (), "a sentence is no step"
+    assert ns.steps_of(Line("runtime.install", ["trash.empty"])) == (one,), "a Line gives its steps, not its text"
+    assert ns.error_report("trash.empty", "en").steps == (), "an error's message is never read as a step"
+
+
 def test_exceptions_carry_steps_with_the_mixin():
     class Refused(WithSteps, RuntimeError):
         pass

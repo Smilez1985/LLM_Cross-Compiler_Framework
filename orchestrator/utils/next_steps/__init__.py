@@ -346,7 +346,9 @@ def steps_of(obj: Any) -> Tuple[NextStep, ...]:
     """The steps an exception, a Line, a Mojo finding, a ToolError or a list carries (() when none)."""
     if obj is None:
         return ()
-    if isinstance(obj, (list, tuple)) and not isinstance(obj, str):
+    if isinstance(obj, Line):   # a text that carries steps: its steps, never its text read as an id
+        return as_next_steps(obj.steps)
+    if isinstance(obj, (list, tuple, str, NextStep)):   # a list, an (id, values) pair, one id or one NextStep
         return as_next_steps(obj)
     return as_next_steps(getattr(obj, "steps", ()) or ())
 
@@ -1285,7 +1287,8 @@ def error_report(error: Any, lang: Optional[str] = None, summary: str = "") -> E
     detail = str(error) if isinstance(error, BaseException) else str(error or "")
     if isinstance(error, BaseException):
         detail = f"{type(error).__name__}: {detail}".strip()
-    return ErrorReport(own_text("error.title", lang), text, steps_of(error), redact_secrets(detail)[:4000], code,
+    steps = steps_of(error) if not isinstance(error, str) or isinstance(error, Line) else ()   # a message is no id
+    return ErrorReport(own_text("error.title", lang), text, steps, redact_secrets(detail)[:4000], code,
                        own_text("error.details", lang))
 
 
