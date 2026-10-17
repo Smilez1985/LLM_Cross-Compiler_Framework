@@ -152,6 +152,20 @@ def test_ui_text_fills_path_placeholders(monkeypatch):
     assert ui_text("test.path.text", "de", n=2) == "Schau in Datei > Papierkorb...: 2"
 
 
+def test_ui_text_reads_the_formal_text_first_and_then_fills_its_places(monkeypatch):
+    """Merge resolution (a0 + f-words): ui_text lays f-words' formal overlay over the du text, then fills a0's
+    {path:} places, then the values; a formal text names its places like its du text does."""
+    from orchestrator.utils import localization
+    monkeypatch.setitem(localization.LocalizationManager.TRANSLATIONS["de"], "test.path.text",
+                        "Schau in {path:act_file_trash}: {n}")
+    monkeypatch.setitem(localization.FORMAL_TEXTS, "de",
+                        {"test.path.text": "Schauen Sie in {path:act_file_trash}: {n}"})
+    monkeypatch.setattr(localization, "_form_of_address", "sie")
+    assert localization.ui_text("test.path.text", "de", n=2) == "Schauen Sie in Datei > Papierkorb...: 2"
+    monkeypatch.setattr(localization, "_form_of_address", "du")
+    assert localization.ui_text("test.path.text", "de", n=2) == "Schau in Datei > Papierkorb...: 2"
+
+
 def test_window_of_names_what_opens_an_objects_window():
     assert ns.window_of("btn_ditto_runtime_build") == "act_ditto_runtime_open"
     assert ns.window_of("act_deploy_scan_remote") == "builder_tab"
