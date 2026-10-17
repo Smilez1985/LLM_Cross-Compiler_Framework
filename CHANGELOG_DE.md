@@ -1847,6 +1847,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Rockchip-Target die Option nicht auswertet.
 
 ### Entfernt
+- Der ungenutzte `LocalProbeWorker` des Builder-Tabs, ein zweiter Starter des Fallback-Probe-Skripts (ein eigener
+  Subprocess-Aufruf ohne Zeitlimit, mit geerbtem stdin, im Arbeitsordner der GUI). Jeder lokale Scan
+  startet das Skript über `HardwareProbes.run_local` (den einen Starter, den `llmcf scan --script` und das
+  Scan-Menü nutzen); seine Tests sind dorthin umgezogen.
 - Die veraltete Kopie `Docker Setup/pyproject.toml` (Version 1.6.0, von nichts gelesen): Das Container-Image entsteht
   aus der `pyproject.toml` und der `requirements.txt` des Repositorys selbst.
 - Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen

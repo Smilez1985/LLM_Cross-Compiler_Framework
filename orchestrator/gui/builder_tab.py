@@ -13,7 +13,6 @@ Updates v2.4.0:
 
 import importlib.util
 import platform
-import subprocess
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -150,44 +149,6 @@ def probe_result_dir(framework) -> Path:
     resolve = getattr(framework, "resolve_path", None) or resolve_install_path
     return Path(resolve(cache)) / "probes"
 
-
-class LocalProbeWorker(QThread):
-    """Runs the fallback probe script on this computer; the probe writes output_file (see probe_result_dir). The scan
-    menu now uses LocalScanWorker (the CLI's own step: the Python probe by default, the result stored as this
-    computer's probe); this worker stays for callers that run the script file directly."""
-    finished = Signal(bool, str, str) # success, message, file_path
-    
-    def __init__(self, script_path, output_file):
-        super().__init__()
-        self.script_path = script_path
-        self.output_file = Path(output_file)
-        
-    def run(self):
-        try:
-            if not Path(self.script_path).exists():
-                 self.finished.emit(False, f"Script not found: {self.script_path}", "")
-                 return
-
-            # Told where to write: without it the probe writes into the GUI's working directory.
-            output_file = self.output_file.absolute()
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            output_file.unlink(missing_ok=True)  # a file of an earlier run must not count as this run's result
-
-            if platform.system() == "Windows":
-                cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(self.script_path),
-                       "-OutputFile", str(output_file)]
-            else:
-                cmd = ["sh", str(self.script_path), "--output", str(output_file)]  # POSIX sh, no bash needed
-                
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
-            
-            if output_file.exists():
-                self.finished.emit(True, "Local probe successful.", str(output_file))
-            else:
-                self.finished.emit(False, "Script ran but no config file generated.", "")
-                
-        except Exception as e:
-            self.finished.emit(False, str(e), "")
 
 class LocalScanWorker(QThread):
     """Runs the hardware probe on this computer the way `llmcf scan` does (orchestrator/runtime/scan_steps.scan_local:

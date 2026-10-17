@@ -1632,6 +1632,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and prints a warning. `--optimization` stays; its help now says that the Rockchip target ignores it.
 
 ### Removed
+- The Builder tab's unused `LocalProbeWorker`, a second runner of the fallback probe script (its own subprocess call
+  without a time limit, with the inherited stdin, in the GUI's working folder). Every local scan runs the script
+  through `HardwareProbes.run_local` (the one runner `llmcf scan --script` and the scan menu use); its tests moved
+  there.
 - The stale copy `Docker Setup/pyproject.toml` (version 1.6.0, read by nothing): the container image is built from
   the repository's own `pyproject.toml` and `requirements.txt`.
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
