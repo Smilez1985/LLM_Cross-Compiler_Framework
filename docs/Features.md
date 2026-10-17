@@ -720,6 +720,14 @@ gives the defaults).
   each MCP server). The panel reads the signed chat feed once a second and never waits on it; an entry that does not
   verify is not shown, and the panel says how many were skipped. Without the feed it shows Ditto's conversation as
   before and says that new messages are not kept.
+- **What AIs did** (unreleased, wave 6): whatever Ditto or an AI app does through the framework's tools becomes one
+  signed entry, written by the framework process that did the work: a call that changed something ("Started a
+  build.", "Changed settings: language."), the end of work an AI started (a download, a deploy, a Deep Ingest, a
+  build, with the folder a finished build was saved in by its label), a use of a standing approval, a question that
+  waits for you and how it ended, and work an AI could not do with the reason in framework words. An entry names the
+  window that shows the result, from a fixed list, and nothing ever runs from an entry. Your own work in the GUI and
+  on the command line makes no entries; an app is named by the connection the framework knows it by, its own name
+  only as its claim. The same refusal of the same app is written once in 30 seconds; the audit log keeps every call.
 - **Questions that wait** come from the pending approvals, never from chat entries alone, and stay at the bottom
   under **Needs you**: who asks, what, and the time left, counted again while the question waits. **Open in the
   approvals window…** decides them there. A new question shows a hidden panel without taking the keyboard focus, and

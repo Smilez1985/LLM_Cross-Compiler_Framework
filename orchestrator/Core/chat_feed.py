@@ -48,6 +48,7 @@ from orchestrator.tools.delegation import DELEGATION_ID_RE   # the delegation pa
 from orchestrator.tools.grants import GRANT_ID_RE
 from orchestrator.tools.signing import SignatureError, sign_row, verify_row
 from orchestrator.tools.spec import WARNING_CODE_RE, CallWarning, WarningKind, number_problems
+from orchestrator.tools.tool_windows import MAX_STEPS, STEP_ID_RE, WINDOW_ID_RE   # the window and step vocabulary
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.untrusted import sanitize_untrusted
@@ -62,16 +63,19 @@ CALLER_RE = r"^(?:ditto|mcp|mcp:[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)?$"   # "" 
 
 FEED_KINDS = ("person_message", "ditto_answer", "ditto_tool_note", "notice", "approval", "approval_end",
               "delegated_decision", "grant_used", "job_result", "blocked", "explanation", "person_action",
-              "relay_question", "client_reply", "feed_cleared")
+              "relay_question", "client_reply", "feed_cleared", "ai_action")
 FeedKind = Literal["person_message", "ditto_answer", "ditto_tool_note", "notice", "approval", "approval_end",
                    "delegated_decision", "grant_used", "job_result", "blocked", "explanation", "person_action",
-                   "relay_question", "client_reply", "feed_cleared"]
+                   "relay_question", "client_reply", "feed_cleared", "ai_action"]
 # "Clear chat" deletes the conversation; the records of what AIs did (and what the person did about them) are only
 # hidden from the panel and stay readable in the approvals window and on the command line.
 CONVERSATION_KINDS = frozenset({"person_message", "ditto_answer", "ditto_tool_note", "notice", "explanation",
                                 "relay_question", "client_reply", "feed_cleared"})
 RECORD_KINDS = frozenset({"approval", "approval_end", "delegated_decision", "grant_used", "job_result", "blocked",
-                          "person_action"})
+                          "person_action", "ai_action"})
+# The rows the AI activity producer writes (Core/activity.py): what Ditto or an AI app started, changed, ended, used,
+# asked or could not do. ai_action: an AI started or changed something (a call that changed something ended ok).
+ACTIVITY_KINDS = ("ai_action", "job_result", "grant_used", "approval", "approval_end", "blocked")
 PROGRAMS = ("gui", "cli", "mcp", "ditto")
 
 MAX_PARAMS = 20
@@ -122,6 +126,89 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "caller.token": "the AI app with your connection '{name}'",
         "caller.self_name": "calls itself '{client}'",
         "caller.framework": "the framework",
+        # What Ditto or an AI app did (Core/activity.py): the row's sender is named by the bubble's header, so a text
+        # starts with what it did. Parameters are closed framework values (setting keys, labels, counts).
+        "activity.action": "Changed something.",
+        "activity.tool.start_build": "Started a build.",
+        "activity.tool.start_recipe_build": "Started a build from a recipe.",
+        "activity.tool.cancel_build": "Cancelled a build.",
+        "activity.tool.resolve_healing": "Decided on a fix proposal for a build.",
+        "activity.tool.propose_healing_fix": "Proposed a fix for a failed build; you decide whether to use it.",
+        "activity.tool.cancel_job": "Stopped a running task.",
+        "activity.tool.download_hf_file": "Started a download from Hugging Face.",
+        "activity.tool.crawl_docs_site": "Started reading a documentation website into the knowledge base (Deep "
+                                         "Ingest).",
+        "activity.tool.index_framework_docs": "Started adding the framework's documentation to the knowledge base.",
+        "activity.tool.add_pack_from_index": "Started installing a pack from the Community Hub.",
+        "activity.tool.export_pack": "Started exporting a pack to a file.",
+        "activity.tool.restore_knowledge_snapshot": "Started restoring a knowledge snapshot; the current state is "
+                                                    "saved first.",
+        "activity.tool.delete_artifact": "Moved a finished model to the trash.",
+        "activity.tool.restore_from_trash": "Put something back from the trash.",
+        "activity.tool.build_local_runtime": "Started building Ditto's local model program.",
+        "activity.tool.start_local_runtime": "Started Ditto's local model program.",
+        "activity.tool.stop_local_runtime": "Stopped Ditto's local model program.",
+        "activity.tool.run_benchmark": "Started a speed test of a local model.",
+        "activity.tool.probe_remote_device": "Started checking a board's hardware.",
+        "activity.tool.deploy_device_runtime": "Started installing the model program on a board.",
+        "activity.tool.run_device_benchmark": "Started a speed test on a board.",
+        "activity.tool.create_deploy_package": "Started creating a deployment package.",
+        "activity.tool.deploy_to_device": "Started deploying a model to a board.",
+        "activity.tool.probe_local_hardware": "Checked this computer's hardware.",
+        "activity.tool.create_target_module": "Created a new target.",
+        "activity.tool.run_mojo_miracle": "Repaired something with Mojo Miracle.",
+        "activity.tool.update_settings": "Changed settings: {keys}.",
+        "activity.tool.gui": "Filled in fields in an open window.",
+        "activity.job.done": "Work it started has finished.",
+        "activity.job.not_done": "Work it started did not finish.",
+        "activity.job.crawl.done": "Deep Ingest finished: the website is in the knowledge base.",
+        "activity.job.crawl.not_done": "Deep Ingest did not finish.",
+        "activity.job.deploy.done": "The deployment to the board finished.",
+        "activity.job.deploy.not_done": "The deployment to the board did not finish.",
+        "activity.job.package.done": "The deployment package is ready.",
+        "activity.job.package.not_done": "The deployment package was not created.",
+        "activity.job.probe.done": "The hardware check finished.",
+        "activity.job.probe.not_done": "The hardware check did not finish.",
+        "activity.job.pack_import.done": "The pack is installed.",
+        "activity.job.pack_import.not_done": "The pack was not installed.",
+        "activity.job.pack_export.done": "The pack was exported to a file.",
+        "activity.job.pack_export.not_done": "The pack was not exported.",
+        "activity.job.snapshot_restore.done": "The knowledge snapshot is restored.",
+        "activity.job.snapshot_restore.not_done": "The knowledge snapshot was not restored.",
+        "activity.job.hf_download.done": "The download from Hugging Face finished.",
+        "activity.job.hf_download.not_done": "The download from Hugging Face did not finish.",
+        "activity.job.runtime_build.done": "Ditto's local model program is built.",
+        "activity.job.runtime_build.not_done": "Building Ditto's local model program did not finish.",
+        "activity.job.runtime_start.done": "Ditto's local model program is running.",
+        "activity.job.runtime_start.not_done": "Ditto's local model program did not start.",
+        "activity.job.benchmark.done": "The speed test finished.",
+        "activity.job.benchmark.not_done": "The speed test did not finish.",
+        "activity.job.docs_index.done": "The framework's documentation is in the knowledge base.",
+        "activity.job.docs_index.not_done": "Adding the framework's documentation did not finish.",
+        "activity.build.completed": "The build finished.",
+        "activity.build.saved": "The build finished and was saved as {saved}.",
+        "activity.build.partial": "The build finished with errors: {completed} done, {failed} failed.",
+        "activity.build.error": "The build failed.",
+        "activity.build.cancelled": "The build was cancelled.",
+        "activity.grant_used": "Ran a call under your standing approval, without asking you.",
+        "activity.approval": "Asks you to approve a call.",
+        "activity.approval_end": "A question for your approval has ended.",
+        "activity.approval_end.done": "You approved it, and it ran.",
+        "activity.approval_end.declined": "You declined it; nothing ran.",
+        "activity.approval_end.expired": "Nobody answered in time; nothing ran.",
+        "activity.approval_end.withdrawn": "The question was withdrawn; nothing ran.",
+        "activity.approval_end.failed": "It did not work.",
+        "activity.blocked": "Could not do something.",
+        "activity.blocked.missing_information": "Could not do it: information is missing.",
+        "activity.blocked.not_supported": "Could not do it: the framework does not support this.",
+        "activity.blocked.no_tool": "Could not do it: there is no tool for this; only you can do it.",
+        "activity.blocked.permission_denied": "Could not do it: your tool permissions do not allow it.",
+        "activity.blocked.declined": "Did not do it: you declined it.",
+        "activity.blocked.needs_person": "Could not do it: you need to decide or act.",
+        "activity.blocked.hardware_unavailable": "Could not do it: the hardware is not available.",
+        "activity.blocked.insufficient_resources": "Could not do it: not enough disk space or memory.",
+        "activity.blocked.limit_reached": "Could not do it: a limit was reached.",
+        "activity.blocked.failed": "Could not do it: it failed.",
     },
     "de": {
         "chat.feed.unverified": "{n} Chat-Einträge konnten nicht geprüft werden (außerhalb des Frameworks geändert "
@@ -157,6 +244,89 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "caller.token": "die KI-App mit deiner Verbindung „{name}“",
         "caller.self_name": "nennt sich „{client}“",
         "caller.framework": "das Framework",
+        "activity.action": "Hat etwas geändert.",
+        "activity.tool.start_build": "Hat einen Build gestartet.",
+        "activity.tool.start_recipe_build": "Hat einen Build nach einem Rezept gestartet.",
+        "activity.tool.cancel_build": "Hat einen Build abgebrochen.",
+        "activity.tool.resolve_healing": "Hat über einen Lösungsvorschlag für einen Build entschieden.",
+        "activity.tool.propose_healing_fix": "Hat eine Lösung für einen fehlgeschlagenen Build vorgeschlagen; du "
+                                             "entscheidest, ob sie verwendet wird.",
+        "activity.tool.cancel_job": "Hat eine laufende Aufgabe gestoppt.",
+        "activity.tool.download_hf_file": "Hat einen Download von Hugging Face gestartet.",
+        "activity.tool.crawl_docs_site": "Hat begonnen, eine Dokumentations-Website in die Wissensbasis einzulesen "
+                                         "(Deep Ingest).",
+        "activity.tool.index_framework_docs": "Hat begonnen, die Dokumentation des Frameworks in die Wissensbasis "
+                                              "aufzunehmen.",
+        "activity.tool.add_pack_from_index": "Hat begonnen, ein Paket aus dem Community Hub zu installieren.",
+        "activity.tool.export_pack": "Hat begonnen, ein Paket in eine Datei zu exportieren.",
+        "activity.tool.restore_knowledge_snapshot": "Hat begonnen, einen Wissens-Snapshot wiederherzustellen; der "
+                                                    "aktuelle Stand wird vorher gesichert.",
+        "activity.tool.delete_artifact": "Hat ein fertiges Modell in den Papierkorb verschoben.",
+        "activity.tool.restore_from_trash": "Hat etwas aus dem Papierkorb zurückgeholt.",
+        "activity.tool.build_local_runtime": "Hat begonnen, Dittos lokales Modellprogramm zu bauen.",
+        "activity.tool.start_local_runtime": "Hat Dittos lokales Modellprogramm gestartet.",
+        "activity.tool.stop_local_runtime": "Hat Dittos lokales Modellprogramm gestoppt.",
+        "activity.tool.run_benchmark": "Hat einen Geschwindigkeitstest eines lokalen Modells gestartet.",
+        "activity.tool.probe_remote_device": "Hat begonnen, die Hardware eines Boards zu prüfen.",
+        "activity.tool.deploy_device_runtime": "Hat begonnen, das Modellprogramm auf einem Board zu installieren.",
+        "activity.tool.run_device_benchmark": "Hat einen Geschwindigkeitstest auf einem Board gestartet.",
+        "activity.tool.create_deploy_package": "Hat begonnen, ein Bereitstellungspaket zu erstellen.",
+        "activity.tool.deploy_to_device": "Hat begonnen, ein Modell auf ein Board zu übertragen.",
+        "activity.tool.probe_local_hardware": "Hat die Hardware dieses Computers geprüft.",
+        "activity.tool.create_target_module": "Hat ein neues Target angelegt.",
+        "activity.tool.run_mojo_miracle": "Hat etwas mit Mojo Miracle repariert.",
+        "activity.tool.update_settings": "Hat Einstellungen geändert: {keys}.",
+        "activity.tool.gui": "Hat Felder in einem offenen Fenster ausgefüllt.",
+        "activity.job.done": "Eine Arbeit, die es gestartet hat, ist fertig.",
+        "activity.job.not_done": "Eine Arbeit, die es gestartet hat, wurde nicht abgeschlossen.",
+        "activity.job.crawl.done": "Deep Ingest ist fertig: die Website ist in der Wissensbasis.",
+        "activity.job.crawl.not_done": "Deep Ingest wurde nicht abgeschlossen.",
+        "activity.job.deploy.done": "Die Übertragung auf das Board ist fertig.",
+        "activity.job.deploy.not_done": "Die Übertragung auf das Board wurde nicht abgeschlossen.",
+        "activity.job.package.done": "Das Bereitstellungspaket ist fertig.",
+        "activity.job.package.not_done": "Das Bereitstellungspaket wurde nicht erstellt.",
+        "activity.job.probe.done": "Die Hardware-Prüfung ist fertig.",
+        "activity.job.probe.not_done": "Die Hardware-Prüfung wurde nicht abgeschlossen.",
+        "activity.job.pack_import.done": "Das Paket ist installiert.",
+        "activity.job.pack_import.not_done": "Das Paket wurde nicht installiert.",
+        "activity.job.pack_export.done": "Das Paket wurde in eine Datei exportiert.",
+        "activity.job.pack_export.not_done": "Das Paket wurde nicht exportiert.",
+        "activity.job.snapshot_restore.done": "Der Wissens-Snapshot ist wiederhergestellt.",
+        "activity.job.snapshot_restore.not_done": "Der Wissens-Snapshot wurde nicht wiederhergestellt.",
+        "activity.job.hf_download.done": "Der Download von Hugging Face ist fertig.",
+        "activity.job.hf_download.not_done": "Der Download von Hugging Face wurde nicht abgeschlossen.",
+        "activity.job.runtime_build.done": "Dittos lokales Modellprogramm ist gebaut.",
+        "activity.job.runtime_build.not_done": "Der Bau von Dittos lokalem Modellprogramm wurde nicht abgeschlossen.",
+        "activity.job.runtime_start.done": "Dittos lokales Modellprogramm läuft.",
+        "activity.job.runtime_start.not_done": "Dittos lokales Modellprogramm ist nicht gestartet.",
+        "activity.job.benchmark.done": "Der Geschwindigkeitstest ist fertig.",
+        "activity.job.benchmark.not_done": "Der Geschwindigkeitstest wurde nicht abgeschlossen.",
+        "activity.job.docs_index.done": "Die Dokumentation des Frameworks ist in der Wissensbasis.",
+        "activity.job.docs_index.not_done": "Die Aufnahme der Framework-Dokumentation wurde nicht abgeschlossen.",
+        "activity.build.completed": "Der Build ist fertig.",
+        "activity.build.saved": "Der Build ist fertig und wurde als {saved} gespeichert.",
+        "activity.build.partial": "Der Build ist mit Fehlern fertig: {completed} geschafft, {failed} fehlgeschlagen.",
+        "activity.build.error": "Der Build ist fehlgeschlagen.",
+        "activity.build.cancelled": "Der Build wurde abgebrochen.",
+        "activity.grant_used": "Hat einen Aufruf mit deiner Dauerfreigabe ausgeführt, ohne dich zu fragen.",
+        "activity.approval": "Bittet dich, einen Aufruf freizugeben.",
+        "activity.approval_end": "Eine Frage zu deiner Freigabe ist beendet.",
+        "activity.approval_end.done": "Du hast es freigegeben, und es wurde ausgeführt.",
+        "activity.approval_end.declined": "Du hast es abgelehnt; nichts wurde ausgeführt.",
+        "activity.approval_end.expired": "Niemand hat rechtzeitig geantwortet; nichts wurde ausgeführt.",
+        "activity.approval_end.withdrawn": "Die Frage wurde zurückgezogen; nichts wurde ausgeführt.",
+        "activity.approval_end.failed": "Es hat nicht funktioniert.",
+        "activity.blocked": "Konnte etwas nicht tun.",
+        "activity.blocked.missing_information": "Konnte es nicht tun: es fehlen Angaben.",
+        "activity.blocked.not_supported": "Konnte es nicht tun: das Framework unterstützt das nicht.",
+        "activity.blocked.no_tool": "Konnte es nicht tun: dafür gibt es kein Werkzeug; nur du kannst es tun.",
+        "activity.blocked.permission_denied": "Konnte es nicht tun: deine Werkzeug-Berechtigungen erlauben es nicht.",
+        "activity.blocked.declined": "Hat es nicht getan: du hast es abgelehnt.",
+        "activity.blocked.needs_person": "Konnte es nicht tun: dafür musst du entscheiden oder handeln.",
+        "activity.blocked.hardware_unavailable": "Konnte es nicht tun: die Hardware ist nicht verfügbar.",
+        "activity.blocked.insufficient_resources": "Konnte es nicht tun: zu wenig Speicherplatz oder Arbeitsspeicher.",
+        "activity.blocked.limit_reached": "Konnte es nicht tun: eine Grenze wurde erreicht.",
+        "activity.blocked.failed": "Konnte es nicht tun: es ist fehlgeschlagen.",
     },
 }
 
@@ -255,6 +425,21 @@ class FeedRefs(_Model):
     reply_to: Optional[str] = Field(None, pattern=ENTRY_ID_RE)
     to_caller: str = Field(default="", pattern=CALLER_RE)   # relay: the deciding caller
     to_owner: str = Field(default="", max_length=120)       # relay: the deciding session while it lives
+    # The window that shows what the row is about (tool_windows.WINDOW_IDS, a closed list): the GUI's [Show] opens it
+    # on the person's click, nothing ever opens or runs from a row by itself.
+    window: Optional[str] = Field(None, pattern=WINDOW_ID_RE)
+    # Next steps by their catalogue ids ("<area>.<name>", e.g. runtime.install); the GUI renders them.
+    steps: List[str] = Field(default_factory=list, max_length=MAX_STEPS)
+    # "gui-chat": the person asked Ditto in this window's chat for it (the window may come up at once); "" otherwise.
+    asked_in: Literal["", "gui-chat"] = ""
+
+    @field_validator("steps")
+    @classmethod
+    def _step_ids(cls, value: List[str]) -> List[str]:
+        bad = [step for step in value if not isinstance(step, str) or not re.fullmatch(STEP_ID_RE, step)]
+        if bad:
+            raise ValueError(f"steps are catalogue ids (<area>.<name>), not {bad!r}")
+        return value
 
 
 class FeedEntry(_Model):
@@ -325,6 +510,9 @@ class FeedEntry(_Model):
             # The person has no caller id: a row in the person's name comes only from the person's own windows,
             # never from a process that serves an AI or from Ditto.
             raise ValueError("the person writes only in the GUI or at the terminal")
+        if self.refs.asked_in and (self.sender.caller != "ditto" or self.program != "gui"):
+            # Only Ditto, asked in the GUI's own chat, works for a turn the person typed into this window.
+            raise ValueError("only Ditto's rows written by the GUI are asked in its chat")
         return self
 
     def canonical(self) -> str:
@@ -433,19 +621,19 @@ _SCHEMA = (
 )
 # The statements are constants (the kind lists are spelled out; a test keeps them equal to the sets above).
 _SQL_AFTER = "SELECT id, entry_id, ts, kind, body, sig FROM entries WHERE id > ? ORDER BY id LIMIT ?"
-_SQL_AFTER_RECORDS = ("SELECT id, entry_id, ts, kind, body, sig FROM entries WHERE id > ? AND kind IN ('approval', "
-                      "'approval_end', 'blocked', 'delegated_decision', 'grant_used', 'job_result', 'person_action') "
-                      "ORDER BY id LIMIT ?")
+_SQL_AFTER_RECORDS = ("SELECT id, entry_id, ts, kind, body, sig FROM entries WHERE id > ? AND kind IN ('ai_action', "
+                      "'approval', 'approval_end', 'blocked', 'delegated_decision', 'grant_used', 'job_result', "
+                      "'person_action') ORDER BY id LIMIT ?")
 _SQL_PAGE = "SELECT id, entry_id, ts, kind, body, sig FROM entries WHERE id < ? AND id > ? ORDER BY id DESC LIMIT ?"
 _SQL_PAGE_RECORDS = ("SELECT id, entry_id, ts, kind, body, sig FROM entries WHERE id < ? AND id > ? AND kind IN "
-                     "('approval', 'approval_end', 'blocked', 'delegated_decision', 'grant_used', 'job_result', "
-                     "'person_action') ORDER BY id DESC LIMIT ?")
+                     "('ai_action', 'approval', 'approval_end', 'blocked', 'delegated_decision', 'grant_used', "
+                     "'job_result', 'person_action') ORDER BY id DESC LIMIT ?")
 _SQL_NEWEST = "SELECT id, entry_id, ts, kind, body, sig FROM entries ORDER BY id DESC LIMIT ?"
 _SQL_PLAN_ROWS = ("SELECT id, LENGTH(CAST(body AS BLOB)) FROM entries WHERE id <= ? AND kind IN ('client_reply', "
                   "'ditto_answer', 'ditto_tool_note', 'explanation', 'feed_cleared', 'notice', 'person_message', "
                   "'relay_question') ORDER BY id")
-_SQL_PLAN_HIDDEN = ("SELECT COUNT(*) FROM entries WHERE id <= ? AND id > ? AND kind IN ('approval', 'approval_end', "
-                    "'blocked', 'delegated_decision', 'grant_used', 'job_result', 'person_action')")
+_SQL_PLAN_HIDDEN = ("SELECT COUNT(*) FROM entries WHERE id <= ? AND id > ? AND kind IN ('ai_action', 'approval', "
+                    "'approval_end', 'blocked', 'delegated_decision', 'grant_used', 'job_result', 'person_action')")
 _SQL_DELETE_CONVERSATION = ("DELETE FROM entries WHERE id <= ? AND kind IN ('client_reply', 'ditto_answer', "
                             "'ditto_tool_note', 'explanation', 'feed_cleared', 'notice', 'person_message', "
                             "'relay_question')")
@@ -1018,6 +1206,30 @@ class FeedWriter:
         self.problem = None
         return stored
 
+    def activity_entry(self, kind: str, sender: FeedSender, *, text_key: str,
+                       params: Optional[Mapping[str, Any]] = None, refs: Optional[Any] = None,
+                       level: str = "info") -> FeedEntry:
+        """A row about an AI's work (Core/activity.py), not written yet: one of ACTIVITY_KINDS, the framework's text by
+        key with closed framework parameters (never outside text, never AI text), from the AI's trusted caller id or
+        the framework, never in the person's name. ValueError for anything else."""
+        if kind not in ACTIVITY_KINDS:
+            raise ValueError(f"{kind!r} is not a row about an AI's work")
+        if sender.role == "person":
+            raise ValueError("a row about an AI's work is never in the person's name")
+        return self.entry(kind, sender, text_key=text_key, params=params, refs=refs, level=level)
+
+    def write_entry(self, entry: FeedEntry, *, timeout: Optional[float] = None) -> StoredEntry:
+        """Writes a row built with entry() and fails open: a row that could not be saved comes back with row id -1
+        (logged, `problem` set), so who shows it can say it was not saved."""
+        try:
+            stored = self.store.append(entry, timeout=timeout)
+        except FeedWriteError as e:
+            self.problem = str(e)
+            logger.warning(f"A chat entry was not saved ({e.reason}): {e}")
+            return StoredEntry(-1, entry)
+        self.problem = None
+        return stored
+
     def person_message(self, text: str, *, reply_to: Optional[str] = None,
                        timeout: Optional[float] = None) -> Optional[StoredEntry]:
         return self.write("person_message", FeedSender(role="person"), person_text=text,
@@ -1171,7 +1383,8 @@ def open_chat_feed(framework: Any) -> FeedStore:
     return FeedStore(state_dir, key=key, refuse_unkeyed=None if key else AuditLog(state_dir / "audit.db").kept_with_key)
 
 
-__all__ = ["FEED_KINDS", "CONVERSATION_KINDS", "RECORD_KINDS", "TEXTS", "feed_text", "WarningRow", "FeedSender",
-           "FeedFact", "FeedRefs", "FeedEntry", "StoredEntry", "FeedPage", "ClearPlan", "FeedCheck", "FeedWriteError",
-           "ClearPlanChanged", "FeedStore", "FeedWriter", "clean_client_name", "clean_ai_text", "reason_sha256",
-           "import_chat_history", "Explanation", "caller_words", "framework_explanation", "open_chat_feed"]
+__all__ = ["FEED_KINDS", "CONVERSATION_KINDS", "RECORD_KINDS", "ACTIVITY_KINDS", "TEXTS", "feed_text", "WarningRow",
+           "FeedSender", "FeedFact", "FeedRefs", "FeedEntry", "StoredEntry", "FeedPage", "ClearPlan", "FeedCheck",
+           "FeedWriteError", "ClearPlanChanged", "FeedStore", "FeedWriter", "clean_client_name", "clean_ai_text",
+           "reason_sha256", "import_chat_history", "Explanation", "caller_words", "framework_explanation",
+           "open_chat_feed"]

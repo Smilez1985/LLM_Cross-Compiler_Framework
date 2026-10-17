@@ -690,6 +690,65 @@ class TestImportAndExplanation:
             assert fields(english[key]) == fields(german[key]), key
 
 
+# --- rows about an AI's work (wave 6, Core/activity.py) -----------------------------------------------------------
+
+class TestActivityRows:
+
+    def test_a_row_names_its_window_and_steps_from_closed_lists(self, store):
+        from orchestrator.tools import tool_windows
+        assert chat_feed.WINDOW_ID_RE is tool_windows.WINDOW_ID_RE, "one window vocabulary, not a copy"
+        writer = FeedWriter(store, "mcp")
+        ok = writer.write("ai_action", client_sender(), text_key="activity.tool.start_build",
+                          refs={"window": "builder", "steps": ["runtime.install", "board.prune_on_device"],
+                                "request_id": "req_1a2b3c4d"})
+        assert (ok.entry.refs.window, ok.entry.refs.steps) == ("builder", ["runtime.install", "board.prune_on_device"])
+        for bad in ({"window": "desktop"}, {"window": "Builder"}, {"steps": ["rm -rf /"]},
+                    {"steps": ["runtime install"]}, {"steps": ["a.b", "c.d", "e.f", "g.h", "i.j"]},
+                    {"asked_in": "terminal"}):
+            with pytest.raises(ValueError):
+                writer.write("ai_action", client_sender(), refs=bad)
+
+    def test_only_dittos_rows_written_by_the_gui_are_asked_in_its_chat(self, store):
+        asked = {"asked_in": "gui-chat", "window": "builder"}
+        row = FeedWriter(store, "gui").write("ai_action", ditto_sender(), text_key="activity.tool.start_build",
+                                             refs=asked)
+        assert row.entry.refs.asked_in == "gui-chat"
+        for program, sender in (("gui", client_sender()), ("mcp", ditto_sender()), ("cli", ditto_sender()),
+                                ("gui", framework_sender())):
+            with pytest.raises(ValueError):
+                FeedWriter(store, program).write("ai_action", sender, refs=asked)
+
+    def test_activity_rows_are_framework_text_never_in_the_persons_name(self, store):
+        writer = FeedWriter(store, "mcp")
+        entry = writer.activity_entry("job_result", client_sender(), text_key="activity.job.crawl.done",
+                                      params={"kind": "crawl"}, refs={"window": "knowledge_sources"})
+        assert entry.kind == "job_result" and entry.param_origin == {"kind": "framework"}
+        assert set(chat_feed.ACTIVITY_KINDS) <= RECORD_KINDS
+        with pytest.raises(ValueError):
+            writer.activity_entry("ditto_answer", ditto_sender(), text_key="activity.action")
+        with pytest.raises(ValueError):
+            FeedWriter(store, "gui").activity_entry("ai_action", FeedSender(role="person"), text_key="activity.action")
+        assert writer.write_entry(entry).row_id == 1
+
+    def test_a_row_that_cannot_be_saved_comes_back_marked_not_raised(self, tmp_path):
+        broken = FeedStore(tmp_path / "broken", key=KEY)
+        broken.path.parent.mkdir()
+        broken.path.write_bytes(b"not a database" * 200)
+        writer = FeedWriter(broken, "mcp")
+        stored = writer.write_entry(writer.activity_entry("ai_action", client_sender(), text_key="activity.action"))
+        assert stored.row_id == -1 and stored.entry.kind == "ai_action" and writer.problem
+
+    def test_clearing_the_chat_hides_what_ais_did_and_deletes_none_of_it(self, store):
+        FeedWriter(store, "gui").person_message("Build it, please.")
+        FeedWriter(store, "mcp").write("ai_action", client_sender(), text_key="activity.tool.start_build",
+                                       refs={"window": "builder"})
+        plan = store.clear_plan()
+        assert (plan.rows, plan.hidden_records) == (1, 1)
+        assert store.clear_conversation(plan, "gui", RecordingAudit()) == 1
+        assert [e.entry.kind for e in store.after(0).entries] == ["feed_cleared"]
+        assert [e.entry.kind for e in store.after(0, view="records").entries] == ["ai_action"]
+
+
 # --- the framework and the doctor ----------------------------------------------------------------------------------
 
 class TestFrameworkAndDoctor:

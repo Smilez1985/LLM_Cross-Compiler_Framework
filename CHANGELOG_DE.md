@@ -10,6 +10,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Was Ditto und KI-Apps tun, wird zu Einträgen des Chat-Verlaufs, in jedem Prozess** (Welle 6, DECISIONS Runde 9
+  U1, Folge b): `orchestrator/Core/activity.py` schreibt einen signierten Eintrag je Ereignis, aus dem Prozess, der die
+  Arbeit getan hat (der GUI, `llm-cli`, jedem stdio-MCP-Server und dem HTTP-Kindprozess): ein Aufruf, der etwas
+  geändert hat (das neue Registry-Ereignis `call_done`, Eintragsart `ai_action`), das Ende jeder Job-Art (ein
+  Ende-Listener des Job-Dienstes), das Ende eines Builds (der Orchestrator; wer ihn abgebrochen hat, der gespeicherte
+  Ordner als Bezeichnung), Nutzungen von Dauerfreigaben, ausstehende Freigaben und ihr Ende sowie abgelehnte Arbeit
+  (`blocked`). Die eigenen Aufrufe der Person erzeugen keine Einträge; der Absender ist die vertrauenswürdige
+  Aufrufer-ID, der eigene Name einer App nur ihre Angabe; Einträge enthalten nur geschlossene Werte und nennen das
+  Fenster, das das Ergebnis zeigt (`orchestrator/tools/tool_windows.py`: die geschlossene Fensterliste, ein Fenster für
+  jedes Werkzeug, das etwas ändert, geprüft von einem Test über die ganze Registry, für jede Job-Art, und was jedes
+  Fenster öffnet), dazu Schritt-IDs nach Muster; `refs.asked_in` markiert Dittos Runden im eigenen Chat der GUI. Er
+  versagt offen, und dieselbe Ablehnung wird einmal in 30 Sekunden geschrieben. `ActivityProducer.add_listener` gibt
+  der GUI die Einträge ihres eigenen Prozesses sofort, und `ConfigManager.reload_user_config` übernimmt Einstellungen,
+  die ein anderer Prozess gespeichert hat, außer Werten, die dieser Prozess selbst hält (als Konflikte gemeldet). Die
+  Seite der GUI (Fenster zeigen, Hinweise mit Zeigen) folgt in Welle 6.
 - **`tests/test_cli_gui_parity.py`: Jeder Befehl und jede Option der CLI für Personen hat einen Weg mit der Maus**
   (W1', Runde 9 U2): Der Test geht den ganzen Befehlsbaum von `llm-cli` durch (294 Pfade: Befehle, Unterbefehle und
   Optionen) und liest `CLI_PATHS`, `MACHINE_ONLY` und die Fenster- und Reitertabellen jedes Moduls in

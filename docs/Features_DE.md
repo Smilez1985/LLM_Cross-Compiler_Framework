@@ -785,6 +785,16 @@ die Vorgaben).
   pro Sekunde und wartet nie darauf; ein Eintrag, der sich nicht prüfen lässt, wird nicht gezeigt, und der Bereich
   sagt, wie viele übersprungen wurden. Ohne den Verlauf zeigt er Dittos Gespräch wie bisher und sagt, dass neue
   Nachrichten nicht behalten werden.
+- **Was KIs getan haben** (unveröffentlicht, Welle 6): Was Ditto oder eine KI-App mit den Werkzeugen des Frameworks
+  tut, wird zu einem signierten Eintrag, geschrieben von dem Prozess des Frameworks, der die Arbeit getan hat: ein
+  Aufruf, der etwas geändert hat („Hat einen Build gestartet.“, „Hat Einstellungen geändert: language.“), das Ende
+  einer Arbeit, die eine KI gestartet hat (ein Download, eine Übertragung, ein Deep Ingest, ein Build, mit dem Ordner
+  eines fertigen Builds als Bezeichnung), die Nutzung einer Dauerfreigabe, eine Frage, die auf dich wartet, und wie
+  sie endete, und eine Arbeit, die eine KI nicht tun konnte, mit dem Grund in Worten des Frameworks. Ein Eintrag nennt
+  das Fenster, das das Ergebnis zeigt, aus einer festen Liste, und aus einem Eintrag läuft nie etwas. Deine eigene
+  Arbeit in der GUI und auf der Kommandozeile erzeugt keine Einträge; eine App wird mit der Verbindung genannt, unter
+  der das Framework sie kennt, ihr eigener Name nur als ihre Angabe. Dieselbe Ablehnung derselben App wird einmal in
+  30 Sekunden geschrieben; das Audit-Log behält jeden Aufruf.
 - **Wartende Fragen** kommen aus den ausstehenden Freigaben, nie allein aus Chat-Einträgen, und bleiben unten unter
   **Braucht dich**: wer fragt, was, und wie viel Zeit bleibt, neu gezählt, solange die Frage wartet. **Im
   Freigabe-Fenster öffnen…** entscheidet sie dort. Eine neue Frage zeigt einen verborgenen Bereich, ohne den

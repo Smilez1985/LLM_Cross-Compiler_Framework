@@ -13,9 +13,10 @@ Updates v2.4.0:
 """
 
 import asyncio
+import threading
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Callable, Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -132,6 +133,8 @@ class WorkflowState:
     summary: Dict[str, Any] = field(default_factory=dict)
     # Fix proposals of AI clients (client_proposals.ClientProposal): manual steps for the person, never applied.
     client_proposals: List[Any] = field(default_factory=list)
+    # Who cancelled it, when an AI did (its caller id: ditto, mcp, mcp:<token>); "" for the person or the framework
+    cancelled_by: str = ""
 
     @property
     def progress_percent(self) -> int:
@@ -175,6 +178,16 @@ class BuildJob:
     status: BuildStatus
     error_log: str = ""
     model_label: str = ""  # how the model is named in stage texts and healing context (never a host path)
+
+
+def _calling_actor() -> str:
+    """The caller of the tool call this runs for (the registry's context, which the framework's event loop carries
+    into a coroutine it was handed), "" outside a tool call."""
+    try:
+        from orchestrator.tools.registry import current_actor
+        return str(current_actor() or "")
+    except Exception:  # noqa: BLE001 - without the registry nobody is named
+        return ""
 
 
 def model_label(model: str, local_inputs: Any = None) -> str:
@@ -242,6 +255,13 @@ class LLMOrchestrator:
 
         # Pending healing approvals (request_id -> event set by resolve_healing from the GUI/CLI thread)
         self._healing_events: Dict[str, asyncio.Event] = {}
+        # Told once when a request ends (completed, error, cancelled): the chat feed's producer (Core/activity.py).
+        self._end_listeners: List[Callable[[Dict[str, Any]], None]] = []
+        self._ended: set = set()
+        self._end_lock = threading.Lock()
+        # A finished build's folder as an AI may read it (build_service.artifact_label: output:<relative path>), set
+        # by the framework; without it the folder's own name.
+        self.artifact_label: Optional[Callable[[str], str]] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         # Strong references: the event loop keeps only weak references to tasks.
         self._worker_tasks: set = set()
@@ -302,14 +322,18 @@ class LLMOrchestrator:
         """Listet alle bekannten Workflows"""
         return list(self._workflows.values())
 
-    async def cancel_request(self, request_id: str) -> bool:
-        """Cancels a request: stops its running build container and the pipeline task."""
+    async def cancel_request(self, request_id: str, by: str = "") -> bool:
+        """Cancels a request: stops its running build container and the pipeline task. `by`: the AI caller that
+        cancels it (ditto, mcp, mcp:<token>); without it the caller of the tool call that runs this, if any (the
+        person's own GUI and CLI cancels name nobody)."""
         state = self._workflows.get(request_id)
         task = self._active_tasks.get(request_id)
         if state is None or (task is None and state.status in (OrchestrationStatus.COMPLETED,
                                                                OrchestrationStatus.ERROR,
                                                                OrchestrationStatus.CANCELLED)):
             return False
+        who = by or _calling_actor()
+        state.cancelled_by = who if who not in ("", "cli", "gui") else ""
         # Mark first, so the pipeline does not treat the stopped build as a failure to heal.
         state.status = OrchestrationStatus.CANCELLED
         loop = asyncio.get_running_loop()
@@ -328,7 +352,59 @@ class LLMOrchestrator:
         if task is not None:
             task.cancel()  # a queued request (no task yet) is skipped by the worker
         state.end_time = state.end_time or datetime.now()
+        if task is None:
+            self._announce_end(state)  # a queued request ends here; a running one when its task has stopped
         return True
+
+    def add_end_listener(self, callback: Callable[[Dict[str, Any]], None]) -> Callable[[], None]:
+        """Calls `callback(facts)` once for every request that ends from now on (build_end): request_id, status
+        (completed, error, cancelled), the owner's caller class ("" for the person), who cancelled it (an AI's caller
+        id, else ""), the saved folder as a label (never a host path) and the counts. Called on the build loop's
+        thread; a listener must not block. Returns the function that removes it."""
+        with self._end_lock:
+            self._end_listeners.append(callback)
+
+        def remove() -> None:
+            with self._end_lock:
+                if callback in self._end_listeners:
+                    self._end_listeners.remove(callback)
+        return remove
+
+    def _saved_label(self, path: Any) -> str:
+        """A finished build's folder as an AI may read it: the framework's label, else the folder's own name."""
+        label = ""
+        if self.artifact_label is not None:
+            try:
+                label = str(self.artifact_label(str(path)) or "")
+            except Exception as e:  # noqa: BLE001 - the folder's own name then
+                self.logger.debug(f"No label for a finished build's folder: {e.__class__.__name__}")
+        if not label or is_absolute_anywhere(label):
+            label = last_part(str(path))
+        return label
+
+    def _announce_end(self, state: "WorkflowState") -> None:
+        """Tells the end listeners once that a request ended (completed, error, cancelled): framework facts only."""
+        if state.status not in (OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR,
+                                OrchestrationStatus.CANCELLED):
+            return
+        with self._end_lock:
+            if state.request_id in self._ended:
+                return
+            self._ended.add(state.request_id)
+            listeners = list(self._end_listeners)
+        if not listeners:
+            return
+        from orchestrator.Core.job_service import owner_actor
+        facts = {"request_id": state.request_id, "status": state.status.value, "owner": owner_actor(state.owner),
+                 "cancelled_by": state.cancelled_by or "",
+                 "saved": self._saved_label(state.artifacts[0]) if state.artifacts else "",
+                 "artifacts": len(state.artifacts), "completed": int(state.completed_builds),
+                 "failed": int(state.failed_builds)}
+        for callback in listeners:
+            try:
+                callback(dict(facts))
+            except Exception as e:  # noqa: BLE001 - a listener never changes a build
+                self.logger.warning(f"An end listener of {state.request_id} failed: {e.__class__.__name__}")
 
     def _share(self, state: "WorkflowState") -> None:
         """Writes the request's summary into the shared build state; a summary that cannot be written never stops
@@ -362,6 +438,7 @@ class LLMOrchestrator:
         state = self._workflows.get(request.request_id)
         if state is not None and state.status == OrchestrationStatus.CANCELLED:
             self._release_disk(request)
+            self._announce_end(state)
             self._ensure_worker_running()  # cancelled while queued: go on with the next request
             return
         
@@ -382,6 +459,7 @@ class LLMOrchestrator:
             self._release_disk(request)
             if request.request_id in self._workflows:
                 self._share(self._workflows[request.request_id])  # errors and warnings added at the end
+                self._announce_end(self._workflows[request.request_id])  # with them: the end, once
             self._active_tasks.pop(request.request_id, None)
             self._queue.task_done()
             self._ensure_worker_running()

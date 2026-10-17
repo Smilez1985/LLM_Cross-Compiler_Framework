@@ -119,6 +119,7 @@ class FrameworkManager:
         self.job_service: Optional[JobService] = None
         self.tool_registry = None
         self.chat_feed = None  # Core.chat_feed.FeedStore: what arrives in the chat panel
+        self.activity = None  # Core.activity.ActivityProducer: what Ditto and AI apps do, as rows of the chat feed
         self.updater: Optional[UpdateManager] = None
 
         self._initialized = False
@@ -224,6 +225,14 @@ class FrameworkManager:
             except Exception as e:
                 self.chat_feed = None
                 self.logger.error(f"The chat feed is unavailable (per-user folder): {e}")
+            # What Ditto and AI apps do through tools becomes rows of that feed, written by this process (the GUI,
+            # llmcf, every MCP server): the GUI shows them, whichever process did the work (Core/activity.py).
+            try:
+                from orchestrator.Core.activity import attach_activity
+                self.activity = attach_activity(self)
+            except Exception as e:
+                self.activity = None
+                self.logger.error(f"AI activity is not shown in the chat (it stays in the audit log): {e}")
 
             # === DEPENDENCY INJECTION ===
             # Connect the Guardian (Self-Healing, which asks Ditto) to the Orchestrator
@@ -313,6 +322,7 @@ class FrameworkManager:
             "job_service": self.job_service,
             "tool_registry": self.tool_registry,
             "chat_feed": self.chat_feed,
+            "activity": self.activity,
             "docker_client": getattr(getattr(self.docker_manager, "builder", None), "docker_client", None)
         }
         return components.get(name)
@@ -328,6 +338,8 @@ class FrameworkManager:
                 approvals.close()
             except Exception as e:
                 self.logger.warning(f"Pending approvals not closed: {e}")
+        if self.activity is not None:  # the rows still queued are written first
+            self.activity.close()
         if self.chat_feed is not None:
             self.chat_feed.close()
         self._stop_loop()

@@ -116,6 +116,32 @@ class JobService:
         self._jobs: Dict[str, Job] = {}
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
+        # Called once when a job ends (done, failed, cancelled, expired), with its summary: the chat feed's producer
+        # (Core/activity.py) listens here. A listener that raises is logged and skipped; it never changes the job.
+        self._finish_listeners: List[Callable[[Dict[str, Any]], None]] = []
+
+    def add_finish_listener(self, callback: Callable[[Dict[str, Any]], None]) -> Callable[[], None]:
+        """Calls `callback(summary)` once for every job that ends from now on, whatever its kind (the summary as it
+        is kept: job_id, kind, owner's caller class, state, times, error code; never a result or a session id).
+        Returns the function that removes the listener."""
+        with self._lock:
+            self._finish_listeners.append(callback)
+
+        def remove() -> None:
+            with self._lock:
+                if callback in self._finish_listeners:
+                    self._finish_listeners.remove(callback)
+        return remove
+
+    def _finished(self, job: Job) -> None:
+        """Tells the finish listeners that `job` ended (called once, outside the lock)."""
+        with self._lock:
+            listeners, summary = list(self._finish_listeners), job.summary()
+        for callback in listeners:
+            try:
+                callback(dict(summary))
+            except Exception as e:  # noqa: BLE001 - a listener never changes how a job ends
+                logger.warning(f"A finish listener of job {job.job_id} failed: {redact_secrets(str(e))}")
 
     # --- creating and changing jobs --------------------------------------------------------------------------
 
@@ -173,12 +199,13 @@ class JobService:
             job = self._get(job_id)
             if job.finished:
                 return job  # a finished job never changes again (a late result of a cancelled job is dropped)
-            persist = False
+            persist = ended = False
             if state is not None:
                 if state not in JOB_STATES:
                     raise ValueError(f"Unknown job state {state!r}.")
                 persist = state != job.state
                 job.state = state
+                ended = state in TERMINAL_STATES
             if progress is not None:
                 job.done, job.total, message = progress
                 job.message = redact_secrets(str(message or ""))[:500]
@@ -192,6 +219,8 @@ class JobService:
             self._touch(job)
         if persist:
             self._persist(job)
+        if ended:  # every way a job ends passes here: _finish, cancel, and a state set directly (approvals)
+            self._finished(job)
         return job
 
     def _finish(self, job_id: str, state: str, **changes) -> Job:
