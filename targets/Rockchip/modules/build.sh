@@ -1,190 +1,156 @@
 #!/bin/bash
-# build.sh for Rockchip (v2.4.0)
-# Manually created / Template instantiated
-# Handles dispatching between RK3588 (RKLLM), RK3566 (RKNN) and CPU Fallback.
-# Adds support for IMatrix generation and usage.
+# build.sh - Rockchip build dispatcher (run by BuildEngine inside the target image)
+#
+# Inputs (environment, set by BuildEngine):
+#   MODEL_SOURCE   local HF model directory inside the container (staged by the host)
+#   TARGET_FORMAT  gguf | rkllm | rknn                       (default: gguf)
+#   TARGET_BOARD   rk3588 | rk3576 | rk3566 | ...            (default: rk3588)
+#   QUANTIZATION   e.g. Q4_K_M, IQ4_XS, F16 (gguf) / w4a16, w8a8 (rkllm) / i8, fp16 (rknn)
+#   JOB_TYPE       build | imatrix
+#   USE_IMATRIX / IMATRIX_PATH, DATASET_PATH, MODEL_NAME (optional)
+#   OPTIMIZATION_LEVEL is set as well but not used: the Rockchip conversions have no matching setting.
+# Outputs go to $BUILD_CACHE_DIR/output (mounted from the host).
 
 set -euo pipefail
 
-# --- CONFIGURATION & PATHS ---
 WORK_DIR="${BUILD_CACHE_DIR:-/build-cache}"
 OUTPUT_DIR="${WORK_DIR}/output"
 IMATRIX_DIR="${WORK_DIR}/imatrix"
-mkdir -p "$OUTPUT_DIR"
-mkdir -p "$IMATRIX_DIR"
+# Large intermediates (F16 GGUF) go to the mounted work folder; the image filesystem may be read-only.
+SCRATCH_DIR="${BUILD_SCRATCH_DIR:-$WORK_DIR}"
+mkdir -p "$SCRATCH_DIR"
 
-TASK="${MODEL_TASK:-LLM}"
-BOARD="${TARGET_BOARD:-rk3566}" 
-QUANT="${QUANTIZATION:-FP16}"
-JOB_TYPE="${JOB_TYPE:-build}" # 'build' or 'imatrix'
+FORMAT="$(echo "${TARGET_FORMAT:-gguf}" | tr '[:upper:]' '[:lower:]')"
+BOARD="$(echo "${TARGET_BOARD:-rk3588}" | tr '[:upper:]' '[:lower:]')"
+QUANT="${QUANTIZATION:-}"
+JOB_TYPE="${JOB_TYPE:-build}"
+MODEL_SOURCE="${MODEL_SOURCE:-}"
+MODEL_NAME="${MODEL_NAME:-$(basename "${MODEL_SOURCE%/}")}"
 
-# Tools (assuming standard llama.cpp install path in container)
-LLAMA_BASE="/usr/src/llama.cpp"
-CONVERT_SCRIPT="$LLAMA_BASE/convert-hf-to-gguf.py"
-QUANTIZE_BIN="$LLAMA_BASE/llama-quantize"
-IMATRIX_BIN="$LLAMA_BASE/llama-imatrix"
+LLAMA_BASE="${LLAMA_CPP_PATH:-/usr/src/llama.cpp}"
+CONVERT_SCRIPT="$LLAMA_BASE/convert_hf_to_gguf.py"
+QUANTIZE_BIN="$LLAMA_BASE/build/bin/llama-quantize"
+IMATRIX_BIN="$LLAMA_BASE/build/bin/llama-imatrix"
 
-echo "=== Rockchip Build Dispatcher v2.4.0 ==="
-echo "Target Board: $BOARD"
-echo "Task Type:    $TASK"
-echo "Quantization: $QUANT"
-echo "Job Type:     $JOB_TYPE"
+die() { echo "ERROR: $*" >&2; exit 1; }
 
-# ==============================================================================
-# 0. SPECIAL JOB: IMATRIX GENERATION
-# ==============================================================================
-if [[ "$JOB_TYPE" == "imatrix" ]]; then
-    echo ">> [IMatrix] Starting Importance Matrix Calculation..."
-    
-    DATASET="${DATASET_PATH:-}"
-    if [ ! -f "$DATASET" ]; then
-        echo "Error: Dataset not found at $DATASET"
-        exit 1
-    fi
+echo "=== Rockchip Build Dispatcher ==="
+echo "Model:        $MODEL_SOURCE"
+echo "Format:       $FORMAT"
+echo "Board:        $BOARD"
+echo "Quantization: ${QUANT:-<default>}"
+echo "Job:          $JOB_TYPE"
 
-    # 1. Convert to F16 (Intermediate)
-    echo ">> [IMatrix] Converting to intermediate F16 GGUF..."
-    INTERMEDIATE="/tmp/model-f16.gguf"
-    if [ -f "$CONVERT_SCRIPT" ]; then
-        python3 "$CONVERT_SCRIPT" "$MODEL_SOURCE" --outfile "$INTERMEDIATE" --outtype f16
-    else
-        echo "Error: Conversion script not found."
-        exit 1
-    fi
+[ -n "$MODEL_SOURCE" ] && [ -e "$MODEL_SOURCE" ] || die "MODEL_SOURCE '$MODEL_SOURCE' does not exist in the container."
 
-    # 2. Calculate Matrix
-    echo ">> [IMatrix] Calculating matrix (this may take time)..."
-    OUTPUT_DAT="$IMATRIX_DIR/imatrix.dat"
-    
-    if [ -x "$IMATRIX_BIN" ]; then
-        "$IMATRIX_BIN" -m "$INTERMEDIATE" -f "$DATASET" -o "$OUTPUT_DAT" --chunks 100
-        echo ">> [IMatrix] Success. Matrix saved to $OUTPUT_DAT"
-        rm -f "$INTERMEDIATE"
-        exit 0
-    else
-        echo "Error: llama-imatrix binary not found at $IMATRIX_BIN"
-        exit 1
-    fi
-fi
+# --- GGUF helpers ------------------------------------------------------------
 
-# ==============================================================================
-# 1. NORMAL BUILD DISPATCH
-# ==============================================================================
+# Output types convert_hf_to_gguf.py writes directly.
+GGUF_CONVERT_TYPES=" f32 f16 bf16 q8_0 auto "
+# Types accepted by llama-quantize (llama.cpp v0.6.0).
+GGUF_QUANT_TYPES=" Q4_0 Q4_1 Q5_0 Q5_1 Q8_0 Q2_K Q2_K_S Q3_K_S Q3_K_M Q3_K_L Q4_K_S Q4_K_M Q5_K_S Q5_K_M Q6_K \
+IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS TQ1_0 TQ2_0 MXFP4_MOE "
+# Very low-bit i-quants are unusable without an importance matrix; other i-quants lose quality without one.
+GGUF_NEEDS_IMATRIX=" IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S "
+GGUF_WANTS_IMATRIX=" IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS "
 
-# Helper for GGUF Quantization
-function build_gguf() {
-    local q_type="$1"
-    local use_matrix="${USE_IMATRIX:-0}"
-    local matrix_file="${IMATRIX_PATH:-}"
-
-    echo ">> Building GGUF (Quant: $q_type, IMatrix: $use_matrix)..."
-
-    # Step 1: Convert to F16 first (Gold standard for quantization input)
-    local f16_file="$OUTPUT_DIR/model-f16.gguf"
-    if [ ! -f "$f16_file" ]; then
-        echo ">> Converting HF -> GGUF F16..."
-        python3 "$CONVERT_SCRIPT" "$MODEL_SOURCE" --outfile "$f16_file" --outtype f16
-    fi
-
-    # Step 2: Quantize
-    local out_file="$OUTPUT_DIR/model-${q_type}.gguf"
-    local quant_cmd=("$QUANTIZE_BIN" "$f16_file" "$out_file" "$q_type")
-
-    # Apply IMatrix if requested and available
-    if [[ "$use_matrix" == "1" ]] && [[ -f "$matrix_file" ]]; then
-        echo ">> Applying IMatrix optimization..."
-        quant_cmd+=("--imatrix" "$matrix_file")
-    elif [[ "$use_matrix" == "1" ]]; then
-        echo "Warning: USE_IMATRIX=1 but file '$matrix_file' not found. Fallback to standard quantization."
-    fi
-
-    echo ">> Running: ${quant_cmd[*]}"
-    "${quant_cmd[@]}"
-
-    # Cleanup F16 intermediate to save space (unless requested)
-    if [[ "$q_type" != "f16" ]]; then
-        rm -f "$f16_file"
-    fi
+normalize_gguf_type() {
+    local q
+    q="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
+    case "$q" in
+        ""|F16|FP16) echo "F16" ;;
+        BF16) echo "BF16" ;;
+        F32|FP32) echo "F32" ;;
+        INT8|Q8) echo "Q8_0" ;;
+        INT4|Q4) echo "Q4_K_M" ;;
+        Q5) echo "Q5_K_M" ;;
+        *) echo "$q" ;;
+    esac
 }
 
-# --- DISPATCH LOGIC ---
+convert_to_gguf() {
+    local outtype="$1" outfile="$2"
+    [ -f "$CONVERT_SCRIPT" ] || die "llama.cpp converter not found at $CONVERT_SCRIPT"
+    echo ">> Converting HF -> GGUF ($outtype)..."
+    python3 "$CONVERT_SCRIPT" "$MODEL_SOURCE" --outfile "$outfile" --outtype "$outtype"
+}
 
-# 1. CPU Fallback Check (User requested FP16/Original)
-if [[ "$QUANT" == "FP16" ]] || [[ "$QUANT" == *"Original"* ]]; then
-    echo ">> Strategy: User requested FP16/Original. Skipping NPU quantization."
-    
-    # Just run F16 conversion
-    if [ -f "$CONVERT_SCRIPT" ]; then
-         python3 "$CONVERT_SCRIPT" "$MODEL_SOURCE" --outfile "$OUTPUT_DIR/model-f16.gguf" --outtype f16
-    else
-         echo "Error: llama.cpp conversion script not found."
-         exit 1
+build_gguf() {
+    local q f16_file out_file
+    q="$(normalize_gguf_type "$QUANT")"
+    local q_lower
+    q_lower="$(echo "$q" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ "$GGUF_CONVERT_TYPES" == *" $q_lower "* ]]; then
+        convert_to_gguf "$q_lower" "$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf"
+        return
     fi
-    
-    cd "$OUTPUT_DIR" && tar -czf "rockchip_cpu_deployment.tar.gz" *
-    echo "Done."
+    [[ "$GGUF_QUANT_TYPES" == *" $q "* ]] || die "Unsupported GGUF quantization '$QUANT'. Supported: F16 BF16 F32 Q8_0 and$GGUF_QUANT_TYPES"
+    [ -x "$QUANTIZE_BIN" ] || die "llama-quantize not found at $QUANTIZE_BIN"
+
+    local imatrix_args=()
+    if [[ "${USE_IMATRIX:-0}" == "1" ]]; then
+        [ -f "${IMATRIX_PATH:-}" ] || die "USE_IMATRIX=1 but importance matrix '${IMATRIX_PATH:-}' is missing."
+        imatrix_args=(--imatrix "$IMATRIX_PATH")
+    elif [[ "$GGUF_NEEDS_IMATRIX" == *" $q "* ]]; then
+        die "$q needs an importance matrix; enable IMatrix calibration for this build."
+    elif [[ "$GGUF_WANTS_IMATRIX" == *" $q "* ]]; then
+        echo "WARNING: $q without an importance matrix loses quality; enable IMatrix calibration for better results." >&2
+    fi
+
+    f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
+    out_file="$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf"
+    convert_to_gguf f16 "$f16_file"
+    echo ">> Quantizing -> $q"
+    "$QUANTIZE_BIN" "${imatrix_args[@]}" "$f16_file" "$out_file" "$q"
+    rm -f "$f16_file"
+}
+
+build_imatrix() {
+    local dataset="${DATASET_PATH:-}" f16_file
+    [ -f "$dataset" ] || die "Calibration dataset not found at '$dataset'."
+    [ -x "$IMATRIX_BIN" ] || die "llama-imatrix not found at $IMATRIX_BIN"
+    mkdir -p "$IMATRIX_DIR"
+    f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
+    convert_to_gguf f16 "$f16_file"
+    echo ">> Computing importance matrix..."
+    # -o *.dat keeps the legacy format, which llama-quantize --imatrix accepts.
+    "$IMATRIX_BIN" -m "$f16_file" -f "$dataset" -o "$IMATRIX_DIR/imatrix.dat" --chunks 100
+    rm -f "$f16_file"
+}
+
+# --- Dispatch ----------------------------------------------------------------
+
+if [[ "$JOB_TYPE" == "imatrix" ]]; then
+    build_imatrix
+    echo "Done (imatrix)."
     exit 0
 fi
 
-# 2. Hardware Specific Dispatch
-if [[ "$BOARD" == *"rk3588"* ]] || [[ "$BOARD" == *"RK3588"* ]]; then
-    # === RK3588 (Strong NPU) ===
-    if [ "$TASK" == "LLM" ]; then
-        echo ">> Strategy: RK3588 detected. Using RKLLM-Toolkit."
-        if [ -f "/app/modules/rkllm_module.sh" ]; then
-            /app/modules/rkllm_module.sh
-        else
-             echo "Error: rkllm_module.sh not found."
-             exit 1
-        fi
-    else
-        echo ">> Strategy: Non-LLM task ($TASK). Using RKNN-Toolkit2."
-        if [ -f "/app/modules/rknn_module.sh" ]; then
-            /app/modules/rknn_module.sh
-        else
-             echo "Error: rknn_module.sh not found."
-             exit 1
-        fi
-    fi
+mkdir -p "$OUTPUT_DIR"
 
-elif [[ "$BOARD" == *"rk3566"* ]] || [[ "$BOARD" == *"RK3566"* ]]; then
-    # === RK3566 (Weak NPU) ===
-    if [ "$TASK" == "LLM" ]; then
-        echo ">> Strategy: RK3566 detected. NPU too weak for RKLLM. Fallback to CPU (llama.cpp/GGUF)."
-        
-        # Map Quantization Strings
-        GGUF_TYPE="q8_0" 
-        if [[ "$QUANT" == "Q4"* ]]; then GGUF_TYPE="q4_k_m"; fi
-        if [[ "$QUANT" == "Q5"* ]]; then GGUF_TYPE="q5_k_m"; fi
-        if [[ "$QUANT" == "Q8"* ]]; then GGUF_TYPE="q8_0"; fi
-        if [[ "$QUANT" == "INT4" ]]; then GGUF_TYPE="q4_k_m"; fi
-        if [[ "$QUANT" == "INT8" ]]; then GGUF_TYPE="q8_0"; fi
-        
-        build_gguf "$GGUF_TYPE"
-        
-    else
-        echo ">> Strategy: Voice/Vision task. Using RKNN-Toolkit2 for NPU acceleration."
-        if [ -f "/app/modules/rknn_module.sh" ]; then
-            /app/modules/rknn_module.sh
-        else
-             echo "Error: rknn_module.sh not found."
-             exit 1
-        fi
-    fi
+case "$FORMAT" in
+    gguf)
+        build_gguf
+        ;;
+    rkllm)
+        case "$BOARD" in
+            *rk3588*|*rk3576*) /app/modules/rkllm_module.sh ;;
+            *) die "RKLLM needs an RK3588 or RK3576 NPU; board '$BOARD' should use the gguf format (CPU)." ;;
+        esac
+        ;;
+    rknn)
+        /app/modules/rknn_module.sh
+        ;;
+    *)
+        die "Format '$FORMAT' is not supported by the Rockchip target (gguf, rkllm, rknn)."
+        ;;
+esac
 
-else
-    # === GENERIC / UNKNOWN ===
-    echo ">> Unknown Rockchip Board '$BOARD'. Defaulting to CPU/GGUF."
-    build_gguf "q4_k_m" # Default generic quant
-fi
+cat > "$OUTPUT_DIR/build_info.json" <<EOF
+{"model": "$MODEL_NAME", "format": "$FORMAT", "board": "$BOARD", "quantization": "${QUANT:-default}", "llama_cpp": "$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)"}
+EOF
 
-# --- PACKAGING ---
-echo "=== Packaging ==="
-if [ -d "$OUTPUT_DIR" ]; then
-    cd "$OUTPUT_DIR" && tar -czf "rockchip_deployment.tar.gz" *
-    echo "Artifacts packaged."
-else
-    echo "Error: Output directory not found."
-    exit 1
-fi
+echo "=== Artifacts ==="
+ls -la "$OUTPUT_DIR"
 echo "Done."

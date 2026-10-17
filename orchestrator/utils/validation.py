@@ -24,21 +24,18 @@ Updates v2.3.0:
 """
 
 import os
-import sys
-import json
 import re
 import subprocess
 import platform
 import socket
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union, Tuple, Set, Callable
+from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 import ipaddress
 import urllib.parse
 
-import yaml
 import psutil
 from packaging import version
 
@@ -131,7 +128,11 @@ class ValidationResult:
     details: Dict[str, Any] = field(default_factory=dict)
     validation_type: ValidationType = ValidationType.CONFIGURATION
     timestamp: datetime = field(default_factory=datetime.now)
-    
+
+    # Callers write `if not validate_x(...)`; without this every result is truthy.
+    def __bool__(self) -> bool:
+        return bool(self.valid)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -383,8 +384,8 @@ def _validate_path_security(path: Path) -> ValidationResult:
     """Validate path security (prevent path traversal, etc.)"""
     
     try:
-        # Resolve path to check for traversal
-        resolved_path = path.resolve()
+        # Resolve path to check for traversal (an unresolvable path fails here)
+        path.resolve()
         
         # Check for path traversal attempts
         if ".." in path.parts:
@@ -447,7 +448,6 @@ def validate_directory_writable(directory: Union[str, Path]) -> ValidationResult
     
     try:
         # Attempt to create and delete a test file
-        import tempfile
         import uuid
         
         test_filename = f".test_write_{uuid.uuid4().hex[:8]}"
@@ -1405,6 +1405,98 @@ def validate_url(url: str) -> ValidationResult:
         )
 
 
+_NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+
+
+def is_public_ip(addr: Union[str, ipaddress.IPv4Address, ipaddress.IPv6Address]) -> bool:
+    """True only for globally routable unicast addresses, including IPv4 wrapped in IPv6."""
+    if isinstance(addr, str):
+        addr = ipaddress.ip_address(addr.split("%")[0])
+    if addr.version == 6:
+        if addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        elif addr in _NAT64_PREFIX:
+            addr = ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF)
+        elif addr.sixtofour:
+            addr = addr.sixtofour
+        elif addr.teredo:
+            return False
+    # is_global excludes private, loopback, link-local, CGNAT (100.64/10) and unspecified ranges.
+    return addr.is_global and not addr.is_multicast and not addr.is_reserved
+
+
+def resolve_public_addresses(host: str, port: int) -> List[str]:
+    """Resolves host and returns its addresses; raises PermissionError if any of them is not public."""
+    infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    addresses = [info[4][0] for info in infos]
+    for address in addresses:
+        if not is_public_ip(address):
+            raise PermissionError(f"{host} resolves to non-public address {address}")
+    return addresses
+
+
+def _idna_host(host: str) -> str:
+    try:
+        import idna
+        return idna.encode(host, uts46=True).decode("ascii").lower()
+    except Exception:
+        try:
+            return host.encode("idna").decode("ascii").lower()
+        except Exception:
+            return host.lower()
+
+
+def validate_public_url(url: str) -> ValidationResult:
+    """Validate that a URL is http(s) and only resolves to public addresses (SSRF guard)."""
+    def _fail(message: str) -> ValidationResult:
+        return ValidationResult(
+            valid=False,
+            severity=ValidationSeverity.ERROR,
+            message=message,
+            validation_type=ValidationType.SECURITY,
+            details={"url": url}
+        )
+
+    # urllib and urllib3/requests split authorities differently on these characters
+    # (e.g. "http://127.0.0.1\\@example.com/"), so such URLs are rejected outright.
+    if not isinstance(url, str) or "\\" in url or any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7f for ch in url):
+        return _fail(f"URL contains backslashes, whitespace or control characters: {url!r}")
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+        port = parsed.port
+    except Exception as e:
+        return _fail(f"URL validation error: {e}")
+
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return _fail(f"Only http(s) URLs with a host are allowed: {url}")
+
+    try:
+        from urllib3.util import parse_url
+        fetch_host = (parse_url(url).host or "").strip("[]").lower()
+    except Exception as e:
+        return _fail(f"URL validation error: {e}")
+    host = parsed.hostname.lower()
+    if fetch_host != host and fetch_host != _idna_host(host):
+        return _fail(f"Ambiguous URL host ({parsed.hostname!r} vs {fetch_host!r}): {url}")
+
+    try:
+        # Resolve the IDNA host that urllib3 will actually connect to.
+        resolve_public_addresses(fetch_host, port or (443 if parsed.scheme == "https" else 80))
+    except PermissionError as e:
+        return _fail(f"{e}: {url}")
+    except (socket.gaierror, ValueError, UnicodeError) as e:
+        return _fail(f"Host could not be resolved: {parsed.hostname} ({e})")
+
+    return ValidationResult(
+        valid=True,
+        severity=ValidationSeverity.SUCCESS,
+        message=f"Public URL valid: {url}",
+        validation_type=ValidationType.SECURITY,
+        details={"url": url, "host": parsed.hostname}
+    )
+
+
 def validate_email(email: str) -> ValidationResult:
     """Validate email address format"""
     email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -1525,7 +1617,16 @@ try:
         supported_platforms=["linux", "windows", "macos"]
     )
     
-    _init_validation = validate_system_requirements(basic_requirements)
+    # validate_system_requirements() without the lookups of the optional commands (cmake, ninja: two child
+    # processes) and the CPU and memory-usage samples: those only give warnings, which are not logged here (a failing
+    # psutil shows in the memory check), and the CPU sample waited one second on every import, i.e. on every start
+    # of the CLI, the GUI and the MCP server.
+    _init_validation = ValidationReport()
+    for _result in (_validate_python_version(basic_requirements.min_python_version),
+                    _validate_memory_requirements(basic_requirements.min_memory_gb),
+                    _validate_disk_space(basic_requirements.min_disk_space_gb),
+                    _validate_platform(basic_requirements.supported_platforms)):
+        _init_validation.add_result(_result)
     if not _init_validation.overall_valid:
         # Log warnings using logger but don't break import
         for error in _init_validation.get_errors():

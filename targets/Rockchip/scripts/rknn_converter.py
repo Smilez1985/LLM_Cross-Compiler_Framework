@@ -20,11 +20,15 @@ def convert_to_rknn(onnx_path, output_path, target_platform, dtype='i8', dataset
         logger.error("CRITICAL: 'rknn' module not found.")
         sys.exit(1)
 
+    output_path = os.path.abspath(output_path)  # the build may change the working directory
     rknn = RKNN(verbose=False)
 
     logger.info(f"Configuring for {target_platform.upper()}...")
-    q_dtype = 'asymmetric_quantized-8' if dtype == 'i8' else 'fp16'
-    rknn.config(target_platform=target_platform, optimization_level=3, quantized_dtype=q_dtype)
+    # rknn-toolkit2 >= 2.x names quantization schemes w8a8/w8a16/...; FP16 simply means no quantization.
+    config_kwargs = {"target_platform": target_platform, "optimization_level": 3}
+    if dtype == 'i8':
+        config_kwargs["quantized_dtype"] = "w8a8"
+    rknn.config(**config_kwargs)
 
     logger.info(f"Loading model: {os.path.basename(onnx_path)}")
     if rknn.load_onnx(model=onnx_path) != 0:
@@ -34,9 +38,10 @@ def convert_to_rknn(onnx_path, output_path, target_platform, dtype='i8', dataset
     logger.info(f"Building (Quant: {dtype}, Dataset: {dataset_path or 'None'})...")
     do_quant = (dtype == 'i8')
     
-    # DATASET LOGIC
-    # If do_quant is True but no dataset, RKNN might fail or do hybrid.
-    # We pass the path if provided.
+    # The dataset lists sample inputs; relative entries are relative to the list file, so build from there.
+    if dataset_path:
+        dataset_path = os.path.abspath(dataset_path)
+        os.chdir(os.path.dirname(dataset_path))
     if rknn.build(do_quantization=do_quant, dataset=dataset_path) != 0:
         logger.error("Build failed!")
         sys.exit(1)

@@ -1,39 +1,100 @@
-name: Security & Quality Audit
+name: Security
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-on:
-  push:
-    branches: [ "main", "develop" ]
-  schedule:
-    - cron: '0 0 * * 0'
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  security-audit:
+  secret-scan:
+    name: Secret scan (whole history)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.10"
+          persist-credentials: false
+          fetch-depth: 0
 
-      # 🚨 DIESER SCHRITT FEHLT BEI DIR! 🚨
-      - name: Install Python Dependencies
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Scan every commit for API keys, tokens and private keys
+        run: python scripts/secret_scan.py --history
+
+      # The allowlist (.secret-scan-allow) applies to --history only; the tracked files of this commit get the
+      # full check, so a listed test mock added again fails here and not only in the optional git hooks.
+      - name: Scan the tracked files of this commit
+        run: python scripts/secret_scan.py
+
+  bandit:
+    name: Bandit (static analysis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install bandit
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Bandit (fails on high severity, high confidence)
+        run: bandit -r orchestrator scripts targets --severity-level high --confidence-level high
+
+      - name: Bandit full report (medium and up, informational)
+        if: always()
+        run: bandit -r orchestrator scripts targets --severity-level medium --exit-zero
+
+  pip-audit:
+    name: pip-audit (known vulnerabilities)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install pip-audit
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Audit pinned runtime dependencies
+        # requirements.txt is a fully pinned export. Markers are stripped so Windows-only and
+        # version-specific pins are audited too, not only those matching this Linux runner.
+        # A package pinned differently per Python version (e.g. numpy) goes to a second file,
+        # because pip-audit rejects duplicate names in one requirements file.
         run: |
-          pip install --upgrade pip
-          pip install pyyaml psutil docker packaging
+          grep -E '^[A-Za-z0-9]' requirements.txt \
+            | sed -E 's/[[:space:]]*;.*$//; s/[[:space:]]*\\$//' \
+            | awk -F'==' -v main="$RUNNER_TEMP/req-main.txt" -v dups="$RUNNER_TEMP/req-dups.txt" \
+                '{ if (seen[$1]++) print > dups; else print > main }'
+          pip-audit --requirement "$RUNNER_TEMP/req-main.txt" --no-deps --disable-pip --desc on
+          if [ -s "$RUNNER_TEMP/req-dups.txt" ]; then
+            pip-audit --requirement "$RUNNER_TEMP/req-dups.txt" --no-deps --disable-pip --desc on
+          fi
 
-      - name: Install Audit Tools
-        run: pip install bandit safety
-
-      - name: Security Scan (Bandit)
-        run: bandit -r orchestrator/ scripts/ -x tests -s B101
-
-      - name: Dependency Vulnerability Scan (Safety)
-        run: |
-          pip install poetry
-          poetry export -f requirements.txt --output requirements.txt --without-hashes || true
-          safety check -r requirements.txt || true
+      - name: Audit dev tools
+        run: pip-audit --requirement requirements-dev.txt --desc on

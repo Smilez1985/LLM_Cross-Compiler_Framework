@@ -5,7 +5,6 @@ DIREKTIVE: Goldstandard, Modular & Data-Driven.
 
 Zweck:
 Verwaltet Downloads, Suche und Metadaten von KI-Modellen (Hugging Face).
-Stellt sicher, dass Offline-Modelle (Tiny Models) verfügbar sind.
 Fungiert als 'Ethics Gate' durch Prüfung von Lizenzen.
 
 Updates v2.3.0:
@@ -13,24 +12,11 @@ Updates v2.3.0:
 - License check improvements.
 """
 
-import os
-import sys
-import json
-import logging
-import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
-from dataclasses import dataclass, field
-from datetime import datetime
-import time
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
 
-import requests
 from orchestrator.utils.logging import get_logger
-
-# Fallback Helper, falls utils.helpers noch nicht existiert
-def ensure_directory(path: Path):
-    if not path.exists():
-        path.mkdir(parents=True, exist_ok=True)
 
 @dataclass
 class ModelMetadata:
@@ -46,218 +32,102 @@ class ModelMetadata:
         return self.size_bytes / (1024 ** 3)
 
 class ModelManager:
-    def __init__(self, config_or_framework: Any):
+    def __init__(self, config_or_framework: Any, base_dir: Optional[Path] = None):
         self.logger = get_logger("ModelManager")
         
         # --- Logic for handling Framework vs Config object ---
-        # framework.py passes 'self.config' (ConfigManager), but code might expect FrameworkManager
+        framework = None
         if hasattr(config_or_framework, 'config') and not isinstance(config_or_framework, dict):
-            # It is FrameworkManager
-            self.config = config_or_framework.config
-            self.root_path = getattr(config_or_framework.info, 'installation_path', Path("."))
+            # It is FrameworkManager: relative paths resolve against the installation, never the working
+            # directory (the CLI and the MCP server are started inside arbitrary projects).
+            framework = config_or_framework
+            self.config = framework.config
+            self.root_path = Path(getattr(getattr(framework, 'info', None), 'installation_path', None) or Path("."))
         else:
-            # It is ConfigManager directly
+            # It is ConfigManager directly (standalone use): base_dir, else the working directory
             self.config = config_or_framework
-            self.root_path = getattr(self.config, 'root_path', Path("."))
+            self.root_path = Path(base_dir or getattr(self.config, 'root_path', None) or Path("."))
 
         # Paths
         # Use .get() for safety if config is ConfigManager class
         models_dir_name = self.config.get("models_dir", "models") if hasattr(self.config, "get") else getattr(self.config, "models_dir", "models")
+        models_dir_name = models_dir_name or "models"
         
-        self.models_dir = self.root_path / models_dir_name
-        self.tiny_models_dir = self.models_dir / "tiny_models"
-        
-        ensure_directory(self.models_dir)
-        ensure_directory(self.tiny_models_dir)
-        
+        if framework is not None and callable(getattr(framework, "resolve_path", None)):
+            self.models_dir = framework.resolve_path(models_dir_name)
+        else:
+            self.models_dir = self.root_path / Path(str(models_dir_name)).expanduser()
+        # Created by the downloads that use it, not at startup.
+
     def initialize(self) -> bool:
         self.logger.info(f"Model Manager initialized. Storage: {self.models_dir}")
         return True
 
     # --- HUGGING FACE INTEGRATION ---
 
-    def search_huggingface_models(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
-        try:
-            from huggingface_hub import HfApi
-            api = HfApi()
-            # Expand tags to find license info if possible
-            models = api.list_models(
-                search=query, 
-                limit=limit, 
-                sort="downloads", 
-                direction=-1,
-                expand=["gated", "downloads", "likes", "tags"] 
-            )
-            
-            results = []
-            for m in models:
-                is_gated = getattr(m, "gated", False)
-                # Normalize gated status
-                if is_gated not in [False, None]: is_gated = True
-                else: is_gated = False
-                
-                # Extract license from tags (heuristik)
-                license_tag = "unknown"
-                if m.tags:
-                    for tag in m.tags:
-                        if tag.startswith("license:"):
-                            license_tag = tag.split(":")[1]
-                            break
-                    
-                results.append({
-                    "id": m.modelId,
-                    "downloads": m.downloads,
-                    "likes": m.likes,
-                    "gated": is_gated,
-                    "license": license_tag
-                })
-            return results
+    def search_huggingface_models(self, query: str, limit: int = 20,
+                                  gated: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """Models matching `query`, most downloaded first. gated: False only models that download without accepting
+        conditions, True only gated ones, None all. Each result keeps the gating mode (`gating`: false, auto,
+        manual) next to the plain `gated` flag. Raises on any failure: an error is never an empty list."""
+        from huggingface_hub import HfApi
+        from orchestrator.Core.hf_hub import gating
+        models = HfApi().list_models(search=query, limit=limit, sort="downloads", gated=gated,
+                                     expand=["gated", "downloads", "likes", "tags"])
+        results = []
+        for m in models:
+            mode = gating(getattr(m, "gated", False))
+            license_tag = "unknown"
+            for tag in (m.tags or []):
+                if tag.startswith("license:"):
+                    license_tag = tag.split(":", 1)[1]
+                    break
+            results.append({"id": m.id, "downloads": m.downloads, "likes": m.likes, "gated": mode != "false",
+                            "gating": mode, "license": license_tag})
+        return results
 
-        except ImportError:
-            self.logger.error("huggingface_hub not installed")
-            return []
-        except Exception as e:
-            self.logger.error(f"HF Search failed: {e}")
-            return []
-            
     # --- v2.3.0: ETHICS GATE (License Check) ---
     def check_license(self, model_id: str) -> Dict[str, Any]:
-        """
-        Checks the license of a model and returns warnings if restrictive.
-        Used by GUI before starting download/build.
-        """
+        """The licence of a model: `restrictive` is "false" only for a licence on the permissive allowlist, "true"
+        for a known restrictive one and "unknown" otherwise (`other`, custom, a list, none); `is_restrictive` is
+        True unless it is "false", so the GUI asks before such a download. Raises when the check fails: a failed
+        check never counts as "not restrictive"."""
+        from huggingface_hub import model_info
+        from orchestrator.Core.hf_hub import classify_license
         self.logger.info(f"Checking license for {model_id}...")
-        
-        try:
-            from huggingface_hub import model_info
-            info = model_info(model_id)
-            
-            # Try to find license in cardData or tags
-            license_name = "unknown"
-            if info.cardData and "license" in info.cardData:
-                license_name = info.cardData["license"]
-            elif info.tags:
-                for tag in info.tags:
-                    if tag.startswith("license:"):
-                        license_name = tag.split(":")[1]
-                        break
-            
-            # Analysis of restrictive keywords
-            restrictive_keywords = [
-                "non-commercial", "cc-by-nc", "research-only", 
-                "llama-2-community", "creativeml-openrail-m"
-            ]
-            is_restrictive = any(k in license_name.lower() for k in restrictive_keywords)
-            
-            result = {
-                "license": license_name,
-                "is_restrictive": is_restrictive,
-                "message": ""
-            }
-            
-            if is_restrictive:
-                result["message"] = f"⚠️ Warning: Model '{model_id}' has a restrictive license ({license_name}). Check usage rights!"
-                self.logger.warning(result["message"])
-            else:
-                result["message"] = f"✅ License seems permissible: {license_name}"
-                
-            return result
-
-        except Exception as e:
-            self.logger.warning(f"Could not verify license for {model_id}: {e}")
-            return {"license": "unknown", "is_restrictive": False, "message": "License check failed."}
+        info = model_info(model_id)
+        card = info.card_data
+        raw = card.get("license") if card is not None and hasattr(card, "get") else None
+        if raw is None:
+            raw = next((t.split(":", 1)[1] for t in (info.tags or []) if t.startswith("license:")), None)
+        license_name, restrictive = classify_license(raw)
+        result = {"license": license_name, "restrictive": restrictive, "is_restrictive": restrictive != "false"}
+        if restrictive == "true":
+            result["message"] = (f"Warning: model '{model_id}' has a restrictive license ({license_name}). Check "
+                                 "your usage rights!")
+        elif restrictive == "unknown":
+            result["message"] = (f"The license of '{model_id}' ({license_name}) is not on the list of permissive "
+                                 "licenses; read it before you use the model.")
+        else:
+            result["message"] = f"Permissive license: {license_name}"
+        return result
 
     def list_repo_files(self, repo_id: str, token: Optional[str] = None) -> List[str]:
-        """Fetches file list from a repository."""
-        try:
-            from huggingface_hub import HfApi
-            api = HfApi(token=token)
-            files = api.list_repo_files(repo_id=repo_id)
-            return files
-        except Exception as e:
-            self.logger.error(f"Failed to list files for {repo_id}: {e}")
-            return []
+        """The file list of a repository. Raises on any failure."""
+        from huggingface_hub import HfApi
+        return HfApi(token=token).list_repo_files(repo_id=repo_id)
 
-    def download_file(self, repo_id: str, filename: str, token: Optional[str] = None) -> Optional[str]:
-        """Downloads a specific file (GGUF/Bin) from HF."""
-        try:
-            from huggingface_hub import hf_hub_download
-            self.logger.info(f"Downloading {filename} from {repo_id}...")
-            
-            path = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                cache_dir=str(self.models_dir),
-                token=token
-            )
-            self.logger.info(f"Download successful: {path}")
-            return path
-        except Exception as e:
-            self.logger.error(f"Download failed: {e}")
-            return None
-
-    # --- TINY MODELS / OFFLINE INTELLIGENCE ---
-
-    def get_available_tiny_models(self) -> Dict[str, Dict[str, Any]]:
-        """Returns the list of tiny models defined in SSOT."""
-        # Use .get() method if available (ConfigManager), else dictionary access
-        if hasattr(self.config, 'get'):
-            sources = self.config.get("source_repositories", {})
-        else:
-            sources = getattr(self.config, "source_repositories", {})
-            
-        return sources.get("tiny_models", {})
-
-    def is_tiny_model_installed(self, model_key: str) -> bool:
-        """Checks if the specific tiny model is already downloaded."""
-        tiny_defs = self.get_available_tiny_models()
-        if model_key not in tiny_defs: return False
-        
-        repo_url = tiny_defs[model_key].get("url", "")
-        repo_id = repo_url.replace("https://huggingface.co/", "")
-        
-        # Check if local directory exists in tiny_models_dir
-        local_dir = self.tiny_models_dir / model_key
-        # Simple check: Does folder exist and have content?
-        if local_dir.exists() and (local_dir / "config.json").exists():
-            return True
-            
-        return False
-
-    def download_tiny_model(self, model_key: str) -> Optional[str]:
-        """
-        Downloads a full Tiny Model (Repo Snapshot) for offline usage.
-        Used by AI Setup Wizard.
-        """
-        tiny_defs = self.get_available_tiny_models()
-        if model_key not in tiny_defs:
-            self.logger.error(f"Unknown tiny model key: {model_key}")
-            return None
-
-        repo_url = tiny_defs[model_key].get("url", "")
-        repo_id = repo_url.replace("https://huggingface.co/", "")
-        
-        self.logger.info(f"Starting download for Offline Brain: {repo_id}...")
-        
-        try:
-            from huggingface_hub import snapshot_download
-            
-            # Download into a specific subfolder
-            local_dir = self.tiny_models_dir / model_key
-            
-            path = snapshot_download(
-                repo_id=repo_id,
-                local_dir=str(local_dir),
-                local_dir_use_symlinks=False, # Real files for true offline portability
-                resume_download=True
-            )
-            
-            self.logger.info(f"Tiny Model installed to: {path}")
-            return str(path)
-            
-        except Exception as e:
-            self.logger.error(f"Tiny Model download failed: {e}")
-            return None
+    def download_file(self, repo_id: str, filename: str, token: Optional[str] = None) -> str:
+        """Downloads one file for the GUI's Hugging Face browser (the person's own action). Raises on any failure.
+        AI callers use download_hf_file instead (orchestrator/Core/hf_hub.py: pinned commit, sha256, stop)."""
+        from huggingface_hub import HfApi, hf_hub_download
+        # The commit is resolved first and the file downloaded from exactly that commit (not a moving branch).
+        commit = HfApi(token=token).model_info(repo_id).sha
+        self.logger.info(f"Downloading {filename} from {repo_id} (commit {commit})...")
+        path = hf_hub_download(repo_id=repo_id, filename=filename, revision=commit, cache_dir=str(self.models_dir),
+                               token=token)
+        self.logger.info(f"Download successful: {path}")
+        return path
 
     def _detect_model_format(self, model_path: Path) -> str:
         if not model_path.exists(): return "unknown"

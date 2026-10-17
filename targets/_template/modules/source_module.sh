@@ -16,8 +16,8 @@ readonly REPO_DIR="${BUILD_CACHE_DIR}/repos"
 readonly LLAMA_CPP_PATH="${LLAMA_CPP_PATH:-${BUILD_CACHE_DIR}/llama.cpp}"
 
 # Quellen aus Environment (injiziert durch Orchestrator aus project_sources.yml)
-readonly LLAMA_CPP_REPO="${LLAMA_CPP_REPO_OVERRIDE:-https://github.com/ggerganov/llama.cpp.git}"
-readonly LLAMA_CPP_COMMIT="${LLAMA_CPP_COMMIT:-b3626}" # Standard-Fallback (sollte via Docker Arg kommen)
+readonly LLAMA_CPP_REPO="${LLAMA_CPP_REPO_OVERRIDE:-https://github.com/ggml-org/llama.cpp.git}"
+readonly LLAMA_CPP_COMMIT="${LLAMA_CPP_COMMIT:-v0.6.0}" # Standard-Fallback (sollte via Docker Arg kommen)
 
 readonly LOG_LEVEL="${LOG_LEVEL:-INFO}"
 DEBUG="${DEBUG:-0}"

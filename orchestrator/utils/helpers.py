@@ -9,19 +9,19 @@ Vermeidet zirkuläre Abhängigkeiten durch strikte Trennung von Business-Logik.
 """
 
 import os
-import sys
 import json
 import shutil
 import subprocess
 import platform
-import tempfile
 import hashlib
 import zipfile
 import tarfile
 import re
 import ctypes
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import List, Union
+
+from orchestrator.security import secret_patterns
 
 def ensure_directory(path: Union[str, Path], mode: int = 0o755) -> Path:
     """Creates directory if not exists."""
@@ -64,42 +64,42 @@ def safe_extract_archive(archive_path: Path, dest_dir: Path):
     """
     Secure extraction preventing Zip Slip/Tar Slip vulnerabilities.
     """
-    dest_dir = dest_dir.resolve()
-    
+    dest_dir = Path(dest_dir).resolve()
+
+    def inside(path: Path) -> bool:
+        # Path containment, not string prefixes ("/x/out2" starts with "/x/out").
+        return path.resolve().is_relative_to(dest_dir)
+
     if str(archive_path).endswith('.zip'):
         with zipfile.ZipFile(archive_path, 'r') as zf:
             for member in zf.infolist():
-                # Resolve the target path
-                member_path = (dest_dir / member.filename).resolve()
-                # Security Check: Must actully be inside dest_dir
-                if not str(member_path).startswith(str(dest_dir)):
+                if not inside(dest_dir / member.filename):
                     raise Exception(f"Security: Zip Slip attempt detected: {member.filename}")
-            
-            # Bandit: Paths validated above
-            zf.extractall(dest_dir) # nosec
-                
+            # Every member path was checked above.
+            zf.extractall(dest_dir)  # nosec B202
+
     elif str(archive_path).endswith(('.tar.gz', '.tgz', '.tar')):
         with tarfile.open(archive_path, 'r:*') as tf:
-            for member in tf.getmembers():
-                member_path = (dest_dir / member.name).resolve()
-                if not str(member_path).startswith(str(dest_dir)):
-                     raise Exception(f"Security: Tar Slip attempt detected: {member.name}")
-            
-            # Bandit: Paths validated above
-            def is_within_directory(directory, target):
-                abs_directory = os.path.abspath(directory)
-                abs_target = os.path.abspath(target)
-                prefix = os.path.commonprefix([abs_directory, abs_target])
-                return prefix == abs_directory
+            members = tf.getmembers()
+            for member in members:
+                target = dest_dir / member.name
+                if not inside(target):
+                    raise Exception(f"Security: Tar Slip attempt detected: {member.name}")
+                if member.issym() and not inside(target.parent / member.linkname):
+                    raise Exception(f"Security: Tar Slip via symlink detected: {member.name} -> {member.linkname}")
+                if member.islnk() and not inside(dest_dir / member.linkname):
+                    raise Exception(f"Security: Tar Slip via hardlink detected: {member.name} -> {member.linkname}")
+                if member.isdev():
+                    raise Exception(f"Security: Device file in archive: {member.name}")
 
-            def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
-                for member in tar.getmembers():
-                    member_path = os.path.join(path, member.name)
-                    if not is_within_directory(path, member_path):
-                        raise Exception("Attempted Path Traversal in Tar File")
-                tar.extractall(path, members, numeric_owner=numeric_owner) 
-                
-            safe_extract(tf, dest_dir)
+            if hasattr(tarfile, "data_filter"):
+                tf.extractall(dest_dir, members=members, filter="data")
+            else:
+                # Without extraction filters, chained links could still escape; only plain files and dirs are allowed.
+                links = [m.name for m in members if m.issym() or m.islnk()]
+                if links:
+                    raise Exception(f"Security: links in archive need Python >= 3.10.12 / 3.11.4: {links[:3]}")
+                tf.extractall(dest_dir, members=members)  # nosec B202
 
 def calculate_file_checksum(path: Path, algorithm="sha256") -> str:
     """Calculates hash of a file."""
@@ -118,6 +118,16 @@ def is_admin() -> bool:
             return os.geteuid() == 0
     except:
         return False
+
+# The one table of secret formats, shared with scripts/secret_scan.py.
+SECRET_PATTERNS = secret_patterns.PATTERNS
+
+def redact_secrets(text: str) -> str:
+    """Replaces known API key/token formats, credential headers and query parameters before text leaves the
+    machine or reaches a log."""
+    if not text:
+        return ""
+    return secret_patterns.redact(text)
 
 def sanitize_filename(name: str) -> str:
     """Removes illegal characters for filenames."""

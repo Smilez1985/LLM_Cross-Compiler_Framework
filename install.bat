@@ -17,6 +17,8 @@ if %errorLevel% NEQ 0 (
     exit /b
 )
 
+:: Die Argumente (z. B. --ditto=skip) erreichen den PowerShell-Teil als Variable.
+set "LCF_INSTALL_ARGS=%*"
 :: Rufe den PowerShell-Teil dieses Skripts auf
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression ($(Get-Content '%~f0' -Raw))"
 if %errorlevel% NEQ 0 (
@@ -34,20 +36,32 @@ goto :EOF
 # --- INSTALLER LOGIC (PowerShell Teil) ---
 
 $ErrorActionPreference = "Stop"
-$ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Run through Invoke-Expression (see above), this part has no script path of its own; the batch part has
+# changed into the folder of install.bat before, so that folder is the current one.
+$ScriptPath = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 
 # 1. KONFIGURATION
 $AppName = "LLM-Conversion-Framework"
 $ProgramFiles = [Environment]::GetFolderPath("ProgramFiles")
 $InstallDir = Join-Path $ProgramFiles $AppName
-$PublicDocs = [Environment]::GetFolderPath("CommonDocuments")
-$DataDir = Join-Path $PublicDocs $AppName
+# Program Files is read-only for standard users: the framework keeps builds, cache and models in each user's
+# own folder (%USERPROFILE%\.llm-framework, or LLM_FRAMEWORK_HOME) and creates them when they are needed.
+$UserDataHint = "%USERPROFILE%\.llm-framework"
+# Ditto's local runtime: --ditto=auto|bare-metal|docker|skip, for unattended runs also LCF_DITTO (no questions; the
+# model's size and licence are still shown). An unknown value stops here, before anything is installed.
+$DittoChoice = if ($env:LCF_DITTO) { $env:LCF_DITTO } else { "auto" }
+foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
+    if ($InstallArg -like "--ditto=*") { $DittoChoice = $InstallArg.Substring(8) }
+}
+if ($DittoChoice -notin @("auto", "bare-metal", "docker", "skip")) {
+    Write-Error "Unbekannter Wert fuer --ditto: '$DittoChoice' (auto, bare-metal, docker oder skip)."
+}
 
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host "      LLM Framework - Enterprise Installer"
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host "Code Ziel: $InstallDir"
-Write-Host "Daten Ziel: $DataDir"
+Write-Host "Daten (je Benutzer, beim ersten Gebrauch angelegt): $UserDataHint"
 Write-Host ""
 
 # 2. PYTHON PRÜFUNG & INSTALLATION
@@ -55,8 +69,8 @@ Write-Host "[1/5] Pruefe Python Umgebung..." -ForegroundColor Yellow
 if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
     Write-Host "Python nicht gefunden. Versuche Installation via Winget..."
     try {
-        # Python 3.11 festnageln für Stabilität
-        winget install -e --id Python.Python.3.11 --scope machine --accept-source-agreements --accept-package-agreements
+        # Python 3.13: supported by every pinned dependency (3.11 reaches end of life in 2027-10)
+        winget install -e --id Python.Python.3.13 --scope machine --accept-source-agreements --accept-package-agreements
         # Refresh Env Vars
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
     } catch {
@@ -66,13 +80,15 @@ if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
 # Versions-Check
 python --version
 if ($LASTEXITCODE -ne 0) { Write-Error "Python ist nicht korrekt im PATH." }
+# requirements.txt only matches Python 3.11-3.14; outside that range pip would silently install nothing.
+& python -c "import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)"
+if ($LASTEXITCODE -ne 0) { Write-Error "Python 3.11 bis 3.14 wird benoetigt. Bitte z. B. 'winget install Python.Python.3.13' ausfuehren." }
 
 # 3. DATEIEN KOPIEREN
 Write-Host "[2/5] Installiere Dateien (Robocopy)..." -ForegroundColor Yellow
 
 # Verzeichnisse erstellen
 New-Item -Path $InstallDir -ItemType Directory -Force | Out-Null
-New-Item -Path $DataDir -ItemType Directory -Force | Out-Null
 
 # Robocopy Wrapper Funktion
 function Copy-Robust ($Src, $Dst, $Exclude) {
@@ -87,17 +103,8 @@ function Copy-Robust ($Src, $Dst, $Exclude) {
     }
 }
 
-# Code kopieren (ohne git, venv, cache)
-Copy-Robust $ScriptPath $InstallDir -Exclude ".git", ".venv", "__pycache__", "build", "dist", ".installer_venv"
-
-# Daten Templates kopieren (targets, models, configs)
-foreach ($folder in @("targets", "models", "configs", "assets")) {
-    Copy-Robust (Join-Path $ScriptPath $folder) (Join-Path $DataDir $folder)
-}
-# Output Ordner anlegen
-foreach ($folder in @("output", "logs", "cache")) {
-    New-Item -Path (Join-Path $DataDir $folder) -ItemType Directory -Force | Out-Null
-}
+# Code kopieren (ohne git, venv, cache und ohne Build-Ergebnisse oder Modelle einer Entwicklungskopie)
+Copy-Robust $ScriptPath $InstallDir -Exclude ".git", ".venv", "__pycache__", "build", "dist", ".installer_venv", "output", "cache", "models", "logs"
 
 # 4. VENV SETUP
 Write-Host "[3/5] Erstelle Python Environment..." -ForegroundColor Yellow
@@ -113,25 +120,14 @@ $PythonVenv = ".venv\Scripts\python.exe"
 # Pip Upgrade & Dependencies
 & $Pip install --upgrade pip | Out-Null
 Write-Host "Installiere Requirements..."
-if (Test-Path "requirements.txt") {
-    & $Pip install -r requirements.txt | Out-Null
-} else {
-    & $Pip install pyyaml requests psutil pywin32 winshell | Out-Null
-}
+# Exactly the versions in requirements.txt of this checkout (uv export from uv.lock); pip checks every file against
+# its hash. Without the file nothing is installed unchecked.
+if (-not (Test-Path "requirements.txt")) { Write-Error "requirements.txt fehlt; ohne die festgelegten Versionen wird nichts installiert." }
+& $Pip install --require-hashes -r requirements.txt | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Error "Die Pakete aus requirements.txt liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)." }
 
-# 5. CONFIG UPDATE
-Write-Host "[4/5] Konfiguriere Pfade..." -ForegroundColor Yellow
-$ConfigFile = Join-Path $DataDir "configs\user_config.yml"
-if (Test-Path $ConfigFile) {
-    $YamlContent = Get-Content $ConfigFile -Raw
-    # Simpler String Replace, da wir kein PyYAML im Host-PowerShell haben
-    $YamlContent = $YamlContent -replace "output_dir:.*", "output_dir: $(Join-Path $DataDir 'output')"
-    $YamlContent = $YamlContent -replace "logs_dir:.*", "logs_dir: $(Join-Path $DataDir 'logs')"
-    $YamlContent = $YamlContent -replace "cache_dir:.*", "cache_dir: $(Join-Path $DataDir 'cache')"
-    $YamlContent = $YamlContent -replace "\\", "/"  # YAML mag Forward Slashes lieber
-    Set-Content -Path $ConfigFile -Value $YamlContent
-}
-
+# 5. LAUNCHER
+Write-Host "[4/5] Erstelle Launcher..." -ForegroundColor Yellow
 # Launcher Skript im InstallDir erstellen (damit die Shortcuts funktionieren)
 $LauncherBat = Join-Path $InstallDir "start_framework.bat"
 $BatContent = @"
@@ -143,8 +139,8 @@ pause
 "@
 Set-Content $LauncherBat $BatContent
 
-# 6. SHORTCUTS
-Write-Host "[5/5] Erstelle Desktop Verknuepfungen..." -ForegroundColor Yellow
+# 6. SHORTCUT
+Write-Host "[5/5] Erstelle Desktop Verknuepfung..." -ForegroundColor Yellow
 $WshShell = New-Object -comObject WScript.Shell
 $Desktop = [Environment]::GetFolderPath("Desktop")
 
@@ -157,12 +153,35 @@ $IconPath = Join-Path $InstallDir "assets\LLM-Builder.ico"
 if (Test-Path $IconPath) { $Shortcut.IconLocation = $IconPath }
 $Shortcut.Save()
 
-# Data Shortcut
-$ShortcutData = $WshShell.CreateShortcut((Join-Path $Desktop "$AppName Data.lnk"))
-$ShortcutData.TargetPath = $DataDir
-$ShortcutData.Description = "Hier liegen Modelle und Outputs"
-$IconPathData = Join-Path $InstallDir "assets\setup_LLM-Builder.ico"
-if (Test-Path $IconPathData) { $ShortcutData.IconLocation = $IconPathData }
-$ShortcutData.Save()
+# Marker for scripts\Uninstall-LLM-Conversion-Framework.bat: the installation folder, kept next to this script
+try {
+    Set-Content -Path (Join-Path $ScriptPath ".install_complete") -Value $InstallDir -Encoding ASCII
+} catch {
+    Write-Warning "Marker fuer den Uninstaller nicht geschrieben ($_); er findet die Installation dann nicht."
+}
+
+# DITTO: lokale Laufzeit (llm-cli ditto runtime ensure). Idempotent, und sie laesst die Installation nie scheitern:
+# ein Fehler wird gemeldet, die Installation geht weiter. Sie laeuft nur fuer die angemeldete Person selbst (ihr
+# Benutzerordner); hat ein anderes Administratorkonto die Rechte gegeben, wird sie der Person ueberlassen.
+Write-Host "[Ditto] Lokale Laufzeit fuer Ditto ($DittoChoice)..." -ForegroundColor Yellow
+try {
+    $SignedIn = (Get-CimInstance Win32_ComputerSystem).UserName
+    $Elevated = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    if ($DittoChoice -eq "skip") {
+        Write-Host "Uebersprungen (--ditto=skip). Spaeter: llm-cli ditto runtime ensure"
+    } elseif ($SignedIn -and ($SignedIn -ne $Elevated)) {
+        Write-Warning "Ditto wird fuer $SignedIn eingerichtet, nicht fuer das Administratorkonto. Spaeter als du selbst (normales Terminal, im Ordner $InstallDir): .venv\Scripts\python.exe -m orchestrator.cli ditto runtime ensure"
+    } else {
+        $DittoArgs = @("-m", "orchestrator.cli", "ditto", "runtime", "ensure", "--mode", $DittoChoice)
+        if ($env:LCF_DITTO) { $DittoArgs += "--yes" }
+        & $PythonVenv @DittoArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Ditto liess sich nicht einrichten (Meldungen oben); die Installation ist trotzdem fertig. Spaeter erneut: llm-cli ditto runtime ensure"
+        }
+    }
+} catch {
+    Write-Warning "Ditto: $_ - die Installation ist trotzdem fertig. Spaeter: llm-cli ditto runtime ensure"
+}
 
 Write-Host "Installation Erfolgreich!" -ForegroundColor Green
+Write-Host "Builds, Cache und Modelle: $UserDataHint (je Benutzer)"
