@@ -76,6 +76,7 @@ class BuildCancelled(Exception):
 
 STAGING_WATCH_EVERY = 2.0    # seconds between two disk checks while a model is staged
 CONTAINER_WATCH_EVERY = 5.0  # seconds between two disk checks while a stage container runs
+RESOURCES_EVERY = 5.0        # seconds between two CPU and memory samples of a running stage container
 
 
 class BuildSlotsBusy(RuntimeError):
@@ -214,6 +215,9 @@ class BuildProgress:
     artifacts: List[str] = field(default_factory=list)
     # The folder the build was published to: its planned folder, or next to it ("-2") when an earlier build is there
     published: Optional[str] = None
+    # The running stage container's CPU and memory (docker_manager.container_resources: cpu_percent, memory_bytes,
+    # memory_limit_bytes), sampled every RESOURCES_EVERY seconds; None while no stage container runs
+    resources: Optional[Dict[str, float]] = None
     
     def add_log(self, message: str, level: str = "INFO"):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -509,6 +513,8 @@ class BuildEngine:
                         return
             guard = threading.Thread(target=watchdog, name=f"disk-watch-{config.build_id}", daemon=True)
             guard.start()
+            threading.Thread(target=self._sample_resources, args=(container, progress, prefix, watched),
+                             name=f"resources-{config.build_id}", daemon=True).start()
             timeout = config.build_timeout or self.default_timeout
             started = time.monotonic()
             try:
@@ -539,12 +545,42 @@ class BuildEngine:
         finally:
             if "watched" in locals():
                 watched.set()
+            progress.resources = None
             with self._lock:
                 self._active_containers.pop(config.build_id, None)
             try:
                 container.remove(force=True)
             except Exception:
                 pass
+
+    @staticmethod
+    def _sample_resources(container: Container, progress: "BuildProgress", prefix: str, stop: threading.Event) -> None:
+        """The running stage container's CPU and memory into progress.resources (the person's Builder shows them under
+        the progress bar), until `stop`; one warning in the build log when it nears its memory limit, which is
+        Docker's (or the WSL2 / Docker Desktop VM's) when the container has none of its own. A container whose
+        statistics cannot be read is not sampled any further; the build goes on."""
+        from orchestrator.Core.docker_manager import MEMORY_WARN_SHARE, container_resources, memory_near_limit
+        from orchestrator.utils.sizes import format_size
+        warned = False
+        while not stop.wait(RESOURCES_EVERY):
+            try:
+                sample = container_resources(container.stats(stream=False))
+            except Exception:  # noqa: BLE001 - ended, removed, or a daemon without statistics
+                return
+            if sample is None:
+                continue
+            progress.resources = sample
+            if stop.is_set():   # the stage ended while it was read: never show a stale sample
+                progress.resources = None
+                return
+            if not warned and memory_near_limit(sample):
+                warned = True
+                progress.add_log(
+                    f"{prefix}The build container uses {format_size(int(sample['memory_bytes']), 'en')} of its "
+                    f"{format_size(int(sample['memory_limit_bytes']), 'en')} memory limit (over "
+                    f"{int(MEMORY_WARN_SHARE * 100)} %). If it runs out, the build stops: give Docker more memory "
+                    "(the resource settings of Docker Desktop, or .wslconfig for WSL2) or close other programs.",
+                    "WARNING")
 
     def _keep_as_last_build(self, tag: str) -> None:
         """Names the image of a build `llm-framework/<target>:last-build` and then drops its per-build name `tag`.

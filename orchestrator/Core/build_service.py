@@ -283,6 +283,22 @@ class BuildService:
         step = str(getattr(build, "current_stage", "") or "")
         return (f"{stage}: {step}" if stage and step else stage or step), percent
 
+    def live_resources(self, request_id: str) -> Optional[Dict[str, float]]:
+        """The CPU and memory of the request's running build container (cpu_percent, memory_bytes,
+        memory_limit_bytes; BuildEngine samples them while a stage container runs), or None while none runs or for a
+        request of another process. For the person's Builder under the progress bar (DECISIONS round 12, item 6);
+        not part of the AI's build status."""
+        orchestrator = getattr(self.framework, "orchestrator", None)
+        state = orchestrator._workflows.get(request_id) if orchestrator is not None else None
+        if state is None or state.status not in self._RUNNING or not state.build_ids:
+            return None
+        try:
+            build = orchestrator.build_engine.get_build_status(state.build_ids[-1])
+        except Exception:  # noqa: BLE001 - no engine: nothing to show
+            return None
+        resources = getattr(build, "resources", None)
+        return dict(resources) if isinstance(resources, dict) else None
+
     def _state(self, request_id: str) -> WorkflowState:
         state = self._orchestrator._workflows.get(request_id)
         if state is None:
