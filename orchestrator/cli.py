@@ -4490,24 +4490,11 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
         
     output_dir = _output_dir(ctx)
     # A folder from 'deploy list-artifacts' (relative to the output folder or the framework's build folder) or any
-    # existing path.
-    given = Path(artifact_name).expanduser()
-    artifact_path = given.resolve() if given.is_absolute() or given.exists() else output_dir / artifact_name
-    if not artifact_path.exists():
-        from orchestrator.Core.artifact_output import build_folder
-        waiting = build_folder(ctx.framework_manager) / artifact_name
-        artifact_path = waiting if waiting.exists() else artifact_path
-    
-    docker_config = {"use_docker": docker}
-    if docker:
-        # TODO: Get real image name from config/profile logic (the package itself takes image_inference_runtime)
-        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE
-        docker_config["image_name"] = DEFAULT_INFERENCE_IMAGE
-    
-    from orchestrator.Core.deployment_manager import DeployError
+    # existing path; the same core step as the GUI's "Create package only..." (make_package).
+    from orchestrator.Core.deployment_manager import DeployError, make_package
     try:
         with console.status(f"Generiere Paket für {artifact_name}...", spinner="dots"):
-            pkg_path = dep_mgr.create_package(artifact_path, profile, docker_config, output_dir)
+            pkg_path = make_package(dep_mgr, ctx.framework_manager, artifact_name, profile, docker, output_dir)
     except DeployError as e:
         console.print(f"[bold red]Package generation failed: {escape(str(e))}[/bold red]")
         if e.next:
@@ -4917,9 +4904,8 @@ def _profile_summary(profile) -> list:
 
 
 def _write_profile_file(profile, output_file: Path, as_json: bool) -> None:
-    from orchestrator.Core.vault_key import write_private
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    write_private(output_file, profile.to_json() + "\n" if as_json else profile.to_text())
+    from orchestrator.runtime.scan_steps import write_profile_file
+    write_profile_file(profile, output_file, as_json)
 
 
 def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Optional[str],
@@ -4954,8 +4940,8 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
 def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
                  password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str],
                  ctx: Optional[FrameworkContext] = None) -> None:
-    from orchestrator.runtime.profile import device_id_for_host_key
-    from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh, store_address, valid_host
+    from orchestrator.runtime.remote_probe import valid_host
+    from orchestrator.runtime.scan_steps import DeviceScanError, label_problem, scan_device
     from orchestrator.utils import ssh_trust
     if not user:
         raise click.UsageError("--device needs --user")
@@ -4964,7 +4950,7 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
                                "or myboard.local")
     if not 1 <= port <= 65535:
         raise click.UsageError("--port must be between 1 and 65535")
-    if label is not None and not (1 <= len(" ".join(label.split())) <= 64 and label.isprintable()):
+    if label_problem(label):
         raise click.UsageError("--label takes 1 to 64 printable characters")
     if ssh_trust.paramiko is None:
         console.print("[red]Probing a device needs the 'paramiko' package.[/red]")
@@ -4972,40 +4958,33 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     key = _trust_device(state_dir, host, port, trust_fingerprint, ctx)
     if password is None:
         password = _device_password(None, False, ask_when_omitted=True)
+    # The same core step as the GUI's Builder tab > Scan / Import... > Remote Scan via SSH... (scan_steps.scan_device):
+    # login (recorded for Mojo), probe, profile file, profile store, deploy user and the trusted, paired record.
     try:
-        client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
-    except Exception as e:  # authentication, network, a host key that changed meanwhile
-        _unreachable(ctx, host, port, e, doing=f"log in to {user}@", step="probe", state_dir=state_dir)
-    _note_reach(ctx, host, port, "probe", "", state_dir=state_dir)
-    try:
-        if password:
-            ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
         with console.status(f"Running the hardware probe on {escape(host)}...", spinner="dots"):
-            result = probe_over_ssh(client)
-    except (RemoteProbeError, ssh_trust.HostKeyError) as e:
-        console.print(f"[red]The probe on {escape(host)} failed: {escape(str(e))}[/red]")
+            scan = scan_device(state_dir, host, port, user, key, password=password, label=label,
+                               output_file=output_file, as_json=as_json, store=store, record=ctx is not None,
+                               via="cli", actor="cli",   # the audit log is opened only for the record, as before
+                               audit_factory=(lambda: _device_audit(ctx, state_dir)) if ctx is not None else None)
+    except DeviceScanError as e:
+        if e.kind == "login":   # recorded for Mojo by the core step already
+            _unreachable(ctx, host, port, e.error, doing=f"log in to {user}@", state_dir=state_dir)
+        elif e.kind == "probe":
+            console.print(f"[red]The probe on {escape(host)} failed: {escape(str(e.error))}[/red]")
+        else:
+            console.print(f"[red]Could not save the profile: {escape(str(e.error))}[/red]")
         sys.exit(1)
-    finally:
-        client.close()
-    device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
-    try:
-        _write_profile_file(result.profile, output_file, as_json)
-        stored = store.save_device(device_id, result.profile, label=label, address=store_address(host, port))
-    except (OSError, ValueError) as e:
-        console.print(f"[red]Could not save the profile: {escape(str(e))}[/red]")
-        sys.exit(1)
-    from orchestrator.runtime.device.settings import remember_ssh_user
-    remember_ssh_user(store, device_id, user)  # the deploy user for `device runtime deploy` (never root)
-    if ctx is not None:
-        _remember_device(ctx, host, port, user, key, paired=True, label=label)
-    tool = "Python probe" if result.tool == "python" else "shell probe"
+    if scan.trusted is not None:
+        console.print(f"Trusted device {scan.trusted.device_id} ({escape(scan.trusted.label)}): AI tools may deploy "
+                      "to it with your confirmation (llm-cli deploy devices list).")
+    tool = "Python probe" if scan.tool == "python" else "shell probe"
     console.print(f"[bold green]Probe of {escape(host)} successful ({tool}). Config generated: "
                   f"{escape(str(output_file))}[/bold green]")
-    for note in result.notes:
+    for note in scan.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
-    for line in _profile_summary(result.profile):
+    for line in _profile_summary(scan.profile):
         console.print(line)
-    console.print(f"Stored as device {device_id}: {escape(str(stored))}")
+    console.print(f"Stored as device {scan.device_id}: {escape(str(scan.stored))}")
 
 
 @cli.command('scan')
@@ -5050,10 +5029,12 @@ def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, p
                      ctx=ctx)
         return
 
+    from orchestrator.runtime.scan_steps import ProfileWriteError, scan_local
     try:
         with console.status("Running the hardware probe...", spinner="dots"):
-            # The script writes the --output file itself; the Python probe's result is written below.
-            profile, how = probes.run_local(use_script=use_script, output=output_file)
+            # The same core step as the GUI's Builder tab > Scan / Import... > Scan This Computer (scan_local): the
+            # script writes the --output file itself, the Python probe's result is written there by the step.
+            scan = scan_local(probes, output_file, as_json=as_json, use_script=use_script)
     except ProbeError as e:
         console.print(f"[red]Probe execution failed: {escape(str(e))}[/red]")
         if e.detail:  # the underlying error for the person (it may name a path, so it is not part of the message)
@@ -5061,44 +5042,28 @@ def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, p
         if e.next:
             console.print(escape(e.next))
         sys.exit(1)
-    if how != "fallback script" or as_json:
-        try:
-            _write_profile_file(profile, output_file, as_json)
-        except OSError as e:
-            console.print(f"[red]The profile could not be written to {escape(str(output_file))}: "
-                          f"{escape(str(e))}[/red]")
-            sys.exit(1)
-    for note in probes.notes:
+    except ProfileWriteError as e:
+        console.print(f"[red]The profile could not be written to {escape(str(output_file))}: "
+                      f"{escape(str(e))}[/red]")
+        sys.exit(1)
+    for note in scan.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
-    console.print(f"[bold green]Probe successful ({how}). Config generated: {escape(str(output_file))}[/bold green]")
-    for line in _profile_summary(profile):
+    console.print(f"[bold green]Probe successful ({scan.how}). Config generated: {escape(str(output_file))}"
+                  "[/bold green]")
+    for line in _profile_summary(scan.profile):
         console.print(line)
-    if profile.needs_reprobe:
+    if scan.needs_reprobe:
         console.print("[yellow]This profile lacks facts a build needs; run the probe again before a build.[/yellow]")
-    console.print(f"Stored as this computer's profile (probe id local): {escape(str(store.local_path()))}")
+    console.print(f"Stored as this computer's profile (probe id local): {escape(str(scan.local_path))}")
 
 
 def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str]) -> None:
     """Copies a board's probe file, validated and without its host name, into the probe store and prints its probe
     id (MCP design T5: AI clients and Ditto name a board's probe only by that id, never by a path)."""
-    from orchestrator.runtime.probe_service import ProbeError, match_target
-    if label is not None and not (1 <= len(" ".join(label.split())) <= 64 and label.isprintable()):
+    from orchestrator.runtime.probe_service import ProbeError
+    from orchestrator.runtime.scan_steps import import_probe, label_problem
+    if label_problem(label):
         raise click.UsageError("--label takes 1 to 64 printable characters")
-    try:
-        probe_id = probes.import_file(import_file, label)
-        profile = probes.get(probe_id)
-    except ProbeError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        if e.next:
-            console.print(escape(e.next))
-        sys.exit(1)
-    info = probes.info(probe_id, profile)
-    console.print(f"[bold green]Imported as probe {probe_id} ({escape(info.label)}).[/bold green]")
-    for line in _profile_summary(profile):
-        console.print(line)
-    if profile.needs_reprobe:
-        console.print("[yellow]This probe was converted from an older probe file and lacks facts; probe the board "
-                      "again with the current script when you can.[/yellow]")
     try:  # the targets only, without booting the framework: the match is a hint
         from types import SimpleNamespace
         from orchestrator.Core.framework import resolve_install_path
@@ -5107,7 +5072,20 @@ def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str
         target_manager = TargetManager(SimpleNamespace(config=config, resolve_path=resolve_install_path))
     except Exception:  # noqa: BLE001
         target_manager = None
-    match = match_target(profile, target_manager)
+    try:  # the same core step as the GUI's Builder tab > Scan / Import... > Import from File (scan_steps.import_probe)
+        imported = import_probe(probes, import_file, label, target_manager)
+    except ProbeError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        if e.next:
+            console.print(escape(e.next))
+        sys.exit(1)
+    probe_id, profile, info, match = imported.probe_id, imported.profile, imported.info, imported.match
+    console.print(f"[bold green]Imported as probe {probe_id} ({escape(info.label)}).[/bold green]")
+    for line in _profile_summary(profile):
+        console.print(line)
+    if profile.needs_reprobe:
+        console.print("[yellow]This probe was converted from an older probe file and lacks facts; probe the board "
+                      "again with the current script when you can.[/yellow]")
     if match is not None:
         console.print(f"Matching target: {escape(match.target)}" + (f", board {escape(match.board)}" if match.board
                                                                    else "") + f" ({escape(match.reason)}).")

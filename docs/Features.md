@@ -316,6 +316,16 @@ Deployment copies a finished build to a board over SSH and installs the model fi
 - **Package:** a ZIP with the model file, the build's manifest and model card, `checksums.sha256` and a generated
   `deploy.sh`. Only model files are deployed (`.gguf`, `.rkllm`, `.rknn`, `.onnx`, `.safetensors`, `.bin`); a
   build with several weight files is refused.
+- **A package without a board** (`llm-cli deploy package`; GUI: Deployment tab > **Create package only…**): the
+  package of the selected build for the chosen profile, with Docker images for a board without network if you tick
+  **Use Docker Containerization?**. Like the CLI, the GUI takes any path: **Other build or model file…** adds a build
+  folder or a model file to the build list. No board is contacted. The GUI opens the folder
+  dialog at the output folder, as for every golden artifact, and names the package's full path, or the reason and
+  the next step when it cannot be made. Copy it to the board and run `deploy.sh` there, or deploy it later.
+- **An existing package** (`llm-cli deploy run PACKAGE_PATH`; GUI: Deployment tab > **Deploy existing package…**):
+  a ZIP made earlier goes to the board in the address field, with the same host-key question, one-time password,
+  wait and trusted-device record as **Deploy to Target**. The **Port**, **Name** and **Wait for the board** fields of
+  the tab are the CLI's `--port`, `--label` and `--wait`, for both buttons.
 - **On the board:** the package goes into a private temporary folder (`mktemp -d`), `deploy.sh` (run with `sh`,
   so boards that mount `/tmp` with `noexec` or have no bash work too) checks every checksum with `sha256sum -c`,
   copies the model to `~/models` (or `$MODEL_DIR`) and the temporary folder is
@@ -2376,11 +2386,16 @@ decides a deletion: not through its own form, a standing approval or a delegatio
 - **Where it runs:** on the machine the build is for. `llm-cli scan` probes this computer with the Python probe and
   keeps the profile as `local`; `llm-cli scan --device` runs it on a board over SSH (the Python probe with `python3
   -I` if the board has Python 3.8 or newer, else the shell probe; nothing is installed on the board) and keeps the
-  profile under the board's ID; the SSH user becomes the board's deploy user (never root). In the GUI, **Scan /
-  Import...** imports a probe file, scans a board over SSH with the same trust-on-first-use rules as deployment, or
-  scans this PC; it keeps scan results in `<cache_dir>/probes/`. The GUI's SSH scan runs the same remote probe as
-  `llm-cli scan --device`: the script travels over the SSH channel, so it also works on boards that mount `/tmp`
-  with `noexec`, and the profile is kept under the board's ID.
+  profile under the board's ID; the SSH user becomes the board's deploy user (never root). GUI: Builder tab >
+  **Scan / Import...** runs the same steps as the CLI: **Scan Local Host** (the Python probe, kept as `local`),
+  **Scan Local Host with the Fallback Script** (`--script`), **Scan Local Host and Save the Profile As...**
+  (`--output`, a `.json` file for `--json`), **Scan Local Host with the Fallback Script and Save the Profile As...**
+  (`--script --output`), **Remote Scan via SSH...** (`--device`, with **Port** and **Name**; the
+  same trust-on-first-use rules as deployment, the host key read in the background, and the board added to the
+  trusted devices as by the CLI) and **Import from File (USB/Disk)...** (`--import`, asking for the board's name).
+  It keeps a copy of each result in `<cache_dir>/probes/` for the target match. The GUI's SSH scan runs the same
+  remote probe as `llm-cli scan --device`: the script travels over the SSH channel, so it also works on boards that
+  mount `/tmp` with `noexec`, and the profile is kept under the board's ID.
   Machines without network access run a probe by hand ([README](../README.md#probing-the-boards-hardware)).
 - **Ditto's local model** uses the same probe: the hardware its build and model choice are based on comes from a
   probe profile, and free RAM and free VRAM are read again at every start.

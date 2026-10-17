@@ -307,4 +307,5 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
                                              "orchestrator.utils.l10n_mojo",
                                              "orchestrator.utils.l10n_boards",
                                              "orchestrator.utils.l10n_tools_mcp",
-                                             "orchestrator.utils.l10n_signin"}
+                                             "orchestrator.utils.l10n_signin",
+                                             "orchestrator.utils.l10n_deploy"}

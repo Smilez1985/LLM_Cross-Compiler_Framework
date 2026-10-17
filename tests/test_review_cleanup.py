@@ -107,15 +107,15 @@ class TestLocalProbe:
         monkeypatch.chdir(tmp_path / "work")
         started = []
 
-        class Worker:
-            def __init__(self, script, output):
+        class Worker:   # the scan menu runs the CLI's own step (LocalScanWorker: the Python probe by default)
+            def __init__(self, framework, output, **options):
                 started.append(Path(output))
                 self.finished = SimpleNamespace(connect=lambda slot: None)
 
             def start(self):
                 pass
 
-        monkeypatch.setattr(builder_tab, "LocalProbeWorker", Worker)
+        monkeypatch.setattr(builder_tab, "LocalScanWorker", Worker)
         tab = builder_tab.BuilderTab(booted_framework)
         try:
             tab._run_local_probe()

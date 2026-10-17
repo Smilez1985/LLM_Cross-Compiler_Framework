@@ -221,21 +221,80 @@ def resolve_model_artifact(artifact_path: Path) -> Path:
         raise ValueError(f"No model file found in {path}.")
     return max(models, key=lambda f: f.stat().st_size)
 
+
+# --- a package without a board (`llmcf deploy package`, the Deployment tab's "Create package only...") -------------
+
+def package_docker_config(docker: bool) -> Dict[str, Any]:
+    """The Docker part of a package: whether the inference container image goes into it (air-gap use) and, then, the
+    image the package names (the package itself takes image_inference_runtime from the settings)."""
+    config: Dict[str, Any] = {"use_docker": bool(docker)}
+    if docker:
+        config["image_name"] = DEFAULT_INFERENCE_IMAGE
+    return config
+
+
+def resolve_package_source(framework: Any, artifact: Any, output_dir: Path) -> Path:
+    """The build or model file a package is made from: an absolute path or one relative to the working folder as it
+    is, else a folder as `llmcf deploy list-artifacts` names it (relative to the output folder, then to the
+    framework's build folder, where builds wait to be saved). A path that exists nowhere is returned as below the
+    output folder, so the refusal names it."""
+    given = Path(str(artifact)).expanduser()
+    path = given.resolve() if given.is_absolute() or given.exists() else Path(output_dir) / str(artifact)
+    if not path.exists():
+        from orchestrator.Core.artifact_output import build_folder
+        waiting = build_folder(framework) / str(artifact)
+        path = waiting if waiting.exists() else path
+    return path
+
+
+def make_package(manager: Any, framework: Any, artifact: Any, profile: str, docker: bool, output_dir: Path, *,
+                 kv_cache: Optional[str] = None, cancelled: Optional[Callable[[], bool]] = None) -> Path:
+    """The deployment ZIP for a board this computer need not reach (`llmcf deploy package` and the GUI's "Create
+    package only..."): the model, its provenance, deploy.sh and checksums, with `docker` also the inference image
+    (air-gap). Written to `output_dir`; raises DeployError with the reason and the next step."""
+    extra: Dict[str, Any] = {}
+    if cancelled is not None:
+        extra["cancelled"] = cancelled
+    if kv_cache:
+        extra["kv_cache"] = kv_cache
+    return manager.create_package(resolve_package_source(framework, artifact, output_dir), profile,
+                                  package_docker_config(docker), Path(output_dir), **extra)
+
+
+def package_model_name(package: Path) -> Optional[str]:
+    """The GGUF model a package's deploy.sh copies to models/ on the board (for the benchmark there): the model file at
+    the package's top level, None when the package carries Docker images (the model then goes into the container),
+    has no GGUF model or cannot be read. Reads only the ZIP's list of names."""
+    try:
+        with zipfile.ZipFile(package) as zf:
+            names = zf.namelist()
+    except (OSError, zipfile.BadZipFile, ValueError):
+        return None
+    if any(name.startswith("images/") for name in names):
+        return None
+    models = [name for name in names if "/" not in name and name.lower().endswith(".gguf")]
+    return models[0] if len(models) == 1 else None
+
+
 class DeploymentManager:
     def __init__(self, framework_manager=None):
         self.logger = get_logger("DeploymentManager")
         self.framework = framework_manager
         self._clock, self._sleep = time.monotonic, time.sleep  # the waiting for a board (tests replace them)
+        self.last_package_error: Optional[DeployError] = None   # why create_deployment_package returned None
 
     # --- PACKAGE GENERATION ---
 
     def create_deployment_package(self, artifact_path: Path, profile_name: str, docker_config: Dict, output_dir: Path,
                                   kv_cache: Optional[str] = None) -> Optional[Path]:
-        """The package (see create_package), or None when it cannot be made (the reason is logged)."""
+        """The package (see create_package), or None when it cannot be made (the reason is logged and kept in
+        `last_package_error`, so a caller can show it with its next step)."""
+        self.last_package_error = None
         try:
             return self.create_package(artifact_path, profile_name, docker_config, output_dir, kv_cache=kv_cache)
         except DeployError as e:
             self.logger.error(str(e))
+            self.last_package_error = e
             return None
 
     def create_package(self, artifact_path: Path, profile_name: str, docker_config: Dict, output_dir: Path, *,
