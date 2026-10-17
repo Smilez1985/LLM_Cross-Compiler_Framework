@@ -445,6 +445,21 @@ class TestOnePlace:
         source = inspect.getsource(dialogs.AIConfigurationDialog._save_config)
         assert "problems(" in source and "apply(" in source and "cfg.set" not in source
 
+    @pytest.mark.usefixtures("boxes")
+    def test_the_dialogs_address_workspace_and_saved_values_come_from_the_service(self, framework, monkeypatch):
+        """The leftover-address rule exists once (review of c3-ai-settings): the dialog's live model list and its
+        sign-in read the address and the workspace through AISettingsChange, and saved values through user_value."""
+        from orchestrator.gui import dialogs
+        from orchestrator.llm import settings_change
+        dlg = dialog(framework, "anthropic", txt_workspace="wrkspc_01")
+        preset = dlg._preset()
+        monkeypatch.setattr(settings_change.AISettingsChange, "address", property(lambda self: "wired-address"))
+        monkeypatch.setattr(settings_change.AISettingsChange, "workspace", property(lambda self: "wired-workspace"))
+        monkeypatch.setattr(dialogs, "user_value", lambda config, key, default=None: f"wired-{key}")
+        assert dlg._base_url(preset) == "wired-address"
+        assert dlg._workspace_id(preset) == "wired-workspace"
+        assert dlg._user_value("ai_effort") == "wired-ai_effort"
+
     def test_the_service_loads_without_qt_or_a_provider_sdk(self):
         import subprocess
         import sys
