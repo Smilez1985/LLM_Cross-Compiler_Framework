@@ -1225,6 +1225,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **The code is arranged in layers, and a test keeps them** (consolidation; maintainer decision of 2026-10-17: one
+  repository, layers enforced by a test). `tests/test_layering.py` maps every module of `orchestrator/` to a layer
+  (bottom, remote, kernel, domain, tool definitions, adapters), reads every import (also inside functions, under
+  `TYPE_CHECKING` and lazy ones) and fails on an import that points upward, on one adapter importing another, on
+  PySide6, click/rich, mcp/uvicorn or paramiko outside their home, and on a larger import cycle; today's exceptions
+  stand with their reason in `tests/data/layering_allowlist.json`, which may only shrink. Shared helpers moved out
+  of the tool modules to the layer that needs them, and the old names stay: path labels for AIs to
+  `orchestrator/security/paths.py` (with `scrub_for_ai`, the one status scrub of AI-facing texts, and the
+  home-folder patterns the GUI tool, the pack export and the privacy masks share), the private atomic writers to
+  `orchestrator/utils/atomic.py`, the one-time notices to `orchestrator/utils/notice_store.py`, Docker image
+  references to `orchestrator/utils/image_ref.py`, the SSRF-safe HTTP adapter to `orchestrator/security/http.py`, the
+  audit key to `Core/vault_key.audit_key`, a pack's base images to `Core/community_pack.py`, the snapshot check before
+  an index to `Core/knowledge_snapshots.py` and the audit of a saved module to `Core/module_generator.py`. Nothing
+  changes for the person; the Core no longer imports tool definitions for these, and the largest import cycle shrank
+  from 81 to 9 modules.
 - **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
   `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
   and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the
