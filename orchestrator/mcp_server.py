@@ -1835,6 +1835,27 @@ def http_server_config(app, host: str, port: int):
     return uvicorn.Config(app, host=host, port=port, log_level="warning", proxy_headers=False, access_log=False)
 
 
+# Set by the GUI for the HTTP server it starts as its child: the server ends, as on Ctrl+C, when its input closes.
+STOP_ON_EOF_ENV = "LCF_MCP_STOP_ON_EOF"
+
+
+def stop_when_input_ends(server, stream) -> threading.Thread:
+    """The program that started this server stops it by closing the server's input (the GUI's Stop button). That
+    works on every system: on Windows a GUI without a console cannot send Ctrl+Break to its child. `server`: the
+    uvicorn Server; at the end of the input it ends as on Ctrl+C (the open sessions end, their builds and jobs are
+    cancelled by the lifespan, then the framework shuts down)."""
+    def watch() -> None:
+        try:
+            while stream.read(4096):
+                pass
+        except (OSError, ValueError):
+            pass
+        server.should_exit = True
+    thread = threading.Thread(target=watch, name="mcp-http-input", daemon=True)
+    thread.start()
+    return thread
+
+
 def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765,
           stdio_token: Optional[str] = None, container: bool = False) -> None:
     """Runs the server until the client (stdio) or the process (HTTP) ends it. The session's builds and jobs are
@@ -1873,7 +1894,10 @@ def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: in
         if container:
             print(f"Container mode: publish the port to the host's loopback only (docker run -p "
                   f"127.0.0.1:{port}:{port} ...) and connect to http://127.0.0.1:{port}/mcp.", file=sys.stderr)
-        anyio.run(uvicorn.Server(http_server_config(http_app(server, tokens, host, port), host, port)).serve)
+        listener = uvicorn.Server(http_server_config(http_app(server, tokens, host, port), host, port))
+        if os.environ.get(STOP_ON_EOF_ENV) == "1":
+            stop_when_input_ends(listener, getattr(sys.stdin, "buffer", sys.stdin))
+        anyio.run(listener.serve)
     finally:
         shutdown = getattr(framework, "shutdown", None)
         if callable(shutdown):
