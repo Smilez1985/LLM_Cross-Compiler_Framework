@@ -27,6 +27,7 @@ TEXTS = {
         # File
         "main.file.trash": "Trash...",
         "main.file.output_folder": "Output Folder...",
+        "main.file.exit": "Exit",
         # Ditto: the AI administration, "Set up Ditto..." first (Q2)
         "main.ditto.setup": "Set up Ditto...",
         "main.ditto.settings": "AI Settings...",
@@ -42,6 +43,9 @@ TEXTS = {
         "main.tools.snapshots": "Knowledge Snapshots...",
         "main.tools.images": "Framework Build Images...",
         "main.tools.index_docs": "Index the Framework's Documentation...",
+        "main.tools.hub": "Open Community Hub",
+        "main.tools.audio": "Spoken Announcements",
+        "main.tools.clear_history": "Clear Input History...",
         # Help
         "main.help.about": "About...",
         # the tabs (the emoji stays out of these texts: the tab shows it in front, a screen reader reads the text)
@@ -80,6 +84,7 @@ TEXTS = {
         "main.menu.help": "&Hilfe",
         "main.file.trash": "Papierkorb...",
         "main.file.output_folder": "Ausgabeordner...",
+        "main.file.exit": "Beenden",
         "main.ditto.setup": "Ditto einrichten...",
         "main.ditto.settings": "KI-Einstellungen...",
         "main.ditto.permissions": "Tool-Berechtigungen...",
@@ -92,6 +97,9 @@ TEXTS = {
         "main.tools.snapshots": "Wissens-Snapshots...",
         "main.tools.images": "Build-Images des Frameworks...",
         "main.tools.index_docs": "Dokumentation des Frameworks indexieren...",
+        "main.tools.hub": "Community Hub öffnen",
+        "main.tools.audio": "Gesprochene Ansagen",
+        "main.tools.clear_history": "Eingabeverlauf löschen...",
         "main.help.about": "Über...",
         "main.tab.builder": "Builder",
         "main.tab.deployment": "Deployment",

@@ -42,7 +42,9 @@ from orchestrator.tools.registry import ToolRegistry, ToolSpec  # noqa: E402
 from test_mcp_server import In, Out, answering, run, text_of  # noqa: E402
 
 MODES = ["auto", "legacy"]  # 2026-07-28 input_required rounds, and the classic in-request elicitation
-PERMISSIONS_HINT = "llm-cli tools permissions"
+# Wave 6 (V2): the next step is rendered from the catalogue for a client on no channel (stdio MCP), with the command's
+# new name (seventh round, item 11; llm-cli stays an alias): it said `llm-cli tools permissions` before.
+PERMISSIONS_HINT = "llmcf tools permissions"
 # The reviewer's attack: a valid but padded local model path pushes the dangerous fields out of view.
 PADDED_MODEL = "/home/user/models/" + "./" * 240 + "SmolLM2"
 ATTACK = {"model": PADDED_MODEL, "target": "Rockchip", "format": "gguf", "quantization": "Q2_K",
@@ -838,7 +840,8 @@ def test_broken_config_file_real_stdio_client(tmp_path, broken_config):
     assert not caps.is_error and "gguf" in caps.structured_content["formats"]
     # This client cannot ask: the question waits in the framework instead (S9), nothing runs before the person decides.
     assert start.is_error and "Waiting for the person to approve" in text_of(start)
-    assert "llm-cli tools approvals" in text_of(start) and "get_job_status" in text_of(start)
+    # Wave 6 (V2): the step comes from the catalogue with the command's new name (it said `llm-cli tools approvals`).
+    assert "llmcf tools approvals" in text_of(start) and "get_job_status" in text_of(start)
 
 
 # --- Adversarial pass: cases the tests above do not reach ------------------------------------------

@@ -8,9 +8,9 @@ the person's; `secrets.set` takes its value in a hidden field and hands it to th
 from orchestrator.utils.next_steps import Param, Step
 
 MOUSE_LABELS = {
-    "btn_signin_save": ("act_signin_overview", "signin.save"),
+    "btn_signin_save": ("act_signin_overview", "signin.button.save"),
     "btn_secrets_store": ("act_signin_secrets", "secrets.store"),
-    "btn_storage_use": ("act_signin_key_storage", "signin.storage.use"),
+    "btn_storage_use": ("act_signin_key_storage", "signin.button.storage_use"),
 }
 
 STEPS = (

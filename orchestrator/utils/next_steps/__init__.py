@@ -433,12 +433,60 @@ def menu_layout() -> Tuple[Any, ...]:
     return catalogue().layout
 
 
+LOCALIZATION = "orchestrator.utils.localization"
+_PLAIN_TEXTS: Optional[Dict[str, Dict[str, str]]] = None
+_PLAIN_LOCK = threading.Lock()
+
+
+def _loaded_localization() -> Any:
+    """orchestrator.utils.localization when this process imported it already (the window does at its start), else
+    None. The catalogue never imports it itself: it imports PySide6, and the first PySide6 import in a worker thread
+    (a tool call of the MCP server renders its next steps there) makes Qt take that thread for the main thread, which
+    breaks a window made later in the same process."""
+    module = sys.modules.get(LOCALIZATION)
+    return module if module is not None and hasattr(module, "merge_text_modules") else None
+
+
+def _plain_texts() -> Dict[str, Dict[str, str]]:
+    """The texts of the l10n modules (orchestrator/utils/l10n_*.py, plain tables that import nothing), read without
+    Qt, for a process without the window: the same tables ui_text merges (TEXT_MODULES names every one of them)."""
+    global _PLAIN_TEXTS
+    with _PLAIN_LOCK:
+        if _PLAIN_TEXTS is None:
+            import orchestrator.utils as utils_package
+            table: Dict[str, Dict[str, str]] = {"en": {}, "de": {}}
+            for info in sorted(pkgutil.iter_modules(utils_package.__path__), key=lambda i: i.name):
+                if not info.name.startswith("l10n_"):
+                    continue
+                texts = getattr(importlib.import_module(f"orchestrator.utils.{info.name}"), "TEXTS", None) or {}
+                for lang, entries in texts.items():
+                    if isinstance(entries, dict):
+                        for key, text in entries.items():
+                            table.setdefault(lang, {}).setdefault(key, text)
+            _PLAIN_TEXTS = table
+        return _PLAIN_TEXTS
+
+
+def _ui_text(key: str, lang: str) -> str:
+    """ui_text(key, lang) of orchestrator.utils.localization when the process loaded it, else the same text from the
+    l10n tables without Qt (see _loaded_localization)."""
+    localization = _loaded_localization()
+    if localization is not None:
+        return localization.ui_text(key, lang)
+    table = _plain_texts()
+    text = table.get(lang, {}).get(key) or table["en"].get(key, key)
+    return fill_paths(text, lang) if "{path:" in text else text
+
+
 def _lang(lang: Optional[str]) -> str:
+    """`lang`, else the window's language (English in a process without the window)."""
     if lang:
         return lang
+    localization = _loaded_localization()
+    if localization is None:
+        return "en"
     try:
-        from orchestrator.utils.localization import current_language
-        return current_language()
+        return localization.current_language()
     except Exception:   # noqa: BLE001
         return "en"
 
@@ -523,15 +571,13 @@ def clean_label(text: str) -> str:
 def mouse_path(object_name: str, lang: Optional[str] = None) -> str:
     """Where the person clicks to reach `object_name`, in `lang`: "Ditto > Advanced > Local Runtime... > Build
     llama-server..." (KeyError for an object the catalogue does not know)."""
-    from orchestrator.utils.localization import ui_text
     lang = _lang(lang)
-    return " > ".join(clean_label(ui_text(key, lang)) for key in label_chain(object_name))
+    return " > ".join(clean_label(_ui_text(key, lang)) for key in label_chain(object_name))
 
 
 def button_label(object_name: str, lang: Optional[str] = None) -> str:
     """Only the last element of the path: what the object itself reads (for a text shown inside its own window)."""
-    from orchestrator.utils.localization import ui_text
-    return clean_label(ui_text(label_chain(object_name)[-1], _lang(lang)))
+    return clean_label(_ui_text(label_chain(object_name)[-1], _lang(lang)))
 
 
 def fill_paths(text: str, lang: Optional[str] = None) -> str:
@@ -744,8 +790,7 @@ class CommandProposal:
 
 def _secret_name(param: Param, lang: str) -> str:
     if param.secret_key:
-        from orchestrator.utils.localization import ui_text
-        text = ui_text(param.secret_key, lang)
+        text = _ui_text(param.secret_key, lang)
         if text != param.secret_key:
             return text
     return own_text("steps.secret", lang)

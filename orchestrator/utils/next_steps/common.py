@@ -18,7 +18,7 @@ MENU_LAYOUT = (
         ("act_file_output_folder", "main.file.output_folder"),
         ("act_file_settings", "bld.menu.settings"),
         "-",
-        ("act_file_exit", "menu.exit"),
+        ("act_file_exit", "main.file.exit"),
     )),
     ("menu_build", "main.menu.build", (
         ("act_build_targets", "bld.menu.targets"),
@@ -61,7 +61,7 @@ MENU_LAYOUT = (
         ("act_tools_hf_browser", "main.tools.hf_browser"),
         "-",
         ("menu_tools_knowledge", "main.menu.tools_knowledge", (
-            ("act_knowledge_hub", "menu.open_hub"),
+            ("act_knowledge_hub", "main.tools.hub"),
             ("act_knowledge_snapshots", "main.tools.snapshots"),
             ("act_knowledge_sources", "knowledge.menu.sources"),
             ("act_knowledge_index_docs", "main.tools.index_docs"),
@@ -72,8 +72,8 @@ MENU_LAYOUT = (
             ("act_mojo_health", "mojo.menu"),
         )),
         "-",
-        ("act_tools_audio", "menu.audio"),
-        ("act_tools_clear_history", "menu.clear_history"),
+        ("act_tools_audio", "main.tools.audio"),
+        ("act_tools_clear_history", "main.tools.clear_history"),
     )),
     ("menu_help", "main.menu.help", (
         ("act_help_about", "main.help.about"),

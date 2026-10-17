@@ -421,17 +421,25 @@ def test_the_registry_renders_a_refusals_steps_for_the_callers_channel(tmp_path)
     from orchestrator.tools.registry import ToolContext, ToolError
     from test_vocabulary_records import make_registry
     registry = make_registry(tmp_path, None)
-    registry.policy_store.replace(ToolPolicy(configured=True, reviewed=["tool"], overrides={"tool": Decision.DENY}))
-    seen = []
-    registry.events.subscribe(lambda kind, data: seen.append((kind, data)))
+    # Nobody could be asked (no question channel): where the person allows it is the step, rendered per channel.
     with pytest.raises(ToolError) as chat:
         registry.call("tool", {"text": "x"}, ToolContext("ditto", channel="gui-chat"))
+    assert chat.value.code == "needs_person"
     assert "Ditto > Tool Permissions..." in chat.value.next and "llmcf" not in chat.value.next
     assert chat.value.steps == (NextStep("permissions.edit"),)
-    assert seen[-1][1]["step"] == "permissions.edit", "the blocked row names the step"
     with pytest.raises(ToolError) as app:
         registry.call("tool", {"text": "x"}, ToolContext("mcp"))
     assert "command line: llmcf tools permissions" in app.value.next
+    # The person's own "deny": the blocked row in the person's feed names the place, the AI's error carries no step
+    # and no way to change the setting (DENIED_HINT; tests/test_review_mcp.py pins the same for MCP).
+    registry.policy_store.replace(ToolPolicy(configured=True, reviewed=["tool"], overrides={"tool": Decision.DENY}))
+    seen = []
+    registry.events.subscribe(lambda kind, data: seen.append((kind, data)))
+    for ctx in (ToolContext("ditto", channel="gui-chat"), ToolContext("mcp")):
+        with pytest.raises(ToolError) as denied:
+            registry.call("tool", {"text": "x"}, ctx)
+        assert denied.value.steps == () and "llmcf" not in denied.value.next and "Ditto >" not in denied.value.next
+        assert seen[-1][1]["step"] == "permissions.edit", "the blocked row names the step"
 
 
 def test_a_handler_failure_points_to_mojo_without_a_terminal(tmp_path):
@@ -486,3 +494,48 @@ def test_the_cli_prints_an_errors_steps_as_next_lines(capsys):
     assert err == ["Refused.", "Next: Allow it in the tool permissions: llmcf tools permissions"]
     cli._say_error(ToolError("Refused.", next="Ask the person."))
     assert capsys.readouterr().err.splitlines() == ["Refused. Next: Ask the person."]
+
+
+QT_FREE_CHILD = """
+import sys
+from orchestrator.utils import next_steps as ns
+ids = list(ns.steps())
+for audience in ("cli", "gui", "ai"):
+    for channel in ns.CHANNELS:
+        for lang in ("en", "de"):
+            ns.render(ids, audience, lang, channel)
+from orchestrator.tools.registry import ToolContext, ToolError
+error = ToolError("Refused.", next="Ask the person.", steps=["permissions.edit", "approvals.list"])
+error.fill_steps(None)
+print(ns.mouse_path("btn_ditto_runtime_build", "de"))
+print(sorted(m for m in sys.modules if m.startswith("PySide6") or m == ns.LOCALIZATION))
+"""
+
+
+def test_the_catalogue_renders_without_qt_in_a_process_without_the_window():
+    """A tool call of the MCP server renders its next steps in a worker thread. The catalogue must not import
+    orchestrator.utils.localization (and with it PySide6) there: the first PySide6 import in a worker thread made Qt
+    take that thread for the main thread, and a window made later in the same process crashed when it closed. Without
+    the window the texts come from the l10n tables, in the same words."""
+    import subprocess
+    from pathlib import Path
+    root = Path(ns.__file__).resolve().parents[3]
+    out = subprocess.run([sys.executable, "-c", QT_FREE_CHILD], cwd=str(root), capture_output=True, text=True,
+                         encoding="utf-8", timeout=300)
+    assert out.returncode == 0, out.stderr[-2000:]
+    path, loaded = out.stdout.strip().splitlines()[-2:]
+    assert loaded == "[]", "the catalogue imported Qt"
+    assert path.startswith("Ditto > Erweitert > Lokale Laufzeit... > ")
+
+
+def test_the_plain_texts_are_the_texts_of_ui_text():
+    """The texts read without Qt are those ui_text shows, for every label of the catalogue and every secret's name."""
+    from orchestrator.utils.localization import ui_text
+    table = ns._plain_texts()
+    keys = {key for name in ns.mouse_labels() for key in ns.label_chain(name)}
+    keys |= {p.secret_key for s in ns.steps() for p in ns.get(s).params.values() if p.secret_key}
+    assert keys
+    for key in sorted(keys):
+        for lang in ("en", "de"):
+            assert key in table["en"], f"{key} is not in an l10n table"
+            assert (table.get(lang, {}).get(key) or table["en"][key]) == ui_text(key, lang), (key, lang)
