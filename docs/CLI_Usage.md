@@ -207,6 +207,17 @@ llmcf mojo --oracle --board "Kitchen board"
 llm-cli mojo --json > mojo.json
 ```
 
+In the GUI: **Tools > Mojo Health Check...** runs Mojo Oracle when it opens (**Check again** runs it once more) and
+shows every finding as the command prints it: the severity as text with its mark and icon, the area, the message,
+where, why it matters, the next step, what Mojo Miracle can do with the steps of its plan, the summary sentence and an
+overall line with the exit code. **Run Mojo Miracle...** (`--miracle`) asks "Run Mojo Miracle now?" (No is the
+default), applies exactly the plans shown and opens the framework's build images in the deletion dialog (the full
+list, nothing ticked), then shows what was repaired, what was not and why. Each board a recorded fact points to gets
+**Check <board> now**, and **Check a board...** (`--board`) checks any trusted board you pick (label and address;
+two boards that read the same, such as a board set up again with a new host key, also show their device ID): one
+connection to its SSH port, no login. The Deployment tab's **Check this board** (group "Benchmark on a board")
+checks the chosen board the same way.
+
 ---
 
 ## doctor
@@ -229,6 +240,9 @@ llm-cli doctor
 llm-cli doctor --json > doctor.json
 llm-cli doctor --fix --tier 2
 ```
+
+In the GUI: **Tools > Mojo Health Check...** (the check; **Run Mojo Miracle...** makes the repairs of `--fix`) and
+**Tools > Framework Build Images...** (the list of `--tier 2`).
 
 ---
 

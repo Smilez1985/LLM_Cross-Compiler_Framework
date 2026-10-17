@@ -670,12 +670,19 @@ class DeploymentWindow(QWidget):
         self.btn_bench = QPushButton(ui_text("device.bench.start"))
         self.btn_bench.clicked.connect(self._on_bench)
         row.addWidget(self.btn_bench)
+        # W1': Mojo's check of the chosen board, as Tools > Mojo Health Check... and `llmcf mojo --board` check it
+        self.btn_check_board = QPushButton(ui_text("mojo.deploy.check").replace("&", "&&"))
+        self.btn_check_board.setObjectName("btn_check_board")
+        self.btn_check_board.setToolTip(plain_tooltip(ui_text("mojo.deploy.check_tip")))
+        self.btn_check_board.clicked.connect(self._on_check_board)
+        row.addWidget(self.btn_check_board)
         box.addLayout(row)
         self.lbl_bench = plain_label("")
         box.addWidget(self.lbl_bench)
         group.setLayout(box)
         layout.addWidget(group)
         self.bench_worker = None
+        self.board_check = None   # mojo_window.BoardCheck, made at the first check (Mojo loads when first used)
         self._refresh_boards()
 
     def _refresh_boards(self, select=None):
@@ -695,6 +702,7 @@ class DeploymentWindow(QWidget):
         found = self.cb_bench_board.findData(keep) if keep else -1
         self.cb_bench_board.setCurrentIndex(found if found >= 0 else (0 if devices else -1))
         self.btn_bench.setEnabled(bool(devices))
+        self.btn_check_board.setEnabled(bool(devices))
         self.lbl_bench.setText("" if devices else ui_text("device.bench.none"))
         self._on_bench_board()
 
@@ -727,6 +735,27 @@ class DeploymentWindow(QWidget):
         self.bench_worker = BoardBenchWorker(self.framework, device_id, model, allowed)
         self.bench_worker.finished.connect(self._on_bench_done)
         self.bench_worker.start()
+
+    def _on_check_board(self):
+        """[Check this board]: Mojo's check of the chosen board off the GUI thread (Core/mojo/boards.check_board: one
+        connection to its SSH port, no login); the result shows under the row, a problem also in a message."""
+        device_id = self.cb_bench_board.currentData()
+        if not device_id:
+            plain_box(self, "warning", ui_text("mojo.deploy.check"), ui_text("mojo.deploy.choose"))
+            return
+        if self.board_check is None:
+            from orchestrator.gui.mojo_window import BoardCheck
+            self.board_check = BoardCheck(self, self.framework, self._on_board_checked)
+        label = self.cb_bench_board.currentText()
+        if self.board_check.start(device_id, label):
+            self.btn_check_board.setEnabled(False)
+            self.lbl_bench.setText(ui_text("mojo.boards.checking", label=label))
+
+    def _on_board_checked(self, device_id, label, text, finding):
+        self.btn_check_board.setEnabled(self.cb_bench_board.count() > 0)
+        self.lbl_bench.setText(text)
+        if finding is None or finding.severity.value not in ("ok", "info"):
+            plain_box(self, "warning", ui_text("mojo.deploy.check"), text)
 
     def _on_bench_done(self, ok, text):
         self.btn_bench.setEnabled(True)
