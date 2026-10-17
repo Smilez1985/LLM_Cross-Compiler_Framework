@@ -579,6 +579,7 @@ TEXT_MODULES = ("orchestrator.utils.l10n_facts", "orchestrator.utils.l10n_chat",
 TEXT_MODULES += ("orchestrator.utils.l10n_mojo",)   # Mojo in the GUI: Tools > Mojo Health Check..., Check this board
 TEXT_MODULES += ("orchestrator.utils.l10n_boards",)   # Boards > Boards and Devices... (trusted and stored boards)
 TEXT_MODULES += ("orchestrator.utils.l10n_tools_mcp",)   # tool permissions, audit log, AI folders, MCP connections
+TEXT_MODULES += ("orchestrator.utils.l10n_signin",)   # Security > Secrets..., Sign-in Overview..., Key Storage...
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

@@ -164,6 +164,7 @@ class MainOrchestrator(QMainWindow):
         act_openai = QAction("Set OpenAI API Key", self)
         act_openai.triggered.connect(lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))
         sec_menu.addAction(act_openai)
+        __import__("orchestrator.gui.menus.signin", fromlist=["install"]).install(self, menubar)  # Security entries
         
 
         self.view_menu = menubar.addMenu(ui_text("chat.view.menu"))  # filled by _setup_chat_dock

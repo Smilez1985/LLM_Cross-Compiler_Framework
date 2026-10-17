@@ -73,6 +73,34 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   vorgewählt, mit der Funktion der CLI `crawl_notice.acknowledge_and_audit`); der Modul-Assistent zeigt ihn vor der
   Prüfung der Wissensdatenbank. Tools > Folders the AI May Use... > Add folder... fragt, was im Ordner liegt
   (Modell-Dateien, Datensatz-Dateien oder beides: `tools folders add --kind`).
+- **Security > Anmeldeübersicht...: jeder Weg von `ditto login`, `ditto logout` und `ditto auth status|methods` mit
+  der Maus** (W1'): Ein Fenster zeigt die Anmeldung aller Anbieter auf einmal (Verfahren, Quelle, Konto oder die
+  letzten vier Zeichen eines Schlüssels, Zustand, Dittos Anbieter markiert) und wie der Tresor geschützt ist, mit
+  seiner Datei; **Alle prüfen** führt im Hintergrund die kostenlose Prüfung jedes Anbieters mit Zugangsdaten aus
+  (`--check`); der Reiter **Alle Anmeldeverfahren** listet die Verfahren jedes Anbieters mit ihren
+  Umgebungsvariablen und Anmerkungen. Wer einen Anbieter wählt, sieht sein Anmeldefeld mit einem eigenen Feld
+  **Serveradresse**: Eine dort eingegebene (oder von den KI-Einstellungen übergebene) Adresse wird nur für diesen
+  Anbieter gemerkt und nicht mehr nur über die KI-Einstellungen, die den Anbieter dabei auch zu Dittos machten
+  (`login --base-url`). Die Schlüsselkarte nennt die Umgebungsvariablen und die Anmerkung des Verfahrens und bietet
+  **Den Schlüssel aus <VARIABLE> im Tresor speichern** an, solange eine gesetzt ist (`login --from-env`, vorher
+  geprüft, außer du nimmst den Haken weg; neu `SignIn.env_variable()` / `SignIn.env_key()`, die auch die CLI
+  aufruft); ein Server ohne Anmeldung (Ollama, `custom` ohne Schlüssel) hat **Vergessen** (`logout`: die gemerkte
+  Adresse und das gemerkte Verfahren). Vor dem Abmelden oder Vergessen fragt es („Nein“ ist vorgewählt). Das
+  Framework liest, speichert und übergibt nie Zugangsdaten eines Claude-Abos und startet nie den Befehl claude.
+- **Security > Schlüsselspeicher...: `ditto auth storage` und `ditto auth rotate-key` mit der Maus** (W1'): wie der
+  Tresor geschützt ist und seine Datei, auch während er funktioniert (bisher zeigte die GUI das nur, wenn er
+  scheiterte); **Anders schützen** wechselt zwischen dem Schlüsselbund des Betriebssystems (neu als Wahl in der GUI,
+  so braucht der Weg zurück zum Schlüsselbund die CLI nicht mehr), einem Credential-Helper mit seinem Befehl, einer
+  Passphrase und der unverschlüsselten Schlüsseldatei (nach der Bestätigung und der Frage der CLI, „Nein“ ist
+  vorgewählt); **Schlüssel erneuern...** fragt vorher („Nein“ ist vorgewählt). Der Tresor wird im Hintergrund mit
+  denselben Kernfunktionen wie in der CLI neu verschlüsselt.
+- **Security > Geheimnisse...: `secrets list` und `secrets set` mit der Maus** (W1'): die Namen, die das Framework
+  liest (`hf_token`, `qdrant_api_key`, die Schlüssel der Community-Pakete), und jeder gespeicherte Name mit
+  „gespeichert“ oder „nicht gespeichert“ und wofür, nie ein Wert; **Ein Geheimnis setzen** nimmt einen Namen aus der
+  Liste oder einen anderen Namen und den Wert zweimal in verdeckten Feldern. CLI und Fenster rufen dasselbe neue
+  `Core/secret_entries.py` auf (`store_secret`, `secret_entries`; die Ausgabe der CLI bleibt gleich): Im Speicher
+  `ephemeral` sagen beide, dass nichts gespeichert wurde, und ebenso Security > Set OpenAI API Key, das dort
+  „gespeichert“ meldete.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den

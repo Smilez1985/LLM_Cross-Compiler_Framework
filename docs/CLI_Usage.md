@@ -715,6 +715,15 @@ llm-cli ditto login anthropic --method ant_profile --profile work
 
 `ditto login` signs in; it does not change which provider Ditto uses (`ai_provider`, set in the AI settings).
 
+In the GUI: **Security > Sign-in Overview...**, then select the provider: its sign-in panel has one card per method
+(`--method`) with **Check** and **Save** (Save stores without the check, as `--no-check`) and the extra fields
+(`--workspace-id`, `--organization`, `--project`); **Use this profile** on the `ant` profile card (`--profile`);
+**Store the key from <VARIABLE> in the vault** while that variable is set (`--from-env`; **Check it first (free)**
+is ticked); and, for providers whose address you set, its own **Server address** field (`--base-url`: remembered
+for that provider only, it does not make it Ditto's provider). Without a usable keyring the panel offers the storage
+choices (`--insecure-storage`). The same panel opens from **Tools > Configure AI Agent (Ditto)... > Sign in...** for
+the address typed there.
+
 ### ditto logout
 
 ```
@@ -731,6 +740,11 @@ also sign out the other tools that use it, so the command leaves that to you.
 |---|---|
 | `--method ID` | Method to sign out of (default: the one in use). |
 | `--base-url URL` | Address whose key is deleted (default: the configured one). |
+
+In the GUI: **Security > Sign-in Overview...**, then the provider: **Sign out** on its key card or **Stop using** on
+the `ant` profile card (both ask first, "No" is the default; the address is the panel's **Server address**). For a
+server without sign-in (Ollama, `custom` without a key) **Forget** forgets the remembered server address and method
+(it asks first).
 
 ### ditto auth status
 
@@ -751,6 +765,9 @@ A key is never shown.
 Exit code 5 when the credential vault cannot be used; with `--check` the code of the first failed check (3 or 4);
 otherwise 0.
 
+In the GUI: **Security > Sign-in Overview...** (every provider at once, Ditto's provider marked with `*`, and how
+the credential vault is protected with its file); **Check all** does `--check` in the background.
+
 ### ditto auth methods
 
 ```
@@ -760,6 +777,10 @@ llm-cli ditto auth methods [PROVIDER] [--json]
 The sign-in methods of every provider (or of one) in the order they are preferred: the recommended one, opt-in
 methods, methods that come in a later version, the key page, the environment variables, the extra options
 (`--workspace-id`, `--organization`, `--project`) and policy notes. Needs neither the vault nor the network.
+
+In the GUI: **Security > Sign-in Overview...**, tab **All sign-in methods** (every provider's methods with their
+tags, environment variables, key page, where to find the key, options and notes); each key card names its
+environment variables and note too.
 
 ### ditto auth storage
 
@@ -779,6 +800,11 @@ llm-cli ditto auth storage --use passphrase
 llm-cli ditto auth storage --use helper --helper "pass show llmcc/vault-key"
 ```
 
+In the GUI: **Security > Key Storage...** shows the protection and the vault file, also while the vault works.
+**Protect it another way** offers the OS keyring, a credential helper with its command (`--helper`), a passphrase
+and the unencrypted key file (only after the acknowledgement and the CLI's question, "No" is the default); **Use
+this storage** switches (`--use`).
+
 ### ditto auth rotate-key
 
 ```
@@ -787,6 +813,8 @@ llm-cli ditto auth rotate-key
 
 Creates a new vault key, re-encrypts every stored credential with it and removes the old key. Exit code 5 when
 the vault cannot be used.
+
+In the GUI: **Security > Key Storage... > Rotate key...** (it asks first; "No" is the default).
 
 ### ditto setup
 
@@ -1553,6 +1581,10 @@ llm-cli secrets set hf_token
 printf %s "$GITHUB_TOKEN" | llm-cli secrets set github_token --with-token
 ```
 
+In the GUI: **Security > Secrets...**, **Set a secret**: a name from the list (`hf_token`, `qdrant_api_key`, the
+community pack keys) or any other name, the value twice in masked fields, **Store**. In the ephemeral storage the
+window says that nothing was saved.
+
 ### secrets list
 
 ```
@@ -1561,6 +1593,9 @@ llm-cli secrets list
 
 Lists the stored names, never the values. Ditto's provider keys are listed under their vault names, for example
 `cred/anthropic/api_key` for `anthropic_api_key`; `secrets set` accepts both forms.
+
+In the GUI: **Security > Secrets...** (the known and the stored names, each with "stored" or "not stored" and what
+it is for; never a value).
 
 ---
 

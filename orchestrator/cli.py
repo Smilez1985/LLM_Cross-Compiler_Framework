@@ -1073,11 +1073,13 @@ def set_secret(ctx: FrameworkContext, key, with_token: bool, password: Optional[
     elif password is None:
         password = click.prompt("Value", hide_input=True, confirmation_prompt=True)
 
-    sm = ctx.framework_manager.secrets_manager
-    if not sm.set_secret(key, password):
+    from orchestrator.Core.secret_entries import SecretNotStored, store_secret
+    try:
+        stored = store_secret(ctx.framework_manager.secrets_manager, key, password)
+    except SecretNotStored:
         console.print(f"[red]Failed to store secret '{escape(key)}'.[/red]")
         sys.exit(1)
-    elif getattr(sm, "storage_mode", None) == "ephemeral":
+    if stored.memory_only:
         # Never let a CI user believe it was saved.
         console.print(f"[yellow]Secret '{escape(key)}' is kept in memory for this run only "
                       "(secret_storage: ephemeral); nothing was saved.[/yellow]")
@@ -1093,7 +1095,8 @@ def list_secrets(ctx: FrameworkContext):
         console.print("[red]SecretsManager not available![/red]")
         sys.exit(1)
         
-    keys = ctx.framework_manager.secrets_manager.list_secrets()
+    from orchestrator.Core.secret_entries import stored_names
+    keys = stored_names(ctx.framework_manager.secrets_manager)
     if not keys:
         console.print("[yellow]No secrets found.[/yellow]")
         return
@@ -2833,7 +2836,7 @@ def _ensure_storage(service, preset, insecure: bool, yes: bool) -> None:
     _say(f"{warning} (secret_storage: insecure)", err=True, fg="yellow")
 
 
-def _read_key(spec, preset, *, with_token: bool, from_env: bool) -> Tuple[str, str]:
+def _read_key(spec, preset, *, with_token: bool, from_env: bool, service) -> Tuple[str, str]:
     """The key and where it came from: stdin, the provider's environment variable or a hidden prompt. Never argv."""
     from orchestrator.llm.auth.store import malformed_key
     optional = spec.type == "bearer_optional"
@@ -2848,14 +2851,17 @@ def _read_key(spec, preset, *, with_token: bool, from_env: bool) -> Tuple[str, s
                    "pipe only the key.")
         return key, "stdin"
     if from_env:
-        if not spec.env:
-            _usage(f"{preset.label} ({spec.label}) reads no environment variable; use --with-token or the prompt.")
-        name = next((v for v in spec.env if (os.environ.get(v) or "").strip()), None)
-        if name is None:
-            _usage(f"{' and '.join(spec.env)} {'is' if len(spec.env) == 1 else 'are'} not set.")
-        if malformed_key(os.environ[name].strip()):
-            _usage(f"{name} has a space, a line break or another character that is never part of a key.")
-        return os.environ[name].strip(), f"env:{name}"
+        from orchestrator.llm.auth.signin import EnvKeyError
+        try:
+            key, name = service.env_key(preset, spec)
+        except EnvKeyError as e:
+            if e.code == "no_variable":
+                _usage(f"{preset.label} ({spec.label}) reads no environment variable; use --with-token or the "
+                       "prompt.")
+            if e.code == "not_set":
+                _usage(f"{' and '.join(spec.env)} {'is' if len(spec.env) == 1 else 'are'} not set.")
+            _usage(f"{e.name} has a space, a line break or another character that is never part of a key.")
+        return key, f"env:{name}"
     if not _interactive():
         _usage("No terminal to ask for the key: pipe it to --with-token (printf %s \"$KEY\" | llm-cli ditto login "
                f"{preset.id} --with-token) or use --from-env.")
@@ -3006,7 +3012,7 @@ def ditto_login(ctx: FrameworkContext, provider: str, method_id: Optional[str], 
     # A key method (api_key, bearer_optional).
     if spec.type == "api_key":
         _ensure_storage(service, preset, insecure_storage, yes)
-    key, source = _read_key(spec, preset, with_token=with_token, from_env=from_env)
+    key, source = _read_key(spec, preset, with_token=with_token, from_env=from_env, service=service)
     if key and spec.rejected(key):
         _auth_fail(rejected_key_error(preset))  # before any request
     if key and spec.type == "bearer_optional":
