@@ -31,8 +31,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   mit Tastenkürzeln, jeder Eintrag dort benannt und beschriftet, wo er entsteht, eine Layout-Tabelle,
   `retranslate_menus()`. Die von Hand geschriebenen Menüpfade der Texte (30 Schlüssel auf Englisch und Deutsch) sind
   jetzt `{path:<objectName>}` und werden aus den Beschriftungen auf dem Bildschirm gefüllt; `tests/test_no_command_texts.py`
-  bewacht die Texte und zählt den Rest gegen eine Ausgangslage, die nur sinken darf. Die deutschen Texte des Katalogs
-  folgen der gewählten Anrede: Die Tabelle `FORMAL` eines Moduls hält die Sie-Form jedes Textes, der anders lautet.
+  bewacht die Texte samt ihrer Sie-Form und zählt den Rest gegen eine Ausgangslage, die nur sinken darf. Die
+  deutschen Texte des Katalogs folgen der gewählten Anrede: Die Tabelle `FORMAL` eines Moduls hält die Sie-Form jedes
+  Textes, der anders lautet.
 - **Was Ditto und KI-Apps tun, wird zu Einträgen des Chat-Verlaufs, in jedem Prozess** (Welle 6, DECISIONS Runde 9
   U1, Folge b): `orchestrator/Core/activity.py` schreibt einen signierten Eintrag je Ereignis, aus dem Prozess, der die
   Arbeit getan hat (der GUI, `llm-cli`, jedem stdio-MCP-Server und dem HTTP-Kindprozess): ein Aufruf, der etwas

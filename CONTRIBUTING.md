@@ -617,10 +617,11 @@ text:
   deletion, a licence or a board's, an administrator's or another program's command (the tests check this against
   the real CLI). A board's address or login account is a `Param(..., private=True)`: an AI never reads it, nor a
   path.
-- `tests/test_no_command_texts.py` fails on a command or a hand-written path in a person's text and on more commands
-  or paths in any other literal than `tests/data/command_text_baseline.json` allows (only down; the integration
-  tightens it, a change never raises it). `tests/test_cli_gui_parity.py` checks every step against the CLI, the tools
-  and the windows and every mouse label against the live menus and buttons.
+- `tests/test_no_command_texts.py` fails on a command or a hand-written path in a person's text (its "Sie" form in
+  a module's `FORMAL` included) and on more commands or paths in any other literal than
+  `tests/data/command_text_baseline.json` allows (only down; the integration tightens it, a change never raises it).
+  `tests/test_cli_gui_parity.py` checks every step against the CLI, the tools and the windows and every mouse label
+  against the live menus and buttons.
 
 ---
 
