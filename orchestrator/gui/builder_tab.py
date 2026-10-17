@@ -12,7 +12,6 @@ Updates v2.4.0:
 """
 
 import platform
-import subprocess
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -36,10 +35,8 @@ from orchestrator.remote.transport import PARAMIKO_AVAILABLE  # noqa: E402
 
 # Core Imports fallback
 try:
-    from orchestrator.Core.orchestrator import BuildRequest, WorkflowType, PriorityLevel, OptimizationLevel, ModelFormat
+    from orchestrator.Core.orchestrator import PriorityLevel, OptimizationLevel, ModelFormat
 except ImportError:
-    class BuildRequest: pass
-    class WorkflowType: SIMPLE_CONVERSION = "simple"
     class PriorityLevel: NORMAL = "normal"
     class OptimizationLevel: BALANCED = "balanced"
     class ModelFormat: GGUF = "gguf"
@@ -149,44 +146,6 @@ def probe_result_dir(framework) -> Path:
     resolve = getattr(framework, "resolve_path", None) or resolve_install_path
     return Path(resolve(cache)) / "probes"
 
-
-class LocalProbeWorker(QThread):
-    """Runs the fallback probe script on this computer; the probe writes output_file (see probe_result_dir). The scan
-    menu now uses LocalScanWorker (the CLI's own step: the Python probe by default, the result stored as this
-    computer's probe); this worker stays for callers that run the script file directly."""
-    finished = Signal(bool, str, str) # success, message, file_path
-    
-    def __init__(self, script_path, output_file):
-        super().__init__()
-        self.script_path = script_path
-        self.output_file = Path(output_file)
-        
-    def run(self):
-        try:
-            if not Path(self.script_path).exists():
-                 self.finished.emit(False, f"Script not found: {self.script_path}", "")
-                 return
-
-            # Told where to write: without it the probe writes into the GUI's working directory.
-            output_file = self.output_file.absolute()
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            output_file.unlink(missing_ok=True)  # a file of an earlier run must not count as this run's result
-
-            if platform.system() == "Windows":
-                cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(self.script_path),
-                       "-OutputFile", str(output_file)]
-            else:
-                cmd = ["sh", str(self.script_path), "--output", str(output_file)]  # POSIX sh, no bash needed
-                
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
-            
-            if output_file.exists():
-                self.finished.emit(True, "Local probe successful.", str(output_file))
-            else:
-                self.finished.emit(False, "Script ran but no config file generated.", "")
-                
-        except Exception as e:
-            self.finished.emit(False, str(e), "")
 
 class LocalScanWorker(QThread):
     """Runs the hardware probe on this computer the way `llmcf scan` does (orchestrator/runtime/scan_steps.scan_local:
@@ -1199,40 +1158,79 @@ class BuilderTab(QWidget):
         """Asks about earlier builds with the same options (if any), then submits exactly `values`."""
         if found and not self._decide_about_earlier(found):
             return
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        service = self._build_service() or BuildService(self.framework)
         recipe = values["recipe"]
-        req = BuildRequest(
-            request_id="",
-            workflow_type=WorkflowType.SIMPLE_CONVERSION,
-            priority=values.get("priority", PriorityLevel.NORMAL),
-            models=[values["model"]],
-            targets=[values["target"]],
-            target_formats=[values["target_fmt"]],
-            optimization_level=values["opt_lvl"],
-            quantization_options=[values["quant"]] if values["quant"] else [],
-            parallel_builds=True,
-            output_base_dir=values["output_dir"],
-            description="Builder Tab Job",
-            use_gpu=values["use_gpu"],
-            # NEW v2.4.0: Pass IMatrix config
-            use_imatrix=values["use_imatrix"],
-            dataset_path=values["dataset"],
-            target_board=values["board"],
-            # A recipe pins the model commit (and context length) while its model is still selected.
-            model_revision=recipe.model.revision if recipe else None,
-            max_context_length=recipe.options.max_context_length if recipe else None,
-        )
-
+        options = dict(local_paths=True, optimization=getattr(values["opt_lvl"], "value", "balanced"),
+                       priority=values.get("priority", PriorityLevel.NORMAL), output_dir=values["output_dir"],
+                       parallel_builds=True, description="Builder Tab Job")
         try:
-            # The build keeps running on the framework's background loop after this slot returns.
-            rid = self.framework.run_coroutine(self.framework.orchestrator.submit_build_request(req), timeout=30)
+            # The one build path (BuildService), as for the CLI and AI callers: the service checks the request again
+            # and queues it; the build keeps running on the framework's background loop after this slot returns.
+            if recipe is not None and self._recipe_as_pinned(values):
+                # Exactly the recipe: the recipe as installed now (refused when the community index revoked it or it
+                # changed since it filled the form), with its calibration dataset checked against its pin.
+                rid = service.start_recipe(recipe.id, dataset_path=values["dataset"], use_gpu=values["use_gpu"],
+                                           expect=self._recipe_expect(values), **options).request_id
+            else:
+                if recipe is not None:  # the person's own values at the recipe's commit: still never a revoked one
+                    service.installed_recipe(recipe.id)
+                rid = service.start_build(self._service_request(values), **options).request_id
             self._set_state("success")
             self._log(f"Job Submitted! ID: {rid}")
             self._track_build(rid)
             self._remember_build(values["model"], values["target"], values["board"], values["dataset"])
             QMessageBox.information(self, "Success", f"Job {rid} started.")
+        except BuildServiceError as e:  # refused by the service's checks: nothing was started
+            self._set_state("fail")
+            self._log(f"Submission Error: {e}")
+            QMessageBox.warning(self, "Build settings", "\n".join(getattr(e, "problems", None) or [str(e)]))
         except Exception as e:
             self._set_state("fail")
             self._log(f"Submission Error: {e}")
+
+    def _recipe_pins(self, recipe):
+        """(format, board, quantization) a recipe builds with, normalized like the form (the board's default type)."""
+        caps = self._capabilities()
+        if caps is None:
+            return recipe.format, recipe.board, recipe.quantization
+        return caps.normalize(recipe.format, recipe.board, recipe.quantization)
+
+    def _recipe_as_pinned(self, values) -> bool:
+        """The form still holds exactly the recipe's values (target, format, board, quantization, importance
+        matrix, and a calibration dataset exactly when the recipe names one), so Start Build builds the recipe itself.
+        A dataset the recipe does not name, or none for a recipe that names one, is the person's own choice: their
+        values are built at the recipe's commit, as the Builder always did."""
+        recipe = values["recipe"]
+        fmt, board, quant = self._recipe_pins(recipe)
+        same = [(values["target"], recipe.target.id), (values["target_fmt"].value, fmt), (values["board"], board),
+                (values["quant"], quant)]
+        return (all(str(a or "").casefold() == str(b or "").casefold() for a, b in same)
+                and bool(values["use_imatrix"]) == bool(recipe.options.use_imatrix)
+                and bool(values["dataset"]) == (recipe.options.dataset is not None))
+
+    @staticmethod
+    def _recipe_expect(values):
+        """The recipe values the person saw in the form, for BuildService.start_recipe's check that the installed
+        recipe has not changed since."""
+        from orchestrator.Core.build_service import BuildService
+        recipe = values["recipe"]
+        return {"model": recipe.model.repo, "revision": recipe.model.revision, "target": values["target"],
+                "format": values["target_fmt"].value, "board": values["board"], "quantization": values["quant"],
+                "recipe_sha256": BuildService.recipe_digest(recipe)}
+
+    @staticmethod
+    def _service_request(values):
+        """The build request of the checked form values (BuildRequestIn): a recipe pins the model commit (and context
+        length) while its model is still selected."""
+        from orchestrator.Core.build_service import BuildService
+        recipe = values["recipe"]
+        return BuildService.request_in(model=values["model"], revision=recipe.model.revision if recipe else None,
+                                       target=values["target"], format=values["target_fmt"].value,
+                                       board=values["board"], quantization=values["quant"],
+                                       use_imatrix=values["use_imatrix"], dataset_path=values["dataset"],
+                                       use_gpu=values["use_gpu"],
+                                       max_context_length=recipe.options.max_context_length if recipe else None)
 
     def _earlier_builds(self, values):
         """(finished builds with 100 % the same options (eighth round, N11), the commit look-up still to do or None).
@@ -1242,15 +1240,8 @@ class BuilderTab(QWidget):
         service = self._build_service()
         if service is None or not hasattr(service, "earlier_builds"):
             return [], None
-        from orchestrator.schemas.build import BuildRequestIn
-        recipe = values["recipe"]
         try:
-            request = BuildRequestIn(model=values["model"], revision=recipe.model.revision if recipe else None,
-                                     target=values["target"], format=values["target_fmt"].value,
-                                     board=values["board"], quantization=values["quant"],
-                                     use_imatrix=values["use_imatrix"], dataset_path=values["dataset"],
-                                     use_gpu=values["use_gpu"],
-                                     max_context_length=recipe.options.max_context_length if recipe else None)
+            request = self._service_request(values)
             level = getattr(values["opt_lvl"], "value", "balanced")
             found = service.earlier_builds(request, optimization=level, local_paths=True)
             if found and not request.revision and all(b.match == "commit_unchecked" for b in found):

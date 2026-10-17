@@ -210,7 +210,8 @@ def _allow_sdk_env_headers(config_path: Optional[str]) -> Any:
 
 
 def model_format_from_string(format_str: str) -> ModelFormat:
-    """Convert string to ModelFormat enum"""
+    """Convert string to ModelFormat enum (by name or value, any letter case; GGUF for an unknown one). Kept for its
+    callers: `build start` lets BuildService.start_build normalize the format now."""
     try:
         return ModelFormat[format_str.upper()]
     except KeyError:
@@ -630,37 +631,17 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: bool, dataset: Optional[str]):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130."""
-    from orchestrator.Core.build_formats import OptimizationLevel
-    from orchestrator.Core.orchestrator import BuildRequest, OrchestrationStatus, PriorityLevel, WorkflowType
+    from orchestrator.Core.build_service import BuildServiceError
+    from orchestrator.Core.orchestrator import OrchestrationStatus
     ctx.require_framework()
     if parallel:
         Console(stderr=True).print("[yellow]--parallel is deprecated and has no effect.[/yellow]")
-    
+
     try:
-        # Target id (or folder name), resolved to the registered id below
-        target_arch_str = target
-        target_format_enum = model_format_from_string(format)
-        
-        opt_mapping = {
-            'fast': OptimizationLevel.FAST,
-            'balanced': OptimizationLevel.BALANCED,
-            'size': OptimizationLevel.SIZE,
-            'speed': OptimizationLevel.SPEED,
-            'aggressive': OptimizationLevel.AGGRESSIVE
-        }
-        optimization_level = opt_mapping[optimization]
-        
-        priority_mapping = {
-            'low': PriorityLevel.LOW,
-            'normal': PriorityLevel.NORMAL,
-            'high': PriorityLevel.HIGH,
-            'urgent': PriorityLevel.URGENT,
-            'critical': PriorityLevel.CRITICAL
-        }
-        priority_level = priority_mapping[priority]
-        
-        # Validate against the target's declared capabilities and fill its defaults.
-        tm = getattr(ctx.framework_manager, "target_manager", None)
+        fm = ctx.framework_manager
+        # The one build path (BuildService.start_build), as for the Builder tab and AI callers.
+        service = _build_service(ctx)
+        tm = getattr(fm, "target_manager", None)
         if tm:
             # The registered id (also for its folder name or another letter case), so `-t rockchip` is checked
             # like `-t Rockchip`; an unknown target would otherwise "complete" with nothing built.
@@ -669,47 +650,31 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 known = [str(t.get("id")) for t in tm.list_targets() if t.get("id")]
                 console.print(f"[red]Unknown target '{escape(target)}' (targets: {escape(', '.join(known) or 'none')}).[/red]")
                 sys.exit(2)
-            target = target_arch_str = match
-        caps = tm.get_capabilities(target) if tm else None
-        if caps:
-            # The values the build really runs with (canonical spellings, the scripts' default board).
-            _, board, quantization = caps.normalize(format, board, quantization)
-            problems = caps.check_request(format, board, quantization, dataset=bool(dataset), imatrix=imatrix)
-            if problems:
-                for problem in problems:
-                    console.print(f"[red]{escape(problem)}[/red]")
-                sys.exit(2)
-        elif board:
-            board = board.strip().lower()  # the module scripts lower-case it as well
+            target = match
+        # Checked by the service against the target's declared capabilities (a target without them is built
+        # unchecked), with its defaults filled: the values the build really runs with (canonical spellings, the
+        # scripts' default board).
+        try:
+            request = service.validate(service.request_in(
+                model=model, target=target, format=format, board=board, quantization=quantization,
+                use_imatrix=imatrix, dataset_path=str(Path(dataset).resolve()) if dataset else None, use_gpu=gpu),
+                local_paths=True)
+        except BuildServiceError as e:
+            for problem in getattr(e, "problems", None) or [str(e)]:
+                console.print(f"[red]{escape(problem)}[/red]")
+            sys.exit(2)
+        board, quantization = request.board, request.quantization
 
         # Where the golden artifact goes (eighth round, answer 3): --output, else at a terminal the person's answer to
         # a prompt with the output folder as its default, else the output folder; '-' keeps it in the framework's
         # build folder ('llm-cli build save' saves it later). A relative path means the current directory.
         output_dir, chosen = _build_destination(ctx, output_dir)
-        
-        build_request = BuildRequest(
-            request_id="",
-            workflow_type=WorkflowType.SIMPLE_CONVERSION,
-            priority=priority_level,
-            models=[model],
-            targets=[target_arch_str], # List of strings
-            target_formats=[target_format_enum],
-            optimization_level=optimization_level,
-            quantization_options=[quantization] if quantization else [],
-            parallel_builds=False,
-            output_base_dir=output_dir,
-            description=f"CLI build: {model} -> {target} ({format})",
-            use_gpu=gpu,
-            # Pass IMatrix Flags to Orchestrator
-            use_imatrix=imatrix,
-            dataset_path=str(Path(dataset).resolve()) if dataset else None,
-            target_board=board
-        )
-        
+
         # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
         # build service can cancel the build from here on Ctrl+C.
-        fm = ctx.framework_manager
-        request_id = fm.run_coroutine(ctx.orchestrator.submit_build_request(build_request), timeout=30)
+        request_id = service.start_build(request, local_paths=True, optimization=optimization, priority=priority,
+                                         output_dir=output_dir,
+                                         description=f"CLI build: {model} -> {target} ({format})").request_id
 
         # The CLI stays until the build has ended; from here on Ctrl+C cancels it.
         last = None
@@ -729,7 +694,7 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             if follow:
                 console.print("[blue]Following build progress (Ctrl+C cancels the build)...[/blue]")
             while True:
-                workflow_status = fm.run_coroutine(ctx.orchestrator.get_workflow_status(request_id), timeout=30)
+                workflow_status = service.request_state(request_id)
                 if workflow_status:
                     line = (workflow_status.status, workflow_status.current_stage, workflow_status.completed_builds)
                     if follow and line != last:
@@ -767,6 +732,17 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
 BUILD_POLL_SECONDS = 2
 KEEP_IN_BUILD_FOLDER = "-"
+
+
+def _build_service(ctx: FrameworkContext):
+    """The one build path (BuildService) on the orchestrator this command's context holds: the framework's own
+    service, or one bound to the context's orchestrator when that is another object."""
+    from orchestrator.Core.build_service import BuildService
+    fm = ctx.framework_manager
+    shared = getattr(fm, "build_service", None)
+    if shared is not None and ctx.orchestrator is getattr(fm, "orchestrator", None):
+        return shared
+    return BuildService(fm, orchestrator=ctx.orchestrator)
 
 
 def _build_destination(ctx: FrameworkContext, given: Optional[str]) -> Tuple[str, bool]:
@@ -2789,8 +2765,9 @@ def ditto_login(ctx: FrameworkContext, provider: str, method_id: Optional[str], 
     encrypted vault, and the method is remembered (ai_auth_<provider>). Exit codes: 0 signed in, 2 usage,
     3 rejected, 4 network, 5 credential storage unavailable, 6 not allowed or not available."""
     from orchestrator.llm.auth.errors import auth_error
-    from orchestrator.llm.auth.signin import exit_code, plain_http_to_remote, valid_profile_name
+    from orchestrator.llm.auth.signin import exit_code, valid_profile_name
     from orchestrator.llm.auth.spec import KEY_TYPES
+    from orchestrator.llm.settings_change import plain_http_to_remote  # the AI-settings rule every channel shares
     from orchestrator.llm.auth.store import display_origin, last4
     from orchestrator.llm.errors import LLMError, NotConfigured, rejected_key_error
 

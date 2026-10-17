@@ -1,7 +1,7 @@
 """Regression tests of the cleanup track (numbers: the items of the task).
 
 1 one source of settings in the CLI (ConfigManager), an unreadable -c file is reported
-3 the local hardware probe writes into the probe folder
+3 the local hardware probe writes into the probe folder (the fallback script through HardwareProbes.run_local)
 4 wait_stopped after a cancel that came before the engine registered the build
 5 `module create` hint and <NAME>_REPO_OVERRIDE names
 6 failed saves of the settings are reported
@@ -26,6 +26,9 @@ from conftest import REPO_ROOT
 from orchestrator.Core.builder import BuildStatus
 from test_cli_builds import invoke_plain, quiet_console, write_user_config
 from test_review_capabilities_paths import make_cli, no_docker
+
+
+FIXTURE_PROBE = REPO_ROOT / "tests" / "fixtures" / "hardware_probe" / "schema2_rk3566_dietpi.txt"
 
 
 @pytest.fixture
@@ -66,38 +69,62 @@ class TestLocalProbe:
 
     @pytest.fixture
     def fake_probe(self, monkeypatch):
-        from orchestrator.gui import builder_tab
+        """The fallback script as HardwareProbes.run_local(use_script=True) runs it (the one script runner; the GUI's
+        own LocalProbeWorker was removed, round 12 item 1): records the command and its working folder."""
+        from orchestrator.runtime import probe_service
         calls = []
 
         def run(cmd, **kwargs):
-            calls.append(cmd)
+            calls.append((cmd, kwargs))
             flag = "--output" if "--output" in cmd else "-OutputFile"
-            Path(cmd[cmd.index(flag) + 1]).write_text("CPU_MODEL=Rockchip RK3588\nARCH=aarch64\n")
+            Path(cmd[cmd.index(flag) + 1]).write_text(FIXTURE_PROBE.read_text(encoding="utf-8"), encoding="utf-8")
+            return SimpleNamespace(returncode=0)
 
-        monkeypatch.setattr(builder_tab, "subprocess", SimpleNamespace(run=run))
+        monkeypatch.setattr(probe_service, "subprocess", SimpleNamespace(
+            run=run, CalledProcessError=subprocess.CalledProcessError, TimeoutExpired=subprocess.TimeoutExpired,
+            DEVNULL=subprocess.DEVNULL, PIPE=subprocess.PIPE))
         return calls
 
     @pytest.mark.parametrize("system, flag", [("Linux", "--output"), ("Windows", "-OutputFile")])
-    def test_the_worker_tells_the_probe_where_to_write(self, qapp, tmp_path, monkeypatch, fake_probe, system, flag):
+    def test_the_probe_script_is_told_where_to_write(self, tmp_path, monkeypatch, fake_probe, system, flag):
         from orchestrator.gui import builder_tab
-        monkeypatch.setattr(builder_tab, "platform", SimpleNamespace(system=lambda: system))
+        from orchestrator.runtime import probe_service
+        from orchestrator.runtime.probe_service import HardwareProbes
+        monkeypatch.setattr(probe_service, "platform", SimpleNamespace(system=lambda: system))
         work = tmp_path / "work"
         work.mkdir()
         monkeypatch.chdir(work)
-        script = tmp_path / "hardware_probe.sh"
-        script.write_text("#!/bin/bash\n")
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        for name in ("hardware_probe.sh", "hardware_probe.ps1"):
+            (scripts / name).write_text("# probe\n")
         output = tmp_path / "cache" / "probes" / builder_tab.LOCAL_PROBE_FILE
         output.parent.mkdir(parents=True)
         output.write_text("an earlier run")
-        results = []
-        worker = builder_tab.LocalProbeWorker(script, output)
-        worker.finished.connect(lambda ok, message, path: results.append((ok, path)))
-        worker.run()
-        assert results == [(True, str(output))]
-        (cmd,) = fake_probe
+        probes = HardwareProbes(tmp_path / "state", scripts_dir=scripts)
+        profile, how = probes.run_local(use_script=True, output=output)
+        assert how == "fallback script" and profile is not None
+        ((cmd, options),) = fake_probe
         assert cmd[-2:] == [flag, str(output)]
-        assert output.read_text().startswith("CPU_MODEL=")
-        assert not (work / "target_hardware_config.txt").exists(), "nothing goes into the working directory"
+        assert output.read_text(encoding="utf-8").startswith(FIXTURE_PROBE.read_text(encoding="utf-8")[:20])
+        assert options["stdin"] is subprocess.DEVNULL and options["timeout"] > 0, "no terminal, a time limit"
+        assert Path(options["cwd"]) != work, "never the caller's working folder"
+        assert not any(work.iterdir()), "nothing goes into the working directory"
+
+    def test_an_earlier_file_never_counts_as_this_runs_result(self, tmp_path, monkeypatch):
+        from orchestrator.runtime import probe_service
+        from orchestrator.runtime.probe_service import HardwareProbes, ProbeError
+        monkeypatch.setattr(probe_service, "platform", SimpleNamespace(system=lambda: "Linux"))
+        monkeypatch.setattr(probe_service, "subprocess", SimpleNamespace(
+            run=lambda cmd, **kwargs: SimpleNamespace(returncode=0), CalledProcessError=subprocess.CalledProcessError,
+            TimeoutExpired=subprocess.TimeoutExpired, DEVNULL=subprocess.DEVNULL, PIPE=subprocess.PIPE))
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        (scripts / "hardware_probe.sh").write_text("# probe\n")
+        output = tmp_path / "probe.txt"
+        output.write_text(FIXTURE_PROBE.read_text(encoding="utf-8"), encoding="utf-8")  # an earlier run's file
+        with pytest.raises(ProbeError, match="wrote no file"):
+            HardwareProbes(tmp_path / "state", scripts_dir=scripts).run_local(use_script=True, output=output)
 
     def test_the_builder_tab_uses_the_configured_probe_folder(self, qapp, booted_framework, tmp_path, monkeypatch):
         from orchestrator.gui import builder_tab

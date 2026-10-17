@@ -1464,6 +1464,28 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   älteren Wegs (Start, Überwachung, Stopp, ein Self-Healing-Auslöser und sechs Qt-Signale, auf die niemand hörte) wurde
   entfernt, weil der eine Build-Weg all das tut (Entscheidung Runde 12, Punkt 6). Der Build-Status für die KI bleibt
   gleich.
+- **Ein Dienst für Änderungen der KI-Einstellungen, für jeden Kanal** (`orchestrator/llm/settings_change.py`,
+  `AISettingsChange`): Die Regeln, die nur der Dialog der KI-Einstellungen kannte (bekannte Provider in der
+  Fallback-Kette, kein Cloud-Provider im Offline-Modus, ein Schlüssel ist nötig und kein Admin-Schlüssel, die Form der
+  Workspace-ID, die Serveradresse, ein Modell, die Rückfrage bei einem Schlüssel über plain http, der Schlüssel wird
+  für seine Adresse gespeichert, die Einstellungen werden geschrieben, die Wissensbasis gestartet und Ditto neu
+  geladen), liegen jetzt an einem Qt-freien Ort. Der Dialog behält nur seine Hinweisfenster und seine Rückfrage; die
+  Anmeldung und `llmcf ditto login` nutzen dieselben Adressregeln und MCP `update_settings` dieselbe
+  Nur-verschärfen-Regel, die aus dem Tool-Modul dorthin umgezogen ist (`direction_problem`, weiter aus
+  `orchestrator.tools.tools_status` importierbar). `AISettingsChange.current()` und `with_setting()` sind für die
+  Änderung einer einzelnen Einstellung bereit (das kommende `llmcf config set`).
+- **Ein Weg, Builds zu starten, für CLI, GUI und KI-Aufrufer**: `llmcf build start` und **Start Build** im
+  Builder-Tab reihen ihren Build über `BuildService.start_build` ein, den Weg, den der MCP-Server und Ditto schon
+  nutzten, statt jeweils einen eigenen Auftrag an den Orchestrator zu bauen. CLI und GUI prüfen einen Auftrag deshalb
+  gleich, bevor etwas startet: Ein Auftrag ohne Modell, ein lokales Modell, das es nicht gibt (oder das nicht wie ein
+  Modell aussieht), ein Kalibrierungsdatensatz, der keine Datei ist, und eine Revision für ein lokales Modell werden
+  mit dem Grund abgelehnt (die CLI endet mit Code 2, die GUI zeigt ihn in einem Hinweisfenster), statt später im
+  Build zu scheitern. Was jedes Fenster einstellt, bleibt wie es war: Priorität, Optimierung und Zielfrage der CLI,
+  Priorität, parallele Builds und Build-Ordner der GUI, ein Target ohne Capabilities wird ungeprüft gebaut, und
+  deine eigenen Builds lehnt das Warteschlangen-Limit für KI-Aufrufer nie ab. Die Verfolgungsschleife der CLI liest
+  den Build über denselben Dienst. Die Prüfung des Builders auf einen früheren Build mit denselben Optionen erfasst
+  jetzt auch ein Target ohne Capabilities (vorher lehnte der Dienst den Vergleich eines solchen Auftrags ab, und der
+  Builder vermerkte das nur im Log).
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:
@@ -1916,6 +1938,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Rockchip-Target die Option nicht auswertet.
 
 ### Entfernt
+- Der ungenutzte `LocalProbeWorker` des Builder-Tabs, ein zweiter Starter des Fallback-Probe-Skripts (ein eigener
+  Subprocess-Aufruf ohne Zeitlimit, mit geerbtem stdin, im Arbeitsordner der GUI). Jeder lokale Scan
+  startet das Skript über `HardwareProbes.run_local` (den einen Starter, den `llmcf scan --script` und das
+  Scan-Menü nutzen); seine Tests sind dorthin umgezogen.
 - Die veraltete Kopie `Docker Setup/pyproject.toml` (Version 1.6.0, von nichts gelesen): Das Container-Image entsteht
   aus der `pyproject.toml` und der `requirements.txt` des Repositorys selbst.
 - Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen
@@ -2381,6 +2407,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nur, wo es erlaubt ist): dem Deployment, dem Hinzufügen eines Boards, dem Deployment-Tab, den Einträgen
   vertrauenswürdiger Boards, den Deploy-Einstellungen, der systemd-Unit und den Kontonamen, die eine KI nie liest
   (`device_text`). Das Hinzufügen eines Boards lädt für diese Prüfung nicht mehr die Build-Engine und das Docker-SDK.
+- **Der Dialog der KI-Einstellungen lehnt eine Serveradresse mit Benutzername oder Passwort darin ab**, wie es die
+  Anmeldung und `llmcf ditto login` schon taten (dieselbe Adressregel aus `AISettingsChange`): Vorher wurde eine
+  solche Adresse (oder eine mit Leerzeichen oder Backslash, die Parser als zwei verschiedene Hosts lesen können) so,
+  wie sie eingegeben war, in die `config.yml` gespeichert.
+- **Ein Community-Rezept, das du in der GUI baust, wird beim Bauen geprüft, wie über MCP**: Der Knopf **Build** im
+  Community Hub und **Start Build** im Builder-Tab gehen über `BuildService.installed_recipe` und
+  `BuildService.start_recipe`, den Weg, den `start_recipe_build` nutzt. Ein Rezept, das der Community-Index
+  zurückgezogen hat, nachdem die Liste des Hubs angezeigt wurde, oder eines, das sich nicht mehr lesen lässt, wird
+  beim Klick und noch einmal bei Start Build abgelehnt; vorher stand nur der Build-Knopf im Weg, den die Liste
+  deaktiviert hatte, und die GUI las die `recipe.yml` selbst. Ein Build, der alle Werte des Rezepts behält, legt
+  jetzt seinen Kalibrierungsdatensatz fest: Eine andere Datei als die, deren sha256 das Rezept nennt, wird abgelehnt,
+  und die Build-Engine prüft die Kopie, die sie nutzt. Ein Rezept, das sich geändert hat, seit es das Formular
+  gefüllt hat, wird ebenfalls abgelehnt. Änderst du im Formular einen Wert des Rezepts, baust du weiter deine eigenen
+  Werte auf dem Commit des Rezepts, nach derselben Prüfung auf Rückzug; ebenso, wie bisher, mit einem
+  Kalibrierungsdatensatz für ein Rezept, das keinen nennt, oder ohne einen für ein Rezept, das einen nennt.
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI

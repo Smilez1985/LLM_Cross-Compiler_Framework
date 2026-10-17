@@ -2,9 +2,12 @@
 """
 LLM Cross-Compiler Framework - Build Service
 
-Typed facade over the orchestrator, the build engine and the target registry. Every entry point
-that is not the GUI's own widgets (MCP server, Ditto's tools, scripts) goes through this class, so
-requests are validated once, against the target's declared capabilities, and results have one shape.
+Typed facade over the orchestrator, the build engine and the target registry. It is the one build-submission
+path: the CLI's `build start`, the Builder tab's Start Build, the MCP server, Ditto's tools and scripts all queue a
+build through start_build (start_recipe for an installed community recipe), so requests are validated once, against
+the target's declared capabilities, and results have one shape. The person's own callers (local_paths=True) may name
+any path, choose the priority and the folder the build is saved to, and build a target without capabilities
+unchecked; AI callers may not.
 """
 
 import hashlib
@@ -80,15 +83,20 @@ class BuildServiceError(WithSteps, ValueError):
 
 
 class BuildService:
-    def __init__(self, framework):
+    def __init__(self, framework, orchestrator=None):
+        """`orchestrator`: the orchestrator to queue builds on and read them from when it is not the framework's own
+        (the CLI passes the one its command context holds; in a running framework it is the same object)."""
         self.framework = framework
+        self._own_orchestrator = orchestrator
         self.logger = get_logger("BuildService")
 
     # --- helpers ----------------------------------------------------------------------------
 
     @property
     def _orchestrator(self):
-        orch = getattr(self.framework, "orchestrator", None)
+        orch = self._own_orchestrator
+        if orch is None:
+            orch = getattr(self.framework, "orchestrator", None)
         if orch is None:
             raise BuildServiceError("The framework is not initialized (no orchestrator).", next=NOT_READY_NEXT)
         return orch
@@ -817,10 +825,9 @@ class BuildService:
 
     def installed_recipe(self, recipe_id: str):
         """(Recipe, provenance) of an installed recipe pack; BuildServiceError (unknown_id, not_supported)
-        otherwise. A revoked recipe is refused."""
-        import yaml
-        from orchestrator.Core.community_manager import CommunityManager, trust_of_folder
-        from orchestrator.schemas.recipes import Recipe
+        otherwise. A revoked recipe is refused. The only path that builds an installed recipe: the Community Hub's
+        Build button and AI callers (start_recipe_build) both come here."""
+        from orchestrator.Core.community_manager import CommunityManager, read_recipe, trust_of_folder
         cm = getattr(self.framework, "community_manager", None)
         if cm is None:
             raise BuildServiceError("The community zoo is not available here.", code="not_supported",
@@ -834,7 +841,10 @@ class BuildService:
                                          "add one with add_pack_from_index.")
         folder, prov = found
         try:
-            index = CommunityManager.read_cached_index(Path(cm.cache_dir), revocations=True)
+            # the revocations the Community Hub's list shows too: the manager's own trusted keys
+            cached = getattr(cm, "cached_index", None)
+            index = (cached(revocations=True) if callable(cached)
+                     else CommunityManager.read_cached_index(Path(cm.cache_dir), revocations=True))
         except Exception:  # noqa: BLE001 - no cached index: no revocations known
             index = None
         trust, reason = trust_of_folder(folder, index)
@@ -842,7 +852,7 @@ class BuildService:
             raise BuildServiceError(f"The recipe {prov.id} was revoked by the community index; it is not built.",
                                     code="not_supported", next="Tell the person; they remove it in the Community Hub.")
         try:
-            recipe = Recipe.model_validate(yaml.safe_load((folder / "recipe.yml").read_text(encoding="utf-8")))
+            recipe = read_recipe(folder)
         except Exception:  # noqa: BLE001 - details of a broken pack are not shown
             raise BuildServiceError(f"The installed recipe {prov.id} cannot be read.", code="not_supported",
                                     next="Tell the person; list_packs with verify true checks the installed "
@@ -896,9 +906,11 @@ class BuildService:
 
     def start_recipe(self, recipe_id: str, *, dataset_path: Optional[str] = None, use_gpu: bool = False,
                      owner: str = "", local_paths: bool = False, disk_reservation: str = "",
-                     expect: Optional[Dict[str, Any]] = None) -> BuildHandle:
-        """Builds an installed recipe exactly as pinned, through start_build. `expect`: the request values the
-        person was shown (model, revision, target, format, board, quantization); a recipe changed since is refused."""
+                     expect: Optional[Dict[str, Any]] = None, **build_options: Any) -> BuildHandle:
+        """Builds an installed recipe exactly as pinned, through start_build: the use-time revocation check, the
+        calibration-dataset pin. `expect`: the request values the person was shown (model, revision, target, format,
+        board, quantization, recipe_sha256); a recipe changed since is refused. `build_options`: start_build's
+        optimization, priority, output_dir, parallel_builds and description (the Builder tab's)."""
         request, recipe, _prov = self.recipe_request(recipe_id, dataset_path, use_gpu)
         validated, _ = self._validated(request, local_paths)
         if expect is not None:
@@ -916,7 +928,7 @@ class BuildService:
         # with exactly the pinned sha256), so a file swapped after this check is never used
         named = recipe.options.dataset
         return self.start_build(request, local_paths=local_paths, owner=owner, disk_reservation=disk_reservation,
-                                dataset_sha256=named.sha256 if named is not None else None)
+                                dataset_sha256=named.sha256 if named is not None else None, **build_options)
 
     # --- identical builds (DECISIONS, eighth round, N11) -------------------------------------------------------
 
@@ -977,9 +989,19 @@ class BuildService:
 
     def _validated(self, request: BuildRequestIn, local_paths: bool) -> Tuple[BuildRequestIn, Optional[LocalInputs]]:
         target = self.resolve_target(request.target)
-        caps = self.capabilities(target)
-        # Canonical spellings, the board the scripts use when none is given, the board's default type.
-        fmt, board, quant = caps.normalize(request.format, request.board, request.quantization)
+        caps = self._targets().get_capabilities(target) if local_paths else self.capabilities(target)
+        if caps is not None:
+            # Canonical spellings, the board the scripts use when none is given, the board's default type.
+            fmt, board, quant = caps.normalize(request.format, request.board, request.quantization)
+        else:
+            # A person's own target without a capabilities block (a module the wizard wrote): built unchecked, as the
+            # CLI and the Builder tab always did; the board lower-cased as the module scripts read it.
+            fmt, quant = str(request.format).strip().lower(), request.quantization
+            board = (request.board or "").strip().lower() or None
+            if fmt == ModelFormat.HUGGINGFACE.value or fmt not in {f.value for f in ModelFormat}:
+                raise BuildServiceError(f"Unknown format '{request.format}'.", code="invalid_value", field="format",
+                                        next="Use one of: " + ", ".join(f.value for f in ModelFormat
+                                                                        if f is not ModelFormat.HUGGINGFACE) + ".")
         inputs = None
         if not local_paths:
             request, inputs = self._confined(request)
@@ -993,11 +1015,14 @@ class BuildService:
                                         next="Name an existing dataset file as <label>:<relative path>.",
                                         field="dataset_path")
             dataset = str(path.resolve())
-        problems = caps.check_request(fmt, board, quant, dataset=bool(dataset), imatrix=request.use_imatrix)
+        problems = caps.check_request(fmt, board, quant, dataset=bool(dataset),
+                                      imatrix=request.use_imatrix) if caps is not None else []
         if problems:
-            raise BuildServiceError(" ".join(problems), code="not_supported",
-                                    next=f"Call get_target_capabilities for {target}, then choose a supported "
-                                         "combination.")
+            error = BuildServiceError(" ".join(problems), code="not_supported",
+                                      next=f"Call get_target_capabilities for {target}, then choose a supported "
+                                           "combination.")
+            error.problems = list(problems)  # one by one, as the CLI and the Builder tab show them
+            raise error
         if local_paths or getattr(inputs, "model", None) is not None:
             model = self._check_model_source(request.model, None if local_paths else inputs.model.ref)
         else:
@@ -1009,33 +1034,71 @@ class BuildService:
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model}), inputs
 
+    @staticmethod
+    def request_in(**values: Any) -> BuildRequestIn:
+        """The build request of a person's own window (the CLI's options, the Builder tab's form) from its values;
+        BuildServiceError (invalid_value, the first field) in plain words when a value breaks the request's limits,
+        e.g. no model at all."""
+        from pydantic import ValidationError
+        try:
+            return BuildRequestIn(**values)
+        except ValidationError as e:
+            errors = e.errors()
+            field = str(errors[0]["loc"][0]) if errors and errors[0].get("loc") else ""
+            text = "; ".join(f"{'.'.join(str(p) for p in err.get('loc', ())) or 'request'}: {err.get('msg')}"
+                             for err in errors)
+            raise BuildServiceError(f"The build request is not valid ({text}).", code="invalid_value", field=field,
+                                    next="Correct that value and start the build again.") from None
+
+    @staticmethod
+    def _priority(priority: Any) -> PriorityLevel:
+        if isinstance(priority, PriorityLevel):
+            return priority
+        try:
+            return PriorityLevel[str(priority or "normal").strip().upper()]
+        except KeyError:
+            raise BuildServiceError(f"Unknown priority '{priority}'.", code="invalid_value", field="priority",
+                                    next="Use one of: low, normal, high, urgent, critical.") from None
+
     def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "",
                     optimization: str = "balanced", disk_reservation: str = "",
-                    dataset_sha256: Optional[str] = None) -> BuildHandle:
-        """Validates and queues a build. `owner` is the tool caller that starts it (ToolContext.owner);
-        `disk_reservation` the reservation an AI caller's accepted build took (released when the request ends);
-        `dataset_sha256` the sha256 the calibration dataset must have (a recipe's pin), checked by the build engine
-        on the copy it uses."""
+                    dataset_sha256: Optional[str] = None, priority: Any = "normal",
+                    output_dir: Optional[str] = None, parallel_builds: bool = False,
+                    description: str = "Build service request") -> BuildHandle:
+        """Validates and queues a build: the one build-submission path of the CLI, the GUI and AI callers. `owner` is
+        the tool caller that starts it (ToolContext.owner; empty for the person's own CLI and GUI, whose builds the
+        queue limit for tool callers never refuses); `disk_reservation` the reservation an AI caller's accepted build
+        took (released when the request ends); `dataset_sha256` the sha256 the calibration dataset must have (a
+        recipe's pin), checked by the build engine on the copy it uses. Only the person's own callers (`local_paths`)
+        set `output_dir`, the folder the finished build is saved to (default: the output folder), and a `priority`
+        other than normal (a PriorityLevel or its name); `parallel_builds` and `description` as their windows set
+        them."""
         try:
             level = OptimizationLevel(str(optimization or "balanced").lower())
         except ValueError:
             raise BuildServiceError(f"Unknown optimization level '{optimization}'.", code="invalid_value",
                                     next="Use one of: fast, balanced, size, speed, aggressive.",
                                     field="optimization") from None
+        chosen_priority = self._priority(priority)
+        if not local_paths and (output_dir is not None or chosen_priority is not PriorityLevel.NORMAL):
+            raise BuildServiceError("Only the person's own windows choose the priority and the folder a build is "
+                                    "saved to.", code="not_supported",
+                                    next="Leave them out; the build goes to the output folder.",
+                                    field="output_dir" if output_dir is not None else "priority")
         req, inputs = self._validated(request, local_paths)
         build_request = BuildRequest(
             request_id="",
             workflow_type=WorkflowType.SIMPLE_CONVERSION,
-            priority=PriorityLevel.NORMAL,
+            priority=chosen_priority,
             models=[req.model],
             model_revision=req.revision,
             targets=[req.target],
             target_formats=[ModelFormat(req.format)],
             optimization_level=level,
             quantization_options=[req.quantization] if req.quantization else [],
-            parallel_builds=False,
-            output_base_dir=str(self._output_dir()),
-            description="Build service request",
+            parallel_builds=bool(parallel_builds),
+            output_base_dir=str(output_dir) if output_dir is not None else str(self._output_dir()),
+            description=description,
             use_gpu=req.use_gpu,
             use_imatrix=req.use_imatrix,
             dataset_path=req.dataset_path,
@@ -1057,6 +1120,12 @@ class BuildService:
                                          "one of your builds, then call start_build again.") from None
         self.logger.info(f"Build request {request_id} submitted ({req.model} -> {req.target}/{req.format}/{req.quantization})")
         return BuildHandle(request_id=request_id, status=OrchestrationStatus.QUEUED.value)
+
+    def request_state(self, request_id: str) -> Optional[WorkflowState]:
+        """The orchestrator's own state of a request this process queued (WorkflowState: the finished builds' real
+        paths, the pending healing proposal itself), None when it does not know the request. For the person's own
+        windows only (the CLI's follow loop); AI callers read get_status, which labels paths and redacts texts."""
+        return self.framework.run_coroutine(self._orchestrator.get_workflow_status(request_id), timeout=30)
 
     def cancel(self, request_id: str) -> BuildStatusOut:
         self._state(request_id)

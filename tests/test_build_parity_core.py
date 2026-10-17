@@ -295,3 +295,451 @@ class TestDittoForOneRun:
         with pytest.raises(ValueError, match="base_image_reason"):
             ditto.save_module({"module_name": "B", "base_os": f"registry.example/vendor/img@{DIGEST}"},
                               tmp_path / "targets")
+
+
+# --- one build-submission path (consolidation c3-build-path) ------------------------------------------------------
+# Characterization tests of what the CLI's `build start`, the Builder tab's Start Build and BuildService.start_build
+# submit. They were written before the CLI and the GUI were moved onto BuildService.start_build and pin what each
+# channel sent to the orchestrator then.
+
+HF_MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct"
+from test_review_capabilities_paths import gui_messages  # noqa: E402,F401 - the Builder tab's recorded message boxes
+
+
+@pytest.fixture
+def cli_harness(booted_framework, tmp_path, monkeypatch):
+    from test_review_capabilities_paths import make_cli
+    return make_cli(booted_framework, tmp_path, monkeypatch)
+
+
+class TestCliSubmission:
+
+    def test_priority_optimization_and_the_request_fields(self, cli_harness):
+        from orchestrator.Core.build_formats import OptimizationLevel
+        from orchestrator.Core.orchestrator import PriorityLevel
+        result = cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "--priority", "high",
+                                    "--optimization", "size", "--gpu")
+        assert result.code == 0, result.out
+        (req,) = cli_harness.submitted
+        assert (req.priority, req.optimization_level) == (PriorityLevel.HIGH, OptimizationLevel.SIZE)
+        assert req.models == [HF_MODEL] and req.targets == ["Rockchip"] and req.use_gpu is True
+        assert req.parallel_builds is False and req.owner == "", "the person's own build: no owner, no queue limit"
+        assert req.description == f"CLI build: {HF_MODEL} -> Rockchip (gguf)"
+        assert (req.model_revision, req.dataset_sha256, req.max_context_length) == (None, None, None)
+        assert req.disk_reservation == ""
+
+    @pytest.mark.parametrize("level, priority", [("low", "LOW"), ("normal", "NORMAL"), ("urgent", "URGENT"),
+                                                 ("critical", "CRITICAL")])
+    def test_every_priority_maps_to_its_level(self, cli_harness, level, priority):
+        from orchestrator.Core.orchestrator import PriorityLevel
+        assert cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "--priority", level).code == 0
+        assert cli_harness.submitted[-1].priority == PriorityLevel[priority]
+
+    def test_defaults_are_normal_and_balanced(self, cli_harness):
+        from orchestrator.Core.build_formats import OptimizationLevel
+        from orchestrator.Core.orchestrator import PriorityLevel
+        assert cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip").code == 0
+        (req,) = cli_harness.submitted
+        assert (req.priority, req.optimization_level) == (PriorityLevel.NORMAL, OptimizationLevel.BALANCED)
+
+    @pytest.mark.parametrize("answer, where", [("-", "build"), ("chosen", "chosen")])
+    def test_the_destination_prompt_at_a_terminal(self, cli_harness, monkeypatch, answer, where):
+        from orchestrator import cli as cli_module
+        from orchestrator.Core.artifact_output import build_folder
+        chosen = cli_harness.work / "chosen"
+        asked = []
+        monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+        monkeypatch.setattr(cli_module.click, "prompt", lambda text, **k: asked.append(k.get("default")) or
+                            (answer if answer == "-" else str(chosen)))
+        assert cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip").code == 0
+        out = Path(cli_harness.submitted[0].output_base_dir)
+        assert out == (build_folder(cli_harness.framework) if where == "build" else chosen.resolve())
+        assert len(asked) == 1, "asked once, with the output folder as the default"
+
+    def test_the_follow_loop_asks_about_a_healing_proposal_then_ends(self, booted_framework, tmp_path,
+                                                                     monkeypatch):
+        from orchestrator import cli as cli_module
+        from orchestrator.Core.orchestrator import OrchestrationStatus
+        from test_cli_builds import invoke_plain, quiet_console
+        from test_review_capabilities_paths import CliOrchestrator, make_cli
+        make_cli(booted_framework, tmp_path, monkeypatch)
+        proposal = SimpleNamespace(summary="s", root_cause="c", fix_command="f", is_ai_generated=False,
+                                   strategy=SimpleNamespace(value="retry"))
+
+        class Healing(CliOrchestrator):
+            polls = 0
+
+            async def get_workflow_status(self, request_id):
+                state = self._workflows.get(request_id)
+                Healing.polls += 1
+                if Healing.polls == 1:
+                    state.status, state.healing_proposal = OrchestrationStatus.AWAITING_APPROVAL, proposal
+                else:
+                    state.status = OrchestrationStatus.COMPLETED
+                return state
+
+        orch = Healing()
+        decided = []
+        monkeypatch.setattr(cli_module, "_pause", lambda seconds: None)
+        monkeypatch.setattr(cli_module, "_resolve_healing_interactively",
+                            lambda orchestrator, rid, shown: decided.append((orchestrator, rid, shown)))
+
+        class Ctx(cli_module.FrameworkContext):
+            def require_framework(self):
+                self.framework_manager = booted_framework
+                self.orchestrator = orch
+                return self
+
+        printed = quiet_console(monkeypatch)
+        result = invoke_plain("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "--follow", ctx=Ctx())
+        assert result.code == 0, printed.getvalue() + result.out
+        (rid,) = orch._workflows
+        assert decided == [(orch, rid, proposal)]
+        assert "Status: awaiting_approval" in printed.getvalue() and "Status: completed" in printed.getvalue()
+
+
+@pytest.mark.usefixtures("qapp", "gui_messages")
+class TestGuiSubmission:
+
+    @pytest.fixture
+    def tab(self, booted_framework):
+        from test_review_capabilities_paths import make_tab
+        tab = make_tab(booted_framework)
+        tab.model_input.setEditText(HF_MODEL)
+        yield tab
+        tab._build_timer.stop()
+
+    def test_the_request_fields(self, tab):
+        from orchestrator.Core.artifact_output import build_folder
+        from orchestrator.Core.build_formats import OptimizationLevel
+        from orchestrator.Core.orchestrator import PriorityLevel
+        from test_review_capabilities_paths import select, submit
+        select(tab.priority_combo, "HIGH")
+        tab.opt_combo.setCurrentText("SIZE")
+        req = submit(tab)
+        assert req is not None
+        assert (req.priority, req.optimization_level) == (PriorityLevel.HIGH, OptimizationLevel.SIZE)
+        assert req.parallel_builds is True and req.description == "Builder Tab Job" and req.owner == ""
+        assert Path(req.output_base_dir) == build_folder(tab.framework), "it waits in the build folder"
+        assert (req.model_revision, req.max_context_length, req.dataset_sha256) == (None, None, None)
+
+    @staticmethod
+    def recipe(tmp_path, **options):
+        """(an installed-looking recipe with a calibration dataset, that dataset file)."""
+        import hashlib
+
+        from orchestrator.schemas.recipes import Recipe
+        from test_recipes import recipe_data
+        dataset = tmp_path / "calib.txt"
+        dataset.write_text("calibration text\n", encoding="utf-8")
+        data = recipe_data()
+        data.update(target={"id": "Rockchip", "pack_sha256": "a" * 64}, format="gguf", board="rk3588",
+                    quantization="Q4_K_M")
+        data["options"].update(use_imatrix=True, max_context_length=4096,
+                               dataset={"name": "calib.txt",
+                                        "sha256": hashlib.sha256(dataset.read_bytes()).hexdigest()}, **options)
+        return Recipe.model_validate(data), dataset
+
+    @staticmethod
+    def installed(monkeypatch, tab, recipe, revoked=False):
+        """The recipe as BuildService.installed_recipe finds it (installed, or revoked by the community index)."""
+        from orchestrator.Core.build_service import BuildServiceError
+        calls = []
+
+        def installed_recipe(recipe_id):
+            calls.append(recipe_id)
+            if revoked:
+                raise BuildServiceError(f"The recipe {recipe_id} was revoked by the community index; it is not built.",
+                                        code="not_supported")
+            return recipe, SimpleNamespace(id=recipe.id)
+
+        monkeypatch.setattr(tab.framework.build_service, "installed_recipe", installed_recipe)
+        return calls
+
+    def test_a_recipe_pins_the_commit_the_context_length_and_the_dataset(self, tab, tmp_path, monkeypatch):
+        # Changed on purpose with c3-build-path (CHANGELOG Security): the GUI pinned no calibration dataset; a recipe
+        # build now goes through BuildService.start_recipe, which pins the recipe's dataset sha256.
+        from test_review_capabilities_paths import submit
+        recipe, dataset = self.recipe(tmp_path)
+        calls = self.installed(monkeypatch, tab, recipe)
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(dataset)
+        req = submit(tab)
+        assert req is not None and req.model_revision == recipe.model.revision and calls == [recipe.id]
+        assert req.max_context_length == 4096 and req.dataset_path == str(dataset.resolve())
+        assert req.dataset_sha256 == recipe.options.dataset.sha256
+        assert req.parallel_builds is True and req.description == "Builder Tab Job" and req.owner == ""
+
+    def test_a_recipe_revoked_after_it_filled_the_form_is_not_built(self, tab, tmp_path, monkeypatch,
+                                                                   gui_messages):
+        from test_review_capabilities_paths import submit
+        recipe, dataset = self.recipe(tmp_path)
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(dataset)
+        self.installed(monkeypatch, tab, recipe, revoked=True)
+        assert submit(tab) is None
+        assert gui_messages[-1][0] == "warning" and "revoked" in gui_messages[-1][1]
+        tab.quant_combo.setEditText("Q8_0")  # the person's own values at the recipe's commit: still refused
+        assert submit(tab) is None and "revoked" in gui_messages[-1][1]
+
+    def test_another_calibration_file_than_the_recipe_pins_is_refused(self, tab, tmp_path, monkeypatch,
+                                                                    gui_messages):
+        from test_review_capabilities_paths import submit
+        recipe, _dataset = self.recipe(tmp_path)
+        self.installed(monkeypatch, tab, recipe)
+        other = tmp_path / "other.txt"
+        other.write_text("other text\n", encoding="utf-8")
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(other)
+        assert submit(tab) is None
+        assert "not the file the recipe" in gui_messages[-1][1]
+
+    def test_a_changed_form_builds_the_persons_values_at_the_recipes_commit(self, tab, tmp_path, monkeypatch):
+        from test_review_capabilities_paths import submit
+        recipe, dataset = self.recipe(tmp_path)
+        calls = self.installed(monkeypatch, tab, recipe)
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(dataset)
+        tab.quant_combo.setEditText("Q8_0")
+        req = submit(tab)
+        assert req is not None and calls == [recipe.id], "the use-time check ran"
+        assert req.quantization_options == ["Q8_0"] and req.model_revision == recipe.model.revision
+        assert req.dataset_sha256 is None, "not the recipe any more: no recipe pin"
+
+    # The calibration dataset is one of the form's values too (review of c3-build-path): the Builder always built a
+    # recipe with a dataset the person chose for a recipe that names none, and without one for a recipe that names
+    # one (it only logged which file the recipe was calibrated with). Neither form is the recipe as pinned, so both
+    # build the person's values at the recipe's commit after the revocation check, never refused in a tool's words.
+
+    def test_a_dataset_the_recipe_does_not_name_builds_the_persons_values(self, tab, tmp_path, monkeypatch,
+                                                                        gui_messages):
+        from test_review_capabilities_paths import submit
+        named, dataset = self.recipe(tmp_path)
+        recipe = named.model_copy(update={"options": named.options.model_copy(update={"dataset": None})})
+        calls = self.installed(monkeypatch, tab, recipe)
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(dataset)
+        req = submit(tab)
+        assert req is not None, gui_messages
+        assert calls == [recipe.id], "the use-time check ran"
+        assert req.dataset_path == str(dataset.resolve()) and req.dataset_sha256 is None
+        assert req.model_revision == recipe.model.revision and req.max_context_length == 4096
+
+    def test_no_dataset_for_a_recipe_that_names_one_builds_the_persons_values(self, tab, tmp_path, monkeypatch,
+                                                                            gui_messages):
+        from test_review_capabilities_paths import submit
+        recipe, _dataset = self.recipe(tmp_path)
+        calls = self.installed(monkeypatch, tab, recipe)
+        tab.apply_recipe(recipe)
+        assert tab.dataset_path is None
+        req = submit(tab)
+        assert req is not None, gui_messages
+        assert calls == [recipe.id], "the use-time check ran"
+        assert (req.dataset_path, req.dataset_sha256) == (None, None)
+        assert req.model_revision == recipe.model.revision and req.max_context_length == 4096
+
+
+class TestServiceSubmission:
+
+    @pytest.fixture
+    def service(self, booted_framework):
+        from orchestrator.Core.build_service import BuildService
+        from test_foundation import FakeOrchestrator
+        booted_framework.orchestrator = FakeOrchestrator()
+        return BuildService(booted_framework)
+
+    def request(self, **values):
+        from orchestrator.schemas.build import BuildRequestIn
+        return BuildRequestIn(**{"model": HF_MODEL, "target": "Rockchip", "format": "gguf", **values})
+
+    def test_the_request_fields(self, service, tmp_path):
+        from orchestrator.Core.orchestrator import PriorityLevel
+        dataset = tmp_path / "calib.txt"
+        dataset.write_text("x", encoding="utf-8")
+        service.start_build(self.request(dataset_path=str(dataset), use_imatrix=True), local_paths=True,
+                            owner="mcp#a", dataset_sha256="d" * 64)
+        (req,) = service.framework.orchestrator.submitted
+        assert req.priority == PriorityLevel.NORMAL and req.parallel_builds is False
+        assert req.description == "Build service request" and req.owner == "mcp#a"
+        assert Path(req.output_base_dir) == service.output_folder()
+        assert req.dataset_sha256 == "d" * 64 and req.dataset_path == str(dataset.resolve())
+
+    def test_a_dataset_pin_without_a_dataset_is_dropped(self, service):
+        service.start_build(self.request(), local_paths=True, dataset_sha256="d" * 64)
+        assert service.framework.orchestrator.submitted[0].dataset_sha256 is None
+
+    def test_a_disk_reservation_hands_the_ledger_to_the_orchestrator(self, service, monkeypatch):
+        ledger = object()
+        monkeypatch.setattr(service, "disk_ledger", lambda: ledger)
+        service.start_build(self.request(), disk_reservation="res-1")
+        assert service.framework.orchestrator.submitted[0].disk_reservation == "res-1"
+        assert service.framework.orchestrator.disk_ledger is ledger
+
+    def test_a_refused_request_submits_nothing(self, service):
+        from orchestrator.Core.build_service import BuildServiceError
+        with pytest.raises(BuildServiceError) as raised:
+            service.start_build(self.request(model="not a repo"), local_paths=True)
+        assert raised.value.code == "invalid_value" and raised.value.field == "model"
+        assert service.framework.orchestrator.submitted == []
+
+    # --- what the one path added for the person's own callers -----------------------------------------------
+
+    def test_the_persons_priority_folder_and_description(self, service, tmp_path):
+        from orchestrator.Core.orchestrator import PriorityLevel
+        service.start_build(self.request(), local_paths=True, priority="urgent", output_dir=str(tmp_path / "out"),
+                            parallel_builds=True, description="Builder Tab Job")
+        (req,) = service.framework.orchestrator.submitted
+        assert (req.priority, req.output_base_dir, req.parallel_builds, req.description) == (
+            PriorityLevel.URGENT, str(tmp_path / "out"), True, "Builder Tab Job")
+
+    @pytest.mark.parametrize("option", [{"output_dir": "/anywhere"}, {"priority": "critical"}])
+    def test_an_ai_caller_never_chooses_the_folder_or_the_priority(self, service, option):
+        from orchestrator.Core.build_service import BuildServiceError
+        with pytest.raises(BuildServiceError) as raised:
+            service.start_build(self.request(), owner="mcp#a", **option)
+        assert raised.value.code == "not_supported" and raised.value.field == next(iter(option))
+        assert service.framework.orchestrator.submitted == []
+
+    def test_an_unknown_priority_is_refused(self, service):
+        from orchestrator.Core.build_service import BuildServiceError
+        with pytest.raises(BuildServiceError, match="Unknown priority"):
+            service.start_build(self.request(), local_paths=True, priority="asap")
+
+    def test_a_target_without_capabilities_is_built_unchecked_only_for_the_person(self, make_framework, tmp_path):
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        from test_foundation import FakeOrchestrator
+        from test_review_capabilities_paths import framework_with_targets
+        fm = framework_with_targets(make_framework, tmp_path / "targets")
+        fm.orchestrator = FakeOrchestrator()
+        service = BuildService(fm)
+        service.start_build(self.request(target="myjetson", board=" Orin-NX ", quantization="Custom_Q"),
+                            local_paths=True)
+        (req,) = fm.orchestrator.submitted
+        assert (req.targets, req.target_board, req.quantization_options) == (["MyJetson"], "orin-nx", ["Custom_Q"])
+        with pytest.raises(BuildServiceError, match="declares no capabilities"):
+            service.start_build(self.request(target="MyJetson"))
+        with pytest.raises(BuildServiceError, match="Unknown format") as raised:
+            service.start_build(self.request(target="MyJetson", format="hf"), local_paths=True)
+        assert raised.value.field == "format" and len(fm.orchestrator.submitted) == 1
+
+    def test_the_earlier_build_check_covers_a_target_without_capabilities_for_the_person(self, make_framework,
+                                                                                       tmp_path):
+        """A consequence of the one check (CHANGELOG Changed): the Builder's earlier-build check (local_paths) runs
+        for a target without capabilities too, where the service used to refuse to compare; AI callers still get
+        the refusal."""
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        from test_foundation import FakeOrchestrator
+        from test_review_capabilities_paths import framework_with_targets
+        fm = framework_with_targets(make_framework, tmp_path / "targets")
+        fm.orchestrator = FakeOrchestrator()
+        service = BuildService(fm)
+        assert service.earlier_builds(self.request(target="MyJetson"), local_paths=True) == []
+        with pytest.raises(BuildServiceError, match="declares no capabilities"):
+            service.earlier_builds(self.request(target="MyJetson"))
+
+    def test_capability_problems_are_kept_one_by_one(self, service):
+        from orchestrator.Core.build_service import BuildServiceError
+        with pytest.raises(BuildServiceError) as raised:
+            service.start_build(self.request(format="rknn", board="rk3588", quantization="int8"), local_paths=True)
+        assert raised.value.problems and " ".join(raised.value.problems) == str(raised.value)
+
+    def test_a_request_without_a_model_is_refused_in_plain_words(self):
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        with pytest.raises(BuildServiceError) as raised:
+            BuildService.request_in(model="", target="Rockchip", format="gguf")
+        assert raised.value.code == "invalid_value" and raised.value.field == "model"
+        assert "validation error" not in str(raised.value)
+
+    def test_request_state_is_the_orchestrators_own(self, booted_framework):
+        from orchestrator.Core.build_service import BuildService
+        from test_review_capabilities_paths import CliOrchestrator
+        booted_framework.orchestrator = CliOrchestrator()
+        service = BuildService(booted_framework)
+        rid = service.start_build(self.request(), local_paths=True).request_id
+        assert service.request_state(rid) is booted_framework.orchestrator._workflows[rid]
+        assert service.request_state("req_unknown") is None
+
+    def test_a_service_bound_to_another_orchestrator_uses_it(self, service):
+        from orchestrator.Core.build_service import BuildService
+        from test_foundation import FakeOrchestrator
+        own = FakeOrchestrator()
+        BuildService(service.framework, orchestrator=own).start_build(self.request(), local_paths=True)
+        assert len(own.submitted) == 1 and service.framework.orchestrator.submitted == []
+
+
+class TestOnePath:
+    """The CLI and the Builder tab queue builds only through BuildService.start_build (and its own checks)."""
+
+    def test_no_window_or_command_submits_to_the_orchestrator_itself(self):
+        import ast
+        offenders = []
+        for path in [REPO_ROOT / "orchestrator" / "cli.py", *sorted((REPO_ROOT / "orchestrator" / "gui").rglob("*.py")),
+                     *sorted((REPO_ROOT / "orchestrator" / "tools").rglob("*.py"))]:
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.Attribute) and node.attr == "submit_build_request":
+                    offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")
+        assert offenders == []
+
+    def test_the_cli_keeps_model_format_from_string(self):
+        """`build start` no longer needs it (the service normalizes the format), but a public helper is never removed
+        without the maintainer's word (review of c3-build-path): it stays, with its behaviour."""
+        from orchestrator import cli
+        from orchestrator.Core.build_formats import ModelFormat
+        assert cli.model_format_from_string("GGUF") is ModelFormat.GGUF
+        assert cli.model_format_from_string("rkllm") is ModelFormat.RKLLM
+        assert cli.model_format_from_string("Rknn") is ModelFormat.RKNN
+        assert cli.model_format_from_string("no-such-format") is ModelFormat.GGUF, "unknown names fall back to GGUF"
+
+    def test_recipe_yml_has_one_reader(self):
+        """community_manager.read_recipe is the only parser of recipe.yml (the install check, the listings and
+        BuildService.installed_recipe, which the Community Hub's Build button and start_recipe_build use)."""
+        import ast
+        parsers = []
+        for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "model_validate" and isinstance(node.func.value, ast.Name)
+                        and node.func.value.id == "Recipe"):
+                    parsers.append(path.relative_to(REPO_ROOT).as_posix())
+        assert parsers == ["orchestrator/Core/community_manager.py"]
+
+    def test_the_cli_starts_through_the_service(self, cli_harness, monkeypatch):
+        from orchestrator.Core.build_service import BuildService
+        seen = []
+        original = BuildService.start_build
+
+        def start_build(service, request, **options):
+            seen.append(options)
+            return original(service, request, **options)
+
+        monkeypatch.setattr(BuildService, "start_build", start_build)
+        assert cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "--priority", "low").code == 0
+        assert seen and seen[0]["local_paths"] is True and seen[0]["priority"] == "low"
+        assert seen[0].get("owner", "") == "" and len(cli_harness.submitted) == 1
+
+    def test_the_cli_reports_a_refusal_of_the_service_and_submits_nothing(self, cli_harness):
+        result = cli_harness.invoke("build", "start", "-m", "not a repo", "-t", "Rockchip")
+        assert result.code == 2 and "neither an existing local model nor a Hugging Face repo id" in result.out
+        assert cli_harness.submitted == []
+
+    @pytest.mark.usefixtures("qapp")
+    def test_the_builder_tab_starts_through_the_service_and_shows_a_refusal(self, booted_framework, gui_messages,
+                                                                           monkeypatch):
+        from orchestrator.Core.build_service import BuildService
+        from test_review_capabilities_paths import make_tab, submit
+        tab = make_tab(booted_framework)
+        try:
+            seen = []
+            original = BuildService.start_build
+            monkeypatch.setattr(BuildService, "start_build",
+                                lambda service, request, **o: seen.append(o) or original(service, request, **o))
+            assert submit(tab) is not None
+            assert seen[0]["local_paths"] is True and seen[0]["parallel_builds"] is True
+            tab.model_input.setEditText("")
+            assert submit(tab) is None, "no model: nothing is queued"
+            assert gui_messages[-1][0] == "warning" and "model" in gui_messages[-1][1]
+            tab.model_input.setEditText("/no/such/model.gguf")
+            assert submit(tab) is None
+            assert "neither an existing local model" in gui_messages[-1][1]
+        finally:
+            tab._build_timer.stop()
