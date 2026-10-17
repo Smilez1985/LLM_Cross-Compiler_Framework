@@ -809,10 +809,9 @@ class BuildService:
 
     def installed_recipe(self, recipe_id: str):
         """(Recipe, provenance) of an installed recipe pack; BuildServiceError (unknown_id, not_supported)
-        otherwise. A revoked recipe is refused."""
-        import yaml
-        from orchestrator.Core.community_manager import CommunityManager, trust_of_folder
-        from orchestrator.schemas.recipes import Recipe
+        otherwise. A revoked recipe is refused. The only path that builds an installed recipe: the Community Hub's
+        Build button and AI callers (start_recipe_build) both come here."""
+        from orchestrator.Core.community_manager import CommunityManager, read_recipe, trust_of_folder
         cm = getattr(self.framework, "community_manager", None)
         if cm is None:
             raise BuildServiceError("The community zoo is not available here.", code="not_supported",
@@ -834,7 +833,7 @@ class BuildService:
             raise BuildServiceError(f"The recipe {prov.id} was revoked by the community index; it is not built.",
                                     code="not_supported", next="Tell the person; they remove it in the Community Hub.")
         try:
-            recipe = Recipe.model_validate(yaml.safe_load((folder / "recipe.yml").read_text(encoding="utf-8")))
+            recipe = read_recipe(folder)
         except Exception:  # noqa: BLE001 - details of a broken pack are not shown
             raise BuildServiceError(f"The installed recipe {prov.id} cannot be read.", code="not_supported",
                                     next="Tell the person; list_packs with verify true checks the installed "

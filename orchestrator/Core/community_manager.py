@@ -392,6 +392,15 @@ def read_provenance(folder: Path) -> Optional[Provenance]:
         return None
 
 
+def read_recipe(folder: Path):
+    """The one reader of a recipe pack's recipe.yml (installed, or staged for its install check): the Recipe.
+    Raises OSError (FileNotFoundError when it is missing), yaml.YAMLError or pydantic.ValidationError; each caller
+    says what that means for it (the install check names it, the listings show no values, BuildService.installed_recipe
+    refuses the build)."""
+    from orchestrator.schemas.recipes import Recipe
+    return Recipe.model_validate(yaml.safe_load((Path(folder) / RECIPE_FILE).read_text(encoding="utf-8")))
+
+
 def trust_of_folder(folder: Path, index: Optional[CommunityIndex]) -> Tuple[Optional[TrustLevel], str]:
     """(trust, reason) of an installed pack folder; (None, "") for a folder without provenance (shipped or own)."""
     prov = read_provenance(folder)
@@ -858,10 +867,9 @@ class CommunityManager:
                      and p.is_dir() and not p.is_symlink()), None)
 
     def _check_recipe(self, root: Path, manifest: PackManifest, notes: List[str]) -> List[str]:
-        from orchestrator.schemas.recipes import Recipe
         from orchestrator.schemas.targets import TargetCapabilities
         try:
-            recipe = Recipe.model_validate(yaml.safe_load((root / RECIPE_FILE).read_text(encoding="utf-8")))
+            recipe = read_recipe(root)
         except FileNotFoundError:
             return [f"{RECIPE_FILE}: missing"]
         except (yaml.YAMLError, ValidationError) as e:
