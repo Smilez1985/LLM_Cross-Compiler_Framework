@@ -16,6 +16,9 @@ paramiko = pytest.importorskip("paramiko")
 from orchestrator.runtime.device import reasons  # noqa: E402
 from orchestrator.utils import ssh_trust  # noqa: E402
 
+from test_board_deploy import TARGET, board, manager, package, run  # noqa: E402,F401 - the fake board of the N5 tests
+from test_deployment import config  # noqa: E402,F401 - the manager fixture's configuration
+
 HOST, PORT = "192.0.2.10", 2222
 
 
@@ -291,3 +294,66 @@ def test_the_copies_call_reach_code(monkeypatch, tmp_path):
     from orchestrator.gui import host_key
     assert host_key.unreachable_text(HOST, PORT, ValueError("x"), "en") == \
         reasons.person_text(reasons.PORT_CLOSED, "en", address=HOST, port=PORT)
+
+
+# --- regression (Fixed): a dropped connection while the deploy waits for the board ----------------------------------
+
+TRANSIENT = [ConnectionResetError(errno.ECONNRESET, "Connection reset by peer"),
+             ConnectionAbortedError(errno.ECONNABORTED, "Software caused connection abort"),
+             BrokenPipeError(errno.EPIPE, "Broken pipe"), EOFError()]
+
+
+@pytest.mark.parametrize("error", TRANSIENT, ids=lambda e: type(e).__name__)
+def test_while_waiting_a_dropped_connection_means_not_back_yet(error):
+    from orchestrator.remote.reasons import reach_code
+    assert reach_code(error, while_waiting=True) == reasons.HOST_DOWN
+    assert reasons.classify(error) is None, "outside the wait it is still none of the four by itself"
+
+
+def test_while_waiting_changes_nothing_else():
+    from orchestrator.remote.reasons import reach_code
+    for error, code in ERRORS:
+        if not any(type(error) is type(t) for t in TRANSIENT):
+            assert reach_code(error, while_waiting=True) == reach_code(error), error
+
+
+@pytest.mark.parametrize("error", TRANSIENT, ids=lambda e: type(e).__name__)
+def test_the_deploy_keeps_waiting_while_the_ssh_server_restarts(error, manager, board, package, monkeypatch):
+    """After a network drop the deploy waits for the board (N5). When the board is back, its SSH server may still be
+    starting: the key exchange ends with a reset or EOF. classify() gave None for these, the login reported code "",
+    and wait_for_board gave up at once instead of waiting on."""
+    board.drop_after = 600_000
+    board.back_at = 30.0
+    restarting = {"left": 2}
+
+    def fetch(host, port=22, timeout=10.0):
+        board.tick()
+        if not board.online:
+            raise socket.timeout("timed out")
+        if board.logins and restarting["left"]:   # back on the network, sshd not ready yet
+            restarting["left"] -= 1
+            raise error
+        return board.key
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", fetch)
+    result, events = run(manager, package)
+    assert result.success and result.resumed == 1, result.reason
+    assert restarting["left"] == 0 and board.starts == 1
+    assert bytes(board.files[f"{TARGET}/{package.name}"]) == package.read_bytes()
+
+
+def test_a_reset_at_the_first_login_is_recorded_like_everywhere_else(manager, board, package, monkeypatch):
+    """The deploy's first contact uses the same rule as every other path: an OSError that is none of the four means the
+    board does not answer (it reported code "" with the exception's text before)."""
+    def fetch(host, port=22, timeout=10.0):
+        raise ConnectionResetError(errno.ECONNRESET, "Connection reset by peer")
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", fetch)
+    result, _events = run(manager, package)
+    assert not result.success and result.code == reasons.HOST_DOWN and "(device_host_down)" in result.reason
+
+
+def test_an_eof_at_the_first_login_is_still_no_reason_code(manager, board, package, monkeypatch):
+    def fetch(host, port=22, timeout=10.0):
+        raise EOFError()
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", fetch)
+    result, _events = run(manager, package)
+    assert not result.success and result.code == "" and "Could not read the host key" in result.reason

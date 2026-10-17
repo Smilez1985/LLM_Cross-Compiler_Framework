@@ -1667,6 +1667,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **A deploy keeps waiting while the board's SSH server starts again**: after the network dropped, the deploy waits
+  for the board (N5). When the board answered again but its SSH server was still starting, the connection opened and
+  dropped (a reset, an abort, a broken pipe or EOF in the key exchange); none of these had a reason code, so the deploy
+  gave up at once instead of waiting on. While it waits, such a drop now means "not back yet" and the wait goes on
+  (`orchestrator/remote/reasons.py`, `reach_code(..., while_waiting=True)`). The deploy's first contact also uses the
+  rule every other path uses: a connection error that is none of the four codes means the board does not answer
+  (`device_host_down`, recorded for Mojo) instead of an empty code.
 - **A board whose home folder has a long path can be deployed to**: the device runtime refused a board user's home
   folder longer than 200 characters (and its staging folder and models below 400), so a home on a deep mount point
   stopped the deployment with "not a plain absolute path". The characters are checked as before; the length is now

@@ -57,6 +57,11 @@ _DOWN_ERRNOS = {getattr(errno, name) for name in ("EHOSTUNREACH", "ENETUNREACH",
 _REFUSED_ERRNOS = {getattr(errno, name) for name in ("ECONNREFUSED", "WSAECONNREFUSED") if hasattr(errno, name)}
 _REFUSED_ERRNOS.add(10061)  # Windows: the connection was refused
 
+# What a board does while it restarts its SSH server: the TCP connection opens and drops again (a reset, an abort, a
+# broken pipe, or EOF during paramiko's key exchange). None of the four by itself; while a deploy waits for the board
+# (reach_code with while_waiting) it means the board is not back yet.
+DROPPED = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, EOFError)
+
 # What OpenSSH prints for each (its messages are English whatever the locale).
 _SSH_OUTPUT = (
     ("REMOTE HOST IDENTIFICATION HAS CHANGED", HOST_KEY_CHANGED),
@@ -109,12 +114,14 @@ def classify(error: BaseException) -> Optional[str]:
     return None
 
 
-def reach_code(error: BaseException) -> str:
+def reach_code(error: BaseException, *, while_waiting: bool = False) -> str:
     """The SSH reason code of a failed connection or login as every caller records and shows it: classify's code, or
     device_host_down for any other OSError (the board does not answer); "" when it is none of the four (for example a
-    host key that is not trusted yet)."""
+    host key that is not trusted yet). `while_waiting`: the deploy waits for a board that dropped off the network
+    (N5); a connection that opens and drops again (DROPPED: its SSH server is still starting) means it is not back
+    yet, so the wait goes on."""
     code = classify(error)
-    if code is None and isinstance(error, OSError):
+    if code is None and (isinstance(error, OSError) or (while_waiting and isinstance(error, DROPPED))):
         code = HOST_DOWN
     return code or ""
 
@@ -156,6 +163,6 @@ def person_text(code: str, lang: Optional[str] = None, *, address: str = "", por
            f"{person_next(code, lang, address=address, port=port)}"
 
 
-__all__ = ["AI_NEXT", "AUTH_FAILED", "CONNECT_TIMEOUT", "HOST_DOWN", "HOST_KEY_CHANGED", "PORT_CLOSED", "REASONS",
-           "TOOL_CODES", "check_port", "classify", "classify_ssh_output", "person_next", "person_text",
+__all__ = ["AI_NEXT", "AUTH_FAILED", "CONNECT_TIMEOUT", "DROPPED", "HOST_DOWN", "HOST_KEY_CHANGED", "PORT_CLOSED",
+           "REASONS", "TOOL_CODES", "check_port", "classify", "classify_ssh_output", "person_next", "person_text",
            "person_title", "reach_code"]
