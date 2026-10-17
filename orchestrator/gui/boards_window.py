@@ -1267,20 +1267,25 @@ class BoardsWindow(QDialog):
             self.check_board(entry["device_id"])
 
     def check_board(self, device_id: str) -> None:
-        from orchestrator.Core.mojo.checks.devices import check_devices
+        """One core call and one text for every 'Check this board' of the GUI: Core/mojo/boards.check_board (the CLI's
+        `mojo --oracle --board` check) and mojo_window.board_check_text, as in the Mojo window and the Deployment
+        tab."""
+        from orchestrator.Core.mojo.boards import check_board
         framework = self.framework
-        self._start(self._t("boards.check.running"), lambda: check_devices(framework, contact=(device_id,)),
-                    lambda findings: self._checked(device_id, findings))
+        label = next((e.get("label") for e in self.entries if e.get("device_id") == device_id), "") or device_id
 
-    def _checked(self, device_id: str, findings: Any) -> None:
-        found = next((f for f in findings if f.code == f"devices.{device_id}"), None)
-        if found is None:
-            self._say(self._t("boards.check.none"))
-            return
-        lines = [found.message]
-        if found.fix_hint:
-            lines.append(self._t("boards.check.next", hint=found.fix_hint))
-        self._show_text("\n".join(lines), warn=getattr(found.severity, "value", "") not in ("ok", "info"))
+        def failed(error: BaseException) -> bool:
+            self._checked(label, None, str(error) or type(error).__name__)
+            return True
+
+        self._start(self._t("boards.check.running"), lambda: check_board(framework, device_id),
+                    lambda finding: self._checked(label, finding), failed=failed)
+
+    def _checked(self, label: str, finding: Any, problem: str = "") -> None:
+        from orchestrator.gui.mojo_window import board_check_text
+        severity = getattr(getattr(finding, "severity", None), "value", "")
+        self._show_text(board_check_text(finding, label, problem, self.lang),
+                        warn=bool(problem) or severity not in ("ok", "info"))
 
     # --- closing ----------------------------------------------------------------------------------------------------
 
