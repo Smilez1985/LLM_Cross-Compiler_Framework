@@ -8,8 +8,8 @@
 # früheres install.sh kopiert hat und die nicht mehr ausgeliefert werden (Liste in .lcf-installed-files). Alles
 # andere bleibt: eigene Targets, installierte Community-Packs, Einstellungen, Builds, Cache und Modelle.
 # Eine Installation unter dem früheren Namen (/opt/llm-conversion-framework) wird nie verändert oder gelöscht: Der
-# Installer sagt, dass es sie gibt, kopiert nur ihre Einstellungen, wenn die neue Installation noch keine hat, und
-# erklärt, wie man sie selbst entfernt.
+# Installer sagt, dass es sie gibt, kopiert nur ihre persönlichen Dateien aus configs/ (Einstellungen, einen Tresor
+# von vor 3.0.0), die die neue Installation noch nicht hat, und erklärt, wie man sie selbst entfernt.
 
 # Das Skript braucht bash; unter sh (dash) mit einer klaren Meldung abbrechen statt mit "Bad substitution".
 if [ -z "${BASH_VERSION:-}" ]; then
