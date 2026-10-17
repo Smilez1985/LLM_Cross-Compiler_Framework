@@ -152,12 +152,6 @@
    "until": "c1-imports"
   },
   {
-   "from": "orchestrator.utils.image_registry",
-   "to": "orchestrator.llm.task_prompts",
-   "reason": "split_image and is_official_image live in the LLM prompt module",
-   "until": "c1-imports"
-  },
-  {
    "from": "orchestrator.utils.next_steps",
    "to": "orchestrator.tools.tool_windows",
    "reason": "the next-step catalogue maps windows to their openers (w6-a0)",

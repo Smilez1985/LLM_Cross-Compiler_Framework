@@ -305,7 +305,7 @@ class ModuleDefinition(BaseModel):
         return self
 
     def _registry(self) -> str:
-        from orchestrator.llm.task_prompts import split_image
+        from orchestrator.utils.image_ref import split_image
         info = split_image(self.base_os)
         return f"{info['registry']}, image {info['repository']}"
 
@@ -886,7 +886,7 @@ class DittoCoder:
             raise ValueError(f"base_os: {PREBUILT_CUDA_REFUSAL}")
         # The same rule as create_target_module (DECISIONS round 3 (d)): an image that is not a Docker Official Image
         # needs the AI's reason, which the person reads before approving.
-        from orchestrator.llm.task_prompts import is_official_image
+        from orchestrator.utils.image_ref import is_official_image
         base = str(data.get("base_os") or "debian:bookworm-slim").strip()
         if not is_official_image(base) and not str(data.get("base_image_reason") or "").strip():
             raise ValueError(f"base_os: '{base}' is not a Docker Official Image, so base_image_reason is required "

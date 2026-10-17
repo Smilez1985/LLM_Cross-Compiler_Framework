@@ -19,7 +19,7 @@ import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from orchestrator.llm.task_prompts import split_image
+from orchestrator.utils.image_ref import split_image
 from orchestrator.utils.next_steps import WithSteps
 
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024

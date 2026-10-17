@@ -155,7 +155,7 @@ def pack_warnings(kind: str, trust: str, images: List[str], disk: Any) -> tuple:
 def base_image_line(image: str) -> str:
     """One base image, plainly (DECISIONS round 3): registry, image, tag, digest, and whether it is a Docker Official
     Image or a prebuilt image from another registry."""
-    from orchestrator.llm.task_prompts import split_image
+    from orchestrator.utils.image_ref import split_image
     if "$" in image:
         return (f"{image}: names a build argument; the image is decided when the target is built. The image build runs "
                 "with network access on this computer, outside the build sandbox.")

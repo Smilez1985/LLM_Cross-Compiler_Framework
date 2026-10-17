@@ -402,7 +402,7 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         fields, every value the generator checks, the base image's form, its reason, and that every address is
         public. Refused before the question with the field and the fix."""
         from orchestrator.Core.ditto_manager import PREBUILT_CUDA_IMAGE, PREBUILT_CUDA_REFUSAL, dangerous_command
-        from orchestrator.llm.task_prompts import is_official_image
+        from orchestrator.utils.image_ref import is_official_image
         from orchestrator.utils.prebuilt_llama import is_prebuilt_llama_image
         from orchestrator.utils.validation import validate_public_url
         data = generator_input(inp.model_dump(mode="json"), inp.module_name, inp.supported_boards or None)
@@ -544,7 +544,7 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         if soft_cap_warnings(data):
             ctx.notes.append("The person approved going above a soft limit for this module.")
         ctx.notes.append("The module is untested: tell the user what to check first (its assumptions).")
-        from orchestrator.llm.task_prompts import split_image
+        from orchestrator.utils.image_ref import split_image
         image = split_image(bound["image"])
         return CreateModuleOut(target=tid, folder=folder.name, base_image=BaseImageOut(
             registry=image["registry"], image=image["repository"], tag=image["tag"], digest=image["digest"],
