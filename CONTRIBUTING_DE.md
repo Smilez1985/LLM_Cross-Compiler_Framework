@@ -586,7 +586,10 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 
 ## 9. Commits und Pull-Requests
 
-- Zweige von `main` ab; ein Thema je Pull-Request.
+- Branches: die laufende Arbeit geschieht auf `development`; `main` hält den stabilen Stand und übernimmt
+  `development` per Pull-Request, sobald es stabil ist (CI grün unter Linux und Windows, geprüft). Zweige von
+  `development` ab und richte deinen Pull-Request darauf; ein Thema je Pull-Request. Die CI läuft bei jedem Push
+  auf `main` und `development` und bei jedem Pull-Request.
 - Commit-Nachrichten: eine Zusammenfassungszeile auf Englisch, im Imperativ, nur der erste Buchstabe groß, ohne
   Typ-Präfix, möglichst nicht länger als etwa 72 Zeichen. Beispiele aus der Historie: `Add a secret scan:
   pre-commit and pre-push hooks and a CI job` und `Pin the provider SDKs and local embeddings, drop LiteLLM and

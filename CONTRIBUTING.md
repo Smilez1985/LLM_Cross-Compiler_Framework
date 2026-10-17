@@ -559,7 +559,10 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 
 ## 9. Commits and pull requests
 
-- Branch from `main`; one topic per pull request.
+- Branches: ongoing work happens on `development`; `main` holds the stable state and takes `development` in by a
+  pull request once that is stable (CI green on Linux and Windows, reviewed). Branch from `development` and aim
+  your pull request at it; one topic per pull request. CI runs on every push to `main` and `development` and on
+  every pull request.
 - Commit messages: a summary line in English, in the imperative, sentence case, no type prefix, ideally no longer
   than about 72 characters. Examples from the history: `Add a secret scan: pre-commit and pre-push hooks and a CI
   job` and `Pin the provider SDKs and local embeddings, drop LiteLLM and tiktoken`. The body explains why.
