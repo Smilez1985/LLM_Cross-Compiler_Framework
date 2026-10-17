@@ -561,6 +561,11 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 
 ## 8. Regeln für den Code
 
+- **Erst nutzen, was es gibt.** Bevor du einen Helfer, eine Prüfung, ein Modell oder eine Suche schreibst, such
+  im Repository nach einem, der die Aufgabe schon erledigt (`git log -S` zeigt, was zuerst da war). Nutze ihn,
+  erweitere ihn und verdrahte ihn; etwas Neues daneben baust du nur, wenn es nichts Passendes gibt, und sagst im
+  Pull Request, warum. Zwei Umsetzungen einer Aufgabe werden zur besseren zusammengeführt (zur älteren, wenn sie
+  genügt), und jeder Aufrufer wird an sie verdrahtet. Fertig heißt verdrahtet und getestet, nicht nur geschrieben.
 - Nutze Typangaben für neue Funktionen.
 - Protokolliere mit `orchestrator.utils.logging.get_logger`, nicht mit `print()`. CLI-Ausgaben laufen über `rich`;
   maskiere externen Text vor der Ausgabe mit `rich.markup.escape`.
