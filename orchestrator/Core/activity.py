@@ -19,8 +19,9 @@ Rules:
 - The person's own calls (actor gui or cli) produce nothing; neither does a caller without a trusted caller id.
 - The sender is the trusted caller id (ditto, mcp, mcp:<token>). An app's own name appears only as its claim.
 - A row holds closed values only: tool, job kind, state and reason codes, setting keys (never their values), ids
-  the framework issued, a window from tool_windows.WINDOW_IDS, step ids by pattern, a finished build's folder as a
-  label (never a host path). Every value is checked again here; one that does not fit is left out.
+  the framework issued, a window from tool_windows.WINDOW_IDS, step ids of the next-step catalogue
+  (orchestrator/utils/next_steps), a finished build's folder as a label (never a host path). Every value is checked
+  again here; one that does not fit is left out.
 - `refs.asked_in` is "gui-chat" only for Ditto's calls in the GUI process for a turn the person typed into its chat.
 - It fails open: a row that cannot be written is logged and dropped (listeners still get it, with row id -1), and
   nothing ever runs from a row. The audit log stays the authority.
@@ -134,14 +135,37 @@ def closed_params(params: Mapping[str, Any]) -> Dict[str, str]:
     return kept
 
 
+def catalogue_steps() -> Mapping[str, Any]:
+    """The steps of the next-step catalogue by id (orchestrator/utils/next_steps, chain a0; Qt-free)."""
+    from orchestrator.utils.next_steps import catalogue
+    return catalogue().steps
+
+
 def closed_refs(refs: Mapping[str, Any]) -> Dict[str, Any]:
-    """Only the references a row may carry whose values are ids of the framework's own formats."""
+    """Only the references a row may carry whose values are ids of the framework's own formats. A step must be a step
+    of the catalogue, not only look like one (a ui_text key such as action.free_disk has the same shape)."""
     kept: Dict[str, Any] = {name: value for name, value in refs.items()
                             if name in REF_RULES and value and REF_RULES[name](value)}
-    steps = [s for s in refs.get("steps") or () if is_step_id(s)]
+    known = catalogue_steps()
+    steps = [s for s in refs.get("steps") or () if is_step_id(s) and s in known]
     if steps:
         kept["steps"] = list(dict.fromkeys(steps))[:MAX_STEPS]
     return kept
+
+
+def refusal_steps(data: Mapping[str, Any]) -> List[str]:
+    """The catalogue steps of a refused_before_question event: the registry's `step` (the refusal's first catalogue
+    step), and for a `person_action` that is a facts_catalog key (action.free_disk) the step of the blockers that name
+    it, when they all name the same one. English text in `person_action` (what blocked() hands on) never becomes a
+    step; closed_refs drops whatever the catalogue does not know."""
+    from orchestrator.tools.facts_catalog import BLOCKERS
+    found = [data.get("step")]
+    action = data.get("person_action")
+    if isinstance(action, str) and action:
+        mapped = {spec.step for spec in BLOCKERS.values() if spec.person_action == action and spec.step}
+        if len(mapped) == 1:
+            found.extend(mapped)
+    return [s for s in found if isinstance(s, str) and s]
 
 
 @dataclass(frozen=True)
@@ -217,8 +241,7 @@ def row_for_event(kind: str, data: Mapping[str, Any]) -> Optional[Row]:
                     {"tool": tool, "state": state}, refs, level="warning" if state == "failed" else "info")
     if kind == "refused_before_question":
         code = str(data.get("code") or "")
-        steps = [data.get("step"), data.get("person_action")]   # a catalogue id where one is given (chain a0)
-        refs = {"window": REASON_WINDOWS.get(code) or TOOL_WINDOWS.get(tool), "steps": steps}
+        refs = {"window": REASON_WINDOWS.get(code) or TOOL_WINDOWS.get(tool), "steps": refusal_steps(data)}
         return _row("blocked", caller, f"activity.blocked.{code}", "activity.blocked",
                     {"tool": tool, "code": code, "stage": data.get("stage"), "blocker": data.get("blocker")}, refs,
                     level="warning")

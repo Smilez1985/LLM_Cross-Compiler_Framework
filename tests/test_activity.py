@@ -473,6 +473,36 @@ class TestRows:
         assert blocked.refs.steps == [], "the person's action as text never goes into a row; the GUI finds the step"
         assert blocked.sender.role == "ditto" and blocked.refs.window == "builder"
 
+    def test_a_refusal_carries_catalogue_steps_only(self, tmp_path):
+        """Merge seam (a0 + b0): refused_before_question rows took the event's person_action as a step when it had
+        the shape of one, so a facts_catalog key such as action.free_disk (a ui_text key, not a step) went into
+        refs.steps, where the GUI renders catalogue ids. A person_action key now becomes the step its blockers name,
+        and only ids the catalogue knows are written."""
+        prod, store = producer(tmp_path, program="gui")
+        base = {"tool": "start_build", "actor": "ditto", "owner": "ditto", "code": "insufficient_resources",
+                "stage": "look_up"}
+        prod.on_registry_event("refused_before_question", {**base, "blocker": "disk_full", "step": "images.free",
+                                                           "person_action": "action.free_disk"})
+        prod.on_registry_event("refused_before_question", {**base, "tool": "create_snapshot",
+                                                           "blocker": "snapshot_no_room",
+                                                           "person_action": "action.free_snapshots"})
+        prod.on_registry_event("refused_before_question", {**base, "tool": "publish_pack", "code": "needs_person",
+                                                           "blocker": "commit_required",
+                                                           "person_action": "action.commit_required"})
+        prod.on_registry_event("refused_before_question", {**base, "tool": "deploy_to_device", "code": "needs_person",
+                                                           "step": "nothing.known", "person_action": "action.pair_device"})
+        assert prod.flush()
+        disk, snapshots, commit, board = rows(store)
+        assert disk.refs.steps == ["images.free"], "the key is not a step; the registry's step stays"
+        assert snapshots.refs.steps == ["snapshots.free"], "a person_action key becomes its blocker's step"
+        assert commit.refs.steps == [], "a key without a step is left out"
+        assert board.refs.steps == ["board.trust"], "an id the catalogue does not know is left out"
+        assert closed_refs({"steps": ["runtime.install", "action.free_disk", "nothing.known"]}) == {
+            "steps": ["runtime.install"]}
+        from orchestrator.tools.facts_catalog import BLOCKERS
+        from orchestrator.utils.next_steps import catalogue
+        assert {spec.step for spec in BLOCKERS.values() if spec.step} <= set(catalogue().steps)
+
     def test_a_refusal_in_a_loop_is_written_once_per_quiet_time(self, tmp_path):
         now = [1000.0]
         prod, store = producer(tmp_path, clock=lambda: now[0])
