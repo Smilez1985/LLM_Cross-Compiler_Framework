@@ -4,8 +4,11 @@ OSError' copies become one reach_code(), and the six note_reach helpers become o
 giving the same code and writing the same row.
 """
 
+import contextlib
 import errno
 import socket
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +23,8 @@ from test_board_deploy import TARGET, board, manager, package, run  # noqa: E402
 from test_deployment import config  # noqa: E402,F401 - the manager fixture's configuration
 
 HOST, PORT = "192.0.2.10", 2222
+# The real key read and login, kept before the fake board's fixture replaces them.
+REAL_FETCH_HOST_KEY, REAL_CONNECT = ssh_trust.fetch_host_key, ssh_trust.connect
 
 
 def _errors():
@@ -339,6 +344,85 @@ def test_the_deploy_keeps_waiting_while_the_ssh_server_restarts(error, manager, 
     assert result.success and result.resumed == 1, result.reason
     assert restarting["left"] == 0 and board.starts == 1
     assert bytes(board.files[f"{TARGET}/{package.name}"]) == package.read_bytes()
+
+
+@contextlib.contextmanager
+def dropping_ssh_server(mode):
+    """A local TCP server that drops every connection the way a board's starting SSH server does: at once ("close"),
+    after its banner ("after_banner") or during the key exchange, with the client's bytes unread ("during_kex")."""
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(8)
+    server.settimeout(0.1)   # accept() wakes up to see the end (closing alone does not wake it on Linux)
+    done = threading.Event()
+
+    def serve():
+        while not done.is_set():
+            try:
+                conn, _ = server.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            try:
+                conn.settimeout(5.0)
+                if mode != "close":
+                    conn.sendall(b"SSH-2.0-OpenSSH_9.6\r\n")
+                if mode == "after_banner":
+                    conn.recv(64)
+                elif mode == "during_kex":
+                    time.sleep(0.2)
+            except OSError:
+                pass
+            finally:
+                conn.close()
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield server.getsockname()[1]
+    finally:
+        done.set()
+        thread.join(timeout=10)
+        server.close()
+
+
+DROP_MODES = ["close", "after_banner", "during_kex"]
+
+
+@pytest.mark.parametrize("mode", DROP_MODES)
+def test_what_paramiko_really_raises_on_a_drop_keeps_the_wait_going(mode, tmp_path):
+    """The exceptions paramiko itself raises (an SSHException about the banner, EOFError, ConnectionResetError), not
+    stand-ins: reading the host key and logging in both give a code wait_for_board keeps waiting on."""
+    from orchestrator.remote.reasons import reach_code
+    with dropping_ssh_server(mode) as port:
+        for contact in (lambda: REAL_FETCH_HOST_KEY("127.0.0.1", port, timeout=5.0),
+                        lambda: REAL_CONNECT("127.0.0.1", "radxa", tmp_path, port=port, timeout=5.0)):
+            with pytest.raises(Exception) as raised:
+                contact()
+            assert reach_code(raised.value, while_waiting=True) in (reasons.HOST_DOWN, reasons.PORT_CLOSED), \
+                repr(raised.value)
+
+
+@pytest.mark.parametrize("mode", DROP_MODES)
+def test_the_deploy_waits_through_what_paramiko_really_raises(mode, manager, board, package, monkeypatch):
+    """The N5 wait end to end with paramiko's own exceptions: the board is back on the network, but its first two
+    key reads reach a server that drops the connection."""
+    board.drop_after = 600_000
+    board.back_at = 30.0
+    restarting = {"left": 2}
+    with dropping_ssh_server(mode) as port:
+        def fetch(host, port_=22, timeout=10.0):
+            board.tick()
+            if not board.online:
+                raise socket.timeout("timed out")
+            if board.logins and restarting["left"]:   # back on the network, sshd not ready yet
+                restarting["left"] -= 1
+                return REAL_FETCH_HOST_KEY("127.0.0.1", port, timeout=5.0)
+            return board.key
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", fetch)
+        result, _events = run(manager, package)
+    assert result.success and result.resumed == 1, result.reason
+    assert restarting["left"] == 0 and board.starts == 1
 
 
 def test_a_reset_at_the_first_login_is_recorded_like_everywhere_else(manager, board, package, monkeypatch):
