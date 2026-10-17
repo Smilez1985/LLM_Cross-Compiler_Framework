@@ -42,7 +42,6 @@ except ImportError:  # SecretsManager reports the missing package (SecurityError
 # The private atomic writer and the Windows replace retry live in orchestrator/utils/atomic.py (consolidation chain
 # c1-imports); the old names stay importable here.
 from orchestrator.utils.atomic import REPLACE_RETRIES, replace_file, write_private  # noqa: F401
-from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
@@ -768,7 +767,8 @@ _KEY_THREAD_LOCK = threading.Lock()
 def _key_lock(state_dir: Path, timeout: float = 30.0):
     """Serializes the audit key's get-or-create between threads and processes (GUI, CLI, MCP servers) with a
     lock file in the per-user folder (the shared file_lock helper). Without a usable lock file it goes on
-    unlocked."""
+    unlocked. The lock library is imported here: the storage names of this module are read without it (RG1)."""
+    from orchestrator.utils.file_lock import file_lock
     deadline = time.monotonic() + timeout
     if not _KEY_THREAD_LOCK.acquire(timeout=timeout):
         raise TimeoutError("another thread holds the audit key lock")
