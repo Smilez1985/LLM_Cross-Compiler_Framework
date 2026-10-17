@@ -37,7 +37,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from orchestrator.runtime.build.verify import Check, VerifyReport, parse_bench_json, parse_devices, parse_version
-from orchestrator.runtime.device.launcher import (KEY_REL, START_SCRIPT, UNIT_NAME, UNIT_PATH, install_root,
+from orchestrator.runtime.device.launcher import (DEVICE_FOLDER_MAX, DEVICE_PATH_MAX, KEY_REL, START_SCRIPT,
+                                                  UNIT_NAME, UNIT_PATH, install_root,
                                                   render_systemd_unit)
 from orchestrator.runtime.device.settings import DeploySettings
 from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, POSIX_CLEARED_PATH, SERVER_TOOLS_REFUSAL,
@@ -53,12 +54,12 @@ MAX_OUTPUT = 1024 * 1024
 REQUIRED_TOOLS = ("tar", "gzip", "sha256sum", "od", "dd", "tr", "readlink", "awk", "mktemp")
 MACHINES = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
 
-_RE_HOME = re.compile(r"^/[A-Za-z0-9._/-]{1,200}$", re.ASCII)
+_RE_HOME = re.compile(r"^/[A-Za-z0-9._/-]{1,%d}$" % DEVICE_FOLDER_MAX, re.ASCII)   # bounds: launcher.py
 _RE_UID = re.compile(r"^\d{1,10}$", re.ASCII)
 _RE_ID16 = re.compile(r"^[0-9a-f]{16}$", re.ASCII)
 _RE_ID = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 _RE_SHA = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
-_RE_MODEL = re.compile(r"^/[A-Za-z0-9._+/-]{1,400}$", re.ASCII)
+_RE_MODEL = re.compile(r"^/[A-Za-z0-9._+/-]{1,%d}$" % DEVICE_PATH_MAX, re.ASCII)
 _RE_TOOL = re.compile(r"^[a-z0-9]{1,16}$", re.ASCII)
 _RE_BUILD_LINE = re.compile(r"^build=([0-9a-f]{16}) (\d{1,15}) ([01])$", re.ASCII)
 _PROGRAMS = ("llama-server", "llama-bench")

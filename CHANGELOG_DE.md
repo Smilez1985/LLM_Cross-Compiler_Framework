@@ -1790,6 +1790,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Auf ein Board, dessen Home-Ordner einen langen Pfad hat, lässt sich deployen**: Die Geräte-Laufzeit lehnte einen
+  Home-Ordner des Board-Benutzers mit mehr als 200 Zeichen ab (und dessen Staging-Ordner sowie Modelle darunter ab
+  400), deshalb brach ein Home auf einem tief liegenden Einhängepunkt das Deployment mit „not a plain absolute path“
+  ab. Die Zeichen werden wie bisher geprüft; die Länge ist jetzt nur noch eine Plausibilitätsgrenze weit unter der
+  Grenze des Systems (1024 Zeichen für einen Ordner, 1536 für eine Datei darin, an einer Stelle in
+  `runtime/device/launcher.py`). Die Gerätetests laufen auch unter einem langen temporären Ordner (wie auf dem
+  Windows-Runner).
+- **Ein beschädigter Speicher der festgehaltenen Autorenschlüssel wird einmal kopiert, nicht zweimal**: Eine
+  Installation liest den Speicher zweimal (für ihre Zusammenfassung, dann zum Festhalten des Schlüssels), und die
+  zweite Kopie derselben Beschädigung entstand noch einmal, wenn dieses Lesen in die nächste Sekunde fiel, weil die
+  Kopie nur nach der Uhrzeit benannt war. Eine gleiche Kopie wird jetzt einmal aufbewahrt, und eine andere
+  Beschädigung in derselben Sekunde bekommt einen eigenen Namen, statt eine aufbewahrte Kopie zu ersetzen.
 - **Das Widerrufen eines MCP-Tokens in der GUI entfernt auch seine dauerhaften Freigaben, und der neue eigene
   Abschnitt eines Aufrufers behält die Tools, die nur im Framework gefragt werden**: Widerrufen in der GUI löschte das
   Token, ließ aber seine dauerhaften Freigaben (die von `mcp:NAME`) in der Berechtigungsdatei stehen, aufgelistet, bis
