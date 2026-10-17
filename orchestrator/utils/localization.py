@@ -16,14 +16,17 @@ Updates v2.3.0:
 from collections import ChainMap
 from typing import Any, Dict, FrozenSet, Mapping, Optional, Sequence
 
-from PySide6.QtCore import QObject, Signal
+# Qt-free (DECISIONS round 11, A3): the command line, the MCP server and the core read their texts here without
+# PySide6. The GUI's Qt object (LocalizationManager with the language_changed signal that makes the windows
+# retranslate, and get_instance) lives in orchestrator/gui/localization.py; both names resolve to it on first use
+# (__getattr__ at the end of this module), so `from orchestrator.utils.localization import get_instance` keeps working.
 
-class LocalizationManager(QObject):
+
+class TextTable:
     """
-    Verwaltet Übersetzungen und Sprachstatus.
-    Singelton-Pattern-Nutzung empfohlen.
+    The text table (TRANSLATIONS: language -> key -> text) and one language's view of it (current_lang, t,
+    get_text). Without Qt; the GUI's LocalizationManager adds the language_changed signal to it.
     """
-    language_changed = Signal(str) # Signalisiert Sprachwechsel an UI-Komponenten
 
     # Das Wörterbuch
     # Key-Format: "context.element"
@@ -512,14 +515,16 @@ class LocalizationManager(QObject):
     }
 
     def __init__(self, initial_lang="en"):
-        super().__init__()
         self.current_lang = initial_lang if initial_lang in self.TRANSLATIONS else "en"
 
     def set_language(self, lang_code: str):
-        """Setzt die Sprache und feuert das Change-Signal."""
+        """Setzt die Sprache und meldet den Wechsel (language_set; die GUI feuert dort ihr Change-Signal)."""
         if lang_code in self.TRANSLATIONS:
             self.current_lang = lang_code
-            self.language_changed.emit(lang_code)
+            self.language_set(lang_code)
+
+    def language_set(self, lang_code: str) -> None:
+        """Called after every switch to a known language; the GUI's LocalizationManager emits language_changed."""
 
     def t(self, key: str, default: str = None) -> str:
         """Alias für get_text (kürzer in GUI Code)."""
@@ -538,14 +543,11 @@ class LocalizationManager(QObject):
             
         return text
 
-# Globale Instanz (wird in main.py initialisiert)
-_instance = None
+TRANSLATIONS = TextTable.TRANSLATIONS   # the one text table; the GUI's Qt object reads this same dict
 
-def get_instance(initial_lang="en") -> LocalizationManager:
-    global _instance
-    if _instance is None:
-        _instance = LocalizationManager(initial_lang)
-    return _instance
+# The GUI's instance (orchestrator/gui/localization.get_instance makes it when the window starts); tr() and
+# current_language() follow it. None in the command line and the MCP server.
+_instance = None
 
 # Helper für einfachen Zugriff (wie Qt's tr())
 def tr(key: str, default: str = None) -> str:
@@ -608,7 +610,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_main", "orchestrator.utils.l10n_shell"
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
                        modules: Sequence[str] = TEXT_MODULES,
                        formal: Optional[Dict[str, Dict[str, str]]] = None) -> Dict[str, Dict[str, str]]:
-    """Merges the TEXTS of `modules` into `table` (default: LocalizationManager.TRANSLATIONS) and returns it. A key
+    """Merges the TEXTS of `modules` into `table` (default: TRANSLATIONS, the one text table) and returns it. A key
     that already exists, a language the table does not have or a value that is not text is refused (ValueError): a
     text is never replaced silently. A module named twice is merged once.
 
@@ -618,7 +620,7 @@ def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
     import importlib
     if formal is None:
         formal = FORMAL_TEXTS if table is None else {}
-    table = LocalizationManager.TRANSLATIONS if table is None else table
+    table = TRANSLATIONS if table is None else table
     for name in dict.fromkeys(modules):
         try:
             module = importlib.import_module(name)
@@ -691,7 +693,7 @@ def set_form_of_address(form: Optional[str]) -> str:
 def text_tables(form: Optional[str] = None) -> Mapping[str, Mapping[str, str]]:
     """The language tables as the person reads them: with `form` (default: the one in use) "sie", German reads the
     formal overlay first and the du text for every key the overlay does not have."""
-    table = LocalizationManager.TRANSLATIONS
+    table = TRANSLATIONS
     if (form or _form_of_address) != "sie" or not FORMAL_TEXTS.get("de"):
         return table
     return {**table, "de": ChainMap(FORMAL_TEXTS["de"], table["de"])}
@@ -702,7 +704,7 @@ def texts_in_every_form(keys: Sequence[str]) -> Dict[str, Any]:
     the person acknowledges hashes (crawl_notice, ditto_notice), so a changed text in any form asks again. Without a
     formal form the result is the plain language table, so a hash made before the overlay existed stays the same."""
     texts: Dict[str, Any] = {lang: [table.get(key, "") for key in keys]
-                             for lang, table in sorted(LocalizationManager.TRANSLATIONS.items())}
+                             for lang, table in sorted(TRANSLATIONS.items())}
     formal = {lang: [table.get(key, "") for key in keys] for lang, table in sorted(FORMAL_TEXTS.items())
               if any(key in table for key in keys)}
     if formal:
@@ -721,3 +723,15 @@ def placeholders(text: str) -> FrozenSet[str]:
 
 
 merge_text_modules()
+
+
+# The GUI's names, from orchestrator/gui/localization.py (PEP 562): loaded on first use, so a process that never asks
+# for them never imports Qt. Without PySide6 (the optional 'gui' extra) the ImportError names the missing package.
+_GUI_NAMES = ("LocalizationManager", "get_instance")
+
+
+def __getattr__(name: str) -> Any:
+    if name in _GUI_NAMES:
+        from orchestrator.gui import localization as gui_localization
+        return getattr(gui_localization, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
