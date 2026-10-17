@@ -17,30 +17,45 @@ HOSTS_REFUSED_BY_SHAPE = ["", "[fe80::1]", "-oProxyCommand=x", "a b", "host;id",
 HOSTS_REFUSED_BY_VALID_HOST = ["192.168.1.300", "1.2.3", "fe80::1::2", "a..b", "-a"]
 
 
-def _host_patterns():
-    from orchestrator.Core import deployment_manager
-    from orchestrator.runtime import remote_probe
-    from orchestrator.runtime.device import trusted
-    return {"deployment_manager": deployment_manager._HOST, "remote_probe": remote_probe._HOST,
-            "trusted": trusted._HOST}
+def _record(host="192.0.2.1", port=22, user="dietpi"):
+    from orchestrator.runtime.device.trusted import TrustedDevice
+    from orchestrator.runtime.profile import device_id_for_host_key
+    fp = "SHA256:" + "A" * 43
+    return TrustedDevice(device_id=device_id_for_host_key(fp), label="Shelf", host=host, port=port, user=user,
+                         key_type="ssh-ed25519", fingerprint=fp, paired=True, trusted_at="2026-10-17T10:00:00Z",
+                         trusted_via="cli")
 
 
-def test_the_three_host_patterns_are_one_pattern():
-    patterns = _host_patterns()
-    assert len({p.pattern for p in patterns.values()}) == 1
-    assert len({p.flags for p in patterns.values()}) == 1
+def _record_takes(**fields) -> bool:
+    from orchestrator.runtime.device.trusted import DeviceStoreError
+    try:
+        _record(**fields).check()
+    except DeviceStoreError:
+        return False
+    return True
+
+
+def _deploy(tmp_path):
+    from orchestrator.Core.config_manager import ConfigManager
+    from orchestrator.Core.deployment_manager import DeploymentManager
+    from test_deployment import FakeFramework
+    return DeploymentManager(FakeFramework(ConfigManager(tmp_path / "configs")))
 
 
 @pytest.mark.parametrize("host", HOSTS_ACCEPTED + HOSTS_REFUSED_BY_VALID_HOST[:-1])
-def test_every_host_pattern_accepts_the_shape(host):
-    for where, pattern in _host_patterns().items():
-        assert pattern.fullmatch(host), (where, host)
+def test_a_stored_record_takes_every_host_of_the_right_shape(host):
+    """TrustedDevice.check checks the shape only: a record the person once trusted is never dropped by the stricter
+    valid_host later."""
+    assert _record_takes(host=host)
 
 
-@pytest.mark.parametrize("host", HOSTS_REFUSED_BY_SHAPE)
-def test_every_host_pattern_refuses(host):
-    for where, pattern in _host_patterns().items():
-        assert not pattern.fullmatch(host), (where, host)
+@pytest.mark.parametrize("host", HOSTS_REFUSED_BY_SHAPE + ["-a"])
+def test_every_host_check_refuses_the_wrong_shape(host, tmp_path):
+    from orchestrator.runtime.remote_probe import valid_host
+    assert not valid_host(host)
+    assert not _record_takes(host=host)
+    result = _deploy(tmp_path).deploy_package(tmp_path / "none.zip", host, "dietpi")
+    assert not result.success and "Invalid address or host name" in result.reason
 
 
 @pytest.mark.parametrize("host", HOSTS_ACCEPTED)
@@ -55,40 +70,27 @@ def test_valid_host_refuses(host):
     assert not valid_host(host)
 
 
-def test_a_stored_record_checks_only_the_shape():
-    """TrustedDevice.check refuses what no copy accepts, but keeps a record whose host is only shaped like an address
-    (it never re-checks with the stricter valid_host: a record the person once trusted is not dropped silently)."""
-    from orchestrator.runtime.device.trusted import DeviceStoreError, TrustedDevice
-    from orchestrator.runtime.profile import device_id_for_host_key
-    fp = "SHA256:" + "A" * 43
-
-    def record(host, port=22, user="dietpi"):
-        return TrustedDevice(device_id=device_id_for_host_key(fp), label="Shelf", host=host, port=port, user=user,
-                             key_type="ssh-ed25519", fingerprint=fp, paired=True, trusted_at="2026-10-17T10:00:00Z",
-                             trusted_via="cli")
-
-    assert record("192.168.1.300").check()
-    assert record("fe80::1", 2222).check()
+def test_a_stored_record_names_the_field_it_refuses():
+    from orchestrator.runtime.device.trusted import DeviceStoreError
+    assert _record(host="fe80::1", port=2222).check()
     for bad in ("-a", "[fe80::1]", "a b"):
         with pytest.raises(DeviceStoreError, match="host"):
-            record(bad).check()
-    for port in (0, 65536, True, "22"):
+            _record(host=bad).check()
+    for port in (0, 65536, True, "22", 22.0):
         with pytest.raises(DeviceStoreError, match="port"):
-            record("192.0.2.1", port).check()
+            _record(port=port).check()
     for user in ("1abc", "-o", "ä"):
         with pytest.raises(DeviceStoreError, match="user"):
-            record("192.0.2.1", user=user).check()
+            _record(user=user).check()
 
 
 def test_the_deploy_refuses_what_valid_host_refuses(tmp_path):
-    """deployment_manager checks its own pattern and valid_host; together they refuse what valid_host refuses."""
-    from orchestrator.Core.deployment_manager import DeploymentManager
-    from test_deployment import FakeFramework
-    from orchestrator.Core.config_manager import ConfigManager
-    dm = DeploymentManager(FakeFramework(ConfigManager(tmp_path / "configs")))
+    dm = _deploy(tmp_path)
     for host in HOSTS_REFUSED_BY_SHAPE + HOSTS_REFUSED_BY_VALID_HOST:
         result = dm.deploy_package(tmp_path / "none.zip", host, "dietpi")
         assert not result.success and "Invalid address or host name" in result.reason, host
+    result = dm.deploy_package(tmp_path / "none.zip", "myboard.local", "dietpi")
+    assert "does not exist" in result.reason, "a good address passes on to the next check"
 
 
 # --- what every user check accepts and refuses ----------------------------------------------------------------------
@@ -97,36 +99,57 @@ USERS_ACCEPTED = ["dietpi", "Pi", "_svc", "a.b-c_d", "root", "a" * 32, "orangepi
 USERS_REFUSED = ["", "1abc", "-oProxyCommand=x", "a b", "a;b", "a" * 33, "ä", "a/b", "$(id)", ".x", "a@b"]
 
 
-def _user_checks():
-    """Each copy's check as it is called: deployment_manager and the GUI's deployment window with match(), the others
-    with fullmatch()."""
-    from orchestrator.Core import deployment_manager
-    from orchestrator.runtime.device import launcher, settings, trusted
-    from orchestrator.tools import tools_runtime
-    return {"deployment_manager": lambda u: bool(deployment_manager.SSH_USER_PATTERN.match(u)),
-            "trusted": lambda u: bool(trusted._USER.fullmatch(u)),
-            "settings": lambda u: bool(settings._RE_USER.fullmatch(u)),
-            "launcher": lambda u: bool(launcher._RE_USER.fullmatch(u)),
-            "tools_runtime": lambda u: bool(tools_runtime._ACCOUNT.fullmatch(u))}
+def _user_checks(tmp_path):
+    """Each place's own check of an SSH user, as it is called (root aside: the runtime refuses it on purpose, see
+    test_root_is_refused_where_the_runtime_runs)."""
+    from orchestrator.runtime.device.launcher import LauncherError, render_systemd_unit
+    from orchestrator.runtime.device.person_steps import BoardStepError, check_board_entry
+    from orchestrator.runtime.device.settings import SettingsError, check_ssh_user
+    from orchestrator.tools.tools_runtime import DEVICE_ACCOUNT, device_text
+
+    def takes(check, refusal):
+        def run(user):
+            try:
+                check(user)
+            except refusal:
+                return False
+            return True
+        return run
+
+    def deploy(user):
+        result = _deploy(tmp_path).deploy_package(tmp_path / "none.zip", "myboard.local", user)
+        return "Invalid SSH user name" not in result.reason
+
+    def unit(user):
+        render_systemd_unit(user=user, home="/home/x", model="/home/x/m.gguf", port=8080)
+
+    return {"deployment_manager": deploy,
+            "trusted": lambda u: _record_takes(user=u),
+            "settings": lambda u: u == "root" or takes(check_ssh_user, SettingsError)(u),
+            "launcher": lambda u: u == "root" or takes(unit, LauncherError)(u),
+            "person_steps": takes(lambda u: check_board_entry("192.0.2.10", u, None), BoardStepError),
+            "tools_runtime": lambda u: DEVICE_ACCOUNT in device_text(f"login as {u} failed", [u])}
 
 
 @pytest.mark.parametrize("user", USERS_ACCEPTED)
-def test_every_user_check_accepts(user):
-    for where, check in _user_checks().items():
+def test_every_user_check_accepts(user, tmp_path):
+    for where, check in _user_checks(tmp_path).items():
         assert check(user), (where, user)
 
 
 @pytest.mark.parametrize("user", USERS_REFUSED)
-def test_every_user_check_refuses(user):
-    for where, check in _user_checks().items():
+def test_every_user_check_refuses(user, tmp_path):
+    for where, check in _user_checks(tmp_path).items():
+        if where == "tools_runtime" and not user.strip():
+            continue  # an empty name replaces nothing either way
         assert not check(user), (where, user)
 
 
-@pytest.mark.parametrize("user", ["ſudo", "piK", "ıx"])
-def test_the_ascii_user_checks_refuse_letters_that_only_fold_to_ascii(user):
+@pytest.mark.parametrize("user", ["ſudo", "pi\u212a", "\u0131x"])
+def test_the_ascii_user_checks_refuse_letters_that_only_fold_to_ascii(user, tmp_path):
     """trusted, settings and launcher compile the user pattern with re.ASCII: a long s or the Kelvin sign is no
     account name there."""
-    checks = _user_checks()
+    checks = _user_checks(tmp_path)
     for where in ("trusted", "settings", "launcher"):
         assert not checks[where](user), (where, user)
 
@@ -180,8 +203,7 @@ def test_the_forms(host, port, known_hosts, stored):
     assert ssh_trust.host_entry(host, port) == known_hosts
     assert store_address(host, port) == stored
     assert split_address(stored) == (host, port), "the stored form reads back"
-    record = _record(host, port)
-    assert record.address == stored
+    assert _record(host=host, port=port).address == stored
 
 
 def test_the_stored_form_strips_brackets_someone_typed():
@@ -211,15 +233,6 @@ def test_reading_a_bad_stored_address(address):
     from orchestrator.runtime.device.devices import split_address
     with pytest.raises(ValueError):
         split_address(address)
-
-
-def _record(host, port):
-    from orchestrator.runtime.device.trusted import TrustedDevice
-    from orchestrator.runtime.profile import device_id_for_host_key
-    fp = "SHA256:" + "B" * 43
-    return TrustedDevice(device_id=device_id_for_host_key(fp), label="Shelf", host=host, port=port, user="dietpi",
-                         key_type="ssh-ed25519", fingerprint=fp, paired=True, trusted_at="2026-10-17T10:00:00Z",
-                         trusted_via="gui")
 
 
 @pytest.fixture
