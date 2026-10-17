@@ -121,8 +121,9 @@ TERMS = {
     "fingerprint": Term("Fingerprint", "https://en.wikipedia.org/wiki/Public_key_fingerprint"),
     "ssh_key": Term("SSH key", "https://www.ssh.com/academy/ssh/public-key-authentication"),
     "api_key": Term("API key", "https://en.wikipedia.org/wiki/API_key", aliases=("access key",)),
-    "app_access_code": Term("App access code", "https://en.wikipedia.org/wiki/Access_token",
-                            aliases=("MCP token", "access token")),
+    # The framework's own code (a named MCP token), explained in its manual. Not "access token": Hugging Face calls its
+    # sign-in that (the token field "Access Token:"), and Wikipedia's "Access token" is a Windows logon token.
+    "app_access_code": _framework("App access code", _manual("mcp-server", "mcp-server"), ("MCP token",)),
     "keyring": Term("Keyring", "https://keyring.readthedocs.io/en/latest/"),
     "vault": _framework("Vault", _manual("secrets-and-personal-state", "geheimnisse-und-pers%C3%B6nlicher-zustand"),
                         ("key safe", "credential vault")),

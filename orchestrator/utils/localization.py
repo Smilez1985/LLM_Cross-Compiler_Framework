@@ -629,6 +629,8 @@ def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
         for lang, entries in overlay.items():
             if lang not in table or not isinstance(entries, dict):
                 raise ValueError(f"{name}: unknown language {lang!r} in FORMAL")
+            if lang not in FORMAL_LANGUAGES:   # English has one form: an overlay would never be read
+                raise ValueError(f"{name}: FORMAL is only German; {lang!r} has one form of address")
             for key, text in entries.items():
                 if not isinstance(key, str) or not isinstance(text, str):
                     raise ValueError(f"{name}: FORMAL {key!r} in {lang} is not text")
@@ -653,6 +655,7 @@ def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
 # get_text() then read German through the overlay. English has one form.
 
 FORMS_OF_ADDRESS = ("du", "sie")
+FORMAL_LANGUAGES = ("de",)   # the languages with a formal overlay (English has one form)
 FORMAL_TEXTS: Dict[str, Dict[str, str]] = {"de": {}}
 _form_of_address = "du"
 
@@ -678,6 +681,19 @@ def text_tables(form: Optional[str] = None) -> Mapping[str, Mapping[str, str]]:
     if (form or _form_of_address) != "sie" or not FORMAL_TEXTS.get("de"):
         return table
     return {**table, "de": ChainMap(FORMAL_TEXTS["de"], table["de"])}
+
+
+def texts_in_every_form(keys: Sequence[str]) -> Dict[str, Any]:
+    """The texts of `keys` in every language, plus their formal forms under "formal" when one exists: what a notice
+    the person acknowledges hashes (crawl_notice, ditto_notice), so a changed text in any form asks again. Without a
+    formal form the result is the plain language table, so a hash made before the overlay existed stays the same."""
+    texts: Dict[str, Any] = {lang: [table.get(key, "") for key in keys]
+                             for lang, table in sorted(LocalizationManager.TRANSLATIONS.items())}
+    formal = {lang: [table.get(key, "") for key in keys] for lang, table in sorted(FORMAL_TEXTS.items())
+              if any(key in table for key in keys)}
+    if formal:
+        texts["formal"] = formal
+    return texts
 
 
 def placeholders(text: str) -> FrozenSet[str]:

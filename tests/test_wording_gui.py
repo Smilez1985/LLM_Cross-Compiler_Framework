@@ -160,6 +160,42 @@ def test_the_card_replaces_the_tooltip_and_keeps_its_text(opened):
     combo.close()
 
 
+def test_the_card_shows_a_plain_tooltip_exactly_as_the_tooltip_did(opened):
+    """Review fix: the card read every tooltip as HTML, so a plain tooltip with angle brackets lost words ("Size < 4 GB
+    and <model> name" became "Size name"), while Qt shows such a tooltip as plain text."""
+    from PySide6.QtCore import QEvent, QPoint
+    from PySide6.QtGui import QHelpEvent
+    from PySide6.QtWidgets import QApplication, QComboBox, QLabel
+    combo = QComboBox()
+    combo.setToolTip("Size < 4 GB and <model> name")
+    explain.explain(combo, "gguf")
+    combo.show()
+    QApplication.sendEvent(combo, QHelpEvent(QEvent.ToolTip, QPoint(2, 2), combo.mapToGlobal(QPoint(2, 2))))
+    card = explain.hover_controller().card
+    assert card.findChildren(QLabel)[0].text() == "Size < 4 GB and <model> name"
+    combo.setToolTip("<b>bold</b> words")   # rich text, as Qt itself reads it
+    assert explain._tooltip_text(combo) == "bold words"
+    combo.close()
+
+
+def test_marking_keeps_the_widgets_own_description_and_tooltip_for_screen_readers():
+    """Review fix: explain() replaced the accessible description, and Qt reads a set description instead of the
+    tooltip, so a screen reader lost what the window said about the widget; now that comes first."""
+    from PySide6.QtWidgets import QComboBox, QPushButton
+    combo = QComboBox()
+    combo.setAccessibleDescription("The models this target can build.")
+    explain.explain(combo, "q4_k_m")
+    assert combo.accessibleDescription().startswith("The models this target can build. About 4.5 bits per weight")
+    explain.explain(combo, "q8_0")   # marked again: the own part once, both terms
+    description = combo.accessibleDescription()
+    assert description.count("The models this target can build.") == 1 and "8 bits per weight" in description
+    button = QPushButton("Build")
+    button.setToolTip(plain.plain_tooltip("Starts the build <now>"))
+    explain.explain(button, "gguf")
+    assert button.accessibleDescription().startswith("Starts the build <now> The file format llama.cpp uses")
+    assert TERMS["gguf"].link in button.accessibleDescription()
+
+
 def test_f1_and_the_help_button_open_a_pinned_card_for_the_keyboard(opened):
     from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QKeyEvent
@@ -318,6 +354,59 @@ def test_the_error_box_for_an_exception(boxes):
     assert boxes[-1].btn_details is None, "no details, no toggle"
 
 
+def test_the_error_box_shows_no_secret_anywhere(boxes):
+    """Review fix: only the technical details were redacted; a summary, reason or next step made from an error's
+    text (str(e) with a token in it) showed the secret in the box."""
+    token = "hf_" + "Z9q" * 12   # the shape of a Hugging Face token, made up
+    error_dialog.show_error(None, f"Upload failed: {token}", why=f"The server refused {token}.",
+                            next_step=f"Sign in again instead of {token}.", details=f"token={token}", lang="en",
+                            steps=None)
+    box = boxes[-1]
+    for label in (box.summary, box.why, box.next):
+        assert token not in label.text() and label.text(), label.objectName()
+    assert box.summary.text().startswith("Upload failed: ") and token not in box.details_text
+    error_dialog.show_error(None, "x", steps=[f"Paste {token} nowhere."], lang="en")
+    assert token not in boxes[-1].next.text() and boxes[-1].next.text().startswith("Next step: Paste ")
+
+
+def test_the_error_box_never_shows_a_step_object_as_its_repr(boxes, monkeypatch):
+    """Review fix: without chain a0's StepsRow the steps were shown as str(step), and a catalogue step (a NextStep
+    object) would have shown as "NextStep(id=..., values=...)". A step object is rendered by the catalogue (a0's
+    next_steps.rendered for the GUI) or left out; a plain sentence stays as it is."""
+    import types as _types
+
+    class Step:   # a catalogue step as chain a0 makes it: not text
+        def __init__(self, step_id):
+            self.id = step_id
+
+        def __repr__(self):
+            return f"NextStep(id={self.id!r}, values={{}})"
+
+    monkeypatch.setitem(__import__("sys").modules, "orchestrator.gui.next_step_widgets", None)
+    monkeypatch.setitem(__import__("sys").modules, "orchestrator.utils.next_steps", None)
+    error_dialog.show_error(None, "Building failed.", steps=[Step("runtime.install"), "Free some disk space."],
+                            lang="en")
+    assert boxes[-1].next.text() == "Next step: Free some disk space.", "no renderer: the object is left out"
+    error_dialog.show_error(None, "Building failed.", steps=[Step("runtime.install")], lang="en")
+    assert boxes[-1].next is None
+    calls = []
+
+    def rendered(steps, audience, lang=None, channel=None, here=None):
+        calls.append((audience, lang))
+        return [_types.SimpleNamespace(text=f"Install the runtime: Ditto > Local Runtime... ({s.id})")
+                for s in steps if isinstance(s, Step)]
+
+    fake = _types.ModuleType("orchestrator.utils.next_steps")
+    fake.rendered = rendered
+    monkeypatch.setitem(__import__("sys").modules, "orchestrator.utils.next_steps", fake)
+    error_dialog.show_error(None, "Building failed.", steps=[Step("runtime.install"), "Free some disk space."],
+                            lang="de")
+    assert boxes[-1].next.text() == ("Nächster Schritt: Install the runtime: Ditto > Local Runtime... "
+                                     "(runtime.install)\nNächster Schritt: Free some disk space.")
+    assert calls and all(c == ("gui", "de") for c in calls), "the GUI's rendering: a mouse path, never a command"
+    assert "NextStep(" not in boxes[-1].next.text()
+
+
 # --- empty states ---------------------------------------------------------------------------------------------------
 
 def test_an_empty_state_has_one_sentence_and_one_button():
@@ -380,6 +469,21 @@ def test_the_first_run_hook_asks_saves_and_applies(tmp_path, monkeypatch, langua
     localization.set_form_of_address("du")
     assert form_of_address.apply_saved_form(ConfigManager(tmp_path / "cfg")) == "sie", "read back at start-up"
     assert config.set("form_of_address", "Ihr") is False, "only du or sie"
+
+
+def test_the_chat_texts_follow_the_form_of_address(monkeypatch, language_state):
+    """Review fix: the chat bubbles read the language table directly and so always said "du", whatever the person
+    chose; they read it through the formal overlay like ui_text."""
+    from orchestrator.gui.chat_panel import bubbles
+    key = "chat.panel.heading"
+    du = bubbles.text(key, "de")
+    assert "deine" in du
+    monkeypatch.setitem(localization.FORMAL_TEXTS, "de", dict(localization.FORMAL_TEXTS["de"]))
+    localization.FORMAL_TEXTS["de"][key] = "Ditto und Ihre KI-Apps"
+    assert bubbles.text(key, "de") == du, "du is the default"
+    localization.set_form_of_address("sie")
+    assert bubbles.text(key, "de") == "Ditto und Ihre KI-Apps"
+    assert bubbles.text(key, "en") == localization.LocalizationManager.TRANSLATIONS["en"][key]
 
 
 def test_file_settings_general_changes_the_form_of_address(tmp_path, language_state):

@@ -29,6 +29,7 @@ from typing import Iterable, List, Optional
 
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import QCursor, QDesktopServices, QFont, QGuiApplication, QPalette, QTextDocument
+from PySide6.QtGui import Qt as GuiQt   # Qt.mightBeRichText lives in QtGui
 from PySide6.QtWidgets import (QAbstractButton, QApplication, QFrame, QGroupBox, QLabel, QPushButton, QToolButton,
                                QVBoxLayout, QWidget)
 
@@ -46,6 +47,7 @@ TERMS_PROPERTY = "glossary_terms"       # the glossary ids a widget is marked wi
 F1_PROPERTY = "glossary_f1_terms"       # the ids F1 opens on a marked label's field
 LANG_PROPERTY = "glossary_lang"
 URL_PROPERTY = "glossary_url"
+OWN_DESCRIPTION_PROPERTY = "glossary_own_description"   # the widget's description before it was marked
 
 
 def _open_url(url: str) -> bool:
@@ -77,10 +79,13 @@ def _terms_of(widget: QWidget, prop: str = TERMS_PROPERTY) -> List[str]:
 
 
 def _tooltip_text(widget: QWidget) -> str:
-    """The widget's own tooltip as plain text (plain_tooltip wraps it in escaped rich text)."""
+    """The widget's own tooltip as plain text, read the way Qt reads it: rich text (plain_tooltip wraps a text in
+    escaped rich text) is turned into its words, any other tooltip stays exactly as it is ("Size < 4 GB")."""
     tip = widget.toolTip()
     if not tip:
         return ""
+    if not GuiQt.mightBeRichText(tip):
+        return tip.strip()
     document = QTextDocument()
     document.setHtml(tip)
     return document.toPlainText().strip()
@@ -90,6 +95,22 @@ def description(terms: Iterable[str], lang: Optional[str] = None) -> str:
     """What a screen reader reads for marked terms: each explanation with its link."""
     return " ".join(ui_text("words.card.described", lang, explanation=glossary.explanation(t, lang),
                             url=glossary.link(t, lang)) for t in terms)
+
+
+def _own_description(widget: QWidget) -> str:
+    """What the window itself says about `widget` for screen readers, remembered the first time it is marked: its
+    accessible description, else its tooltip (Qt reads the tooltip only while no description is set, so marking must
+    not silence it)."""
+    own = widget.property(OWN_DESCRIPTION_PROPERTY)
+    if own is None:
+        own = widget.accessibleDescription() or _tooltip_text(widget)
+        widget.setProperty(OWN_DESCRIPTION_PROPERTY, own)
+    return str(own)
+
+
+def _describe(widget: QWidget, terms: List[str], lang: Optional[str]) -> None:
+    """The widget's own description first, then the explanation and link of each term."""
+    widget.setAccessibleDescription(" ".join(filter(None, (_own_description(widget), description(terms, lang)))))
 
 
 class HoverCard(QFrame):
@@ -315,7 +336,7 @@ def explain(widget: QWidget, *terms: str, lang: Optional[str] = None) -> QWidget
     widget.setProperty(TERMS_PROPERTY, marked)
     if lang:
         widget.setProperty(LANG_PROPERTY, lang)
-    widget.setAccessibleDescription(description(marked, lang or widget.property(LANG_PROPERTY) or None))
+    _describe(widget, marked, lang or widget.property(LANG_PROPERTY) or None)
     if isinstance(widget, QLabel):
         widget.setCursor(Qt.WhatsThisCursor)   # the usual sign that help is there
         buddy = widget.buddy()
@@ -329,8 +350,8 @@ def _mark_buddy(buddy: QWidget, terms: List[str], lang: Optional[str]) -> None:
     buddy.setProperty(F1_PROPERTY, terms)
     if lang:
         buddy.setProperty(LANG_PROPERTY, lang)
-    if not buddy.accessibleDescription():
-        buddy.setAccessibleDescription(description(terms, lang))
+    if not _terms_of(buddy):   # a field marked itself describes its own terms
+        _describe(buddy, terms, lang)
     hover_controller().watch(buddy)
 
 

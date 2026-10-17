@@ -6,7 +6,9 @@ What happened, in the person's language and in plain words first; why, when it i
 steps (chain a0's StepsRow with its [Open] buttons), a plain sentence, or one button. The English technical detail
 (the framework's message, a traceback) is folded away under "Technical details", can be expanded and copied, with
 secrets redacted and the home folder written as "~" (utils/wording.technical_details): the person can paste it into a
-bug report or ask Ditto, who reads English and explains it in German. Every text is plain text, never HTML from data.
+bug report or ask Ditto, who reads English and explains it in German. Every text is plain text, never HTML from data,
+and no text of the box shows a secret (the summary, the reason and the steps are redacted too: they are often made
+from an error's message). A catalogue step is shown in the GUI's words (a mouse path), never as a command or object.
 
     show_error(parent, ui_text("build.failed.summary"), why=..., next_step=..., details=str(e))
     show_exception(parent, e, ui_text("deploy.failed"))      # details = message + traceback, steps = e.steps
@@ -14,7 +16,7 @@ bug report or ask Ditto, who reads English and explains it in German. Every text
 """
 
 import traceback
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -22,12 +24,41 @@ from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QHBoxLay
                                QPushButton, QStyle, QToolButton, QVBoxLayout, QWidget)
 
 from orchestrator.gui.plain import button_text, mnemonic_text, plain_label
+from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import current_language, ui_text
 from orchestrator.utils.wording import technical_details
 
 DETAILS_LIMIT = 20000   # the end of a longer detail is kept (a traceback's last lines matter most)
 ICONS = {"critical": QStyle.SP_MessageBoxCritical, "warning": QStyle.SP_MessageBoxWarning,
          "information": QStyle.SP_MessageBoxInformation}
+
+
+def _shown(text: Any) -> str:
+    """A text of the box as the person sees it: never a secret, even when it was made from an error's message."""
+    return redact_secrets(str(text or ""))
+
+
+def _step_lines(steps: Any, lang: str) -> List[str]:
+    """Each step as one line for the person: a plain sentence as it is (a0's Line is text too); a catalogue step
+    (chain a0's NextStep) in the GUI's words through a0's renderer (a mouse path, never a command). A step that no
+    renderer can show is left out rather than shown as its Python repr."""
+    try:
+        from orchestrator.utils.next_steps import rendered
+    except ImportError:
+        rendered = None
+    lines: List[str] = []
+    for step in (steps if isinstance(steps, (list, tuple)) else [steps]):
+        text = ""
+        if not isinstance(step, str) and rendered is not None:
+            try:
+                text = "\n".join(r.text for r in rendered([step], "gui", lang))
+            except Exception:  # noqa: BLE001 - an error box never fails because of its next step
+                text = ""
+        elif isinstance(step, str):
+            text = step
+        if text.strip():
+            lines.append(_shown(text.strip()))
+    return lines
 
 
 def _steps_widget(steps: Any, parent: QWidget, lang: str) -> Optional[QWidget]:
@@ -41,7 +72,7 @@ def _steps_widget(steps: Any, parent: QWidget, lang: str) -> Optional[QWidget]:
             return StepsRow(steps, parent=parent, lang=lang)
         except Exception:  # noqa: BLE001 - an error box never fails because of its next step
             pass
-    lines = [str(s) for s in (steps if isinstance(steps, (list, tuple)) else [steps]) if str(s).strip()]
+    lines = _step_lines(steps, lang)
     return plain_label("\n".join(ui_text("words.error.next", lang, step=line) for line in lines), parent) \
         if lines else None
 
@@ -58,7 +89,7 @@ class ErrorDialog(QDialog):
         super().__init__(parent if isinstance(parent, QWidget) else None)
         self.lang = lang or current_language()
         self.setObjectName("error_dialog")
-        self.setWindowTitle(title or ui_text("words.error.title", self.lang))
+        self.setWindowTitle(_shown(title) or ui_text("words.error.title", self.lang))
         self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
@@ -66,14 +97,14 @@ class ErrorDialog(QDialog):
         icon.setPixmap(self.style().standardIcon(ICONS.get(kind, ICONS["critical"])).pixmap(32, 32))
         icon.setAlignment(Qt.AlignTop)
         top.addWidget(icon)
-        self.summary = plain_label(summary or ui_text("words.error.title", self.lang), self)
+        self.summary = plain_label(_shown(summary) or ui_text("words.error.title", self.lang), self)
         self.summary.setObjectName("error_summary")
         font = QFont(self.summary.font())
         font.setBold(True)
         self.summary.setFont(font)
         top.addWidget(self.summary, 1)
         layout.addLayout(top)
-        self.why = plain_label(why, self)
+        self.why = plain_label(_shown(why), self)
         self.why.setObjectName("error_why")
         self.why.setVisible(bool(why))
         layout.addWidget(self.why)
@@ -81,14 +112,14 @@ class ErrorDialog(QDialog):
         if steps:
             self.next = _steps_widget(steps, self, self.lang)
         elif next_step:
-            self.next = plain_label(ui_text("words.error.next", self.lang, step=next_step), self)
+            self.next = plain_label(ui_text("words.error.next", self.lang, step=_shown(next_step)), self)
         if self.next is not None:
             self.next.setObjectName("error_next")
             layout.addWidget(self.next)
         self.btn_action = None
         if action is not None:
             label, slot = action
-            self.btn_action = QPushButton(mnemonic_text(label), self)
+            self.btn_action = QPushButton(mnemonic_text(_shown(label)), self)
             self.btn_action.setObjectName("btn_error_action")
             self.btn_action.setAutoDefault(False)
             self.btn_action.clicked.connect(lambda _=False: (self.accept(), slot()))
