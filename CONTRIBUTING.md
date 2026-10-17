@@ -45,8 +45,9 @@ Up to release 3.0.0 the repository was called `llm_conversion_framework`. GitHub
 existing clone keeps working; to point it at the new address:
 `git remote set-url origin https://github.com/Smilez1985/LLM_Cross-Compiler_Framework.git`.
 
-You need **Python 3.11 to 3.14**, Git, and Docker for real builds. On a Linux machine without a desktop, the Qt
-GUI tests need a few system libraries; the CI installs
+You need **Python 3.11 to 3.14**, Git, and Docker for real builds. The GUI's PySide6 is the optional extra `gui`
+(`requirements-gui.txt`); the command line, the MCP server and the core run without it. On a Linux machine without a
+desktop, the Qt GUI tests need a few system libraries; the CI installs
 `libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0`.
 
 ### Option A: uv
@@ -56,10 +57,10 @@ Installs exactly the pinned, hashed versions from the requirements files:
 ```bash
 uv venv --python 3.13
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
-uv pip install -r requirements.txt -r requirements-dev.txt
+uv pip install -r requirements-gui.txt -r requirements-dev.txt   # without the GUI: requirements.txt
 
 python -m orchestrator.cli --help      # command line
-python -m orchestrator.main            # GUI
+python -m orchestrator.main            # GUI (orchestrator/gui/app.py; without PySide6 it says how to install it)
 ```
 
 ### Option B: uv project environment
@@ -67,7 +68,7 @@ python -m orchestrator.main            # GUI
 Installs exactly the versions pinned in `uv.lock`:
 
 ```bash
-uv sync                                # runtime and dev dependencies plus the llm-cli, llmcf and llm-gui commands
+uv sync --extra gui                    # runtime (with the GUI) and dev dependencies, the llm-cli, llmcf and llm-gui commands
 uv run llm-cli --help
 uv run llm-gui
 ```
@@ -90,9 +91,10 @@ uv run llm-gui
 
 - `pyproject.toml` declares the allowed versions (`[project]`, the dev tools in `[dependency-groups]`), `uv.lock`
   pins them (the lock file of [uv](https://docs.astral.sh/uv/)).
-- `requirements.txt` (runtime) and `requirements-dev.txt` (dev tools) are exports of `uv.lock` with hashes. Their
-  first lines name the command that made them. The installers and the CI install from them. **Never edit them by
-  hand.**
+- `requirements.txt` (runtime), `requirements-gui.txt` (runtime plus the optional extra `gui`, PySide6) and
+  `requirements-dev.txt` (dev tools) are exports of `uv.lock` with hashes. Their first lines name the command that
+  made them. The installers and the CI install from them: the desktop installers `requirements-gui.txt`,
+  `install.sh --headless` and the framework image without `--gui` `requirements.txt`. **Never edit them by hand.**
 - `anthropic`, `openai`, `fastembed` and `mcp` are pinned to exact versions on purpose: LLM tooling is a
   supply-chain target (see the comments in `pyproject.toml`). If you change such a pin, explain why in the pull
   request.
@@ -103,15 +105,16 @@ After adding, removing or updating a dependency:
 uv lock                                         # update uv.lock (other pins stay; one package: --upgrade-package NAME)
 uv lock --check                                 # pyproject.toml and uv.lock agree
 uv export --frozen --format requirements-txt --no-dev --no-emit-project -o requirements.txt
+uv export --frozen --format requirements-txt --no-dev --extra gui --no-emit-project -o requirements-gui.txt
 uv export --frozen --format requirements-txt --only-group dev --no-emit-project -o requirements-dev.txt
 ```
 
 Then run pip-audit ([section 5](#5-lint-and-security-checks)) and the tests, and commit `pyproject.toml`, `uv.lock`
-and both requirements files together. The CI job "Lock files" runs the same commands and fails when a file differs.
+and the three requirements files together. The CI job "Lock files" runs the same commands and fails when a file differs.
 
 Dependabot opens weekly pull requests for Python packages (`pyproject.toml` and `uv.lock`), GitHub Actions and the
-target Dockerfiles. It changes only `uv.lock`: run the two export commands on its branch and push the requirements
-files too.
+target Dockerfiles. It changes only `uv.lock`: run the three export commands on its branch and push the
+requirements files too.
 
 ---
 
@@ -291,8 +294,14 @@ pip-audit
 pip-audit --requirement requirements-dev.txt
 ```
 
-The CI also audits every pin in `requirements.txt`, including Windows-only and version-specific ones; the exact
-script is in `security.yml`.
+The CI also audits every pin in `requirements-gui.txt` (all of `requirements.txt` plus PySide6), including
+Windows-only and version-specific ones; the exact script is in `security.yml`.
+
+**Tests without the GUI extra** (`ci.yml`, job `test-headless`): installs `requirements.txt` without PySide6 and runs
+the Qt-free checks (`tests/test_qt_free_core.py`: the core's texts, `llmcf --help`, `llmcf mcp serve` and the plain
+message of `llm-gui`) and the whole suite, whose GUI tests skip themselves (`pytest.importorskip("PySide6")` or the
+`qapp` fixture). A test module that imports `orchestrator.gui` at its top skips without Qt first. Locally:
+`python -m venv .venv-headless && .venv-headless/bin/pip install -r requirements.txt -r requirements-dev.txt`.
 
 **Secret scan** (`security.yml`): every commit of the whole history, see [section 6](#6-secret-scan-and-git-hooks).
 
@@ -315,8 +324,8 @@ docker build -t llm-framework/rockchip:dev /tmp/rockchip-context
 
 GitHub Actions are pinned by commit SHA with the version as a comment. Keep it that way for new actions.
 
-**Framework container** (`framework-container.yml`): when `Docker Setup/`, `install.sh`, `requirements.txt`, the
-builder or the Makefile change, the CI builds the framework's image with `scripts/build_container_image.sh` (a local
+**Framework container** (`framework-container.yml`): when `Docker Setup/`, `install.sh`, a requirements export,
+the builder or the Makefile change, the CI builds the framework's image with `scripts/build_container_image.sh` (a local
 tag, never pushed), lints its Dockerfile and runs smoke tests. `make build`, `make up`, `make down`, `make mojo` and
 `make audit` work with it locally ([docs/Container_Setup.md](docs/Container_Setup.md)). No workflow, Makefile target,
 script or document pushes or pulls a framework image (`tests/test_container_setup.py`). `make test` (uv),
@@ -565,6 +574,15 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 - Code adapted from another project keeps a comment that names its source ("Adapted from ...") and gets an entry
   with that project's licence in `THIRD_PARTY_NOTICES.md`.
 - Do not weaken the build sandbox, the privacy filter or the SSH trust rules.
+- **Qt lives only in `orchestrator/gui/`.** PySide6 is the optional extra `gui`; the command line, the MCP server and
+  everything below the GUI import no Qt, also not inside a function (`tests/test_qt_free_core.py` checks every import
+  and runs them in a process without PySide6). Texts for any process come from `orchestrator/utils/localization.py`
+  (`ui_text`, `tr`, `current_language`, the one table `TRANSLATIONS`); the window's language object with its
+  `language_changed` signal and Qt's own translation of its standard buttons is
+  `orchestrator/gui/localization.py` (`LocalizationManager`, `get_instance`; the old import path resolves to it on
+  first use). Core code that the window should follow reports plain values the GUI polls (for example the build
+  container's figures in `BuildProgress.resources`, read through `BuildService.live_resources`), never a Qt signal.
+  The GUI starts in `orchestrator/gui/app.py`; `orchestrator/main.py` is the launchers' entry point.
 - **Words the person reads.** Every visible text is English and German through `ui_text` (a `TEXTS` table in an
   `orchestrator/utils/l10n_*.py` module named in `TEXT_MODULES`). German says "du"; a module adds `FORMAL = {"de":
   {key: text}}` with the "Sie" form of exactly the texts that address the person (same `{placeholders}`, checked when
@@ -597,10 +615,9 @@ text:
   its place in `MOUSE_LABELS` (its parent object and its label's ui_text key, from an `l10n_*` module); a menu entry
   gets it from `MENU_LAYOUT` in `common.py`. Step texts say "du" like every German text; a German text that differs
   in the "Sie" form gets it in the module's `FORMAL = {"de": {...}}` (same placeholders, its own du text; the
-  catalogue reads it while the window's form of address is "Sie"). The catalogue never imports PySide6 or
-  `localization.py` itself: an MCP
-  tool call renders its steps in a worker thread, and the first Qt import there breaks a window made later in the
-  same process; without the window it reads the `l10n_*` tables directly.
+  catalogue reads it while the window's form of address is "Sie"). The catalogue reads its labels through
+  `orchestrator/utils/localization.py`, which is Qt-free: an MCP tool call renders its steps in a worker thread, and
+  a first Qt import there would break a window made later in the same process.
 - **Carry the step, not the words:** raise a core exception with `.with_steps("runtime.install")` (the `WithSteps`
   mixin), give a `ToolError` `steps=[...]`, a result line `Line(text, steps)`, a Mojo finding `steps=(...)`. The
   renderer writes the command for the CLI (`_say_error` in `cli.py`), the menu path for the window (`StepsRow`) and the

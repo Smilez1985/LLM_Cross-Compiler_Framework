@@ -128,7 +128,8 @@ The installer:
    copied and the repository no longer ships; everything else there stays: your own targets (module wizard,
    `llm-cli module create`), installed community packs, `configs/config.yml`, builds, cache and models. Start
    updates in the repository folder: the copy of `install.sh` in `/opt` copies and removes nothing,
-4. creates a virtual environment (`.venv`) there and installs the pinned packages from `requirements.txt`,
+4. creates a virtual environment (`.venv`) there and installs the pinned packages from `requirements-gui.txt`
+   (everything in `requirements.txt` plus the GUI's PySide6; with `--headless` only `requirements.txt`),
 5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI,
 6. sets up Ditto's local model server (`llm-cli ditto runtime ensure`, run as you, never as root): bare metal by
    default, in Docker when you choose it or when bare metal is not possible here. If Ditto is there already, it does
@@ -139,6 +140,9 @@ Choose the Ditto step with `sudo ./install.sh --ditto=auto|bare-metal|docker|ski
 run set `LCF_DITTO` instead (for example `sudo LCF_DITTO=auto ./install.sh`): then nothing is asked, and a model under
 a permissive licence (such as Apache 2.0) is downloaded after its size and licence are shown.
 
+On a server without a display, `sudo ./install.sh --headless` (unattended: `LCF_HEADLESS=1`) leaves the GUI out:
+the command line and the MCP server need no Qt. `llm-framework` then says how to add the GUI later.
+
 Log out and back in once so the `docker` group takes effect. Then start the GUI with `llm-framework`.
 
 ### Windows
@@ -148,7 +152,7 @@ Log out and back in once so the `docker` group takes effect. Then start the GUI 
 
 The installer checks for Python (installs Python 3.13 with `winget` if none is found, then requires 3.11 to
 3.14), copies the framework to `C:\Program Files\LLM-Cross-Compiler-Framework`, creates `.venv` there, installs
-`requirements.txt`, and puts a **LLM-Cross-Compiler-Framework** shortcut on the desktop. The shortcut runs
+`requirements-gui.txt` (with the GUI), and puts a **LLM-Cross-Compiler-Framework** shortcut on the desktop. The shortcut runs
 `start_framework.bat`, which starts the GUI. The Ditto step is the same as on Linux (`install.bat --ditto=...` or
 `LCF_DITTO`); it runs only for the person who is signed in. In this version Windows has no self-built server and
 no Docker mode for Ditto yet, so the step says so and the installation goes on.
