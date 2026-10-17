@@ -15,8 +15,7 @@ compatibility alias with the same checks): its paths lead to the same objects. M
 
 from typing import Dict, Optional
 
-from PySide6.QtGui import QAction
-
+from orchestrator.gui.menus import place
 from orchestrator.utils.localization import ui_text
 
 TOOLS_MENU = "Tools"   # the main window's menus are not translated (their titles name them in docs and tests)
@@ -45,28 +44,14 @@ MACHINE_ONLY: Dict[str, str] = {
 }
 
 
-def _tools_menu(menubar):
-    for action in menubar.actions():
-        if action.menu() is not None and action.text() == TOOLS_MENU:
-            return action.menu()
-    return menubar.addMenu(TOOLS_MENU)
-
-
 def install(window, menubar) -> None:
     """Adds Tools > Mojo Health Check... (window.act_mojo_health) after Framework Build Images..., and names that
     existing entry (act_framework_images) for the CLI paths it already covered."""
-    menu = _tools_menu(menubar)
-    action = QAction(ui_text("mojo.menu"), window)
-    action.setObjectName("act_mojo_health")
-    action.triggered.connect(lambda _=False: open_mojo_window(window))
+    menu = place.menu_or_new(menubar, place.MENU_TOOLS, TOOLS_MENU)
+    action = place.new_action(window, "act_mojo_health", ui_text("mojo.menu"), lambda: open_mojo_window(window))
     images = getattr(window, "act_images", None)
-    actions = menu.actions()
-    if images is not None and images in actions and actions.index(images) + 1 < len(actions):
-        menu.insertAction(actions[actions.index(images) + 1], action)
-    else:
-        menu.addAction(action)
-    if images is not None and not images.objectName():
-        images.setObjectName("act_framework_images")
+    place.insert_after(menu, images, action)
+    place.name_entry(images, "act_framework_images")
     window.act_mojo_health = action
 
 

@@ -15,12 +15,12 @@ MACHINE_ONLY lists the switches that only skip a question or change the output f
 
 from typing import Any
 
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
 
+from orchestrator.gui.menus import place
 from orchestrator.utils.localization import ui_text
 
-DITTO_MENU = "menu_ditto"
+DITTO_MENU = place.MENU_DITTO
 BEFORE_MENU = "Security"   # the Ditto menu comes after File, Build and Boards, before Security (GUI_PARITY.md)
 
 CLI_PATHS = {
@@ -60,24 +60,15 @@ MACHINE_ONLY = {
 }
 
 
-def _title(menu: QMenu) -> str:
-    return menu.title().replace("&", "")
-
-
 def ditto_menu(window: Any, menubar: Any) -> QMenu:
     """The menu bar's Ditto menu: found by its object name or its title, else created before the Security menu."""
     title = ui_text("ditto_runtime.menu")
-    for action in menubar.actions():
-        menu = action.menu()
-        if menu is not None and (menu.objectName() == DITTO_MENU or _title(menu) == title.replace("&", "")):
-            return menu
+    menu = place.find_menu(menubar, DITTO_MENU, (title,))
+    if menu is not None:
+        return menu
     menu = QMenu(title, menubar)
     menu.setObjectName(DITTO_MENU)
-    before = next((a for a in menubar.actions() if a.menu() is not None and _title(a.menu()) == BEFORE_MENU), None)
-    if before is None:
-        menubar.addMenu(menu)
-    else:
-        menubar.insertMenu(before, menu)
+    place.place_menu_before(menubar, place.find_menu(menubar, place.MENU_SECURITY, (BEFORE_MENU,)), menu)
     window.menu_ditto = menu
     return menu
 
@@ -104,9 +95,8 @@ def open_window(window: Any) -> Any:
 def install(window: Any, menubar: Any) -> None:
     """Ditto > Local Runtime... in the main window's menu bar."""
     menu = ditto_menu(window, menubar)
-    action = QAction(ui_text("ditto_runtime.menu.open"), window)
-    action.setObjectName("act_ditto_runtime_open")
-    action.triggered.connect(lambda _=False: open_window(window))
+    action = place.new_action(window, "act_ditto_runtime_open", ui_text("ditto_runtime.menu.open"),
+                              lambda: open_window(window))
     menu.addAction(action)
     window.act_ditto_runtime = action
 

@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QGroupBox, QHBoxLayout, QLa
                                QVBoxLayout, QWidget)
 
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_tooltip
-from orchestrator.gui.worker_relay import worker_relay
+from orchestrator.gui.worker_relay import WorkerQuestion, ask_from_worker, worker_relay
 from orchestrator.runtime import runtime_mode
 from orchestrator.utils.localization import current_language, ui_text
 
@@ -325,12 +325,8 @@ class RuntimeModeBox(QGroupBox):
         default) while the worker waits; "No" when the box is gone."""
         if threading.current_thread() is threading.main_thread():
             return ask(self, ui_text("runtime.mode.title"), text)
-        event, answer = threading.Event(), []
-        worker_relay().done.emit(self._question, (text, event, answer))
-        while not event.wait(0.2):
-            if self._state["closed"]:
-                return False
-        return bool(answer and answer[0])
+        return ask_from_worker(self._question, ui_text("runtime.mode.title"), text,
+                               stop=lambda: self._state["closed"], interval=0.2)
 
     def _fetch_question(self, rt: Any) -> bool:
         """`ditto runtime ensure`'s question before the pinned source is fetched, in the person's language."""
@@ -393,12 +389,8 @@ class RuntimeModeBox(QGroupBox):
         threading.Thread(target=work, name="ditto-runtime-mode", daemon=True).start()
 
     def _on_relay(self, token: object, result: Any) -> None:
-        if token is self._question and isinstance(result, tuple) and len(result) == 3:
-            text, event, answer = result
-            try:
-                answer.append(ask(self, ui_text("runtime.mode.title"), str(text)))
-            finally:
-                event.set()
+        if token is self._question and isinstance(result, WorkerQuestion):
+            result.reply(lambda: ask(self, result.title, result.text))
             return
         if token is self._progress and self._token is not None:
             self.lbl_progress.setText(one_line(str(result))[:300])

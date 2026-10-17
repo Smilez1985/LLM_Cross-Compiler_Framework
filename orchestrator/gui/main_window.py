@@ -50,6 +50,7 @@ from orchestrator.gui.menus import ditto_models as menu_ditto_models
 from orchestrator.gui.menus import ditto_runtime as menu_ditto_runtime
 from orchestrator.gui.menus import knowledge as menu_knowledge
 from orchestrator.gui.menus import mojo as menu_mojo
+from orchestrator.gui.menus import place as menu_place
 from orchestrator.gui.menus import signin as menu_signin
 from orchestrator.gui.menus import tools_mcp as menu_tools_mcp
 
@@ -160,7 +161,9 @@ class MainOrchestrator(QMainWindow):
     def _setup_menu(self):
         menubar = self.menuBar()
         
+        # The menus carry object names, so the area modules (orchestrator/gui/menus/place.py) find them in any language
         file_menu = menubar.addMenu(self.i18n.t("menu.file", "File"))
+        file_menu.setObjectName(menu_place.MENU_FILE)
         self._add_trash_action(file_menu)
         self._add_output_folder_action(file_menu)
         exit_action = QAction(self.i18n.t("menu.exit", "Exit"), self)
@@ -168,14 +171,17 @@ class MainOrchestrator(QMainWindow):
         file_menu.addAction(exit_action)
         
         sec_menu = menubar.addMenu("Security")
+        sec_menu.setObjectName(menu_place.MENU_SECURITY)
         act_openai = QAction("Set OpenAI API Key", self)
         act_openai.triggered.connect(lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))
         sec_menu.addAction(act_openai)
         
 
         self.view_menu = menubar.addMenu(ui_text("chat.view.menu"))  # filled by _setup_chat_dock
+        self.view_menu.setObjectName(menu_place.MENU_VIEW)
 
         tools_menu = menubar.addMenu("Tools")
+        tools_menu.setObjectName(menu_place.MENU_TOOLS)
         act_ai = QAction("Configure AI Agent (Ditto)...", self)
         act_ai.triggered.connect(self._open_ai_config)
         tools_menu.addAction(act_ai)
@@ -225,6 +231,7 @@ class MainOrchestrator(QMainWindow):
         tools_menu.addAction(self.act_clear_history)
 
         help_menu = menubar.addMenu("Help")
+        help_menu.setObjectName(menu_place.MENU_HELP)
         about_action = QAction("About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
