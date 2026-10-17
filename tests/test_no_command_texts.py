@@ -134,6 +134,13 @@ def test_the_persons_texts_name_no_command_and_no_hand_written_path():
     assert text_problems(person_texts()) == []
 
 
+def test_the_catalogues_own_texts_name_no_command_and_no_hand_written_path():
+    """The step texts of the next-step area modules are the person's texts too (every chain adds its own there), so
+    the same guard reads them (review w6-a0-v: they were outside both guards)."""
+    from orchestrator.utils.next_steps import catalogue
+    assert text_problems(catalogue().texts) == []
+
+
 def test_every_path_placeholder_is_filled_in_both_languages():
     from orchestrator.utils.localization import ui_text
     from orchestrator.utils.next_steps import PATH_RE
