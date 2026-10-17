@@ -295,3 +295,196 @@ class TestDittoForOneRun:
         with pytest.raises(ValueError, match="base_image_reason"):
             ditto.save_module({"module_name": "B", "base_os": f"registry.example/vendor/img@{DIGEST}"},
                               tmp_path / "targets")
+
+
+# --- one build-submission path (consolidation c3-build-path) ------------------------------------------------------
+# Characterization tests of what the CLI's `build start`, the Builder tab's Start Build and BuildService.start_build
+# submit. They were written before the CLI and the GUI were moved onto BuildService.start_build and pin what each
+# channel sent to the orchestrator then.
+
+HF_MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct"
+from test_review_capabilities_paths import gui_messages  # noqa: E402,F401 - the Builder tab's recorded message boxes
+
+
+@pytest.fixture
+def cli_harness(booted_framework, tmp_path, monkeypatch):
+    from test_review_capabilities_paths import make_cli
+    return make_cli(booted_framework, tmp_path, monkeypatch)
+
+
+class TestCliSubmission:
+
+    def test_priority_optimization_and_the_request_fields(self, cli_harness):
+        from orchestrator.Core.build_formats import OptimizationLevel
+        from orchestrator.Core.orchestrator import PriorityLevel
+        result = cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "--priority", "high",
+                                    "--optimization", "size", "--gpu")
+        assert result.code == 0, result.out
+        (req,) = cli_harness.submitted
+        assert (req.priority, req.optimization_level) == (PriorityLevel.HIGH, OptimizationLevel.SIZE)
+        assert req.models == [HF_MODEL] and req.targets == ["Rockchip"] and req.use_gpu is True
+        assert req.parallel_builds is False and req.owner == "", "the person's own build: no owner, no queue limit"
+        assert req.description == f"CLI build: {HF_MODEL} -> Rockchip (gguf)"
+        assert (req.model_revision, req.dataset_sha256, req.max_context_length) == (None, None, None)
+        assert req.disk_reservation == ""
+
+    @pytest.mark.parametrize("level, priority", [("low", "LOW"), ("normal", "NORMAL"), ("urgent", "URGENT"),
+                                                 ("critical", "CRITICAL")])
+    def test_every_priority_maps_to_its_level(self, cli_harness, level, priority):
+        from orchestrator.Core.orchestrator import PriorityLevel
+        assert cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "--priority", level).code == 0
+        assert cli_harness.submitted[-1].priority == PriorityLevel[priority]
+
+    def test_defaults_are_normal_and_balanced(self, cli_harness):
+        from orchestrator.Core.build_formats import OptimizationLevel
+        from orchestrator.Core.orchestrator import PriorityLevel
+        assert cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip").code == 0
+        (req,) = cli_harness.submitted
+        assert (req.priority, req.optimization_level) == (PriorityLevel.NORMAL, OptimizationLevel.BALANCED)
+
+    @pytest.mark.parametrize("answer, where", [("-", "build"), ("chosen", "chosen")])
+    def test_the_destination_prompt_at_a_terminal(self, cli_harness, monkeypatch, answer, where):
+        from orchestrator import cli as cli_module
+        from orchestrator.Core.artifact_output import build_folder
+        chosen = cli_harness.work / "chosen"
+        asked = []
+        monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+        monkeypatch.setattr(cli_module.click, "prompt", lambda text, **k: asked.append(k.get("default")) or
+                            (answer if answer == "-" else str(chosen)))
+        assert cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip").code == 0
+        out = Path(cli_harness.submitted[0].output_base_dir)
+        assert out == (build_folder(cli_harness.framework) if where == "build" else chosen.resolve())
+        assert len(asked) == 1, "asked once, with the output folder as the default"
+
+    def test_the_follow_loop_asks_about_a_healing_proposal_then_ends(self, booted_framework, tmp_path,
+                                                                     monkeypatch):
+        from orchestrator import cli as cli_module
+        from orchestrator.Core.orchestrator import OrchestrationStatus
+        from test_cli_builds import invoke_plain, quiet_console
+        from test_review_capabilities_paths import CliOrchestrator, make_cli
+        make_cli(booted_framework, tmp_path, monkeypatch)
+        proposal = SimpleNamespace(summary="s", root_cause="c", fix_command="f", is_ai_generated=False,
+                                   strategy=SimpleNamespace(value="retry"))
+
+        class Healing(CliOrchestrator):
+            polls = 0
+
+            async def get_workflow_status(self, request_id):
+                state = self._workflows.get(request_id)
+                Healing.polls += 1
+                if Healing.polls == 1:
+                    state.status, state.healing_proposal = OrchestrationStatus.AWAITING_APPROVAL, proposal
+                else:
+                    state.status = OrchestrationStatus.COMPLETED
+                return state
+
+        orch = Healing()
+        decided = []
+        monkeypatch.setattr(cli_module, "_pause", lambda seconds: None)
+        monkeypatch.setattr(cli_module, "_resolve_healing_interactively",
+                            lambda orchestrator, rid, shown: decided.append((orchestrator, rid, shown)))
+
+        class Ctx(cli_module.FrameworkContext):
+            def require_framework(self):
+                self.framework_manager = booted_framework
+                self.orchestrator = orch
+                return self
+
+        printed = quiet_console(monkeypatch)
+        result = invoke_plain("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "--follow", ctx=Ctx())
+        assert result.code == 0, printed.getvalue() + result.out
+        (rid,) = orch._workflows
+        assert decided == [(orch, rid, proposal)]
+        assert "Status: awaiting_approval" in printed.getvalue() and "Status: completed" in printed.getvalue()
+
+
+@pytest.mark.usefixtures("qapp", "gui_messages")
+class TestGuiSubmission:
+
+    @pytest.fixture
+    def tab(self, booted_framework):
+        from test_review_capabilities_paths import make_tab
+        tab = make_tab(booted_framework)
+        tab.model_input.setEditText(HF_MODEL)
+        yield tab
+        tab._build_timer.stop()
+
+    def test_the_request_fields(self, tab):
+        from orchestrator.Core.artifact_output import build_folder
+        from orchestrator.Core.build_formats import OptimizationLevel
+        from orchestrator.Core.orchestrator import PriorityLevel
+        from test_review_capabilities_paths import select, submit
+        select(tab.priority_combo, "HIGH")
+        tab.opt_combo.setCurrentText("SIZE")
+        req = submit(tab)
+        assert req is not None
+        assert (req.priority, req.optimization_level) == (PriorityLevel.HIGH, OptimizationLevel.SIZE)
+        assert req.parallel_builds is True and req.description == "Builder Tab Job" and req.owner == ""
+        assert Path(req.output_base_dir) == build_folder(tab.framework), "it waits in the build folder"
+        assert (req.model_revision, req.max_context_length, req.dataset_sha256) == (None, None, None)
+
+    def test_a_recipe_pins_the_commit_and_the_context_length_not_the_dataset(self, tab, tmp_path):
+        import hashlib
+
+        from orchestrator.schemas.recipes import Recipe
+        from test_recipes import recipe_data
+        from test_review_capabilities_paths import submit
+        dataset = tmp_path / "calib.txt"
+        dataset.write_text("calibration text\n", encoding="utf-8")
+        data = recipe_data()
+        data.update(target={"id": "Rockchip", "pack_sha256": "a" * 64}, format="gguf", board="rk3588",
+                    quantization="Q4_K_M")
+        data["options"].update(use_imatrix=True, max_context_length=4096,
+                               dataset={"name": "calib.txt",
+                                        "sha256": hashlib.sha256(dataset.read_bytes()).hexdigest()})
+        recipe = Recipe.model_validate(data)
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(dataset)
+        req = submit(tab)
+        assert req is not None and req.model_revision == recipe.model.revision
+        assert req.max_context_length == 4096 and req.dataset_path == str(dataset)
+        assert req.dataset_sha256 is None, "today the GUI pins no calibration dataset"
+
+
+class TestServiceSubmission:
+
+    @pytest.fixture
+    def service(self, booted_framework):
+        from orchestrator.Core.build_service import BuildService
+        from test_foundation import FakeOrchestrator
+        booted_framework.orchestrator = FakeOrchestrator()
+        return BuildService(booted_framework)
+
+    def request(self, **values):
+        from orchestrator.schemas.build import BuildRequestIn
+        return BuildRequestIn(**{"model": HF_MODEL, "target": "Rockchip", "format": "gguf", **values})
+
+    def test_the_request_fields(self, service, tmp_path):
+        from orchestrator.Core.orchestrator import PriorityLevel
+        dataset = tmp_path / "calib.txt"
+        dataset.write_text("x", encoding="utf-8")
+        service.start_build(self.request(dataset_path=str(dataset), use_imatrix=True), local_paths=True,
+                            owner="mcp#a", dataset_sha256="d" * 64)
+        (req,) = service.framework.orchestrator.submitted
+        assert req.priority == PriorityLevel.NORMAL and req.parallel_builds is False
+        assert req.description == "Build service request" and req.owner == "mcp#a"
+        assert Path(req.output_base_dir) == service.output_folder()
+        assert req.dataset_sha256 == "d" * 64 and req.dataset_path == str(dataset.resolve())
+
+    def test_a_dataset_pin_without_a_dataset_is_dropped(self, service):
+        service.start_build(self.request(), local_paths=True, dataset_sha256="d" * 64)
+        assert service.framework.orchestrator.submitted[0].dataset_sha256 is None
+
+    def test_a_disk_reservation_hands_the_ledger_to_the_orchestrator(self, service, monkeypatch):
+        ledger = object()
+        monkeypatch.setattr(service, "disk_ledger", lambda: ledger)
+        service.start_build(self.request(), disk_reservation="res-1")
+        assert service.framework.orchestrator.submitted[0].disk_reservation == "res-1"
+        assert service.framework.orchestrator.disk_ledger is ledger
+
+    def test_a_refused_request_submits_nothing(self, service):
+        from orchestrator.Core.build_service import BuildServiceError
+        with pytest.raises(BuildServiceError) as raised:
+            service.start_build(self.request(model="not a repo"), local_paths=True)
+        assert raised.value.code == "invalid_value" and raised.value.field == "model"
+        assert service.framework.orchestrator.submitted == []
