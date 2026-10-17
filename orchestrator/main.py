@@ -93,7 +93,9 @@ def main():
     
     # 3. Initialize Global Localization with selected language
     get_i18n(language)
-    
+    from orchestrator.gui.form_of_address import apply_saved_form
+    apply_saved_form(cfg_mgr)   # German "du" (the default) or "Sie": File > Settings..., General
+
     # 4. Start Main GUI
     try:
         # MainOrchestrator usually initializes the full FrameworkManager internally

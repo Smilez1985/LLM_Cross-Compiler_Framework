@@ -322,6 +322,22 @@ def test_the_docker_manager_needs_qt_only_for_its_signals(tmp_path):
     assert present(modules, ("PySide6",)) == []
 
 
+def test_the_command_lines_sizes_need_no_qt(tmp_path):
+    """Review fix (wave 6, f-words): deletion.size_text, used by the command line, Mojo and the board steps, went
+    through the GUI's language tables (localization imports Qt) and so loaded Qt into llmcf and the MCP server."""
+    code = ("import sys\n"
+            "from orchestrator.Core.deletion import size_text\n"
+            "from orchestrator.utils.sizes import format_size\n"
+            "assert size_text(1_500_000_000) == '1.5 GB' and size_text(532) == '532 bytes'\n"
+            "assert format_size(532, 'de') == '532 Byte'\n"
+            "assert format_size(1_500, 'de', exact=True) == '2 kB (1.500 Byte)'\n"
+            "assert 'PySide6' not in sys.modules, 'Qt loaded for a size'\n"
+            "assert 'orchestrator.utils.localization' not in sys.modules\n")
+    modules, run = loaded_modules(tmp_path, code)
+    assert run.returncode == 0, run.stderr[-3000:]
+    assert present(modules, ("PySide6",)) == []
+
+
 def test_docker_manager_signals_still_connect_and_emit():
     pytest.importorskip("PySide6")
     from orchestrator.Core.docker_manager import DockerManager

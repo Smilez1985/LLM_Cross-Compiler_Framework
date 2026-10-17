@@ -403,6 +403,9 @@ class ConfigManager:
 
             # I18N & Security
             ConfigSchema("language", str, False, "en", "Interface Language (en/de)"),
+            ConfigSchema("form_of_address", str, False, "du",
+                         "German form of address: du (informal, the default) or sie (formal)",
+                         ["regex:^(du|sie)$"]),
             ConfigSchema("ai_security_level", str, False, "STRICT", "AI Data Leakage Protection Level",
                          ["regex:^(STRICT|BALANCED|OFF)$"]),
             ConfigSchema("secret_storage", str, False, "keyring",
@@ -706,7 +709,8 @@ class ConfigManager:
 
         with self._lock:
             persist_keys = [
-                "language", "ai_security_level", "secret_storage", "secret_helper", "gui_theme", "docker_registry",
+                "language", "form_of_address", "ai_security_level", "secret_storage", "secret_helper", "gui_theme",
+                "docker_registry",
                 "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
                 "rag_reranker", "rag_rerank_default", "rag_rerank_min_score", "rag_model_idle_minutes",
                 "crawler_max_depth", "crawler_max_pages",
