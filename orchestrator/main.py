@@ -1,118 +1,58 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Main Entry Point (v2.3.0)
-DIREKTIVE: Goldstandard, Startup Logic, I18n.
+LLM Cross-Compiler Framework - GUI entry point (llm-gui, llm-framework, the desktop shortcut).
 
-Launches the GUI Application.
-- Sets up Python Path.
-- Initializes Configuration.
-- Handles First-Run Language Selection.
-- Boots the Main Window.
+The GUI's start-up lives in orchestrator/gui/app.py. This module stays where the launchers look for it (install.sh,
+install.bat, scripts/start-llm_cross_compiler_framework.bat, `llm-gui` in pyproject.toml) and is the GUI module itself
+once it is imported (`import orchestrator.main` gives orchestrator.gui.app, so existing callers and tests keep working).
+
+PySide6 is the optional 'gui' extra (DECISIONS round 11, A3). Without it this prints how to install it instead of a
+traceback; the command line (llmcf) and the MCP server work without it.
 """
 
+import importlib.util
 import sys
-import os
 from pathlib import Path
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
-# Adjust path to ensure modules are found
-# Structure: root/orchestrator/main.py -> resolve -> parent is orchestrator -> parent is root
-current_dir = Path(__file__).resolve().parent
-root_dir = current_dir.parent
-if str(root_dir) not in sys.path:
-    sys.path.insert(0, str(root_dir))
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:   # started as a script: python orchestrator/main.py
+    sys.path.insert(0, str(_ROOT))
 
-# Core Imports
-from orchestrator.Core.config_manager import ConfigManager
-from orchestrator.Core.vault_key import set_passphrase_prompt
-from orchestrator.llm.sdk_env import guard_sdk_environment
-from orchestrator.utils.logging import setup_logging
+# Only the hash-pinned way: the framework is installed from its checkout, not from the package index, so a
+# `pip install <project>[gui]` would fetch whatever carries that name there, unpinned (review of chain qt).
+GUI_EXTRA_MISSING = (
+    "The graphical interface needs PySide6, the optional 'gui' extra, and this installation does not have it. "
+    "Run the installer again without --headless, or install the hash-pinned list from the framework's folder with "
+    "the pip of this environment: pip install --require-hashes -r requirements-gui.txt. The command line (llmcf) "
+    "and its MCP server work without it.")
 
-# GUI Imports
-# Note: These will fail if files are missing. We wrap them for better error messages.
+
+def qt_installed() -> bool:
+    """Whether PySide6 can be found (a broken one, such as a missing system library, still counts as installed)."""
+    try:
+        return importlib.util.find_spec("PySide6") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 try:
-    from orchestrator.gui.main_window import MainOrchestrator
-    from orchestrator.gui.dialogs import LanguageSelectionDialog
-    from orchestrator.gui.sign_in import PassphrasePrompt
-    from orchestrator.utils.localization import get_instance as get_i18n
-except ImportError as e:
-    print(f"CRITICAL ERROR: Missing GUI components.\n{e}")
-    print("Please ensure 'orchestrator/gui/main_window.py', 'dialogs.py' and 'utils/localization.py' exist.")
-    sys.exit(1)
-
-def save_language(cfg_mgr: ConfigManager, language: str) -> bool:
-    """Saves the first-run language choice to config.yml in the effective config folder (other settings there
-    are kept). False if it could not be written."""
-    return bool(cfg_mgr.set("language", language)) and bool(cfg_mgr.save_user_config())
+    from orchestrator.gui import app as _app
+except ImportError as _error:
+    if (_error.name or "").split(".")[0] not in ("PySide6", "shiboken6") or qt_installed():
+        raise   # anything else than the missing extra keeps its own message
+    _app = None
 
 
 def main():
-    # High DPI Scaling for modern screens
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    """Starts the GUI; without the 'gui' extra prints how to install it and returns 1."""
+    if _app is None:
+        print(GUI_EXTRA_MISSING, file=sys.stderr)
+        return 1
+    return _app.main()
 
-    # Determine App Root
-    app_root = root_dir
-    from orchestrator.Core.request_store import set_program
-    set_program("gui")  # shown with this window's builds in the shared build state
 
-    # 1. Load Config (User Preferences) from the effective config folder: LLM_FRAMEWORK_CONFIG_DIR, else the
-    # installation's configs/ if this user may write there, else the per-user folder (C:\Program Files is
-    # read-only for standard users). The framework started below uses the same folder.
-    cfg_mgr = ConfigManager()
-
-    # Before Qt or the framework start threads: SDK environment guard (orchestrator/llm/sdk_env.py).
-    debug_http = "--debug-http" in sys.argv[1:]
-    for warning in guard_sdk_environment(cfg_mgr.get("ai_allow_sdk_env_headers", False), debug_http):
-        print(f"Warning: {warning}", file=sys.stderr)
-    # The SDK logger levels follow the flag too; the framework's later setup_logging() keeps the choice.
-    setup_logging(debug_http=debug_http)
-
-    app = QApplication([arg for arg in sys.argv if arg != "--debug-http"])
-    app.setApplicationName("LLM Cross-Compiler")
-    # A vault protected by a passphrase asks for it in a dialog (also when it opens in a worker thread).
-    set_passphrase_prompt(PassphrasePrompt(app))
-
-    language = cfg_mgr.get("language")
-    # The schema default 'en' is always loaded, so a first run is detected by where the value came from.
-    language_value = cfg_mgr.config_values.get("language")
-    first_run = language_value is None or language_value.source.source_type == "default"
-
-    # 2. First Run / Language Selection
-    if first_run:
-        # Initialize I18n with default English for the dialog
-        get_i18n("en")
-        
-        dlg = LanguageSelectionDialog()
-        if dlg.exec() == QDialog.Accepted:
-            language = dlg.selected_lang
-            if not save_language(cfg_mgr, language):
-                print(f"Warning: Could not save language preference to {cfg_mgr.config_dir}", file=sys.stderr)
-        else:
-            # User cancelled setup
-            sys.exit(0)
-    
-    # 3. Initialize Global Localization with selected language
-    get_i18n(language)
-    from orchestrator.gui.form_of_address import apply_saved_form
-    apply_saved_form(cfg_mgr)   # German "du" (the default) or "Sie": File > Settings..., General
-
-    # 4. Start Main GUI
-    try:
-        # MainOrchestrator usually initializes the full FrameworkManager internally
-        # We pass app_root so it knows where it runs
-        window = MainOrchestrator(app_root)
-        window.show()
-        
-        sys.exit(app.exec())
-    except Exception as e:
-        # Fallback error dialog if crash during boot
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Critical)
-        msg.setText("Fatal Error during startup")
-        msg.setInformativeText(str(e))
-        msg.setWindowTitle("Error")
-        msg.exec()
-        raise e
+if _app is not None and __name__ != "__main__":
+    sys.modules[__name__] = _app
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

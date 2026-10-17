@@ -51,13 +51,15 @@ What happens:
      when your group id exists in Debian already (for example 100, `users`), that group is used;
    - `install.sh` runs as on a Debian computer, as if started with `sudo` by `lcf`: it installs Python with `apt`,
      copies the program to `/opt/llm-cross-compiler-framework`, creates `.venv` there with the pinned
-     `requirements.txt` and writes the `llm-framework` launcher. Only the Docker engine and the `docker` group are
-     left out (`LCF_CONTAINER_BUILD=1`);
+     `requirements.txt` (with `--gui`: `requirements-gui.txt`, which adds the GUI's PySide6) and writes the
+     `llm-framework` launcher. Only the Docker engine and the `docker` group are left out (`LCF_CONTAINER_BUILD=1`),
+     and the headless image installs as with `install.sh --headless`: no Qt and no Qt system libraries;
    - `llm-cli` is put on the PATH, and `llmcf`, its new name (unreleased);
    - the sources are a read-only mount during the build, so they never become an image layer, and no secret is in
      any layer;
-   - at the end the build checks the installation: the command line must import, and every system library Qt loads
-     must be there (for `--gui` also those of the desktop and the X11 platform plugin). Otherwise the build stops
+   - at the end the build checks the installation: the command line must import; the headless image must not
+     contain Qt; with `--gui` every system library Qt loads must be there (also those of the desktop and the X11
+     platform plugin). Otherwise the build stops
      and names what is missing, instead of giving an image whose `llm-cli` fails at the first command. When `pip`
      cannot install the pinned packages, `install.sh` stops the build too.
 4. The image gets the local tag `lcf-framework:local`, and the builder prints how to run it.

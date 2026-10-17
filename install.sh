@@ -33,6 +33,10 @@ PACKAGE_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple/}"
 # läuft dann in einem Image, das auf diesem Rechner gebaut wird. Ohne Docker-Engine im Image (sie installiert dort
 # niemand) und ohne docker-Gruppe; alles andere ist wie auf dem Rechner selbst.
 CONTAINER_BUILD="${LCF_CONTAINER_BUILD:-0}"
+# Die grafische Oberfläche (PySide6, das optionale Extra 'gui') wird mitinstalliert (requirements-gui.txt). --headless
+# (für unbeaufsichtigte Läufe auch LCF_HEADLESS=1; das Framework-Image ohne --gui setzt es) installiert nur
+# requirements.txt: Kommandozeile und MCP-Server ohne Qt, für einen Server ohne Bildschirm.
+HEADLESS="${LCF_HEADLESS:-0}"
 # Dittos lokale Laufzeit (selbst gebauter llama-server und sein Modell): --ditto=auto|bare-metal|docker|skip, für
 # unbeaufsichtigte Läufe auch LCF_DITTO=... (ohne Rückfragen; Größe und Lizenz des Modells werden trotzdem gezeigt).
 DITTO_CHOICE="${LCF_DITTO:-auto}"
@@ -287,6 +291,10 @@ setup_venv() {
     local as_user=(sudo -u "$REAL_USER")
     if ! command -v sudo &> /dev/null; then as_user=(runuser -u "$REAL_USER" --); fi
     
+    # Mit grafischer Oberfläche requirements-gui.txt (Basis plus PySide6), mit --headless nur requirements.txt.
+    REQUIREMENTS="requirements-gui.txt"
+    if [ "$HEADLESS" = "1" ]; then REQUIREMENTS="requirements.txt"; fi
+
     # Scheitert ein Schritt (kein venv, ein Paket nicht erreichbar), bricht die Installation ab: Sonst meldete sie
     # "abgeschlossen" mit einer leeren Umgebung, und ein Container-Image würde trotzdem gebaut.
     if ! "${as_user[@]}" bash <<EOF
@@ -295,14 +303,14 @@ setup_venv() {
     python3 -m venv .venv
     ./.venv/bin/pip install --upgrade pip > /dev/null || echo "⚠️ pip ließ sich nicht aktualisieren; weiter mit der vorhandenen Version."
 
-    # Genau die Versionen aus requirements.txt dieses Stands (uv export aus uv.lock); pip prüft jede Datei gegen
+    # Genau die Versionen aus $REQUIREMENTS dieses Stands (uv export aus uv.lock); pip prüft jede Datei gegen
     # ihren Hash. Ohne die Datei wird nichts ungeprüft nachinstalliert.
-    echo "Installiere Abhängigkeiten..."
-    if [ ! -f requirements.txt ]; then
-        echo "requirements.txt fehlt in $INSTALL_DIR; ohne die festgelegten Versionen wird nichts installiert." >&2
+    echo "Installiere Abhängigkeiten ($REQUIREMENTS)..."
+    if [ ! -f "$REQUIREMENTS" ]; then
+        echo "$REQUIREMENTS fehlt in $INSTALL_DIR; ohne die festgelegten Versionen wird nichts installiert." >&2
         exit 1
     fi
-    ./.venv/bin/pip install --require-hashes -r requirements.txt > /dev/null
+    ./.venv/bin/pip install --require-hashes -r "$REQUIREMENTS" > /dev/null
 EOF
     then
         log_error "Die Python-Umgebung in $INSTALL_DIR/.venv ließ sich nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Proxy oder eigener Spiegel: sudo -E ./install.sh bzw. PIP_INDEX_URL."
@@ -331,6 +339,7 @@ ditto_option() {
     for arg in "$@"; do
         case "$arg" in
             --ditto=*) DITTO_CHOICE="${arg#--ditto=}" ;;
+            --headless) HEADLESS=1 ;;
         esac
     done
     case "$DITTO_CHOICE" in
@@ -379,7 +388,11 @@ finish() {
     echo "-----------------------------------------------------"
     echo "📂 Code:   $INSTALL_DIR"
     echo "📂 Daten:  $INSTALL_DIR/output, cache, models (beim ersten Gebrauch angelegt)"
-    echo "🚀 Start:  Tippe einfach 'llm-framework'"
+    if [ "$HEADLESS" = "1" ]; then
+        echo "🚀 Start:  llm-cli bzw. llmcf (ohne grafische Oberfläche installiert, --headless)"
+    else
+        echo "🚀 Start:  Tippe einfach 'llm-framework'"
+    fi
     echo "-----------------------------------------------------"
     old_installation_note
     

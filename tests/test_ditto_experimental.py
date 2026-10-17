@@ -43,9 +43,9 @@ def test_shown_once_per_person_and_again_when_the_text_changes(tmp_path, monkeyp
         assert notice.path.stat().st_mode & 0o777 == 0o600
     with pytest.raises(ValueError):
         notice.acknowledge("mcp")   # an AI never answers it
-    de = dict(localization.LocalizationManager.TRANSLATIONS["de"])
+    de = dict(localization.TRANSLATIONS["de"])
     de["chat.ditto.notice.text"] += " Neu."
-    monkeypatch.setitem(localization.LocalizationManager.TRANSLATIONS, "de", de)
+    monkeypatch.setitem(localization.TRANSLATIONS, "de", de)
     assert notice.needed(), "a changed text in any language is shown again"
 
 

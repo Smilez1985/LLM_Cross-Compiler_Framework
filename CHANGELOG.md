@@ -1264,6 +1264,27 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `DiskWatchdog`, which the container watchdog and the staging watcher now are); the build engine keeps its old
   method names as delegates, the texts are unchanged and keep "No space left on device", which the self-healing
   pattern (now built from the same phrases) matches. Margins are unchanged.
+- **The GUI is an optional extra; the command line, the MCP server and the core run without Qt.** PySide6 is the
+  extra `gui` in `pyproject.toml` (the hash-pinned `requirements-gui.txt`, an export of `uv.lock` like
+  `requirements.txt`). The Linux and Windows installers install it as before; `sudo ./install.sh --headless`
+  (`LCF_HEADLESS=1`) and the framework image without `--gui` leave out Qt and its system libraries (the headless image
+  no longer installs libglib, and its build refuses an installation with Qt). The texts every process reads
+  (`ui_text`, `tr`, `current_language`, the one table `TRANSLATIONS` in `orchestrator/utils/localization.py`) no longer
+  import Qt; the window's language object (`LocalizationManager`, `get_instance`) lives in
+  `orchestrator/gui/localization.py`, and the old import path still finds it. The GUI starts in
+  `orchestrator/gui/app.py`; `orchestrator/main.py` stays the launchers' entry point and, without the extra, says how
+  to install it instead of a traceback. The next-step catalogue reads its labels from the one text table instead of a
+  second reader of the `l10n_*` modules. A CI job runs the Qt-free checks and the whole suite without PySide6.
+- **Qt's own buttons speak the window's language**: German dialogs showed Qt's standard buttons in English ("Close",
+  "Cancel", "Yes", "No"). The window now installs Qt's own translation (`qtbase_de`, shipped with PySide6) with its
+  language and swaps it when the language changes; an open dialog follows.
+- **The Builder shows the build container's CPU and memory**, under the progress bar while a stage container runs
+  ("Build container: CPU 251 % · memory 2.0 GB of 8.0 GB"), and the build log warns once when the container uses 90 %
+  of its memory limit (Docker's, or the WSL2 / Docker Desktop VM's), with what to do. The figures came from the Docker
+  manager's older build path, which nothing called any more; they are now sampled by the one build path (the build
+  engine, `BuildService.live_resources`), and the rest of that older path (start, monitor, stop, a healing trigger
+  and six Qt signals nothing listened to) was removed because the one build path does all of it (decision round 12,
+  item 6). The AI's build status is unchanged.
 - **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
   `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
   and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the
@@ -1713,6 +1734,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`orchestrator/remote/reasons.py`, `reach_code(..., while_waiting=True)`). The deploy's first contact also uses the
   rule every other path uses: a connection error that is none of the four codes means the board does not answer
   (`device_host_down`, recorded for Mojo) instead of an empty code.
+- **The language chosen at the first start applies at once**: the first-start dialog ran with the window's texts in
+  English, and choosing German left them English (also Qt's own buttons) until the next start. The window now
+  switches to the chosen language before it opens (`orchestrator/gui/app.py`).
 - **A board whose home folder has a long path can be deployed to**: the device runtime refused a board user's home
   folder longer than 200 characters (and its staging folder and models below 400), so a home on a deep mount point
   stopped the deployment with "not a plain absolute path". The characters are checked as before; the length is now

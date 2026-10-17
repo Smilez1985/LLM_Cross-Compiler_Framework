@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.gui import plain
+pytest.importorskip("PySide6")   # the GUI's tests; the install without the 'gui' extra skips them
+from orchestrator.gui import plain  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("qapp")
 

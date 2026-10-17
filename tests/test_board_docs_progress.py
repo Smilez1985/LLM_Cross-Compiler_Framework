@@ -231,6 +231,7 @@ def test_the_cannot_reason_travels_to_the_gui_thread(wizard, qapp):
     ("[2026-10-15 10:00:00] [INFO] Starting Main Build Container...", "info"),
 ])
 def test_log_levels(line, level):
+    pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
     from orchestrator.gui.builder_parts import line_level
     assert line_level(line) == level
 

@@ -244,4 +244,5 @@ class TestCli:
 def test_entry_points_name_their_program():
     text = (REPO_ROOT / "orchestrator" / "cli.py").read_text(encoding="utf-8")
     assert 'set_program("cli")' in text and 'set_program("mcp")' in text
-    assert 'set_program("gui")' in (REPO_ROOT / "orchestrator" / "main.py").read_text(encoding="utf-8")
+    # the GUI's start-up moved to orchestrator/gui/app.py (orchestrator/main.py is its launcher shim, chain qt)
+    assert 'set_program("gui")' in (REPO_ROOT / "orchestrator" / "gui" / "app.py").read_text(encoding="utf-8")
