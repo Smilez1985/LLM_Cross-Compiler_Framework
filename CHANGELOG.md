@@ -2024,6 +2024,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **The GUI tool hides this computer's home folder in every spelling**: a form value an AI reads through the `gui`
+  tool (Ditto or an AI app) showed the home folder as `~` only when it was written exactly as `Path.home()` gives it.
+  Named by HOME or USERPROFILE (the MSYS form `/c/Users/<name>`), with the other separator, in another case
+  (`c:/users/<name>`) or with doubled backslashes as Python quotes a path, it reached the AI with the account name.
+  `tools_gui._no_home` now uses the shared `security.paths.shorten_home` (the one the runtime and deploy tools use)
+  before the pattern for other accounts' home folders.
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI

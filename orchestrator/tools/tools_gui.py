@@ -33,14 +33,13 @@ on a reconnect), so a tool that appeared only while the window is open would be 
 before the window, and an AI would have no honest reason to give.
 """
 
-import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
-from orchestrator.security.paths import ACCOUNT_NAME, HOME_ROOT
+from orchestrator.security.paths import ACCOUNT_NAME, HOME_ROOT, shorten_home
 from orchestrator.tools import gui_surface
 from orchestrator.tools.gui_surface import DITTO, Filler
 from orchestrator.tools.output import ToolOutput, fact, untrusted_text, UntrustedText
@@ -228,12 +227,10 @@ def _not_open() -> ToolError:
 
 
 def _no_home(text: str) -> str:
-    """Text the person typed, with every home folder (it names the user) as '~'."""
-    home = str(Path.home())
-    for form in {home, os.path.realpath(home)}:
-        if form and form not in ("/", "\\"):
-            text = text.replace(form, "~")
-    return HOME_FOLDERS.sub("~", text)
+    """Text the person typed, with every home folder (it names the user) as '~': this computer's in every spelling
+    (security.paths.shorten_home: HOME and USERPROFILE too, either separator, a Windows path in any case, doubled
+    backslashes), any other account's by HOME_FOLDERS."""
+    return HOME_FOLDERS.sub("~", shorten_home(text))
 
 
 def plain_facts(inp: GuiIn, by: Filler) -> Optional[CallFacts]:
