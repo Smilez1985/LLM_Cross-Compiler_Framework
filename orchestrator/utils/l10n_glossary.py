@@ -199,7 +199,7 @@ TEXTS = {
         "words.help.name": "Explain {term}",
         "words.help.tip": "What is {term}? (F1)",
         # the error box (gui/error_dialog.py)
-        "words.error.title": "Something went wrong",
+        "words.error.title": "Something did not work",   # = next_steps error.title (error_report)
         "words.error.next": "Next step: {step}",
         "words.error.next_heading": "Next step:",
         "words.error.details": "Technical details",
@@ -381,7 +381,7 @@ TEXTS = {
         "words.card.described": "{explanation} Mehr dazu: {url}",
         "words.help.name": "{term} erklären",
         "words.help.tip": "Was ist {term}? (F1)",
-        "words.error.title": "Etwas ist schiefgelaufen",
+        "words.error.title": "Etwas hat nicht geklappt",
         "words.error.next": "Nächster Schritt: {step}",
         "words.error.next_heading": "Nächster Schritt:",
         "words.error.details": "Technische Details",
