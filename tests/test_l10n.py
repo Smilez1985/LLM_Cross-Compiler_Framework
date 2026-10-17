@@ -13,6 +13,7 @@ import pytest
 from orchestrator.tools import facts_catalog as catalog
 from orchestrator.utils.l10n_facts import TEXTS
 from orchestrator.utils.localization import LocalizationManager, ui_text
+from orchestrator.utils.next_steps import fill_paths
 
 # Words a layperson does not know, or that name the framework's insides; never in the short layer.
 JARGON = ("sha256", "digest", "elicitation", "stdio", "toctou", "json", "registry", "enum", "mcp", "delegable",
@@ -47,7 +48,7 @@ def test_a_warnings_person_text_uses_only_its_own_numbers():
 def test_short_texts_have_no_ids_or_jargon():
     for lang, table in TEXTS.items():
         for key, text in table.items():
-            bare = re.sub(r"\{[a-z_]+\}", "", text)
+            bare = re.sub(r"\{[a-z_]+\}", "", fill_paths(text, lang))   # what the person reads (wave 6: {path:...})
             assert "_" not in bare, f"{lang} {key}: a code or an id in a person's text"
             low = bare.lower()
             for word in JARGON:

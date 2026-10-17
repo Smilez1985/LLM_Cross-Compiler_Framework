@@ -99,7 +99,7 @@ class TestPermissions:
             async with Client(server) as client:
                 return await client.call_tool("write", {"text": "x"})
         result = run(go())
-        assert result.is_error and "llm-cli tools permissions" in text_of(result)
+        assert result.is_error and "llmcf tools permissions" in text_of(result)
         assert registry.writes == []
 
     @pytest.mark.parametrize("mode", ["auto", "legacy"])

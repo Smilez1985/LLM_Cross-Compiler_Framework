@@ -34,6 +34,7 @@ from orchestrator.tools.mcp_env import ENV_VAR  # noqa: F401 - re-exported: the 
 from orchestrator.tools.policy import Decision, ToolPolicy, ToolTier, restrictive_policy
 from orchestrator.tools.signing import SIGNATURE_FIELD, RevisionAnchor, SignatureError, sign, verify
 from orchestrator.utils.file_lock import file_lock
+from orchestrator.utils.next_steps import WithSteps
 
 ACTOR_PREFIX = "mcp:"          # the audit actor of a named token is "mcp:<name>"
 TOKEN_PREFIX = "lcf_mcp_"      # makes a token recognisable in a configuration file
@@ -94,7 +95,7 @@ class TokenFile(BaseModel):
         return self
 
 
-class TokenStoreError(Exception):
+class TokenStoreError(WithSteps, Exception):
     """The token store cannot be used or the change is not possible; the message is safe to show."""
 
 

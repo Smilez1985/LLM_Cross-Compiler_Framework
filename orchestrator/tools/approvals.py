@@ -41,6 +41,7 @@ from orchestrator.tools.registry import caller_label
 from orchestrator.tools.signing import SIGNATURE_FIELD, SignatureError, sign, verify
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.next_steps import WithSteps
 
 APPROVAL_TTL = 15 * 60          # seconds a pending approval waits for the person
 MAX_PENDING_PER_CALLER = 5      # open approvals one client may have at a time (design 6.5)
@@ -158,7 +159,7 @@ class ApprovalFile(BaseModel):
     approvals: List[ApprovalRecord] = Field(default_factory=list)
 
 
-class ApprovalStoreError(Exception):
+class ApprovalStoreError(WithSteps, Exception):
     """The approval cannot be decided (unknown, decided already, expired, the store cannot be used)."""
 
 

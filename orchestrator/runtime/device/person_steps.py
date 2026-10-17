@@ -17,6 +17,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from orchestrator.utils.next_steps import WithSteps
+
 # The question before the systemd unit is allowed (CLI and GUI ask exactly this; "No" is the default).
 SUDO_QUESTION = ("The systemd unit is written to /etc/systemd/system and enabled with sudo on the device (sudo -n: it "
                  "must work without a password, the deployment never asks). Allow deployments to this device to run "
@@ -35,7 +37,7 @@ UNTRUSTED_CONSENT = ("device_runtime_untrusted_model",
                      "an untrusted model may run natively on the device for the short llama-bench run")
 
 
-class BoardStepError(RuntimeError):
+class BoardStepError(WithSteps, RuntimeError):
     """A board step that cannot be done. `kind` names the case (no_paramiko, unreachable, host_key_changed,
     not_trusted, other_device, login_failed, key_install, host_user, label, not_known, no_systemd, sudo_declined,
     not_saved, damaged, no_user, no_address); `reason` is the SSH reason code when the board could not be reached or

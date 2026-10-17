@@ -10,9 +10,10 @@ import time
 from typing import Any, Optional, Sequence
 
 from orchestrator.utils.helpers import redact_secrets
+from orchestrator.utils.next_steps import WithSteps
 
 
-class LLMError(Exception):
+class LLMError(WithSteps, Exception):
     retryable = False
 
     def __init__(self, message: str, *, provider: str = "", status: Optional[int] = None,

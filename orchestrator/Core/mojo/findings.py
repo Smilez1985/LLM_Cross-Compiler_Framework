@@ -9,7 +9,7 @@ and what Mojo Miracle can do about it. The report's exit code follows the worst 
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 class Severity(str, Enum):
@@ -40,12 +40,17 @@ class Finding:
     # the name to give for it (its label, or its device ID when another board has the same label; never an address).
     board_check: str = ""
     board_name: str = ""
+    # Wave 6 (chain a0): what to do, as next steps of the catalogue (orchestrator/utils/next_steps), so the Mojo window
+    # names the place in the person's language with [Open] (and an allow-to-run proposal where the step allows one),
+    # while `fix_hint` stays the command line's text (`llmcf mojo` and --json keep their output). NextStep or step ids.
+    steps: Tuple[Any, ...] = ()
 
     def to_dict(self) -> Dict:
         data = asdict(self)
         data.pop("fix")
         data["severity"] = self.severity.value
         data["fixable"] = self.fix is not None
+        data["steps"] = [getattr(s, "id", s) for s in self.steps if isinstance(getattr(s, "id", s), str)]
         return data
 
 

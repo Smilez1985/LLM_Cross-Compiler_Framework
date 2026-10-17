@@ -44,6 +44,7 @@ from orchestrator.Core.deletion import (AcceptedDeletion, PlanChanged, plan_of, 
 from orchestrator.tools.signing import SignatureError, sign, verify
 from orchestrator.tools.spec import DeletionItem, DeletionPlan
 from orchestrator.utils.file_lock import file_lock
+from orchestrator.utils.next_steps import WithSteps
 
 TRASH_FOLDER = ".trash"
 INDEX_FILE = "tool_trash.json"
@@ -62,7 +63,7 @@ EntryKind = Literal["artifact", "model_file", "knowledge_snapshot", "module", "p
 _SUFFIXES = (".jsonl.gz", ".tar.gz", ".zip", ".gguf", ".rkllm", ".rknn", ".onnx", ".bin", ".safetensors")
 
 
-class TrashError(RuntimeError):
+class TrashError(WithSteps, RuntimeError):
     """A trash operation the framework refuses, with a reason code (the facts catalogue's blockers trash_unknown and
     trash_not_yours, or failed) and never a host path in the message (it can reach an AI)."""
 

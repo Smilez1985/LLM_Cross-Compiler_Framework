@@ -112,26 +112,30 @@ TEXTS = {
         "blocker.gui_not_open": "The framework window is not open.",
         # --- what the person can do ---
         "action.free_disk": "Free disk space (old builds, the model cache, the trash), or choose a smaller model.",
-        "action.free_snapshots": "Delete or export knowledge snapshots you no longer need (Tools > Knowledge "
-                                 "Snapshots...), or free space on that disk otherwise.",
-        "action.offline_off": "Switch offline mode off in Settings, or use a model already on this computer.",
-        "action.sandbox_on": "Switch the build sandbox on in Settings.",
-        "action.knowledge_on": "Switch the knowledge base on in Settings.",
+        "action.free_snapshots": "Delete or export knowledge snapshots you no longer need "
+                                 "({path:act_knowledge_snapshots}), or free space on that disk otherwise.",
+        "action.offline_off": "Switch offline mode off ({path:act_ditto_settings}), or use a model already on this "
+                              "computer.",
+        "action.sandbox_on": "Switch the build sandbox on: today only in the settings file; "
+                             "{path:act_file_settings} shows the setting.",
+        "action.knowledge_on": "Switch the knowledge base on ({path:act_ditto_settings}).",
         "action.remove_target": "Remove the hardware module in the Community Hub.",
-        "action.pin_image": "Set the program image to an exact version in Settings, or package without images.",
+        "action.pin_image": "Give the program image with its exact version in "
+                            "{path:act_tools_module_wizard}, or package without images.",
         "action.hf_access": "Sign in to Hugging Face and accept the model's conditions on huggingface.co, then save "
                             "your sign-in in the framework.",
         "action.update_index": "Update the community list in the Community Hub.",
-        "action.ingest_notice": "Read the Deep Ingest notice (Tools > Create Hardware Module..., then Deep Ingest).",
-        "action.pair_device": "Pair the board in the Deployment window.",
-        "action.check_device": "Check the board and confirm its identity again in the Deployment window.",
+        "action.ingest_notice": "Read the Deep Ingest notice ({path:act_tools_mcp_crawl_notice}).",
+        "action.pair_device": "Pair the board once with its password ({path:btn_boards_deploy}).",
+        "action.check_device": "Check the board and confirm its identity again ({path:act_boards_devices}).",
         "action.device_on": "Check that the board is switched on and on the same network; if you entered a host "
                             "name such as myboard.local, try the board's IP address.",
         "action.device_ssh": "Check that the remote login (SSH) runs on the board, that the port is right and that no "
                              "firewall blocks it.",
-        "action.device_login": "Check the user name and the password, then pair the board again in the Deployment "
-                               "window.",
-        "action.install_tools": "Install the vendor tools: the framework shows what is missing and its licence.",
+        "action.device_login": "Check the user name and the password, then pair the board again "
+                               "({path:btn_boards_deploy}).",
+        "action.install_tools": "Install the build tools (an administrator does this), or build in a container "
+                                "({path:cb_ditto_runtime_placement}).",
         "action.device_settings": "Choose the model in the board's deploy settings.",
         "action.signing_key": "Create your personal keys in the Community Hub.",
         "action.commit_required": "Try again when Hugging Face answers, or start the build yourself.",
@@ -291,30 +295,30 @@ TEXTS = {
         # --- was die Person tun kann ---
         "action.free_disk": "Speicherplatz freigeben (alte Builds, den Modell-Cache, den Papierkorb) oder ein "
                             "kleineres Modell wählen.",
-        "action.free_snapshots": "Wissens-Snapshots, die du nicht mehr brauchst, löschen oder exportieren (Tools > "
-                                 "Knowledge Snapshots...) oder auf dieser Festplatte anders Platz schaffen.",
-        "action.offline_off": "Den Offline-Modus in den Einstellungen ausschalten oder ein Modell nehmen, das schon "
-                              "auf diesem Computer ist.",
-        "action.sandbox_on": "Die Build-Sandbox in den Einstellungen einschalten.",
-        "action.knowledge_on": "Die Wissensbasis in den Einstellungen einschalten.",
+        "action.free_snapshots": "Wissens-Snapshots, die du nicht mehr brauchst, löschen oder exportieren "
+                                 "({path:act_knowledge_snapshots}) oder auf dieser Festplatte anders Platz schaffen.",
+        "action.offline_off": "Den Offline-Modus ausschalten ({path:act_ditto_settings}) oder ein Modell nehmen, das "
+                              "schon auf diesem Computer ist.",
+        "action.sandbox_on": "Die Build-Sandbox einschalten: derzeit nur in der Einstellungsdatei; "
+                             "{path:act_file_settings} zeigt die Einstellung.",
+        "action.knowledge_on": "Die Wissensbasis einschalten ({path:act_ditto_settings}).",
         "action.remove_target": "Das Hardware-Modul im Community-Hub entfernen.",
-        "action.pin_image": "Das Programm-Image in den Einstellungen auf eine genaue Version festlegen oder ohne "
-                            "Images verpacken.",
+        "action.pin_image": "Das Programm-Image mit seiner genauen Version unter "
+                            "{path:act_tools_module_wizard} angeben oder ohne Images verpacken.",
         "action.hf_access": "Bei Hugging Face anmelden und die Bedingungen des Modells auf huggingface.co "
                             "akzeptieren, dann die Anmeldung im Framework speichern.",
         "action.update_index": "Die Community-Liste im Community-Hub aktualisieren.",
-        "action.ingest_notice": "Den Hinweis zu Deep Ingest lesen (Tools > Create Hardware Module..., dann Deep "
-                                "Ingest).",
-        "action.pair_device": "Das Board im Fenster „Deployment“ koppeln.",
-        "action.check_device": "Das Board prüfen und seine Identität im Fenster „Deployment“ neu bestätigen.",
+        "action.ingest_notice": "Den Hinweis zu Deep Ingest lesen ({path:act_tools_mcp_crawl_notice}).",
+        "action.pair_device": "Das Board einmal mit seinem Passwort verbinden ({path:btn_boards_deploy}).",
+        "action.check_device": "Das Board prüfen und seine Identität neu bestätigen ({path:act_boards_devices}).",
         "action.device_on": "Prüfen, ob das Board eingeschaltet und im selben Netzwerk ist; bei einem Hostnamen wie "
                             "myboard.local die IP-Adresse des Boards versuchen.",
         "action.device_ssh": "Prüfen, ob die Fernanmeldung (SSH) auf dem Board läuft, der Port stimmt und keine "
                              "Firewall sie sperrt.",
-        "action.device_login": "Benutzernamen und Passwort prüfen, dann das Board im Fenster „Deployment“ neu "
-                               "koppeln.",
-        "action.install_tools": "Die Hersteller-Werkzeuge installieren: das Framework zeigt, was fehlt, und die "
-                                "Lizenz dazu.",
+        "action.device_login": "Benutzernamen und Passwort prüfen, dann das Board neu verbinden "
+                               "({path:btn_boards_deploy}).",
+        "action.install_tools": "Die Build-Werkzeuge installieren (das macht jemand mit Administratorrechten) oder in "
+                                "einem Container bauen ({path:cb_ditto_runtime_placement}).",
         "action.device_settings": "Das Modell in den Deploy-Einstellungen des Boards wählen.",
         "action.signing_key": "Deine persönlichen Schlüssel im Community-Hub erstellen.",
         "action.commit_required": "Es noch einmal versuchen, wenn Hugging Face antwortet, oder den Build selbst "

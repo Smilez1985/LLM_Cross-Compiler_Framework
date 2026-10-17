@@ -581,12 +581,15 @@ def _facts_from_dict(data: Any) -> CallFacts:
                      consequence_template=str(data.get("consequence_template") or ""))
 
 
-_ERROR_KEYS = ("message", "code", "next", "field", "allowed", "blocker", "person_action")
+_ERROR_KEYS = ("message", "code", "next", "field", "allowed", "blocker", "person_action", "steps")
 
 
 def _error_to_dict(error: ToolError) -> Dict[str, Any]:
+    # The next steps cross the bridge by their catalogue ids (orchestrator/utils/next_steps); the other side renders
+    # them for its own caller's channel.
     return {"message": error.message, "code": error.code, "next": error.next, "field": error.field,
-            "allowed": list(error.allowed)[:60], "blocker": error.blocker, "person_action": error.person_action}
+            "allowed": list(error.allowed)[:60], "blocker": error.blocker, "person_action": error.person_action,
+            "steps": [s.id for s in getattr(error, "steps", ())][:8]}
 
 
 def _error_from_dict(data: Any) -> ToolError:
@@ -598,7 +601,8 @@ def _error_from_dict(data: Any) -> ToolError:
     return ToolError(str(text["message"] or "The framework window refused the call.")[:2000],
                      code=str(text["code"] or "failed")[:40], next=str(text["next"] or "")[:1000],
                      field=str(text["field"] or "")[:80], allowed=allowed, blocker=str(text["blocker"] or "")[:40],
-                     person_action=str(text["person_action"] or "")[:400])
+                     person_action=str(text["person_action"] or "")[:400],
+                     steps=[s for s in (text["steps"] or []) if isinstance(s, str)][:8])
 
 
 def bridge_handler(framework: Any, surface: Callable[[], Optional[gui_surface.GuiSurface]]) \

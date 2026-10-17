@@ -43,6 +43,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from orchestrator import __version__
 from orchestrator.utils.helpers import calculate_file_checksum
+from orchestrator.utils.next_steps import WithSteps
 
 MANIFEST_NAME = "pack.json"
 SIGNATURE_NAME = "pack.sig"
@@ -72,7 +73,7 @@ _ENCRYPTED_CONTEXT = b"lcf-encrypted-pack/v2 signature\n"
 _INDEX_CONTEXT = b"lcf-community-index/v1\n"
 
 
-class PackError(Exception):
+class PackError(WithSteps, Exception):
     """A pack, key or signature problem; the message is meant for the user."""
 
 

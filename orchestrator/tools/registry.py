@@ -68,18 +68,28 @@ class ToolError(Exception):
     The facts model of the delegation design (4.1): `blocker` names the hard fact that refused the call before any
     question (a code of the facts catalogue, e.g. disk_full), binding the AI and the person alike; `person_action` says
     what the person can do about it (framework text, GUI place first), separate from `next`, which is for the AI;
-    `details` carries framework facts only (never external text), e.g. the waiting result of a pending approval."""
+    `details` carries framework facts only (never external text), e.g. the waiting result of a pending approval.
+
+    `steps` (wave 6, chain a0): what to do, as catalogue steps (orchestrator/utils/next_steps) instead of a command in
+    the text. The AI's next step is `next` followed by the steps rendered for the caller's channel (fill_steps, called
+    by the registry with ToolContext.channel; until then rendered for an MCP app); `person_action` defaults to their
+    GUI rendering; the GUI and the chat render them in the person's language themselves."""
     code = "failed"
     quoted = ""
     field = ""
     blocker = ""
     person_action = ""
+    steps: tuple = ()
+    _steps_filled = False
 
     def __init__(self, message: str = "", code: Optional[str] = None, next: str = "",
                  allowed: Optional[List[str]] = None, suggestions: Optional[List[str]] = None, quoted: str = "",
                  field: str = "", notes: Optional[List[str]] = None, blocker: str = "", person_action: str = "",
-                 details: Optional[Dict[str, Any]] = None):
+                 details: Optional[Dict[str, Any]] = None, steps: Any = None):
         super().__init__(message)
+        if steps:
+            from orchestrator.utils.next_steps import as_next_steps
+            self.steps = as_next_steps(steps)
         self.message = message
         if code:
             self.code = code
@@ -97,9 +107,33 @@ class ToolError(Exception):
             self.person_action = person_action
         self.details: Optional[Dict[str, Any]] = dict(details) if details is not None else None
 
+    def next_text(self, channel: Optional[str] = None) -> str:
+        """The AI's next step: `next` and the steps rendered for `channel` (once fill_steps ran: `next` as filled)."""
+        if not self.steps or self._steps_filled:
+            return self.next
+        from orchestrator.utils.next_steps import as_next_steps, catalogue, render
+        known = catalogue().steps
+        self.steps = as_next_steps(self.steps)   # a site may have set plain step ids
+        # A step whose tool `next` names already adds nothing for the AI (its steps still reach the person).
+        new = [s for s in self.steps if not (s.id in known and known[s.id].tool and known[s.id].tool in self.next)]
+        rendered = render(new, "ai", "en", channel) if new else ""
+        return f"{self.next} {rendered}".strip() if self.next else rendered
+
+    def fill_steps(self, channel: Optional[str] = None) -> "ToolError":
+        """Renders the steps into `next` for the caller's channel (and into `person_action` when it is empty), once;
+        the registry calls it at the boundary with ToolContext.channel. Returns the error."""
+        if self.steps and not self._steps_filled:
+            from orchestrator.utils.next_steps import render
+            self.next = self.next_text(channel)
+            if not self.person_action:
+                self.person_action = render(self.steps, "gui", "en").replace("\n", " ")
+            self._steps_filled = True
+        return self
+
     def text(self) -> str:
         """The message and the next step, without the notes (the MCP server adds them to every refusal itself)."""
-        return f"{self.message} Next: {self.next}" if self.next else self.message
+        following = self.next_text()
+        return f"{self.message} Next: {following}" if following else self.message
 
     def __str__(self) -> str:
         return self.text() + notes_text(self.notes)
@@ -117,9 +151,16 @@ class ToolError(Exception):
         copy.notes = list(self.notes)
         copy.repairs = list(getattr(self, "repairs", []))
         copy.blocker, copy.person_action = self.blocker, self.person_action
+        copy.steps, copy._steps_filled = tuple(getattr(self, "steps", ()) or ()), getattr(self, "_steps_filled", False)
         details = getattr(self, "details", None)
         copy.details = dict(details) if details is not None else None
         return copy
+
+
+def _steps_of(error: BaseException) -> tuple:
+    """The next steps a core exception carries (next_steps.WithSteps), for the ToolError made of it."""
+    from orchestrator.utils.next_steps import steps_of
+    return steps_of(error)
 
 
 def repair_notes(repairs: List[Repair]) -> List[str]:
@@ -174,15 +215,20 @@ def _with_message(error: ToolError, message: str) -> ToolError:
 # The person's own setting: the next step names where they decide, not a command for the AI to suggest.
 DENIED_HINT = ("Tell the person it is not allowed by their tool permissions; only they can change that, in Tool "
                "Permissions. get_status shows why.")
-# Nobody could be asked: the person can allow the tool, or use a client that can ask.
-UNASKED_HINT = ("The person can allow it with 'llm-cli tools permissions' or in the GUI (Tools > Tool Permissions "
-                "(Ditto / MCP)), or use a client that can ask them.")
+# Nobody could be asked: the person can allow the tool, or use a client that can ask. Where they allow it is the
+# step permissions.edit (UNASKED_STEPS), rendered for the caller's channel (wave 6: no command for a GUI person).
+UNASKED_HINT = "The person can allow it in their tool permissions, or use a client that can ask them."
+UNASKED_STEPS = ("permissions.edit",)
 REPEAT_WARN = "This exact call already failed. "
 # The next step of a question too long for the channel that would show it (an MCP form or the framework's windows).
 TOO_LONG_NEXT = "Make the call smaller (fewer or shorter values), or tell the person why it cannot be confirmed."
 # The next step of a failure nobody can fix by changing the call (the framework's or a service's own problem).
-FAILED_NEXT = ("Tell the person what failed and why; run_mojo_oracle (or 'llmcf mojo' in a terminal) and the "
-               "framework log show the cause. Do not retry the same call unchanged.")
+# The person checks the installation with Mojo (FAILED_STEPS: the Mojo window, or `llmcf mojo` for the CLI).
+FAILED_NEXT = ("Tell the person what failed and why; run_mojo_oracle and the framework log show the cause. Do not "
+               "retry the same call unchanged.")
+FAILED_STEPS = ("mojo.oracle",)
+# A pending approval: the person answers in the framework (its notice, or the list of pending approvals).
+APPROVAL_STEPS = ("approvals.list",)
 GUARD_SIZE = 512  # failing calls remembered per registry for the repeat guard
 EXAMPLE_AFTER = 3  # input errors in a session before every input error shows an example call
 
@@ -406,7 +452,7 @@ class ToolContext:
     notes: List[str] = field(default_factory=list)
     # Set by the MCP server when nobody can be asked through the client (no form elicitation, a question too long for
     # one, or a tool the person wants confirmed in the framework): "ask" then becomes a pending approval in the
-    # framework (GUI notice, `llm-cli tools approvals`) instead of a refusal.
+    # framework (a notice in the GUI, the list of pending approvals) instead of a refusal.
     pending_approvals: bool = False
     # The facts the tool's prepare looked up for this call (the MCP server hands in the ones its question showed);
     # the handler must use exactly these. New for every call.
@@ -422,6 +468,10 @@ class ToolContext:
     # True for Ditto while it has a live delegation: a call the delegation covers becomes a pending approval Ditto's
     # model answers, while every other question keeps the person's dialog (design 3.2). Set by Ditto, never by a client.
     ai_pending: bool = False
+    # Where the person who asked sits (wave 6, design A.6): "gui-chat" (Ditto, asked in this window's chat), "gui"
+    # (Ditto working for the GUI without a chat turn), "cli" (`llmcf ditto ask`), None (an MCP app). The next steps of
+    # a refusal are rendered for it (ToolError.fill_steps): in the GUI's channels an AI is never told a command.
+    channel: Optional[str] = None
 
     @property
     def owner(self) -> str:
@@ -1030,8 +1080,8 @@ class ToolRegistry:
                 self.logger.error(f"Audit write failed, '{spec.name}' refused: {reason}")
                 raise AuditUnavailable(
                     f"The audit log cannot be written ({reason}), so '{spec.title}' was not run: calls that change "
-                    "something run only when they are recorded. Mojo Oracle finds the cause: run_mojo_oracle, or "
-                    "'llmcf mojo' in a terminal.") from None
+                    "something run only when they are recorded. Mojo Oracle finds the cause.",
+                    steps=FAILED_STEPS) from None
             self.logger.warning(f"Audit write failed: {reason}")
             return None
 
@@ -1419,8 +1469,9 @@ class ToolRegistry:
             raise error from None
         except ValueError as e:  # a service's refusal (BuildServiceError carries code and next)
             message = external_error_text(str(e))
-            error = ToolError(message, code=getattr(e, "code", None) or "failed",
-                              next=redact_secrets(getattr(e, "next", "") or "") or FAILED_NEXT, quoted=message)
+            own_next = redact_secrets(getattr(e, "next", "") or "")
+            error = ToolError(message, code=getattr(e, "code", None) or "failed", next=own_next or FAILED_NEXT,
+                              quoted=message, steps=_steps_of(e) or (() if own_next else FAILED_STEPS))
             error.repairs = repairs_of(e)
             blocker = getattr(e, "blocker", "")  # a service's refusal that names a blocker of the facts catalogue
             if blocker:
@@ -1431,10 +1482,11 @@ class ToolRegistry:
         except Exception as e:
             self.logger.error(f"Looking up the facts for {spec.name} failed: {e}", exc_info=True)
             message = external_error_text(str(e))
-            raise ToolError(f"{spec.title} could not be prepared: {message}", next=FAILED_NEXT, quoted=message) from e
+            raise ToolError(f"{spec.title} could not be prepared: {message}", next=FAILED_NEXT, quoted=message,
+                            steps=_steps_of(e) or FAILED_STEPS) from e
         if not isinstance(facts, CallFacts):
             raise ToolError(f"{spec.title} could not be prepared (internal error; details are in the framework log).",
-                            next=FAILED_NEXT)
+                            next=FAILED_NEXT, steps=FAILED_STEPS)
         # The facts name their tool, so their decision digest is bound to it (design 4.4).
         return facts if facts.tool == spec.name else dataclasses.replace(facts, tool=spec.name)
 
@@ -1465,6 +1517,7 @@ class ToolRegistry:
             try:
                 self.enforce_limits(prepared, limited)
             except ToolError as e:
+                e.fill_steps(getattr(ctx, "channel", None))
                 with_repairs(e, call_repairs(limited))
                 raise
         spec, inp, arguments = prepared.spec, prepared.input, prepared.arguments
@@ -1473,6 +1526,7 @@ class ToolRegistry:
         try:
             result = self._run(spec, inp, arguments, ctx, approved, began)
         except ToolError as e:
+            e.fill_steps(getattr(ctx, "channel", None))   # the next steps in the caller's words (wave 6, A.6)
             # Every refusal and error after a repair names it, as a successful result's notes would (a denied call,
             # a look-up that found too little disk space, a "no", a handler's failure): the fool-proof layer's
             # repairs and the look-up's (ctx.facts, set by _run on this very context, or carried by its refusal).
@@ -1508,13 +1562,18 @@ class ToolRegistry:
             self.logger.warning(f"Discarding the staged work of {spec.name} failed: {redact_secrets(str(e))}")
 
     def _refused_before_question(self, spec: ToolSpec, ctx: ToolContext, code: str, stage: str, blocker: str = "",
-                                 person_action: str = "") -> None:
+                                 person_action: str = "", steps: Any = ()) -> None:
         """Tells the observers that an AI's call was refused before anything was asked (the chat shows what the
-        person can do about it). Framework facts only; the person's own CLI and GUI calls are not reported."""
+        person can do about it). Framework facts only; the person's own CLI and GUI calls are not reported. `step`
+        is the first catalogue step id (orchestrator/utils/next_steps), which the blocked row carries."""
         if ctx.actor in ("cli", "gui"):
             return
+        from orchestrator.utils.next_steps import as_next_steps
+        found = as_next_steps(steps)
+        extra = {"step": found[0].id} if found else {}
         self.events.emit("refused_before_question", tool=spec.name, actor=ctx.actor, owner=ctx.owner,
-                         code=code or "failed", stage=stage, blocker=blocker or "", person_action=person_action or "")
+                         code=code or "failed", stage=stage, blocker=blocker or "", person_action=person_action or "",
+                         **extra)
 
     def _run(self, spec: ToolSpec, inp: BaseModel, arguments: Dict[str, Any], ctx: ToolContext,
              approved: Optional[bool], began: float) -> BaseModel:
@@ -1522,18 +1581,20 @@ class ToolRegistry:
         decision = self.decide(spec, inp, ctx)
         if decision == Decision.DENY:
             self._audit(ctx, spec, decision, "denied", arguments, reason_code="permission_denied")
-            self._refused_before_question(spec, ctx, "permission_denied", stage="policy")
-            raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
+            self._refused_before_question(spec, ctx, "permission_denied", stage="policy", steps=UNASKED_STEPS)
+            raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT,
+                             steps=UNASKED_STEPS)
         # Two-phase: the facts only the server knows, looked up before the question (the MCP server hands in the
         # ones its question showed). They can make an allowed call ask, and the handler is bound to them.
         if ctx.facts is None and spec.prepare is not None:
             try:
                 ctx.facts = self.look_up(spec, inp, ctx)
             except ToolError as e:
+                e.fill_steps(getattr(ctx, "channel", None))
                 self._audit(dataclasses.replace(ctx, repairs=call_repairs(ctx, repairs_of(e))), spec, decision,
                             "error", arguments, detail=f"{e.message} {e.next}".strip(), reason_code=e.code)
                 self._refused_before_question(spec, ctx, e.code, stage="look_up", blocker=e.blocker,
-                                              person_action=e.person_action)
+                                              person_action=e.person_action, steps=e.steps)
                 raise
         decision = self.capped(decision, ctx.facts)
         # Round 5 f: a call that deletes something is the person's alone. It always asks; neither "allow", a standing
@@ -1622,10 +1683,11 @@ class ToolRegistry:
                     self._audit(ctx, spec, decision, "rate_limited", arguments, detail=e.message,
                                 reason_code=e.code)
                     raise
-                raise ToolError(f"Waiting for the person to approve '{spec.title}' in the framework (GUI notice or "
-                                f"'llm-cli tools approvals'). Job {job.job_id}: poll get_job_status with "
+                raise ToolError(f"Waiting for the person to approve '{spec.title}' in the framework (a notice, "
+                                f"and the list of pending approvals). Job {job.job_id}: poll get_job_status with "
                                 "wait_seconds=50.", code="waiting_for_approval",
-                                next="Do not call this tool again; the framework runs it when approved.")
+                                next="Do not call this tool again; the framework runs it when approved.",
+                                steps=APPROVAL_STEPS)
             if not approved:
                 # approved stays None when nobody could be asked; False is a person's "no"
                 self.discard_staged(spec, inp, ctx)
@@ -1637,7 +1699,8 @@ class ToolRegistry:
                             answer=answer or ("declined" if approved is False else "unavailable"), reason_code=code)
                 raise ToolDenied(f"'{spec.title}' needs your confirmation, which was not given.", code=code,
                                  next=("Do not retry it unless the person asks for it." if code == "declined" else
-                                       "Nobody could be asked. " + UNASKED_HINT))
+                                       "Nobody could be asked. " + UNASKED_HINT),
+                                 steps=() if code == "declined" else UNASKED_STEPS)
         if approved and channel and channel != ctx.confirm_channel:
             # the handler sees how this call was confirmed (a build the person confirmed in the framework's own
             # window is recorded, design 6.10)
@@ -1671,8 +1734,9 @@ class ToolRegistry:
             raise ToolError(f"{spec.title}: {e}", code="limit_reached") from None
         except ToolError as e:  # raised by the handler: its message can quote external text
             message, next_step = external_error_text(e.message), redact_secrets(e.next)
-            if not next_step and e.code == "failed":
+            if not next_step and e.code == "failed" and not e.steps:
                 next_step = FAILED_NEXT
+                e.steps = FAILED_STEPS
             end("error", f"{message} {next_step}".strip(), reason_code=e.code)
             error = e if (message, next_step) == (e.message, e.next) else e.with_text(message, next_step)
             error.quoted = message
@@ -1683,21 +1747,23 @@ class ToolRegistry:
             self.logger.error(f"Tool {spec.name} produced invalid data: {e}", exc_info=True)
             end("error", repr(e), reason_code="failed")
             raise ToolError(f"{spec.title} failed (internal error; details are in the framework log).",
-                            next=FAILED_NEXT) from e
+                            next=FAILED_NEXT, steps=FAILED_STEPS) from e
         except ValueError as e:  # user-facing validation problems (e.g. BuildServiceError, with its own code)
             code = getattr(e, "code", None) or "failed"
             end("error", str(e), reason_code=code)
             message = external_error_text(str(e))
             next_step = redact_secrets(getattr(e, "next", "") or "")
-            if not next_step and code == "failed" and "Next:" not in message:
-                next_step = FAILED_NEXT
+            steps = _steps_of(e)
+            if not next_step and not steps and code == "failed" and "Next:" not in message:
+                next_step, steps = FAILED_NEXT, FAILED_STEPS
             raise ToolError(message, code=code, next=next_step, quoted=message,
-                            field=str(getattr(e, "field", "") or "")) from e
+                            field=str(getattr(e, "field", "") or ""), steps=steps) from e
         except Exception as e:
             self.logger.error(f"Tool {spec.name} failed: {e}", exc_info=True)
             end("error", repr(e), reason_code="failed")
             message = external_error_text(str(e))
-            raise ToolError(f"{spec.title} failed: {message}", next=FAILED_NEXT, quoted=message) from e
+            raise ToolError(f"{spec.title} failed: {message}", next=FAILED_NEXT, quoted=message,
+                            steps=_steps_of(e) or FAILED_STEPS) from e
         except BaseException:  # interrupted in the calling thread (KeyboardInterrupt, shutdown): still recorded
             end("cancelled", "Interrupted while it ran.")
             raise
@@ -1849,7 +1915,7 @@ class ToolRegistry:
             raise ToolDenied(f"Reading '{spec.title}' needs the person's confirmation, which reading a resource "
                              "cannot ask for.", code="needs_person",
                              next=(f"Call the tool {spec.tool} instead; it asks the person." if spec.tool
-                                   else UNASKED_HINT))
+                                   else UNASKED_HINT), steps=() if spec.tool else UNASKED_STEPS)
 
         def end(outcome: str, detail: str = "", reason_code: str = "", text: str = "") -> None:
             extra = {"result": {"sha256": text_sha256(text), "bytes": len(text.encode("utf-8"))}} if text else {}
@@ -2005,7 +2071,7 @@ class ToolRegistry:
                                  next=f"Call the tool {holder} instead; it asks the person.")
             if asks:
                 raise ToolDenied(f"The prompt '{spec.title}' needs the person's confirmation, which getting a prompt "
-                                 "cannot ask for.", code="needs_person", next=UNASKED_HINT)
+                                 "cannot ask for.", code="needs_person", next=UNASKED_HINT, steps=UNASKED_STEPS)
             if holder:
                 raise ToolDenied(f"The prompt '{spec.title}' holds what {holder} returns, which your tool permissions "
                                  "do not allow.", next=DENIED_HINT)

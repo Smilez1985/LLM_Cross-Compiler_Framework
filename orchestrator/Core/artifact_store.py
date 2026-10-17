@@ -31,9 +31,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from orchestrator.Core.deletion import AcceptedDeletion, require_person, require_same
 from orchestrator.tools.spec import DeletionItem, DeletionPlan
+from orchestrator.utils.next_steps import WithSteps
 
 
-class ArtifactRefused(ValueError):
+class ArtifactRefused(WithSteps, ValueError):
     """A deletion the store refuses, with a reason code and the next step (never a host path in the message)."""
 
     def __init__(self, message: str, code: str = "failed", next: str = ""):

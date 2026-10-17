@@ -560,9 +560,17 @@ def current_language() -> str:
 
 def ui_text(key: str, lang: Optional[str] = None, **values: Any) -> str:
     """The text of key in lang (default: the UI language; English when missing) with {placeholders} filled.
-    Unlike tr() it also works before the GUI created the LocalizationManager, e.g. in worker threads."""
+    Unlike tr() it also works before the GUI created the LocalizationManager, e.g. in worker threads.
+
+    A text that names a place in the window writes {path:<objectName>} (wave 6, V2: never a hand-written
+    "Tools > ..."): it is filled with that object's mouse path in the same language, built from the live menu labels
+    (orchestrator/utils/next_steps)."""
     table = LocalizationManager.TRANSLATIONS
-    text = table.get(lang or current_language(), {}).get(key) or table["en"].get(key, key)
+    lang = lang or current_language()
+    text = table.get(lang, {}).get(key) or table["en"].get(key, key)
+    if "{path:" in text:
+        from orchestrator.utils.next_steps import fill_paths
+        text = fill_paths(text, lang)
     return text.format(**values) if values else text
 
 
@@ -587,6 +595,11 @@ TEXT_MODULES += ("orchestrator.utils.l10n_deploy",)   # Deployment tab and hardw
 TEXT_MODULES += ("orchestrator.utils.l10n_build",)   # Build menu, File > Settings..., the Builder, the module wizard
 TEXT_MODULES += ("orchestrator.utils.l10n_ditto_runtime",)   # Ditto > Local Runtime...
 TEXT_MODULES += ("orchestrator.utils.l10n_ditto_models",)   # Ditto > Local Models..., Evaluation..., chat options
+# Wave 6 (chain a0 pre-registers every planned module; one that does not exist yet is skipped): the menu bar and tabs,
+# the application shell, the AI activity, the Hugging Face browser, the Ditto setup guide and the glossary.
+TEXT_MODULES += ("orchestrator.utils.l10n_main", "orchestrator.utils.l10n_shell", "orchestrator.utils.l10n_activity",
+                 "orchestrator.utils.l10n_hf", "orchestrator.utils.l10n_ditto_setup",
+                 "orchestrator.utils.l10n_glossary")
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.next_steps import WithSteps
 
 MAX_START_URLS = 5
 MAX_URL_CHARS = 2048
@@ -50,7 +51,7 @@ def _no_paths(text: str) -> str:
     return _PATH.sub("(a folder on this computer)", text)
 
 
-class CrawlRefused(ValueError):
+class CrawlRefused(WithSteps, ValueError):
     """A crawl that cannot start; `code` is the reason code of design 6.11 (D10), `next` the next step, `blocker` the
     facts catalogue's code of the hard fact that refused it (delegation design 4.2)."""
 

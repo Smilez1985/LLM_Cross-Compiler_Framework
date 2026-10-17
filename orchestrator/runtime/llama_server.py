@@ -63,6 +63,7 @@ from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloade
 from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
 from orchestrator.utils.helpers import redact_secrets, safe_extract_archive
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.next_steps import WithSteps
 
 APP_ROOT = Path(__file__).resolve().parents[2]
 MIB = 1024 ** 2
@@ -75,7 +76,7 @@ _LOG_HEADER = "=== llama-server start"
 ProgressFn = Callable[[str, int, Optional[int]], None]
 
 
-class LocalRuntimeError(DownloadError):
+class LocalRuntimeError(WithSteps, DownloadError):
     """User-facing runtime problem (the message is safe to show). log_tail is llama-server output: untrusted
     text that must go through orchestrator.utils.untrusted.wrap_untrusted before it reaches a model."""
 
