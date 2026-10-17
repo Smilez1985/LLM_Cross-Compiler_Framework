@@ -1,5 +1,5 @@
 {
- "largest_cycle": 81,
+ "largest_cycle": 80,
  "imports": [
   {
    "from": "orchestrator.Core.build_plan",
@@ -144,12 +144,6 @@
    "to": "orchestrator.Core.job_service",
    "reason": "the window vocabulary reads the Core's job states (cut with the Core<->tools cycle)",
    "until": "c5-split-core"
-  },
-  {
-   "from": "orchestrator.utils.image_registry",
-   "to": "orchestrator.Core.crawler_manager",
-   "reason": "PublicOnlyAdapter (the SSRF-safe HTTP adapter) lives in the crawler",
-   "until": "c1-imports"
   },
   {
    "from": "orchestrator.utils.next_steps",
