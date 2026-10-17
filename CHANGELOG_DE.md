@@ -2319,7 +2319,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   jetzt seinen Kalibrierungsdatensatz fest: Eine andere Datei als die, deren sha256 das Rezept nennt, wird abgelehnt,
   und die Build-Engine prüft die Kopie, die sie nutzt. Ein Rezept, das sich geändert hat, seit es das Formular
   gefüllt hat, wird ebenfalls abgelehnt. Änderst du im Formular einen Wert des Rezepts, baust du weiter deine eigenen
-  Werte auf dem Commit des Rezepts, nach derselben Prüfung auf Rückzug.
+  Werte auf dem Commit des Rezepts, nach derselben Prüfung auf Rückzug; ebenso, wie bisher, mit einem
+  Kalibrierungsdatensatz für ein Rezept, das keinen nennt, oder ohne einen für ein Rezept, das einen nennt.
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI

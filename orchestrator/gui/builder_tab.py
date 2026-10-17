@@ -1199,13 +1199,16 @@ class BuilderTab(QWidget):
 
     def _recipe_as_pinned(self, values) -> bool:
         """The form still holds exactly the recipe's values (target, format, board, quantization, importance
-        matrix), so Start Build builds the recipe itself."""
+        matrix, and a calibration dataset exactly when the recipe names one), so Start Build builds the recipe itself.
+        A dataset the recipe does not name, or none for a recipe that names one, is the person's own choice: their
+        values are built at the recipe's commit, as the Builder always did."""
         recipe = values["recipe"]
         fmt, board, quant = self._recipe_pins(recipe)
         same = [(values["target"], recipe.target.id), (values["target_fmt"].value, fmt), (values["board"], board),
                 (values["quant"], quant)]
         return (all(str(a or "").casefold() == str(b or "").casefold() for a, b in same)
-                and bool(values["use_imatrix"]) == bool(recipe.options.use_imatrix))
+                and bool(values["use_imatrix"]) == bool(recipe.options.use_imatrix)
+                and bool(values["dataset"]) == (recipe.options.dataset is not None))
 
     @staticmethod
     def _recipe_expect(values):

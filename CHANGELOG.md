@@ -2055,7 +2055,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   keeps every value of the recipe now pins its calibration dataset: a file other than the one the recipe's sha256
   names is refused, and the build engine checks the copy it uses. A recipe that changed since it filled the form is
   refused too. Changing a value of the recipe in the form still builds your own values at the recipe's commit,
-  after the same revocation check.
+  after the same revocation check; so does a calibration dataset for a recipe that names none, or none for a recipe
+  that names one, as before.
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI
