@@ -181,11 +181,61 @@ def load_corpus(directory: Path) -> List[CorpusDoc]:
     return docs
 
 
-def corpus_digest(directory: Path) -> str:
+def corpus_digest(directory: Path, pattern: str = "*.md") -> str:
     digest = hashlib.sha256()
-    for path in sorted(Path(directory).glob("*.md")):
+    for path in sorted(Path(directory).glob(pattern)):
         digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()
+
+
+# --- hidden-text carriers (recon P1) ------------------------------------------------------------------------------
+
+class CarrierDoc(BaseModel):
+    """A web page that hides a payload from its reader in one way (kind: what the knowledge base must count as left
+    out, rag/html_text.REMOVED_KINDS; empty when the HTML converter drops it without counting, as a comment) next to
+    a visible text. Indexed the way Deep Ingest stores a page; the payload must never reach the stored excerpts, the
+    visible text must."""
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^[\w.-]{1,64}$")
+    kind: str = Field(default="", pattern=r"^[a-z_]{0,40}$")
+    html: str = Field(min_length=1)
+    payload: str = Field(min_length=1)
+    visible: str = Field(min_length=1)
+
+
+def carriers_dir(cases_path: Optional[Path] = None) -> Optional[Path]:
+    """The carrier pages of a cases file: its 'carriers' entry (a folder relative to the file), None without one."""
+    path = Path(cases_path or RETRIEVAL_CASES)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    name = data.get("carriers") if isinstance(data, dict) else None
+    return path.parent / str(name) if name else None
+
+
+def load_carriers(directory: Optional[Path]) -> List[CarrierDoc]:
+    """<doc-id>.html pages whose <meta name="carrier-kind">, <meta name="carrier-payload"> and
+    <meta name="carrier-visible"> name how the payload is hidden, the payload and the visible text (attributes, so
+    neither is page text). None without a folder."""
+    if directory is None:
+        return []
+    from bs4 import BeautifulSoup
+    carriers = []
+    for path in sorted(Path(directory).glob("*.html")):
+        page = path.read_text(encoding="utf-8")
+        meta = {str(m["name"]): str(m.get("content") or "")
+                for m in BeautifulSoup(page, "html.parser").find_all("meta", attrs={"name": True})}
+        try:
+            carriers.append(CarrierDoc(id=path.stem, kind=meta.get("carrier-kind", ""), html=page,
+                                       payload=meta.get("carrier-payload", ""),
+                                       visible=meta.get("carrier-visible", "")))
+        except ValidationError as e:
+            raise ValueError(f"{path}: {e}") from None
+    if not carriers:
+        raise ValueError(f"{directory}: no carrier pages (*.html)")
+    return carriers
+
+
+def _plain(text: str) -> str:
+    return " ".join(str(text or "").split()).casefold()
 
 
 def check_retrieval_cases(cases: Sequence["Case"], docs: Sequence[CorpusDoc]) -> None:
@@ -710,19 +760,61 @@ def corpus_source(doc_id: str) -> str:
 
 class RetrievalEval:
     """Retrieval cases against a knowledge base holding the fixture corpus. `knowledge` offers RAGManager's
-    ingest_document() and search(); the CLI passes temporary_knowledge_base(). No LLM is involved."""
+    ingest_document() and search() (with carrier pages also ingest_page(), read_source() and find_source()); the CLI
+    passes temporary_knowledge_base(). No LLM is involved.
 
-    def __init__(self, knowledge, docs: Sequence[CorpusDoc]):
+    The corpus is indexed as outside text (ingest_document(outside=True)), as a crawled page or a pack's page is, so the
+    figures include what the cleaning of outside text costs. Carrier pages (CarrierDoc among `docs`) go through the
+    crawler's page extraction and ingest_page, like a Deep Ingest; then their stored excerpts are checked: a payload
+    that reached them, a visible text that did not, or a hidden kind that was not counted stops the evaluation
+    (RetrievalEvalError). carrier_checks holds one row per carrier page."""
+
+    def __init__(self, knowledge, docs: Sequence[Any]):
         self.knowledge = knowledge
         self.docs = list(docs)
         self._ids = {corpus_source(d.id): d.id for d in self.docs}
+        self.carrier_checks: List[Dict[str, Any]] = []
 
     def ingest(self) -> None:
         for doc in self.docs:
+            if isinstance(doc, CarrierDoc):
+                continue
             meta = {"title": doc.title, "lang": doc.lang, "doc_id": doc.id}
-            if not self.knowledge.ingest_document(corpus_source(doc.id), doc.text, meta, replace=True):
+            if not self.knowledge.ingest_document(corpus_source(doc.id), doc.text, meta, replace=True, outside=True):
                 reason = getattr(self.knowledge, "last_error", "") or "nothing to index"
                 raise RetrievalEvalError(f"Could not index the corpus document {doc.id}: {reason}")
+        self.carrier_checks = self._ingest_carriers([d for d in self.docs if isinstance(d, CarrierDoc)])
+
+    def _ingest_carriers(self, carriers: Sequence[CarrierDoc]) -> List[Dict[str, Any]]:
+        if not carriers:
+            return []
+        from orchestrator.Core.crawler_manager import CrawlerManager
+        from orchestrator.Core.rag_manager import source_id
+        crawler = CrawlerManager(SimpleNamespace(config={}), {"languages": []})   # extraction only, no request
+        rows, failed = [], []
+        for carrier in carriers:
+            source = corpus_source(carrier.id)
+            doc, _ = crawler._process_html(carrier.html, source, set())
+            try:
+                if doc is None or not self.knowledge.ingest_page(doc):
+                    raise RetrievalEvalError(f"Could not index the carrier page {carrier.id}: no text")
+                stored = _plain(" ".join(c["content"] for c in self.knowledge.read_source(source, 0, 100000)[0]))
+                entry = self.knowledge.find_source(source_id(source)) or {}
+            except KnowledgeBaseError as e:
+                raise RetrievalEvalError(f"Could not index the carrier page {carrier.id}: {e}") from None
+            removed = dict(entry.get("hidden_removed") or {})
+            row = {"id": carrier.id, "kind": carrier.kind, "removed": removed,
+                   "payload_stored": _plain(carrier.payload) in stored,
+                   "visible_stored": _plain(carrier.visible) in stored}
+            rows.append(row)
+            problems = (["its hidden payload reached the stored excerpts"] if row["payload_stored"] else []) + \
+                (["its visible text is missing from the stored excerpts"] if not row["visible_stored"] else []) + \
+                ([f"{carrier.kind} was not counted as left out"] if carrier.kind and not removed.get(carrier.kind)
+                 else [])
+            failed += [f"{carrier.id}: {'; '.join(problems)}"] if problems else []
+        if failed:
+            raise RetrievalEvalError("Hidden text check failed (recon P1): " + " | ".join(failed))
+        return rows
 
     def _doc_id(self, hit) -> str:
         return self._ids.get(hit.source) or str((hit.metadata or {}).get("doc_id") or hit.source)

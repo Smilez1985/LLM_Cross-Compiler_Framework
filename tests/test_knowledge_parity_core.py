@@ -219,6 +219,19 @@ def test_sources_are_filtered_by_kind_and_carry_the_same_words(tmp_path, monkeyp
     assert sources_mod.empty_sentence("docs") in out
 
 
+def test_hidden_text_left_out_reads_the_same_in_the_cli(tmp_path, monkeypatch):
+    """Recon P1: how much hidden text was left out of a source before it was stored, kind by kind in a fixed order;
+    "none" when the check found nothing, "-" for a source stored without it (the framework's documents, older pages)."""
+    entries = [dict(SOURCES[0], hidden_removed={"invisible_characters": 3, "display_none": 1, "aria_hidden": 2}),
+               dict(SOURCES[1], hidden_removed={}), SOURCES[2]]
+    assert [sources_mod.removed_text(e) for e in entries] == [
+        "aria-hidden 2, display:none 1, invisible characters 3", "none", "-"]
+    assert sources_mod.removed_text({"hidden_removed": {"display_none": 0, "x": "2"}}) == "none"
+    _, out = run_cli(framework_for(tmp_path, ensure_rag_manager=lambda: FakeRag(entries)), monkeypatch,
+                     "knowledge", "sources")
+    assert "Hidden text left out" in out and "aria-hidden 2, display:none 1, invisible characters 3" in out
+
+
 def test_the_cli_kind_choices_are_the_core_ones():
     from orchestrator.cli import cli
     option = next(p for p in cli.commands["knowledge"].commands["sources"].params if p.name == "kind")

@@ -11,6 +11,7 @@ model (and the system prompt's rule about these blocks) can tell data from instr
 import re
 import secrets
 import unicodedata
+from typing import Dict, Tuple
 
 # Format characters (Unicode category Cf) are removed as a whole: tag characters, zero-width characters,
 # bidi controls and isolates, soft hyphen, BOM and similar. These marks are invisible but not Cf:
@@ -27,12 +28,26 @@ UNTRUSTED_RULE = (
 )
 
 
-def sanitize_untrusted(text: str, max_len: int = 20000) -> str:
-    """Normalizes text and removes characters that render invisibly but are read by models."""
+def clean_untrusted(text: str) -> Tuple[str, Dict[str, int]]:
+    """sanitize_untrusted without a length limit, and what it removed: {"invisible_characters": characters,
+    "html_comments": comments}, only the kinds it found. The knowledge base stores outside text cleaned this way
+    (RAGManager, outside=True), so a stored excerpt is what a model is later shown."""
     text = unicodedata.normalize("NFKC", text or "")
+    normalized = len(text)
     text = "".join(ch for ch in text if ch in _KEEP_FORMAT or unicodedata.category(ch) != "Cf")
     text = _INVISIBLE_EXTRA.sub("", text)
-    text = _HTML_COMMENT.sub("", text)
+    removed: Dict[str, int] = {}
+    if len(text) < normalized:
+        removed["invisible_characters"] = normalized - len(text)
+    text, comments = _HTML_COMMENT.subn("", text)
+    if comments:
+        removed["html_comments"] = comments
+    return text, removed
+
+
+def sanitize_untrusted(text: str, max_len: int = 20000) -> str:
+    """Normalizes text and removes characters that render invisibly but are read by models."""
+    text = clean_untrusted(text)[0]
     if len(text) > max_len:
         text = text[:max_len] + "\n[... truncated ...]"
     return text

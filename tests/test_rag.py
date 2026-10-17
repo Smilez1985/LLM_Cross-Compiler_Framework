@@ -1041,3 +1041,236 @@ class TestFastEmbedApi:
 
         assert len(tokenizer.encode("word " * 10).ids) == 4
         assert len(copy.encode("word " * 10).ids) == 10
+
+
+# --- hidden carriers (recon P1): what a reader does not see never reaches the knowledge base ------------------------
+
+def carrier_pages():
+    """The carrier fixtures of the retrieval evaluation (evals/retrieval/carriers): one hidden payload per page."""
+    from orchestrator.evals import ditto_eval
+    return ditto_eval.load_carriers(ditto_eval.carriers_dir(ditto_eval.RETRIEVAL_CASES.parent / "carriers.yml"))
+
+
+def stored_text(rag, source):
+    chunks, _ = rag.read_source(source, 0, 10000)
+    return " ".join(" ".join(c["content"] for c in chunks).split())
+
+
+def flat(text):
+    return " ".join(text.split())
+
+
+class TestHiddenElements:
+    """rag/html_text.hidden_kind: the one rule for what a person reading a page does not see."""
+
+    @pytest.mark.parametrize("attrs, kind", [
+        ({"style": "display:none"}, "display_none"),
+        ({"style": "DISPLAY: NONE !important"}, "display_none"),
+        ({"style": "visibility: collapse"}, "visibility_hidden"),
+        ({"style": "font-size: 0"}, "font_size_zero"),
+        ({"style": "font-size: 0.1em"}, "font_size_zero"),
+        ({"style": "font-size: 1px"}, "font_size_zero"),
+        ({"style": "font: 0/0 a"}, "font_size_zero"),
+        ({"style": "opacity: .01"}, "opacity_zero"),
+        ({"style": "opacity: 0%"}, "opacity_zero"),
+        ({"style": "position: fixed; top: -10000px"}, "off_screen"),
+        ({"style": "position:absolute;left:-200vw"}, "off_screen"),
+        ({"style": "text-indent: -9999em"}, "off_screen"),
+        ({"style": "position:absolute; clip: rect(1px, 1px, 1px, 1px)"}, "clipped"),
+        ({"style": "clip-path: inset(50%)"}, "clipped"),
+        ({"style": "clip-path: circle(0)"}, "clipped"),
+        ({"style": "clip-path: polygon(0 0, 0 0, 0 0)"}, "clipped"),
+        ({"style": "width: 0; height: 0; overflow: hidden"}, "clipped"),
+        ({"style": "color: #FFF; background: #ffffff"}, "same_colour"),
+        ({"style": "color: rgb(0, 0, 0); background-color: black"}, "same_colour"),
+        ({"hidden": ""}, "hidden_attribute"),
+        ({"hidden": "hidden", "role": "tabpanel"}, "hidden_attribute"),   # a tab panel on a page without tabs
+        ({"aria-hidden": "TRUE"}, "aria_hidden"),
+    ])
+    def test_hidden(self, attrs, kind):
+        from orchestrator.rag.html_text import hidden_kind
+        assert hidden_kind("div", attrs) == kind
+
+    @pytest.mark.parametrize("attrs", [
+        {}, {"style": "display: block"}, {"style": "display:none; display:block"}, {"style": "font-size: 12px"},
+        {"style": "font: 700 14px Arial"}, {"style": "font-size: 50%"}, {"style": "opacity: 0.5"},
+        {"style": "position: absolute; left: -20px"}, {"style": "left: -9999px"},   # not positioned: no effect
+        {"style": "clip: rect(0, 100px, 20px, 0)"}, {"style": "clip-path: inset(10px)"},
+        {"style": "color: #fff; background: #000"}, {"style": "color: transparent"},   # gradient text stays
+        {"style": "color: white; background: white url(x.png)"}, {"hidden": "until-found"},
+        {"aria-hidden": "false"}, {"style": "overflow: hidden; width: 300px"},
+    ])
+    def test_shown(self, attrs):
+        from orchestrator.rag.html_text import hidden_kind
+        assert hidden_kind("div", attrs) is None
+
+    def test_template_and_noscript_and_tab_panels(self):
+        from orchestrator.rag.html_text import hidden_kind
+        assert hidden_kind("template", {}) == "template" and hidden_kind("noscript", {}) == "noscript"
+        for attrs in ({"hidden": ""}, {"aria-hidden": "true"}, {"style": "display:none"}):
+            assert hidden_kind("div", {"role": "tabpanel", **attrs}, tabs=True) is None
+        # A tab panel hidden in a way no click undoes is hidden all the same.
+        assert hidden_kind("div", {"role": "tabpanel", "style": "font-size:0"}, tabs=True) == "font_size_zero"
+
+    def test_a_page_keeps_what_its_reader_sees(self):
+        from orchestrator.rag.html_text import page_markdown
+        html = ("<html><head><title>T</title></head><body><nav>Menu</nav><h1>Guide</h1><p>Seen one.</p>"
+                "<div style='display:none'><p>gone one</p><p style='display:block'>gone two</p></div>"
+                "<span aria-hidden='true'></span><p hidden>gone three</p><noscript>gone four</noscript>"
+                "<p>Seen <b style='color:#000;background:#fff'>two</b>.</p></body></html>")
+        title, text, removed = page_markdown(html)
+        assert title == "T" and text == "# Guide\n\nSeen one.\n\nSeen two."
+        # Elements with text, each counted once (the visible child of a hidden one is gone with it).
+        assert removed == {"display_none": 1, "hidden_attribute": 1, "noscript": 1}
+
+    def test_the_crawler_strips_through_the_shared_helper(self, tmp_path):
+        from bs4 import BeautifulSoup
+
+        from orchestrator.Core.crawler_manager import CrawlerManager
+        from orchestrator.rag import html_text
+        html = "<body><header>H</header><p style='opacity:0'>x</p><template>t</template><p>Seen</p></body>"
+        soups = BeautifulSoup(html, "html.parser"), BeautifulSoup(html, "html.parser")
+        assert CrawlerManager._strip_boilerplate(soups[0]) == html_text.strip_boilerplate(soups[1]) == \
+            {"opacity_zero": 1, "template": 1}
+        assert str(soups[0]) == str(soups[1]) == "<body><p>Seen</p></body>"
+
+    def test_markup_inside_markdown_loses_only_its_hidden_elements(self):
+        from orchestrator.rag.html_text import is_html_document, strip_hidden_markup
+        text = ("# Pack page\n\nSeen <span style=\"display:none\">gone one</span>text, `<b hidden>code span</b>`.\n\n"
+                "```html\n<div hidden>fenced code</div>\n```\n\n<div aria-hidden=\"true\">gone\ntwo <div>inner</div>"
+                " still</div> after. Placeholder <repository or path> and a < b > c stay.\n<p hidden>gone three\n")
+        clean, removed = strip_hidden_markup(text)
+        assert clean == ("# Pack page\n\nSeen text, `<b hidden>code span</b>`.\n\n```html\n<div hidden>fenced code"
+                         "</div>\n```\n\n after. Placeholder <repository or path> and a < b > c stay.\n")
+        assert removed == {"display_none": 1, "aria_hidden": 1, "hidden_attribute": 1}
+        assert strip_hidden_markup("no markup at all") == ("no markup at all", {})
+        assert is_html_document("<!-- x -->\n<!DOCTYPE html><html>") and not is_html_document("# T\n\n<html>")
+
+
+class TestUntrustedCleaning:
+    """utils/untrusted: one cleaning of outside text, now also reporting what it removed."""
+
+    @staticmethod
+    def sanitize_before(text, max_len=20000):
+        """sanitize_untrusted as it was before clean_untrusted existed (characterization)."""
+        import unicodedata
+
+        from orchestrator.utils import untrusted
+        text = unicodedata.normalize("NFKC", text or "")
+        text = "".join(ch for ch in text if ch in untrusted._KEEP_FORMAT or unicodedata.category(ch) != "Cf")
+        text = untrusted._INVISIBLE_EXTRA.sub("", text)
+        text = untrusted._HTML_COMMENT.sub("", text)
+        if len(text) > max_len:
+            text = text[:max_len] + "\n[... truncated ...]"
+        return text
+
+    @pytest.mark.parametrize("text", [
+        "", "plain", "ﬁ ① Ｈｅｌｌｏ", "a​b‍c‮d﻿e­f", "x" + chr(0xE0041) * 3 + "️y",
+        "keep <!-- gone --> this <!-- open", "ᅟㅤ hangul fillers", "👍🏽 and 👨‍👩‍👧", "x" * 25000,
+    ])
+    def test_sanitize_is_unchanged(self, text):
+        from orchestrator.utils.untrusted import sanitize_untrusted
+        assert sanitize_untrusted(text) == self.sanitize_before(text)
+        assert sanitize_untrusted(text, 10) == self.sanitize_before(text, 10)
+
+    def test_clean_counts_what_it_removed(self):
+        from orchestrator.utils.untrusted import clean_untrusted
+        assert clean_untrusted("a​b" + chr(0xE0041) * 4 + " <!-- x --> c <!-- y") == (
+            "ab  c ", {"invisible_characters": 5, "html_comments": 2})
+        assert clean_untrusted("nothing hidden") == ("nothing hidden", {})
+        assert clean_untrusted("y" * 30000)[0] == "y" * 30000   # no length limit when it is stored
+
+
+class TestHiddenCarriersAtIngest:
+    """Every path that brings outside HTML into the knowledge base: Deep Ingest (crawled pages and their links) and
+    knowledge packs (whole HTML pages and HTML inside Markdown). The framework's own documents are stored as written."""
+
+    @pytest.fixture
+    def web(self, monkeypatch):
+        import requests
+        from requests.structures import CaseInsensitiveDict
+        pages = {f"http://93.184.215.14/{c.id}": c.html for c in carrier_pages()}
+        links = "".join(f'<a href="/{c.id}">{c.id}</a>' for c in carrier_pages())
+        pages["http://93.184.215.14/"] = (f"<html><body><p>{EN}</p>{links}"
+                                          '<div hidden><a href="/trap">trap</a></div></body></html>')
+        pages["http://93.184.215.14/trap"] = f"<html><body><p>{EN}</p></body></html>"
+        fetched = []
+
+        def send(session, prepared, **kwargs):
+            fetched.append(prepared.url)
+            body = pages.get(prepared.url)
+            return SimpleNamespace(status_code=200 if body else 404, text=body or "", content=(body or "").encode(),
+                                   headers=CaseInsensitiveDict({"Content-Type": "text/html"}), is_redirect=False)
+
+        monkeypatch.setattr(requests.Session, "send", send)
+        return fetched
+
+    def test_deep_ingest_stores_no_hidden_payload_and_records_what_it_left_out(self, make_rag, web):
+        from orchestrator.Core import knowledge_sources
+        rag = make_rag()
+        result = rag.ingest_url("http://93.184.215.14/", {"request_delay": 0, "max_depth": 1, "languages": []})
+        assert result["success"], result
+        listed = {e["source"]: e for e in rag.list_sources()}
+        for carrier in carrier_pages():
+            url = f"http://93.184.215.14/{carrier.id}"
+            stored = stored_text(rag, url)
+            assert flat(carrier.visible) in stored, carrier.id
+            assert flat(carrier.payload) not in stored and "evil-" not in stored, carrier.id
+            removed = listed[url]["hidden_removed"]
+            assert (removed.get(carrier.kind, 0) >= 1) if carrier.kind else removed == {}, (carrier.id, removed)
+        assert listed["http://93.184.215.14/display-none"]["hidden_removed"] == {"display_none": 1}
+        assert knowledge_sources.removed_text(listed["http://93.184.215.14/"]) == "hidden attribute 1"
+        # A link a reader cannot see is not followed either.
+        assert "http://93.184.215.14/trap" not in web
+
+    def test_pack_pages_carrying_html_are_stored_without_hidden_text(self, make_rag, tmp_path):
+        from orchestrator.Core.community_manager import CommunityManager
+        rag = make_rag()
+        framework = SimpleNamespace(config=rag.config, info=SimpleNamespace(installation_path=tmp_path),
+                                    get_component=lambda name: rag if name == "rag_manager" else None)
+        community = CommunityManager(framework)
+        carriers = {c.id: c for c in carrier_pages()}
+        inline = carriers["aria-hidden"]
+        body = inline.html.split("<main>", 1)[1].split("</main>", 1)[0]
+        pages = [
+            # a whole HTML page, read like a crawled one
+            {"source": "https://pack.example/display-none", "content": carriers["display-none"].html,
+             "metadata": {"content_type": "html", "hidden_removed": {"display_none": 0}}},   # a pack cannot set it
+            # HTML inside Markdown, with a comment and invisible characters around it
+            {"source": "https://pack.example/aria-hidden",
+             "content": f"# Quenby radio\n\n{body}\n\n<!-- {inline.payload} -->\nTwelve​ stations.\n",
+             "metadata": {"title": "Quenby​ radio"}},
+        ]
+        community.knowledge_dir.mkdir(parents=True, exist_ok=True)
+        (community.knowledge_dir / "carriers.json").write_text(json.dumps(pages), encoding="utf-8")
+        assert community.sync_knowledge_base() == 2
+        listed = {e["source"]: e for e in rag.list_sources()}
+        whole = stored_text(rag, "https://pack.example/display-none")
+        assert flat(carriers["display-none"].visible) in whole and "evil-" not in whole and "<p" not in whole
+        assert listed["https://pack.example/display-none"]["hidden_removed"] == {"display_none": 1}
+        assert listed["https://pack.example/display-none"]["title"] == "Orvelle lantern"
+        mixed = stored_text(rag, "https://pack.example/aria-hidden")
+        assert flat(inline.visible) in mixed and "evil-" not in mixed and "Twelve stations." in mixed
+        assert listed["https://pack.example/aria-hidden"]["hidden_removed"] == {
+            "aria_hidden": 1, "invisible_characters": 1, "html_comments": 1}
+        assert listed["https://pack.example/aria-hidden"]["title"] == "Quenby radio"   # cleaned as well
+
+    def test_the_hidden_text_counts_never_leave_with_an_export(self, make_rag, tmp_path, web):
+        from orchestrator.Core.community_manager import CommunityManager
+        rag = make_rag()
+        assert rag.ingest_url("http://93.184.215.14/display-none", {"request_delay": 0, "max_depth": 0})["success"]
+        framework = SimpleNamespace(config=rag.config, info=SimpleNamespace(installation_path=tmp_path),
+                                    get_component=lambda name: rag if name == "rag_manager" else None)
+        pages, _ = CommunityManager(framework)._knowledge_pages()
+        assert pages and not any("hidden_removed" in p["metadata"] for p in pages)
+        assert any("hidden_removed" in r["metadata"] for r in rag.export_records())   # kept in the snapshot
+
+    def test_the_framework_documents_are_stored_as_written(self, make_rag, tmp_path):
+        rag = make_rag()
+        readme = "# Readme\n\nThe marker <!-- starts a comment; keep `<span hidden>` and zero​width as written.\n"
+        (tmp_path / "README.md").write_text(readme, encoding="utf-8")
+        assert rag.ingest_codebase(tmp_path)["success"]
+        (entry,) = rag.list_sources()
+        assert entry["kind"] == "docs" and entry["hidden_removed"] is None
+        assert "<!-- starts a comment" in stored_text(rag, "code:README.md")
+        assert "zero​width" in stored_text(rag, "code:README.md")
