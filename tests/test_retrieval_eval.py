@@ -49,8 +49,9 @@ class ScriptedKnowledge:
         self.searches = []
         self.last_error = "" if ingest_ok else "embedding model missing"
 
-    def ingest_document(self, source, content, metadata=None, replace=False):
+    def ingest_document(self, source, content, metadata=None, replace=False, *, outside=False):
         self.ingested.append((source, content, metadata, replace))
+        self.outside = getattr(self, "outside", []) + [outside]
         return self.ingest_ok
 
     def search(self, query, limit=3, score_threshold=None, strict=False, **options):
@@ -286,6 +287,8 @@ def test_ingest_uses_opaque_sources_and_reports_failures():
     # The source is embedded with each chunk: it must not give the search the words of the document id.
     assert re.fullmatch(r"eval:[0-9a-f]{12}", corpus_source("llama-cpp-cuda-flags"))
     assert knowledge.ingested[0][2] == {"title": "a", "lang": "en", "doc_id": "a"} and knowledge.ingested[0][3]
+    # The corpus is indexed as outside text, like a crawled page: the figures include what that cleaning costs.
+    assert knowledge.outside == [True] * len(DOCS)
     with pytest.raises(RetrievalEvalError, match="embedding model missing"):
         RetrievalEval(ScriptedKnowledge(ingest_ok=False), DOCS).ingest()
 
@@ -504,3 +507,102 @@ def test_cli_variant_choices_match_the_runner():
     assert list(option.type.choices) == list(ditto_eval.RAG_VARIANTS)
     kind = next(p for p in cli.ditto_eval.params if p.name == "kinds")
     assert list(kind.type.choices) == list(ditto_eval.KINDS)
+
+
+# --- hidden-text carriers (recon P1): evals/retrieval/carriers.yml --------------------------------------------------
+
+CARRIER_CASES = RETRIEVAL_CASES.parent / "carriers.yml"
+
+
+def shipped_carriers():
+    return ditto_eval.load_carriers(ditto_eval.carriers_dir(CARRIER_CASES))
+
+
+def test_shipped_carrier_pages_and_cases_are_valid_and_consistent():
+    from orchestrator.rag.html_text import HIDDEN_KINDS, REMOVED_KINDS
+    cases = load_cases(CARRIER_CASES)
+    carriers = shipped_carriers()
+    check_retrieval_cases(cases, [*load_corpus(corpus_dir(CARRIER_CASES)), *carriers])
+    assert corpus_dir(CARRIER_CASES) == CORPUS   # the corpus of cases.yml around the carrier pages
+    assert ditto_eval.carriers_dir(RETRIEVAL_CASES) is None   # the main cases stay as they were
+    # Every way of hiding the knowledge base counts has a page; each page names a kind it counts (or none, for an
+    # HTML comment, which the converter never reads).
+    assert {c.kind for c in carriers} - {""} <= set(REMOVED_KINDS)
+    assert set(HIDDEN_KINDS) | {"invisible_characters"} <= {c.kind for c in carriers}
+    assert {"tab-panel", "html-comment"} <= {c.id for c in carriers}
+    # One case per page, each asking for its visible text without quoting it.
+    assert sorted(d for c in cases for d in c.expect.relevant) == sorted(c.id for c in carriers)
+    visible = {c.id: c.visible.lower() for c in carriers}
+    assert all("carrier" in c.tags and c.query.lower().rstrip("?.") not in visible[c.expect.relevant[0]]
+               for c in cases)
+    assert all(c.payload in c.html and c.payload != c.visible for c in carriers)
+
+
+def test_carrier_pages_need_their_meta_tags(tmp_path):
+    (tmp_path / "x.html").write_text('<html><head><meta name="carrier-kind" content="aria_hidden"></head></html>',
+                                     encoding="utf-8")
+    with pytest.raises(ValueError, match="x.html"):
+        ditto_eval.load_carriers(tmp_path)
+    with pytest.raises(ValueError, match="no carrier pages"):
+        ditto_eval.load_carriers(tmp_path / "missing")
+    assert ditto_eval.load_carriers(None) == []
+
+
+def carrier_docs(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+    framework = framework_stand_in(tmp_path, rag_embedding_model="intfloat/multilingual-e5-small")
+    return framework, [*load_corpus(CORPUS), *shipped_carriers()]
+
+
+def test_carrier_pages_are_stored_without_their_payload_and_found_by_their_visible_text(
+        tmp_path, monkeypatch, fake_models, no_network):
+    framework, docs = carrier_docs(tmp_path, monkeypatch)
+    with temporary_knowledge_base(framework) as knowledge:
+        ev = RetrievalEval(knowledge, docs)
+        ev.ingest()
+        rows = {row["id"]: row for row in ev.carrier_checks}
+        report = ev.run(load_cases(CARRIER_CASES))
+    assert len(rows) == len(shipped_carriers())
+    assert not any(row["payload_stored"] for row in rows.values())
+    assert all(row["visible_stored"] for row in rows.values())
+    assert rows["display-none"]["removed"] == {"display_none": 1}
+    assert rows["invisible-characters"]["removed"]["invisible_characters"] > 20   # zero-width and tag characters
+    assert rows["html-comment"]["removed"] == {}   # the converter never reads a comment: nothing to count
+    assert rows["tab-panel"]["removed"] == {"aria_hidden": 1}   # the inactive tab panel stays
+    assert report.pass_rate == 1.0, [r.first_problem() for r in report.results if r.pass_rate < 1]
+    assert no_network == []
+
+
+def test_a_carrier_whose_payload_reaches_the_knowledge_base_stops_the_evaluation(
+        tmp_path, monkeypatch, fake_models, no_network):
+    import orchestrator.rag.html_text as html_text
+    framework, docs = carrier_docs(tmp_path, monkeypatch)
+    monkeypatch.setattr(html_text, "hidden_kind", lambda name, attrs, tabs=False: None)   # a broken filter
+    with temporary_knowledge_base(framework) as knowledge:
+        with pytest.raises(RetrievalEvalError, match="Hidden text check failed") as failed:
+            RetrievalEval(knowledge, docs).ingest()
+    message = str(failed.value)
+    assert "display-none: its hidden payload reached the stored excerpts; display_none was not counted" in message
+    assert "invisible-characters" not in message   # the text cleaning still works
+
+
+def test_cli_carrier_cases_list_every_page_in_the_report(tmp_path, monkeypatch, fake_models, no_network):
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+    out = tmp_path / "report.json"
+    result = run_cli(monkeypatch, framework_stand_in(tmp_path), "--kind", "retrieval", "--cases", str(CARRIER_CASES),
+                     "--json", str(out), "--min-pass", "1.0")
+    assert result.exit_code == 0, result.output
+    (run,) = json.loads(out.read_text())["runs"]
+    assert run["setup"]["carrier_documents"] == len(shipped_carriers()) and len(run["setup"]["carriers_sha256"]) == 64
+    assert run["setup"]["corpus_documents"] == len(load_corpus(CORPUS))
+    assert sorted(row["id"] for row in run["setup"]["carriers"]) == sorted(c.id for c in shipped_carriers())
+    assert not any(row["payload_stored"] for row in run["setup"]["carriers"])
+    assert run["retrieval"]["by_tag"]["carrier"]["hit@k"] == 1.0
+
+
+def test_cli_fails_when_a_carrier_leaks(tmp_path, monkeypatch, fake_models, no_network):
+    import orchestrator.rag.html_text as html_text
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(html_text, "hidden_kind", lambda name, attrs, tabs=False: None)
+    result = run_cli(monkeypatch, framework_stand_in(tmp_path), "--kind", "retrieval", "--cases", str(CARRIER_CASES))
+    assert result.exit_code == 1 and "Hidden text check failed" in result.output

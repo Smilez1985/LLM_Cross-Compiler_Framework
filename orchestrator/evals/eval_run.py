@@ -189,17 +189,21 @@ def _run_ai(framework, ai_cases, runs, make_ditto, make_runtime, tiers, provider
 def run_retrieval(framework: Any, cases: Sequence[Any], source: Path, variants: Sequence[str], repeat: int = 1,
                   events: Optional[EvalEvents] = None, stop: Any = None) -> List[Any]:
     """Retrieval cases: the corpus is indexed once into a temporary knowledge base (the person's own is not touched),
-    one report per variant."""
+    one report per variant. A cases file with a 'carriers' folder adds its hidden-text carrier pages: indexed like a
+    Deep Ingest and checked (a payload that reaches the stored excerpts fails the run, exit 1 "index_failed"); each
+    report's setup lists them (carrier_documents, carriers)."""
     events = events or EvalEvents()
     try:
         folder = de.corpus_dir(source)
         docs = de.load_corpus(folder)
-        de.check_retrieval_cases(cases, docs)
+        carrier_folder = de.carriers_dir(source)
+        carriers = de.load_carriers(carrier_folder)
+        de.check_retrieval_cases(cases, [*docs, *carriers])
     except (OSError, ValueError) as e:
         raise EvalRunError(f"Cannot read the retrieval corpus: {e}", 2, "corpus_unreadable") from None
     reports = []
     with de.temporary_knowledge_base(framework) as knowledge:
-        ev = de.RetrievalEval(knowledge, docs)
+        ev = de.RetrievalEval(knowledge, [*docs, *carriers])
         start = time.monotonic()
         try:
             with events.busy("index", documents=len(docs)):
@@ -229,10 +233,12 @@ def run_retrieval(framework: Any, cases: Sequence[Any], source: Path, variants: 
             except Exception:
                 rss_mb = None
             used = {"model": reranker.model_id, "min_score": knowledge.rerank_floor(reranker)} if reranked else None
+            carrier_setup = {"carrier_documents": len(carriers), "carriers": getattr(ev, "carrier_checks", []),
+                             "carriers_sha256": de.corpus_digest(carrier_folder, "*.html")} if carriers else {}
             report.setup = de.run_setup(
                 label, "knowledge base", model, source, cases, repeat, variant=variant, reranker=used,
                 model_reason=knowledge.model_reason, corpus_sha256=de.corpus_digest(folder), corpus_documents=len(docs),
-                index_seconds=index_seconds, rss_mb=rss_mb)
+                index_seconds=index_seconds, rss_mb=rss_mb, **carrier_setup)
             reports.append(report)
     return reports
 

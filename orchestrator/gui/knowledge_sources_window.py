@@ -3,7 +3,8 @@
 What the knowledge base holds, as the person sees it (Tools > Knowledge Sources...; DECISIONS W1', round 8 Q-1/Q-1').
 
 Every source with its kind (a web page, a page of an installed knowledge pack, the framework's own documents, other),
-the licence and copyright notice it shows, what a knowledge pack would carry of it (its full text, only its address
+how much hidden text was left out of it before it was stored (knowledge_sources.removed_text, recon P1), the licence
+and copyright notice it shows, what a knowledge pack would carry of it (its full text, only its address
 and short facts, or nothing) and why. The kind filter lists only web pages, pack pages, documents or other sources.
 The list comes from knowledge_sources.sources (RAGManager.list_sources, the same list as `llm-cli knowledge sources
 --kind ...`); it opens the knowledge base, so it is read in a worker thread that reports through the one WorkerRelay.
@@ -20,8 +21,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogBut
 from orchestrator.gui.plain import button_text, one_line, plain_label, plain_tooltip
 from orchestrator.utils.localization import current_language, ui_text
 
-COLUMNS = ("sources.col.source", "sources.col.kind", "sources.col.licence", "sources.col.copyright",
-           "sources.col.carried", "sources.col.why")
+COLUMNS = ("sources.col.source", "sources.col.kind", "sources.col.removed", "sources.col.licence",
+           "sources.col.copyright", "sources.col.carried", "sources.col.why")
 KIND_FILTER = ("any", "web", "pack", "docs", "other")   # knowledge_sources.KIND_CHOICES, "any" first
 
 
@@ -124,7 +125,9 @@ class KnowledgeSourcesDialog(QDialog):
         self.table.setRowCount(len(self.entries))
         for row, entry in enumerate(self.entries):
             share = str(entry.get("pack_share") or "")
-            values = (str(entry.get("source") or ""), self._kind_text(str(entry.get("kind") or "")),
+            removed = knowledge_sources.removed_text(entry, lambda kind: self._t(f"sources.removed.{kind}"),
+                                                     self._t("sources.removed.none"))
+            values = (str(entry.get("source") or ""), self._kind_text(str(entry.get("kind") or "")), removed,
                       str(entry.get("licence") or "-"), str(entry.get("copyright") or "-"),
                       self._t(f"sources.carried.{share}") if share in knowledge_sources.CARRIED else "-",
                       str(entry.get("share_reason") or ""))

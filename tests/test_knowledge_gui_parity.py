@@ -216,9 +216,10 @@ def test_the_snapshot_window_buttons_have_object_names(tmp_path):
 
 SOURCES = [
     {"source": "https://docs.example/a", "title": "<b>A</b>", "kind": "web", "licence": "MIT",
-     "copyright": "(c) 2026 A <a href=x>", "pack_share": "full_text", "share_reason": "MIT allows it"},
+     "copyright": "(c) 2026 A <a href=x>", "pack_share": "full_text", "share_reason": "MIT allows it",
+     "hidden_removed": {"invisible_characters": 5, "display_none": 2}},
     {"source": "https://docs.example/b", "kind": "web", "licence": "", "copyright": "", "pack_share": "link_and_facts",
-     "share_reason": "no licence that allows it"},
+     "share_reason": "no licence that allows it", "hidden_removed": {}},
     {"source": "pack:notes/x", "kind": "pack", "licence": "", "copyright": "", "pack_share": "not_exported",
      "share_reason": "its author shares it"},
 ]
@@ -257,9 +258,13 @@ def test_the_sources_window_lists_by_kind_through_the_core_off_the_gui_thread(qa
         assert calls[0][0] == "any" and calls[0][1] != threading.current_thread().name
         headers = [dialog.table.horizontalHeaderItem(c).text() for c in range(dialog.table.columnCount())]
         assert headers == [ui_text(k, lang) for k in window.COLUMNS]
-        row = [dialog.table.item(0, c).text() for c in range(6)]
-        assert row == ["https://docs.example/a", ui_text("sources.filter.web", lang), "MIT", "(c) 2026 A <a href=x>",
-                       ui_text("sources.carried.full_text", lang), "MIT allows it"]
+        row = [dialog.table.item(0, c).text() for c in range(7)]
+        # Hidden text left out before storing (recon P1): kind by kind in a fixed order, in the window's language.
+        left_out = (f"{ui_text('sources.removed.display_none', lang)} 2, "
+                    f"{ui_text('sources.removed.invisible_characters', lang)} 5")
+        assert row == ["https://docs.example/a", ui_text("sources.filter.web", lang), left_out, "MIT",
+                       "(c) 2026 A <a href=x>", ui_text("sources.carried.full_text", lang), "MIT allows it"]
+        assert [dialog.table.item(r, 2).text() for r in (1, 2)] == [ui_text("sources.removed.none", lang), "-"]
         assert "&lt;b&gt;A&lt;/b&gt;" in dialog.table.item(0, 0).toolTip(), "the title is plain text"
         assert dialog.summary.text() == ui_text("sources.totals", lang, n=3, full=1, facts=1)
         dialog.kind.setCurrentIndex(dialog.kind.findData("web"))
@@ -272,9 +277,12 @@ def test_the_sources_window_lists_by_kind_through_the_core_off_the_gui_thread(qa
         assert [dialog.kind.itemData(i) for i in range(dialog.kind.count())] == ["any", *knowledge_sources.KINDS]
     finally:
         dialog.close()
-    if lang == "en":   # the same "In a pack" words as `llm-cli knowledge sources`
+    if lang == "en":   # the same "In a pack" and "Hidden text left out" words as `llm-cli knowledge sources`
         assert {k: ui_text(f"sources.carried.{k}", "en") for k in knowledge_sources.CARRIED} == \
             knowledge_sources.CARRIED
+        assert {k: ui_text(f"sources.removed.{k}", "en") for k in knowledge_sources.REMOVED} == \
+            knowledge_sources.REMOVED
+        assert ui_text("sources.removed.none", "en") == knowledge_sources.REMOVED_NONE
 
 
 def test_the_sources_window_says_when_the_knowledge_base_is_off_or_unreadable(qapp):
@@ -870,6 +878,8 @@ def test_every_text_key_of_the_knowledge_windows_exists_in_english_and_german():
     used |= {f"{k}.tip" for k in ("zoo.details", "zoo.verify_installed", "zoo.verify_file", "zoo.export", "zoo.keys")}
     used |= {f"sources.filter.{k}" for k in ("any", "web", "pack", "docs", "other")}
     used |= {f"sources.carried.{k}" for k in ("full_text", "link_and_facts", "not_exported")}
+    from orchestrator.Core.knowledge_sources import REMOVED
+    used |= {f"sources.removed.{k}" for k in (*REMOVED, "none")}
     used |= {f"storage.reason.{k}" for k in ("engine_missing", "not_converted")}
     used |= {f"zoo.export.kind.{k}" for k in ("target", "recipe", "knowledge")}
     used |= {f"zoo.export.encrypt.{k}" for k in ("none", "keys", "passphrase")}
