@@ -72,6 +72,14 @@ uv run llm-cli --help
 uv run llm-gui
 ```
 
+### Check a new setup
+
+`uv run llmcf mojo` checks what a build needs on this computer (Python 3.11 to 3.14, Docker and buildx, free disk
+space, targets, the state folder, secrets and keyring, tool permissions) and says what to do for each problem.
+`make test` then runs the tests ([section 3](#3-running-the-tests)), and `scripts/mcp_client_smoke.sh` is the smoke
+test with a real AI client ([below](#the-real-client-smoke-test)). The CI smoke-tests the build images. There is no
+separate quick-check script.
+
 ### Keep your development setup apart from your real one
 
 - `LLM_FRAMEWORK_CONFIG_DIR=/some/folder` makes the framework use that folder for its settings. Without it, a
