@@ -2369,7 +2369,9 @@ everything worked) reaches an AI with the account's name, its home folder and bo
   (the defaults, a settings file with its full path, an `LLM_FRAMEWORK_*` variable, or changed while the program
   runs), secrets redacted, as `llm-cli config show` (`settings_view.effective_settings`), and the source repository
   overrides with the variable each becomes, to add and remove as with `llm-cli config repos` (removing asks first,
-  "No" is the default). The output folder has its own entry, **File > Output Folder...**.
+  "No" is the default). A repository URL with a password or token in it is refused in both, with the same check:
+  credentials belong in the secrets store (**Security > Secrets...**), not in the plain-text settings file. The
+  output folder has its own entry, **File > Output Folder...**.
 - **Settings** are never read from the working directory: `LLM_FRAMEWORK_CONFIG_DIR`, then `configs/` in the
   installation if you may write there, then the personal folder.
 - **Data folders** (`output/`, `cache/`, `models/`) are in the installation if you may write there, otherwise in the

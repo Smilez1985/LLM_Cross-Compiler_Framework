@@ -2176,6 +2176,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Eine URL für ein Quell-Repository nimmt kein Passwort und kein Token mehr auf**: `llm-cli config repos --add` und
+  **Datei > Einstellungen… > Hinzufügen** speicherten eine URL genau wie eingegeben, deshalb landeten
+  `https://user:passwort@...`, ein Token als Benutzername oder ein Parameter wie `?private_token=` als reiner Text in
+  der `config.yml`. Beide lehnen eine solche URL jetzt mit einer Prüfung im Kern ab (`settings_view.url_credential` in
+  `add_repo_override`; Exit-Code 2 in der CLI), mit einem einfachen Grund, der auf den Secrets-Speicher verweist
+  (`llm-cli secrets set`, **Security > Geheimnisse...**); ein einfacher Kontoname wie der einer SSH-Adresse zählt
+  nicht als Zugangsdaten. Ein früher so gespeicherter Eintrag erreicht die Builds weiter und wird nur mit
+  `REDACTED` statt der Zugangsdaten gezeigt (die Liste, `config show`, Datei > Einstellungen…).
 - **Der Modul-Assistent speichert Dittos Vorschlag so wie `llm-cli module generate-ai`**: Er speicherte ein von der
   KI erstelltes Modul nur über den Modul-Generator, deshalb fielen die Prüfungen von DittoManager.save_module weg (die
   Ablehnung jedes vorgefertigten `nvidia/cuda`-Images in einem KI-Vorschlag und die Pflicht zur Begründung der KI für

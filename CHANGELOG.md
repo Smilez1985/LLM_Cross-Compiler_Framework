@@ -1931,6 +1931,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **A source repository URL no longer takes a password or token**: `llm-cli config repos --add` and **File >
+  Settings... > Add** stored a URL exactly as typed, so `https://user:password@...`, a token as the user name or a
+  parameter such as `?private_token=` ended up in plain text in `config.yml`. Both now refuse such a URL through one
+  core check (`settings_view.url_credential` in `add_repo_override`; exit code 2 in the CLI) with a plain reason that
+  points to the secrets store (`llm-cli secrets set`, **Security > Secrets...**); a plain account name such as the
+  one of an SSH address is no credential. An entry stored with one before still reaches the builds and is shown
+  only with the credential replaced by `REDACTED` (the list, `config show`, File > Settings...).
 - **The module wizard saves Ditto's proposal the way `llm-cli module generate-ai` does**: it saved an AI-made module
   through the module generator alone, so DittoManager.save_module's checks were skipped (the refusal of any prebuilt
   `nvidia/cuda` image in an AI proposal, and the AI's reason required for an image that is not a Docker Official

@@ -2622,7 +2622,9 @@ Board-Pfade.
   kommt (die Vorgaben, eine Einstellungsdatei mit ihrem vollen Pfad, eine Variable `LLM_FRAMEWORK_*` oder während des
   Laufs geändert), Geheimnisse geschwärzt, wie `llm-cli config show` (`settings_view.effective_settings`), und die
   Repository-Überschreibungen mit der Variablen, zu der jede wird, zum Hinzufügen und Entfernen wie mit `llm-cli
-  config repos` (Entfernen fragt zuerst, „Nein“ ist die Vorgabe). Der Ausgabeordner hat seinen eigenen Eintrag,
+  config repos` (Entfernen fragt zuerst, „Nein“ ist die Vorgabe). Eine Repository-URL mit Passwort oder Token wird
+  in beiden mit derselben Prüfung abgelehnt: Zugangsdaten gehören in den Secrets-Speicher (**Security >
+  Geheimnisse...**), nicht in die Einstellungsdatei aus reinem Text. Der Ausgabeordner hat seinen eigenen Eintrag,
   **Datei > Output Folder...**.
 - **Einstellungen** werden nie aus dem Arbeitsverzeichnis gelesen: `LLM_FRAMEWORK_CONFIG_DIR`, dann `configs/` in der
   Installation, wenn du dort schreiben darfst, dann der persönliche Ordner.
