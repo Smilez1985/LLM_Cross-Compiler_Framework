@@ -140,6 +140,11 @@ class TestWindowVocabulary:
             assert not re.fullmatch(tool_windows.WINDOW_ID_RE, bad)
 
     def test_every_job_kind_and_every_window_is_covered(self):
+        assert JOB_KIND_WINDOWS == {
+            "crawl": "knowledge_sources", "deploy": "deployment", "package": "deployment", "probe": "boards",
+            "pack_import": "community_hub", "pack_export": "community_hub", "snapshot_restore": "knowledge_snapshots",
+            "hf_download": "hf_browser", "runtime_build": "ditto_runtime", "runtime_start": "ditto_runtime",
+            "benchmark": "ditto_runtime", "approval": "approvals", "docs_index": "knowledge_sources"}
         assert set(JOB_KIND_WINDOWS) == set(JOB_KINDS)
         assert set(WINDOW_OPENERS) == set(WINDOW_IDS)
         for table in (TOOL_WINDOWS, JOB_KIND_WINDOWS, tool_windows.REASON_WINDOWS, tool_windows.ACTION_WINDOWS):
@@ -410,8 +415,8 @@ class TestRows:
         assert rows(store)[0].refs.window == "knowledge_snapshots"
 
     def test_build_ends(self):
-        saved = row_for_build({"request_id": REQ, "status": "completed", "owner": "mcp", "saved": "output:Rockchip/m/Q4",
-                               "completed": 1, "failed": 0})
+        saved = row_for_build({"request_id": REQ, "status": "completed", "owner": "mcp",
+                               "saved": "output:Rockchip/m/Q4", "completed": 1, "failed": 0})
         assert (saved.kind, saved.caller, saved.text_key) == ("job_result", "mcp", "activity.build.saved")
         assert saved.params["saved"] == "output:Rockchip/m/Q4" and saved.refs == {"request_id": REQ,
                                                                                   "window": "builder"}

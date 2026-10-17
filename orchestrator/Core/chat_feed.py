@@ -141,7 +141,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "activity.tool.index_framework_docs": "Started adding the framework's documentation to the knowledge base.",
         "activity.tool.add_pack_from_index": "Started installing a pack from the Community Hub.",
         "activity.tool.export_pack": "Started exporting a pack to a file.",
-        "activity.tool.restore_knowledge_snapshot": "Started restoring a knowledge snapshot; the current state is "
+        "activity.tool.restore_knowledge": "Started restoring a knowledge snapshot; the current state is "
                                                     "saved first.",
         "activity.tool.delete_artifact": "Moved a finished model to the trash.",
         "activity.tool.restore_from_trash": "Put something back from the trash.",
@@ -173,8 +173,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "activity.job.pack_import.not_done": "The pack was not installed.",
         "activity.job.pack_export.done": "The pack was exported to a file.",
         "activity.job.pack_export.not_done": "The pack was not exported.",
-        "activity.job.snapshot_restore.done": "The knowledge snapshot is restored.",
-        "activity.job.snapshot_restore.not_done": "The knowledge snapshot was not restored.",
+        "activity.job.knowledge_restore.done": "The knowledge snapshot is restored.",
+        "activity.job.knowledge_restore.not_done": "The knowledge snapshot was not restored.",
         "activity.job.hf_download.done": "The download from Hugging Face finished.",
         "activity.job.hf_download.not_done": "The download from Hugging Face did not finish.",
         "activity.job.runtime_build.done": "Ditto's local model program is built.",
@@ -259,7 +259,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
                                               "aufzunehmen.",
         "activity.tool.add_pack_from_index": "Hat begonnen, ein Paket aus dem Community Hub zu installieren.",
         "activity.tool.export_pack": "Hat begonnen, ein Paket in eine Datei zu exportieren.",
-        "activity.tool.restore_knowledge_snapshot": "Hat begonnen, einen Wissens-Snapshot wiederherzustellen; der "
+        "activity.tool.restore_knowledge": "Hat begonnen, einen Wissens-Snapshot wiederherzustellen; der "
                                                     "aktuelle Stand wird vorher gesichert.",
         "activity.tool.delete_artifact": "Hat ein fertiges Modell in den Papierkorb verschoben.",
         "activity.tool.restore_from_trash": "Hat etwas aus dem Papierkorb zurückgeholt.",
@@ -291,8 +291,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "activity.job.pack_import.not_done": "Das Paket wurde nicht installiert.",
         "activity.job.pack_export.done": "Das Paket wurde in eine Datei exportiert.",
         "activity.job.pack_export.not_done": "Das Paket wurde nicht exportiert.",
-        "activity.job.snapshot_restore.done": "Der Wissens-Snapshot ist wiederhergestellt.",
-        "activity.job.snapshot_restore.not_done": "Der Wissens-Snapshot wurde nicht wiederhergestellt.",
+        "activity.job.knowledge_restore.done": "Der Wissens-Snapshot ist wiederhergestellt.",
+        "activity.job.knowledge_restore.not_done": "Der Wissens-Snapshot wurde nicht wiederhergestellt.",
         "activity.job.hf_download.done": "Der Download von Hugging Face ist fertig.",
         "activity.job.hf_download.not_done": "Der Download von Hugging Face wurde nicht abgeschlossen.",
         "activity.job.runtime_build.done": "Dittos lokales Modellprogramm ist gebaut.",

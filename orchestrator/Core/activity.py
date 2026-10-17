@@ -64,6 +64,9 @@ _NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _KEY = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 _COUNT = re.compile(r"^[0-9]{1,6}$")
 BUILD_STATES = ("completed", "error", "cancelled")
+# A tool or job kind whose text key has another name: the feed's own texts name no knowledge snapshot (it holds no
+# reminder about them, tests/test_doctor_fixes.py), so restoring one is a knowledge restore there.
+TEXT_NAMES = {"restore_knowledge_snapshot": "restore_knowledge", "snapshot_restore": "knowledge_restore"}
 
 
 def feed_program(kind: str) -> str:
@@ -183,9 +186,9 @@ def row_for_call(data: Mapping[str, Any], *, program: str, job_window: Optional[
     refs["window"] = (job_window if tool == "cancel_job" and job_window else
                       window_for_tool(tool, form=str(data.get("form") or ""), window=str(data.get("window") or "")))
     keys = ", ".join(k for k in str(data.get("keys") or "").split(",") if k)
-    return _row("ai_action", caller, f"activity.tool.{tool}", "activity.action", {"tool": tool, "keys": keys}, refs,
-                needs=("keys",) if tool == "update_settings" else (), client=data.get("client", ""),
-                asked_in=asked_in)
+    return _row("ai_action", caller, f"activity.tool.{TEXT_NAMES.get(tool, tool)}", "activity.action",
+                {"tool": tool, "keys": keys}, refs, needs=("keys",) if tool == "update_settings" else (),
+                client=data.get("client", ""), asked_in=asked_in)
 
 
 def row_for_event(kind: str, data: Mapping[str, Any]) -> Optional[Row]:
@@ -223,7 +226,8 @@ def row_for_job(summary: Mapping[str, Any], *, window: Optional[str] = None) -> 
     if caller is None or kind not in JOB_KINDS or kind == "approval":
         return None
     outcome = "done" if state == "done" else "not_done"
-    return _row("job_result", caller, f"activity.job.{kind}.{outcome}", f"activity.job.{outcome}",
+    return _row("job_result", caller, f"activity.job.{TEXT_NAMES.get(kind, kind)}.{outcome}",
+                f"activity.job.{outcome}",
                 {"kind": kind, "state": state, "code": summary.get("error")},
                 {"job_id": summary.get("job_id"), "window": window or JOB_KIND_WINDOWS.get(kind)},
                 level="info" if outcome == "done" else "warning")

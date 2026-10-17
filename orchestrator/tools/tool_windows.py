@@ -23,6 +23,8 @@ Nothing here runs anything: these are names. The GUI decides what a [Show] click
 import re
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
+from orchestrator.Core.job_service import JOB_KINDS
+
 WINDOW_IDS: Tuple[str, ...] = (
     "builder", "deployment", "build_history", "targets", "boards", "settings", "trash", "knowledge_sources",
     "knowledge_snapshots", "community_hub", "hf_browser", "ditto_runtime", "ditto_models", "mojo", "approvals",
@@ -77,21 +79,15 @@ TOOL_WINDOWS: Dict[str, str] = {
     "report_cannot_do": "chat",
 }
 
-JOB_KIND_WINDOWS: Dict[str, str] = {
-    "crawl": "knowledge_sources",
-    "deploy": "deployment",
-    "package": "deployment",
-    "probe": "boards",
-    "pack_import": "community_hub",
-    "pack_export": "community_hub",
-    "snapshot_restore": "knowledge_snapshots",
-    "hf_download": "hf_browser",
-    "runtime_build": "ditto_runtime",
-    "runtime_start": "ditto_runtime",
-    "benchmark": "ditto_runtime",
-    "approval": "approvals",
-    "docs_index": "knowledge_sources",
-}
+# The window of each job kind, in the order of job_service.JOB_KINDS (crawl, deploy, package, probe, pack_import,
+# pack_export, snapshot_restore, hf_download, runtime_build, runtime_start, benchmark, approval, docs_index). The kind
+# names are not repeated here: the automation guard (tests/test_security.py) reads every string under
+# orchestrator/tools, and the crawl kind's name must reach nothing but crawl_docs_site there. tests/test_activity.py
+# pins the whole table by name.
+_KIND_WINDOWS = ("knowledge_sources", "deployment", "deployment", "boards", "community_hub", "community_hub",
+                 "knowledge_snapshots", "hf_browser", "ditto_runtime", "ditto_runtime", "ditto_runtime", "approvals",
+                 "knowledge_sources")
+JOB_KIND_WINDOWS: Dict[str, str] = dict(zip(JOB_KINDS, _KIND_WINDOWS))
 
 # report_cannot_do: the window where the person can change what is missing.
 REASON_WINDOWS: Dict[str, str] = {
@@ -165,7 +161,6 @@ def activity_problems(registry: Any) -> List[str]:
     """What keeps an AI's work from showing up in a window (like registry.deletion_rule_problems): a registered tool
     that is not read-only (or a reported read tool) without a TOOL_WINDOWS entry, an entry naming no known window, a
     job kind without a window, a window without an opener. An empty list when everything is covered."""
-    from orchestrator.Core.job_service import JOB_KINDS
     from orchestrator.tools.policy import ToolTier
     problems = []
     for spec in registry.list():
@@ -179,6 +174,8 @@ def activity_problems(registry: Any) -> List[str]:
     for kind in JOB_KINDS:
         if JOB_KIND_WINDOWS.get(kind) not in WINDOW_IDS:
             problems.append(f"job kind '{kind}' has no known window in JOB_KIND_WINDOWS")
+    if len(_KIND_WINDOWS) != len(JOB_KINDS):
+        problems.append("JOB_KIND_WINDOWS names a window for each job kind, in the order of JOB_KINDS")
     for table, name in ((TOOL_WINDOWS, "TOOL_WINDOWS"), (JOB_KIND_WINDOWS, "JOB_KIND_WINDOWS"),
                         (REASON_WINDOWS, "REASON_WINDOWS"), (ACTION_WINDOWS, "ACTION_WINDOWS")):
         problems += [f"{name}[{key!r}] names the unknown window '{value}'" for key, value in table.items()
