@@ -584,7 +584,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
         console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(str(e))}")
         sys.exit(1)
     from orchestrator.Core.module_generator import generator_input
-    from orchestrator.tools.tools_targets import record_module_saved
+    from orchestrator.Core.module_generator import record_module_saved
     record_module_saved(fm, "cli", generator_input(definition.model_dump(), module_name), path, "framework-cli")
     console.print(f"[bold green]✅ Module '{escape(module_name)}' created in {escape(str(path))}[/bold green]")
 
@@ -3532,8 +3532,8 @@ def _person_trash(ctx: FrameworkContext, state_dir: Path):
         return Trash.for_framework(fm), _cli_audit(ctx)
     audit = _device_audit(ctx, state_dir)
     try:
-        from orchestrator.tools.framework_tools import _audit_key
-        key = _audit_key(None, state_dir)
+        from orchestrator.Core.vault_key import audit_key
+        key = audit_key(None, state_dir)
     except Exception:  # noqa: BLE001 - without a keyring the trash index is unkeyed, like the permission file
         key = None
     config, _ = _settings(ctx)
@@ -3808,7 +3808,7 @@ def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
                       "settings first.[/red]")
         sys.exit(1)
     docs, code = framework_documents(rag.app_root, with_code)
-    from orchestrator.tools.tools_framework_docs import snapshot_space
+    from orchestrator.Core.knowledge_snapshots import snapshot_space
     service = getattr(ctx.framework_manager, "build_service", None)
     checks = snapshot_space(rag, getattr(service, "disk_usage", None))
     short = [c for c in checks if not c.fits]
@@ -4577,8 +4577,8 @@ def _device_audit(ctx: FrameworkContext, state_dir: Path):
         return audit
     try:
         from orchestrator.tools.audit import AuditLog
-        from orchestrator.tools.framework_tools import _audit_key
-        return AuditLog(state_dir / "audit.db", key=_audit_key(None, state_dir))
+        from orchestrator.Core.vault_key import audit_key
+        return AuditLog(state_dir / "audit.db", key=audit_key(None, state_dir))
     except Exception:  # noqa: BLE001 - the record is still written; the trust itself was the person's
         return None
 

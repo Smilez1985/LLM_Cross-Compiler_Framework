@@ -1,0 +1,169 @@
+{
+ "largest_cycle": 9,
+ "imports": [
+  {
+   "from": "orchestrator.Core.framework",
+   "to": "orchestrator.tools.framework_tools",
+   "reason": "the composition root builds the tool registry with every tool definition",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.cli",
+   "to": "orchestrator.mcp_server",
+   "reason": "`mcp serve` and the client setup live in the server module",
+   "until": "c5-split-adapters"
+  },
+  {
+   "from": "orchestrator.evals.ditto_eval",
+   "to": "orchestrator.tools.framework_tools",
+   "reason": "the evaluation builds its own tool registry to run Ditto's tool loop",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.gui.mcp_window",
+   "to": "orchestrator.mcp_server",
+   "reason": "the SDK-free client setup lives in the server module (moves to Core/mcp_clients.py)",
+   "until": "c5-split-adapters"
+  },
+  {
+   "from": "orchestrator.llm.auth.signin",
+   "to": "orchestrator.Core.vault_key",
+   "reason": "the key storage choices live in Core/vault_key.py (moves to security/)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.llm.auth.store",
+   "to": "orchestrator.Core.secrets_manager",
+   "reason": "the secret store interface lives in the Core (moves to security/)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.llm.task_prompts",
+   "to": "orchestrator.Core.module_generator",
+   "reason": "TRUSTED_IMAGE_PREFIXES lives in the module generator",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.rag.migration",
+   "to": "orchestrator.Core.deletion",
+   "reason": "the knowledge-base conversion uses the Core's deletion service (to be injected)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.rag.migration",
+   "to": "orchestrator.Core.disk_plan",
+   "reason": "the knowledge-base conversion checks free space with the Core's disk rule (to be injected)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.rag.migration",
+   "to": "orchestrator.Core.knowledge_snapshots",
+   "reason": "the knowledge-base conversion takes a snapshot first (to be injected)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.rag.migration",
+   "to": "orchestrator.Core.trash",
+   "reason": "the knowledge-base conversion moves the old storage to the trash (to be injected)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.schemas.build",
+   "to": "orchestrator.tools.output",
+   "reason": "the untrusted-text annotations live in tools/output.py (move to schemas/)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.schemas.jobs",
+   "to": "orchestrator.tools.output",
+   "reason": "the untrusted-text annotations live in tools/output.py (move to schemas/)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.schemas.recipes",
+   "to": "orchestrator.Core.community_pack",
+   "reason": "a recipe made from a build scrubs it with the pack export's scrub",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.schemas.targets",
+   "to": "orchestrator.tools.output",
+   "reason": "the untrusted-text annotations live in tools/output.py (move to schemas/)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.tools.audit",
+   "to": "orchestrator.Core.chat_feed",
+   "reason": "ENTRY_ID_RE lives in the chat feed (moves into the kernel)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.tools.grants",
+   "to": "orchestrator.Core.confirmed_builds",
+   "reason": "the kernel reads the Core's confirmed builds (cut with the Core<->tools cycle)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.tools.job_audit",
+   "to": "orchestrator.Core.job_service",
+   "reason": "job audits read the Core's job service (cut with the Core<->tools cycle)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.tools.local_files",
+   "to": "orchestrator.Core.trash",
+   "reason": "the AI folders move deleted files to the Core's trash (cut with the Core<->tools cycle)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.tools.registry",
+   "to": "orchestrator.Core.confirmed_builds",
+   "reason": "the kernel reads the Core's confirmed builds (cut with the Core<->tools cycle)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.tools.registry",
+   "to": "orchestrator.Core.job_service",
+   "reason": "the registry starts jobs through the Core's job service (cut with the Core<->tools cycle)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.tools.tool_windows",
+   "to": "orchestrator.Core.job_service",
+   "reason": "the window vocabulary reads the Core's job states (cut with the Core<->tools cycle)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.utils.next_steps",
+   "to": "orchestrator.tools.tool_windows",
+   "reason": "the next-step catalogue maps windows to their openers (w6-a0)",
+   "until": "c5-split-core"
+  },
+  {
+   "from": "orchestrator.utils.next_steps.runtime",
+   "to": "orchestrator.runtime.catalog",
+   "reason": "a next step offers the model tiers of the runtime catalogue (w6-a0)",
+   "until": "c5-split-core"
+  }
+ ],
+ "third_party": [
+  {
+   "from": "orchestrator.Core.docker_manager",
+   "library": "PySide6",
+   "reason": "the Docker manager's Qt signals (lazy, PEP 562)",
+   "until": "c1-texts-qtfree"
+  },
+  {
+   "from": "orchestrator.runtime.device.reasons",
+   "library": "paramiko",
+   "reason": "classify() reads paramiko's exception classes",
+   "until": "c2-remote-base"
+  },
+  {
+   "from": "orchestrator.utils.localization",
+   "library": "PySide6",
+   "reason": "the language-switch QObject lives in the shared text module",
+   "until": "c1-texts-qtfree"
+  }
+ ]
+}

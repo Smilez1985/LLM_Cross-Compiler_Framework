@@ -214,7 +214,7 @@ class ApprovalStore:
                 os.fsync(f.fileno())
             os.chmod(tmp, 0o600)
             # Windows: while another window or the approval watcher reads the file, replacing it fails for a moment
-            from orchestrator.Core.vault_key import replace_file
+            from orchestrator.utils.atomic import replace_file
             replace_file(tmp, self.path)
         except BaseException:
             try:

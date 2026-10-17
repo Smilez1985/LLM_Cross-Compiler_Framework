@@ -74,7 +74,7 @@ DELETION_SITES = {
     ("orchestrator/Core/trash.py", "Trash.move"): TEMP,      # the empty entry folder of a move that failed
     ("orchestrator/Core/trash.py", "Trash.restore"): TEMP,   # the empty entry folder after a restore
     ("orchestrator/Core/vault_key.py", "KeyFileHolder._write"): TEMP,
-    ("orchestrator/Core/vault_key.py", "write_private"): TEMP,
+    ("orchestrator/utils/atomic.py", "write_private"): TEMP,
     ("orchestrator/Core/deployment_manager.py", "DeploymentManager.create_package"): TEMP,
     ("orchestrator/Core/knowledge_snapshots.py", "_copy_checked"): TEMP,   # an export's unfinished copy
     ("orchestrator/Core/artifact_output.py", "_copy_verified"): TEMP,      # a save's unfinished copy
@@ -86,7 +86,7 @@ DELETION_SITES = {
     ("orchestrator/gui/sign_in.py", "UserConfigSnapshot.restore"): TEMP,   # puts the config back as it was
     ("orchestrator/llm/auth/store.py", "CredentialStore._write"): TEMP,
     ("orchestrator/mcp_server.py", "_write_private"): TEMP,
-    ("orchestrator/runtime/llama_server.py", "_write_private"): TEMP,
+    ("orchestrator/utils/atomic.py", "write_private_exclusive"): TEMP,
     ("orchestrator/runtime/build/source.py", "export_source"): TEMP,
     ("orchestrator/runtime/build/store.py", "BuildStore.export_build"): TEMP,
     ("orchestrator/runtime/device/package.py", "package_runtime"): TEMP,

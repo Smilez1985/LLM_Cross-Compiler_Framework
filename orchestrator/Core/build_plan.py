@@ -162,7 +162,7 @@ class BuildPlan:
                           + (f"; {self.trust_note}" if self.trust_note else "")))
         facts.append(Fact("Image build", self.image_build))
         if self.base_images:
-            from orchestrator.tools.tools_community import base_image_line
+            from orchestrator.Core.community_pack import base_image_line
             for file, image in self.base_images:
                 facts.append(Fact(f"Base image ({file})", base_image_line(image), TARGET_TEXT))
         elif self.base_image:
@@ -443,7 +443,7 @@ def _target_image_pairs(target_folder: Optional[Path]) -> List[Tuple[str, str]]:
     if target_folder is None:
         return []
     try:
-        from orchestrator.tools.tools_community import pack_base_images
+        from orchestrator.Core.community_pack import pack_base_images
         return list(pack_base_images(Path(target_folder)))
     except Exception:  # noqa: BLE001 - images that cannot be read are no official images
         return [("Dockerfile", "?")]

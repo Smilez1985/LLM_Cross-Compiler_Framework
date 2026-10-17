@@ -33,7 +33,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, List, Literal, Optional, Sequence, Tuple, Union, get_args
+from typing import Callable, Dict, Iterable, List, Literal, Optional, Sequence, Tuple, Union, get_args
 
 import pyrage
 import yaml
@@ -42,6 +42,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from orchestrator import __version__
+from orchestrator.security.paths import ACCOUNT_NAME, HOME_ROOT
 from orchestrator.utils.helpers import calculate_file_checksum
 from orchestrator.utils.next_steps import WithSteps
 
@@ -760,14 +761,112 @@ class UserKeys:
                             f'python -c "{by_hand}" | llm-cli secrets set {name} --with-token') from None
 
 
+# --- base images of a target pack (moved here from tools/tools_community.py by chain c1-imports) -------------
+
+def _logical_lines(text: str) -> List[str]:
+    lines, current = [], ""
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not current and (not stripped or stripped.startswith("#")):
+            continue
+        if stripped.endswith("\\"):
+            current += stripped[:-1] + " "
+            continue
+        lines.append(current + stripped)
+        current = ""
+    if current:
+        lines.append(current)
+    return lines
+
+
+def dockerfile_bases(text: str) -> List[str]:
+    """The base images a Dockerfile's FROM lines name, and the images COPY/ADD --from and RUN --mount=...,from= pull,
+    in order: build stages named with AS are left out, `scratch` too; a build argument with a default declared before
+    the first FROM is filled in, any other stays as written."""
+    args: Dict[str, str] = {}
+    stages, images = set(), []
+    seen_from = False
+    for line in _logical_lines(text):
+        word, _, rest = line.partition(" ")
+        word = word.upper()
+        if word == "ARG" and not seen_from:
+            name, eq, value = rest.strip().partition("=")
+            if eq:
+                args[name.strip()] = value.strip().strip('"').strip("'")
+        if word in ("COPY", "ADD", "RUN"):
+            # COPY --from=<image> and RUN --mount=...,from=<image> pull a prebuilt image just like FROM does (a stage
+            # name or a stage number is not an image)
+            for flag in (t for t in rest.split() if t.startswith("--")):
+                name, _, value = flag[2:].partition("=")
+                sources = [value] if name.lower() == "from" else [
+                    part.partition("=")[2] for part in value.split(",")
+                    if name.lower() == "mount" and part.partition("=")[0].strip().lower() == "from"]
+                for source in sources:
+                    source = source.strip().strip('"').strip("'")
+                    if source and not source.isdigit() and source.lower() not in stages and source not in images:
+                        images.append(source)
+            continue
+        if word != "FROM":
+            continue
+        seen_from = True
+        tokens = [t for t in rest.split() if not t.startswith("--")]
+        if not tokens:
+            continue
+        image = re.sub(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", lambda m: args.get(m.group(1), m.group(0)), tokens[0])
+        if len(tokens) >= 3 and tokens[1].upper() == "AS":
+            stages.add(tokens[2].lower())
+        if image.lower() in stages or image.lower() == "scratch":
+            continue
+        if image not in images:
+            images.append(image)
+    return images
+
+
+def pack_base_images(folder: Path) -> List[Tuple[str, str]]:
+    """(file, image) for every base image of every Dockerfile in a pack folder (Dockerfile, *.dockerfile,
+    Dockerfile.*, Containerfile), never following a link."""
+    found = []
+    for path in sorted(Path(folder).rglob("*")):
+        name = path.name.lower()
+        if path.is_symlink() or not path.is_file():
+            continue
+        if not (name in ("dockerfile", "containerfile") or name.endswith(".dockerfile")
+                or name.startswith("dockerfile.")):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel = path.relative_to(folder).as_posix()
+        found += [(rel, image) for image in dockerfile_bases(text)]
+    return found
+
+
+def base_image_line(image: str) -> str:
+    """One base image, plainly (DECISIONS round 3): registry, image, tag, digest, and whether it is a Docker Official
+    Image or a prebuilt image from another registry."""
+    from orchestrator.utils.image_ref import split_image
+    if "$" in image:
+        return (f"{image}: names a build argument; the image is decided when the target is built. The image build runs "
+                "with network access on this computer, outside the build sandbox.")
+    info = split_image(image)
+    parts = [f"{image}: registry {info['registry']}, image {info['repository']}"
+             + (f", tag {info['tag']}" if info["tag"] else "")]
+    parts.append(f"digest {info['digest']}" if info["digest"] else
+                 "not pinned by digest: its publisher can later point the tag at another image")
+    parts.append("Docker Official Image" if info["official"] else
+                 f"other registry: {info['registry']}; prebuilt image made by its publisher, not checked by the framework")
+    parts.append("the image build runs with network access on this computer, outside the build sandbox")
+    return "; ".join(parts) + "."
+
+
 # --- Privacy scrub ----------------------------------------------------------------------------------------
 
 # Adapted from rag4ll rag4ll/mojo/redact.py (MIT, (c) 2026 Smilez1985, https://github.com/Smilez1985/rag4ll).
 # Extended: Windows and macOS home folders, IPv6, MAC and e-mail addresses (LCF's privacy detectors), the host
 # name and the user name, and LCF's secret patterns.
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")
-_HOME_DIRS = re.compile(r"((?:(?<![\w.])/home|(?<![\w.])/Users|\b[A-Za-z]:\\Users|\b[A-Za-z]:/Users)([/\\]))"
-                        r"([^/\\\s\"'<>|:]+)")
+_HOME_DIRS = re.compile(rf"({HOME_ROOT}([/\\]))({ACCOUNT_NAME})")   # the shared patterns (security/paths.py)
 # Text the detectors must not touch is shielded with private-use characters while they run: image digests
 # (name@sha256:..., which the validators require) are no user@host logins, and default accounts are no persons.
 # A scrubbed git@ remote or digest would break the script it is in.

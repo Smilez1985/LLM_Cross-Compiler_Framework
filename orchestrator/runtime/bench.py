@@ -568,7 +568,7 @@ class BenchRunner:
     # --- results ---
 
     def _keep(self, run: BenchRun) -> None:
-        from orchestrator.Core.vault_key import write_private
+        from orchestrator.utils.atomic import write_private
         runs = self.root / "runs"
         runs.mkdir(parents=True, exist_ok=True)
         data = {"schema": SCHEMA, **asdict(run)}

@@ -19,7 +19,7 @@ import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from orchestrator.llm.task_prompts import split_image
+from orchestrator.utils.image_ref import split_image
 from orchestrator.utils.next_steps import WithSteps
 
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
@@ -112,7 +112,7 @@ class RegistryClient:
     def __init__(self, session: Any = None, timeout: float = TIMEOUT):
         if session is None:
             import requests
-            from orchestrator.Core.crawler_manager import PublicOnlyAdapter
+            from orchestrator.security.http import PublicOnlyAdapter
             session = requests.Session()
             session.trust_env = False  # never a proxy or .netrc credential from the environment
             adapter = PublicOnlyAdapter()  # connects only to the public address that was checked (DNS rebinding)

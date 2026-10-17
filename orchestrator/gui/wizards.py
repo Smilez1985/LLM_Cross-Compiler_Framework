@@ -1280,7 +1280,7 @@ Setup commands:
         of their own are passed on."""
         from orchestrator.Core.ditto_manager import DittoCoder
         from orchestrator.Core.module_generator import AI_DEFINITION_FIELDS, generator_input
-        from orchestrator.tools.tools_targets import record_module_saved
+        from orchestrator.Core.module_generator import record_module_saved
         definition = {k: v for k, v in (self.ai_proposal or {}).items() if k in AI_DEFINITION_FIELDS}
         definition.update({k: self.module_data[k] for k in ("architecture", "sdk", "base_os", "packages", "cpu_flags",
                                                             "cmake_flags", "setup_commands", "quantization_logic")})
@@ -1387,7 +1387,7 @@ Setup commands:
                 output_path = generator.generate_module(self.module_data, profile=profile)
             if ai_made and not (self.ai_proposal or self._ai_chose_base_image()):
                 # fields an AI filled through the GUI tools, saved by the person: audited (design 6.7)
-                from orchestrator.tools.tools_targets import record_module_saved
+                from orchestrator.Core.module_generator import record_module_saved
                 record_module_saved(self.framework_manager, "gui", self.module_data, Path(output_path),
                                     "framework-gui")
             message = f"{tr('msg.module_created')}\n{output_path}"
