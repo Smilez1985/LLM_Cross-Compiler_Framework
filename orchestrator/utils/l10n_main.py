@@ -121,3 +121,7 @@ TEXTS = {
         "main.folders.add": "Ordner hinzufügen...",
     },
 }
+
+# The "Sie" form of the German texts above that differ (Q1): none. Menu titles, entries, tab titles and buttons address
+# nobody, so both forms read the same (checked by tests/test_next_steps.py).
+FORMAL = {"de": {}}
