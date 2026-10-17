@@ -216,6 +216,15 @@ llm-cli ditto eval --provider ollama --model qwen3.5:4b --kind chat
 Cases live in `evals/ditto/cases.yml` and are graded by rules; nothing is built. Cloud providers bill every
 request (about 20 per run and repeat). New cases are data: add them to the cases file, not to the code.
 
+If you change how the knowledge base reads or stores text (chunking, the HTML extraction, the cleaning of outside
+text), run the retrieval evaluation before and after (no AI model; the local embedding and reranking models are
+downloaded once) and its hidden-carrier group, which fails when a hidden payload reaches the stored excerpts:
+
+```bash
+llm-cli ditto eval --kind retrieval --rag-variant fused --rag-variant rerank --json before.json
+llm-cli ditto eval --kind retrieval --cases evals/retrieval/carriers.yml
+```
+
 ### Bumping the llama.cpp pin
 
 Every self-built llama.cpp comes from one commit: `llama_cpp.source` in `configs/llama_runtime.yml` (where it lives
@@ -536,6 +545,12 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   shell commands with `shlex.quote`.
 - External text (web pages, logs, probe files, knowledge base, tool results) reaches a language model only through
   `orchestrator/utils/untrusted.py`, and never in a system prompt.
+- **Outside text enters the knowledge base cleaned, through one path.** HTML is read with
+  `rag/html_text.strip_boilerplate` (page furniture and every element `hidden_kind` finds hidden are dropped before
+  text and links are read); a crawled page is stored with `RAGManager.ingest_page`, other outside text with
+  `ingest_document(..., outside=True)` (a pack's page always counts as outside text). Both clean the text with
+  `utils/untrusted.clean_untrusted` and record what was left out (`hidden_removed`). Never add a second sanitizer or a
+  store call around them; a new hiding trick goes into `hidden_kind` with a page in `evals/retrieval/carriers/`.
 - **AI calls go through the provider layer.** Use `LLMClient` from `orchestrator/llm`; never build an SDK client of
   your own. Answers the framework acts on are pydantic models (structured answers), never parsed free text. New
   providers or models are presets in `configs/llm_providers.yml`.

@@ -58,10 +58,27 @@ jobs:
           python -m orchestrator.cli -q ditto eval --kind retrieval --rag-variant fused --rag-variant rerank
           --json retrieval-report.json --min-pass 0.7
 
+      # Hidden-text carriers (recon P1): web pages that hide a payload from their reader (display:none, aria-hidden,
+      # off-screen, invisible characters, ...) are indexed the way Deep Ingest stores a page, around the same corpus.
+      # A payload in the stored excerpts, or a visible text missing from them, fails the step (exit code 1) whatever
+      # the pass rate; the cases then ask for each page's visible text.
+      - name: Run the hidden-carrier cases
+        if: always()
+        env:
+          LLM_FRAMEWORK_HOME: ${{ runner.temp }}/llm-home
+          LLM_FRAMEWORK_CONFIG_DIR: ${{ runner.temp }}/llm-config
+          LLM_FRAMEWORK_MODELS_DIR: ${{ runner.temp }}/models
+          LLM_FRAMEWORK_RAG_RERANKER: cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
+        run: >-
+          python -m orchestrator.cli -q ditto eval --kind retrieval --cases evals/retrieval/carriers.yml
+          --rag-variant fused --rag-variant rerank --json carrier-report.json --min-pass 0.9
+
       - name: Upload the report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: retrieval-report
-          path: retrieval-report.json
+          path: |
+            retrieval-report.json
+            carrier-report.json
           if-no-files-found: ignore

@@ -1622,6 +1622,42 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   address it in robots.txt and in a meta tag with that name. Rules a site wrote for its name before the repository
   was renamed, `LLM-Conversion-Framework-Bot`, still apply to it, so an opt-out made earlier holds.
 
+### Hidden text is left out (unreleased)
+
+Text that a person reading a page does not see is a known way to hide instructions for an AI in a web page (prompt
+injection). So Deep Ingest stores only what a reader sees (`orchestrator/rag/html_text.py`):
+
+- **Left out of every crawled page,** with everything inside, before its text and its links are read (a link a reader
+  cannot see is not followed either): elements hidden by their own inline style (`display:none`, `visibility:hidden`,
+  a font size of 2 px or less, an opacity of 5 % or less, absolute, fixed or relative positioning far off the screen
+  or a large negative `text-indent`, a `clip` or `clip-path` that leaves no visible box, a box of 1 px or less with
+  `overflow:hidden`, text in the same colour as its own background); elements with the `hidden` attribute (not
+  `hidden="until-found"`, which the browser's search reveals) or `aria-hidden="true"`; `<template>` and `<noscript>`.
+  The inactive panel of a tab widget stays (`role="tabpanel"` on a page with tabs): you open it with a click.
+- **Then cleaned like every outside text,** before it is stored, so the stored excerpt is what an AI is shown later
+  (not only at the moment it is shown): Unicode normalized (NFKC), invisible characters removed (zero-width
+  characters, Unicode tag characters, bidi controls and similar) and HTML comments removed, the same cleaning every
+  excerpt gets before it reaches a model (`orchestrator/utils/untrusted.py`). The page's title is cleaned too. A PDF's
+  text gets the same cleaning.
+- **Knowledge packs** follow the same rule when they carry HTML: a page that is a whole HTML document is read like a
+  crawled page, and HTML inside a pack's Markdown loses its hidden elements (HTML in code spans and code blocks is
+  shown, not rendered, and stays); then the same cleaning. This holds for every page that comes from a pack, however
+  it is stored.
+- **You see how much was left out:** **Tools > Knowledge Sources...** and `llm-cli knowledge sources` have the column
+  "Hidden text left out", kind by kind (for example "display:none 2, invisible characters 14"; elements count once
+  each, invisible characters one by one); "none" when nothing was found, "-" for a source stored without this check
+  (the framework's own documents, pages stored before this version). The framework writes these counts itself (a
+  pack cannot set them); they are never given to an AI and never go into an exported pack, and the removed text is
+  not kept anywhere.
+- **The framework's own documents** are stored as written: they are not outside text.
+- **Limits:** only what an element says itself counts. Rules in style sheets and classes (such as `.sr-only`) are not
+  seen, because the framework has no CSS engine, so the removal is partial. A knowledge base keeps its older excerpts
+  until a page is ingested again (for example a new Deep Ingest of the same address) or a pack is imported again.
+- **Checked in CI:** fixture pages that each hide one payload next to a visible text (`evals/retrieval/carriers/`)
+  run through the crawler and the knowledge base in the tests, and the nightly retrieval evaluation runs them as a
+  group of their own (`llm-cli ditto eval --kind retrieval --cases evals/retrieval/carriers.yml`): a payload that
+  reaches the stored excerpts, or a visible text that does not, fails the run.
+
 ### Licences and copyright
 
 Text and data mining lets the knowledge base keep the text the crawl was allowed to read. Passing that text on is

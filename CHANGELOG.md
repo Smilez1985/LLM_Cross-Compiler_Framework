@@ -2024,6 +2024,24 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **Text hidden from a reader never reaches the knowledge base** (recon P1): text that a web page hides from the person
+  reading it (inline `display:none` or `visibility:hidden`, a font size or opacity near zero, off-screen or clipped
+  boxes, text in its own background colour, the `hidden` attribute, `aria-hidden="true"`, `<template>`, `<noscript>`)
+  reached the knowledge base unchanged and with it any instruction for an AI it carried. Deep Ingest now drops those
+  elements before it reads a page's text and links (one rule, `hidden_kind` in `rag/html_text.py`, which the
+  crawler's boilerplate step uses, so a link a reader cannot see is not followed either); the inactive panel of a tab
+  widget stays. Every outside text is then stored already cleaned the way a model's view of it is (NFKC, invisible
+  and tag characters and HTML comments removed; `utils/untrusted.clean_untrusted`, the existing cleaning, now also
+  reporting what it removed), not only cleaned when it is shown: crawled pages and PDFs (`RAGManager.ingest_page`),
+  and every knowledge pack page, whose HTML is read like a crawled page or, inside Markdown, loses its hidden elements
+  (code spans and code blocks stay). How much was left out, by kind, is the page's new provenance field
+  `hidden_removed`, which only the framework writes: **Tools > Knowledge Sources...** and `llm-cli knowledge sources`
+  show it in the new column "Hidden text left out"; it never reaches an AI and never goes into an exported pack. The
+  framework's own documents are stored as written. Fixture pages that each hide one payload
+  (`evals/retrieval/carriers/`) run through the crawler and the knowledge base in the tests and as their own group in
+  the nightly retrieval evaluation (`llm-cli ditto eval --kind retrieval --cases evals/retrieval/carriers.yml`), which
+  fails when a payload reaches the stored excerpts; the evaluation now indexes its corpus as outside text too.
+  Pages stored before keep their excerpts until they are ingested again.
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI

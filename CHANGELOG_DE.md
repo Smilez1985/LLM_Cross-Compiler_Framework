@@ -2285,6 +2285,27 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Text, den eine Leserin oder ein Leser nicht sieht, kommt nie in die Wissensbasis** (Recon P1): Text, den eine
+  Webseite vor der lesenden Person versteckt (Inline-`display:none` oder `visibility:hidden`, eine Schriftgröße oder
+  Deckkraft nahe null, Boxen außerhalb des Bildschirms oder weggeschnitten, Text in seiner eigenen Hintergrundfarbe,
+  das Attribut `hidden`, `aria-hidden="true"`, `<template>`, `<noscript>`), kam unverändert in die Wissensbasis und
+  mit ihm jede Anweisung an eine KI, die er enthielt. Deep Ingest lässt diese Elemente jetzt weg, bevor es Text und
+  Links einer Seite liest (eine Regel, `hidden_kind` in `rag/html_text.py`, die der Schritt für Seitenelemente des
+  Crawlers nutzt, also folgt der Crawler auch keinem Link, den niemand sieht); der inaktive Bereich eines Tab-Widgets
+  bleibt. Jeder Text von außen wird danach schon so gereinigt gespeichert, wie ihn ein Modell zu sehen bekommt (NFKC,
+  unsichtbare Zeichen, Tag-Zeichen und HTML-Kommentare entfernt; `utils/untrusted.clean_untrusted`, die bestehende
+  Reinigung, die jetzt auch meldet, was sie entfernt hat), nicht erst beim Anzeigen gereinigt: gecrawlte Seiten und
+  PDFs (`RAGManager.ingest_page`) und jede Seite eines Wissenspakets, deren HTML wie eine gecrawlte Seite gelesen wird
+  oder, im Markdown, seine versteckten Elemente verliert (Code-Spans und Code-Blöcke bleiben). Wie viel herausgefallen
+  ist, Art für Art, steht im neuen Herkunftsfeld `hidden_removed` der Seite, das nur das Framework schreibt:
+  **Tools > Wissensquellen...** und `llm-cli knowledge sources` zeigen es in der neuen Spalte „Ausgelassener
+  versteckter Text“; es erreicht nie eine KI und geht nie in ein exportiertes Paket. Die eigenen Dokumente des
+  Frameworks werden so gespeichert, wie sie geschrieben sind. Testseiten, die je eine Nutzlast verstecken
+  (`evals/retrieval/carriers/`), laufen in den Tests durch den Crawler und die Wissensbasis und als eigene Gruppe in
+  der nächtlichen Retrieval-Evaluation (`llm-cli ditto eval --kind retrieval --cases evals/retrieval/carriers.yml`),
+  die scheitert, wenn eine Nutzlast in die gespeicherten Auszüge gelangt; die Evaluation liest ihr Korpus jetzt
+  ebenfalls als Text von außen ein. Früher gespeicherte Seiten behalten ihre Auszüge, bis sie erneut eingelesen
+  werden.
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI
