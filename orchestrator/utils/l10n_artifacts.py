@@ -21,7 +21,7 @@ TEXTS = {
         # saving a finished build (the save dialog and Save...)
         "save.title": "Save the finished model {name} to",
         "save.kept": "Not saved elsewhere: the model stays in the framework's build folder ({path}). Save it later "
-                     "with Save... in the Deployment tab.",
+                     "with: {path:btn_deploy_save}",
         "save.in_output": "The model is in the output folder: {path}",
         "save.done.renamed": "Saved: {path} (moved on the same disk, nothing copied; {files} files, {size}).",
         "save.done.copied": "Saved: {path} ({files} files, {size}; every copy was checked against its original, then "
@@ -61,7 +61,7 @@ TEXTS = {
                            "Festplatte sind noch {free} frei.",
         "save.title": "Das fertige Modell {name} speichern in",
         "save.kept": "Nicht woanders gespeichert: das Modell bleibt im Build-Ordner des Frameworks ({path}). Speichere "
-                     "es später mit „Speichern…“ im Tab „Deployment“.",
+                     "es später mit: {path:btn_deploy_save}",
         "save.in_output": "Das Modell liegt im Ausgabeordner: {path}",
         "save.done.renamed": "Gespeichert: {path} (auf derselben Platte verschoben, nichts kopiert; {files} Dateien, "
                              "{size}).",

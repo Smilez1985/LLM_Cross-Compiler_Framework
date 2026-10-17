@@ -21,10 +21,11 @@ MOUSE_LABELS = {
 }
 
 STEPS = (
-    Step("probe.local", cli="scan", tool="probe_local_hardware", window="builder", target="act_deploy_scan_local",
-         runnable=True),
+    # not runnable: `scan` writes target_hardware_config.txt into the folder it runs in (for a proposal the program
+    # folder); the Builder's scan saves where the person chooses
+    Step("probe.local", cli="scan", tool="probe_local_hardware", window="builder", target="act_deploy_scan_local"),
     Step("probe.script", cli="scan --script", cli_args=("--script",), tool="probe_local_hardware", window="builder",
-         target="act_deploy_scan_script", runnable=True),
+         target="act_deploy_scan_script"),
     Step("probe.import", cli="scan --import", cli_args=("--import", "{file}"), params={"file": Param("path")},
          tool="probe_remote_device", window="builder",
          target="act_deploy_scan_import"),

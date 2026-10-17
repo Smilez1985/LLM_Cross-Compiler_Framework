@@ -8,6 +8,8 @@ from orchestrator.utils.next_steps import Param, Step
 
 _BOARDS = "act_boards_devices"
 _DEVICE = Param("label")
+# a board's address and login account: the person's to see, never an AI's (study 6.2 D0)
+_LOGIN = Param("label", private=True)
 
 MOUSE_LABELS = {
     "btn_boards_add": (_BOARDS, "boards.btn.add"),
@@ -21,9 +23,9 @@ MOUSE_LABELS = {
 
 STEPS = (
     Step("board.trust", cli="deploy devices add", cli_args=("{host}", "--user", "{user}"),
-         params={"host": _DEVICE, "user": _DEVICE}, person_only="host_key", window="boards", target="btn_boards_add"),
+         params={"host": _LOGIN, "user": _LOGIN}, person_only="host_key", window="boards", target="btn_boards_add"),
     Step("board.probe", cli="scan --device", cli_args=("--device", "{host}", "--user", "{user}"),
-         params={"host": _DEVICE, "user": _DEVICE}, tool="probe_remote_device", window="builder",
+         params={"host": _LOGIN, "user": _LOGIN}, tool="probe_remote_device", window="builder",
          target="act_deploy_scan_remote"),
     Step("board.pair", cli="device runtime deploy", cli_args=("{device}",), params={"device": _DEVICE},
          person_only="secret", window="boards",

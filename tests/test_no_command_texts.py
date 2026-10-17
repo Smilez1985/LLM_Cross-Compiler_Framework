@@ -33,6 +33,11 @@ COMMAND = re.compile(r"llm-cli |\bllmcf [a-z]|in a terminal|im Terminal|in einem
 MENU_PATH = re.compile(r"(?<![\w-])(?:File|Build|Boards|Ditto|Security|View|Tools|Help|Datei|Sicherheit|Ansicht|"
                        r"Extras|Hilfe|Werkzeuge|Builder|Deployment)\s+>\s+[A-Z\w]")
 PATTERNS = {"command": COMMAND, "menu_path": MENU_PATH}
+# A place written out in words instead of a path ("Save... in the Deployment tab"): the person's texts only (review
+# w6-a0-v found one the " > " pattern missed).
+WORDED_PLACE = re.compile(r"\bin the (?:Builder|Deployment) tab\b|\bim Tab „?(?:Builder|Deployment)\b|"
+                          r"\bin the (?:File|Build|Boards|Ditto|Security|View|Tools|Help) menu\b|"
+                          r"\bim Menü „?(?:Datei|Build|Boards|Ditto|Sicherheit|Ansicht|Extras|Hilfe)\b")
 # Files whose literals are commands by design: the command line's own output, and the catalogue's command templates.
 EXCLUDED = ("orchestrator/cli.py", "orchestrator/utils/next_steps/")
 # l10n texts that keep another program's own command, with the reason.
@@ -59,6 +64,9 @@ def text_problems(texts: Dict[str, Dict[str, str]]) -> List[str]:
                 problems.append(f"{lang} {key}: names a command ({COMMAND.search(text).group(0)!r})")
             if MENU_PATH.search(text):
                 problems.append(f"{lang} {key}: a hand-written menu path ({MENU_PATH.search(text).group(0)!r}); "
+                                "write {path:<objectName>}")
+            elif WORDED_PLACE.search(text):
+                problems.append(f"{lang} {key}: a place written out ({WORDED_PLACE.search(text).group(0)!r}); "
                                 "write {path:<objectName>}")
             for name in PATH_RE.findall(text):
                 if name not in known:
@@ -142,11 +150,15 @@ def test_the_text_guard_bites():
                     "cmd": "Run 'llmcf mojo' first.", "terminal": "Do it in a terminal.",
                     "ghost": "See {path:act_not_there}.",
                     "tmcp.mcp.claude_code": "Claude Code (run once in a terminal)",
-                    "product": "The creator of LLMCF is not liable."},
-             "de": {"path": "Öffne Extras > Wartung > Mojo...", "terminal": "Mach das im Terminal."}}
+                    "product": "The creator of LLMCF is not liable.",
+                    "worded": "Save it later with Save... in the Deployment tab.",
+                    "tab_name": "Deployment tab"},
+             "de": {"path": "Öffne Extras > Wartung > Mojo...", "terminal": "Mach das im Terminal.",
+                    "worded": "Speichere es mit „Speichern…“ im Tab „Deployment“."}}
     problems = text_problems(texts)
     flagged = {p.split(":")[0] for p in problems}
-    assert flagged == {"en path", "en cmd", "en terminal", "en ghost", "de path", "de terminal"}, problems
+    assert flagged == {"en path", "en cmd", "en terminal", "en ghost", "en worded", "de path", "de terminal",
+                       "de worded"}, problems
 
 
 # --- every other literal: a baseline that only goes down --------------------------------------------------------------

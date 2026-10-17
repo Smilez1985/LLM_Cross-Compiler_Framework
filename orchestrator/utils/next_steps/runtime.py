@@ -36,17 +36,21 @@ MOUSE_LABELS = {
 STEPS = (
     Step("runtime.install", cli="ditto runtime install", cli_args=("--yes",), tool="build_local_runtime",
          window="ditto_runtime", target="btn_ditto_runtime_build", runnable=True),
+    # not runnable: a licence is read in its window, never accepted with --yes from a one-line question
     Step("runtime.prebuilt", cli="ditto runtime install --prebuilt", cli_args=("--prebuilt", "--yes"),
-         person_only="licence", window="ditto_runtime", target="btn_ditto_runtime_prebuilt", runnable=True),
+         person_only="licence", window="ditto_runtime", target="btn_ditto_runtime_prebuilt"),
     Step("runtime.start", cli="ditto runtime start", tool="start_local_runtime", window="ditto_runtime",
          target="btn_ditto_runtime_start", runnable=True),
     Step("runtime.stop", cli="ditto runtime stop", tool="stop_local_runtime", window="ditto_runtime",
          target="btn_ditto_runtime_stop", runnable=True),
+    # not runnable: `ensure --force` needs a terminal and deletes the old kind after its own list (the window's switch
+    # shows that list)
     Step("runtime.switch", cli="ditto runtime ensure --force", cli_args=("--mode", "{mode}", "--force", "--yes"),
+         params={"mode": _MODE}, person_only="permission", window="ditto_runtime", target="btn_ditto_runtime_switch"),
+    # --no-model: the step installs the program only; `--yes` alone would also download the recommended model
+    Step("runtime.ensure", cli="ditto runtime ensure", cli_args=("--mode", "{mode}", "--no-model", "--yes"),
          params={"mode": _MODE}, person_only="permission", window="ditto_runtime", target="btn_ditto_runtime_switch",
          runnable=True),
-    Step("runtime.ensure", cli="ditto runtime ensure", cli_args=("--mode", "{mode}", "--yes"), params={"mode": _MODE},
-         person_only="permission", window="ditto_runtime", target="btn_ditto_runtime_switch", runnable=True),
     Step("runtime.install_native", cli="ditto runtime install --placement",
          cli_args=("--placement", "native", "--yes"), person_only="permission", window="ditto_runtime",
          target="cb_ditto_runtime_placement", runnable=True),
@@ -125,7 +129,8 @@ TEXTS = {
         "step.runtime.show.what": "Shows whether llama-server runs, the build in use and its problems.",
         "step.runtime.install_tools": "Install the build tools for llama.cpp (cmake and a C++ compiler)",
         "step.models.download": "Download Ditto's model",
-        "step.models.download.what": "Downloads the pinned model of the tier {tier} and checks its checksum.",
+        "step.models.download.what": "Downloads the pinned model of the tier {tier} (several GB) and checks its "
+                                     "checksum; its licence, listed in {path:act_ditto_models_open}, applies to you.",
         "step.models.download.why": "The model is not downloaded yet.",
         "step.models.show": "Look at Ditto's local models",
         "step.models.show.what": "Lists the model tiers with file, size, licence and whether each is downloaded.",
@@ -173,8 +178,9 @@ TEXTS = {
         "step.runtime.show.what": "Zeigt, ob llama-server läuft, welcher Build benutzt wird und seine Probleme.",
         "step.runtime.install_tools": "Die Build-Werkzeuge für llama.cpp installieren (cmake und einen C++-Compiler)",
         "step.models.download": "Dittos Modell herunterladen",
-        "step.models.download.what": "Lädt das festgelegte Modell der Stufe {tier} herunter und prüft seine "
-                                     "Prüfsumme.",
+        "step.models.download.what": "Lädt das festgelegte Modell der Stufe {tier} herunter (mehrere GB) und prüft "
+                                     "seine Prüfsumme; seine Lizenz, aufgeführt unter {path:act_ditto_models_open}, "
+                                     "gilt für dich.",
         "step.models.download.why": "Das Modell ist noch nicht heruntergeladen.",
         "step.models.show": "Dittos lokale Modelle ansehen",
         "step.models.show.what": "Listet die Modellstufen mit Datei, Größe, Lizenz und ob jede heruntergeladen ist.",
