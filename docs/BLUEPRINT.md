@@ -988,8 +988,10 @@ These are real limitations of the current state. Most are scheduled in the [road
   `crawl_docs_site` and the person confirms each crawl.
 - **Hidden text is found by what an element says itself.** Inline styles and attributes count; rules in style sheets
   and classes (such as `.sr-only`) are not seen without a CSS engine, and a PDF's hidden text layer is not checked
-  (its text still gets the cleaning). Excerpts stored before this check keep their text until the page is ingested or
-  the pack imported again.
+  (its text still gets the cleaning). A page is read without its scripts, and an element hidden by a font size,
+  visibility or colour goes with a child that sets its own. A knowledge pack's Markdown keeps its HTML tags as written,
+  so attribute values such as `title` or `alt` reach the stored text. Excerpts stored before this check keep their
+  text until the page is ingested or the pack imported again.
 - **Reranking is on only for build recommendations.** The chat and the MCP search use it only with
   `rag_rerank_default`. The reranker's floor is calibrated for questions; for short keyword searches, such as the
   module proposal's, it drops relevant excerpts too.

@@ -1635,16 +1635,26 @@ injection). So Deep Ingest stores only what a reader sees (`orchestrator/rag/htm
   `hidden="until-found"`, which the browser's search reveals) or `aria-hidden="true"`; `<template>` and `<noscript>`;
   CDATA sections, which a browser treats as comments. The inactive panel of a tab widget stays (`role="tabpanel"` on a
   page with tabs): you open it with a click.
+- **Read the way a browser reads it:** the inline style counts as a browser applies it (`!important`, CSS comments
+  and escapes included), and so do transparent text (`color: transparent`, a colour with no opacity, unless the text
+  is painted another way, such as gradient text), `transform: scale(0)`, a box with `max-height: 0`, a large negative
+  margin or translation, `filter: opacity(0)` and `content-visibility: hidden`. Elements a browser never shows the
+  content of are left out too: the fallback text of `<iframe>`, `<canvas>`, `<video>` and `<audio>`, `<noembed>`,
+  `<noframes>`, `<datalist>`, `<rp>`, a `<dialog>` that is not open and a second `<title>` in the page (counted as
+  `display:none`). A hiding element written as a self-closing tag (`<div hidden/>`) holds what follows it, as in a
+  browser, and of an attribute written twice the first counts.
 - **Then cleaned like every outside text,** before it is stored, so the stored excerpt is what an AI is shown later
   (not only at the moment it is shown): Unicode normalized (NFKC), invisible characters removed (zero-width
   characters, Unicode tag characters, bidi controls and similar) and HTML comments removed, the same cleaning every
   excerpt gets before it reaches a model (`orchestrator/utils/untrusted.py`). The page's title is cleaned too. A PDF's
-  text gets the same cleaning.
+  text gets the same cleaning. By then the text is what its reader sees, so a `<!--` that nothing closes is visible
+  text: it loses only those four characters, never the rest of the page.
 - **Knowledge packs** follow the same rule when they carry HTML: a page that is a whole HTML document is read like a
   crawled page, and HTML inside a pack's Markdown loses its hidden elements and whatever a browser shows nothing of
   (comments, CDATA sections, processing instructions); HTML in code spans and code blocks is shown, not rendered, and
-  stays. Then the same cleaning. This holds for every page that comes from a pack, however
-  it is stored.
+  stays. The result is then rendered as Markdown (CommonMark); if that rendering still hides text (where code spans,
+  code blocks or HTML blocks are read differently), the page is stored as the visible text of its rendering instead.
+  Then the same cleaning. This holds for every page that comes from a pack, however it is stored.
 - **You see how much was left out:** **Tools > Knowledge Sources...** and `llm-cli knowledge sources` have the column
   "Hidden text left out", kind by kind (for example "display:none 2, invisible characters 14"; elements count once
   each, invisible characters one by one); "none" when nothing was found, "-" for a source stored without this check
@@ -1653,8 +1663,12 @@ injection). So Deep Ingest stores only what a reader sees (`orchestrator/rag/htm
   not kept anywhere.
 - **The framework's own documents** are stored as written: they are not outside text.
 - **Limits:** only what an element says itself counts. Rules in style sheets and classes (such as `.sr-only`) are not
-  seen, because the framework has no CSS engine, so the removal is partial. A knowledge base keeps its older excerpts
-  until a page is ingested again (for example a new Deep Ingest of the same address) or a pack is imported again.
+  seen, because the framework has no CSS engine, so the removal is partial. An element hidden by a font size,
+  visibility or colour goes with everything in it, even a child that sets its own visible size or colour. The page is
+  read as it is served, without its scripts: text that a script reveals later (an inline `opacity: 0` that fades in)
+  is left out. A pack's Markdown keeps its HTML tags as written, attribute values (`title`, `alt`) included. A
+  knowledge base keeps its older excerpts until a page is ingested again (for example a new Deep Ingest of the same
+  address) or a pack is imported again.
 - **Checked in CI:** fixture pages that each hide one payload next to a visible text (`evals/retrieval/carriers/`)
   run through the crawler and the knowledge base in the tests, and the nightly retrieval evaluation runs them as a
   group of their own (`llm-cli ditto eval --kind retrieval --cases evals/retrieval/carriers.yml`): a payload that
