@@ -23,7 +23,12 @@ default) or exports them.
   it fits but leaves little free space, that is a situation warning (`disk_tight`). Nothing is ever deleted to make
   room.
 
-This module reads the folder only; it never opens the knowledge base itself (no embedding model, no Qdrant).
+- The check before an index of the framework's documents (`snapshot_space`, moved from tools/tools_framework_docs.py
+  by consolidation chain c1-imports; the GUI, the CLI and the index tool share it): the largest snapshot so far or the
+  estimate of the knowledge base it is handed (`rag.snapshot_estimate`), whichever is larger, against the free space.
+
+This module reads the folder only; it never opens the knowledge base itself (no embedding model, no Qdrant):
+`snapshot_space` asks the knowledge base its caller already opened.
 """
 
 import hashlib
@@ -484,6 +489,6 @@ def snapshot_space(rag, disk_usage=None) -> List:
 
 __all__ = ["DISK_LINE", "ExportedSnapshot", "FOLDER", "FREE_SPACE_STEP", "KEEPING_NOTE", "NEXT_DOES_NOT_FIT",
            "NEXT_TIGHT", "SUFFIX", "SnapshotDeletion", "SnapshotDisk", "SnapshotFile", "SnapshotNoRoom", "SnapshotRoom",
-           "delete_snapshots", "export_snapshots", "files_size", "folder_bytes", "folder_size", "list_snapshots", "newest_size", "require_room",
-           "room_before", "size_text", "snapshot_disk", "snapshot_files", "snapshot_folder", "snapshot_plan",
+           "delete_snapshots", "export_snapshots", "files_size", "folder_bytes", "folder_size", "list_snapshots",
+           "newest_size", "require_room", "room_before", "size_text", "snapshot_disk", "snapshot_files", "snapshot_folder", "snapshot_plan",
            "snapshot_room", "snapshot_space"]
