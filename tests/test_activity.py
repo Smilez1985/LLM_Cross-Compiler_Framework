@@ -325,6 +325,22 @@ class TestBuildEnds:
         asyncio.run(scenario())
         assert ended[0]["saved"] == "Q4_K_M" and str(tmp_path) not in str(ended)
 
+    def test_a_label_that_hides_a_host_path_after_its_prefix_names_the_folder(self, orchestrator, tmp_path):
+        """Review b0 (w6-b0-v): "output:" + a host path passed the end listener's own check (the whole value is not
+        absolute), so the build end handed the host path on. The folder's own name is used then."""
+        ended = []
+        orchestrator.add_end_listener(ended.append)
+        orchestrator.artifact_label = lambda path: "output:" + str(path)
+
+        async def scenario():
+            await orchestrator.submit_build_request(self.request(tmp_path))
+            for _ in range(500):
+                if ended:
+                    break
+                await asyncio.sleep(0.01)
+        asyncio.run(scenario())
+        assert ended[0]["saved"] == "Q4_K_M" and str(tmp_path) not in str(ended)
+
     def test_who_cancelled_is_named_for_an_ai_only(self, orchestrator, tmp_path):
         from orchestrator.tools import registry as registry_module
         ended = []
@@ -504,6 +520,19 @@ class TestRows:
         for saved in ("~/out", "../x", "output:../../etc", "/srv/out", "D:/out", "\\\\nas\\share", "a\nb"):
             assert not PARAM_RULES["saved"](saved), saved
         assert PARAM_RULES["saved"]("output:Rockchip/SmolLM2/Q4_K_M")
+
+    def test_a_host_path_behind_a_label_prefix_is_no_label(self):
+        """Review b0 (w6-b0-v): the label rule looked at the whole value only, so a host path after a "<where>:"
+        prefix passed as a label (is_absolute_anywhere sees "output:..." as relative) and could reach the feed with
+        the person's account name in it. The part after the prefix is checked as well now."""
+        for saved in ("output:/home/alice/builds/m", "models:C:/Users/alice/m", "output:C:\\Users\\alice",
+                      "output://nas/share/alice", "output:~alice/m", "file:///home/alice/m", "output:",
+                      "output:Rockchip/C:/Users/alice", "builds:\\\\nas\\alice"):
+            assert not PARAM_RULES["saved"](saved), saved
+            row = row_for_build({"request_id": REQ, "status": "completed", "owner": "mcp", "saved": saved})
+            assert "saved" not in row.params and row.text_key == "activity.build.completed", saved
+        for saved in ("output:Rockchip/SmolLM2/Q4_K_M", "builds:Rockchip/m", "Q4_K_M", "my build 2026"):
+            assert PARAM_RULES["saved"](saved), saved
 
     def test_every_row_the_producer_can_make_holds_closed_values_and_a_known_text(self):
         made = []

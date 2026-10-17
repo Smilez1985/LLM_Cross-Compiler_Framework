@@ -378,7 +378,9 @@ class LLMOrchestrator:
                 label = str(self.artifact_label(str(path)) or "")
             except Exception as e:  # noqa: BLE001 - the folder's own name then
                 self.logger.debug(f"No label for a finished build's folder: {e.__class__.__name__}")
-        if not label or is_absolute_anywhere(label):
+        where, sep, rest = label.partition(":")
+        # a host path, also one behind a label's place ("output:/home/<user>/..."): the folder's own name then
+        if not label or is_absolute_anywhere(label) or (sep and is_absolute_anywhere(rest)):
             label = last_part(str(path))
         return label
 
