@@ -74,6 +74,15 @@ uv run llm-cli --help
 uv run llm-gui
 ```
 
+### Eine neue Umgebung prüfen
+
+`uv run llmcf mojo` prüft, was ein Build auf diesem Rechner braucht (Python 3.11 bis 3.14, Docker und buildx, freien
+Speicherplatz, Targets, den State-Ordner, Secrets und Schlüsselbund, Tool-Berechtigungen), und sagt zu jedem
+Problem, was zu tun ist. `make test` führt danach die Tests aus ([Abschnitt 3](#3-tests-ausführen)), und
+`scripts/mcp_client_smoke.sh` ist der Smoke-Test mit einem echten KI-Client
+([weiter unten](#der-smoke-test-mit-einem-echten-client)). Die CI testet die Build-Images mit Smoke-Tests. Ein
+eigenes Schnellprüf-Skript gibt es nicht.
+
 ### Entwicklungsumgebung von der echten trennen
 
 - `LLM_FRAMEWORK_CONFIG_DIR=/ein/ordner` lässt das Framework diesen Ordner für seine Einstellungen nutzen. Ohne die
