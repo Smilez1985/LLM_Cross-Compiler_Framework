@@ -67,6 +67,37 @@ def test_importing_the_remote_code_loads_no_paramiko_and_no_qt():
     assert loaded == []
 
 
+def test_classify_waits_for_a_paramiko_import_another_thread_started(tmp_path):
+    """classify() reads paramiko's error types only when paramiko was imported already. Another thread may be in the
+    middle of that first import (the Builder tab's remote scan, a deploy) while a board check classifies a refused
+    connection (Mojo's check_port threads): the module is then in sys.modules but half loaded. The old classify
+    imported paramiko itself, which waits for such an import; reading the half-loaded module raised AttributeError
+    ('partially initialized module') instead of giving the reason code."""
+    fake = tmp_path / "paramiko"
+    fake.mkdir()
+    (fake / "__init__.py").write_text(
+        "import time\n"
+        "time.sleep(1.5)   # an import that takes a while (paramiko loads cryptography)\n"
+        "class SSHException(Exception): pass\n"
+        "class BadHostKeyException(SSHException): pass\n"
+        "class AuthenticationException(SSHException): pass\n"
+        "class ssh_exception:\n"
+        "    NoValidConnectionsError = None\n", encoding="utf-8")
+    result = _fresh(
+        "import errno, json, sys, threading, time\n"
+        f"sys.path.insert(0, {str(tmp_path)!r})\n"
+        "from orchestrator.remote import reasons, transport\n"
+        "threading.Thread(target=transport.paramiko_module, daemon=True).start()\n"
+        "while 'paramiko' not in sys.modules:\n"
+        "    time.sleep(0.005)\n"
+        "try:\n"
+        "    out = reasons.classify(ConnectionRefusedError(errno.ECONNREFUSED, 'refused'))\n"
+        "except Exception as e:\n"
+        "    out = type(e).__name__ + ': ' + str(e)\n"
+        "print(json.dumps([out, transport.available()[0]]))\n")
+    assert result == ["device_port_closed", True]
+
+
 def test_the_first_check_imports_paramiko():
     pytest.importorskip("paramiko")
     loaded = _fresh(
