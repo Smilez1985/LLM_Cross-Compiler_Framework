@@ -555,6 +555,34 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   with that project's licence in `THIRD_PARTY_NOTICES.md`.
 - Do not weaken the build sandbox, the privacy filter or the SSH trust rules.
 
+### Next steps instead of commands
+
+The window never tells a person to type a command (DECISIONS round 9 U2). A message says what is wrong; what to do is
+a **next step** of the catalogue in `orchestrator/utils/next_steps/`, never a command or a hand-written menu path in a
+text:
+
+- **A new hint** is a `Step` in the area module of its part (`runtime.py`, `boards.py`, `knowledge.py`, ...; a new
+  module is found by itself): its id (`runtime.install`), the CLI command (`cli`, a `CLI_PATHS` key, and the argument
+  template `cli_args` with checked `params`), the tool an AI calls or why only the person can do it (`person_only`),
+  the object the window's [Open] goes to (`target`, which must be `CLI_PATHS[cli]`), and its texts in English and
+  German (`step.<id>`; `step.<id>.what` and `.why` for a command the person may allow). An object the step names needs
+  its place in `MOUSE_LABELS` (its parent object and its label's ui_text key, from an `l10n_*` module); a menu entry
+  gets it from `MENU_LAYOUT` in `common.py`. The catalogue never imports PySide6 or `localization.py` itself: an MCP
+  tool call renders its steps in a worker thread, and the first Qt import there breaks a window made later in the
+  same process; without the window it reads the `l10n_*` tables directly.
+- **Carry the step, not the words:** raise a core exception with `.with_steps("runtime.install")` (the `WithSteps`
+  mixin), give a `ToolError` `steps=[...]`, a result line `Line(text, steps)`, a Mojo finding `steps=(...)`. The
+  renderer writes the command for the CLI (`_say_error` in `cli.py`), the menu path for the window (`StepsRow`) and the
+  tool or the place for an AI (`ToolContext.channel`).
+- **A text that names a place** writes `{path:<objectName>}`; `ui_text` fills it from the live labels in the text's
+  language.
+- **A command the person may allow** (V1) is built only with `next_steps.proposal(step, values)` and run with
+  `run_proposal()`: never from free AI text; a deletion opens the deletion list, a secret goes through stdin.
+- `tests/test_no_command_texts.py` fails on a command or a hand-written path in a person's text and on more commands
+  or paths in any other literal than `tests/data/command_text_baseline.json` allows (only down; the integration
+  tightens it, a change never raises it). `tests/test_cli_gui_parity.py` checks every step against the CLI, the tools
+  and the windows and every mouse label against the live menus and buttons.
+
 ---
 
 ## 9. Commits and pull requests

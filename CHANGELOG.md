@@ -10,6 +10,23 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Next steps instead of commands, allow-to-run proposals and translated, regrouped menus** (wave 6, chain a0;
+  DECISIONS round 10 V1, V2, Q2, Q7): the Qt-free catalogue `orchestrator/utils/next_steps/` holds every next step
+  the wave-6 audit names (104 steps in nine area modules found by themselves, English and German texts), and one
+  renderer turns a step into the command for the command line (`Next: ... llmcf ...`), the menu path in the person's
+  language for the window (`StepsRow` with Open, Copy for a board's, an administrator's or another program's command,
+  Open page) and the tool or the place for an AI (`ToolContext.channel`: an AI working for the window is never told a
+  command). `proposal()` builds an allow-to-run command from a catalogue step and checked values (the exact command,
+  what it does and why, localized), `run_proposal()` runs exactly that command with the framework's own Python and
+  streams its lines (deletions open the deletion list, secrets go through stdin, other places are only shown, each
+  decision can be recorded); `error_report()` gives the error box a localized summary, the next step and the English
+  technical detail. Carriers: `ToolError(steps=...)` rendered for the caller's channel at the registry boundary,
+  `BlockerSpec.step`, `WithSteps` on the core exceptions, `Line`, `Finding.steps`, `_say_error` in the CLI. The menus:
+  the AI administration in the Ditto menu ("Set up Ditto..." first), runtime, models and evaluation under Ditto >
+  Advanced, Tools with Knowledge and Maintenance; translated titles with mnemonics, every entry named and labelled
+  where it is created, one layout table, `retranslate_menus()`. The hand-written menu paths of the texts (30 keys in
+  English and German) became `{path:<objectName>}`, filled from the live labels; `tests/test_no_command_texts.py`
+  guards the texts and counts the rest against a baseline that only goes down.
 - **What Ditto and AI apps do becomes entries of the chat feed, in every process** (wave 6, DECISIONS round 9 U1,
   consequence b): `orchestrator/Core/activity.py` writes one signed entry per event, from the process that did the
   work (the GUI, `llm-cli`, every stdio MCP server and the HTTP child): a call that changed something (the new
