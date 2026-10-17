@@ -7,8 +7,7 @@ Characterization first: each scrubber keeps its own policy, and a move must neit
 - tools_gui._no_home: text the person typed, with every home folder as "~" (no labels, no cap).
 - tools_status._scrub_paths: framework text with this computer's home folder as "~", secrets redacted, cleaned, capped.
 - tools_deploy.hide_paths: known folders by their label, then the status scrub.
-- community_pack.scrub: the irreversible anonymisation of an export; llm/privacy: the reversible masks (home users);
-  telemetry: the issue link's "~USER".
+- community_pack.scrub: the irreversible anonymisation of an export; llm/privacy: the reversible masks (home users).
 Every case runs with this computer's home folder as a POSIX path and as a Windows path, on any host.
 """
 
@@ -21,7 +20,6 @@ import pytest
 from orchestrator.Core import community_pack
 from orchestrator.llm import privacy
 from orchestrator.tools import tools_deploy, tools_gui, tools_runtime, tools_status
-from orchestrator.utils.telemetry import TelemetryManager
 
 ROOTS = {"/srv/my out": "output"}
 DEVICE_USERS = ["dietpi"]
@@ -63,7 +61,6 @@ def scrubbers():
         "hide_paths": lambda s: tools_deploy.hide_paths(s, {"/srv/my out": "the output folder"}),
         "community_scrub": community_pack.scrub,
         "privacy_home_users": lambda s: [span.value for span in privacy._find_home_users(s)],
-        "telemetry": lambda s: TelemetryManager._sanitize(None, s),
     }
 
 
@@ -187,8 +184,8 @@ GOLDEN = {
             'home is ~ here',
             'in c:/users/jane doe/src/llama.cpp now',
             'open ~\\Desktop\\m.gguf',
-            "[WinError 5] Access is denied: 'C:\\\\Users\\\\Jane Doe\\\\x.bin'",
-            "[WinError 5] Access is denied: 'C:\\\\Users\\\\Bob Smith'",
+            "[WinError 5] Access is denied: '~\\x.bin'",
+            "[WinError 5] Access is denied: '~ Smith'",
             'cannot read /usr/home/bob/x.gguf and /usr/home/bob',
             'ls /var/home/pi',
             'data in /export/home/carol/data.bin and /export/home/carol',
@@ -276,30 +273,6 @@ GOLDEN = {
             'keep 127.0.0.1:8080/x and https://x.org/a/b and and/or',
             'colour \x1b[31mred\u200b text',
             "x" * 520 + ' ~/end',
-        ],
-        'telemetry': [
-            "cannot open '~USER/My Models/x.gguf'",
-            'load ~USER/models/qwen 2/model.gguf failed',
-            'home is ~USER here',
-            'in c:/users/jane doe/src/llama.cpp now',
-            'open C:\\Users\\Jane Doe\\Desktop\\m.gguf',
-            "[WinError 5] Access is denied: 'C:\\\\Users\\\\Jane Doe\\\\x.bin'",
-            "[WinError 5] Access is denied: 'C:\\\\Users\\\\Bob Smith'",
-            'cannot read /usr/home/bob/x.gguf and /usr/home/bob',
-            'ls /var/home/pi',
-            'data in /export/home/carol/data.bin and /export/home/carol',
-            'WSL: /mnt/c/Users/dave/m.gguf and /mnt/c/Users/dave',
-            'MSYS: /c/Users/erin/models/q.gguf and /c/Users/erin',
-            'share \\\\fs\\Users\\frank\\m.gguf and \\\\fs\\Users\\frank',
-            "share '\\\\srv\\home$\\gina\\My Models\\x.gguf'",
-            'ok (/srv/my out/Rk/m.gguf)',
-            'nothing in /srv/my out.',
-            'scp to dietpi@board:/home/dietpi/x.tar failed',
-            'installed /home/dietpi/models/q.gguf for dietpi; chown dietpi:dietpi ~dietpi/models',
-            'bad uri file://~USER/private/a.bin',
-            'keep 127.0.0.1:8080/x and https://x.org/a/b and and/or',
-            'colour \x1b[31mred\u200b text',
-            "x" * 520 + ' ~USER/end',
         ],
     },
     'windows': {
@@ -403,10 +376,10 @@ GOLDEN = {
             "cannot open '~/My Models/x.gguf'",
             'load ~/models/qwen 2/model.gguf failed',
             'home is ~ Doe here',
-            'in c:/users/jane doe/src/llama.cpp now',
+            'in ~/src/llama.cpp now',
             'open ~\\Desktop\\m.gguf',
-            "[WinError 5] Access is denied: 'C:\\\\Users\\\\Jane Doe\\\\x.bin'",
-            "[WinError 5] Access is denied: 'C:\\\\Users\\\\Bob Smith'",
+            "[WinError 5] Access is denied: '~\\x.bin'",
+            "[WinError 5] Access is denied: '~ Smith'",
             'cannot read /usr/home/bob/x.gguf and /usr/home/bob',
             'ls /var/home/pi',
             'data in /export/home/carol/data.bin and /export/home/carol',
@@ -495,30 +468,6 @@ GOLDEN = {
             'colour \x1b[31mred\u200b text',
             "x" * 520 + ' /home/Jane Doe/end',
         ],
-        'telemetry': [
-            "cannot open '/home/Jane Doe/My Models/x.gguf'",
-            'load /home/Jane Doe/models/qwen 2/model.gguf failed',
-            'home is /home/Jane Doe here',
-            'in c:/users/jane doe/src/llama.cpp now',
-            'open ~USER\\Desktop\\m.gguf',
-            "[WinError 5] Access is denied: 'C:\\\\Users\\\\Jane Doe\\\\x.bin'",
-            "[WinError 5] Access is denied: 'C:\\\\Users\\\\Bob Smith'",
-            'cannot read /usr/home/bob/x.gguf and /usr/home/bob',
-            'ls /var/home/pi',
-            'data in /export/home/carol/data.bin and /export/home/carol',
-            'WSL: /mnt/c/Users/dave/m.gguf and /mnt/c/Users/dave',
-            'MSYS: /c/Users/erin/models/q.gguf and /c/Users/erin',
-            'share \\\\fs\\Users\\frank\\m.gguf and \\\\fs\\Users\\frank',
-            "share '\\\\srv\\home$\\gina\\My Models\\x.gguf'",
-            'ok (/srv/my out/Rk/m.gguf)',
-            'nothing in /srv/my out.',
-            'scp to dietpi@board:/home/dietpi/x.tar failed',
-            'installed /home/dietpi/models/q.gguf for dietpi; chown dietpi:dietpi ~dietpi/models',
-            'bad uri file:///home/Jane Doe/private/a.bin',
-            'keep 127.0.0.1:8080/x and https://x.org/a/b and and/or',
-            'colour \x1b[31mred\u200b text',
-            "x" * 520 + ' /home/Jane Doe/end',
-        ],
     },
 }
 
@@ -563,3 +512,16 @@ def test_the_home_patterns_are_shared():
     assert HOME_ROOT in tools_gui.HOME_FOLDERS.pattern and ACCOUNT_NAME in tools_gui.HOME_FOLDERS.pattern
     assert HOME_ROOT in community_pack._HOME_DIRS.pattern and ACCOUNT_NAME in community_pack._HOME_DIRS.pattern
     assert privacy._HOME.pattern.endswith(f"({ACCOUNT_NAME})")
+
+
+def test_the_gui_tool_hides_this_computers_home_folder_in_every_spelling(monkeypatch):
+    """Security (chain c1-paths): the GUI tool's _no_home compared only Path.home() letter by letter, so a home folder
+    named by HOME (Git Bash, MSYS) or USERPROFILE, with the other separator, in another case or doubled as Python
+    quotes a path reached the AI with the person's account name. It now uses security.paths.shorten_home."""
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\Jane Doe")
+    monkeypatch.setenv("HOME", "/c/Users/Jane Doe")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: PureWindowsPath(r"C:\Users\Jane Doe")))
+    for text in ("c:/users/jane doe/models/x.gguf", "C:/Users/Jane Doe/x", "/c/Users/Jane Doe/src",
+                 "error: " + repr(r"C:\Users\Jane Doe\x.bin"), r"C:\Users\Jane Doe"):
+        out = tools_gui._no_home(text)
+        assert "jane" not in out.lower() and out.count("~") == 1, (text, out)

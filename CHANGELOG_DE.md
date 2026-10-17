@@ -2285,6 +2285,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Das GUI-Werkzeug verbirgt den Home-Ordner dieses Computers in jeder Schreibweise**: Ein Formularwert, den eine KI
+  über das Tool `gui` liest (Ditto oder eine KI-App), zeigte den Home-Ordner nur dann als `~`, wenn er genau so
+  geschrieben war, wie `Path.home()` ihn liefert. Über HOME oder USERPROFILE benannt (die MSYS-Form
+  `/c/Users/<Name>`), mit dem anderen Trennzeichen, in anderer Groß- und Kleinschreibung (`c:/users/<Name>`) oder mit
+  doppelten Backslashes, wie Python einen Pfad zitiert, erreichte er die KI mit dem Kontonamen. `tools_gui._no_home`
+  nutzt jetzt das gemeinsame `security.paths.shorten_home` (dasselbe wie die Laufzeit- und Deploy-Tools) vor dem
+  Muster für die Home-Ordner anderer Konten.
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI
