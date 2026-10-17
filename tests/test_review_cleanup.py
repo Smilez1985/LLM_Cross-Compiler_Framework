@@ -87,6 +87,9 @@ class TestLocalProbe:
 
     @pytest.mark.parametrize("system, flag", [("Linux", "--output"), ("Windows", "-OutputFile")])
     def test_the_probe_script_is_told_where_to_write(self, tmp_path, monkeypatch, fake_probe, system, flag):
+        # The file name is the Builder tab's (a GUI module): without the GUI extra the test skips like every GUI test
+        # (the CI job without PySide6); with it, it runs unchanged.
+        pytest.importorskip("PySide6")
         from orchestrator.gui import builder_tab
         from orchestrator.runtime import probe_service
         from orchestrator.runtime.probe_service import HardwareProbes
