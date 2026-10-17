@@ -606,7 +606,14 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   dem Bildschirm in der Sprache des Texts.
 - **Ein Befehl, den die Person zulassen kann** (V1), wird nur mit `next_steps.proposal(step, values)` gebaut und mit
   `run_proposal()` ausgeführt: nie aus freiem KI-Text; eine Löschung öffnet die Löschliste, ein Geheimnis geht über
-  die Standardeingabe.
+  die Standardeingabe. Jeder Wert jedes Vorschlags ist ein geschlossener (eine Auswahl, ein Name, eine ID, eine Zahl;
+  ein Name nennt am besten seine vorhandenen `choices`), ein Geheimnis oder ein Pfad ist nie ein Wert, und der Lauf
+  lehnt einen Vorschlag ab, der in einem Wort, das die Person gelesen hat, von dem des Katalogs abweicht. Markiere
+  einen Schritt nur dann als `runnable`, wenn sein Befehl ohne Terminal und ohne Rückfrage durchläuft, keine Datei in
+  den Ordner schreibt, in dem er startet, und nicht mehr tut, als sein `.what`-Text sagt; nie eine Löschung, eine
+  Lizenz oder einen Befehl für das Board, mit Administratorrechten oder eines anderen Programms (die Tests prüfen das
+  gegen die echte CLI). Die Adresse oder das Login-Konto eines Boards ist ein `Param(..., private=True)`: Eine KI
+  liest es nie, ebenso wenig einen Pfad.
 - `tests/test_no_command_texts.py` schlägt bei einem Befehl oder einem von Hand geschriebenen Pfad in einem Text der
   Person fehl und bei mehr Befehlen oder Pfaden in einem anderen Literal, als `tests/data/command_text_baseline.json`
   erlaubt (nur nach unten; die Integration zieht es an, eine Änderung hebt es nie an). `tests/test_cli_gui_parity.py`

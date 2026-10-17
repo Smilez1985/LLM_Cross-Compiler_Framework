@@ -3254,8 +3254,10 @@ Warum er jetzt nötig ist." Ja führt genau diesen Befehl mit dem eigenen Python
 Ausgabe; Nein führt nichts aus. Der Befehl ist nie freier Text einer KI: Er ist ein Schritt des Katalogs mit
 geprüften Werten (Auswahlen, Namen, IDs; nie ein Pfad, den du nicht gewählt hast). Ein Schritt, der etwas löscht,
 öffnet die Liste dessen, was gelöscht wird (Nein ist vorgewählt); ein Passwort oder Schlüssel wird in einem verdeckten
-Feld abgefragt und über die Standardeingabe übergeben, nie auf der Kommandozeile. Jede Entscheidung steht im
-Aktivitätsprotokoll. (Die Frage und ihre Konsole im Fenster kommen mit der Ditto-Konsole.)
+Feld abgefragt und über die Standardeingabe übergeben, nie auf der Kommandozeile. Was läuft, ist genau das, was du
+gelesen hast: Ein geänderter Vorschlag wird abgelehnt. Zugelassen werden nur Befehle, die ohne Terminal durchlaufen
+und nicht mehr tun, als die Frage sagt; alles andere (zum Beispiel eine Lizenz zu lesen) öffnet seinen Ort im Fenster.
+Jede Entscheidung steht im Aktivitätsprotokoll. (Die Frage und ihre Konsole im Fenster kommen mit der Ditto-Konsole.)
 
 **Fehler in deiner Sprache:** Ein Fehler erscheint mit einer verständlichen Zusammenfassung in deiner Sprache, dem
 nächsten Schritt und dem englischen technischen Detail zum Aufklappen und Kopieren (Ditto liest das englische Detail

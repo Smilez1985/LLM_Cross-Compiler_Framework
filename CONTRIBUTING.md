@@ -577,7 +577,14 @@ text:
 - **A text that names a place** writes `{path:<objectName>}`; `ui_text` fills it from the live labels in the text's
   language.
 - **A command the person may allow** (V1) is built only with `next_steps.proposal(step, values)` and run with
-  `run_proposal()`: never from free AI text; a deletion opens the deletion list, a secret goes through stdin.
+  `run_proposal()`: never from free AI text; a deletion opens the deletion list, a secret goes through stdin. Every
+  value of every proposal is a closed one (a choice, a label, an id, a number; a label best names its existing
+  `choices`), a secret or a path is never a value, and the run refuses a proposal that differs from the catalogue's
+  in any word the person read. Mark a step `runnable` only when its command finishes without a terminal and without a
+  question, writes no file into the folder it starts in, and does no more than its `.what` text says; never a
+  deletion, a licence or a board's, an administrator's or another program's command (the tests check this against
+  the real CLI). A board's address or login account is a `Param(..., private=True)`: an AI never reads it, nor a
+  path.
 - `tests/test_no_command_texts.py` fails on a command or a hand-written path in a person's text and on more commands
   or paths in any other literal than `tests/data/command_text_baseline.json` allows (only down; the integration
   tightens it, a change never raises it). `tests/test_cli_gui_parity.py` checks every step against the CLI, the tools
