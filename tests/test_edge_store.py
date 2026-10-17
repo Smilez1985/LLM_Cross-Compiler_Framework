@@ -917,7 +917,9 @@ def test_the_snapshots_window_tries_a_failed_conversion_again(qapp, tmp_path, mo
     try:
         assert not dialog.btn_convert.isHidden() and dialog.btn_convert.isEnabled()
         text = dialog.storage.text()
-        assert "on the next start" not in text and "llm-cli knowledge storage convert" in text
+        # Wave 6 (DECISIONS round 9 U2, round 10 V2): the window never tells the person to type a command, so the
+        # retry text names only the button here (it named the CLI command too before; the CLI and Mojo still do).
+        assert "on the next start" not in text and "llm-cli" not in text and "llmcf" not in text
         assert "Umwandlung erneut versuchen" in text
         dialog.btn_convert.click()
         deadline = _time.monotonic() + 60

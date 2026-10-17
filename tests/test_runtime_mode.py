@@ -1458,7 +1458,10 @@ class TestAISettings:
         monkeypatch.setattr(box_module, "ask", lambda parent, title, question: False)
         box._token, box._pending = object(), ("docker", "bare-metal")
         box._on_relay(box._token, ("error", "no"))
-        assert "llm-cli ditto runtime ensure --mode bare-metal" in shown[-1] and len(started) == 1
+        # Wave 6 (DECISIONS round 9 U2): the window says the mode can be made again here; it named the CLI command
+        # (`ditto runtime ensure --mode bare-metal`) before and never tells a command now.
+        assert "You can make it again here later." in shown[-1] and "llm-cli" not in shown[-1]
+        assert len(started) == 1
 
 
 # --- the installers ---------------------------------------------------------------------------------------------------
