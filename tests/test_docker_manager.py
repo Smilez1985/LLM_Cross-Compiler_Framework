@@ -176,7 +176,7 @@ def test_the_engine_samples_the_running_stage_container_and_warns_once_near_its_
     assert progress.resources is None, "no figures once the stage container ended"
     warnings = [line for line in progress.logs if "[WARNING]" in line and "memory limit" in line]
     assert len(warnings) == 1, progress.logs
-    assert "CONT: The build container uses 996.1 MB of its 1.0 GB memory limit (over 90 %)" in warnings[0]
+    assert "CONT: The build container uses 996.1 MB of its 1.0 GB memory limit (90 % or more)" in warnings[0]
     assert "Docker Desktop" in warnings[0] and "WSL2" in warnings[0]
 
 

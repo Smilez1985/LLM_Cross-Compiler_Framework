@@ -229,6 +229,7 @@ class TestStatus:
             win.deleteLater()
 
     def test_problems_rebuild_server_and_the_chosen_tier(self, view):
+        pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
         from orchestrator.gui.ditto_runtime_window import status_text
         status = view.status.model_copy(update={"problems": ["the active build is old"],
                                                 "rebuild": "required: the pin changed", "running": True,
@@ -245,6 +246,7 @@ class TestStatus:
         assert "Server: bereit http://127.0.0.1:5/v1 (PID 42, Modell m, Kontext 4096)" in german
 
     def test_nothing_installed_and_docker_mode(self, tmp_path):
+        pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
         from orchestrator.gui.ditto_runtime_window import status_text
         from orchestrator.runtime.runtime_overview import overview
         rt = runtime(tmp_path, hw=machine([]))
@@ -748,11 +750,11 @@ class TestTextsAndQuestions:
 
     def test_every_text_exists_in_english_and_german_with_the_same_placeholders(self):
         from orchestrator.utils.l10n_ditto_runtime import TEXTS
-        from orchestrator.utils.localization import LocalizationManager
+        from orchestrator.utils.localization import TRANSLATIONS
         assert set(TEXTS["en"]) == set(TEXTS["de"])
         for key, text in TEXTS["en"].items():
             assert set(re.findall(r"{(\w+)}", text)) == set(re.findall(r"{(\w+)}", TEXTS["de"][key])), key
-        table = LocalizationManager.TRANSLATIONS
+        table = TRANSLATIONS
         used = set()
         for name in ("ditto_runtime_window.py", "runtime_mode_box.py", "menus/ditto_runtime.py"):
             source = (GUI / name).read_text(encoding="utf-8")
@@ -801,6 +803,7 @@ class TestTextsAndQuestions:
             win.deleteLater()
 
     def test_archive_path(self, tmp_path):
+        pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
         from orchestrator.gui.ditto_runtime_window import archive_path
         assert archive_path(str(tmp_path / "a")) == tmp_path / "a.tar.gz"
         assert archive_path(str(tmp_path / "a.tar.gz")) == tmp_path / "a.tar.gz"

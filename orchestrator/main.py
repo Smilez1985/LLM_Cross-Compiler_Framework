@@ -22,7 +22,7 @@ GUI_EXTRA_MISSING = (
     "The graphical interface needs PySide6, the optional 'gui' extra, and this installation does not have it. "
     "Install it into this environment with: pip install --require-hashes -r requirements-gui.txt (from the "
     "framework's folder; or pip install 'llm-cross-compiler-framework[gui]'), or run the installer again without "
-    "--headless. The command line (llmcf) and the MCP server (llmcf mcp serve) work without it.")
+    "--headless. The command line (llmcf) and its MCP server work without it.")
 
 
 def qt_installed() -> bool:
