@@ -17,9 +17,6 @@ value reaches a build script, what a setting does, which tool to use. It is an e
   index (its name inside the framework's folder, with why), never a host path or file text.
 """
 
-import os
-from pathlib import Path
-from typing import List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,6 +26,9 @@ from orchestrator.tools.output import ToolOutput, fact
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
 from orchestrator.tools.spec import CallFacts, Fact, FieldMeta
+# The snapshot check before an index (and the size helpers it uses) lives in Core/knowledge_snapshots.py
+# (consolidation chain c1-imports: the GUI, the CLI and this tool share it); the names stay importable here.
+from orchestrator.Core.knowledge_snapshots import files_size, folder_size, snapshot_space  # noqa: F401
 
 JOB_KIND = "docs_index"
 
@@ -52,52 +52,12 @@ def _size(n: int) -> str:
     return f"{n / 1000 ** 2:.1f} MB" if n >= 10 ** 5 else f"{max(1, n // 1000)} kB"
 
 
-def files_size(paths: List) -> int:
-    total = 0
-    for path in paths:
-        try:
-            total += path.stat().st_size
-        except OSError:
-            pass
-    return total
-
-
 def job_failure(message: str, code: str = "failed") -> ValueError:
     """A failed index as get_job_status shows it: the framework's own sentence and reason code (the job service keeps
     the message of a ValueError and hides any other error's text)."""
     error = ValueError(message)
     error.code = code  # type: ignore[attr-defined]
     return error
-
-
-def folder_size(folder: Path) -> int:
-    """The bytes of the files below `folder` (linked folders are not followed); 0 for a folder that is not there."""
-    total = 0
-    for base, _dirs, names in os.walk(folder):
-        total += files_size([Path(base) / name for name in names])
-    return total
-
-
-def snapshot_space(rag, disk_usage=None) -> List:
-    """The disk check (disk_plan.DiskCheck per file system) of the snapshot taken before the index: about the size of
-    the largest snapshot so far or of the next snapshot as the knowledge base estimates it (rag.snapshot_estimate, the
-    same estimate create_snapshot checks), whichever is larger, so the first snapshot is checked too. When the
-    knowledge base cannot give an estimate, the size of its own storage folder stands in. A check that does not fit
-    means: nothing is indexed (no snapshot, no "continue anyway"); "tight" is a situation warning. Its sentences name
-    labels, never a path."""
-    from orchestrator.Core.disk_plan import DiskNeed, check_disk
-    folder = Path(rag.snapshot_dir)
-    largest = max((files_size([p]) for p in folder.glob("*.jsonl.gz")), default=0) if folder.is_dir() else 0
-    estimate = getattr(rag, "snapshot_estimate", None)
-    try:
-        held = int(estimate()) if callable(estimate) else None
-    except Exception:  # the knowledge base cannot be read now: its storage folder gives the size
-        held = None
-    if held is None:
-        storage = getattr(rag, "storage_dir", None)
-        held = folder_size(Path(storage)) if storage is not None else 0
-    return check_disk([DiskNeed("knowledge snapshots", folder, max(largest, held), "snapshot taken first")],
-                      disk_usage=disk_usage)
 
 
 def register_framework_docs_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
