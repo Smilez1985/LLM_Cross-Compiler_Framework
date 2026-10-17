@@ -88,8 +88,14 @@ def classify(error: BaseException) -> Optional[str]:
     if isinstance(error, ssh_trust.HostKeyError):
         return None
     # paramiko only when something imported it already: none of its errors exists before that, so classify never
-    # loads it (RG1) and works the same without it.
+    # loads it (RG1) and works the same without it. The import statement (not the sys.modules entry itself) waits
+    # for an import another thread started and has not finished, so a half-loaded module is never read.
     paramiko = sys.modules.get("paramiko")
+    if paramiko is not None:
+        try:
+            import paramiko
+        except Exception:  # noqa: BLE001 - that other import failed: no paramiko error can exist
+            paramiko = None
     if paramiko is not None:
         if isinstance(error, paramiko.BadHostKeyException):
             return HOST_KEY_CHANGED
