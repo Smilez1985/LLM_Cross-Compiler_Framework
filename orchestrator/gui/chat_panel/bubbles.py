@@ -47,7 +47,7 @@ from orchestrator.Core.chat_feed import FeedEntry, FeedSender, StoredEntry, call
 from orchestrator.Core.speaking_names import SpeakingNames
 from orchestrator.gui.chat_panel.segments import blocks, has_marks, has_names, shown_blocks, split_segments
 from orchestrator.gui.plain import ask, button_text, display_text, one_line, plain_label
-from orchestrator.utils.localization import LocalizationManager, text_tables
+from orchestrator.utils.localization import TRANSLATIONS, text_tables
 
 MAX_LINES = 20                       # lines shown in a bubble before "Show all"
 ASSETS = Path(__file__).resolve().parents[3] / "assets"
@@ -555,7 +555,7 @@ class RecordBubble(Bubble):
 
     def add_warnings(self) -> None:
         def words(rows: List[Any]) -> str:
-            known = LocalizationManager.TRANSLATIONS["en"]
+            known = TRANSLATIONS["en"]
             return "; ".join(one_line(text(f"warning.{r.code}", self.lang,
                                            **{k: one_line(v) for k, v in r.numbers.items()}))
                              if f"warning.{r.code}" in known else r.code.replace("_", " ") for r in rows)

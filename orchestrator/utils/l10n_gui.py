@@ -86,6 +86,8 @@ TEXTS = {
         "gui.progress.status.cancelled": "cancelled",
         "gui.progress.unknown": "The status of build {request} cannot be read any more. The log below shows its "
                                 "last lines.",
+        "gui.progress.resources": "Build container: CPU {cpu} % · memory {used} of {limit}",
+        "gui.progress.resources.near": "Build container: CPU {cpu} % · memory {used} of {limit}, nearly full",
         "gui.log.title": "Build log (live)",
         "gui.log.search": "Search the build log",
         "gui.log.level": "Show the lines of this level",
@@ -222,6 +224,8 @@ TEXTS = {
         "gui.progress.status.cancelled": "abgebrochen",
         "gui.progress.unknown": "Der Status von Build {request} lässt sich nicht mehr lesen. Das Protokoll darunter "
                                 "zeigt seine letzten Zeilen.",
+        "gui.progress.resources": "Build-Container: CPU {cpu} % · Arbeitsspeicher {used} von {limit}",
+        "gui.progress.resources.near": "Build-Container: CPU {cpu} % · Arbeitsspeicher {used} von {limit}, fast voll",
         "gui.log.title": "Build-Protokoll (live)",
         "gui.log.search": "Im Build-Protokoll suchen",
         "gui.log.level": "Die Zeilen dieser Stufe zeigen",

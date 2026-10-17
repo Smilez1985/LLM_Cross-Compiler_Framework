@@ -52,13 +52,15 @@ Was passiert:
      Datenordner dir gehören; gibt es deine Gruppen-ID in Debian schon (etwa 100, `users`), wird diese Gruppe genutzt;
    - `install.sh` läuft wie auf einem Debian-Computer, als hätte `lcf` es mit `sudo` gestartet: Es installiert Python
      mit `apt`, kopiert das Programm nach `/opt/llm-cross-compiler-framework`, legt dort `.venv` mit der festgelegten
-     `requirements.txt` an und schreibt den Starter `llm-framework`. Nur die Docker-Engine und die Gruppe `docker`
-     fallen weg (`LCF_CONTAINER_BUILD=1`);
+     `requirements.txt` an (mit `--gui`: `requirements-gui.txt`, das PySide6 für die GUI ergänzt) und schreibt den
+     Starter `llm-framework`. Nur die Docker-Engine und die Gruppe `docker` fallen weg (`LCF_CONTAINER_BUILD=1`), und
+     das Image ohne Oberfläche installiert wie `install.sh --headless`: kein Qt und keine Systembibliotheken für Qt;
    - `llm-cli` liegt im PATH, und `llmcf`, sein neuer Name (unveröffentlicht);
    - die Quellen sind während des Builds nur lesbar eingebunden und werden nie zu einer Image-Schicht; in keiner
      Schicht steht ein Geheimnis;
-   - am Ende prüft der Build die Installation: Die Befehlszeile muss sich importieren lassen, und jede
-     Systembibliothek, die Qt lädt, muss da sein (mit `--gui` auch die des Desktops und des X11-Plattform-Plugins).
+   - am Ende prüft der Build die Installation: Die Befehlszeile muss sich importieren lassen; das Image ohne
+     Oberfläche darf kein Qt enthalten; mit `--gui` muss jede Systembibliothek da sein, die Qt lädt (auch die des
+     Desktops und des X11-Plattform-Plugins).
      Sonst bricht der Build ab und nennt, was fehlt, statt ein Image zu liefern, dessen `llm-cli` beim ersten Befehl
      scheitert. Kann `pip` die festgelegten Pakete nicht installieren, bricht `install.sh` den Build ebenfalls ab.
 4. Das Image bekommt das lokale Tag `lcf-framework:local`, und der Builder zeigt, wie du es startest.

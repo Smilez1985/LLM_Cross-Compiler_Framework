@@ -190,7 +190,7 @@ def test_ui_text_reads_the_formal_overlay_only_for_german_with_sie(form):
     assert localization.ui_text(key, "de", url="u") == "Öffnet u in Ihrem Webbrowser."
     assert localization.ui_text(key, "en", url="u") == "Opens u in your web browser."
     assert localization.ui_text("words.size.bytes", "de", n=3) == "3 Byte", "a text without overlay: its du text"
-    manager = localization.LocalizationManager("de")
+    manager = localization.TextTable("de")   # the window's LocalizationManager reads its texts the same way
     assert manager.get_text(key) == "Öffnet {url} in Ihrem Webbrowser."
     assert localization.text_tables("du")["de"][key] == "Öffnet {url} in deinem Webbrowser."
 
@@ -255,7 +255,7 @@ def test_the_notices_ask_again_when_their_formal_text_changes(monkeypatch):
 
 def test_formal_overlays_name_du_texts_with_the_same_placeholders():
     """Always on: every FORMAL overlay of every text module names a German du text with the same placeholders."""
-    table = localization.LocalizationManager.TRANSLATIONS
+    table = localization.TRANSLATIONS
     found = 0
     for name in localization.TEXT_MODULES:
         try:

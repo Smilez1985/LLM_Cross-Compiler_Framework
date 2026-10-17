@@ -140,6 +140,12 @@
    "until": "c5-split-core"
   },
   {
+   "from": "orchestrator.utils.localization",
+   "to": "orchestrator.gui.localization",
+   "reason": "the old names LocalizationManager/get_instance resolve lazily (PEP 562) to the GUI Qt object",
+   "until": "c4-qt-optional (callers import gui.localization directly)"
+  },
+  {
    "from": "orchestrator.utils.next_steps",
    "to": "orchestrator.tools.tool_windows",
    "reason": "the next-step catalogue maps windows to their openers (w6-a0)",
@@ -154,22 +160,10 @@
  ],
  "third_party": [
   {
-   "from": "orchestrator.Core.docker_manager",
-   "library": "PySide6",
-   "reason": "the Docker manager's Qt signals (lazy, PEP 562)",
-   "until": "c1-texts-qtfree"
-  },
-  {
    "from": "orchestrator.remote.reasons",
    "library": "paramiko",
    "reason": "classify() reads paramiko's exception classes once paramiko is loaded",
    "until": "c2-remote-session (the transport owns paramiko)"
-  },
-  {
-   "from": "orchestrator.utils.localization",
-   "library": "PySide6",
-   "reason": "the language-switch QObject lives in the shared text module",
-   "until": "c1-texts-qtfree"
   }
  ]
 }

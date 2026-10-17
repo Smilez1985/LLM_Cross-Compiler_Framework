@@ -494,6 +494,7 @@ def test_there_is_no_snapshot_limit():
 
     from orchestrator import cli
     from orchestrator.Core import chat_feed, knowledge_snapshots, rag_manager
+    pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
     from orchestrator.gui import knowledge_snapshots_window
     for module in (knowledge_snapshots, rag_manager, knowledge_snapshots_window):
         assert not hasattr(module, "MAX_SNAPSHOTS"), module.__name__

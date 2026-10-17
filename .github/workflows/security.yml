@@ -82,12 +82,13 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
 
       - name: Audit pinned runtime dependencies
-        # requirements.txt is a fully pinned export. Markers are stripped so Windows-only and
+        # requirements-gui.txt is a fully pinned export (requirements.txt plus the optional extra 'gui', so every
+        # runtime pin is audited, PySide6 too). Markers are stripped so Windows-only and
         # version-specific pins are audited too, not only those matching this Linux runner.
         # A package pinned differently per Python version (e.g. numpy) goes to a second file,
         # because pip-audit rejects duplicate names in one requirements file.
         run: |
-          grep -E '^[A-Za-z0-9]' requirements.txt \
+          grep -E '^[A-Za-z0-9]' requirements-gui.txt \
             | sed -E 's/[[:space:]]*;.*$//; s/[[:space:]]*\\$//' \
             | awk -F'==' -v main="$RUNNER_TEMP/req-main.txt" -v dups="$RUNNER_TEMP/req-dups.txt" \
                 '{ if (seen[$1]++) print > dups; else print > main }'

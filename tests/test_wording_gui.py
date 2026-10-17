@@ -13,7 +13,8 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from orchestrator.gui import error_dialog, explain, plain
+pytest.importorskip("PySide6")   # the GUI's tests; the install without the 'gui' extra skips them
+from orchestrator.gui import error_dialog, explain, plain  # noqa: E402
 from orchestrator.utils import localization
 from orchestrator.utils.l10n_glossary import TERMS
 

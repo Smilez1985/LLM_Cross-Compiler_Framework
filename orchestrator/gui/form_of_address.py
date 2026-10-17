@@ -16,7 +16,7 @@ every text read afterwards follows it.
 * `first_run_language_and_form(config, parent)`
                                 THE FIRST-RUN HOOK: asks, saves and applies; None (nothing changed) on Cancel. The
                                 first-run guidance (chain ditto-setup) calls it.
-* `apply_saved_form(config)`    reads the setting at start-up (main.py) and applies it.
+* `apply_saved_form(config)`    reads the setting at start-up (orchestrator/gui/app.py) and applies it.
 """
 
 from typing import Any, Optional, Tuple

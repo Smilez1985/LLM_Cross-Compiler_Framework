@@ -1044,12 +1044,16 @@ dependencies = [
     { name = "pydantic" },
     { name = "pypdf" },
     { name = "pyrage" },
-    { name = "pyside6-essentials" },
     { name = "pyyaml" },
     { name = "qdrant-client" },
     { name = "qdrant-edge-py", marker = "platform_machine != 'ARM64' or sys_platform != 'win32'" },
     { name = "requests" },
     { name = "rich" },
+]
+
+[package.optional-dependencies]
+gui = [
+    { name = "pyside6-essentials" },
 ]
 
 [package.dev-dependencies]
@@ -1082,13 +1086,14 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pypdf", specifier = ">=6.19,<7" },
     { name = "pyrage", specifier = "==1.4.0" },
-    { name = "pyside6-essentials", specifier = ">=6.11,<6.13" },
+    { name = "pyside6-essentials", marker = "extra == 'gui'", specifier = ">=6.11,<6.13" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "qdrant-client", specifier = ">=1.19,<2" },
     { name = "qdrant-edge-py", marker = "platform_machine != 'ARM64' or sys_platform != 'win32'", specifier = "==0.8.0" },
     { name = "requests", specifier = ">=2.34,<3" },
     { name = "rich", specifier = ">=13.9,<16" },
 ]
+provides-extras = ["gui"]
 
 [package.metadata.requires-dev]
 dev = [
