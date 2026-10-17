@@ -28,7 +28,8 @@ from orchestrator.llm.auth.store import display_origin
 from orchestrator.llm.providers.anthropic import takes_workspace_id
 # The AI settings rules (one service for the dialog, sign-in, MCP and `llmcf config set`); SettingsOverlay lived here.
 from orchestrator.llm.settings_change import (AISettingsChange, SettingsChangeError, SettingsOverlay,  # noqa: F401
-                                              direction_problem, key_method, parse_fallback, removed_message)
+                                              direction_problem, key_method, parse_fallback, removed_message,
+                                              user_value)
 from orchestrator.utils.crawl_notice import CrawlNotice, acknowledge_and_audit, notice_text
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import current_language, get_instance as get_i18n, ui_text
@@ -369,7 +370,7 @@ class AIConfigurationDialog(QDialog):
 
     def _user_value(self, key: str, default: Any = None) -> Any:
         """A value the user set; schema defaults do not count (the default model belongs to OpenAI)."""
-        return SettingsOverlay(self._config(), {}).get(key, default)
+        return user_value(self._config(), key, default)
 
     def _preset(self):
         return self.catalog.providers.get(self.cb_provider.currentData())
@@ -402,10 +403,13 @@ class AIConfigurationDialog(QDialog):
         return self._change(preset).key_required(self._config())
 
     def _base_url(self, preset) -> str:
-        return self.txt_base_url.text().strip() if preset is not None and preset.base_url_configurable else ""
+        """The address field as the provider uses it (AISettingsChange.address: only a configurable address, so a
+        leftover one never reaches another provider)."""
+        return AISettingsChange(preset, base_url=self.txt_base_url.text()).address if preset is not None else ""
 
     def _workspace_id(self, preset) -> str:
-        return self.txt_workspace.text().strip() if preset is not None and takes_workspace_id(preset) else ""
+        """The workspace field as the provider uses it (AISettingsChange.workspace: the Claude API's only)."""
+        return AISettingsChange(preset, workspace_id=self.txt_workspace.text()).workspace if preset is not None else ""
 
     def _apply_enabled_state(self):
         preset = self._preset()
