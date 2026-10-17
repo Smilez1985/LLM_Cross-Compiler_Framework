@@ -53,6 +53,15 @@ TEXTS = {
         "deploy.package.done": "Package created:\n{path}\n\nCopy it to the board (for example on a USB stick) and run "
                                "deploy.sh there, or deploy it later with \"Deploy existing package…\".",
         "deploy.package.failed": "No package was made: {reason}",
+        # Other build or model file... (deploy package ARTIFACT / deploy run: any path, not only a listed build)
+        "deploy.source.button": "Other build or model file…",
+        "deploy.source.tip": "Adds a build folder or a model file from anywhere to the list above (as llmcf deploy "
+                             "package takes any path); select it, then Create package only… or Deploy to Target.",
+        "deploy.source.folder": "Build Folder…",
+        "deploy.source.model": "Model File…",
+        "deploy.source.folder_title": "Choose the build folder to package or deploy",
+        "deploy.source.model_title": "Choose the model file to package or deploy",
+        "deploy.source.chosen": "chosen by you",
 
         # Deploy existing package... (deploy run PACKAGE_PATH)
         "deploy.existing.button": "Deploy existing package…",
@@ -72,6 +81,7 @@ TEXTS = {
         # the hardware scan (Builder tab > Scan / Import...)
         "deploy.scan.script": "💻 Scan Local Host with the Fallback Script",
         "deploy.scan.save": "💻 Scan Local Host and Save the Profile As...",
+        "deploy.scan.script_save": "💻 Scan Local Host with the Fallback Script and Save the Profile As...",
         "deploy.scan.save_title": "Save the hardware profile of this computer as",
         "deploy.scan.save_filter": "Probe file, KEY=VALUE lines (*.txt);;JSON view (*.json)",
         "deploy.scan.running": "Running the {how} on this computer...",
@@ -145,6 +155,16 @@ TEXTS = {
                                "\"Vorhandenes Paket deployen…\".",
         "deploy.package.failed": "Es wurde kein Paket erstellt: {reason}",
 
+        "deploy.source.button": "Anderer Build oder Modelldatei…",
+        "deploy.source.tip": "Fügt der Liste oben einen Build-Ordner oder eine Modelldatei von irgendwo hinzu (wie "
+                             "llmcf deploy package jeden Pfad nimmt); wähle ihn aus, dann Nur Paket erstellen… oder "
+                             "Deploy to Target.",
+        "deploy.source.folder": "Build-Ordner…",
+        "deploy.source.model": "Modelldatei…",
+        "deploy.source.folder_title": "Build-Ordner zum Packen oder Deployen wählen",
+        "deploy.source.model_title": "Modelldatei zum Packen oder Deployen wählen",
+        "deploy.source.chosen": "von dir gewählt",
+
         "deploy.existing.button": "Vorhandenes Paket deployen…",
         "deploy.existing.tip": "Lädt ein früher erstelltes Deployment-ZIP (hier oder mit llmcf deploy package) auf "
                                "das oben genannte Board und startet dort sein deploy.sh.",
@@ -161,6 +181,8 @@ TEXTS = {
 
         "deploy.scan.script": "💻 Lokalen Rechner mit dem Ersatz-Skript scannen",
         "deploy.scan.save": "💻 Lokalen Rechner scannen und Profil speichern unter...",
+        "deploy.scan.script_save": "💻 Lokalen Rechner mit dem Ersatz-Skript scannen und Profil speichern "
+                                   "unter...",
         "deploy.scan.save_title": "Hardware-Profil dieses Rechners speichern unter",
         "deploy.scan.save_filter": "Probe-Datei, KEY=VALUE-Zeilen (*.txt);;JSON-Ansicht (*.json)",
         "deploy.scan.running": "{how} läuft auf diesem Rechner...",
