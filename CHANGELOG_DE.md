@@ -1887,6 +1887,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Ein Deployment wartet weiter, während der SSH-Server des Boards neu startet**: Nach einem Netzabbruch wartet das
+  Deployment auf das Board (N5). Antwortete das Board wieder, während sein SSH-Server noch startete, öffnete sich die
+  Verbindung und brach wieder ab (ein Reset, ein Abbruch, eine unterbrochene Pipe oder EOF beim Schlüsselaustausch);
+  keiner dieser Fälle hatte einen Grundcode, deshalb gab das Deployment sofort auf, statt weiter zu warten. Während es
+  wartet, heißt ein solcher Abbruch jetzt „noch nicht zurück“, und das Warten geht weiter
+  (`orchestrator/remote/reasons.py`, `reach_code(..., while_waiting=True)`). Der erste Kontakt des Deployments nutzt
+  außerdem die Regel aller anderen Wege: Ein Verbindungsfehler, der keiner der vier Codes ist, heißt, dass das Board
+  nicht antwortet (`device_host_down`, für Mojo festgehalten), statt eines leeren Codes.
 - **Auf ein Board, dessen Home-Ordner einen langen Pfad hat, lässt sich deployen**: Die Geräte-Laufzeit lehnte einen
   Home-Ordner des Board-Benutzers mit mehr als 200 Zeichen ab (und dessen Staging-Ordner sowie Modelle darunter ab
   400), deshalb brach ein Home auf einem tief liegenden Einhängepunkt das Deployment mit „not a plain absolute path“

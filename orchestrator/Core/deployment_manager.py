@@ -843,15 +843,16 @@ class _BoardSession:
 
     # --- logging in ---
 
-    def login(self) -> Optional[DeployResult]:
-        """Reads and checks the board's host key, then logs in. None when logged in, else why not."""
-        from orchestrator.runtime.device import reasons
+    def login(self, waiting: bool = False) -> Optional[DeployResult]:
+        """Reads and checks the board's host key, then logs in. None when logged in, else why not. `waiting`: the board
+        dropped off the network before (wait_for_board), so a connection that drops again means it is not back yet."""
+        from orchestrator.remote import reasons
         state_dir = self.manager._state_dir()
         try:
             key = ssh_trust.fetch_host_key(self.host, self.port)
             status = ssh_trust.check_host_key(state_dir, self.host, self.port, key)
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko, a damaged known_hosts
-            code = reasons.classify(e) or ""
+            code = reasons.reach_code(e, while_waiting=waiting)
             return self.result(False, code=code, reason=f"Could not read the host key of {self.host}"
                                                         + (f" ({code})." if code else f": {e}"))
         if status == "unknown":
@@ -871,7 +872,7 @@ class _BoardSession:
         try:
             self.ssh = ssh_trust.connect(self.host, self.user, state_dir, port=self.port, password=self.password)
         except Exception as e:  # noqa: BLE001 - authentication, network, a host key that changed meanwhile
-            code = reasons.classify(e) or ""
+            code = reasons.reach_code(e, while_waiting=waiting)
             return self.result(False, code=code, reason=f"SSH login to {self.user}@{self.host} failed"
                                                         + (f" ({code})." if code else f": {e}"))
         if self.on_client is not None:
@@ -909,7 +910,7 @@ class _BoardSession:
             elapsed = manager._clock() - started
             self.on_event(DeployEvent("waiting", elapsed=elapsed, limit=self.wait_seconds, step=step))
             if manager._check_conn(self.host, self.port):
-                failed = self.login()
+                failed = self.login(waiting=True)
                 if failed is None:
                     self.waited += manager._clock() - started
                     return None
