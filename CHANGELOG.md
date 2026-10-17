@@ -19,7 +19,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   command). `proposal()` builds an allow-to-run command from a catalogue step and checked values (the exact command,
   what it does and why, localized), `run_proposal()` runs exactly that command with the framework's own Python and
   streams its lines (deletions open the deletion list, secrets go through stdin, other places are only shown, each
-  decision can be recorded); `error_report()` gives the error box a localized summary, the next step and the English
+  decision can be recorded; every value of every proposal is checked by its kind, a proposal that differs from the
+  catalogue's in any word the person read is refused, only commands that finish without a terminal and do no more
+  than their question says are runnable, and an AI never reads a board's login or a path from a step); `error_report()` gives the error box a localized summary, the next step and the English
   technical detail. Carriers: `ToolError(steps=...)` rendered for the caller's channel at the registry boundary,
   `BlockerSpec.step`, `WithSteps` on the core exceptions, `Line`, `Finding.steps`, `_say_error` in the CLI. The menus:
   the AI administration in the Ditto menu ("Set up Ditto..." first), runtime, models and evaluation under Ditto >

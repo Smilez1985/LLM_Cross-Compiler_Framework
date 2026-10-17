@@ -2947,8 +2947,10 @@ the exact command from its own catalogue and asks: "Allow `llmcf ...`? What it d
 exactly that command with the framework's own Python and shows its output; No runs nothing. The command is never free
 text from an AI: it is a catalogue step with checked values (choices, names, ids; never a path you did not choose).
 A step that deletes something opens the list of what goes (No is the default), a password or key is asked in a hidden
-field and handed over through standard input, never on the command line. Each decision is recorded in the activity
-record. (The question and its console in the window come with the Ditto console.)
+field and handed over through standard input, never on the command line. What runs is exactly what you read: a
+changed proposal is refused. Only commands that finish without a terminal and do no more than the question says can be
+allowed; anything else (reading a licence, for example) opens its place in the window. Each decision is recorded in
+the activity record. (The question and its console in the window come with the Ditto console.)
 
 **Errors in your language:** an error is shown with a plain summary in your language, the next step, and the English
 technical detail to expand and copy (Ditto reads the English detail and explains it to you).

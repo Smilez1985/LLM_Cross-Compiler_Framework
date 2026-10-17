@@ -20,7 +20,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `proposal()` baut aus einem Schritt des Katalogs und geprüften Werten einen Befehl zum Zulassen (der genaue Befehl,
   was er tut und warum, übersetzt), `run_proposal()` führt genau diesen Befehl mit dem eigenen Python des Frameworks aus und reicht
   seine Zeilen weiter (Löschungen öffnen die Löschliste, Geheimnisse gehen über die Standardeingabe, andere Orte werden
-  nur gezeigt, jede Entscheidung kann protokolliert werden); `error_report()` gibt der Fehlerbox eine übersetzte
+  nur gezeigt, jede Entscheidung kann protokolliert werden; jeder Wert jedes Vorschlags wird nach seiner Art geprüft,
+  ein Vorschlag, der in einem Wort, das die Person gelesen hat, von dem des Katalogs abweicht, wird abgelehnt, nur
+  Befehle, die ohne Terminal durchlaufen und nicht mehr tun, als ihre Frage sagt, sind ausführbar, und eine KI liest
+  aus einem Schritt nie das Login eines Boards oder einen Pfad); `error_report()` gibt der Fehlerbox eine übersetzte
   Zusammenfassung, den nächsten Schritt und das englische technische Detail. Träger: `ToolError(steps=...)`, an der
   Grenze der Registry für den Kanal des Aufrufers dargestellt, `BlockerSpec.step`, `WithSteps` an den Kern-Ausnahmen,
   `Line`, `Finding.steps`, `_say_error` in der CLI. Die Menüs: die KI-Verwaltung im Menü Ditto („Ditto einrichten..."
