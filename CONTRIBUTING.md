@@ -24,6 +24,8 @@ Ways to contribute:
 - [ ] Lint and security checks pass ([section 5](#5-lint-and-security-checks))
 - [ ] The secret scan hooks are enabled (`make hooks`) and the scan is clean ([section 6](#6-secret-scan-and-git-hooks))
 - [ ] New behaviour is covered by tests in `tests/`
+- [ ] A new CLI command or option has its mouse path in the GUI and a `CLI_PATHS` entry, or a `MACHINE_ONLY` reason
+  ([section 8](#8-code-guidelines))
 - [ ] Entry under `[Unreleased]` in `CHANGELOG.md` and `CHANGELOG_DE.md`
 - [ ] Documentation updated in English and German
 - [ ] No secrets, personal state, binaries or model files in the diff
@@ -535,6 +537,16 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   and run by hand; `orchestrator/runtime/hardware_probe.py` is its byte-identical copy inside the package. Edit the
   script, then copy it (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`); a test fails while
   the two differ.
+- **Every CLI action has a mouse path.** Many people never use a terminal, so a person can start every command and
+  option of `llm-cli` in the GUI as well, without typing a command (typing a value into a field is fine). A new
+  command or option needs its mouse path, a menu entry, a button or a field that calls the same core function as the
+  CLI, and an entry in `CLI_PATHS` of its area module in `orchestrator/gui/menus/` (the command path, e.g.
+  `"deploy devices remove"` or `"mojo --board"`, to the objectName of the QAction or widget; `WINDOW_OBJECTS` or
+  `TAB_OBJECTS` names the window or tab it lives in). A switch that is for scripts only (machine output such as
+  `--json`, a `--yes` that skips a question the GUI always asks, a compatibility alias) goes into `MACHINE_ONLY`
+  with its reason instead. Otherwise `tests/test_cli_gui_parity.py` fails: it walks the whole command tree, opens
+  every window from its menu entry offscreen and checks that every named object exists and every action can be
+  reached from the menu bar. Menus are found and placed through `orchestrator/gui/menus/place.py`.
 - New actions for AI clients and Ditto are tools in `orchestrator/tools/framework_tools.py` with the correct tier
   (`read`, `local_write`, `external`). Never bypass the registry, the permissions or the audit log.
 - The framework never asks for, reads or stores a repository token. Hand work over to GitHub through an installed

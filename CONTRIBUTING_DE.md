@@ -26,6 +26,8 @@ Möglichkeiten mitzuhelfen:
 - [ ] Lint- und Sicherheitsprüfungen laufen durch ([Abschnitt 5](#5-lint--und-sicherheitsprüfungen))
 - [ ] Die Hooks des Secret-Scans sind eingeschaltet (`make hooks`), und der Scan ist sauber ([Abschnitt 6](#6-secret-scan-und-git-hooks))
 - [ ] Neues Verhalten ist durch Tests in `tests/` abgedeckt
+- [ ] Ein neuer CLI-Befehl oder eine neue Option hat ihren Weg mit der Maus in der GUI und einen Eintrag in
+  `CLI_PATHS`, oder einen Grund in `MACHINE_ONLY` ([Abschnitt 8](#8-regeln-für-den-code))
 - [ ] Eintrag unter `[Unreleased]` in `CHANGELOG.md` und `CHANGELOG_DE.md`
 - [ ] Dokumentation auf Englisch und Deutsch aktualisiert
 - [ ] Keine Secrets, kein persönlicher Zustand, keine Binärdateien und keine Modelldateien im Diff
@@ -559,6 +561,18 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   geschickt und von Hand ausgeführt wird; `orchestrator/runtime/hardware_probe.py` ist ihre byte-gleiche Kopie im
   Paket. Ändere das Skript und kopiere es dann (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`);
   ein Test schlägt fehl, solange die beiden sich unterscheiden.
+- **Jede CLI-Aktion hat einen Weg mit der Maus.** Viele Menschen nutzen nie ein Terminal, deshalb kann eine Person
+  jeden Befehl und jede Option von `llm-cli` auch in der GUI starten, ohne einen Befehl zu tippen (einen Wert in ein
+  Feld zu tippen ist in Ordnung). Ein neuer Befehl oder eine neue Option braucht ihren Weg mit der Maus, einen
+  Menüeintrag, eine Schaltfläche oder ein Feld, das dieselbe Kernfunktion wie die CLI aufruft, und einen Eintrag in
+  `CLI_PATHS` des Bereichsmoduls in `orchestrator/gui/menus/` (der Befehlspfad, z. B. `"deploy devices remove"` oder
+  `"mojo --board"`, auf den objectName der QAction oder des Widgets; `WINDOW_OBJECTS` oder `TAB_OBJECTS` nennt das
+  Fenster oder den Reiter, in dem es liegt). Ein Schalter nur für Skripte (Maschinenausgabe wie `--json`, ein
+  `--yes`, das eine Frage überspringt, die die GUI immer stellt, ein Kompatibilitäts-Alias) kommt stattdessen mit
+  seinem Grund nach `MACHINE_ONLY`. Sonst schlägt `tests/test_cli_gui_parity.py` fehl: Er geht den ganzen
+  Befehlsbaum durch, öffnet jedes Fenster offscreen über seinen Menüeintrag und prüft, dass jedes genannte Objekt
+  existiert und jede Aktion von der Menüleiste aus erreichbar ist. Menüs werden über
+  `orchestrator/gui/menus/place.py` gefunden und platziert.
 - Neue Aktionen für KI-Clients und Ditto sind Tools in `orchestrator/tools/framework_tools.py` mit der richtigen
   Stufe (`read`, `local_write`, `external`). Umgehe nie die Tool-Registry, die Berechtigungen oder das Audit-Log.
 - Das Framework fragt nie nach einem Repository-Token, liest keines und speichert keines. Übergib Arbeit an GitHub
