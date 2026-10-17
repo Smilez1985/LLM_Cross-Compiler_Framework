@@ -586,6 +586,14 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   `orchestrator/gui/menus/place.py` gefunden und platziert.
 - Neue Aktionen für KI-Clients und Ditto sind Tools in `orchestrator/tools/framework_tools.py` mit der richtigen
   Stufe (`read`, `local_write`, `external`). Umgehe nie die Tool-Registry, die Berechtigungen oder das Audit-Log.
+- **Ein Anwendungsfall, ein Weg; erst schauen, dann erweitern.** Bevor du etwas schreibst, such den Code, der es
+  schon tut, und erweitere und verdrahte ihn, statt eine zweite Kopie daneben zu bauen. Ein Build wird nur über
+  `BuildService.start_build` eingereiht (`start_recipe` für ein installiertes Community-Rezept): CLI, Builder-Tab und
+  Tools geben ihre eigenen Optionen mit (`local_paths`, `priority`, `output_dir`, ...) und behalten nur ihre Fragen
+  und ihre Darstellung. Die `recipe.yml` liest nur `community_manager.read_recipe`. Eine Änderung der
+  KI-Einstellungen geht über `AISettingsChange` (`orchestrator/llm/settings_change.py`): `problems()`, die eigene
+  Rückfrage des Kanals zu `plain_http_url()`, dann `apply()`. `tests/test_build_parity_core.py` und
+  `tests/test_ai_settings_change.py` prüfen, dass kein Fenster und kein Befehl an ihnen vorbeigeht.
 - Das Framework fragt nie nach einem Repository-Token, liest keines und speichert keines. Übergib Arbeit an GitHub
   über eine installierte GitHub CLI (sie behält ihre eigene Anmeldung) oder den Browser, so wie
   `llm-cli zoo export --pr` es tut.
