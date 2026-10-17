@@ -642,13 +642,13 @@ def test_a_standard_import_after_dittos_proposal_keeps_none_of_dittos_values(wiz
 
 def test_dittos_proposal_is_saved_through_save_module_and_audited(wizard, tmp_path, monkeypatch):
     from orchestrator.Core import ditto_manager
-    from orchestrator.tools import tools_targets
+    from orchestrator.Core import module_generator   # record_module_saved's home since chain c1-imports
     saves, audits = [], []
     real = ditto_manager.DittoCoder.save_module
     monkeypatch.setattr(ditto_manager.DittoCoder, "save_module",
                         lambda self, definition, targets_dir, **kw: saves.append((dict(definition), kw)) or
                         real(self, definition, targets_dir, **kw))
-    monkeypatch.setattr(tools_targets, "record_module_saved",
+    monkeypatch.setattr(module_generator, "record_module_saved",
                         lambda fm, actor, data, folder, channel: audits.append((actor, data, channel)))
     wizard.crawled_roots.add("https://docs.example/board")
     wizard.chk_knowledge.setEnabled(True)

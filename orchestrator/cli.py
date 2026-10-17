@@ -584,7 +584,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
         console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(str(e))}")
         sys.exit(1)
     from orchestrator.Core.module_generator import generator_input
-    from orchestrator.tools.tools_targets import record_module_saved
+    from orchestrator.Core.module_generator import record_module_saved
     record_module_saved(fm, "cli", generator_input(definition.model_dump(), module_name), path, "framework-cli")
     console.print(f"[bold green]✅ Module '{escape(module_name)}' created in {escape(str(path))}[/bold green]")
 

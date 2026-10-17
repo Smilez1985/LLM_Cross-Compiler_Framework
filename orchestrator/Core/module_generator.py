@@ -970,3 +970,26 @@ echo "Generated $OUTPUT_FILE"
         # Generated build scripts must run in the image; packs keep exactly the modes 0644 or 0755.
         try: os.chmod(path, 0o755)  # nosec B103
         except: pass
+
+
+# --- the audit row of a module the person saved (moved unchanged from tools/tools_targets.py, chain c1-imports) ---
+
+def record_module_saved(framework: Any, actor: str, data: Dict[str, Any], folder: Path, channel: str) -> None:
+    """Audits a module the person saved from an AI proposal outside the registry (the GUI wizard, the CLI): actor,
+    that it is AI-generated, the definition's sha256 and the base image (design 6.7). Never fails the save."""
+    import hashlib
+
+    from orchestrator.tools.policy import Decision, ToolTier
+    registry = getattr(framework, "tool_registry", None)
+    audit = getattr(registry, "audit", None)
+    if audit is None:
+        return
+    text = json.dumps({k: data.get(k) for k in sorted(data) if k != "description"}, sort_keys=True, default=str)
+    try:
+        audit.record(actor, "module_saved", ToolTier.LOCAL_WRITE.value, Decision.ASK.value, "ok",
+                     arguments={"target": Path(folder).name, "ai_generated": data.get("provenance") == "ai-generated",
+                                "definition_sha256": hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
+                                "base_image": str(data.get("base_os") or "")},
+                     approved=True, extra={"confirm_channel": channel, "answer": "accepted"})
+    except Exception:  # noqa: BLE001 - the module exists; the audit failure is logged by the audit log itself
+        pass
