@@ -163,7 +163,7 @@ def test_the_crawler_gets_only_its_options_and_a_delay_of_at_least_a_second(env)
     ({"start_urls": [SITE], "max_depth": 3}, "invalid_value"),      # above the setting (2)
     ({"start_urls": [SITE] * 2 + [f"http://93.184.215.{n}/" for n in range(20, 24)]}, "invalid_value"),  # 6
     ({"start_urls": ["http://127.0.0.1/"]}, "invalid_value"),
-    ({"start_urls": ["http://192.168.1.10/admin"]}, "invalid_value"),
+    ({"start_urls": ["http://192.168.77.10/admin"]}, "invalid_value"),
     ({"start_urls": ["file:///etc/passwd"]}, "invalid_value"),
     ({"start_urls": []}, "invalid_value"),
 ])

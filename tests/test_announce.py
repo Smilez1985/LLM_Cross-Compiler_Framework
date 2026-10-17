@@ -214,7 +214,7 @@ class TestSilence:
     @pytest.mark.parametrize("env,platform,config", [
         ({"LLM_FRAMEWORK_NO_AUDIO": "1"}, "linux", None),
         ({"CI": "true"}, "linux", None),
-        ({"SSH_CONNECTION": "10.0.0.2 50000 10.0.0.1 22", "DISPLAY": ""}, "darwin", None),
+        ({"SSH_CONNECTION": "10.0.0.2 50000 10.20.30.1 22", "DISPLAY": ""}, "darwin", None),
         ({"SSH_TTY": "/dev/pts/1", "DISPLAY": ""}, "win32", None),
         ({"DISPLAY": "", "WAYLAND_DISPLAY": ""}, "linux", None),     # headless, e.g. Docker
         ({}, "linux", {an.SETTING: False}),
@@ -240,7 +240,7 @@ class TestSilence:
 
     def test_ssh_with_a_display_may_speak(self, audible, runs, monkeypatch):
         audible()
-        monkeypatch.setenv("SSH_CONNECTION", "10.0.0.2 50000 10.0.0.1 22")
+        monkeypatch.setenv("SSH_CONNECTION", "10.0.0.2 50000 10.20.30.1 22")
         assert an.silent_reason() is None
 
     def test_an_unreadable_setting_means_silence(self, audible, runs):

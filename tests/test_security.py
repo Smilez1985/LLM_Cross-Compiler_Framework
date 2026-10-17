@@ -101,11 +101,11 @@ class TestFilenameSanitization:
 class TestValidationResultTruthiness:
     """Call sites use `if not validate_x(...)`; a result object must behave like its .valid flag."""
 
-    @pytest.mark.parametrize("ip", ["192.168.1.100", "10.0.0.1", "8.8.8.8", "::1"])
+    @pytest.mark.parametrize("ip", ["192.168.1.100", "10.20.30.1", "8.8.8.8", "::1"])
     def test_valid_ips(self, ip):
         assert validate_ip_address(ip)
 
-    @pytest.mark.parametrize("ip", ["256.1.1.1", "192.168.1", "not-an-ip", "192.168.1.1.1", "", "1.2.3.4; rm -rf /"])
+    @pytest.mark.parametrize("ip", ["256.1.1.1", "192.168.1", "not-an-ip", "192.168.77.1.1", "", "1.2.3.4; rm -rf /"])
     def test_invalid_ips(self, ip):
         result = validate_ip_address(ip)
         assert not result
@@ -118,7 +118,7 @@ class TestSSRFGuard:
         "http://localhost/",
         "http://127.0.0.1:6333/collections",
         "http://10.0.0.5/",
-        "http://192.168.1.1/admin",
+        "http://192.168.77.1/admin",
         "http://169.254.169.254/latest/meta-data/",
         "http://100.100.100.200/latest/meta-data/",   # Alibaba metadata, CGNAT range
         "http://100.64.0.1/",                         # Tailscale / CGNAT
