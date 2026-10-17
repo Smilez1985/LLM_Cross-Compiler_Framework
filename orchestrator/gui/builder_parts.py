@@ -6,8 +6,9 @@ Parts of the Builder tab from wave 3b, kept out of builder_tab.py so the tab its
   target, format, board, quantization, optimization, GPU, importance matrix and calibration dataset. The Start button
   is not a field: only the person starts a build, with its own checks and questions.
 - `BuildProgressPanel` shows the running build: a progress bar with the stage and the percent from the build service
-  (BuildService.get_status) and the live build log (BuildService.log_tail, secrets redacted), with a search box and an
-  Info / Warning / Error filter. The log is plain text: build output never renders as rich text.
+  (BuildService.get_status), the build container's CPU and memory under it (BuildService.live_resources) and the live
+  build log (BuildService.log_tail, secrets redacted), with a search box and an Info / Warning / Error filter. The log
+  is plain text: build output never renders as rich text.
 - `BoardAdvice` shows the board the hardware probe points to as a recommendation with its source and how sure it is
   (orchestrator/runtime/board_recommendation.py), the candidates when it is not sure, and the offer to create a target
   with the wizard or to ask Ditto when no target fits the probe. A board or target the person chose is never
@@ -215,6 +216,11 @@ class BuildProgressPanel(QWidget):
         self.bar.setValue(0)
         self.bar.setAccessibleName(ui_text("gui.progress.bar", self.lang))
         layout.addWidget(self.bar)
+        # The running build container's CPU and memory (DECISIONS round 12, item 6); hidden while none runs
+        self.lbl_resources = plain_label("", self)
+        self.lbl_resources.setObjectName("lbl_build_resources")
+        self.lbl_resources.setVisible(False)
+        layout.addWidget(self.lbl_resources)
         row = QHBoxLayout()
         self.search = QLineEdit(self)
         self.search.setPlaceholderText(ui_text("gui.log.search", self.lang))
@@ -250,6 +256,7 @@ class BuildProgressPanel(QWidget):
         self._lines, self._seen, self._dropped, self._attempts = [], 0, 0, False
         self.bar.setValue(0)
         self.lbl_stage.setText(ui_text("gui.progress.started", self.lang, request=request_id))
+        self.show_resources(None)
         self.apply_filter()
 
     def poll(self, service: Any, request_id: str) -> Optional[str]:
@@ -261,6 +268,11 @@ class BuildProgressPanel(QWidget):
             self.lbl_stage.setText(ui_text("gui.progress.unknown", self.lang, request=request_id))
             return None
         self.show_status(status)
+        try:
+            resources = service.live_resources(request_id)
+        except Exception:  # noqa: BLE001 - a service without the figures: the line stays hidden
+            resources = None
+        self.show_resources(resources if status.status not in ("completed", "error", "cancelled") else None)
         try:
             tail = service.log_tail(request_id, lines=TAIL_LINES, for_person=True)  # the person's window: full paths
         except Exception:  # noqa: BLE001 - the status is shown; the log comes with the next poll
@@ -278,6 +290,21 @@ class BuildProgressPanel(QWidget):
         self.lbl_stage.setText(ui_text(key, self.lang, stage=stage or "-", percent=percent,
                                        status=ui_text(f"gui.progress.status.{state}", self.lang)
                                        if state in ("completed", "error", "cancelled") else state))
+
+    def show_resources(self, resources: Optional[Dict[str, float]]) -> None:
+        """The build container's CPU and memory (BuildService.live_resources), or nothing while no container runs."""
+        if not resources:
+            self.lbl_resources.setVisible(False)
+            self.lbl_resources.setText("")
+            return
+        from orchestrator.Core.docker_manager import memory_near_limit
+        from orchestrator.utils.sizes import format_size
+        limit = int(resources.get("memory_limit_bytes") or 0)
+        key = "gui.progress.resources.near" if memory_near_limit(resources) else "gui.progress.resources"
+        self.lbl_resources.setText(ui_text(key, self.lang, cpu=f"{float(resources.get('cpu_percent') or 0):.0f}",
+                                           used=format_size(int(resources.get("memory_bytes") or 0), self.lang),
+                                           limit=format_size(limit, self.lang) if limit else "?"))
+        self.lbl_resources.setVisible(True)
 
     def add_lines(self, lines: Sequence[str], first_line: int, total: int) -> None:
         """New lines of the log (numbered from first_line); lines read before are skipped, lines the service no

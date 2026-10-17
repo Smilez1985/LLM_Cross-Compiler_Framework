@@ -310,12 +310,15 @@ def test_mcp_token_variable_has_one_name():
     assert mcp_tokens.ENV_VAR == mcp_env.ENV_VAR == "LCF_MCP_TOKEN"
 
 
-# --- the Docker manager's Qt signals --------------------------------------------------------------------------------
+# --- the Docker manager needs no Qt ---------------------------------------------------------------------------------
 
-def test_the_docker_manager_needs_qt_only_for_its_signals(tmp_path):
+def test_the_docker_manager_needs_no_qt(tmp_path):
+    """Changed on purpose (round 12, item 6): its Qt signals were removed with its old build path, so the manager
+    never loads Qt (tests/test_docker_manager.py has what took their place)."""
     code = ("import sys\n"
-            "from orchestrator.Core.docker_manager import DockerManager\n"
+            "from orchestrator.Core.docker_manager import DockerManager, container_resources\n"
             "manager = DockerManager()\n"
+            "container_resources({'memory_stats': {'usage': 1, 'limit': 2}})\n"
             "assert 'PySide6' not in sys.modules, 'Qt loaded with the manager'\n")
     modules, run = loaded_modules(tmp_path, code)
     assert run.returncode == 0, run.stderr[-3000:]
@@ -336,19 +339,6 @@ def test_the_command_lines_sizes_need_no_qt(tmp_path):
     modules, run = loaded_modules(tmp_path, code)
     assert run.returncode == 0, run.stderr[-3000:]
     assert present(modules, ("PySide6",)) == []
-
-
-def test_docker_manager_signals_still_connect_and_emit():
-    pytest.importorskip("PySide6")
-    from orchestrator.Core.docker_manager import DockerManager
-    manager, other = DockerManager(), DockerManager()
-    got = []
-    manager.build_output.connect(lambda build, line: got.append((build, line)))
-    manager.build_completed.connect(lambda build, ok, path: got.append((build, ok, path)))
-    manager.build_output.emit("b1", "line")
-    manager.build_completed.emit("b1", True, "/out")
-    other.build_output.emit("b2", "not connected")
-    assert got == [("b1", "line"), ("b1", True, "/out")]
 
 
 # --- the import-time host check of utils.validation ---------------------------------------------------------------
