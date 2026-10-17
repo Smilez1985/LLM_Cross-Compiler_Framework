@@ -133,7 +133,7 @@ class TestNoSecrets:
         "https://docs.example.org/?a=1;token=abc",                      # ";" separates parameters too
         "https://docs.example.org/?%74oken=abc",                        # percent-encoded name
         "https://docs.example.org/?jwt=abc.def.ghi",
-        "root:hunter2@192.168.1.10",
+        "root:hunter2@192.168.77.10",
         "https://[::1/",
         "org/model\n--trust-remote-code",
         "org/model\u202e",
@@ -146,7 +146,7 @@ class TestNoSecrets:
 
     @pytest.mark.parametrize("value", [
         "Qwen/Qwen3.5-0.8B", "/home/me/models/model.gguf", "C:\\data\\calib.txt", "https://docs.radxa.com/?q=npu",
-        "https://wiki.example.org/page#section", "root@192.168.1.10", "fe80::1", "rock-5b.local", "rk3588",
+        "https://wiki.example.org/page#section", "root@192.168.77.10", "fe80::1", "rock-5b.local", "rk3588",
         "https://docs.example.org/side/inside?topic=sidebar",
     ])
     def test_allowed(self, history, value):

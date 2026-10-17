@@ -311,7 +311,7 @@ class TestSSHDeployment:
 
     # N4: a host name such as myboard.local is an address too; a typo in an IP address, a shell character or an
     # option is refused before anything is sent
-    @pytest.mark.parametrize("ip", ["999.999.999.999", "192.168.1.300", "192.168.1", "not a host", "", "10.0.0.1; reboot",
+    @pytest.mark.parametrize("ip", ["999.999.999.999", "192.168.1.300", "192.168.1", "not a host", "", "10.20.30.1; reboot",
                                     "-oProxyCommand=touch", "board..local", "[fe80::1]", "$(reboot)"])
     def test_invalid_ip_is_rejected_before_connecting(self, dm, artifact, ip):
         assert dm.deploy_artifact(artifact, ip, "root") is False
