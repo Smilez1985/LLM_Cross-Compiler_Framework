@@ -11,6 +11,7 @@ imported at all.
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -261,6 +262,22 @@ def test_the_gui_entry_point_says_what_is_missing_without_qt(tmp_path):
                          stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", timeout=300)
     assert run.returncode == 1 and "Traceback" not in run.stderr, run.stderr[-3000:]
     assert "gui" in run.stderr and "requirements-gui.txt" in run.stderr and "llmcf" in run.stderr, run.stderr
+
+
+def test_the_missing_extra_is_added_only_from_the_hash_pinned_list(tmp_path):
+    """Review of chain qt: the message also offered `pip install 'llm-cross-compiler-framework[gui]'`. The framework
+    is installed from its checkout, not from the package index (the installers copy its files and install the
+    hash-pinned exports with --no-emit-project), so that line would fetch whatever carries the name there, unpinned
+    and unchecked. The person is told only the hash-pinned way: the installer, or requirements-gui.txt."""
+    code = BLOCK_QT + "from orchestrator.main import main\nraise SystemExit(main())"
+    run = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, env=_child_env(tmp_path),
+                         stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", timeout=300)
+    assert run.returncode == 1, run.stderr[-3000:]
+    message = run.stderr
+    assert "llm-cross-compiler-framework" not in message and "[gui]" not in message, message
+    installs = [message[m.end():] for m in re.finditer(r"pip install", message)]
+    assert installs and all(i.startswith(" --require-hashes -r requirements-gui.txt") for i in installs), installs
+    assert "--headless" in message, "or the installer again, without --headless"
 
 
 def test_only_the_gui_imports_qt():

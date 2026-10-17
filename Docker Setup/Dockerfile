@@ -7,7 +7,8 @@
 # Guide: docs/Container_Setup.md (German: docs/Container_Setup_DE.md).
 #
 # Inside, install.sh runs exactly as on a Debian computer (apt, /opt/llm-cross-compiler-framework, .venv with the pinned
-# requirements.txt), for the unprivileged user lcf; only the Docker engine is left out (LCF_CONTAINER_BUILD=1).
+# requirements.txt, with --gui requirements-gui.txt), for the unprivileged user lcf; only the Docker engine is left out
+# (LCF_CONTAINER_BUILD=1).
 # No secret enters a layer: the sources are a read-only bind mount of the staged context (tracked files only), and
 # everything personal (settings, credential vault, audit log, MCP tokens, models, builds) lives in /data at run time.
 

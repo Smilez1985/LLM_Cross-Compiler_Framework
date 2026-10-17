@@ -46,13 +46,19 @@ def cpu_percent(stats: Mapping[str, Any]) -> float:
 
 
 def memory_used(memory_stats: Mapping[str, Any]) -> int:
-    """The container's memory in bytes as `docker stats` counts it: the usage without the inactive page cache
-    (inactive_file with cgroup v2, total_inactive_file with v1), so reading a large model file does not look like
-    memory the build needs."""
+    """The container's memory in bytes as `docker stats` counts it: the usage without the inactive page cache, so
+    reading a large model file does not look like memory the build needs. Docker's order (docker/cli
+    calculateMemUsageUnixNoCache): total_inactive_file on a cgroup v1 host (which reports inactive_file too, without
+    the child cgroups) when it is below the usage, else inactive_file (cgroup v2) when it is below the usage, else
+    the usage itself."""
     usage = int(memory_stats.get("usage") or 0)
     details = memory_stats.get("stats") or {}
-    cache = details.get("inactive_file", details.get("total_inactive_file", 0)) or 0
-    return usage - int(cache) if 0 < int(cache) < usage else usage
+    for key in ("total_inactive_file", "inactive_file"):
+        if key in details:
+            cache = int(details.get(key) or 0)
+            if cache < usage:
+                return usage - cache
+    return usage
 
 
 def container_resources(stats: Optional[Mapping[str, Any]]) -> Optional[Dict[str, float]]:
