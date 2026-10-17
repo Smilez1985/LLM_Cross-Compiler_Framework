@@ -43,8 +43,8 @@ def _translated_bar():
     from orchestrator.gui.menus import place
     win = QMainWindow()
     win.framework = SimpleNamespace()
-    win.i18n = SimpleNamespace(t=lambda key, default=None: {"menu.file": "Datei", "menu.exit": "Beenden",
-                                                             "menu.open_hub": "Community Hub öffnen"}.get(key, default))
+    german = {"menu.file": "Datei", "menu.exit": "Beenden", "menu.open_hub": "Community Hub öffnen"}
+    win.i18n = SimpleNamespace(t=lambda key, default=None: german.get(key, default))
     bar = win.menuBar()
     menus = {}
     for name, title in ((place.MENU_FILE, "Datei"), (place.MENU_SECURITY, "Sicherheit"), (place.MENU_VIEW, "Ansicht"),

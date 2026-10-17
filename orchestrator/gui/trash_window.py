@@ -47,8 +47,11 @@ class TrashDialog(QDialog):
         self.btn_restore = QPushButton(button_text(self._t("trash.restore")), self)
         self.btn_delete = QPushButton(button_text(self._t("trash.delete")), self)
         self.btn_keep = QPushButton(button_text(self._t("trash.keep")), self)
-        for button, slot in ((self.btn_restore, self._restore), (self.btn_delete, self._delete),
-                             (self.btn_keep, self._keep)):
+        # object names: `llm-cli trash restore` and `trash empty` by mouse (CLI_PATHS of menus/existing.py)
+        for button, slot, name in ((self.btn_restore, self._restore, "btn_trash_restore"),
+                                   (self.btn_delete, self._delete, "btn_trash_delete"),
+                                   (self.btn_keep, self._keep, "btn_trash_keep")):
+            button.setObjectName(name)
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             buttons.addButton(button, QDialogButtonBox.ActionRole)
