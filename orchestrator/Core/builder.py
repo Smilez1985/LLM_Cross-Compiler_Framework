@@ -494,21 +494,18 @@ class BuildEngine:
             watched = threading.Event()
             full: Dict[str, str] = {}
 
-            def watchdog():
-                # Disk watchdog (design 6.5): the container is stopped when the cache disk falls below half the
-                # reserve, so the per-user folder always keeps room to record what happened.
-                while not watched.wait(CONTAINER_WATCH_EVERY):
-                    problem = self._low_disk_text(Path(self.cache_dir), prefix.strip(": ") or "The build")
-                    if problem:
-                        full["text"] = problem
-                        progress.add_log(problem)
-                        try:
-                            container.kill()
-                        except Exception:
-                            pass
-                        return
-            guard = threading.Thread(target=watchdog, name=f"disk-watch-{config.build_id}", daemon=True)
-            guard.start()
+            def low(problem: str) -> None:
+                full["text"] = problem
+                progress.add_log(problem)
+                try:
+                    container.kill()
+                except Exception:
+                    pass
+            # Disk watchdog (design 6.5, Core/disk_plan.py): the container is stopped when the cache disk falls below
+            # half the reserve, so the per-user folder always keeps room to record what happened.
+            from orchestrator.Core.disk_plan import DiskWatchdog
+            DiskWatchdog(Path(self.cache_dir), prefix.strip(": ") or "The build", CONTAINER_WATCH_EVERY, low, watched,
+                         check=self._low_disk_text, name=f"disk-watch-{config.build_id}").start()
             timeout = config.build_timeout or self.default_timeout
             started = time.monotonic()
             try:
@@ -711,28 +708,12 @@ class BuildEngine:
 
     def _disk_full_text(self, error: BaseException) -> Optional[str]:
         """A full disk (ENOSPC, EDQUOT, or the message a tool printed) as reason insufficient_resources with the free
-        space of the build's folders, by label (G40); None for any other error."""
-        import errno
-        text = str(error)
-        full = (isinstance(error, OSError) and error.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", -1))) or \
-            "No space left on device" in text or "Disk quota exceeded" in text or \
-            getattr(error, "code", "") == "insufficient_resources"
-        if not full:
-            return None
-        from orchestrator.Core.disk_plan import gb
-        free = []
+        space of the build's folders, by label (G40); None for any other error (disk_plan.disk_full_text)."""
+        from orchestrator.Core.disk_plan import disk_full_text
         output = self.base_dir / Path(str(self._get_conf("output_dir", "output"))).expanduser()
         builds = Path(getattr(self, "build_dir", output))
-        for label, folder in (("cache", Path(self.cache_dir)), ("output", output),
-                              *((("builds", builds),) if builds != output else ())):
-            try:
-                free.append(f"{label} disk {gb(shutil.disk_usage(folder if folder.exists() else folder.parent).free)} "
-                            "free")
-            except (OSError, ValueError):
-                continue
-        where = f" ({', '.join(free)})" if free else ""
-        detail = text if "No space left on device" in text else f"{text} (No space left on device)"
-        return f"insufficient_resources: the disk ran full during the build{where}. {detail}"
+        folders = {"cache": Path(self.cache_dir), "output": output, **({"builds": builds} if builds != output else {})}
+        return disk_full_text(error, folders)
 
     def _end_cancelled(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
         self._discard_staged(config, prog)
@@ -1065,13 +1046,13 @@ class BuildEngine:
         build's temporary folder. (None, None) when the cache disk has no room for it: the scan is skipped with a
         warning that says how much it needs."""
         import tempfile
-        from orchestrator.Core.disk_plan import gb, reserve_for
+        from orchestrator.Core.disk_plan import gb, low_disk_floor
         image = self.docker_client.images.get(image_tag)
         size = int((getattr(image, "attrs", None) or {}).get("Size") or 0)
         parent = self.cache_dir / "builds" / build_id
         parent.mkdir(parents=True, exist_ok=True)
         usage = shutil.disk_usage(parent)
-        floor = reserve_for(usage.total) // 2
+        floor = low_disk_floor(usage.total)
         if usage.free - size < floor:
             progress.add_warning(f"Security scan skipped: the scanner reads a saved copy of the image (about "
                                  f"{gb(size)}), and the cache disk has {gb(usage.free)} free, of which {gb(floor)} "
@@ -1151,18 +1132,19 @@ class BuildEngine:
         stop = threading.Event()
         reason: Dict[str, Any] = {}
 
-        def watch():
-            while not stop.wait(STAGING_WATCH_EVERY):
-                if progress.status == BuildStatus.CANCELLED:
-                    reason["cancelled"] = True
-                    stop.set()
-                    return
-                problem = self._low_disk_text(dest, "Staging")
-                if problem:
-                    reason["disk"] = problem
-                    stop.set()
-                    return
-        watcher = threading.Thread(target=watch, name=f"staging-watch-{config.build_id}", daemon=True)
+        def cancelled() -> bool:
+            if progress.status == BuildStatus.CANCELLED:
+                reason["cancelled"] = True
+                stop.set()
+                return True
+            return False
+
+        def low(problem: str) -> None:
+            reason["disk"] = problem
+            stop.set()
+        from orchestrator.Core.disk_plan import DiskWatchdog
+        watcher = DiskWatchdog(dest, "Staging", STAGING_WATCH_EVERY, low, stop, also_stop_when=cancelled,
+                               check=self._low_disk_text, name=f"staging-watch-{config.build_id}")
         fetcher = self._hub_fetcher(auth or None, stop)
         try:
             with StagingLock(dest.parent / f".{dest.name}.lock"):
@@ -1223,20 +1205,9 @@ class BuildEngine:
     @staticmethod
     def _low_disk_text(folder: Path, what: str) -> Optional[str]:
         """Why `what` must stop when the file system of `folder` has fallen below half the reserve (design 6.5), or
-        None while it has room."""
-        from orchestrator.Core.disk_plan import gb, reserve_for
-        probe = Path(folder)
-        while not probe.exists() and probe.parent != probe:
-            probe = probe.parent
-        try:
-            usage = shutil.disk_usage(probe)
-        except OSError:
-            return None
-        floor = reserve_for(usage.total) // 2
-        if usage.free < floor:
-            return (f"{what} stopped: the cache disk has only {gb(usage.free)} free, less than half of the "
-                    f"{gb(floor * 2)} that must stay free. No space left on device for the rest of the build.")
-        return None
+        None while it has room (disk_plan.low_disk_text)."""
+        from orchestrator.Core.disk_plan import low_disk_text
+        return low_disk_text(folder, what)
 
     @staticmethod
     def _model_commit(api, source: str, revision: Optional[str], token: Any = False) -> Optional[str]:

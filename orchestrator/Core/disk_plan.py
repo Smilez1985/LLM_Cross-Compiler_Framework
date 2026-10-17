@@ -25,6 +25,7 @@ import json
 import os
 import secrets
 import shutil
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -158,11 +159,15 @@ def build_needs(download: int, fmt: str, quantization: Optional[str], cache_dir:
     return needs
 
 
-def _existing(path: Path) -> Path:
+def nearest_existing(path: Path) -> Path:
+    """`path`, or its nearest ancestor that exists (a folder not made yet is measured on the disk it will be on)."""
     path = Path(path)
     while not path.exists() and path.parent != path:
         path = path.parent
     return path
+
+
+_existing = nearest_existing  # the name this module used before
 
 
 def device_of(path: Path) -> str:
@@ -171,6 +176,98 @@ def device_of(path: Path) -> str:
         return str(os.stat(_existing(path)).st_dev)
     except OSError:
         return f"?{path}"
+
+
+def free_space(path: Path, disk_usage: Optional[DiskUsage] = None):
+    """Total, used and free bytes of the file system `path` is on (its nearest existing folder); OSError when it cannot
+    be measured. The one test seam: `disk_usage`, else shutil.disk_usage looked up at each call."""
+    return (disk_usage or shutil.disk_usage)(str(nearest_existing(path)))
+
+
+# --- the disk watchdog and the disk-full texts (moved from BuildEngine; design 6.5, G39, G40) ----------------------
+
+DISK_FULL_PHRASE = "No space left on device"  # in every disk-full text: self_healing_manager.DISK_FULL_PATTERN
+DISK_QUOTA_PHRASE = "Disk quota exceeded"
+
+
+def low_disk_floor(disk_total: int) -> int:
+    """Half the reserve: below this a running build, staging or scan stops, so the per-user folder (audit log,
+    permissions) always keeps room to record what happened."""
+    return reserve_for(disk_total) // 2
+
+
+def low_disk_text(folder: Path, what: str, disk_usage: Optional[DiskUsage] = None) -> Optional[str]:
+    """Why `what` must stop when the file system of `folder` has fallen below half the reserve, or None while it has
+    room (or cannot be measured). Names the disk by its label, never a path."""
+    try:
+        usage = free_space(folder, disk_usage)
+    except OSError:
+        return None
+    floor = low_disk_floor(usage.total)
+    if usage.free < floor:
+        return (f"{what} stopped: the cache disk has only {gb(usage.free)} free, less than half of the "
+                f"{gb(floor * 2)} that must stay free. {DISK_FULL_PHRASE} for the rest of the build.")
+    return None
+
+
+def is_disk_full(error) -> bool:
+    """A full disk: ENOSPC or EDQUOT, the message a tool printed for it, or reason code insufficient_resources. Takes an
+    exception or a text."""
+    import errno
+    if isinstance(error, str):
+        return DISK_FULL_PHRASE in error or DISK_QUOTA_PHRASE in error
+    return (isinstance(error, OSError) and error.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", -1))) or \
+        is_disk_full(str(error)) or getattr(error, "code", "") == "insufficient_resources"
+
+
+def disk_full_text(error: BaseException, folders: Dict[str, Path],
+                   disk_usage: Optional[DiskUsage] = None) -> Optional[str]:
+    """A full disk as reason insufficient_resources with the free space of each folder by its label (cache, output,
+    builds; never a path); None for any other error. A folder not made yet is measured on its parent, and left out
+    when that is missing too. The text keeps DISK_FULL_PHRASE, which the self-healing heuristic matches."""
+    if not is_disk_full(error):
+        return None
+    text = str(error)
+    usage = disk_usage or shutil.disk_usage
+    free = []
+    for label, folder in folders.items():
+        folder = Path(folder)
+        try:
+            free.append(f"{label} disk {gb(usage(folder if folder.exists() else folder.parent).free)} free")
+        except (OSError, ValueError):
+            continue
+    where = f" ({', '.join(free)})" if free else ""
+    detail = text if DISK_FULL_PHRASE in text else f"{text} ({DISK_FULL_PHRASE})"
+    return f"insufficient_resources: the disk ran full during the build{where}. {detail}"
+
+
+class DiskWatchdog:
+    """A daemon thread that checks the disk of `folder` every `every` seconds while `stop` (a threading.Event) is not
+    set: below half the reserve it calls on_low(text) once and ends. `also_stop_when` is asked first in each round; a
+    true answer ends the watch (the caller's own reason, e.g. a cancel). `check(folder, what)` gives the text
+    (default low_disk_text). Qt-free; used by the build's container watchdog and its staging watcher."""
+
+    def __init__(self, folder: Path, what: str, every: float, on_low: Callable[[str], None],
+                 stop: Optional[threading.Event] = None, *, also_stop_when: Optional[Callable[[], bool]] = None,
+                 check: Optional[Callable[[Path, str], Optional[str]]] = None, name: str = "disk-watch"):
+        self.folder, self.what, self.every, self.on_low = Path(folder), what, every, on_low
+        self.stop = stop if stop is not None else threading.Event()
+        self.also_stop_when, self.check, self.text = also_stop_when, check or low_disk_text, None
+        self.thread = threading.Thread(target=self.run, name=name, daemon=True)
+
+    def run(self) -> None:
+        while not self.stop.wait(self.every):
+            if self.also_stop_when is not None and self.also_stop_when():
+                return
+            problem = self.check(self.folder, self.what)
+            if problem:
+                self.text = problem
+                self.on_low(problem)
+                return
+
+    def start(self) -> "DiskWatchdog":
+        self.thread.start()
+        return self
 
 
 def check_disk(needs: Iterable[DiskNeed], ledger: Optional["ReservationLedger"] = None, exclude: str = "",
