@@ -92,8 +92,11 @@ def main():
             # User cancelled setup
             sys.exit(0)
     
-    # 3. Initialize Global Localization with selected language
-    get_i18n(language)
+    # 3. Initialize Global Localization with selected language. After the first-run dialog the instance exists in
+    # English already: the chosen language applies now (also to Qt's own buttons), not only after a restart.
+    i18n = get_i18n(language)
+    if getattr(i18n, "current_lang", language) != language:
+        i18n.set_language(language)
     from orchestrator.gui.form_of_address import apply_saved_form
     apply_saved_form(cfg_mgr)   # German "du" (the default) or "Sie": File > Settings..., General
 
