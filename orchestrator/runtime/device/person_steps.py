@@ -64,13 +64,11 @@ def unreachable_error(error: BaseException, host: str, port: int, *, state_dir: 
                       device_id: str = "", step: str = "") -> BoardStepError:
     """The refusal after a failed connection: its SSH reason code when it has one (OSError: the board does not
     answer), recorded for Mojo when the contact is named."""
-    from orchestrator.runtime.device import reasons
-    code = reasons.classify(error)
-    if code is None and isinstance(error, OSError):
-        code = reasons.HOST_DOWN
-    if code is not None and state_dir is not None and device_id:
+    from orchestrator.remote import reasons
+    code = reasons.reach_code(error)
+    if code and state_dir is not None and device_id:
         _note(state_dir, device_id, step, code)
-    return BoardStepError(f"Could not reach {host}:{port}: {error}", "unreachable", reason=code or "", error=error)
+    return BoardStepError(f"Could not reach {host}:{port}: {error}", "unreachable", reason=code, error=error)
 
 
 def _need_paramiko() -> None:

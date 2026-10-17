@@ -77,16 +77,14 @@ def pinned_source():
 def read_key(device: TrustedDevice, state_dir: Path, step: str = "") -> str:
     """The fingerprint of the key the device presents now (a key read, no login); refused unless it is the trusted
     one. Nothing is written but, when `step` names the contact, a failure with an SSH reason code for Mojo."""
+    from orchestrator.remote import reasons
     from orchestrator.utils import ssh_trust
-    from orchestrator.runtime.device import reasons
     try:
         key = ssh_trust.fetch_host_key(device.host, device.port)
         status = ssh_trust.check_host_key(state_dir, device.host, device.port, key)
     except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
-        reason = reasons.classify(e)
-        if reason is None and isinstance(e, OSError):
-            reason = reasons.HOST_DOWN
-        if reason is not None:
+        reason = reasons.reach_code(e)
+        if reason:
             raise unreachable(device, reason, state_dir, step) from None
         raise DeviceRuntimeError(f"The host key of {device.label} could not be read ({e.__class__.__name__}).",
                                  code="failed", next="Tell the person; the framework's log has the details.") from None

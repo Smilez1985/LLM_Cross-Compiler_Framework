@@ -258,3 +258,36 @@ def test_a_real_store_keeps_the_last_problem(tmp_path):
     assert TrustedDevices(tmp_path).reach_problem(device)["code"] == reasons.PORT_CLOSED
     service.note_reach(tmp_path, device, "benchmark", "")
     assert TrustedDevices(tmp_path).reach_problem(device) is None
+
+
+# --- the one implementation (orchestrator/remote/reasons.py) ---------------------------------------------------------
+
+def test_the_old_module_is_the_moved_one():
+    """runtime/device/reasons.py is remote/reasons.py itself: a patch on either name reaches every caller."""
+    import orchestrator.runtime.device.reasons as old
+    from orchestrator.remote import reasons as moved
+    assert old is moved and reasons is moved
+
+
+@pytest.mark.parametrize("error, code", ERRORS, ids=lambda v: type(v).__name__ if isinstance(v, BaseException) else
+                         str(v))
+def test_reach_code(error, code):
+    from orchestrator.remote.reasons import reach_code
+    assert reach_code(error) == expected_reach(error, code)
+
+
+def test_the_copies_call_reach_code(monkeypatch, tmp_path):
+    """The six 'classify, else device_host_down' copies are calls of reach_code now (one patch changes them all)."""
+    from orchestrator.remote import reasons as moved
+    from orchestrator.runtime import scan_steps
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.tools import tools_deploy
+    assert scan_steps.reach_code is moved.reach_code
+    monkeypatch.setattr(moved, "reach_code", lambda error: reasons.PORT_CLOSED)
+    assert person_steps.unreachable_error(ValueError("x"), HOST, PORT).reason == reasons.PORT_CLOSED
+    assert tools_deploy.unreachable_error(SimpleNamespace(label="Shelf"), ValueError("x")).blocker == \
+        reasons.PORT_CLOSED
+    pytest.importorskip("PySide6")
+    from orchestrator.gui import host_key
+    assert host_key.unreachable_text(HOST, PORT, ValueError("x"), "en") == \
+        reasons.person_text(reasons.PORT_CLOSED, "en", address=HOST, port=PORT)

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
+from orchestrator.remote.reasons import reach_code  # noqa: F401 - the SSH reason code, also under this module's name
 from orchestrator.utils.next_steps import WithSteps
 
 LABEL_HINT = "1 to 64 printable characters"
@@ -138,16 +139,6 @@ def _note_reach(state_dir: Path, host: str, port: int, code: str) -> None:
         TrustedDevices(Path(state_dir)).note_reach_at(host, port, "probe", code)
     except Exception:  # noqa: BLE001 - bookkeeping never changes what the scan does
         pass
-
-
-def reach_code(error: BaseException) -> str:
-    """The SSH reason code of a failed connection or login ("" when it has none); an OSError means the board does not
-    answer."""
-    from orchestrator.runtime.device import reasons
-    code = reasons.classify(error)
-    if code is None and isinstance(error, OSError):
-        code = reasons.HOST_DOWN
-    return code or ""
 
 
 def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = None, *, password: Optional[str] = None,
