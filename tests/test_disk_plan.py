@@ -233,3 +233,101 @@ class TestWatchers:
         progress = BuildProgress("b1", BuildStatus.BUILDING, "")
         assert engine._run_container(SimpleNamespace(build_id="b1", build_timeout=60), progress, Container(), "") == 0
         assert not Container.killed
+
+
+# --- The one place: Core/disk_plan.py ---------------------------------------------------------------------------------
+
+class TestDiskPlanWatchdog:
+    def test_nearest_existing_and_the_old_name(self, tmp_path):
+        from orchestrator.Core import disk_plan
+        assert disk_plan.nearest_existing(tmp_path / "x" / "y") == tmp_path
+        assert disk_plan.nearest_existing(tmp_path) == tmp_path
+        assert disk_plan._existing is disk_plan.nearest_existing
+
+    def test_free_space_has_one_seam(self, tmp_path, monkeypatch):
+        from orchestrator.Core import disk_plan
+        seen = []
+        assert disk_plan.free_space(tmp_path / "new", lambda p: seen.append(p) or usage(7)).free == 7
+        assert seen == [str(tmp_path)]
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: usage(9))
+        assert disk_plan.free_space(tmp_path).free == 9, "shutil.disk_usage is looked up at each call"
+
+    def test_the_floor_is_half_the_reserve(self):
+        from orchestrator.Core import disk_plan
+        assert disk_plan.low_disk_floor(1000 * GB) == disk_plan.reserve_for(1000 * GB) // 2 == 10 * GB
+        assert disk_plan.low_disk_floor(10 * GB) == disk_plan.RESERVE_MIN // 2
+
+    def test_low_disk_text(self, tmp_path):
+        from orchestrator.Core import disk_plan
+        assert disk_plan.low_disk_text(tmp_path, "Staging", lambda p: usage(5 * 10 ** 8)) == TestLowDiskText.TEXT
+        assert disk_plan.low_disk_text(tmp_path, "Staging", lambda p: usage(10 * GB)) is None
+
+        def broken(path):
+            raise OSError("gone")
+        assert disk_plan.low_disk_text(tmp_path, "Staging", broken) is None
+
+    @pytest.mark.parametrize("error, full", [
+        (OSError(errno.ENOSPC, "x"), True), (OSError(errno.EDQUOT, "x"), True), (OSError(errno.EACCES, "x"), False),
+        ("No space left on device", True), ("Disk quota exceeded", True), ("Permission denied", False),
+        (RuntimeError("write error: No space left on device"), True), (ValueError("other"), False)])
+    def test_is_disk_full(self, error, full):
+        from orchestrator.Core import disk_plan
+        assert disk_plan.is_disk_full(error) is full
+
+    def test_is_disk_full_by_reason_code(self):
+        from orchestrator.Core import disk_plan
+        assert disk_plan.is_disk_full(disk_plan.InsufficientSpace("not enough room"))
+
+    def test_disk_full_text_by_label(self, tmp_path):
+        from orchestrator.Core import disk_plan
+        folders = {"cache": tmp_path, "output": tmp_path / "new"}
+        text = disk_plan.disk_full_text(OSError(errno.ENOSPC, "No space left on device"), folders,
+                                        lambda p: usage(2 * GB))
+        assert text == ("insufficient_resources: the disk ran full during the build (cache disk 2.0 GB free, output "
+                        "disk 2.0 GB free). [Errno 28] No space left on device")
+        assert disk_plan.disk_full_text(ValueError("other"), folders) is None
+        assert disk_plan.DISK_FULL_PHRASE in disk_plan.disk_full_text(RuntimeError("Disk quota exceeded"), {})
+
+    def test_the_watchdog_calls_on_low_once_and_ends(self, tmp_path):
+        from orchestrator.Core import disk_plan
+        calls, stop = [], threading.Event()
+        dog = disk_plan.DiskWatchdog(tmp_path, "Convert", 0.01, calls.append, stop,
+                                     check=lambda folder, what: f"{what} low in {folder.name}").start()
+        dog.thread.join(5)
+        assert not dog.thread.is_alive() and calls == [f"Convert low in {tmp_path.name}"] and dog.text == calls[0]
+        assert not stop.is_set(), "on_low decides what stops"
+
+    def test_the_watchdog_ends_when_stopped_or_when_the_caller_says_so(self, tmp_path):
+        from orchestrator.Core import disk_plan
+        calls, stop = [], threading.Event()
+        dog = disk_plan.DiskWatchdog(tmp_path, "Staging", 0.01, calls.append, stop, check=lambda f, w: None).start()
+        time.sleep(0.05)
+        stop.set()
+        dog.thread.join(5)
+        assert not dog.thread.is_alive() and calls == []
+        asked = []
+
+        def caller_says_stop():
+            asked.append(1)
+            return True
+        dog = disk_plan.DiskWatchdog(tmp_path, "Staging", 0.01, calls.append, also_stop_when=caller_says_stop,
+                                     check=lambda f, w: "never asked").start()
+        dog.thread.join(5)
+        assert not dog.thread.is_alive() and calls == [] and asked == [1]
+
+    def test_the_watchdog_checks_the_real_disk_by_default(self, tmp_path, monkeypatch):
+        from orchestrator.Core import disk_plan
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: usage(5 * 10 ** 8))
+        calls = []
+        dog = disk_plan.DiskWatchdog(tmp_path, "Staging", 0.01, calls.append, name="t").start()
+        dog.thread.join(5)
+        assert calls == [TestLowDiskText.TEXT] and dog.thread.name == "t"
+
+    def test_build_engine_delegates_to_disk_plan(self, engine, monkeypatch, tmp_path):
+        from orchestrator.Core import disk_plan
+        monkeypatch.setattr(disk_plan, "low_disk_text", lambda folder, what: f"low {what}")
+        monkeypatch.setattr(disk_plan, "disk_full_text", lambda error, folders: sorted(folders))
+        assert engine._low_disk_text(tmp_path, "Staging") == "low Staging"
+        assert engine._disk_full_text(OSError()) == ["cache", "output"]
+        engine.build_dir = tmp_path / "builds"
+        assert engine._disk_full_text(OSError()) == ["builds", "cache", "output"]
