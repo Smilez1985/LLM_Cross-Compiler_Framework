@@ -1395,6 +1395,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Der Code, der mit einem Board spricht, bekommt sein eigenes Paket, `orchestrator/remote/`**
+  (Konsolidierungskette c2-remote-base; für die Person und eine KI ändert sich nichts). Die vorhandenen
+  Umsetzungen sind dorthin umgezogen, statt eine zweite Kopie zu bekommen: die Host-Prüfung der Remote-Probe, die
+  Speicher- und die known_hosts-Schreibweise und das Lesen einer gespeicherten Adresse (`address.py`), die Grundcodes
+  aus `orchestrator/runtime/device/reasons.py` mit dem Code, den jeder Aufrufer festhält (`reasons.py`,
+  `reach_code`; der alte Pfad ist dasselbe Modul), das einzeilige Ende einer Board-Antwort, die behaltenen
+  Ausgabezeilen des Deployments und die drei Kopien des Texts eines laufenden Deployments für den Deployment-Tab,
+  `llm-cli deploy run` und das Deploy-Tool (`text.py`). Die Kopien der Benutzerprüfung (fünf), der Host-Prüfung
+  (drei), des Ersatzcodes (sechs) und des Kontakt-Eintrags für Mojo (sechs, jetzt `record_reach`) rufen die eine
+  Umsetzung auf; die Fehler der Board-Schritte teilen sich `RemoteFailure`. paramiko wird erst bei der ersten Nutzung
+  importiert, deshalb laden `orchestrator/utils/ssh_trust.py` und alles, was es importiert, keine SSH-Bibliothek, und
+  das Deployment und der Builder-Tab fragen mit einem echten Import, ob SSH geht (eine kaputte Installation galt dort
+  als vorhanden und bei der Anmeldung als fehlend).
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:

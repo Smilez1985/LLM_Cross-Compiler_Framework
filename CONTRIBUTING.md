@@ -565,6 +565,14 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 - Code adapted from another project keeps a comment that names its source ("Adapted from ...") and gets an entry
   with that project's licence in `THIRD_PARTY_NOTICES.md`.
 - Do not weaken the build sandbox, the privacy filter or the SSH trust rules.
+- **Code that talks to a board uses `orchestrator/remote/`.** Check a board's address, port or SSH user with
+  `remote.address` (`valid_host`, `valid_port`, `valid_user`; the forms come from `Endpoint`), turn a failed contact
+  into its reason code with `remote.reasons.reach_code` (`while_waiting=True` inside a wait for the board), record what
+  a contact found with `record_reach` (`orchestrator/runtime/device/trusted.py`), derive a board step's error from
+  `remote.errors.RemoteFailure`, show a deploy's progress with `remote.text.event_text` and ask
+  `remote.transport.available()` whether SSH works; never import paramiko at module level. Never write a second
+  regex, reason table or recorder next to them. The package imports only `orchestrator/utils` and
+  `orchestrator/security` (`tests/test_remote_layer.py`).
 - **Words the person reads.** Every visible text is English and German through `ui_text` (a `TEXTS` table in an
   `orchestrator/utils/l10n_*.py` module named in `TEXT_MODULES`). German says "du"; a module adds `FORMAL = {"de":
   {key: text}}` with the "Sie" form of exactly the texts that address the person (same `{placeholders}`, checked when

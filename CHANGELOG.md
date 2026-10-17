@@ -1225,6 +1225,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **The code that talks to a board starts its own package, `orchestrator/remote/`** (consolidation chain
+  c2-remote-base; nothing changes for the person or an AI). The existing implementations moved there instead of
+  getting a second copy: the host check of the remote probe, the store and known_hosts forms and the reading of a
+  stored address (`address.py`), the reason codes of `orchestrator/runtime/device/reasons.py` with the code every
+  caller records (`reasons.py`, `reach_code`; the old path is the same module), the one-line tail of a board's answer,
+  the deploy's kept output lines and the three copies of a running deploy's text for the Deployment tab, `llm-cli
+  deploy run` and the deploy tool (`text.py`). The copies of the user check (five), the host check (three), the
+  reason-code fallback (six) and the reach record for Mojo (six, now `record_reach`) call the one implementation;
+  the board steps' errors share `RemoteFailure`. paramiko is imported on first use only, so `orchestrator/utils/
+  ssh_trust.py` and everything that imports it load no SSH library, and the deploy and the Builder tab ask with a
+  real import whether SSH works (a broken installation counted as present there and as missing at the login).
 - **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
   `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
   and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the
