@@ -10,6 +10,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **`tests/test_cli_gui_parity.py`: every person-facing CLI command and option has a mouse path** (W1', round 9
+  U2): the test walks the whole command tree of `llm-cli` (294 paths: commands, subcommands and options) and reads
+  `CLI_PATHS`, `MACHINE_ONLY` and the window and tab tables of every module in `orchestrator/gui/menus/`. It fails
+  when a command or option has neither a mouse path nor a machine-only reason, when a table names a command that does
+  not exist or that two modules claim, and, in an offscreen main window, when a named object is missing or a menu
+  action cannot be reached from the menu bar (every window is opened from its menu entry; window and tab objects are
+  checked inside the window or tab their entry opens). Today 238 paths have a mouse path, 37 are machine-only with
+  their reason, none is missing. The paths that existed before wave 5 without an area module (File > Trash...,
+  `ditto setup`, `--version` in Help > About) are named in `orchestrator/gui/menus/existing.py`; the menus of every
+  area are found by their object names through one helper (`orchestrator/gui/menus/place.py`), so a translated menu
+  title never adds a second menu. CONTRIBUTING names the rule.
 - **Tools > Mojo Health Check... in the GUI** (DECISIONS W1': every action of the command line also by mouse): the
   Mojo window runs Mojo Oracle when it opens, off the GUI thread, and shows every finding as `llmcf mojo` prints it
   (the severity as text with its mark and icon, never colour alone; where with the full path, why it matters, the

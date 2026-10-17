@@ -78,7 +78,7 @@ llm-cli [OPTIONS] COMMAND [ARGS]...
 
 | Option | Meaning |
 |---|---|
-| `--version` | Print the version and exit. |
+| `--version` | Print the version and exit (in the GUI: **Help > About**). |
 | `-c, --config PATH` | Use this settings file (YAML or JSON, must exist). Its folder becomes the settings folder for this run (a `config.yml` there is read as well), and the file's own values win over it. The usual settings folder is not read then. A file that cannot be read is named on stderr and ignored; the other settings (that `config.yml`, `LLM_FRAMEWORK_*` variables, defaults) still apply. |
 | `-v, --verbose` | Log level `DEBUG`. |
 | `-q, --quiet` | Log level `ERROR` and no start banner. |
@@ -884,6 +884,9 @@ First-time setup of the tool permissions, used by Ditto and the MCP server. Asks
 
 The answers are saved in `~/.llm-framework/tool_policy.json`. Change them later with
 [`llm-cli tools permissions`](#tools-permissions).
+
+In the GUI: the framework asks the same questions at its first start; later **Tools > Tool Permissions (Ditto /
+MCP)...**.
 
 ### ditto ask
 

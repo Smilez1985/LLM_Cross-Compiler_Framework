@@ -79,7 +79,7 @@ llm-cli [OPTIONEN] BEFEHL [ARGUMENTE]...
 
 | Option | Bedeutung |
 |---|---|
-| `--version` | Version ausgeben und beenden. |
+| `--version` | Version ausgeben und beenden (in der GUI: **Help > About**). |
 | `-c, --config PATH` | Diese Einstellungsdatei verwenden (YAML oder JSON, muss existieren). Ihr Ordner wird für diesen Aufruf zum Einstellungsordner (eine `config.yml` dort wird ebenfalls gelesen), und die Werte der Datei haben Vorrang davor. Der übliche Einstellungsordner wird dann nicht gelesen. Eine Datei, die sich nicht lesen lässt, wird auf stderr genannt und übergangen; die übrigen Einstellungen (jene `config.yml`, `LLM_FRAMEWORK_*`-Variablen, Standardwerte) gelten weiter. |
 | `-v, --verbose` | Log-Level `DEBUG`. |
 | `-q, --quiet` | Log-Level `ERROR` und kein Start-Banner. |
@@ -916,6 +916,9 @@ Ersteinrichtung der Tool-Berechtigungen, die Ditto und der MCP-Server verwenden.
 
 Die Antworten werden in `~/.llm-framework/tool_policy.json` gespeichert. Später änderst du sie mit
 [`llm-cli tools permissions`](#tools-permissions).
+
+In der GUI: Das Framework stellt dieselben Fragen bei seinem ersten Start; später **Tools > Tool Permissions (Ditto /
+MCP)...**.
 
 ### ditto ask
 

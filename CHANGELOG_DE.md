@@ -10,6 +10,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **`tests/test_cli_gui_parity.py`: Jeder Befehl und jede Option der CLI für Personen hat einen Weg mit der Maus**
+  (W1', Runde 9 U2): Der Test geht den ganzen Befehlsbaum von `llm-cli` durch (294 Pfade: Befehle, Unterbefehle und
+  Optionen) und liest `CLI_PATHS`, `MACHINE_ONLY` und die Fenster- und Reitertabellen jedes Moduls in
+  `orchestrator/gui/menus/`. Er schlägt fehl, wenn ein Befehl oder eine Option weder einen Weg mit der Maus noch einen
+  Grund als reine Maschinenausgabe hat, wenn eine Tabelle einen Befehl nennt, den es nicht gibt oder den zwei Module
+  beanspruchen, und in einem Hauptfenster offscreen, wenn ein genanntes Objekt fehlt oder eine Menüaktion von der
+  Menüleiste aus nicht erreichbar ist (jedes Fenster wird über seinen Menüeintrag geöffnet; Objekte in Fenstern und
+  Reitern werden in dem Fenster oder Reiter geprüft, den ihr Eintrag öffnet). Heute haben 238 Pfade einen Weg mit der
+  Maus, 37 sind mit Grund nur für Skripte, keiner fehlt. Die Wege, die es vor Welle 5 ohne Bereichsmodul gab
+  (File > Trash..., `ditto setup`, `--version` unter Help > About), nennt `orchestrator/gui/menus/existing.py`; die
+  Menüs aller Bereiche werden über ihre Objektnamen mit einer Hilfsfunktion gefunden
+  (`orchestrator/gui/menus/place.py`), deshalb fügt ein übersetzter Menütitel nie ein zweites Menü hinzu.
+  CONTRIBUTING nennt die Regel.
 - **Tools > Mojo-Gesundheitscheck... in der GUI** (DECISIONS W1': jede Aktion der Kommandozeile auch mit der Maus):
   Das Mojo-Fenster startet Mojo Oracle beim Öffnen, außerhalb des GUI-Threads, und zeigt jeden Befund so, wie
   `llmcf mojo` ihn ausgibt (die Schwere als Text mit Zeichen und Symbol, nie nur als Farbe; wo mit dem vollen Pfad,
