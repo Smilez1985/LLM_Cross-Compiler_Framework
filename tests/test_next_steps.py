@@ -771,6 +771,17 @@ def test_every_german_step_text_that_says_du_has_its_sie_form():
     assert ns.FORMAL_LANGUAGES == localization.FORMAL_LANGUAGES
 
 
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_without_paths_leaves_the_sentences_own_words(lang):
+    """For the glossary's marking (wave-6 base): the filled places of a text are taken out, the rest stays."""
+    path = ns.mouse_path("act_ditto_settings", lang)
+    text = ns.fill_paths("Turn it on under {path:act_ditto_settings}, then build llama-server.", lang)
+    assert path in ns.known_paths(lang) and path in text
+    assert ns.without_paths(text, lang) == "Turn it on under  , then build llama-server."
+    assert ns.without_paths("Ditto answers.", lang) == "Ditto answers.", "a text without a path is unchanged"
+    assert all(" > " in p for p in ns.known_paths(lang))
+
+
 def test_a_wrong_formal_text_is_a_catalogue_problem():
     import types
     module = types.ModuleType("orchestrator.utils.next_steps.fake_area")

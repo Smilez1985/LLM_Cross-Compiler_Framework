@@ -669,6 +669,40 @@ def fill_paths(text: str, lang: Optional[str] = None) -> str:
     return PATH_RE.sub(path, text)
 
 
+_PATHS: Dict[Tuple[int, str, str], Tuple[str, ...]] = {}
+
+
+def known_paths(lang: Optional[str] = None) -> Tuple[str, ...]:
+    """Every mouse path of the catalogue with more than one element ("Ditto > AI Settings..."), in `lang`, longest
+    first: what a filled {path:...} place can read in a text. Built once per catalogue, language and form."""
+    lang = _lang(lang)
+    key = (id(catalogue()), lang, form_of_address())
+    found = _PATHS.get(key)
+    if found is None:
+        paths = set()
+        for object_name in catalogue().labels:
+            try:
+                path = mouse_path(object_name, lang)
+            except KeyError:
+                continue
+            if " > " in path:
+                paths.add(path)
+        found = _PATHS[key] = tuple(sorted(paths, key=lambda p: (-len(p), p)))
+    return found
+
+
+def without_paths(text: str, lang: Optional[str] = None) -> str:
+    """`text` with every mouse path of the catalogue taken out: the sentence's own words, for a check that must not
+    read the names of the menus a path passes through (the glossary marks terms the text uses, not a menu title such
+    as Ditto or a tab such as Deployment that a place happens to be under)."""
+    if " > " not in (text or ""):
+        return text
+    for path in known_paths(lang):
+        if path in text:
+            text = text.replace(path, " ")
+    return text
+
+
 def protect_paths(text: str, lang: Optional[str] = None) -> str:
     """fill_paths for a text that is formatted afterwards: the filled-in paths cannot carry braces anyway, so this is
     the same; kept as the name ui_text uses."""
@@ -1345,10 +1379,9 @@ def _text_belongs(key: str, steps_: Mapping[str, Step]) -> bool:
 
 
 __all__ = ["AUDIENCES", "CHANNELS", "CommandProposal", "ErrorReport", "FORMAL_LANGUAGES", "GUI_CHANNELS", "Line",
-           "NextStep",
-           "PERSON_ONLY", "PROGRAM", "Param", "ProposalRefused", "ProposalResult", "Rendered", "SHOWN_ONLY", "Step",
-           "WithSteps", "as_next_steps", "audit_proposal", "button_label", "catalogue", "catalogue_problems",
+           "NextStep", "PERSON_ONLY", "PROGRAM", "Param", "ProposalRefused", "ProposalResult", "Rendered", "SHOWN_ONLY",
+           "Step", "WithSteps", "as_next_steps", "audit_proposal", "button_label", "catalogue", "catalogue_problems",
            "checked_values", "child_argv", "clean_label", "command_line", "error_report", "fill_paths",
-           "form_of_address", "framework_python", "get", "label_chain", "menu_layout", "mouse_labels", "mouse_path", "own_text",
-           "proposal", "render", "rendered", "run_proposal", "shown_values", "step_text", "steps", "steps_of",
-           "validate", "window_of"]
+           "form_of_address", "framework_python", "get", "known_paths", "label_chain", "menu_layout", "mouse_labels",
+           "mouse_path", "own_text", "proposal", "render", "rendered", "run_proposal", "shown_values", "step_text",
+           "steps", "steps_of", "validate", "window_of", "without_paths"]

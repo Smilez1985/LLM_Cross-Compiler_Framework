@@ -410,10 +410,23 @@ def _own_text(widget: QWidget) -> str:
     return ""
 
 
+def _sentence_words(text: str, lang: Optional[str]) -> str:
+    """`text` without the mouse paths of chain a0's catalogue (filled {path:...} places): a menu title or tab name on
+    the way to a place ("Ditto > AI Settings...", "Deployment > Save...") is not a term the text uses."""
+    try:
+        from orchestrator.utils.next_steps import without_paths
+    except ImportError:
+        return text
+    try:
+        return without_paths(text, lang)
+    except Exception:  # noqa: BLE001 - marking never fails a window
+        return text
+
+
 def mark_terms(widget: QWidget, lang: Optional[str] = None) -> List[str]:
     """Marks `widget` with the glossary terms its own text and tooltip name (only terms that may be found
-    automatically); returns the ids, empty when there are none."""
-    found = glossary.find_terms(_own_text(widget) + "\n" + _tooltip_text(widget))
+    automatically, and never a word of a menu path in it); returns the ids, empty when there are none."""
+    found = glossary.find_terms(_sentence_words(_own_text(widget) + "\n" + _tooltip_text(widget), lang))
     if found:
         explain(widget, *found, lang=lang)
     return found

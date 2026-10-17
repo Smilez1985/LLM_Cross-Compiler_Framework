@@ -404,6 +404,41 @@ def test_mark_terms_finds_terms_in_labels_buttons_and_group_boxes():
     assert box.property(explain.TERMS_PROPERTY) == ["ssh_host_key"]
 
 
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_a_marked_term_in_a_text_with_a_menu_path(lang, opened):
+    """Merge seam (a0's {path:} places + f-words' hover card): a text that names a place gets the filled mouse path
+    in the label, the card and the screen reader's description, and its terms are marked; the menu titles the path
+    passes through are not terms of the text (a path under the Ditto menu got Ditto's card before, a place on the
+    Deployment tab the card of deployment)."""
+    from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+    from orchestrator.utils.localization import ui_text
+    from orchestrator.utils.next_steps import mouse_path
+    window = QWidget()
+    layout = QVBoxLayout(window)
+    off = QLabel(ui_text("storage.convert.off", lang))            # "... Turn it on under {path:act_ditto_settings}."
+    off.setToolTip(ui_text("storage.convert.off", lang))
+    proposal = QLabel(ui_text("chat.notice.proposal", lang, who="Claude", build="b1"))   # under the Ditto menu
+    kept = QLabel(ui_text("save.kept", lang, path="output"))      # {path:btn_deploy_save}, on the Deployment tab
+    named = QLabel(f"Ditto: {ui_text('storage.convert.off', lang)}")
+    for widget in (off, proposal, kept, named):
+        layout.addWidget(widget)
+    path = mouse_path("act_ditto_settings", lang)
+    assert path.startswith("Ditto > ") and path in off.text() and "{path:" not in off.text()
+    expected = ["knowledge_base"] if lang == "en" else []   # German says Wissensdatenbank (not found by name)
+    assert explain.mark_terms(off, lang) == expected
+    assert explain.mark_terms(proposal, lang) == [] and explain.mark_terms(kept, lang) == []
+    assert explain.mark_terms(named, lang)[0] == "ditto", "a term the sentence itself names stays marked"
+    explain.explain(off, "knowledge_base", lang=lang)
+    assert off.accessibleDescription().startswith(off.toolTip()) and path in off.accessibleDescription()
+    assert "{path:" not in off.accessibleDescription()
+    window.show()
+    card = explain.hover_controller().show_for(off)
+    shown = [w.text() for w in card.findChildren(QLabel)]
+    assert shown[0] == off.toolTip() and path in shown[0], "the card's context is the tooltip with the filled path"
+    assert all("{path:" not in t for t in shown)
+    assert card.terms == ["knowledge_base"]
+
+
 # --- mnemonics and accessible names ---------------------------------------------------------------------------------
 
 def test_mnemonic_text_keeps_the_templates_mnemonic_and_escapes_values():
