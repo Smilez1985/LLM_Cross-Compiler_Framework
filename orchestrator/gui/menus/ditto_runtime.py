@@ -51,6 +51,10 @@ CLI_PATHS = {
     "ditto runtime import-source": "btn_ditto_runtime_import_source",
 }
 
+# Objects that live in Ditto > Local Runtime..., and the menu action that opens it (the mode box's objects also exist
+# in Tools > Configure AI Agent (Ditto)...). Added by the wave 5 integration for tests/test_cli_gui_parity.py.
+WINDOW_OBJECTS = {name: "act_ditto_runtime_open" for name in CLI_PATHS.values() if name != "act_ditto_runtime_open"}
+
 MACHINE_ONLY = {
     "ditto runtime status --json": "machine-readable output; the window shows the same values as text",
     "ditto runtime install --yes": "skips the questions; the GUI always asks (No by default)",
@@ -101,4 +105,4 @@ def install(window: Any, menubar: Any) -> None:
     window.act_ditto_runtime = action
 
 
-__all__ = ["CLI_PATHS", "DITTO_MENU", "MACHINE_ONLY", "ditto_menu", "install", "open_window"]
+__all__ = ["CLI_PATHS", "DITTO_MENU", "MACHINE_ONLY", "WINDOW_OBJECTS", "ditto_menu", "install", "open_window"]

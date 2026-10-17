@@ -233,6 +233,7 @@ class MainOrchestrator(QMainWindow):
         help_menu = menubar.addMenu("Help")
         help_menu.setObjectName(menu_place.MENU_HELP)
         about_action = QAction("About", self)
+        about_action.setObjectName("act_help_about")   # shows the version, as `llm-cli --version` (menus/existing.py)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
@@ -658,6 +659,7 @@ class MainOrchestrator(QMainWindow):
     def _add_trash_action(self, menu):
         """File > Trash...: what deletions moved to the trash; only the person restores or empties it."""
         self.act_trash = QAction("Trash...", self)
+        self.act_trash.setObjectName("act_file_trash")   # `llm-cli trash` by mouse (menus/existing.py)
         self.act_trash.triggered.connect(self._open_trash)
         menu.addAction(self.act_trash)
 
