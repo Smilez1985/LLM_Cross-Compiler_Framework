@@ -3,7 +3,8 @@
 Each module belongs to a layer, and an import may only point to its own layer or a lower one:
 
     0 bottom        orchestrator (the package), orchestrator.utils, orchestrator.security, orchestrator.schemas
-    1 remote        orchestrator.remote (the one package that talks to a board)
+    1 remote        orchestrator.remote (the one package that talks to a board) and orchestrator.utils.ssh_trust,
+                    the SSH layer before it (it stays as remote's re-export shim)
     2 kernel        the tools modules that define no tools: registry, policy, audit, approvals, signing, spec, ...
     3 domain        orchestrator.Core, orchestrator.runtime, orchestrator.rag, orchestrator.llm, orchestrator.evals;
                     llm and rag are libraries the Core uses and never import orchestrator.Core
@@ -45,6 +46,8 @@ _PREFIX_LAYERS = (("orchestrator.utils", BOTTOM), ("orchestrator.security", BOTT
                   ("orchestrator.llm", DOMAIN), ("orchestrator.evals", DOMAIN),
                   ("orchestrator.cli", ADAPTERS), ("orchestrator.mcp_server", ADAPTERS), ("orchestrator.mcp", ADAPTERS),
                   ("orchestrator.gui", ADAPTERS), ("orchestrator.main", ADAPTERS))
+# The SSH layer that lives in utils until orchestrator/remote takes it over (it imports remote, never the bottom).
+_SSH_LAYER = ("orchestrator.utils.ssh_trust",)
 # The tools package: tool definitions are tools_* plus the modules that put them together or reach the window.
 _TOOL_DEFINITIONS = ("framework_tools", "framework_prompts", "framework_resources", "gui_bridge", "gui_surface")
 # The adapters, each one unit: the GUI's start (orchestrator.main) belongs to the GUI.
@@ -81,6 +84,8 @@ def module_name(path: Path) -> str:
 def layer_of(module: str) -> int:
     if module == "orchestrator":
         return BOTTOM
+    if module in _SSH_LAYER:
+        return REMOTE
     if _within(module, "orchestrator.tools"):
         last = module.split(".")[2] if module.count(".") >= 2 else ""
         return TOOL_DEFS if last.startswith("tools_") or last in _TOOL_DEFINITIONS else KERNEL
@@ -439,6 +444,7 @@ def test_the_layers_of_the_tools_package():
     assert layer_of("orchestrator.tools.framework_tools") == TOOL_DEFS
     assert layer_of("orchestrator.tools.gui_bridge") == TOOL_DEFS
     assert layer_of("orchestrator.remote.transport") == REMOTE
+    assert layer_of("orchestrator.utils.ssh_trust") == REMOTE and layer_of("orchestrator.utils.helpers") == BOTTOM
     assert layer_of("orchestrator.security.paths") == BOTTOM
     assert adapter_of("orchestrator.main") == adapter_of("orchestrator.gui.app") == "gui"
     assert adapter_of("orchestrator.Core.builder") is None
