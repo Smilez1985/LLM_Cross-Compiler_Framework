@@ -1,4 +1,4 @@
-Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-11
+Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-17
 
 [English](CONTRIBUTING.md) · **Deutsch**
 
@@ -581,6 +581,19 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 - Code, der aus einem anderen Projekt übernommen ist, behält einen Kommentar, der seine Quelle nennt („Adapted from
   ...“), und bekommt einen Eintrag mit der Lizenz dieses Projekts in `THIRD_PARTY_NOTICES.md`.
 - Schwäche nicht die Build-Sandbox, den Datenschutzfilter oder die Regeln für SSH-Vertrauen.
+- **Texte, die die Person liest.** Jeder sichtbare Text ist Englisch und Deutsch über `ui_text` (eine Tabelle `TEXTS`
+  in einem Modul `orchestrator/utils/l10n_*.py`, das in `TEXT_MODULES` steht). Deutsch sagt „du“; ein Modul ergänzt
+  `FORMAL = {"de": {key: text}}` mit der „Sie“-Form genau der Texte, die die Person ansprechen (gleiche
+  `{Platzhalter}`, beim Zusammenführen geprüft). Fachbegriffe bleiben Englisch; markiere sie mit dem Glossar aus
+  `orchestrator/utils/l10n_glossary.py` (ein neuer Begriff: ein Eintrag in `TERMS` mit einem https-Link und
+  `term.<id>` auf Englisch und Deutsch): `explain(widget, "kv_cache")`, `term_label("Quantization:", "quantization",
+  buddy=field)`, `help_button(term)` oder `mark_terms_in(window)` aus `orchestrator/gui/explain.py`. Fehler für die
+  Person laufen über `show_error()` / `show_exception()` (`orchestrator/gui/error_dialog.py`, auch
+  `plain.plain_error()`): eine übersetzte Zusammenfassung, ein nächster Schritt, die englischen Details eingeklappt;
+  eine leere Liste zeigt `EmptyState` (`orchestrator/gui/empty_state.py`); Größen kommen aus
+  `orchestrator/utils/sizes.py`; eine Beschriftung mit Tastenkürzel und eingesetzten Werten nutzt
+  `plain.mnemonic_text()`; `orchestrator/gui/accessible.py` verbindet Beschriftungen mit Feldern und benennt Knöpfe
+  ohne Text. Überall reiner Text: Keine Beschriftung, kein Fenster und kein Tooltip zeigt je HTML aus Daten.
 
 ---
 

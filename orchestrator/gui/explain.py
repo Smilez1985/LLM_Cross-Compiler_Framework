@@ -62,6 +62,15 @@ def open_link(url: str) -> bool:
     return bool(_open_url(url))
 
 
+def _alive(widget: QObject) -> bool:
+    """Whether the Qt object behind `widget` still exists (a window may be gone while a timer still names it)."""
+    try:
+        import shiboken6
+        return shiboken6.isValid(widget)
+    except ImportError:  # pragma: no cover - PySide6 always ships shiboken6
+        return True
+
+
 def _terms_of(widget: QWidget, prop: str = TERMS_PROPERTY) -> List[str]:
     value = widget.property(prop)
     return [str(t) for t in value] if isinstance(value, (list, tuple)) else []
@@ -195,6 +204,15 @@ class _HoverController(QObject):
         if not widget.property("glossary_watched"):
             widget.setProperty("glossary_watched", True)
             widget.installEventFilter(self)
+            widget.destroyed.connect(self._widget_gone)
+
+    def _widget_gone(self, *_args) -> None:
+        """A watched widget was deleted (its window closed): forget it, and its card goes too."""
+        if self.pending is not None and not _alive(self.pending):
+            self.show_timer.stop()
+            self.pending = None
+        if self.owner is not None and not _alive(self.owner):
+            self.close_card()
 
     def show_for(self, widget: QWidget, *, pinned: bool = False, terms: Optional[List[str]] = None) -> HoverCard:
         self.show_timer.stop()
@@ -224,7 +242,7 @@ class _HoverController(QObject):
 
     def _show_pending(self) -> None:
         widget, self.pending = self.pending, None
-        if widget is not None and widget.isVisible() and _terms_of(widget):
+        if widget is not None and _alive(widget) and widget.isVisible() and _terms_of(widget):
             self.show_for(widget)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt's name

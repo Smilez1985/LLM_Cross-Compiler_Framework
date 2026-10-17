@@ -563,7 +563,7 @@ def ui_text(key: str, lang: Optional[str] = None, **values: Any) -> str:
     """The text of key in lang (default: the UI language; English when missing) with {placeholders} filled.
     Unlike tr() it also works before the GUI created the LocalizationManager, e.g. in worker threads."""
     table = text_tables()   # German in the person's form of address (form_of_address)
-    text =table.get(lang or current_language(), {}).get(key) or table["en"].get(key, key)
+    text = table.get(lang or current_language(), {}).get(key) or table["en"].get(key, key)
     return text.format(**values) if values else text
 
 

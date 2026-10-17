@@ -100,6 +100,24 @@ def test_leaving_before_the_delay_shows_nothing_and_a_click_closes_the_card(open
     holder.close()
 
 
+def test_a_widget_deleted_while_waiting_or_showing_is_forgotten(opened):
+    import shiboken6
+    from PySide6.QtCore import QEvent
+    controller = explain.hover_controller()
+    holder, label = _shown_label("GGUF", "gguf")
+    _send(label, QEvent.Enter)
+    assert controller.pending is label
+    shiboken6.delete(holder)   # the window closes while the card waits for the delay
+    assert controller.pending is None and not controller.show_timer.isActive()
+    controller.show_timer.timeout.emit()
+    assert controller.card is None
+    holder, label = _shown_label("RKLLM", "rkllm")
+    controller.show_for(label)
+    assert controller.card is not None
+    shiboken6.delete(holder)
+    assert controller.card is None and controller.owner is None, "the card goes with its window"
+
+
 def test_the_link_opens_only_on_a_click_and_only_glossary_links(opened):
     from PySide6.QtWidgets import QPushButton
     card = explain.HoverCard(["qdrant"], lang="en")
@@ -371,10 +389,12 @@ def test_file_settings_general_changes_the_form_of_address(tmp_path, language_st
     dialog = SettingsDialog(SimpleNamespace(config=config), lang="de")
     assert dialog.tabs.tabText(0) == "Allgemein" and dialog.tabs.widget(0).objectName() == "tab_settings_general"
     assert dialog.chooser_form.form() == "du"
+    language = localization.current_language()
     dialog.chooser_form.radio_sie.click()
     assert config.get("form_of_address") == "sie" and localization.form_of_address() == "sie"
     saved = yaml.safe_load((tmp_path / "cfg" / "config.yml").read_text(encoding="utf-8"))
     assert saved["form_of_address"] == "sie"
+    assert "language" not in saved and localization.current_language() == language, "the language stays"
     assert "die Sie ab jetzt öffnen" in dialog.lbl_general_result.text()
     rows = [dialog.table_effective.item(r, 0).text() for r in range(dialog.table_effective.rowCount())]
     assert "form_of_address" in rows

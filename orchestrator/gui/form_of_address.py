@@ -12,6 +12,7 @@ every text read afterwards follows it.
 * `ask_language_and_form()`     shows the dialog; (language, form) or None when the person cancelled.
 * `apply_language_and_form()`   saves both settings in config.yml, applies the form and switches the language
                                 (LocalizationManager.language_changed, so windows that retranslate do it).
+* `apply_form()`                the same for the form of address alone (File > Settings..., General).
 * `first_run_language_and_form(config, parent)`
                                 THE FIRST-RUN HOOK: asks, saves and applies; None (nothing changed) on Cancel. The
                                 first-run guidance (chain ditto-setup) calls it.
@@ -150,6 +151,22 @@ def apply_language_and_form(config: Any, language: str, form: str, *, save: bool
     return ok
 
 
+def apply_form(config: Any, form: str, *, save: bool = True) -> bool:
+    """Uses `form` for the German texts from now on: the setting set (and saved with `save`), the form applied, and
+    the windows that follow language_changed retranslate in the language they show. The language setting is left
+    alone. Returns False when the setting could not be set or saved (it still applies until the program ends)."""
+    form = set_form_of_address(form)
+    ok = True
+    if config is not None:
+        ok = bool(config.set("form_of_address", form))
+        if ok and save:
+            ok = bool(config.save_user_config())
+    from orchestrator.utils import localization
+    if localization._instance is not None:   # the GUI's texts follow at once
+        localization._instance.language_changed.emit(localization._instance.current_lang)
+    return ok
+
+
 def first_run_language_and_form(config: Any, parent: Optional[QWidget] = None) -> Optional[Tuple[str, str]]:
     """The first-run hook: asks for the language and the form of address, saves and applies them. Returns the
     choice, or None when the person cancelled (nothing is changed then)."""
@@ -166,5 +183,5 @@ def apply_saved_form(config: Any) -> str:
     return set_form_of_address(config.get("form_of_address", "du") if config is not None else None)
 
 
-__all__ = ["FormOfAddressChooser", "LANGUAGES", "LanguageAndFormDialog", "apply_language_and_form",
+__all__ = ["FormOfAddressChooser", "LANGUAGES", "LanguageAndFormDialog", "apply_form", "apply_language_and_form",
            "apply_saved_form", "ask_language_and_form", "first_run_language_and_form"]
