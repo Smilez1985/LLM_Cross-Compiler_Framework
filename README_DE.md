@@ -191,7 +191,7 @@ verändern oder löschen sie nie, sie sagen, dass es sie gibt und wie du sie ent
 - **Über MCP verbundene KI-Apps** (Claude Code, Claude Desktop, VS Code) starten das Python der Installation, aus
   der sie eingerichtet wurden. Bevor du die alte Installation entfernst, richte sie aus der neuen ein:
   `llm-cli mcp config` mit dem Python der neuen Installation ([Schnellstart: KI-Clients über
-  MCP](#schnellstart-ki-clients-über-mcp-claude-code-claude-desktop-vs-code)) oder **Security > Verbindungen zu
+  MCP](#schnellstart-ki-clients-über-mcp-claude-code-claude-desktop-vs-code)) oder **Sicherheit > Verbindungen zu
   KI-Apps (MCP)...**.
 - **Der Framework-Container:** Ein Image, das du jetzt baust, hat seinen Programmordner unter
   `/opt/llm-cross-compiler-framework`. `make` behält einen Container von vor der Umbenennung, solange er Targets oder

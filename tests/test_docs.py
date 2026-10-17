@@ -626,3 +626,17 @@ def test_the_cloud_build_check_finds_the_old_wording():
     assert cloud_builds_planned(kept) == []
     summary = ["- **Planned:** recipes as target templates, and builds in the cloud on AWS."]
     assert cloud_builds_planned(summary) == summary, "a README summary that plans them is found too"
+
+
+# --- the README's section on the repository rename names the window by its mouse path -----------------------------
+
+@pytest.mark.parametrize("rel, lang", [("README.md", "en"), ("README_DE.md", "de")])
+def test_the_rename_section_names_the_mcp_window_by_its_mouse_path(rel, lang):
+    """Merge seam (review w6-base-v): the rename (round 10b) was written on development before chain a0 translated
+    the menu titles, so the German README sent the person to "Security > Verbindungen zu KI-Apps (MCP)...", a path
+    the German GUI does not show (it says "Sicherheit"). The path is the one the GUI builds from its own labels."""
+    from orchestrator.utils.next_steps import mouse_path
+    text = " ".join((REPO_ROOT / rel).read_text(encoding="utf-8").split())
+    start = text.index("AI apps connected over MCP" if lang == "en" else "Über MCP verbundene KI-Apps")
+    item = text[start:text.index(" - **", start)]   # the list item, up to the next one
+    assert f"**{mouse_path('act_tools_mcp_connections', lang)}**" in item, item
