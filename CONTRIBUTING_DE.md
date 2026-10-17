@@ -650,8 +650,9 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   gegen die echte CLI). Die Adresse oder das Login-Konto eines Boards ist ein `Param(..., private=True)`: Eine KI
   liest es nie, ebenso wenig einen Pfad.
 - `tests/test_no_command_texts.py` schlägt bei einem Befehl oder einem von Hand geschriebenen Pfad in einem Text der
-  Person fehl und bei mehr Befehlen oder Pfaden in einem anderen Literal, als `tests/data/command_text_baseline.json`
-  erlaubt (nur nach unten; die Integration zieht es an, eine Änderung hebt es nie an). `tests/test_cli_gui_parity.py`
+  Person fehl (auch in seiner Sie-Form im `FORMAL` eines Moduls) und bei mehr Befehlen oder Pfaden in einem anderen
+  Literal, als `tests/data/command_text_baseline.json` erlaubt (nur nach unten; die Integration zieht es an, eine
+  Änderung hebt es nie an). `tests/test_cli_gui_parity.py`
   prüft jeden Schritt gegen die CLI, die Tools und die Fenster und jede Mausbeschriftung gegen die echten Menüs und
   Schaltflächen.
 

@@ -51,6 +51,18 @@ def person_texts() -> Dict[str, Dict[str, str]]:
     return LocalizationManager.TRANSLATIONS
 
 
+def formal_texts() -> Dict[str, Dict[str, str]]:
+    """The "Sie" forms of the l10n modules (their FORMAL tables, Q1): what a person who chose Sie reads instead of
+    the du text, so the same guard reads them."""
+    from orchestrator.utils.localization import FORMAL_TEXTS
+    return FORMAL_TEXTS
+
+
+def person_problems() -> List[str]:
+    """text_problems of every text a person reads in the GUI: the du tables and their formal overlay."""
+    return text_problems(person_texts()) + [f"formal {p}" for p in text_problems(formal_texts())]
+
+
 def text_problems(texts: Dict[str, Dict[str, str]]) -> List[str]:
     """Commands and hand-written menu paths in the person's texts; placeholders that name no known object."""
     from orchestrator.utils.next_steps import PATH_RE, mouse_labels
@@ -132,6 +144,20 @@ def baseline_problems(current: Dict[str, Dict[str, int]], baseline: Dict[str, Di
 
 def test_the_persons_texts_name_no_command_and_no_hand_written_path():
     assert text_problems(person_texts()) == []
+    assert formal_texts()["de"], "the l10n modules' Sie forms are read too"
+    assert person_problems() == []
+
+
+def test_the_text_guard_reads_the_formal_overlay(monkeypatch):
+    """Merge seam (review w6-base-v): f-words' formal overlay (FORMAL of an l10n module) is not in the du tables, so
+    a Sie text that named a command or hand-wrote a menu path passed both guards; the formal chain writes one for
+    every German text that addresses the person."""
+    from orchestrator.utils import localization
+    planted = {"words.help.tip": "Was ist {term}? Öffnen Sie Extras > Wartung > Mojo... (F1)",
+               "words.error.details_hint": "Führen Sie 'llmcf mojo' aus."}
+    monkeypatch.setitem(localization.FORMAL_TEXTS, "de", {**localization.FORMAL_TEXTS["de"], **planted})
+    flagged = {p.split(":")[0] for p in person_problems()}
+    assert flagged == {"formal de words.help.tip", "formal de words.error.details_hint"}, person_problems()
 
 
 def test_the_catalogues_own_texts_name_no_command_and_no_hand_written_path():
@@ -143,15 +169,19 @@ def test_the_catalogues_own_texts_name_no_command_and_no_hand_written_path():
     assert catalogue().formal["de"] and text_problems(catalogue().formal) == []
 
 
-def test_every_path_placeholder_is_filled_in_both_languages():
+def test_every_path_placeholder_is_filled_in_both_languages(monkeypatch):
+    from orchestrator.utils import localization
     from orchestrator.utils.localization import ui_text
     from orchestrator.utils.next_steps import PATH_RE
     texts = person_texts()
     keys = {key for lang in ("en", "de") for key, text in texts[lang].items() if PATH_RE.search(text)}
     assert len(keys) >= 30, "the hand-written paths became placeholders"
-    for key in keys:
-        for lang in ("en", "de"):
-            assert "{path:" not in ui_text(key, lang), (key, lang)
+    keys |= {key for key, text in formal_texts()["de"].items() if PATH_RE.search(text)}
+    for form in ("du", "sie"):   # German in either form of address (a Sie text has the same places, Q1)
+        monkeypatch.setattr(localization, "_form_of_address", form)
+        for key in keys:
+            for lang in ("en", "de"):
+                assert "{path:" not in ui_text(key, lang), (key, lang, form)
 
 
 def test_the_text_guard_bites():

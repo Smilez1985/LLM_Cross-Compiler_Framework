@@ -28,8 +28,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Advanced, Tools with Knowledge and Maintenance; translated titles with mnemonics, every entry named and labelled
   where it is created, one layout table, `retranslate_menus()`. The hand-written menu paths of the texts (30 keys in
   English and German) became `{path:<objectName>}`, filled from the live labels; `tests/test_no_command_texts.py`
-  guards the texts and counts the rest against a baseline that only goes down. The catalogue's German texts follow
-  the chosen form of address: a module's `FORMAL` table holds the "Sie" form of each text that differs.
+  guards the texts, their "Sie" forms included, and counts the rest against a baseline that only goes down. The
+  catalogue's German texts follow the chosen form of address: a module's `FORMAL` table holds the "Sie" form of each
+  text that differs.
 - **What Ditto and AI apps do becomes entries of the chat feed, in every process** (wave 6, DECISIONS round 9 U1,
   consequence b): `orchestrator/Core/activity.py` writes one signed entry per event, from the process that did the
   work (the GUI, `llm-cli`, every stdio MCP server and the HTTP child): a call that changed something (the new
