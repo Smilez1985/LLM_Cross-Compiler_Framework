@@ -186,3 +186,12 @@ TEXTS = {
         "step.models.show.what": "Listet die Modellstufen mit Datei, Größe, Lizenz und ob jede heruntergeladen ist.",
     },
 }
+
+# The "Sie" form of the German texts above that address the person (Q1); only the texts that differ.
+FORMAL = {
+    "de": {
+        "step.models.download.what": "Lädt das festgelegte Modell der Stufe {tier} herunter (mehrere GB) und prüft "
+                                     "seine Prüfsumme; seine Lizenz, aufgeführt unter "
+                                     "{path:act_ditto_models_open}, gilt für Sie.",
+    },
+}
