@@ -12,7 +12,7 @@ import pytest
 
 from orchestrator.tools import facts_catalog as catalog
 from orchestrator.utils.l10n_facts import TEXTS
-from orchestrator.utils.localization import LocalizationManager, ui_text
+from orchestrator.utils.localization import TRANSLATIONS, ui_text
 from orchestrator.utils.next_steps import fill_paths
 
 # Words a layperson does not know, or that name the framework's insides; never in the short layer.
@@ -59,7 +59,7 @@ def test_short_texts_have_no_ids_or_jargon():
 
 def test_the_texts_are_merged_into_the_framework_texts():
     for key in ("warning.disk_tight", "blocker.disk_full", "action.free_disk", "summary.title"):
-        assert key in LocalizationManager.TRANSLATIONS["en"] and key in LocalizationManager.TRANSLATIONS["de"]
+        assert key in TRANSLATIONS["en"] and key in TRANSLATIONS["de"]
     assert ui_text("warning.disk_tight", "de", free_after_gb=3.5, reserve_gb=2.0).startswith("Der Speicherplatz")
 
 
