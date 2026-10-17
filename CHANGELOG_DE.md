@@ -1395,6 +1395,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Ein Weg, Builds zu starten, für CLI, GUI und KI-Aufrufer**: `llmcf build start` und **Start Build** im
+  Builder-Tab reihen ihren Build über `BuildService.start_build` ein, den Weg, den der MCP-Server und Ditto schon
+  nutzten, statt jeweils einen eigenen Auftrag an den Orchestrator zu bauen. CLI und GUI prüfen einen Auftrag deshalb
+  gleich, bevor etwas startet: Ein Auftrag ohne Modell, ein lokales Modell, das es nicht gibt (oder das nicht wie ein
+  Modell aussieht), ein Kalibrierungsdatensatz, der keine Datei ist, und eine Revision für ein lokales Modell werden
+  mit dem Grund abgelehnt (die CLI endet mit Code 2, die GUI zeigt ihn in einem Hinweisfenster), statt später im
+  Build zu scheitern. Was jedes Fenster einstellt, bleibt wie es war: Priorität, Optimierung und Zielfrage der CLI,
+  Priorität, parallele Builds und Build-Ordner der GUI, ein Target ohne Capabilities wird ungeprüft gebaut, und
+  deine eigenen Builds lehnt das Warteschlangen-Limit für KI-Aufrufer nie ab. Die Verfolgungsschleife der CLI liest
+  den Build über denselben Dienst.
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:

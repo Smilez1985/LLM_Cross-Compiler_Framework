@@ -488,3 +488,127 @@ class TestServiceSubmission:
             service.start_build(self.request(model="not a repo"), local_paths=True)
         assert raised.value.code == "invalid_value" and raised.value.field == "model"
         assert service.framework.orchestrator.submitted == []
+
+    # --- what the one path added for the person's own callers -----------------------------------------------
+
+    def test_the_persons_priority_folder_and_description(self, service, tmp_path):
+        from orchestrator.Core.orchestrator import PriorityLevel
+        service.start_build(self.request(), local_paths=True, priority="urgent", output_dir=str(tmp_path / "out"),
+                            parallel_builds=True, description="Builder Tab Job")
+        (req,) = service.framework.orchestrator.submitted
+        assert (req.priority, req.output_base_dir, req.parallel_builds, req.description) == (
+            PriorityLevel.URGENT, str(tmp_path / "out"), True, "Builder Tab Job")
+
+    @pytest.mark.parametrize("option", [{"output_dir": "/anywhere"}, {"priority": "critical"}])
+    def test_an_ai_caller_never_chooses_the_folder_or_the_priority(self, service, option):
+        from orchestrator.Core.build_service import BuildServiceError
+        with pytest.raises(BuildServiceError) as raised:
+            service.start_build(self.request(), owner="mcp#a", **option)
+        assert raised.value.code == "not_supported" and raised.value.field == next(iter(option))
+        assert service.framework.orchestrator.submitted == []
+
+    def test_an_unknown_priority_is_refused(self, service):
+        from orchestrator.Core.build_service import BuildServiceError
+        with pytest.raises(BuildServiceError, match="Unknown priority"):
+            service.start_build(self.request(), local_paths=True, priority="asap")
+
+    def test_a_target_without_capabilities_is_built_unchecked_only_for_the_person(self, make_framework, tmp_path):
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        from test_foundation import FakeOrchestrator
+        from test_review_capabilities_paths import framework_with_targets
+        fm = framework_with_targets(make_framework, tmp_path / "targets")
+        fm.orchestrator = FakeOrchestrator()
+        service = BuildService(fm)
+        service.start_build(self.request(target="myjetson", board=" Orin-NX ", quantization="Custom_Q"),
+                            local_paths=True)
+        (req,) = fm.orchestrator.submitted
+        assert (req.targets, req.target_board, req.quantization_options) == (["MyJetson"], "orin-nx", ["Custom_Q"])
+        with pytest.raises(BuildServiceError, match="declares no capabilities"):
+            service.start_build(self.request(target="MyJetson"))
+        with pytest.raises(BuildServiceError, match="Unknown format") as raised:
+            service.start_build(self.request(target="MyJetson", format="hf"), local_paths=True)
+        assert raised.value.field == "format" and len(fm.orchestrator.submitted) == 1
+
+    def test_capability_problems_are_kept_one_by_one(self, service):
+        from orchestrator.Core.build_service import BuildServiceError
+        with pytest.raises(BuildServiceError) as raised:
+            service.start_build(self.request(format="rknn", board="rk3588", quantization="int8"), local_paths=True)
+        assert raised.value.problems and " ".join(raised.value.problems) == str(raised.value)
+
+    def test_a_request_without_a_model_is_refused_in_plain_words(self):
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        with pytest.raises(BuildServiceError) as raised:
+            BuildService.request_in(model="", target="Rockchip", format="gguf")
+        assert raised.value.code == "invalid_value" and raised.value.field == "model"
+        assert "validation error" not in str(raised.value)
+
+    def test_request_state_is_the_orchestrators_own(self, booted_framework):
+        from orchestrator.Core.build_service import BuildService
+        from test_review_capabilities_paths import CliOrchestrator
+        booted_framework.orchestrator = CliOrchestrator()
+        service = BuildService(booted_framework)
+        rid = service.start_build(self.request(), local_paths=True).request_id
+        assert service.request_state(rid) is booted_framework.orchestrator._workflows[rid]
+        assert service.request_state("req_unknown") is None
+
+    def test_a_service_bound_to_another_orchestrator_uses_it(self, service):
+        from orchestrator.Core.build_service import BuildService
+        from test_foundation import FakeOrchestrator
+        own = FakeOrchestrator()
+        BuildService(service.framework, orchestrator=own).start_build(self.request(), local_paths=True)
+        assert len(own.submitted) == 1 and service.framework.orchestrator.submitted == []
+
+
+class TestOnePath:
+    """The CLI and the Builder tab queue builds only through BuildService.start_build (and its own checks)."""
+
+    def test_no_window_or_command_submits_to_the_orchestrator_itself(self):
+        import ast
+        offenders = []
+        for path in [REPO_ROOT / "orchestrator" / "cli.py", *sorted((REPO_ROOT / "orchestrator" / "gui").rglob("*.py")),
+                     *sorted((REPO_ROOT / "orchestrator" / "tools").rglob("*.py"))]:
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.Attribute) and node.attr == "submit_build_request":
+                    offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")
+        assert offenders == []
+
+    def test_the_cli_starts_through_the_service(self, cli_harness, monkeypatch):
+        from orchestrator.Core.build_service import BuildService
+        seen = []
+        original = BuildService.start_build
+
+        def start_build(service, request, **options):
+            seen.append(options)
+            return original(service, request, **options)
+
+        monkeypatch.setattr(BuildService, "start_build", start_build)
+        assert cli_harness.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "--priority", "low").code == 0
+        assert seen and seen[0]["local_paths"] is True and seen[0]["priority"] == "low"
+        assert seen[0].get("owner", "") == "" and len(cli_harness.submitted) == 1
+
+    def test_the_cli_reports_a_refusal_of_the_service_and_submits_nothing(self, cli_harness):
+        result = cli_harness.invoke("build", "start", "-m", "not a repo", "-t", "Rockchip")
+        assert result.code == 2 and "neither an existing local model nor a Hugging Face repo id" in result.out
+        assert cli_harness.submitted == []
+
+    @pytest.mark.usefixtures("qapp")
+    def test_the_builder_tab_starts_through_the_service_and_shows_a_refusal(self, booted_framework, gui_messages,
+                                                                           monkeypatch):
+        from orchestrator.Core.build_service import BuildService
+        from test_review_capabilities_paths import make_tab, submit
+        tab = make_tab(booted_framework)
+        try:
+            seen = []
+            original = BuildService.start_build
+            monkeypatch.setattr(BuildService, "start_build",
+                                lambda service, request, **o: seen.append(o) or original(service, request, **o))
+            assert submit(tab) is not None
+            assert seen[0]["local_paths"] is True and seen[0]["parallel_builds"] is True
+            tab.model_input.setEditText("")
+            assert submit(tab) is None, "no model: nothing is queued"
+            assert gui_messages[-1][0] == "warning" and "model" in gui_messages[-1][1]
+            tab.model_input.setEditText("/no/such/model.gguf")
+            assert submit(tab) is None
+            assert "neither an existing local model" in gui_messages[-1][1]
+        finally:
+            tab._build_timer.stop()
