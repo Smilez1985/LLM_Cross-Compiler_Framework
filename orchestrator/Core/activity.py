@@ -31,9 +31,11 @@ thread; the GUI moves it to its own thread). `flush()` waits until every queued 
 framework shutdown) writes what is queued and stops.
 """
 
+import atexit
 import re
 import threading
 import time
+import weakref
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, List, Mapping, Optional, Tuple, Union
@@ -56,6 +58,7 @@ PERSON_ACTORS = frozenset({"gui", "cli", ""})
 BLOCKED_QUIET = 30.0    # seconds: the same refusal of the same caller is written once in this time
 QUEUE_SIZE = 1000       # rows waiting to be written; more are dropped (logged), the audit log has them all
 REMEMBERED_JOBS = 256   # job id -> window of the call that started it, for that job's end
+EXIT_FLUSH = 3.0        # seconds a process that ends without the framework's shutdown (llm-cli) writes what is queued
 
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _KEY = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
@@ -279,6 +282,7 @@ class ActivityProducer:
         self._quiet: Dict[Tuple[str, str, str], float] = {}
         self._dropped = 0
         self.job_service: Any = None
+        _LIVE.add(self)
 
     # --- wiring ----------------------------------------------------------------------------------------------------
 
@@ -451,6 +455,21 @@ class ActivityProducer:
             self._cv.notify_all()
         self.flush(timeout)
         self._closed = True
+
+
+# Producers of this process: a process that ends without the framework's shutdown (a `llm-cli` command) still writes
+# the rows it queued, at most EXIT_FLUSH seconds in all (the writer thread is a daemon and would stop mid-queue).
+_LIVE: "weakref.WeakSet[ActivityProducer]" = weakref.WeakSet()
+
+
+@atexit.register
+def _flush_at_exit() -> None:
+    deadline = time.monotonic() + EXIT_FLUSH
+    for producer in list(_LIVE):
+        try:
+            producer.flush(max(0.0, deadline - time.monotonic()))
+        except Exception:  # noqa: BLE001 - the process ends anyway
+            pass
 
 
 def attach_activity(framework: Any) -> ActivityProducer:

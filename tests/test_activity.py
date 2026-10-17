@@ -673,7 +673,28 @@ producer.close()
 """
 
 
+ENDING_CHILD = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[2])
+from orchestrator.Core.activity import ActivityProducer
+from orchestrator.Core.chat_feed import FeedStore
+key = bytes.fromhex(sys.stdin.read().strip())
+producer = ActivityProducer(FeedStore(Path(sys.argv[1]) / "state", key=key), program="cli")
+for _ in range(5):
+    producer.on_job_end({"job_id": "job_k3j2h1g0f9e8d7c6", "kind": "crawl", "owner": "ditto", "state": "done"})
+# the process ends here, without the framework's shutdown (as a llm-cli command does)
+"""
+
+
 class TestOtherProcesses:
+
+    def test_a_process_that_ends_without_shutdown_still_writes_its_rows(self, tmp_path):
+        child = subprocess.run([sys.executable, "-c", ENDING_CHILD, str(tmp_path), str(REPO_ROOT)], input=KEY.hex(),
+                               capture_output=True, text=True, timeout=120, env=dict(os.environ))
+        assert child.returncode == 0, child.stderr[-3000:]
+        written = rows(FeedStore(tmp_path / "state", key=KEY))
+        assert [(e.kind, e.program) for e in written] == [("job_result", "cli")] * 5
 
     def test_a_call_and_a_job_end_in_an_mcp_process_reach_the_guis_watcher(self, tmp_path, qapp):
         from orchestrator.gui.chat_panel.watcher import FeedWatcher
