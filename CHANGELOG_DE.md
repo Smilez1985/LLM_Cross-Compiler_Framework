@@ -2288,8 +2288,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Text, den eine Leserin oder ein Leser nicht sieht, kommt nie in die Wissensbasis** (Recon P1): Text, den eine
   Webseite vor der lesenden Person versteckt (Inline-`display:none` oder `visibility:hidden`, eine Schriftgröße oder
   Deckkraft nahe null, Boxen außerhalb des Bildschirms oder weggeschnitten, Text in seiner eigenen Hintergrundfarbe,
-  das Attribut `hidden`, `aria-hidden="true"`, `<template>`, `<noscript>`), kam unverändert in die Wissensbasis und
-  mit ihm jede Anweisung an eine KI, die er enthielt. Deep Ingest lässt diese Elemente jetzt weg, bevor es Text und
+  das Attribut `hidden`, `aria-hidden="true"`, `<template>`, `<noscript>` und ein CDATA-Abschnitt, den der Umwandler
+  sogar zu Seitentext machte), kam unverändert in die Wissensbasis und mit ihm jede Anweisung an eine KI, die er
+  enthielt. Deep Ingest lässt diese Elemente jetzt weg, bevor es Text und
   Links einer Seite liest (eine Regel, `hidden_kind` in `rag/html_text.py`, die der Schritt für Seitenelemente des
   Crawlers nutzt, also folgt der Crawler auch keinem Link, den niemand sieht); der inaktive Bereich eines Tab-Widgets
   bleibt. Jeder Text von außen wird danach schon so gereinigt gespeichert, wie ihn ein Modell zu sehen bekommt (NFKC,

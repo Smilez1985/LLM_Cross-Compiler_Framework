@@ -1795,8 +1795,8 @@ eine KI zu verstecken (Prompt Injection). Deshalb speichert Deep Ingest nur, was
   `text-indent`, ein `clip` oder `clip-path`, der keine sichtbare Fläche übrig lässt, eine Box von 1 px oder weniger
   mit `overflow:hidden`, Text in derselben Farbe wie sein eigener Hintergrund); Elemente mit dem Attribut `hidden`
   (nicht `hidden="until-found"`, das die Suche des Browsers aufdeckt) oder mit `aria-hidden="true"`; `<template>` und
-  `<noscript>`. Der inaktive Bereich eines Tab-Widgets bleibt (`role="tabpanel"` auf einer Seite mit Tabs): Du öffnest
-  ihn mit einem Klick.
+  `<noscript>`; CDATA-Abschnitte, die ein Browser wie Kommentare behandelt. Der inaktive Bereich eines Tab-Widgets
+  bleibt (`role="tabpanel"` auf einer Seite mit Tabs): Du öffnest ihn mit einem Klick.
 - **Danach gereinigt wie jeder Text von außen,** bevor er gespeichert wird, damit der gespeicherte Auszug das ist, was
   eine KI später zu sehen bekommt (nicht erst im Moment, in dem sie ihn sieht): Unicode normalisiert (NFKC),
   unsichtbare Zeichen entfernt (Zeichen ohne Breite, Unicode-Tag-Zeichen, Bidi-Steuerzeichen und ähnliche) und
@@ -1804,8 +1804,9 @@ eine KI zu verstecken (Prompt Injection). Deshalb speichert Deep Ingest nur, was
   (`orchestrator/utils/untrusted.py`). Der Titel der Seite wird ebenfalls gereinigt. Der Text eines PDFs bekommt
   dieselbe Reinigung.
 - **Wissenspakete** folgen derselben Regel, wenn sie HTML enthalten: Eine Seite, die ein ganzes HTML-Dokument ist,
-  wird wie eine gecrawlte Seite gelesen, und HTML im Markdown eines Pakets verliert seine versteckten Elemente (HTML in
-  Code-Spans und Code-Blöcken wird gezeigt, nicht dargestellt, und bleibt); danach dieselbe Reinigung. Das gilt für
+  wird wie eine gecrawlte Seite gelesen, und HTML im Markdown eines Pakets verliert seine versteckten Elemente und
+  alles, wovon ein Browser nichts zeigt (Kommentare, CDATA-Abschnitte, Verarbeitungsanweisungen); HTML in Code-Spans
+  und Code-Blöcken wird gezeigt, nicht dargestellt, und bleibt. Danach dieselbe Reinigung. Das gilt für
   jede Seite, die aus einem Paket stammt, gleich wie sie gespeichert wird.
 - **Du siehst, wie viel herausgefallen ist:** **Tools > Wissensquellen...** und `llm-cli knowledge sources` haben die
   Spalte „Ausgelassener versteckter Text“ (CLI: „Hidden text left out“), Art für Art (zum Beispiel „display:none 2,

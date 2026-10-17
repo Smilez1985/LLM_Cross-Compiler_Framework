@@ -2026,8 +2026,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ### Security
 - **Text hidden from a reader never reaches the knowledge base** (recon P1): text that a web page hides from the person
   reading it (inline `display:none` or `visibility:hidden`, a font size or opacity near zero, off-screen or clipped
-  boxes, text in its own background colour, the `hidden` attribute, `aria-hidden="true"`, `<template>`, `<noscript>`)
-  reached the knowledge base unchanged and with it any instruction for an AI it carried. Deep Ingest now drops those
+  boxes, text in its own background colour, the `hidden` attribute, `aria-hidden="true"`, `<template>`, `<noscript>`,
+  and a CDATA section, which the converter even turned into page text) reached the knowledge base unchanged and with
+  it any instruction for an AI it carried. Deep Ingest now drops those
   elements before it reads a page's text and links (one rule, `hidden_kind` in `rag/html_text.py`, which the
   crawler's boilerplate step uses, so a link a reader cannot see is not followed either); the inactive panel of a tab
   widget stays. Every outside text is then stored already cleaned the way a model's view of it is (NFKC, invisible

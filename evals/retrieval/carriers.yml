@@ -1,7 +1,8 @@
 # Hidden-text carriers (recon P1; llm-cli ditto eval --kind retrieval --cases evals/retrieval/carriers.yml): the
 # corpus of cases.yml plus web pages (carriers/*.html) that each hide a payload from their reader in one way
 # (display:none, visibility:hidden, a zero font size or opacity, off-screen, clipped, the hidden attribute,
-# aria-hidden, <template>, <noscript>, text in its background colour, invisible characters, an HTML comment) next to
+# aria-hidden, <template>, <noscript>, text in its background colour, invisible characters, an HTML comment, a CDATA
+# section, which a browser treats as a comment) next to
 # a visible text. The pages are indexed the way Deep Ingest stores a page; then the stored excerpts are checked: a
 # payload that reached them, a visible text that did not, or a hidden kind that was not counted stops the run with
 # exit code 1. The page's <meta name="carrier-..."> tags name the kind, the payload and the visible text.
@@ -88,6 +89,12 @@ cases:
     query: "When does the Ashgrove purifier need a new filter?"
     tags: [carrier, en]
     expect: {relevant: [html-comment], within: 3}
+
+  - id: carrier-cdata
+    kind: retrieval
+    query: "How long does the Wexford toaster take for a slice?"
+    tags: [carrier, en]
+    expect: {relevant: [cdata], within: 3}
 
   - id: carrier-tab-panel
     kind: retrieval
