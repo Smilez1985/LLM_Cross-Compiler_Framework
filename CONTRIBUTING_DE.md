@@ -587,9 +587,13 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   `{Platzhalter}`, beim Zusammenführen geprüft). Fachbegriffe bleiben Englisch; markiere sie mit dem Glossar aus
   `orchestrator/utils/l10n_glossary.py` (ein neuer Begriff: ein Eintrag in `TERMS` mit einem https-Link und
   `term.<id>` auf Englisch und Deutsch): `explain(widget, "kv_cache")`, `term_label("Quantization:", "quantization",
-  buddy=field)`, `help_button(term)` oder `mark_terms_in(window)` aus `orchestrator/gui/explain.py`. Fehler für die
-  Person laufen über `show_error()` / `show_exception()` (`orchestrator/gui/error_dialog.py`, auch
-  `plain.plain_error()`): eine übersetzte Zusammenfassung, ein nächster Schritt, die englischen Details eingeklappt;
+  buddy=field)`, `help_button(term)` oder `mark_terms_in(window)` aus `orchestrator/gui/explain.py`. Eine markierte
+  Beschriftung braucht einen Buddy (F1 in ihrem Feld öffnet die Karte) oder einen `help_button()`;
+  `accessibility_problems(window)` nennt eine, die keine Taste erreicht. `find_terms` liest „KV-Cache“ wie „KV cache“,
+  findet aber kein deutsches Wort für einen Begriff („Wissensbasis“): markiere es über die ID. Fehler für die Person
+  laufen über `show_error()` / `show_exception()` (`orchestrator/gui/error_dialog.py`, auch `plain.plain_error()`,
+  nur im GUI-Thread): eine übersetzte Zusammenfassung, ein nächster Schritt (ein Satz oder Schritte aus dem Katalog
+  von Chain a0), die englischen Details eingeklappt, jeder Text des Fensters ohne Geheimnisse;
   eine leere Liste zeigt `EmptyState` (`orchestrator/gui/empty_state.py`); Größen kommen aus
   `orchestrator/utils/sizes.py`; eine Beschriftung mit Tastenkürzel und eingesetzten Werten nutzt
   `plain.mnemonic_text()`; `orchestrator/gui/accessible.py` verbindet Beschriftungen mit Feldern und benennt Knöpfe

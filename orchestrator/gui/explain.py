@@ -8,9 +8,12 @@ a small window of its own, not a QToolTip: it stays while the mouse is on the wi
 be clicked; it goes away a moment after the mouse left both. A link opens in the web browser only when the person
 clicks it, and only a link of the glossary (https). Every text is plain text.
 
-For the keyboard: F1 on a marked widget (or on the field of a marked label) opens the same card as a popup that takes
-the focus (Escape closes it), and help_button() gives a focusable "?" button that does the same. Screen readers read
-the explanation and the link from the widget's accessible description.
+For the keyboard: F1 on a marked widget (or on the field of a marked label, or in a field inside a marked group box)
+opens the same card as a popup that takes the focus (Escape closes it); F1 there wins over a window shortcut on F1
+(Help). help_button() gives a focusable "?" button that does the same; a marked label without a buddy needs one
+(accessible.accessibility_problems finds it). Screen readers read the window's own description of the widget (or its
+tooltip), then the explanation and the link, from the widget's accessible description. The card belongs to the
+window of the widget it explains, so it also works over a modal dialog.
 
 API for the windows (each area chain marks the terms of its own windows):
 
@@ -47,7 +50,8 @@ TERMS_PROPERTY = "glossary_terms"       # the glossary ids a widget is marked wi
 F1_PROPERTY = "glossary_f1_terms"       # the ids F1 opens on a marked label's field
 LANG_PROPERTY = "glossary_lang"
 URL_PROPERTY = "glossary_url"
-OWN_DESCRIPTION_PROPERTY = "glossary_own_description"   # the widget's description before it was marked
+OWN_DESCRIPTION_PROPERTY = "glossary_own_description"   # the description the window itself gave the widget
+SET_DESCRIPTION_PROPERTY = "glossary_set_description"   # the description explain() set last
 
 
 def _open_url(url: str) -> bool:
@@ -98,19 +102,25 @@ def description(terms: Iterable[str], lang: Optional[str] = None) -> str:
 
 
 def _own_description(widget: QWidget) -> str:
-    """What the window itself says about `widget` for screen readers, remembered the first time it is marked: its
-    accessible description, else its tooltip (Qt reads the tooltip only while no description is set, so marking must
-    not silence it)."""
-    own = widget.property(OWN_DESCRIPTION_PROPERTY)
-    if own is None:
-        own = widget.accessibleDescription() or _tooltip_text(widget)
-        widget.setProperty(OWN_DESCRIPTION_PROPERTY, own)
-    return str(own)
+    """What the window itself says about `widget` for screen readers: an accessible description the window set (kept
+    until the window sets another one), else its tooltip as it is now (Qt reads the tooltip only while no description
+    is set, so marking must not silence it; after a language switch the new tooltip is read)."""
+    current = widget.accessibleDescription()
+    if current and current != widget.property(SET_DESCRIPTION_PROPERTY):   # the window's own text, not ours
+        widget.setProperty(OWN_DESCRIPTION_PROPERTY, current)
+    return str(widget.property(OWN_DESCRIPTION_PROPERTY) or "") or _tooltip_text(widget)
 
 
 def _describe(widget: QWidget, terms: List[str], lang: Optional[str]) -> None:
     """The widget's own description first, then the explanation and link of each term."""
-    widget.setAccessibleDescription(" ".join(filter(None, (_own_description(widget), description(terms, lang)))))
+    text = " ".join(filter(None, (_own_description(widget), description(terms, lang))))
+    widget.setProperty(SET_DESCRIPTION_PROPERTY, text)
+    widget.setAccessibleDescription(text)
+
+
+def _plain_f1(event: QEvent) -> bool:
+    """F1 itself (also from a keypad), not Shift+F1, Ctrl+F1 and the like: those stay for the window's shortcuts."""
+    return event.key() == Qt.Key_F1 and not (event.modifiers() & ~Qt.KeypadModifier)
 
 
 class HoverCard(QFrame):
@@ -279,11 +289,10 @@ class _HoverController(QObject):
             return False
         if not isinstance(obj, QWidget):
             return False
-        if kind == QEvent.ShortcutOverride and event.key() == Qt.Key_F1 \
-                and (_terms_of(obj) or _terms_of(obj, F1_PROPERTY)):
+        if kind == QEvent.ShortcutOverride and _plain_f1(event) and (_terms_of(obj) or _terms_of(obj, F1_PROPERTY)):
             event.accept()   # a marked field keeps F1 for its card, even when a window action (Help) uses F1
             return True
-        if kind == QEvent.KeyPress and event.key() == Qt.Key_F1:
+        if kind == QEvent.KeyPress and _plain_f1(event):
             terms = _terms_of(obj) or _terms_of(obj, F1_PROPERTY)
             if terms:
                 self.show_for(obj, pinned=True, terms=terms)

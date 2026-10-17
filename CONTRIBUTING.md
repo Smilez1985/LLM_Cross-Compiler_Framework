@@ -560,9 +560,12 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   merged). Technical terms stay English; mark them with the glossary of `orchestrator/utils/l10n_glossary.py` (a new
   term: an entry in `TERMS` with an https link, and `term.<id>` in English and German): `explain(widget, "kv_cache")`,
   `term_label("Quantization:", "quantization", buddy=field)`, `help_button(term)` or `mark_terms_in(window)` from
-  `orchestrator/gui/explain.py`. Errors for the person go through `show_error()` / `show_exception()`
-  (`orchestrator/gui/error_dialog.py`, also `plain.plain_error()`): a localized summary, one next step, the English
-  details folded away; an empty list shows `EmptyState` (`orchestrator/gui/empty_state.py`); sizes come from
+  `orchestrator/gui/explain.py`. A marked label needs a buddy (F1 in its field opens the card) or a `help_button()`;
+  `accessibility_problems(window)` names one that no key reaches. `find_terms` reads "KV-Cache" like "KV cache", but
+  a German word for a term ("Wissensbasis") is not found: mark it by id. Errors for the person go through
+  `show_error()` / `show_exception()` (`orchestrator/gui/error_dialog.py`, also `plain.plain_error()`, GUI thread
+  only): a localized summary, one next step (a sentence or chain a0's catalogue steps), the English details folded
+  away, every text of the box redacted; an empty list shows `EmptyState` (`orchestrator/gui/empty_state.py`); sizes come from
   `orchestrator/utils/sizes.py`; a label with a keyboard mnemonic and inserted values uses `plain.mnemonic_text()`;
   `orchestrator/gui/accessible.py` pairs labels with fields and names icon-only buttons. Plain text everywhere: no
   label, box or tooltip ever draws HTML from data.

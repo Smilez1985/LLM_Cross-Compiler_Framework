@@ -2684,8 +2684,9 @@ erklärt sie dort, wo sie stehen (unveröffentlicht).
   Doku von llama.cpp und ggml, die RKLLM- und RKNN-Repositories von Rockchip, modelcontextprotocol.io) oder dieses
   Handbuch. Die Karte bleibt, solange die Maus auf der Beschriftung oder auf der Karte ist, damit du den Link erreichst;
   er öffnet sich erst in deinem Webbrowser, wenn du ihn anklickst. Mit der Tastatur drückst du **F1** im Feld (oder den
-  kleinen Knopf **?**, wo ein Fenster einen hat); **Escape** schließt die Karte. Screenreader lesen die Erklärung und
-  den Link aus der Beschreibung des Felds. Das Glossar hat 74 Begriffe (zum Beispiel GGUF, Quantization und ihre Typen
+  kleinen Knopf **?**, wo ein Fenster einen hat); **Escape** schließt die Karte. Die Karte funktioniert auch in einem
+  Dialog, der auf deine Antwort wartet. Screenreader lesen die Erklärung und den Link aus der Beschreibung des Felds,
+  nach dem, was das Fenster selbst über das Feld sagt. Das Glossar hat 74 Begriffe (zum Beispiel GGUF, Quantization und ihre Typen
   wie Q4_K_M, Importance Matrix, Calibration Dataset, KV Cache, RKLLM, RKNN, NPU, Qdrant, MCP, SSH Host Key,
   Fingerprint, Digest, Keyring, Standing Approval); die Beschriftungen **Format** und **Quantization** im Builder
   nutzen es jetzt, die übrigen Fenster folgen.
@@ -2693,7 +2694,7 @@ erklärt sie dort, wo sie stehen (unveröffentlicht).
   einen nächsten Schritt (einen Satz oder einen Knopf). Die englischen technischen Details (die Meldung des Frameworks,
   ein Traceback) sind unter **Technische Details** eingeklappt; **Details kopieren** kopiert sie ohne Geheimnisse und
   mit `~` statt deines Home-Ordners, für einen Fehlerbericht oder um Ditto zu fragen, der sie dir auf Deutsch erklären
-  kann.
+  kann. Kein Teil des Fensters zeigt ein Geheimnis, auch nicht dort, wo er die Meldung eines Fehlers wiederholt.
 - **„du“ oder „Sie“:** Deutsche Texte sprechen dich mit „du“ an. **Datei > Einstellungen…** hat einen Reiter
   **Allgemein**, in dem du stattdessen „Sie“ wählst; die Wahl wird gespeichert (Einstellung `form_of_address`, `du`
   oder `sie`) und gilt sofort für jeden Text, der danach gelesen wird. Ein Fenster, das schon offen ist, behält seine
