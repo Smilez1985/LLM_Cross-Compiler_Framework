@@ -473,14 +473,24 @@ def page_markdown(html: str) -> Tuple[str, str, Dict[str, int]]:
     return title, text, removed
 
 
-_HTML_DOCUMENT = re.compile(r"\s*(?:<!--.*?-->\s*)*<(?:!doctype\s+html|html|head|body)[\s>]", re.IGNORECASE | re.DOTALL)
+_HTML_START = re.compile(r"<(?:!doctype\s+html|html|head|body)[\s>]", re.IGNORECASE)
 _CODE_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 
 
 def is_html_document(text: str) -> bool:
-    """Whether a text is a whole HTML page (a doctype, <html>, <head> or <body> first), not Markdown with some HTML."""
-    return bool(_HTML_DOCUMENT.match(text or ""))
+    """Whether a text is a whole HTML page (a doctype, <html>, <head> or <body> first, after any comments), not Markdown
+    with some HTML. One pass over the leading comments, so a page of many comments costs no more than its length."""
+    text, position = text or "", 0
+    while True:
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if not text.startswith("<!--", position):
+            return bool(_HTML_START.match(text, position))
+        end = text.find("-->", position + 4)
+        if end < 0:
+            return False
+        position = end + 3
 
 
 def _mask_code(text: str) -> str:

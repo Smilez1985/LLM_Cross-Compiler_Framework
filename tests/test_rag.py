@@ -1432,6 +1432,18 @@ class TestHiddenCarrierVariants:
             assert "<!--" not in kept and sanitize_untrusted(kept) == kept
         assert clean_untrusted(page) == (sanitize_untrusted(page), {"html_comments": 2})   # unchanged by default
 
+    def test_untrusted_pack_text_is_cleaned_in_linear_time(self):
+        """A pack page is untrusted: many leading comments made is_html_document backtrack exponentially (26 took
+        seconds, 40 days), and many unclosed markers must not cost more than the text's length either."""
+        from orchestrator.rag.html_text import is_html_document
+        from orchestrator.utils.untrusted import clean_untrusted
+        start = time.monotonic()
+        assert not is_html_document("<!--a-->" * 26 + "x")
+        assert is_html_document("<!--a--> \n" * 26 + "<html>") and not is_html_document("<!-- open <html>")
+        assert clean_untrusted("<!--" * 20000 + "x", keep_after_open_comment=True) == ("x", {})
+        assert clean_untrusted("<!" * 5000 + "--" * 5000 + "y", keep_after_open_comment=True) == ("y", {})
+        assert time.monotonic() - start < 2
+
     def test_deep_ingest_reads_pages_the_way_a_browser_does(self, make_rag, monkeypatch):
         import requests
         from requests.structures import CaseInsensitiveDict
