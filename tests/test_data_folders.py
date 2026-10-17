@@ -5,6 +5,7 @@ install.sh / install.bat drop their unused data folder and check the network ove
 keeps what the user and the framework created in the installation."""
 
 import getpass
+import json
 import os
 import re
 import shutil
@@ -490,6 +491,94 @@ class TestInstallSh:
 
         assert run.returncode == 0, run.stdout + run.stderr
         assert not (new / "configs" / "config.yml").exists() and not (new / "configs" / "config.yml").is_symlink()
+
+    @staticmethod
+    def old_vault(old: Path, memory_keyring, secrets: dict) -> Path:
+        """A credential vault as versions before 3.0.0 kept it: configs/secrets.store in the installation folder,
+        encrypted with the shared key, which is still under the keyring service name from before the rename."""
+        from cryptography.fernet import Fernet
+        from orchestrator.Core import vault_key
+        vault_key.reset_probe()
+        shared = Fernet.generate_key()
+        memory_keyring.store[(vault_key.LEGACY_KEYRING_SERVICE, vault_key.KEY_ENTRY)] = shared.decode()
+        store = old / "configs" / "secrets.store"
+        store.write_text(json.dumps({name: Fernet(shared).encrypt(value.encode()).decode()
+                                     for name, value in secrets.items()}))
+        store.chmod(0o600)
+        return store
+
+    @staticmethod
+    def secrets_of(config_dir: Path, state: Path):
+        from orchestrator.Core.secrets_manager import SecretsManager
+        sm = SecretsManager(SimpleNamespace(config=SimpleNamespace(user_state_dir=state, config_dir=config_dir)))
+        assert sm.initialize(), sm.storage_error
+        return sm
+
+    def test_a_vault_from_before_3_0_in_the_old_folder_is_copied_and_taken_over(self, tmp_path, memory_keyring):
+        """Before 3.0.0 the credential vault was configs/secrets.store in the installation folder; the framework takes
+        it over into the per-user folder from the installation's configs/ once. Under the new folder name it stayed
+        behind in the old installation (and the note said the credentials were in ~/.llm-framework), so install.sh
+        copies it like config.yml, and a hand-written configs/framework.yml too."""
+        old, new = self.old_and_new(tmp_path)
+        token = "hf_" + "OldInstallFolderToken0123456789"
+        store = self.old_vault(old, memory_keyring, {"hf_token": token})
+        (old / "configs" / "framework.yml").write_text("log_level: DEBUG\n")
+        before = self.tree(old)
+
+        run = self.run_old_steps(old, new, tmp_path)
+
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert self.tree(old) == before, "the installer never changes or deletes the old installation"
+        copied = new / "configs" / "secrets.store"
+        assert copied.read_bytes() == store.read_bytes()
+        assert copied.stat().st_mode & 0o077 == 0, "the copy is readable by its owner only"
+        assert (new / "configs" / "framework.yml").read_text() == "log_level: DEBUG\n"
+        assert "configs/secrets.store" in run.stdout
+        assert self.secrets_of(new / "configs", tmp_path / "state").get_secret("hf_token") == token
+
+    def test_a_vault_taken_over_already_brings_back_no_deleted_secret(self, tmp_path, memory_keyring):
+        """3.0.0 took the old vault over already (recorded by path and content): its copy in the new installation adds
+        nothing, so a secret deleted since then does not come back."""
+        old, new = self.old_and_new(tmp_path)
+        key = "sk-" + "proj-" + "OldInstallFolderKey0123456789"
+        token = "hf_" + "OldInstallFolderToken0123456789"
+        self.old_vault(old, memory_keyring, {"hf_token": token, "openai_api_key": key})
+        first = self.secrets_of(old / "configs", tmp_path / "state")
+        assert first.get_secret("hf_token") == token and first.delete_secret("hf_token")
+
+        run = self.run_old_steps(old, new, tmp_path)
+
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert (new / "configs" / "secrets.store").exists()
+        again = self.secrets_of(new / "configs", tmp_path / "state")
+        assert again.get_secret("hf_token") is None and again.get_secret("openai_api_key") == key
+
+    def test_an_existing_or_linked_vault_is_never_overwritten_or_followed(self, tmp_path, memory_keyring):
+        old, new = self.old_and_new(tmp_path)
+        self.old_vault(old, memory_keyring, {"hf_token": "hf_" + "OldInstallFolderToken0123456789"})
+        (new / "configs").mkdir()
+        (new / "configs" / "secrets.store").write_text("{}")
+        elsewhere = tmp_path / "elsewhere.yml"
+        elsewhere.write_text("not a settings file")
+        (old / "configs" / "framework.yml").symlink_to(elsewhere)
+
+        run = self.run_old_steps(old, new, tmp_path)
+
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert (new / "configs" / "secrets.store").read_text() == "{}"
+        assert not os.path.lexists(new / "configs" / "framework.yml")
+
+    def test_the_note_says_that_ai_apps_set_up_before_still_start_the_old_installation(self, tmp_path):
+        """Claude Desktop, VS Code or Claude Code set up from the old installation start its Python: removing the old
+        folder breaks them unless they are set up again from the new installation first."""
+        old, new = self.old_and_new(tmp_path)
+
+        run = self.run_old_steps(old, new, tmp_path)
+
+        assert run.returncode == 0, run.stdout + run.stderr
+        out = run.stdout
+        assert "llm-cli mcp config" in out and "MCP" in out
+        assert out.index("llm-cli mcp config") < out.index(f"sudo rm -rf {old}"), "said before how to remove it"
 
     def test_without_an_old_installation_nothing_is_said_or_copied(self, tmp_path):
         old, new = self.old_and_new(tmp_path)

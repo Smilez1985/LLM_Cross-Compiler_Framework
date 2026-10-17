@@ -433,6 +433,15 @@ class TestWindowsScripts:
         assert not [line for line in lines if line.endswith("(")]
         assert not [line for line in lines if line.lower().startswith("echo") and "&" in line]
 
+    def test_install_bat_says_that_ai_apps_set_up_before_still_start_the_old_installation(self):
+        """AI apps connected over MCP from the old installation start its Python: the note about the old installation
+        says to set them up again from the new one before the uninstaller removes the old one."""
+        install = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+        note = install[install.index("# The installation under the old name"):]
+        assert "MCP" in note and "llm-cli mcp config" in note
+        assert ".venv\\Scripts\\python.exe -m orchestrator.cli mcp config" in note, "llm-cli is not on the PATH"
+        assert note.index("mcp config") < note.index("Uninstall-LLM-Cross-Compiler-Framework.bat")
+
     def test_install_bat_finds_its_folder_without_a_script_path(self):
         # Its PowerShell part runs through Invoke-Expression, where $MyInvocation.MyCommand.Path is empty: the folder
         # it was started in (the batch part changes into it first) is the source folder then.

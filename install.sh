@@ -213,25 +213,34 @@ old_installation_exists() {
     [ -d "$OLD_INSTALL_DIR" ] && [ "$(realpath -m -- "$OLD_INSTALL_DIR")" != "$(realpath -m -- "$INSTALL_DIR")" ]
 }
 
-# Die Einstellungen (configs/config.yml) der früheren Installation, wenn die neue noch keine hat: kopiert, nie
+# Die persönlichen Dateien in configs/ der früheren Installation, die es in der neuen noch nicht gibt: kopiert, nie
 # verschoben, und als die Person, die installiert (nicht als root: ein Link dort kann so nichts lesen, was ihr nicht
-# ohnehin gehört). Eine vorhandene Datei wird nie überschrieben. Auf Linux liegen die Einstellungen im
-# Installationsordner, und ohne sie passte etwa die gewählte Art, den Tresor zu schützen (secret_storage), nicht mehr.
-OLD_SETTINGS_COPIED=0
+# ohnehin gehört). Eine vorhandene Datei wird nie überschrieben, ein Link nie verfolgt. Auf Linux liegen sie im
+# Installationsordner: config.yml (ohne sie passte etwa die gewählte Art, den Tresor zu schützen, secret_storage,
+# nicht mehr), eine selbst geschriebene framework.yml und secrets.store, der Tresor für Zugangsdaten einer Version vor
+# 3.0.0. Ihn übernimmt das Framework beim ersten Start einmal nach ~/.llm-framework; einen schon übernommenen erkennt
+# es am Inhalt wieder und übernimmt nichts davon noch einmal, ein seither gelöschter Eintrag kommt also nicht zurück.
+OLD_CONFIG_FILES=(config.yml framework.yml secrets.store)
+OLD_SETTINGS_COPIED=()
 adopt_old_settings() {
     old_installation_exists || return 0
-    local old="$OLD_INSTALL_DIR/configs/config.yml" new="$INSTALL_DIR/configs/config.yml"
-    if [ ! -f "$old" ] || [ -L "$old" ] || [ -e "$new" ] || [ -L "$new" ]; then return 0; fi
-    local real_user="${SUDO_USER:-${USER:-}}"
+    local real_user="${SUDO_USER:-${USER:-}}" name old new
     local as_user=(sudo -u "$real_user")
     if ! command -v sudo &> /dev/null; then as_user=(runuser -u "$real_user" --); fi
     if [ -z "$real_user" ] || [ "$real_user" = "root" ]; then as_user=(); fi
-    if ${as_user[@]+"${as_user[@]}"} mkdir -p "$INSTALL_DIR/configs" \
-        && ${as_user[@]+"${as_user[@]}"} cp -P -n -- "$old" "$new"; then
-        OLD_SETTINGS_COPIED=1
-    else
-        log_warn "Die Einstellungen aus $old ließen sich nicht kopieren; die neue Installation beginnt mit den Standardwerten."
-    fi
+    for name in "${OLD_CONFIG_FILES[@]}"; do
+        old="$OLD_INSTALL_DIR/configs/$name"
+        new="$INSTALL_DIR/configs/$name"
+        if [ ! -f "$old" ] || [ -L "$old" ] || [ -e "$new" ] || [ -L "$new" ]; then continue; fi
+        if ${as_user[@]+"${as_user[@]}"} mkdir -p "$INSTALL_DIR/configs" \
+            && ${as_user[@]+"${as_user[@]}"} cp -P -n -- "$old" "$new"; then
+            # Der Tresor bleibt nur für seine Besitzerin lesbar, auch wenn das Original es nicht war.
+            if [ "$name" = "secrets.store" ]; then ${as_user[@]+"${as_user[@]}"} chmod go-rwx -- "$new"; fi
+            OLD_SETTINGS_COPIED+=("configs/$name")
+        else
+            log_warn "$old ließ sich nicht kopieren; die neue Installation beginnt ohne diese Datei."
+        fi
+    done
 }
 
 # Sagt in klaren Worten, dass es die frühere Installation noch gibt, was übernommen wurde und was nicht, und wie man
@@ -247,8 +256,13 @@ old_installation_note() {
     echo "   Der Installer hat sie nicht verändert und löscht sie nicht. Die neue Installation liegt in $INSTALL_DIR;"
     echo "   'llm-framework' startet ab jetzt die neue. Dein persönlicher Ordner (~/.llm-framework: Zugangsdaten,"
     echo "   Werkzeugrechte, Wissensbasis, Verlauf) gehört keiner der beiden und gilt weiter, wie er ist."
-    if [ "$OLD_SETTINGS_COPIED" = "1" ]; then
-        echo "   Deine Einstellungen (configs/config.yml) wurden in die neue Installation kopiert; das Original bleibt."
+    # Nur mit Einträgen ausgewertet: Ein leeres Feld gilt unter 'set -u' in bash vor 4.4 als ungesetzt.
+    if [ "${#OLD_SETTINGS_COPIED[@]}" -gt 0 ]; then
+        echo "   Diese Dateien wurden in die neue Installation kopiert; die Originale bleiben: ${OLD_SETTINGS_COPIED[*]}"
+        if [[ " ${OLD_SETTINGS_COPIED[*]} " == *" configs/secrets.store "* ]]; then
+            echo "   configs/secrets.store ist der Tresor für Zugangsdaten einer Version vor 3.0.0; das Framework"
+            echo "   übernimmt ihn beim ersten Start nach ~/.llm-framework."
+        fi
     fi
     if [ "${#kept[@]}" -gt 0 ]; then
         echo "   Nicht übernommen, weil groß (bei Bedarf selbst kopieren, z. B. cp -a $OLD_INSTALL_DIR/output $INSTALL_DIR/):"
@@ -256,6 +270,9 @@ old_installation_note() {
     fi
     echo "   Ebenso nicht übernommen: Targets, die du selbst angelegt hast, und installierte Packs unter targets/ und"
     echo "   community/ dort. Kopiere sie bei Bedarf in dieselben Ordner von $INSTALL_DIR."
+    echo "   KI-Apps, die du über MCP verbunden hast (Claude Desktop, VS Code, Claude Code), starten noch die alte"
+    echo "   Installation. Richte sie vor dem Entfernen aus der neuen ein (llm-cli mcp config, siehe README):"
+    echo "   cd $INSTALL_DIR && .venv/bin/python -m orchestrator.cli mcp config"
     echo "   Entfernen, wenn du nichts mehr daraus brauchst: erst ansehen, was darin liegt (ls -la $OLD_INSTALL_DIR),"
     echo "   dann selbst: sudo rm -rf $OLD_INSTALL_DIR"
 }
