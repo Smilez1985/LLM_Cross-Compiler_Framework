@@ -122,6 +122,117 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Boards als vertraut und gekoppelt (im Audit-Log), so dass das Board in der Benchmark-Liste erscheint und
   KI-Deployments es nennen können; CLI und GUI teilen einen Schritt im Kern (`scan_steps.scan_device`). **Import from
   File** fragt nach dem Namen des Boards (`--label`).
+- **Build > Targets…** (GUI-Parität, jede CLI-Aktion mit der Maus): jedes Target mit seiner ID (dem Wert für
+  `--target`), Name, Architektur, Boards, Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“ (oder dass
+  sein Fähigkeiten-Block ungültig ist), aus der Abfrage von `llm-cli targets list`. **Target prüfen** (dort und neben
+  der Target-Liste des Builders, neben der neuen Schaltfläche **Targets…**) prüft das gewählte Target wie `llm-cli
+  targets validate`, über eine Kernfunktion (`TargetManager.validate`, die jetzt auch die CLI aufruft), mit frisch
+  gelesener `target.yml`, und nennt jeden Schemafehler mit seinem Feld. Dieselbe Prüfung läuft, nachdem der
+  Modul-Assistent ein Target angelegt hat und nach der Installation eines Targets aus dem Community Hub, und ihr
+  Ergebnis wird angezeigt.
+- **Build > Build-Verlauf…**: jeder Build jedes Programms (GUI, CLI, MCP-Server), alle wie `llm-cli build status
+  --all`, auch gescheiterte, abgebrochene, unterbrochene und wartende; **Details anzeigen** (oder ein Doppelklick)
+  zeigt einen Build wie `build status REQUEST_ID`: seine Anfrage mit Fehlern und Hinweisen, jeden Versuch mit seinem
+  Ausgabeordner (voller Pfad) und Fehler und die Korrekturvorschläge der KI-Clients, als KI-generiert markiert. CLI und
+  Fenster lesen eine Abfrage (`orchestrator/Core/build_history.py`). Die Statusleiste nennt für Builds anderer
+  Programme jetzt dieses Fenster statt eines Befehls.
+- **Datei > Einstellungen…**: die wirksamen Einstellungen und woher jeder Wert kommt, Geheimnisse geschwärzt (wie
+  `llm-cli config show`), und die Repository-Überschreibungen mit der Variablen, zu der jede wird, zum Hinzufügen und
+  Entfernen (wie `llm-cli config repos`; Entfernen fragt zuerst, „Nein“ ist die Vorgabe). Beide nutzen ein Kernmodul
+  (`orchestrator/Core/settings_view.py`), das jetzt auch die CLI aufruft; ein Speichern, das scheitert, lässt die
+  Einstellung auch im laufenden Programm unverändert.
+- **Der Builder bietet, was die CLI bietet**: Ein Target ohne Fähigkeiten bekommt jedes Format von `--format` (nicht
+  nur GGUF, RKLLM und RKNN), mit dem Hinweis, dass seine Boards, Formate und Quantisierungen nicht geprüft werden (für
+  ein Target mit ungültigem Fähigkeiten-Block sagt der Hinweis das, und **Target prüfen** nennt jeden Fehler); die
+  Optimierungsstufe `FAST`; eine Liste **Priorität** (`--priority`, Vorgabe normal; ein fehlgeschlagener kritischer
+  Build beendet die Pipeline).
+- **Modul-Assistent: Beschreibung und Anbieter und Modell für eine Analyse**: Die Hardware-Seite hat ein Feld
+  **Beschreibung** (`llm-cli module create` fragt danach; leer ergibt „Target for <Name>“). Nur du füllst es aus: Bei
+  einem Modul, an dem eine KI mitgewirkt hat, steht deine Beschreibung vorn, und der Hinweis des Frameworks, dass das
+  Modul KI-generiert und ungetestet ist, folgt. Die erste Seite bietet Anbieter und Modell **nur für diese Analyse**
+  (`module generate-ai --provider --model`): Ditto läuft damit über `DittoManager.for_run`, das jetzt auch `generate-ai`
+  in der CLI nutzt, und die gespeicherten KI-Einstellungen bleiben unverändert. `for_run` nutzt dieselbe Prüfung
+  des Anbieters und dieselbe Überlagerung der Einstellungen wie die Wahl für eine Frage im Chat-Bereich und Ditto >
+  Bewertung... (`orchestrator/Core/ai_override.py`): ein Code-Weg für jede solche Wahl.
+- **Ditto > Lokale Laufzeit...: jeder Befehl `llm-cli ditto runtime` mit der Maus** (W1'): Ein Fenster zeigt, was
+  `ditto runtime status` zeigt (Hardware, Betriebsart, der Build in Gebrauch und seine Prüfungen, Probleme und der Rat
+  zum Neubau, der Plan für den eigenen Build, das fertige Archiv, der Server mit Adresse, Modell und Kontext, das
+  empfohlene und das gewählte Modell, die Protokolldatei), und erledigt `install` (**llama-server bauen...** mit
+  GPU-Backend, Ort des Builds und Compile-Jobs; **Offizielles fertiges Archiv installieren...** mit „Noch einmal
+  herunterladen“), `ensure` (Betriebsart Automatisch, Direkt oder In Docker, dieselben Build-Optionen und das
+  Modell-Angebot danach mit Größe und Lizenz, ohne Haken wie `--no-model`), **Starten** (Modellstufe oder die
+  Empfehlung, Kontextlänge, Entladen im Leerlauf; das früher gewählte Modell wird genannt) und **Stoppen**, **Build
+  importieren...** und **Build exportieren...**, **Ältere Builds entfernen...** (der Lösch-Dialog mit der ganzen
+  Liste, nichts angehakt, „Nein“ als Vorgabe), **Quellcode exportieren...** (mit optionalem Spiegel) und **Quellcode
+  importieren...**. Es laufen dieselben Kernfunktionen wie in der CLI (die Status-Übersicht, das Modell-Angebot und
+  die llama.cpp-Festlegung sind jetzt Kernfunktionen, die auch die CLI aufruft; ihre Ausgabe bleibt gleich); Builds,
+  Downloads, Docker und der Serverstart laufen im Hintergrund mit einer Fortschrittszeile und Abbrechen, wo sich der
+  Befehl unterbrechen lässt; jede Frage der CLI wird mit denselben Worten und „Nein“ als Vorgabe gestellt (auch die
+  vor dem Holen des festgelegten Quellcodes); in der ganzen GUI läuft immer nur eine Aufgabe der Laufzeit. Der Bereich
+  „Dittos lokaler Server“ (hier und in den KI-Einstellungen) lehnt die installierte Art nicht mehr ab: **Prüfen und
+  reparieren...** prüft sie und installiert sie nur neu, wenn sie sich nicht nutzen lässt (zum Beispiel ein alter
+  llama.cpp-Build nach einem Update), und Installieren und Wechseln nehmen jetzt die Build-Optionen mit; der Wechsel
+  behält die Platzprüfung und das vollständige Entfernen der alten Art. Sein neuer Knopf **Status und mehr...** öffnet
+  das Fenster aus den KI-Einstellungen. Ein gestoppter lokaler Server und ein abgelehntes Holen des Quellcodes nennen
+  jetzt neben dem Befehl auch den Weg in der GUI.
+- **Tools > Knowledge Snapshots... sagt vorher, ob der nächste Snapshot passt, und zeigt den Speicher in jedem
+  Zustand** (W1'): Die Zeile zur Festplatte sagt jetzt mit den Worten von `llm-cli knowledge snapshots`, wenn der
+  nächste Snapshot (etwa so groß wie der neueste) nicht passen würde, sodass Deep Ingest, eine Wiederherstellung und ein
+  Paket-Import abgelehnt würden, oder nur wenig Platz ließe. Die Zeile zum Speicher erscheint in jedem Zustand, so wie
+  `llm-cli knowledge storage` ihn zeigt (Qdrant Edge mit seinem Ordner, der alte Speicher mit seinem Grund, ein
+  Qdrant-Server, Qdrant Edge, das sich nicht laden lässt), und **Jetzt umwandeln** wird auch vor dem ersten Versuch
+  angeboten, unter der Bedingung von `llm-cli knowledge storage convert`. CLI und Fenster rufen dieselben neuen
+  Kernfunktionen auf (`knowledge_snapshots.snapshot_disk`, `migration.storage_status`, `storage_lines` und
+  `convert_refusal`); die Ausgabe der CLI bleibt gleich, außer bei einem eingestellten Qdrant-Server (siehe Behoben).
+- **Tools > Wissensquellen...: jede Quelle der Wissensbasis per Maus** (W1'): Ein neues Fenster listet jede Quelle mit
+  ihrer Art, der Lizenz und dem Urheberrechtshinweis, die sie zeigt, und was ein Wissenspaket von ihr mitnähme (voller
+  Text, Link und kurze Fakten, nicht exportiert) und warum, mit einem Filter nach Art (Webseiten, Seiten aus
+  Wissenspaketen, Dokumente des Frameworks, sonstige). Es liest die Liste im Hintergrund über das neue Kernmodul
+  `knowledge_sources`, das auch `llm-cli knowledge sources` nutzt, sodass beide dieselben Worte zeigen. Die Verdrahtung
+  des Menüs liegt in `orchestrator/gui/menus/knowledge.py`, dessen `CLI_PATHS` den Mausweg jedes `knowledge`- und
+  `zoo`-Befehls nennt.
+- **Community Hub: jede Aktion von `llm-cli zoo` per Maus** (W1'): **Details...** (oder ein Doppelklick) zeigt, was
+  `zoo show` zeigt (Lizenz, Vertrauensstufe, installierter Ordner, Download-Adresse, Größe, sha256, die `recipe.yml`
+  eines installierten Rezepts); **Import file...** nimmt eine Passphrase (nie gespeichert oder angezeigt) und die
+  Schlüsseldateien der einzigen Absender, die angenommen werden, wie `zoo install --file --passphrase / --from`;
+  **Installierte Pakete prüfen** und **Paketdatei prüfen...** führen `zoo verify` ohne und mit Datei aus;
+  **Exportieren...** exportiert jeden Target-Ordner (auch einen vorhandenen oder installierten), einen fertigen Build
+  oder die Wissensbasis mit ihrer Paket-ID, offen oder an die Schlüssel in Schlüsseldateien bzw. mit einer Passphrase
+  verschlüsselt, in einen Ordner deiner Wahl; **Meine öffentlichen Schlüssel...** zeigt `zoo keys` mit Kopieren und
+  Speichern.... Jede ruft die Kernfunktion der CLI auf (neu: `CommunityManager.details`, `exportable_targets`,
+  `read_public_key_files`, `needs_passphrase`), im Hintergrund; Fragen behalten „Nein“ als Vorgabe, und ein
+  verschlüsseltes Paket wird nie eingereicht.
+- **Ditto > Lokale Modelle...: `llm-cli ditto models list` und `download` mit der Maus** (W1'): jede Stufe von
+  Dittos festgelegtem Katalog mit Datei, Größe, Lizenz, ob sie heruntergeladen (und geprüft) ist, und ihrem Hinweis
+  (empfohlen für diesen Computer, gewählt, auf Wunsch, nicht festgelegt), dem Grund der Empfehlung und dem vollen
+  Modellordner; **Empfohlenes Modell herunterladen...** oder **Ausgewähltes herunterladen...** nach der Frage der CLI
+  (Repository, Datei, Lizenz, Größe, Ordner; „Nein“ als Vorgabe), im Hintergrund mit Fortschritt und **Abbrechen** (der
+  Teil bleibt für die Fortsetzung). Der empfohlene Download nimmt die Empfehlung, die das Fenster zeigt (mit der Liste
+  im Hintergrund gelesen), damit keine Hardware-Prüfung im GUI-Thread läuft. Die Zeilen des Katalogs und das Modell
+  eines Downloads sind Kernfunktionen, die auch die CLI aufruft (ihre Ausgabe bleibt gleich). Die Installationsfrage
+  der Laufzeit in den KI-Einstellungen nennt dieses Fenster statt des CLI-Befehls. Ein Download ist eine Aufgabe von
+  Dittos lokaler Laufzeit: Er wartet, solange in Ditto > Lokale Laufzeit... oder in den KI-Einstellungen ein Build,
+  ein Serverstart oder ein anderer Download läuft, und diese warten auf ihn.
+- **Ditto > Bewertung...: `llm-cli ditto eval` mit der Maus** (W1'): Arten und Retrieval-Varianten (fused, rerank),
+  einzelne Fälle, eine andere Falldatei, Läufe pro Fall, mehrere lokale Stufen, oder Anbieter, Modell und Denkaufwand
+  nur für diesen Lauf (die gespeicherten KI-Einstellungen bleiben unverändert); eine Frage vor dem Lauf sagt, was
+  aufgerufen wird und ob es Geld kostet, auch wenn die Ersatzkette der KI-Einstellungen einen Cloud-Anbieter nennt, und
+  dass Retrieval seine Modelle bei der ersten Verwendung herunterlädt („Nein“ als Vorgabe); eine Stufe, die noch nicht
+  heruntergeladen ist, wird mit einem Hinweis auf Ditto > Lokale Modelle... abgelehnt (ihr Start würde zuerst deinen
+  Server stoppen); ein Lauf mit lokalen Stufen ist eine Aufgabe von Dittos lokaler Laufzeit und wartet, solange eine
+  andere läuft; der Lauf geht im Hintergrund mit Fortschritt und **Abbrechen** (vor dem nächsten Versuch;
+  Abbrechen während der Aufnahme lädt keinen Reranker), das Fenster zeigt die Tabellen der CLI, und **Bericht
+  speichern...** schreibt ihren JSON-Bericht. Der Lauf selbst (Auswahl der Fälle, die Schleife über die Stufen mit dem
+  Wiederherstellen des Servers, die Retrieval-Läufe, die Tabellen und der Bericht) liegt jetzt in
+  `orchestrator/evals/eval_run.py`, das auch die CLI aufruft; ihre Ausgabe und Exit-Codes bleiben gleich, nur wird ein
+  Server von dir, den eine Stufe ersetzt hat, jetzt auch gemeldet, wenn der Lauf früher endet (eine spätere Stufe, die
+  in der CLI nicht startet, Abbrechen im Fenster).
+- **Chat-Bereich: Optionen für eine Frage** (W1', `llm-cli ditto ask --no-tools/--provider/--model` mit der Maus):
+  **Optionen für diese Frage** über dem Nachrichtenfeld bieten **Ohne Werkzeuge antworten**, einen Anbieter und ein
+  Modell nur für die nächste Frage. Die gespeicherten KI-Einstellungen bleiben unverändert (die Frage geht an einen
+  Ditto mit diesen Werten über den Einstellungen, `orchestrator/Core/ai_override.py`, das den Anbieter auch wie die CLI
+  prüft), der Bereich sagt, was die Frage verwendet hat, und die Optionen werden nach dem Senden zurückgesetzt; Feed,
+  Fragen und Freigaben arbeiten wie bisher.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
@@ -1702,6 +1813,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   er ist jetzt englisch und deutsch, und Rotieren sowie die Frage zu einem verknüpften Token kommen als reiner Text mit
   „Nein“ als Vorwahl. Ein Installationspfad, den PYTHONPATH nicht aufnehmen kann, ließ „Server starten“ ohne jede
   Meldung scheitern; jetzt sagt das Fenster den Grund, und nichts wird gestartet.
+- **Community Hub und Speicher der Wissensbasis: Installation im Hintergrund, die Frage vor dem Pull Request, ein
+  Qdrant-Server** (Prüfung von W1'): Ein Paket zu installieren (Install, Import file...) schob es nach deinem „Ja“
+  im GUI-Thread an seinen Platz, was bei einem Wissenspaket einen Snapshot der Wissensbasis und den Import jeder Seite
+  bei eingefrorenem Fenster bedeutete; das läuft jetzt im Hintergrund, und die Statuszeile nennt den zuvor
+  angelegten Snapshot, wie `llm-cli zoo install`. **Open pull request** im Export-Fenster übergab das Paket sofort an
+  einen öffentlichen Pull Request; es stellt jetzt zuerst die Frage von `llm-cli zoo export --pr` („Dieses Paket beim
+  öffentlichen Community-Repository einreichen?“, „Nein“ ist die Vorgabe). Mit einem eingestellten Qdrant-Server
+  (`qdrant_url`) nannten `llm-cli knowledge storage` und **Tools > Knowledge Snapshots...** den lokalen Speicher und
+  boten an, ihn umzuwandeln, was den Server öffnete und nichts umwandelte; beide nennen jetzt den Server, und die
+  Umwandlung wird abgelehnt, solange er eingestellt ist. Eine in **Import file...** oder im Export-Fenster eingegebene
+  Passphrase bleibt nach Abbrechen oder Schließen nicht mehr im verborgenen Fenster.
 - **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
   seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
   (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein
@@ -2054,6 +2176,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Der Modul-Assistent speichert Dittos Vorschlag so wie `llm-cli module generate-ai`**: Er speicherte ein von der
+  KI erstelltes Modul nur über den Modul-Generator, deshalb fielen die Prüfungen von DittoManager.save_module weg (die
+  Ablehnung jedes vorgefertigten `nvidia/cuda`-Images in einem KI-Vorschlag und die Pflicht zur Begründung der KI für
+  ein Image, das kein Docker Official Image ist), und er legte das vorgeschlagene Basis-Image nicht auf seinen Digest
+  fest. Jetzt wird das Basis-Image des Vorschlags im Analyse-Worker festgelegt, bevor du ihn siehst (`pin_base_image`,
+  die Funktion der CLI), und das Modul wird über `DittoManager.save_module` gespeichert und wie auf der Kommandozeile
+  im Audit-Log festgehalten; ein Basis-Image, das eine KI über die GUI-Werkzeuge in den Assistenten eingetragen hat,
+  geht denselben Weg. Ein vorgefertigtes Image, das du selbst wählst, bleibt deine ausdrückliche Wahl. Ein
+  regelbasierter Import einer Probe nach Dittos Vorschlag ersetzt jetzt auch Dittos Pakete, Setup-Befehle und
+  Quantisierungslogik: Sie blieben in ihren Feldern und gelangten in ein Modul, das als deines gespeichert wurde, ohne
+  Markierung und ohne Audit-Eintrag.
 - **Das Koppeln eines Boards sendet nur eine geprüfte Schlüsselzeile** (bandit B601): Der Befehl, der den öffentlichen
   Schlüssel des Frameworks in `authorized_keys` des Boards einträgt, ist fest, und sein einziger Wert, die
   Schlüsselzeile, wurde für die Shell maskiert. Jetzt muss die Zeile außerdem ein reiner öffentlicher SSH-Schlüssel

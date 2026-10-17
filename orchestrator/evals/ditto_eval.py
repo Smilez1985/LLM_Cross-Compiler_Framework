@@ -590,11 +590,31 @@ def run_setup(label: str, provider: str, model: str, cases_path: Optional[Path],
             "cases_sha256": cases_digest(cases_path), "repeat": repeat, "cases": [c.id for c in cases]}
 
 
+class EvalCancelled(Exception):
+    """The run was stopped (its stop event was set, e.g. the GUI's Cancel) before the next attempt. `runs` holds the
+    reports that were complete before (filled in by evals/eval_run.run_evaluation)."""
+
+    def __init__(self, message: str = "The evaluation was cancelled.", runs: Optional[list] = None):
+        super().__init__(message)
+        self.runs: list = list(runs or [])
+
+
+def _check_stop(stop: Any) -> None:
+    if stop is not None and stop.is_set():
+        raise EvalCancelled()
+
+
 def run_cases(run_case: Callable[[Case], Attempt], cases: Sequence[Case], repeat: int = 1,
-              on_result: Optional[Callable[[CaseResult], None]] = None) -> EvalReport:
+              on_result: Optional[Callable[[CaseResult], None]] = None, stop: Any = None) -> EvalReport:
+    """Runs every case `repeat` times. A set `stop` event (threading.Event) ends the run with EvalCancelled before the
+    next attempt; the attempt that runs finishes first (a model's answer is not cut off)."""
     results = []
     for case in cases:
-        result = CaseResult(case, [run_case(case) for _ in range(max(1, repeat))])
+        attempts = []
+        for _ in range(max(1, repeat)):
+            _check_stop(stop)
+            attempts.append(run_case(case))
+        result = CaseResult(case, attempts)
         results.append(result)
         if on_result is not None:
             on_result(result)
@@ -672,8 +692,8 @@ class DittoEval:
         return Attempt(not problems, time.monotonic() - start, problems, answer=text[:1500], tool_calls=tool_calls)
 
     def run(self, cases: Sequence[Case], repeat: int = 1,
-            on_result: Optional[Callable[[CaseResult], None]] = None) -> EvalReport:
-        return run_cases(self.run_case, cases, repeat, on_result)
+            on_result: Optional[Callable[[CaseResult], None]] = None, stop: Any = None) -> EvalReport:
+        return run_cases(self.run_case, cases, repeat, on_result, stop=stop)
 
 
 # --- retrieval ----------------------------------------------------------------------------------------------------
@@ -726,10 +746,10 @@ class RetrievalEval:
         return Attempt(not problems, seconds, problems, answer=answer or "(no excerpt)", retrieved=retrieved)
 
     def run(self, cases: Sequence[Case], variant: str = "fused", repeat: int = 1,
-            on_result: Optional[Callable[[CaseResult], None]] = None) -> EvalReport:
+            on_result: Optional[Callable[[CaseResult], None]] = None, stop: Any = None) -> EvalReport:
         if variant not in RAG_VARIANTS:
             raise ValueError(f"Unknown retrieval variant '{variant}' (known: {', '.join(RAG_VARIANTS)}).")
-        return run_cases(lambda case: self.run_case(case, variant), cases, repeat, on_result)
+        return run_cases(lambda case: self.run_case(case, variant), cases, repeat, on_result, stop=stop)
 
 
 class _TemporaryKnowledgeConfig:

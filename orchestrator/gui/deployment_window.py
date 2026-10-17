@@ -396,6 +396,7 @@ class DeploymentWindow(QWidget):
         # Save...: a build still in the framework's build folder goes to the output folder or another folder
         # (eighth round, answer 3); the person's save dialog, never by itself
         self.btn_save = QPushButton(ui_text("save.button").replace("&", "&&"))
+        self.btn_save.setObjectName("btn_deploy_save")  # `llm-cli build save` by mouse (GUI parity)
         self.btn_save.clicked.connect(self._on_save)
         layout_art.addWidget(self.btn_save)
         self._save_workers = []

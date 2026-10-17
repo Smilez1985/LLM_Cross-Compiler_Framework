@@ -757,7 +757,11 @@ def test_the_snapshots_window_offers_the_old_folder_only_after_the_conversion(qa
     told = boxes(monkeypatch)
     dialog = window.KnowledgeSnapshotsDialog(state, framework=framework, lang="en")
     try:
-        assert dialog.btn_old.isHidden() and dialog.storage.isHidden()
+        # Wave 5 (W1'): the storage line is shown in every state, also before the conversion; the old folder is
+        # still the knowledge base then, so it is never offered for deletion.
+        assert dialog.btn_old.isHidden() and not dialog.storage.isHidden()
+        assert "has not been converted to Qdrant Edge yet" in dialog.storage.text()
+        assert str(state / "qdrant") in dialog.storage.text()
     finally:
         dialog.close()
     from orchestrator.rag import migration

@@ -80,6 +80,16 @@ The schema is in `orchestrator/schemas/targets.py`. The GUI, the CLI, the build 
 read the same block: they offer exactly these options, fill in the defaults, and reject everything else with a
 clear reason before anything runs. The Rockchip values are listed in the [README](../README.md#supported-targets-and-formats).
 
+GUI: **Build > Targets...** lists every target with its ID (the value for `--target`), name, architecture, boards,
+formats and support level, or "no capabilities declared" (or that its capabilities block is invalid); **Targets...**
+next to the Builder's target list opens the same window. **Check target** (in that window and next to the Builder's
+target list) checks the selected target as `llm-cli targets validate` does, through the same function
+(`TargetManager.validate`), with its `target.yml` read again, and names each schema error by field. The same check runs
+after the module wizard created a target and after a Community Hub target install, and its result is shown. A target
+without capabilities gets every format in the Builder, as on the command line, with the note that its boards, formats
+and quantizations are not checked; for a target whose capabilities block is invalid the note says so, and **Check
+target** names each error.
+
 ---
 
 ## Build pipeline
@@ -138,6 +148,14 @@ Further behaviour:
   no secret) and one record per build into `<cache_dir>/build_records/`. So the GUI status bar, `llm-cli build
   status`, `list_build_requests` and `get_build_status` see the same builds, also a request that still waits in
   another program's queue; a request whose program has ended before it finished is shown as interrupted.
+- **Build History (GUI):** **Build > Build History...** lists every build of every program (as `llm-cli build status
+  --all`: failed, cancelled, interrupted and queued ones too) from the same query (`build_history.read_history`);
+  **Show details** (or a double click) shows one build as `build status REQUEST_ID` does: its request with errors and
+  notes, every attempt with its output folder (full path) and error, and the fix proposals AI clients made for it,
+  marked AI-generated and never run. The status bar names this window for builds of other programs.
+- **Optimization and priority (GUI):** the Builder's **Optimization** list offers every level of `--optimization`
+  (also `FAST`), and **Priority** sets the build priority of `--priority` (default normal; a failed critical build
+  stops the pipeline).
 - **Build slots:** at most `max_concurrent_builds` builds (setting, 1 to 10, default 2) run at the same time in one
   program; a further build waits for a free slot (its stage shows "Waiting for a free build slot") instead of
   failing. A cancelled build keeps its slot until its container has stopped.
@@ -728,6 +746,10 @@ gives the defaults).
   newest entry, Up/Down and Home/End move between entries, Escape goes back to the message field. Every entry has an
   accessible name (sender and time), and new entries are announced to screen readers, questions with priority. No
   key approves anything.
+- **Options for this question** (above the message field; `llm-cli ditto ask --no-tools/--provider/--model`):
+  **Answer without tools**, a provider and a model for the next question only. The saved AI settings stay unchanged
+  (the question goes to a Ditto with these values over your settings), the panel says what the question used, and
+  the options are reset once it is sent. A provider the catalogue does not know is refused like on the command line.
 - **Clear chat…** asks first and lists, for Ditto's conversation (`chat_history.json`, as the file holds it now, also
   when another window or the terminal saved it since) and for the chat messages in the chat feed
   (`chat_feed.sqlite`), the full path, the file name, the size and what it is; **No, keep everything** is the
@@ -984,6 +1006,16 @@ tool call the model attempted (also refused ones: unknown names, invalid argumen
 `tool_use` summary: tool calls per task, the share of malformed calls and of unknown tool names, the repairs the
 framework applied and the repeat refusals. Cloud providers bill about 20 requests per run and repeat. All options: [CLI_Usage.md](CLI_Usage.md#ditto-eval).
 
+**GUI: Ditto > Evaluation...** runs the same evaluation by mouse: kinds, retrieval variants (fused, rerank), single
+cases, another cases file, runs per case, several local tiers, or provider, model and effort for this run only (the
+saved AI settings stay unchanged). Before a run it says what is called and whether that costs money, also when the
+fallback chain of the AI settings names a cloud provider, and that retrieval downloads its models on first use ("No"
+is the default); a tier that is not downloaded yet is refused with a pointer to **Ditto > Local Models...**, and a
+run of local tiers waits while another task of Ditto's local runtime runs (it starts its own server). The run
+goes in the background with progress and **Cancel** (the case that runs finishes first; a tier's server is stopped as
+after a normal run, and a server of yours that it replaced is reported), the window shows the same tables, and
+**Save report...** writes the JSON report of `--json`.
+
 **First measurement** (for context, not a benchmark): on a CPU-only machine with Qwen3.5 2B, effort `low` (thinking
 off) and the prompts of that time, the 2-bit tier `small-q2` passed 42% of the 19 cases and the 4-bit tier `small`
 47%. The evaluation found gaps in Ditto's prompts (attributing failures to host or device, which inputs each format
@@ -1034,6 +1066,30 @@ llm-cli ditto eval --kind retrieval --rag-variant fused --rag-variant rerank --j
 The managed runtime gives Ditto a local model without any cloud account. It is controlled with
 `llm-cli ditto runtime` and `llm-cli ditto models` ([CLI_Usage.md](CLI_Usage.md#ditto-runtime)); Ditto's provider
 `local` finds the running server by itself (address, key and loaded model are read for every call).
+
+**GUI: Ditto > Local Runtime...** does every `llm-cli ditto runtime` command by mouse, with the same code as the
+commands:
+
+- **Status:** what `ditto runtime status` shows (hardware, mode, the build in use and its checks, problems and the
+  rebuild advice, the self-built plan, the prebuilt option, the server with address, model and context, the
+  recommended and the chosen model, the log file), in your language; **Check again** reads it again. In **Tools >
+  Configure AI Agent (Ditto)...**, **Status and more...** opens the same window.
+- **Install, check or switch:** the box "Ditto's local server" (also in **Tools > Configure AI Agent (Ditto)...**)
+  runs `ditto runtime ensure` with the mode (Automatic, Bare metal, In Docker), the build options (GPU backend, where
+  the build runs, compile jobs) and the model offer afterwards (unticked: `--no-model`). For the installed mode the
+  button says **Check and repair...**: the build is checked and installed again only when it cannot be used (an old
+  llama.cpp build after an update, for example); the other mode is a **Switch...** with the space check and the
+  complete removal of the old mode described [below](#bare-metal-or-docker-runtime-mode).
+- **Build llama-server...** (`ditto runtime install`, with the same build options) and **Install the official
+  prebuilt archive...** (`--prebuilt`; "Download it again even if it is installed" is `--force`).
+- **Server:** **Start** with the model (as before; "Recommended for this computer" forgets an earlier choice; or a
+  tier), the context length and the idle unload; **Stop**.
+- **Builds and source:** **Import a build...**, **Export the build...**, **Remove older builds...** (the deletion
+  dialog: full path, file name, size and what each is, nothing ticked, "No" by default; trash or for good), **Export
+  the source...** (with an optional mirror) and **Import the source...** for a computer without network.
+
+Builds, downloads, Docker and the server start run in the background with a progress line; **Cancel** stops a build
+before its next step and a download between two chunks (the part is kept). Every question has "No" as the default.
 
 ### What is pinned
 
@@ -1106,6 +1162,15 @@ The first rule whose conditions hold and whose model fits wins:
 the system, plus 95% of a dedicated GPU's memory. Integrated AMD and Intel GPUs share the RAM, so only the RAM counts
 for them. `runtime start --model <tier>` overrides the choice and remembers it; `--model auto` returns to the
 recommendation.
+
+**GUI: Ditto > Local Models...** shows every tier with file, size, licence, whether it is downloaded (and verified)
+and its note (recommended for this computer, chosen, on request, not pinned), with the reason for the
+recommendation and the full models folder. **Download the recommended model...** and **Download selected...** do
+`ditto models download` with the same question (repo, file, licence, size, folder; "No" is the default); the list and
+the download run in the background, with progress and **Cancel** (the part is kept for a resume). The recommended
+download takes the recommendation the window shows, so no hardware probe runs while you wait for the question. A
+download is a task of Ditto's local runtime: it waits while a build, a server start or another download runs in
+**Ditto > Local Runtime...** or the AI settings, and they wait for it.
 
 ### How the server runs
 
@@ -1262,8 +1327,9 @@ run). The mode is recorded in `~/.llm-framework/runtime/llama.cpp/mode.json`.
   or rebuilt; `start_local_runtime` starts the server of the recorded mode, and its result names what runs (the
   image's build in Docker mode). Switching the mode and removing the old mode are the person's alone: no tool does
   either, and `build_local_runtime` removes no old build.
-- **The AI settings** show where the server runs and offer the switch through the same code path as the command,
-  with the same list of leftovers afterwards.
+- **The AI settings** and **Ditto > Local Runtime...** show where the server runs and run `ensure` through the same
+  code path as the command, with its options: install, check and repair the installed mode (installed again only
+  when it cannot be used), or switch, with the same list of leftovers afterwards.
 
 ### Local runtime tools for AI clients (optional)
 
@@ -1357,7 +1423,10 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   keeps working, nothing of the half-made copy stays, and the reason is shown (`llm-cli knowledge storage`, Mojo
   Oracle, the knowledge snapshots window). A lack of disk space is tried again on the next start; other failures when
   you ask: **Tools > Knowledge Snapshots... > Try the conversion again** (it runs in the background) or `llm-cli
-  knowledge storage convert`. Converting 50 000 excerpts took between 1 and 2.5 minutes in two tests, 5 000 about 15
+  knowledge storage convert`. GUI: **Tools > Knowledge Snapshots...** shows the storage in every state, like `llm-cli
+  knowledge storage` (Qdrant Edge with its folder, the old storage with its reason, a Qdrant server, Qdrant Edge that
+  cannot be loaded), and offers **Convert now** also before the first attempt, on the condition of `llm-cli knowledge
+  storage convert`. Converting 50 000 excerpts took between 1 and 2.5 minutes in two tests, 5 000 about 15
   seconds. Once converted, the old folder never stands in for Qdrant Edge again: if Qdrant Edge cannot be loaded later
   (a missing or broken package), the knowledge base is not opened and says why, and Mojo Oracle reports it as an error,
   instead of quietly using the old folder, which lacks what was added since.
@@ -1380,10 +1449,11 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   snapshot is made, its size is estimated. When it does not fit beside the reserve that always stays free, no
   snapshot is made and the change does not run either; there is no "continue anyway". You get the list to delete or
   export snapshots (the GUI offers **Knowledge Snapshots...**; AI clients get the blocker `snapshot_no_room` with your
-  action). When it fits but leaves little free space, that is a situation warning (`disk_tight`). **Tools >
-  Knowledge Snapshots...** in the GUI or `llm-cli knowledge snapshots` lists each
-  one with its full path, name, size and what it is, nothing ticked. To free space you tick the ones to delete (they
-  go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
+  action). When it fits but leaves little free space, that is a situation warning (`disk_tight`). The CLI and the GUI
+  both say beforehand whether the next snapshot fits (GUI: the disk line of **Tools > Knowledge Snapshots...**, in the
+  words of `llm-cli knowledge snapshots`). **Tools > Knowledge Snapshots...** in the GUI or `llm-cli knowledge
+  snapshots` lists each one with its full path, name, size and what it is, nothing ticked. To free space you tick the
+  ones to delete (they go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
   `llm-cli knowledge snapshots export NAME... --to FOLDER`, each copy checked by sha256). See [Deleting and the
   trash](#deleting-and-the-trash). Restoring a snapshot is not available from the GUI or the CLI yet. A snapshot is a
   portable file; snapshots written by earlier versions (format 1) are converted when they are restored.
@@ -1593,7 +1663,7 @@ per page from that (`orchestrator/rag/licences.py`; eighth round, Q-1 and Q-1').
   `LICENSES/` and `NOTICE` in its folder, and each page it adds to the knowledge base names its licence text
   (`licence_text_file`).
 - **You see it per page:** `llm-cli knowledge sources` lists every source with its licence, its copyright notice and
-  what a pack would carry and why; `llm-cli zoo export knowledge` lists every page again with what the pack carries
+  what a pack would carry and why (GUI: **Tools > Knowledge Sources...**, with a kind filter); `llm-cli zoo export knowledge` lists every page again with what the pack carries
   and why, and names each licence text in the pack and why. A target export does the same for the target's knowledge
   snapshot, also for a snapshot made before this rule (the target folder itself stays as it is); licence files left in
   `knowledge/` without a snapshot stay out of the pack, and a note says so.
@@ -2295,6 +2365,11 @@ everything worked) reaches an AI with the account's name, its home folder and bo
   cached [community index](#the-signed-index) with the pinned author keys, and two random values per installation
   (one for the privacy placeholders, one as an anonymous cache ID for OpenAI). Your key pairs for
   [community packs](#encrypted-packs-for-private-sharing) are kept in the encrypted secrets store.
+- **Settings in the GUI:** **File > Settings...** shows the effective settings with where each value comes from
+  (the defaults, a settings file with its full path, an `LLM_FRAMEWORK_*` variable, or changed while the program
+  runs), secrets redacted, as `llm-cli config show` (`settings_view.effective_settings`), and the source repository
+  overrides with the variable each becomes, to add and remove as with `llm-cli config repos` (removing asks first,
+  "No" is the default). The output folder has its own entry, **File > Output Folder...**.
 - **Settings** are never read from the working directory: `LLM_FRAMEWORK_CONFIG_DIR`, then `configs/` in the
   installation if you may write there, then the personal folder.
 - **Data folders** (`output/`, `cache/`, `models/`) are in the installation if you may write there, otherwise in the
@@ -2422,12 +2497,21 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   you allowed it), never offers "do not ask again", refuses a name that reads like an existing target (case and
   separators ignored) and never uses a prebuilt llama.cpp. A long definition becomes a pending approval in the
   framework, shown up to 16,000 characters.
-- **New target by questions:** `llm-cli module create` or the wizard under **Tools > Create Hardware Module...**.
+- **New target by questions:** `llm-cli module create` or the wizard under **Tools > Create Hardware Module...**,
+  which also asks for the description (default "Target for <name>"). Only you fill it in: for a module an AI helped with
+  (through the GUI tools), your description leads and the framework's note that the module is AI-generated and untested
+  follows. After **Finish** the wizard checks the new target as `llm-cli targets validate` does and shows the result.
 - **New target from a probe:** `llm-cli module generate-ai <probe file>` or the wizard's AI analysis. Ditto proposes
   architecture, SDK, base image, packages, vendor sources, pip packages and downloads, CPU and CMake flags, setup
-  commands and the quantization block of `build.sh`; you see the whole proposal first. `module generate-ai` pins the
-  base image to its digest before it asks, and the wizard passes on every field of the proposal; both record the
-  saved module in the audit log (`module_saved`, with the definition's sha256 and the base image).
+  commands and the quantization block of `build.sh`; you see the whole proposal first. Both take the same path: the base
+  image is pinned to its digest before you see the proposal (`pin_base_image`; in the wizard off the GUI thread), the
+  module is saved through `DittoManager.save_module`, which refuses a prebuilt `nvidia/cuda` image and an image that is
+  not a Docker Official Image without the AI's reason (also for a base image an AI filled into the wizard through the
+  GUI tools), and both record the saved module in the audit log (`module_saved`, with the definition's sha256 and the
+  base image). The wizard passes on every field of the proposal. Its first page offers provider and model **for this
+  analysis only** (`--provider`, `--model`, `DittoManager.for_run`): the saved AI settings stay unchanged. A rule-based
+  probe import after Ditto's proposal replaces every value of the proposal (also its packages, setup commands and
+  quantization logic), so the module is then yours.
 - **The device runtime in the module:** every new `target.yml` gets a `runtime:` block, the build recipe's plan for
   the board's llama.cpp runtime from the target's probe (the wizard's imported probe file, the probe file of
   `module generate-ai`, or `llm-cli module create --probe <file>`): architecture, OS, the C library the cross build
@@ -2603,8 +2687,9 @@ file>` or `--passphrase`):
 - **Receiving:** `llm-cli zoo install --file <pack>.lcfpack` decrypts with your key, or with `--passphrase`.
   `--from <key file>` (repeatable) accepts only these senders; otherwise the summary names the sender's key id. A
   passphrase pack whose scrypt work factor is above 2^20 (1 GiB of memory) is refused before anything is decrypted.
-  The hub's **Import file...** opens packs encrypted to your key; a passphrase pack needs the CLI. An encrypted pack
-  is never submitted to the community.
+  The hub's **Import file...** opens both (GUI: a passphrase field, never stored or shown, and **Only accept these
+  senders** with key files); **My public keys...** in the hub shows your public keys with **Copy** and **Save...**. An
+  encrypted pack is never submitted to the community.
 
 ### Recipes
 
@@ -2683,10 +2768,11 @@ trust level.
 ### Checking installed packs
 
 - `llm-cli zoo verify` checks every installed pack against the cached index: revoked, or changed since it was
-  installed. The exit code is 1 when it finds a problem.
+  installed. The exit code is 1 when it finds a problem. GUI: **Tools > Open Community Hub > Check installed packs**.
 - `llm-cli zoo verify <pack file>` checks a file without installing it: format, hashes, the checks of its kind, an
   included author signature and the privacy scrub (no home folders, addresses, host or user names, keys). It needs
-  no keyring; the community repository's CI uses it.
+  no keyring; the community repository's CI uses it. GUI: **Tools > Open Community Hub > Check a pack file...**,
+  before you install or share a file.
 - `llm-cli mojo` reports revoked packs as errors, changed packs as warnings and packs with trust `local` as
   information ([Health check](#health-check-mojo)).
 
@@ -2695,15 +2781,23 @@ trust level.
 **Tools > Open Community Hub** lists the index entries and the installed packs with name, kind, version, a coloured
 trust column, author and status, with a search field and filters for kind and trust. **Refresh** fetches the index
 again, **Install** installs an index entry after its summary, **Import file...** installs a pack file (also one
-encrypted to your key), and **Build** on an installed recipe fills in the Builder. A revoked pack shows a disabled
-**Revoked** button.
+encrypted to your key or protected with a passphrase, and only from the senders in key files if you choose them), and
+**Build** on an installed recipe fills in the Builder. A revoked pack shows a disabled **Revoked** button. An installed
+target is checked as `llm-cli targets validate` does, and the result is shown.
+**Details...** (or a double click on a row) shows what `llm-cli zoo show` shows: licence, trust and revocation, the
+installed version and folder, the download address with size and sha256, the description and an installed recipe's
+`recipe.yml`. **Check installed packs**, **Check a pack file...**, **Export...** and **My public keys...** do what
+`zoo verify`, `zoo verify FILE`, `zoo export` and `zoo keys` do; each runs in the background.
 
 ### Export for community
 
 - **Where:** the module wizard's last page (**Export for community after creating**: the new target), the Builder
   log's context menu (**Export a finished build for the community...**: a finished build's `build_info.json` becomes
   a recipe), and `llm-cli zoo export target <id>`, `zoo export recipe <build folder>` or `zoo export knowledge`,
-  each with `--author <name>` (a pseudonym is fine). Knowledge packs are exported with the CLI only.
+  each with `--author <name>` (a pseudonym is fine). GUI: **Tools > Open Community Hub > Export...** exports any
+  target folder (also an existing or installed one; a community pack is refused, see below), a finished build or the
+  knowledge base, with the pack id of a knowledge pack, private sharing to the keys in key files or with a passphrase,
+  and the folder.
 - **Privacy scrub:** every file is scrubbed on this computer. Home folders become `~`, IP and MAC addresses `<ip>`
   and `<mac>`, e-mail addresses `<email>`, JWTs `<jwt>`, the host name `<host>`, the user name `<user>`, and API
   keys are redacted. Loopback addresses, image digests, `git@` remotes and default accounts such as `root` or
@@ -2728,7 +2822,8 @@ encrypted to your key), and **Build** on an installed recipe fills in the Builde
 
 - **Open pull request** in the export dialog, or `--pr` with `llm-cli zoo export`, hands the pack to the repository
   in the setting `community_repo` (`owner/name`). The CLI first shows the summary and asks "Submit this pack to the
-  public community repository?" unless `--yes` is given; without a terminal nothing is submitted.
+  public community repository?" unless `--yes` is given; without a terminal nothing is submitted. The export window
+  asks the same question after its summary ("No" is the default).
 - If the GitHub CLI (`gh`) and `git` are installed and `gh` is logged in, the framework forks the repository,
   commits the pack as `contributions/<kind>/<file>` on a new branch and opens the pull request with `gh pr create`;
   `gh` and `git` use their own stored credentials. Otherwise, or if that fails, the repository's upload page opens in
@@ -2839,7 +2934,7 @@ What does not work yet, so you are not surprised:
   available yet; Ditto signs in with API keys, and local engines need none.
 - **Device runtime:** the self-built llama.cpp runtime on a board works from the command line and is tested with a
   fake SSH channel, not yet on a real board; there is no GUI or MCP tool for it yet.
-- **GUI:** the Auto-Tuning and Models tabs are placeholders; the local runtime is controlled from the CLI only.
+- **GUI:** the Auto-Tuning and Models tabs are placeholders (the local runtime is in **Ditto > Local Runtime...**).
 - **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it. Restoring a
   knowledge-base snapshot is not available from the GUI or the CLI.
 - **Reranking** runs only for build recommendations; `rag_rerank_default` adds the chat and the MCP tool

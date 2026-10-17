@@ -44,6 +44,14 @@ from orchestrator.gui.plain import ask, button_text, notify, one_line, plain_box
 from orchestrator.gui.sign_in import STORAGE_CHOICE_CODES, UserConfigSnapshot, choose_storage_at_start
 from orchestrator.gui.deployment_window import DeploymentWindow
 from orchestrator.gui.form_surface import close_gui, open_gui
+from orchestrator.gui.menus import boards as menu_boards
+from orchestrator.gui.menus import build as menu_build
+from orchestrator.gui.menus import ditto_models as menu_ditto_models
+from orchestrator.gui.menus import ditto_runtime as menu_ditto_runtime
+from orchestrator.gui.menus import knowledge as menu_knowledge
+from orchestrator.gui.menus import mojo as menu_mojo
+from orchestrator.gui.menus import signin as menu_signin
+from orchestrator.gui.menus import tools_mcp as menu_tools_mcp
 
 # ============================================================================
 # DITTO AVATAR WIDGET
@@ -158,13 +166,11 @@ class MainOrchestrator(QMainWindow):
         exit_action = QAction(self.i18n.t("menu.exit", "Exit"), self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        __import__("orchestrator.gui.menus.boards", fromlist=["install"]).install(self, menubar)  # Boards menu
         
         sec_menu = menubar.addMenu("Security")
         act_openai = QAction("Set OpenAI API Key", self)
         act_openai.triggered.connect(lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))
         sec_menu.addAction(act_openai)
-        __import__("orchestrator.gui.menus.signin", fromlist=["install"]).install(self, menubar)  # Security entries
         
 
         self.view_menu = menubar.addMenu(ui_text("chat.view.menu"))  # filled by _setup_chat_dock
@@ -205,7 +211,6 @@ class MainOrchestrator(QMainWindow):
         self._add_knowledge_snapshots_action(tools_menu)
         self._add_framework_images_action(tools_menu)
         self._add_framework_docs_action(tools_menu)
-        __import__("orchestrator.gui.menus.mojo", fromlist=["install"]).install(self, menubar)  # Mojo Health Check...
 
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
         self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
@@ -218,12 +223,24 @@ class MainOrchestrator(QMainWindow):
         self.act_clear_history = QAction(self.i18n.t("menu.clear_history", "Clear Input History..."), self)
         self.act_clear_history.triggered.connect(self._clear_input_history)
         tools_menu.addAction(self.act_clear_history)
-        __import__("orchestrator.gui.menus.tools_mcp", fromlist=["install"]).install(self, menubar)  # Audit Log, MCP
 
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+        # GUI parity (W1'): one install line per area, in the menu order of the design (GUI_PARITY.md): File, Build,
+        # Boards, Ditto, Security, View, Tools, Help. Each module finds or makes its menu and puts it and its entries
+        # in place (Build after File, Boards after Build, Ditto before Security, entries next to the ones they
+        # follow). The deploy area's paths are buttons of the Deployment and Builder tabs (menus/deploy.py).
+        menu_build.install(self, menubar)  # File > Settings... (above Exit); Build > Targets..., Build History...
+        menu_boards.install(self, menubar)  # Boards > Boards and Devices...
+        menu_ditto_runtime.install(self, menubar)  # Ditto > Local Runtime...
+        menu_ditto_models.install(self, menubar)  # Ditto > Local Models..., Evaluation... (after Local Runtime...)
+        menu_signin.install(self, menubar)  # Security > Secrets..., Sign-in Overview..., Key Storage...
+        menu_tools_mcp.install(self, menubar)  # Security > Audit Log..., AI App Connections...; Tools > Deep Ingest
+        menu_knowledge.install(self, menubar)  # Tools > Knowledge Sources... (below Knowledge Snapshots...)
+        menu_mojo.install(self, menubar)  # Tools > Mojo Health Check... (after Framework Build Images...)
 
     def _setup_toolbar(self):
         toolbar = QToolBar("Main Toolbar")
@@ -796,7 +813,7 @@ class MainOrchestrator(QMainWindow):
             self.status.showMessage(
                 f"{len(running)} build(s) in other framework processes; newest: {summary.get('model') or '?'} for "
                 f"{summary.get('target') or '?'} ({latest.get('status')}, {latest.get('program')}). "
-                "Details: llm-cli build status", int(self.OTHER_BUILDS_EVERY * 1000) + 1000)
+                + ui_text("bld.history.status_hint"), int(self.OTHER_BUILDS_EVERY * 1000) + 1000)
 
     def _notice_client_proposals(self):
         """A status bar notice when an AI client proposed a new fix (also from an MCP server in another process)."""
