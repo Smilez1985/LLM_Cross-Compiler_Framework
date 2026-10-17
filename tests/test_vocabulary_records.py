@@ -239,7 +239,8 @@ def test_observers_get_framework_facts_only_and_never_fail_a_call(tmp_path):
         registry.events.emit("made_up")
     with pytest.raises(ValueError):
         registry.events.emit("grant_used", arguments={"text": "x"})
-    assert set(EVENT_KINDS) == {"refused_before_question", "grant_used", "approval", "approval_end"}
+    # call_done (wave 6): a call that changed something ended ok; Core/activity.py writes its chat row
+    assert set(EVENT_KINDS) == {"refused_before_question", "grant_used", "approval", "approval_end", "call_done"}
 
 
 def test_a_standing_approvals_use_is_reported(tmp_path):
@@ -255,7 +256,9 @@ def test_a_standing_approvals_use_is_reported(tmp_path):
     seen = []
     registry.events.subscribe(lambda kind, data: seen.append((kind, data)))
     registry.call("probe", {}, ToolContext("ditto"))
-    assert seen == [("grant_used", {"tool": "probe", "actor": "ditto", "owner": "ditto", "grant_id": grant.id})]
+    # the use of the standing approval, then (wave 6) the end of the call it ran, which changed something
+    assert seen[0] == ("grant_used", {"tool": "probe", "actor": "ditto", "owner": "ditto", "grant_id": grant.id})
+    assert [kind for kind, _ in seen] == ["grant_used", "call_done"]
 
 
 def test_an_unaudited_field_never_reaches_the_audit_preview(tmp_path):

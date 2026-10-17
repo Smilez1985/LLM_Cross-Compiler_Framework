@@ -25,7 +25,7 @@ import json
 import math
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Any, Callable, Set, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -175,6 +175,17 @@ class ConfigValue:
         _, errors = self.schema.validate_value(self.value)
         return errors
 
+@dataclass(frozen=True)
+class SettingsReload:
+    """What ConfigManager.reload_user_config did: the keys whose value this process took from the file, the keys it
+    kept its own value for, each with the reason (changed_here: set in this process and not saved since; environment:
+    an LLM_FRAMEWORK_* variable; explicit_file: the file given at start, e.g. `llm-cli -c`), and why the file could not
+    be read ("" when it could)."""
+    changed: Tuple[str, ...] = ()
+    conflicts: Dict[str, str] = field(default_factory=dict)
+    problem: str = ""
+
+
 @dataclass
 class AdvancedModeConfig:
     enabled: bool = False
@@ -229,7 +240,11 @@ class ConfigManager:
         self.change_history: List[Dict[str, Any]] = []
         self.change_listeners: List[Callable] = []
         self._revisions: Dict[str, int] = {}  # per key: how often set() stored it (see revision())
-        
+        # What config.yml held for each key the last time this process read or wrote it: a value set in this process
+        # that equals it was saved (another process may change it since), one that differs was not (reload_user_config)
+        self._disk_seen: Dict[str, Any] = {}
+        self._explicit_file: Optional[str] = str(config_file) if config_file and config_file.exists() else None
+
         self._initialize_core_schemas()
         self._ensure_directories()
         self.load_configuration(config_file if config_file and config_file.exists() else None)
@@ -542,7 +557,10 @@ class ConfigManager:
                 config_data = {}
         
         if not config_data: return
-        
+
+        if isinstance(config_data, dict) and Path(config_file) == self.user_config_file:
+            with self._lock:
+                self._disk_seen.update(config_data)
         file_source = ConfigSource("file", str(config_file), datetime.now(), 10)
         self._load_config_data(config_data, file_source)
     
@@ -725,10 +743,86 @@ class ConfigManager:
             with open(config_file, 'w') as f:
                 yaml.dump(data, f, default_flow_style=False)
             self.logger.info(f"Configuration saved to {config_file}")
+            with self._lock:
+                self._disk_seen = dict(data)  # what the file holds now
             return True
         except Exception as e:
             self.logger.error(f"Failed to save config: {e}")
             return False
+
+    @property
+    def user_config_file(self) -> Path:
+        """The user's settings file (config.yml in the settings folder), which save_user_config writes."""
+        return self.config_dir / "config.yml"
+
+    def reload_user_config(self, keys: Optional[Iterable[str]] = None) -> SettingsReload:
+        """Takes into this process what another framework process saved to config.yml since this one read it (an AI
+        app's update_settings in an MCP server, the CLI's `config` commands), for `keys` (None: every key in the
+        file). A key this process has not overridden gets the file's value (checked as at start; an invalid value is
+        left out and logged). A key this process holds its own value for keeps it and comes back as a conflict with
+        the reason: changed_here (set here and not saved since), environment (an LLM_FRAMEWORK_* variable),
+        explicit_file (the file given at start). Nothing is written. A file that cannot be read changes nothing and
+        names why in `problem`."""
+        path = self.user_config_file
+        try:
+            with open(path, 'r') as f:
+                loaded = yaml.safe_load(f)
+        except FileNotFoundError:
+            loaded = {}
+        except (OSError, ValueError, yaml.YAMLError) as e:
+            return SettingsReload(problem=f"{path.name} cannot be read ({type(e).__name__})")
+        if loaded is None:
+            loaded = {}
+        if not isinstance(loaded, dict):
+            return SettingsReload(problem=f"{path.name} does not contain settings (key: value)")
+        wanted = list(loaded) if keys is None else list(dict.fromkeys(keys))
+        source = ConfigSource("file", str(path), datetime.now(), 10)
+        changed: List[str] = []
+        conflicts: Dict[str, str] = {}
+        with self._lock:
+            for key in wanted:
+                if key not in loaded or key in RETIRED_SETTINGS:
+                    continue
+                disk, schema = loaded[key], self.config_schemas.get(key)
+                if schema and schema.enterprise_only and not self.advanced_mode.enabled:
+                    continue
+                try:
+                    valid = not schema or schema.validate_value(disk)[0]
+                except Exception:  # an odd value never costs the other keys
+                    valid = False
+                if not valid:
+                    self.logger.warning(f"Ignoring invalid value for '{key}' from {path.name}: {disk!r}")
+                    continue
+                current = self.config_values.get(key)
+                if current is not None and current.value == disk:
+                    self._disk_seen[key] = disk   # in step with the file
+                    continue
+                reason = self._held_here(key, current)
+                if reason:
+                    conflicts[key] = reason
+                    continue
+                self.config_values[key] = ConfigValue(key=key, value=disk, source=source, schema=schema,
+                                                      last_modified=datetime.now())
+                self._disk_seen[key] = disk
+                self._revisions[key] = self._revisions.get(key, 0) + 1   # caches see the change (revision())
+                changed.append(key)
+        for key in changed:
+            self._notify_change_listeners(key, self.get(key))
+        return SettingsReload(tuple(changed), conflicts)
+
+    def _held_here(self, key: str, current: Optional[ConfigValue]) -> str:
+        """Why this process keeps its own value of `key` over the file's ("" when it does not): set here and not
+        saved since, an environment variable, or the file given at start."""
+        if current is None:
+            return ""
+        kind = current.source.source_type
+        if kind == "environment":
+            return "environment"
+        if kind == "override" and (key not in self._disk_seen or self._disk_seen[key] != current.value):
+            return "changed_here"
+        if kind == "file" and self._explicit_file and current.source.source_path == self._explicit_file:
+            return "explicit_file"
+        return ""
 
     def _track_config_change(self, key: str, old_value: Any, new_value: Any, source: str):
         self.change_history.append({

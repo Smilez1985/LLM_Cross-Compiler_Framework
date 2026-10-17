@@ -10,6 +10,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **What Ditto and AI apps do becomes entries of the chat feed, in every process** (wave 6, DECISIONS round 9 U1,
+  consequence b): `orchestrator/Core/activity.py` writes one signed entry per event, from the process that did the
+  work (the GUI, `llm-cli`, every stdio MCP server and the HTTP child): a call that changed something (the new
+  registry event `call_done`, entry kind `ai_action`), the end of every job kind (a finish listener of the job
+  service), the end of a build (the orchestrator; who cancelled it, the saved folder as a label), uses of standing
+  approvals, pending approvals and their end, and refused work (`blocked`). The person's own calls make no entries;
+  the sender is the trusted caller id, an app's own name only its claim; entries hold closed values only and name the
+  window that shows the result (`orchestrator/tools/tool_windows.py`: the closed window list, a window for every tool
+  that changes something, checked by a registry-wide test, for every job kind, and what opens each window) plus step
+  ids by pattern; `refs.asked_in` marks Ditto's turns in the GUI's own chat. It fails open, and the same refusal is
+  written once in 30 seconds. `ActivityProducer.add_listener` hands the GUI its own process's entries at once, and
+  `ConfigManager.reload_user_config` takes settings another process saved, except values this process holds itself
+  (reported as conflicts). The GUI side (showing windows, notices with Show) follows in wave 6.
 - **`tests/test_cli_gui_parity.py`: every person-facing CLI command and option has a mouse path** (W1', round 9
   U2): the test walks the whole command tree of `llm-cli` (294 paths: commands, subcommands and options) and reads
   `CLI_PATHS`, `MACHINE_ONLY` and the window and tab tables of every module in `orchestrator/gui/menus/`. It fails

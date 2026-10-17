@@ -498,9 +498,41 @@ def deletion_rule_problems(spec: "ToolSpec") -> List[str]:
 
 
 # What the registry tells its observers (design 5.4). An event carries framework facts only: names, ids and reason
-# codes, never arguments, results or external text.
-EVENT_KINDS = ("refused_before_question", "grant_used", "approval", "approval_end")
+# codes, never arguments, results or external text. call_done (wave 6, design B.1): a call by any caller that changed
+# something (or a reported read, tool_windows.REPORTED_READ_TOOLS) ended ok; Core/activity.py writes the chat row.
+# Its one outside value is the app's own name (`client`, cleaned when it arrived), which a row shows only as a claim.
+EVENT_KINDS = ("refused_before_question", "grant_used", "approval", "approval_end", "call_done")
 _EVENT_VALUE = (str, int, float, bool, type(None))
+# What a call_done names of a call (`_done_facts`): ids the framework issued, the window or form the gui tool worked
+# on, the setting keys an update_settings changed (never their values), the closed reason and action of a
+# report_cannot_do, each at most this long; the producer checks every value against its closed pattern again.
+_DONE_TEXT = 200
+
+
+def _done_facts(spec: "ToolSpec", inp: Any, result: Any) -> Dict[str, Any]:
+    """The framework facts of a finished call for its call_done event: request_id and job_id from the result, the gui
+    tool's window and form, update_settings' changed keys, report_cannot_do's closed reason and action. Strings only;
+    a value of any other shape is left out."""
+    facts: Dict[str, Any] = {}
+
+    def text(value: Any) -> str:
+        return value[:_DONE_TEXT] if isinstance(value, str) else ""
+
+    for name in ("request_id", "job_id", "window"):
+        facts[name] = text(getattr(result, name, ""))
+    facts["form"] = text(getattr(result, "form_id", ""))
+    applied = getattr(result, "applied", None)   # update_settings: the keys it changed (the values stay out)
+    keys = [text(getattr(a, "key", "")) for a in applied] if isinstance(applied, list) else []
+    facts["keys"] = ",".join(k for k in keys if k)[:_DONE_TEXT]
+    if spec.name in _reported_reads():
+        facts["reason"] = text(getattr(inp, "reason", ""))
+        facts["action"] = text(getattr(inp, "action", None) or "")
+    return {k: v for k, v in facts.items() if v}
+
+
+def _reported_reads() -> frozenset:
+    from orchestrator.tools.tool_windows import REPORTED_READ_TOOLS
+    return REPORTED_READ_TOOLS
 
 
 class RegistryEvents:
@@ -1677,6 +1709,16 @@ class ToolRegistry:
             self.limiter.add(("day", ctx.actor, spec.name), DAY)
         serialized = result.model_dump_json()
         end("ok", result={"sha256": text_sha256(serialized), "bytes": len(serialized.encode("utf-8"))})
+        if writes or spec.name in _reported_reads():
+            # The observers (the chat feed's producer) hear of a call that changed something: who, which tool, the
+            # turn's channel and the ids it issued. Emitting never changes or fails the finished call.
+            try:
+                from orchestrator.Core.job_service import owner_actor
+                self.events.emit("call_done", tool=spec.name, actor=ctx.actor, owner=owner_actor(ctx.owner),
+                                 channel=getattr(ctx, "channel", None) or None, client=ctx.client or "",
+                                 **_done_facts(spec, inp, result))
+            except Exception as e:  # noqa: BLE001
+                self.logger.warning(f"The call_done of {spec.name} was not reported: {redact_secrets(str(e))}")
         return result
 
     def _output(self, spec: ToolSpec, result: Any, notes: Optional[List[str]] = None) -> BaseModel:
