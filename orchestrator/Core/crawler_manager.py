@@ -69,7 +69,7 @@ from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from orchestrator import __version__
 from orchestrator.rag import licences
-from orchestrator.rag.html_text import html_to_markdown, strip_boilerplate
+from orchestrator.rag.html_text import html_to_markdown, parse_page, strip_boilerplate
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.validation import validate_public_url, resolve_public_addresses
@@ -584,7 +584,7 @@ class CrawlerManager:
                         doc = self._process_pdf(response.content, url, response.headers)
                 elif 'text/html' in content_type:
                     if not (reasons and nofollow):
-                        soup = BeautifulSoup(response.text, 'html.parser')
+                        soup = parse_page(response.text)   # read the way a browser reads it (rag/html_text)
                         meta_reasons, meta_nofollow = self._meta_opt_outs(soup)
                         reasons += meta_reasons
                         nofollow = nofollow or meta_nofollow
@@ -792,7 +792,7 @@ class CrawlerManager:
         """Extracts the page (HTML text or parsed soup) as Markdown (headings, code blocks, tables kept) and
         its links. Its licence and copyright notice are read first, from the whole page (the footer included). Text
         hidden from a person reading the page is left out; how much, by kind, is the Document's hidden_removed."""
-        soup = html_content if isinstance(html_content, BeautifulSoup) else BeautifulSoup(html_content, 'html.parser')
+        soup = html_content if isinstance(html_content, BeautifulSoup) else parse_page(html_content)
         licence = licences.from_html(soup, url, headers)
         removed = self._strip_boilerplate(soup)
         if removed:

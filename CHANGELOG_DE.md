@@ -2293,12 +2293,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   enthielt. Deep Ingest lässt diese Elemente jetzt weg, bevor es Text und
   Links einer Seite liest (eine Regel, `hidden_kind` in `rag/html_text.py`, die der Schritt für Seitenelemente des
   Crawlers nutzt, also folgt der Crawler auch keinem Link, den niemand sieht); der inaktive Bereich eines Tab-Widgets
-  bleibt. Jeder Text von außen wird danach schon so gereinigt gespeichert, wie ihn ein Modell zu sehen bekommt (NFKC,
-  unsichtbare Zeichen, Tag-Zeichen und HTML-Kommentare entfernt; `utils/untrusted.clean_untrusted`, die bestehende
-  Reinigung, die jetzt auch meldet, was sie entfernt hat), nicht erst beim Anzeigen gereinigt: gecrawlte Seiten und
-  PDFs (`RAGManager.ingest_page`) und jede Seite eines Wissenspakets, deren HTML wie eine gecrawlte Seite gelesen wird
-  oder, im Markdown, seine versteckten Elemente verliert (Code-Spans und Code-Blöcke bleiben). Wie viel herausgefallen
-  ist, Art für Art, steht im neuen Herkunftsfeld `hidden_removed` der Seite, das nur das Framework schreibt:
+  bleibt. Eine Seite wird so gelesen, wie ein Browser sie liest: der Inline-Style mit `!important`, CSS-Kommentaren und
+  Escapes, durchsichtiger Text (nicht Verlaufstext), `scale(0)`, `max-height: 0`, große negative Ränder und
+  Verschiebungen, `filter: opacity(0)` und `content-visibility: hidden`; der Ersatztext von `<iframe>`, `<canvas>`,
+  `<video>` und `<audio>`, `<noembed>`, `<noframes>`, `<datalist>`, `<rp>`, ein geschlossenes `<dialog>` und ein
+  zweiter `<title>`; ein versteckendes Element als selbstschließender Tag (`<div hidden/>`) enthält, was danach folgt,
+  und von einem doppelt geschriebenen Attribut zählt das erste. Jeder Text von außen wird danach schon so gereinigt
+  gespeichert, wie ihn ein Modell zu sehen bekommt (NFKC, unsichtbare Zeichen, Tag-Zeichen und HTML-Kommentare
+  entfernt; `utils/untrusted.clean_untrusted`, die bestehende Reinigung, die jetzt auch meldet, was sie entfernt hat),
+  nicht erst beim Anzeigen gereinigt: gecrawlte Seiten und PDFs (`RAGManager.ingest_page`) und jede Seite eines
+  Wissenspakets, deren HTML wie eine gecrawlte Seite gelesen wird oder, im Markdown, seine versteckten Elemente
+  verliert (Code-Spans und Code-Blöcke bleiben; versteckt eine CommonMark-Darstellung des Ergebnisses noch Text, wird
+  stattdessen der sichtbare Text dieser Darstellung gespeichert). Ein `<!--`, das nichts schließt, verliert in schon
+  ausgelesenem Text nur diese Zeichen, nicht den Rest der Seite. Wie viel herausgefallen ist, Art für Art, steht im
+  neuen Herkunftsfeld `hidden_removed` der Seite, das nur das Framework schreibt:
   **Tools > Wissensquellen...** und `llm-cli knowledge sources` zeigen es in der neuen Spalte „Ausgelassener
   versteckter Text“; es erreicht nie eine KI und geht nie in ein exportiertes Paket. Die eigenen Dokumente des
   Frameworks werden so gespeichert, wie sie geschrieben sind. Testseiten, die je eine Nutzlast verstecken

@@ -1058,8 +1058,11 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
   `crawl_docs_site` darum, und die Person bestätigt jeden Crawl.
 - **Versteckter Text wird an dem erkannt, was ein Element selbst sagt.** Inline-Styles und Attribute zählen; Regeln in
   Stylesheets und Klassen (wie `.sr-only`) sind ohne CSS-Engine nicht zu sehen, und die versteckte Textebene eines PDFs
-  wird nicht geprüft (sein Text bekommt trotzdem die Reinigung). Auszüge, die vor dieser Prüfung gespeichert wurden,
-  behalten ihren Text, bis die Seite erneut eingelesen oder das Paket erneut importiert wird.
+  wird nicht geprüft (sein Text bekommt trotzdem die Reinigung). Eine Seite wird ohne ihre Skripte gelesen, und ein
+  Element, das eine Schriftgröße, Sichtbarkeit oder Farbe versteckt, nimmt ein Kind mit, das eine eigene setzt. Das
+  Markdown eines Wissenspakets behält seine HTML-Tags, wie sie geschrieben sind; Attributwerte wie `title` oder `alt`
+  gelangen also in den gespeicherten Text. Auszüge, die vor dieser Prüfung gespeichert wurden, behalten ihren Text,
+  bis die Seite erneut eingelesen oder das Paket erneut importiert wird.
 - **Reranking ist nur für Build-Empfehlungen eingeschaltet.** Chat und MCP-Suche nutzen es nur mit
   `rag_rerank_default`. Die Schwelle des Rerankers ist für Fragen kalibriert; bei kurzen Suchen aus Stichwörtern,
   etwa der des Modulvorschlags, verwirft sie auch passende Auszüge.

@@ -270,8 +270,10 @@ def clean_outside_text(content: str, markup: bool = True,
     HTML, e.g. a knowledge pack's page): a whole HTML page is read like a crawled one (rag/html_text.page_markdown),
     and the hidden elements of HTML inside Markdown are cut out (strip_hidden_markup). Then always the untrusted-text
     cleaning that a model's view of the text gets too (utils/untrusted.clean_untrusted: NFKC, invisible characters,
-    HTML comments), without a length limit. Returns (the title of a whole HTML page or "", the text, the counts by kind:
-    `removed`, e.g. what the crawler left out of the page, plus what was found here)."""
+    HTML comments), without a length limit. By then the text is what its reader sees (real comments are gone), so a
+    "<!--" that nothing closes is visible text: it loses only those characters, not the rest of the page. Returns (the
+    title of a whole HTML page or "", the text, the counts by kind: `removed`, e.g. what the crawler left out of the
+    page, plus what was found here)."""
     from orchestrator.utils.untrusted import clean_untrusted
     counts = _add_counts({}, removed or {})
     title = ""
@@ -282,7 +284,7 @@ def clean_outside_text(content: str, markup: bool = True,
         else:
             content, found = strip_hidden_markup(content)
         _add_counts(counts, found)
-    content, found = clean_untrusted(content)
+    content, found = clean_untrusted(content, keep_after_open_comment=True)
     return title, content, _add_counts(counts, found)
 
 

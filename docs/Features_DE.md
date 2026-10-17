@@ -1797,16 +1797,28 @@ eine KI zu verstecken (Prompt Injection). Deshalb speichert Deep Ingest nur, was
   (nicht `hidden="until-found"`, das die Suche des Browsers aufdeckt) oder mit `aria-hidden="true"`; `<template>` und
   `<noscript>`; CDATA-Abschnitte, die ein Browser wie Kommentare behandelt. Der inaktive Bereich eines Tab-Widgets
   bleibt (`role="tabpanel"` auf einer Seite mit Tabs): Du öffnest ihn mit einem Klick.
+- **Gelesen wie ein Browser liest:** Der Inline-Style zählt so, wie ein Browser ihn anwendet (`!important`,
+  CSS-Kommentare und Escapes eingeschlossen), und ebenso zählen durchsichtiger Text (`color: transparent`, eine Farbe
+  ohne Deckkraft, außer der Text wird anders gemalt, etwa als Verlaufstext), `transform: scale(0)`, eine Box mit
+  `max-height: 0`, ein großer negativer Rand oder eine große Verschiebung, `filter: opacity(0)` und
+  `content-visibility: hidden`. Auch Elemente, deren Inhalt ein Browser nie zeigt, fallen heraus: der Ersatztext von
+  `<iframe>`, `<canvas>`, `<video>` und `<audio>`, `<noembed>`, `<noframes>`, `<datalist>`, `<rp>`, ein `<dialog>`,
+  das nicht offen ist, und ein zweiter `<title>` in der Seite (gezählt als `display:none`). Ein versteckendes Element,
+  das als selbstschließender Tag geschrieben ist (`<div hidden/>`), enthält wie im Browser, was danach folgt, und von
+  einem doppelt geschriebenen Attribut zählt das erste.
 - **Danach gereinigt wie jeder Text von außen,** bevor er gespeichert wird, damit der gespeicherte Auszug das ist, was
   eine KI später zu sehen bekommt (nicht erst im Moment, in dem sie ihn sieht): Unicode normalisiert (NFKC),
   unsichtbare Zeichen entfernt (Zeichen ohne Breite, Unicode-Tag-Zeichen, Bidi-Steuerzeichen und ähnliche) und
   HTML-Kommentare entfernt, dieselbe Reinigung, die jeder Auszug bekommt, bevor er ein Modell erreicht
   (`orchestrator/utils/untrusted.py`). Der Titel der Seite wird ebenfalls gereinigt. Der Text eines PDFs bekommt
-  dieselbe Reinigung.
+  dieselbe Reinigung. Zu diesem Zeitpunkt ist der Text das, was seine Leserin oder sein Leser sieht; ein `<!--`, das
+  nichts schließt, ist also sichtbarer Text: Es verliert nur diese vier Zeichen, nie den Rest der Seite.
 - **Wissenspakete** folgen derselben Regel, wenn sie HTML enthalten: Eine Seite, die ein ganzes HTML-Dokument ist,
   wird wie eine gecrawlte Seite gelesen, und HTML im Markdown eines Pakets verliert seine versteckten Elemente und
   alles, wovon ein Browser nichts zeigt (Kommentare, CDATA-Abschnitte, Verarbeitungsanweisungen); HTML in Code-Spans
-  und Code-Blöcken wird gezeigt, nicht dargestellt, und bleibt. Danach dieselbe Reinigung. Das gilt für
+  und Code-Blöcken wird gezeigt, nicht dargestellt, und bleibt. Das Ergebnis wird danach als Markdown (CommonMark)
+  dargestellt; versteckt diese Darstellung noch Text (wo Code-Spans, Code-Blöcke oder HTML-Blöcke anders gelesen
+  werden), wird stattdessen der sichtbare Text dieser Darstellung gespeichert. Danach dieselbe Reinigung. Das gilt für
   jede Seite, die aus einem Paket stammt, gleich wie sie gespeichert wird.
 - **Du siehst, wie viel herausgefallen ist:** **Tools > Wissensquellen...** und `llm-cli knowledge sources` haben die
   Spalte „Ausgelassener versteckter Text“ (CLI: „Hidden text left out“), Art für Art (zum Beispiel „display:none 2,
@@ -1818,9 +1830,13 @@ eine KI zu verstecken (Prompt Injection). Deshalb speichert Deep Ingest nur, was
 - **Die eigenen Dokumente des Frameworks** werden so gespeichert, wie sie geschrieben sind: Sie sind kein Text von
   außen.
 - **Grenzen:** Es zählt nur, was ein Element selbst sagt. Regeln in Stylesheets und Klassen (wie `.sr-only`) sieht das
-  Framework nicht, weil es keine CSS-Engine hat; das Entfernen ist also unvollständig. Eine Wissensbasis behält ihre
-  älteren Auszüge, bis eine Seite erneut eingelesen wird (zum Beispiel durch ein neues Deep Ingest derselben Adresse)
-  oder ein Paket erneut importiert wird.
+  Framework nicht, weil es keine CSS-Engine hat; das Entfernen ist also unvollständig. Ein Element, das eine
+  Schriftgröße, Sichtbarkeit oder Farbe versteckt, fällt mit allem heraus, was darin steht, auch mit einem Kind, das
+  eine eigene sichtbare Größe oder Farbe setzt. Die Seite wird so gelesen, wie sie ausgeliefert wird, ohne ihre
+  Skripte: Text, den ein Skript erst später zeigt (ein Inline-`opacity: 0`, das eingeblendet wird), fällt heraus. Das
+  Markdown eines Pakets behält seine HTML-Tags, wie sie geschrieben sind, Attributwerte (`title`, `alt`)
+  eingeschlossen. Eine Wissensbasis behält ihre älteren Auszüge, bis eine Seite erneut eingelesen wird (zum Beispiel
+  durch ein neues Deep Ingest derselben Adresse) oder ein Paket erneut importiert wird.
 - **In der CI geprüft:** Testseiten, die je eine versteckte Nutzlast neben einem sichtbaren Text enthalten
   (`evals/retrieval/carriers/`), laufen in den Tests durch den Crawler und die Wissensbasis, und die nächtliche
   Retrieval-Evaluation führt sie als eigene Gruppe aus (`llm-cli ditto eval --kind retrieval --cases
