@@ -11,7 +11,6 @@ The knowledge base stays on this computer, where it serves Ditto: a package carr
 sidecar (nothing on the device used one).
 """
 
-import importlib.util
 import os
 import re
 import shlex
@@ -26,9 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, List, Dict
 
-# paramiko is used through orchestrator.utils.ssh_trust; without it deployments fall back to OpenSSH.
-PARAMIKO_AVAILABLE = importlib.util.find_spec("paramiko") is not None
-
+from orchestrator.remote.transport import PARAMIKO_AVAILABLE   # true while paramiko imports (tested on first use)
 from orchestrator.utils.logging import get_logger
 
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder

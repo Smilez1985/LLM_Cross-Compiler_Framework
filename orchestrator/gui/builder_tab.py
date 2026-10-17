@@ -11,7 +11,6 @@ Updates v2.4.0:
 - Updated BuildRequest handling for IMatrix parameters.
 """
 
-import importlib.util
 import platform
 import subprocess
 from pathlib import Path
@@ -32,8 +31,8 @@ from orchestrator.gui.plain import button_text, plain_label, plain_tooltip
 from orchestrator.utils import input_history
 from orchestrator.utils.localization import ui_text
 
-# Optional: Paramiko for SSH (used through orchestrator.utils.ssh_trust)
-PARAMIKO_AVAILABLE = importlib.util.find_spec("paramiko") is not None
+# SSH needs paramiko (used through orchestrator.utils.ssh_trust): true while it imports, asked when first tested.
+from orchestrator.remote.transport import PARAMIKO_AVAILABLE  # noqa: E402
 
 # Core Imports fallback
 try:
