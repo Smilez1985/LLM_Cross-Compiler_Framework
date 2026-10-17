@@ -400,9 +400,17 @@ def pin_base_image(definition: "ModuleDefinition", offline: bool = False, client
     .next) when the tag cannot be resolved (offline mode, the registry cannot be reached)."""
     if "@sha256:" in definition.base_os:
         return definition
+    return definition.model_copy(update={"base_os": pin_reference(definition.base_os, offline=offline, client=client)})
+
+
+def pin_reference(reference: str, offline: bool = False, client: Any = None) -> str:
+    """The image reference pinned to the digest its tag points at now (one that has a digest stays as it is): what an
+    AI-made module is written with, also for a base image an AI filled into the module wizard through the GUI tools.
+    Network: call it off the GUI thread. Raises ImageLookupError (with .next) when the tag cannot be resolved."""
+    if "@sha256:" in reference:
+        return reference
     from orchestrator.utils.image_registry import inspect_image
-    image = inspect_image(definition.base_os, offline=offline, client=client)
-    return definition.model_copy(update={"base_os": image.pinned})
+    return inspect_image(reference, offline=offline, client=client).pinned
 
 
 class OptimizerRecommendation(BaseModel):

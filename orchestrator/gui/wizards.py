@@ -229,6 +229,11 @@ class ModuleCreationWizard(QWizard):
         # emits on, or frees, a Qt object this wizard owns; gui/worker_relay.py). Only the latest request counts.
         self._ai_request: Optional[object] = None
         worker_relay().done.connect(self._on_ai_relay, Qt.QueuedConnection)
+        # The digest of a base image an AI filled in through the GUI tools is looked up the same way when the person
+        # clicks Finish; the pinned image the person accepted is what the module is written with.
+        self._pin_request: Optional[object] = None
+        self._pinned_image: Optional[tuple] = None   # (the AI's image, its pinned reference)
+        worker_relay().done.connect(self._on_pin_relay, Qt.QueuedConnection)
         
         # Container for Avatar (Stacked to switch widgets)
         self.avatar_container = QStackedWidget()
@@ -1204,6 +1209,67 @@ Setup commands:
         field = form.field("base_image") if form is not None else None
         return bool(field is not None and field.filled_by_ai())
 
+    def _unpinned_ai_image(self) -> Optional[str]:
+        """The base image an AI filled in through the GUI tools while it has no digest yet (None otherwise, and once
+        the person accepted its pinned form). Ditto's own proposal is pinned before the person sees it."""
+        if not self._ai_chose_base_image():
+            return None
+        image = str(self.gui_form.field("base_image").get() or "").strip()
+        if not image or "@sha256:" in image or (self._pinned_image and self._pinned_image[0] == image):
+            return None
+        return image
+
+    def _offline(self) -> bool:
+        ditto = self._ditto()
+        if ditto is not None:
+            return bool(getattr(ditto, "offline_mode", False))
+        try:
+            config = getattr(self.framework_manager, "config", None)
+            return bool(config.get("offline_mode", False)) if config is not None else False
+        except Exception:  # noqa: BLE001 - no settings: the registry is asked
+            return False
+
+    def _start_pin(self, image: str) -> None:
+        """Looks up the digest the AI's base image points at now, as `llm-cli module generate-ai` pins Ditto's
+        proposal (ditto_manager.pin_reference; the registry is asked off the GUI thread); the answer comes back to
+        _on_pin_relay, which asks the person before anything is saved."""
+        token = self._pin_request = object()
+        relay, offline = worker_relay(), self._offline()
+        finish = self.button(QWizard.FinishButton)
+        if finish is not None:
+            finish.setEnabled(False)   # one lookup at a time; Finish comes back with the answer
+
+        def work() -> None:
+            from orchestrator.Core.ditto_manager import pin_reference
+            try:
+                result = ("pinned", image, pin_reference(image, offline=offline), "")
+            except Exception as e:  # noqa: BLE001 - ImageLookupError (offline, no registry, unknown tag) and others
+                result = ("failed", image, str(e), str(getattr(e, "next", "") or ""))
+            relay.done.emit(token, result)
+
+        threading.Thread(target=work, name="ai-image-pin", daemon=True).start()
+
+    def _on_pin_relay(self, token: object, result: Any) -> None:
+        if token is not self._pin_request or not isinstance(result, tuple) or len(result) != 4:
+            return
+        from orchestrator.gui.plain import ask, plain_box
+        self._pin_request = None
+        finish = self.button(QWizard.FinishButton)
+        if finish is not None:
+            finish.setEnabled(True)
+        kind, image, value, next_step = result
+        title = ui_text("bld.wizard.pin_title")
+        if kind != "pinned":   # as `module generate-ai` refuses a proposal whose image cannot be pinned
+            plain_box(self, "critical", title, ui_text("bld.wizard.pin_not_saved", image=image, reason=value,
+                                                       next=next_step))
+            return
+        if self._unpinned_ai_image() != image:   # the field changed meanwhile: Finish asks again
+            return
+        if not ask(self, title, ui_text("bld.wizard.pin_question", image=image, pinned=value)):
+            return
+        self._pinned_image = (image, value)
+        self.accept()
+
     def _save_through_ditto(self, roots, profile) -> Path:
         """An AI-made module takes the path of `llm-cli module generate-ai`: DittoManager.save_module refuses a
         prebuilt nvidia/cuda image and an image that is not a Docker Official Image without the AI's reason, the
@@ -1240,6 +1306,12 @@ Setup commands:
 
     def accept(self):
         if self._crawl_running():  # Finish is disabled meanwhile; the snapshot must hold every crawled page
+            return
+        if self._pin_request is not None:   # the digest of the AI's base image is being looked up
+            return
+        unpinned = self._unpinned_ai_image()
+        if unpinned:   # an AI's base image is written with its digest, as `module generate-ai` writes it
+            self._start_pin(unpinned)
             return
         # --- CROSS-COMPILER AUTO-INJECTION ---
         packages_list = self.packages_edit.text().split()
@@ -1286,6 +1358,9 @@ Setup commands:
             "quantization_logic": self.quant_logic.toPlainText(),
             "detection_commands": "lscpu"
         }
+        if self._pinned_image and self._ai_chose_base_image() and \
+                self.module_data["base_os"].strip() == self._pinned_image[0]:
+            self.module_data["base_os"] = self._pinned_image[1]   # the pinned image the person accepted
         if ai_made:
             # The proposal's fields without a widget of their own are passed on, never dropped (the person saw them
             # in the proposal's facts), and the module is marked AI-generated and untested.

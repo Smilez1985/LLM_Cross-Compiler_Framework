@@ -2777,7 +2777,10 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   gespeichert, das ein vorgefertigtes `nvidia/cuda`-Image und ein Image, das kein Docker Official Image ist, ohne die
   Begründung der KI ablehnt (auch für ein Basis-Image, das eine KI über die GUI-Werkzeuge in den Assistenten eingetragen
   hat), und beide halten das gespeicherte Modul im Audit-Log fest (`module_saved`, mit dem sha256 der Definition und dem
-  Basis-Image). Der Assistent gibt jedes Feld des Vorschlags weiter. Seine erste Seite bietet Anbieter und Modell **nur
+  Basis-Image). Ein Basis-Image ohne Digest, das eine KI über die GUI-Werkzeuge eingetragen hat, wird bei **Finish**
+  ebenso festgelegt (`pin_reference`, außerhalb des GUI-Threads): Der Assistent zeigt das festgelegte Image und fragt
+  zuerst („Nein“ ist die Vorgabe); lässt sich der Digest nicht nachschlagen, wird nichts gespeichert. Der Assistent gibt
+  jedes Feld des Vorschlags weiter. Seine erste Seite bietet Anbieter und Modell **nur
   für diese Analyse** (`--provider`, `--model`, `DittoManager.for_run`): Die gespeicherten KI-Einstellungen bleiben
   unverändert. Ein regelbasierter Import einer Probe nach Dittos Vorschlag ersetzt jeden Wert des Vorschlags (auch seine
   Pakete, Setup-Befehle und Quantisierungslogik), sodass das Modul dann deines ist.

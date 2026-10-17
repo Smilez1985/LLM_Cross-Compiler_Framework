@@ -2510,7 +2510,10 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   module is saved through `DittoManager.save_module`, which refuses a prebuilt `nvidia/cuda` image and an image that is
   not a Docker Official Image without the AI's reason (also for a base image an AI filled into the wizard through the
   GUI tools), and both record the saved module in the audit log (`module_saved`, with the definition's sha256 and the
-  base image). The wizard passes on every field of the proposal. Its first page offers provider and model **for this
+  base image). A base image without a digest that an AI filled in through the GUI tools is pinned the same way when
+  you click **Finish** (`pin_reference`, off the GUI thread): the wizard shows the pinned image and asks first ("No"
+  is the default); when the digest cannot be looked up, nothing is saved. The wizard passes on every field of the
+  proposal. Its first page offers provider and model **for this
   analysis only** (`--provider`, `--model`, `DittoManager.for_run`): the saved AI settings stay unchanged. A rule-based
   probe import after Ditto's proposal replaces every value of the proposal (also its packages, setup commands and
   quantization logic), so the module is then yours.

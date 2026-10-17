@@ -1952,6 +1952,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
+  the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
+  wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI
+  app) was saved as a bare tag such as `ubuntu:24.04`. **Finish** now looks the digest up off the GUI thread (the same
+  lookup, `ditto_manager.pin_reference`), shows the pinned image and asks first ("No" is the default); the module is
+  saved through `DittoManager.save_module` with exactly that image. When the digest cannot be looked up (offline
+  mode, no registry), nothing is saved and the window says why and what to do. The field keeps the AI's value and
+  its mark.
 - **A source repository URL no longer takes a password or token**: `llm-cli config repos --add` and **File >
   Settings... > Add** stored a URL exactly as typed, so `https://user:password@...`, a token as the user name or a
   parameter such as `?private_token=` ended up in plain text in `config.yml`. Both now refuse such a URL through one
