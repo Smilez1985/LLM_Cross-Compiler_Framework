@@ -297,6 +297,22 @@ def roomy_snapshot_disk(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def logger_levels_restored():
+    """A CLI test with -q (or --log-level) sets the framework's loggers to ERROR process-wide (setup_logging keeps
+    the last level), so a later test's caplog saw no warning, depending only on the order the files ran in. Every
+    logger's level is put back after each test."""
+    root = logging.getLogger()
+    levels = {name: logger.level for name, logger in logging.Logger.manager.loggerDict.items()
+              if isinstance(logger, logging.Logger)}
+    root_level = root.level
+    yield
+    root.setLevel(root_level)
+    for name, logger in list(logging.Logger.manager.loggerDict.items()):
+        if isinstance(logger, logging.Logger) and logger.level != levels.get(name, logging.NOTSET):
+            logger.setLevel(levels.get(name, logging.NOTSET))
+
+
+@pytest.fixture(autouse=True)
 def sdk_debug_logging_off():
     """A CLI or GUI test with --debug-http must not leave the SDK loggers at DEBUG, with a stderr handler, for
     the tests after it (the choice is process-wide and kept by later setup_logging() calls)."""
