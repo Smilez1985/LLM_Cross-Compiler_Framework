@@ -340,7 +340,8 @@ def record_trusted_device(state_dir: Path, host: str, port: int, user: str, key:
 def label_is_address(device: TrustedDevice) -> bool:
     """Whether the board's label is its address: the person gave it no name of its own, so the address became the
     label (TrustedDevices.record)."""
-    forms = (device.host, device.address, f"{device.host}:{device.port}", f"[{device.host}]:{device.port}")
+    at = device.endpoint
+    forms = (at.host, at.store_form, at.display, f"[{at.host}]:{at.port}")
     return device.label.casefold() in {form.casefold() for form in forms}
 
 
@@ -358,7 +359,7 @@ def find_boards(store: "TrustedDevices", name: str, *, by_address: bool) -> List
     found = [d for d in boards if d.label.casefold() == wanted.casefold() and (by_address or not label_is_address(d))]
     if found or not by_address:
         return found
-    return [d for d in boards if wanted in (d.host, d.address, f"{d.host}:{d.port}")]
+    return [d for d in boards if wanted in (d.host, d.endpoint.store_form, d.endpoint.display)]
 
 
 def board_name(store: "TrustedDevices", device: TrustedDevice) -> str:
