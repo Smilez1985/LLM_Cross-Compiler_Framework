@@ -359,7 +359,7 @@ SCRIPTS = REPO_ROOT / "scripts"
 class TestWindowsScripts:
 
     def test_the_start_script_finds_the_framework_folder(self):
-        text = (SCRIPTS / "start-llm_convertion_framework.bat").read_text(encoding="utf-8")
+        text = (SCRIPTS / "start-llm_cross_compiler_framework.bat").read_text(encoding="utf-8")
         # It lies in scripts\ (the updater, still in development, copies it into the framework folder): both work.
         assert 'if not exist "orchestrator\\main.py" if exist "..\\orchestrator\\main.py" cd ..' in text
         assert 'set "PYTHONPATH=%FRAMEWORK_ROOT%"' in text and 'set "PYTHONPATH=%~dp0"' not in text
@@ -370,7 +370,7 @@ class TestWindowsScripts:
             assert f'if exist "{optional}"' in text, optional
 
     def test_the_uninstaller_reads_the_marker_install_bat_writes(self):
-        uninstall = (SCRIPTS / "Uninstall-LLM-Conversion-Framework.bat").read_text(encoding="utf-8")
+        uninstall = (SCRIPTS / "Uninstall-LLM-Cross-Compiler-Framework.bat").read_text(encoding="utf-8")
         install = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
         marker = re.search(r'SET "MARKER_FILE=([^"]+)"', uninstall).group(1)
         assert f'Join-Path $ScriptPath "{marker}"' in install and "-Value $InstallDir" in install

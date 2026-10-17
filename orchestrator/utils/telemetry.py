@@ -25,7 +25,7 @@ from datetime import datetime
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.helpers import redact_secrets
 
-GITHUB_REPO_URL = "https://github.com/Smilez1985/llm_conversion_framework/issues/new"
+GITHUB_REPO_URL = "https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/issues/new"
 
 class TelemetryManager:
     """
