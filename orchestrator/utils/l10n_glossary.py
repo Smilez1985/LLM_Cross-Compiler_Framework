@@ -26,7 +26,7 @@ module that addresses the person; ui_text shows it when the person chose "Sie" (
 
 from typing import NamedTuple, Tuple
 
-REPO_DOCS = "https://github.com/Smilez1985/llm_conversion_framework/blob/main/docs/"
+REPO_DOCS = "https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/blob/main/docs/"
 LLAMA_CPP = "https://github.com/ggml-org/llama.cpp/blob/master/"
 
 

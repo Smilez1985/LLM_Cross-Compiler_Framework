@@ -129,6 +129,19 @@ def test_links_into_the_manual_name_existing_headings():
         assert TERMS[term_id].link_de.startswith(REPO_DOCS) and "_DE.md" in TERMS[term_id].link_de, term_id
 
 
+def test_links_into_the_manual_use_the_repository_s_current_address():
+    """Merge fix (round 10b): the glossary was written before the repository was renamed to LLM_Cross-Compiler_Framework
+    and linked the manual under the old address. GitHub forwards it today, but the card names the source it opens,
+    so it showed the old name. The manual's address is the one the bug report link of the program uses."""
+    from orchestrator.utils.telemetry import GITHUB_REPO_URL
+    repository = GITHUB_REPO_URL.rsplit("/issues/", 1)[0]
+    assert repository == "https://github.com/Smilez1985/LLM_Cross-Compiler_Framework"
+    assert REPO_DOCS == f"{repository}/blob/main/docs/"
+    for term_id, entry in TERMS.items():
+        for url in filter(None, (entry.link, entry.link_de)):
+            assert "llm_conversion_framework" not in url.lower(), (term_id, url)
+
+
 def test_explanation_and_link_follow_the_language(form):
     assert glossary.explanation("gguf", "en").startswith("The file format llama.cpp uses")
     assert glossary.explanation("gguf", "de").startswith("Das Dateiformat, das llama.cpp")
@@ -148,7 +161,7 @@ def test_source_label_names_where_a_link_goes():
     assert glossary.source_label("https://www.ssh.com/academy/ssh/host-key") == "ssh.com"
     assert glossary.source_label(TERMS["llama_server"].link) == "github.com/ggml-org/llama.cpp"
     assert glossary.source_label(TERMS["qdrant"].link) == "qdrant.tech"
-    assert glossary.source_label(TERMS["target"].link) == "github.com/Smilez1985/llm_conversion_framework"
+    assert glossary.source_label(TERMS["target"].link) == "github.com/Smilez1985/LLM_Cross-Compiler_Framework"
 
 
 def test_find_terms_marks_whole_words_and_skips_ambiguous_ones():
