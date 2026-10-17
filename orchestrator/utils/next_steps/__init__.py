@@ -168,8 +168,8 @@ FORMAL_LANGUAGES: Tuple[str, ...] = ("de",)   # = orchestrator.utils.localizatio
 FORMAL: Dict[str, Dict[str, str]] = {
     "de": {
         "steps.only_person": "Das können nur Sie tun",
-        "steps.shown_only": "Das Framework führt diesen Befehl nicht aus; kopieren Sie ihn und führen Sie ihn {where} "
-                            "aus.",
+        "steps.shown_only": "Das Framework führt diesen Befehl nicht aus; kopieren Sie ihn und führen Sie ihn "
+                            "{where} aus.",
         "steps.declined": "Nicht ausgeführt: Sie haben Nein gesagt.",
         "error.permission_denied": "Ihre Einstellungen erlauben das nicht.",
         "error.needs_person": "Das können nur Sie tun.",

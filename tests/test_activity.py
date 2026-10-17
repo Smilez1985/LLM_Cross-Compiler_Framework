@@ -490,7 +490,8 @@ class TestRows:
                                                            "blocker": "commit_required",
                                                            "person_action": "action.commit_required"})
         prod.on_registry_event("refused_before_question", {**base, "tool": "deploy_to_device", "code": "needs_person",
-                                                           "step": "nothing.known", "person_action": "action.pair_device"})
+                                                           "step": "nothing.known",
+                                                           "person_action": "action.pair_device"})
         assert prod.flush()
         disk, snapshots, commit, board = rows(store)
         assert disk.refs.steps == ["images.free"], "the key is not a step; the registry's step stays"
