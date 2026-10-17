@@ -25,6 +25,7 @@ is this module itself, so every old import and every test that patches it reache
 
 import errno
 import socket
+import sys
 from typing import Optional
 
 HOST_DOWN = "device_host_down"
@@ -86,8 +87,9 @@ def classify(error: BaseException) -> Optional[str]:
         return HOST_KEY_CHANGED
     if isinstance(error, ssh_trust.HostKeyError):
         return None
-    from orchestrator.remote import transport
-    paramiko = transport.paramiko_module()   # None without paramiko: its errors cannot occur then
+    # paramiko only when something imported it already: none of its errors exists before that, so classify never
+    # loads it (RG1) and works the same without it.
+    paramiko = sys.modules.get("paramiko")
     if paramiko is not None:
         if isinstance(error, paramiko.BadHostKeyException):
             return HOST_KEY_CHANGED
