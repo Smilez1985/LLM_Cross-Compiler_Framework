@@ -4,6 +4,11 @@ updates:
   # again on its branch (CONTRIBUTING.md, section 2); the CI job "Lock files" fails until they match uv.lock.
   - package-ecosystem: uv
     directory: "/"
+    # The hash-pinned exports are made by `uv export` from uv.lock, not edited by Dependabot (its pip-compile updater
+    # fails on them: "unknown url type: '/pypi/<package>/json'").
+    exclude-paths:
+      - "requirements.txt"
+      - "requirements-dev.txt"
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
