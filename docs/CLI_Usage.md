@@ -2087,6 +2087,10 @@ the stage containers as `<NAME>_REPO_OVERRIDE` (`NAME`: the whole name in upper 
 ASCII letters and digits as `_`, so `llama.cpp`, `llama_cpp` and `llama-cpp` all give `LLAMA_CPP_REPO_OVERRIDE`). A
 dotted name is passed under the name earlier versions used as well, its part after the last dot (`sources.llama_cpp`
 also gives `LLAMA_CPP_REPO_OVERRIDE`). `--add` refuses a name without any ASCII letter or digit (exit code 2).
+`--add` also refuses a URL with a credential in it (`user:password@`, a token as the user name or in a parameter
+such as `?private_token=`, exit code 2): `config.yml` is plain text, so keep passwords and tokens in the secrets store
+(`llm-cli secrets set NAME`) and enter the URL without them. An entry stored with one before still works; the list,
+`config show` and the GUI show it only with the credential replaced by `REDACTED`.
 
 | Option | Meaning |
 |---|---|

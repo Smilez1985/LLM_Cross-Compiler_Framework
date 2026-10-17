@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFo
                                QWidget)
 
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label
-from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import current_language, ui_text
 
 
@@ -172,14 +171,14 @@ class SettingsDialog(QDialog):
         return page
 
     def refresh_repos(self) -> None:
-        from orchestrator.Core.settings_view import repo_overrides
+        from orchestrator.Core.settings_view import repo_overrides, shown_repo_url
         self.repos = repo_overrides(self.config)
         path = one_line(self._config_file())
         self.lbl_repos.setText(self._t("bld.settings.repos.intro", path=path) + "\n" +
                                ("" if self.repos else self._t("bld.settings.repos.empty")))
         self.table_repos.setRowCount(len(self.repos))
         for row, (name, url) in enumerate(self.repos.items()):
-            for column, text in enumerate((name, redact_secrets(url), _variable(name))):
+            for column, text in enumerate((name, shown_repo_url(url), _variable(name))):
                 self.table_repos.setItem(row, column, QTableWidgetItem(one_line(text)))
         self.btn_repo_remove.setEnabled(bool(self.repos))
 
@@ -191,7 +190,8 @@ class SettingsDialog(QDialog):
         return item.text() if item is not None else None
 
     def add_repo(self) -> None:
-        from orchestrator.Core.settings_view import RepoOverrideError, add_repo_override
+        from orchestrator.Core.settings_view import (CREDENTIAL_IN_URL, RepoOverrideError, add_repo_override,
+                                                     shown_repo_url)
         name, url = self.edit_repo_name.text().strip(), self.edit_repo_url.text().strip()
         if not name or not url:
             plain_box(self, "information", self._t("bld.settings.tab.repos"), self._t("bld.settings.repos.need_both"))
@@ -199,22 +199,27 @@ class SettingsDialog(QDialog):
         try:
             variable = add_repo_override(self.config, name, url)
         except RepoOverrideError as e:
-            plain_box(self, "warning", self._t("bld.settings.tab.repos"), one_line(str(e)))
+            if e.code == CREDENTIAL_IN_URL:   # the same refusal as `config repos --add`, in the GUI's words
+                what = self._t("bld.settings.repos.password" if e.kind == "password" else "bld.settings.repos.token")
+                plain_box(self, "warning", self._t("bld.settings.tab.repos"),
+                          self._t("bld.settings.repos.credential", what=what, url=one_line(shown_repo_url(url))))
+            else:
+                plain_box(self, "warning", self._t("bld.settings.tab.repos"), one_line(str(e)))
             return
         self.lbl_repo_result.setText(self._t("bld.settings.repos.added", name=one_line(name.lower()),
-                                             url=one_line(redact_secrets(url)), variable=variable))
+                                             url=one_line(shown_repo_url(url)), variable=variable))
         self.edit_repo_name.clear()
         self.edit_repo_url.clear()
         self.refresh()
 
     def remove_repo(self) -> None:
-        from orchestrator.Core.settings_view import RepoOverrideError, remove_repo_override
+        from orchestrator.Core.settings_view import RepoOverrideError, remove_repo_override, shown_repo_url
         name = self.selected_repo()
         if not name:
             plain_box(self, "information", self._t("bld.settings.tab.repos"), self._t("bld.settings.repos.pick"))
             return
         question = self._t("bld.settings.repos.remove_question", name=one_line(name),
-                           url=one_line(redact_secrets(self.repos.get(name, "-"))), variable=_variable(name),
+                           url=one_line(shown_repo_url(self.repos.get(name, "-"))), variable=_variable(name),
                            path=one_line(self._config_file()))
         if not ask(self, self._t("bld.settings.tab.repos"), question):   # "No" is the default
             return

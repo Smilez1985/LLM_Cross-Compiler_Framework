@@ -158,6 +158,12 @@ TEXTS = {
         "bld.settings.repos.removed": "Removed repo override: {name}",
         "bld.settings.repos.not_found": "Repo {name} not found.",
         "bld.settings.repos.pick": "Choose a repository override in the list first.",
+        "bld.settings.repos.credential": "Not added: the URL contains {what} ({url}).\n\nSettings are saved as plain "
+                                         "text, so a repository URL never takes a credential. Keep passwords and "
+                                         "tokens in the secrets store (Security > Secrets...) and enter the URL "
+                                         "without them.",
+        "bld.settings.repos.password": "a password",
+        "bld.settings.repos.token": "a token",
         "bld.settings.repos.remove_question": "Remove this repository override?\n\nName: {name}\nURL: {url}\nPassed "
                                               "to builds as: {variable}\nSaved in: {path}\n\nBuilds then use the "
                                               "repository the target's scripts name.",
@@ -324,6 +330,12 @@ TEXTS = {
         "bld.settings.repos.removed": "Repository-Überschreibung entfernt: {name}",
         "bld.settings.repos.not_found": "Repository {name} nicht gefunden.",
         "bld.settings.repos.pick": "Wähle zuerst eine Repository-Überschreibung in der Liste.",
+        "bld.settings.repos.credential": "Nicht hinzugefügt: Die URL enthält {what} ({url}).\n\nEinstellungen werden "
+                                         "als reiner Text gespeichert, deshalb nimmt eine Repository-URL nie "
+                                         "Zugangsdaten auf. Bewahre Passwörter und Tokens im Geheimnisspeicher auf "
+                                         "(Security > Geheimnisse...) und gib die URL ohne sie ein.",
+        "bld.settings.repos.password": "ein Passwort",
+        "bld.settings.repos.token": "ein Token",
         "bld.settings.repos.remove_question": "Diese Repository-Überschreibung entfernen?\n\nName: {name}\nURL: {url}"
                                               "\nAn Builds übergeben als: {variable}\nGespeichert in: {path}\n\n"
                                               "Builds verwenden dann das Repository, das die Skripte des Targets "

@@ -2176,6 +2176,11 @@ Name in Großbuchstaben, jedes Zeichen außer ASCII-Buchstaben und Ziffern als `
 `llama_cpp` und `llama-cpp` alle `LLAMA_CPP_REPO_OVERRIDE`). Ein Name mit Punkt wird zusätzlich unter dem Namen
 früherer Versionen weitergereicht, seinem Teil nach dem letzten Punkt (`sources.llama_cpp` ergibt auch
 `LLAMA_CPP_REPO_OVERRIDE`). `--add` lehnt einen Namen ohne ASCII-Buchstaben und Ziffern ab (Exit-Code 2).
+`--add` lehnt auch eine URL mit Zugangsdaten ab (`user:passwort@`, ein Token als Benutzername oder in einem Parameter
+wie `?private_token=`, Exit-Code 2): Die `config.yml` ist reiner Text, deshalb gehören Passwörter und Tokens in den
+Secrets-Speicher (`llm-cli secrets set NAME`), und die URL wird ohne sie eingegeben. Ein früher so gespeicherter
+Eintrag funktioniert weiter; die Liste, `config show` und die GUI zeigen ihn nur mit `REDACTED` statt der
+Zugangsdaten.
 
 | Option | Bedeutung |
 |---|---|

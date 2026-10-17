@@ -5592,8 +5592,8 @@ def config_output_folder(ctx: FrameworkContext, folder: Optional[str]):
 @pass_context
 def config_repos(ctx: FrameworkContext, add, remove):
     """Manage SSOT Source Repositories"""
-    from orchestrator.Core.settings_view import (RepoOverrideError, add_repo_override, remove_repo_override,
-                                                 repo_overrides)
+    from orchestrator.Core.settings_view import (CREDENTIAL_IN_URL, RepoOverrideError, add_repo_override,
+                                                 remove_repo_override, repo_overrides, shown_repo_url)
     ctx.require_framework()
     cm = ctx.framework_manager.config
     # The same functions as File > Settings... in the GUI.
@@ -5601,7 +5601,7 @@ def config_repos(ctx: FrameworkContext, add, remove):
         if add:
             name, url = add
             variable = add_repo_override(cm, name, url)
-            console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(redact_secrets(url))} "
+            console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(shown_repo_url(url))} "
                           f"(passed to builds as {escape(variable)})[/green]")
         elif remove:
             if remove_repo_override(cm, remove):
@@ -5617,11 +5617,11 @@ def config_repos(ctx: FrameworkContext, add, remove):
                 table.add_column("Key", style="cyan")
                 table.add_column("URL", style="green")
                 for k, url in current_repos.items():
-                    table.add_row(escape(k), escape(redact_secrets(url)))
+                    table.add_row(escape(k), escape(shown_repo_url(url)))
                 console.print(table)
     except RepoOverrideError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(2 if e.code == "invalid_name" else 1)
+        sys.exit(2 if e.code in ("invalid_name", CREDENTIAL_IN_URL) else 1)
 
 # ============================================================================
 # COMMUNITY ZOO (signed community packs: targets, recipes, knowledge)
