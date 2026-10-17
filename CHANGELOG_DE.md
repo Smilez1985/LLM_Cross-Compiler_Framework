@@ -26,6 +26,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Board so, wie es `llmcf mojo --oracle --board` tut, im Hintergrund (eine Verbindung zu seinem SSH-Port, keine
   Anmeldung), und zeigt seinen Befund mit dem nächsten Schritt unter der Zeile; ein Problem wird auch in einer Meldung
   genannt.
+- **Boards > Boards und Geräte...: jeder Befehl von `deploy devices` und `device` mit der Maus** (W1'): Ein neues
+  Menü Boards öffnet ein Fenster für jedes Board, das du untersucht hast oder dem du vertraust, mit dem Konto auf
+  dem Board, dem vollen Fingerabdruck des Host-Schlüssels und seinem Stand in `known_hosts`, seit wann ihm vertraut
+  wird, dem letzten Deployment, seinem System, den Deploy-Einstellungen und der installierten Laufzeit. Seine Knöpfe
+  rufen dieselben Kernfunktionen wie die CLI auf (neu `runtime/device/person_steps.py` und `steps.py`; die CLI ruft
+  sie auch auf, ihre Ausgabe bleibt gleich), mit denselben Prüfungen, Ablehnungen, Fragen ("Nein" ist die Vorgabe)
+  und Audit-Einträgen: Vertrautes Board hinzufügen..., Vertrauen entfernen... (bisher konnte nur die CLI einem
+  Board die Erlaubnis für KI-Deployments wieder nehmen), Einstellungen... (mit der sudo-Frage für systemd),
+  Laufzeit-Plan, Status, Laufzeit bauen... (Jobs, Spiegel, die Frage nach dem Quelltext, Abbrechen), Laufzeit
+  installieren... (das Passwort jedes Mal abgefragt, nie gespeichert; ein nicht vertrauenswürdiges Benchmark-Modell
+  nur nach einer ausdrücklichen Warnung), Prüfen... (auch ohne Modell), Ältere Laufzeit-Pakete entfernen... und
+  Ältere Builds auf dem Board entfernen... (der Löschdialog mit der vollständigen Liste) sowie Dieses Board prüfen
+  (Mojo). Jeder Kontakt mit einem Board und jeder Build laufen im Hintergrund. Die Laufzeit-Tools der KI bauen und
+  installieren mit denselben Schritten. Beschädigte Deploy-Einstellungen ("damaged; set them again") lassen sich jetzt
+  neu festlegen, im Fenster und mit `device settings`, nach einer Frage, die die Datei mit vollem Pfad und Größe nennt.
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den

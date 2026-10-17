@@ -365,6 +365,18 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   ([CLI](CLI_Usage_DE.md#deploy-devices)). Nur diese Geräte kann ein KI-Client oder Ditto für ein Deployment nennen,
   und nur, solange die `known_hosts` des Frameworks noch genau diesen Schlüssel enthält; kein Tool vertraut einem
   Gerät, koppelt es oder trägt es ein.
+- **Fenster Boards und Geräte** (GUI: **Boards > Boards und Geräte...**): jedes Board, das du untersucht hast oder
+  dem du vertraust, in einer Tabelle, mit dem, was nur du siehst (das Konto auf dem Board, den vollen Fingerabdruck
+  des Host-Schlüssels und ob `known_hosts` ihn noch enthält, seit wann und wie ihm vertraut wird, das letzte
+  Deployment, das System aus seiner Probe, seine Deploy-Einstellungen und die installierte Laufzeit). Seine Knöpfe
+  rufen dieselben Funktionen wie die CLI auf, mit denselben Fragen ("Nein" ist die Vorgabe) und Audit-Einträgen:
+  **Vertrautes Board hinzufügen...** (`deploy devices add`), **Vertrauen entfernen...** (`deploy devices remove`:
+  ohne es bleibt ein einmal gekoppeltes Board für KI-Deployments erlaubt), **Einstellungen...**,
+  **Laufzeit-Plan**, **Status**, **Laufzeit bauen...**, **Laufzeit installieren...**, **Prüfen...**, **Ältere
+  Laufzeit-Pakete entfernen...** und **Ältere Builds auf dem Board entfernen...** (die `device`-Befehle unten;
+  Löschen im Löschdialog mit der vollständigen Liste) sowie **Dieses Board prüfen (Mojo)** (eine Verbindung zum
+  SSH-Port des Boards, keine Anmeldung). Jeder Kontakt mit einem Board und jeder Build laufen im Hintergrund mit
+  Abbrechen; ein Passwort wird jedes Mal abgefragt und nie gespeichert.
 - **Adresse oder Hostname:** Du gibst ein, was du weißt, die IP-Adresse des Boards oder seinen Hostnamen
   (`myboard.local`). Dem Host-Schlüssel wird je eingegebenem Namen vertraut: ein Board, das du unter beiden Namen
   erreichst, bestätigst du für jeden einmal, und es bleibt dasselbe vertraute Gerät.
@@ -406,7 +418,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
 
 Für GGUF-Modelle baut das Framework llama.cpp für ein Board und installiert es dort (`llm-cli device ...`,
 [CLI_Usage_DE.md](CLI_Usage_DE.md#device)). Die RKLLM- und RKNN-Runtime sind Herstellerbinärdateien; sie
-installierst du selbst.
+installierst du selbst. GUI: **Boards > Boards und Geräte...** (**Laufzeit-Plan**, **Laufzeit bauen...**,
+**Laufzeit installieren...**, **Prüfen...**, **Status**, **Einstellungen...**, **Ältere Laufzeit-Pakete
+entfernen...**, **Ältere Builds auf dem Board entfernen...**).
 
 - **Bauplan aus der eigenen Probe des Boards** (Entscheidung D14): `llm-cli scan --device` legt das Profil des
   Boards unter seiner ID ab (aus seinem SSH-Host-Schlüssel). Der Bauplan ist ein Cross-Build für dieses Profil:

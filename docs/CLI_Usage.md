@@ -640,6 +640,12 @@ deployment, and by `deploy devices add`. No tool writes, changes or removes one.
 A record is usable only while the framework's `known_hosts` holds exactly the key it names: after you removed a
 changed key there (to trust a reinstalled board again), trust the board again with `deploy run` or `scan --device`.
 
+In the GUI: **Boards > Boards and Devices...**: the table lists every trusted board (label, address, user, the host key with its full
+fingerprint and its state in `known_hosts`, paired, since when and how it was trusted, the last deploy), next to
+the probed boards. **Add a trusted board...** does `add` (address, user, port, label; the fingerprint is shown and
+asked, "No" is the default) and **Remove trust...** does `remove` (it names exactly what goes, "No" is the
+default, and it writes the same audit record).
+
 ---
 
 ## ditto
@@ -1666,6 +1672,8 @@ llm-cli device runtime prune DEVICE [--on-device]
 The stored boards: ID, label, address, system (OS, version, architecture, C library and version, init system),
 deploy settings and the deployed runtime. `--json` for scripts.
 
+In the GUI: **Boards > Boards and Devices...** (the same rows, merged with the trusted boards).
+
 ### device settings
 
 Shows or changes how the runtime is installed on the board. This is decided here, before a deployment; a deployment
@@ -1684,12 +1692,23 @@ never asks.
 Exit code 1 when the board does not run systemd or the confirmation is missing (nothing is changed), 2 for a bad
 value.
 
+Damaged deploy settings (`device list` shows "damaged; set them again") are never read as the defaults. With an
+option, the command names the file with its full path and size and asks whether to set them again, starting from
+the defaults ("No" is the default; without a terminal nothing is replaced, exit code 1); the file is overwritten
+only when the new settings are saved.
+
+In the GUI: **Boards > Boards and Devices...** **> Settings...** (the current settings in full; install, user, port, model and KV cache; the
+same sudo question with "No" as the default, written to the audit log first; for damaged settings the same question
+before the form opens with the defaults).
+
 ### device runtime plan
 
 Shows the cross build planned from the board's own profile: architecture, C library and version, the builder base
 and its GCC, `GGML_CPU_ARM_ARCH` or the x86 features, OpenMP and `libgomp.so.1`, the programs, the build ID, and
 whether it is built. `--json` prints the whole plan. Exit code 1 when no plan can be made (for example a board whose
 glibc is older than every builder base, or a profile without `LIBC_VERSION`: probe it again).
+
+In the GUI: **Boards > Boards and Devices...** **> Runtime plan**.
 
 ### device runtime build
 
@@ -1701,6 +1720,9 @@ format of the programs on your PC and packs the tarball into
 stored is only packed again. Exit code 1 when Docker does not answer, the build fails or its checks fail. Older
 packages of the device are kept (unreleased; before, a build or a deployment removed them); the output says how many,
 and `device runtime prune` lists them for you to delete.
+
+In the GUI: **Boards > Boards and Devices...** **> Build runtime...** (parallel jobs, a source mirror and the same source question with "No"
+as the default; it runs in the background with its progress, and Cancel stops it after the current step).
 
 ### device runtime deploy
 
@@ -1732,6 +1754,10 @@ comes from the deploy settings or `--user`.
 The result is kept in `device/<ID>/deployed.json` (a failed deployment does not change it). Exit code 1 when a step
 or a check fails.
 
+In the GUI: **Boards > Boards and Devices...** **> Deploy runtime...** (the SSH user, the password asked each time and never stored, a model
+for the short benchmark; a model that is not a catalog model runs only after an explicit warning with "No" as
+the default, and the consent is written to the audit log before it is loaded).
+
 On the board, the start script runs the server:
 
 ```bash
@@ -1751,6 +1777,8 @@ server's version.
 
 Runs the checks of step 4 again on the active build, `current` (also with `--bench-model`), and updates the record.
 
+In the GUI: **Boards > Boards and Devices...** **> Verify...** (also without a model; another SSH user for this check).
+
 A short benchmark with `--bench-model` (here or with `device runtime deploy`) is the proof that a model works on
 that board. Its result is recorded with every build of that model in the output folder: the file
 `device_tests.json` in the build folder, found by the model's sha256 (also when the file on the board has another
@@ -1763,6 +1791,8 @@ A model that no build of this framework made is recorded nowhere.
 
 What is deployed (build, time, start script or systemd, result of the checks) and whether it is still the build the
 board's profile, the pin and the recipe call for; if not, build and deploy again.
+
+In the GUI: **Boards > Boards and Devices...** **> Status**.
 
 ### device runtime prune
 
@@ -1777,6 +1807,10 @@ build active before the last deployment says so). The active build and a build a
 listed. You type the numbers, nothing is picked, and you confirm exactly those (default no). A board has no trash,
 so they are removed for good. The removal is written to the audit log first, with the folder names only. No AI
 can do this: the AI tools only say how many older builds stayed.
+
+In the GUI: **Boards > Boards and Devices...** **> Remove older runtime packages...** and **> Remove older builds on the board...** (the
+deletion dialog with the full list, nothing ticked, "No" is the default; the board's list is read in the
+background).
 
 For a [trusted device](#deploy-devices), the optional MCP tools `probe_remote_device`, `deploy_device_runtime` and
 `run_device_benchmark` run `scan --device`, `device runtime build` with `deploy`, and `device runtime verify

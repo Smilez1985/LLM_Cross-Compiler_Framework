@@ -662,6 +662,13 @@ Ein Eintrag ist nur nutzbar, solange die `known_hosts` des Frameworks genau den 
 Hast du dort einen geänderten Schlüssel entfernt (um einem neu installierten Board wieder zu vertrauen), vertraue dem
 Board erneut mit `deploy run` oder `scan --device`.
 
+In der GUI: **Boards > Boards und Geräte...**: Die Tabelle zeigt jedes vertraute Board (Name, Adresse, Benutzer, den Host-Schlüssel mit
+seinem vollen Fingerabdruck und seinem Stand in `known_hosts`, gekoppelt, seit wann und wie ihm vertraut wird,
+das letzte Deployment) neben den untersuchten Boards. **Vertrautes Board hinzufügen...** macht `add` (Adresse,
+Benutzer, Port, Name; der Fingerabdruck wird gezeigt und erfragt, "Nein" ist die Vorgabe), und
+**Vertrauen entfernen...** macht `remove` (es nennt genau, was wegfällt, "Nein" ist die Vorgabe, und es schreibt
+denselben Audit-Eintrag).
+
 ---
 
 ## ditto
@@ -1730,6 +1737,8 @@ llm-cli device runtime prune GERÄT [--on-device]
 Die gespeicherten Boards: ID, Bezeichnung, Adresse, System (OS, Version, Architektur, C-Bibliothek mit Version,
 Init-System), Deploy-Einstellungen und die deployte Laufzeit. `--json` für Skripte.
 
+In der GUI: **Boards > Boards und Geräte...** (dieselben Zeilen, zusammen mit den vertrauten Boards).
+
 ### device settings
 
 Zeigt oder ändert, wie die Laufzeit auf dem Board installiert wird. Das wird hier entschieden, vor einem Deployment;
@@ -1748,6 +1757,15 @@ ein Deployment fragt nie.
 Exit-Code 1, wenn das Board kein systemd hat oder die Bestätigung fehlt (dann wird nichts geändert), 2 bei einem
 falschen Wert.
 
+Beschädigte Deploy-Einstellungen (`device list` zeigt "damaged; set them again") werden nie als die Vorgaben gelesen.
+Mit einer Option nennt der Befehl die Datei mit vollem Pfad und Größe und fragt, ob sie neu festgelegt werden sollen,
+ausgehend von den Vorgaben ("Nein" ist die Vorgabe; ohne Terminal wird nichts ersetzt, Exit-Code 1); die Datei wird
+erst überschrieben, wenn die neuen Einstellungen gespeichert werden.
+
+In der GUI: **Boards > Boards und Geräte...** **> Einstellungen...** (die aktuellen Einstellungen vollständig; Installation, Benutzer, Port,
+Modell und KV-Cache; dieselbe sudo-Frage mit "Nein" als Vorgabe, zuerst ins Audit-Log geschrieben; bei beschädigten
+Einstellungen dieselbe Frage, bevor das Formular mit den Vorgaben öffnet).
+
 ### device runtime plan
 
 Zeigt den Cross-Build, der aus dem eigenen Profil des Boards geplant wird: Architektur, C-Bibliothek mit Version,
@@ -1755,6 +1773,8 @@ die Builder-Basis mit ihrem GCC, `GGML_CPU_ARM_ARCH` oder die x86-Merkmale, Open
 Programme, die Build-ID und ob er gebaut ist. `--json` gibt den ganzen Bauplan aus. Exit-Code 1, wenn sich kein
 Bauplan machen lässt (zum Beispiel für ein Board, dessen glibc älter ist als jede Builder-Basis, oder ein Profil ohne
 `LIBC_VERSION`: untersuche es erneut).
+
+In der GUI: **Boards > Boards und Geräte...** **> Laufzeit-Plan**.
 
 ### device runtime build
 
@@ -1766,6 +1786,10 @@ Speicher), prüft das Format der Programme auf deinem PC und packt den Tarball n
 wird nur neu gepackt. Exit-Code 1, wenn Docker nicht antwortet, der Build scheitert oder seine Prüfungen scheitern.
 Ältere Pakete des Geräts bleiben (unveröffentlicht; vorher entfernte ein Build oder ein Deployment sie); die Ausgabe
 sagt, wie viele, und `device runtime prune` listet sie, damit du sie löschst.
+
+In der GUI: **Boards > Boards und Geräte...** **> Laufzeit bauen...** (parallele Jobs, ein Quell-Spiegel und dieselbe Frage nach dem
+Quelltext mit "Nein" als Vorgabe; es läuft im Hintergrund mit seinem Fortschritt, und Abbrechen hält es nach
+dem laufenden Schritt an).
 
 ### device runtime deploy
 
@@ -1800,6 +1824,10 @@ aus `--user`.
 Das Ergebnis liegt in `device/<ID>/deployed.json` (ein gescheitertes Deployment ändert es nicht). Exit-Code 1, wenn
 ein Schritt oder eine Prüfung scheitert.
 
+In der GUI: **Boards > Boards und Geräte...** **> Laufzeit installieren...** (der SSH-Benutzer, das Passwort jedes Mal abgefragt und nie
+gespeichert, ein Modell für den kurzen Benchmark; ein Modell, das kein Katalogmodell ist, läuft nur nach einer
+ausdrücklichen Warnung mit "Nein" als Vorgabe, und die Zustimmung steht im Audit-Log, bevor es geladen wird).
+
 Auf dem Board startet das Startskript den Server:
 
 ```bash
@@ -1820,6 +1848,8 @@ gibt die Version des Servers aus.
 Führt die Prüfungen aus Schritt 4 erneut für den aktiven Build `current` aus (auch mit `--bench-model`) und
 aktualisiert den Eintrag.
 
+In der GUI: **Boards > Boards und Geräte...** **> Prüfen...** (auch ohne Modell; ein anderer SSH-Benutzer für diese Prüfung).
+
 Ein kurzer Benchmark mit `--bench-model` (hier oder mit `device runtime deploy`) ist der Beweis, dass ein Modell auf
 diesem Board läuft. Sein Ergebnis wird bei jedem Build dieses Modells im Ausgabeordner vermerkt: die Datei
 `device_tests.json` im Build-Ordner, gefunden über die sha256 des Modells (auch wenn die Datei auf dem Board anders
@@ -1832,6 +1862,8 @@ des Boards eingestellt ist, und ob die Prüfungen bestanden. Das Deployment-Fens
 
 Was deployt ist (Build, Zeit, Startskript oder systemd, Ergebnis der Prüfungen) und ob es noch der Build ist, den
 das Profil des Boards, der Pin und das Rezept verlangen; wenn nicht, erneut bauen und deployen.
+
+In der GUI: **Boards > Boards und Geräte...** **> Status**.
 
 ### device runtime prune
 
@@ -1848,6 +1880,10 @@ und ein Build, den ein laufendes Programm nutzt, stehen nie in der Liste. Du gib
 ausgewählt, und du bestätigst genau diese (Standard: nein). Ein Board hat keinen Papierkorb, sie werden also
 endgültig entfernt. Das Entfernen steht zuerst im Audit-Log, nur mit den Ordnernamen. Keine KI kann das: Die
 KI-Tools sagen nur, wie viele ältere Builds geblieben sind.
+
+In der GUI: **Boards > Boards und Geräte...** **> Ältere Laufzeit-Pakete entfernen...** und **> Ältere Builds auf dem Board entfernen...**
+(der Löschdialog mit der vollständigen Liste, nichts angehakt, "Nein" ist die Vorgabe; die Liste des Boards wird
+im Hintergrund gelesen).
 
 Für ein [vertrautes Gerät](#deploy-devices) führen die optionalen MCP-Tools `probe_remote_device`,
 `deploy_device_runtime` und `run_device_benchmark` für einen KI-Client `scan --device`, `device runtime build` mit

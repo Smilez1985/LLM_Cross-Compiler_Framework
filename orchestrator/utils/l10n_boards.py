@@ -1,0 +1,538 @@
+#!/usr/bin/env python3
+"""
+Texts of the Boards menu and its window Boards > Boards and Devices... (W1' of 2026-10-16: every action of `llmcf deploy
+devices` and `llmcf device` also by mouse), English and German. LocalizationManager merges them
+(localization.TEXT_MODULES); a key that exists already is refused there, so these never replace another text.
+
+Every key has the same {placeholders} in both languages (tests/test_boards_window.py). The other menus of the main
+window are not translated, so a German text names them as they are shown ("Builder > Scan / Import..."). German
+terms: "Board", "vertrauen" (trust), "koppeln" (pair), "Laufzeit" (runtime), "Deploy-Einstellungen" (deploy
+settings). This module imports nothing from the framework.
+"""
+
+TEXTS = {
+    "en": {
+        # the menu and the window
+        "boards.menu": "Boards",
+        "boards.menu.devices": "Boards and Devices...",
+        "boards.title": "Boards and Devices",
+        "boards.intro": "Every board you probed or trusted, once. Only the trusted boards may be named by AI tools for "
+                        "a deploy, and you still confirm each deploy. The buttons do what the 'llmcf deploy devices' "
+                        "and 'llmcf device' commands do; every contact with a board runs in the background.",
+        "boards.empty": "No board yet: probe one (Builder > Scan / Import... > Remote Scan via SSH...) or add one you "
+                        "trusted before (Add a trusted board...).",
+        "boards.col.board": "Board",
+        "boards.col.id": "Device ID",
+        "boards.col.address": "Address",
+        "boards.col.user": "User",
+        "boards.col.key": "Host key",
+        "boards.col.paired": "Paired",
+        "boards.col.trusted": "Trusted since",
+        "boards.col.last": "Last deploy",
+        "boards.col.system": "System",
+        "boards.col.settings": "Deploy settings",
+        "boards.col.runtime": "Deployed runtime",
+        "boards.key.known": "{key_type} {fingerprint} (the trusted key)",
+        "boards.key.changed": "{key_type} {fingerprint} (CHANGED in known_hosts)",
+        "boards.key.unknown": "{key_type} {fingerprint} (not in known_hosts)",
+        "boards.not_trusted": "not trusted",
+        "boards.not_probed": "not probed",
+        "boards.yes": "yes",
+        "boards.no": "no",
+        "boards.dash": "-",
+        "boards.last": "{at} ({result})",
+        "boards.last.ok": "ok",
+        "boards.last.failed": "failed",
+        "boards.system": "{os} {version} {arch}, {libc} {libc_version}, init {init}",
+        "boards.system.missing": "probe missing",
+        "boards.settings.row": "{install} as {user}",
+        "boards.settings.damaged": "damaged; set them again",
+        "boards.runtime.row": "{build} ({install}, {at})",
+        "boards.btn.add": "Add a trusted board...",
+        "boards.btn.remove_trust": "Remove trust...",
+        "boards.btn.settings": "Settings...",
+        "boards.btn.check": "Check this board (Mojo)",
+        "boards.btn.refresh": "Refresh",
+        "boards.btn.plan": "Runtime plan",
+        "boards.btn.build": "Build runtime...",
+        "boards.btn.deploy": "Deploy runtime...",
+        "boards.btn.verify": "Verify...",
+        "boards.btn.status": "Status",
+        "boards.btn.prune": "Remove older runtime packages...",
+        "boards.btn.prune_board": "Remove older builds on the board...",
+        "boards.btn.cancel": "Cancel",
+        "boards.busy": "{what} ... (in the background; the window stays usable)",
+        "boards.busy_already": "Another step is running. Wait for it to end or cancel it.",
+        "boards.cancelling": "Cancelling ...",
+        "boards.cancelled": "Cancelled.",
+        "boards.need_selection": "Select a board in the table first.",
+        "boards.need_trusted": "This board is not trusted: add it first (Add a trusted board...).",
+        "boards.need_stored": "This board has no stored probe: probe it first (Builder > Scan / Import... > Remote "
+                              "Scan via SSH...).",
+        "boards.need_user": "No SSH user is set for this board: set one in Settings...",
+        "boards.need_address": "The board has no usable stored address: probe it again ({reason}).",
+        "boards.no_pin": "configs/llama_runtime.yml has no llama_cpp.source (the pinned commit).",
+        # errors of a board contact
+        "boards.err.no_paramiko": "Reaching a board needs the 'paramiko' package.",
+        "boards.err.unreachable": "Could not reach {address}: {reason}",
+        "boards.err.not_trusted": "{address} is not trusted yet: probe it first (Builder > Scan / Import... > Remote "
+                                  "Scan via SSH...).",
+        "boards.err.other_device": "{address} answers with the host key of another board than {device_id}; probe it "
+                                   "again before you deploy to it.",
+        "boards.err.login_failed": "The login to {user} at {address} failed: {reason}",
+        "boards.err.pair": "Pair the board once with its password (Deploy runtime... asks for it) or with Builder > "
+                           "Scan / Import... > Remote Scan via SSH...",
+        "boards.err.key_install": "The framework's key could not be installed on the board: {reason}",
+        "boards.err.failed": "The step failed: {reason}",
+        # add a trusted board (deploy devices add)
+        "boards.add.title": "Add a trusted board",
+        "boards.add.intro": "Adds a board whose host key is already in the framework's known_hosts, because you "
+                            "trusted it before (for example with a deploy or a remote scan). Nothing is trusted here "
+                            "that was not trusted before.",
+        "boards.add.host": "Address or host name:",
+        "boards.add.user": "User on the board:",
+        "boards.add.port": "SSH port:",
+        "boards.add.label": "Your name for it (optional):",
+        "boards.add.bad_entry": "Enter an address or a host name (e.g. 192.168.1.50, fe80::1 without brackets or "
+                                "myboard.local) and an account name.",
+        "boards.add.bad_label": "The name has 1 to 64 printable characters.",
+        "boards.add.reading": "Reading the board's host key",
+        "boards.add.not_known": "{address} is not trusted yet (its host key is {status}). Trust it first with "
+                                "Deployment > Deploy to Target or Builder > Scan / Import... > Remote Scan via SSH..., "
+                                "which show the fingerprint for you to compare.",
+        "boards.add.question": "{address} presents the trusted key {key_type} {fingerprint}.\n\nAllow AI tools to "
+                               "deploy to {user} at {host} (each deploy is still confirmed by you)? The trust is "
+                               "written to the audit log.",
+        "boards.add.nothing": "Nothing was added.",
+        "boards.add.pairing": "Testing whether the framework's key logs in",
+        "boards.add.done": "Trusted board {device_id} ({label}): AI tools may deploy to it with your confirmation.",
+        "boards.add.not_paired": "The framework's SSH key does not log in there yet: pair the board once with "
+                                 "Deployment > Deploy to Target (it asks for the password one time).",
+        "boards.add.key_gone": "The trusted key is not in the framework's known_hosts.",
+        "boards.add.failed": "The board record could not be written.",
+        # remove trust (deploy devices remove)
+        "boards.remove.title": "Remove trust",
+        "boards.remove.question": "Remove the trust of this board?\n\nBoard: {label}\nDevice ID: {device_id}\n"
+                                  "Address: {address}\nUser: {user}\nHost key: {key_type} {fingerprint}\n\nAI tools "
+                                  "can then no longer name this board for a deploy. Its entry in the framework's "
+                                  "known_hosts, its probe and its deploy settings stay. The removal is written to the "
+                                  "audit log.",
+        "boards.remove.done": "Board {label} ({device_id}) was removed from the trusted boards.",
+        "boards.remove.gone": "There is no trusted board {device_id} any more.",
+        # deploy settings (device settings)
+        "boards.settings.title": "Deploy settings of {label}",
+        "boards.settings.current": "Current settings\nInstall: {install}\nSSH user: {user}\nPort: {port}\nModel for "
+                                   "the systemd unit: {model}\nKV cache: {kv}",
+        "boards.settings.install_user": "user (start script in the user's home)",
+        "boards.settings.install_systemd": "systemd (systemd unit; sudo confirmed {at})",
+        "boards.settings.not_set": "not set",
+        "boards.settings.problems": "This cannot be deployed yet:",
+        "boards.settings.install": "Install:",
+        "boards.settings.opt_user": "Start script in the user's home (user)",
+        "boards.settings.opt_systemd": "systemd unit, written with sudo (systemd)",
+        "boards.settings.user": "SSH user (never root):",
+        "boards.settings.port": "Port of the server (1024-65535):",
+        "boards.settings.model": "Model for the systemd unit:",
+        "boards.settings.model_hint": "path on the board, e.g. models/model.gguf (relative: in the home folder)",
+        "boards.settings.kv": "KV cache:",
+        "boards.settings.kv_auto": "Automatic: {kind} ({why})",
+        "boards.settings.sudo_question": "The systemd unit is written to /etc/systemd/system and enabled with sudo on "
+                                         "the device (sudo -n: it must work without a password, the deployment never "
+                                         "asks). Allow deployments to this device to run these sudo commands? Your "
+                                         "answer is written to the audit log.",
+        "boards.settings.no_systemd": "This board does not run systemd (its probe reports {init}); the start script "
+                                      "is the way to run the runtime there. The settings were not changed.",
+        "boards.settings.no_init": "no init system",
+        "boards.settings.sudo_declined": "The systemd unit needs your confirmation that deployments may use sudo on "
+                                         "the board; the settings were not changed.",
+        "boards.settings.consent_failed": "The consent could not be written to the audit log ({reason}); nothing was "
+                                          "changed.",
+        "boards.settings.not_saved": "Could not save the deploy settings: {reason}",
+        "boards.settings.bad_value": "This value cannot be used: {reason}",
+        "boards.settings.damaged_text": "The deploy settings of this board cannot be used: {reason}",
+        # the CLI's words (person_steps.DAMAGED_QUESTION)
+        "boards.settings.damaged_question": "The deploy settings of device {device_id} cannot be used ({reason}). Set "
+                                            "them again, starting from the defaults? The damaged file {path} ({size}) "
+                                            "is overwritten with the new settings; the board's probe, its trust and "
+                                            "its runtime stay as they are.",
+        "boards.settings.saved": "Deploy settings of {label} saved.",
+        "boards.settings.unchanged": "Nothing was changed.",
+        # runtime plan and status (device runtime plan|status)
+        "boards.plan.title": "Runtime plan of {label}",
+        "boards.plan.text": "Board: {os}/{arch}, {libc} {libc_version}\nBuilder: container {base} ({blibc} "
+                            "{blibc_version}, GCC {gcc}), without network\nCPU: {cpu}, OpenMP {openmp}, C++ runtime "
+                            "linked statically: {static}\nPrograms: {programs}\nBuild ID: {build_id}",
+        "boards.plan.cpu_all": "all variants",
+        "boards.plan.cpu_x86": "x86 features of the probe",
+        "boards.plan.built": "Built: yes, {path}",
+        "boards.plan.not_built": "Built: no (Build runtime...)",
+        "boards.plan.none": "No runtime can be planned for this board: {reason}",
+        "boards.status.title": "Runtime status of {label}",
+        "boards.status.planned": "Planned build {build} ({built})",
+        "boards.status.built": "built",
+        "boards.status.not_built": "not built yet",
+        "boards.status.nothing": "Deployed: nothing yet",
+        "boards.status.deployed": "Deployed: build {build} on {at} ({install}), checks on the board {checks} "
+                                  "({verified})",
+        "boards.status.passed": "passed",
+        "boards.status.failed": "failed",
+        "boards.status.kv": "KV cache at that deployment: {kv}",
+        "boards.status.old": "The deployed build is not the one planned now (the probe, the pin or the recipe "
+                             "changed): build and deploy again.",
+        # build (device runtime build)
+        "boards.build.title": "Build the runtime of {label}",
+        "boards.build.intro": "Cross-builds the pinned llama.cpp for this board in the builder container (without "
+                              "network) and packages it. Cancel stops after the current step; a build that runs in "
+                              "the container runs to its end.",
+        "boards.build.jobs": "Parallel compile jobs (0: automatic):",
+        "boards.build.mirror": "Source mirror (optional):",
+        "boards.build.mirror_hint": "URL of a mirror of the llama.cpp repository",
+        "boards.build.checking": "Looking for the pinned source",
+        "boards.build.source_question": "The pinned llama.cpp source ({tag}, commit {commit}, about 215 MB) is not "
+                                        "cached yet. Fetch it now?",
+        "boards.build.source_needed": "The build needs the pinned llama.cpp source; nothing was built. On a computer "
+                                      "without internet, import the source first.",
+        "boards.build.running": "Building the runtime",
+        "boards.build.fetching": "Fetching the pinned llama.cpp source",
+        "boards.build.building": "Building llama.cpp for {label} in the builder container",
+        "boards.build.stored": "Build {build} for this board is already stored; packaging it.",
+        "boards.build.done": "Board runtime ready: {path}\nsha256 {sha256}",
+        "boards.build.older": "{n} older runtime package(s) of this board are kept; the framework deletes none by "
+                              "itself (Remove older runtime packages... lists them).",
+        "boards.build.cancelled": "The build was cancelled; nothing was packaged.",
+        "boards.build.failed": "The build failed: {reason}",
+        "boards.build.logs": "Logs: {path}",
+        # older packages on this computer (device runtime prune)
+        "boards.prune.title": "Runtime packages of {label}",
+        "boards.prune.none": "No older runtime packages of this board: the one of the build deployed last is never "
+                             "listed.",
+        "boards.prune.intro": "The older runtime packages of this board on this computer (the one of the build "
+                              "deployed last is never listed). Tick what you want to delete; nothing is ticked.",
+        "boards.prune.reading": "Reading the runtime packages of this board",
+        "boards.prune.deleting": "Deleting the ticked runtime packages",
+        # older builds on the board (device runtime prune --on-device)
+        "boards.prune_board.title": "Runtime builds on {label}",
+        "boards.prune_board.reading": "Reading the builds on the board",
+        "boards.prune_board.busy": "Not listed, because a running program uses them: {builds}.",
+        "boards.prune_board.none": "No older runtime builds on this board to remove: the active build is never "
+                                   "listed.",
+        "boards.prune_board.intro": "The older runtime builds on the board (never the active one, never one a running "
+                                    "program uses). A board has no trash: what you tick is removed for good. Nothing "
+                                    "is ticked.",
+        "boards.prune_board.removing": "Removing the ticked builds on the board",
+        "boards.prune_board.freed": "{size} freed on the board.",
+        # deploy (device runtime deploy)
+        "boards.deploy.title": "Deploy the runtime to {label}",
+        "boards.deploy.intro": "Installs the built runtime on the board as its deploy settings say, checks the new "
+                               "build there and activates it only when it passes. Every older build stays on the "
+                               "board.",
+        "boards.deploy.user": "SSH user:",
+        "boards.deploy.password": "Password (only for a board that is not paired yet):",
+        "boards.deploy.password_hint": "used once to install the framework's key, never stored",
+        "boards.bench.model": "Model for a short benchmark (optional):",
+        "boards.bench.hint": "path on the board, e.g. models/model.gguf (relative: in the home folder)",
+        # asked only after the board named the model's sha256 and it is not a catalog model: the CLI's words
+        # (person_steps.UNTRUSTED_QUESTION)
+        "boards.untrusted_question": "{path} is not a catalog model, so it is untrusted. llama-bench loads it "
+                                     "natively on the device as {user} (no sandbox). Run the short benchmark with "
+                                     "it? Your answer is written to the audit log.",
+        "boards.deploy.not_built": "The runtime for this board is not built yet (or the board's probe changed): "
+                                   "Build runtime... first.",
+        "boards.deploy.needs_source": "The tarball must be packaged again, which needs the pinned source (its "
+                                      "licence text): Build runtime... first.",
+        "boards.deploy.problems": "Nothing was deployed; change the deploy settings first (Settings...):",
+        "boards.deploy.root": "The SSH user on the board is root: the runtime never runs as root. Deploy as an "
+                              "unprivileged user (Settings...).",
+        "boards.deploy.preparing": "Checking the build and its package",
+        "boards.deploy.running": "Deploying to the board",
+        "boards.deploy.done": "Deployed build {build} to {root}.",
+        "boards.deploy.previous": "The previous build {previous} is kept.",
+        "boards.deploy.failed": "Build {build} did not pass its checks on the board; it was not activated.",
+        "boards.deploy.server_user": "The server listens on 127.0.0.1:{port}; its key is in "
+                                     "~/.config/llm-framework/llama-server.key. stop, status and serve (in the "
+                                     "foreground) work the same way as the start command above.",
+        "boards.deploy.server_systemd": "systemd unit: {state}; the server listens on 127.0.0.1:{port}; its key is in "
+                                        "~/.config/llm-framework/llama-server.key.",
+        "boards.deploy.unit_started": "started",
+        "boards.deploy.unit_enabled": "enabled",
+        "boards.checks": "Checks on the board:",
+        "boards.check_line": "{name}: {result} - {detail}",
+        "boards.check.passed": "passed",
+        "boards.check.failed": "failed",
+        "boards.check.skipped": "skipped",
+        "boards.bench.missing": "No readable model at {path} on the board; the short benchmark is skipped.",
+        "boards.kv": "KV cache: {kv}",
+        # verify (device runtime verify)
+        "boards.verify.title": "Verify the runtime on {label}",
+        "boards.verify.intro": "Checks the deployed runtime on the board again as the unprivileged user (never with "
+                               "sudo); with a model, also a short benchmark.",
+        "boards.verify.user": "SSH user:",
+        "boards.verify.nothing": "Nothing was deployed to this board yet (Deploy runtime...).",
+        "boards.verify.root": "The SSH user is root; the checks run as the unprivileged user only.",
+        "boards.verify.running": "Checking on the board",
+        "boards.verify.result": "Board {device_id}, build {build}:",
+        # Mojo's check of one board
+        "boards.check.running": "Checking the board (one connection to its SSH port, no login)",
+        "boards.check.next": "Next step: {hint}",
+        "boards.check.none": "Mojo returned no finding for this board.",
+    },
+    "de": {
+        "boards.menu": "Boards",
+        "boards.menu.devices": "Boards und Geräte...",
+        "boards.title": "Boards und Geräte",
+        "boards.intro": "Jedes Board, das du geprüft oder dem du vertraut hast, einmal. Nur vertraute Boards dürfen "
+                        "KI-Werkzeuge für ein Deployment nennen, und du bestätigst jedes Deployment. Die Knöpfe tun, "
+                        "was die Befehle 'llmcf deploy devices' und 'llmcf device' tun; jeder Kontakt mit einem Board "
+                        "läuft im Hintergrund.",
+        "boards.empty": "Noch kein Board: prüfe eines (Builder > Scan / Import... > Remote Scan via SSH...) oder füge "
+                        "eines hinzu, dem du früher vertraut hast (Vertrautes Board hinzufügen...).",
+        "boards.col.board": "Board",
+        "boards.col.id": "Geräte-ID",
+        "boards.col.address": "Adresse",
+        "boards.col.user": "Benutzer",
+        "boards.col.key": "Host-Schlüssel",
+        "boards.col.paired": "Gekoppelt",
+        "boards.col.trusted": "Vertraut seit",
+        "boards.col.last": "Letztes Deployment",
+        "boards.col.system": "System",
+        "boards.col.settings": "Deploy-Einstellungen",
+        "boards.col.runtime": "Installierte Laufzeit",
+        "boards.key.known": "{key_type} {fingerprint} (der vertraute Schlüssel)",
+        "boards.key.changed": "{key_type} {fingerprint} (in known_hosts GEÄNDERT)",
+        "boards.key.unknown": "{key_type} {fingerprint} (nicht in known_hosts)",
+        "boards.not_trusted": "nicht vertraut",
+        "boards.not_probed": "nicht geprüft",
+        "boards.yes": "ja",
+        "boards.no": "nein",
+        "boards.dash": "-",
+        "boards.last": "{at} ({result})",
+        "boards.last.ok": "ok",
+        "boards.last.failed": "fehlgeschlagen",
+        "boards.system": "{os} {version} {arch}, {libc} {libc_version}, Init {init}",
+        "boards.system.missing": "Prüfprofil fehlt",
+        "boards.settings.row": "{install} als {user}",
+        "boards.settings.damaged": "beschädigt; neu setzen",
+        "boards.runtime.row": "{build} ({install}, {at})",
+        "boards.btn.add": "Vertrautes Board hinzufügen...",
+        "boards.btn.remove_trust": "Vertrauen entfernen...",
+        "boards.btn.settings": "Einstellungen...",
+        "boards.btn.check": "Dieses Board prüfen (Mojo)",
+        "boards.btn.refresh": "Aktualisieren",
+        "boards.btn.plan": "Laufzeit-Plan",
+        "boards.btn.build": "Laufzeit bauen...",
+        "boards.btn.deploy": "Laufzeit installieren...",
+        "boards.btn.verify": "Prüfen...",
+        "boards.btn.status": "Status",
+        "boards.btn.prune": "Ältere Laufzeit-Pakete entfernen...",
+        "boards.btn.prune_board": "Ältere Builds auf dem Board entfernen...",
+        "boards.btn.cancel": "Abbrechen",
+        "boards.busy": "{what} ... (im Hintergrund; das Fenster bleibt bedienbar)",
+        "boards.busy_already": "Ein anderer Schritt läuft. Warte, bis er fertig ist, oder brich ihn ab.",
+        "boards.cancelling": "Wird abgebrochen ...",
+        "boards.cancelled": "Abgebrochen.",
+        "boards.need_selection": "Wähle zuerst ein Board in der Tabelle.",
+        "boards.need_trusted": "Diesem Board wird nicht vertraut: füge es zuerst hinzu (Vertrautes Board "
+                               "hinzufügen...).",
+        "boards.need_stored": "Für dieses Board gibt es kein gespeichertes Prüfprofil: prüfe es zuerst (Builder > "
+                              "Scan / Import... > Remote Scan via SSH...).",
+        "boards.need_user": "Für dieses Board ist kein SSH-Benutzer gesetzt: setze einen unter Einstellungen...",
+        "boards.need_address": "Das Board hat keine brauchbare gespeicherte Adresse: prüfe es erneut ({reason}).",
+        "boards.no_pin": "configs/llama_runtime.yml hat keine llama_cpp.source (den festgelegten Commit).",
+        "boards.err.no_paramiko": "Um ein Board zu erreichen, wird das Paket 'paramiko' gebraucht.",
+        "boards.err.unreachable": "{address} ist nicht erreichbar: {reason}",
+        "boards.err.not_trusted": "{address} ist noch nicht vertraut: prüfe es zuerst (Builder > Scan / Import... > "
+                                  "Remote Scan via SSH...).",
+        "boards.err.other_device": "{address} antwortet mit dem Host-Schlüssel eines anderen Boards als {device_id}; "
+                                   "prüfe es erneut, bevor du darauf installierst.",
+        "boards.err.login_failed": "Die Anmeldung als {user} bei {address} ist fehlgeschlagen: {reason}",
+        "boards.err.pair": "Kopple das Board einmal mit seinem Passwort (Laufzeit installieren... fragt danach) oder "
+                           "mit Builder > Scan / Import... > Remote Scan via SSH...",
+        "boards.err.key_install": "Der Schlüssel des Frameworks konnte nicht auf dem Board eingerichtet werden: "
+                                  "{reason}",
+        "boards.err.failed": "Der Schritt ist fehlgeschlagen: {reason}",
+        "boards.add.title": "Vertrautes Board hinzufügen",
+        "boards.add.intro": "Fügt ein Board hinzu, dessen Host-Schlüssel schon in der known_hosts-Datei des "
+                            "Frameworks steht, weil du ihm früher vertraut hast (zum Beispiel bei einem Deployment "
+                            "oder einem Remote-Scan). Hier wird nichts vertraut, was nicht schon vorher vertraut war.",
+        "boards.add.host": "Adresse oder Hostname:",
+        "boards.add.user": "Benutzer auf dem Board:",
+        "boards.add.port": "SSH-Port:",
+        "boards.add.label": "Dein Name dafür (optional):",
+        "boards.add.bad_entry": "Gib eine Adresse oder einen Hostnamen ein (z. B. 192.168.1.50, fe80::1 ohne Klammern "
+                                "oder myboard.local) und einen Kontonamen.",
+        "boards.add.bad_label": "Der Name hat 1 bis 64 druckbare Zeichen.",
+        "boards.add.reading": "Host-Schlüssel des Boards wird gelesen",
+        "boards.add.not_known": "{address} ist noch nicht vertraut (sein Host-Schlüssel ist {status}). Vertraue ihm "
+                                "zuerst mit Deployment > Deploy to Target oder Builder > Scan / Import... > Remote "
+                                "Scan via SSH...; dort siehst du den Fingerabdruck zum Vergleichen.",
+        "boards.add.question": "{address} zeigt den vertrauten Schlüssel {key_type} {fingerprint}.\n\nDürfen "
+                               "KI-Werkzeuge auf {user} bei {host} installieren (jedes Deployment bestätigst du "
+                               "weiterhin selbst)? Das Vertrauen wird im Audit-Log vermerkt.",
+        "boards.add.nothing": "Es wurde nichts hinzugefügt.",
+        "boards.add.pairing": "Es wird geprüft, ob der Schlüssel des Frameworks sich anmeldet",
+        "boards.add.done": "Vertrautes Board {device_id} ({label}): KI-Werkzeuge dürfen mit deiner Bestätigung darauf "
+                           "installieren.",
+        "boards.add.not_paired": "Der SSH-Schlüssel des Frameworks meldet sich dort noch nicht an: kopple das Board "
+                                 "einmal mit Deployment > Deploy to Target (es fragt einmal nach dem Passwort).",
+        "boards.add.key_gone": "Der vertraute Schlüssel steht nicht in der known_hosts-Datei des Frameworks.",
+        "boards.add.failed": "Der Eintrag des Boards konnte nicht geschrieben werden.",
+        "boards.remove.title": "Vertrauen entfernen",
+        "boards.remove.question": "Das Vertrauen zu diesem Board entfernen?\n\nBoard: {label}\nGeräte-ID: "
+                                  "{device_id}\nAdresse: {address}\nBenutzer: {user}\nHost-Schlüssel: {key_type} "
+                                  "{fingerprint}\n\nKI-Werkzeuge können dieses Board dann nicht mehr für ein "
+                                  "Deployment nennen. Sein Eintrag in der known_hosts-Datei des Frameworks, sein "
+                                  "Prüfprofil und seine Deploy-Einstellungen bleiben. Das Entfernen wird im Audit-Log "
+                                  "vermerkt.",
+        "boards.remove.done": "Board {label} ({device_id}) wurde aus den vertrauten Boards entfernt.",
+        "boards.remove.gone": "Es gibt kein vertrautes Board {device_id} mehr.",
+        "boards.settings.title": "Deploy-Einstellungen von {label}",
+        "boards.settings.current": "Aktuelle Einstellungen\nInstallation: {install}\nSSH-Benutzer: {user}\nPort: "
+                                   "{port}\nModell für die systemd-Unit: {model}\nKV-Cache: {kv}",
+        "boards.settings.install_user": "user (Startskript im Home-Ordner des Benutzers)",
+        "boards.settings.install_systemd": "systemd (systemd-Unit; sudo bestätigt {at})",
+        "boards.settings.not_set": "nicht gesetzt",
+        "boards.settings.problems": "So kann noch nicht installiert werden:",
+        "boards.settings.install": "Installation:",
+        "boards.settings.opt_user": "Startskript im Home-Ordner des Benutzers (user)",
+        "boards.settings.opt_systemd": "systemd-Unit, mit sudo geschrieben (systemd)",
+        "boards.settings.user": "SSH-Benutzer (nie root):",
+        "boards.settings.port": "Port des Servers (1024-65535):",
+        "boards.settings.model": "Modell für die systemd-Unit:",
+        "boards.settings.model_hint": "Pfad auf dem Board, z. B. models/model.gguf (relativ: im Home-Ordner)",
+        "boards.settings.kv": "KV-Cache:",
+        "boards.settings.kv_auto": "Automatisch: {kind} ({why})",
+        "boards.settings.sudo_question": "Die systemd-Unit wird mit sudo nach /etc/systemd/system geschrieben und auf "
+                                         "dem Gerät aktiviert (sudo -n: es muss ohne Passwort gehen, das Deployment "
+                                         "fragt nie). Dürfen Deployments auf dieses Gerät diese sudo-Befehle "
+                                         "ausführen? Deine Antwort wird im Audit-Log vermerkt.",
+        "boards.settings.no_systemd": "Dieses Board nutzt kein systemd (sein Prüfprofil meldet {init}); dort läuft "
+                                      "die Laufzeit über das Startskript. Die Einstellungen wurden nicht geändert.",
+        "boards.settings.no_init": "kein Init-System",
+        "boards.settings.sudo_declined": "Die systemd-Unit braucht deine Bestätigung, dass Deployments sudo auf dem "
+                                         "Board nutzen dürfen; die Einstellungen wurden nicht geändert.",
+        "boards.settings.consent_failed": "Die Zustimmung konnte nicht im Audit-Log vermerkt werden ({reason}); es "
+                                          "wurde nichts geändert.",
+        "boards.settings.not_saved": "Die Deploy-Einstellungen konnten nicht gespeichert werden: {reason}",
+        "boards.settings.bad_value": "Dieser Wert ist nicht verwendbar: {reason}",
+        "boards.settings.damaged_text": "Die Deploy-Einstellungen dieses Boards sind nicht verwendbar: {reason}",
+        "boards.settings.damaged_question": "Die Deploy-Einstellungen von Gerät {device_id} sind nicht verwendbar "
+                                            "({reason}). Neu festlegen, ausgehend von den Vorgaben? Die beschädigte "
+                                            "Datei {path} ({size}) wird mit den neuen Einstellungen überschrieben; "
+                                            "die Probe des Boards, das Vertrauen und seine Laufzeit bleiben, wie sie "
+                                            "sind.",
+        "boards.settings.saved": "Deploy-Einstellungen von {label} gespeichert.",
+        "boards.settings.unchanged": "Es wurde nichts geändert.",
+        "boards.plan.title": "Laufzeit-Plan von {label}",
+        "boards.plan.text": "Board: {os}/{arch}, {libc} {libc_version}\nBuilder: Container {base} ({blibc} "
+                            "{blibc_version}, GCC {gcc}), ohne Netzwerk\nCPU: {cpu}, OpenMP {openmp}, C++-Laufzeit "
+                            "statisch gelinkt: {static}\nProgramme: {programs}\nBuild-ID: {build_id}",
+        "boards.plan.cpu_all": "alle Varianten",
+        "boards.plan.cpu_x86": "x86-Merkmale aus dem Prüfprofil",
+        "boards.plan.built": "Gebaut: ja, {path}",
+        "boards.plan.not_built": "Gebaut: nein (Laufzeit bauen...)",
+        "boards.plan.none": "Für dieses Board lässt sich keine Laufzeit planen: {reason}",
+        "boards.status.title": "Laufzeit-Status von {label}",
+        "boards.status.planned": "Geplanter Build {build} ({built})",
+        "boards.status.built": "gebaut",
+        "boards.status.not_built": "noch nicht gebaut",
+        "boards.status.nothing": "Installiert: noch nichts",
+        "boards.status.deployed": "Installiert: Build {build} am {at} ({install}), Prüfungen auf dem Board {checks} "
+                                  "({verified})",
+        "boards.status.passed": "bestanden",
+        "boards.status.failed": "fehlgeschlagen",
+        "boards.status.kv": "KV-Cache bei diesem Deployment: {kv}",
+        "boards.status.old": "Der installierte Build ist nicht der jetzt geplante (Prüfprofil, festgelegte Version "
+                             "oder Rezept haben sich geändert): neu bauen und installieren.",
+        "boards.build.title": "Laufzeit von {label} bauen",
+        "boards.build.intro": "Baut das festgelegte llama.cpp für dieses Board im Builder-Container (ohne Netzwerk) "
+                              "und packt es. Abbrechen hält nach dem laufenden Schritt an; ein Build, der im "
+                              "Container läuft, läuft zu Ende.",
+        "boards.build.jobs": "Parallele Compile-Jobs (0: automatisch):",
+        "boards.build.mirror": "Quell-Spiegel (optional):",
+        "boards.build.mirror_hint": "URL eines Spiegels des llama.cpp-Repositorys",
+        "boards.build.checking": "Festgelegte Quelle wird gesucht",
+        "boards.build.source_question": "Die festgelegte llama.cpp-Quelle ({tag}, Commit {commit}, etwa 215 MB) ist "
+                                        "noch nicht zwischengespeichert. Jetzt herunterladen?",
+        "boards.build.source_needed": "Der Build braucht die festgelegte llama.cpp-Quelle; es wurde nichts gebaut. "
+                                      "Auf einem Rechner ohne Internet importiere die Quelle zuerst.",
+        "boards.build.running": "Laufzeit wird gebaut",
+        "boards.build.fetching": "Festgelegte llama.cpp-Quelle wird heruntergeladen",
+        "boards.build.building": "llama.cpp für {label} wird im Builder-Container gebaut",
+        "boards.build.stored": "Build {build} für dieses Board ist schon gespeichert; er wird gepackt.",
+        "boards.build.done": "Board-Laufzeit fertig: {path}\nsha256 {sha256}",
+        "boards.build.older": "{n} ältere Laufzeit-Paket(e) dieses Boards bleiben erhalten; das Framework löscht "
+                              "keines von selbst (Ältere Laufzeit-Pakete entfernen... listet sie).",
+        "boards.build.cancelled": "Der Build wurde abgebrochen; es wurde nichts gepackt.",
+        "boards.build.failed": "Der Build ist fehlgeschlagen: {reason}",
+        "boards.build.logs": "Logs: {path}",
+        "boards.prune.title": "Laufzeit-Pakete von {label}",
+        "boards.prune.none": "Keine älteren Laufzeit-Pakete dieses Boards: das Paket des zuletzt installierten Builds "
+                             "wird nie aufgeführt.",
+        "boards.prune.intro": "Die älteren Laufzeit-Pakete dieses Boards auf diesem Rechner (das Paket des zuletzt "
+                              "installierten Builds wird nie aufgeführt). Hake an, was du löschen willst; nichts ist "
+                              "angehakt.",
+        "boards.prune.reading": "Die Laufzeit-Pakete dieses Boards werden gelesen",
+        "boards.prune.deleting": "Die angehakten Laufzeit-Pakete werden gelöscht",
+        "boards.prune_board.title": "Laufzeit-Builds auf {label}",
+        "boards.prune_board.reading": "Builds auf dem Board werden gelesen",
+        "boards.prune_board.busy": "Nicht aufgeführt, weil ein laufendes Programm sie nutzt: {builds}.",
+        "boards.prune_board.none": "Keine älteren Laufzeit-Builds auf diesem Board zu entfernen: der aktive Build "
+                                   "wird nie aufgeführt.",
+        "boards.prune_board.intro": "Die älteren Laufzeit-Builds auf dem Board (nie der aktive, nie einer, den ein "
+                                    "laufendes Programm nutzt). Ein Board hat keinen Papierkorb: was du anhakst, wird "
+                                    "endgültig entfernt. Nichts ist angehakt.",
+        "boards.prune_board.removing": "Die angehakten Builds auf dem Board werden entfernt",
+        "boards.prune_board.freed": "{size} auf dem Board frei geworden.",
+        "boards.deploy.title": "Laufzeit auf {label} installieren",
+        "boards.deploy.intro": "Installiert die gebaute Laufzeit so auf dem Board, wie seine Deploy-Einstellungen es "
+                               "sagen, prüft den neuen Build dort und aktiviert ihn nur, wenn er besteht. Jeder ältere "
+                               "Build bleibt auf dem Board.",
+        "boards.deploy.user": "SSH-Benutzer:",
+        "boards.deploy.password": "Passwort (nur für ein noch nicht gekoppeltes Board):",
+        "boards.deploy.password_hint": "einmal genutzt, um den Schlüssel des Frameworks einzurichten, nie gespeichert",
+        "boards.bench.model": "Modell für einen kurzen Benchmark (optional):",
+        "boards.bench.hint": "Pfad auf dem Board, z. B. models/model.gguf (relativ: im Home-Ordner)",
+        "boards.untrusted_question": "{path} ist kein Katalogmodell und daher nicht vertrauenswürdig. llama-bench "
+                                     "lädt es nativ auf dem Gerät als {user} (ohne Sandbox). Den kurzen Benchmark "
+                                     "damit ausführen? Deine Antwort wird im Audit-Log vermerkt.",
+        "boards.deploy.not_built": "Die Laufzeit für dieses Board ist noch nicht gebaut (oder sein Prüfprofil hat "
+                                   "sich geändert): zuerst Laufzeit bauen...",
+        "boards.deploy.needs_source": "Das Paket muss neu gepackt werden, dafür wird die festgelegte Quelle gebraucht "
+                                      "(ihr Lizenztext): zuerst Laufzeit bauen...",
+        "boards.deploy.problems": "Es wurde nichts installiert; ändere zuerst die Deploy-Einstellungen "
+                                  "(Einstellungen...):",
+        "boards.deploy.root": "Der SSH-Benutzer auf dem Board ist root: die Laufzeit läuft nie als root. Installiere "
+                              "als Benutzer ohne Sonderrechte (Einstellungen...).",
+        "boards.deploy.preparing": "Build und Paket werden geprüft",
+        "boards.deploy.running": "Installation auf dem Board",
+        "boards.deploy.done": "Build {build} nach {root} installiert.",
+        "boards.deploy.previous": "Der vorherige Build {previous} bleibt erhalten.",
+        "boards.deploy.failed": "Build {build} hat seine Prüfungen auf dem Board nicht bestanden; er wurde nicht "
+                                "aktiviert.",
+        "boards.deploy.server_user": "Der Server lauscht auf 127.0.0.1:{port}; sein Schlüssel liegt in "
+                                     "~/.config/llm-framework/llama-server.key. stop, status und serve (im "
+                                     "Vordergrund) funktionieren genauso wie der Startbefehl oben.",
+        "boards.deploy.server_systemd": "systemd-Unit: {state}; der Server lauscht auf 127.0.0.1:{port}; sein "
+                                        "Schlüssel liegt in ~/.config/llm-framework/llama-server.key.",
+        "boards.deploy.unit_started": "gestartet",
+        "boards.deploy.unit_enabled": "aktiviert",
+        "boards.checks": "Prüfungen auf dem Board:",
+        "boards.check_line": "{name}: {result} - {detail}",
+        "boards.check.passed": "bestanden",
+        "boards.check.failed": "fehlgeschlagen",
+        "boards.check.skipped": "übersprungen",
+        "boards.bench.missing": "Kein lesbares Modell unter {path} auf dem Board; der kurze Benchmark entfällt.",
+        "boards.kv": "KV-Cache: {kv}",
+        "boards.verify.title": "Laufzeit auf {label} prüfen",
+        "boards.verify.intro": "Prüft die installierte Laufzeit auf dem Board erneut als Benutzer ohne Sonderrechte "
+                               "(nie mit sudo); mit einem Modell auch einen kurzen Benchmark.",
+        "boards.verify.user": "SSH-Benutzer:",
+        "boards.verify.nothing": "Auf diesem Board wurde noch nichts installiert (Laufzeit installieren...).",
+        "boards.verify.root": "Der SSH-Benutzer ist root; die Prüfungen laufen nur als Benutzer ohne Sonderrechte.",
+        "boards.verify.running": "Prüfung auf dem Board",
+        "boards.verify.result": "Board {device_id}, Build {build}:",
+        "boards.check.running": "Das Board wird geprüft (eine Verbindung zu seinem SSH-Port, keine Anmeldung)",
+        "boards.check.next": "Nächster Schritt: {hint}",
+        "boards.check.none": "Mojo hat für dieses Board keinen Befund geliefert.",
+    },
+}

@@ -343,6 +343,16 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   list|add|remove` shows and manages them ([CLI](CLI_Usage.md#deploy-devices)). These are the only devices an AI
   client or Ditto can name for a deploy, and only while the framework's `known_hosts` still holds that key; no tool
   trusts, pairs or records a device.
+- **Boards and Devices window** (GUI: **Boards > Boards and Devices...**): every board you probed or trusted in one
+  table, with what only you see (the board's account, the full host-key fingerprint and whether `known_hosts` still
+  holds it, since when and how it was trusted, the last deploy, the system of its probe, its deploy settings and the
+  deployed runtime). Its buttons call the same functions as the CLI, with the same questions ("No" is the default)
+  and audit records: **Add a trusted board...** (`deploy devices add`), **Remove trust...** (`deploy devices
+  remove`: without it, a board paired once stays allowed for AI deploys), **Settings...**, **Runtime plan**,
+  **Status**, **Build runtime...**, **Deploy runtime...**, **Verify...**, **Remove older runtime packages...** and
+  **Remove older builds on the board...** (the `device` commands below; deletions in the deletion dialog with the
+  full list), and **Check this board (Mojo)** (one connection to the board's SSH port, no login). Every contact with
+  a board and every build runs in the background with Cancel; a password is asked each time and never stored.
 - **Address or host name:** you enter what you know, the board's IP address or its host name (`myboard.local`).
   The host key is trusted per name you enter: a board you reach by both names is confirmed once for each, and it
   stays the same trusted device.
@@ -380,6 +390,9 @@ Deployment copies a finished build to a board over SSH and installs the model fi
 
 For GGUF models the framework builds llama.cpp for a board and installs it there (`llm-cli device ...`,
 [CLI_Usage.md](CLI_Usage.md#device)). The RKLLM and RKNN runtimes are vendor binaries and stay yours to install.
+GUI: **Boards > Boards and Devices...** (**Runtime plan**, **Build runtime...**, **Deploy runtime...**,
+**Verify...**, **Status**, **Settings...**, **Remove older runtime packages...**, **Remove older builds on the
+board...**).
 
 - **Plan from the board's own probe** (decision D14): `llm-cli scan --device` stores the board's profile under its ID
   (from its SSH host key). The plan is a cross build for that profile: `GGML_CPU_ARM_ARCH` from the board's CPU
