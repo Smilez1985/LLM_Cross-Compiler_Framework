@@ -73,6 +73,14 @@ uv run llm-cli --help
 uv run llm-gui
 ```
 
+### Check a new setup
+
+`uv run llmcf mojo` checks what a build needs on this computer (Python 3.11 to 3.14, Docker and buildx, free disk
+space, targets, the state folder, secrets and keyring, tool permissions) and says what to do for each problem.
+`make test` then runs the tests ([section 3](#3-running-the-tests)), and `scripts/mcp_client_smoke.sh` is the smoke
+test with a real AI client ([below](#the-real-client-smoke-test)). The CI smoke-tests the build images. There is no
+separate quick-check script.
+
 ### Keep your development setup apart from your real one
 
 - `LLM_FRAMEWORK_CONFIG_DIR=/some/folder` makes the framework use that folder for its settings. Without it, a
@@ -538,6 +546,11 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 
 ## 8. Code guidelines
 
+- **Use what exists before building it again.** Before you write a helper, a check, a model or a lookup, search
+  the repository for one that does the job (`git log -S` shows which came first). Use it, extend it and wire it;
+  build something new beside it only when nothing suitable exists, and say why in the pull request. Two
+  implementations of one job are merged into the better one (the older one when it is adequate), and every caller
+  is wired to it. Done means wired and tested, not only written.
 - Use type hints for new functions.
 - Log with `orchestrator.utils.logging.get_logger`, not `print()`. CLI output goes through `rich`; escape external
   text with `rich.markup.escape` before printing it.

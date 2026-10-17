@@ -11,7 +11,6 @@ languages (tests/test_gui_ditto_models.py). This module imports nothing from the
 TEXTS = {
     "en": {
         # the menu (shared with Ditto > Local Runtime...: found by its object name or its title)
-        "ditto_models.menu": "Ditto",
         "ditto_models.menu.models": "Local Models...",
         "ditto_models.menu.eval": "Evaluation...",
 
@@ -174,7 +173,6 @@ TEXTS = {
         "ditto_eval.col.p50": "p50 ms",
     },
     "de": {
-        "ditto_models.menu": "Ditto",
         "ditto_models.menu.models": "Lokale Modelle...",
         "ditto_models.menu.eval": "Bewertung...",
 

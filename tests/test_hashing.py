@@ -379,8 +379,9 @@ class TestSha256Sums:
 
 
 class _Response:
-    def __init__(self, chunks):
-        self.chunks = chunks
+    def __init__(self, chunks, url="https://example.invalid/f"):
+        self.chunks, self.url, self.status_code = chunks, url, 200
+        self.headers = {"Content-Length": str(sum(len(c) for c in chunks))}
 
     def __enter__(self):
         return self
@@ -395,41 +396,40 @@ class _Response:
         return iter(self.chunks)
 
 
-class TestNetworkGuardDownload:
-    """utils/network.NetworkGuard.download_file hashes while it downloads (no product caller; item 11 of round 12)."""
+class TestStreamedDownloadHash:
+    """A download is hashed while it is written. These cases pinned utils/network.NetworkGuard.download_file, which had
+    no product caller and was removed by round 12 of the decisions (item 11); PinnedDownloader.fetch, the one
+    downloader, does its job, so they now pin that: the same bytes, the hash compared in any case, a wrong hash keeps
+    nothing. On purpose, a download without a pinned hash is refused instead of kept (item 11)."""
 
-    def _guard(self, monkeypatch, chunks):
-        from orchestrator.utils import network
+    def _fetch(self, chunks, dest, pin, size=None):
+        from orchestrator.utils.download import PinnedDownloader
 
         class Session:
-            def mount(self, *a):
-                pass
-
-            def get(self, url, stream, timeout):
+            def get(self, url, **kwargs):
                 return _Response(chunks)
-        monkeypatch.setattr(network.requests, "Session", Session)
-        guard = network.NetworkGuard()
-        monkeypatch.setattr(guard, "wait_for_network", lambda verbose=True: None)
-        return guard
+        size = sum(len(c) for c in chunks) if size is None else size
+        return PinnedDownloader(Session(), sleep=lambda s: None).fetch("https://example.invalid/f", dest, size, pin)
 
-    def test_a_matching_hash_in_any_case_keeps_the_file(self, monkeypatch, tmp_path):
+    def test_a_matching_hash_in_any_case_keeps_the_file(self, tmp_path):
         chunks = [b"abc", b"", b"def" * 5000]
-        guard = self._guard(monkeypatch, chunks)
         target = tmp_path / "f.bin"
-        assert guard.download_file("https://example.invalid/f", target, sha(b"".join(chunks)).upper())
-        assert target.read_bytes() == b"".join(chunks) and not (tmp_path / "f.bin.tmp").exists()
+        assert self._fetch(chunks, target, sha(b"".join(chunks)).upper()) == target
+        assert target.read_bytes() == b"".join(chunks) and not (tmp_path / "f.bin.part").exists()
 
-    def test_a_wrong_hash_removes_the_download(self, monkeypatch, tmp_path):
-        guard = self._guard(monkeypatch, [b"abc"])
+    def test_a_wrong_hash_removes_the_download(self, tmp_path):
+        from orchestrator.utils.download import IntegrityError
         folder = tmp_path / "dl"
         folder.mkdir()
-        assert guard.download_file("https://example.invalid/f", folder / "f.bin", "0" * 64) is False
-        assert list(folder.iterdir()) == []
+        with pytest.raises(IntegrityError):
+            self._fetch([b"abc"], folder / "f.bin", "0" * 64)
+        assert [p.name for p in folder.iterdir() if not p.name.endswith(".lock")] == []
 
-    def test_without_a_hash_the_download_is_kept(self, monkeypatch, tmp_path):
-        guard = self._guard(monkeypatch, [b"abc"])
-        assert guard.download_file("https://example.invalid/f", tmp_path / "f.bin")
-        assert (tmp_path / "f.bin").read_bytes() == b"abc"
+    def test_without_a_hash_nothing_is_downloaded(self, tmp_path):
+        from orchestrator.utils.download import IntegrityError
+        with pytest.raises(IntegrityError, match="No sha256 and size pinned"):
+            self._fetch([b"abc"], tmp_path / "f.bin", None)
+        assert not (tmp_path / "f.bin").exists()
 
 
 class TestPinnedDownloadCompare:

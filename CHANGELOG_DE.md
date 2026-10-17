@@ -1425,21 +1425,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   importiert, deshalb laden `orchestrator/utils/ssh_trust.py` und alles, was es importiert, keine SSH-Bibliothek, und
   das Deployment und der Builder-Tab fragen mit einem echten Import, ob SSH geht (eine kaputte Installation galt dort
   als vorhanden und bei der Anmeldung als fehlend).
-- **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des
-  Maintainers: zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9
-  Schleifen) laufen über das Modul der ältesten, `orchestrator/utils/helpers.py` (wo `calculate_file_checksum` war),
-  das eine Hash-Schleife bekommen hat, mit optionalen Callbacks für Abbruch und Fortschritt, dem Hashen eines offenen
-  Handles oder seiner ersten Bytes (die Prüfung beim Fortsetzen des Deploys), Kopieren beim Hashen (der
-  Kalibrierdatensatz eines Rezepts, gespeicherte Artefakte, die Modellkopie der Benchmark-Sandbox), einem Vergleich in
-  konstanter Zeit ohne Groß- und Kleinschreibung, einem Hash-Cache mit Lock (der des Benchmark-Tools hatte keinen),
-  dem Schreiber für `SHA256SUMS` und der `.sha256`-Begleitdatei. Jeder alte Name bleibt als Delegate mit seinem
-  Fehlerverhalten (ein Fehler, None oder ein leerer Text) und seiner Link-Regel; `tests/test_hashing.py` hält jeden
-  fest und lehnt eine neue Hash-Schleife neben der einen Implementierung ab. Die Texte und Prüfungen des
-  Disk-Watchdogs sind von der Build-Engine nach `orchestrator/Core/disk_plan.py` gezogen (`low_disk_text`,
-  `disk_full_text`, `is_disk_full`, `low_disk_floor`, `free_space`, `nearest_existing` und `DiskWatchdog`, das der
-  Container-Watchdog und der Staging-Wächter jetzt sind); die Build-Engine behält ihre alten Methodennamen als
-  Delegates, die Texte bleiben gleich und behalten "No space left on device", worauf das Self-Healing-Muster (jetzt
-  aus denselben Phrasen gebaut) passt. Die Spielräume bleiben gleich.
+- **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
+  zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9 Schleifen; die
+  Schleife von `utils/network.py` ist mit diesem Modul gegangen, siehe unten) laufen über das Modul der ältesten,
+  `orchestrator/utils/helpers.py` (wo `calculate_file_checksum` war), das eine Hash-Schleife bekommen hat, mit
+  optionalen Callbacks für Abbruch und Fortschritt, dem Hashen eines offenen Handles oder seiner ersten Bytes (die
+  Prüfung beim Fortsetzen des Deploys), Kopieren beim Hashen (der Kalibrierdatensatz eines Rezepts, gespeicherte
+  Artefakte, die Modellkopie der Benchmark-Sandbox), einem Vergleich in konstanter Zeit ohne Groß- und Kleinschreibung,
+  einem Hash-Cache mit Lock (der des Benchmark-Tools hatte keinen), dem Schreiber für `SHA256SUMS` und der
+  `.sha256`-Begleitdatei. Jeder alte Name bleibt als Delegate mit seinem Fehlerverhalten (ein Fehler, None oder ein
+  leerer Text) und seiner Link-Regel; `tests/test_hashing.py` hält jeden fest und lehnt eine neue Hash-Schleife neben
+  der einen Implementierung ab. Die Texte und Prüfungen des Disk-Watchdogs sind von der Build-Engine nach
+  `orchestrator/Core/disk_plan.py` gezogen (`low_disk_text`, `disk_full_text`, `is_disk_full`, `low_disk_floor`,
+  `free_space`, `nearest_existing` und `DiskWatchdog`, das der Container-Watchdog und der Staging-Wächter jetzt sind);
+  die Build-Engine behält ihre alten Methodennamen als Delegates, die Texte bleiben gleich und behalten "No space left
+  on device", worauf das Self-Healing-Muster (jetzt aus denselben Phrasen gebaut) passt. Die Spielräume bleiben gleich.
 - **Die GUI ist ein optionales Extra; Kommandozeile, MCP-Server und Kern laufen ohne Qt.** PySide6 ist das Extra
   `gui` in `pyproject.toml` (die per Hash festgelegte `requirements-gui.txt`, ein Export von `uv.lock` wie
   `requirements.txt`). Die Installer für Linux und Windows installieren es wie bisher; `sudo ./install.sh --headless`
@@ -1486,6 +1486,33 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   den Build über denselben Dienst. Die Prüfung des Builders auf einen früheren Build mit denselben Optionen erfasst
   jetzt auch ein Target ohne Capabilities (vorher lehnte der Dienst den Vergleich eines solchen Auftrags ab, und der
   Builder vermerkte das nur im Log).
+- **Eine Umsetzung je Aufgabe, die ältere, wo sie genügt (Runde 12 der Entscheidungen).** Jeder Punkt der Liste
+  unverdrahteter Teile wurde an seiner Geschichte geprüft (`git log -S`) und ist verdrahtet oder mit Nachweis entfernt:
+  Die Frage vor dem Öffnen eines Links im Chat ist `bubbles.confirm_open_link` (die ungenutzte Kopie des Panels ist
+  weg); die kostenlose Prüfung der Zugangsdaten ist `SignIn.check` (`LLMClient.check_credentials` ist weg, sein Test
+  läuft über `SignIn.check`). Die Prüfungen von Python und Docker in Mojo laufen über die ursprünglichen Prüfungen des
+  Frameworks in `orchestrator/utils/validation.py`: `validate_python_version` und `check_docker_environment`, das auch
+  der Start der Build-Engine nutzt (Befunde und Logzeilen unverändert; seine Frage nach buildx läuft über
+  `helpers.execute_command`, schließt also stdin, öffnet unter Windows kein Konsolenfenster und hält den Start, wie das
+  Original der Engine, nie an, auch nicht bei einer Ausgabe, die es nicht dekodieren kann). Der Import von
+  `validation.py` prüft den Host nicht mehr. Das Modul behält den SSRF-Schutz und die Prüfungen, die kein neuerer Code macht, und verliert, was neuerer
+  Code besser kann: die System- und Docker-Berichte (Mojo), die Speicherplatzprüfung (die eine Regel für Speicherplatz),
+  die Prüfung von Konfigurationen (`ConfigSchema`), die Regeln für Image- und Target-Namen (die des Modulgenerators),
+  den Schreibtest (`ConfigManager.writable_dir`) und `validate_url`. Ältere Helfer werden von ihren neueren Kopien
+  wieder genutzt: `helpers.execute_command` führt die Prüfungen von Hardware und Toolchain aus, `helpers.safe_json_load`
+  liest die Zustandsdateien der lokalen Laufzeit und des Wissensspeichers, `llama_server.managed_endpoint` findet den
+  lokalen Server für den Chat-Client, `LLMOrchestrator.list_workflows` (jetzt eine normale Methode) ersetzt das Lesen
+  seiner privaten Tabelle im Hauptfenster, `TargetIn` und `TargetCapabilitiesOut` sind die Basis der Modelle des
+  Target-Werkzeugs, `grant_facts` entscheidet über die stehende Freigabe eines Build-Plans, `ChatHistory.in_state_dir`
+  lädt den Verlauf des Chat-Panels, `PROFILE_FILE_NAME` benennt die Datei der Skript-Prüfung und `TUNINGS` sichert, was
+  `build_info.json` festhält. Entfernt: die Texte der v2-GUI und sieben neuere doppelte Texte (EN und DE; der ältere
+  Schlüssel bleibt), die Aliase der Menünamen `BUILD_MENU_NAMES` und `TOOLS_MENU_NAMES`, `utils/network.py`
+  (NetworkGuard prüfte 8.8.8.8 und wartete ohne Grenze; `PinnedDownloader` setzt fort, versucht es begrenzt erneut und
+  prüft den Pin), `scripts/quick_smoke_test.py` (es verlangte Pfade, die es nicht gibt; CONTRIBUTING nennt jetzt `llmcf
+  mojo`, `make test` und den Smoke-Test mit einem echten Client) und die Reste `check_command_exists`, `is_admin`,
+  `canonical_key`, `_with_message`, `BoardOut`, `is_probe_id`, `SOURCE_KINDS`, `snapshot_listing`,
+  `_write_profile_file`, `TokenStore.policy_of`, `deploy_artifact` (Aufrufer nutzen `deploy_package`), `WIDTH_LABELS`
+  und `REQUEST_TTL`. CONTRIBUTING (EN/DE) nennt die Regel: erst nutzen, was es gibt.
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:

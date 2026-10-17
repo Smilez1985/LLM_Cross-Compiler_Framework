@@ -1251,19 +1251,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the board steps' errors share `RemoteFailure`. paramiko is imported on first use only, so `orchestrator/utils/
   ssh_trust.py` and everything that imports it load no SSH library, and the deploy and the Builder tab ask with a
   real import whether SSH works (a broken installation counted as present there and as missing at the login).
-- **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0:
-  the existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops) run through the
-  oldest one's module, `orchestrator/utils/helpers.py` (where `calculate_file_checksum` was), which gained one hashing
-  loop with optional cancel and progress callbacks, hashing of an open handle or its first bytes (the deploy's resume
-  check), copy-while-hashing (the recipe dataset, saved artifacts, the benchmark sandbox's model copy), a
-  case-insensitive constant-time compare, a hash cache with a lock (the benchmark tool's had none), the `SHA256SUMS`
-  writer and the `.sha256` sidecar. Every old name stays as a delegate with its error mode (an error, None or an
-  empty text) and link rule; `tests/test_hashing.py` pins each of them and refuses a new hash loop beside the one
-  implementation. The disk watchdog's texts and checks moved from the build engine into `orchestrator/Core/disk_plan.py`
-  (`low_disk_text`, `disk_full_text`, `is_disk_full`, `low_disk_floor`, `free_space`, `nearest_existing` and
-  `DiskWatchdog`, which the container watchdog and the staging watcher now are); the build engine keeps its old
-  method names as delegates, the texts are unchanged and keep "No space left on device", which the self-healing
-  pattern (now built from the same phrases) matches. Margins are unchanged.
+- **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
+  existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
+  `utils/network.py` left with that module, see below) run through the oldest one's module,
+  `orchestrator/utils/helpers.py` (where `calculate_file_checksum` was), which gained one hashing loop with optional
+  cancel and progress callbacks, hashing of an open handle or its first bytes (the deploy's resume check),
+  copy-while-hashing (the recipe dataset, saved artifacts, the benchmark sandbox's model copy), a case-insensitive
+  constant-time compare, a hash cache with a lock (the benchmark tool's had none), the `SHA256SUMS` writer and the
+  `.sha256` sidecar. Every old name stays as a delegate with its error mode (an error, None or an empty text) and link
+  rule; `tests/test_hashing.py` pins each of them and refuses a new hash loop beside the one implementation. The disk
+  watchdog's texts and checks moved from the build engine into `orchestrator/Core/disk_plan.py` (`low_disk_text`,
+  `disk_full_text`, `is_disk_full`, `low_disk_floor`, `free_space`, `nearest_existing` and `DiskWatchdog`, which the
+  container watchdog and the staging watcher now are); the build engine keeps its old method names as delegates, the
+  texts are unchanged and keep "No space left on device", which the self-healing pattern (now built from the same
+  phrases) matches. Margins are unchanged.
 - **The GUI is an optional extra; the command line, the MCP server and the core run without Qt.** PySide6 is the
   extra `gui` in `pyproject.toml` (the hash-pinned `requirements-gui.txt`, an export of `uv.lock` like
   `requirements.txt`). The Linux and Windows installers install it as before; `sudo ./install.sh --headless`
@@ -1305,6 +1306,31 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   never refused by the queue limit for AI callers. The CLI's follow loop reads the build through the same service.
   The Builder's check for an earlier build with the same options now also covers a target without capabilities
   (before, the service refused to compare such a request and the Builder only logged that).
+- **One implementation per job, the older one where it is adequate (round 12 of the decisions).** Every item of the
+  unwired audit was checked against its history (`git log -S`) and is wired or removed with proof: the chat's link
+  question is `bubbles.confirm_open_link` (the panel's unused copy is gone); the zero-cost credential check is
+  `SignIn.check` (`LLMClient.check_credentials` is gone, its test runs through `SignIn.check`). Mojo's Python and Docker
+  checks run on the framework's original checks in `orchestrator/utils/validation.py`: `validate_python_version` and
+  `check_docker_environment`, which the build engine's start uses as well (findings and log lines unchanged; its
+  buildx question runs through `helpers.execute_command`, so it closes stdin, opens no console window on Windows and,
+  as the engine's original did, never stops the start, also not for output it cannot decode). Importing
+  `validation.py` no longer checks the host. The module keeps the SSRF guard and the checks no newer code does, and
+  loses what newer code does better: the system and Docker reports (Mojo), the disk check (the one disk rule), the
+  config validator (`ConfigSchema`), the image and target name rules (the module generator's), the writability test
+  (`ConfigManager.writable_dir`) and `validate_url`. Older helpers are used by their newer copies again:
+  `helpers.execute_command` runs the hardware and toolchain probes, `helpers.safe_json_load` reads the local runtime's
+  and the knowledge store's state files, `llama_server.managed_endpoint` finds the local server for the chat client,
+  `LLMOrchestrator.list_workflows` (now a plain method) replaces reads of its private table in the main window,
+  `TargetIn` and `TargetCapabilitiesOut` are the bases of the target tool's models, `grant_facts` decides a build plan's
+  standing approval, `ChatHistory.in_state_dir` loads the chat panel's history, `PROFILE_FILE_NAME` names the script
+  probe's file and `TUNINGS` guards what `build_info.json` records. Removed: the texts of the v2 GUI and seven newer
+  duplicate texts (EN and DE; the older key stays), the menu name aliases `BUILD_MENU_NAMES` and `TOOLS_MENU_NAMES`,
+  `utils/network.py` (NetworkGuard pinged 8.8.8.8 and waited without limit; `PinnedDownloader` resumes, retries within
+  bounds and checks the pin), `scripts/quick_smoke_test.py` (it required paths that do not exist; CONTRIBUTING now names
+  `llmcf mojo`, `make test` and the real-client smoke test), and the leftovers `check_command_exists`, `is_admin`,
+  `canonical_key`, `_with_message`, `BoardOut`, `is_probe_id`, `SOURCE_KINDS`, `snapshot_listing`,
+  `_write_profile_file`, `TokenStore.policy_of`, `deploy_artifact` (callers use `deploy_package`), `WIDTH_LABELS` and
+  `REQUEST_TTL`. CONTRIBUTING (EN/DE) states the rule: use what exists before building it again.
 - **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
   `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
   and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the

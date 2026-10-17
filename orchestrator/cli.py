@@ -4675,11 +4675,6 @@ def _profile_summary(profile) -> list:
     return lines
 
 
-def _write_profile_file(profile, output_file: Path, as_json: bool) -> None:
-    from orchestrator.runtime.scan_steps import write_profile_file
-    write_profile_file(profile, output_file, as_json)
-
-
 def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Optional[str],
                   ctx: Optional[FrameworkContext] = None):
     """The device's host key, trusted on first use but never silently (as for deploy run). Exits when refused."""

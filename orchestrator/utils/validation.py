@@ -1,42 +1,37 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Validation Utilities (v2.3.0)
-DIREKTIVE: Goldstandard, professionell geschrieben.
+LLM Cross-Compiler Framework - Validation Utilities
 
-Comprehensive validation system for configurations, data structures,
-system requirements, and runtime validation. Container-native with
-Poetry+VENV, robust error recovery and detailed reporting.
+The framework's original validation toolkit (2025). Round 12 of the decisions (recon first, one implementation) kept
+what the newer code uses or what no newer code does, and removed what newer code does better (each with its
+replacement in the changelog of that round):
 
-Key Responsibilities:
-- Configuration validation (YAML, JSON, Python objects)
-- System requirements validation (dependencies, hardware, software)
-- Runtime data validation (user inputs, API parameters)
-- Path and file system validation with security checks
-- Docker environment validation
-- Target hardware validation
-- Model format validation
-- Build configuration validation
+- The SSRF guard for every URL the framework fetches: validate_public_url with is_public_ip, resolve_public_addresses
+  and _idna_host (crawler, crawl jobs, target sources, image registry), and validate_ip_address.
+- validate_python_version: the supported-Python check that Mojo's Python check (Core/mojo/checks/python.py) runs on.
+- check_docker_environment: the build engine's Docker check (ping of the framework's client, buildx), which Mojo's
+  Docker check (Core/mojo/checks/docker.py) runs on as well.
+- Checks no newer code does: validate_path with its path security check, the platform, port, CPU- and memory-usage
+  and Docker version/Compose checks, validate_email, and the ValidationError family.
 
-Updates v2.3.0:
-- Integrated centralized logging.
-- refined Docker validation.
-- Enhanced path security checks.
+Importing this module checks nothing: the former check of the host at import time is gone (Mojo reports the Python
+version and the free disk space, decision A4; the RAM a build needs is part of every build plan, disk_plan.host_fit).
 """
 
+import ipaddress
 import os
-import re
-import subprocess
 import platform
+import re
+import shutil
 import socket
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+import subprocess
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-import ipaddress
-import urllib.parse
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
-import psutil
 from packaging import version
 
 # Centralized Logging Integration
@@ -143,94 +138,6 @@ class ValidationResult:
             "validation_type": self.validation_type.value,
             "timestamp": self.timestamp.isoformat()
         }
-
-
-@dataclass
-class ValidationReport:
-    """Comprehensive validation report"""
-    overall_valid: bool = True
-    results: List[ValidationResult] = field(default_factory=list)
-    summary: Dict[str, int] = field(default_factory=dict)
-    validation_time: datetime = field(default_factory=datetime.now)
-    
-    def add_result(self, result: ValidationResult):
-        """Add validation result"""
-        self.results.append(result)
-        
-        # Update overall validity
-        if not result.valid and result.severity == ValidationSeverity.ERROR:
-            self.overall_valid = False
-        
-        # Update summary
-        severity = result.severity.value
-        self.summary[severity] = self.summary.get(severity, 0) + 1
-    
-    def add_error(self, message: str, details: Dict[str, Any] = None, 
-                 validation_type: ValidationType = ValidationType.CONFIGURATION):
-        """Add error result"""
-        result = ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=message,
-            details=details or {},
-            validation_type=validation_type
-        )
-        self.add_result(result)
-    
-    def add_warning(self, message: str, details: Dict[str, Any] = None,
-                   validation_type: ValidationType = ValidationType.CONFIGURATION):
-        """Add warning result"""
-        result = ValidationResult(
-            valid=True,
-            severity=ValidationSeverity.WARNING,
-            message=message,
-            details=details or {},
-            validation_type=validation_type
-        )
-        self.add_result(result)
-    
-    def add_success(self, message: str, details: Dict[str, Any] = None,
-                   validation_type: ValidationType = ValidationType.CONFIGURATION):
-        """Add success result"""
-        result = ValidationResult(
-            valid=True,
-            severity=ValidationSeverity.SUCCESS,
-            message=message,
-            details=details or {},
-            validation_type=validation_type
-        )
-        self.add_result(result)
-    
-    def get_errors(self) -> List[ValidationResult]:
-        """Get all error results"""
-        return [r for r in self.results if r.severity == ValidationSeverity.ERROR]
-    
-    def get_warnings(self) -> List[ValidationResult]:
-        """Get all warning results"""
-        return [r for r in self.results if r.severity == ValidationSeverity.WARNING]
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
-        return {
-            "overall_valid": self.overall_valid,
-            "summary": self.summary,
-            "validation_time": self.validation_time.isoformat(),
-            "results": [r.to_dict() for r in self.results]
-        }
-
-
-@dataclass
-class SystemRequirements:
-    """System requirements specification"""
-    min_python_version: str = "3.8.0"
-    min_memory_gb: float = 4.0
-    min_disk_space_gb: float = 10.0
-    required_commands: List[str] = field(default_factory=lambda: ["docker", "git"])
-    optional_commands: List[str] = field(default_factory=lambda: ["cmake", "ninja"])
-    required_ports: List[int] = field(default_factory=list)
-    supported_platforms: List[str] = field(default_factory=lambda: ["linux", "windows", "macos"])
-    max_cpu_usage_percent: float = 80.0
-    max_memory_usage_percent: float = 80.0
 
 
 # ============================================================================
@@ -429,421 +336,24 @@ def _validate_path_security(path: Path) -> ValidationResult:
         )
 
 
-def validate_directory_writable(directory: Union[str, Path]) -> ValidationResult:
-    """
-    Validate that directory is writable by attempting to create a test file.
-    
-    Args:
-        directory: Directory to test
-        
-    Returns:
-        ValidationResult: Validation result
-    """
-    dir_path = Path(directory)
-    
-    # First check basic path validation
-    path_result = validate_path(dir_path, PathType.DIRECTORY, must_exist=True)
-    if not path_result.valid:
-        return path_result
-    
-    try:
-        # Attempt to create and delete a test file
-        import uuid
-        
-        test_filename = f".test_write_{uuid.uuid4().hex[:8]}"
-        test_file = dir_path / test_filename
-        
-        # Write test
-        with open(test_file, 'w') as f:
-            f.write("test")
-        
-        # Read test
-        with open(test_file, 'r') as f:
-            content = f.read()
-        
-        # Cleanup
-        test_file.unlink()
-        
-        if content != "test":
-            return ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Directory write test failed: {directory}",
-                validation_type=ValidationType.SYSTEM,
-                details={"test": "write_read_mismatch"}
-            )
-        
-        return ValidationResult(
-            valid=True,
-            severity=ValidationSeverity.SUCCESS,
-            message=f"Directory is writable: {directory}",
-            validation_type=ValidationType.SYSTEM
-        )
-        
-    except Exception as e:
-        logger.error(f"Directory write test failed for {directory}: {e}")
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Directory write test error: {str(e)}",
-            validation_type=ValidationType.SYSTEM,
-            details={"exception": str(e), "directory": str(directory)}
-        )
-
-
-# ============================================================================
-# CONFIGURATION VALIDATION
-# ============================================================================
-
-def validate_config(config: Dict[str, Any], 
-                   schema: Optional[Dict[str, Any]] = None,
-                   config_name: str = "configuration") -> ValidationReport:
-    """
-    Validate configuration dictionary against schema and business rules.
-    
-    Args:
-        config: Configuration dictionary to validate
-        schema: Optional schema for validation
-        config_name: Name of configuration for error messages
-        
-    Returns:
-        ValidationReport: Comprehensive validation report
-    """
-    report = ValidationReport()
-    
-    if not isinstance(config, dict):
-        report.add_error(
-            f"{config_name} must be a dictionary",
-            {"actual_type": type(config).__name__},
-            ValidationType.CONFIGURATION
-        )
-        return report
-    
-    # Schema-based validation if provided
-    if schema:
-        schema_result = _validate_against_schema(config, schema, config_name)
-        for result in schema_result:
-            report.add_result(result)
-    
-    # Business rules validation
-    business_rules_result = _validate_business_rules(config, config_name)
-    for result in business_rules_result:
-        report.add_result(result)
-    
-    return report
-
-
-def _validate_against_schema(config: Dict[str, Any], 
-                           schema: Dict[str, Any], 
-                           config_name: str) -> List[ValidationResult]:
-    """Validate configuration against schema"""
-    results = []
-    
-    # Check required fields
-    required_fields = schema.get('required', [])
-    for field in required_fields:
-        if field not in config:
-            results.append(ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Required field missing in {config_name}: {field}",
-                validation_type=ValidationType.CONFIGURATION,
-                details={"field": field, "config": config_name}
-            ))
-    
-    # Check field types and constraints
-    properties = schema.get('properties', {})
-    for field_name, field_schema in properties.items():
-        if field_name in config:
-            field_results = _validate_field_against_schema(
-                config[field_name], 
-                field_schema, 
-                f"{config_name}.{field_name}"
-            )
-            results.extend(field_results)
-    
-    # Check for unexpected fields
-    allowed_fields = set(properties.keys())
-    actual_fields = set(config.keys())
-    unexpected_fields = actual_fields - allowed_fields
-    
-    for field in unexpected_fields:
-        results.append(ValidationResult(
-            valid=True,
-            severity=ValidationSeverity.WARNING,
-            message=f"Unexpected field in {config_name}: {field}",
-            validation_type=ValidationType.CONFIGURATION,
-            details={"field": field, "config": config_name}
-        ))
-    
-    return results
-
-
-def _validate_field_against_schema(value: Any, 
-                                 field_schema: Dict[str, Any], 
-                                 field_path: str) -> List[ValidationResult]:
-    """Validate individual field against its schema"""
-    results = []
-    
-    # Type validation
-    expected_type = field_schema.get('type')
-    if expected_type:
-        type_valid = _check_type(value, expected_type)
-        if not type_valid:
-            results.append(ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Type mismatch for {field_path}: expected {expected_type}, got {type(value).__name__}",
-                validation_type=ValidationType.CONFIGURATION,
-                details={"field": field_path, "expected_type": expected_type, "actual_type": type(value).__name__}
-            ))
-            return results  # Skip further validation if type is wrong
-    
-    # Range validation for numbers
-    if isinstance(value, (int, float)):
-        minimum = field_schema.get('minimum')
-        maximum = field_schema.get('maximum')
-        
-        if minimum is not None and value < minimum:
-            results.append(ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Value too small for {field_path}: {value} < {minimum}",
-                validation_type=ValidationType.CONFIGURATION,
-                details={"field": field_path, "value": value, "minimum": minimum}
-            ))
-        
-        if maximum is not None and value > maximum:
-            results.append(ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Value too large for {field_path}: {value} > {maximum}",
-                validation_type=ValidationType.CONFIGURATION,
-                details={"field": field_path, "value": value, "maximum": maximum}
-            ))
-    
-    # String validation
-    if isinstance(value, str):
-        min_length = field_schema.get('minLength')
-        max_length = field_schema.get('maxLength')
-        pattern = field_schema.get('pattern')
-        
-        if min_length is not None and len(value) < min_length:
-            results.append(ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"String too short for {field_path}: {len(value)} < {min_length}",
-                validation_type=ValidationType.CONFIGURATION,
-                details={"field": field_path, "length": len(value), "min_length": min_length}
-            ))
-        
-        if max_length is not None and len(value) > max_length:
-            results.append(ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"String too long for {field_path}: {len(value)} > {max_length}",
-                validation_type=ValidationType.CONFIGURATION,
-                details={"field": field_path, "length": len(value), "max_length": max_length}
-            ))
-        
-        if pattern and not re.match(pattern, value):
-            results.append(ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"String does not match pattern for {field_path}: {pattern}",
-                validation_type=ValidationType.CONFIGURATION,
-                details={"field": field_path, "value": value, "pattern": pattern}
-            ))
-    
-    # Enum validation
-    enum_values = field_schema.get('enum')
-    if enum_values and value not in enum_values:
-        results.append(ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Invalid enum value for {field_path}: {value} not in {enum_values}",
-            validation_type=ValidationType.CONFIGURATION,
-            details={"field": field_path, "value": value, "allowed_values": enum_values}
-        ))
-    
-    return results
-
-
-def _check_type(value: Any, expected_type: str) -> bool:
-    """Check if value matches expected type"""
-    type_mapping = {
-        'string': str,
-        'integer': int,
-        'number': (int, float),
-        'boolean': bool,
-        'array': list,
-        'object': dict
-    }
-    
-    expected_python_type = type_mapping.get(expected_type)
-    if expected_python_type is None:
-        return True  # Unknown type, assume valid
-    
-    return isinstance(value, expected_python_type)
-
-
-def _validate_business_rules(config: Dict[str, Any], config_name: str) -> List[ValidationResult]:
-    """Validate business-specific rules"""
-    results = []
-    
-    # Framework-specific validation rules
-    
-    # Docker configuration validation
-    if 'docker' in config:
-        docker_config = config['docker']
-        if isinstance(docker_config, dict):
-            
-            # Validate base image
-            base_image = docker_config.get('base_image')
-            if base_image and not _validate_docker_image_name(base_image):
-                results.append(ValidationResult(
-                    valid=False,
-                    severity=ValidationSeverity.ERROR,
-                    message=f"Invalid Docker image name: {base_image}",
-                    validation_type=ValidationType.CONFIGURATION,
-                    details={"field": "docker.base_image", "value": base_image}
-                ))
-    
-    # Build configuration validation
-    if 'build' in config:
-        build_config = config['build']
-        if isinstance(build_config, dict):
-            
-            # Validate timeout
-            timeout = build_config.get('timeout')
-            if timeout is not None:
-                if not isinstance(timeout, int) or timeout <= 0:
-                    results.append(ValidationResult(
-                        valid=False,
-                        severity=ValidationSeverity.ERROR,
-                        message=f"Build timeout must be positive integer: {timeout}",
-                        validation_type=ValidationType.CONFIGURATION,
-                        details={"field": "build.timeout", "value": timeout}
-                    ))
-                elif timeout > 86400:  # 24 hours
-                    results.append(ValidationResult(
-                        valid=True,
-                        severity=ValidationSeverity.WARNING,
-                        message=f"Build timeout is very large: {timeout}s (>24h)",
-                        validation_type=ValidationType.CONFIGURATION,
-                        details={"field": "build.timeout", "value": timeout}
-                    ))
-    
-    # Target configuration validation
-    if 'targets' in config:
-        targets = config['targets']
-        if isinstance(targets, list):
-            for i, target in enumerate(targets):
-                if isinstance(target, str):
-                    if not _validate_target_name(target):
-                        results.append(ValidationResult(
-                            valid=False,
-                            severity=ValidationSeverity.ERROR,
-                            message=f"Invalid target name: {target}",
-                            validation_type=ValidationType.CONFIGURATION,
-                            details={"field": f"targets[{i}]", "value": target}
-                        ))
-    
-    return results
-
-
-def _validate_docker_image_name(image_name: str) -> bool:
-    """Validate Docker image name format"""
-    # Basic Docker image name pattern
-    # Allows: [registry/]namespace/name[:tag]
-    pattern = r'^([a-z0-9]+([-._][a-z0-9]+)*\/)?([a-z0-9]+([-._][a-z0-9]+)*\/)?[a-z0-9]+([-._][a-z0-9]+)*(:[a-z0-9]+([-._][a-z0-9]+)*)?$'
-    return bool(re.match(pattern, image_name, re.IGNORECASE))
-
-
-def _validate_target_name(target_name: str) -> bool:
-    """Validate target name format"""
-    # Target names should be valid identifiers
-    pattern = r'^[a-z][a-z0-9_]*$'
-    return bool(re.match(pattern, target_name))
-
-
 # ============================================================================
 # SYSTEM VALIDATION
 # ============================================================================
 
-def validate_system_requirements(requirements: Optional[SystemRequirements] = None) -> ValidationReport:
-    """
-    Validate system meets minimum requirements.
-    
-    Args:
-        requirements: System requirements specification
-        
-    Returns:
-        ValidationReport: System validation report
-    """
-    if requirements is None:
-        requirements = SystemRequirements()
-    
-    report = ValidationReport()
-    
-    # Python version check
-    python_result = _validate_python_version(requirements.min_python_version)
-    report.add_result(python_result)
-    
-    # Memory check
-    memory_result = _validate_memory_requirements(requirements.min_memory_gb)
-    report.add_result(memory_result)
-    
-    # Disk space check
-    disk_result = _validate_disk_space(requirements.min_disk_space_gb)
-    report.add_result(disk_result)
-    
-    # Platform check
-    platform_result = _validate_platform(requirements.supported_platforms)
-    report.add_result(platform_result)
-    
-    # Command availability check
-    for command in requirements.required_commands:
-        cmd_result = _validate_command_availability(command, required=True)
-        report.add_result(cmd_result)
-    
-    for command in requirements.optional_commands:
-        cmd_result = _validate_command_availability(command, required=False)
-        report.add_result(cmd_result)
-    
-    # Port availability check
-    for port in requirements.required_ports:
-        port_result = _validate_port_availability(port)
-        report.add_result(port_result)
-    
-    # Resource usage check
-    cpu_result = _validate_cpu_usage(requirements.max_cpu_usage_percent)
-    report.add_result(cpu_result)
-    
-    memory_usage_result = _validate_memory_usage(requirements.max_memory_usage_percent)
-    report.add_result(memory_usage_result)
-    
-    return report
 
-
-def _validate_python_version(min_version: str) -> ValidationResult:
-    """Validate Python version"""
+def validate_python_version(min_version: str, below: Optional[str] = None,
+                            current: Optional[str] = None) -> ValidationResult:
+    """Validate the Python version: at least `min_version` and, when `below` is given, older than `below` (Mojo's
+    supported range is 3.11 up to, not including, 3.15). `current` is the version to judge (default: this
+    interpreter's); a pre-release of `below` counts as `below`."""
     try:
-        current_version = platform.python_version()
-        
+        current_version = current or platform.python_version()
+
         # Parse versions
-        current = version.parse(current_version)
+        current_parsed = version.parse(current_version)
         minimum = version.parse(min_version)
-        
-        if current >= minimum:
-            return ValidationResult(
-                valid=True,
-                severity=ValidationSeverity.SUCCESS,
-                message=f"Python version OK: {current_version} >= {min_version}",
-                validation_type=ValidationType.SYSTEM,
-                details={"current_version": current_version, "minimum_version": min_version}
-            )
-        else:
+
+        if current_parsed < minimum:
             return ValidationResult(
                 valid=False,
                 severity=ValidationSeverity.ERROR,
@@ -851,7 +361,26 @@ def _validate_python_version(min_version: str) -> ValidationResult:
                 validation_type=ValidationType.SYSTEM,
                 details={"current_version": current_version, "minimum_version": min_version}
             )
-            
+        if below is not None and version.parse(current_parsed.base_version) >= version.parse(below):
+            return ValidationResult(
+                valid=False,
+                severity=ValidationSeverity.ERROR,
+                message=f"Python version too new: {current_version} >= {below}",
+                validation_type=ValidationType.SYSTEM,
+                details={"current_version": current_version, "minimum_version": min_version, "below": below}
+            )
+        details = {"current_version": current_version, "minimum_version": min_version}
+        if below is not None:
+            details["below"] = below
+        return ValidationResult(
+            valid=True,
+            severity=ValidationSeverity.SUCCESS,
+            message=f"Python version OK: {current_version} >= {min_version}"
+                    + (f" and < {below}" if below is not None else ""),
+            validation_type=ValidationType.SYSTEM,
+            details=details
+        )
+
     except Exception as e:
         return ValidationResult(
             valid=False,
@@ -859,72 +388,6 @@ def _validate_python_version(min_version: str) -> ValidationResult:
             message=f"Python version check failed: {str(e)}",
             validation_type=ValidationType.SYSTEM,
             details={"exception": str(e)}
-        )
-
-
-def _validate_memory_requirements(min_memory_gb: float) -> ValidationResult:
-    """Validate system memory"""
-    try:
-        memory_info = psutil.virtual_memory()
-        available_gb = memory_info.total / (1024 ** 3)
-        
-        if available_gb >= min_memory_gb:
-            return ValidationResult(
-                valid=True,
-                severity=ValidationSeverity.SUCCESS,
-                message=f"Memory OK: {available_gb:.1f}GB >= {min_memory_gb}GB",
-                validation_type=ValidationType.SYSTEM,
-                details={"available_gb": available_gb, "required_gb": min_memory_gb}
-            )
-        else:
-            return ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Insufficient memory: {available_gb:.1f}GB < {min_memory_gb}GB",
-                validation_type=ValidationType.SYSTEM,
-                details={"available_gb": available_gb, "required_gb": min_memory_gb}
-            )
-            
-    except Exception as e:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Memory check failed: {str(e)}",
-            validation_type=ValidationType.SYSTEM,
-            details={"exception": str(e)}
-        )
-
-
-def _validate_disk_space(min_disk_gb: float, path: str = ".") -> ValidationResult:
-    """Validate disk space"""
-    try:
-        disk_usage = psutil.disk_usage(path)
-        available_gb = disk_usage.free / (1024 ** 3)
-        
-        if available_gb >= min_disk_gb:
-            return ValidationResult(
-                valid=True,
-                severity=ValidationSeverity.SUCCESS,
-                message=f"Disk space OK: {available_gb:.1f}GB >= {min_disk_gb}GB",
-                validation_type=ValidationType.SYSTEM,
-                details={"available_gb": available_gb, "required_gb": min_disk_gb, "path": path}
-            )
-        else:
-            return ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Insufficient disk space: {available_gb:.1f}GB < {min_disk_gb}GB",
-                validation_type=ValidationType.SYSTEM,
-                details={"available_gb": available_gb, "required_gb": min_disk_gb, "path": path}
-            )
-            
-    except Exception as e:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Disk space check failed: {str(e)}",
-            validation_type=ValidationType.SYSTEM,
-            details={"exception": str(e), "path": path}
         )
 
 
@@ -969,56 +432,6 @@ def _validate_platform(supported_platforms: List[str]) -> ValidationResult:
         )
 
 
-def _validate_command_availability(command: str, required: bool = True) -> ValidationResult:
-    """Validate command availability"""
-    try:
-        # Check if command exists
-        if platform.system().lower() == "windows":
-            result = subprocess.run(
-                ["where", command], 
-                capture_output=True, 
-                text=True, 
-                timeout=5
-            )
-        else:
-            result = subprocess.run(
-                ["which", command], 
-                capture_output=True, 
-                text=True, 
-                timeout=5
-            )
-        
-        available = result.returncode == 0 and result.stdout.strip()
-        
-        if available:
-            return ValidationResult(
-                valid=True,
-                severity=ValidationSeverity.SUCCESS,
-                message=f"Command available: {command}",
-                validation_type=ValidationType.DEPENDENCY,
-                details={"command": command, "path": result.stdout.strip()}
-            )
-        else:
-            severity = ValidationSeverity.ERROR if required else ValidationSeverity.WARNING
-            return ValidationResult(
-                valid=not required,
-                severity=severity,
-                message=f"Command not available: {command}",
-                validation_type=ValidationType.DEPENDENCY,
-                details={"command": command, "required": required}
-            )
-            
-    except Exception as e:
-        severity = ValidationSeverity.ERROR if required else ValidationSeverity.WARNING
-        return ValidationResult(
-            valid=not required,
-            severity=severity,
-            message=f"Command check failed: {command} - {str(e)}",
-            validation_type=ValidationType.DEPENDENCY,
-            details={"command": command, "exception": str(e)}
-        )
-
-
 def _validate_port_availability(port: int) -> ValidationResult:
     """Validate port availability"""
     try:
@@ -1058,6 +471,7 @@ def _validate_port_availability(port: int) -> ValidationResult:
 def _validate_cpu_usage(max_cpu_percent: float) -> ValidationResult:
     """Validate current CPU usage"""
     try:
+        import psutil
         cpu_percent = psutil.cpu_percent(interval=1)
         
         if cpu_percent <= max_cpu_percent:
@@ -1090,6 +504,7 @@ def _validate_cpu_usage(max_cpu_percent: float) -> ValidationResult:
 def _validate_memory_usage(max_memory_percent: float) -> ValidationResult:
     """Validate current memory usage"""
     try:
+        import psutil
         memory_info = psutil.virtual_memory()
         memory_percent = memory_info.percent
         
@@ -1124,77 +539,36 @@ def _validate_memory_usage(max_memory_percent: float) -> ValidationResult:
 # DOCKER VALIDATION
 # ============================================================================
 
-def validate_docker_environment() -> ValidationReport:
-    """Validate Docker environment"""
-    report = ValidationReport()
-    
-    # Check Docker command availability
-    docker_cmd_result = _validate_command_availability("docker", required=True)
-    report.add_result(docker_cmd_result)
-    
-    if not docker_cmd_result.valid:
-        return report
-    
-    # Check Docker daemon
-    daemon_result = _validate_docker_daemon()
-    report.add_result(daemon_result)
-    
-    # Check Docker version
-    version_result = _validate_docker_version()
-    report.add_result(version_result)
-    
-    # Check Docker permissions
-    permission_result = _validate_docker_permissions()
-    report.add_result(permission_result)
-    
-    # Check Docker Compose
-    compose_result = _validate_docker_compose()
-    report.add_result(compose_result)
-    
-    return report
+
+@dataclass
+class DockerEnvironment:
+    """What the Docker check found: the daemon behind the framework's Docker client answered a ping (`error` says why
+    not), the docker command is on PATH, and `docker buildx version` succeeded (None: not asked or no answer)."""
+    reachable: bool
+    error: str = ""
+    docker_cli: bool = False
+    buildx: Optional[bool] = None
 
 
-def _validate_docker_daemon() -> ValidationResult:
-    """Validate Docker daemon is running"""
+def check_docker_environment(client: Any) -> DockerEnvironment:
+    """The one Docker check of the build engine (its start, since 2025) and of Mojo: ping the framework's Docker
+    client, the one builds use (the docker command can be set to another daemon by a docker context), then, when the
+    docker command is on PATH, ask for BuildKit's buildx (at most 15 seconds). Never raises: the engine runs it while
+    the framework starts. The question goes through helpers.execute_command, the one runner of a short command
+    (stdin closed, so an MCP server's stdio stream never reaches docker; no console window on Windows)."""
+    if client is None:
+        return DockerEnvironment(False, "no client")
     try:
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        if result.returncode == 0:
-            return ValidationResult(
-                valid=True,
-                severity=ValidationSeverity.SUCCESS,
-                message="Docker daemon is running",
-                validation_type=ValidationType.DEPENDENCY
-            )
-        else:
-            return ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Docker daemon not accessible: {result.stderr}",
-                validation_type=ValidationType.DEPENDENCY,
-                details={"stderr": result.stderr}
-            )
-            
-    except subprocess.TimeoutExpired:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message="Docker daemon check timed out",
-            validation_type=ValidationType.DEPENDENCY
-        )
-    except Exception as e:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Docker daemon check failed: {str(e)}",
-            validation_type=ValidationType.DEPENDENCY,
-            details={"exception": str(e)}
-        )
+        client.ping()
+    except Exception as e:  # noqa: BLE001 - any failure means: builds cannot reach the daemon
+        return DockerEnvironment(False, str(e))
+    if not shutil.which("docker"):
+        return DockerEnvironment(True)
+    from orchestrator.utils.helpers import execute_command
+    code, _out, _err = execute_command(["docker", "buildx", "version"], timeout=15)
+    if code == -1:  # docker could not be started or gave no answer in time: buildx unknown
+        return DockerEnvironment(True, docker_cli=True)
+    return DockerEnvironment(True, docker_cli=True, buildx=code == 0)
 
 
 def _validate_docker_version() -> ValidationResult:
@@ -1260,52 +634,6 @@ def _validate_docker_version() -> ValidationResult:
         )
 
 
-def _validate_docker_permissions() -> ValidationResult:
-    """Validate Docker permissions (non-root access)"""
-    try:
-        result = subprocess.run(
-            ["docker", "ps"],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        if result.returncode == 0:
-            return ValidationResult(
-                valid=True,
-                severity=ValidationSeverity.SUCCESS,
-                message="Docker permissions OK",
-                validation_type=ValidationType.SECURITY
-            )
-        else:
-            error_msg = result.stderr.lower()
-            if "permission denied" in error_msg or "access denied" in error_msg:
-                return ValidationResult(
-                    valid=False,
-                    severity=ValidationSeverity.ERROR,
-                    message="Docker permission denied - user may need to be in docker group",
-                    validation_type=ValidationType.SECURITY,
-                    details={"stderr": result.stderr}
-                )
-            else:
-                return ValidationResult(
-                    valid=False,
-                    severity=ValidationSeverity.ERROR,
-                    message=f"Docker access failed: {result.stderr}",
-                    validation_type=ValidationType.DEPENDENCY,
-                    details={"stderr": result.stderr}
-                )
-            
-    except Exception as e:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Docker permission check error: {str(e)}",
-            validation_type=ValidationType.SECURITY,
-            details={"exception": str(e)}
-        )
-
-
 def _validate_docker_compose() -> ValidationResult:
     """Validate Docker Compose availability"""
     try:
@@ -1363,46 +691,6 @@ def _validate_docker_compose() -> ValidationResult:
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-
-def validate_url(url: str) -> ValidationResult:
-    """Validate URL format and accessibility"""
-    try:
-        parsed = urllib.parse.urlparse(url)
-        
-        if not parsed.scheme or not parsed.netloc:
-            return ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Invalid URL format: {url}",
-                validation_type=ValidationType.CONFIGURATION,
-                details={"url": url}
-            )
-        
-        if parsed.scheme not in ['http', 'https', 'ftp']:
-            return ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.WARNING,
-                message=f"Unusual URL scheme: {parsed.scheme}",
-                validation_type=ValidationType.CONFIGURATION,
-                details={"url": url, "scheme": parsed.scheme}
-            )
-        
-        return ValidationResult(
-            valid=True,
-            severity=ValidationSeverity.SUCCESS,
-            message=f"URL format valid: {url}",
-            validation_type=ValidationType.CONFIGURATION,
-            details={"url": url, "scheme": parsed.scheme, "netloc": parsed.netloc}
-        )
-        
-    except Exception as e:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"URL validation error: {str(e)}",
-            validation_type=ValidationType.CONFIGURATION,
-            details={"url": url, "exception": str(e)}
-        )
 
 
 _NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
@@ -1540,98 +828,3 @@ def validate_ip_address(ip: str) -> ValidationResult:
             validation_type=ValidationType.CONFIGURATION,
             details={"ip": ip, "error": str(e)}
         )
-
-
-def create_comprehensive_validation_report(config: Dict[str, Any], 
-                                         system_requirements: Optional[SystemRequirements] = None,
-                                         validate_docker: bool = True,
-                                         validate_paths: List[str] = None) -> ValidationReport:
-    """
-    Create comprehensive validation report covering all aspects.
-    
-    Args:
-        config: Configuration to validate
-        system_requirements: System requirements to check
-        validate_docker: Whether to validate Docker environment
-        validate_paths: List of paths to validate
-        
-    Returns:
-        ValidationReport: Comprehensive validation report
-    """
-    overall_report = ValidationReport()
-    
-    # Configuration validation
-    config_report = validate_config(config)
-    for result in config_report.results:
-        overall_report.add_result(result)
-    
-    # System validation
-    system_report = validate_system_requirements(system_requirements)
-    for result in system_report.results:
-        overall_report.add_result(result)
-    
-    # Docker validation
-    if validate_docker:
-        docker_report = validate_docker_environment()
-        for result in docker_report.results:
-            overall_report.add_result(result)
-    
-    # Path validation
-    if validate_paths:
-        for path_str in validate_paths:
-            path_result = validate_path(path_str)
-            overall_report.add_result(path_result)
-    
-    return overall_report
-
-
-# ============================================================================
-# MODULE INITIALIZATION
-# ============================================================================
-
-def get_validation_info() -> Dict[str, Any]:
-    """Get validation module information"""
-    return {
-        "module": "orchestrator.utils.validation",
-        "version": "1.0.0",
-        "description": "Comprehensive validation utilities for LLM Cross-Compiler Framework",
-        "validation_types": [vt.value for vt in ValidationType],
-        "severity_levels": [vs.value for vs in ValidationSeverity],
-        "path_types": [pt.value for pt in PathType],
-        "functions": [
-            "validate_path", "validate_config", "validate_system_requirements",
-            "validate_docker_environment", "validate_url", "validate_email",
-            "validate_ip_address", "create_comprehensive_validation_report"
-        ]
-    }
-
-
-# Initialize validation system
-try:
-    # Perform basic system validation on import
-    basic_requirements = SystemRequirements(
-        min_python_version="3.8.0",
-        min_memory_gb=2.0,
-        min_disk_space_gb=5.0,
-        required_commands=[],  # Don't require anything on import
-        supported_platforms=["linux", "windows", "macos"]
-    )
-    
-    # validate_system_requirements() without the lookups of the optional commands (cmake, ninja: two child
-    # processes) and the CPU and memory-usage samples: those only give warnings, which are not logged here (a failing
-    # psutil shows in the memory check), and the CPU sample waited one second on every import, i.e. on every start
-    # of the CLI, the GUI and the MCP server.
-    _init_validation = ValidationReport()
-    for _result in (_validate_python_version(basic_requirements.min_python_version),
-                    _validate_memory_requirements(basic_requirements.min_memory_gb),
-                    _validate_disk_space(basic_requirements.min_disk_space_gb),
-                    _validate_platform(basic_requirements.supported_platforms)):
-        _init_validation.add_result(_result)
-    if not _init_validation.overall_valid:
-        # Log warnings using logger but don't break import
-        for error in _init_validation.get_errors():
-            logger.warning(f"Validation Warning on Import: {error.message}")
-            
-except Exception:
-    # Don't break import if validation fails
-    pass

@@ -318,8 +318,9 @@ class LLMOrchestrator:
         """Gibt den aktuellen Status zurück"""
         return self._workflows.get(request_id)
 
-    async def list_workflows(self) -> List[WorkflowState]:
-        """Listet alle bekannten Workflows"""
+    def list_workflows(self) -> List[WorkflowState]:
+        """Every workflow this orchestrator knows, oldest first: a snapshot (the build service and the GUI read it
+        from their own threads)."""
         return list(self._workflows.values())
 
     async def cancel_request(self, request_id: str, by: str = "") -> bool:

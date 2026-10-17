@@ -18,7 +18,6 @@ import os
 import platform
 import re
 import shutil
-import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,12 +86,8 @@ def default_tool_runner(argv: Sequence[str], timeout: float, cwd: Optional[str] 
            "HOME": tempfile.gettempdir()}
     if os.name == "nt":  # pragma: no cover - Windows
         env.update({k: os.environ[k] for k in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP") if k in os.environ})
-    try:
-        res = subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout, check=False, cwd=cwd,
-                             stdin=subprocess.DEVNULL, env=env, errors="replace")
-    except (OSError, subprocess.SubprocessError, ValueError) as e:
-        return -1, "", str(e)
-    return res.returncode, res.stdout or "", res.stderr or ""
+    from orchestrator.utils.helpers import execute_command
+    return execute_command(argv, cwd=cwd, timeout=timeout, env=env)
 
 
 # --- parsers ------------------------------------------------------------------------------------------------------

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-from orchestrator.Core.knowledge_snapshots import (SUFFIX, SnapshotNoRoom, delete_snapshots, list_snapshots,
+from orchestrator.Core.knowledge_snapshots import (SUFFIX, SnapshotNoRoom, delete_snapshots,
                                                    require_room, snapshot_files, snapshot_plan, snapshot_room)
 from orchestrator.rag import licences
 from orchestrator.rag.chunking import PREAMBLE_RESERVE_TOKENS, chunk_document, passage_text, point_id
@@ -89,7 +89,6 @@ _CODE_IGNORE = frozenset({"__pycache__", "venv", "node_modules", "dist", "build"
 _USER_CONFIG_NAMES = frozenset({"config.yml", "framework.yml"})
 SOURCES_TTL = 60.0  # seconds a list of the knowledge sources is reused (cleared at once by every write)
 SOURCE_ID_PREFIX = "ks_"
-SOURCE_KINDS = ("web", "pack", "docs", "other")
 # Payload fields a source listing reads (never the chunk text): provenance, and what the page says about its licence.
 _SOURCE_FIELDS = ["source", "title", "content_type", "type", "origin_pack", "root_url", "ingested_at",
                   *licences.META_KEYS]
@@ -992,10 +991,6 @@ class RAGManager:
 
     def _snapshot_files(self) -> List[Path]:
         return snapshot_files(self.snapshot_dir)
-
-    def snapshot_listing(self):
-        """Every snapshot with its full path, size and time, oldest first (knowledge_snapshots.SnapshotFile)."""
-        return list_snapshots(self.snapshot_dir)
 
     def snapshot_plan(self, names=None):
         """The deletion plan of the snapshots `names` (default: all of them, for the person's multiple choice)."""

@@ -354,28 +354,33 @@ def test_the_command_lines_sizes_need_no_qt(tmp_path):
     assert present(modules, ("PySide6",)) == []
 
 
-# --- the import-time host check of utils.validation ---------------------------------------------------------------
+# --- the former import-time host check of utils.validation -------------------------------------------------------
 
-def test_validation_import_takes_no_cpu_sample_and_still_warns_about_disk_space(tmp_path):
-    """Importing the module checked the host with a one-second CPU sample (and two command lookups); their results
-    are only warnings, which the import never logged. The errors it logs (disk, memory, Python, platform) stay."""
+def test_validation_import_checks_nothing_about_the_host(tmp_path):
+    """Importing the module once checked the host (Python, memory, disk, platform; earlier also a one-second CPU
+    sample and two command lookups) and logged what it found. Round 12 removed that check from the import: Mojo
+    reports the Python version (on validate_python_version) and the free disk space (decision A4), and every build
+    plan judges the RAM it needs (disk_plan.host_fit). The import now takes no sample, starts no process and logs
+    nothing, even on a host with almost no free disk space."""
     code = ("import psutil, subprocess\n"
-            "samples, lookups = [], []\n"
-            "psutil.cpu_percent = lambda *a, **k: samples.append(1) or 0.0\n"
-            "real_run = subprocess.run\n"
-            "def run(args, *a, **k):\n"
-            "    if list(args)[:1] in (['which'], ['where']):  # the command lookups (other calls: platform, ...)\n"
-            "        lookups.append(args)\n"
-            "    return real_run(args, *a, **k)\n"
-            "subprocess.run = run\n"
+            "calls = []\n"
+            "psutil.cpu_percent = lambda *a, **k: calls.append('cpu') or 0.0\n"
+            "psutil.virtual_memory = lambda *a, **k: calls.append('memory')\n"
             "real_disk = psutil.disk_usage\n"
-            "psutil.disk_usage = lambda path: real_disk(path)._replace(free=1024 ** 3)\n"
+            "psutil.disk_usage = lambda path: calls.append('disk') or real_disk(path)._replace(free=1024 ** 3)\n"
+            "real_run = subprocess.run\n"
+            "subprocess.run = lambda args, *a, **k: calls.append(list(args)[:1]) or real_run(args, *a, **k)\n"
             "import orchestrator.utils.validation as v\n"
-            "assert samples == [] and lookups == [], (samples, lookups)\n"
-            "assert [r.message for r in v._init_validation.get_errors()] == ['Insufficient disk space: 1.0GB < 5.0GB']\n")
+            "assert calls == [], calls\n"
+            "assert not hasattr(v, '_init_validation')\n")
     _, run = loaded_modules(tmp_path, code)
     assert run.returncode == 0, run.stderr[-3000:]
-    assert "Validation Warning on Import: Insufficient disk space: 1.0GB < 5.0GB" in run.stderr
+    assert "Validation Warning on Import" not in run.stderr
+    alone = tmp_path / "alone"
+    alone.mkdir()
+    modules, run = loaded_modules(alone, "import orchestrator.utils.validation")
+    assert run.returncode == 0, run.stderr[-3000:]
+    assert present(modules, ("psutil",)) == [], "psutil is loaded by the two usage checks that need it, not at import"
 
 
 def test_llama_pin_reads_the_same_values_with_either_loader(monkeypatch):
