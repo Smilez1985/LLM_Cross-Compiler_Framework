@@ -540,7 +540,8 @@ class TestRows:
         the person's account name in it. The part after the prefix is checked as well now."""
         for saved in ("output:/home/alice/builds/m", "models:C:/Users/alice/m", "output:C:\\Users\\alice",
                       "output://nas/share/alice", "output:~alice/m", "file:///home/alice/m", "output:",
-                      "output:Rockchip/C:/Users/alice", "builds:\\\\nas\\alice"):
+                      "output:Rockchip/C:/Users/alice", "builds:\\\\nas\\alice", "Output:/home/alice/m",
+                      "build-dir:/srv/alice/m", "x y:~/m"):
             assert not PARAM_RULES["saved"](saved), saved
             row = row_for_build({"request_id": REQ, "status": "completed", "owner": "mcp", "saved": saved})
             assert "saved" not in row.params and row.text_key == "activity.build.completed", saved

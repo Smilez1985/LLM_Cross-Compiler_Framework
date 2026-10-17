@@ -83,7 +83,6 @@ def trusted_caller(actor: Any) -> Optional[str]:
     return actor if re.fullmatch(CALLER_RE, actor) else None
 
 
-_WHERE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")   # the place of a label (output:, builds:), never a drive letter
 _DRIVE = re.compile(r"^[A-Za-z]:$")
 
 
@@ -92,12 +91,10 @@ def _label(value: str) -> bool:
     the whole value nor the part after the label's place ("output:/home/<user>/..." is a host path behind a prefix)."""
     if not value or len(value) > 300 or any(ch in value for ch in "\r\n\t\x00"):
         return False
-    where, sep, rest = value.partition(":")
-    name = rest if sep and _WHERE.fullmatch(where) else value
-    if not name or "\\" in value or is_absolute_anywhere(value) or is_absolute_anywhere(name):
+    _where, sep, rest = value.partition(":")
+    if "\\" in value or is_absolute_anywhere(value) or (sep and (not rest or is_absolute_anywhere(rest))):
         return False
-    parts = re.split(r"[/:]", name)
-    return ".." not in parts and not any(_DRIVE.fullmatch(part) for part in name.split("/"))
+    return ".." not in re.split(r"[/:]", value) and not any(_DRIVE.fullmatch(part) for part in value.split("/"))
 
 
 # Every parameter a row may carry, with the rule its value must pass (closed vocabularies and patterns).
