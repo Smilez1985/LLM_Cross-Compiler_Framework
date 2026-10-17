@@ -119,10 +119,9 @@ def remove_trust(state_dir: Path, device_id: str, *, audit: Any, actor: str, cha
 def check_board_entry(host: str, user: str, label: Optional[str]) -> Optional[str]:
     """The checks of `llmcf deploy devices add HOST --user U [--label L]`: an address or host name, an account name and
     a label of 1-64 printable characters. Returns the cleaned label (None: none given)."""
-    from orchestrator.Core.deployment_manager import SSH_USER_PATTERN
+    from orchestrator.remote.address import valid_host, valid_user
     from orchestrator.runtime.device.trusted import DeviceStoreError, clean_label
-    from orchestrator.remote.address import valid_host
-    if not valid_host(host) or not SSH_USER_PATTERN.fullmatch(user or ""):
+    if not valid_host(host) or not valid_user(user, allow_root=True):
         raise BoardStepError("HOST must be an address or a host name (e.g. 192.168.1.50, fe80::1 without brackets or "
                              "myboard.local) and the user an account name", "host_user")
     if label is None:

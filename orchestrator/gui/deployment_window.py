@@ -626,14 +626,13 @@ class DeploymentWindow(QWidget):
         """The board's address, user, port, name and wait as the person entered them, checked as `deploy run`
         checks them; None after a plain-text warning."""
         from types import SimpleNamespace
-        from orchestrator.Core.deployment_manager import SSH_USER_PATTERN
-        from orchestrator.remote.address import valid_host
+        from orchestrator.remote.address import valid_host, valid_user
         from orchestrator.runtime.scan_steps import label_problem
         host = self.cb_device.currentText().strip()
         user = self.txt_user.text().strip()
         label = " ".join(self.txt_label.text().split()) or None
         problem = ("deploy.bad_address" if not valid_host(host) else
-                   "deploy.bad_user" if not SSH_USER_PATTERN.match(user) else
+                   "deploy.bad_user" if not valid_user(user, allow_root=True) else
                    "deploy.label.bad" if label_problem(label) else "")
         if problem:
             plain_box(self, "warning", "Warning", ui_text(problem))

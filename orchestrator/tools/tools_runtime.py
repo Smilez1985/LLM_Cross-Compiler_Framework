@@ -39,6 +39,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.remote.address import USER_PATTERN
 from orchestrator.tools.facts_catalog import blocked, warn, with_blocker
 from orchestrator.tools.job_audit import audited_job
 from orchestrator.tools.output import ToolOutput, fact
@@ -395,7 +396,7 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
 
 # What an AI reads instead of the account name the framework logs in with on a device ("dietpi", "orangepi", ...).
 DEVICE_ACCOUNT = "device account"
-_ACCOUNT = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
+_ACCOUNT = USER_PATTERN   # the one account check (orchestrator/remote/address.py, ASCII only)
 _HOME_ROOTS = ("/home", "/Users", "/usr/home", "/var/home", "/export/home")
 _WORD_END = r"(?=$|[\s/'\"`:;,()\[\]{}<>|=@])"
 

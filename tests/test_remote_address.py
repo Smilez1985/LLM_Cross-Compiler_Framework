@@ -306,7 +306,86 @@ def test_every_place_uses_the_one_implementation():
     from orchestrator.remote import address
     from orchestrator.runtime import remote_probe
     assert remote_probe.valid_host is address.valid_host
+    from orchestrator.Core import deployment_manager
     from orchestrator.runtime.device import launcher, settings, trusted
-    for module in (remote_probe, trusted, settings, launcher):
+    for module in (remote_probe, trusted, settings, launcher, deployment_manager):
         for name in ("_HOST", "_USER", "_RE_USER"):
             assert not hasattr(module, name), (module.__name__, name)
+    assert deployment_manager.SSH_USER_PATTERN is address.USER_PATTERN, "the old public name is the one pattern"
+
+
+# --- regression (Security): every place takes the same account names -------------------------------------------------
+
+FOLDED = ["ſudo", "piK", "ıx", "dietpi\n"]
+
+
+@pytest.mark.parametrize("user", FOLDED)
+def test_the_deploy_refuses_a_name_the_trusted_record_refuses(user, tmp_path):
+    """The deploy's user pattern lacked re.ASCII (and was matched with match(), so a trailing newline passed): a long
+    s or the Kelvin sign deployed, and the board's trusted record then refused the same name silently."""
+    result = _deploy(tmp_path).deploy_package(tmp_path / "none.zip", "myboard.local", user)
+    assert not result.success and "Invalid SSH user name" in result.reason
+    assert not _record_takes(user=user)
+
+
+@pytest.mark.parametrize("user", FOLDED)
+def test_adding_a_board_refuses_it_too(user):
+    from orchestrator.runtime.device.person_steps import BoardStepError, check_board_entry
+    with pytest.raises(BoardStepError) as e:
+        check_board_entry("192.0.2.10", user, None)
+    assert e.value.kind == "host_user"
+
+
+def test_the_deployment_window_refuses_it_too(qapp, make_framework, tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    from test_input_history import framework as make_window_framework
+    from orchestrator.gui import plain
+    from orchestrator.gui.deployment_window import DeploymentWindow
+    told = []
+    monkeypatch.setattr(plain, "_exec", lambda box: told.append(box.text()) or plain.QMessageBox.No)
+    win = DeploymentWindow(make_window_framework.__wrapped__(make_framework, tmp_path))
+    win.cb_device.setEditText("myboard.local")
+    for user in ("ſudo", "piK"):
+        win.txt_user.setText(user)
+        assert win._connection() is None and "SSH user" in told[-1]
+    win.txt_user.setText("radxa")
+    assert win._connection().user == "radxa"
+
+
+def test_an_ai_sees_device_account_for_every_name_a_board_may_have():
+    from orchestrator.remote.address import USER_PATTERN
+    from orchestrator.tools import tools_runtime
+    assert tools_runtime._ACCOUNT is USER_PATTERN
+    assert tools_runtime.device_text("login as orangepi failed", ["orangepi"]) == \
+        f"login as {tools_runtime.DEVICE_ACCOUNT} failed"
+
+
+def test_adding_a_board_no_longer_loads_the_build_engine(tmp_path):
+    """check_board_entry imported the deploy module for its user pattern, and with it the build engine and the Docker
+    SDK."""
+    import json
+    import subprocess
+    import sys
+    from conftest import REPO_ROOT
+    code = ("import json, sys\n"
+            "from orchestrator.runtime.device.person_steps import check_board_entry\n"
+            "check_board_entry('192.0.2.10', 'dietpi', None)\n"
+            "print(json.dumps(sorted(m for m in sys.modules if m.startswith(('orchestrator.Core', 'docker')))))\n")
+    run = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
+                         stdin=subprocess.DEVNULL)
+    assert run.returncode == 0, run.stderr[-2000:]
+    loaded = json.loads(run.stdout.strip().splitlines()[-1])
+    assert "orchestrator.Core.deployment_manager" not in loaded and "orchestrator.Core.builder" not in loaded
+    assert not [m for m in loaded if m == "docker" or m.startswith("docker.")]
+
+
+def test_no_place_keeps_its_own_copy_of_the_checks():
+    """The host and user patterns live in orchestrator/remote/address.py only (llm/privacy.py finds 'user@host' in
+    free text to mask it: no check of an entered name)."""
+    from conftest import REPO_ROOT
+    copies = {"[a-z_][a-z0-9_.-]{0,31}": {"orchestrator/remote/address.py", "orchestrator/llm/privacy.py"},
+              "[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45}": {"orchestrator/remote/address.py"}}
+    for needle, allowed in copies.items():
+        found = {p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / "orchestrator").rglob("*.py")
+                 if needle in p.read_text(encoding="utf-8")}
+        assert found == allowed, needle

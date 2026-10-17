@@ -2285,6 +2285,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Jede Stelle nimmt dieselben SSH-Benutzernamen an**: Das Deployment (`llm-cli deploy run`, **Deploy to Target**
+  im Deployment-Tab) und `llm-cli deploy devices add` prüften den Benutzernamen ohne `re.ASCII`, deshalb ließ Pythons
+  Groß-/Kleinschreibungs-Faltung ein langes s (`ſ`) oder das Kelvin-Zeichen als `s` und `k` durch, und das `match()`
+  des Deployments ließ auch einen Zeilenumbruch am Ende durch. Ein solches Deployment lief, und der vertrauenswürdige
+  Eintrag des Boards lehnte denselben Namen danach wortlos ab, sodass KI-Tools das Board nicht nennen konnten. Eine
+  Prüfung dient jetzt jeder Stelle (`orchestrator/remote/address.py`, `valid_user`: nur ASCII, der ganze Name, root
+  nur, wo es erlaubt ist): dem Deployment, dem Hinzufügen eines Boards, dem Deployment-Tab, den Einträgen
+  vertrauenswürdiger Boards, den Deploy-Einstellungen, der systemd-Unit und den Kontonamen, die eine KI nie liest
+  (`device_text`). Das Hinzufügen eines Boards lädt für diese Prüfung nicht mehr die Build-Engine und das Docker-SDK.
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI
