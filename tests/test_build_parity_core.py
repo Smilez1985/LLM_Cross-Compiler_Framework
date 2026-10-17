@@ -506,6 +506,38 @@ class TestGuiSubmission:
         assert req.quantization_options == ["Q8_0"] and req.model_revision == recipe.model.revision
         assert req.dataset_sha256 is None, "not the recipe any more: no recipe pin"
 
+    # The calibration dataset is one of the form's values too (review of c3-build-path): the Builder always built a
+    # recipe with a dataset the person chose for a recipe that names none, and without one for a recipe that names
+    # one (it only logged which file the recipe was calibrated with). Neither form is the recipe as pinned, so both
+    # build the person's values at the recipe's commit after the revocation check, never refused in a tool's words.
+
+    def test_a_dataset_the_recipe_does_not_name_builds_the_persons_values(self, tab, tmp_path, monkeypatch,
+                                                                        gui_messages):
+        from test_review_capabilities_paths import submit
+        named, dataset = self.recipe(tmp_path)
+        recipe = named.model_copy(update={"options": named.options.model_copy(update={"dataset": None})})
+        calls = self.installed(monkeypatch, tab, recipe)
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(dataset)
+        req = submit(tab)
+        assert req is not None, gui_messages
+        assert calls == [recipe.id], "the use-time check ran"
+        assert req.dataset_path == str(dataset.resolve()) and req.dataset_sha256 is None
+        assert req.model_revision == recipe.model.revision and req.max_context_length == 4096
+
+    def test_no_dataset_for_a_recipe_that_names_one_builds_the_persons_values(self, tab, tmp_path, monkeypatch,
+                                                                            gui_messages):
+        from test_review_capabilities_paths import submit
+        recipe, _dataset = self.recipe(tmp_path)
+        calls = self.installed(monkeypatch, tab, recipe)
+        tab.apply_recipe(recipe)
+        assert tab.dataset_path is None
+        req = submit(tab)
+        assert req is not None, gui_messages
+        assert calls == [recipe.id], "the use-time check ran"
+        assert (req.dataset_path, req.dataset_sha256) == (None, None)
+        assert req.model_revision == recipe.model.revision and req.max_context_length == 4096
+
 
 class TestServiceSubmission:
 
