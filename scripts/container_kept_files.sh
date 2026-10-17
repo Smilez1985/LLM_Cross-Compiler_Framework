@@ -15,7 +15,10 @@
 
 set -uo pipefail
 
-INSTALL_DIR=/opt/llm-conversion-framework
+INSTALL_DIR=/opt/llm-cross-compiler-framework
+# The program folder of an image built before the repository was renamed (LLM Conversion Framework). A container made
+# from such an image keeps your targets and packs there, so they count as yours as well: make must keep it too.
+OLD_INSTALL_DIR=/opt/llm-conversion-framework
 
 # A check that cannot run must not look like "nothing of yours": every failure exits 2, and the make targets then
 # remove and replace nothing.
@@ -48,7 +51,7 @@ yours() {
     case "$1" in
         */__pycache__ | */__pycache__/* | *.pyc) return 1 ;;
         /home/*/.bash_history | /home/*/.python_history | /home/*/.lesshst) return 1 ;;
-        "$INSTALL_DIR"/* | /home/*/*) return 0 ;;
+        "$INSTALL_DIR"/* | "$OLD_INSTALL_DIR"/* | /home/*/*) return 0 ;;
     esac
     return 1
 }
@@ -56,15 +59,16 @@ yours() {
 what_it_is() {   # $1 the path, $2 A (added) or C (a file that was there before and was changed)
     if [ "$2" = C ]; then
         case "$1" in
-            "$INSTALL_DIR"/*) echo "a file the framework ships, changed in this container" ;;
+            "$INSTALL_DIR"/* | "$OLD_INSTALL_DIR"/*) echo "a file the framework ships, changed in this container" ;;
             *) echo "a file in the container user's home folder, changed in this container" ;;
         esac
         return
     fi
     case "$1" in
-        "$INSTALL_DIR"/targets/*) echo "a target in the program folder (one you created, or a target pack you installed)" ;;
-        "$INSTALL_DIR"/community/*) echo "a community pack in the program folder" ;;
-        "$INSTALL_DIR"/*) echo "a file in the program folder" ;;
+        "$INSTALL_DIR"/targets/* | "$OLD_INSTALL_DIR"/targets/*)
+            echo "a target in the program folder (one you created, or a target pack you installed)" ;;
+        "$INSTALL_DIR"/community/* | "$OLD_INSTALL_DIR"/community/*) echo "a community pack in the program folder" ;;
+        "$INSTALL_DIR"/* | "$OLD_INSTALL_DIR"/*) echo "a file in the program folder" ;;
         *) echo "a file in the container user's home folder" ;;
     esac
 }

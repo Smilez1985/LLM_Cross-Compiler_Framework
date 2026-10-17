@@ -1,12 +1,15 @@
 #!/bin/bash
 # install.sh - LLM Framework Enterprise Installer
 # DIREKTIVE: Goldstandard. Vereint System-Checks, Docker-Setup und App-Deployment.
-# Code und Python-Umgebung landen in /opt/llm-conversion-framework (dem aufrufenden Benutzer übergeben). Das
+# Code und Python-Umgebung landen in /opt/llm-cross-compiler-framework (dem aufrufenden Benutzer übergeben). Das
 # Framework legt Builds, Cache und Modelle dort an, wenn sie gebraucht werden (Einstellungen output_dir,
 # cache_dir, models_dir); persönlicher Zustand liegt in ~/.llm-framework des Benutzers.
 # Ein erneuter Aufruf aktualisiert die Dateien, die das Repository ausliefert, und entfernt nur Dateien, die ein
 # früheres install.sh kopiert hat und die nicht mehr ausgeliefert werden (Liste in .lcf-installed-files). Alles
 # andere bleibt: eigene Targets, installierte Community-Packs, Einstellungen, Builds, Cache und Modelle.
+# Eine Installation unter dem früheren Namen (/opt/llm-conversion-framework) wird nie verändert oder gelöscht: Der
+# Installer sagt, dass es sie gibt, kopiert nur ihre Einstellungen, wenn die neue Installation noch keine hat, und
+# erklärt, wie man sie selbst entfernt.
 
 # Das Skript braucht bash; unter sh (dash) mit einer klaren Meldung abbrechen statt mit "Bad substitution".
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -17,8 +20,10 @@ fi
 set -u
 
 # --- KONFIGURATION ---
-APP_NAME="llm-conversion-framework"
+APP_NAME="llm-cross-compiler-framework"
 INSTALL_DIR="/opt/$APP_NAME"
+# Der Ordner der Installation vor der Umbenennung des Repositorys (LLM Conversion Framework). Nur gelesen.
+OLD_INSTALL_DIR="/opt/llm-conversion-framework"
 # Die Dateien, die das letzte install.sh nach $INSTALL_DIR kopiert hat (NUL-getrennt).
 MANIFEST_NAME=".lcf-installed-files"
 REPO_ROOT="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
@@ -202,6 +207,59 @@ deploy_files() {
     chown -R "$REAL_USER:$REAL_GROUP" "$INSTALL_DIR"
 }
 
+# --- INSTALLATION UNTER DEM FRÜHEREN NAMEN ---
+# Gibt es OLD_INSTALL_DIR (nicht derselbe Ordner wie INSTALL_DIR)?
+old_installation_exists() {
+    [ -d "$OLD_INSTALL_DIR" ] && [ "$(realpath -m -- "$OLD_INSTALL_DIR")" != "$(realpath -m -- "$INSTALL_DIR")" ]
+}
+
+# Die Einstellungen (configs/config.yml) der früheren Installation, wenn die neue noch keine hat: kopiert, nie
+# verschoben, und als die Person, die installiert (nicht als root: ein Link dort kann so nichts lesen, was ihr nicht
+# ohnehin gehört). Eine vorhandene Datei wird nie überschrieben. Auf Linux liegen die Einstellungen im
+# Installationsordner, und ohne sie passte etwa die gewählte Art, den Tresor zu schützen (secret_storage), nicht mehr.
+OLD_SETTINGS_COPIED=0
+adopt_old_settings() {
+    old_installation_exists || return 0
+    local old="$OLD_INSTALL_DIR/configs/config.yml" new="$INSTALL_DIR/configs/config.yml"
+    if [ ! -f "$old" ] || [ -L "$old" ] || [ -e "$new" ] || [ -L "$new" ]; then return 0; fi
+    local real_user="${SUDO_USER:-${USER:-}}"
+    local as_user=(sudo -u "$real_user")
+    if ! command -v sudo &> /dev/null; then as_user=(runuser -u "$real_user" --); fi
+    if [ -z "$real_user" ] || [ "$real_user" = "root" ]; then as_user=(); fi
+    if ${as_user[@]+"${as_user[@]}"} mkdir -p "$INSTALL_DIR/configs" \
+        && ${as_user[@]+"${as_user[@]}"} cp -P -n -- "$old" "$new"; then
+        OLD_SETTINGS_COPIED=1
+    else
+        log_warn "Die Einstellungen aus $old ließen sich nicht kopieren; die neue Installation beginnt mit den Standardwerten."
+    fi
+}
+
+# Sagt in klaren Worten, dass es die frühere Installation noch gibt, was übernommen wurde und was nicht, und wie man
+# sie selbst entfernt. Der Installer löscht sie nie.
+old_installation_note() {
+    old_installation_exists || return 0
+    local kept=() d
+    for d in output cache models; do
+        if [ -d "$OLD_INSTALL_DIR/$d" ]; then kept+=("$OLD_INSTALL_DIR/$d"); fi
+    done
+    echo ""
+    log_warn "Es gibt noch eine Installation unter dem früheren Namen: $OLD_INSTALL_DIR"
+    echo "   Der Installer hat sie nicht verändert und löscht sie nicht. Die neue Installation liegt in $INSTALL_DIR;"
+    echo "   'llm-framework' startet ab jetzt die neue. Dein persönlicher Ordner (~/.llm-framework: Zugangsdaten,"
+    echo "   Werkzeugrechte, Wissensbasis, Verlauf) gehört keiner der beiden und gilt weiter, wie er ist."
+    if [ "$OLD_SETTINGS_COPIED" = "1" ]; then
+        echo "   Deine Einstellungen (configs/config.yml) wurden in die neue Installation kopiert; das Original bleibt."
+    fi
+    if [ "${#kept[@]}" -gt 0 ]; then
+        echo "   Nicht übernommen, weil groß (bei Bedarf selbst kopieren, z. B. cp -a $OLD_INSTALL_DIR/output $INSTALL_DIR/):"
+        for d in "${kept[@]}"; do echo "     $d"; done
+    fi
+    echo "   Ebenso nicht übernommen: Targets, die du selbst angelegt hast, und installierte Packs unter targets/ und"
+    echo "   community/ dort. Kopiere sie bei Bedarf in dieselben Ordner von $INSTALL_DIR."
+    echo "   Entfernen, wenn du nichts mehr daraus brauchst: erst ansehen, was darin liegt (ls -la $OLD_INSTALL_DIR),"
+    echo "   dann selbst: sudo rm -rf $OLD_INSTALL_DIR"
+}
+
 # --- SCHRITT 3: PYTHON VENV ---
 setup_venv() {
     log_info "[3/5] Erstelle Python Environment (VENV)..."
@@ -306,6 +364,7 @@ finish() {
     echo "📂 Daten:  $INSTALL_DIR/output, cache, models (beim ersten Gebrauch angelegt)"
     echo "🚀 Start:  Tippe einfach 'llm-framework'"
     echo "-----------------------------------------------------"
+    old_installation_note
     
     # Hinweis zum Docker Group Refresh
     REAL_USER="${SUDO_USER:-$USER}"
@@ -321,6 +380,7 @@ main() {
     check_root
     setup_system
     deploy_files
+    adopt_old_settings
     setup_venv
     configure
     setup_ditto

@@ -86,7 +86,8 @@ WINDOWS_USERS = PureWindowsPath(r"C:\Users")
 
 
 @pytest.mark.parametrize("folder", [
-    r"C:\Windows", r"c:\windows\System32\models", r"C:\Program Files", r"C:\Program Files\LLM-Conversion-Framework",
+    r"C:\Windows", r"c:\windows\System32\models", r"C:\Program Files",
+    r"C:\Program Files\LLM-Cross-Compiler-Framework", r"C:\Program Files\LLM-Conversion-Framework",
     r"C:\PROGRAM FILES (X86)\Vendor", r"C:\ProgramData", r"C:\ProgramData\Microsoft\Crypto", r"C:\ProgramData\ssh",
     r"C:\Program Files (Arm)\Vendor", r"C:\Windows.old\models", r"C:\Recovery", r"C:\Boot\x",
     r"C:\$Recycle.Bin\S-1-5-21", r"D:\$RECYCLE.BIN", r"D:\System Volume Information\x", r"\\nas\share\$Recycle.Bin",

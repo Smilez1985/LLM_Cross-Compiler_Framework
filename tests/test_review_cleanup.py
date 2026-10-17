@@ -384,6 +384,55 @@ class TestWindowsScripts:
         app = re.search(r'\$AppName = "([^"]+)"', install).group(1)
         assert shortcut == f"{app}.lnk" and '"$AppName.lnk"' in install
 
+    def test_the_uninstaller_finds_the_new_and_the_old_installation(self):
+        """The repository was renamed: install.bat installs to LLM-Cross-Compiler-Framework now, and an installation
+        under the old name may still exist. The marker names both, and the uninstaller also looks for both folders."""
+        uninstall = (SCRIPTS / "Uninstall-LLM-Cross-Compiler-Framework.bat").read_text(encoding="utf-8")
+        install = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+
+        def setting(name):
+            return re.search(rf'SET "{name}=([^"]+)"', uninstall).group(1)
+
+        assert setting("APP_NAME") == re.search(r'\$AppName = "([^"]+)"', install).group(1) == \
+            "LLM-Cross-Compiler-Framework"
+        assert setting("OLD_APP_NAME") == re.search(r'\$OldAppName = "([^"]+)"', install).group(1) == \
+            "LLM-Conversion-Framework"
+        assert setting("OLD_SHORTCUT_NAME") == setting("OLD_APP_NAME") + ".lnk"
+        # Every line of the marker, then the folder under each name in Program Files.
+        assert 'FOR /F "usebackq delims=" %%P IN ("%MARKER_FILE%") DO CALL :CHECK_ONE "%%~P" marker' in uninstall
+        assert 'CALL :CHECK_ONE "%ProgramFiles%\\%APP_NAME%" default' in uninstall
+        assert 'CALL :CHECK_ONE "%ProgramFiles%\\%OLD_APP_NAME%" default' in uninstall
+        # install.bat keeps the old installation (and any other one still there) in the marker after its own folder.
+        assert "if (Test-Path $OldInstallDir) { $OtherInstalls += $OldInstallDir }" in install
+        assert "Add-Content -Path $MarkerFile -Value $OtherInstalls" in install
+        assert install.index("-Value $InstallDir") < install.index("Add-Content -Path $MarkerFile")
+        # install.bat only reads the old folder: nothing in it removes or moves anything there.
+        for line in install.splitlines():
+            if "OldInstallDir" in line:
+                assert not re.search(r"Remove-Item|\brm\b|\brd\b|rmdir|Move-Item|robocopy", line, re.I), line
+
+    def test_the_uninstaller_lists_what_it_removes_and_asks_with_no_as_the_default(self):
+        uninstall = (SCRIPTS / "Uninstall-LLM-Cross-Compiler-Framework.bat").read_text(encoding="utf-8")
+        lines = [line.strip() for line in uninstall.splitlines()]
+        prompts = [i for i, line in enumerate(lines) if line.lower().startswith("set /p")]
+        assert len(prompts) == 2
+        listing = lines.index('FOR /F "delims=" %%E IN (\'dir /b /a "!INSTALL_PATH!" 2^>nul\') DO echo     %%E')
+        assert listing < prompts[0], "everything it would remove is shown before the question"
+        for i in prompts:
+            assert lines[i - 1] == 'SET "CHOICE="', "an empty answer never reuses the answer for another installation"
+            after = lines[i + 1:]
+            end = next(k for k, line in enumerate(after) if not line.startswith('IF /I "!CHOICE!"=='))
+            assert after[end:end + 2] == ["echo Nicht entfernt.", "GOTO :EOF"], "no answer: nothing is removed"
+        # The folder goes only on an explicit answer (J, D, or B after the backup).
+        for i, line in enumerate(lines):
+            if "GOTO :DO_" in line:
+                section = next(x for x in reversed(lines[:i]) if x.startswith(":") and not x.startswith("::"))
+                assert line.startswith('IF /I "!CHOICE!"==') or section == ":DO_BACKUP", line
+        assert ":BACKUP_FAILED" in lines and 'IF "!BACKUP_OK!"=="0" GOTO :BACKUP_FAILED' in lines
+        # No parenthesised blocks: there a ")" or "&" in an echo text breaks the script.
+        assert not [line for line in lines if line.endswith("(")]
+        assert not [line for line in lines if line.lower().startswith("echo") and "&" in line]
+
     def test_install_bat_finds_its_folder_without_a_script_path(self):
         # Its PowerShell part runs through Invoke-Expression, where $MyInvocation.MyCommand.Path is empty: the folder
         # it was started in (the batch part changes into it first) is the source folder then.

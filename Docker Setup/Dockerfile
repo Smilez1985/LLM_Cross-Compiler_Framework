@@ -6,7 +6,7 @@
 #   scripts/build_container_image.sh --gui    # also the desktop libraries for the GUI (explicit option)
 # Guide: docs/Container_Setup.md (German: docs/Container_Setup_DE.md).
 #
-# Inside, install.sh runs exactly as on a Debian computer (apt, /opt/llm-conversion-framework, .venv with the pinned
+# Inside, install.sh runs exactly as on a Debian computer (apt, /opt/llm-cross-compiler-framework, .venv with the pinned
 # requirements.txt), for the unprivileged user lcf; only the Docker engine is left out (LCF_CONTAINER_BUILD=1).
 # No secret enters a layer: the sources are a read-only bind mount of the staged context (tracked files only), and
 # everything personal (settings, credential vault, audit log, MCP tokens, models, builds) lives in /data at run time.
@@ -59,13 +59,13 @@ RUN --mount=type=bind,source=.,target=/src \
         exit 1; \
     fi \
     && SUDO_USER=lcf LCF_CONTAINER_BUILD=1 bash /src/install.sh \
-    && rm -f /opt/llm-conversion-framework/.lcf-container-context \
+    && rm -f /opt/llm-cross-compiler-framework/.lcf-container-context \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
 # llm-cli on the PATH (on bare metal the installers leave that to you), started like the MCP client configs do:
 # -P keeps the working directory off sys.path, the installation comes from PYTHONPATH. llmcf is its new name.
 RUN printf '%s\n' '#!/bin/sh' \
-        'exec env PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv/bin/python -P -m orchestrator.cli "$@"' \
+        'exec env PYTHONPATH=/opt/llm-cross-compiler-framework /opt/llm-cross-compiler-framework/.venv/bin/python -P -m orchestrator.cli "$@"' \
         > /usr/local/bin/llm-cli \
     && chmod 0755 /usr/local/bin/llm-cli \
     && ln -s llm-cli /usr/local/bin/llmcf \
@@ -74,8 +74,8 @@ RUN printf '%s\n' '#!/bin/sh' \
 # The image counts as built only when the installation works: the framework's command line imports, and every system
 # library Qt loads is there (the CLI needs QtCore; the GUI also QtGui, QtWidgets and the xcb platform plugin). A
 # missing one would otherwise only show at the first llm-cli or llm-framework command. Nothing is written here.
-RUN PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv/bin/python -P -c "import orchestrator.cli" \
-    && qt=$(echo /opt/llm-conversion-framework/.venv/lib/python3*/site-packages/PySide6) \
+RUN PYTHONPATH=/opt/llm-cross-compiler-framework /opt/llm-cross-compiler-framework/.venv/bin/python -P -c "import orchestrator.cli" \
+    && qt=$(echo /opt/llm-cross-compiler-framework/.venv/lib/python3*/site-packages/PySide6) \
     && set -- "$qt/QtCore.abi3.so" \
     && if [ "$WITH_GUI" = "1" ]; then \
         set -- "$@" "$qt/QtGui.abi3.so" "$qt/QtWidgets.abi3.so" "$qt/Qt/plugins/platforms/libqxcb.so"; \
