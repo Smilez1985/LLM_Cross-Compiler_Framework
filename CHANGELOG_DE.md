@@ -1473,7 +1473,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anmeldung und `llmcf ditto login` nutzen dieselben Adressregeln und MCP `update_settings` dieselbe
   Nur-verschärfen-Regel, die aus dem Tool-Modul dorthin umgezogen ist (`direction_problem`, weiter aus
   `orchestrator.tools.tools_status` importierbar). `AISettingsChange.current()` und `with_setting()` sind für die
-  Änderung einer einzelnen Einstellung bereit (das kommende `llmcf config set`).
+  Änderung einer einzelnen Einstellung bereit (das kommende `llmcf config set`), und `problems_of_settings()` wendet
+  für eine solche Änderung jede Regel an. MCP `update_settings` nutzt es für die beiden KI-Einstellungen, die eine KI
+  ändern darf: Offline-Modus mit einem Cloud-Provider wird jetzt mit dem Text des Dialogs abgelehnt (vorher wurde nur
+  die Richtung geprüft, sodass eine KI den Offline-Modus einschalten konnte, während ein Cloud-Provider eingestellt
+  war), erneut geprüft, wenn die Person geantwortet hat; ein Problem, das die gespeicherten Einstellungen schon haben
+  (etwa ein fehlender Schlüssel), lehnt nichts ab.
 - **Ein Weg, Builds zu starten, für CLI, GUI und KI-Aufrufer**: `llmcf build start` und **Start Build** im
   Builder-Tab reihen ihren Build über `BuildService.start_build` ein, den Weg, den der MCP-Server und Ditto schon
   nutzten, statt jeweils einen eigenen Auftrag an den Orchestrator zu bauen. CLI und GUI prüfen einen Auftrag deshalb

@@ -150,6 +150,8 @@ class TestUpdateSettings:
     def test_tightening_is_asked_by_default_and_may_be_allowed(self, fw):
         out, shown = call(fw, "update_settings", {"changes": [{"key": "crawler_max_pages", "value": "10"}]})
         assert shown and fw.config.get("crawler_max_pages") == 10
+        # Offline mode needs a local provider (the AI settings' rule, test_offline_mode_follows_the_ai_settings_rules).
+        fw.config.set("ai_provider", "ollama")
         registry = fw.tool_registry
         registry.policy_store.replace(ToolPolicy(configured=True, overrides={"update_settings": Decision.ALLOW},
                                                  reviewed=[s.name for s in registry.list()]))
@@ -161,6 +163,48 @@ class TestUpdateSettings:
 
     def test_no_standing_approval_is_ever_offered(self, fw):
         assert fw.tool_registry.get("update_settings").grant is None
+
+    # Stage-B integration (deviation the build chain's review found): the AI settings an AI may change (offline_mode,
+    # enable_rag_knowledge) go through the AI settings' one rule set (AISettingsChange, as the dialog and the sign-in),
+    # not only the direction rule. The dialog's message is the refusal; a problem the saved settings already have
+    # (here: no key for the default provider) is not this change's and refuses nothing.
+
+    def test_offline_mode_follows_the_ai_settings_rules(self, fw):
+        fw.config.set("ai_provider", "openai")
+        error, shown = refused(fw, "update_settings", {"changes": [{"key": "offline_mode", "value": "true"}]})
+        assert error.code == "invalid_value" and shown == []
+        assert "is a cloud provider. In offline mode choose a local provider" in str(error)
+        assert fw.config.get("offline_mode") is False
+        fw.config.set("ai_provider", "ollama")
+        out, shown = call(fw, "update_settings", {"changes": [{"key": "offline_mode", "value": "true"},
+                                                              {"key": "enable_rag_knowledge", "value": "false"}]})
+        assert shown and [a.key for a in out.applied] == ["offline_mode", "enable_rag_knowledge"]
+        assert fw.config.get("offline_mode") is True and out.rejected == []
+
+    def test_a_problem_the_saved_ai_settings_already_have_refuses_nothing(self, fw):
+        from orchestrator.llm.settings_change import AISettingsChange
+        from orchestrator.llm import load_catalog
+        saved = AISettingsChange.current(fw.config, load_catalog())
+        assert [p.code for p in saved.problems(fw.config, fw.secrets_manager)] == ["key_missing"]
+        fw.config.set("enable_rag_knowledge", True)
+        out, _ = call(fw, "update_settings", {"changes": [{"key": "enable_rag_knowledge", "value": "false"}]})
+        assert [a.key for a in out.applied] == ["enable_rag_knowledge"]
+        assert fw.config.get("enable_rag_knowledge") is False
+
+    def test_the_ai_settings_rules_are_checked_again_when_the_change_is_applied(self, fw):
+        """The person may switch to a cloud provider while the question is open: offline mode is then not set."""
+        fw.config.set("ai_provider", "ollama")
+
+        def person_switches(summary, inp):
+            fw.config.set("ai_provider", "openai")
+            return True
+        out = fw.tool_registry.call("update_settings", {"changes": [{"key": "offline_mode", "value": "true"},
+                                                                    {"key": "language", "value": "de"}]},
+                                    ToolContext("ditto", session="s1", confirm=person_switches))
+        assert [r.key for r in out.rejected] == ["offline_mode"]
+        assert "is a cloud provider" in out.rejected[0].reason
+        assert fw.config.get("offline_mode") is False
+        assert [a.key for a in out.applied] == ["language"] and fw.config.get("language") == "de"
 
 
 class TestReportCannotDo:

@@ -14,7 +14,9 @@ wraps those existing rules in one Qt-free place:
 
 Each channel keeps only its own prompts: the dialog's message boxes and its plain-http question, the CLI's confirm,
 and MCP's refusal of anything that loosens what an AI may do (direction_problem). AISettingsChange.current(config,
-catalog) and with_setting(key, value) serve a change of one setting (the coming `llmcf config set`, Q6).
+catalog) and with_setting(key, value) serve a change of one setting; problems_of_settings(config, secrets, values)
+runs the same rules for it (MCP update_settings for offline_mode and enable_rag_knowledge, the coming `llmcf config
+set`, Q6).
 
 Moved here from where they were first written, their old import paths kept: check_base_url and plain_http_to_remote
 (llm/auth/signin.py), direction_problem with TIGHTEN_ONLY and memory_bytes (tools/tools_status.py), and the dialog's
@@ -379,6 +381,28 @@ class AISettingsChange:
                    fallback_chain=list(chain) if isinstance(chain, (list, tuple)) else parse_fallback(chain),
                    offline_mode=bool(get("offline_mode", False)) if callable(get) else False,
                    enable_rag=bool(get("enable_rag_knowledge", False)) if callable(get) else False)
+
+    @classmethod
+    def problems_of_settings(cls, config: Any, secrets: Any, values: Dict[str, Any],
+                             catalog: Any = None) -> List[SettingsProblem]:
+        """The refusals (problems(), the dialog's rules) that setting `values` ({setting name: new value}) one by one
+        would bring: the saved AI settings (current) with each AI setting among `values` replaced (with_setting);
+        names that are not AI settings are ignored. A problem the saved settings already have is not counted, so a
+        change that does not touch it is not refused for it (the person fixes it in the AI settings dialog). For the
+        channels that change single settings: MCP update_settings and the coming `llmcf config set`. ValueError for a
+        value an AI setting cannot take."""
+        names = [key for key in values if key in AI_SETTINGS]
+        if not names:
+            return []
+        if catalog is None:
+            from orchestrator.llm.catalog import load_catalog
+            catalog = load_catalog(user_dir=getattr(config, "config_dir", None))
+        saved = cls.current(config, catalog)
+        changed = saved
+        for key in names:
+            changed = changed.with_setting(key, values[key], config)
+        known = {problem.code for problem in saved.problems(config, secrets)}
+        return [problem for problem in changed.problems(config, secrets) if problem.code not in known]
 
     def with_setting(self, key: str, value: Any, config: Any = None) -> "AISettingsChange":
         """This change with one AI setting replaced (a name of AI_SETTINGS). A new provider brings its own address,

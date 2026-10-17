@@ -2101,6 +2101,9 @@ wurde.
   `build_sandbox` auf true, `enable_telemetry`, `enable_rag_knowledge` und `crawler_download_pdfs` auf false, Seiten-
   und Tiefengrenzen und Container-Grenzen niedriger, die Pause beim Crawlen länger; ein Speicherlimit von 0 bedeutet
   für Docker gar keins und zählt daher als Lockerung); nur solche Aufrufe dürfen auf „erlauben“ gestellt werden.
+  `offline_mode` und `enable_rag_knowledge` laufen zusätzlich durch die Regeln des Dialogs der KI-Einstellungen
+  (`AISettingsChange`): Offline-Modus mit einem Cloud-Provider wird mit dem Text des Dialogs abgelehnt, du wählst
+  also zuerst einen lokalen Provider.
   Einstellungen, die dich darüber informieren, was KIs tun (gesprochene Ansagen), kann keine KI ändern, in keine
   Richtung. Berechtigungen, Geheimnisse, der Tresor, Einstellungen des KI-Anbieters,
   Adressen, Image-Referenzen, Ordner und die lockernde Richtung werden vor der Frage abgelehnt, und kein Wert wird je

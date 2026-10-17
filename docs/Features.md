@@ -1906,7 +1906,9 @@ with the token's standing approvals, Back to read only). A token is shown once, 
   may do can only be tightened (`offline_mode` and `enable_security_scan` and `build_sandbox` to true,
   `enable_telemetry`, `enable_rag_knowledge` and `crawler_download_pdfs` to false, page and depth limits and container
   limits lower, the crawl delay higher; a container memory limit of 0 means none to Docker, so it counts as
-  loosening); only such calls may be set to "allow". Settings that keep you informed of what AIs do (spoken
+  loosening); only such calls may be set to "allow". `offline_mode` and `enable_rag_knowledge` also go through the
+  rules of the AI settings dialog (`AISettingsChange`): offline mode with a cloud provider is refused with the
+  dialog's own text, so you choose a local provider first. Settings that keep you informed of what AIs do (spoken
   announcements) are read-only for every AI, in both directions. Permissions, secrets, the vault, AI provider
   settings, addresses, image references, folders and the loosening direction are refused before the question, and
   no value is ever read as "default". `report_cannot_do` is for a task the AI really cannot do: it names the reason

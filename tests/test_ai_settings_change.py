@@ -412,6 +412,43 @@ class TestOneSettingAtATime:
         assert local.with_setting("ai_fallback_chain", "local, ollama:x").fallback_chain == ["local", "ollama:x"]
         assert local.with_setting("ai_security_level", "balanced").security_level == "BALANCED"
 
+    def test_settings_changed_one_by_one_answer_for_the_problems_they_bring(self, catalog, tmp_path):
+        """MCP update_settings (and the coming `llmcf config set`) change single settings: they run every rule of the
+        dialog on the saved settings with their values, and refuse what those values add, not what was already
+        there (stage-B integration)."""
+        from orchestrator.llm.settings_change import AISettingsChange
+        config = ConfigManager(tmp_path)
+        config.set("ai_provider", "openai")
+        config.set("ai_model", "gpt-6.1-sol")
+        assert codes(AISettingsChange.current(config, catalog).problems(config, FakeSecrets())) == ["key_missing"]
+        found = AISettingsChange.problems_of_settings(config, FakeSecrets(), {"offline_mode": True}, catalog)
+        assert codes(found) == ["offline_cloud"] and found[0].title == "Offline Mode"
+        assert AISettingsChange.problems_of_settings(config, FakeSecrets(), {"enable_rag_knowledge": False},
+                                                     catalog) == []
+        assert AISettingsChange.problems_of_settings(config, FakeSecrets(), {"language": "de"}, catalog) == []
+        config.set("ai_provider", "ollama")
+        assert AISettingsChange.problems_of_settings(config, FakeSecrets(), {"offline_mode": True,
+                                                                              "enable_rag_knowledge": False},
+                                                     catalog) == []
+        with pytest.raises(ValueError):
+            AISettingsChange.problems_of_settings(config, FakeSecrets(), {"offline_mode": "yes"}, catalog)
+
+    def test_update_settings_asks_the_service(self, monkeypatch):
+        """One place: the tool module has no rule of its own for the AI settings."""
+        from orchestrator.llm.settings_change import AISettingsChange, SettingsProblem
+        from orchestrator.tools import tools_status
+        seen = []
+
+        def problems_of_settings(config, secrets, values, catalog=None):
+            seen.append(dict(values))
+            return [SettingsProblem("offline_cloud", "Offline Mode", "the service's text")]
+        monkeypatch.setattr(AISettingsChange, "problems_of_settings", staticmethod(problems_of_settings))
+        framework = SimpleNamespace(config=SimpleNamespace(), secrets_manager=None)
+        assert tools_status.ai_settings_problem(framework, {"offline_mode": True, "language": "de"}) == \
+            "Offline Mode: the service's text"
+        assert seen == [{"offline_mode": True}]
+        assert tools_status.ai_settings_problem(framework, {"language": "de"}) is None and len(seen) == 1
+
     @pytest.mark.parametrize("key, value, error", [("language", "de", KeyError), ("offline_mode", "yes", ValueError),
                                                    ("ai_security_level", "loose", ValueError),
                                                    ("ai_effort", "turbo", ValueError),
