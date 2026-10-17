@@ -225,6 +225,16 @@ Die Fälle stehen in `evals/ditto/cases.yml` und werden nach Regeln bewertet; ge
 berechnen jede Anfrage (etwa 20 je Lauf und Wiederholung). Neue Fälle sind Daten: Ergänze sie in der Falldatei,
 nicht im Code.
 
+Wenn du änderst, wie die Wissensbasis Text liest oder speichert (das Zerlegen in Abschnitte, das Auslesen von HTML,
+die Reinigung von Text von außen), führe die Retrieval-Evaluation vor und nach der Änderung aus (ohne KI-Modell; die
+lokalen Embedding- und Reranking-Modelle werden einmal heruntergeladen) und ihre Gruppe mit versteckten Trägern, die
+scheitert, wenn eine versteckte Nutzlast in die gespeicherten Auszüge gelangt:
+
+```bash
+llm-cli ditto eval --kind retrieval --rag-variant fused --rag-variant rerank --json vorher.json
+llm-cli ditto eval --kind retrieval --cases evals/retrieval/carriers.yml
+```
+
 ### Den llama.cpp-Pin anheben
 
 Jedes selbst gebaute llama.cpp stammt aus einem Commit: `llama_cpp.source` in `configs/llama_runtime.yml` (wo er
@@ -559,6 +569,13 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   Shell-Befehle auf entfernten Rechnern setzt du mit `shlex.quote` in Anführungszeichen.
 - Externer Text (Webseiten, Logs, Probe-Dateien, Wissensbasis, Tool-Ergebnisse) erreicht ein Sprachmodell nur über
   `orchestrator/utils/untrusted.py` und nie in einem System-Prompt.
+- **Text von außen kommt gereinigt und auf einem Weg in die Wissensbasis.** HTML wird mit
+  `rag/html_text.strip_boilerplate` gelesen (Seitenelemente und jedes Element, das `hidden_kind` als versteckt erkennt,
+  fallen heraus, bevor Text und Links gelesen werden); eine gecrawlte Seite wird mit `RAGManager.ingest_page`
+  gespeichert, anderer Text von außen mit `ingest_document(..., outside=True)` (die Seite eines Pakets zählt immer als
+  Text von außen). Beide reinigen den Text mit `utils/untrusted.clean_untrusted` und halten fest, was herausgefallen
+  ist (`hidden_removed`). Baue nie einen zweiten Bereiniger und keinen Speicheraufruf daneben; ein neuer Trick zum
+  Verstecken kommt in `hidden_kind`, mit einer Seite in `evals/retrieval/carriers/`.
 - **KI-Aufrufe laufen über die Anbieterschicht.** Nutze `LLMClient` aus `orchestrator/llm`; baue nie einen eigenen
   SDK-Client. Antworten, nach denen das Framework handelt, sind pydantic-Modelle (strukturierte Antworten), nie
   ausgewerteter freier Text. Neue Anbieter oder Modelle sind Vorlagen in `configs/llm_providers.yml`.

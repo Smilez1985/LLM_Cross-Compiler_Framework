@@ -1782,6 +1782,50 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   für seinen Namen von vor der Umbenennung des Repositorys geschrieben hat, `LLM-Conversion-Framework-Bot`, gelten
   weiter für ihn, ein früher erklärter Nutzungsvorbehalt bleibt also bestehen.
 
+### Versteckter Text bleibt draußen (unveröffentlicht)
+
+Text, den eine Person beim Lesen einer Seite nicht sieht, ist ein bekannter Weg, in einer Webseite Anweisungen für
+eine KI zu verstecken (Prompt Injection). Deshalb speichert Deep Ingest nur, was eine Leserin oder ein Leser sieht
+(`orchestrator/rag/html_text.py`):
+
+- **Aus jeder gecrawlten Seite fällt heraus,** mit allem, was darin steht, bevor ihr Text und ihre Links gelesen
+  werden (einem Link, den niemand sieht, folgt der Crawler auch nicht): Elemente, die ihr eigener Inline-Style
+  versteckt (`display:none`, `visibility:hidden`, eine Schriftgröße von 2 px oder weniger, eine Deckkraft von 5 % oder
+  weniger, absolute, feste oder relative Positionierung weit außerhalb des Bildschirms oder ein großer negativer
+  `text-indent`, ein `clip` oder `clip-path`, der keine sichtbare Fläche übrig lässt, eine Box von 1 px oder weniger
+  mit `overflow:hidden`, Text in derselben Farbe wie sein eigener Hintergrund); Elemente mit dem Attribut `hidden`
+  (nicht `hidden="until-found"`, das die Suche des Browsers aufdeckt) oder mit `aria-hidden="true"`; `<template>` und
+  `<noscript>`. Der inaktive Bereich eines Tab-Widgets bleibt (`role="tabpanel"` auf einer Seite mit Tabs): Du öffnest
+  ihn mit einem Klick.
+- **Danach gereinigt wie jeder Text von außen,** bevor er gespeichert wird, damit der gespeicherte Auszug das ist, was
+  eine KI später zu sehen bekommt (nicht erst im Moment, in dem sie ihn sieht): Unicode normalisiert (NFKC),
+  unsichtbare Zeichen entfernt (Zeichen ohne Breite, Unicode-Tag-Zeichen, Bidi-Steuerzeichen und ähnliche) und
+  HTML-Kommentare entfernt, dieselbe Reinigung, die jeder Auszug bekommt, bevor er ein Modell erreicht
+  (`orchestrator/utils/untrusted.py`). Der Titel der Seite wird ebenfalls gereinigt. Der Text eines PDFs bekommt
+  dieselbe Reinigung.
+- **Wissenspakete** folgen derselben Regel, wenn sie HTML enthalten: Eine Seite, die ein ganzes HTML-Dokument ist,
+  wird wie eine gecrawlte Seite gelesen, und HTML im Markdown eines Pakets verliert seine versteckten Elemente (HTML in
+  Code-Spans und Code-Blöcken wird gezeigt, nicht dargestellt, und bleibt); danach dieselbe Reinigung. Das gilt für
+  jede Seite, die aus einem Paket stammt, gleich wie sie gespeichert wird.
+- **Du siehst, wie viel herausgefallen ist:** **Tools > Wissensquellen...** und `llm-cli knowledge sources` haben die
+  Spalte „Ausgelassener versteckter Text“ (CLI: „Hidden text left out“), Art für Art (zum Beispiel „display:none 2,
+  unsichtbare Zeichen 14“; Elemente zählen je einmal, unsichtbare Zeichen einzeln); „nichts“ (CLI: „none“), wenn
+  nichts gefunden wurde, „-“ für eine Quelle, die ohne diese Prüfung gespeichert wurde (die eigenen Dokumente des
+  Frameworks, Seiten von vor dieser Version). Diese Zahlen schreibt nur das Framework selbst (ein Paket kann sie nicht
+  setzen); sie gehen nie an eine KI und nie in ein exportiertes Paket, und der entfernte Text wird nirgends
+  aufbewahrt.
+- **Die eigenen Dokumente des Frameworks** werden so gespeichert, wie sie geschrieben sind: Sie sind kein Text von
+  außen.
+- **Grenzen:** Es zählt nur, was ein Element selbst sagt. Regeln in Stylesheets und Klassen (wie `.sr-only`) sieht das
+  Framework nicht, weil es keine CSS-Engine hat; das Entfernen ist also unvollständig. Eine Wissensbasis behält ihre
+  älteren Auszüge, bis eine Seite erneut eingelesen wird (zum Beispiel durch ein neues Deep Ingest derselben Adresse)
+  oder ein Paket erneut importiert wird.
+- **In der CI geprüft:** Testseiten, die je eine versteckte Nutzlast neben einem sichtbaren Text enthalten
+  (`evals/retrieval/carriers/`), laufen in den Tests durch den Crawler und die Wissensbasis, und die nächtliche
+  Retrieval-Evaluation führt sie als eigene Gruppe aus (`llm-cli ditto eval --kind retrieval --cases
+  evals/retrieval/carriers.yml`): Eine Nutzlast, die in die gespeicherten Auszüge gelangt, oder ein sichtbarer Text,
+  der dort fehlt, lässt den Lauf scheitern.
+
 ### Lizenzen und Urheberrecht
 
 Text- und Data-Mining erlaubt der Wissensbasis, den Text zu behalten, den der Crawl lesen durfte. Diesen Text
