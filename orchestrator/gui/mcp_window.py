@@ -39,6 +39,7 @@ SNIPPETS = (("claude-code", "tmcp.mcp.claude_code"), ("claude-desktop", "tmcp.mc
 LOOPBACK_CHOICES = ("127.0.0.1", "::1", "localhost")
 DEFAULT_PORT = 8765           # the CLI's --port default
 STOP_WAIT = 15.0              # seconds the server gets to end its sessions before it is stopped at once
+INPUT_WAIT = 5.0              # of those, seconds after its input closed before Ctrl+Break / SIGTERM follows
 SERVING_MARK = "MCP server on http"   # the line mcp_server.serve() writes once it listens
 
 
@@ -114,12 +115,13 @@ class McpHttpServer(QObject):
             return str(e)
         env = {k: v for k, v in os.environ.items() if k != ENV_VAR}
         env.update(command.get("env") or {})
+        env[mcp_server.STOP_ON_EOF_ENV] = "1"   # Stop closes the child's input (Ctrl+Break needs a console on Windows)
         kwargs: Dict[str, Any] = {}
         if sys.platform == "win32":   # a group of its own, so Ctrl+Break can end it like Ctrl+C would
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | _no_window_flag()
         try:
             process = subprocess.Popen(  # nosec B603 - the framework's own interpreter and CLI entry, no shell
-                [command["command"], *command["args"]], cwd=command.get("cwd"), env=env, stdin=subprocess.DEVNULL,
+                [command["command"], *command["args"]], cwd=command.get("cwd"), env=env, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                 **kwargs)
         except OSError as e:
@@ -144,29 +146,49 @@ class McpHttpServer(QObject):
         return None
 
     def _signal_stop(self) -> None:
+        """The first step of a stop: the end of the server's input. The server ends as on Ctrl+C (its sessions end,
+        their builds and jobs are cancelled), on every system; on Windows a GUI without a console cannot send it
+        Ctrl+Break."""
         process = self.process
         if process is None or process.poll() is not None:
             return
+        if process.stdin is not None:
+            try:
+                process.stdin.close()
+            except (OSError, ValueError):
+                pass
+
+    @staticmethod
+    def _interrupt(process) -> None:
+        """The second step, when the server did not end within INPUT_WAIT seconds: Ctrl+Break (Windows) or SIGTERM."""
         try:
             if sys.platform == "win32":
                 os.kill(process.pid, signal.CTRL_BREAK_EVENT)   # the server ends its sessions (uvicorn: SIGBREAK)
             else:
-                process.terminate()                             # SIGTERM: the same as Ctrl+C for the server
+                process.terminate()
         except OSError:
             process.terminate()
 
     def _wait_or_kill(self, timeout: float) -> None:
+        """Waits for the server after its input closed; after INPUT_WAIT seconds interrupts it, after `timeout`
+        seconds in all ends it at once."""
         process = self.process
         if process is None:
             return
-        try:
-            process.wait(timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        first = min(INPUT_WAIT, timeout)
+        for step, wait in ((None, first), (self._interrupt, max(timeout - first, 0.1))):
+            if step is not None and process.poll() is None:
+                step(process)
             try:
-                process.wait(5)
+                process.wait(wait)
+                return
             except subprocess.TimeoutExpired:
-                pass
+                continue
+        process.kill()
+        try:
+            process.wait(5)
+        except subprocess.TimeoutExpired:
+            pass
 
     def stop(self) -> bool:
         """Ends the server: first as Ctrl+C would (its sessions' builds and jobs are cancelled, the framework shuts

@@ -241,3 +241,20 @@ def test_real_stdio_server_with_framework_tools(tmp_path):
     assert {"list_targets", "start_build", "resolve_healing"} <= names
     assert not caps.is_error and set(caps.structured_content["formats"]) == {"gguf", "rkllm", "rknn"}
     assert start.is_error, "starting a build needs a confirmation this client cannot give"
+
+
+def test_the_http_server_ends_when_its_input_closes():
+    """The GUI stops the HTTP server it started by closing the server's input (on Windows a GUI without a console
+    cannot send Ctrl+Break): at the end of the input the uvicorn server is told to end, as on Ctrl+C."""
+    import io
+    import types
+    listener = types.SimpleNamespace(should_exit=False)
+    mcp_server.stop_when_input_ends(listener, io.BytesIO(b"anything the parent wrote\n")).join(5)
+    assert listener.should_exit is True
+
+    class Broken:
+        def read(self, size):
+            raise ValueError("I/O operation on closed file")
+    listener = types.SimpleNamespace(should_exit=False)
+    mcp_server.stop_when_input_ends(listener, Broken()).join(5)
+    assert listener.should_exit is True, "an input that cannot be read any more ends the server too"

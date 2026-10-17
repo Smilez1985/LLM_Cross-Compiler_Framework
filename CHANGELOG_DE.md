@@ -78,7 +78,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   genau das (`mcp_server.plan_claude_desktop_config`, eine inzwischen geänderte Datei wird abgelehnt); der lokale
   HTTP-Server (Adresse, Port, Container-Bindung) als Kindprozess der GUI mit dem eigenen Einstieg und den Ablehnungen
   der CLI, Adresse, Zustand und Ausgabe zu sehen, gestoppt auf Wunsch oder wenn das Framework nach einer Rückfrage
-  schließt („Nein“ lässt es offen); und die Liste der Tokens (Hinzufügen, auch als Kopie der Berechtigungen eines
+  schließt („Nein“ lässt es offen), indem seine Eingabe geschlossen wird; so endet er auf jedem System wie bei
+  Strg+C, auch unter Windows ohne Konsole (`mcp_server.stop_when_input_ends`; Strg+Pause oder SIGTERM folgt erst
+  nach 5 Sekunden, ein sofortiges Ende nach 15); und die Liste der Tokens (Hinzufügen, auch als Kopie der Berechtigungen eines
   anderen Tokens, Rotieren, Widerrufen, Zurück auf nur lesen, Berechtigungen). Ein Token wird einmal gezeigt, direkt
   nachdem es angelegt oder rotiert wurde.
 - **Tools > Hinweis zu Deep Ingest... und die Art eines KI-Ordners** (W1'): der Deep-Ingest-Hinweis hat einen eigenen

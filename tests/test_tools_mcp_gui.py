@@ -500,7 +500,19 @@ SERVER_STAND_IN = (
     "import sys, time\n"
     "print('MCP server on http://127.0.0.1:%s/mcp - each client sends its own named token' % sys.argv[1], "
     "file=sys.stderr, flush=True)\n"
-    "time.sleep(120)\n")
+    "sys.stdin.read()\n")   # like the real server (mcp_server.stop_when_input_ends): it ends when its input closes
+
+# A child that ends ONLY when its input closes: SIGTERM, Ctrl+C and Ctrl+Break are ignored, as when no console can
+# carry Ctrl+Break to it (a GUI without a console on Windows).
+DEAF_STAND_IN = (
+    "import os, signal, sys\n"
+    "for name in ('SIGTERM', 'SIGINT', 'SIGBREAK'):\n"
+    "    if hasattr(signal, name):\n"
+    "        signal.signal(getattr(signal, name), signal.SIG_IGN)\n"
+    "print('MCP server on http://127.0.0.1:%s/mcp - each client sends its own named token' % sys.argv[1], "
+    "file=sys.stderr, flush=True)\n"
+    "sys.stdin.read()\n"
+    "sys.exit(0 if os.environ.get('LCF_MCP_STOP_ON_EOF') == '1' else 3)\n")
 
 
 class TestMcpConnections:
@@ -599,7 +611,9 @@ class TestMcpConnections:
         assert argv == [expected["command"], *expected["args"]]
         assert argv[-6:] == ["--transport", "http", "--host", "127.0.0.1", "--port", "9123"]
         assert "LCF_MCP_TOKEN" not in kwargs["env"] and kwargs["env"]["PYTHONPATH"] == expected["env"]["PYTHONPATH"]
-        assert kwargs["stdin"] is mcp_window.subprocess.DEVNULL and "shell" not in kwargs
+        # Its input is a pipe the GUI closes to stop it (Ctrl+Break needs a console on Windows); the server is told so.
+        assert kwargs["stdin"] is mcp_window.subprocess.PIPE and "shell" not in kwargs
+        assert kwargs["env"][mcp_server.STOP_ON_EOF_ENV] == "1"
 
     def test_the_server_runs_as_a_child_with_its_address_and_state_and_stops(self, qapp, window_of):
         def stand_in(host, port, container):
@@ -621,6 +635,49 @@ class TestMcpConnections:
         wait_until(qapp, lambda: dialog.server.state == "stopped")
         assert dialog.state.text().startswith("Stopped") and dialog.btn_start.isEnabled()
         assert not dialog.server.running
+
+    def test_stop_ends_the_server_by_closing_its_input_without_any_signal(self, qapp, window_of):
+        """On Windows a GUI without a console cannot send Ctrl+Break to its child, so Stop waited STOP_WAIT seconds
+        and then killed the server without ending its sessions. Closing the child's input ends it at once, as on
+        Ctrl+C, on every system."""
+        from orchestrator.gui.mcp_window import STOP_WAIT
+
+        def stand_in(host, port, container):
+            return {"command": sys.executable, "args": ["-c", DEAF_STAND_IN, str(port)], "cwd": str(REPO_ROOT),
+                    "env": {}}
+        dialog = window_of(command_for=stand_in)
+        dialog.registry.tokens.add("laptop")
+        dialog.port.setValue(9125)
+        assert dialog.start_server()
+        wait_until(qapp, lambda: dialog.server.state == "running")
+        began = time.monotonic()
+        dialog.btn_stop.click()
+        wait_until(qapp, lambda: dialog.server.state == "stopped", timeout=STOP_WAIT - 5)
+        assert time.monotonic() - began < STOP_WAIT - 5, "ended by its input, not killed after the wait"
+        assert dialog.server.exit_code == 0, "it saw the end of its input and the GUI's note to stop on it"
+
+    def test_a_server_that_ignores_its_input_is_interrupted_then_ended(self, qapp, window_of, monkeypatch):
+        """A child that does not end when its input closes gets Ctrl+Break / SIGTERM after INPUT_WAIT seconds and is
+        ended at once after STOP_WAIT seconds in all, so Stop always ends it."""
+        from orchestrator.gui import mcp_window
+        monkeypatch.setattr(mcp_window, "INPUT_WAIT", 0.3)
+        monkeypatch.setattr(mcp_window, "STOP_WAIT", 2.0)
+        interrupted = []
+        original = mcp_window.McpHttpServer._interrupt
+        monkeypatch.setattr(mcp_window.McpHttpServer, "_interrupt",
+                            staticmethod(lambda process: interrupted.append(process.pid) or original(process)))
+
+        def stand_in(host, port, container):
+            sleeper = SERVER_STAND_IN.replace("sys.stdin.read()", "time.sleep(120)")
+            return {"command": sys.executable, "args": ["-c", sleeper, str(port)], "cwd": str(REPO_ROOT), "env": {}}
+        dialog = window_of(command_for=stand_in)
+        dialog.registry.tokens.add("laptop")
+        dialog.port.setValue(9126)
+        assert dialog.start_server()
+        wait_until(qapp, lambda: dialog.server.state == "running")
+        dialog.btn_stop.click()
+        wait_until(qapp, lambda: dialog.server.state == "stopped", timeout=10)
+        assert interrupted == [dialog.server.pid], "interrupted once its input had not ended it"
 
     def test_tokens_are_managed_here_too(self, window_of, monkeypatch):
         dialog = window_of()

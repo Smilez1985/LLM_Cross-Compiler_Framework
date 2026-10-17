@@ -70,7 +70,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   entries that are kept and the backup, asks first and writes exactly that (`mcp_server.plan_claude_desktop_config`,
   a file changed meanwhile is refused); the local HTTP server (address, port, container binding) as a child process
   of the GUI with the CLI's own entry and refusals, its address, state and output shown, stopped on request or when
-  the framework closes after a question ("No" keeps it open); and the token list (Add, also as a copy of another
+  the framework closes after a question ("No" keeps it open) by closing its input, so it ends as on Ctrl+C on every
+  system, also on Windows without a console (`mcp_server.stop_when_input_ends`; Ctrl+Break or SIGTERM follows only
+  after 5 seconds, an immediate end after 15); and the token list (Add, also as a copy of another
   token's permissions, Rotate, Revoke, Back to read only, Permissions). A token is shown once, right after it is
   made or rotated.
 - **Tools > Deep Ingest Notice... and the kind of an AI folder** (W1'): the Deep Ingest notice has its own entry and
