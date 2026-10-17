@@ -12,7 +12,7 @@ from packaging.specifiers import SpecifierSet
 
 from conftest import REPO_ROOT
 
-PROJECT = "llm-conversion-framework"
+PROJECT = "llm-cross-compiler-framework"
 
 
 def norm(name: str) -> str:
