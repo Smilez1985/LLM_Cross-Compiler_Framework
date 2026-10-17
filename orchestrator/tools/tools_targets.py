@@ -37,8 +37,8 @@ from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_I
                                                 ProbeError, match_target)
 from orchestrator.schemas.build import TargetOut
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
+from orchestrator.schemas.targets import TargetCapabilitiesOut, TargetIn
 from orchestrator.tools.facts_catalog import warn
-from orchestrator.tools.framework_tools import TargetCapabilitiesOut, TargetIn
 from orchestrator.tools.grants import tool_rule
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
 from orchestrator.tools.policy import Decision, ToolTier
@@ -55,7 +55,7 @@ AI_TEXT = "written by the AI"
 # --- inputs and outputs -------------------------------------------------------------------------------------------
 
 class TargetCheckIn(TargetIn):
-    # get_target_capabilities' input: the original TargetIn (framework_tools) and whether to check the files. A
+    # get_target_capabilities' input: the original TargetIn (schemas/targets.py) and whether to check the files. A
     # comment, not a docstring: a docstring would become the description of the input schema an AI reads.
     check_files: bool = Field(default=False, description="Also check the target's files (target.yml, Dockerfile "
                                                          "pins, scripts) the way a module or pack is checked")

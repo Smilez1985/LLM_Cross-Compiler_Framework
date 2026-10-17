@@ -355,6 +355,26 @@ def test_the_target_tool_input_schema_an_ai_reads_is_the_one_of_before():
                             "title": "Check Files", "type": "boolean"}}}
 
 
+def test_the_shared_target_models_keep_their_schemas():
+    """Characterization (stage-B integration): TargetIn and TargetCapabilitiesOut, the bases of the target tool's
+    models, keep the JSON schema an AI reads however they are imported (framework_tools keeps the names)."""
+    from orchestrator.schemas.targets import TargetCapabilities
+    from orchestrator.tools.framework_tools import TargetCapabilitiesOut, TargetIn
+    from orchestrator.tools.output import ToolOutput
+    assert TargetIn.model_json_schema() == {
+        "additionalProperties": False, "required": ["target"], "title": "TargetIn", "type": "object",
+        "properties": {"target": {"description": "Target id, e.g. Rockchip", "maxLength": 64, "minLength": 1,
+                                  "title": "Target", "type": "string"}}}
+    assert list(TargetCapabilitiesOut.model_fields) == ["notes", "schema_version", "support_level", "boards",
+                                                        "formats", "default_board"]
+    assert issubclass(TargetCapabilitiesOut, TargetCapabilities) and issubclass(TargetCapabilitiesOut, ToolOutput)
+    out, base, notes = (TargetCapabilitiesOut.model_json_schema(), TargetCapabilities.model_json_schema(),
+                        ToolOutput.model_json_schema())
+    assert out["title"] == "TargetCapabilitiesOut" and out["additionalProperties"] is False
+    assert out["properties"] == {**notes["properties"], **base["properties"]}
+    assert out["$defs"] == {**notes.get("$defs", {}), **base["$defs"]} and out["required"] == base["required"]
+
+
 def test_the_original_helpers_do_the_job_of_their_copies(tmp_path):
     from orchestrator.utils.helpers import execute_command, safe_json_load
     (tmp_path / "a.json").write_text('[1, 2]', encoding="utf-8")
