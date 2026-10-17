@@ -17,8 +17,7 @@ that only skip a question or set an exit code for scripts, with the reason.
 
 from typing import Any, Dict
 
-from PySide6.QtGui import QAction
-
+from orchestrator.gui.menus import place
 # One helper finds or makes the shared Ditto menu: the one of Ditto > Local Runtime... (wave 5b integration)
 from orchestrator.gui.menus.ditto_runtime import BEFORE_MENU, DITTO_MENU, ditto_menu  # noqa: F401
 from orchestrator.utils.localization import ui_text
@@ -103,13 +102,9 @@ def open_eval(window: Any) -> Any:
 def install(window: Any, menubar: Any) -> None:
     """Ditto > Local Models... and Ditto > Evaluation... in the main window's menu bar."""
     menu = ditto_menu(window, menubar)
-    models = QAction(ui_text("ditto_models.menu.models"), window)
-    models.setObjectName(MODELS_ACTION)
-    models.triggered.connect(lambda _=False: open_models(window))
+    models = place.new_action(window, MODELS_ACTION, ui_text("ditto_models.menu.models"), lambda: open_models(window))
     menu.addAction(models)
-    evaluation = QAction(ui_text("ditto_models.menu.eval"), window)
-    evaluation.setObjectName(EVAL_ACTION)
-    evaluation.triggered.connect(lambda _=False: open_eval(window))
+    evaluation = place.new_action(window, EVAL_ACTION, ui_text("ditto_models.menu.eval"), lambda: open_eval(window))
     menu.addAction(evaluation)
     window.act_ditto_models = models
     window.act_ditto_eval = evaluation

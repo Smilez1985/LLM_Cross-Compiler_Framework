@@ -16,11 +16,10 @@ area that are for scripts only, with the reason (the integrator lists them once)
 
 from typing import Dict
 
-from PySide6.QtGui import QAction
-
+from orchestrator.gui.menus import place
 from orchestrator.utils.localization import ui_text
 
-MENU_NAME = "menu_boards"
+MENU_NAME = place.MENU_BOARDS
 ACTION_NAME = "act_boards_devices"
 
 CLI_PATHS: Dict[str, str] = {
@@ -71,40 +70,29 @@ MACHINE_ONLY: Dict[str, str] = {
     "device settings --confirm-sudo": "script switch: the window asks the sudo question instead",
     "device runtime deploy --password-stdin": "script switch: the window asks for the password each time",
 }
-BUILD_MENU_NAMES = ("menu_build",)
+BUILD_MENU_NAMES = (place.MENU_BUILD,)
 BUILD_MENU_TITLES = ("Build", "Bauen")
 
 
 def _after(menubar):
-    """The menu bar action the Boards menu follows: the Build menu, else the first menu (File)."""
-    actions = [a for a in menubar.actions() if a.menu() is not None]
-    for action in actions:
-        menu = action.menu()
-        if menu.objectName() in BUILD_MENU_NAMES or action.text().replace("&", "") in BUILD_MENU_TITLES:
-            return action
-    return actions[0] if actions else None
+    """The menu the Boards menu follows: the Build menu, else the first menu (File)."""
+    build = place.find_menu(menubar, place.MENU_BUILD, BUILD_MENU_TITLES)
+    if build is not None:
+        return build
+    menus = place.menus(menubar)
+    return menus[0] if menus else None
 
 
 def install(window, menubar) -> None:
     """Adds the Boards menu with Boards and Devices... (window.act_boards_devices); finds an existing Boards menu by
     its object name."""
-    menu = next((a.menu() for a in menubar.actions() if a.menu() is not None
-                 and a.menu().objectName() == MENU_NAME), None)
+    menu = place.find_menu(menubar, MENU_NAME)
     if menu is None:
         from PySide6.QtWidgets import QMenu
         menu = QMenu(ui_text("boards.menu"), menubar)
         menu.setObjectName(MENU_NAME)
-        after = _after(menubar)
-        actions = menubar.actions()
-        following = actions[actions.index(after) + 1] if after is not None and actions.index(after) + 1 < len(
-            actions) else None
-        if following is not None:
-            menubar.insertMenu(following, menu)
-        else:
-            menubar.addMenu(menu)
-    action = QAction(ui_text("boards.menu.devices"), window)
-    action.setObjectName(ACTION_NAME)
-    action.triggered.connect(lambda _=False: open_boards_window(window))
+        place.place_menu_after(menubar, _after(menubar), menu)
+    action = place.new_action(window, ACTION_NAME, ui_text("boards.menu.devices"), lambda: open_boards_window(window))
     menu.addAction(action)
     window.menu_boards = menu
     window.act_boards_devices = action

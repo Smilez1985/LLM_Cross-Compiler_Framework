@@ -19,11 +19,10 @@ mouse path of a command whose argument changes what it does (`zoo verify PACK_FI
 
 from typing import Dict
 
-from PySide6.QtGui import QAction
-
+from orchestrator.gui.menus import place
 from orchestrator.utils.localization import ui_text
 
-TOOLS_MENU_NAMES = ("menu_tools",)
+TOOLS_MENU_NAMES = (place.MENU_TOOLS,)
 TOOLS_MENU_TITLES = ("Tools",)
 ACT_SNAPSHOTS = "act_knowledge_snapshots"
 ACT_SOURCES = "act_knowledge_sources"
@@ -105,43 +104,24 @@ MACHINE_ONLY: Dict[str, str] = {
 }
 
 
-def _tools_menu(menubar):
-    for action in menubar.actions():
-        menu = action.menu()
-        if menu is not None and (menu.objectName() in TOOLS_MENU_NAMES
-                                 or action.text().replace("&", "") in TOOLS_MENU_TITLES):
-            return menu
-    return None
-
-
 def install(window, menubar) -> None:
     """Names the knowledge entries of the Tools menu (act_knowledge_snapshots, act_knowledge_index_docs,
     act_knowledge_hub) and adds Knowledge Sources... (window.act_knowledge_sources) right below Knowledge
     Snapshots...; a Tools menu that does not exist yet is made."""
-    tools = _tools_menu(menubar)
-    if tools is None:
-        tools = menubar.addMenu("Tools")
+    tools = place.menu_or_new(menubar, place.MENU_TOOLS, "Tools", TOOLS_MENU_TITLES)
     for attribute, name in (("act_snapshots", ACT_SNAPSHOTS), ("act_framework_docs", ACT_INDEX_DOCS)):
         existing = getattr(window, attribute, None)
         if existing is not None:
             existing.setObjectName(name)
     i18n = getattr(window, "i18n", None)
     hub_text = i18n.t("menu.open_hub", "Community Hub") if i18n is not None else "Community Hub"
-    hub = next((a for a in tools.actions() if a.text() == hub_text), None)
+    hub = place.entry(tools, hub_text)
     if hub is not None:
         hub.setObjectName(ACT_HUB)
         window.act_knowledge_hub = hub
-    action = QAction(ui_text("knowledge.menu.sources"), window)
-    action.setObjectName(ACT_SOURCES)
-    action.triggered.connect(lambda _=False: open_sources_window(window))
-    actions = tools.actions()
-    snapshots = getattr(window, "act_snapshots", None)
-    following = actions[actions.index(snapshots) + 1] if snapshots in actions and \
-        actions.index(snapshots) + 1 < len(actions) else None
-    if following is not None:
-        tools.insertAction(following, action)
-    else:
-        tools.addAction(action)
+    action = place.new_action(window, ACT_SOURCES, ui_text("knowledge.menu.sources"),
+                              lambda: open_sources_window(window))
+    place.insert_after(tools, getattr(window, "act_snapshots", None), action)
     window.act_knowledge_sources = action
 
 

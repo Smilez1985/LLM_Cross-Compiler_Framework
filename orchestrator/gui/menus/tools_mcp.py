@@ -21,6 +21,7 @@ from typing import Dict, Optional
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QAction
 
+from orchestrator.gui.menus import place
 from orchestrator.utils.localization import current_language, ui_text
 
 SECURITY_MENU = "Security"   # the main window's menus are not translated (their titles name them in docs and tests)
@@ -118,28 +119,8 @@ MACHINE_ONLY: Dict[str, str] = {
 }
 
 
-def _menu(menubar, title: str):
-    for action in menubar.actions():
-        if action.menu() is not None and action.text().replace("&", "") == title:
-            return action.menu()
-    return menubar.addMenu(title)
-
-
-def _named(menu, text: str, name: str):
-    """Gives the existing entry `text` of `menu` its object name (when it has none) and returns it."""
-    for action in menu.actions():
-        if action.text() == text:
-            if not action.objectName():
-                action.setObjectName(name)
-            return action
-    return None
-
-
 def _action(window, name: str, key: str, slot) -> QAction:
-    action = QAction(ui_text(key), window)
-    action.setObjectName(name)
-    action.triggered.connect(lambda _=False: slot(window))
-    return action
+    return place.new_action(window, name, ui_text(key), lambda: slot(window))
 
 
 class _CloseGuard(QObject):
@@ -166,22 +147,18 @@ def install(window, menubar) -> None:
     """Adds Security > Audit Log..., Security > AI App Connections (MCP)... and Tools > Deep Ingest Notice... (after
     Folders the AI May Use...), names the existing Tool Permissions and Folders entries, and installs the question
     before closing while the HTTP MCP server serves."""
-    security = _menu(menubar, SECURITY_MENU)
+    security = place.menu_or_new(menubar, place.MENU_SECURITY, SECURITY_MENU)
     window.act_tools_mcp_audit = _action(window, ACT_AUDIT, "tmcp.menu.audit", open_audit_log)
     window.act_tools_mcp_connections = _action(window, ACT_CONNECTIONS, "tmcp.menu.mcp", open_connections)
     security.addAction(window.act_tools_mcp_audit)
     security.addAction(window.act_tools_mcp_connections)
 
-    tools = _menu(menubar, TOOLS_MENU)
-    _named(tools, PERMISSIONS_TEXT, ACT_PERMISSIONS)
-    _named(tools, APPROVALS_TEXT, ACT_APPROVALS)
-    folders = _named(tools, FOLDERS_TEXT, ACT_FOLDERS)
+    tools = place.menu_or_new(menubar, place.MENU_TOOLS, TOOLS_MENU)
+    place.name_entry(place.entry(tools, PERMISSIONS_TEXT), ACT_PERMISSIONS)
+    place.name_entry(place.entry(tools, APPROVALS_TEXT), ACT_APPROVALS)
+    folders = place.name_entry(place.entry(tools, FOLDERS_TEXT), ACT_FOLDERS)
     window.act_tools_mcp_crawl_notice = _action(window, ACT_CRAWL, "tmcp.menu.crawl", open_crawl_notice)
-    actions = tools.actions()
-    if folders is not None and actions.index(folders) + 1 < len(actions):
-        tools.insertAction(actions[actions.index(folders) + 1], window.act_tools_mcp_crawl_notice)
-    else:
-        tools.addAction(window.act_tools_mcp_crawl_notice)
+    place.insert_after(tools, folders, window.act_tools_mcp_crawl_notice)
 
     guard = _CloseGuard(window)
     window.installEventFilter(guard)

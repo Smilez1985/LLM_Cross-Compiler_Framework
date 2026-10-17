@@ -35,7 +35,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
 
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
 from orchestrator.gui.runtime_mode_box import RuntimeModeBox, gib, job_begins, job_ends, job_running, throttled
-from orchestrator.gui.worker_relay import worker_relay
+from orchestrator.gui.worker_relay import WorkerQuestion, worker_relay
+from orchestrator.gui.worker_relay import ask_from_worker as relay_question  # the jobs name their hook so
 from orchestrator.runtime.runtime_overview import overview
 from orchestrator.utils.localization import current_language, ui_text
 
@@ -364,20 +365,12 @@ class LocalRuntimeWindow(QDialog):
         waits; "No" when the window is gone."""
         if threading.current_thread() is threading.main_thread():
             return ask(self, self._t("ditto_runtime.title"), text)
-        event, answer = threading.Event(), []
-        worker_relay().done.emit(self._question, (text, event, answer))
-        while not event.wait(0.2):
-            if self._state["closed"]:
-                return False
-        return bool(answer and answer[0])
+        return relay_question(self._question, self._t("ditto_runtime.title"), text,
+                              stop=lambda: self._state["closed"], interval=0.2)
 
     def _on_relay(self, token: object, result: Any) -> None:
-        if token is self._question and isinstance(result, tuple) and len(result) == 3:
-            text, event, answer = result
-            try:
-                answer.append(ask(self, self._t("ditto_runtime.title"), str(text)))
-            finally:
-                event.set()
+        if token is self._question and isinstance(result, WorkerQuestion):
+            result.reply(lambda: ask(self, result.title, result.text))
             return
         if token is self._status_token and self._status_token is not None:
             self._status_done(result)

@@ -19,11 +19,10 @@ Sign-in methods per provider (`ditto login`, `ditto logout`) are also reachable 
 
 from typing import Dict
 
-from PySide6.QtGui import QAction
-
+from orchestrator.gui.menus import place
 from orchestrator.utils.localization import ui_text
 
-MENU_NAME = "menu_security"
+MENU_NAME = place.MENU_SECURITY
 SECURITY_TITLES = ("Security", "Sicherheit")
 ACT_SECRETS = "act_signin_secrets"
 ACT_OVERVIEW = "act_signin_overview"
@@ -87,38 +86,17 @@ MACHINE_ONLY: Dict[str, str] = {
 }
 
 
-def _security_menu(menubar):
-    """The Security menu of the menu bar (by object name, else by title), added at the end when there is none."""
-    for action in menubar.actions():
-        menu = action.menu()
-        if menu is None:
-            continue
-        if menu.objectName() == MENU_NAME or action.text().replace("&", "") in SECURITY_TITLES:
-            if not menu.objectName():
-                menu.setObjectName(MENU_NAME)
-            return menu
-    from PySide6.QtWidgets import QMenu
-    menu = QMenu("Security", menubar)
-    menu.setObjectName(MENU_NAME)
-    menubar.addMenu(menu)
-    return menu
-
-
 def install(window, menubar) -> None:
     """Adds Secrets..., Sign-in Overview... and Key Storage... to the Security menu (window.act_signin_*) and names the
     existing Set OpenAI API Key entry."""
-    menu = _security_menu(menubar)
-    for action in menu.actions():
-        if not action.objectName() and action.text() == OPENAI_KEY_TEXT:
-            action.setObjectName(ACT_OPENAI_KEY)
+    menu = place.menu_or_new(menubar, MENU_NAME, "Security", SECURITY_TITLES)
+    place.name_entry(place.entry(menu, OPENAI_KEY_TEXT), ACT_OPENAI_KEY)
     menu.addSeparator()
     entries = ((ACT_SECRETS, "signin.menu.secrets", open_secrets_window),
                (ACT_OVERVIEW, "signin.menu.overview", open_overview_window),
                (ACT_KEY_STORAGE, "signin.menu.key_storage", open_key_storage_window))
     for name, text_key, opener in entries:
-        action = QAction(ui_text(text_key), window)
-        action.setObjectName(name)
-        action.triggered.connect(lambda _=False, open_it=opener: open_it(window))
+        action = place.new_action(window, name, ui_text(text_key), lambda open_it=opener: open_it(window))
         menu.addAction(action)
         setattr(window, name, action)
     window.menu_security = menu

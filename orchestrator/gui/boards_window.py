@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogBut
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label
+from orchestrator.gui.worker_relay import WorkerQuestion, ask_from_worker
 from orchestrator.utils.localization import current_language, ui_text
 
 COLUMNS = ("boards.col.board", "boards.col.id", "boards.col.address", "boards.col.user", "boards.col.key",
@@ -307,15 +308,10 @@ class BoardsWindow(QDialog):
     def _ask_from_worker(self, title: str, text: str) -> bool:
         """A yes/no question the running step needs answered before it goes on (the CLI asks it at that point too):
         asked in the GUI thread with "No" as the default while the worker waits; Cancel ends the wait."""
-        from orchestrator.gui.worker_relay import worker_relay
         token = self._progress_token
         if token is None:
             raise Cancelled()
-        question = _Question(title, text)
-        worker_relay().done.emit(token, question)
-        while not question.answered.wait(0.1):
-            self._check_cancel()
-        return question.yes
+        return ask_from_worker(token, title, text, stop=self._check_cancel)
 
     def _keep_client(self, client: Any) -> None:
         """The SSH session of the running step, so Cancel can close it."""
@@ -342,11 +338,8 @@ class BoardsWindow(QDialog):
         if token is not None and token is self._progress_token and isinstance(result, str):
             self._say(result)
             return
-        if token is not None and token is self._progress_token and isinstance(result, _Question):
-            try:
-                result.yes = ask(self, result.title, result.text)
-            finally:
-                result.answered.set()
+        if token is not None and token is self._progress_token and isinstance(result, WorkerQuestion):
+            result.reply(lambda: ask(self, result.title, result.text))
             return
         if token is None or token is not self._token:
             return
@@ -1298,14 +1291,6 @@ class BoardsWindow(QDialog):
 
 class _Refusal(Exception):
     """A step the board's state refuses (not built, root, ...): its text is the person's message."""
-
-
-class _Question:
-    """A yes/no question from the worker thread, answered in the GUI thread (BoardsWindow._ask_from_worker)."""
-
-    def __init__(self, title: str, text: str):
-        self.title, self.text, self.yes = title, text, False
-        self.answered = threading.Event()
 
 
 def open_boards(window: Any) -> Optional[BoardsWindow]:

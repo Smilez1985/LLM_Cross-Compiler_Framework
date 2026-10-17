@@ -12,11 +12,11 @@ as the CLI. CLI_PATHS names, for every command of this area, the QAction or butt
 objectName); tests/test_cli_gui_parity.py of the integrator checks that each exists in the main window.
 """
 
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
 
+from orchestrator.gui.menus import place
 from orchestrator.gui.plain import one_line, plain_box
 from orchestrator.utils.localization import current_language, ui_text
 
@@ -63,74 +63,32 @@ MACHINE_ONLY: Dict[str, str] = {
 }
 
 
-def _menu_holding(menubar, action) -> Optional[QMenu]:
-    """The menu of the menu bar that holds `action`."""
-    if action is None:
-        return None
-    for entry in menubar.actions():
-        menu = entry.menu()
-        if menu is not None and action in menu.actions():
-            return menu
-    return None
-
-
-def _menu_titled(menubar, title: str) -> Optional[QMenu]:
-    for entry in menubar.actions():
-        if entry.menu() is not None and entry.text().replace("&", "") == title:
-            return entry.menu()
-    return None
-
-
-def _action(window, name: str, text: str, slot) -> QAction:
-    action = QAction(text, window)
-    action.setObjectName(name)
-    action.triggered.connect(lambda _checked=False: slot())
-    return action
-
-
-def _name(obj: Any, name: str) -> None:
-    """Gives an existing action an objectName for CLI_PATHS (one it has already stays)."""
-    if obj is not None and not obj.objectName():
-        obj.setObjectName(name)
-
-
 def install(window, menubar) -> None:
     """Adds the Build menu after File and File > Settings... above Exit; names the existing entries of this area."""
     lang = current_language()
-    file_menu = _menu_holding(menubar, getattr(window, "act_output_folder", None)) \
-        or _menu_titled(menubar, window.i18n.t("menu.file", "File"))
+    file_menu = place.menu_holding(menubar, getattr(window, "act_output_folder", None)) \
+        or place.find_menu(menubar, place.MENU_FILE, (window.i18n.t("menu.file", "File"),))
 
     build_menu = QMenu(ui_text("bld.menu", lang), menubar)
-    build_menu.setObjectName("menu_build")
-    entries = menubar.actions()
-    after = entries.index(file_menu.menuAction()) + 1 if file_menu is not None else 0
-    if after < len(entries):
-        menubar.insertMenu(entries[after], build_menu)
-    else:
-        menubar.addMenu(build_menu)
+    build_menu.setObjectName(place.MENU_BUILD)
+    place.place_menu_after(menubar, file_menu, build_menu)
     window.menu_build = build_menu
-    window.act_build_targets = _action(window, "act_build_targets", ui_text("bld.menu.targets", lang),
-                                       lambda: open_targets(window))
-    window.act_build_history = _action(window, "act_build_history", ui_text("bld.menu.history", lang),
-                                       lambda: open_build_history(window))
+    window.act_build_targets = place.new_action(window, "act_build_targets", ui_text("bld.menu.targets", lang),
+                                                lambda: open_targets(window))
+    window.act_build_history = place.new_action(window, "act_build_history", ui_text("bld.menu.history", lang),
+                                                lambda: open_build_history(window))
     build_menu.addAction(window.act_build_targets)
     build_menu.addAction(window.act_build_history)
 
-    window.act_file_settings = _action(window, "act_file_settings", ui_text("bld.menu.settings", lang),
-                                       lambda: open_settings(window))
+    window.act_file_settings = place.new_action(window, "act_file_settings", ui_text("bld.menu.settings", lang),
+                                                lambda: open_settings(window))
     if file_menu is not None:
-        exit_text = window.i18n.t("menu.exit", "Exit")
-        exit_action = next((a for a in file_menu.actions() if a.text() == exit_text), None)
-        if exit_action is not None:
-            file_menu.insertAction(exit_action, window.act_file_settings)
-        else:
-            file_menu.addAction(window.act_file_settings)
+        place.insert_before(file_menu, place.entry(file_menu, window.i18n.t("menu.exit", "Exit")),
+                            window.act_file_settings)
 
-    _name(getattr(window, "act_output_folder", None), "act_file_output_folder")
-    tools = _menu_titled(menubar, "Tools")
-    for action in tools.actions() if tools is not None else ():
-        if action.text() == "Create Hardware Module...":
-            _name(action, "act_tools_module_wizard")
+    place.name_entry(getattr(window, "act_output_folder", None), "act_file_output_folder")
+    tools = place.find_menu(menubar, place.MENU_TOOLS, ("Tools",))
+    place.name_entry(place.entry(tools, "Create Hardware Module..."), "act_tools_module_wizard")
 
 
 def _refresh_target_lists(window) -> None:
