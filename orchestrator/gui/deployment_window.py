@@ -577,7 +577,8 @@ class DeploymentWindow(QWidget):
 
     def _add_source(self, folder: bool) -> None:
         """The folder or the file dialog, opened at the output folder; the chosen path joins the list, selected.
-        Nothing is read here: packaging finds the model and says why when there is none."""
+        The model is not checked here: packaging finds it and says why when there is none (the KV-cache choice reads
+        its size, as for a listed build)."""
         from orchestrator.Core.artifact_output import output_folder
         from orchestrator.Core.deployment_manager import MODEL_SUFFIXES
         out = output_folder(self.framework)
