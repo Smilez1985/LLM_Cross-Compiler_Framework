@@ -148,15 +148,11 @@ def same_items(current: Optional[DeletionPlan], chosen: DeletionPlan) -> Optiona
     return plan_of(items, chosen.mode_offered)
 
 
-def size_text(n: int) -> str:
-    """Bytes in decimal units, as the deletion lists show them."""
-    if n >= 10 ** 9:
-        return f"{n / 1000 ** 3:.1f} GB"
-    if n >= 10 ** 6:
-        return f"{n / 1000 ** 2:.1f} MB"
-    if n >= 10 ** 3:
-        return f"{n / 1000:.0f} kB"
-    return f"{n} bytes"
+def size_text(n: int, lang: str = "en") -> str:
+    """Bytes in decimal units, as the deletion lists show them (English for the command line; the GUI passes the
+    person's language): the one size formatter, utils/sizes.py."""
+    from orchestrator.utils.sizes import format_size
+    return format_size(n, lang)
 
 
 def rows(plan: DeletionPlan) -> List[Dict[str, Any]]:

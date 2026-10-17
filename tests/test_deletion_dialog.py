@@ -88,7 +88,8 @@ def test_multiple_choice_ticks_nothing_and_rebuilds_the_plan_from_the_ticked_ite
     try:
         dialog._arm()
         dialog.checks[0].setChecked(True)
-        assert dialog.btn_yes.text() == "1 Einträge (1.5 GB) in den Papierkorb"
+        # sizes in the person's language (utils/sizes.py): German writes a decimal comma
+        assert dialog.btn_yes.text() == "1 Einträge (1,5 GB) in den Papierkorb"
         dialog.reject()
         assert dialog.accepted_deletion() is None
     finally:
