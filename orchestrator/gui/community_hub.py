@@ -18,7 +18,6 @@ checks, exports and the keys run off the GUI thread; passphrases are never store
 from pathlib import Path
 from typing import Callable, Optional
 
-import yaml
 from PySide6.QtCore import Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtGui import Qt as QtText
@@ -408,11 +407,17 @@ class CommunityHubWindow(QMainWindow):
         self.refresh_list()
 
     def build_recipe(self, item):
-        from orchestrator.schemas.recipes import Recipe
+        """Build on an installed recipe: read through BuildService.installed_recipe, the one path that builds a
+        recipe, so a recipe the community index revoked after the list was shown (or one that cannot be read) is
+        refused now, not only by the button the list disabled. The Builder is filled in; its Start Build checks the
+        recipe again (BuildService.start_recipe)."""
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        framework = self.framework_manager
+        service = getattr(framework, "build_service", None) or BuildService(framework)
         try:
-            recipe = Recipe.model_validate(yaml.safe_load((item.path / "recipe.yml").read_text(encoding="utf-8")))
-        except Exception as e:
-            self.on_error(f"The recipe {item.id} cannot be read: {e}")
+            recipe, _provenance = service.installed_recipe(item.id)
+        except BuildServiceError as e:
+            self.on_error(str(e))
             return
         if self.on_build_recipe is None:
             self.on_error("The Builder is not available.")

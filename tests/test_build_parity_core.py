@@ -423,12 +423,13 @@ class TestGuiSubmission:
         assert Path(req.output_base_dir) == build_folder(tab.framework), "it waits in the build folder"
         assert (req.model_revision, req.max_context_length, req.dataset_sha256) == (None, None, None)
 
-    def test_a_recipe_pins_the_commit_and_the_context_length_not_the_dataset(self, tab, tmp_path):
+    @staticmethod
+    def recipe(tmp_path, **options):
+        """(an installed-looking recipe with a calibration dataset, that dataset file)."""
         import hashlib
 
         from orchestrator.schemas.recipes import Recipe
         from test_recipes import recipe_data
-        from test_review_capabilities_paths import submit
         dataset = tmp_path / "calib.txt"
         dataset.write_text("calibration text\n", encoding="utf-8")
         data = recipe_data()
@@ -436,14 +437,74 @@ class TestGuiSubmission:
                     quantization="Q4_K_M")
         data["options"].update(use_imatrix=True, max_context_length=4096,
                                dataset={"name": "calib.txt",
-                                        "sha256": hashlib.sha256(dataset.read_bytes()).hexdigest()})
-        recipe = Recipe.model_validate(data)
+                                        "sha256": hashlib.sha256(dataset.read_bytes()).hexdigest()}, **options)
+        return Recipe.model_validate(data), dataset
+
+    @staticmethod
+    def installed(monkeypatch, tab, recipe, revoked=False):
+        """The recipe as BuildService.installed_recipe finds it (installed, or revoked by the community index)."""
+        from orchestrator.Core.build_service import BuildServiceError
+        calls = []
+
+        def installed_recipe(recipe_id):
+            calls.append(recipe_id)
+            if revoked:
+                raise BuildServiceError(f"The recipe {recipe_id} was revoked by the community index; it is not built.",
+                                        code="not_supported")
+            return recipe, SimpleNamespace(id=recipe.id)
+
+        monkeypatch.setattr(tab.framework.build_service, "installed_recipe", installed_recipe)
+        return calls
+
+    def test_a_recipe_pins_the_commit_the_context_length_and_the_dataset(self, tab, tmp_path, monkeypatch):
+        # Changed on purpose with c3-build-path (CHANGELOG Security): the GUI pinned no calibration dataset; a recipe
+        # build now goes through BuildService.start_recipe, which pins the recipe's dataset sha256.
+        from test_review_capabilities_paths import submit
+        recipe, dataset = self.recipe(tmp_path)
+        calls = self.installed(monkeypatch, tab, recipe)
         tab.apply_recipe(recipe)
         tab.dataset_path = str(dataset)
         req = submit(tab)
-        assert req is not None and req.model_revision == recipe.model.revision
-        assert req.max_context_length == 4096 and req.dataset_path == str(dataset)
-        assert req.dataset_sha256 is None, "today the GUI pins no calibration dataset"
+        assert req is not None and req.model_revision == recipe.model.revision and calls == [recipe.id]
+        assert req.max_context_length == 4096 and req.dataset_path == str(dataset.resolve())
+        assert req.dataset_sha256 == recipe.options.dataset.sha256
+        assert req.parallel_builds is True and req.description == "Builder Tab Job" and req.owner == ""
+
+    def test_a_recipe_revoked_after_it_filled_the_form_is_not_built(self, tab, tmp_path, monkeypatch,
+                                                                   gui_messages):
+        from test_review_capabilities_paths import submit
+        recipe, dataset = self.recipe(tmp_path)
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(dataset)
+        self.installed(monkeypatch, tab, recipe, revoked=True)
+        assert submit(tab) is None
+        assert gui_messages[-1][0] == "warning" and "revoked" in gui_messages[-1][1]
+        tab.quant_combo.setEditText("Q8_0")  # the person's own values at the recipe's commit: still refused
+        assert submit(tab) is None and "revoked" in gui_messages[-1][1]
+
+    def test_another_calibration_file_than_the_recipe_pins_is_refused(self, tab, tmp_path, monkeypatch,
+                                                                    gui_messages):
+        from test_review_capabilities_paths import submit
+        recipe, _dataset = self.recipe(tmp_path)
+        self.installed(monkeypatch, tab, recipe)
+        other = tmp_path / "other.txt"
+        other.write_text("other text\n", encoding="utf-8")
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(other)
+        assert submit(tab) is None
+        assert "not the file the recipe" in gui_messages[-1][1]
+
+    def test_a_changed_form_builds_the_persons_values_at_the_recipes_commit(self, tab, tmp_path, monkeypatch):
+        from test_review_capabilities_paths import submit
+        recipe, dataset = self.recipe(tmp_path)
+        calls = self.installed(monkeypatch, tab, recipe)
+        tab.apply_recipe(recipe)
+        tab.dataset_path = str(dataset)
+        tab.quant_combo.setEditText("Q8_0")
+        req = submit(tab)
+        assert req is not None and calls == [recipe.id], "the use-time check ran"
+        assert req.quantization_options == ["Q8_0"] and req.model_revision == recipe.model.revision
+        assert req.dataset_sha256 is None, "not the recipe any more: no recipe pin"
 
 
 class TestServiceSubmission:
@@ -571,6 +632,19 @@ class TestOnePath:
                 if isinstance(node, ast.Attribute) and node.attr == "submit_build_request":
                     offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")
         assert offenders == []
+
+    def test_recipe_yml_has_one_reader(self):
+        """community_manager.read_recipe is the only parser of recipe.yml (the install check, the listings and
+        BuildService.installed_recipe, which the Community Hub's Build button and start_recipe_build use)."""
+        import ast
+        parsers = []
+        for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "model_validate" and isinstance(node.func.value, ast.Name)
+                        and node.func.value.id == "Recipe"):
+                    parsers.append(path.relative_to(REPO_ROOT).as_posix())
+        assert parsers == ["orchestrator/Core/community_manager.py"]
 
     def test_the_cli_starts_through_the_service(self, cli_harness, monkeypatch):
         from orchestrator.Core.build_service import BuildService

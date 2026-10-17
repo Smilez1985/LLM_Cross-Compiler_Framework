@@ -2037,6 +2037,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **A community recipe built from the GUI is checked when it is built, as over MCP**: the Community Hub's **Build**
+  button and the Builder tab's **Start Build** go through `BuildService.installed_recipe` and
+  `BuildService.start_recipe`, the path `start_recipe_build` uses. A recipe the community index revoked after the
+  Hub's list was shown, or one that can no longer be read, is refused at the click and again at Start Build; before,
+  only the Build button the list had disabled stood in the way, and the GUI parsed `recipe.yml` itself. A build that
+  keeps every value of the recipe now pins its calibration dataset: a file other than the one the recipe's sha256
+  names is refused, and the build engine checks the copy it uses. A recipe that changed since it filled the form is
+  refused too. Changing a value of the recipe in the form still builds your own values at the recipe's commit,
+  after the same revocation check.
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI
