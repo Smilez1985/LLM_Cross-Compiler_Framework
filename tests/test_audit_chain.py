@@ -549,7 +549,8 @@ class TestAuditKeyLock:
 
     def test_no_key_is_created_while_another_process_creates_one(self, holder, memory_keyring, monkeypatch):
         state, _proc = holder
-        monkeypatch.setattr(framework_tools, "_key_lock", functools.partial(framework_tools._key_lock, timeout=0.3))
+        from orchestrator.Core import vault_key   # the audit key and its lock live there since chain c1-imports
+        monkeypatch.setattr(vault_key, "_key_lock", functools.partial(framework_tools._key_lock, timeout=0.3))
         assert framework_tools._audit_key(SimpleNamespace(secrets_manager=None), state) is None
         assert not memory_keyring.store  # an unkeyed process, never a second key
 

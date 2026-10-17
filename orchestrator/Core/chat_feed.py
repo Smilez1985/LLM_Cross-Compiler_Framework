@@ -1383,8 +1383,8 @@ def open_chat_feed(framework: Any) -> FeedStore:
         return FeedStore(state_dir, key=getattr(policy_store, "key", None),
                          refuse_unkeyed=getattr(policy_store, "refuse_unkeyed", None))
     from orchestrator.tools.audit import AuditLog
-    from orchestrator.tools.framework_tools import _audit_key
-    key = _audit_key(framework, state_dir)
+    from orchestrator.Core.vault_key import audit_key
+    key = audit_key(framework, state_dir)
     return FeedStore(state_dir, key=key, refuse_unkeyed=None if key else AuditLog(state_dir / "audit.db").kept_with_key)
 
 
