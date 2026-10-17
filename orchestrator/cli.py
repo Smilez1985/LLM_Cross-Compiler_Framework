@@ -4533,11 +4533,9 @@ def _unreachable(ctx: Optional[FrameworkContext], host: str, port: int, error: B
                  doing: str = "reach", step: str = "", device_id: str = "", state_dir: Optional[Path] = None) -> None:
     """Exits after a failed connection or login: its reason code with the next step when it has one (recorded for
     Mojo with the board, in `state_dir`, when `step` names the contact)."""
-    from orchestrator.runtime.device import reasons
-    code = reasons.classify(error)
-    if code is None and isinstance(error, OSError):
-        code = reasons.HOST_DOWN
-    if code is not None:
+    from orchestrator.remote import reasons
+    code = reasons.reach_code(error)
+    if code:
         _note_reach(ctx, host, port, step, code, device_id, state_dir)
         _print_reason(ctx, code, host, port)
     else:

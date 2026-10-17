@@ -123,11 +123,9 @@ def event_text(event: Any, label: str) -> str:
 def unreachable_error(device: Any, error: BaseException) -> ToolError:
     """The refusal for a board whose host key could not be read: the SSH reason code of the failure (N6) with the
     AI's next step, never the address, the account or the exception's text."""
-    from orchestrator.runtime.device import reasons
-    reason = reasons.classify(error)
-    if reason is None and isinstance(error, OSError):
-        reason = reasons.HOST_DOWN
-    if reason is None:
+    from orchestrator.remote import reasons
+    reason = reasons.reach_code(error)
+    if not reason:
         return ToolError(f"The host key of {device.label} could not be read ({error.__class__.__name__}).",
                          code="failed", field="device_id", next="Tell the person; the framework's log has the details.")
     return blocked(reason, f"The device {device.label} cannot be reached to read its host key ({reason}).",
@@ -470,13 +468,13 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
     def read_host_key(device):
         """The key the device presents now (a key read, no login) and its state against the framework's known_hosts.
         Nothing is written: an unknown or changed key is refused, never trusted."""
-        from orchestrator.runtime.device import reasons
+        from orchestrator.remote import reasons
         from orchestrator.utils import ssh_trust
         try:
             key = ssh_trust.fetch_host_key(device.host, device.port)
             status = ssh_trust.check_host_key(devices().state_dir, device.host, device.port, key)
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
-            code = reasons.classify(e) or (reasons.HOST_DOWN if isinstance(e, OSError) else "")
+            code = reasons.reach_code(e)
             if code:  # recorded for Mojo, which reads it instead of contacting the board (W1)
                 devices().note_reach(device.device_id, "deploy", code)
             raise unreachable_error(device, e) from None
