@@ -182,6 +182,11 @@ def test_the_image_is_headless_by_default_and_the_gui_is_an_explicit_option():
     assert gui and "libxcb" in gui.group(1) and "libgl1" in gui.group(1)
     outside = text.replace(gui.group(0), "")
     assert "libxcb" not in outside and "libgl1" not in outside, "desktop libraries only with WITH_GUI=1"
+    # Changed on purpose (chain qt, DECISIONS round 11, A3): the headless image has no Qt, so not even libglib, and
+    # installs without the 'gui' extra
+    always, gui_only = _apt_packages(text)
+    assert "libglib2.0-0t64" in gui_only and "libglib2.0-0t64" not in always, (always, gui_only)
+    assert 'LCF_HEADLESS="$headless"' in text and 'headless=1 && if [ "$WITH_GUI" = "1" ]; then headless=0; fi' in text
     cmd = re.findall(r"^CMD\s+(.+)$", text, re.M)
     assert cmd == ['["llm-cli", "--help"]'], "the default command is the CLI, never the GUI"
     assert re.search(r'^VOLUME \["/data"\]$', text, re.M) and "LLM_FRAMEWORK_HOME=/data/home" in text
@@ -217,11 +222,11 @@ def _apt_packages(text: str):
 
 
 def _qt_modules(gui: bool):
-    """The Qt modules the code imports: without the GUI (orchestrator/gui, orchestrator/main.py), or all of them."""
+    """The Qt modules the code imports: without the GUI (orchestrator/gui), or all of them."""
     found = set()
     for path in (REPO_ROOT / "orchestrator").rglob("*.py"):
         rel = path.relative_to(REPO_ROOT).as_posix()
-        if not gui and (rel.startswith("orchestrator/gui/") or rel == "orchestrator/main.py"):
+        if not gui and rel.startswith("orchestrator/gui/"):
             continue
         found |= set(re.findall(r"^\s*(?:from|import)\s+PySide6\.(Qt\w+)", path.read_text(encoding="utf-8"), re.M))
     return found
@@ -256,14 +261,18 @@ needs_qt_elf = pytest.mark.skipif(not sys.platform.startswith("linux") or not sh
 @needs_qt_elf
 @pytest.mark.parametrize("gui", [False, True], ids=["headless", "gui"])
 def test_the_image_installs_every_system_library_qt_needs(gui):
-    """The CLI imports PySide6.QtCore (docker_manager, localization), whose Qt library needs libglib: without it every
-    llm-cli command of the headless image fails at import. The GUI image needs everything QtGui, QtWidgets and the
-    xcb platform plugin load, or Qt stops with "could not load the Qt platform plugin xcb"."""
+    """Changed on purpose (chain qt): the code outside the GUI imports no Qt any more (it imported PySide6.QtCore, whose
+    library needs libglib, in every llm-cli command), so the headless image needs no Qt library at all. The GUI image
+    needs everything QtCore, QtGui, QtWidgets and the xcb platform plugin load, or Qt stops with "could not load the
+    Qt platform plugin xcb"."""
+    modules = _qt_modules(gui)
+    if not gui:
+        assert modules == set(), f"the CLI and the MCP server import Qt: {modules}"
+        return
     pytest.importorskip("PySide6")
     import PySide6
     package = Path(PySide6.__file__).parent
-    modules = _qt_modules(gui)
-    assert modules and (gui or modules == {"QtCore"}), modules
+    assert {"QtCore", "QtGui", "QtWidgets"} <= modules, modules
     files = [package / f"{module}.abi3.so" for module in sorted(modules)]
     if gui:
         files.append(package / "Qt" / "plugins" / "platforms" / "libqxcb.so")
@@ -290,16 +299,22 @@ def _build_check(install_dir: Path) -> str:
 
 @needs_bash
 @pytest.mark.parametrize("case", ["ok", "ok-gui", "import-fails", "library-missing", "gui-library-missing",
-                                  "plugin-missing"])
+                                  "plugin-missing", "headless-with-qt"])
 def test_the_build_fails_when_the_installation_does_not_work(tmp_path, case):
     """Before, a failed pip install or a missing system library still gave a "built" image whose llm-cli failed at
-    the first command. The build now imports the CLI and resolves every library Qt loads (ldd), and stops if not."""
+    the first command. The build now imports the CLI and, for the GUI, resolves every library Qt loads (ldd), and
+    stops if not. Changed on purpose (chain qt): the headless image has no Qt to check, and a headless image that
+    installed PySide6 anyway is refused."""
     install = tmp_path / "opt"
-    qt = install / ".venv" / "lib" / "python3.13" / "site-packages" / "PySide6"
-    (qt / "Qt" / "plugins" / "platforms").mkdir(parents=True)
-    for rel in ("QtCore.abi3.so", "QtGui.abi3.so", "QtWidgets.abi3.so", "Qt/plugins/platforms/libqxcb.so"):
-        if not (case == "plugin-missing" and rel.endswith("libqxcb.so")):
-            (qt / rel).write_text("elf")
+    gui = "1" if case in ("ok-gui", "library-missing", "gui-library-missing", "plugin-missing") else "0"
+    site = install / ".venv" / "lib" / "python3.13" / "site-packages"
+    site.mkdir(parents=True)
+    qt = site / "PySide6"
+    if gui == "1" or case == "headless-with-qt":
+        (qt / "Qt" / "plugins" / "platforms").mkdir(parents=True)
+        for rel in ("QtCore.abi3.so", "QtGui.abi3.so", "QtWidgets.abi3.so", "Qt/plugins/platforms/libqxcb.so"):
+            if not (case == "plugin-missing" and rel.endswith("libqxcb.so")):
+                (qt / rel).write_text("elf")
     python = install / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.write_text("#!/bin/sh\n" + ('echo "ModuleNotFoundError: yaml" >&2; exit 1\n' if case == "import-fails"
@@ -311,7 +326,6 @@ def test_the_build_fails_when_the_installation_does_not_work(tmp_path, case):
     (stubs / "ldd").write_text('#!/bin/sh\necho "\tlibc.so.6 => /lib/libc.so.6"\n'
                                f'case "$1" in *{missing_in}*) echo "\tlibglib-2.0.so.0 => not found" ;; esac\n')
     (stubs / "ldd").chmod(0o755)
-    gui = "1" if case in ("ok-gui", "gui-library-missing", "plugin-missing") else "0"
     run = subprocess.run(["/bin/bash", "-c", _build_check(install)], capture_output=True, text=True, timeout=60,
                          env={"PATH": f"{stubs}:/usr/bin:/bin", "WITH_GUI": gui, "HOME": str(tmp_path)})
     if case.startswith("ok"):
@@ -322,6 +336,8 @@ def test_the_build_fails_when_the_installation_does_not_work(tmp_path, case):
         assert "libglib-2.0.so.0 => not found" in run.stderr and "apt step" in run.stderr
     if case == "plugin-missing":
         assert "libqxcb.so" in run.stderr
+    if case == "headless-with-qt":
+        assert "must not install Qt" in run.stderr
 
 
 def test_the_container_user_reuses_a_group_that_exists_already():
@@ -772,10 +788,14 @@ class TestInstallShInAContainer:
         expected = "sudo -u lcf bash" if with_sudo else "runuser -u lcf -- bash"
         assert calls.splitlines() == [expected]
 
+    @pytest.mark.parametrize("headless", ["0", "1"], ids=["gui", "headless"])
     @pytest.mark.parametrize("failing", ["pip", "venv", None])
-    def test_a_failed_python_environment_stops_the_installation(self, tmp_path, failing):
+    def test_a_failed_python_environment_stops_the_installation(self, tmp_path, failing, headless):
         """Before, a pip install that could not reach the index (or a missing venv module) still ended with
-        "Installation abgeschlossen", and the container builder reported a built image with an empty .venv."""
+        "Installation abgeschlossen", and the container builder reported a built image with an empty .venv. With the
+        GUI (the default) the installer installs requirements-gui.txt, with --headless (LCF_HEADLESS=1, the
+        framework image without --gui) requirements.txt (chain qt)."""
+        wanted = "requirements.txt" if headless == "1" else "requirements-gui.txt"
         stubs = tmp_path / "bin"
         stubs.mkdir()
         # runuser -u lcf -- bash: runs the script it gets on stdin, as the installer's own user here.
@@ -784,7 +804,7 @@ class TestInstallShInAContainer:
             '#!/bin/sh\n'
             f'[ "{failing}" = venv ] && {{ echo "No module named venv" >&2; exit 1; }}\n'
             'mkdir -p .venv/bin\n'
-            f'printf \'#!/bin/sh\\ncase "$*" in *"-r requirements.txt"*) [ "{failing}" = pip ] && '
+            f'printf \'#!/bin/sh\\necho "$*" >> pip.log\\ncase "$*" in *"-r {wanted}"*) [ "{failing}" = pip ] && '
             '{ echo "No matching distribution found" >&2; exit 1; } ;; esac\\nexit 0\\n\' > .venv/bin/pip\n'
             'chmod +x .venv/bin/pip\n')
         for name in ("runuser", "python3"):
@@ -792,7 +812,8 @@ class TestInstallShInAContainer:
         install_dir = tmp_path / "opt"
         install_dir.mkdir()
         (install_dir / "requirements.txt").write_text("pyyaml==6.0.3\n")
-        env = {"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path), "SUDO_USER": "lcf"}
+        (install_dir / "requirements-gui.txt").write_text("pyyaml==6.0.3\npyside6-essentials==6.12.0\n")
+        env = {"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path), "SUDO_USER": "lcf", "LCF_HEADLESS": headless}
         # No sudo on this PATH, so the installer takes runuser.
         script = ('source "$1"; INSTALL_DIR="$2"; command() { if [ "$2" = sudo ]; then return 1; fi; '
                   'builtin command "$@"; }; setup_venv; echo "AFTER setup_venv"')
@@ -800,6 +821,8 @@ class TestInstallShInAContainer:
                              capture_output=True, text=True, timeout=60)
         if failing is None:
             assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, run.stdout + run.stderr
+            installs = [line for line in (install_dir / "pip.log").read_text().splitlines() if "--upgrade" not in line]
+            assert installs == [f"install --require-hashes -r {wanted}"]
             return
         assert run.returncode != 0, run.stdout + run.stderr
         assert "AFTER setup_venv" not in run.stdout, "the installer went on as if the environment existed"
