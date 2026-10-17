@@ -121,3 +121,13 @@ class TestAcknowledgeAndAudit:
         with pytest.raises(ValueError):
             crawl_notice.acknowledge_and_audit(crawl_notice.CrawlNotice(tmp_path), "mcp", audit)
         assert audit.rows == [] and crawl_notice.CrawlNotice(tmp_path).needed()
+
+
+def test_both_notices_are_the_one_mechanism(notice):
+    """utils/notice_store.OneTimeNotice holds the mechanism once; each notice only names its file, texts and words."""
+    from orchestrator.utils.notice_store import OneTimeNotice
+    module, cls, _, keys, _, _ = notice
+    assert issubclass(cls, OneTimeNotice) and cls.TEXT_KEYS == keys
+    for name in ("needed", "acknowledge", "acknowledged_via"):
+        assert name not in vars(cls), f"{cls.__name__}.{name} is the shared one"
+    assert cls("x").sha256() == module.notice_sha256()

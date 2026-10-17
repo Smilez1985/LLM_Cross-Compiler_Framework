@@ -16,68 +16,32 @@ resource or prompt can: an AI client that wants to crawl (crawl_docs_site) is re
 is told those two places (MCP design 2.5, DECISIONS round 1 item 1).
 """
 
-import hashlib
-import json
-import logging
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional, Tuple
 
-from orchestrator.utils.atomic import write_private
-from orchestrator.utils.localization import texts_in_every_form, ui_text
+from orchestrator.utils import notice_store
+from orchestrator.utils.notice_store import OneTimeNotice
 
 TEXT_KEYS = ("crawl.notice.title", "crawl.notice.text")
-VIA = ("gui", "cli")   # the framework's own windows where a person acknowledges the notice
-
-logger = logging.getLogger(__name__)
+VIA = notice_store.VIA   # the framework's own windows where a person acknowledges the notice
 
 
 def notice_text(lang: Optional[str] = None) -> Tuple[str, str]:
     """(title, text) of the notice in lang (default: the UI language)."""
-    return ui_text(TEXT_KEYS[0], lang), ui_text(TEXT_KEYS[1], lang)
+    return notice_store.notice_text(TEXT_KEYS, lang)
 
 
 def notice_sha256() -> str:
     """Changes whenever the text in any language changes, also its formal ("Sie") form."""
-    texts = texts_in_every_form(TEXT_KEYS)
-    return hashlib.sha256(json.dumps(texts, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return notice_store.notice_sha256(TEXT_KEYS)
 
 
-class CrawlNotice:
-    """Remembers per user whether the current notice was shown."""
+class CrawlNotice(OneTimeNotice):
+    """Remembers per user whether the current notice was shown (the mechanism: utils/notice_store.py)."""
 
     FILE_NAME = "crawl_notice.json"
-
-    def __init__(self, state_dir: Path):
-        self.path = Path(state_dir) / self.FILE_NAME
-
-    def needed(self) -> bool:
-        try:
-            return json.loads(self.path.read_text(encoding="utf-8"))["notice_sha256"] != notice_sha256()
-        except FileNotFoundError:
-            return True
-        except (OSError, ValueError, TypeError, KeyError) as e:   # unreadable or damaged: show the notice again
-            logger.info(f"Showing the Deep Ingest notice again: {self.path} cannot be used ({str(e)[:200]}).")
-            return True
-
-    def acknowledge(self, via: str) -> None:
-        """Records that a person read the current notice, and where (`via`: gui or cli)."""
-        if via not in VIA:
-            raise ValueError(f"The Deep Ingest notice is acknowledged in the GUI or the CLI, not via {via!r}.")
-        write_private(self.path, json.dumps({
-            "notice_sha256": notice_sha256(), "via": via,
-            "acknowledged_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}, indent=2))
-
-    def acknowledged_via(self) -> Optional[str]:
-        """Where the current notice was acknowledged (gui or cli); None when it is needed or was recorded without."""
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-        if not isinstance(data, dict) or data.get("notice_sha256") != notice_sha256():
-            return None
-        via = data.get("via")
-        return via if via in VIA else None
+    TEXT_KEYS = TEXT_KEYS
+    AGAIN = "Showing the Deep Ingest notice again"
+    WRONG_VIA = "The Deep Ingest notice is acknowledged in the GUI or the CLI, not via {via!r}."
 
 
 def acknowledge_and_audit(notice: CrawlNotice, via: str, audit=None) -> Optional[str]:
