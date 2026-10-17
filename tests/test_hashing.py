@@ -148,6 +148,21 @@ class TestEveryNamedCopy:
         from orchestrator.runtime.device import package
         assert package._sha256_bytes(b"abc") == sha(b"abc")
 
+    def test_the_benchmark_keeps_its_read_at_offset(self, tmp_path):
+        """bench._read_at (1 MiB at an offset, the reads without pread) stays as a delegate of the one implementation:
+        no function is removed by the consolidation."""
+        from orchestrator.runtime import bench
+        data = data_of((1 << 20) + 9)
+        path = tmp_path / "f.bin"
+        path.write_bytes(data)
+        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        try:
+            assert bench._read_at(fd, 0) == data[:1 << 20]
+            assert bench._read_at(fd, 1 << 20) == data[1 << 20:]
+            assert bench._read_at(fd, len(data)) == b""
+        finally:
+            os.close(fd)
+
 
 class TestCancelMidFile:
     def test_a_cancelled_build_stops_hashing_its_model(self, tmp_path):
