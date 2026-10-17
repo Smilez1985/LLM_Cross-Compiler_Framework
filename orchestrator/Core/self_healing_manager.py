@@ -21,13 +21,15 @@ from typing import Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
+from orchestrator.Core.disk_plan import DISK_FULL_PHRASE, DISK_QUOTA_PHRASE
 from orchestrator.utils.logging import get_logger
 
 # ============================================================================
 # DATA MODELS
 # ============================================================================
 
-DISK_FULL_PATTERN = r"No space left on device|Disk quota exceeded"
+# The disk-full texts of the build (Core/disk_plan.py) keep DISK_FULL_PHRASE; neither phrase has a regex character.
+DISK_FULL_PATTERN = f"{DISK_FULL_PHRASE}|{DISK_QUOTA_PHRASE}"
 
 
 class HealingStrategy(Enum):

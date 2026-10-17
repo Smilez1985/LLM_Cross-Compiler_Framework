@@ -360,6 +360,23 @@ class TestBenchmark:
             call(fw, "run_benchmark", {"kind": "artifact_speed", "artifact_id": aid, "sandbox": False}, confirm=None)
         assert len(bench) == 1
 
+    def test_an_unchanged_built_model_is_hashed_once_for_the_question_and_the_run(self, fw, bench, monkeypatch):
+        """model_sha is the shared HashCache of utils/helpers.py (tests/test_hashing.py pins the cache itself): the
+        question and the run take one hash of an unchanged model."""
+        from orchestrator.utils import helpers
+        real, hashed = helpers.sha256_file, []
+
+        def counting(path, **kwargs):
+            if Path(path).suffix == ".gguf":
+                hashed.append(Path(path).name)
+            return real(path, **kwargs)
+        monkeypatch.setattr(helpers, "sha256_file", counting)
+        aid = self.gguf_artifact(fw)
+        allow(fw, "run_benchmark")
+        started = call(fw, "run_benchmark", {"kind": "artifact_speed", "artifact_id": aid}, confirm=asking(True))
+        assert wait_job(fw, started.job_id).state == "done" and len(bench) == 1
+        assert hashed == ["model.gguf"], "the question hashed it; the run took the cached digest"
+
     def test_the_sandbox_opt_in(self, fw, bench):
         aid = self.gguf_artifact(fw)
         allow(fw, "run_benchmark")

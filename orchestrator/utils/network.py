@@ -17,12 +17,13 @@ Updates v2.3.0:
 
 import time
 import socket
-import hashlib
 import requests
 import logging
 import os
 from pathlib import Path
 from typing import Optional
+
+from orchestrator.utils.helpers import digest_matches, hash_stream
 
 # Wir nutzen den existierenden Logger oder Fallback
 try:
@@ -114,20 +115,13 @@ class NetworkGuard:
             with session.get(url, stream=True, timeout=30) as r:
                 r.raise_for_status()
                 
-                # Wir berechnen den Hash während des Downloads "on the fly"
-                sha256_hash = hashlib.sha256()
-                
+                # Wir berechnen den Hash während des Downloads "on the fly" (die eine Hash-Implementierung)
                 with open(temp_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            if expected_sha256:
-                                sha256_hash.update(chunk)
+                    calculated_hash = hash_stream(r.iter_content(chunk_size=8192), sink=f.write)
 
             # Validierung (falls Hash angegeben)
             if expected_sha256:
-                calculated_hash = sha256_hash.hexdigest()
-                if calculated_hash.lower() != expected_sha256.lower():
+                if not digest_matches(calculated_hash, expected_sha256):
                     logger.error(f"Hash-Mismatch bei {target_path.name}!")
                     logger.debug(f"Erwartet: {expected_sha256}")
                     logger.debug(f"Erhalten: {calculated_hash}")

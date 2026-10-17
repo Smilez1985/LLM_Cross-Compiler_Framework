@@ -1425,6 +1425,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   importiert, deshalb laden `orchestrator/utils/ssh_trust.py` und alles, was es importiert, keine SSH-Bibliothek, und
   das Deployment und der Builder-Tab fragen mit einem echten Import, ob SSH geht (eine kaputte Installation galt dort
   als vorhanden und bei der Anmeldung als fehlend).
+- **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des
+  Maintainers: zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9
+  Schleifen) laufen über das Modul der ältesten, `orchestrator/utils/helpers.py` (wo `calculate_file_checksum` war),
+  das eine Hash-Schleife bekommen hat, mit optionalen Callbacks für Abbruch und Fortschritt, dem Hashen eines offenen
+  Handles oder seiner ersten Bytes (die Prüfung beim Fortsetzen des Deploys), Kopieren beim Hashen (der
+  Kalibrierdatensatz eines Rezepts, gespeicherte Artefakte, die Modellkopie der Benchmark-Sandbox), einem Vergleich in
+  konstanter Zeit ohne Groß- und Kleinschreibung, einem Hash-Cache mit Lock (der des Benchmark-Tools hatte keinen),
+  dem Schreiber für `SHA256SUMS` und der `.sha256`-Begleitdatei. Jeder alte Name bleibt als Delegate mit seinem
+  Fehlerverhalten (ein Fehler, None oder ein leerer Text) und seiner Link-Regel; `tests/test_hashing.py` hält jeden
+  fest und lehnt eine neue Hash-Schleife neben der einen Implementierung ab. Die Texte und Prüfungen des
+  Disk-Watchdogs sind von der Build-Engine nach `orchestrator/Core/disk_plan.py` gezogen (`low_disk_text`,
+  `disk_full_text`, `is_disk_full`, `low_disk_floor`, `free_space`, `nearest_existing` und `DiskWatchdog`, das der
+  Container-Watchdog und der Staging-Wächter jetzt sind); die Build-Engine behält ihre alten Methodennamen als
+  Delegates, die Texte bleiben gleich und behalten "No space left on device", worauf das Self-Healing-Muster (jetzt
+  aus denselben Phrasen gebaut) passt. Die Spielräume bleiben gleich.
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:

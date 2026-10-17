@@ -8,8 +8,6 @@ matched the pin. get_bytes reads a small file that is verified another way (the 
 size cap. Redirects away from HTTPS are refused.
 """
 
-import hashlib
-import hmac
 import os
 import re
 import shutil
@@ -19,6 +17,9 @@ from typing import Any, Callable, Optional
 
 import psutil
 import requests
+
+from orchestrator.utils.helpers import digest_matches
+from orchestrator.utils.helpers import sha256_file  # download.sha256_file: community zoo, Hugging Face
 
 MIB = 1024 ** 2
 ProgressFn = Callable[[str, int, Optional[int]], None]
@@ -38,14 +39,6 @@ class DownloadStopped(DownloadError):
 
 class _Retry(Exception):
     """A transient problem; the download is resumed."""
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(1 << 20):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _gib(size: float) -> str:
@@ -141,7 +134,7 @@ class PinnedDownloader:
         dest.parent.mkdir(parents=True, exist_ok=True)
         with self.lock_class(dest.with_name(f".{dest.name}.lock"), sleep=self._sleep):
             if dest.is_file():
-                if dest.stat().st_size == size and hmac.compare_digest(sha256_file(dest), sha256.lower()):
+                if dest.stat().st_size == size and digest_matches(sha256_file(dest), sha256):
                     return dest  # complete and verified by an earlier, interrupted run
                 dest.unlink()
             part = dest.with_name(dest.name + ".part")
@@ -220,7 +213,7 @@ class PinnedDownloader:
     def verify(self, path: Path, size: int, sha256: str, name: str) -> None:
         actual_size = path.stat().st_size
         digest = sha256_file(path)
-        if actual_size != size or not hmac.compare_digest(digest, sha256.lower()):
+        if actual_size != size or not digest_matches(digest, sha256):
             path.unlink(missing_ok=True)
             raise self.integrity_error(f"{name} does not match its pin (expected {size} bytes, sha256 {sha256}; got "
                                        f"{actual_size} bytes, {digest}). The file was deleted and will not be used.")

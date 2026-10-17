@@ -31,7 +31,6 @@ This module reads the folder only; it never opens the knowledge base itself (no 
 `snapshot_space` asks the knowledge base its caller already opened.
 """
 
-import hashlib
 import os
 import shutil
 import time
@@ -40,6 +39,7 @@ from pathlib import Path
 from typing import Any, Iterable, List, Optional, Tuple
 
 from orchestrator.rag.errors import KnowledgeBaseError
+from orchestrator.utils.helpers import sha256_file as _sha256
 from orchestrator.utils.next_steps import WithSteps
 
 FOLDER = "knowledge_snapshots"
@@ -350,14 +350,6 @@ class ExportedSnapshot:
     sha256: str = ""
     ok: bool = False
     problem: str = ""
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _copy_checked(source: Path, target: Path, original: str) -> str:

@@ -570,6 +570,15 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   and run by hand; `orchestrator/runtime/hardware_probe.py` is its byte-identical copy inside the package. Edit the
   script, then copy it (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`); a test fails while
   the two differ.
+- **One file hash, one disk watchdog.** Every sha256 of a file goes through `orchestrator/utils/helpers.py`, where
+  the first one (`calculate_file_checksum`) was: `sha256_file` (optional cancel and progress callbacks, links refused
+  on request), `try_sha256_file` (None for a link, a folder or an unreadable file), `sha256_fileobj` (an open handle,
+  or its first N bytes for a resume), `sha256_fd`, `copy_hashed` (copies exactly the bytes it hashes, never through a
+  link), `hash_stream`, `digest_matches` (constant-time, case-insensitive), `HashCache`, `write_sha256sums` and the
+  `.sha256` sidecar. Old names elsewhere are delegates; `tests/test_hashing.py` fails on a new hash loop beside it.
+  A disk watchdog, a low-disk text or a disk-full text comes from `orchestrator/Core/disk_plan.py`
+  (`low_disk_text`, `disk_full_text`, `is_disk_full`, `DiskWatchdog`, `free_space`, `nearest_existing`); such a text
+  names folders by label and keeps `DISK_FULL_PHRASE`, which the self-healing heuristic matches.
 - **Every CLI action has a mouse path.** Many people never use a terminal, so a person can start every command and
   option of `llm-cli` in the GUI as well, without typing a command (typing a value into a field is fine). A new
   command or option needs its mouse path, a menu entry, a button or a field that calls the same core function as the

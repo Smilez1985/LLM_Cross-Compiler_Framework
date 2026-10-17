@@ -16,7 +16,6 @@ import re
 import shlex
 import time
 import subprocess
-import hashlib
 import shutil
 import tempfile
 import json
@@ -32,6 +31,8 @@ from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_st
 from orchestrator.remote.address import USER_PATTERN, valid_host, valid_user
 from orchestrator.remote.text import LINE_CHARS, OUTPUT_LINES, keep_tail
 from orchestrator.utils import ssh_trust
+from orchestrator.utils.helpers import sha256_fileobj, write_sha256sums
+from orchestrator.utils.helpers import sha256_file  # deployment_manager.sha256_file, a public name
 from orchestrator.utils.next_steps import WithSteps
 
 # A local image name: a package takes it only once it was built on this computer (image_problem); no framework image
@@ -148,14 +149,6 @@ def image_problem(image: str, client: Any) -> Optional[str]:
                 return None
     return (f"the image {image} is neither pinned by its digest nor built on this computer; packages take only "
             "image@sha256:<digest> references or images built here")
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _primary_name(info: Dict[str, Any]) -> Optional[str]:
@@ -472,16 +465,15 @@ class DeploymentManager:
 
     def _generate_checksums(self, directory: Path, output_file: Path):
         # LF line endings: sha256sum < coreutils 9.0 (Debian 11, Ubuntu 22.04, Git for Windows) treats CR as part of the name.
-        with open(output_file, "w", newline="\n", encoding="utf-8") as f:
+        # POSIX separators: the file is verified with sha256sum on the Linux target, also when built on Windows. Both
+        # come from write_sha256sums; the checksum file itself (created first, in the same folder) is left out.
+        def entries():
             for root, _, files in os.walk(directory):
                 for file in files:
                     p = Path(root) / file
                     if p.name == output_file.name: continue
-                    sha = hashlib.sha256()
-                    with open(p, "rb") as f_in:
-                        for chunk in iter(lambda: f_in.read(4096), b""): sha.update(chunk)
-                    # POSIX separators: the file is verified with sha256sum on the Linux target, also when built on Windows.
-                    f.write(f"{sha.hexdigest()}  {p.relative_to(directory).as_posix()}\n")
+                    yield sha256_file(p), p.relative_to(directory)
+        write_sha256sums(entries(), output_file)
 
     def _generate_deploy_script(self, artifact, flags, use_docker,
                                 inference_image: str = DEFAULT_INFERENCE_IMAGE,
@@ -726,17 +718,15 @@ class DeploymentManager:
         # The package is opened once: the bytes hashed are the bytes uploaded, and a changed package is refused before
         # anything reaches the device.
         with open(artifact, "rb") as fh:
-            h = hashlib.sha256()
-            for chunk in iter(lambda: fh.read(1 << 20), b""):
-                h.update(chunk)
-            if expect_sha256 and h.hexdigest() != expect_sha256:
+            digest = sha256_fileobj(fh)
+            if expect_sha256 and digest != expect_sha256:
                 return DeployResult(False, reason=f"The package {artifact.name} changed after it was shown (its "
                                                   "sha256 differs); nothing was deployed.")
             size = fh.tell()
             fh.seek(0)
             session = _BoardSession(self, ip, user, pw, port, expect_fingerprint, on_client, stop, wait_seconds,
                                     on_event)
-            return session.deploy(fh, artifact.name, size, h.hexdigest(), pair)
+            return session.deploy(fh, artifact.name, size, digest, pair)
 
     def _deploy_system(self, artifact: Path, ip: str, user: str, port: int = 22,
                        expect_sha256: Optional[str] = None, stop: Callable[[], bool] = lambda: False) -> DeployResult:
@@ -1028,16 +1018,9 @@ class _BoardSession:
         if offset <= 0 or offset > size:
             return 0
         status, out, _err = DeploymentManager._run(self.ssh, f"head -c {offset} {shlex.quote(part)} | sha256sum")
-        h = hashlib.sha256()
         fh.seek(0)
-        left = offset
-        while left:
-            chunk = fh.read(min(UPLOAD_CHUNK, left))
-            if not chunk:
-                break
-            h.update(chunk)
-            left -= len(chunk)
-        if status != 0 or out.split()[:1] != [h.hexdigest()]:
+        prefix = sha256_fileobj(fh, limit=offset, chunk=UPLOAD_CHUNK)  # the first `offset` bytes of the package
+        if status != 0 or out.split()[:1] != [prefix]:
             self.logger.warning("What arrived on the board does not match the package; the upload starts again.")
             return 0
         self.on_event(DeployEvent("back", done=offset, total=size))

@@ -35,6 +35,7 @@ from orchestrator.tools.output import ToolOutput, count, fact
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
 from orchestrator.tools.spec import CallFacts, Fact, FieldMeta, GrantRule, Rate, ToolLimits
+from orchestrator.utils.helpers import HashCache
 from orchestrator.utils.logging import get_logger
 
 logger = get_logger("DeployTools")
@@ -244,23 +245,11 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             return {}
         return data if isinstance(data, dict) else {}
 
-    hashes: Dict[tuple, str] = {}
-    hash_lock = threading.Lock()
+    hashes = HashCache(64)
 
     def package_sha256(path: Path) -> str:
-        """The package's sha256, cached by name, size and time (a retried question hashes a large package once)."""
-        from orchestrator.Core.deployment_manager import sha256_file
-        st = path.stat()
-        key = (path.name, st.st_size, st.st_mtime_ns)
-        with hash_lock:
-            if key in hashes:
-                return hashes[key]
-        digest = sha256_file(path)
-        with hash_lock:
-            if len(hashes) > 64:
-                hashes.clear()
-            hashes[key] = digest
-        return digest
+        """The package's sha256, cached by path, size and time (a retried question hashes a large package once)."""
+        return hashes.sha256(path)
 
     def device_record(device_id: str):
         device = devices().get(device_id)
