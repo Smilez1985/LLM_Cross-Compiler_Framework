@@ -264,7 +264,6 @@ TEXTS = {
         "boards.verify.title": "Verify the runtime on {label}",
         "boards.verify.intro": "Checks the deployed runtime on the board again as the unprivileged user (never with "
                                "sudo); with a model, also a short benchmark.",
-        "boards.verify.user": "SSH user:",
         "boards.verify.nothing": "Nothing was deployed to this board yet (Deploy runtime...).",
         "boards.verify.root": "The SSH user is root; the checks run as the unprivileged user only.",
         "boards.verify.running": "Checking on the board",
@@ -520,7 +519,6 @@ TEXTS = {
         "boards.verify.title": "Laufzeit auf {label} prüfen",
         "boards.verify.intro": "Prüft die installierte Laufzeit auf dem Board erneut als Benutzer ohne Sonderrechte "
                                "(nie mit sudo); mit einem Modell auch einen kurzen Benchmark.",
-        "boards.verify.user": "SSH-Benutzer:",
         "boards.verify.nothing": "Auf diesem Board wurde noch nichts installiert (Laufzeit installieren...).",
         "boards.verify.root": "Der SSH-Benutzer ist root; die Prüfungen laufen nur als Benutzer ohne Sonderrechte.",
         "boards.verify.running": "Prüfung auf dem Board",

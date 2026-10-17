@@ -31,7 +31,6 @@ TEXTS = {
         "deletion.yes.permanent": "Delete {n} items ({size}) for good",
         "deletion.yes.none": "Nothing ticked",
         "deletion.no": "No, keep everything",
-        "deletion.result.title": "Deleting",
         "deletion.changed": "The list changed while you read it; nothing was deleted. Open it again to see the new "
                             "list.",
         "deletion.failed": "Nothing was deleted: {reason}",
@@ -78,7 +77,6 @@ TEXTS = {
         "snapshots.export_to": "Copy the snapshots to",
         "snapshots.exported": "Copied and checked (sha256): {name} -> {path}",
         "snapshots.not_exported": "Not exported: {name}: {reason}",
-        "snapshots.export_title": "Export",
         "snapshots.export_note": "The snapshots themselves were not changed.",
         "snapshots.no_delete": "Deleting needs the framework (its trash and audit log); open this window from the "
                                "main window.",
@@ -122,7 +120,6 @@ TEXTS = {
         "deletion.yes.permanent": "{n} Einträge ({size}) endgültig löschen",
         "deletion.yes.none": "Nichts angehakt",
         "deletion.no": "Nein, alles behalten",
-        "deletion.result.title": "Löschen",
         "deletion.changed": "Die Liste hat sich geändert, während du sie gelesen hast; nichts wurde gelöscht. Öffne "
                             "sie noch einmal, um die neue Liste zu sehen.",
         "deletion.failed": "Nichts wurde gelöscht: {reason}",
@@ -168,7 +165,6 @@ TEXTS = {
         "snapshots.export_to": "Snapshots kopieren nach",
         "snapshots.exported": "Kopiert und geprüft (sha256): {name} -> {path}",
         "snapshots.not_exported": "Nicht exportiert: {name}: {reason}",
-        "snapshots.export_title": "Exportieren",
         "snapshots.export_note": "Die Snapshots selbst wurden nicht verändert.",
         "snapshots.no_delete": "Zum Löschen braucht es das Framework (seinen Papierkorb und sein Audit-Protokoll); "
                                "öffne dieses Fenster aus dem Hauptfenster.",
