@@ -73,6 +73,7 @@ PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 MAX_VALUE = 200                          # characters of one argument value
 MAX_LINE = 2000                          # characters of one streamed output line
 KEEP_LINES = 400                         # output lines a ProposalResult keeps
+OUTPUT_GRACE = 2.0                       # seconds a run still reads output after the command ended
 
 # Texts of the renderer itself (the frames around a step); the steps' own texts live in the area modules.
 TEXTS: Dict[str, Dict[str, str]] = {
@@ -166,6 +167,7 @@ class Param:
 
     - "choice": one of `choices` (a tuple, or a function that returns the allowed values, e.g. the model tiers);
     - "label": a person's name for something (1-64 printable characters, no line break, never starting with "-");
+      with `choices` (best practice: a function that returns the existing labels) it must also be one of them;
     - "id": an id the framework issued (letters, digits, ".", "_", "-"; 1-80 characters; never starting with "-");
     - "int": a whole number between `minimum` and `maximum`;
     - "secret": a password or key: never in argv, given to the command through stdin (`via` "stdin") or an
@@ -175,6 +177,9 @@ class Param:
 
     `display`: for a "choice", the prefix of the catalogue texts that name each value in the person's words
     (``<display>.<value>``), used in the step's texts instead of the raw value.
+
+    `private`: a value an AI never reads (a board's address or login account, study 6.2 D0): the AI's rendering shows
+    the placeholder's name instead. A "path" or "secret" value never reaches an AI either.
     """
     kind: str
     choices: Union[Tuple[str, ...], Callable[[], Iterable[str]], None] = None
@@ -183,6 +188,7 @@ class Param:
     via: str = "stdin"
     secret_key: str = ""          # the ui_text key that names the secret for the person ("the password")
     display: str = ""
+    private: bool = False
 
     def allowed(self) -> Tuple[str, ...]:
         if callable(self.choices):
@@ -682,11 +688,36 @@ def rendered(steps_: Any, audience: str, lang: Optional[str] = None, channel: Op
     return found
 
 
+def shown_values(step: Step, values: Optional[Mapping[str, Any]], audience: str) -> Dict[str, str]:
+    """The values of a step that `audience` may read, each checked like a proposal's value (one that does not fit its
+    parameter is left out, so its placeholder's name shows: never free text): never a secret or a value the step has
+    no parameter for; for an AI never a path or a private value (a board's address or login, D0)."""
+    shown: Dict[str, str] = {}
+    for name, value in (values or {}).items():
+        param = step.params.get(name)
+        if param is None or value is None or param.kind == "secret":
+            continue
+        if param.kind == "path" or param.private:
+            if audience == "ai":
+                continue
+            if param.kind == "path":   # a file the person chose, named to the person only
+                text = " ".join(str(value).split())
+                if text and len(text) <= 4 * MAX_VALUE and "\0" not in text:
+                    shown[name] = text
+                continue
+        try:
+            shown[name] = _check_value(step.id, name, param, value)
+        except ProposalRefused:
+            continue
+    return shown
+
+
 def _render_one(step: Step, next_step: NextStep, audience: str, lang: str, channel: Optional[str],
                 here: Optional[str]) -> Rendered:
-    label = step_text(next_step, lang) or step.id
+    values = shown_values(step, next_step.values, audience)
+    label = step_text(step.id, lang, **values) or step.id
     try:
-        command = command_line(step, next_step.values) if step.cli else ""
+        command = command_line(step, values) if step.cli else ""
     except Exception:   # noqa: BLE001 - a value that cannot be shown never breaks a message
         command = ""
     where = ""
@@ -756,7 +787,9 @@ class CommandProposal:
     the full list, "No" by default), "shown" (a board, administrator or other-program command: shown with [Copy],
     never run) or "open" (no command; [Open] shows the place). `argv`: the words after the program name; `command`:
     what the person reads; `what` and `why`: what it does and why it is needed now, in `lang`; `secrets`: the names of
-    the values asked in a masked field (passed through stdin or the environment, never on the command line)."""
+    the values asked in a masked field (passed through stdin or the environment, never on the command line); `reason`:
+    the name of the step's alternative reason `why` came from ("" for its default one). run_proposal builds the
+    proposal again from the catalogue and runs it only when every field is the same: what runs is what was shown."""
     step_id: str
     kind: str
     argv: Tuple[str, ...]
@@ -768,6 +801,7 @@ class CommandProposal:
     secrets: Tuple[str, ...] = ()
     target: Optional[str] = None
     copy: str = ""
+    reason: str = ""
 
     def question(self) -> str:
         """The person's question: "Allow `<command>`? <what it does>. <why>." in the proposal's language (or why it
@@ -796,25 +830,39 @@ def _secret_name(param: Param, lang: str) -> str:
     return own_text("steps.secret", lang)
 
 
-def validate(step: Union[Step, str], values: Optional[Mapping[str, Any]] = None) -> Dict[str, str]:
-    """The values of `step`'s template, checked: exactly its placeholders (secrets excluded), each of its kind and
-    allowed range, one line, never starting with "-" (no option can be smuggled in), no NUL. ProposalRefused when
-    one does not fit. Returns the values as text."""
+def checked_values(step: Union[Step, str], values: Optional[Mapping[str, Any]] = None) -> Dict[str, str]:
+    """Every given value of `step` checked by its parameter's kind (the closed values of a proposal of any kind: a
+    choice, a label, an id, a number). ProposalRefused for a value the step has no parameter for, a secret (asked in
+    the hidden field only, never a value), a path (chosen by the person in the window's own dialog) or a value that
+    does not fit. A None value counts as not given. Returns the values as text."""
     step = get(step) if isinstance(step, str) else step
-    values = dict(values or {})
-    wanted = [name for name in step.placeholders() if not (name in step.params and step.params[name].kind == "secret")]
-    unknown = sorted(set(values) - set(wanted) - set(step.params))
-    if unknown:
-        raise ProposalRefused(f"{step.id}: no value {', '.join(unknown)} in its template")
     checked: Dict[str, str] = {}
-    for name in wanted:
+    for name, value in dict(values or {}).items():
+        if value is None:
+            continue
         param = step.params.get(name)
         if param is None:
-            raise ProposalRefused(f"{step.id}: {{{name}}} has no parameter description")
-        if name not in values or values[name] is None:
-            raise ProposalRefused(f"{step.id}: the value {name} is missing")
-        checked[name] = _check_value(step.id, name, param, values[name])
+            raise ProposalRefused(f"{step.id}: it has no value {name}")
+        if param.kind == "secret":
+            raise ProposalRefused(f"{step.id}: {name} is asked in a hidden field, never given as a value")
+        checked[name] = _check_value(step.id, name, param, value)
     return checked
+
+
+def validate(step: Union[Step, str], values: Optional[Mapping[str, Any]] = None) -> Dict[str, str]:
+    """The values of `step`'s template, checked: exactly its placeholders (secrets excluded), each of its kind and
+    allowed range, one line, never starting with "-" (no option can be smuggled in), no NUL; any other value given
+    is checked the same way (checked_values). ProposalRefused when one does not fit. Returns the template's values
+    as text."""
+    step = get(step) if isinstance(step, str) else step
+    checked = checked_values(step, values)
+    wanted = [name for name in step.placeholders() if not (name in step.params and step.params[name].kind == "secret")]
+    for name in wanted:
+        if name not in step.params:
+            raise ProposalRefused(f"{step.id}: {{{name}}} has no parameter description")
+        if name not in checked:
+            raise ProposalRefused(f"{step.id}: the value {name} is missing")
+    return {name: checked[name] for name in wanted}
 
 
 def _check_value(step_id: str, name: str, param: Param, value: Any) -> str:
@@ -832,6 +880,8 @@ def _check_value(step_id: str, name: str, param: Param, value: Any) -> str:
         collapsed = " ".join(text.split())
         if not (1 <= len(collapsed) <= 64 and collapsed.isprintable()):
             raise ProposalRefused(f"{step_id}: {name} must have 1 to 64 printable characters")
+        if param.choices is not None and collapsed not in param.allowed():
+            raise ProposalRefused(f"{step_id}: {name} names nothing that exists")
         text = collapsed
     elif param.kind == "id":
         if not _ID_RE.match(text):
@@ -859,7 +909,8 @@ def _argv(step: Step, values: Mapping[str, str]) -> Tuple[str, ...]:
 def proposal(step: Union[Step, NextStep, str], values: Optional[Mapping[str, Any]] = None,
              lang: Optional[str] = None, reason: str = "") -> CommandProposal:
     """The command proposal of a catalogue step (see CommandProposal). A NextStep brings its values and reason.
-    ProposalRefused for an unknown step or a value outside the template."""
+    Every value is a closed one, for every kind of proposal (checked_values: never free text, a secret or a path in
+    what the person reads). ProposalRefused for an unknown step or a value that does not fit."""
     if isinstance(step, NextStep):
         values = {**step.values, **(values or {})}
         reason = reason or step.reason
@@ -870,7 +921,7 @@ def proposal(step: Union[Step, NextStep, str], values: Optional[Mapping[str, Any
         except KeyError as e:
             raise ProposalRefused(str(e)) from None
     lang = _lang(lang)
-    shown = {k: v for k, v in (values or {}).items() if not (k in step.params and step.params[k].kind == "secret")}
+    shown = checked_values(step, values)
     what = step_text(step.id, lang, "what", **shown) or step_text(step.id, lang, **shown)
     why = ""
     if reason:
@@ -883,16 +934,18 @@ def proposal(step: Union[Step, NextStep, str], values: Optional[Mapping[str, Any
     secrets = tuple(name for name, param in step.params.items() if param.kind == "secret")
     if step.shown_only:
         return CommandProposal(step.id, "shown", (), step.literal, what, why, lang, copy=step.literal,
-                               target=step.target)
+                               target=step.target, reason=reason)
     if step.deletes:
         command = command_line(step, shown) if step.cli else ""
-        return CommandProposal(step.id, "deletion", (), command, what, why, lang, target=step.target)
+        return CommandProposal(step.id, "deletion", (), command, what, why, lang, values=shown, target=step.target,
+                               reason=reason)
     if not (step.runnable and step.cli):
-        return CommandProposal(step.id, "open", (), "", what, why, lang, target=None if step.planned else step.target)
+        return CommandProposal(step.id, "open", (), "", what, why, lang, values=shown,
+                               target=None if step.planned else step.target, reason=reason)
     checked = validate(step, shown)
     argv = _argv(step, checked)
-    return CommandProposal(step.id, "run", argv, command_line(step, checked), what, why, lang, values=checked,
-                           secrets=secrets, target=step.target)
+    return CommandProposal(step.id, "run", argv, command_line(step, checked), what, why, lang, values=shown,
+                           secrets=secrets, target=step.target, reason=reason)
 
 
 @dataclass(frozen=True)
@@ -944,15 +997,21 @@ def run_proposal(prop: CommandProposal, on_line: Optional[Callable[[str], Any]] 
                  python: Optional[str] = None, env: Optional[Mapping[str, str]] = None) -> ProposalResult:
     """Runs exactly the proposal's command (after the person's yes) as a child process of the framework's own
     interpreter (the same code path as the CLI) and streams each output line (redacted, control characters removed)
-    to `on_line` in the calling thread. Only a "run" proposal runs; its argv is built again from the catalogue and
-    must match (a changed proposal is refused). `secrets`: the masked values by name (stdin or the environment, never
-    argv). `cancel`: stops the command; `timeout`: seconds before it is stopped. Never raises for the command's own
-    failure: the result says what happened."""
+    to `on_line` in the calling thread. Only a "run" proposal runs; it is built again from the catalogue and every
+    field must match (argv, the command text, what and why the person read, the secrets): a changed proposal is
+    refused, so what runs is what was shown. `secrets`: the masked values by name (stdin or the environment, never
+    argv). `cancel`: stops the command; `timeout`: seconds before it is stopped. The run ends when the command ends
+    (a process it left behind with the output still open is not waited for longer than OUTPUT_GRACE). Never raises
+    for the command's own failure: the result says what happened. The lines are for the person (they may name this
+    computer's folders): never hand them to an AI unfiltered."""
     lang = prop.lang or "en"
     if prop.kind != "run":
         raise ProposalRefused(f"{prop.step_id}: a {prop.kind} proposal is not run by the framework")
-    again = proposal(prop.step_id, prop.values, lang)
-    if again.argv != prop.argv or again.kind != "run":
+    try:
+        again = proposal(prop.step_id, prop.values, lang, prop.reason)
+    except ProposalRefused:
+        raise ProposalRefused(f"{prop.step_id}: the proposal does not match the catalogue") from None
+    if again != prop:
         raise ProposalRefused(f"{prop.step_id}: the proposal does not match the catalogue")
     step = get(prop.step_id)
     secrets = dict(secrets or {})
@@ -1003,6 +1062,7 @@ def run_proposal(prop: CommandProposal, on_line: Optional[Callable[[str], Any]] 
     began = time.monotonic()
     state = ""
     done_reading = False
+    ended: Optional[float] = None
     while not done_reading:
         try:
             raw = lines.get(timeout=0.1)
@@ -1025,8 +1085,15 @@ def run_proposal(prop: CommandProposal, on_line: Optional[Callable[[str], Any]] 
             state = "timeout"
         if state and proc.poll() is None:
             _stop(proc)
+        if not done_reading and proc.poll() is not None:
+            # The command ended; a process it started may still hold the output open (a server it left running):
+            # read what is still coming for a short grace, then stop waiting for it.
+            ended = ended if ended is not None else time.monotonic()
+            if time.monotonic() - ended > OUTPUT_GRACE:
+                break
     code = proc.wait()
-    reader.join(timeout=5)
+    if done_reading:
+        reader.join(timeout=5)
     if state == "cancelled":
         return ProposalResult("cancelled", None, tuple(kept), own_text("steps.result.cancelled", lang))
     if state == "timeout":
@@ -1158,6 +1225,9 @@ def catalogue_problems(known_tools: Optional[Iterable[str]] = None, cli_paths: O
             problems.append(f"{where}: a {step.person_only} step is never run")
         if step.deletes and step.runnable:
             problems.append(f"{where}: a deletion is never run blind (the deletion dialog lists it)")
+        if step.person_only == "licence" and step.runnable:
+            problems.append(f"{where}: a licence step is never run from a one-line question (the person reads the "
+                            "licence in its window)")
         if step.runnable and not step.cli:
             problems.append(f"{where}: runnable without a command")
         if step.url and not step.url.startswith("https://"):
@@ -1210,6 +1280,7 @@ def _text_belongs(key: str, steps_: Mapping[str, Step]) -> bool:
 __all__ = ["AUDIENCES", "CHANNELS", "CommandProposal", "ErrorReport", "GUI_CHANNELS", "Line", "NextStep",
            "PERSON_ONLY", "PROGRAM", "Param", "ProposalRefused", "ProposalResult", "Rendered", "SHOWN_ONLY", "Step",
            "WithSteps", "as_next_steps", "audit_proposal", "button_label", "catalogue", "catalogue_problems",
-           "child_argv", "clean_label", "command_line", "error_report", "fill_paths", "framework_python", "get",
-           "label_chain", "menu_layout", "mouse_labels", "mouse_path", "own_text", "proposal", "render", "rendered",
-           "run_proposal", "step_text", "steps", "steps_of", "validate", "window_of"]
+           "checked_values", "child_argv", "clean_label", "command_line", "error_report", "fill_paths",
+           "framework_python", "get", "label_chain", "menu_layout", "mouse_labels", "mouse_path", "own_text",
+           "proposal", "render", "rendered", "run_proposal", "shown_values", "step_text", "steps", "steps_of",
+           "validate", "window_of"]

@@ -74,13 +74,13 @@ TEXTS = {
         "main.menu.file": "&Datei",
         "main.menu.build": "&Build",
         "main.menu.boards": "B&oards",
-        "main.menu.ditto": "&Ditto",
+        "main.menu.ditto": "D&itto",   # Alt+D is Datei
         "main.menu.ditto_advanced": "&Erweitert",
         "main.menu.security": "&Sicherheit",
         "main.menu.view": "&Ansicht",
         "main.menu.tools": "E&xtras",
         "main.menu.tools_knowledge": "&Wissen",
-        "main.menu.tools_maintenance": "&Wartung",
+        "main.menu.tools_maintenance": "Wa&rtung",   # Alt+W is Wissen
         "main.menu.help": "&Hilfe",
         "main.file.trash": "Papierkorb...",
         "main.file.output_folder": "Ausgabeordner...",

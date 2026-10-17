@@ -29,8 +29,9 @@ STEPS = (
     Step("audit.archive", cli="tools audit --archive", cli_args=("--archive",), person_only="audit",
          target="btn_audit_archive"),
     Step("audit.show", cli="tools audit", person_only="audit", target="act_tools_mcp_audit", runnable=True),
+    # not runnable: `tools approvals` needs a terminal (an approval is the person's own, never a piped answer)
     Step("approvals.list", cli="tools approvals list", person_only="permission", window="approvals",
-         target="act_tools_approvals", runnable=True),
+         target="act_tools_approvals"),
     Step("folders.add", cli="tools folders add", cli_args=("{folder}", "--label", "{label}"),
          params={"folder": Param("path"), "label": Param("label")}, person_only="permission",
          target="btn_ai_folders_add"),

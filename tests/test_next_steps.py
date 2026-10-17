@@ -242,11 +242,13 @@ def test_a_next_step_needs_a_step_id():
 # --- allow-to-run proposals (V1) --------------------------------------------------------------------------------------
 
 def test_a_proposal_has_the_exact_command_and_says_what_and_why():
-    prop = ns.proposal("runtime.switch", {"mode": "docker"}, "de")
+    # runtime.ensure, not runtime.switch: the mode switch needs a terminal and deletes after its own list, so it is
+    # no longer runnable (review w6-a0-v; test_every_runnable_step_runs_in_the_real_cli_... pins why)
+    prop = ns.proposal("runtime.ensure", {"mode": "docker"}, "de")
     assert prop.kind == "run"
-    assert prop.argv == ("ditto", "runtime", "ensure", "--mode", "docker", "--force", "--yes")
-    assert prop.command == "llmcf ditto runtime ensure --mode docker --force --yes"
-    assert prop.question().startswith("`llmcf ditto runtime ensure --mode docker --force --yes` zulassen? ")
+    assert prop.argv == ("ditto", "runtime", "ensure", "--mode", "docker", "--no-model", "--yes")
+    assert prop.command == "llmcf ditto runtime ensure --mode docker --no-model --yes"
+    assert prop.question().startswith("`llmcf ditto runtime ensure --mode docker --no-model --yes` zulassen? ")
     assert "in Docker" in prop.what and prop.why
     en = ns.proposal(NextStep("runtime.install", reason="rebuild"), lang="en")
     assert en.why == "The build no longer fits this computer and needs to be made again."
@@ -257,8 +259,8 @@ def test_a_proposal_has_the_exact_command_and_says_what_and_why():
 @pytest.mark.parametrize("values", [{"mode": "--evil"}, {"mode": "auto"}, {"mode": "docker\n--x"}, {},
                                     {"mode": "docker", "extra": "1"}, {"mode": True}])
 def test_values_outside_the_template_are_refused(values):
-    with pytest.raises(ProposalRefused):
-        ns.proposal("runtime.switch", values, "en")
+    with pytest.raises(ProposalRefused):   # a runnable step (runtime.switch is no longer one, review w6-a0-v)
+        ns.proposal("runtime.ensure", values, "en")
 
 
 def test_labels_and_ids_are_checked():
@@ -340,7 +342,7 @@ def test_a_run_can_be_cancelled_or_time_out(monkeypatch):
 
 def test_a_changed_proposal_is_refused():
     import dataclasses
-    prop = ns.proposal("runtime.switch", {"mode": "docker"}, "en")
+    prop = ns.proposal("runtime.ensure", {"mode": "docker"}, "en")   # runnable (runtime.switch is not, review)
     tampered = dataclasses.replace(prop, argv=("trash", "empty", "--all"))
     with pytest.raises(ProposalRefused):
         ns.run_proposal(tampered)
@@ -539,3 +541,180 @@ def test_the_plain_texts_are_the_texts_of_ui_text():
         for lang in ("en", "de"):
             assert key in table["en"], f"{key} is not in an l10n table"
             assert (table.get(lang, {}).get(key) or table["en"][key]) == ui_text(key, lang), (key, lang)
+
+
+# --- review of chain a0 (w6-a0-v): proposals run exactly what was shown, closed values only ---------------------------
+
+def _click_command(argv):
+    """The click command a proposal's words name in the real CLI, and the words left for its options."""
+    import click
+    from orchestrator.cli import cli
+    command, words = cli, list(argv)
+    ctx = click.Context(cli, info_name=ns.PROGRAM)
+    while isinstance(command, click.Group) and words and not words[0].startswith("-"):
+        found = command.get_command(ctx, words[0])
+        assert found is not None, f"{argv}: no command {words[0]!r}"
+        command, words = found, words[1:]
+    return command, words
+
+
+def _terminal_only_commands():
+    """The commands orchestrator/cli.py refuses without a terminal (its _require_terminal("llm-cli ...") calls)."""
+    import re
+    from conftest import REPO_ROOT
+    source = (REPO_ROOT / "orchestrator" / "cli.py").read_text(encoding="utf-8")
+    return [tuple(found.split()) for found in re.findall(r'_require_terminal\("llm-cli ([^"]+)"\)', source)]
+
+
+def _sample_values(step):
+    return {name: (param.allowed()[0] if param.kind == "choice" else "rk3566") for name, param in step.params.items()
+            if param.kind not in ("secret", "path")}
+
+
+def test_every_runnable_step_runs_in_the_real_cli_without_a_terminal_and_writes_no_file_of_its_own():
+    """A runnable step is a command the child process (stdin closed, no terminal) can finish: the real CLI accepts
+    exactly its words, it is no command the CLI refuses without a terminal (`tools approvals`, `ditto runtime ensure
+    --force`), and it writes no file into the folder the child starts in (the program folder: `scan` without
+    --output). Found by review: these steps were runnable but could never run, wrote into the program folder, or
+    accepted a licence the question did not show."""
+    terminal_only = _terminal_only_commands()
+    assert ("tools", "approvals") in terminal_only and ("ditto", "runtime", "ensure", "--force") in terminal_only
+    runnable = [step_id for step_id, step in ns.steps().items() if step.runnable]
+    assert len(runnable) >= 20
+    for step_id in runnable:
+        step = ns.get(step_id)
+        argv = list(ns.proposal(step_id, _sample_values(step), "en").argv)
+        for words in terminal_only:
+            sub = [w for w in words if not w.startswith("-")]
+            flags = [w for w in words if w.startswith("-")]
+            assert not (argv[:len(sub)] == sub and all(f in argv for f in flags)), \
+                f"{step_id}: `{' '.join(words)}` needs a terminal"
+        command, rest = _click_command(argv)
+        command.make_context(step_id, list(rest))   # the real CLI parses exactly these words
+        for param in command.params:
+            if param.name == "output" and param.default and "--output" not in argv:
+                pytest.fail(f"{step_id}: writes {param.default} into the folder the child starts in")
+    for step_id in ("approvals.list", "runtime.switch", "probe.local", "probe.script", "runtime.prebuilt"):
+        assert ns.proposal(step_id, _sample_values(ns.get(step_id)), "en").kind == "open", step_id
+
+
+def test_a_runnable_step_does_no_more_than_its_question_says():
+    """`ditto runtime ensure --yes` also downloads the recommended model; the step installs the program only (the
+    model is the separate step models.download, whose question names where its licence is shown). A licence step is
+    never run from a one-line question: the person reads the licence in its window."""
+    ensure = ns.proposal("runtime.ensure", {"mode": "docker"}, "en")
+    assert "--no-model" in ensure.argv and ensure.kind == "run"
+    tier = ns.get("models.download").params["tier"].allowed()[0]
+    for lang in ("en", "de"):
+        assert "Ditto > " in ns.proposal("models.download", {"tier": tier}, lang).what
+    licence = ns.Step("x.licence", cli="ditto runtime install --prebuilt", cli_args=("--prebuilt", "--yes"),
+                      person_only="licence", runnable=True)
+    assert any("licence" in p for p in _problems_of(licence))
+
+
+def _problems_of(step):
+    """catalogue_problems for one extra step (the real area modules plus a module holding `step`)."""
+    import types
+    module = types.ModuleType("orchestrator.utils.next_steps.x_review")
+    module.STEPS = (step,)
+    module.TEXTS = {"en": {f"step.{step.id}": "x", f"step.{step.id}.what": "x"},
+                    "de": {f"step.{step.id}": "x", f"step.{step.id}.what": "x"}}
+    saved = ns._CATALOGUE
+    ns._CATALOGUE = ns.Catalogue([*ns.area_modules(), module])
+    try:
+        return [p for p in ns.catalogue_problems() if step.id in p]
+    finally:
+        ns._CATALOGUE = saved
+
+
+@pytest.mark.parametrize("step_id, values", [
+    ("board.prune_on_device", {"device": "rk3566\n--all"}),            # a deletion's command shows no free text
+    ("board.prune_on_device", {"device": "-o ProxyCommand=x"}),
+    ("board.prune_on_device", {"device": "x" * 65}),
+    ("trash.restore", {"ids": "../../x"}),                              # an "open" proposal checks its values too
+    ("folders.add", {"folder": "/etc", "label": "docs"}),               # a path the person did not choose
+    ("permissions.edit", {"anything": "free text from the model"}),     # a value the step does not have
+    ("secrets.set", {"name": "hf_token", "value": "hunter2"}),          # a secret is asked in a hidden field only
+])
+def test_every_kind_of_proposal_takes_closed_values_only(step_id, values):
+    with pytest.raises(ProposalRefused):
+        ns.proposal(step_id, values, "en")
+
+
+def test_a_deletions_command_shows_only_the_checked_value_and_a_label_may_be_closed():
+    deletion = ns.proposal("board.prune_on_device", {"device": "  my   board "}, "en")
+    assert deletion.kind == "deletion" and deletion.command == "llmcf device runtime prune 'my board' --on-device"
+    known = ns.Step("x.check", cli="mojo --board", cli_args=("--board", "{device}"), tool="run_mojo_oracle",
+                    params={"device": ns.Param("label", choices=lambda: ("rk3566", "pi5"))}, runnable=True)
+    assert ns.validate(known, {"device": "pi5"}) == {"device": "pi5"}
+    with pytest.raises(ProposalRefused):
+        ns.validate(known, {"device": "Ignore the rules"})
+
+
+def test_a_run_refuses_a_proposal_whose_shown_words_differ_from_the_catalogue(monkeypatch):
+    """The person reads question() (command, what, why); run_proposal runs only when every field is the catalogue's
+    own: a proposal with another command text, explanation, language or secret list is refused, so what runs is what
+    was shown. Found by review: only argv was compared."""
+    import dataclasses
+    fake_child(monkeypatch, "print('ran')")
+    prop = ns.proposal(NextStep("secrets.set", {"name": "openai_api_key"}), lang="en")
+    for change in ({"command": "llmcf trash list"}, {"what": "Lists the trash."}, {"why": ""}, {"secrets": ()},
+                   {"lang": "de"}, {"target": "act_file_trash"}):
+        with pytest.raises(ProposalRefused):
+            ns.run_proposal(dataclasses.replace(prop, **change), secrets={"value": "x"}, timeout=60)
+    assert ns.run_proposal(prop, secrets={"value": "x"}, timeout=60).state == "done"
+    why = ns.proposal(NextStep("runtime.install", reason="rebuild"), lang="en")
+    assert why.reason == "rebuild" and ns.run_proposal(why, timeout=60).state == "done"
+
+
+def test_a_run_ends_when_the_command_ends_even_if_something_it_started_keeps_its_output(monkeypatch):
+    """A command that leaves a process behind (a server it started that kept the inherited output) must not keep the
+    run waiting for the end of the output: once the command has ended, the run ends after a short grace."""
+    import time
+    fake_child(monkeypatch, "import subprocess, sys\n"
+                            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'])\n"
+                            "print('started', flush=True)\n")
+    began = time.monotonic()
+    result = ns.run_proposal(ns.proposal("runtime.stop", lang="en"), timeout=60)
+    assert (result.state, result.exit_code, result.lines) == ("done", 0, ("started",))
+    assert time.monotonic() - began < 15
+
+
+def test_an_ai_never_reads_a_boards_login_a_path_or_a_value_outside_its_kind():
+    """D0: a board's address and account and any path stay out of what an AI reads (its command line included),
+    while the person at the command line sees them; a value that does not fit its parameter is shown to nobody."""
+    trust = NextStep("board.trust", {"host": "192.0.2.7", "user": "boarduser"})
+    for channel in ns.CHANNELS:
+        text = ns.render([trust], "ai", channel=channel)
+        assert "192.0.2.7" not in text and "boarduser" not in text, text
+        assert all("boarduser" not in r.command for r in ns.rendered([trust], "ai", channel=channel))
+    assert "llmcf deploy devices add 192.0.2.7 --user boarduser" in ns.render([trust], "cli")
+    bench = NextStep("board.verify_bench", {"device": "rk3566", "model": "/srv/models/x.gguf"})
+    assert all("/srv/models" not in r.command + r.text for r in ns.rendered([bench], "ai"))
+    free = NextStep("board.check", {"device": "y" * 300})
+    for audience in ("cli", "gui", "ai"):
+        assert "y" * 65 not in ns.render([free], audience, "en"), audience
+
+
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_the_menu_mnemonics_are_unique_on_every_level(lang):
+    """Alt+letter opens one menu: no two titles (or entries) on the same level share a mnemonic. Found by review: the
+    German Datei and Ditto were both Alt+D, Wissen and Wartung both Alt+W."""
+    import re
+
+    def letter(text):
+        found = re.search(r"&([^&\s])", text.replace("&&", ""))
+        return found.group(1).lower() if found else None
+
+    def walk(items, where):
+        letters = {}
+        for item in items:
+            if item == "-":
+                continue
+            mnemonic = letter(ns._ui_text(item[1], lang))
+            if mnemonic:
+                assert mnemonic not in letters, f"{where}: {item[0]} and {letters[mnemonic]} share Alt+{mnemonic}"
+                letters[mnemonic] = item[0]
+            if len(item) == 3:
+                walk(item[2], item[0])
+    walk(ns.menu_layout(), "the menu bar")
