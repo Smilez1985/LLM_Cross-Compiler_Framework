@@ -538,15 +538,16 @@ from orchestrator.tools.registry import ToolContext, ToolError
 error = ToolError("Refused.", next="Ask the person.", steps=["permissions.edit", "approvals.list"])
 error.fill_steps(None)
 print(ns.mouse_path("btn_ditto_runtime_build", "de"))
-print(sorted(m for m in sys.modules if m.startswith("PySide6") or m == ns.LOCALIZATION))
+print(sorted(m for m in sys.modules if m.startswith("PySide6")))
 """
 
 
 def test_the_catalogue_renders_without_qt_in_a_process_without_the_window():
-    """A tool call of the MCP server renders its next steps in a worker thread. The catalogue must not import
-    orchestrator.utils.localization (and with it PySide6) there: the first PySide6 import in a worker thread made Qt
-    take that thread for the main thread, and a window made later in the same process crashed when it closed. Without
-    the window the texts come from the l10n tables, in the same words."""
+    """A tool call of the MCP server renders its next steps in a worker thread. The catalogue must not import PySide6
+    there: the first PySide6 import in a worker thread made Qt take that thread for the main thread, and a window made
+    later in the same process crashed when it closed. Changed on purpose (consolidation chain qt): the catalogue now
+    reads its texts from orchestrator.utils.localization, which is Qt-free, instead of a second reader of the l10n
+    tables; PySide6 still never loads."""
     import subprocess
     from pathlib import Path
     root = Path(ns.__file__).resolve().parents[3]
@@ -559,16 +560,16 @@ def test_the_catalogue_renders_without_qt_in_a_process_without_the_window():
 
 
 def test_the_plain_texts_are_the_texts_of_ui_text():
-    """The texts read without Qt are those ui_text shows, for every label of the catalogue and every secret's name."""
-    from orchestrator.utils.localization import ui_text
-    table = ns._plain_texts()
+    """The catalogue's texts are those ui_text shows, for every label of the catalogue and every secret's name, and
+    each of them has an English text (since chain qt there is one text table and the catalogue reads it)."""
+    from orchestrator.utils.localization import TRANSLATIONS, ui_text
     keys = {key for name in ns.mouse_labels() for key in ns.label_chain(name)}
     keys |= {p.secret_key for s in ns.steps() for p in ns.get(s).params.values() if p.secret_key}
     assert keys
     for key in sorted(keys):
         for lang in ("en", "de"):
-            assert key in table["en"], f"{key} is not in an l10n table"
-            assert (table.get(lang, {}).get(key) or table["en"][key]) == ui_text(key, lang), (key, lang)
+            assert key in TRANSLATIONS["en"], f"{key} has no text"
+            assert ns._ui_text(key, lang) == ui_text(key, lang), (key, lang)
 
 
 # --- review of chain a0 (w6-a0-v): proposals run exactly what was shown, closed values only ---------------------------
@@ -777,8 +778,7 @@ def test_a_person_who_chose_sie_reads_the_steps_in_the_formal_form(sie):
 
 
 def test_without_the_window_the_steps_keep_the_du_form(sie, monkeypatch):
-    """A process without the window (llmcf, the MCP server) has no setting to read: the catalogue never imports the
-    localization module itself, so it keeps the du texts there."""
+    """A process without the window (llmcf, the MCP server) has no setting to read, so it keeps the du texts there."""
     monkeypatch.setattr(ns, "_loaded_localization", lambda: None)
     assert ns.form_of_address() == "du"
     assert ns.own_text("error.needs_person", "de") == "Das kannst nur du tun."
