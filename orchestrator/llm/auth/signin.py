@@ -18,7 +18,6 @@ import os
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Mapping, Optional
-from urllib.parse import urlsplit
 
 from orchestrator.llm.auth.errors import EXIT_AUTH, EXIT_NETWORK, EXIT_STORAGE, AuthError, auth_error
 from orchestrator.llm.auth.resolver import ResolvedCredential
@@ -28,6 +27,8 @@ from orchestrator.llm.auth.tokens import sign_out as sign_out_tokens
 from orchestrator.llm.auth.validate import ValidationResult, validate_credential
 from orchestrator.llm.errors import (AuthFailed, BadRequest, LLMError, NotConfigured, PermissionDenied,
                                      ProviderTimeout, ProviderUnavailable, rejected_key_error)
+# The address rules of every AI-settings channel (the settings dialog, sign-in, `ditto login`) live in one place.
+from orchestrator.llm.settings_change import check_base_url, plain_http_to_remote  # noqa: F401 - shared
 from orchestrator.security.redaction import SecretStr
 from orchestrator.utils.logging import get_logger
 
@@ -72,23 +73,6 @@ def exit_code(error: BaseException) -> int:
     if isinstance(error, (AuthFailed, PermissionDenied, BadRequest, NotConfigured)):
         return EXIT_AUTH
     return EXIT_AUTH
-
-
-def check_base_url(url: str) -> str:
-    """A server address typed by the user: http(s), a host, no user info, nothing a parser could read two ways.
-    The address is never part of the error (it may hold a password)."""
-    text = (url or "").strip()
-    parts = urlsplit(text)
-    if parts.scheme not in ("http", "https") or not parts.netloc or not display_origin(text):
-        raise ValueError("The server address must be a plain http:// or https:// URL with a host (no user name or "
-                         "password in it).")
-    return text
-
-
-def plain_http_to_remote(url: Optional[str]) -> bool:
-    """A key would travel unencrypted: http:// to a host that is not this computer."""
-    from orchestrator.llm.client import is_loopback_url
-    return bool(url) and urlsplit(url).scheme == "http" and not is_loopback_url(url)
 
 
 def valid_profile_name(name: str) -> bool:

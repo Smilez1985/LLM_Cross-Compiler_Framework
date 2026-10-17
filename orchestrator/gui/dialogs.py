@@ -24,11 +24,11 @@ from PySide6.QtCore import Qt, QTimer
 from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
 from orchestrator.gui.worker_relay import worker_relay
-from orchestrator.llm.auth.signin import plain_http_to_remote
-from orchestrator.llm.auth.spec import KEY_TYPES
-from orchestrator.llm.auth.store import CredentialStore, display_origin
-from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, LLMError, rejected_key_error
-from orchestrator.llm.providers.anthropic import WORKSPACE_ID, takes_workspace_id
+from orchestrator.llm.auth.store import display_origin
+from orchestrator.llm.providers.anthropic import takes_workspace_id
+# The AI settings rules (one service for the dialog, sign-in, MCP and `llmcf config set`); SettingsOverlay lived here.
+from orchestrator.llm.settings_change import (AISettingsChange, SettingsChangeError, SettingsOverlay,  # noqa: F401
+                                              direction_problem, key_method, parse_fallback, removed_message)
 from orchestrator.utils.crawl_notice import CrawlNotice, acknowledge_and_audit, notice_text
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import current_language, get_instance as get_i18n, ui_text
@@ -191,33 +191,6 @@ class HealingConfirmDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-
-class SettingsOverlay:
-    """The saved settings with the dialog's unsaved choices on top, for the live model list.
-    Like LLMClient, it counts only values the user set: schema defaults belong to the default provider."""
-
-    config_values = None  # makes LLMClient read every key through get()
-
-    def __init__(self, base: Any, overrides: Dict[str, Any]):
-        self._base = base
-        self._overrides = overrides
-
-    def get(self, key: str, default: Any = None) -> Any:
-        if key in self._overrides:
-            return self._overrides[key]
-        values = getattr(self._base, "config_values", None)
-        if isinstance(values, dict):
-            entry = values.get(key)
-            if entry is None or getattr(getattr(entry, "source", None), "source_type", "") == "default":
-                return default
-            return entry.value
-        return self._base.get(key, default) if self._base is not None and hasattr(self._base, "get") else default
-
-    def __getattr__(self, name: str) -> Any:
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return getattr(self._base, name)
-
 
 class _SecretsOverlay:
     """The secrets store, plus a key typed into the dialog but not saved yet."""
@@ -405,26 +378,28 @@ class AIConfigurationDialog(QDialog):
         return getattr(self.framework, 'secrets_manager', None)
 
     def _key_method(self, preset):
-        return next((m for m in preset.methods if m.type in KEY_TYPES), None) if preset is not None else None
+        return key_method(preset)
+
+    def _change(self, preset=None) -> Optional[AISettingsChange]:
+        """The change the dialog's fields describe (llm/settings_change.py holds the rules)."""
+        preset = preset or self._preset()
+        if preset is None:
+            return None
+        return AISettingsChange(
+            preset, self.catalog, model=self.cb_model.currentText().strip(), api_key=self.txt_api_key.text().strip(),
+            base_url=self.txt_base_url.text(), workspace_id=self.txt_workspace.text(),
+            effort=self.cb_effort.currentData() or "", security_level=self.cb_security.currentData() or "STRICT",
+            fallback_chain=self._parse_fallback(self.txt_fallback.text()), offline_mode=self.chk_offline.isChecked(),
+            enable_rag=self.chk_enable_rag.isChecked())
 
     def _stored_key(self) -> Optional[str]:
         """Where the provider's key comes from ("vault", "env:<VARIABLE>"), None without one. A key bound to a
         server address counts only for the address in the dialog."""
-        preset, sm = self._preset(), self._secrets()
-        spec = self._key_method(preset)
-        if preset is None or not preset.secret or not sm or spec is None:
-            return None
-        return CredentialStore(sm).key_source(preset, spec, self._base_url(preset) or preset.base_url)
+        change = self._change()
+        return change.stored_key(self._secrets()) if change is not None else None
 
     def _key_required(self, preset) -> bool:
-        # Presets that also work without a key (local servers) do not need one, nor does a provider whose other
-        # sign-in method the user chose (ai_auth_<provider>); opt-in methods never stand in for the key on their own.
-        if not preset.secret:
-            return False
-        chosen = self._user_value(f"ai_auth_{preset.id}")
-        if chosen and chosen != "api_key":
-            return False
-        return all(method == "api_key" or method in preset.opt_in_auth for method in preset.auth)
+        return self._change(preset).key_required(self._config())
 
     def _base_url(self, preset) -> str:
         return self.txt_base_url.text().strip() if preset is not None and preset.base_url_configurable else ""
@@ -464,7 +439,7 @@ class AIConfigurationDialog(QDialog):
 
     @staticmethod
     def _parse_fallback(text: str) -> List[str]:
-        return [part.strip() for part in text.split(",") if part.strip()]
+        return parse_fallback(text)
 
     # --- sign-in ---
     def _sign_in_available(self, preset) -> bool:
@@ -548,16 +523,14 @@ class AIConfigurationDialog(QDialog):
         preset = self._preset()
         if preset is None:
             return
-        saved = self.catalog.resolve_id(self._user_value("ai_provider")) == preset.id
+        # The saved settings as they apply to this provider (its own address and workspace, the saved model only when
+        # it is the saved provider's): the same values `llmcf config set` starts from.
+        saved = AISettingsChange.current(self._config(), self.catalog, provider=preset.id)
         suggestions = [m for m in [*preset.models.values(), *preset.suggested_models] if m]
-        keep = (self._user_value("ai_model") if saved else None) or preset.model_for("chat") or ""
         self.cb_model.clear()
-        self._fill_models(suggestions, keep=keep)
-        own_url = self._user_value(f"ai_base_url_{preset.id}") if preset.base_url_configurable else None
-        self.txt_base_url.setText(own_url or ((self._user_value("ai_base_url") or "")
-                                              if saved and preset.base_url_configurable else ""))
-        self.txt_workspace.setText((self._user_value("ai_anthropic_workspace_id") or "")
-                                   if takes_workspace_id(preset) else "")
+        self._fill_models(suggestions, keep=saved.model)
+        self.txt_base_url.setText(saved.base_url)
+        self.txt_workspace.setText(saved.workspace_id)
         self.txt_api_key.clear()
         self.lbl_models.setText("")
         self._apply_enabled_state()
@@ -586,118 +559,30 @@ class AIConfigurationDialog(QDialog):
 
     def _removed_message(self, entries: List[str]) -> Optional[str]:
         """The migration text for the first removed provider among `entries` (provider or provider:model)."""
-        for entry in entries:
-            removed = self.catalog.removed_message(str(entry).partition(":")[0])
-            if removed:
-                return removed
-        return None
+        return removed_message(self.catalog, entries)
 
     def _save_config(self):
-        preset = self._preset()
-        if preset is None:
+        """Save: the change the fields describe, checked and applied by AISettingsChange (llm/settings_change.py,
+        the rules every channel shares); the dialog keeps only its message boxes and the plain-http question."""
+        change = self._change()
+        if change is None:
             return
-        model = self.cb_model.currentText().strip()
-        api_key = self.txt_api_key.text().strip()
-        offline = self.chk_offline.isChecked()
-        enable_rag = self.chk_enable_rag.isChecked()
-        # A leftover Ollama/custom URL must never reach a cloud provider (it would receive that provider's key).
-        base_url = self._base_url(preset)
-        fallback = self._parse_fallback(self.txt_fallback.text())
-
-        unknown = [entry for entry in fallback if self.catalog.get(entry.partition(":")[0]) is None]
-        if unknown:
-            removed = self._removed_message(unknown)
-            QMessageBox.warning(self, "Invalid Fallback Chain",
-                                f"Unknown provider in the fallback chain: {', '.join(unknown)}.\n"
-                                f"Known providers: {', '.join(self.catalog.ids())}."
-                                + (f"\n\n{removed}" if removed else ""))
+        problems = change.problems(self._config(), self._secrets())
+        if problems:  # the first refusal, as the dialog always showed one at a time
+            QMessageBox.warning(self, problems[0].title, problems[0].message)
             return
-        if offline and preset.location == "cloud":
-            QMessageBox.warning(self, "Offline Mode",
-                                f"{preset.label} is a cloud provider. In offline mode choose a local provider "
-                                "(Ollama, the managed local model, or a custom server on your network).")
+        url = change.plain_http_url()
+        if url and not self._confirm_plain_http(url):
             return
-        if self._key_required(preset) and not api_key and not self._stored_key():
-            QMessageBox.warning(self, "Missing API Key", "Please provide an API key for this provider.")
+        try:
+            applied = change.apply(self._config(), self._secrets(), self.framework)
+        except SettingsChangeError as e:
+            QMessageBox.critical(self, e.title, str(e))
             return
-        if preset.rejected_key(api_key):
-            QMessageBox.warning(self, "Unsuitable API Key", str(rejected_key_error(preset)))
-            return
-        workspace = self._workspace_id(preset)
-        if workspace and not WORKSPACE_ID.match(workspace):
-            QMessageBox.warning(self, "Invalid Workspace ID", ANTHROPIC_WORKSPACE_INVALID)
-            return
-        if preset.base_url_configurable and not preset.base_url and not base_url:
-            QMessageBox.warning(self, "Missing Base URL", "A custom endpoint requires a Base URL.")
-            return
-        if base_url and (urlparse(base_url).scheme not in ("http", "https") or not urlparse(base_url).netloc):
-            QMessageBox.warning(self, "Invalid Base URL", "The Base URL must start with http:// or https://.")
-            return
-        if not model and not preset.runtime_endpoint:
-            QMessageBox.warning(self, "Missing Model", "Please select or enter a model.")
-            return
-
-        spec = self._key_method(preset)
-        key_url = base_url or preset.base_url
-        if api_key and preset.secret and plain_http_to_remote(key_url) and not self._confirm_plain_http(key_url):
-            return
-        if api_key and preset.secret and spec is not None:
-            # A key of a server whose address can be changed is stored for that address only.
-            try:
-                CredentialStore(self._secrets()).save_api_key(preset, spec, api_key,
-                                                              base_url=base_url or preset.base_url)
-            except (LLMError, ValueError) as e:
-                QMessageBox.critical(self, "Error", f"Failed to store the API key: {e}")
-                return
-        elif api_key and preset.secret:  # a user preset with a key name but no key method
-            sm = self._secrets()
-            if not sm or not sm.set_secret(preset.secret, api_key):
-                QMessageBox.critical(self, "Error", "Failed to store the API key in the encrypted credential vault.")
-                return
-
-        effort = self.cb_effort.currentData() or ""
-        security = self.cb_security.currentData() or "STRICT"
-        cfg = self._config()
-        if cfg is not None and hasattr(cfg, 'set'):
-            cfg.set("ai_provider", preset.id)
-            cfg.set("ai_model", model)
-            cfg.set("ai_base_url", base_url)
-            if self._user_value(f"ai_base_url_{preset.id}"):
-                cfg.set(f"ai_base_url_{preset.id}", base_url)  # set by `llm-cli ditto login`; it wins over ai_base_url
-            chosen = self._user_value(f"ai_auth_{preset.id}")
-            if api_key and spec is not None and chosen and getattr(preset.method(chosen), "id", None) != spec.id:
-                # A key typed here is meant to be used: the method remembered by a sign-in (an `ant` profile, no
-                # key) would otherwise keep it unused without a word.
-                cfg.set(f"ai_auth_{preset.id}", spec.id)
-            if takes_workspace_id(preset):
-                cfg.set("ai_anthropic_workspace_id", workspace)
-            cfg.set("ai_effort", effort)
-            cfg.set("ai_security_level", security)
-            cfg.set("ai_fallback_chain", fallback)
-            cfg.set("offline_mode", offline)
-            cfg.set("enable_rag_knowledge", enable_rag)
-        if cfg is not None and hasattr(cfg, 'set') and hasattr(cfg, 'save_user_config') and not cfg.save_user_config():
+        if applied.saved is False:
             QMessageBox.warning(self, "Settings Not Saved", "The AI settings apply until the program ends, but "
                                 "they could not be saved to config.yml. See the log.")
-
-        if enable_rag and hasattr(self.framework, 'ensure_rag_manager'):
-            self.framework.ensure_rag_manager()
-
-        ditto = getattr(self.framework, 'ditto_manager', None)
-        if ditto is not None and hasattr(ditto, 'reload'):
-            ditto.reload()  # a new key or catalog takes effect on the next question
-
-        self._result_config = {
-            "provider": preset.id,
-            "provider_label": preset.label,
-            "model": model,
-            "base_url": base_url or None,
-            "effort": effort or None,
-            "security_level": security,
-            "fallback_chain": fallback,
-            "offline_mode": offline,
-            "enable_rag": enable_rag,
-        }
+        self._result_config = applied.result
         self.accept()
 
     def _confirm_plain_http(self, url: str) -> bool:
@@ -717,7 +602,6 @@ class AIConfigurationDialog(QDialog):
         what an AI may do (provider, address, privacy, fallback chain); the knowledge base only off, offline mode only
         on (the direction rule of update_settings)."""
         from orchestrator.gui.form_surface import FormBinding, person_audit
-        from orchestrator.tools.tools_status import direction_problem
         b = FormBinding("ai_settings", "gui.form.ai_settings")
 
         def person_only(why_key: str) -> Callable[[], str]:

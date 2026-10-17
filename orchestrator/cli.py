@@ -2753,8 +2753,9 @@ def ditto_login(ctx: FrameworkContext, provider: str, method_id: Optional[str], 
     encrypted vault, and the method is remembered (ai_auth_<provider>). Exit codes: 0 signed in, 2 usage,
     3 rejected, 4 network, 5 credential storage unavailable, 6 not allowed or not available."""
     from orchestrator.llm.auth.errors import auth_error
-    from orchestrator.llm.auth.signin import exit_code, plain_http_to_remote, valid_profile_name
+    from orchestrator.llm.auth.signin import exit_code, valid_profile_name
     from orchestrator.llm.auth.spec import KEY_TYPES
+    from orchestrator.llm.settings_change import plain_http_to_remote  # the AI-settings rule every channel shares
     from orchestrator.llm.auth.store import display_origin, last4
     from orchestrator.llm.errors import LLMError, NotConfigured, rejected_key_error
 

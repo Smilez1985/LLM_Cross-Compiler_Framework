@@ -1225,6 +1225,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **One AI-settings change service for every channel** (`orchestrator/llm/settings_change.py`,
+  `AISettingsChange`): the rules the AI settings dialog kept to itself (known providers in the fallback chain, no
+  cloud provider in offline mode, a key required and not an admin key, the workspace ID's form, the server address,
+  a model, the plain-http question for a key, the key stored for its address, the settings written, the knowledge
+  base started and Ditto reloaded) now live in one Qt-free place. The dialog keeps only its message boxes and its
+  question; sign-in and `llmcf ditto login` use the same address rules, and MCP `update_settings` the same
+  tighten-only rule, which moved there from the tool module (`direction_problem`, still importable from
+  `orchestrator.tools.tools_status`). `AISettingsChange.current()` and `with_setting()` are ready for a change of
+  one setting at a time (the coming `llmcf config set`). The dialog now also refuses a server address with a user
+  name or password in it, as sign-in already did.
 - **One build-submission path for the CLI, the GUI and AI callers**: `llmcf build start` and the Builder tab's
   **Start Build** queue their build through `BuildService.start_build`, the path the MCP server and Ditto already
   used, instead of building their own orchestrator request each. The CLI and the GUI therefore check a request the

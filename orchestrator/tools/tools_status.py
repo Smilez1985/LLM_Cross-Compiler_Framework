@@ -26,6 +26,8 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.llm.settings_change import (MIN_MEMORY_LIMIT, TIGHTEN_ONLY, direction_problem,  # noqa: F401
+                                              memory_bytes)
 from orchestrator.tools.output import ToolOutput, untrusted_text
 from orchestrator.utils.any_path import last_part
 from orchestrator.utils.helpers import redact_secrets
@@ -40,11 +42,9 @@ ORDINARY = ("language", "gui_theme", "calibration_language", "crawler_languages"
             "rag_model_idle_minutes", "build_jobs", "chat_context_limit", "default_enable_imatrix")
 # key -> the direction an AI may move it: True/False for a boolean (only to that value), "lower"/"higher" for a number.
 # crawler_download_pdfs: Deep Ingest reads more third-party text with it on, so an AI may only turn it off (SEC-M3).
-TIGHTEN_ONLY: Dict[str, Any] = {
-    "offline_mode": True, "enable_telemetry": False, "enable_security_scan": True, "build_sandbox": True,
-    "enable_rag_knowledge": False, "crawler_max_pages": "lower", "crawler_max_depth": "lower",
-    "crawler_rate_limit": "higher", "build_memory_limit": "lower", "build_pids_limit": "lower",
-    "crawler_download_pdfs": False}
+# The table (TIGHTEN_ONLY), memory_bytes and direction_problem live with the AI-settings change service
+# (llm/settings_change.py), so the AI settings dialog's GUI-tool fields apply the same rule without importing a tool
+# module; they are imported above and stay importable from here.
 WRITABLE = ORDINARY + tuple(TIGHTEN_ONLY)
 # Settings that keep the person informed of what AIs do (delegation design 3.7, SEC-M3): an AI never changes them, in
 # either direction. Some belong to parts that are still being built (the chat panel, the relay, the trash, the benchmark
@@ -61,7 +61,6 @@ FOLDER_KEYS = {"targets_dir": "targets", "models_dir": "models", "datasets_dir":
 READABLE = WRITABLE + READ_ONLY + URL_KEYS + tuple(FOLDER_KEYS)
 NOT_A_VALUE = ("", "default", "null", "none", "reset", "unset")
 SETTINGS_PER_HOUR = 10
-MIN_MEMORY_LIMIT = 6 * 1024 ** 2  # Docker refuses a smaller container memory limit
 
 ReadableKey = Literal[READABLE]  # type: ignore[valid-type]
 WritableKey = Literal[WRITABLE]  # type: ignore[valid-type]
@@ -355,23 +354,6 @@ def allowed_text(key: str) -> str:
     return "read-only over MCP; the person changes it in the GUI or CLI"
 
 
-def memory_bytes(value: Any) -> Optional[int]:
-    """A Docker memory limit ('24g', '512m', '1024') in bytes; None for no limit ('')."""
-    text = str(value or "").strip().lower()
-    if not text:
-        return None
-    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([bkmg]?)b?", text)
-    if not match:
-        raise ValueError(f"'{value}' is not a memory size (e.g. 16g or 512m)")
-    factor = {"": 1, "b": 1, "k": 1024, "m": 1024 ** 2, "g": 1024 ** 3}[match.group(2)]
-    value = int(float(match.group(1)) * factor)
-    if value == 0:
-        return None  # Docker reads a memory limit of 0 as no limit at all
-    if value < MIN_MEMORY_LIMIT:
-        raise ValueError(f"'{value}' bytes is below the smallest memory limit Docker accepts (6m)")
-    return value
-
-
 def parse_value(schema, key: str, text: str) -> Any:
     """The text of a change as the setting's type; ValueError with the reason. Never "default" or empty."""
     raw = text.strip()
@@ -405,36 +387,6 @@ def parse_value(schema, key: str, text: str) -> Any:
     if key == "build_memory_limit":
         memory_bytes(raw)
     return raw
-
-
-def direction_problem(key: str, old: Any, new: Any) -> Optional[str]:
-    """Why a change of a tighten-only setting would widen what an AI may do (None when it tightens or keeps it)."""
-    if key not in TIGHTEN_ONLY:
-        return None
-    rule = TIGHTEN_ONLY[key]
-    if isinstance(rule, bool):
-        return None if new is rule else (f"{key} may only be set to {str(rule).lower()} over MCP; the other "
-                                         "direction widens what an AI may do and stays with the person")
-    if key == "build_memory_limit":
-        try:
-            old_b = memory_bytes(old)
-        except ValueError:
-            old_b = None  # an unreadable current value limits nothing a build can rely on
-        new_b = memory_bytes(new)
-        if old_b is None or (new_b is not None and new_b <= old_b):
-            return None
-        return "build_memory_limit may only be lowered over MCP (a larger limit or none widens what builds may use)"
-    try:
-        old_n = float(old) if old is not None else None
-    except (TypeError, ValueError):
-        old_n = None
-    if old_n is None:
-        return None
-    if rule == "lower" and float(new) > old_n:
-        return f"{key} may only be lowered over MCP (now {old}); raising it stays with the person"
-    if rule == "higher" and float(new) < old_n:
-        return f"{key} may only be raised over MCP (now {old}); lowering it stays with the person"
-    return None
 
 
 def shown(value: Any) -> str:
