@@ -354,6 +354,21 @@ def test_the_command_lines_sizes_need_no_qt(tmp_path):
     assert present(modules, ("PySide6",)) == []
 
 
+def test_the_target_tools_load_no_tool_hub(tmp_path):
+    """Stage-B integration (open item of the cleanup chain): the target tool module took TargetIn and
+    TargetCapabilitiesOut from framework_tools, so importing it (module create in the CLI, the GUI wizard's save,
+    target_marks of the deploy tools) loaded the whole tool hub with the HF, knowledge, Mojo and status tools and the
+    job service. The two models live in schemas/targets.py; framework_tools keeps the names."""
+    code = ("import sys\n"
+            "from orchestrator.tools.tools_targets import TargetCheckIn, TargetDetailsOut, target_marks\n"
+            "from orchestrator.Core.module_generator import record_module_saved\n")
+    modules, run = loaded_modules(tmp_path, code)
+    assert run.returncode == 0, run.stderr[-3000:]
+    assert present(modules, ("orchestrator.tools.framework_tools", "orchestrator.tools.tools_hf",
+                             "orchestrator.tools.tools_knowledge", "orchestrator.tools.tools_mojo",
+                             "orchestrator.Core.job_service")) == []
+
+
 # --- the former import-time host check of utils.validation -------------------------------------------------------
 
 def test_validation_import_checks_nothing_about_the_host(tmp_path):

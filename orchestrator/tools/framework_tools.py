@@ -11,7 +11,9 @@ from orchestrator.Core import job_service
 from orchestrator.Core.job_service import JobService
 from orchestrator.schemas.build import BuildHandle, BuildStatusOut, TargetList
 from orchestrator.schemas.jobs import CancelJobOut, JobErrorOut, JobIn, JobProgress, JobStatusOut, JobWaitIn
-from orchestrator.schemas.targets import TargetCapabilities
+# TargetIn and TargetCapabilitiesOut live in schemas/targets.py (the target tools build on them without the
+# hub); the names stay importable here.
+from orchestrator.schemas.targets import TargetCapabilities, TargetCapabilitiesOut, TargetIn  # noqa: F401
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.mcp_tokens import TokenStore
 from orchestrator.tools import tools_status
@@ -32,11 +34,6 @@ class NoInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class TargetIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target: str = Field(min_length=1, max_length=64, description="Target id, e.g. Rockchip")
-
-
 class RequestIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str = Field(min_length=1, max_length=64, pattern=r"^[\w.-]+$")
@@ -54,10 +51,6 @@ class ResolveHealingIn(RequestIn):
 
 # The tools' output models: the service's models plus the framework's `notes` (output.ToolOutput).
 class TargetListOut(TargetList, ToolOutput):
-    pass
-
-
-class TargetCapabilitiesOut(TargetCapabilities, ToolOutput):
     pass
 
 
