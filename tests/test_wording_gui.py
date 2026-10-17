@@ -494,7 +494,7 @@ def test_the_error_box_says_what_happened_and_folds_the_redacted_details_away(bo
     error_dialog.show_error(None, MARKUP, why="The board did not answer.", next_step="Check its network cable.",
                             details=f"ConnectionError: timed out\n token={token}\n see {home_file}", lang="en")
     box = boxes[-1]
-    assert box.windowTitle() == "Something went wrong"
+    assert box.windowTitle() == "Something did not work"
     assert box.summary.text() == MARKUP and box.summary.textFormat() == Qt.PlainText, "never HTML from data"
     assert box.why.text() == "The board did not answer." and box.next.text() == "Next step: Check its network cable."
     assert box.btn_details.text() == "Technical details" and not box.btn_details.isChecked()
@@ -513,7 +513,7 @@ def test_the_error_box_in_german_with_one_button(boxes, language_state):
     plain.plain_error(None, "Der Build ist fehlgeschlagen.", "Das Board antwortet nicht.",
                       action=("&Open log folder", lambda: calls.append("open")), details="Traceback ...", lang="de")
     box = boxes[-1]
-    assert box.windowTitle() == "Etwas ist schiefgelaufen" and box.btn_details.text() == "Technische Details"
+    assert box.windowTitle() == "Etwas hat nicht geklappt" and box.btn_details.text() == "Technische Details"
     assert box.btn_copy.text() == "Details kopieren"
     assert box.details_hint.text().startswith("Auf Englisch, ohne Geheimnisse und ohne deinen Home-Ordner")
     assert box.btn_action.text() == "&Open log folder", "the button keeps its mnemonic"
@@ -531,7 +531,7 @@ def test_the_error_box_for_an_exception(boxes):
         e.steps = ["Open the board's settings and choose another port."]
         error_dialog.show_exception(None, e, lang="en")
     box = boxes[-1]
-    assert box.summary.text() == "Something went wrong" and not box.details.isHidden(), \
+    assert box.summary.text() == "Something did not work" and not box.details.isHidden(), \
         "without a localized summary the facts are visible at once"
     assert "Traceback" in box.details_text and "ValueError: bad value for the port" in box.details_text
     assert box.next.text() == "Next step: Open the board's settings and choose another port."
@@ -637,6 +637,22 @@ def test_the_error_box_keeps_every_plain_sentence_beside_a0s_steps(boxes):
     assert [r.step_id for r in box.next.row.rows] == ["trash.empty", "images.free"]
     error_dialog.show_error(None, "Saving failed.", lang="en", steps=[ns.NextStep("nothing.known")])
     assert boxes[-1].next is None, "a step no version knows shows nothing, never its id"
+
+
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_the_error_box_has_one_title_however_it_is_opened(boxes, lang):
+    """Merge seam (review w6-base-v): a0's error_report() titled the box "Something did not work" ("Etwas hat nicht
+    geklappt"), f-words' own default "Something went wrong" ("Etwas ist schiefgelaufen"): the same box had two names
+    depending on the way a window opened it. One title, in both languages."""
+    from orchestrator.utils import next_steps as ns
+    from orchestrator.utils.localization import ui_text
+    error = OSError("disk gone")
+    error_dialog.show_exception(None, error, lang=lang)
+    error_dialog.show_error(None, "Saving failed.", lang=lang)
+    error_dialog.show_error(None, lang=lang, **ns.error_report(error, lang).dialog_kwargs())
+    titles = {box.windowTitle() for box in boxes[-3:]}
+    assert titles == {ui_text("words.error.title", lang)} == {ns.error_report(error, lang).title}, titles
+    assert ns.error_report(error, lang).details_label == ui_text("words.error.details", lang)
 
 
 # --- empty states ---------------------------------------------------------------------------------------------------
