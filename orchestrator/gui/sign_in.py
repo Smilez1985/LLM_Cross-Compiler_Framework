@@ -192,7 +192,7 @@ class KeyForm(QWidget):
         layout.addLayout(form)
         buttons = QHBoxLayout()
         self.btn_check = QPushButton(_t("signin.check", "Check"))
-        self.btn_save = QPushButton(_t("signin.save", "Save"))
+        self.btn_save = QPushButton(_t("signin.button.save", "Save"))
         self.btn_sign_out = QPushButton(_t("signin.sign_out", "Sign out"))
         for button, name in ((self.btn_check, "btn_signin_check"), (self.btn_save, "btn_signin_save"),
                              (self.btn_sign_out, "btn_signin_sign_out")):
@@ -414,7 +414,7 @@ class StorageChooser(QGroupBox):
         layout.addWidget(self.txt_helper)
         layout.addWidget(self.rb_insecure)
         layout.addWidget(self.chk_insecure)
-        self.btn_use = QPushButton(_t("signin.storage.use", "Use this storage"))
+        self.btn_use = QPushButton(_t("signin.button.storage_use", "Use this storage"))
         self.btn_use.setObjectName("btn_storage_use")
         self.btn_use.clicked.connect(self._choose)
         layout.addWidget(self.btn_use, alignment=Qt.AlignLeft)

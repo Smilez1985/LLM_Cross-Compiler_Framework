@@ -63,6 +63,10 @@ TEXTS = {
         "secrets.list_failed": "The names cannot be read: {reason}",
         "secrets.working": "Storing...",
 
+        # the buttons that store a key and choose the key storage (wave 6: their labels are read without Qt)
+        "signin.button.save": "Save",
+        "signin.button.storage_use": "Use this storage",
+
         # Security > Sign-in Overview...
         "signin.overview.title": "Sign-in Overview",
         "signin.overview.intro": "Every AI provider Ditto can use, with its sign-in. A key is never shown, at most "
@@ -206,6 +210,9 @@ TEXTS = {
         "secrets.count": "{n} Namen, {stored} gespeichert.",
         "secrets.list_failed": "Die Namen können nicht gelesen werden: {reason}",
         "secrets.working": "Wird gespeichert...",
+
+        "signin.button.save": "Speichern",
+        "signin.button.storage_use": "Diesen Schutz verwenden",
 
         # Security > Anmeldeübersicht...
         "signin.overview.title": "Anmeldeübersicht",

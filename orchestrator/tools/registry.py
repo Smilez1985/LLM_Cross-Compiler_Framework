@@ -1581,9 +1581,10 @@ class ToolRegistry:
         decision = self.decide(spec, inp, ctx)
         if decision == Decision.DENY:
             self._audit(ctx, spec, decision, "denied", arguments, reason_code="permission_denied")
+            # The person's feed entry carries the place where they decide (rendered for the window); the AI's error
+            # carries no step: a denial by the person's own setting never pushes a way to change it (DENIED_HINT).
             self._refused_before_question(spec, ctx, "permission_denied", stage="policy", steps=UNASKED_STEPS)
-            raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT,
-                             steps=UNASKED_STEPS)
+            raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
         # Two-phase: the facts only the server knows, looked up before the question (the MCP server hands in the
         # ones its question showed). They can make an allowed call ask, and the handler is bound to them.
         if ctx.facts is None and spec.prepare is not None:

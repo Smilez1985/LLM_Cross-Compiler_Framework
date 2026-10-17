@@ -182,7 +182,7 @@ class MainOrchestrator(QMainWindow):
         file_menu = self._menu(menubar, menu_place.MENU_FILE, "main.menu.file")
         self._add_trash_action(file_menu)
         self._add_output_folder_action(file_menu)
-        self.act_exit = self._entry(file_menu, "act_file_exit", "menu.exit", self.close)
+        self.act_exit = self._entry(file_menu, "act_file_exit", "main.file.exit", self.close)
 
         ditto_menu = self._menu(menubar, menu_place.MENU_DITTO, "main.menu.ditto")
         self.menu_ditto = ditto_menu
@@ -218,7 +218,7 @@ class MainOrchestrator(QMainWindow):
                                                 self._open_hf_browser)
         knowledge = tools_menu.addMenu(ui_text("main.menu.tools_knowledge"))
         knowledge.setObjectName("menu_tools_knowledge")
-        self.act_knowledge_hub = self._entry(knowledge, "act_knowledge_hub", "menu.open_hub", self._open_community_hub)
+        self.act_knowledge_hub = self._entry(knowledge, "act_knowledge_hub", "main.tools.hub", self._open_community_hub)
         self._add_knowledge_snapshots_action(knowledge)
         self._add_framework_docs_action(knowledge)
         maintenance = tools_menu.addMenu(ui_text("main.menu.tools_maintenance"))
@@ -226,7 +226,7 @@ class MainOrchestrator(QMainWindow):
         self._add_framework_images_action(maintenance)
 
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
-        self.act_audio = QAction(ui_text("menu.audio"), self)
+        self.act_audio = QAction(ui_text("main.tools.audio"), self)
         self.act_audio.setObjectName("act_tools_audio")
         self.act_audio.setCheckable(True)
         self.act_audio.setChecked(bool(self.framework.config.get(AUDIO_SETTING, True)))
@@ -234,7 +234,7 @@ class MainOrchestrator(QMainWindow):
         tools_menu.addAction(self.act_audio)
 
         # Recent models, targets, boards, URLs, devices and datasets offered in the input fields (per user)
-        self.act_clear_history = self._entry(tools_menu, "act_tools_clear_history", "menu.clear_history",
+        self.act_clear_history = self._entry(tools_menu, "act_tools_clear_history", "main.tools.clear_history",
                                              self._clear_input_history)
 
         help_menu = self._menu(menubar, menu_place.MENU_HELP, "main.menu.help")

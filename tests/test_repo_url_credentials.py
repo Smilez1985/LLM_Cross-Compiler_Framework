@@ -125,7 +125,9 @@ def test_the_gui_refuses_with_security_secrets_in_both_languages(qapp, tmp_path,
     (folder / "config.yml").write_text(yaml.safe_dump({"source_repositories": {"old": {"url": OPAQUE_USER}}}),
                                        encoding="utf-8")
     framework = SimpleNamespace(config=ConfigManager(folder))
-    for lang, where in (("en", "Security > Secrets..."), ("de", "Security > Geheimnisse...")):
+    # Wave 6 (Q2, V2): the path is filled from the live, translated menu labels, so the German text names "Sicherheit"
+    # (it said "Security > Geheimnisse..." before, with an untranslated menu title).
+    for lang, where in (("en", "Security > Secrets..."), ("de", "Sicherheit > Geheimnisse...")):
         boxes = _Boxes(monkeypatch)
         dialog = SettingsDialog(framework, lang=lang)
         try:
