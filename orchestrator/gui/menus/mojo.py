@@ -9,8 +9,8 @@ first used, not with the main window (lazy loading, RG1).
 
 CLI_PATHS names, for each `llmcf` command path of Mojo, the object that does it by mouse; WINDOW_OBJECTS names, for
 an object that lives in a window, the menu action that opens that window. The doctor is the 3.0.0 name of Mojo (a
-compatibility alias with the same checks): its paths lead to the same objects. `mojo --json` is machine output only
-(the integrator lists it with the reason).
+compatibility alias with the same checks): its paths lead to the same objects. MACHINE_ONLY lists `mojo --json` and
+`doctor --json`, machine output only, with the reason.
 """
 
 from typing import Dict, Optional
@@ -37,6 +37,11 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "btn_mojo_miracle": "act_mojo_health",
     "btn_mojo_check_board": "act_mojo_health",
     "btn_mojo_check": "act_mojo_health",
+}
+# Switches of this area that are for scripts only, with the reason (the same shape as the other area modules).
+MACHINE_ONLY: Dict[str, str] = {
+    "mojo --json": "machine-readable output; the Mojo window shows the same findings",
+    "doctor --json": "machine-readable output of the 3.0.0 alias; the Mojo window shows the same findings",
 }
 
 
@@ -89,4 +94,4 @@ def open_mojo_window(window) -> Optional[object]:
     return dialog
 
 
-__all__ = ["CLI_PATHS", "WINDOW_OBJECTS", "install", "open_mojo_window"]
+__all__ = ["CLI_PATHS", "MACHINE_ONLY", "WINDOW_OBJECTS", "install", "open_mojo_window"]
