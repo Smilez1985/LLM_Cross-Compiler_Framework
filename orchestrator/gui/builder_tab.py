@@ -238,6 +238,7 @@ class SSHProbeWorker(QThread):
         self.result_dir = Path(result_dir)
 
     def run(self):
+        password, self.password = self.password, None   # used once for this scan, never kept
         if not PARAMIKO_AVAILABLE:
             self.finished.emit(False, "Paramiko library missing. Cannot use SSH.", "")
             return
@@ -251,7 +252,7 @@ class SSHProbeWorker(QThread):
         # valid_host() allows no path separators, so the name stays inside result_dir.
         local_output = self.result_dir / f"target_hardware_config_{self.ip.replace(':', '_')}.txt"
         try:
-            scan = scan_device(self.state_dir, self.ip, int(self.port), self.user, None, password=self.password,
+            scan = scan_device(self.state_dir, self.ip, int(self.port), self.user, None, password=password,
                                label=self.label, output_file=local_output, via="gui", actor="gui", audit=self.audit)
         except DeviceScanError as e:
             if e.kind == "login":

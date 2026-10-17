@@ -238,6 +238,34 @@ class TestScanDevice:
             scan_device(tmp_path / "state", "192.0.2.10", 22, "dietpi", FakeHostKey(), label="x" * 65)
         assert raised.value.kind == "save"
 
+    def test_the_audit_log_is_opened_only_for_the_record(self, tmp_path, ssh):
+        """Review (w5-deploy-v): the CLI opened its audit log (the OS keyring's audit key, created on first use) only
+        after a successful probe; the extracted step got it before the login. `audit_factory` opens it when the
+        trusted record is written, and never for a scan that fails or writes no record."""
+        from orchestrator.runtime.remote_probe import RemoteProbeError
+        from orchestrator.runtime.scan_steps import DeviceScanError, scan_device
+        opened, audited = [], []
+
+        def factory():
+            opened.append(1)
+            return SimpleNamespace(record=lambda *a, **k: audited.append(a[:2]))
+
+        state = tmp_path / "state"
+        ssh["fail"] = ConnectionRefusedError(111, "refused")
+        with pytest.raises(DeviceScanError):
+            scan_device(state, "192.0.2.10", 22, "dietpi", FakeHostKey(), audit_factory=factory)
+        ssh["fail"], ssh["probe_fail"] = None, RemoteProbeError("hardware_probe.sh exited with status 3")
+        with pytest.raises(DeviceScanError):
+            scan_device(state, "192.0.2.10", 22, "dietpi", FakeHostKey(), audit_factory=factory)
+        ssh["probe_fail"] = None
+        with pytest.raises(DeviceScanError):
+            scan_device(state, "192.0.2.10", 22, "dietpi", FakeHostKey(), label="x" * 65, audit_factory=factory)
+        scan_device(state, "192.0.2.10", 22, "dietpi", FakeHostKey(), record=False, audit_factory=factory)
+        assert opened == [], "no audit log for a failed scan or one without a record"
+        scan = scan_device(state, "192.0.2.10", 22, "dietpi", FakeHostKey(), via="cli", actor="cli",
+                           audit_factory=factory)
+        assert opened == [1] and audited == [("cli", "device_trusted")] and scan.trusted is not None
+
 
 def test_no_ai_reachable_code_imports_the_person_s_scan_steps():
     """The scan steps log in with a password, write the trusted record and run the local probe for the person;

@@ -324,6 +324,37 @@ class TestDeploymentTab:
         assert f"Trusted board {device.device_id} (Shed board)" in msg
         assert worker.model_name == "smol-q4_0.gguf"
 
+    def test_the_password_is_used_once_and_not_kept(self, window_framework, monkeypatch, tmp_path):
+        """Review (w5-deploy-v): the one-time password stayed on the worker (kept by the window until the next
+        deploy or scan); it is dropped once the deploy or the board scan used it, also when it failed."""
+        from orchestrator.Core.deployment_manager import DeployResult
+        from orchestrator.gui import builder_tab
+        from orchestrator.gui.deployment_window import DeploymentWorker
+        from orchestrator.utils import ssh_trust
+        package = tmp_path / "deploy_x.zip"
+        package.write_bytes(b"PK")
+        used = []
+        for ok in (True, False):
+            manager = SimpleNamespace(deploy_package=lambda *a, **kw: used.append(kw["password"]) or DeployResult(
+                ok, exit_status=0 if ok else 1, reason="" if ok else "made-up failure"))
+            monkeypatch.setattr(window_framework, "get_component", lambda name: manager)
+            worker = DeploymentWorker(window_framework, None, "", {}, "192.0.2.83", "radxa", "pw-made-up",
+                                      package=package)
+            monkeypatch.setattr(worker, "_remember_device", lambda *a, **k: None)
+            worker.run()
+            assert worker.password is None
+        assert used == ["pw-made-up", "pw-made-up"]
+
+        def refuse(host, user, state, port=22, password=None):
+            used.append(password)
+            raise ConnectionRefusedError(111, "refused")
+
+        monkeypatch.setattr(builder_tab, "PARAMIKO_AVAILABLE", True)
+        monkeypatch.setattr(ssh_trust, "connect", refuse)
+        probe = builder_tab.SSHProbeWorker("192.0.2.84", "radxa", "pw-made-up", tmp_path / "state", tmp_path / "p")
+        probe.run()
+        assert used[-1] == "pw-made-up" and probe.password is None
+
     def test_a_failed_package_names_its_reason_and_the_next_step(self, window_framework, monkeypatch, tmp_path):
         from orchestrator.Core.deployment_manager import DeployError
         from orchestrator.gui.deployment_window import DeploymentWorker

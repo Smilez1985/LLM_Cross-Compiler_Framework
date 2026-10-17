@@ -151,6 +151,7 @@ def reach_code(error: BaseException) -> str:
 def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = None, *, password: Optional[str] = None,
                 label: Optional[str] = None, output_file: Optional[Path] = None, as_json: bool = False,
                 store: Any = None, record: bool = True, via: str = "cli", actor: str = "", audit: Any = None,
+                audit_factory: Optional[Callable[[], Any]] = None,
                 on_client: Optional[Callable[[Any], None]] = None) -> DeviceScan:
     """Probes a board whose host key the person trusted (the caller asked; `key` is that key, or None to take the key
     of the session itself): logs in (a password only the first time, to install the framework's SSH key; never
@@ -158,7 +159,9 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     written on the board), stores the profile under the board's device id with its label and address, keeps the SSH
     user as the board's deploy user (never root) and, with `record`, writes the board's trusted, paired record (and
     audits it as the person's decision through `via`). A failed login or a reached board is recorded for Mojo (W1).
-    `on_client` gets the SSH session so a Cancel can close it."""
+    `audit_factory` (instead of `audit`) opens the audit log only when that record is written, so a scan that fails
+    never touches it (the CLI's audit log may create the OS keyring's audit key on first use). `on_client` gets the
+    SSH session so a Cancel can close it."""
     from orchestrator.runtime.device.settings import remember_ssh_user
     from orchestrator.runtime.device.trusted import record_trusted_device
     from orchestrator.runtime.profile import ProfileStore, device_id_for_host_key
@@ -197,6 +200,8 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     remember_ssh_user(store, device_id, user)  # the deploy user for `device runtime deploy` (never root)
     trusted = None
     if record:
+        if audit is None and audit_factory is not None:
+            audit = audit_factory()
         trusted = record_trusted_device(state_dir, host, port, user, key, via=via, paired=True, label=label,
                                         audit=audit, actor=actor or via)
     return DeviceScan(device_id=device_id, profile=result.profile, tool=result.tool, notes=list(result.notes),

@@ -137,6 +137,7 @@ class DeploymentWorker(QThread):
             client.close()
 
     def run(self):
+        password, self.password = self.password, None   # the one-time password: used once, never kept
         dep_mgr = self.framework.get_component("deployment_manager")
         if not dep_mgr:
             self.finished.emit(False, "DeploymentManager not loaded.")
@@ -155,7 +156,7 @@ class DeploymentWorker(QThread):
 
             # 2. Deployment: waits for the board when its network drops, and says why when it cannot reach it
             self.progress.emit(f"🚀 Deploying to {self.target_ip}...")
-            options = {"port": self.port, "password": self.password, "cancelled": self._stop.is_set,
+            options = {"port": self.port, "password": password, "cancelled": self._stop.is_set,
                        "on_client": self._on_client, "on_event": self.event.emit}
             if self.wait_seconds is not None:
                 options["wait_seconds"] = self.wait_seconds
