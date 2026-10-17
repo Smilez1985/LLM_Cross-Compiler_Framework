@@ -246,6 +246,7 @@ class TestHiddenDangerousCommands:
 
 
 def test_the_status_bar_notice_uses_speaking_names_and_cleans_the_clients_name():
+    pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
     from orchestrator.gui.proposals_window import proposal_notice
     p = ClientProposal("hp_1", "req_1", "s", "", "step", 0.5, "HOST", "mcp:laptop",
                        client="Evil​\nClient", request="Qwen/Qwen2.5-0.5B-Instruct for Rockchip")

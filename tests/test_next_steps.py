@@ -145,9 +145,9 @@ def test_path_placeholders_are_filled_in_the_texts_language():
 
 
 def test_ui_text_fills_path_placeholders(monkeypatch):
-    from orchestrator.utils.localization import LocalizationManager, ui_text
-    monkeypatch.setitem(LocalizationManager.TRANSLATIONS["en"], "test.path.text", "Look in {path:act_file_trash}: {n}")
-    monkeypatch.setitem(LocalizationManager.TRANSLATIONS["de"], "test.path.text", "Schau in {path:act_file_trash}: {n}")
+    from orchestrator.utils.localization import TRANSLATIONS, ui_text
+    monkeypatch.setitem(TRANSLATIONS["en"], "test.path.text", "Look in {path:act_file_trash}: {n}")
+    monkeypatch.setitem(TRANSLATIONS["de"], "test.path.text", "Schau in {path:act_file_trash}: {n}")
     assert ui_text("test.path.text", "en", n=2) == "Look in File > Trash...: 2"
     assert ui_text("test.path.text", "de", n=2) == "Schau in Datei > Papierkorb...: 2"
 
@@ -156,7 +156,7 @@ def test_ui_text_reads_the_formal_text_first_and_then_fills_its_places(monkeypat
     """Merge resolution (a0 + f-words): ui_text lays f-words' formal overlay over the du text, then fills a0's
     {path:} places, then the values; a formal text names its places like its du text does."""
     from orchestrator.utils import localization
-    monkeypatch.setitem(localization.LocalizationManager.TRANSLATIONS["de"], "test.path.text",
+    monkeypatch.setitem(localization.TRANSLATIONS["de"], "test.path.text",
                         "Schau in {path:act_file_trash}: {n}")
     monkeypatch.setitem(localization.FORMAL_TEXTS, "de",
                         {"test.path.text": "Schauen Sie in {path:act_file_trash}: {n}"})

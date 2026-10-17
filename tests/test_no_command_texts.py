@@ -47,8 +47,8 @@ ALLOWED_TEXTS = {
 
 
 def person_texts() -> Dict[str, Dict[str, str]]:
-    from orchestrator.utils.localization import LocalizationManager
-    return LocalizationManager.TRANSLATIONS
+    from orchestrator.utils.localization import TRANSLATIONS
+    return TRANSLATIONS
 
 
 def formal_texts() -> Dict[str, Dict[str, str]]:

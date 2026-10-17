@@ -271,6 +271,7 @@ def test_a_link_that_is_not_copied_is_named_and_the_build_folder_keeps_its_copy(
     assert any("tokenizer.json" in note and "link" in note for note in result.notes), result.notes
     assert (folder / "tokenizer.json").is_symlink() and (folder / "m.gguf").is_file(), "the build folder keeps it"
     assert (folder.parent / "Q4_K_M.zip").is_file()
+    pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
     from orchestrator.gui.artifact_save import result_text
     text = result_text(result, "en")
     assert result.kept and "tokenizer.json" in text and "stays" in text and "was removed" not in text

@@ -608,6 +608,7 @@ class TestRevocation:
             hub.close()
 
     def test_every_trust_level_can_occur_and_has_a_hub_colour(self):
+        pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
         from orchestrator.gui.community_hub import TRUST_COLORS
         assert {t.value for t in TrustLevel} == {"verified", "community", "local", "revoked"} == set(TRUST_COLORS)
 

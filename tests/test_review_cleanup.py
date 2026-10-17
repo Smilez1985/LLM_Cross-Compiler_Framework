@@ -295,6 +295,7 @@ class TestFailedSaves:
 
     @pytest.mark.parametrize("saved", [True, False])
     def test_the_audio_switch_warns_when_the_setting_was_not_saved(self, monkeypatch, saved):
+        pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
         from orchestrator.gui import main_window
         from orchestrator.utils.localization import get_instance
         shown, values = [], {}

@@ -577,9 +577,9 @@ class BuildEngine:
                 warned = True
                 progress.add_log(
                     f"{prefix}The build container uses {format_size(int(sample['memory_bytes']), 'en')} of its "
-                    f"{format_size(int(sample['memory_limit_bytes']), 'en')} memory limit (over "
-                    f"{int(MEMORY_WARN_SHARE * 100)} %). If it runs out, the build stops: give Docker more memory "
-                    "(the resource settings of Docker Desktop, or .wslconfig for WSL2) or close other programs.",
+                    f"{format_size(int(sample['memory_limit_bytes']), 'en')} memory limit "
+                    f"({int(MEMORY_WARN_SHARE * 100)} % or more). If it runs out, the build stops: give Docker more "
+                    "memory (the resource settings of Docker Desktop, or .wslconfig for WSL2) or close other programs.",
                     "WARNING")
 
     def _keep_as_last_build(self, tag: str) -> None:
