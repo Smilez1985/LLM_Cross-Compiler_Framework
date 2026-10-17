@@ -716,13 +716,23 @@ def settings_schema(framework, key: str):
 def ai_settings_problem(framework, values: Dict[str, Any]) -> Optional[str]:
     """The first refusal of the AI settings' rules (AISettingsChange, the rules of the AI settings dialog and the
     sign-in) that these new values would bring, as "title: text"; None when there is none or no AI setting
-    (offline_mode, enable_rag_knowledge) is among them. A problem the saved AI settings already have is not counted."""
+    (offline_mode, enable_rag_knowledge) is among them. A problem the saved AI settings already have is not counted.
+    ValueError for a value an AI setting cannot take or a provider list (llm_providers.yml) that cannot be read. Every
+    text is one an AI may read: the framework's folders by label, any other path by its file name (the catalog's
+    errors name the person's config folder)."""
+    import yaml
+    from orchestrator.Core.mojo.views import ai_folder_labels
     from orchestrator.llm.settings_change import AI_SETTINGS, AISettingsChange
+    from orchestrator.security.paths import scrub_for_ai
     ai = {key: value for key, value in values.items() if key in AI_SETTINGS}
     if not ai:
         return None
-    found = AISettingsChange.problems_of_settings(framework.config, getattr(framework, "secrets_manager", None), ai)
-    return f"{found[0].title}: {found[0].message}" if found else None
+    try:
+        found = AISettingsChange.problems_of_settings(framework.config, getattr(framework, "secrets_manager", None),
+                                                      ai)
+    except (ValueError, OSError, yaml.YAMLError) as e:
+        raise ValueError(scrub_for_ai(str(e), ai_folder_labels(framework))) from None
+    return scrub_for_ai(f"{found[0].title}: {found[0].message}", ai_folder_labels(framework)) if found else None
 
 
 AI_SETTINGS_NEXT = ("Tell the person: the AI settings decide this together with the AI provider, so they change the "

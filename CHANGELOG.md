@@ -1299,7 +1299,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   change. MCP `update_settings` uses it for the two AI settings an AI may change: offline mode with a cloud provider
   is now refused with the dialog's text (before, only the direction was checked, so an AI could switch offline mode
   on while a cloud provider was set), checked again when the person has answered; a problem the saved settings
-  already have (such as a missing key) refuses nothing.
+  already have (such as a missing key) refuses nothing. The refusal names folders by their label and files by their
+  name only: an unreadable provider list (`llm_providers.yml`) no longer shows the AI the config folder's path.
 - **One build-submission path for the CLI, the GUI and AI callers**: `llmcf build start` and the Builder tab's
   **Start Build** queue their build through `BuildService.start_build`, the path the MCP server and Ditto already
   used, instead of building their own orchestrator request each. The CLI and the GUI therefore check a request the
