@@ -16,7 +16,7 @@ Every import counts: at module level, inside a function, under `if TYPE_CHECKING
 as a string to a call that imports by name (importlib.import_module, lazy_attributes, LazyModule), also through the
 names, loops, parameter defaults and tables (+= too) the call reads. Third-party libraries have
 their one home: PySide6 and shiboken6 only in the GUI, click and rich only in the CLI, mcp and uvicorn only in the MCP
-adapter, paramiko only in the SSH layer.
+adapter, paramiko only in the SSH transport (utils/ssh_trust.py, later orchestrator/remote/transport.py).
 
 What breaks a rule today stands in tests/data/layering_allowlist.json, each entry with its reason and the chain that
 removes it. The allowlist only shrinks: the test fails on a new violation and on an entry that no longer happens
