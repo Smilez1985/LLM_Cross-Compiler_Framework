@@ -1395,6 +1395,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Ein Dienst für Änderungen der KI-Einstellungen, für jeden Kanal** (`orchestrator/llm/settings_change.py`,
+  `AISettingsChange`): Die Regeln, die nur der Dialog der KI-Einstellungen kannte (bekannte Provider in der
+  Fallback-Kette, kein Cloud-Provider im Offline-Modus, ein Schlüssel ist nötig und kein Admin-Schlüssel, die Form der
+  Workspace-ID, die Serveradresse, ein Modell, die Rückfrage bei einem Schlüssel über plain http, der Schlüssel wird
+  für seine Adresse gespeichert, die Einstellungen werden geschrieben, die Wissensbasis gestartet und Ditto neu
+  geladen), liegen jetzt an einem Qt-freien Ort. Der Dialog behält nur seine Hinweisfenster und seine Rückfrage; die
+  Anmeldung und `llmcf ditto login` nutzen dieselben Adressregeln und MCP `update_settings` dieselbe
+  Nur-verschärfen-Regel, die aus dem Tool-Modul dorthin umgezogen ist (`direction_problem`, weiter aus
+  `orchestrator.tools.tools_status` importierbar). `AISettingsChange.current()` und `with_setting()` sind für die
+  Änderung einer einzelnen Einstellung bereit (das kommende `llmcf config set`). Der Dialog lehnt jetzt auch eine
+  Serveradresse mit Benutzername oder Passwort darin ab, wie es die Anmeldung schon tat.
 - **Ein Weg, Builds zu starten, für CLI, GUI und KI-Aufrufer**: `llmcf build start` und **Start Build** im
   Builder-Tab reihen ihren Build über `BuildService.start_build` ein, den Weg, den der MCP-Server und Ditto schon
   nutzten, statt jeweils einen eigenen Auftrag an den Orchestrator zu bauen. CLI und GUI prüfen einen Auftrag deshalb
