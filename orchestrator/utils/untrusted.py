@@ -18,7 +18,6 @@ from typing import Dict, Tuple
 _INVISIBLE_EXTRA = re.compile("[︀-️\U000E0100-\U000E01EF͏ᅟᅠㅤﾠ]")
 _KEEP_FORMAT = {"‍"}  # zero-width joiner: needed inside emoji sequences, harmless on its own
 _HTML_COMMENT = re.compile(r"<!--.*?(?:-->|$)", re.DOTALL)
-_CLOSED_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _BLOCK_TAG = re.compile(r"<\s*(/?)\s*untrusted[\s_-]*data", re.IGNORECASE)
 
 UNTRUSTED_RULE = (
@@ -46,19 +45,36 @@ def clean_untrusted(text: str, *, keep_after_open_comment: bool = False) -> Tupl
     if len(text) < normalized:
         removed["invisible_characters"] = normalized - len(text)
     if keep_after_open_comment:
-        comments = 0
-        while True:
-            text, closed = _CLOSED_COMMENT.subn("", text)
-            comments += closed
-            marker = text.find("<!--")   # no "-->" follows it
-            if marker < 0:
-                break
-            text = text[:marker] + text[marker + 4:]
+        text, comments = _without_open_markers(text)
     else:
         text, comments = _HTML_COMMENT.subn("", text)
     if comments:
         removed["html_comments"] = comments
     return text, removed
+
+
+def _without_open_markers(text: str) -> Tuple[str, int]:
+    """Closed comments removed as _HTML_COMMENT removes them (from a "<!--" to the next "-->"), then every "<!--" that
+    is left loses its four characters, also one that a removal forms ("<!<!----"); one pass each, linear in the text.
+    Returns the text, which holds no "<!--", and the number of closed comments."""
+    kept, position, comments = [], 0, 0
+    while True:
+        start = text.find("<!--", position)
+        end = text.find("-->", start + 4) if start >= 0 else -1
+        if end < 0:   # no "<!--" left, or none that a "-->" closes
+            break
+        kept.append(text[position:start])
+        position, comments = end + 3, comments + 1
+    kept.append(text[position:])
+    text = "".join(kept)
+    if "<!--" in text:
+        out: list = []
+        for ch in text:
+            out.append(ch)
+            if ch == "-" and len(out) >= 4 and out[-2] == "-" and out[-3] == "!" and out[-4] == "<":
+                del out[-4:]
+        text = "".join(out)
+    return text, comments
 
 
 def sanitize_untrusted(text: str, max_len: int = 20000) -> str:
