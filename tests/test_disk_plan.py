@@ -85,10 +85,15 @@ class TestLowDiskText:
         assert engine._check_staging_space(tmp_path, SimpleNamespace()) is None
 
 
+# The error number in an OSError's text is the system's own: EDQUOT is 122 on Linux, 69 on macOS and 10069 on Windows.
+ENOSPC_TEXT = f"[Errno {errno.ENOSPC}] No space left on device"
+EDQUOT_TEXT = f"[Errno {errno.EDQUOT}] Disk quota exceeded"
+
+
 class TestDiskFullText:
     @pytest.mark.parametrize("error, detail", [
-        (OSError(errno.ENOSPC, "No space left on device"), "[Errno 28] No space left on device"),
-        (OSError(errno.EDQUOT, "Disk quota exceeded"), "[Errno 122] Disk quota exceeded (No space left on device)"),
+        (OSError(errno.ENOSPC, "No space left on device"), ENOSPC_TEXT),
+        (OSError(errno.EDQUOT, "Disk quota exceeded"), f"{EDQUOT_TEXT} (No space left on device)"),
         (RuntimeError("tar: write error: No space left on device"), "tar: write error: No space left on device"),
         (RuntimeError("Disk quota exceeded"), "Disk quota exceeded (No space left on device)"),
         (SimpleNamespace(code="insufficient_resources", __str__=None), None),
@@ -136,7 +141,7 @@ class TestDiskFullText:
             raise OSError("gone")
         monkeypatch.setattr("orchestrator.Core.builder.shutil.disk_usage", broken)
         assert engine._disk_full_text(OSError(errno.ENOSPC, "No space left on device")) == \
-            "insufficient_resources: the disk ran full during the build. [Errno 28] No space left on device"
+            f"insufficient_resources: the disk ran full during the build. {ENOSPC_TEXT}"
 
     def test_self_healing_recognizes_both_texts(self, engine, monkeypatch):
         import re
@@ -284,7 +289,7 @@ class TestDiskPlanWatchdog:
         text = disk_plan.disk_full_text(OSError(errno.ENOSPC, "No space left on device"), folders,
                                         lambda p: usage(2 * GB))
         assert text == ("insufficient_resources: the disk ran full during the build (cache disk 2.0 GB free, output "
-                        "disk 2.0 GB free). [Errno 28] No space left on device")
+                        f"disk 2.0 GB free). {ENOSPC_TEXT}")
         assert disk_plan.disk_full_text(ValueError("other"), folders) is None
         assert disk_plan.DISK_FULL_PHRASE in disk_plan.disk_full_text(RuntimeError("Disk quota exceeded"), {})
 
