@@ -1404,8 +1404,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anmeldung und `llmcf ditto login` nutzen dieselben Adressregeln und MCP `update_settings` dieselbe
   Nur-verschärfen-Regel, die aus dem Tool-Modul dorthin umgezogen ist (`direction_problem`, weiter aus
   `orchestrator.tools.tools_status` importierbar). `AISettingsChange.current()` und `with_setting()` sind für die
-  Änderung einer einzelnen Einstellung bereit (das kommende `llmcf config set`). Der Dialog lehnt jetzt auch eine
-  Serveradresse mit Benutzername oder Passwort darin ab, wie es die Anmeldung schon tat.
+  Änderung einer einzelnen Einstellung bereit (das kommende `llmcf config set`).
 - **Ein Weg, Builds zu starten, für CLI, GUI und KI-Aufrufer**: `llmcf build start` und **Start Build** im
   Builder-Tab reihen ihren Build über `BuildService.start_build` ein, den Weg, den der MCP-Server und Ditto schon
   nutzten, statt jeweils einen eigenen Auftrag an den Orchestrator zu bauen. CLI und GUI prüfen einen Auftrag deshalb
@@ -1415,7 +1414,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Build zu scheitern. Was jedes Fenster einstellt, bleibt wie es war: Priorität, Optimierung und Zielfrage der CLI,
   Priorität, parallele Builds und Build-Ordner der GUI, ein Target ohne Capabilities wird ungeprüft gebaut, und
   deine eigenen Builds lehnt das Warteschlangen-Limit für KI-Aufrufer nie ab. Die Verfolgungsschleife der CLI liest
-  den Build über denselben Dienst.
+  den Build über denselben Dienst. Die Prüfung des Builders auf einen früheren Build mit denselben Optionen erfasst
+  jetzt auch ein Target ohne Capabilities (vorher lehnte der Dienst den Vergleich eines solchen Auftrags ab, und der
+  Builder vermerkte das nur im Log).
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:
@@ -2310,6 +2311,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Der Dialog der KI-Einstellungen lehnt eine Serveradresse mit Benutzername oder Passwort darin ab**, wie es die
+  Anmeldung und `llmcf ditto login` schon taten (dieselbe Adressregel aus `AISettingsChange`): Vorher wurde eine
+  solche Adresse (oder eine mit Leerzeichen oder Backslash, die Parser als zwei verschiedene Hosts lesen können) so,
+  wie sie eingegeben war, in die `config.yml` gespeichert.
 - **Ein Community-Rezept, das du in der GUI baust, wird beim Bauen geprüft, wie über MCP**: Der Knopf **Build** im
   Community Hub und **Start Build** im Builder-Tab gehen über `BuildService.installed_recipe` und
   `BuildService.start_recipe`, den Weg, den `start_recipe_build` nutzt. Ein Rezept, das der Community-Index
