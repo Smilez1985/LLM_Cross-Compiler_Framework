@@ -3532,8 +3532,8 @@ def _person_trash(ctx: FrameworkContext, state_dir: Path):
         return Trash.for_framework(fm), _cli_audit(ctx)
     audit = _device_audit(ctx, state_dir)
     try:
-        from orchestrator.tools.framework_tools import _audit_key
-        key = _audit_key(None, state_dir)
+        from orchestrator.Core.vault_key import audit_key
+        key = audit_key(None, state_dir)
     except Exception:  # noqa: BLE001 - without a keyring the trash index is unkeyed, like the permission file
         key = None
     config, _ = _settings(ctx)
@@ -4577,8 +4577,8 @@ def _device_audit(ctx: FrameworkContext, state_dir: Path):
         return audit
     try:
         from orchestrator.tools.audit import AuditLog
-        from orchestrator.tools.framework_tools import _audit_key
-        return AuditLog(state_dir / "audit.db", key=_audit_key(None, state_dir))
+        from orchestrator.Core.vault_key import audit_key
+        return AuditLog(state_dir / "audit.db", key=audit_key(None, state_dir))
     except Exception:  # noqa: BLE001 - the record is still written; the trust itself was the person's
         return None
 

@@ -1,12 +1,6 @@
 {
- "largest_cycle": 80,
+ "largest_cycle": 9,
  "imports": [
-  {
-   "from": "orchestrator.Core.chat_feed",
-   "to": "orchestrator.tools.framework_tools",
-   "reason": "the audit key comes from the private framework_tools._audit_key",
-   "until": "c1-imports"
-  },
   {
    "from": "orchestrator.Core.framework",
    "to": "orchestrator.tools.framework_tools",
