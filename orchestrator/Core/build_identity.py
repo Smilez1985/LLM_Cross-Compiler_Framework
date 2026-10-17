@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from orchestrator.utils.helpers import sha256_file
+
 OPTIONS_VERSION = 1
 MANIFEST_KEY = "build_options"
 DIGEST_KEY = "build_options_sha256"
@@ -62,12 +64,9 @@ def local_weights(path: Any) -> Optional[List[Dict[str, Any]]]:
 
 
 def file_sha256(path: Any) -> Optional[str]:
+    """sha256 of a file (links followed), None when it cannot be read."""
     try:
-        digest = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(1 << 20), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+        return sha256_file(path)
     except OSError:
         return None
 

@@ -26,7 +26,6 @@ Rules:
 """
 
 import errno
-import hashlib
 import json
 import os
 import re
@@ -44,6 +43,7 @@ from orchestrator.Core.deletion import (AcceptedDeletion, PlanChanged, plan_of, 
 from orchestrator.tools.signing import SignatureError, sign, verify
 from orchestrator.tools.spec import DeletionItem, DeletionPlan
 from orchestrator.utils.file_lock import file_lock
+from orchestrator.utils.helpers import try_sha256_file as file_sha256  # None for a link, a non-file, OSError
 from orchestrator.utils.next_steps import WithSteps
 
 TRASH_FOLDER = ".trash"
@@ -143,19 +143,6 @@ def tree_size(path: Path) -> int:
             except OSError:
                 continue
     return total
-
-
-def file_sha256(path: Path) -> Optional[str]:
-    try:
-        if path.is_symlink() or not path.is_file():
-            return None
-        digest = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(1 << 20), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-    except OSError:
-        return None
 
 
 def restored_name(name: str, stamp: str) -> str:

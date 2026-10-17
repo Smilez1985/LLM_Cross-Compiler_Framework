@@ -20,7 +20,6 @@ import subprocess
 import threading
 import time
 import shutil
-import hashlib
 import re
 import zipfile
 from pathlib import Path
@@ -42,6 +41,7 @@ from orchestrator.tools import local_files
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
 from orchestrator.utils.download import FileLock as DownloadLock
+from orchestrator.utils.helpers import copy_hashed, digest_matches, sha256_file
 from orchestrator.utils.llama_pin import pinned_source
 from orchestrator.utils.sandbox import FALLBACK_USER, container_sandbox, hand_over, sandbox_user
 
@@ -1311,7 +1311,6 @@ class BuildEngine:
         bytes are copied into the build's own folder while they are hashed, and the copy is used only when its sha256
         is the pinned one. From here on the build reads only that copy, so a file swapped after the check (at the
         question, at the start) is never used."""
-        import hmac
         if not config.dataset_sha256 or not config.dataset_path:
             return
         source = Path(config.dataset_path)
@@ -1324,21 +1323,17 @@ class BuildEngine:
             fd = os.open(str(source), flags)
         except OSError:
             raise ValueError(f"The calibration dataset {source.name} cannot be opened; nothing was built.") from None
-        h = hashlib.sha256()
         try:
             import stat
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise ValueError(f"The calibration dataset {source.name} is not a regular file; nothing was built.")
-            with os.fdopen(os.dup(fd), "rb") as src, open(target, "xb") as dst:
-                for chunk in iter(lambda: src.read(1024 * 1024), b""):
-                    h.update(chunk)
-                    dst.write(chunk)
+            digest = copy_hashed(fd, target)  # the bytes copied are the bytes hashed
         except BaseException:
             target.unlink(missing_ok=True)
             raise
         finally:
             os.close(fd)
-        if not hmac.compare_digest(h.hexdigest(), str(config.dataset_sha256)):
+        if not digest_matches(digest, config.dataset_sha256):
             target.unlink(missing_ok=True)
             raise ValueError(f"The calibration dataset {source.name} is not the file that was checked (its sha256 "
                              f"differs from {str(config.dataset_sha256)[:16]}...); nothing was built.")
@@ -1702,13 +1697,8 @@ class BuildEngine:
 
     @staticmethod
     def _sha256_file(path: Path, progress: Optional[BuildProgress] = None) -> str:
-        sha256 = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                if progress is not None:
-                    BuildEngine._check_cancelled(progress)
-                sha256.update(chunk)
-        return sha256.hexdigest()
+        """sha256 of a model file; a cancelled build stops it between two chunks (BuildCancelled)."""
+        return sha256_file(path, cancel=None if progress is None else lambda: BuildEngine._check_cancelled(progress))
 
     def _write_build_manifest(self, config: BuildConfiguration, output_dir: Path,
                               produced: Optional[List[str]] = None,

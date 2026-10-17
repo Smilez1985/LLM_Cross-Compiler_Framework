@@ -22,7 +22,6 @@ Every run uses the shared launch policy (orchestrator/runtime/server_policy.py):
 environment. Failures raise PerplexityError with the reason instead of returning sentinel values.
 """
 
-import hashlib
 import json
 import re
 import subprocess
@@ -32,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from orchestrator.utils.helpers import ensure_directory
+from orchestrator.utils.helpers import sha256_file as _sha256
 from orchestrator.utils.logging import get_logger
 
 PERPLEXITY = "llama-perplexity"
@@ -74,14 +74,6 @@ def parse_perplexity(output: str) -> float:
         raise PerplexityError(f"the text is too short for this context: llama-perplexity needs at least "
                               f"{short.group(1)} tokens; use a longer text or a smaller context")
     raise PerplexityError("llama-perplexity printed no final estimate")
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _tail(text: str, limit: int = 400) -> str:

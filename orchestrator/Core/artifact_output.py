@@ -33,7 +33,6 @@ folder) so the listings keep showing them.
 """
 
 import errno
-import hashlib
 import json
 import os
 import secrets
@@ -44,6 +43,8 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from orchestrator.utils.file_lock import file_lock
+from orchestrator.utils.helpers import copy_hashed
+from orchestrator.utils.helpers import sha256_file as _sha256
 
 BUILDS, OUTPUT, SAVED = "builds", "output", "saved"
 INDEX_FILE = "saved_artifacts.json"
@@ -476,26 +477,11 @@ def _device(path: Path) -> int:
     return os.stat(probe).st_dev
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(COPY_CHUNK), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _copy_file(source: Path, target: Path) -> str:
     """Copies one file (never through a link) and returns the sha256 of what was read."""
-    digest = hashlib.sha256()
-    fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
-    with open(fd, "rb") as fin, open(target, "xb") as fout:
-        for chunk in iter(lambda: fin.read(COPY_CHUNK), b""):
-            digest.update(chunk)
-            fout.write(chunk)
-        fout.flush()
-        os.fsync(fout.fileno())
+    digest = copy_hashed(source, target, fsync=True, chunk=COPY_CHUNK)
     shutil.copystat(source, target, follow_symlinks=False)
-    return digest.hexdigest()
+    return digest
 
 
 def _copy_verified(folder: Path, zip_file: Optional[Path], target: Path,

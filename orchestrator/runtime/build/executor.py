@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from orchestrator.runtime.build.recipe import BuildPlan, PlanError, check_download_options
 from orchestrator.runtime.build.toolchain import DetectedToolchain, host_resources, parallel_jobs
+from orchestrator.utils.helpers import sha256_file as _sha256
 from orchestrator.utils.sandbox import container_sandbox, hand_over, sandbox_user
 
 BUILDER_DOCKERFILE = Path(__file__).resolve().with_name("builder.Dockerfile")
@@ -566,10 +567,3 @@ class BuildExecutor:
                 raise BuildError(f"{name} links to {target}, which is not part of the build", log)
         return files, links
 
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
