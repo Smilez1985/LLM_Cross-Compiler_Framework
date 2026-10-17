@@ -222,6 +222,16 @@ def access_text(info: Mapping[str, Any], translate: Optional[Translate] = None) 
     return " · ".join(p for p in parts if p)
 
 
+class EnvKeyError(ValueError):
+    """`login --from-env` cannot take a key: the method reads no variable (`no_variable`), none of its variables is
+    set (`not_set`), or the value is not a key (`malformed`: a space, a line break, ...). Holds the names, never a
+    value; the CLI and the GUI word it themselves."""
+
+    def __init__(self, code: str, variables: List[str], name: Optional[str] = None):
+        self.code, self.variables, self.name = code, list(variables), name
+        super().__init__(f"{code}: {name or ', '.join(variables)}")
+
+
 @dataclass
 class Saved:
     metadata: Dict[str, Any]
@@ -507,6 +517,30 @@ class SignIn:
                                   source=source if value else "none", api_key=SecretStr.wrap(value),
                                   headers=headers, workspace_id=values.get("workspace_id"),
                                   project=values.get("project"), origin=origin)
+
+    # --- the key from an environment variable (login --from-env) --------------------------------------------
+    def _environ(self) -> Mapping[str, str]:
+        environ = getattr(self.store, "environ", None)
+        return os.environ if environ is None else environ
+
+    def env_variable(self, spec: AuthMethodSpec) -> Optional[str]:
+        """The first of the method's environment variables that is set (its name only), else None."""
+        environ = self._environ()
+        return next((name for name in spec.env if (environ.get(name) or "").strip()), None)
+
+    def env_key(self, preset: Any, spec: AuthMethodSpec) -> "tuple[str, str]":
+        """The key in the method's first environment variable that is set, and that variable's name, for storing it
+        in the vault (`llmcf ditto login PROVIDER --from-env`; Security > Sign-in Overview... > Store the key from
+        the environment variable). Raises EnvKeyError; never reads the vault or the network."""
+        if not spec.env:
+            raise EnvKeyError("no_variable", [])
+        name = self.env_variable(spec)
+        if name is None:
+            raise EnvKeyError("not_set", list(spec.env))
+        value = (self._environ().get(name) or "").strip()
+        if malformed_key(value):
+            raise EnvKeyError("malformed", list(spec.env), name)
+        return value, name
 
     # --- storing ----------------------------------------------------------------------------------------------
     def save_key(self, preset: Any, spec: AuthMethodSpec, key: str, base_url: Optional[str] = None, *,

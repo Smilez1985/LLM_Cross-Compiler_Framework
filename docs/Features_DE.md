@@ -335,6 +335,18 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
 - **Paket:** eine ZIP-Datei mit der Modelldatei, Manifest und Model Card des Builds, `checksums.sha256` und einem
   erzeugten `deploy.sh`. Übertragen werden nur Modelldateien (`.gguf`, `.rkllm`, `.rknn`, `.onnx`, `.safetensors`,
   `.bin`); ein Build mit mehreren Gewichtsdateien wird abgelehnt.
+- **Ein Paket ohne Board** (`llm-cli deploy package`; GUI: Tab Deployment > **Nur Paket erstellen…**): das Paket des
+  ausgewählten Builds für das gewählte Profil, mit Docker-Images für ein Board ohne Netz, wenn du **Use Docker
+  Containerization?** ankreuzt. Wie die CLI nimmt die GUI jeden Pfad: **Anderer Build oder Modelldatei…** fügt der
+  Build-Liste einen Build-Ordner oder eine Modelldatei hinzu. Kein Board wird kontaktiert. Die GUI öffnet den
+  Ordnerdialog beim Ausgabeordner, wie für jedes Golden Artifact, und nennt den vollen Pfad des Pakets oder, wenn es
+  nicht erstellt werden kann, den Grund und den nächsten Schritt. Kopiere es auf das Board und starte dort
+  `deploy.sh`, oder deploye es später.
+- **Ein vorhandenes Paket** (`llm-cli deploy run PACKAGE_PATH`; GUI: Tab Deployment > **Vorhandenes Paket
+  deployen…**): ein früher erstelltes ZIP geht an das Board im Adressfeld, mit derselben Frage zum Host-Schlüssel,
+  demselben einmaligen Passwort, demselben Warten und demselben Eintrag bei den vertrauten Geräten wie **Deploy to
+  Target**. Die Felder **Port**, **Name** und **Auf das Board warten** des Tabs sind `--port`, `--label` und `--wait`
+  der CLI, für beide Schaltflächen.
 - **Auf dem Board:** Das Paket kommt in einen privaten temporären Ordner (`mktemp -d`), `deploy.sh` (mit `sh`
   ausgeführt, also auch auf Boards, die `/tmp` mit `noexec` einhängen oder kein bash haben) prüft jede Prüfsumme mit
   `sha256sum -c`, kopiert das Modell nach `~/models` (oder `$MODEL_DIR`), und der temporäre Ordner wird
@@ -365,6 +377,18 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   ([CLI](CLI_Usage_DE.md#deploy-devices)). Nur diese Geräte kann ein KI-Client oder Ditto für ein Deployment nennen,
   und nur, solange die `known_hosts` des Frameworks noch genau diesen Schlüssel enthält; kein Tool vertraut einem
   Gerät, koppelt es oder trägt es ein.
+- **Fenster Boards und Geräte** (GUI: **Boards > Boards und Geräte...**): jedes Board, das du untersucht hast oder
+  dem du vertraust, in einer Tabelle, mit dem, was nur du siehst (das Konto auf dem Board, den vollen Fingerabdruck
+  des Host-Schlüssels und ob `known_hosts` ihn noch enthält, seit wann und wie ihm vertraut wird, das letzte
+  Deployment, das System aus seiner Probe, seine Deploy-Einstellungen und die installierte Laufzeit). Seine Knöpfe
+  rufen dieselben Funktionen wie die CLI auf, mit denselben Fragen ("Nein" ist die Vorgabe) und Audit-Einträgen:
+  **Vertrautes Board hinzufügen...** (`deploy devices add`), **Vertrauen entfernen...** (`deploy devices remove`:
+  ohne es bleibt ein einmal gekoppeltes Board für KI-Deployments erlaubt), **Einstellungen...**,
+  **Laufzeit-Plan**, **Status**, **Laufzeit bauen...**, **Laufzeit installieren...**, **Prüfen...**, **Ältere
+  Laufzeit-Pakete entfernen...** und **Ältere Builds auf dem Board entfernen...** (die `device`-Befehle unten;
+  Löschen im Löschdialog mit der vollständigen Liste) sowie **Dieses Board prüfen (Mojo)** (eine Verbindung zum
+  SSH-Port des Boards, keine Anmeldung). Jeder Kontakt mit einem Board und jeder Build laufen im Hintergrund mit
+  Abbrechen; ein Passwort wird jedes Mal abgefragt und nie gespeichert.
 - **Adresse oder Hostname:** Du gibst ein, was du weißt, die IP-Adresse des Boards oder seinen Hostnamen
   (`myboard.local`). Dem Host-Schlüssel wird je eingegebenem Namen vertraut: ein Board, das du unter beiden Namen
   erreichst, bestätigst du für jeden einmal, und es bleibt dasselbe vertraute Gerät.
@@ -406,7 +430,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
 
 Für GGUF-Modelle baut das Framework llama.cpp für ein Board und installiert es dort (`llm-cli device ...`,
 [CLI_Usage_DE.md](CLI_Usage_DE.md#device)). Die RKLLM- und RKNN-Runtime sind Herstellerbinärdateien; sie
-installierst du selbst.
+installierst du selbst. GUI: **Boards > Boards und Geräte...** (**Laufzeit-Plan**, **Laufzeit bauen...**,
+**Laufzeit installieren...**, **Prüfen...**, **Status**, **Einstellungen...**, **Ältere Laufzeit-Pakete
+entfernen...**, **Ältere Builds auf dem Board entfernen...**).
 
 - **Bauplan aus der eigenen Probe des Boards** (Entscheidung D14): `llm-cli scan --device` legt das Profil des
   Boards unter seiner ID ab (aus seinem SSH-Host-Schlüssel). Der Bauplan ist ein Cross-Build für dieses Profil:
@@ -608,8 +634,21 @@ die Annahmen; seine Unterstützungsstufe ist community.
 
 ### Anmeldung
 
-- **Wo:** **Anmelden...** in den KI-Einstellungen (GUI) und `llm-cli ditto login | logout | auth` (siehe die
-  [CLI-Anleitung](CLI_Usage_DE.md#ditto-login)).
+- **Wo:** **Anmelden...** in den KI-Einstellungen (GUI), **Security > Anmeldeübersicht...** (GUI) und `llm-cli
+  ditto login | logout | auth` (siehe die [CLI-Anleitung](CLI_Usage_DE.md#ditto-login)).
+- **Anmeldeübersicht** (GUI: **Security > Anmeldeübersicht...**): die Anmeldung aller Anbieter auf einmal
+  (Verfahren, Quelle, Konto oder die letzten vier Zeichen eines Schlüssels, Zustand; Dittos Anbieter mit `*`
+  markiert) und wie der Tresor geschützt ist, mit seiner Datei (`ditto auth status`); **Alle prüfen** führt im
+  Hintergrund die kostenlose Prüfung jedes Anbieters mit Zugangsdaten aus (`--check`); der Reiter **Alle
+  Anmeldeverfahren** listet die Verfahren jedes Anbieters mit ihren Umgebungsvariablen und Anmerkungen (`ditto auth
+  methods`). Wer einen Anbieter wählt, sieht sein Anmeldefeld mit einem eigenen Feld **Serveradresse**: Eine dort
+  eingegebene (oder von den KI-Einstellungen übergebene) Adresse wird nur für diesen Anbieter gemerkt und macht ihn
+  nicht zu Dittos Anbieter (`ditto login --base-url`). Das Framework liest, speichert und übergibt nie Zugangsdaten
+  eines Claude-Abos und startet nie den Befehl claude.
+- **Schlüssel aus einer Umgebungsvariable:** Jede Schlüsselkarte nennt die Umgebungsvariablen des Verfahrens und
+  seine Anmerkung und bietet **Den Schlüssel aus <VARIABLE> im Tresor speichern** an, solange eine gesetzt ist
+  (vorher geprüft, außer du nimmst den Haken bei **Vorher prüfen (kostenlos)** weg; `ditto login --from-env`). Der
+  Schlüssel geht im Hintergrund von der Variable in den Tresor und nie in ein Feld.
 - **Karten für die Verfahren:** Der Bereich zeigt die Anmeldeverfahren des Anbieters in der Reihenfolge des
   Katalogs. Das erste, mit dem sich diese Version anmelden kann, ist als „Empfohlen“ markiert, Verfahren nur auf
   Wunsch (das `ant`-Profil) als „Erweitert“, und Verfahren einer späteren Version werden gezeigt, lassen sich aber
@@ -637,12 +676,18 @@ die Annahmen; seine Unterstützungsstufe ist community.
   Beispiel das `ant`-Profil).
 - **Abmelden zuerst lokal:** Der gespeicherte Schlüssel wird gelöscht, und die Schlüsselseite, auf der du den
   Schlüssel selbst widerrufst, wird genannt; ein Schlüssel in einer Umgebungsvariable bleibt in Gebrauch, bis du sie
-  entfernst.
+  entfernst. Ein Server ohne Anmeldung (Ollama, `custom` ohne Schlüssel) hat **Vergessen**, das seine gemerkte
+  Adresse und sein gemerktes Verfahren vergisst (`ditto logout`); beides fragt vorher, „Nein“ ist vorgewählt.
 - **Kein nutzbarer Schlüsselbund:** Der Bereich zeigt die Auswahl für den Schutz (Passphrase, Credential-Helper
   oder die unverschlüsselte Schlüsseldatei nach einer Bestätigung), und die GUI zeigt dieselbe Auswahl beim Start,
   bevor sie aufgibt; eine Passphrase wird in einem Dialog abgefragt. Eine Wahl, die den vorhandenen Tresor nicht
   öffnen kann (einen, den der gesperrte Schlüsselbund schützt), wird nicht behalten. Die CLI endet mit Exit-Code 5
   und nennt `llm-cli ditto auth storage --use ...`. Für dich wird nichts gewählt.
+- **Schlüsselspeicher** (GUI: **Security > Schlüsselspeicher...**): der Schutz des Tresors und seine Datei
+  jederzeit, auch während er funktioniert (`ditto auth storage`); **Anders schützen** wechselt zum Schlüsselbund des
+  Betriebssystems, zu einem Credential-Helper mit seinem Befehl, zu einer Passphrase oder zur unverschlüsselten
+  Schlüsseldatei (nach der Bestätigung und der Frage der CLI, „Nein“ ist vorgewählt; `--use`), und **Schlüssel
+  erneuern...** fragt vorher (`ditto auth rotate-key`).
 - **Reaktionsschnell:** Jeder Zugriff auf Tresor, Schlüsselbund oder Netz aus dem Anmeldebereich und für den Kopf
   des Chats läuft in einem Hintergrund-Thread.
 
@@ -1619,6 +1664,9 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   sich dieser Ordner nicht nutzen, erscheint der Hinweis jedes Mal.
 - Nur eine Person bestätigt ihn, in der GUI oder mit `llm-cli tools crawl-notice` in einem Terminal. Solange er nicht
   gelesen ist, wird `crawl_docs_site` mit dem Grund `needs_person` und diesen beiden Orten abgelehnt.
+- GUI: Tools > Hinweis zu Deep Ingest... zeigt ihn jederzeit und bittet dich, solange er noch nötig ist, zu
+  bestätigen, dass du ihn gelesen hast („Nein“ ist vorgewählt); der Deep Ingest des Modul-Assistenten zeigt ihn vor
+  der Prüfung der Wissensdatenbank.
 
 ### Was der Crawler beachtet
 
@@ -1810,6 +1858,16 @@ Mit `crawl_docs_site` kann ein MCP-Client oder Ditto Dokumentation in die Wissen
 bereit (offizielles Python-SDK `mcp` 2.3.0, Spezifikation 2026-07-28). KI-Clients wie Claude Code, Claude Desktop oder
 VS Code können dann [dieselben Tools wie Ditto](#dittos-tools) nutzen. Am Client meldest du dich mit deinem eigenen
 Konto oder Schlüssel an; das Framework sieht das nie.
+
+**GUI:** Security > Verbindungen zu KI-Apps (MCP)... zeigt, wie du Claude Code, Claude Desktop (mit dem Pfad seiner
+Konfigurationsdatei) und VS Code verbindest, jeweils mit einer Schaltfläche zum Kopieren, trägt den Eintrag in die
+Konfiguration von Claude Desktop ein, nachdem es Datei und Änderung gezeigt hat (In Claude Desktop eintragen..., die
+Sicherung wie bei `mcp config --write`), startet und stoppt den lokalen HTTP-Server als Kindprozess der GUI (Adresse,
+Port, Container-Bindung; dieselben Ablehnungen wie `mcp serve --transport http`; Adresse, Zustand und Ausgabe zu
+sehen; das Framework fragt vor dem Schließen, solange der Server noch läuft) und verwaltet die benannten Tokens
+(Hinzufügen, auch als Kopie der Berechtigungen eines anderen Tokens, Rotieren, Widerrufen samt den dauerhaften
+Freigaben des Tokens, Zurück auf nur lesen). Ein Token wird einmal gezeigt, direkt nachdem es angelegt oder rotiert
+wurde.
 
 - **Jeder Aufruf läuft durch die Tool-Registry:** Abgleich von Namen und Argumenten, Eingabeschema, deine
   Berechtigungen, Bestätigung, Audit-Log (Akteur `mcp` für lokale stdio-Clients, `mcp:<Name>` für ein benanntes
@@ -2038,7 +2096,8 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Hex-Zeichen), die das Framework dafür festgehalten hat. Die Ordner sind der Modellordner (`models`, Einstellung
   `models_dir`), der Datensatzordner (`datasets`, Einstellung `datasets_dir`, standardmäßig neben dem Modellordner)
   und die Ordner, die du mit [`llm-cli tools folders add`](CLI_Usage_DE.md#tools-folders) oder in der GUI (Tools >
-  Folders the AI May Use...) hinzufügst. Für den Modell- und den Datensatzordner gelten dieselben Grenzen wie für
+  Folders the AI May Use... > Add folder..., das auch fragt, was im Ordner liegt: Modell-Dateien, Datensatz-Dateien
+  oder beides) hinzufügst. Für den Modell- und den Datensatzordner gelten dieselben Grenzen wie für
   einen hinzugefügten Ordner: Zeigt eine Einstellung auf `/`, dein Home oder einen Ordner, der den persönlichen
   Ordner enthält, ist ihr Label nicht nutzbar. Die Datei muss in ihrem Ordner liegen (Links werden verfolgt und
   geprüft) und außerhalb jedes gesperrten Ordners: des persönlichen Ordners des Frameworks (außer den Datenordnern,
@@ -2181,9 +2240,9 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   `llm-cli` nimmt sie aus seiner Umgebung, bevor irgendein Befehl läuft (kein Befehl und kein Kindprozess erbt sie),
   und gibt sie nur an `mcp serve` weiter, das nicht mit einem Wert startet, der kein gültiges Token ist. Ohne sie
   teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen Berechtigungen. Tokens verwaltet nur
-  ein Mensch, an einem Terminal oder in der GUI (Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens“:
-  auflisten, anlegen mit einmal gezeigtem Token, rotieren, widerrufen und die eigenen Berechtigungen jedes Tokens;
-  protokolliert mit dem Akteur `gui`): Kein Tool kann sie anlegen, lesen oder ändern, und kein Token erscheint in
+  ein Mensch, an einem Terminal oder in der GUI (Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP-Tokens
+  (eines je Client)“: auflisten, anlegen mit einmal gezeigtem Token, rotieren, widerrufen und die eigenen
+  Berechtigungen jedes Tokens; protokolliert mit dem Akteur `gui`): Kein Tool kann sie anlegen, lesen oder ändern, und kein Token erscheint in
   einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag. Der Server liest den Token-Speicher bei jeder Prüfung
   und merkt ihn sich anhand des SHA-256 der Dateibytes, sodass er eine Änderung auch dann sieht, wenn sie Größe und
   Zeitstempel der Datei beibehält.
@@ -2287,6 +2346,12 @@ Verfügung.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
   nicht lesen lässt, darf nicht einmal lesen.
+- **GUI:** Tools > Tool Permissions (Ditto / MCP)... zeigt je Tool, was jetzt gilt und warum („Gilt jetzt“, wie
+  `llm-cli tools list`), nennt die Aufrufer mit eigenen Berechtigungen, bearbeitet die gemeinsamen Berechtigungen
+  oder die von Ditto oder den lokalen MCP-Clients („Wessen Berechtigungen“, `--caller`) und setzt sie zurück: auf die
+  empfohlenen Standards, einen Aufrufer zurück auf die gemeinsamen, ein Token zurück auf nur lesen (`--reset`,
+  `--reset --caller`, `--reset --token`). Jedes Zurücksetzen nennt, was sich ändert, und fragt zuerst („Nein“ ist
+  vorgewählt).
 
 **Was eine Rückfrage zeigt** (Dittos GUI-Dialog und CLI-Abfrage, das Formular eines MCP-Clients), in dieser
 Reihenfolge: die Folge in einfachen Worten, aus dem, was das Framework nachgeschlagen hat, mit IDs, denen ihr
@@ -2350,6 +2415,9 @@ neuesten Einträge auffällt. `llm-cli tools audit --verify` prüft die Kette un
 von einem falschen Schlüssel. Jeder Eintrag wird in einer eigenen Transaktion geschrieben, damit mehrere Prozesse die
 Kette nicht aufspalten. `llm-cli tools audit --archive` legt das Log und seinen Anker beiseite (mit Zeitstempel
 aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli mojo` ein Problem mit dem Log gemeldet hat.
+GUI: Security > Prüfprotokoll... zeigt dieselben Zeilen Seite für Seite (mit oder ohne Details), prüft die Kette
+(Unversehrtheit prüfen, das Ergebnis in einfachen Worten), archiviert das Log nach einer Rückfrage und zählt die
+Aufrufe je Aufrufer; Prüfung, Archivieren und Zählen laufen im Hintergrund.
 
 **Festgehalten, bevor er läuft.** Ein Aufruf, der etwas ändert (jede Stufe außer `read`), bekommt einen Eintrag
 `started`, bevor er läuft. Lässt sich dieser Eintrag nicht schreiben, wird der Aufruf abgelehnt und nichts läuft:
@@ -2449,7 +2517,12 @@ Board-Pfade.
   Der Tresor wird atomar unter einer Sperre geschrieben, die GUI, CLI und MCP-Server teilen, ist nur für dich lesbar,
   liegt nie in einer Git-Arbeitskopie, und ein beschädigter Tresor wird nie überschrieben. `llm-cli mojo` warnt
   vor der Schlüsseldatei und vor einem Schlüsselbund, der Geheimnisse nicht schützt. `llm-cli ditto auth
-  rotate-key` ersetzt den Schlüssel des Tresors und verschlüsselt jeden Eintrag neu.
+  rotate-key` ersetzt den Schlüssel des Tresors und verschlüsselt jeden Eintrag neu. GUI: **Security >
+  Geheimnisse...** listet die Namen, die das Framework liest (`hf_token`, `qdrant_api_key`, die Schlüssel der
+  Community-Pakete), und jeden gespeicherten Namen mit „gespeichert“ oder „nicht gespeichert“ und wofür (`secrets
+  list`, nie ein Wert), und setzt jeden Namen mit dem Wert zweimal in verdeckten Feldern (`secrets set`; im Speicher
+  `ephemeral` sagt es, dass nichts gespeichert wurde); **Security > Schlüsselspeicher...** zeigt und wechselt den
+  Schutz und erneuert den Schlüssel des Tresors.
 - **Schwärzen:** Eine Tabelle der Secret-Formate (`orchestrator/security/secret_patterns.py`) teilen sich der
   Secret-Scan des Repositorys und die Schwärzung zur Laufzeit. Zugangsdaten (bekannte Schlüsselformate, Header mit
   Zugangsdaten, Tokens in URLs und Formulardaten, Zeilen wie `HF_TOKEN=...`) werden aus jeder Logzeile und jedem
@@ -2561,9 +2634,15 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   Python-Probe und behält das Profil als `local`; `llm-cli scan --device` führt sie per SSH auf einem Board aus (die
   Python-Probe mit `python3 -I`, wenn das Board Python 3.8 oder neuer hat, sonst die Shell-Probe; auf dem Board wird
   nichts installiert) und behält das Profil unter der ID des Boards; der SSH-Benutzer wird zum Deploy-Benutzer des
-  Boards (nie root). In der GUI importiert **Scan / Import...** eine Probe-Datei, untersucht ein Board per SSH mit
-  denselben Regeln für das Vertrauen beim ersten Kontakt wie beim Deployment oder untersucht diesen PC; die
-  Scan-Ergebnisse legt sie in `<cache_dir>/probes/` ab. Der SSH-Scan der GUI nutzt dieselbe entfernte Probe wie
+  Boards (nie root). GUI: Tab Builder > **Scan / Import...** führt dieselben Schritte aus wie die CLI: **Scan Local
+  Host** (die Python-Probe, als `local` behalten), **Lokalen Rechner mit dem Ersatz-Skript scannen** (`--script`),
+  **Lokalen Rechner scannen und Profil speichern unter...** (`--output`, eine `.json`-Datei für `--json`), **Lokalen
+  Rechner mit dem Ersatz-Skript scannen und Profil speichern unter...** (`--script --output`), **Remote
+  Scan via SSH...** (`--device`, mit **Port** und **Name**; dieselben Regeln für das Vertrauen beim ersten Kontakt wie
+  beim Deployment, der Host-Schlüssel im Hintergrund gelesen, und das Board kommt wie über die CLI zu den vertrauten
+  Geräten) und **Import from File (USB/Disk)...** (`--import`, fragt nach dem Namen des Boards). Eine Kopie jedes
+  Ergebnisses legt sie für den Target-Abgleich in `<cache_dir>/probes/` ab. Der SSH-Scan der GUI nutzt dieselbe
+  entfernte Probe wie
   `llm-cli scan --device`: Das Skript kommt über den SSH-Kanal, also funktioniert er auch auf Boards, die `/tmp` mit
   `noexec` einhängen, und das Profil wird unter der ID des Boards abgelegt. Rechner ohne
   Netzzugang führen eine Probe von Hand aus ([README](../README_DE.md#die-hardware-des-boards-untersuchen)).
@@ -2706,6 +2785,18 @@ Docker-Images auf eine andere Platte zu verlegen ist ein Schritt für Administra
 `llm-cli doctor` behält seine Optionen (`--fix`, `--tier 1|2`, `--json`), seine Ausgabe und seine Exit-Codes, mit
 einem kurzen Hinweis, der `llmcf mojo` nennt; `--fix` macht dieselben protokollierten harmlosen Reparaturen, und
 `--tier 2` zeigt auch die Liste der Build-Images des Frameworks.
+
+GUI (unveröffentlicht): **Tools > Mojo-Gesundheitscheck...** erledigt all das mit der Maus, über dieselben Funktionen
+wie der Befehl. Mojo Oracle läuft beim Öffnen des Fensters, außerhalb des GUI-Threads, und zeigt jeden Befund so, wie
+`llmcf mojo` ihn ausgibt (die Schwere als Text mit Zeichen und Symbol, nie nur als Farbe; wo, warum es wichtig ist,
+den nächsten Schritt, was Mojo Miracle tun kann, mit seinem Plan; den zusammenfassenden Satz und eine Gesamtzeile mit
+dem Exit-Code). **Mojo Miracle ausführen...** fragt „Mojo Miracle jetzt ausführen?“ (Nein ist die Vorgabe) und
+repariert so, wie es der Befehl im Terminal tut: Die gezeigten Pläne binden die Reparaturen, die Build-Images des
+Frameworks öffnen sich im Löschdialog mit der ganzen Liste und nichts angehakt, und das Fenster zeigt danach, was
+repariert wurde, was nicht und warum. Das Fenster nimmt von sich aus keinen Kontakt zu einem Board auf: Ein Board, auf
+das ein aufgezeichneter Fakt zeigt, bekommt **<Board> jetzt prüfen**, **Ein Board prüfen...** prüft ein beliebiges
+vertrautes Board, das du auswählst, und **Dieses Board prüfen** im Deployment-Tab (Gruppe „Benchmark auf einem
+Board“) prüft das gewählte Board; jede Prüfung ist eine Verbindung zum SSH-Port des Boards, keine Anmeldung.
 
 Was eine KI liest: `run_mojo_oracle` liefert dieselben Befunde mit `where` als Bezeichnung, `why` und `repair` (`how`:
 `miracle`, `deletion_list`, `person`, `admin` oder `not_automatic`, mit dem nächsten Schritt), die Ordner des

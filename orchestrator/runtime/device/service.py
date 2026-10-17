@@ -201,11 +201,9 @@ def plan_facts(state_dir: Path, profile: Any) -> DevicePlanFacts:
     from orchestrator.runtime.build.recipe import PlanError
     from orchestrator.runtime.build.source import cached_source
     from orchestrator.runtime.build.store import BuildStore
-    from orchestrator.runtime.build.toolchain import host_platform
-    from orchestrator.runtime.catalog import load_catalog
-    from orchestrator.runtime.device.package import plan_device_runtime
+    from orchestrator.runtime.device.steps import plan_runtime
     try:
-        plan = plan_device_runtime(profile, catalog=load_catalog(), host=host_platform())
+        plan = plan_runtime(profile)
     except PlanError as e:
         raise DeviceRuntimeError(f"No device runtime can be planned for this device: {e}", code="not_supported") \
             from None
@@ -215,93 +213,66 @@ def plan_facts(state_dir: Path, profile: Any) -> DevicePlanFacts:
 
 
 def ensure_build(state_dir: Path, device: TrustedDevice, profile: Any, expect_build_id: str, *,
-                 cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None):
+                 cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None,
+                 jobs: Optional[int] = None, mirror: Optional[str] = None):
     """(BuildStore, StoredBuild, packaged tarball) of the device's runtime: built in the builder container when it is
-    not built yet (the pinned source is fetched when it is not cached), then packaged. The plan must still be the one
-    the person was shown (`expect_build_id`)."""
-    from orchestrator.runtime.build.executor import BuildExecutor, DockerEngine
-    from orchestrator.runtime.build.source import SourceError, cached_source, fetch_source
-    from orchestrator.runtime.build.store import BuildFailed, BuildStore, StoreError
-    from orchestrator.runtime.build.toolchain import host_platform
-    from orchestrator.runtime.build.verify import Verifier
-    from orchestrator.runtime.catalog import load_catalog
-    from orchestrator.runtime.device.package import DeviceRuntimeStore, PackageError, package_runtime, \
-        plan_device_runtime
-    plan = plan_device_runtime(profile, catalog=load_catalog(), host=host_platform())
+    not built yet (the pinned source is fetched when it is not cached, from `mirror` when given; `jobs` parallel
+    compile jobs), then packaged; the same step as `llmcf device runtime build` (steps.build_runtime). The plan must
+    still be the one the person was shown (`expect_build_id`)."""
+    from orchestrator.runtime.build.source import SourceError
+    from orchestrator.runtime.build.store import BuildFailed, StoreError
+    from orchestrator.runtime.device import steps
+    from orchestrator.runtime.device.package import PackageError
+    plan = steps.plan_runtime(profile)
     if plan.build_id != expect_build_id:
         raise DeviceRuntimeError("The device's runtime plan changed after the person was asked (its probe, the pin or "
                                  "the recipe changed); nothing was done.", code="failed", next="Call the tool again.")
-    source = pinned_source()
-    builds = BuildStore(state_dir)
-    try:
-        src = cached_source(source, state_dir)
-        if src is None:
+
+    def on_step(kind: str, _build: Any) -> None:
+        if kind == "fetch":
             say("fetching the pinned llama.cpp source")
-            src = fetch_source(source, state_dir, log=say)
+        elif kind == "build":
+            say(f"building llama.cpp for {device.label} in the builder container")
+
+    try:
+        built = steps.build_runtime(state_dir, device.device_id, profile, plan, pinned_source(), jobs=jobs,
+                                    mirror=mirror, on_step=on_step, log=say, cancelled=cancelled, reuse_package=True)
     except SourceError as e:
         raise DeviceRuntimeError(f"The pinned llama.cpp source: {e}", code="failed") from None
-    if cancelled():
-        raise Stopped("The build")
-    build = builds.find(plan)
-    if build is None:
-        say(f"building llama.cpp for {device.label} in the builder container")
-        executor = BuildExecutor(engine=DockerEngine(), log=say)
-        try:
-            build = builds.build(plan, source=src, executor=executor, verifier=Verifier(),
-                                 perf_key=profile.perf_key(), host=host_platform())
-        except (BuildFailed, StoreError) as e:
-            raise DeviceRuntimeError(f"The device runtime could not be built: {e}", code="failed") from None
-    if cancelled():
-        raise Stopped("The build")
-    devices = DeviceRuntimeStore(state_dir, device.device_id)
-    packaged = devices.tarball(build)
-    if packaged is None:
-        try:
-            packaged = package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
-        except PackageError as e:
-            raise DeviceRuntimeError(f"The device runtime could not be packaged: {e}", code="failed") from None
-    return builds, build, packaged
+    except (BuildFailed, StoreError) as e:
+        raise DeviceRuntimeError(f"The device runtime could not be built: {e}", code="failed") from None
+    except PackageError as e:
+        raise DeviceRuntimeError(f"The device runtime could not be packaged: {e}", code="failed") from None
+    except steps.BuildCancelled:
+        raise Stopped("The build") from None
+    return built.builds, built.build, built.packaged
 
 
 def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, expect_fingerprint: str,
            expect_build_id: str, *, on_client: Optional[Callable[[Any], None]] = None,
            cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None) -> Dict[str, Any]:
     """Builds (when needed) and installs the device runtime as the deploy settings say, checks the new build on the
-    device and activates it only when it passes (as `llm-cli device runtime deploy`)."""
-    from datetime import datetime, timezone
-    from orchestrator.runtime.device.package import DeviceRuntimeStore
-    from orchestrator.runtime.device.remote import RemoteError, RemoteShell, deploy_runtime, verify_on_device
+    device and activates it only when it passes: the same steps as `llm-cli device runtime deploy`
+    (steps.install_runtime saves the deployment's record)."""
+    from orchestrator.runtime.device import steps
+    from orchestrator.runtime.device.remote import RemoteError, RemoteShell
     builds, build, packaged = ensure_build(state_dir, device, profile, expect_build_id, cancelled=cancelled, say=say)
     source = pinned_source()
     client = connect(device, state_dir, settings.ssh_user, expect_fingerprint, on_client, step="runtime_deploy")
     try:
         shell = RemoteShell(client)
-
-        def check_new_build(home: str, folder: str):
-            return verify_on_device(shell, home=home, folder=folder, plan_verify=build.plan.get("verify") or {},
-                                    pin_build=source.build_number, pin_commit=source.commit, port=settings.port)
-
         if cancelled():
             raise Stopped("The deploy")
         try:
-            result = deploy_runtime(shell, tarball=packaged.path, tarball_sha256=packaged.sha256,
-                                    build_id=build.build_id, arch=str(build.plan.get("target", {}).get("arch") or
-                                                                      profile.arch), settings=settings,
-                                    check=check_new_build, say=say, kv_cache=settings.kv_choice(profile).kind)
+            outcome = steps.install_runtime(shell, state_dir=state_dir, device_id=device.device_id, profile=profile,
+                                            settings=settings, build=build, packaged=packaged, source=source,
+                                            arch=str(build.plan.get("target", {}).get("arch") or profile.arch),
+                                            kv_cache=settings.kv_choice(profile).kind, say=say)
         except RemoteError as e:
             raise _device_said("The deploy", device, e) from None
     finally:
         client.close()
-    report = result.report
-    ok = bool(result.activated and report is not None and report.ok)
-    if ok:
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        devices = DeviceRuntimeStore(state_dir, device.device_id)
-        devices.save_record({"build_id": build.build_id, "deployed_at": now, "install": settings.install,
-                             "kv_cache": settings.kv_choice(profile).kind,
-                             "ssh_user": settings.ssh_user, "previous": result.previous,
-                             "perf_key": profile.perf_key(), "verification": report.as_dict(), "verified_at": now,
-                             "unit_started": result.unit_started})
+    result, report, ok = outcome.result, outcome.report, outcome.ok
     # every older build stays on the board (round 5 f): only their number reaches the caller, never their folders
     return {"activated": ok, "build_id": build.build_id, "install": settings.install, "previous": result.previous,
             "older_builds_kept": len(result.older),
@@ -319,7 +290,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
     the model is loaded. The measurement runs on the board, never on this computer (seventh round 2'); its result is
     recorded with every build of that model below `output_dirs` as "tested on" the board (tested.py, N3)."""
     from orchestrator.runtime.build.store import BuildStore
-    from orchestrator.runtime.catalog import load_catalog
+    from orchestrator.runtime.device import steps
     from orchestrator.runtime.device.package import DeviceRuntimeStore
     from orchestrator.runtime.device.remote import RemoteError, RemoteShell, model_sha256, read_facts, \
         verify_on_device
@@ -354,11 +325,8 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
                 raise DeviceRuntimeError(f"There is no readable model at the path the deploy settings name on "
                                          f"{device.label}.", code="missing_information",
                                          next="Ask the person to copy the model there or change the setting.")
-            catalog = load_catalog()
-            pinned = {m.sha256 for m in catalog.models if m.sha256}
-            if catalog.smoke_model is not None:
-                pinned.add(catalog.smoke_model.sha256)
-            trusted = digest in pinned
+            # the same catalog check as the CLI's and the Boards window's benchmark (steps.choose_bench_model)
+            trusted = digest in steps.catalog_model_digests()
             if not trusted:
                 if not allow_untrusted:
                     raise DeviceRuntimeError("The model on the device is not a catalog model and running it was not "

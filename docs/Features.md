@@ -316,6 +316,16 @@ Deployment copies a finished build to a board over SSH and installs the model fi
 - **Package:** a ZIP with the model file, the build's manifest and model card, `checksums.sha256` and a generated
   `deploy.sh`. Only model files are deployed (`.gguf`, `.rkllm`, `.rknn`, `.onnx`, `.safetensors`, `.bin`); a
   build with several weight files is refused.
+- **A package without a board** (`llm-cli deploy package`; GUI: Deployment tab > **Create package only…**): the
+  package of the selected build for the chosen profile, with Docker images for a board without network if you tick
+  **Use Docker Containerization?**. Like the CLI, the GUI takes any path: **Other build or model file…** adds a build
+  folder or a model file to the build list. No board is contacted. The GUI opens the folder
+  dialog at the output folder, as for every golden artifact, and names the package's full path, or the reason and
+  the next step when it cannot be made. Copy it to the board and run `deploy.sh` there, or deploy it later.
+- **An existing package** (`llm-cli deploy run PACKAGE_PATH`; GUI: Deployment tab > **Deploy existing package…**):
+  a ZIP made earlier goes to the board in the address field, with the same host-key question, one-time password,
+  wait and trusted-device record as **Deploy to Target**. The **Port**, **Name** and **Wait for the board** fields of
+  the tab are the CLI's `--port`, `--label` and `--wait`, for both buttons.
 - **On the board:** the package goes into a private temporary folder (`mktemp -d`), `deploy.sh` (run with `sh`,
   so boards that mount `/tmp` with `noexec` or have no bash work too) checks every checksum with `sha256sum -c`,
   copies the model to `~/models` (or `$MODEL_DIR`) and the temporary folder is
@@ -343,6 +353,16 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   list|add|remove` shows and manages them ([CLI](CLI_Usage.md#deploy-devices)). These are the only devices an AI
   client or Ditto can name for a deploy, and only while the framework's `known_hosts` still holds that key; no tool
   trusts, pairs or records a device.
+- **Boards and Devices window** (GUI: **Boards > Boards and Devices...**): every board you probed or trusted in one
+  table, with what only you see (the board's account, the full host-key fingerprint and whether `known_hosts` still
+  holds it, since when and how it was trusted, the last deploy, the system of its probe, its deploy settings and the
+  deployed runtime). Its buttons call the same functions as the CLI, with the same questions ("No" is the default)
+  and audit records: **Add a trusted board...** (`deploy devices add`), **Remove trust...** (`deploy devices
+  remove`: without it, a board paired once stays allowed for AI deploys), **Settings...**, **Runtime plan**,
+  **Status**, **Build runtime...**, **Deploy runtime...**, **Verify...**, **Remove older runtime packages...** and
+  **Remove older builds on the board...** (the `device` commands below; deletions in the deletion dialog with the
+  full list), and **Check this board (Mojo)** (one connection to the board's SSH port, no login). Every contact with
+  a board and every build runs in the background with Cancel; a password is asked each time and never stored.
 - **Address or host name:** you enter what you know, the board's IP address or its host name (`myboard.local`).
   The host key is trusted per name you enter: a board you reach by both names is confirmed once for each, and it
   stays the same trusted device.
@@ -380,6 +400,9 @@ Deployment copies a finished build to a board over SSH and installs the model fi
 
 For GGUF models the framework builds llama.cpp for a board and installs it there (`llm-cli device ...`,
 [CLI_Usage.md](CLI_Usage.md#device)). The RKLLM and RKNN runtimes are vendor binaries and stay yours to install.
+GUI: **Boards > Boards and Devices...** (**Runtime plan**, **Build runtime...**, **Deploy runtime...**,
+**Verify...**, **Status**, **Settings...**, **Remove older runtime packages...**, **Remove older builds on the
+board...**).
 
 - **Plan from the board's own probe** (decision D14): `llm-cli scan --device` stores the board's profile under its ID
   (from its SSH host key). The plan is a cross build for that profile: `GGML_CPU_ARM_ARCH` from the board's CPU
@@ -563,8 +586,20 @@ its support level is community.
 
 ### Sign-in
 
-- **Where:** **Sign in...** in the AI settings (GUI) and `llm-cli ditto login | logout | auth` (see the
-  [CLI guide](CLI_Usage.md#ditto-login)).
+- **Where:** **Sign in...** in the AI settings (GUI), **Security > Sign-in Overview...** (GUI) and `llm-cli ditto
+  login | logout | auth` (see the [CLI guide](CLI_Usage.md#ditto-login)).
+- **Sign-in Overview** (GUI: **Security > Sign-in Overview...**): every provider's sign-in at once (method, source,
+  account or the last four characters of a key, status; Ditto's provider marked with `*`) and how the credential
+  vault is protected with its file (`ditto auth status`); **Check all** runs the free check of every provider with a
+  credential in the background (`--check`); the tab **All sign-in methods** lists every provider's methods with their
+  environment variables and notes (`ditto auth methods`). Selecting a provider shows its sign-in panel with its own
+  **Server address** field: an address typed there (or given by the AI settings) is remembered for that provider only
+  and does not make it Ditto's provider (`ditto login --base-url`). The framework never reads, stores or forwards
+  Claude subscription credentials and never starts the claude command.
+- **Key from an environment variable:** each key card names the method's environment variables and its note, and
+  offers **Store the key from <VARIABLE> in the vault** while one is set (checked first unless you untick **Check it
+  first (free)**; `ditto login --from-env`). The key goes from the variable to the vault in the background and never
+  into a field.
 - **Method cards:** the panel shows the provider's sign-in methods in the catalog's order. The first one this
   version can sign in with is marked "Recommended", opt-in methods (the `ant` profile) "Advanced", and methods of a
   later version are shown but cannot be chosen. Each type has its own form: a key form (key page, password field,
@@ -585,11 +620,17 @@ its support level is community.
   and a typed key goes over plain `http://` to another computer only after you confirm it (CLI: `--yes`). A key typed
   in the AI settings' own key field replaces a method a sign-in remembered (for example the `ant` profile).
 - **Sign-out is local first:** the stored key is deleted, and the key page where you revoke the key itself is named;
-  a key in an environment variable stays in use until you unset it.
+  a key in an environment variable stays in use until you unset it. A server without sign-in (Ollama, `custom`
+  without a key) has **Forget**, which forgets its remembered address and method (`ditto logout`); both ask first,
+  "No" is the default.
 - **No usable keyring:** the panel shows the storage chooser (passphrase, credential helper, or the unencrypted key
   file after a confirmation), and the GUI shows the same chooser at startup before it gives up; a passphrase is asked
   in a dialog. A choice that cannot open the existing vault (one protected by the locked keyring) is not kept. The
   CLI exits with code 5 and names `llm-cli ditto auth storage --use ...`. Nothing is picked for you.
+- **Key Storage** (GUI: **Security > Key Storage...**): the vault's protection and its file at any time, also while
+  it works (`ditto auth storage`); **Protect it another way** switches to the OS keyring, a credential helper with
+  its command, a passphrase or the unencrypted key file (after the acknowledgement and the CLI's question, "No" is
+  the default; `--use`), and **Rotate key...** asks first (`ditto auth rotate-key`).
 - **Responsive:** every vault, keyring or network call of the panel and of the chat header runs in a worker thread.
 
 ### Calls, retries and fallback
@@ -1478,6 +1519,8 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   used, the notice is shown every time.
 - Only a person acknowledges it, in the GUI or with `llm-cli tools crawl-notice` in a terminal. While it is not
   read, `crawl_docs_site` is refused with the reason `needs_person` and these two places.
+- GUI: Tools > Deep Ingest Notice... shows it at any time and asks you to confirm that you read it while it is
+  still needed ("No" is the default); the module wizard's Deep Ingest shows it before the knowledge base check.
 
 ### What the crawler honours
 
@@ -1653,6 +1696,14 @@ same crawler with the same opt-out checks as the GUI, as a job.
 (official Python SDK `mcp` 2.3.0, specification 2026-07-28). AI clients such as Claude Code, Claude Desktop or VS Code
 can then use the [same tools as Ditto](#dittos-tools). You sign in to the client with your own account or key; the
 framework never sees it.
+
+**GUI:** Security > AI App Connections (MCP)... shows how to connect Claude Code, Claude Desktop (with the path of its
+configuration file) and VS Code, each with a Copy button, writes the entry into Claude Desktop's configuration after
+showing the file and the change (Write to Claude Desktop..., the backup as with `mcp config --write`), starts and
+stops the local HTTP server as a child process of the GUI (address, port, container binding; the same refusals as
+`mcp serve --transport http`; its address, state and output shown; the framework asks before it closes while the
+server still serves) and manages the named tokens (Add, also as a copy of another token's permissions, Rotate, Revoke
+with the token's standing approvals, Back to read only). A token is shown once, right after it is made or rotated.
 
 - **Every call goes through the tool registry:** name and argument matching, input schema, your permissions,
   confirmation, audit log (actor `mcp` for local stdio clients, `mcp:<name>` for a named token), exactly as for
@@ -1858,7 +1909,8 @@ framework never sees it.
   `datasets:calib/de.txt`, or by the file id (`lf_` and 16 hex characters) the framework recorded for it. The
   folders are the models folder (`models`, setting `models_dir`), the datasets folder (`datasets`, setting
   `datasets_dir`, next to the models folder by default) and the folders you add with
-  [`llm-cli tools folders add`](CLI_Usage.md#tools-folders) or in the GUI (Tools > Folders the AI May Use...).
+  [`llm-cli tools folders add`](CLI_Usage.md#tools-folders) or in the GUI (Tools > Folders the AI May Use... > Add
+  folder..., which also asks what the folder holds: model files, dataset files or any).
   The models and datasets folders follow the same limits as an added folder: when a setting points at `/`, your
   home folder or a folder that holds the per-user folder, its label cannot be used. The file must lie inside its
   folder (links are followed and checked) and outside every denied folder: the framework's per-user folder (except
@@ -2076,6 +2128,11 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   log is kept with a key.
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
   unknown or revoked token, or a token file that cannot be read, may not even read.
+- **GUI:** Tools > Tool Permissions (Ditto / MCP)... shows per tool what is decided now and why ("Effective now",
+  as `llm-cli tools list`), names the callers with their own permissions, edits the shared permissions or those of
+  Ditto or the local MCP clients ("Whose permissions", `--caller`), and resets them: to the recommended defaults,
+  a caller back to the shared permissions, a token back to read only (`--reset`, `--reset --caller`, `--reset
+  --token`). Each reset lists what changes and asks first ("No" is the default).
 
 **What a question shows** (Ditto's GUI dialog and CLI prompt, an MCP client's form), in this order: the
 consequence in plain words, from what the framework looked up, with ids followed by their speaking names (for example
@@ -2130,7 +2187,10 @@ HMAC chain that someone who can only edit the database cannot recompute. After e
 written to an anchor file, so removing the newest entries is detected too. `llm-cli tools audit --verify` checks the
 chain and tells a changed entry apart from a wrong key. Each entry is written in its own transaction, so several
 processes cannot fork the chain. `llm-cli tools audit --archive` moves the log and its anchor aside (kept with a
-timestamp) and starts a new chain, for example after `llm-cli mojo` has reported a problem with the log.
+timestamp) and starts a new chain, for example after `llm-cli mojo` has reported a problem with the log. GUI:
+Security > Audit Log... shows the same rows page by page (with or without details), checks the chain (Check integrity,
+the result in plain words), archives the log after a question and counts the calls per caller; the check, the archive
+and the counting run in the background.
 
 **Recorded before it runs.** A call that changes something (every tier except `read`) gets a `started` entry before
 it runs. If that entry cannot be written, the call is refused and nothing runs: calls that change something run only
@@ -2218,7 +2278,11 @@ everything worked) reaches an AI with the account's name, its home folder and bo
   only). The vault is written atomically under a lock shared by the GUI, the CLI and MCP servers, is readable only
   by you, never lies inside a git working copy, and a damaged vault is never overwritten. `llm-cli mojo` warns
   about the key file and about a keyring that does not protect secrets. `llm-cli ditto auth rotate-key` replaces
-  the vault key and re-encrypts every entry.
+  the vault key and re-encrypts every entry. GUI: **Security > Secrets...** lists the names the framework reads
+  (`hf_token`, `qdrant_api_key`, the community pack keys) and every stored name with "stored" or "not stored" and
+  what it is for (`secrets list`, never a value), and sets any name with the value twice in masked fields (`secrets
+  set`; in the ephemeral storage it says that nothing was saved); **Security > Key Storage...** shows and switches
+  the protection and rotates the vault key.
 - **Redaction:** one table of secret formats (`orchestrator/security/secret_patterns.py`) is shared by the
   repository's secret scan and the runtime redaction. Credentials (known key formats, credential headers, tokens
   in URLs and form bodies, `HF_TOKEN=...` lines) are removed from every log line and traceback (the framework's own
@@ -2322,11 +2386,16 @@ decides a deletion: not through its own form, a standing approval or a delegatio
 - **Where it runs:** on the machine the build is for. `llm-cli scan` probes this computer with the Python probe and
   keeps the profile as `local`; `llm-cli scan --device` runs it on a board over SSH (the Python probe with `python3
   -I` if the board has Python 3.8 or newer, else the shell probe; nothing is installed on the board) and keeps the
-  profile under the board's ID; the SSH user becomes the board's deploy user (never root). In the GUI, **Scan /
-  Import...** imports a probe file, scans a board over SSH with the same trust-on-first-use rules as deployment, or
-  scans this PC; it keeps scan results in `<cache_dir>/probes/`. The GUI's SSH scan runs the same remote probe as
-  `llm-cli scan --device`: the script travels over the SSH channel, so it also works on boards that mount `/tmp`
-  with `noexec`, and the profile is kept under the board's ID.
+  profile under the board's ID; the SSH user becomes the board's deploy user (never root). GUI: Builder tab >
+  **Scan / Import...** runs the same steps as the CLI: **Scan Local Host** (the Python probe, kept as `local`),
+  **Scan Local Host with the Fallback Script** (`--script`), **Scan Local Host and Save the Profile As...**
+  (`--output`, a `.json` file for `--json`), **Scan Local Host with the Fallback Script and Save the Profile As...**
+  (`--script --output`), **Remote Scan via SSH...** (`--device`, with **Port** and **Name**; the
+  same trust-on-first-use rules as deployment, the host key read in the background, and the board added to the
+  trusted devices as by the CLI) and **Import from File (USB/Disk)...** (`--import`, asking for the board's name).
+  It keeps a copy of each result in `<cache_dir>/probes/` for the target match. The GUI's SSH scan runs the same
+  remote probe as `llm-cli scan --device`: the script travels over the SSH channel, so it also works on boards that
+  mount `/tmp` with `noexec`, and the profile is kept under the board's ID.
   Machines without network access run a probe by hand ([README](../README.md#probing-the-boards-hardware)).
 - **Ditto's local model** uses the same probe: the hardware its build and model choice are based on comes from a
   probe profile, and free RAM and free VRAM are read again at every start.
@@ -2455,6 +2524,17 @@ codes: 0 OK, 1 warnings, 2 errors; `--json` for scripts.
 `llm-cli doctor` keeps its options (`--fix`, `--tier 1|2`, `--json`), output and exit codes, with a short note that
 names `llmcf mojo`; `--fix` makes the same audited harmless repairs, and `--tier 2` also shows the list of the
 framework's build images.
+
+GUI (unreleased): **Tools > Mojo Health Check...** does all of this with the mouse, through the same functions as the
+command. Mojo Oracle runs when the window opens, off the GUI thread, and shows every finding as `llmcf mojo` prints it
+(the severity as text with its mark and icon, never colour alone; where, why it matters, the next step, what Mojo
+Miracle can do with its plan; the summary sentence and an overall line with the exit code). **Run Mojo Miracle...**
+asks "Run Mojo Miracle now?" (No is the default) and repairs as the command does at a terminal: the plans shown bind
+the repairs, the framework's build images open in the deletion dialog with the full list and nothing ticked, and the
+window then shows what was repaired, what was not and why. The window contacts no board by itself: a board a
+recorded fact points to gets **Check <board> now**, **Check a board...** checks any trusted board you pick, and the
+Deployment tab's **Check this board** (group "Benchmark on a board") checks the chosen board; each check is one
+connection to the board's SSH port, no login.
 
 What an AI reads: `run_mojo_oracle` gives the same findings with `where` as a label, `why` and `repair` (`how`:
 `miracle`, `deletion_list`, `person`, `admin` or `not_automatic`, with what to do next), the framework's folders

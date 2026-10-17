@@ -10,6 +10,118 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Tools > Mojo-Gesundheitscheck... in der GUI** (DECISIONS W1': jede Aktion der Kommandozeile auch mit der Maus):
+  Das Mojo-Fenster startet Mojo Oracle beim Öffnen, außerhalb des GUI-Threads, und zeigt jeden Befund so, wie
+  `llmcf mojo` ihn ausgibt (die Schwere als Text mit Zeichen und Symbol, nie nur als Farbe; wo mit dem vollen Pfad,
+  warum es wichtig ist, den nächsten Schritt, was Mojo Miracle tun kann, mit den Schritten seines Plans; den
+  zusammenfassenden Satz und eine Gesamtzeile mit dem Exit-Code). **Mojo Miracle ausführen...** fragt „Mojo Miracle
+  jetzt ausführen?“ („Nein“ ist die Vorgabe) und lässt Mojo Miracle mit der GUI als deinem Kanal laufen: Die gezeigten
+  Pläne binden die Reparaturen, die Build-Images des Frameworks öffnen sich im Löschdialog mit der ganzen Liste und
+  nichts angehakt, und das Fenster zeigt, was repariert wurde, was nicht und warum. Kein Board wird von sich aus
+  kontaktiert: Ein Board, auf das ein aufgezeichneter Fakt zeigt, bekommt **<Board> jetzt prüfen**, und **Ein Board
+  prüfen...** prüft ein beliebiges vertrautes Board, das du auswählst (an Bezeichnung und Adresse, und auch an der
+  Geräte-ID, wo zwei Boards gleich aussehen; eine Verbindung zu seinem SSH-Port, keine Anmeldung). Befehl und Fenster teilen dieselben Kernfunktionen (`Core/mojo/boards.py`, die Sicht der Person in
+  `Core/mojo/views.py`, `docker_objects.offer_image_list`), die Ausgabe von `llmcf mojo` bleibt also, wie sie war.
+- **Dieses Board prüfen im Deployment-Tab** (Gruppe „Benchmark auf einem Board“, DECISIONS W1'): prüft das gewählte
+  Board so, wie es `llmcf mojo --oracle --board` tut, im Hintergrund (eine Verbindung zu seinem SSH-Port, keine
+  Anmeldung), und zeigt seinen Befund mit dem nächsten Schritt unter der Zeile; ein Problem wird auch in einer Meldung
+  genannt.
+- **Boards > Boards und Geräte...: jeder Befehl von `deploy devices` und `device` mit der Maus** (W1'): Ein neues
+  Menü Boards öffnet ein Fenster für jedes Board, das du untersucht hast oder dem du vertraust, mit dem Konto auf
+  dem Board, dem vollen Fingerabdruck des Host-Schlüssels und seinem Stand in `known_hosts`, seit wann ihm vertraut
+  wird, dem letzten Deployment, seinem System, den Deploy-Einstellungen und der installierten Laufzeit. Seine Knöpfe
+  rufen dieselben Kernfunktionen wie die CLI auf (neu `runtime/device/person_steps.py` und `steps.py`; die CLI ruft
+  sie auch auf, ihre Ausgabe bleibt gleich), mit denselben Prüfungen, Ablehnungen, Fragen ("Nein" ist die Vorgabe)
+  und Audit-Einträgen: Vertrautes Board hinzufügen..., Vertrauen entfernen... (bisher konnte nur die CLI einem
+  Board die Erlaubnis für KI-Deployments wieder nehmen), Einstellungen... (mit der sudo-Frage für systemd),
+  Laufzeit-Plan, Status, Laufzeit bauen... (Jobs, Spiegel, die Frage nach dem Quelltext, Abbrechen), Laufzeit
+  installieren... (das Passwort jedes Mal abgefragt, nie gespeichert; ein nicht vertrauenswürdiges Benchmark-Modell
+  nur nach einer ausdrücklichen Warnung), Prüfen... (auch ohne Modell), Ältere Laufzeit-Pakete entfernen... und
+  Ältere Builds auf dem Board entfernen... (der Löschdialog mit der vollständigen Liste) sowie Dieses Board prüfen
+  (Mojo). Jeder Kontakt mit einem Board und jeder Build laufen im Hintergrund. Die Laufzeit-Tools der KI bauen und
+  installieren mit denselben Schritten. Beschädigte Deploy-Einstellungen ("damaged; set them again") lassen sich jetzt
+  neu festlegen, im Fenster und mit `device settings`, nach einer Frage, die die Datei mit vollem Pfad und Größe nennt.
+- **Tools > Tool Permissions (Ditto / MCP)...: jede Option von `tools list` und `tools permissions` per Maus** (W1'):
+  eine Spalte „Gilt jetzt“ zeigt die Entscheidung jedes Tools mit ihrem Grund (wie `tools list` sie ausgibt), und ein
+  Hinweis nennt die Aufrufer mit eigenen Berechtigungen; „Wessen Berechtigungen“ zeigt und bearbeitet die gemeinsamen
+  Berechtigungen oder den eigenen Abschnitt von Ditto oder den lokalen MCP-Clients (`--caller`); „Auf die empfohlenen
+  Standards zurücksetzen...“ (`--reset`), „Wieder die gemeinsamen Berechtigungen nutzen...“ (`--reset --caller`) und
+  „Zurück auf nur lesen...“ für ein Token (`--reset --token`: wieder ein neues Token, keins mit von Hand gesetztem
+  Allow/Deny) nennen, was sich ändert, und fragen zuerst („Nein“ ist vorgewählt; eine inzwischen woanders
+  gespeicherte Änderung wird abgelehnt). Ein neues Token kann als Kopie der eigenen Berechtigungen eines anderen
+  Tokens beginnen (`mcp token add --policy-from TOKEN`). CLI und GUI teilen sich die Kernfunktionen
+  (`policy.with_section`, `reset_policy`, `reset_changes`, `mcp_tokens.add_token`, `copied_policy`,
+  `set_token_policy`, `reset_token_policy`, `revoke_token`); die Ausgabe der CLI bleibt gleich.
+- **Security > Prüfprotokoll...: jede Option von `tools audit` per Maus** (W1'): die Zeilen des Audit-Logs, wie die
+  CLI sie zeigt (gemeinsames `tools/audit_view.py`), Seite für Seite mit „Einträge pro Seite“, „Neuere“ und
+  „Ältere“; „Details“ (`--details`); „Unversehrtheit prüfen“ (`--verify`) mit dem Ergebnis in einfachen Worten;
+  „Archivieren...“ (`--archive`) nach einer Rückfrage, nichts wird gelöscht; und der Reiter „Übersicht je Aufrufer“
+  (`--summary`). Prüfung, Archivieren und Übersicht laufen im Hintergrund. `AuditLog.entries` nimmt einen Versatz,
+  und `AuditLog.count` nennt die Größe, zum Blättern.
+- **Security > Verbindungen zu KI-Apps (MCP)...: jede Aktion von `mcp config`, `mcp serve --transport http` und
+  `mcp token` per Maus** (W1'): die Einträge für Claude Code, Claude Desktop (mit dem Pfad seiner
+  Konfigurationsdatei) und VS Code, jeder mit einer Schaltfläche zum Kopieren; „In Claude Desktop eintragen...“ zeigt
+  die Datei, ob es sie gibt, die Änderung, die Einträge, die bleiben, und die Sicherung, fragt zuerst und schreibt
+  genau das (`mcp_server.plan_claude_desktop_config`, eine inzwischen geänderte Datei wird abgelehnt); der lokale
+  HTTP-Server (Adresse, Port, Container-Bindung) als Kindprozess der GUI mit dem eigenen Einstieg und den Ablehnungen
+  der CLI, Adresse, Zustand und Ausgabe zu sehen, gestoppt auf Wunsch oder wenn das Framework nach einer Rückfrage
+  schließt („Nein“ lässt es offen); und die Liste der Tokens (Hinzufügen, auch als Kopie der Berechtigungen eines
+  anderen Tokens, Rotieren, Widerrufen, Zurück auf nur lesen, Berechtigungen). Ein Token wird einmal gezeigt, direkt
+  nachdem es angelegt oder rotiert wurde.
+- **Tools > Hinweis zu Deep Ingest... und die Art eines KI-Ordners** (W1'): der Deep-Ingest-Hinweis hat einen eigenen
+  Eintrag und lässt sich jederzeit lesen (`tools crawl-notice`; bestätigt auf das Ja der Person, „Nein“ ist
+  vorgewählt, mit der Funktion der CLI `crawl_notice.acknowledge_and_audit`); der Modul-Assistent zeigt ihn vor der
+  Prüfung der Wissensdatenbank. Tools > Folders the AI May Use... > Add folder... fragt, was im Ordner liegt
+  (Modell-Dateien, Datensatz-Dateien oder beides: `tools folders add --kind`).
+- **Security > Anmeldeübersicht...: jeder Weg von `ditto login`, `ditto logout` und `ditto auth status|methods` mit
+  der Maus** (W1'): Ein Fenster zeigt die Anmeldung aller Anbieter auf einmal (Verfahren, Quelle, Konto oder die
+  letzten vier Zeichen eines Schlüssels, Zustand, Dittos Anbieter markiert) und wie der Tresor geschützt ist, mit
+  seiner Datei; **Alle prüfen** führt im Hintergrund die kostenlose Prüfung jedes Anbieters mit Zugangsdaten aus
+  (`--check`); der Reiter **Alle Anmeldeverfahren** listet die Verfahren jedes Anbieters mit ihren
+  Umgebungsvariablen und Anmerkungen. Wer einen Anbieter wählt, sieht sein Anmeldefeld mit einem eigenen Feld
+  **Serveradresse**: Eine dort eingegebene (oder von den KI-Einstellungen übergebene) Adresse wird nur für diesen
+  Anbieter gemerkt und nicht mehr nur über die KI-Einstellungen, die den Anbieter dabei auch zu Dittos machten
+  (`login --base-url`). Die Schlüsselkarte nennt die Umgebungsvariablen und die Anmerkung des Verfahrens und bietet
+  **Den Schlüssel aus <VARIABLE> im Tresor speichern** an, solange eine gesetzt ist (`login --from-env`, vorher
+  geprüft, außer du nimmst den Haken weg; neu `SignIn.env_variable()` / `SignIn.env_key()`, die auch die CLI
+  aufruft); ein Server ohne Anmeldung (Ollama, `custom` ohne Schlüssel) hat **Vergessen** (`logout`: die gemerkte
+  Adresse und das gemerkte Verfahren). Vor dem Abmelden oder Vergessen fragt es („Nein“ ist vorgewählt). Das
+  Framework liest, speichert und übergibt nie Zugangsdaten eines Claude-Abos und startet nie den Befehl claude.
+- **Security > Schlüsselspeicher...: `ditto auth storage` und `ditto auth rotate-key` mit der Maus** (W1'): wie der
+  Tresor geschützt ist und seine Datei, auch während er funktioniert (bisher zeigte die GUI das nur, wenn er
+  scheiterte); **Anders schützen** wechselt zwischen dem Schlüsselbund des Betriebssystems (neu als Wahl in der GUI,
+  so braucht der Weg zurück zum Schlüsselbund die CLI nicht mehr), einem Credential-Helper mit seinem Befehl, einer
+  Passphrase und der unverschlüsselten Schlüsseldatei (nach der Bestätigung und der Frage der CLI, „Nein“ ist
+  vorgewählt); **Schlüssel erneuern...** fragt vorher („Nein“ ist vorgewählt). Der Tresor wird im Hintergrund mit
+  denselben Kernfunktionen wie in der CLI neu verschlüsselt.
+- **Security > Geheimnisse...: `secrets list` und `secrets set` mit der Maus** (W1'): die Namen, die das Framework
+  liest (`hf_token`, `qdrant_api_key`, die Schlüssel der Community-Pakete), und jeder gespeicherte Name mit
+  „gespeichert“ oder „nicht gespeichert“ und wofür, nie ein Wert; **Ein Geheimnis setzen** nimmt einen Namen aus der
+  Liste oder einen anderen Namen und den Wert zweimal in verdeckten Feldern. CLI und Fenster rufen dasselbe neue
+  `Core/secret_entries.py` auf (`store_secret`, `secret_entries`; die Ausgabe der CLI bleibt gleich): Im Speicher
+  `ephemeral` sagen beide, dass nichts gespeichert wurde, und ebenso Security > Set OpenAI API Key, das dort
+  „gespeichert“ meldete.
+- **Tab Deployment: jede Option von `deploy package` und `deploy run` mit der Maus** (W1', GUI-Parität): **Nur Paket
+  erstellen…** erstellt das Paket des ausgewählten Builds für das gewählte Profil, ohne ein Board zu kontaktieren, mit
+  Docker-Images für ein Board ohne Netz, wenn du Docker ankreuzt, und **Anderer Build oder Modelldatei…** fügt der
+  Build-Liste jeden Build-Ordner und jede Modelldatei hinzu (auch die CLI nimmt jeden Pfad); der
+  Ordnerdialog öffnet sich beim Ausgabeordner wie für jedes Golden Artifact, und die Meldung nennt den vollen Pfad des
+  Pakets oder den Grund und den nächsten Schritt (`llm-cli deploy package`, derselbe Schritt im Kern). **Vorhandenes
+  Paket deployen…** lädt ein früher erstelltes ZIP hoch (`deploy run PACKAGE_PATH`). Die neuen Felder **Port**,
+  **Name** und **Auf das Board warten** sind `--port`, `--label` und `--wait` für beide Deploy-Schaltflächen. Der
+  Host-Schlüssel des Boards wird jetzt im Hintergrund gelesen und sein Fingerabdruck mit „Nein“ als Vorgabe gezeigt; ein
+  fehlgeschlagenes Paket bei **Deploy to Target** sagt, warum; die Erfolgsmeldung nennt den vollen Pfad des Pakets, wie
+  oft das Deployment auf das Board gewartet hat, und den Namen des vertrauten Boards.
+- **Tab Builder > Scan / Import...: jede Option von `llm-cli scan` mit der Maus** (W1', GUI-Parität): **Scan Local
+  Host** führt jetzt den Schritt der CLI aus, die Python-Probe, und speichert das Ergebnis als Probe dieses Rechners
+  (Probe-ID `local`, die KI-Clients und Ditto nennen), mit seinen Hinweisen und der Warnung „Probe noch einmal laufen
+  lassen“ im Protokoll; **Lokalen Rechner mit dem Ersatz-Skript scannen** (`--script`), **Lokalen Rechner scannen
+  und Profil speichern unter...** (`--output`; eine `.json`-Datei bekommt die JSON-Ansicht, `--json`) und beides
+  zusammen sind neu.
+  **Remote Scan via SSH...** bekommt die Felder **Port** und **Name** und schreibt wie `scan --device` den Eintrag des
+  Boards als vertraut und gekoppelt (im Audit-Log), so dass das Board in der Benchmark-Liste erscheint und
+  KI-Deployments es nennen können; CLI und GUI teilen einen Schritt im Kern (`scan_steps.scan_device`). **Import from
+  File** fragt nach dem Namen des Boards (`--label`).
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
@@ -1567,6 +1679,29 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Das Widerrufen eines MCP-Tokens in der GUI entfernt auch seine dauerhaften Freigaben, und der neue eigene
+  Abschnitt eines Aufrufers behält die Tools, die nur im Framework gefragt werden**: Widerrufen in der GUI löschte das
+  Token, ließ aber seine dauerhaften Freigaben (die von `mcp:NAME`) in der Berechtigungsdatei stehen, aufgelistet, bis
+  man sie einzeln widerrief (sie galten nicht mehr); das Token, seine Berechtigungen und seine dauerhaften Freigaben
+  gehen jetzt in einer Kernfunktion, die sich GUI und `llm-cli mcp token revoke` teilen. `llm-cli tools permissions
+  --caller ditto|mcp` legte den neuen Abschnitt eines Aufrufers ohne die gemeinsame Liste der Tools an, deren Fragen
+  dir nur im Framework gestellt werden, sodass diese Fragen für diesen Aufrufer wieder im eigenen Dialog des
+  KI-Clients landen konnten; der neue Abschnitt beginnt jetzt auch mit dieser Liste, wie bei `--confirm-in-framework`.
+- **Die Liste der Tools, die nur im Framework gefragt werden, geht nicht mehr durch einen zweiten Aufruf, eine Kopie
+  oder die ersten eigenen Berechtigungen eines Tokens verloren**: `llm-cli tools permissions --caller ditto|mcp` für
+  einen Aufrufer, der schon eigene Berechtigungen hatte, baute dessen Abschnitt ohne diese Liste neu; ein Token, das
+  als Kopie der Berechtigungen Dittos oder der lokalen MCP-Clients entstand (`llm-cli mcp token add --policy-from`
+  oder Hinzufügen... in der GUI), bekam keine; und ein neues Token, das der gemeinsamen Liste folgt, verlor sie bei
+  seinem ersten `tools permissions --token NAME` (oder Berechtigungen... in der GUI), das mit einer leeren Liste
+  begann. Jedes Mal konnten die Fragen zu diesen Tools wieder im eigenen Dialog des KI-Clients landen. Die
+  Berechtigungen, die für einen Aufrufer gezeigt und kopiert werden, tragen jetzt die Liste, die für ihn gilt
+  (`ToolRegistry.policy`).
+- **Die Token-Liste spricht die Sprache des Fensters, und „Server starten“ sagt, warum es nicht geht**: der Abschnitt
+  „MCP-Tokens (eines je Client)“ in Security > Verbindungen zu KI-Apps (MCP)... und in Tools > Tool Permissions (Ditto
+  / MCP)... war nur englisch (Überschrift, Hinweis, Spalten, Schaltflächen, die Fragen beim Hinzufügen und Rotieren);
+  er ist jetzt englisch und deutsch, und Rotieren sowie die Frage zu einem verknüpften Token kommen als reiner Text mit
+  „Nein“ als Vorwahl. Ein Installationspfad, den PYTHONPATH nicht aufnehmen kann, ließ „Server starten“ ohne jede
+  Meldung scheitern; jetzt sagt das Fenster den Grund, und nichts wird gestartet.
 - **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
   seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
   (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein

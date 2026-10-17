@@ -1073,11 +1073,13 @@ def set_secret(ctx: FrameworkContext, key, with_token: bool, password: Optional[
     elif password is None:
         password = click.prompt("Value", hide_input=True, confirmation_prompt=True)
 
-    sm = ctx.framework_manager.secrets_manager
-    if not sm.set_secret(key, password):
+    from orchestrator.Core.secret_entries import SecretNotStored, store_secret
+    try:
+        stored = store_secret(ctx.framework_manager.secrets_manager, key, password)
+    except SecretNotStored:
         console.print(f"[red]Failed to store secret '{escape(key)}'.[/red]")
         sys.exit(1)
-    elif getattr(sm, "storage_mode", None) == "ephemeral":
+    if stored.memory_only:
         # Never let a CI user believe it was saved.
         console.print(f"[yellow]Secret '{escape(key)}' is kept in memory for this run only "
                       "(secret_storage: ephemeral); nothing was saved.[/yellow]")
@@ -1093,7 +1095,8 @@ def list_secrets(ctx: FrameworkContext):
         console.print("[red]SecretsManager not available![/red]")
         sys.exit(1)
         
-    keys = ctx.framework_manager.secrets_manager.list_secrets()
+    from orchestrator.Core.secret_entries import stored_names
+    keys = stored_names(ctx.framework_manager.secrets_manager)
     if not keys:
         console.print("[yellow]No secrets found.[/yellow]")
         return
@@ -1172,12 +1175,12 @@ def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for:
     registered tool counts as reviewed afterwards: the questions apply to the tools listed above them. `shown_for`:
     whose tool facts to list (a named token's, whose own policy `current` is), else `caller`'s. Needs a person at a
     terminal: piped answers (an AI client with a shell) are refused."""
-    from orchestrator.tools.policy import TIER_LABELS, CallerPolicy, Decision, ToolTier
+    from orchestrator.tools.policy import TIER_LABELS, Decision, ToolTier, caller_section, with_section
     _require_terminal("llm-cli tools permissions")
-    section = current.callers.get(caller) if caller else None
-    base_tiers = section.tiers if section is not None else current.tiers
     # A caller's new section starts from the shared settings, so creating it never loosens a per-tool setting.
-    overrides = dict((section if section is not None else current).overrides)
+    section = caller_section(current, caller) if caller else current
+    base_tiers = section.tiers
+    overrides = dict(section.overrides)
     rows = registry.permissions(shown_for or caller or "")
     for row in rows:  # what each tool brings, shown before the person decides
         facts = [f"default {row['default']}", f"at most {row['max']}"] + (["new"] if row["new"] else []) + [
@@ -1195,12 +1198,8 @@ def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for:
         answer = click.prompt(f"{label}", type=click.Choice(choices), default=default)
         tiers[tier] = Decision(answer)
     reviewed = sorted(spec.name for spec in registry.list())
-    if caller:
-        callers = dict(current.callers)
-        callers[caller] = CallerPolicy(tiers=tiers, overrides=overrides, reviewed=reviewed)
-        return current.model_copy(update={"configured": True, "callers": callers})
-    return current.model_copy(update={"configured": True, "tiers": tiers, "overrides": overrides,
-                                      "reviewed": reviewed})
+    changed = with_section(current, caller, tiers=tiers, overrides=overrides, reviewed=reviewed)
+    return changed.model_copy(update={"configured": True})
 
 
 def _save_policy(registry, policy=None, change=None):
@@ -1236,7 +1235,7 @@ def _print_grants(registry) -> None:
 
 
 def _set_framework_only(registry, caller: Optional[str], add: Tuple[str, ...], remove: Tuple[str, ...]) -> None:
-    from orchestrator.tools.policy import CallerPolicy
+    from orchestrator.tools.policy import caller_section, with_section
     known = {spec.name for spec in registry.list()}
     unknown = sorted((set(add) | set(remove)) - known)
     if unknown:
@@ -1244,15 +1243,10 @@ def _set_framework_only(registry, caller: Optional[str], add: Tuple[str, ...], r
         sys.exit(2)
 
     def change(current):
-        section = current.callers.get(caller) if caller else current
-        if caller and section is None:  # a caller's first own section starts from the shared permissions
-            section = CallerPolicy(tiers=dict(current.tiers), overrides=dict(current.overrides),
-                                   reviewed=current.reviewed, framework_only=list(current.framework_only))
+        # a caller's first own section starts from the shared permissions
+        section = caller_section(current, caller) if caller else current
         tools = sorted((set(section.framework_only) | set(add)) - set(remove))
-        if caller:
-            return current.model_copy(update={"callers": {**current.callers,
-                                                          caller: section.model_copy(update={"framework_only": tools})}})
-        return current.model_copy(update={"framework_only": tools})
+        return with_section(current, caller, framework_only=tools)
     policy = _save_policy(registry, change=change)
     tools = policy.framework_only_for(caller)
     console.print(f"[green]Asked in the framework only, for {escape(CALLER_LABELS[caller])}: "
@@ -1277,7 +1271,7 @@ def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: 
                       framework_only: Tuple[str, ...] = (), anywhere: Tuple[str, ...] = (), show_grants: bool = False,
                       revoke_grant: Optional[str] = None):
     """Set which tool calls are allowed, need confirmation, or are denied (needs a terminal)"""
-    from orchestrator.tools.policy import ToolPolicy
+    from orchestrator.tools.policy import reset_policy
     registry = _tool_registry(ctx)
     if show_grants:
         _print_grants(registry)
@@ -1308,13 +1302,10 @@ def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: 
         return
     if reset:
         _require_terminal("llm-cli tools permissions --reset")
+        _save_policy(registry, change=lambda current: reset_policy(current, caller))
         if caller:
-            _save_policy(registry, change=lambda current: current.model_copy(update={
-                "callers": {name: section for name, section in current.callers.items() if name != caller},
-                "grants": {name: grants for name, grants in current.grants.items() if name != caller}}))
             console.print(f"[yellow]{CALLER_LABELS[caller]} use the shared tool permissions again.[/yellow]")
             return
-        _save_policy(registry, change=lambda current: ToolPolicy())
         console.print("[yellow]Tool permissions reset to the recommended defaults.[/yellow]")
         return
     console.print(f"Tool permissions for {CALLER_LABELS[caller]}.")
@@ -1331,39 +1322,9 @@ def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: 
 
 
 def _audit_rows(registry, entries, details: bool = False):
-    """The audit view for people: who (the caller in words, the client as it named itself), the tool by its title
-    (and the name the AI wrote, when that was a spelling variant), how the person was asked and what they answered,
-    the reason code; with `details` also the repairs, duration, result, links and session."""
-    from orchestrator.tools.registry import ToolError, caller_label
-
-    def title(name: str) -> str:
-        try:
-            return registry.get(name).title
-        except ToolError:
-            return name
-
-    for entry in entries:
-        who = caller_label(str(entry.get("actor") or ""))
-        if entry.get("client"):
-            who += f"\n{entry['client']} (self-reported)"
-        tool = str(entry.get("tool") or "")
-        shown = title(tool) + (f" ({tool})" if title(tool) != tool else "")
-        if entry.get("name_requested") and entry["name_requested"] != tool:
-            shown += f"\nthe AI wrote {entry['name_requested']}"
-        asked = entry.get("confirm_channel") or ""
-        if entry.get("answer"):
-            asked = f"{asked}: {entry['answer']}" if asked else str(entry["answer"])
-        row = [str(entry.get("ts", "")), who, shown, str(entry.get("decision", "")),
-               {None: "-", 0: "no", 1: "yes"}.get(entry.get("approved"), "?"), str(entry.get("outcome", "")),
-               str(entry.get("reason_code") or ""), asked or "-"]
-        if details:
-            repairs = entry.get("repairs") if isinstance(entry.get("repairs"), list) else []
-            result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
-            row += [", ".join(f"{r.get('kind')}:{r.get('field') or '-'}" for r in repairs if isinstance(r, dict)),
-                    str(entry.get("duration_ms") or ""),
-                    (f"{str(result.get('sha256', ''))[:12]} {result.get('bytes', '')} B" if result else ""),
-                    ", ".join(str(link) for link in entry.get("links") or []), str(entry.get("session") or "")]
-        yield row
+    """The audit view for people (orchestrator/tools/audit_view.py, shared with the GUI's Audit Log window)."""
+    from orchestrator.tools.audit_view import audit_rows
+    return audit_rows(registry, entries, details)
 
 
 @tools.command('audit')
@@ -1380,6 +1341,8 @@ def _audit_rows(registry, entries, details: bool = False):
 def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, archive: bool, summary: bool):
     """Show the audit log of tool calls"""
     import sqlite3
+
+    from orchestrator.tools.audit_view import DETAIL_COLUMNS, ENTRY_COLUMNS, SUMMARY_COLUMNS, SUMMARY_ENTRIES
     registry = _tool_registry(ctx)
     if registry.audit is None:
         console.print("[red]No audit log.[/red]")
@@ -1399,14 +1362,13 @@ def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, 
         return
     if summary:
         try:
-            rows = _audit_summary(registry.audit.entries(100000))
+            rows = _audit_summary(registry.audit.entries(SUMMARY_ENTRIES))
         except (sqlite3.Error, OSError) as e:
             console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be read: "
                           f"{escape(str(e))}[/red]")
             sys.exit(1)
         table = Table(title="Tool calls per caller")
-        for column in ("Who", "Calls", "Refused", "Cannot reported", "confirmed", "contradicted", "premature",
-                       "unchecked"):
+        for column in SUMMARY_COLUMNS:
             table.add_column(column)
         for row in rows:
             table.add_row(*(escape(str(cell)) for cell in row))
@@ -1423,39 +1385,18 @@ def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, 
         console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be read: {escape(str(e))}[/red]")
         sys.exit(1)
     table = Table(title="Tool calls")
-    columns = ["Time", "Who", "Tool", "Decision", "Confirmed", "Outcome", "Reason", "Asked / answer"]
-    if details:
-        columns += ["Repairs", "ms", "Result", "Links", "Session"]
-    for column in columns:
+    for column in ENTRY_COLUMNS + (DETAIL_COLUMNS if details else ()):
         table.add_column(column)
     for row in _audit_rows(registry, entries, details):
         table.add_row(*(escape(cell) for cell in row))
     console.print(table)
 
 
-CANNOT_CHECKS = ("confirmed", "contradicted", "premature", "unchecked")
-REFUSED_OUTCOMES = ("denied", "not_confirmed", "rate_limited", "repeat_refused", "invalid_input", "unknown_tool")
-
-
 def _audit_summary(entries) -> list:
-    """Rows per caller: calls (end entries), refusals, report_cannot_do reports and how they were checked (design
-    6.11 D14: the honest "cannot" in use)."""
-    per: dict = {}
-    for entry in entries:
-        actor = str(entry.get("actor") or "?")
-        row = per.setdefault(actor, {"calls": 0, "refused": 0, "cannot": 0, **{c: 0 for c in CANNOT_CHECKS}})
-        outcome = str(entry.get("outcome") or "")
-        if outcome == "cannot_reported":
-            row["cannot"] += 1
-            check = str(entry.get("detail") or "").split(":")[-1].split("\n")[0].strip()
-            if check in CANNOT_CHECKS:
-                row[check] += 1
-        elif outcome in REFUSED_OUTCOMES:
-            row["refused"] += 1
-        elif outcome in ("ok", "error", "cancelled"):
-            row["calls"] += 1
-    return [[actor, r["calls"], r["refused"], r["cannot"], *(r[c] for c in CANNOT_CHECKS)]
-            for actor, r in sorted(per.items())]
+    """Rows per caller: calls, refusals, report_cannot_do reports and how they were checked
+    (orchestrator/tools/audit_view.py, shared with the GUI's Audit Log window)."""
+    from orchestrator.tools.audit_view import audit_summary
+    return audit_summary(entries)
 
 
 # Pending approvals: questions of AI clients that could not ask you themselves (design 6.9).
@@ -1728,7 +1669,7 @@ def tools_folders_remove(ctx: FrameworkContext, label: str):
 @pass_context
 def tools_crawl_notice(ctx: FrameworkContext):
     """Read the one-time Deep Ingest notice (needs a terminal); AI clients may crawl only after a person read it"""
-    from orchestrator.utils.crawl_notice import CrawlNotice, notice_text
+    from orchestrator.utils.crawl_notice import CrawlNotice, acknowledge_and_audit, notice_text
     from orchestrator.utils.localization import current_language
     _require_terminal("llm-cli tools crawl-notice")
     ctx.require_framework()
@@ -1741,16 +1682,10 @@ def tools_crawl_notice(ctx: FrameworkContext):
     if not click.confirm("I have read the notice", default=False):
         console.print("Not acknowledged: AI clients cannot crawl until a person has read it.")
         sys.exit(1)
-    notice.acknowledge("cli")
     registry = getattr(ctx.framework_manager, "tool_registry", None)
-    audit = getattr(registry, "audit", None)
-    if audit is not None:
-        try:
-            audit.record("cli", "crawl_notice_acknowledged", "framework", "person", "ok", arguments={"via": "cli"},
-                         approved=True)
-        except Exception as e:
-            console.print(f"[yellow]Acknowledged, but the audit log could not record it: {escape(str(e))}"
-                          "[/yellow]")
+    problem = acknowledge_and_audit(notice, "cli", getattr(registry, "audit", None))
+    if problem:
+        console.print(f"[yellow]Acknowledged, but the audit log could not record it: {escape(problem)}[/yellow]")
     console.print("[green]Acknowledged. AI clients may now ask to crawl documentation sites (crawl_docs_site); "
                   "you confirm every crawl.[/green]")
 
@@ -2901,7 +2836,7 @@ def _ensure_storage(service, preset, insecure: bool, yes: bool) -> None:
     _say(f"{warning} (secret_storage: insecure)", err=True, fg="yellow")
 
 
-def _read_key(spec, preset, *, with_token: bool, from_env: bool) -> Tuple[str, str]:
+def _read_key(spec, preset, *, with_token: bool, from_env: bool, service) -> Tuple[str, str]:
     """The key and where it came from: stdin, the provider's environment variable or a hidden prompt. Never argv."""
     from orchestrator.llm.auth.store import malformed_key
     optional = spec.type == "bearer_optional"
@@ -2916,14 +2851,17 @@ def _read_key(spec, preset, *, with_token: bool, from_env: bool) -> Tuple[str, s
                    "pipe only the key.")
         return key, "stdin"
     if from_env:
-        if not spec.env:
-            _usage(f"{preset.label} ({spec.label}) reads no environment variable; use --with-token or the prompt.")
-        name = next((v for v in spec.env if (os.environ.get(v) or "").strip()), None)
-        if name is None:
-            _usage(f"{' and '.join(spec.env)} {'is' if len(spec.env) == 1 else 'are'} not set.")
-        if malformed_key(os.environ[name].strip()):
-            _usage(f"{name} has a space, a line break or another character that is never part of a key.")
-        return os.environ[name].strip(), f"env:{name}"
+        from orchestrator.llm.auth.signin import EnvKeyError
+        try:
+            key, name = service.env_key(preset, spec)
+        except EnvKeyError as e:
+            if e.code == "no_variable":
+                _usage(f"{preset.label} ({spec.label}) reads no environment variable; use --with-token or the "
+                       "prompt.")
+            if e.code == "not_set":
+                _usage(f"{' and '.join(spec.env)} {'is' if len(spec.env) == 1 else 'are'} not set.")
+            _usage(f"{e.name} has a space, a line break or another character that is never part of a key.")
+        return key, f"env:{name}"
     if not _interactive():
         _usage("No terminal to ask for the key: pipe it to --with-token (printf %s \"$KEY\" | llm-cli ditto login "
                f"{preset.id} --with-token) or use --from-env.")
@@ -3074,7 +3012,7 @@ def ditto_login(ctx: FrameworkContext, provider: str, method_id: Optional[str], 
     # A key method (api_key, bearer_optional).
     if spec.type == "api_key":
         _ensure_storage(service, preset, insecure_storage, yes)
-    key, source = _read_key(spec, preset, with_token=with_token, from_env=from_env)
+    key, source = _read_key(spec, preset, with_token=with_token, from_env=from_env, service=service)
     if key and spec.rejected(key):
         _auth_fail(rejected_key_error(preset))  # before any request
     if key and spec.type == "bearer_optional":
@@ -3405,40 +3343,44 @@ def _doctor_free_space(framework, heading: str = "Tier 2: the framework's build 
     is), nothing ticked, and deletes exactly the images the person picks and then confirms at a terminal (default no).
     Docker's build cache is never cleared: it cannot be limited to the framework. The same list and deletion as Tools >
     Framework Build Images... in the GUI: the one deletion path for the framework's Docker images. Returns how many
-    images were deleted and, when none was, why ("" when the person chose none)."""
+    images were deleted and, when none was, why ("" when the person chose none). The listing and the deletion are
+    docker_objects.offer_image_list's, which the GUI's Mojo window opens with its deletion dialog."""
     from orchestrator.Core.knowledge_snapshots import size_text
-    from orchestrator.Core.mojo.docker_objects import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
-                                                       docker_storage, framework_image_plan)
+    from orchestrator.Core.mojo.docker_objects import offer_image_list
     cache_note = ("Docker's build cache is not touched: it cannot be limited to the framework ('docker system df' "
                   "shows its size; 'docker builder prune' would clear it for every project on this computer).")
     console.print(f"\n[bold]{escape(heading)}[/bold]")
-    try:
-        plan = framework_image_plan(framework)
-    except DockerUnavailable as e:
-        console.print(f"[yellow]{escape(str(e))}[/yellow] {escape(cache_note)}")
-        return 0, str(e)
-    storage = docker_storage(framework) or {}
-    if storage.get("root"):
-        console.print(f"Docker keeps its images in {escape(storage['root'])}.")
-    if plan is None:
+
+    def where(root: str) -> None:
+        if root:
+            console.print(f"Docker keeps its images in {escape(root)}.")
+
+    def ask(plan, root: str):
+        where(root)
+        console.print("Sizes include layers other images may share, so less space can be freed. " + escape(cache_note))
+        return confirm_deletion(plan, title=f"{len(plan.items)} framework build images, "
+                                            f"{size_text(plan.total_bytes)}", multiple=True, again=again)
+
+    outcome = offer_image_list(framework, ask, actor="cli")
+    if not outcome.listed:
+        console.print(f"[yellow]{escape(outcome.problem)}[/yellow] {escape(cache_note)}")
+        return 0, outcome.why
+    if outcome.plan is None:
+        where(outcome.root)
         console.print(f"No framework images to delete. {escape(cache_note)}")
-        return 0, "there are no framework build images to delete"
-    console.print("Sizes include layers other images may share, so less space can be freed. " + escape(cache_note))
-    accepted = confirm_deletion(plan, title=f"{len(plan.items)} framework build images, {size_text(plan.total_bytes)}",
-                                multiple=True, again=again)
-    if accepted is None:
+        return 0, outcome.why
+    if outcome.problem:
+        console.print(f"[yellow]{escape(outcome.problem)}[/yellow]")
+        return 0, outcome.why
+    result = outcome.result
+    if result is None:
         return 0, ""
-    try:
-        result = delete_framework_images(framework, accepted.plan, actor="cli")
-    except (ImagePlanChanged, DockerUnavailable, RuntimeError) as e:
-        console.print(f"[yellow]{escape(str(e))}[/yellow]")
-        return 0, str(e)
     for name in result.deleted:
         console.print(f"[green]Deleted: {escape(name)}[/green]")
     for name, reason in result.failed:
         console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
     console.print(f"{len(result.deleted)} images deleted, about {size_text(result.freed_bytes)}.")
-    return len(result.deleted), "" if result.deleted else "Docker kept every image you chose (the reasons are above)"
+    return outcome.count, outcome.why
 
 
 # ============================================================================
@@ -3487,7 +3429,8 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
     _mojo_print_oracle(report, offered, terminal)
     _mojo_offer_boards(framework, report, terminal)
     if mode == "oracle":
-        acts = [o for o in offered if o.verdict == "miracle" or (o.verdict == "deletion_list" and _mojo_lists(o))]
+        from orchestrator.Core.mojo.views import miracle_acts
+        acts = miracle_acts(offered)   # the GUI's Mojo window offers Mojo Miracle under the same rule
         if not acts:
             sys.exit(report.exit_code)
         if not terminal:
@@ -3509,17 +3452,14 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
 
 def _mojo_board(ctx: FrameworkContext, name: str) -> str:
     """The device ID of the trusted board `--board` names (its label, device ID or address); exits with the trusted
-    boards when it names none or several."""
-    from orchestrator.runtime.device.trusted import TrustedDevices, find_boards
-    store = TrustedDevices(_state_dir(ctx))
-    found = find_boards(store, name, by_address=True)
-    if len(found) == 1:
-        return found[0].device_id
-    boards = found or store.list()
-    what = (f"{len(found)} trusted boards match '{name}'" if found else f"No trusted board is named '{name}'")
-    console.print(f"[red]{escape(what)}.[/red]" + (" Give one of these (label, device ID or address):" if boards
-                                                    else " No board is trusted yet."))
-    for d in boards:
+    boards when it names none or several (Core/mojo/boards.find_board, as the GUI finds it)."""
+    from orchestrator.Core.mojo.boards import find_board
+    found = find_board(ctx.framework_manager, name)
+    if found.device_id:
+        return found.device_id
+    console.print(f"[red]{escape(found.problem)}.[/red]" + (" Give one of these (label, device ID or address):"
+                                                             if found.boards else " No board is trusted yet."))
+    for d in found.boards:
         console.print(f"  {escape(d.label)}  {d.device_id}  {escape(d.address)}")
     sys.exit(2)
 
@@ -3539,65 +3479,39 @@ def _mojo_board_command(name: str, device_id: str) -> str:
 def _mojo_offer_boards(framework, report, terminal: bool) -> None:
     """Boards a recorded fact points to and that Mojo did not contact (W1): at a terminal "Check <board> now? [y/N]"
     for each (yes: one connection to its SSH port, no login, and the result); without a terminal the command that
-    checks it. The person sees the board's label; the command names it as `--board` takes it best (board_name)."""
-    from orchestrator.Core.mojo.checks.devices import check_devices
-    from orchestrator.runtime.device.trusted import TrustedDevices
-    try:
-        labels = {d.device_id: d.label for d in TrustedDevices.for_framework(framework).list()}
-    except Exception:  # noqa: BLE001 - the command's name stands in
-        labels = {}
-    boards = {}
-    for finding in report.findings:
-        if finding.board_check and finding.board_check not in boards:
-            boards[finding.board_check] = finding.board_name or finding.board_check
-    for device_id, name in boards.items():
+    checks it. The person sees the board's label; the command names it as `--board` takes it best (board_name). The
+    boards and the check are Core/mojo/boards' (the GUI's Mojo window offers the same boards)."""
+    from orchestrator.Core.mojo.boards import boards_to_offer, check_board
+    for device_id, label, name in boards_to_offer(framework, report):
         command = _mojo_board_command(name, device_id)
-        label = labels.get(device_id) or name
         if not terminal:
             console.print(f"Mojo did not contact the board {escape(label)}. To check it: {escape(command)}")
             continue
         if not click.confirm(f"Check {label} now? (one connection to its SSH port, no login)", default=False):
             console.print(f"Mojo did not contact {escape(label)}. Later: {escape(command)}")
             continue
-        for finding in check_devices(framework, contact=(device_id,)):
-            if finding.code != f"devices.{device_id}":
-                continue
-            console.print(f"{MOJO_ICONS[finding.severity.value]} {escape(finding.subsystem)}: {escape(finding.message)}")
-            if finding.severity.value != "ok" and finding.fix_hint:
-                console.print(f"    → {escape(finding.fix_hint)}")
-
-
-def _mojo_lists(offer) -> bool:
-    """Whether Mojo Miracle at a terminal opens the person's list for this deletion finding."""
-    from orchestrator.Core.mojo.offers import DELETION_LISTS
-    return offer.finding.code in DELETION_LISTS
+        finding = check_board(framework, device_id)
+        if finding is None:
+            continue
+        console.print(f"{MOJO_ICONS[finding.severity.value]} {escape(finding.subsystem)}: {escape(finding.message)}")
+        if finding.severity.value != "ok" and finding.fix_hint:
+            console.print(f"    → {escape(finding.fix_hint)}")
 
 
 def _mojo_miracle_line(offer, terminal: bool) -> str:
-    """The person's line about what Mojo Miracle can do for one finding."""
-    from orchestrator.Core.mojo.offers import DELETION_WHERE, OTHER_LISTS
-    if offer.verdict == "miracle":
-        return f"Mojo Miracle can repair it: {offer.plan.summary}."
-    if offer.verdict == "deletion_list" and _mojo_lists(offer):
-        if terminal:
-            return ("Mojo Miracle shows you the framework's build images to choose from (name, id, size, what each "
-                    "is; nothing is ticked); only what you tick and confirm is deleted.")
-        return f"Mojo Miracle cannot repair it here: {offer.reason}; {DELETION_WHERE}."
-    if offer.verdict == "deletion_list" and offer.finding.code in OTHER_LISTS:
-        return (f"Mojo Miracle cannot repair it: {offer.reason}; you choose what is deleted or exported: "
-                f"{OTHER_LISTS[offer.finding.code]}.")
-    return f"Mojo Miracle cannot repair it: {offer.reason}."
+    """The person's line about what Mojo Miracle can do for one finding (Core/mojo/views.miracle_line; the GUI's Mojo
+    window shows the same kinds of line)."""
+    from orchestrator.Core.mojo.views import miracle_line
+    return miracle_line(offer, terminal)
 
 
 def _mojo_print_oracle(report, offered, terminal: bool) -> None:
     """What Mojo Oracle found: every finding; for each problem where (the full path), why it matters, the hint and
     what Mojo Miracle can do; then one sentence that counts every problem by what can be done about it."""
-    from orchestrator.Core.mojo.views import oracle_summary
-    by_finding = {id(o.finding): o for o in offered}
+    from orchestrator.Core.mojo.views import oracle_summary, person_findings, plan_steps
     console.print("[bold]Mojo Oracle: checking the installation (read-only, nothing is changed)[/bold]")
-    for finding in report.findings:
+    for finding, offer in person_findings(report, offered):
         console.print(f"{MOJO_ICONS[finding.severity.value]} {escape(finding.subsystem)}: {escape(finding.message)}")
-        offer = by_finding.get(id(finding))
         if offer is None:  # no problem: an information's hint is shown as the doctor showed it
             if finding.severity.value == "info" and finding.fix_hint:
                 console.print(f"    → {escape(finding.fix_hint)}")
@@ -3609,45 +3523,35 @@ def _mojo_print_oracle(report, offered, terminal: bool) -> None:
         if finding.fix_hint:
             console.print(f"    → {escape(finding.fix_hint)}")
         console.print(f"    {escape(_mojo_miracle_line(offer, terminal))}")
-        if offer.verdict == "miracle":
-            for step in offer.plan.steps:
-                where = f" ({step.full_path})" if step.full_path else ""
-                console.print(f"      Plan: {escape(step.target_label)}{escape(where)}: {escape(step.before)} → "
-                              f"{escape(step.after)}" + (", can be undone" if step.undoable else ""))
+        for step in plan_steps(offer):
+            where = f" ({step.full_path})" if step.full_path else ""
+            console.print(f"      Plan: {escape(step.target_label)}{escape(where)}: {escape(step.before)} → "
+                          f"{escape(step.after)}" + (", can be undone" if step.undoable else ""))
     console.print(escape(oracle_summary(offered, person=True)))
 
 
 def _mojo_print_miracle(result) -> None:
-    """What Mojo Miracle did: every problem, repaired or not, and why not; then the count."""
+    """What Mojo Miracle did: every problem, repaired or not, and why not; then the count (Core/mojo/views: the GUI's
+    Mojo window shows the same)."""
+    from orchestrator.Core.mojo.views import entry_next, entry_text, miracle_summary, outcome_kind
     words = {"repaired": "[green]✔ Repaired[/green]", "already_fixed": "[green]✔ Already gone[/green]",
-             "still_present": "[yellow]! Still there[/yellow]", "declined": "[yellow]- Not deleted[/yellow]"}
+             "still_present": "[yellow]! Still there[/yellow]", "declined": "[yellow]- Not deleted[/yellow]",
+             "not_repaired": "[red]✘ Not repaired[/red]"}
     for entry in result.entries:
         finding = entry.finding
-        head = words.get(entry.outcome, "[red]✘ Not repaired[/red]")
-        if entry.outcome == "repaired":
-            text = f"{entry.summary}. Checked again: the problem is gone."
-        else:
-            text = entry.reason or entry.summary
-        console.print(f"{head}: {escape(finding.subsystem)} ({escape(finding.code)}): {escape(text)}")
-        if entry.outcome == "plan_changed":
+        console.print(f"{words[outcome_kind(entry)]}: {escape(finding.subsystem)} ({escape(finding.code)}): "
+                      f"{escape(entry_text(entry))}")
+        step, hint = entry_next(entry)
+        if step == "again":
             console.print("    → Run 'llmcf mojo' again: it shows the new plan.")
-        elif entry.outcome not in ("repaired", "already_fixed") and finding.fix_hint:
-            console.print(f"    → {escape(finding.fix_hint)}")
+        elif step == "hint":
+            console.print(f"    → {escape(hint)}")
     for finding in result.new_problems:
         console.print(f"{MOJO_ICONS[finding.severity.value]} New after Mojo Miracle: {escape(finding.subsystem)} "
                       f"({escape(finding.code)}): {escape(finding.message)}")
         if finding.fix_hint:
             console.print(f"    → {escape(finding.fix_hint)}")
-    total = len(result.entries)
-    if not total:
-        console.print("Mojo Oracle found no problems, so Mojo Miracle had nothing to repair.")
-        return
-    gone, rest = len(result.already_gone), len(result.not_repaired)
-    console.print(f"Mojo Miracle repaired {len(result.repaired)} of {total} problem{'' if total == 1 else 's'}"
-                  + (f"; {gone} {'was' if gone == 1 else 'were'} already gone" if gone else "")
-                  + (f"; {rest} {'was' if rest == 1 else 'were'} not repaired (why: above)" if rest else "")
-                  + (f"; the check afterwards found {len(result.new_problems)} new (above)" if result.new_problems
-                     else "") + ".")
+    console.print(miracle_summary(result))
 
 
 def _mojo_free_space(framework) -> Tuple[int, str]:
@@ -4319,7 +4223,7 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int, conta
 def mcp_config(ctx: FrameworkContext, write_client: Optional[str]):
     """Show how to connect Claude Code, Claude Desktop or VS Code to this framework"""
     from orchestrator import mcp_server
-    app_root = Path(__file__).resolve().parents[1]
+    app_root = mcp_server.installation_root()
     try:
         if write_client == 'claude-desktop':
             path = mcp_server.write_claude_desktop_config(app_root)
@@ -4374,20 +4278,20 @@ def _token_store(registry):
     return registry.tokens
 
 
+def _audit_problem(problem: Optional[str]) -> None:
+    if problem:
+        Console(stderr=True).print(f"[yellow]Done, but the audit log could not record it: {escape(problem)}[/yellow]")
+
+
 def _audit_person(registry, event: str, arguments: dict) -> None:
     """A person's change to who may call the tools, in the audit log (actor cli). Names only, never a token."""
-    if registry.audit is None:
-        return
-    try:
-        registry.audit.record("cli", event, "framework", "person", "ok", arguments=arguments, approved=True)
-    except Exception as e:
-        Console(stderr=True).print(f"[yellow]Done, but the audit log could not record it: {escape(str(e))}[/yellow]")
+    from orchestrator.tools.mcp_tokens import person_change
+    _audit_problem(person_change(registry, "cli", event, arguments))
 
 
 def _policy_summary(policy) -> str:
-    from orchestrator.tools.policy import TIER_LABELS
-    tiers = ", ".join(f"{tier.value}: {policy.tiers[tier].value}" for tier in TIER_LABELS)
-    return tiers + (f" (+{len(policy.overrides)} per tool)" if policy.overrides else "")
+    from orchestrator.tools.mcp_tokens import policy_summary
+    return policy_summary(policy)
 
 
 def _show_new_token(name: str, token: str, what: str) -> None:
@@ -4413,37 +4317,24 @@ def mcp_token():
 @pass_context
 def mcp_token_add(ctx: FrameworkContext, name: str, policy_from: Optional[str], link: Optional[str]):
     """Create a token; it can only read until you allow more (tools permissions --token NAME)"""
-    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStoreError
+    from orchestrator.tools.mcp_tokens import TokenStoreError, UnknownCaller, add_token
     _at_a_terminal("Creating an MCP token", shows_token=True)
     registry = _tool_registry(ctx)
     tokens = _token_store(registry)
-    policy = None
     if policy_from and link:
         console.print("[red]Use either --policy-from or --link.[/red]")
         sys.exit(2)
-    if policy_from:
-        # "mcp:<name>" (a token's audit actor) is always a token, also one named like a caller ("mcp", "ditto").
-        named_token = policy_from.startswith(ACTOR_PREFIX)
-        source = policy_from[len(ACTOR_PREFIX):] if named_token else policy_from
-        if not named_token and source in ("mcp", "ditto"):
-            if registry.policy_store.problem:
-                console.print(f"[red]{escape(registry.policy_store.problem)}[/red]")
-                sys.exit(1)
-            policy = registry.policy(source)
-        elif tokens.get(source) is not None:
-            policy = registry.policy(ACTOR_PREFIX + source)
-        else:
-            console.print(f"[red]Unknown caller '{escape(policy_from)}': use mcp, ditto or a token name.[/red]")
-            sys.exit(2)
-        # A copy (later changes of the source do not apply): the source's decisions and reviewed tools; copied
-        # from ditto or mcp it counts as set by you, so the token is no longer treated as a new, read-only one.
-        policy = policy.model_copy(deep=True, update={"configured": True} if not named_token else {})
+    # --policy-from: "mcp:<name>" (a token's audit actor) is always a token, also one named like a caller ("mcp",
+    # "ditto"); a copy, so later changes of the source do not apply (mcp_tokens.copied_policy).
     try:
-        token = tokens.add(name, policy=policy, link=link)
+        token, problem = add_token(registry, name, "cli", policy_from=policy_from, link=link)
+    except UnknownCaller as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
     except TokenStoreError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    _audit_person(registry, "mcp_token.add", {"token": name, "policy_from": policy_from, "link": link})
+    _audit_problem(problem)
     _show_new_token(name, token, "Token")
     if link:
         click.echo(f"It uses {link}'s permissions; changes to them apply to it at once.")
@@ -4492,7 +4383,7 @@ def mcp_token_rotate(ctx: FrameworkContext, name: str):
 @pass_context
 def mcp_token_revoke(ctx: FrameworkContext, name: str):
     """Delete a token and its permissions; its client loses access at once"""
-    from orchestrator.tools.mcp_tokens import TokenStoreError
+    from orchestrator.tools.mcp_tokens import TokenStoreError, revoke_token
     _at_a_terminal("Revoking an MCP token")
     registry = _tool_registry(ctx)
     tokens = _token_store(registry)
@@ -4501,26 +4392,21 @@ def mcp_token_revoke(ctx: FrameworkContext, name: str):
         sys.exit(1)
     if not click.confirm(f"Revoke the token '{name}'? Its client loses access at once.", default=False):
         return
-    try:
-        tokens.revoke(name)
+    try:  # the token, its permissions and its standing approvals, as the GUI does (mcp_tokens.revoke_token)
+        result = revoke_token(registry, name, "cli")
     except TokenStoreError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    _audit_person(registry, "mcp_token.revoke", {"token": name})
-    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX
-    if registry.policy().grants.get(ACTOR_PREFIX + name):
-        try:  # a new token of the same name would not inherit them anyway (they name the token's creation time)
-            registry.policy_store.update(lambda p: p.model_copy(update={"grants": {
-                c: g for c, g in p.grants.items() if c != ACTOR_PREFIX + name}}), actor="cli")
-        except Exception as e:
-            console.print(f"[yellow]Its standing approvals could not be removed ({escape(str(e))}); they no longer "
-                          "apply.[/yellow]")
+    _audit_problem(result.audit_problem)
+    if result.grants_problem:  # a new token of the same name would not inherit them (they name its creation time)
+        console.print(f"[yellow]Its standing approvals could not be removed ({escape(result.grants_problem)}); they "
+                      "no longer apply.[/yellow]")
     console.print(f"[green]Token '{escape(name)}', its permissions and its standing approvals are deleted.[/green]")
 
 
 def _token_permissions(registry, name: str, reset: bool) -> None:
     """`tools permissions --token NAME`: the same questions, saved as that token's own permissions."""
-    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStoreError, read_only_policy
+    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStoreError, read_only_policy, set_token_policy
     _at_a_terminal("Changing a token's permissions")
     tokens = _token_store(registry)
     record = tokens.get(name)
@@ -4531,15 +4417,15 @@ def _token_permissions(registry, name: str, reset: bool) -> None:
     if record.link and not click.confirm(f"The token '{name}' uses {record.link}'s permissions. Give it its own "
                                          "instead?", default=False):
         return
+    # --reset: a new token again (read only, not configured), as the GUI's "Back to read only" (reset_token_policy)
     policy = read_only_policy() if reset else _ask_tool_policy(registry, before,
                                                                shown_for=ACTOR_PREFIX + name)
     try:
-        tokens.set_policy(name, policy)
+        problem = set_token_policy(registry, name, policy, "cli")
     except TokenStoreError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    _audit_person(registry, "mcp_token.permissions", {"token": name, "before": _policy_summary(before),
-                                                      "after": _policy_summary(policy), "was_linked": record.link})
+    _audit_problem(problem)
     console.print(f"[green]Token '{escape(name)}': {escape(_policy_summary(policy))}[/green]")
 
 
@@ -4604,24 +4490,11 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
         
     output_dir = _output_dir(ctx)
     # A folder from 'deploy list-artifacts' (relative to the output folder or the framework's build folder) or any
-    # existing path.
-    given = Path(artifact_name).expanduser()
-    artifact_path = given.resolve() if given.is_absolute() or given.exists() else output_dir / artifact_name
-    if not artifact_path.exists():
-        from orchestrator.Core.artifact_output import build_folder
-        waiting = build_folder(ctx.framework_manager) / artifact_name
-        artifact_path = waiting if waiting.exists() else artifact_path
-    
-    docker_config = {"use_docker": docker}
-    if docker:
-        # TODO: Get real image name from config/profile logic (the package itself takes image_inference_runtime)
-        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE
-        docker_config["image_name"] = DEFAULT_INFERENCE_IMAGE
-    
-    from orchestrator.Core.deployment_manager import DeployError
+    # existing path; the same core step as the GUI's "Create package only..." (make_package).
+    from orchestrator.Core.deployment_manager import DeployError, make_package
     try:
         with console.status(f"Generiere Paket für {artifact_name}...", spinner="dots"):
-            pkg_path = dep_mgr.create_package(artifact_path, profile, docker_config, output_dir)
+            pkg_path = make_package(dep_mgr, ctx.framework_manager, artifact_name, profile, docker, output_dir)
     except DeployError as e:
         console.print(f"[bold red]Package generation failed: {escape(str(e))}[/bold red]")
         if e.next:
@@ -4902,10 +4775,14 @@ def _remember_device(ctx: FrameworkContext, host: str, port: int, user: str, key
     state_dir = _state_dir(ctx)
     device = record_trusted_device(state_dir, host, port, user, key, via="cli", paired=paired, label=label,
                                    audit=_device_audit(ctx, state_dir), actor="cli")
+    _say_trusted(device)
+    return device
+
+
+def _say_trusted(device) -> None:
     if device is not None:
         console.print(f"Trusted device {device.device_id} ({escape(device.label)}): AI tools may deploy to it with "
                       "your confirmation (llm-cli deploy devices list).")
-    return device
 
 
 @deploy.group('devices')
@@ -4919,15 +4796,8 @@ def deploy_devices():
 @pass_context
 def deploy_devices_list(ctx: FrameworkContext, as_json: bool):
     """List the trusted devices with their host key and whether the key is still the trusted one"""
-    from orchestrator.runtime.device.trusted import TrustedDevices
-    store = TrustedDevices(_state_dir(ctx))
-    last = store.last_deploys()
-    rows = []
-    for d in store.list():
-        rows.append({"device_id": d.device_id, "label": d.label, "address": d.address, "user": d.user,
-                     "key_type": d.key_type, "fingerprint": d.fingerprint, "paired": d.paired,
-                     "host_key": store.key_status(d), "trusted": f"{d.trusted_at} ({d.trusted_via})",
-                     "last_deploy": last.get(d.device_id)})
+    from orchestrator.runtime.device.person_steps import trusted_rows
+    rows = trusted_rows(_state_dir(ctx))
     if as_json:
         click.echo(json.dumps(rows, indent=2, sort_keys=True))
         return
@@ -4942,11 +4812,11 @@ def deploy_devices_list(ctx: FrameworkContext, as_json: bool):
     for r in rows:
         state = {"known": "trusted", "changed": "[red]CHANGED in known_hosts[/red]",
                  "unknown": "[yellow]not in known_hosts[/yellow]"}[r["host_key"]]
-        last_deploy = r["last_deploy"] or {}
+        last_deploy = r["last_deploy"] or {}   # may hold only a recorded contact for Mojo: then no deploy is shown
         table.add_row(r["device_id"], escape(r["label"]), escape(r["address"]), escape(r["user"]),
                       f"{escape(r['key_type'])} {r['fingerprint']} ({state})", "yes" if r["paired"] else "no",
                       escape(f"{last_deploy.get('at')} ({'ok' if last_deploy.get('ok') else 'failed'})")
-                      if last_deploy else "-")
+                      if last_deploy.get("at") else "-")
     console.print(table)
 
 
@@ -4955,18 +4825,12 @@ def deploy_devices_list(ctx: FrameworkContext, as_json: bool):
 @pass_context
 def deploy_devices_remove(ctx: FrameworkContext, device_id: str):
     """Remove a device's record: AI tools can no longer name it (its known_hosts entry is kept)"""
-    from orchestrator.runtime.device.trusted import TrustedDevices
+    from orchestrator.runtime.device.person_steps import remove_trust
     state_dir = _state_dir(ctx)
-    if not TrustedDevices(state_dir).remove(device_id.strip()):
+    if not remove_trust(state_dir, device_id, audit=lambda: _device_audit(ctx, state_dir), actor="cli",
+                        channel="framework-cli"):
         console.print(f"[red]No trusted device {escape(device_id)} (llm-cli deploy devices list).[/red]")
         sys.exit(1)
-    audit = _device_audit(ctx, state_dir)
-    if audit is not None:
-        try:
-            audit.record("cli", "device_removed", "external", "ask", "ok", arguments={"device_id": device_id.strip()},
-                         approved=True, extra={"confirm_channel": "framework-cli", "answer": "accepted"})
-        except Exception:  # noqa: BLE001 - logged by the audit log itself
-            pass
     console.print(f"Device {escape(device_id)} removed from the trusted devices.")
 
 
@@ -4979,49 +4843,36 @@ def deploy_devices_remove(ctx: FrameworkContext, device_id: str):
 def deploy_devices_add(ctx: FrameworkContext, host: str, user: str, port: int, label: Optional[str]):
     """Add a device you trusted before (its host key is already in the framework's known_hosts). Needs a terminal:
     you confirm the fingerprint shown; nothing is trusted here that was not trusted before."""
-    from orchestrator.Core.deployment_manager import SSH_USER_PATTERN
-    from orchestrator.runtime.device.trusted import DeviceStoreError, TrustedDevices, clean_label
-    from orchestrator.runtime.remote_probe import valid_host
-    from orchestrator.utils import ssh_trust
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.runtime.device.trusted import TrustedDevices
     if not _interactive():
         console.print("[red]'deploy devices add' needs a terminal: you confirm the device's fingerprint yourself."
                       "[/red]")
         sys.exit(1)
-    if not valid_host(host) or not SSH_USER_PATTERN.fullmatch(user or ""):
+    try:
+        label = person_steps.check_board_entry(host, user, label)
+    except person_steps.BoardStepError as e:
         raise click.UsageError("HOST must be an address or a host name (e.g. 192.168.1.50, fe80::1 without brackets "
-                               "or myboard.local) and --user an account name")
-    if label is not None:
-        try:
-            label = clean_label(label)
-        except DeviceStoreError as e:
-            raise click.UsageError(str(e))
-    if ssh_trust.paramiko is None:
-        console.print("[red]Reaching a device needs the 'paramiko' package.[/red]")
-        sys.exit(1)
+                               "or myboard.local) and --user an account name" if e.kind == "host_user" else str(e))
     state_dir = _state_dir(ctx)
     try:
-        key = ssh_trust.fetch_host_key(host, port)
-        status = ssh_trust.check_host_key(state_dir, host, port, key)
-    except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        _unreachable(ctx, host, port, e)
+        key, status, fp = person_steps.read_host_key(state_dir, host, port)
+    except person_steps.BoardStepError as e:
+        if e.kind == "no_paramiko":
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+        _unreachable(ctx, host, port, e.error)
     if status != "known":
-        console.print(f"[red]{escape(host)}:{port} is not trusted yet (its host key is {status}). Trust it with "
-                      "'llm-cli deploy run' or 'llm-cli scan --device', which show the fingerprint for you to "
-                      "compare.[/red]")
+        console.print(f"[red]{escape(str(person_steps.not_known_error(host, port, status)))}[/red]")
         sys.exit(1)
-    fp = ssh_trust.fingerprint(key)
     console.print(f"{escape(host)}:{port} presents the trusted key {escape(key.get_name())} {fp}.")
     if not click.confirm(f"Allow AI tools to deploy to {user}@{host} (each deploy is still confirmed by you)?",
                          default=False):
         console.print("Nothing was added.")
         return
-    try:  # paired: the framework's own key logs in (no password is ever asked here)
-        client = ssh_trust.connect(host, user, state_dir, port=port, password=None)
-        client.close()
-        paired = True
-    except Exception:  # noqa: BLE001 - not paired yet: the record says so, and deploy_to_device refuses it
-        paired = False
-    device = _remember_device(ctx, host, port, user, key, paired=paired, label=label)
+    device, paired = person_steps.add_trusted_board(state_dir, host, port, user, key, label=label, via="cli",
+                                                    audit=_device_audit(ctx, state_dir), actor="cli")
+    _say_trusted(device)
     if device is None:
         console.print("[red]The device record could not be written.[/red]")
         sys.exit(1)
@@ -5053,9 +4904,8 @@ def _profile_summary(profile) -> list:
 
 
 def _write_profile_file(profile, output_file: Path, as_json: bool) -> None:
-    from orchestrator.Core.vault_key import write_private
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    write_private(output_file, profile.to_json() + "\n" if as_json else profile.to_text())
+    from orchestrator.runtime.scan_steps import write_profile_file
+    write_profile_file(profile, output_file, as_json)
 
 
 def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Optional[str],
@@ -5090,8 +4940,8 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
 def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
                  password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str],
                  ctx: Optional[FrameworkContext] = None) -> None:
-    from orchestrator.runtime.profile import device_id_for_host_key
-    from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh, store_address, valid_host
+    from orchestrator.runtime.remote_probe import valid_host
+    from orchestrator.runtime.scan_steps import DeviceScanError, label_problem, scan_device
     from orchestrator.utils import ssh_trust
     if not user:
         raise click.UsageError("--device needs --user")
@@ -5100,7 +4950,7 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
                                "or myboard.local")
     if not 1 <= port <= 65535:
         raise click.UsageError("--port must be between 1 and 65535")
-    if label is not None and not (1 <= len(" ".join(label.split())) <= 64 and label.isprintable()):
+    if label_problem(label):
         raise click.UsageError("--label takes 1 to 64 printable characters")
     if ssh_trust.paramiko is None:
         console.print("[red]Probing a device needs the 'paramiko' package.[/red]")
@@ -5108,40 +4958,33 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     key = _trust_device(state_dir, host, port, trust_fingerprint, ctx)
     if password is None:
         password = _device_password(None, False, ask_when_omitted=True)
+    # The same core step as the GUI's Builder tab > Scan / Import... > Remote Scan via SSH... (scan_steps.scan_device):
+    # login (recorded for Mojo), probe, profile file, profile store, deploy user and the trusted, paired record.
     try:
-        client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
-    except Exception as e:  # authentication, network, a host key that changed meanwhile
-        _unreachable(ctx, host, port, e, doing=f"log in to {user}@", step="probe", state_dir=state_dir)
-    _note_reach(ctx, host, port, "probe", "", state_dir=state_dir)
-    try:
-        if password:
-            ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
         with console.status(f"Running the hardware probe on {escape(host)}...", spinner="dots"):
-            result = probe_over_ssh(client)
-    except (RemoteProbeError, ssh_trust.HostKeyError) as e:
-        console.print(f"[red]The probe on {escape(host)} failed: {escape(str(e))}[/red]")
+            scan = scan_device(state_dir, host, port, user, key, password=password, label=label,
+                               output_file=output_file, as_json=as_json, store=store, record=ctx is not None,
+                               via="cli", actor="cli",   # the audit log is opened only for the record, as before
+                               audit_factory=(lambda: _device_audit(ctx, state_dir)) if ctx is not None else None)
+    except DeviceScanError as e:
+        if e.kind == "login":   # recorded for Mojo by the core step already
+            _unreachable(ctx, host, port, e.error, doing=f"log in to {user}@", state_dir=state_dir)
+        elif e.kind == "probe":
+            console.print(f"[red]The probe on {escape(host)} failed: {escape(str(e.error))}[/red]")
+        else:
+            console.print(f"[red]Could not save the profile: {escape(str(e.error))}[/red]")
         sys.exit(1)
-    finally:
-        client.close()
-    device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
-    try:
-        _write_profile_file(result.profile, output_file, as_json)
-        stored = store.save_device(device_id, result.profile, label=label, address=store_address(host, port))
-    except (OSError, ValueError) as e:
-        console.print(f"[red]Could not save the profile: {escape(str(e))}[/red]")
-        sys.exit(1)
-    from orchestrator.runtime.device.settings import remember_ssh_user
-    remember_ssh_user(store, device_id, user)  # the deploy user for `device runtime deploy` (never root)
-    if ctx is not None:
-        _remember_device(ctx, host, port, user, key, paired=True, label=label)
-    tool = "Python probe" if result.tool == "python" else "shell probe"
+    if scan.trusted is not None:
+        console.print(f"Trusted device {scan.trusted.device_id} ({escape(scan.trusted.label)}): AI tools may deploy "
+                      "to it with your confirmation (llm-cli deploy devices list).")
+    tool = "Python probe" if scan.tool == "python" else "shell probe"
     console.print(f"[bold green]Probe of {escape(host)} successful ({tool}). Config generated: "
                   f"{escape(str(output_file))}[/bold green]")
-    for note in result.notes:
+    for note in scan.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
-    for line in _profile_summary(result.profile):
+    for line in _profile_summary(scan.profile):
         console.print(line)
-    console.print(f"Stored as device {device_id}: {escape(str(stored))}")
+    console.print(f"Stored as device {scan.device_id}: {escape(str(scan.stored))}")
 
 
 @cli.command('scan')
@@ -5186,10 +5029,12 @@ def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, p
                      ctx=ctx)
         return
 
+    from orchestrator.runtime.scan_steps import ProfileWriteError, scan_local
     try:
         with console.status("Running the hardware probe...", spinner="dots"):
-            # The script writes the --output file itself; the Python probe's result is written below.
-            profile, how = probes.run_local(use_script=use_script, output=output_file)
+            # The same core step as the GUI's Builder tab > Scan / Import... > Scan This Computer (scan_local): the
+            # script writes the --output file itself, the Python probe's result is written there by the step.
+            scan = scan_local(probes, output_file, as_json=as_json, use_script=use_script)
     except ProbeError as e:
         console.print(f"[red]Probe execution failed: {escape(str(e))}[/red]")
         if e.detail:  # the underlying error for the person (it may name a path, so it is not part of the message)
@@ -5197,44 +5042,28 @@ def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, p
         if e.next:
             console.print(escape(e.next))
         sys.exit(1)
-    if how != "fallback script" or as_json:
-        try:
-            _write_profile_file(profile, output_file, as_json)
-        except OSError as e:
-            console.print(f"[red]The profile could not be written to {escape(str(output_file))}: "
-                          f"{escape(str(e))}[/red]")
-            sys.exit(1)
-    for note in probes.notes:
+    except ProfileWriteError as e:
+        console.print(f"[red]The profile could not be written to {escape(str(output_file))}: "
+                      f"{escape(str(e))}[/red]")
+        sys.exit(1)
+    for note in scan.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
-    console.print(f"[bold green]Probe successful ({how}). Config generated: {escape(str(output_file))}[/bold green]")
-    for line in _profile_summary(profile):
+    console.print(f"[bold green]Probe successful ({scan.how}). Config generated: {escape(str(output_file))}"
+                  "[/bold green]")
+    for line in _profile_summary(scan.profile):
         console.print(line)
-    if profile.needs_reprobe:
+    if scan.needs_reprobe:
         console.print("[yellow]This profile lacks facts a build needs; run the probe again before a build.[/yellow]")
-    console.print(f"Stored as this computer's profile (probe id local): {escape(str(store.local_path()))}")
+    console.print(f"Stored as this computer's profile (probe id local): {escape(str(scan.local_path))}")
 
 
 def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str]) -> None:
     """Copies a board's probe file, validated and without its host name, into the probe store and prints its probe
     id (MCP design T5: AI clients and Ditto name a board's probe only by that id, never by a path)."""
-    from orchestrator.runtime.probe_service import ProbeError, match_target
-    if label is not None and not (1 <= len(" ".join(label.split())) <= 64 and label.isprintable()):
+    from orchestrator.runtime.probe_service import ProbeError
+    from orchestrator.runtime.scan_steps import import_probe, label_problem
+    if label_problem(label):
         raise click.UsageError("--label takes 1 to 64 printable characters")
-    try:
-        probe_id = probes.import_file(import_file, label)
-        profile = probes.get(probe_id)
-    except ProbeError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        if e.next:
-            console.print(escape(e.next))
-        sys.exit(1)
-    info = probes.info(probe_id, profile)
-    console.print(f"[bold green]Imported as probe {probe_id} ({escape(info.label)}).[/bold green]")
-    for line in _profile_summary(profile):
-        console.print(line)
-    if profile.needs_reprobe:
-        console.print("[yellow]This probe was converted from an older probe file and lacks facts; probe the board "
-                      "again with the current script when you can.[/yellow]")
     try:  # the targets only, without booting the framework: the match is a hint
         from types import SimpleNamespace
         from orchestrator.Core.framework import resolve_install_path
@@ -5243,7 +5072,20 @@ def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str
         target_manager = TargetManager(SimpleNamespace(config=config, resolve_path=resolve_install_path))
     except Exception:  # noqa: BLE001
         target_manager = None
-    match = match_target(profile, target_manager)
+    try:  # the same core step as the GUI's Builder tab > Scan / Import... > Import from File (scan_steps.import_probe)
+        imported = import_probe(probes, import_file, label, target_manager)
+    except ProbeError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        if e.next:
+            console.print(escape(e.next))
+        sys.exit(1)
+    probe_id, profile, info, match = imported.probe_id, imported.profile, imported.info, imported.match
+    console.print(f"[bold green]Imported as probe {probe_id} ({escape(info.label)}).[/bold green]")
+    for line in _profile_summary(profile):
+        console.print(line)
+    if profile.needs_reprobe:
+        console.print("[yellow]This probe was converted from an older probe file and lacks facts; probe the board "
+                      "again with the current script when you can.[/yellow]")
     if match is not None:
         console.print(f"Matching target: {escape(match.target)}" + (f", board {escape(match.board)}" if match.board
                                                                    else "") + f" ({escape(match.reason)}).")
@@ -5297,12 +5139,10 @@ def _deploy_settings(store, device_id: str):
 
 def _record_consent(ctx: FrameworkContext, tool: str, arguments: Dict[str, Any], detail: str) -> None:
     """Writes a consent to the audit log; without its record there is no consent (exit 1, nothing changed)."""
+    from orchestrator.runtime.device.person_steps import record_consent
     registry = _tool_registry(ctx)
     try:
-        if getattr(registry, "audit", None) is None:
-            raise RuntimeError("no audit log")
-        registry.audit.record("user", tool, "external", "ask", "ok", arguments=arguments, approved=True,
-                              detail=detail, extra={"answer": "accepted", "confirm_channel": "framework-cli"})
+        record_consent(getattr(registry, "audit", None), tool, arguments, detail, channel="framework-cli")
     except Exception as e:
         console.print(f"[red]The consent could not be written to the audit log ({escape(str(e))}); nothing was "
                       "changed.[/red]")
@@ -5311,11 +5151,9 @@ def _record_consent(ctx: FrameworkContext, tool: str, arguments: Dict[str, Any],
 
 def _device_plan(profile):
     from orchestrator.runtime.build.recipe import PlanError
-    from orchestrator.runtime.build.toolchain import host_platform
-    from orchestrator.runtime.catalog import load_catalog
-    from orchestrator.runtime.device.package import plan_device_runtime
+    from orchestrator.runtime.device.steps import plan_runtime
     try:
-        return plan_device_runtime(profile, catalog=load_catalog(), host=host_platform())
+        return plan_runtime(profile)
     except PlanError as e:
         console.print(f"[red]No device runtime can be planned for this device: {escape(str(e))}[/red]")
         sys.exit(1)
@@ -5327,54 +5165,26 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
     device ID is derived from it), so a deployment never reaches another machine at the same address. `step` names
     the contact for Mojo's record of the board (W1), kept in `state_dir`. A verify only checks: it never rewrites the
     board's trust record (its --ssh-user may name another account than the one AI tools deploy as)."""
-    from orchestrator.runtime.profile import device_id_for_host_key
-    from orchestrator.utils import ssh_trust
-    if ssh_trust.paramiko is None:
-        console.print("[red]Reaching a device needs the 'paramiko' package.[/red]")
-        sys.exit(1)
-    try:
-        key = ssh_trust.fetch_host_key(host, port)
-        status = ssh_trust.check_host_key(state_dir, host, port, key)
-    except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        _unreachable(ctx, host, port, e, step=step, device_id=device_id, state_dir=state_dir)
-    if status == "changed":
-        _note_reach(ctx, host, port, step, "device_host_key_changed", device_id, state_dir)
-        _print_reason(ctx, "device_host_key_changed", host, port)
-        console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
-        sys.exit(1)
-    if status != "known":
-        console.print(f"[red]{escape(host)}:{port} is not trusted yet: probe it first with llm-cli scan --device "
-                      f"{escape(host)} --user USER.[/red]")
-        sys.exit(1)
-    if device_id_for_host_key(ssh_trust.fingerprint(key)) != device_id:
-        console.print(f"[red]{escape(host)}:{port} answers with the host key of another device than {device_id}; "
-                      "probe it again before deploying to it.[/red]")
-        sys.exit(1)
-    try:
-        client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
-    except Exception as e:  # authentication, network, a host key that changed meanwhile
-        from orchestrator.runtime.device import reasons
-        code = reasons.classify(e)
-        if code not in (None, reasons.AUTH_FAILED):
-            _unreachable(ctx, host, port, e, step=step, device_id=device_id, state_dir=state_dir)
-        if code == reasons.AUTH_FAILED:
-            _note_reach(ctx, host, port, step, reasons.AUTH_FAILED, device_id, state_dir)
-            _print_reason(ctx, reasons.AUTH_FAILED, host, port)
-        else:  # none of the four reasons: shown as it is, never relabelled as a refused login
-            console.print(f"[red]SSH login to {escape(user)}@{escape(host)} failed: {escape(str(e))}[/red]")
-        console.print(f"[red]Pair the device once with llm-cli scan --device (it asks for the password one time) or "
-                      "pass --password.[/red]")
-        sys.exit(1)
-    if password:
-        try:
-            ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
-        except ssh_trust.HostKeyError as e:
-            client.close()
+    from orchestrator.runtime.device import person_steps, reasons
+    try:   # the shared step records the board's contacts for Mojo in `state_dir`
+        client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step)
+    except person_steps.BoardStepError as e:
+        if e.kind in ("unreachable", "host_key_changed") and e.reason:
+            _print_reason(ctx, e.reason, host, port)
+            if e.kind == "host_key_changed":
+                console.print(f"[bold red]{escape(str(e))}[/bold red]")
+        elif e.kind == "login_failed":
+            if e.reason == reasons.AUTH_FAILED:
+                _print_reason(ctx, reasons.AUTH_FAILED, host, port)
+            else:  # none of the four reasons: shown as it is, never relabelled as a refused login
+                console.print(f"[red]{escape(str(e))}[/red]")
+            console.print("[red]Pair the device once with llm-cli scan --device (it asks for the password one time) "
+                          "or pass --password.[/red]")
+        else:
             console.print(f"[red]{escape(str(e))}[/red]")
-            sys.exit(1)
+        sys.exit(1)
     if ctx is not None and step != "verify":  # trusted by the person when it was probed, logged in to with the
         _remember_device(ctx, host, port, user, key, paired=True)  # framework's key now (a verify only checks)
-    _note_reach(ctx, host, port, step, "", device_id, state_dir)   # reached and logged in: a recorded problem ends
     return client
 
 
@@ -5382,33 +5192,26 @@ def _bench_choice(ctx: FrameworkContext, shell, home: str, bench_model: Optional
                   device_id: str, user: str):
     """(model path on the device or None, allowed, its sha256): a catalog model (by sha256) runs; any other model only
     after the user's consent, written to the audit log first (decision D23)."""
-    from orchestrator.runtime.catalog import load_catalog
-    from orchestrator.runtime.device.remote import model_sha256
-    from orchestrator.runtime.device.settings import SettingsError, check_model_path
-    if bench_model is None:
-        return None, False, None
+    from orchestrator.runtime.device import steps
+    from orchestrator.runtime.device.person_steps import UNTRUSTED_CONSENT, UNTRUSTED_QUESTION
+    from orchestrator.runtime.device.settings import SettingsError
+
+    def may_run(path: str) -> bool:   # the GUI's Boards window asks these same words
+        question = UNTRUSTED_QUESTION.format(path=path, user=user)
+        return allow_untrusted or (_interactive() and click.confirm(question, default=False))
+
+    tool, detail = UNTRUSTED_CONSENT
     try:
-        path = check_model_path(bench_model if bench_model.startswith("/") else f"{home}/{bench_model}")
+        choice = steps.choose_bench_model(
+            shell, home, bench_model, may_run_untrusted=may_run,
+            record_consent=lambda digest: _record_consent(ctx, tool, {"device": device_id, "model_sha256": digest},
+                                                          detail))
     except SettingsError as e:
         raise click.UsageError(f"--bench-model: {e}")
-    digest = model_sha256(shell, path)
-    if digest is None:
-        console.print(f"[yellow]No readable model at {escape(path)} on the device; the short benchmark is skipped."
-                      "[/yellow]")
-        return None, False, None
-    catalog = load_catalog()
-    pinned = {m.sha256 for m in catalog.models if m.sha256}
-    if catalog.smoke_model is not None:
-        pinned.add(catalog.smoke_model.sha256)
-    if digest in pinned:
-        return path, True, digest
-    question = (f"{path} is not a catalog model, so it is untrusted. llama-bench loads it natively on the device as "
-                f"{user} (no sandbox). Run the short benchmark with it? Your answer is written to the audit log.")
-    if not (allow_untrusted or (_interactive() and click.confirm(question, default=False))):
-        return path, False, digest
-    _record_consent(ctx, "device_runtime_untrusted_model", {"device": device_id, "model_sha256": digest},
-                    "an untrusted model may run natively on the device for the short llama-bench run")
-    return path, True, digest
+    if choice.missing:
+        console.print(f"[yellow]No readable model at {escape(choice.missing)} on the device; the short benchmark is "
+                      "skipped.[/yellow]")
+    return choice.path, choice.allowed, choice.digest
 
 
 def _record_board_test(ctx: FrameworkContext, store, device_id: str, profile, report, digest: Optional[str],
@@ -5449,31 +5252,8 @@ def device():
 @pass_context
 def device_list(ctx: FrameworkContext, as_json: bool):
     """List the stored devices with their system, deploy settings and deployed runtime"""
-    from orchestrator.runtime.device.package import DeviceRuntimeStore
-    from orchestrator.runtime.device.settings import DeploySettings, SettingsError
-    from orchestrator.runtime.profile import ProfileError, ProfileStore
-    state_dir = _state_dir(ctx)
-    store = ProfileStore(state_dir)
-    rows = []
-    for device_id in store.list_devices():
-        info = store.device_info(device_id)
-        try:
-            profile = store.load_device(device_id)
-        except ProfileError:
-            profile = None
-        try:
-            settings: Dict[str, Any] = DeploySettings.from_dict(store.load_deploy_settings(device_id)).as_dict()
-        except (SettingsError, ValueError):
-            settings = {"problem": "damaged; set them again"}
-        record = DeviceRuntimeStore(state_dir, device_id).record()
-        system = None
-        if profile is not None:
-            system = {k: profile.get(k) for k in ("OS", "OS_ID", "OS_VERSION_ID", "ARCH", "LIBC", "LIBC_VERSION",
-                                                  "INIT_SYSTEM", "SOC_MODEL")}
-        rows.append({"device_id": device_id, "label": info.get("label"), "address": info.get("address"),
-                     "system": system, "deploy": settings,
-                     "deployed": {k: record.get(k) for k in ("build_id", "deployed_at", "install")} if record
-                     else None})
+    from orchestrator.runtime.device.person_steps import device_rows
+    rows = device_rows(_state_dir(ctx))
     if as_json:
         click.echo(json.dumps(rows, indent=2, sort_keys=True))
         return
@@ -5515,39 +5295,37 @@ def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[s
                     port: Optional[int], model: Optional[str], confirm_sudo: bool, kv_cache: Optional[str]):
     """Show or change how the runtime is installed on a device. Decided here, before a deployment: a deployment
     never asks."""
-    from dataclasses import replace
+    from orchestrator.runtime.device import person_steps
     from orchestrator.runtime.device.settings import SettingsError
     _state, store, device_id, profile = _device_context(ctx, device_name)
-    current = _deploy_settings(store, device_id)
     changes = {k: v for k, v in (("install", install), ("ssh_user", ssh_user), ("port", port), ("model", model))
                if v is not None}
     if kv_cache is not None:
         changes["kv_cache"] = None if kv_cache == "auto" else kv_cache
+    if not changes:
+        current = _deploy_settings(store, device_id)   # damaged settings are named, never shown as the defaults
+    else:
+        try:   # damaged settings are set again from the defaults only after your yes at a terminal
+            current, _replaced = person_steps.settings_to_change(
+                store, device_id, may_replace=lambda reason, path, size: _interactive() and click.confirm(
+                    person_steps.DAMAGED_QUESTION.format(device_id=device_id, reason=reason, path=path, size=size),
+                    default=False))
+        except person_steps.BoardStepError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
     if changes:
+        tool, detail = person_steps.SYSTEMD_CONSENT
         try:
-            new = current.changed(**changes)
+            new = person_steps.change_settings(
+                store, device_id, profile, current, changes,
+                may_use_sudo=lambda: confirm_sudo or (_interactive() and click.confirm(person_steps.SUDO_QUESTION,
+                                                                                         default=False)),
+                record_sudo_consent=lambda: _record_consent(ctx, tool, {"device": device_id}, detail),
+                stamp=_utc_stamp)
         except SettingsError as e:
             raise click.UsageError(str(e))
-        if new.install == "systemd" and new.sudo_confirmed_at is None:
-            if profile.get("INIT_SYSTEM") != "systemd":
-                console.print(f"[red]Device {device_id} does not run systemd (its probe reports "
-                              f"{escape(profile.get('INIT_SYSTEM') or 'no init system')}); the start script is the "
-                              "way to run the runtime there. The settings were not changed.[/red]")
-                sys.exit(1)
-            question = ("The systemd unit is written to /etc/systemd/system and enabled with sudo on the device "
-                        "(sudo -n: it must work without a password, the deployment never asks). Allow deployments to "
-                        "this device to run these sudo commands? Your answer is written to the audit log.")
-            if not (confirm_sudo or (_interactive() and click.confirm(question, default=False))):
-                console.print("[red]The systemd unit needs your confirmation that deployments may use sudo on the "
-                              "device; the settings were not changed.[/red]")
-                sys.exit(1)
-            _record_consent(ctx, "device_runtime_systemd", {"device": device_id},
-                            "deployments may run sudo -n on the device to install the systemd unit")
-            new = replace(new, sudo_confirmed_at=_utc_stamp())
-        try:
-            store.save_deploy_settings(device_id, new.as_dict())
-        except (OSError, ValueError) as e:
-            console.print(f"[red]Could not save the deploy settings: {escape(str(e))}[/red]")
+        except person_steps.BoardStepError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
             sys.exit(1)
         current = new
         console.print(f"[green]Deploy settings of device {device_id} saved.[/green]")
@@ -5574,26 +5352,27 @@ def device_runtime():
 def device_runtime_plan(ctx: FrameworkContext, device_name: str, as_json: bool):
     """Show the cross build planned from the device's own probe profile"""
     from orchestrator.runtime.build.store import BuildStore
+    from orchestrator.runtime.device.steps import plan_view
     state_dir, _store, device_id, profile = _device_context(ctx, device_name)
     plan = _device_plan(profile)
     if as_json:
         click.echo(plan.to_json(), nl=False)
         return
-    target, builder, options = plan.target, plan.builder, plan.options()
+    view = plan_view(plan, BuildStore(state_dir).find(plan))
+    target, builder = view["target"], view["builder"]
+    cpu = view["cpu_arm_arch"] or ("all variants" if view["cpu_all_variants"] else "x86 features of the probe")
     console.print(f"Device {device_id}: {target['os']}/{target['arch']}, {target.get('libc')} "
                   f"{target.get('libc_version')}")
     console.print(f"Builder: container {builder.get('base')} ({builder.get('libc')} {builder.get('libc_version')}, "
                   f"GCC {builder.get('gcc')}), without network")
-    console.print(f"CPU: {options.get('GGML_CPU_ARM_ARCH') or ('all variants' if options.get('GGML_CPU_ALL_VARIANTS') == 'ON' else 'x86 features of the probe')}"
-                  f", OpenMP {options.get('GGML_OPENMP')}, C++ runtime linked statically: "
-                  f"{'yes' if plan.verify.get('static_libstdcxx') else 'no'}")
-    console.print(f"Programs: {', '.join(plan.targets)}"
-                  + (f"; with {', '.join(plan.verify['runtime_libs'])}" if plan.verify.get("runtime_libs") else ""))
-    console.print(f"Build ID: {plan.build_id}")
-    for note in plan.notes:
+    console.print(f"CPU: {cpu}, OpenMP {view['openmp']}, C++ runtime linked statically: "
+                  f"{'yes' if view['static_libstdcxx'] else 'no'}")
+    console.print(f"Programs: {', '.join(view['programs'])}"
+                  + (f"; with {', '.join(view['runtime_libs'])}" if view["runtime_libs"] else ""))
+    console.print(f"Build ID: {view['build_id']}")
+    for note in view["notes"]:
         console.print(f"[yellow]{escape(note)}[/yellow]")
-    built = BuildStore(state_dir).find(plan)
-    console.print("Built: yes, " + str(built.path) if built else "Built: no (llm-cli device runtime build "
+    console.print("Built: yes, " + view["built_path"] if view["built"] else "Built: no (llm-cli device runtime build "
                   f"{device_id})")
 
 
@@ -5607,55 +5386,53 @@ def device_runtime_plan(ctx: FrameworkContext, device_name: str, as_json: bool):
 def device_runtime_build(ctx: FrameworkContext, device_name: str, jobs: Optional[int], mirror: Optional[str],
                          yes: bool):
     """Cross-build llama.cpp for the device in the builder container (no network) and package the tarball"""
-    from orchestrator.runtime.build.executor import BuildExecutor, DockerEngine
-    from orchestrator.runtime.build.source import SourceError, cached_source, fetch_source
-    from orchestrator.runtime.build.store import BuildFailed, BuildStore, StoreError
-    from orchestrator.runtime.build.toolchain import host_platform
-    from orchestrator.runtime.build.verify import Verifier
-    from orchestrator.runtime.device.package import DeviceRuntimeStore, PackageError, package_runtime
+    from orchestrator.runtime.build.source import SourceError
+    from orchestrator.runtime.build.store import BuildFailed, StoreError
+    from orchestrator.runtime.device import steps
+    from orchestrator.runtime.device.package import DeviceRuntimeStore, PackageError
     state_dir, _store, device_id, profile = _device_context(ctx, device_name)
     plan = _device_plan(profile)
     source = _pinned_llama_source()
-    builds = BuildStore(state_dir)
+    fetching = []   # the console status while the pinned source is fetched
+
+    def may_fetch() -> bool:
+        return yes or (_interactive() and click.confirm(
+            f"The pinned llama.cpp source ({source.tag}, commit {source.commit[:12]}, about 215 MB) is not cached yet. "
+            "Fetch it now?", default=True))
+
+    def on_step(kind: str, build) -> None:
+        if kind == "fetch":
+            fetching.append(console.status("Fetching the pinned llama.cpp source ..."))
+            fetching[-1].start()
+        elif kind == "fetched" and fetching:
+            fetching.pop().stop()
+        elif kind == "build":
+            console.print(f"Building llama.cpp {source.tag} for device {device_id} ({plan.target['arch']}, "
+                          f"{plan.target.get('libc')} {plan.target.get('libc_version')}) in the builder container "
+                          f"{plan.builder.get('base')} ...")
+        elif kind == "stored":
+            console.print(f"Build {build.build_id[:16]} for this device is already stored; packaging it.")
+
     try:
-        src = cached_source(source, state_dir)
-        if src is None:
-            if not yes and not (_interactive() and click.confirm(
-                    f"The pinned llama.cpp source ({source.tag}, commit {source.commit[:12]}, about 215 MB) is not "
-                    "cached yet. Fetch it now?", default=True)):
-                console.print("[red]The build needs the pinned source (or llm-cli ditto runtime import-source on a "
-                              "machine without internet).[/red]")
-                sys.exit(1)
-            with console.status("Fetching the pinned llama.cpp source ..."):
-                src = fetch_source(source, state_dir, url=mirror, log=lambda msg: console.print(escape(msg)))
-    except SourceError as e:
+        built = steps.build_runtime(state_dir, device_id, profile, plan, source, jobs=jobs, mirror=mirror,
+                                    may_fetch=may_fetch, on_step=on_step,
+                                    log=lambda msg: console.print(escape(msg)))
+    except steps.SourceDeclined:
+        console.print("[red]The build needs the pinned source (or llm-cli ditto runtime import-source on a machine "
+                      "without internet).[/red]")
+        sys.exit(1)
+    except BuildFailed as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        if e.log:
+            console.print(f"Logs: {escape(str(e.log))}")
+        sys.exit(1)
+    except (SourceError, StoreError, PackageError) as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    build = builds.find(plan)
-    if build is None:
-        console.print(f"Building llama.cpp {source.tag} for device {device_id} ({plan.target['arch']}, "
-                      f"{plan.target.get('libc')} {plan.target.get('libc_version')}) in the builder container "
-                      f"{plan.builder.get('base')} ...")
-        executor = BuildExecutor(engine=DockerEngine(), log=lambda msg: console.print(escape(msg)))
-        try:
-            build = builds.build(plan, source=src, executor=executor, verifier=Verifier(), jobs=jobs,
-                                 perf_key=profile.perf_key(), host=host_platform())
-        except BuildFailed as e:
-            console.print(f"[red]{escape(str(e))}[/red]")
-            if e.log:
-                console.print(f"Logs: {escape(str(e.log))}")
-            sys.exit(1)
-        except StoreError as e:
-            console.print(f"[red]{escape(str(e))}[/red]")
-            sys.exit(1)
-    else:
-        console.print(f"Build {build.build_id[:16]} for this device is already stored; packaging it.")
-    devices = DeviceRuntimeStore(state_dir, device_id)
-    try:
-        packaged = package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
-    except PackageError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
+    finally:
+        while fetching:
+            fetching.pop().stop()
+    build, packaged, devices = built.build, built.packaged, DeviceRuntimeStore(state_dir, device_id)
     console.print(f"[bold green]Device runtime ready:[/bold green] {escape(str(packaged.path))}")
     _say_older_packages(devices, build)
     console.print(f"sha256 {packaged.sha256}; format checked here (ELF, glibc symbol versions, no shared C++ runtime); "
@@ -5665,29 +5442,23 @@ def device_runtime_build(ctx: FrameworkContext, device_name: str, jobs: Optional
 
 def _say_older_packages(devices, build) -> None:
     """Says how many older runtime packages of the device are kept (the framework deletes none by itself)."""
-    plan = devices.cleanup_plan()
-    older = [i for i in (plan.items if plan is not None else []) if i.file_name.endswith(".tar.gz")
-             and build.build_id[:16] not in i.file_name]
+    from orchestrator.runtime.device.steps import older_package_count
+    older = older_package_count(devices, build)
     if older:
-        console.print(f"[dim]{len(older)} older runtime package(s) of this device kept; the framework deletes none "
+        console.print(f"[dim]{older} older runtime package(s) of this device kept; the framework deletes none "
                       f"by itself. 'llm-cli device runtime prune {devices.device_id}' lists them for you to delete."
                       "[/dim]")
 
 
 def _ensure_package(state_dir: Path, device_id: str, builds, build):
-    from orchestrator.runtime.build.source import cached_source
-    from orchestrator.runtime.device.package import DeviceRuntimeStore, PackageError, package_runtime
-    devices = DeviceRuntimeStore(state_dir, device_id)
-    packaged = devices.tarball(build)
-    if packaged is not None:
-        return devices, packaged
-    src = cached_source(_pinned_llama_source(), state_dir)
-    if src is None:
+    from orchestrator.runtime.device.package import PackageError
+    from orchestrator.runtime.device.steps import PackageNeedsSource, ensure_package
+    try:
+        return ensure_package(state_dir, device_id, builds, build, _pinned_llama_source)
+    except PackageNeedsSource:
         console.print("[red]The tarball must be packaged again, which needs the pinned source (its licence text): "
                       f"run llm-cli device runtime build {device_id}.[/red]")
         sys.exit(1)
-    try:
-        return devices, package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
     except PackageError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
@@ -5733,29 +5504,24 @@ def _prune_on_device(ctx: FrameworkContext, state_dir: Path, store, device_id: s
     with their full path on the device, size and what each is; exactly the ones you tick are removed after your yes
     at a terminal (nothing ticked, "No" by default). A board has no trash, so a removal is for good."""
     from orchestrator.Core.deletion import PlanChanged, size_text
-    from orchestrator.runtime.device.devices import split_address
-    from orchestrator.runtime.device.package import DeviceRuntimeStore
-    from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, board_cleanup_plan, older_builds,
-                                                    read_facts, remove_older_builds)
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.runtime.device.remote import RemoteError, RemoteShell
     settings = _deploy_settings(store, device_id)
     if settings.ssh_user is None:
         console.print(f"[red]No SSH user is set for device {device_id} (llm-cli device settings ... --user).[/red]")
         sys.exit(1)
     try:
-        host, port = split_address(store.device_info(device_id).get("address"))
+        host, port = person_steps.board_address(store, device_id)
     except ValueError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    previous = str(DeviceRuntimeStore(state_dir, device_id).record().get("previous") or "")[:16] or None
     client = _connect_device(state_dir, device_id, host, port, settings.ssh_user, None)
     try:
         shell = RemoteShell(client)
-        root = read_facts(shell).root
-        builds = older_builds(shell, root)
-        busy = [b.build_id16 for b in builds if b.in_use]
-        if busy:
-            console.print(f"Not listed, because a running program uses them: {', '.join(busy)}.")
-        plan = board_cleanup_plan(builds, root, previous)
+        prune = person_steps.list_board_builds(shell, state_dir, device_id)
+        if prune.busy:
+            console.print(f"Not listed, because a running program uses them: {', '.join(prune.busy)}.")
+        plan = prune.plan
         if plan is None:
             console.print(f"No older runtime builds on device {device_id} to remove: the active build is never "
                           "listed.")
@@ -5767,8 +5533,7 @@ def _prune_on_device(ctx: FrameworkContext, state_dir: Path, store, device_id: s
         if accepted is None:
             return
         try:
-            result = remove_older_builds(shell, accepted, root=root, device_id=device_id, previous=previous,
-                                         audit=_device_audit(ctx, state_dir))
+            result = person_steps.remove_board_builds(shell, accepted, prune, device_id, _device_audit(ctx, state_dir))
         except (PlanChanged, PermissionError, RuntimeError) as e:
             console.print(f"[yellow]{escape(str(e))}[/yellow]")
             return
@@ -5794,9 +5559,9 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     """Install the built runtime on the device over SSH as the deploy settings say, then check it there"""
     password = _device_password(password, password_stdin)
     from orchestrator.runtime.build.store import BuildStore
-    from orchestrator.runtime.device.devices import split_address
-    from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, deploy_runtime, read_facts,
-                                                    verify_on_device)
+    from orchestrator.runtime.device import steps
+    from orchestrator.runtime.device.person_steps import board_address
+    from orchestrator.runtime.device.remote import RemoteError, RemoteShell, read_facts
     from orchestrator.runtime.device.settings import SettingsError
     state_dir, store, device_id, profile = _device_context(ctx, device_name)
     settings = _deploy_settings(store, device_id)
@@ -5825,7 +5590,7 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         sys.exit(1)
     devices, packaged = _ensure_package(state_dir, device_id, builds, build)
     try:
-        host, port = split_address(store.device_info(device_id).get("address"))
+        host, port = board_address(store, device_id)
     except ValueError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
@@ -5842,24 +5607,20 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         # Asked before anything changes on the device (decision D23: an untrusted model only after consent).
         model_path, allowed, digest = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model,
                                                     device_id, settings.ssh_user)
-
-        def check_new_build(home: str, folder: str):
-            # Design 3.8 and P6: the new build is checked in its own folder and becomes current only if it passes.
-            return verify_on_device(shell, home=home, folder=folder, plan_verify=build.plan.get("verify") or {},
-                                    pin_build=source.build_number, pin_commit=source.commit, port=settings.port,
-                                    bench_model=model_path, bench_allowed=allowed)
-
-        result = deploy_runtime(shell, tarball=packaged.path, tarball_sha256=packaged.sha256,
-                                build_id=build.build_id, arch=str(plan.target["arch"]), settings=settings,
-                                check=check_new_build, say=lambda msg: console.print(escape(msg)),
-                                kv_cache=kv.kind)
+        # Design 3.8 and P6: the new build is checked in its own folder and becomes current only if it passes; only
+        # then is its record saved.
+        outcome = steps.install_runtime(shell, state_dir=state_dir, device_id=device_id, profile=profile,
+                                        settings=settings, build=build, packaged=packaged, source=source,
+                                        arch=str(plan.target["arch"]), kv_cache=kv.kind,
+                                        bench=steps.BenchChoice(model_path, allowed, digest),
+                                        say=lambda msg: console.print(escape(msg)))
     except RemoteError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     finally:
         client.close()
-    report = result.report
-    if not result.activated or report is None or not report.ok:
+    result, report = outcome.result, outcome.report
+    if not outcome.ok:
         console.print(f"[red]Build {build.build_id[:16]} did not pass its checks on the device; it was not "
                       "activated.[/red]")
         if report is not None:
@@ -5867,12 +5628,6 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         for note in result.notes:
             console.print(f"[yellow]{escape(note)}[/yellow]")
         sys.exit(1)
-    now = _utc_stamp()
-    devices.save_record({"build_id": build.build_id, "deployed_at": now, "install": settings.install,
-                         "kv_cache": kv.kind,
-                         "ssh_user": settings.ssh_user, "previous": result.previous, "perf_key": profile.perf_key(),
-                         "verification": report.as_dict(), "verified_at": now,
-                         "unit_started": result.unit_started})
     console.print(f"[bold green]Deployed[/bold green] build {build.build_id[:16]} to {escape(result.root)}"
                   + (f" (previous {result.previous} kept)" if result.previous else ""))
     _print_report(report)
@@ -5903,10 +5658,10 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
 def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Optional[str],
                           bench_model: Optional[str], allow_untrusted_model: bool):
     """Check the deployed runtime on the device again (as the unprivileged user, never with sudo)"""
-    from orchestrator.runtime.build.store import BuildStore
-    from orchestrator.runtime.device.devices import split_address
+    from orchestrator.runtime.device import steps
     from orchestrator.runtime.device.package import DeviceRuntimeStore
-    from orchestrator.runtime.device.remote import RemoteError, RemoteShell, read_facts, verify_on_device
+    from orchestrator.runtime.device.person_steps import board_address
+    from orchestrator.runtime.device.remote import RemoteError, RemoteShell, read_facts
     from orchestrator.runtime.device.settings import SettingsError
     state_dir, store, device_id, profile = _device_context(ctx, device_name)
     settings = _deploy_settings(store, device_id)
@@ -5922,10 +5677,9 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     if not record:
         console.print(f"[red]Nothing was deployed to device {device_id} yet (llm-cli device runtime deploy).[/red]")
         sys.exit(1)
-    stored = BuildStore(state_dir).get(record["build_id"])
-    plan_verify = (stored.plan.get("verify") if stored else None) or _device_plan(profile).verify
+    plan_verify = steps.deployed_verify_plan(state_dir, record, lambda: _device_plan(profile))
     try:
-        host, port = split_address(store.device_info(device_id).get("address"))
+        host, port = board_address(store, device_id)
     except ValueError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
@@ -5939,17 +5693,14 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
             sys.exit(1)
         model_path, allowed, digest = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model,
                                                     device_id, user)
-        report = verify_on_device(shell, home=facts.home, plan_verify=plan_verify, pin_build=source.build_number,
-                                  pin_commit=source.commit, port=settings.port, bench_model=model_path,
-                                  bench_allowed=allowed)
+        report = steps.check_runtime(shell, state_dir=state_dir, device_id=device_id, home=facts.home, record=record,
+                                     plan_verify=plan_verify, source=source, port=settings.port,
+                                     bench=steps.BenchChoice(model_path, allowed, digest))
     except RemoteError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     finally:
         client.close()
-    record.update({"verification": report.as_dict(), "verified_at": _utc_stamp()})
-    record.pop("format", None)
-    devices.save_record(record)
     console.print(f"Device {device_id}, build {record['build_id'][:16]}:")
     _print_report(report)
     _record_board_test(ctx, store, device_id, profile, report, digest if allowed else None, record["build_id"],
@@ -5964,15 +5715,11 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
 @pass_context
 def device_runtime_status(ctx: FrameworkContext, device_name: str, as_json: bool):
     """What is deployed on the device and whether it still matches the device's profile and the pin"""
-    from orchestrator.runtime.build.store import BuildStore
-    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    from orchestrator.runtime.device.steps import runtime_status
     state_dir, store, device_id, profile = _device_context(ctx, device_name)
     plan = _device_plan(profile)
-    record = DeviceRuntimeStore(state_dir, device_id).record()
-    built = BuildStore(state_dir).find(plan)
-    status = {"device_id": device_id, "planned_build_id": plan.build_id, "built": built is not None,
-              "deployed": record or None,
-              "current": bool(record) and record.get("build_id") == plan.build_id}
+    status = runtime_status(state_dir, device_id, plan)
+    record, built = status["deployed"] or {}, status["built"]
     if as_json:
         click.echo(json.dumps(status, indent=2, sort_keys=True))
         return

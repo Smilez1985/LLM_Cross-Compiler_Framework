@@ -10,6 +10,106 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Tools > Mojo Health Check... in the GUI** (DECISIONS W1': every action of the command line also by mouse): the
+  Mojo window runs Mojo Oracle when it opens, off the GUI thread, and shows every finding as `llmcf mojo` prints it
+  (the severity as text with its mark and icon, never colour alone; where with the full path, why it matters, the
+  next step, what Mojo Miracle can do with the steps of its plan; the summary sentence and an overall line with the
+  exit code). **Run Mojo Miracle...** asks "Run Mojo Miracle now?" ("No" is the default) and runs Mojo Miracle with
+  the GUI as your channel: the plans shown bind the repairs, the framework's build images open in the deletion dialog
+  with the full list and nothing ticked, and the window shows what was repaired, what was not and why. No board is
+  contacted by itself: a board a recorded fact points to gets **Check <board> now**, and **Check a board...** checks
+  any trusted board you pick (by label and address, and also by device ID where two boards read the same; one
+  connection to its SSH port, no login). The command and the window share the same
+  core functions (`Core/mojo/boards.py`, the person's view in `Core/mojo/views.py`, `docker_objects.offer_image_list`),
+  so the output of `llmcf mojo` stays as it was.
+- **Check this board in the Deployment tab** (group "Benchmark on a board", DECISIONS W1'): checks the chosen board
+  as `llmcf mojo --oracle --board` does, in the background (one connection to its SSH port, no login), and shows its
+  finding with the next step under the row; a problem is also said in a message.
+- **Boards > Boards and Devices...: every `deploy devices` and `device` command by mouse** (W1'): a new Boards
+  menu opens one window for every board you probed or trusted, with the board's account, the full host-key
+  fingerprint and its state in `known_hosts`, since when it is trusted, the last deploy, its system, deploy settings
+  and deployed runtime. Its buttons call the same core functions as the CLI (new `runtime/device/person_steps.py`
+  and `steps.py`; the CLI calls them too, its output unchanged), with the same checks, refusals, questions ("No" is
+  the default) and audit records: Add a trusted board..., Remove trust... (until now only the CLI could withdraw a
+  board's permission for AI deploys), Settings... (with the systemd sudo question), Runtime plan, Status, Build
+  runtime... (jobs, mirror, the source question, Cancel), Deploy runtime... (the password asked each time, never
+  stored; an untrusted benchmark model only after an explicit warning), Verify... (also without a model),
+  Remove older runtime packages... and Remove older builds on the board... (the deletion dialog with the full list)
+  and Check this board (Mojo). Every board contact and build runs in the background. The AI's runtime tools build
+  and install with the same steps. Damaged deploy settings ("damaged; set them again") can now be set again, in the
+  window and with `device settings`, after a question that names the file with its full path and size.
+- **Tools > Tool Permissions (Ditto / MCP)...: every `tools list` and `tools permissions` option by mouse** (W1'):
+  a column "Effective now" shows each tool's decision with its reason (as `tools list` prints them) and a note
+  names the callers that have permissions of their own; "Whose permissions" shows and edits the shared permissions
+  or the own section of Ditto or the local MCP clients (`--caller`); "Reset to recommended defaults..." (`--reset`),
+  "Use the shared permissions again..." (`--reset --caller`) and "Back to read only..." for a token (`--reset
+  --token`: a new token again, not one with hand-set Allow/Deny) list what changes and ask first ("No" is the
+  default; a change saved elsewhere meanwhile is refused). A new token can start as a copy of another token's own
+  permissions (`mcp token add --policy-from TOKEN`). The CLI and the GUI share the core functions
+  (`policy.with_section`, `reset_policy`, `reset_changes`, `mcp_tokens.add_token`, `copied_policy`,
+  `set_token_policy`, `reset_token_policy`, `revoke_token`); the CLI's output is unchanged.
+- **Security > Audit Log...: every `tools audit` option by mouse** (W1'): the audit log's rows as the CLI shows
+  them (shared `tools/audit_view.py`), page by page with "Entries per page", "Newer" and "Older"; "Details"
+  (`--details`); "Check integrity" (`--verify`) with the result in plain words; "Archive..." (`--archive`) after a
+  question, nothing deleted; and the tab "Summary per caller" (`--summary`). The check, the archive and the summary
+  run in the background. `AuditLog.entries` takes an offset and `AuditLog.count` gives the size, for paging.
+- **Security > AI App Connections (MCP)...: every `mcp config`, `mcp serve --transport http` and `mcp token` action
+  by mouse** (W1'): the entries for Claude Code, Claude Desktop (with the path of its configuration file) and VS
+  Code, each with a Copy button; "Write to Claude Desktop..." shows the file, whether it exists, the change, the
+  entries that are kept and the backup, asks first and writes exactly that (`mcp_server.plan_claude_desktop_config`,
+  a file changed meanwhile is refused); the local HTTP server (address, port, container binding) as a child process
+  of the GUI with the CLI's own entry and refusals, its address, state and output shown, stopped on request or when
+  the framework closes after a question ("No" keeps it open); and the token list (Add, also as a copy of another
+  token's permissions, Rotate, Revoke, Back to read only, Permissions). A token is shown once, right after it is
+  made or rotated.
+- **Tools > Deep Ingest Notice... and the kind of an AI folder** (W1'): the Deep Ingest notice has its own entry and
+  can be read at any time (`tools crawl-notice`; acknowledged on the person's yes, "No" is the default, with the
+  CLI's function `crawl_notice.acknowledge_and_audit`); the module wizard shows it before the knowledge base check.
+  Tools > Folders the AI May Use... > Add folder... asks what the folder holds (model files, dataset files or any:
+  `tools folders add --kind`).
+- **Security > Sign-in Overview...: every `ditto login`, `ditto logout` and `ditto auth status|methods` path by
+  mouse** (W1'): one window shows every provider's sign-in at once (method, source, account or the last four
+  characters of a key, status, Ditto's provider marked) and how the credential vault is protected with its file;
+  **Check all** runs the free check of every provider with a credential (`--check`) in the background; the tab
+  **All sign-in methods** lists every provider's methods with their environment variables and notes. Selecting a
+  provider shows its sign-in panel with its own **Server address** field: an address typed there (or given by the AI
+  settings) is remembered for that provider only and no longer only through the AI settings, which also made the
+  provider Ditto's (`login --base-url`). The key card names the method's environment variables and note and offers
+  **Store the key from <VARIABLE> in the vault** while one is set (`login --from-env`, checked first unless you
+  untick it; new `SignIn.env_variable()` / `SignIn.env_key()`, which the CLI calls too); a server without sign-in
+  (Ollama, `custom` without a key) has **Forget** (`logout`: the remembered address and method). It asks before
+  signing out or forgetting ("No" is the default). The framework never reads, stores or forwards Claude subscription
+  credentials and never starts the claude command.
+- **Security > Key Storage...: `ditto auth storage` and `ditto auth rotate-key` by mouse** (W1'): how the vault is
+  protected and its file, also while it works (until now the GUI showed it only when it failed); **Protect it another
+  way** switches between the OS keyring (new as a GUI choice, so the way back to the keyring no longer needs the
+  CLI), a credential helper with its command, a passphrase and the unencrypted key file (after the acknowledgement
+  and the CLI's question, "No" is the default); **Rotate key...** asks first ("No" is the default). The vault is
+  re-encrypted in the background with the same core functions as the CLI.
+- **Security > Secrets...: `secrets list` and `secrets set` by mouse** (W1'): the names the framework reads
+  (`hf_token`, `qdrant_api_key`, the community pack keys) and every stored name with "stored" or "not stored" and
+  what it is for, never a value; **Set a secret** takes a name from the list or any other name and the value twice
+  in masked fields. The CLI and the window call the same new `Core/secret_entries.py` (`store_secret`,
+  `secret_entries`; the CLI's output is unchanged): in the ephemeral storage both say that nothing was saved, and so
+  does Security > Set OpenAI API Key, which said "stored" there.
+- **Deployment tab: every `deploy package` and `deploy run` option by mouse** (W1', GUI parity): **Create package
+  only…** makes the package of the selected build for the chosen profile without contacting any board, with Docker
+  images for a board without network if you tick Docker, and **Other build or model file…** adds any build folder or
+  model file to the build list (the CLI takes any path, too); the folder dialog opens at
+  the output folder as for every golden artifact, and the message names the package's full path or the reason and
+  the next step (`llm-cli deploy package`, the same core step). **Deploy existing package…** uploads a ZIP made
+  earlier (`deploy run PACKAGE_PATH`). The new **Port**, **Name** and **Wait for the board** fields are `--port`,
+  `--label` and `--wait` for both deploy buttons. The board's host key is now read in the background and its
+  fingerprint shown with "No" as the default; a failed package in **Deploy to Target** says why; the success message
+  names the full package path, how often the deploy waited for the board, and the trusted board's name.
+- **Builder tab > Scan / Import...: every `llm-cli scan` option by mouse** (W1', GUI parity): **Scan Local Host** now
+  runs the CLI's own step, the Python probe, and stores the result as this computer's probe (probe id `local`, the one
+  AI clients and Ditto name), with its notes and the "run the probe again" warning in the log; **Scan Local Host with
+  the Fallback Script** (`--script`), **Scan Local Host and Save the Profile As...** (`--output`; a `.json` file
+  gets the JSON view, `--json`) and both together are new. **Remote Scan via SSH...** gets **Port** and **Name** fields and, like `scan
+  --device`, writes the board's trusted, paired record (audited), so the board appears in the benchmark list and AI
+  deploys can name it; the CLI and the GUI share one core step (`scan_steps.scan_device`). **Import from File** asks
+  for the board's name (`--label`).
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record
@@ -1386,6 +1486,26 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **Revoking an MCP token in the GUI also removes its standing approvals, and a caller's new own section keeps the
+  tools asked in the framework only**: the GUI's Revoke deleted the token but left its standing approvals (grants of
+  `mcp:NAME`) in the permissions file, listed until revoked one by one (they no longer applied); the token, its
+  permissions and its standing approvals now go in one core function shared with `llm-cli mcp token revoke`.
+  `llm-cli tools permissions --caller ditto|mcp` built a caller's new section without the shared list of tools whose
+  questions are put to you in the framework only, so those questions could reach the AI client's own dialog again for
+  that caller; the new section now starts from that list too, as `--confirm-in-framework` did.
+- **The list of tools asked in the framework only is no longer dropped by a re-run, a copy or a token's first own
+  permissions**: running `llm-cli tools permissions --caller ditto|mcp` again for a caller that already had permissions
+  of its own rebuilt its section without that list; a token made as a copy of Ditto's or the local MCP clients'
+  permissions (`llm-cli mcp token add --policy-from`, or Add... in the GUI) got none; and a new token, which follows
+  the shared list, lost it at its first `tools permissions --token NAME` (or Permissions... in the GUI), which started
+  from an empty list. Each time, the questions about those tools could reach the AI client's own dialog again. The
+  permissions shown and copied for a caller now carry the list that applies to it (`ToolRegistry.policy`).
+- **The token list speaks the window's language, and "Start server" says why it cannot start**: the section "MCP
+  tokens (one per client)" in Security > AI App Connections (MCP)... and in Tools > Tool Permissions (Ditto / MCP)...
+  was English only (title, note, columns, buttons, the questions when adding and rotating); it is English and German
+  now, and Rotate and the question about a linked token are plain text with "No" as the default. An installation path
+  that PYTHONPATH cannot hold made "Start server" fail without any message; the window now says why, and nothing is
+  started.
 - **A build no longer replaces an earlier build of the same name**: in 3.0.0 a completed build moved its files into
   the folder `<target>/<model>/<quantization>` and replaced the files of an earlier build there (for example one for
   another board), so a finished golden artifact was lost without being asked. A later build now goes next to it
