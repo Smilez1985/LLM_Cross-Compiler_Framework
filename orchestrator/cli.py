@@ -4544,27 +4544,11 @@ def _unreachable(ctx: Optional[FrameworkContext], host: str, port: int, error: B
 
 
 def _deploy_event_text(ctx: FrameworkContext, event, host: str) -> str:
-    """The console line of a running deploy: the upload's progress, or the wait for the board (N5)."""
-    from orchestrator.utils.localization import ui_text
-    lang = _config_language(ctx)
-
-    def size(n):
-        return f"{n / 1000 ** 2:.1f} MB"
-
-    def clock(seconds):
-        return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
-
-    if event.kind == "waiting":
-        key = "device.wait.status_install" if event.step == "install" else "device.wait.status"
-        return escape(ui_text(key, lang, address=host, elapsed=clock(event.elapsed), limit=clock(event.limit))
-                      + " (Ctrl+C)")
-    if event.kind == "back":
-        if event.step == "install":
-            return escape(ui_text("device.wait.install", lang))
-        return escape(ui_text("device.wait.back", lang, done=size(event.done), total=size(event.total)))
-    if event.kind == "uploading":
-        return escape(ui_text("device.deploy.uploading", lang, done=size(event.done), total=size(event.total)))
-    return escape(ui_text("device.deploy.installing", lang))
+    """The console line of a running deploy: the upload's progress, or the wait for the board (N5), with the key that
+    cancels a wait (remote/text.py event_text)."""
+    from orchestrator.remote.text import event_text
+    text = event_text(event, host, _config_language(ctx))
+    return escape(text + " (Ctrl+C)" if event.kind == "waiting" else text)
 
 
 def _device_audit(ctx: FrameworkContext, state_dir: Path):

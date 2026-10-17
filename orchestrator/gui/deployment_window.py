@@ -50,27 +50,10 @@ KV_CHOICES = ("auto", "f16", "q8_0", "q4_0")
 KV_KEEP = "keep"
 
 
-def _clock(seconds: float) -> str:
-    seconds = int(max(0, seconds))
-    return f"{seconds // 60}:{seconds % 60:02d}"
-
-
-def _size(n: int) -> str:
-    return f"{n / 1000 ** 2:.1f} MB"
-
-
 def event_text(event, host: str) -> str:
-    """The visible state of a running deploy (N5) in the interface language."""
-    if event.kind == "waiting":
-        key = "device.wait.status_install" if event.step == "install" else "device.wait.status"
-        return ui_text(key, address=host, elapsed=_clock(event.elapsed), limit=_clock(event.limit))
-    if event.kind == "back":
-        if event.step == "install":
-            return ui_text("device.wait.install")
-        return ui_text("device.wait.back", done=_size(event.done), total=_size(event.total))
-    if event.kind == "uploading":
-        return ui_text("device.deploy.uploading", done=_size(event.done), total=_size(event.total))
-    return ui_text("device.deploy.installing")
+    """The visible state of a running deploy (N5) in the interface language (remote/text.py event_text)."""
+    from orchestrator.remote.text import event_text as text_of
+    return text_of(event, host)
 
 
 def choose_file(parent, title: str, start: str, filter_text: str) -> str:

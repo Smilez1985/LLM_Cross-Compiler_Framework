@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.remote import text as remote_text
 from orchestrator.tools.facts_catalog import blocked, gb_number, size_class, warn, with_blocker
 from orchestrator.tools.job_audit import audited_job
 from orchestrator.tools.output import ToolOutput, count, fact
@@ -106,18 +107,8 @@ def hide_paths(text: str, labels: Dict[str, str]) -> str:
 
 def event_text(event: Any, label: str) -> str:
     """A running deploy's event (DeploymentManager.DeployEvent) as plain English for the job's progress: the device by
-    its label, never its address or account."""
-    if event.kind == "uploading":
-        return f"uploading to {label}: {_size(event.done)} of {_size(event.total)}"
-    if event.kind == "waiting":
-        what = "the upload continues" if event.step != "install" else "the installation is followed again"
-        return (f"waiting for the board {label}: {int(event.elapsed)} s of at most {int(event.limit)} s (the network "
-                f"dropped; {what} when it answers)")
-    if event.kind == "back" and event.step == "install":
-        return f"{label} answers again: the installation on the board is followed again (it is never started twice)"
-    if event.kind == "back":
-        return f"{label} answers again: the upload continues at {_size(event.done)} of {_size(event.total)}"
-    return f"installing on {label}"
+    its label, never its address or account (remote/text.py event_text for an AI)."""
+    return remote_text.event_text(event, label, audience="ai")
 
 
 def unreachable_error(device: Any, error: BaseException) -> ToolError:
@@ -133,9 +124,7 @@ def unreachable_error(device: Any, error: BaseException) -> ToolError:
 
 
 def _size(n: Optional[int]) -> str:
-    if n is None:
-        return "size unknown"
-    return f"{n / 1000 ** 3:.2f} GB" if n >= 10 ** 8 else f"{n / 1000 ** 2:.1f} MB"
+    return remote_text.ai_size(n)
 
 
 # --- inputs and outputs ---------------------------------------------------------------------------------------------
