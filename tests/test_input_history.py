@@ -314,13 +314,18 @@ class TestBuilderTab:
         assert boxes and boxes[0][0] == "warning" and not framework.orchestrator.submitted
         assert not user_history(framework).path.exists()
 
-    def test_a_secret_is_never_remembered(self, framework):
+    def test_a_secret_is_never_remembered(self, framework, tmp_path):
         from orchestrator.gui.builder_tab import BuilderTab
 
         tab = BuilderTab(framework)
         select(tab.target_combo, "Rockchip")
         select(tab.format_combo, "gguf")
-        tab.model_input.setEditText(f"/models/{HF_TOKEN}.gguf")
+        # An existing model file: Start Build goes through BuildService.start_build, which refuses a local model that
+        # does not exist (c3-build-path)
+        model = tmp_path / "models" / f"{HF_TOKEN}.gguf"
+        model.parent.mkdir()
+        model.write_bytes(b"GGUF")
+        tab.model_input.setEditText(str(model))
         tab._submit_build()
         assert framework.orchestrator.submitted, "the build itself still runs"
         recent = user_history(framework)

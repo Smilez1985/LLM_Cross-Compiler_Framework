@@ -1225,6 +1225,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **One build-submission path for the CLI, the GUI and AI callers**: `llmcf build start` and the Builder tab's
+  **Start Build** queue their build through `BuildService.start_build`, the path the MCP server and Ditto already
+  used, instead of building their own orchestrator request each. The CLI and the GUI therefore check a request the
+  same way before anything starts: a request without a model, a local model that does not exist (or does not look
+  like a model), a calibration dataset that is not a file and a revision for a local model are refused with the
+  reason (the CLI exits with code 2, the GUI shows it in a message box) instead of failing later in the build. What
+  each window sets stays as it was: the CLI's priority, optimization and destination prompt, the GUI's priority,
+  parallel builds and build folder, a target without capabilities built unchecked, and the person's own builds are
+  never refused by the queue limit for AI callers. The CLI's follow loop reads the build through the same service.
 - **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
   `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
   and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the

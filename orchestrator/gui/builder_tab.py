@@ -36,10 +36,8 @@ PARAMIKO_AVAILABLE = importlib.util.find_spec("paramiko") is not None
 
 # Core Imports fallback
 try:
-    from orchestrator.Core.orchestrator import BuildRequest, WorkflowType, PriorityLevel, OptimizationLevel, ModelFormat
+    from orchestrator.Core.orchestrator import PriorityLevel, OptimizationLevel, ModelFormat
 except ImportError:
-    class BuildRequest: pass
-    class WorkflowType: SIMPLE_CONVERSION = "simple"
     class PriorityLevel: NORMAL = "normal"
     class OptimizationLevel: BALANCED = "balanced"
     class ModelFormat: GGUF = "gguf"
@@ -1161,40 +1159,42 @@ class BuilderTab(QWidget):
         """Asks about earlier builds with the same options (if any), then submits exactly `values`."""
         if found and not self._decide_about_earlier(found):
             return
-        recipe = values["recipe"]
-        req = BuildRequest(
-            request_id="",
-            workflow_type=WorkflowType.SIMPLE_CONVERSION,
-            priority=values.get("priority", PriorityLevel.NORMAL),
-            models=[values["model"]],
-            targets=[values["target"]],
-            target_formats=[values["target_fmt"]],
-            optimization_level=values["opt_lvl"],
-            quantization_options=[values["quant"]] if values["quant"] else [],
-            parallel_builds=True,
-            output_base_dir=values["output_dir"],
-            description="Builder Tab Job",
-            use_gpu=values["use_gpu"],
-            # NEW v2.4.0: Pass IMatrix config
-            use_imatrix=values["use_imatrix"],
-            dataset_path=values["dataset"],
-            target_board=values["board"],
-            # A recipe pins the model commit (and context length) while its model is still selected.
-            model_revision=recipe.model.revision if recipe else None,
-            max_context_length=recipe.options.max_context_length if recipe else None,
-        )
-
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        service = self._build_service() or BuildService(self.framework)
         try:
-            # The build keeps running on the framework's background loop after this slot returns.
-            rid = self.framework.run_coroutine(self.framework.orchestrator.submit_build_request(req), timeout=30)
+            # The one build path (BuildService.start_build), as for the CLI and AI callers: the service checks the
+            # request again and queues it; the build keeps running on the framework's background loop after this
+            # slot returns.
+            rid = service.start_build(self._service_request(values), local_paths=True,
+                                      optimization=getattr(values["opt_lvl"], "value", "balanced"),
+                                      priority=values.get("priority", PriorityLevel.NORMAL),
+                                      output_dir=values["output_dir"], parallel_builds=True,
+                                      description="Builder Tab Job").request_id
             self._set_state("success")
             self._log(f"Job Submitted! ID: {rid}")
             self._track_build(rid)
             self._remember_build(values["model"], values["target"], values["board"], values["dataset"])
             QMessageBox.information(self, "Success", f"Job {rid} started.")
+        except BuildServiceError as e:  # refused by the service's checks: nothing was started
+            self._set_state("fail")
+            self._log(f"Submission Error: {e}")
+            QMessageBox.warning(self, "Build settings", "\n".join(getattr(e, "problems", None) or [str(e)]))
         except Exception as e:
             self._set_state("fail")
             self._log(f"Submission Error: {e}")
+
+    @staticmethod
+    def _service_request(values):
+        """The build request of the checked form values (BuildRequestIn): a recipe pins the model commit (and context
+        length) while its model is still selected."""
+        from orchestrator.Core.build_service import BuildService
+        recipe = values["recipe"]
+        return BuildService.request_in(model=values["model"], revision=recipe.model.revision if recipe else None,
+                                       target=values["target"], format=values["target_fmt"].value,
+                                       board=values["board"], quantization=values["quant"],
+                                       use_imatrix=values["use_imatrix"], dataset_path=values["dataset"],
+                                       use_gpu=values["use_gpu"],
+                                       max_context_length=recipe.options.max_context_length if recipe else None)
 
     def _earlier_builds(self, values):
         """(finished builds with 100 % the same options (eighth round, N11), the commit look-up still to do or None).
@@ -1204,15 +1204,8 @@ class BuilderTab(QWidget):
         service = self._build_service()
         if service is None or not hasattr(service, "earlier_builds"):
             return [], None
-        from orchestrator.schemas.build import BuildRequestIn
-        recipe = values["recipe"]
         try:
-            request = BuildRequestIn(model=values["model"], revision=recipe.model.revision if recipe else None,
-                                     target=values["target"], format=values["target_fmt"].value,
-                                     board=values["board"], quantization=values["quant"],
-                                     use_imatrix=values["use_imatrix"], dataset_path=values["dataset"],
-                                     use_gpu=values["use_gpu"],
-                                     max_context_length=recipe.options.max_context_length if recipe else None)
+            request = self._service_request(values)
             level = getattr(values["opt_lvl"], "value", "balanced")
             found = service.earlier_builds(request, optimization=level, local_paths=True)
             if found and not request.revision and all(b.match == "commit_unchecked" for b in found):

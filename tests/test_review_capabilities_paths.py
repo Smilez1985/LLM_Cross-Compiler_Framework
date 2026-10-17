@@ -935,6 +935,8 @@ def make_tab(framework, target="Rockchip"):
     framework.orchestrator = FakeOrchestrator()
     tab = BuilderTab(framework)
     select(tab.target_combo, target)
+    # Start Build goes through BuildService.start_build, which refuses a request without a model (c3-build-path)
+    tab.model_input.setEditText(HF_MODEL)
     return tab
 
 
