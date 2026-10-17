@@ -273,8 +273,6 @@ TEXTS = {
         "boards.verify.result": "Board {device_id}, build {build}:",
         # Mojo's check of one board
         "boards.check.running": "Checking the board (one connection to its SSH port, no login)",
-        "boards.check.next": "Next step: {hint}",
-        "boards.check.none": "Mojo returned no finding for this board.",
     },
     "de": {
         "boards.menu": "Boards",
@@ -532,7 +530,5 @@ TEXTS = {
         "boards.verify.running": "Prüfung auf dem Board",
         "boards.verify.result": "Board {device_id}, Build {build}:",
         "boards.check.running": "Das Board wird geprüft (eine Verbindung zu seinem SSH-Port, keine Anmeldung)",
-        "boards.check.next": "Nächster Schritt: {hint}",
-        "boards.check.none": "Mojo hat für dieses Board keinen Befund geliefert.",
     },
 }

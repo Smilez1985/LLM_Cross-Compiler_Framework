@@ -786,6 +786,43 @@ def test_check_this_board_is_a_thin_call_of_mojos_board_check_off_the_gui_thread
     assert "checked now: it answers on its SSH port" in window.output.toPlainText()
 
 
+def test_check_this_board_shares_one_core_call_and_one_text_with_the_mojo_window(qapp, window, monkeypatch):
+    """Wave 5a integration: the Boards window, the Mojo window and the Deployment tab check a board through the same
+    core call (Core/mojo/boards.check_board) and show its result in the same words (mojo_window.board_check_text):
+    a problem with its next step, and a check that could not run with its reason."""
+    from orchestrator.Core.mojo import boards as mojo_boards
+    from orchestrator.Core.mojo.findings import Finding, Severity
+    from orchestrator.gui.mojo_window import board_check_text
+    boxes = Boxes(monkeypatch)
+    device = trusted_board(state_of(window))
+    window.reload()
+    window.select(device.device_id)
+    finding = Finding("devices", f"devices.{device.device_id}", Severity.WARN,
+                      "Board Living room did not answer on its SSH port.", "Switch the board on.")
+    calls = []
+
+    def check(framework, device_id):
+        calls.append((framework, device_id, threading.current_thread() is threading.main_thread()))
+        return finding
+
+    monkeypatch.setattr(mojo_boards, "check_board", check)
+    window.buttons["btn_boards_check"].click()
+    wait(qapp, window)
+    assert calls == [(window.framework, device.device_id, False)]
+    expected = board_check_text(finding, "Living room", lang=window.lang)
+    assert "Switch the board on." in expected and expected in window.output.toPlainText()
+    assert boxes.asked and boxes.asked[-1].text == expected, "a problem is also said in a message, as in the tab"
+
+    def broken(framework, device_id):
+        raise OSError("the trusted boards cannot be read")
+
+    monkeypatch.setattr(mojo_boards, "check_board", broken)
+    window.buttons["btn_boards_check"].click()
+    wait(qapp, window)
+    assert board_check_text(None, "Living room", "the trusted boards cannot be read",
+                            window.lang) in window.output.toPlainText()
+
+
 def test_no_html_is_built_from_board_data(qapp, window):
     """A label from a board's probe is shown literally (plain text table cells, plain labels)."""
     stored(state_of(window), label="<b>bold</b>")
