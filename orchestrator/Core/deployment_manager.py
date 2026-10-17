@@ -32,6 +32,7 @@ PARAMIKO_AVAILABLE = importlib.util.find_spec("paramiko") is not None
 from orchestrator.utils.logging import get_logger
 
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
+from orchestrator.remote.address import USER_PATTERN, valid_host, valid_user
 from orchestrator.utils import ssh_trust
 from orchestrator.utils.next_steps import WithSteps
 
@@ -40,7 +41,7 @@ from orchestrator.utils.next_steps import WithSteps
 DEFAULT_INFERENCE_IMAGE = "llm-framework/inference:local"
 # The device runtime's start script, relative to the device user's home (orchestrator/runtime/device/launcher.py).
 DEVICE_START_SCRIPT = ".local/share/llm-framework/llama.cpp/current/llama-server.sh"
-SSH_USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
+SSH_USER_PATTERN = USER_PATTERN   # the one account check (orchestrator/remote/address.py), kept under its old name
 MODEL_SUFFIXES = MODEL_FILE_SUFFIXES
 # An image reference pinned by its content digest (name@sha256:<64 hex>): the only form pulled for a package.
 DIGEST_REFERENCE = re.compile(r"^[a-z0-9][a-z0-9._/:-]{0,254}@sha256:[0-9a-f]{64}$", re.ASCII)
@@ -630,14 +631,13 @@ class DeploymentManager:
         again with the same host key check and continues: the upload resumes where it stopped once the sha256 of what
         arrived matches, and deploy.sh, which runs on the board on its own, is started once and never again.
         """
-        from orchestrator.remote.address import valid_host
         stop = cancelled or (lambda: False)
         # A leading '-' would be parsed by ssh/scp as an option (e.g. -oProxyCommand=...).
         if not valid_host(host):
             return DeployResult(False, reason=f"Security/Format Error: Invalid address or host name: "
                                               f"{str(host)[:64]!r} (an IPv6 address is written without brackets, "
                                               "e.g. fe80::1)")
-        if not SSH_USER_PATTERN.match(user or ""):
+        if not valid_user(user, allow_root=True):
             return DeployResult(False, reason=f"Security/Format Error: Invalid SSH user name: {user!r}")
         if not Path(package).is_file():
             return DeployResult(False, reason=f"The package {Path(package).name} does not exist.")

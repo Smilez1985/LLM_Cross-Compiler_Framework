@@ -2024,6 +2024,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **Every place takes the same SSH user names**: the deploy (`llm-cli deploy run`, **Deploy to Target** in the
+  Deployment tab) and `llm-cli deploy devices add` checked the user name without `re.ASCII`, so Python's case folding
+  let a long s (`ſ`) or the Kelvin sign pass as `s` and `k`, and the deploy's `match()` also let a trailing line break
+  through. Such a deploy ran, and the board's trusted record then refused the same name without a word, so AI tools
+  could not name the board. One check now serves every place (`orchestrator/remote/address.py`, `valid_user`: ASCII
+  only, the whole name, root only where it is allowed): the deploy, adding a board, the Deployment tab, the
+  trusted-board records, the deploy settings, the systemd unit and the account names an AI never reads
+  (`device_text`). Adding a board no longer loads the build engine and the Docker SDK for this check.
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI
