@@ -1354,11 +1354,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Revisionsanker, die noch unter `llm-conversion-framework` liegen, werden gelesen und beim ersten Gebrauch unter den
   neuen Namen kopiert, die alten Einträge werden nie entfernt, und der gespeicherte Prüfwert des Tresors behält seinen
   Text, sodass jeder vorhandene Tresor aufgeht). Wie eine vorhandene Installation umzieht: Eine Installation im alten
-  Ordner wird nie verändert oder gelöscht. `install.sh` kopiert ihre `configs/config.yml`, wenn die neue Installation
-  noch keine hat (nie über eine vorhandene Datei), sagt, was es nicht übernommen hat (Builds, Cache, Modelle, eigene
-  Targets und Packs), und wie man den alten Ordner entfernt, nachdem man hineingesehen hat. `install.bat` nennt den
-  alten Ordner und den Uninstaller, der jetzt beide Installationen findet, für jede zeigt, was er entfernt, und vorher
-  fragt (ohne Antwort wird nichts entfernt). `make` behält einen Container von vor der Umbenennung, solange er Dateien
+  Ordner wird nie verändert oder gelöscht. `install.sh` kopiert die Dateien von dir aus ihrem `configs/`, die die neue
+  Installation noch nicht hat (`config.yml`, eine selbst geschriebene `framework.yml` und `secrets.store`, den Tresor
+  für Zugangsdaten einer Version vor 3.0.0, den das Framework dann übernimmt; nie über eine vorhandene Datei, nie über
+  einen Link), sagt, was es nicht übernommen hat (Builds, Cache, Modelle, eigene Targets und Packs), dass über MCP
+  verbundene KI-Apps die alte Installation starten, bis sie aus der neuen eingerichtet sind, und wie man den alten
+  Ordner entfernt, nachdem man hineingesehen hat. `install.bat` nennt den alten Ordner, die KI-Apps und den
+  Uninstaller, der jetzt beide Installationen findet, für jede zeigt, was er entfernt, und vorher fragt (ohne Antwort
+  wird nichts entfernt). `make` behält einen Container von vor der Umbenennung, solange er Dateien
   von dir im alten Programmordner enthält. Siehe
   [README: Eine Installation von vor der Umbenennung](README_DE.md#eine-installation-von-vor-der-umbenennung).
 - **Schnellerer Start: schwere Teile laden erst, wenn sie gebraucht werden** (unveröffentlicht; Entscheidung des

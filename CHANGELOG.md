@@ -1190,10 +1190,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   key and the revision anchors still under `llm-conversion-framework` are read and copied to the new name on first
   use, the old entries are never removed, and the vault's stored check value keeps its text, so every existing vault
   opens). How an existing installation moves: an installation in the old folder is never changed or deleted.
-  `install.sh` copies its `configs/config.yml` when the new installation has none (never over an existing file), says
-  what it did not take over (builds, cache, models, your own targets and packs) and how to remove the old folder after
-  looking inside. `install.bat` names the old folder and the uninstaller, which now finds both installations, lists
-  for each one what it removes and asks first (no answer: nothing is removed). `make` keeps a container built before
+  `install.sh` copies the files of yours from its `configs/` that the new installation does not have (`config.yml`, a
+  hand-written `framework.yml`, and `secrets.store`, the credential vault of a version before 3.0.0, which the
+  framework then takes over; never over an existing file, never through a link), says what it did not take over
+  (builds, cache, models, your own targets and packs), that AI apps connected over MCP start the old installation until
+  they are set up from the new one, and how to remove the old folder after looking inside. `install.bat` names the old
+  folder, the AI apps and the uninstaller, which now finds both installations, lists for each one what it removes and
+  asks first (no answer: nothing is removed). `make` keeps a container built before
   the rename while it holds files of yours in the old program folder. See
   [README: An installation from before the rename](README.md#an-installation-from-before-the-rename).
 - **Faster start: heavy parts load when they are first used** (unreleased; maintainer decision RG1, lazy loading):
