@@ -1509,8 +1509,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Toolchain aus, `helpers.safe_json_load` liest die Zustandsdateien der lokalen Laufzeit und des Wissensspeichers,
   `llama_server.managed_endpoint` findet den lokalen Server für den Chat-Client, `LLMOrchestrator.list_workflows` (jetzt
   eine normale Methode) ersetzt das Lesen seiner privaten Tabelle im Hauptfenster, `TargetIn` und
-  `TargetCapabilitiesOut` sind die Basis der Modelle des Target-Werkzeugs (sie liegen in `schemas/targets.py`, deshalb
-  lädt der Import der Target-Werkzeuge keinen Tool-Hub; `framework_tools` behält die Namen), `grant_facts` entscheidet
+  `TargetCapabilitiesOut` sind die Basis der Modelle des Target-Werkzeugs (`TargetIn` liegt in `schemas/targets.py`, das
+  Werkzeug-Ergebnis `TargetCapabilitiesOut` in `tools/tools_targets.py`, deshalb lädt der Import der Target-Werkzeuge
+  keinen Tool-Hub und `schemas/` definiert kein Werkzeug-Ergebnis; `framework_tools` behält die Namen), `grant_facts`
+  entscheidet
   über die stehende Freigabe eines Build-Plans, `ChatHistory.in_state_dir` lädt den Verlauf des Chat-Panels,
   `PROFILE_FILE_NAME` benennt die Datei der Skript-Prüfung und `TUNINGS` sichert, was `build_info.json` festhält.
   Entfernt: die Texte der v2-GUI und sieben neuere doppelte Texte (EN und DE; der ältere Schlüssel bleibt), die Aliase

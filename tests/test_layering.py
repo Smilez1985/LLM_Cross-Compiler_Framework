@@ -491,6 +491,24 @@ def test_the_walk_follows_the_tables_a_loop_reads(sample):
     assert set(third_party_violations(g)) == {("orchestrator.utils.texts", "PySide6")}
 
 
+def test_the_schemas_define_no_tool_output():
+    """schemas/ is the bottom layer: of tools/output.py it uses only the untrusted-text annotations (the allowlisted
+    edges, moved down by c5-split-core), never ToolOutput, the base of the tool definitions' results (layer 5). A
+    tool output model in schemas/ would widen those edges with every model built on it (stage-B review: the target
+    tools' TargetCapabilitiesOut had moved into schemas/targets.py; it lives with the target tools)."""
+    offenders = []
+    for path in sorted((REPO_ROOT / "orchestrator" / "schemas").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = []
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("orchestrator.tools"):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ClassDef):
+                names = [getattr(base, "id", getattr(base, "attr", "")) for base in node.bases]
+            if "ToolOutput" in names:
+                offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")
+    assert offenders == [], offenders
+
+
 def test_the_layers_of_the_tools_package():
     assert layer_of("orchestrator.tools.registry") == KERNEL
     assert layer_of("orchestrator.tools.tool_windows") == KERNEL

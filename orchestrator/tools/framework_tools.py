@@ -11,9 +11,9 @@ from orchestrator.Core import job_service
 from orchestrator.Core.job_service import JobService
 from orchestrator.schemas.build import BuildHandle, BuildStatusOut, TargetList
 from orchestrator.schemas.jobs import CancelJobOut, JobErrorOut, JobIn, JobProgress, JobStatusOut, JobWaitIn
-# TargetIn and TargetCapabilitiesOut live in schemas/targets.py (the target tools build on them without the
-# hub); the names stay importable here.
-from orchestrator.schemas.targets import TargetCapabilities, TargetCapabilitiesOut, TargetIn  # noqa: F401
+# TargetIn lives in schemas/targets.py and TargetCapabilitiesOut with the target tools (tools/tools_targets.py), which
+# build on them without the hub; both names stay importable here (TargetCapabilitiesOut on first use, below).
+from orchestrator.schemas.targets import TargetCapabilities, TargetIn  # noqa: F401
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.mcp_tokens import TokenStore
 from orchestrator.tools import tools_status
@@ -28,6 +28,9 @@ from orchestrator.tools.tools_knowledge import EMPTY_SEARCH_NOTE, register_knowl
 from orchestrator.tools.tools_mojo import DoctorFinding, DoctorOut, mojo_tool_specs  # noqa: F401 - their old home
 from orchestrator.tools.spec import BUILD_QUOTA, CallFacts, Choices, Fact, FieldMeta, ToolLimits
 from orchestrator.utils.helpers import redact_secrets
+from orchestrator.utils.lazy_imports import lazy_attributes
+
+__getattr__ = lazy_attributes(__name__, {"TargetCapabilitiesOut": "orchestrator.tools.tools_targets"})
 
 
 class NoInput(BaseModel):

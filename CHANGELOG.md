@@ -1326,9 +1326,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `helpers.execute_command` runs the hardware and toolchain probes, `helpers.safe_json_load` reads the local runtime's
   and the knowledge store's state files, `llama_server.managed_endpoint` finds the local server for the chat client,
   `LLMOrchestrator.list_workflows` (now a plain method) replaces reads of its private table in the main window,
-  `TargetIn` and `TargetCapabilitiesOut` are the bases of the target tool's models (they live in `schemas/targets.py`,
-  so importing the target tools loads no tool hub; `framework_tools` keeps the names), `grant_facts` decides a build
-  plan's standing approval, `ChatHistory.in_state_dir` loads the chat panel's history, `PROFILE_FILE_NAME` names the
+  `TargetIn` and `TargetCapabilitiesOut` are the bases of the target tool's models (`TargetIn` lives in
+  `schemas/targets.py` and the tool result `TargetCapabilitiesOut` in `tools/tools_targets.py`, so importing the target
+  tools loads no tool hub and `schemas/` defines no tool result; `framework_tools` keeps the names), `grant_facts`
+  decides a build plan's standing approval, `ChatHistory.in_state_dir` loads the chat panel's history, `PROFILE_FILE_NAME` names the
   script probe's file and `TUNINGS` guards what `build_info.json` records. Removed: the texts of the v2 GUI and seven
   newer duplicate texts (EN and DE; the older key stays), the menu name aliases `BUILD_MENU_NAMES` and
   `TOOLS_MENU_NAMES`, `utils/network.py` (NetworkGuard pinged 8.8.8.8 and waited without limit; `PinnedDownloader`

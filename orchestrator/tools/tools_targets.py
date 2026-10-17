@@ -37,7 +37,7 @@ from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_I
                                                 ProbeError, match_target)
 from orchestrator.schemas.build import TargetOut
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
-from orchestrator.schemas.targets import TargetCapabilitiesOut, TargetIn
+from orchestrator.schemas.targets import TargetCapabilities, TargetIn
 from orchestrator.tools.facts_catalog import warn
 from orchestrator.tools.grants import tool_rule
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
@@ -53,6 +53,13 @@ AI_TEXT = "written by the AI"
 
 
 # --- inputs and outputs -------------------------------------------------------------------------------------------
+
+class TargetCapabilitiesOut(TargetCapabilities, ToolOutput):
+    # The capabilities with the framework's notes, the base of TargetDetailsOut. First written in
+    # tools/framework_tools.py, which keeps the name (resolved here on first use); a tool result, so it stays with the
+    # tools, never in schemas/. A comment, not a docstring: a docstring would become part of the schema an AI reads.
+    pass
+
 
 class TargetCheckIn(TargetIn):
     # get_target_capabilities' input: the original TargetIn (schemas/targets.py) and whether to check the files. A
