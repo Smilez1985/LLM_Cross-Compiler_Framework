@@ -622,6 +622,21 @@ class TestServiceSubmission:
             service.start_build(self.request(target="MyJetson", format="hf"), local_paths=True)
         assert raised.value.field == "format" and len(fm.orchestrator.submitted) == 1
 
+    def test_the_earlier_build_check_covers_a_target_without_capabilities_for_the_person(self, make_framework,
+                                                                                       tmp_path):
+        """A consequence of the one check (CHANGELOG Changed): the Builder's earlier-build check (local_paths) runs
+        for a target without capabilities too, where the service used to refuse to compare; AI callers still get
+        the refusal."""
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        from test_foundation import FakeOrchestrator
+        from test_review_capabilities_paths import framework_with_targets
+        fm = framework_with_targets(make_framework, tmp_path / "targets")
+        fm.orchestrator = FakeOrchestrator()
+        service = BuildService(fm)
+        assert service.earlier_builds(self.request(target="MyJetson"), local_paths=True) == []
+        with pytest.raises(BuildServiceError, match="declares no capabilities"):
+            service.earlier_builds(self.request(target="MyJetson"))
+
     def test_capability_problems_are_kept_one_by_one(self, service):
         from orchestrator.Core.build_service import BuildServiceError
         with pytest.raises(BuildServiceError) as raised:

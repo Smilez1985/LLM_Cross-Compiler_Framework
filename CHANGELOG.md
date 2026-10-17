@@ -1233,8 +1233,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   question; sign-in and `llmcf ditto login` use the same address rules, and MCP `update_settings` the same
   tighten-only rule, which moved there from the tool module (`direction_problem`, still importable from
   `orchestrator.tools.tools_status`). `AISettingsChange.current()` and `with_setting()` are ready for a change of
-  one setting at a time (the coming `llmcf config set`). The dialog now also refuses a server address with a user
-  name or password in it, as sign-in already did.
+  one setting at a time (the coming `llmcf config set`).
 - **One build-submission path for the CLI, the GUI and AI callers**: `llmcf build start` and the Builder tab's
   **Start Build** queue their build through `BuildService.start_build`, the path the MCP server and Ditto already
   used, instead of building their own orchestrator request each. The CLI and the GUI therefore check a request the
@@ -1244,6 +1243,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   each window sets stays as it was: the CLI's priority, optimization and destination prompt, the GUI's priority,
   parallel builds and build folder, a target without capabilities built unchecked, and the person's own builds are
   never refused by the queue limit for AI callers. The CLI's follow loop reads the build through the same service.
+  The Builder's check for an earlier build with the same options now also covers a target without capabilities
+  (before, the service refused to compare such a request and the Builder only logged that).
 - **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
   `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
   and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the
@@ -2047,6 +2048,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **The AI settings dialog refuses a server address with a user name or password in it**, as sign-in and
+  `llmcf ditto login` already did (the same address rule from `AISettingsChange`): before, such an address (or one
+  with a space or a backslash, which parsers can read as two different hosts) was saved to `config.yml` as typed.
 - **A community recipe built from the GUI is checked when it is built, as over MCP**: the Community Hub's **Build**
   button and the Builder tab's **Start Build** go through `BuildService.installed_recipe` and
   `BuildService.start_recipe`, the path `start_recipe_build` uses. A recipe the community index revoked after the
