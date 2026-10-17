@@ -3405,40 +3405,44 @@ def _doctor_free_space(framework, heading: str = "Tier 2: the framework's build 
     is), nothing ticked, and deletes exactly the images the person picks and then confirms at a terminal (default no).
     Docker's build cache is never cleared: it cannot be limited to the framework. The same list and deletion as Tools >
     Framework Build Images... in the GUI: the one deletion path for the framework's Docker images. Returns how many
-    images were deleted and, when none was, why ("" when the person chose none)."""
+    images were deleted and, when none was, why ("" when the person chose none). The listing and the deletion are
+    docker_objects.offer_image_list's, which the GUI's Mojo window opens with its deletion dialog."""
     from orchestrator.Core.knowledge_snapshots import size_text
-    from orchestrator.Core.mojo.docker_objects import (DockerUnavailable, ImagePlanChanged, delete_framework_images,
-                                                       docker_storage, framework_image_plan)
+    from orchestrator.Core.mojo.docker_objects import offer_image_list
     cache_note = ("Docker's build cache is not touched: it cannot be limited to the framework ('docker system df' "
                   "shows its size; 'docker builder prune' would clear it for every project on this computer).")
     console.print(f"\n[bold]{escape(heading)}[/bold]")
-    try:
-        plan = framework_image_plan(framework)
-    except DockerUnavailable as e:
-        console.print(f"[yellow]{escape(str(e))}[/yellow] {escape(cache_note)}")
-        return 0, str(e)
-    storage = docker_storage(framework) or {}
-    if storage.get("root"):
-        console.print(f"Docker keeps its images in {escape(storage['root'])}.")
-    if plan is None:
+
+    def where(root: str) -> None:
+        if root:
+            console.print(f"Docker keeps its images in {escape(root)}.")
+
+    def ask(plan, root: str):
+        where(root)
+        console.print("Sizes include layers other images may share, so less space can be freed. " + escape(cache_note))
+        return confirm_deletion(plan, title=f"{len(plan.items)} framework build images, "
+                                            f"{size_text(plan.total_bytes)}", multiple=True, again=again)
+
+    outcome = offer_image_list(framework, ask, actor="cli")
+    if not outcome.listed:
+        console.print(f"[yellow]{escape(outcome.problem)}[/yellow] {escape(cache_note)}")
+        return 0, outcome.why
+    if outcome.plan is None:
+        where(outcome.root)
         console.print(f"No framework images to delete. {escape(cache_note)}")
-        return 0, "there are no framework build images to delete"
-    console.print("Sizes include layers other images may share, so less space can be freed. " + escape(cache_note))
-    accepted = confirm_deletion(plan, title=f"{len(plan.items)} framework build images, {size_text(plan.total_bytes)}",
-                                multiple=True, again=again)
-    if accepted is None:
+        return 0, outcome.why
+    if outcome.problem:
+        console.print(f"[yellow]{escape(outcome.problem)}[/yellow]")
+        return 0, outcome.why
+    result = outcome.result
+    if result is None:
         return 0, ""
-    try:
-        result = delete_framework_images(framework, accepted.plan, actor="cli")
-    except (ImagePlanChanged, DockerUnavailable, RuntimeError) as e:
-        console.print(f"[yellow]{escape(str(e))}[/yellow]")
-        return 0, str(e)
     for name in result.deleted:
         console.print(f"[green]Deleted: {escape(name)}[/green]")
     for name, reason in result.failed:
         console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
     console.print(f"{len(result.deleted)} images deleted, about {size_text(result.freed_bytes)}.")
-    return len(result.deleted), "" if result.deleted else "Docker kept every image you chose (the reasons are above)"
+    return outcome.count, outcome.why
 
 
 # ============================================================================
@@ -3487,7 +3491,8 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
     _mojo_print_oracle(report, offered, terminal)
     _mojo_offer_boards(framework, report, terminal)
     if mode == "oracle":
-        acts = [o for o in offered if o.verdict == "miracle" or (o.verdict == "deletion_list" and _mojo_lists(o))]
+        from orchestrator.Core.mojo.views import miracle_acts
+        acts = miracle_acts(offered)   # the GUI's Mojo window offers Mojo Miracle under the same rule
         if not acts:
             sys.exit(report.exit_code)
         if not terminal:
@@ -3509,17 +3514,14 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
 
 def _mojo_board(ctx: FrameworkContext, name: str) -> str:
     """The device ID of the trusted board `--board` names (its label, device ID or address); exits with the trusted
-    boards when it names none or several."""
-    from orchestrator.runtime.device.trusted import TrustedDevices, find_boards
-    store = TrustedDevices(_state_dir(ctx))
-    found = find_boards(store, name, by_address=True)
-    if len(found) == 1:
-        return found[0].device_id
-    boards = found or store.list()
-    what = (f"{len(found)} trusted boards match '{name}'" if found else f"No trusted board is named '{name}'")
-    console.print(f"[red]{escape(what)}.[/red]" + (" Give one of these (label, device ID or address):" if boards
-                                                    else " No board is trusted yet."))
-    for d in boards:
+    boards when it names none or several (Core/mojo/boards.find_board, as the GUI finds it)."""
+    from orchestrator.Core.mojo.boards import find_board
+    found = find_board(ctx.framework_manager, name)
+    if found.device_id:
+        return found.device_id
+    console.print(f"[red]{escape(found.problem)}.[/red]" + (" Give one of these (label, device ID or address):"
+                                                             if found.boards else " No board is trusted yet."))
+    for d in found.boards:
         console.print(f"  {escape(d.label)}  {d.device_id}  {escape(d.address)}")
     sys.exit(2)
 
@@ -3539,65 +3541,39 @@ def _mojo_board_command(name: str, device_id: str) -> str:
 def _mojo_offer_boards(framework, report, terminal: bool) -> None:
     """Boards a recorded fact points to and that Mojo did not contact (W1): at a terminal "Check <board> now? [y/N]"
     for each (yes: one connection to its SSH port, no login, and the result); without a terminal the command that
-    checks it. The person sees the board's label; the command names it as `--board` takes it best (board_name)."""
-    from orchestrator.Core.mojo.checks.devices import check_devices
-    from orchestrator.runtime.device.trusted import TrustedDevices
-    try:
-        labels = {d.device_id: d.label for d in TrustedDevices.for_framework(framework).list()}
-    except Exception:  # noqa: BLE001 - the command's name stands in
-        labels = {}
-    boards = {}
-    for finding in report.findings:
-        if finding.board_check and finding.board_check not in boards:
-            boards[finding.board_check] = finding.board_name or finding.board_check
-    for device_id, name in boards.items():
+    checks it. The person sees the board's label; the command names it as `--board` takes it best (board_name). The
+    boards and the check are Core/mojo/boards' (the GUI's Mojo window offers the same boards)."""
+    from orchestrator.Core.mojo.boards import boards_to_offer, check_board
+    for device_id, label, name in boards_to_offer(framework, report):
         command = _mojo_board_command(name, device_id)
-        label = labels.get(device_id) or name
         if not terminal:
             console.print(f"Mojo did not contact the board {escape(label)}. To check it: {escape(command)}")
             continue
         if not click.confirm(f"Check {label} now? (one connection to its SSH port, no login)", default=False):
             console.print(f"Mojo did not contact {escape(label)}. Later: {escape(command)}")
             continue
-        for finding in check_devices(framework, contact=(device_id,)):
-            if finding.code != f"devices.{device_id}":
-                continue
-            console.print(f"{MOJO_ICONS[finding.severity.value]} {escape(finding.subsystem)}: {escape(finding.message)}")
-            if finding.severity.value != "ok" and finding.fix_hint:
-                console.print(f"    → {escape(finding.fix_hint)}")
-
-
-def _mojo_lists(offer) -> bool:
-    """Whether Mojo Miracle at a terminal opens the person's list for this deletion finding."""
-    from orchestrator.Core.mojo.offers import DELETION_LISTS
-    return offer.finding.code in DELETION_LISTS
+        finding = check_board(framework, device_id)
+        if finding is None:
+            continue
+        console.print(f"{MOJO_ICONS[finding.severity.value]} {escape(finding.subsystem)}: {escape(finding.message)}")
+        if finding.severity.value != "ok" and finding.fix_hint:
+            console.print(f"    → {escape(finding.fix_hint)}")
 
 
 def _mojo_miracle_line(offer, terminal: bool) -> str:
-    """The person's line about what Mojo Miracle can do for one finding."""
-    from orchestrator.Core.mojo.offers import DELETION_WHERE, OTHER_LISTS
-    if offer.verdict == "miracle":
-        return f"Mojo Miracle can repair it: {offer.plan.summary}."
-    if offer.verdict == "deletion_list" and _mojo_lists(offer):
-        if terminal:
-            return ("Mojo Miracle shows you the framework's build images to choose from (name, id, size, what each "
-                    "is; nothing is ticked); only what you tick and confirm is deleted.")
-        return f"Mojo Miracle cannot repair it here: {offer.reason}; {DELETION_WHERE}."
-    if offer.verdict == "deletion_list" and offer.finding.code in OTHER_LISTS:
-        return (f"Mojo Miracle cannot repair it: {offer.reason}; you choose what is deleted or exported: "
-                f"{OTHER_LISTS[offer.finding.code]}.")
-    return f"Mojo Miracle cannot repair it: {offer.reason}."
+    """The person's line about what Mojo Miracle can do for one finding (Core/mojo/views.miracle_line; the GUI's Mojo
+    window shows the same kinds of line)."""
+    from orchestrator.Core.mojo.views import miracle_line
+    return miracle_line(offer, terminal)
 
 
 def _mojo_print_oracle(report, offered, terminal: bool) -> None:
     """What Mojo Oracle found: every finding; for each problem where (the full path), why it matters, the hint and
     what Mojo Miracle can do; then one sentence that counts every problem by what can be done about it."""
-    from orchestrator.Core.mojo.views import oracle_summary
-    by_finding = {id(o.finding): o for o in offered}
+    from orchestrator.Core.mojo.views import oracle_summary, person_findings, plan_steps
     console.print("[bold]Mojo Oracle: checking the installation (read-only, nothing is changed)[/bold]")
-    for finding in report.findings:
+    for finding, offer in person_findings(report, offered):
         console.print(f"{MOJO_ICONS[finding.severity.value]} {escape(finding.subsystem)}: {escape(finding.message)}")
-        offer = by_finding.get(id(finding))
         if offer is None:  # no problem: an information's hint is shown as the doctor showed it
             if finding.severity.value == "info" and finding.fix_hint:
                 console.print(f"    → {escape(finding.fix_hint)}")
@@ -3609,45 +3585,35 @@ def _mojo_print_oracle(report, offered, terminal: bool) -> None:
         if finding.fix_hint:
             console.print(f"    → {escape(finding.fix_hint)}")
         console.print(f"    {escape(_mojo_miracle_line(offer, terminal))}")
-        if offer.verdict == "miracle":
-            for step in offer.plan.steps:
-                where = f" ({step.full_path})" if step.full_path else ""
-                console.print(f"      Plan: {escape(step.target_label)}{escape(where)}: {escape(step.before)} → "
-                              f"{escape(step.after)}" + (", can be undone" if step.undoable else ""))
+        for step in plan_steps(offer):
+            where = f" ({step.full_path})" if step.full_path else ""
+            console.print(f"      Plan: {escape(step.target_label)}{escape(where)}: {escape(step.before)} → "
+                          f"{escape(step.after)}" + (", can be undone" if step.undoable else ""))
     console.print(escape(oracle_summary(offered, person=True)))
 
 
 def _mojo_print_miracle(result) -> None:
-    """What Mojo Miracle did: every problem, repaired or not, and why not; then the count."""
+    """What Mojo Miracle did: every problem, repaired or not, and why not; then the count (Core/mojo/views: the GUI's
+    Mojo window shows the same)."""
+    from orchestrator.Core.mojo.views import entry_next, entry_text, miracle_summary, outcome_kind
     words = {"repaired": "[green]✔ Repaired[/green]", "already_fixed": "[green]✔ Already gone[/green]",
-             "still_present": "[yellow]! Still there[/yellow]", "declined": "[yellow]- Not deleted[/yellow]"}
+             "still_present": "[yellow]! Still there[/yellow]", "declined": "[yellow]- Not deleted[/yellow]",
+             "not_repaired": "[red]✘ Not repaired[/red]"}
     for entry in result.entries:
         finding = entry.finding
-        head = words.get(entry.outcome, "[red]✘ Not repaired[/red]")
-        if entry.outcome == "repaired":
-            text = f"{entry.summary}. Checked again: the problem is gone."
-        else:
-            text = entry.reason or entry.summary
-        console.print(f"{head}: {escape(finding.subsystem)} ({escape(finding.code)}): {escape(text)}")
-        if entry.outcome == "plan_changed":
+        console.print(f"{words[outcome_kind(entry)]}: {escape(finding.subsystem)} ({escape(finding.code)}): "
+                      f"{escape(entry_text(entry))}")
+        step, hint = entry_next(entry)
+        if step == "again":
             console.print("    → Run 'llmcf mojo' again: it shows the new plan.")
-        elif entry.outcome not in ("repaired", "already_fixed") and finding.fix_hint:
-            console.print(f"    → {escape(finding.fix_hint)}")
+        elif step == "hint":
+            console.print(f"    → {escape(hint)}")
     for finding in result.new_problems:
         console.print(f"{MOJO_ICONS[finding.severity.value]} New after Mojo Miracle: {escape(finding.subsystem)} "
                       f"({escape(finding.code)}): {escape(finding.message)}")
         if finding.fix_hint:
             console.print(f"    → {escape(finding.fix_hint)}")
-    total = len(result.entries)
-    if not total:
-        console.print("Mojo Oracle found no problems, so Mojo Miracle had nothing to repair.")
-        return
-    gone, rest = len(result.already_gone), len(result.not_repaired)
-    console.print(f"Mojo Miracle repaired {len(result.repaired)} of {total} problem{'' if total == 1 else 's'}"
-                  + (f"; {gone} {'was' if gone == 1 else 'were'} already gone" if gone else "")
-                  + (f"; {rest} {'was' if rest == 1 else 'were'} not repaired (why: above)" if rest else "")
-                  + (f"; the check afterwards found {len(result.new_problems)} new (above)" if result.new_problems
-                     else "") + ".")
+    console.print(miracle_summary(result))
 
 
 def _mojo_free_space(framework) -> Tuple[int, str]:

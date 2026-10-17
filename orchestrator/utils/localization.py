@@ -576,6 +576,7 @@ def ui_text(key: str, lang: Optional[str] = None, **values: Any) -> str:
 TEXT_MODULES = ("orchestrator.utils.l10n_facts", "orchestrator.utils.l10n_chat", "orchestrator.utils.l10n_deletion",
                 "orchestrator.utils.l10n_runtime", "orchestrator.utils.l10n_artifacts",
                 "orchestrator.utils.l10n_device", "orchestrator.utils.l10n_gui", "orchestrator.utils.l10n_knowledge")
+TEXT_MODULES += ("orchestrator.utils.l10n_mojo",)   # Mojo in the GUI: Tools > Mojo Health Check..., Check this board
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
