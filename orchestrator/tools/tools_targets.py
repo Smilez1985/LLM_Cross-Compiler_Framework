@@ -53,7 +53,8 @@ AI_TEXT = "written by the AI"
 # --- inputs and outputs -------------------------------------------------------------------------------------------
 
 class TargetCheckIn(TargetIn):
-    """get_target_capabilities' input: the original TargetIn (framework_tools) and whether to check the files."""
+    # get_target_capabilities' input: the original TargetIn (framework_tools) and whether to check the files. A
+    # comment, not a docstring: a docstring would become the description of the input schema an AI reads.
     check_files: bool = Field(default=False, description="Also check the target's files (target.yml, Dockerfile "
                                                          "pins, scripts) the way a module or pack is checked")
 

@@ -1230,7 +1230,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   question is `bubbles.confirm_open_link` (the panel's unused copy is gone); the zero-cost credential check is
   `SignIn.check` (`LLMClient.check_credentials` is gone, its test runs through `SignIn.check`). Mojo's Python and Docker
   checks run on the framework's original checks in `orchestrator/utils/validation.py`: `validate_python_version` and
-  `check_docker_environment`, which the build engine's start uses as well (findings and log lines unchanged). Importing
+  `check_docker_environment`, which the build engine's start uses as well (findings and log lines unchanged; its
+  buildx question runs through `helpers.execute_command`, so it closes stdin, opens no console window on Windows and,
+  as the engine's original did, never stops the start, also not for output it cannot decode). Importing
   `validation.py` no longer checks the host. The module keeps the SSRF guard and the checks no newer code does, and
   loses what newer code does better: the system and Docker reports (Mojo), the disk check (the one disk rule), the
   config validator (`ConfigSchema`), the image and target name rules (the module generator's), the writability test

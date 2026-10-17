@@ -1401,8 +1401,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   weg); die kostenlose Prüfung der Zugangsdaten ist `SignIn.check` (`LLMClient.check_credentials` ist weg, sein Test
   läuft über `SignIn.check`). Die Prüfungen von Python und Docker in Mojo laufen über die ursprünglichen Prüfungen des
   Frameworks in `orchestrator/utils/validation.py`: `validate_python_version` und `check_docker_environment`, das auch
-  der Start der Build-Engine nutzt (Befunde und Logzeilen unverändert). Der Import von `validation.py` prüft den Host
-  nicht mehr. Das Modul behält den SSRF-Schutz und die Prüfungen, die kein neuerer Code macht, und verliert, was neuerer
+  der Start der Build-Engine nutzt (Befunde und Logzeilen unverändert; seine Frage nach buildx läuft über
+  `helpers.execute_command`, schließt also stdin, öffnet unter Windows kein Konsolenfenster und hält den Start, wie das
+  Original der Engine, nie an, auch nicht bei einer Ausgabe, die es nicht dekodieren kann). Der Import von
+  `validation.py` prüft den Host nicht mehr. Das Modul behält den SSRF-Schutz und die Prüfungen, die kein neuerer Code macht, und verliert, was neuerer
   Code besser kann: die System- und Docker-Berichte (Mojo), die Speicherplatzprüfung (die eine Regel für Speicherplatz),
   die Prüfung von Konfigurationen (`ConfigSchema`), die Regeln für Image- und Target-Namen (die des Modulgenerators),
   den Schreibtest (`ConfigManager.writable_dir`) und `validate_url`. Ältere Helfer werden von ihren neueren Kopien
