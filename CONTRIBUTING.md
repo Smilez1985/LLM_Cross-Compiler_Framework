@@ -560,6 +560,14 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   reached from the menu bar. Menus are found and placed through `orchestrator/gui/menus/place.py`.
 - New actions for AI clients and Ditto are tools in `orchestrator/tools/framework_tools.py` with the correct tier
   (`read`, `local_write`, `external`). Never bypass the registry, the permissions or the audit log.
+- **One use case, one path; look first, then extend.** Before you write something, look for the code that already
+  does it and extend and wire that one instead of building a second copy beside it. A build is queued only through
+  `BuildService.start_build` (`start_recipe` for an installed community recipe): the CLI, the Builder tab and the
+  tools pass their own options (`local_paths`, `priority`, `output_dir`, ...) and keep only their questions and their
+  rendering. `recipe.yml` is read only by `community_manager.read_recipe`. A change of the AI settings goes through
+  `AISettingsChange` (`orchestrator/llm/settings_change.py`): `problems()`, the channel's own question for
+  `plain_http_url()`, then `apply()`. `tests/test_build_parity_core.py` and `tests/test_ai_settings_change.py` check
+  that no window or command goes around them.
 - The framework never asks for, reads or stores a repository token. Hand work over to GitHub through an installed
   GitHub CLI (it keeps its own sign-in) or the browser, as `llm-cli zoo export --pr` does.
 - Code adapted from another project keeps a comment that names its source ("Adapted from ...") and gets an entry
