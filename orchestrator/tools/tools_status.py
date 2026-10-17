@@ -713,6 +713,22 @@ def settings_schema(framework, key: str):
     return schemas.get(key) if isinstance(schemas, dict) else None
 
 
+def ai_settings_problem(framework, values: Dict[str, Any]) -> Optional[str]:
+    """The first refusal of the AI settings' rules (AISettingsChange, the rules of the AI settings dialog and the
+    sign-in) that these new values would bring, as "title: text"; None when there is none or no AI setting
+    (offline_mode, enable_rag_knowledge) is among them. A problem the saved AI settings already have is not counted."""
+    from orchestrator.llm.settings_change import AI_SETTINGS, AISettingsChange
+    ai = {key: value for key, value in values.items() if key in AI_SETTINGS}
+    if not ai:
+        return None
+    found = AISettingsChange.problems_of_settings(framework.config, getattr(framework, "secrets_manager", None), ai)
+    return f"{found[0].title}: {found[0].message}" if found else None
+
+
+AI_SETTINGS_NEXT = ("Tell the person: the AI settings decide this together with the AI provider, so they change the "
+                    "provider in the AI settings first (only the person changes the provider).")
+
+
 def settings_facts(framework, inp: UpdateSettingsIn):
     """The question's facts (old and new value of every change) and what the handler applies; refuses before the
     question a value that is not one, a schema violation and every loosening of a tighten-only setting."""
@@ -746,6 +762,15 @@ def settings_facts(framework, inp: UpdateSettingsIn):
         raise blocked("setting_invalid", "Invalid settings: " + "; ".join(problems) + ".",
                       "Call get_settings for the current values and what each setting takes, then call "
                       "update_settings again.", field="changes")
+    # The AI settings an AI may change are checked with the one rule set of the AI settings (stage-B integration).
+    try:
+        ai_problem = ai_settings_problem(framework, {c["key"]: c["new"] for c in changes})
+    except ValueError as e:   # a value an AI setting cannot take (parse_value already gives booleans)
+        raise blocked("setting_invalid", f"Invalid settings: {e}", "Call get_settings for what each setting takes.",
+                      field="changes") from None
+    if ai_problem:
+        raise blocked("setting_invalid", f"Refused by the AI settings: {ai_problem}", AI_SETTINGS_NEXT,
+                      field="changes")
     keys = ", ".join(c["key"] for c in changes)
     consequence = (f"Changes {len(changes)} framework setting{'s' if len(changes) != 1 else ''} ({keys}) for every "
                    "AI and for your own builds, and saves them in your config.yml.")
@@ -797,12 +822,22 @@ def status_tool_specs(registry, framework, no_tool_actions: List[Tuple[str, str]
                             code="failed", next="Call update_settings again through the framework's tool registry.")
         config = framework.config
         out = UpdateSettingsOut()
+        # The AI settings' rules, checked again too (the person may have chosen another provider meanwhile); a refusal
+        # keeps the AI settings of this call unchanged, the other settings are still set.
+        try:
+            ai_problem = ai_settings_problem(framework, {c["key"]: c["new"] for c in bound})
+        except ValueError as e:
+            ai_problem = str(e)
+        from orchestrator.llm.settings_change import AI_SETTINGS
         for change in bound:
             key, new = change["key"], change["new"]
             # Checked again right before it is set: the person may have changed it while the question was open.
             loosens = direction_problem(key, _cfg(framework, key), new)
             if loosens:
                 out.rejected.append(RejectedOut(key=key, reason=loosens))
+                continue
+            if ai_problem and key in AI_SETTINGS:
+                out.rejected.append(RejectedOut(key=key, reason=f"refused by the AI settings: {ai_problem}"))
                 continue
             if config.set(key, new):
                 out.applied.append(AppliedOut(key=key, old=change["old"], new=shown(new)))
