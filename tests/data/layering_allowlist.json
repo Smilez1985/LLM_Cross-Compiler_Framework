@@ -2,12 +2,6 @@
  "largest_cycle": 80,
  "imports": [
   {
-   "from": "orchestrator.Core.build_plan",
-   "to": "orchestrator.tools.tools_community",
-   "reason": "pack_base_images and base_image_line live in the community tool module",
-   "until": "c1-imports"
-  },
-  {
    "from": "orchestrator.Core.chat_feed",
    "to": "orchestrator.tools.framework_tools",
    "reason": "the audit key comes from the private framework_tools._audit_key",
