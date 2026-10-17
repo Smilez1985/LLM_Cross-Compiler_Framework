@@ -137,7 +137,9 @@ CALL :BACKUP_ONE "!INSTALL_PATH!\targets" "!TARGET_BACKUP!\targets" "/E /I /H /Y
 echo   - Sichere Output/Artefakte...
 CALL :BACKUP_ONE "!INSTALL_PATH!\output" "!TARGET_BACKUP!\output" "/E /I /H /Y"
 echo   - Sichere Configs...
-CALL :BACKUP_ONE "!INSTALL_PATH!\configs\config.yml" "!TARGET_BACKUP!\configs\" "/Y"
+:: Ziel ist ein vorhandener Ordner ohne Schraegstrich am Ende: xcopy liest \" sonst als Anfuehrungszeichen.
+IF EXIST "!INSTALL_PATH!\configs\config.yml" mkdir "!TARGET_BACKUP!\configs"
+CALL :BACKUP_ONE "!INSTALL_PATH!\configs\config.yml" "!TARGET_BACKUP!\configs" "/Y"
 IF "!BACKUP_OK!"=="0" GOTO :BACKUP_FAILED
 
 echo [INFO] Daten gesichert nach: "!TARGET_BACKUP!"
