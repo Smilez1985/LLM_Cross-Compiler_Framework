@@ -572,6 +572,16 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   geschickt und von Hand ausgeführt wird; `orchestrator/runtime/hardware_probe.py` ist ihre byte-gleiche Kopie im
   Paket. Ändere das Skript und kopiere es dann (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`);
   ein Test schlägt fehl, solange die beiden sich unterscheiden.
+- **Ein Datei-Hash, ein Disk-Watchdog.** Jeder sha256 einer Datei läuft über `orchestrator/utils/helpers.py`, wo der
+  erste (`calculate_file_checksum`) schon war: `sha256_file` (optionale Callbacks für Abbruch und Fortschritt, Links
+  auf Wunsch abgelehnt), `try_sha256_file` (None für einen Link, einen Ordner oder eine unlesbare Datei),
+  `sha256_fileobj` (ein offenes Handle oder seine ersten N Bytes für das Fortsetzen), `sha256_fd`, `copy_hashed`
+  (kopiert genau die Bytes, die es hasht, nie durch einen Link), `hash_stream`, `digest_matches` (konstante Zeit, ohne
+  Groß- und Kleinschreibung), `HashCache`, `write_sha256sums` und die `.sha256`-Begleitdatei. Alte Namen anderswo
+  sind Delegates; `tests/test_hashing.py` schlägt bei einer neuen Hash-Schleife daneben fehl. Ein Disk-Watchdog, ein
+  Text bei wenig Platz oder bei voller Platte kommt aus `orchestrator/Core/disk_plan.py` (`low_disk_text`,
+  `disk_full_text`, `is_disk_full`, `DiskWatchdog`, `free_space`, `nearest_existing`); so ein Text nennt Ordner beim
+  Label und behält `DISK_FULL_PHRASE`, auf die die Self-Healing-Heuristik passt.
 - **Jede CLI-Aktion hat einen Weg mit der Maus.** Viele Menschen nutzen nie ein Terminal, deshalb kann eine Person
   jeden Befehl und jede Option von `llm-cli` auch in der GUI starten, ohne einen Befehl zu tippen (einen Wert in ein
   Feld zu tippen ist in Ordnung). Ein neuer Befehl oder eine neue Option braucht ihren Weg mit der Maus, einen
