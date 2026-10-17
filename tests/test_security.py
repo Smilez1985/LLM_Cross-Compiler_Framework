@@ -1144,7 +1144,8 @@ class TestCrawlerLimits:
             monkeypatch.delenv(name, raising=False)
         # The test server is on the loopback address, which the SSRF guard refuses on purpose.
         monkeypatch.setattr(crawler_manager, "validate_public_url", lambda url: SimpleNamespace(message=""))
-        monkeypatch.setattr(crawler_manager, "resolve_public_addresses", lambda host, port: ["127.0.0.1"])
+        from orchestrator.security import http as security_http   # the pinned connection lives there (c1-imports)
+        monkeypatch.setattr(security_http, "resolve_public_addresses", lambda host, port: ["127.0.0.1"])
         monkeypatch.setattr(CrawlerManager, "REQUEST_DEADLINE", 1.5)
         monkeypatch.setitem(CrawlerManager.BODY_LIMITS, "html", 256 * 1024)
         site = f"http://docs.test:{server.server_address[1]}"
