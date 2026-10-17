@@ -1,4 +1,4 @@
-Version 3.0.0 + unreleased changes · Last updated 2026-10-11
+Version 3.0.0 + unreleased changes · Last updated 2026-10-17
 
 **English** · [Deutsch](BLUEPRINT_DE.md)
 
@@ -562,9 +562,10 @@ judge that yourself.
    makes at most five times `crawler_max_pages` page requests (the fetches of robots.txt and `tdmrep.json` are
    not counted).
 6. **Checks after the response.** First the `X-Robots-Tag` header and the TDMRep `tdm-reservation` header; then,
-   for HTML, `<meta name="robots">`, `<meta name="llm-conversion-framework-bot">` and
-   `<meta name="tdm-reservation">`, and for a PDF, `tdm:reservation` in its metadata. `noindex`, `none`, `noai`
-   and `noimageai` keep the page out; `nofollow` and `none` stop the crawler from following its links.
+   for HTML, `<meta name="robots">`, `<meta name="llm-cross-compiler-framework-bot">` (and the earlier
+   `<meta name="llm-conversion-framework-bot">`) and `<meta name="tdm-reservation">`, and for a PDF,
+   `tdm:reservation` in its metadata. `noindex`, `none`, `noai` and `noimageai` keep the page out; `nofollow` and
+   `none` stop the crawler from following its links.
 7. **Store.** An HTML page is converted to Markdown (headings, code blocks and tables kept) and filtered by language
    (`crawler_languages`), a PDF is read as text; each page is stored at once, replacing its earlier version, with its
    source address and what it says about its licence and copyright (see below). A Stop, or closing the wizard, ends
@@ -580,10 +581,10 @@ Which signals count, and when they are read:
 
 | Signal | When | Rule |
 |---|---|---|
-| robots.txt ([RFC 9309](https://www.rfc-editor.org/rfc/rfc9309)) | before the request, once per origin (scheme, host and port) | The groups whose user-agent equals this crawler's product token (`LLM-Conversion-Framework-Bot`, any case; a group for `bot` is not ours) count, otherwise all `*` groups together; `*` and `$` patterns work; the longest matching rule decides and `Allow` wins a tie. A 401, a 403, a server error or an unreachable file means "disallow everything" (for 401 and 403 this is stricter than RFC 9309, which allows crawling when the file is unavailable with a 4xx code); a missing file (404) means everything is allowed. A file that the SSRF guard blocks or that lies behind more than five redirects counts as unavailable, which RFC 9309 treats as allowed. |
+| robots.txt ([RFC 9309](https://www.rfc-editor.org/rfc/rfc9309)) | before the request, once per origin (scheme, host and port) | The groups whose user-agent equals one of this crawler's product tokens (`LLM-Cross-Compiler-Framework-Bot`, or `LLM-Conversion-Framework-Bot` from before the repository was renamed, so an earlier opt-out still holds; any case; a group for `bot` is not ours) count, merged, otherwise all `*` groups together; `*` and `$` patterns work; the longest matching rule decides and `Allow` wins a tie. A 401, a 403, a server error or an unreachable file means "disallow everything" (for 401 and 403 this is stricter than RFC 9309, which allows crawling when the file is unavailable with a 4xx code); a missing file (404) means everything is allowed. A file that the SSRF guard blocks or that lies behind more than five redirects counts as unavailable, which RFC 9309 treats as allowed. |
 | TDMRep file `/.well-known/tdmrep.json` | before the request, once per origin | The first rule whose location matches the path decides; `"tdm-reservation": 1` reserves the page. A missing or unreadable file means the site does not use the protocol. |
 | `X-Robots-Tag` and `tdm-reservation` headers | after the response | `noindex`, `none`, `noai`, `noimageai` or `tdm-reservation: 1` reserve the page. Directives for other crawlers (`otherbot: noindex`) are ignored. |
-| Robots meta tags (`robots` and `llm-conversion-framework-bot`), `tdm-reservation` meta tag | after the response, HTML | as for the headers |
+| Robots meta tags (`robots`, `llm-cross-compiler-framework-bot` and the earlier `llm-conversion-framework-bot`), `tdm-reservation` meta tag | after the response, HTML | as for the headers |
 | `tdm:reservation` in the PDF metadata | after the response, PDF | the value 1 reserves the PDF |
 
 A reservation from any source wins. TDMRep lets a later source lift a reservation found in an earlier one; the

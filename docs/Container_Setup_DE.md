@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md#unreleased) · Zuletzt aktualisiert am 2026-10-12
+Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md#unreleased) · Zuletzt aktualisiert am 2026-10-17
 
 [English](Container_Setup.md) · **Deutsch**
 
@@ -51,7 +51,7 @@ Was passiert:
    - ein Benutzer `lcf` mit deiner Benutzer- und Gruppen-ID (nie 0, root), damit Dateien in einem eingebundenen
      Datenordner dir gehören; gibt es deine Gruppen-ID in Debian schon (etwa 100, `users`), wird diese Gruppe genutzt;
    - `install.sh` läuft wie auf einem Debian-Computer, als hätte `lcf` es mit `sudo` gestartet: Es installiert Python
-     mit `apt`, kopiert das Programm nach `/opt/llm-conversion-framework`, legt dort `.venv` mit der festgelegten
+     mit `apt`, kopiert das Programm nach `/opt/llm-cross-compiler-framework`, legt dort `.venv` mit der festgelegten
      `requirements.txt` an und schreibt den Starter `llm-framework`. Nur die Docker-Engine und die Gruppe `docker`
      fallen weg (`LCF_CONTAINER_BUILD=1`);
    - `llm-cli` liegt im PATH, und `llmcf`, sein neuer Name (unveröffentlicht);
@@ -149,7 +149,7 @@ Alles Persönliche liegt im Docker-Volume `lcf-data`, eingebunden unter `/data`:
 
 Sichere das Volume wie jedes Docker-Volume.
 
-Der Programmordner `/opt/llm-conversion-framework` gehört `lcf`, so wie er auf dem Rechner selbst deinem Benutzer
+Der Programmordner `/opt/llm-cross-compiler-framework` gehört `lcf`, so wie er auf dem Rechner selbst deinem Benutzer
 gehört. Targets, die du mit dem Modul-Assistenten oder `llm-cli module create` anlegst, und Community-Packs, die du
 installierst, landen dort. Sie liegen damit im Container selbst, nicht im Volume, und gehen verloren, wenn der
 Container entfernt oder ersetzt wird. Die Make-Ziele entfernen oder ersetzen deshalb nie einen Container, der Dateien
@@ -163,6 +163,8 @@ von dir außerhalb des Volumes enthält:
   (vollständiger Pfad, Dateiname, Größe und was sie ist) und nennt den Befehl, mit dem du den Container selbst
   entfernst; das Volume entfernt es nie.
 - `make kept-files` zeigt diese Dateien jederzeit ([`scripts/container_kept_files.sh`](../scripts/container_kept_files.sh)).
+- Ein Container aus einem Image, das vor der Umbenennung des Repositorys gebaut wurde, hat seinen Programmordner unter
+  `/opt/llm-conversion-framework`. Dateien von dir dort zählen genauso: make behält diesen Container und listet sie auf.
 
 ## 6. Die GUI (optional)
 

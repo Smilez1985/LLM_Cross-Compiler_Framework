@@ -1,5 +1,5 @@
 [project]
-name = "llm-conversion-framework"
+name = "llm-cross-compiler-framework"
 version = "3.0.0"
 description = "Convert and quantize language models for edge hardware (GUI, CLI and MCP server)"
 authors = [{ name = "Smilez1985" }]

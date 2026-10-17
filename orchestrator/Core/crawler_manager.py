@@ -10,8 +10,10 @@ Text and data mining of public pages is allowed unless the rightsholder reserved
 * robots.txt as in RFC 9309, per scheme, host and port (the groups naming our product token merged, else the
   '*' groups; '*' and '$' patterns; the longest rule wins). One deliberate deviation: a robots.txt answering 401 or
   403 means "disallow everything" (RFC 9309 allows crawling on a 4xx): a reservation we cannot read still counts;
-* X-Robots-Tag headers and <meta name="robots"> / <meta name="llm-conversion-framework-bot">:
+* X-Robots-Tag headers and <meta name="robots"> / <meta name="llm-cross-compiler-framework-bot">:
   noindex, none, noai and noimageai keep the page out; nofollow and none stop following its links;
+  robots.txt groups, X-Robots-Tag scopes and meta tags written for the product token before the repository was
+  renamed (LLM-Conversion-Framework-Bot, LEGACY_BOT_NAMES) count as ours too, so an earlier opt-out still holds;
 * the W3C TDM Reservation Protocol (TDMRep 1.0): /.well-known/tdmrep.json per origin, the tdm-reservation
   header, <meta name="tdm-reservation"> and tdm:reservation in PDF metadata.
 A reservation from any of these sources wins (TDMRep lets a later source lift an earlier reservation; the
@@ -44,7 +46,7 @@ import logging
 import requests
 import re
 from urllib.parse import urlparse, urljoin
-from typing import Callable, Iterable, Iterator, List, NamedTuple, Set, Optional, Dict, Any, Tuple
+from typing import Callable, Iterable, Iterator, List, NamedTuple, Set, Optional, Dict, Any, Tuple, Union
 from io import BytesIO
 
 # Third-party imports
@@ -74,8 +76,13 @@ from orchestrator.utils.validation import validate_public_url, resolve_public_ad
 
 DEFAULT_LANGUAGES = ("en", "de")
 
-BOT_NAME = "LLM-Conversion-Framework-Bot"
-USER_AGENT = f"{BOT_NAME}/{__version__} (Open Source; +https://github.com/Smilez1985/llm_conversion_framework)"
+BOT_NAME = "LLM-Cross-Compiler-Framework-Bot"
+# The product token before the repository was renamed to LLM_Cross-Compiler_Framework. Sites may have written robots.txt
+# groups, X-Robots-Tag scopes or <meta name="..."> tags for it: they keep applying to this crawler (decision Q-1,
+# robots.txt is respected), so an opt-out made earlier still holds. Only ever extended, never shortened.
+LEGACY_BOT_NAMES = ("LLM-Conversion-Framework-Bot",)
+BOT_TOKENS = (BOT_NAME, *LEGACY_BOT_NAMES)
+USER_AGENT = f"{BOT_NAME}/{__version__} (Open Source; +https://github.com/Smilez1985/LLM_Cross-Compiler_Framework)"
 # Robots directives that keep a page out of the knowledge base, and those that stop following its links.
 SKIP_DIRECTIVES = frozenset({"noindex", "none", "noai", "noimageai"})
 NOFOLLOW_DIRECTIVES = frozenset({"nofollow", "none"})
@@ -178,10 +185,17 @@ class TdmRule(NamedTuple):
     policy: Optional[str]
 
 
-def robots_directives(values: Iterable[str], bot: str = BOT_NAME) -> Set[str]:
+def _bot_tokens(bot: Union[str, Iterable[str]]) -> Set[str]:
+    """The lower-case product tokens that name this crawler: one token, or several (the current one and the earlier
+    ones in BOT_TOKENS)."""
+    return {bot.lower()} if isinstance(bot, str) else {str(token).lower() for token in bot}
+
+
+def robots_directives(values: Iterable[str], bot: Union[str, Iterable[str]] = BOT_TOKENS) -> Set[str]:
     """Lower-case directives of X-Robots-Tag or meta robots values that apply to this crawler: unscoped
-    ones and those after "<bot>:" (a scope lasts until the next one within the same value). Directives are
-    separated by commas; "noindex nofollow" (spaces only) counts too."""
+    ones and those after "<bot>:" for any of its product tokens (a scope lasts until the next one within the same
+    value). Directives are separated by commas; "noindex nofollow" (spaces only) counts too."""
+    ours = _bot_tokens(bot)
     found: Set[str] = set()
     for value in values:
         scope = None
@@ -190,7 +204,7 @@ def robots_directives(values: Iterable[str], bot: str = BOT_NAME) -> Set[str]:
             scoped = re.match(r"([a-z0-9_.-]+)\s*:\s*(.*)", part)
             if scoped and scoped.group(1) not in _VALUED_DIRECTIVES:
                 scope, part = scoped.group(1), scoped.group(2)
-            if scope in (None, bot.lower()) and part:
+            if (scope is None or scope in ours) and part:
                 found.update(word.split(":", 1)[0].strip() for word in ([part] if ":" in part else part.split()))
     return found
 
@@ -235,10 +249,12 @@ def tdm_location_matches(location: str, path: str) -> bool:
     return path.find(parts[-1], pos) >= 0
 
 
-def robots_rules(text: str, bot: str = BOT_NAME) -> List[Tuple[bool, str]]:
+def robots_rules(text: str, bot: Union[str, Iterable[str]] = BOT_TOKENS) -> List[Tuple[bool, str]]:
     """(allow, pattern) rules of a robots.txt for this crawler (RFC 9309): all groups whose user-agent equals
-    its product token (case-insensitive; a group for "bot" is not ours), else all '*' groups.
+    one of its product tokens (case-insensitive; a group for "bot" is not ours; groups for the current and the
+    earlier token are merged), else all '*' groups.
     urllib.robotparser would ignore '*'/'$' patterns and every '*' group after the first."""
+    tokens = _bot_tokens(bot)
     groups: List[Tuple[Set[str], List[Tuple[bool, str]]]] = []
     in_rules = False
     for line in text.splitlines():
@@ -254,7 +270,7 @@ def robots_rules(text: str, bot: str = BOT_NAME) -> List[Tuple[bool, str]]:
             in_rules = True
             if value:   # "Disallow:" (empty) allows everything
                 groups[-1][1].append((key == "allow", _root_pattern(value)))
-    ours = [group for group in groups if bot.lower() in group[0]]
+    ours = [group for group in groups if tokens & group[0]]
     return [rule for _, rules in (ours or [g for g in groups if "*" in g[0]]) for rule in rules]
 
 
@@ -631,11 +647,12 @@ class CrawlerManager:
         return reasons, nofollow
 
     def _meta_opt_outs(self, soup: BeautifulSoup) -> Tuple[List[str], bool]:
-        """Reservations in <meta name="robots">, <meta name="<our bot>"> and <meta name="tdm-reservation">."""
-        reasons, nofollow, bot = [], False, BOT_NAME.lower()
+        """Reservations in <meta name="robots">, <meta name="<our bot>"> (the current or an earlier product token)
+        and <meta name="tdm-reservation">."""
+        reasons, nofollow, bots = [], False, _bot_tokens(BOT_TOKENS)
         for meta in soup.find_all("meta", attrs={"name": True, "content": True}):
             name = str(meta["name"]).strip().lower()
-            if name in ("robots", bot):
+            if name == "robots" or name in bots:
                 found, stop = _robots_opt_out(f'<meta name="{name}">', [str(meta["content"])])
                 reasons, nofollow = reasons + found, nofollow or stop
             elif name == "tdm-reservation" and tdm_flag(meta["content"]):

@@ -232,7 +232,7 @@ configs/known_hosts
 /logs/
 
 # Written by install.bat for the Windows uninstaller (the installation folder) and the uninstaller's backups of
-# your data (scripts/Uninstall-LLM-Conversion-Framework.bat)
+# your data (scripts/Uninstall-LLM-Cross-Compiler-Framework.bat)
 /.install_complete
 /recovered_data/
 

@@ -36,6 +36,17 @@ Möglichkeiten mitzuhelfen:
 
 ## 1. Entwicklungsumgebung
 
+Den Code holen:
+
+```bash
+git clone https://github.com/Smilez1985/LLM_Cross-Compiler_Framework.git
+cd LLM_Cross-Compiler_Framework
+```
+
+Bis Release 3.0.0 hieß das Repository `llm_conversion_framework`. GitHub leitet die alte Adresse weiter, ein
+vorhandener Klon funktioniert also weiter; auf die neue Adresse umstellen:
+`git remote set-url origin https://github.com/Smilez1985/LLM_Cross-Compiler_Framework.git`.
+
 Du brauchst **Python 3.11 bis 3.14**, Git und für echte Builds Docker. Auf einem Linux-Rechner ohne Desktop brauchen
 die Qt-Tests der GUI ein paar Systembibliotheken; die CI installiert
 `libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0`.

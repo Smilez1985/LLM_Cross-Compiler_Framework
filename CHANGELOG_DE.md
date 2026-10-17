@@ -805,9 +805,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in
-  `<meta name="robots">` / `<meta name="llm-conversion-framework-bot">` mit `noindex`, `none`, `noai` oder
-  `noimageai` markiert sind, folgt den Links von `nofollow`-Seiten nicht und beachtet das W3C TDM Reservation
-  Protocol (`/.well-known/tdmrep.json` je Site, Header und Meta-Tag `tdm-reservation`, PDF-Metadaten).
+  `<meta name="robots">` / `<meta name="llm-cross-compiler-framework-bot">` (auch unter dem früheren Namen
+  `llm-conversion-framework-bot`) mit `noindex`, `none`, `noai` oder `noimageai` markiert sind, folgt den Links von
+  `nofollow`-Seiten nicht und beachtet das W3C TDM Reservation Protocol (`/.well-known/tdmrep.json` je Site, Header
+  und Meta-Tag `tdm-reservation`, PDF-Metadaten).
   Weiterleitungsziele auf anderen Hosts werden genauso geprüft. Jede Seite, die nicht gespeichert wird, steht mit
   ihrem Grund im Crawl-Protokoll. Keine dieser Prüfungen lässt sich abschalten.
 - **Hinweis vor dem ersten Deep Ingest** (Englisch und Deutsch): was gelesen wird (nur öffentlich erreichbare
@@ -1389,6 +1390,31 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
+  heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
+  `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:
+  die Links im User-Agent des Crawlers, im Fehlerbericht und im Workflow des Community-Repositorys; die
+  Installationsordner (Linux `/opt/llm-cross-compiler-framework`, Windows
+  `C:\Program Files\LLM-Cross-Compiler-Framework` mit der Desktop-Verknüpfung **LLM-Cross-Compiler-Framework**, und
+  der Programmordner des Framework-Images); die Python-Distribution `llm-cross-compiler-framework`; die
+  Windows-Skripte `scripts/Uninstall-LLM-Cross-Compiler-Framework.bat` und
+  `scripts/start-llm_cross_compiler_framework.bat`; das Produkt-Token des Crawlers `LLM-Cross-Compiler-Framework-Bot`
+  (Gruppen in der robots.txt, Bereiche im `X-Robots-Tag` und Meta-Tags, die für `LLM-Conversion-Framework-Bot`
+  geschrieben wurden, gelten weiter, ein früher erklärter Nutzungsvorbehalt einer Website bleibt also bestehen); und
+  der Schlüsselbund-Dienst `llm-cross-compiler-framework` (Tresorschlüssel, der Audit-Schlüssel und die
+  Revisionsanker, die noch unter `llm-conversion-framework` liegen, werden gelesen und beim ersten Gebrauch unter den
+  neuen Namen kopiert, die alten Einträge werden nie entfernt, und der gespeicherte Prüfwert des Tresors behält seinen
+  Text, sodass jeder vorhandene Tresor aufgeht). Wie eine vorhandene Installation umzieht: Eine Installation im alten
+  Ordner wird nie verändert oder gelöscht. `install.sh` kopiert die Dateien von dir aus ihrem `configs/`, die die neue
+  Installation noch nicht hat (`config.yml`, eine selbst geschriebene `framework.yml` und `secrets.store`, den Tresor
+  für Zugangsdaten einer Version vor 3.0.0, den das Framework dann übernimmt; nie über eine vorhandene Datei, nie über
+  einen Link), sagt, was es nicht übernommen hat (Builds, Cache, Modelle, eigene Targets und Packs), dass über MCP
+  verbundene KI-Apps die alte Installation starten, bis sie aus der neuen eingerichtet sind, und wie man den alten
+  Ordner entfernt, nachdem man hineingesehen hat. `install.bat` nennt den alten Ordner, die KI-Apps und den
+  Uninstaller, der jetzt beide Installationen findet, für jede zeigt, was er entfernt, und vorher fragt (ohne Antwort
+  wird nichts entfernt). `make` behält einen Container von vor der Umbenennung, solange er Dateien
+  von dir im alten Programmordner enthält. Siehe
+  [README: Eine Installation von vor der Umbenennung](README_DE.md#eine-installation-von-vor-der-umbenennung).
 - **Schnellerer Start: schwere Teile laden erst, wenn sie gebraucht werden** (unveröffentlicht; Entscheidung des
   Maintainers RG1, Lazy Loading): `llm-cli`, der MCP-Server und die GUI importierten beim Start das ganze Framework.
   Jetzt importiert ein CLI-Befehl das Framework, die Build-Engine und die Manager erst, wenn er sie nutzt; das
@@ -2077,13 +2103,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Installation) statt nach `output/` im Arbeitsordner.
 - Der Dialog der KI-Einstellungen warnt, wenn sich die Einstellungen nicht in der `config.yml` speichern ließen
   (sie gelten bis zum Programmende); vorher stand das nur im Protokoll.
-- Windows: Der Uninstaller (`scripts/Uninstall-LLM-Conversion-Framework.bat`) findet die Installation.
+- Windows: Der Uninstaller (`scripts/Uninstall-LLM-Cross-Compiler-Framework.bat`) findet die Installation.
   `install.bat` schreibt jetzt die Markierungsdatei mit dem Installationsordner, die der Uninstaller liest, neben
   `install.bat`, wo der Uninstaller sie sucht; vorher schrieb kein Installer sie, und der Uninstaller meldete immer,
   es sei nichts installiert. Meldet PowerShell keinen Skriptpfad (der PowerShell-Teil von `install.bat` läuft über
   `Invoke-Expression`), nimmt `install.bat` den aktuellen Ordner, den sein Batch-Teil auf den eigenen gesetzt hat.
   Das Startskript
-  `scripts/start-llm_convertion_framework.bat` funktioniert auch aus `scripts\` (es suchte `orchestrator\main.py`
+  `scripts/start-llm_cross_compiler_framework.bat` funktioniert auch aus `scripts\` (es suchte `orchestrator\main.py`
   und `.venv` dort).
 - `llm-cli targets list` zeigt für jedes Target die ID (den Wert für `--target`), den Namen sowie Boards und
   Formate aus seinen Capabilities statt Platzhaltern; `llm-cli targets validate` prüft den Block `capabilities:`
@@ -2426,10 +2452,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   oder `$` (etwa `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach
   der ersten und eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler
   Seiten abrief, die die Site ausgeschlossen hatte. Seine Gruppen werden am genauen Produkt-Token
-  `LLM-Conversion-Framework-Bot` erkannt (gleich in welcher Schreibweise), sodass eine Gruppe für `bot` nicht mehr
-  über `*` siegt, und jedes Schema, jeder Host und jeder Port hat eine eigene robots.txt. Die Abweichung: Eine
-  robots.txt, die mit 401 oder 403 antwortet, heißt „alles verboten“, wo RFC 9309 das Crawlen erlauben würde; ein
-  Vorbehalt, den der Crawler nicht lesen kann, zählt trotzdem.
+  `LLM-Cross-Compiler-Framework-Bot` oder seinem früheren Namen `LLM-Conversion-Framework-Bot` erkannt (gleich in
+  welcher Schreibweise), sodass eine Gruppe für `bot` nicht mehr über `*` siegt, und jedes Schema, jeder Host und
+  jeder Port hat eine eigene robots.txt. Die Abweichung: Eine robots.txt, die mit 401 oder 403 antwortet, heißt
+  „alles verboten“, wo RFC 9309 das Crawlen erlauben würde; ein Vorbehalt, den der Crawler nicht lesen kann, zählt
+  trotzdem.
 - Deep Ingest liest jede Antwort bis zu einer Grenze (HTML-Seiten 8 MiB, PDFs 64 MiB, robots.txt 500 KiB,
   `tdmrep.json` 1 MiB) und innerhalb einer Frist für die ganze Anfrage (60 s, PDFs 180 s). Vorher konnte eine Site
   eine endlose oder tröpfelnde Antwort schicken, die den Speicher füllte oder den Crawl, und damit Stoppen oder das

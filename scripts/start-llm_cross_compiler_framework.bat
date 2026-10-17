@@ -13,7 +13,7 @@ cd /d "%~dp0"
 if not exist "orchestrator\main.py" if exist "..\orchestrator\main.py" cd ..
 set "FRAMEWORK_ROOT=%CD%"
 
-title LLM Conversion Framework Orchestrator
+title LLM Cross-Compiler Framework Orchestrator
 
 :: --- BANNER ---
 cls

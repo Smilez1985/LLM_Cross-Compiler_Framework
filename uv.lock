@@ -1022,7 +1022,7 @@ wheels = [
 ]
 
 [[package]]
-name = "llm-conversion-framework"
+name = "llm-cross-compiler-framework"
 version = "3.0.0"
 source = { editable = "." }
 dependencies = [

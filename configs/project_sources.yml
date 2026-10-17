@@ -1,5 +1,5 @@
 # ============================================================================
-# LLM CONVERSION FRAMEWORK - CATALOGUE OF UPSTREAM PROJECTS
+# LLM CROSS-COMPILER FRAMEWORK - CATALOGUE OF UPSTREAM PROJECTS
 # ============================================================================
 # Version: 2.1.0
 # Last Updated: 2025-12-28
@@ -32,7 +32,7 @@
 metadata:
   ssot_version: "2.1.0"
   last_updated: "2025-12-28"
-  maintainer: "LLM Conversion Framework"
+  maintainer: "LLM Cross-Compiler Framework"
   
   purpose: |
     Reference catalogue of external tools and documentation links for developers.
