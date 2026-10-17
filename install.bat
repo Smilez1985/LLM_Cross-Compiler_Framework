@@ -41,9 +41,13 @@ $ErrorActionPreference = "Stop"
 $ScriptPath = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 
 # 1. KONFIGURATION
-$AppName = "LLM-Conversion-Framework"
+$AppName = "LLM-Cross-Compiler-Framework"
 $ProgramFiles = [Environment]::GetFolderPath("ProgramFiles")
 $InstallDir = Join-Path $ProgramFiles $AppName
+# The folder of the installation before the repository was renamed (LLM Conversion Framework). Only read: this installer
+# never changes or deletes it; it says that it is there and how to remove it with the uninstaller.
+$OldAppName = "LLM-Conversion-Framework"
+$OldInstallDir = Join-Path $ProgramFiles $OldAppName
 # Program Files is read-only for standard users: the framework keeps builds, cache and models in each user's
 # own folder (%USERPROFILE%\.llm-framework, or LLM_FRAMEWORK_HOME) and creates them when they are needed.
 $UserDataHint = "%USERPROFILE%\.llm-framework"
@@ -153,9 +157,26 @@ $IconPath = Join-Path $InstallDir "assets\LLM-Builder.ico"
 if (Test-Path $IconPath) { $Shortcut.IconLocation = $IconPath }
 $Shortcut.Save()
 
-# Marker for scripts\Uninstall-LLM-Conversion-Framework.bat: the installation folder, kept next to this script
+# Marker for scripts\Uninstall-LLM-Cross-Compiler-Framework.bat: the installation folder, kept next to this script. The
+# first line is this installation; the lines after it name other installations that still exist (the one under the
+# old name, or one an earlier marker named), so the uninstaller finds them too.
+# Reading the earlier marker never stops the installation: without it, only the old folder is added.
+$MarkerFile = Join-Path $ScriptPath ".install_complete"
+$OtherInstalls = @()
+try {
+    if (Test-Path -LiteralPath $MarkerFile) {
+        $OtherInstalls += @(Get-Content -LiteralPath $MarkerFile | ForEach-Object { $_.Trim().Trim('"') } | Where-Object { $_ })
+    }
+    if (Test-Path $OldInstallDir) { $OtherInstalls += $OldInstallDir }
+    $OtherInstalls = @($OtherInstalls | Where-Object {
+        ($_ -ne $InstallDir) -and (Test-Path -LiteralPath $_ -ErrorAction SilentlyContinue) } | Sort-Object -Unique)
+} catch {
+    $OtherInstalls = @()
+    if (Test-Path $OldInstallDir) { $OtherInstalls = @($OldInstallDir) }
+}
 try {
     Set-Content -Path (Join-Path $ScriptPath ".install_complete") -Value $InstallDir -Encoding ASCII
+    if ($OtherInstalls.Count -gt 0) { Add-Content -Path $MarkerFile -Value $OtherInstalls -Encoding ASCII }
 } catch {
     Write-Warning "Marker fuer den Uninstaller nicht geschrieben ($_); er findet die Installation dann nicht."
 }
@@ -185,3 +206,17 @@ try {
 
 Write-Host "Installation Erfolgreich!" -ForegroundColor Green
 Write-Host "Builds, Cache und Modelle: $UserDataHint (je Benutzer)"
+
+# The installation under the old name: said in plain words, never removed here.
+if (Test-Path $OldInstallDir) {
+    Write-Host ""
+    Write-Warning "Es gibt noch eine Installation unter dem frueheren Namen: $OldInstallDir"
+    Write-Host "Dieser Installer hat sie nicht veraendert und loescht sie nicht. Die neue Installation liegt in $InstallDir,"
+    Write-Host "ihre Verknuepfung auf dem Desktop heisst '$AppName'. Die alte Verknuepfung '$OldAppName' startet weiter die alte."
+    Write-Host "Deine Einstellungen, Zugangsdaten und Builds in $UserDataHint gelten fuer beide und bleiben, wie sie sind."
+    Write-Host "KI-Apps, die du ueber MCP verbunden hast (Claude Desktop, VS Code, Claude Code), starten noch die alte Installation."
+    Write-Host "Vor dem Entfernen aus der neuen einrichten (llm-cli mcp config, siehe README), im Ordner $InstallDir:"
+    Write-Host "  .venv\Scripts\python.exe -m orchestrator.cli mcp config"
+    Write-Host "Entfernen: scripts\Uninstall-LLM-Cross-Compiler-Framework.bat ausfuehren. Es findet beide Installationen,"
+    Write-Host "zeigt fuer jede, was es entfernt, und fragt vorher (ohne Antwort: Nein)."
+}

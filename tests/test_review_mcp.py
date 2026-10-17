@@ -501,8 +501,8 @@ class TestClientSnippets:
         assert not list(tmp_path.glob("pwned*")), "the pasted command ran something else"
 
     @pytest.mark.parametrize("app_root, python", [
-        (r"C:\Program Files\LLM-Conversion-Framework",
-         r"C:\Program Files\LLM-Conversion-Framework\.venv\Scripts\python.exe"),
+        (r"C:\Program Files\LLM-Cross-Compiler-Framework",
+         r"C:\Program Files\LLM-Cross-Compiler-Framework\.venv\Scripts\python.exe"),
         (r"C:\Users\First Last\LLM Framework" + "\\", r"C:\Users\First Last\AppData\Local\Python312\python.exe"),
         (r"D:\llm", r"D:\llm\.venv\Scripts\python.exe"),
     ])

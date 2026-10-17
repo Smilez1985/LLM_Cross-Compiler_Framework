@@ -1,4 +1,4 @@
-Version 3.0.0 plus the [unreleased changes](CHANGELOG.md#unreleased) · Last updated 2026-10-11
+Version 3.0.0 plus the [unreleased changes](CHANGELOG.md#unreleased) · Last updated 2026-10-17
 
 **English** · [Deutsch](README_DE.md)
 
@@ -104,7 +104,11 @@ The GUI, the CLI, Ditto and the MCP server offer exactly these options and rejec
 
 ### Linux
 
-Open a terminal in the downloaded repository folder and run:
+Get the repository from
+[github.com/Smilez1985/LLM_Cross-Compiler_Framework](https://github.com/Smilez1985/LLM_Cross-Compiler_Framework)
+(`git clone https://github.com/Smilez1985/LLM_Cross-Compiler_Framework.git`, or download it as a ZIP file). Up to
+release 3.0.0 it was called `llm_conversion_framework`; GitHub forwards the old address. Open a terminal in the
+repository folder and run:
 
 ```bash
 sudo ./install.sh
@@ -119,7 +123,7 @@ The installer:
    that means: members of the group control the Docker service, which runs as root, so every program that runs
    as your user can get root rights on this computer (`sudo gpasswd -d USER docker` undoes it; the framework
    then cannot build without sudo),
-3. copies the files the repository ships to `/opt/llm-conversion-framework` (owned by your user) and lists them
+3. copies the files the repository ships to `/opt/llm-cross-compiler-framework` (owned by your user) and lists them
    in `.lcf-installed-files`. Running it again updates those files and removes only files that an earlier run
    copied and the repository no longer ships; everything else there stays: your own targets (module wizard,
    `llm-cli module create`), installed community packs, `configs/config.yml`, builds, cache and models. Start
@@ -143,13 +147,45 @@ Log out and back in once so the `docker` group takes effect. Then start the GUI 
 2. Right-click `install.bat` and choose **Run as administrator**.
 
 The installer checks for Python (installs Python 3.13 with `winget` if none is found, then requires 3.11 to
-3.14), copies the framework to `C:\Program Files\LLM-Conversion-Framework`, creates `.venv` there, installs
-`requirements.txt`, and puts a **LLM-Conversion-Framework** shortcut on the desktop. The shortcut runs
+3.14), copies the framework to `C:\Program Files\LLM-Cross-Compiler-Framework`, creates `.venv` there, installs
+`requirements.txt`, and puts a **LLM-Cross-Compiler-Framework** shortcut on the desktop. The shortcut runs
 `start_framework.bat`, which starts the GUI. The Ditto step is the same as on Linux (`install.bat --ditto=...` or
 `LCF_DITTO`); it runs only for the person who is signed in. In this version Windows has no self-built server and
 no Docker mode for Ditto yet, so the step says so and the installation goes on.
 
 Conversions on a Windows host have not been verified yet (see [Known gaps](#known-gaps)).
+
+### An installation from before the rename
+
+Up to release 3.0.0 the repository was called `llm_conversion_framework`, and the installers named their folders
+and the desktop shortcut after it (LLM Conversion Framework). Such an installation stays as it is: the installers
+never change or delete it, they say that it is there and how to remove it.
+
+- **Linux:** the new installation goes to `/opt/llm-cross-compiler-framework`, and `llm-framework` starts the new
+  one. If `/opt/llm-conversion-framework` exists, `install.sh` copies the files of yours from its `configs/` that the
+  new installation does not have yet (never over an existing file, never through a link): the settings
+  `config.yml`, a `framework.yml` you wrote, and `secrets.store`, the credential vault of a version before 3.0.0,
+  which the framework takes over into your personal folder at the first start (a vault it took over before brings
+  back nothing you deleted since). It names what it does not take over: builds, cache and models (`output/`,
+  `cache/`, `models/`) and targets or packs of yours under `targets/` and `community/`. Copy what you still need,
+  look at what is left (`ls -la /opt/llm-conversion-framework`) and remove the old folder yourself:
+  `sudo rm -rf /opt/llm-conversion-framework`.
+- **Windows:** the new installation goes to `C:\Program Files\LLM-Cross-Compiler-Framework` with the shortcut
+  **LLM-Cross-Compiler-Framework**; the old shortcut **LLM-Conversion-Framework** still starts the old installation.
+  `scripts\Uninstall-LLM-Cross-Compiler-Framework.bat` finds both installations, lists for each one what it
+  removes (the folder with everything in it and its shortcut) and asks first; without an answer nothing is removed.
+- **Your personal folder** `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`) belongs to neither
+  installation and stays as it is. Your API keys and tokens stay readable: the key of the credential vault is now
+  kept under the keyring service `llm-cross-compiler-framework`. A key still under the old service
+  `llm-conversion-framework` is read and copied to the new name on first use; the old entry is never removed.
+- **AI apps connected over MCP** (Claude Code, Claude Desktop, VS Code) start the Python of the installation they
+  were set up from. Before you remove the old installation, set them up again from the new one: `llm-cli mcp config`
+  run with the new installation's Python ([Quick start: AI clients over
+  MCP](#quick-start-ai-clients-over-mcp-claude-code-claude-desktop-vs-code)), or **Security > AI App Connections
+  (MCP)...**.
+- **The framework container:** an image you build now has its program folder at `/opt/llm-cross-compiler-framework`.
+  `make` keeps a container built before the rename as long as it holds targets or packs of yours in
+  `/opt/llm-conversion-framework`, and lists them ([docs/Container_Setup.md](docs/Container_Setup.md)).
 
 ### In a container (server, NAS, Proxmox)
 
@@ -173,20 +209,20 @@ The installers do not put `llm-cli` on your PATH. Use the framework's Python fro
 
 ```bash
 # Linux
-cd /opt/llm-conversion-framework
+cd /opt/llm-cross-compiler-framework
 .venv/bin/python -m orchestrator.cli --help
 ```
 
 ```bat
 :: Windows (Command Prompt)
-cd /d "C:\Program Files\LLM-Conversion-Framework"
+cd /d "C:\Program Files\LLM-Cross-Compiler-Framework"
 .venv\Scripts\python.exe -m orchestrator.cli --help
 ```
 
 On Linux you can make a shortcut that works from any folder:
 
 ```bash
-alias llm-cli='PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv/bin/python -m orchestrator.cli'
+alias llm-cli='PYTHONPATH=/opt/llm-cross-compiler-framework /opt/llm-cross-compiler-framework/.venv/bin/python -m orchestrator.cli'
 ```
 
 In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm-cli` exists after
@@ -196,7 +232,7 @@ In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm
 
 | What | Where |
 |---|---|
-| Program and Python environment | Linux: `/opt/llm-conversion-framework` · Windows: `C:\Program Files\LLM-Conversion-Framework` |
+| Program and Python environment | Linux: `/opt/llm-cross-compiler-framework` · Windows: `C:\Program Files\LLM-Cross-Compiler-Framework` |
 | Finished models | The output folder `~/llmcf/output` (Windows: `%USERPROFILE%\llmcf\output`), set once with **File > Output Folder...** or `llm-cli config output-folder`; in the GUI a save dialog opens there for every finished build (unreleased) |
 | Builds not saved yet, cache, downloaded models | `output/` (the framework's build folder; earlier builds stay there and stay listed), `cache/` and `models/` in the installation folder if your user may write there (Linux), otherwise in the personal folder below (Windows: `%USERPROFILE%\.llm-framework\output` and so on); created when they are first needed. The settings `build_dir`, `cache_dir` and `models_dir` set other folders |
 | Settings (`config.yml`) | `configs/` in the installation folder if your user may write there, otherwise the personal folder below; `LLM_FRAMEWORK_CONFIG_DIR` sets another folder |

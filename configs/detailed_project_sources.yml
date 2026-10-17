@@ -1,10 +1,10 @@
 # ============================================================================
-# LLM CONVERSION FRAMEWORK - SINGLE SOURCE OF TRUTH (SSOT)
+# LLM CROSS-COMPILER FRAMEWORK - SINGLE SOURCE OF TRUTH (SSOT)
 # ============================================================================
 # Version: 2.1.0 (Major Update - OpenVINO, Quantization, Deployment Philosophy)
 # Status: Production-Ready & Community-Verified
 # Last Updated: 2025-12-28
-# Maintainer: LLM Conversion Framework Team
+# Maintainer: LLM Cross-Compiler Framework Team
 #
 # Diese Datei ist die zentrale Wissensquelle für das Framework.
 # Der Orchestrator lädt diese Links und injiziert sie als Umgebungsvariablen.
@@ -1177,7 +1177,7 @@ quality_tools:
 metadata:
   ssot_version: "2.1.0"
   last_updated: "2025-12-28"
-  maintainer: "LLM Conversion Framework Team"
+  maintainer: "LLM Cross-Compiler Framework Team"
   
   integration_priorities:
     critical:
