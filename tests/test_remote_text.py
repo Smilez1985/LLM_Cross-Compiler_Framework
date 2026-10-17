@@ -113,3 +113,44 @@ def test_the_kept_output_lines():
     for i in range(REMOTE_OUTPUT_LINES + 5):
         DeploymentManager._keep(lines, str(i))
     assert len(lines) == REMOTE_OUTPUT_LINES and lines[-1] == str(REMOTE_OUTPUT_LINES + 4)
+
+
+# --- the one implementation (orchestrator/remote/text.py) ------------------------------------------------------------
+
+@pytest.mark.parametrize("kind", sorted(EVENTS))
+def test_event_text_for_the_person_and_for_an_ai(kind):
+    from orchestrator.remote.text import event_text
+    assert event_text(EVENTS[kind], HOST, "en") == PERSON["en"][kind]
+    assert event_text(EVENTS[kind], HOST, "de") == person_texts("de")[kind]
+    assert event_text(EVENTS[kind], LABEL, audience="ai") == AI[kind]
+    with pytest.raises(ValueError):
+        event_text(EVENTS[kind], HOST, audience="robot")
+
+
+def test_the_copies_are_calls(monkeypatch):
+    """The CLI, the GUI and the deploy tool call remote.text: one patch changes all three."""
+    import orchestrator.cli as cli
+    from orchestrator.remote import text
+    from orchestrator.runtime.device import remote
+    from orchestrator.tools import tools_deploy
+    assert remote._tail is text.one_line
+    monkeypatch.setattr(text, "event_text", lambda event, place, lang=None, audience="person": f"{audience}:{place}")
+    monkeypatch.setattr(cli, "_config_language", lambda ctx: "en")
+    assert cli._deploy_event_text(None, EVENTS["uploading"], HOST) == f"person:{HOST}"
+    assert cli._deploy_event_text(None, EVENTS["waiting"], HOST) == f"person:{HOST} (Ctrl+C)"
+    assert tools_deploy.event_text(EVENTS["uploading"], LABEL) == f"ai:{LABEL}"
+    pytest.importorskip("PySide6")
+    from orchestrator.gui import deployment_window
+    assert deployment_window.event_text(EVENTS["uploading"], HOST) == f"person:{HOST}"
+
+
+def test_the_output_line_limits_are_one_pair():
+    from orchestrator.Core import deployment_manager
+    from orchestrator.remote import text
+    assert (deployment_manager.REMOTE_OUTPUT_LINES, deployment_manager.REMOTE_LINE_CHARS) == \
+        (text.OUTPUT_LINES, text.LINE_CHARS) == (100, 500)
+    lines = []
+    text.keep_tail(lines, "z" * 9, max_lines=2, max_chars=4)
+    text.keep_tail(lines, "b", max_lines=2, max_chars=4)
+    text.keep_tail(lines, "c", max_lines=2, max_chars=4)
+    assert lines == ["b", "c"]

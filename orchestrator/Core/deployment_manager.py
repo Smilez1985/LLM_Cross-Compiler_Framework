@@ -30,6 +30,7 @@ from orchestrator.utils.logging import get_logger
 
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
 from orchestrator.remote.address import USER_PATTERN, valid_host, valid_user
+from orchestrator.remote.text import LINE_CHARS, OUTPUT_LINES, keep_tail
 from orchestrator.utils import ssh_trust
 from orchestrator.utils.next_steps import WithSteps
 
@@ -42,8 +43,9 @@ SSH_USER_PATTERN = USER_PATTERN   # the one account check (orchestrator/remote/a
 MODEL_SUFFIXES = MODEL_FILE_SUFFIXES
 # An image reference pinned by its content digest (name@sha256:<64 hex>): the only form pulled for a package.
 DIGEST_REFERENCE = re.compile(r"^[a-z0-9][a-z0-9._/:-]{0,254}@sha256:[0-9a-f]{64}$", re.ASCII)
-REMOTE_OUTPUT_LINES = 100     # lines of the device's output kept for the result (the rest is in the log)
-REMOTE_LINE_CHARS = 500
+# Lines of the device's output kept for the result (the rest is in the log), and their length (remote/text.py).
+REMOTE_OUTPUT_LINES = OUTPUT_LINES
+REMOTE_LINE_CHARS = LINE_CHARS
 # A deploy whose network drops (a Wi-Fi board) waits this long for the board to answer again (N5), trying every
 # WAIT_INTERVAL seconds, and continues at most MAX_RESUMES times.
 DEPLOY_WAIT_SECONDS = 300
@@ -683,10 +685,7 @@ class DeploymentManager:
 
     @staticmethod
     def _keep(lines: List[str], line: str) -> None:
-        text = "".join(ch if ch.isprintable() else " " for ch in str(line).rstrip("\r\n"))[:REMOTE_LINE_CHARS]
-        lines.append(text)
-        if len(lines) > REMOTE_OUTPUT_LINES:
-            del lines[0]
+        keep_tail(lines, line, max_lines=REMOTE_OUTPUT_LINES, max_chars=REMOTE_LINE_CHARS)
 
     @staticmethod
     def _run(ssh, command: str) -> tuple:

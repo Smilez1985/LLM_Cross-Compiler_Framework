@@ -7,5 +7,7 @@ Everything that talks to a board (consolidation plan, layer 2): one Qt-free pack
   (valid_host, host_shaped), the port check and the one account check (valid_user, re.ASCII).
 - reasons.py: why a board cannot be reached (the N6 codes), check_port, classify and reach_code (the code every caller
   records and shows). orchestrator/runtime/device/reasons.py is this module under its old name.
+- text.py: a board's words as one line (one_line) or as kept output lines (keep_tail), and the visible state of a
+  running deploy (event_text: for the person in their language, or for an AI in English with the board's label).
 - transport.py: whether SSH works here (available(), PARAMIKO_AVAILABLE); paramiko is imported on first use only.
 """
