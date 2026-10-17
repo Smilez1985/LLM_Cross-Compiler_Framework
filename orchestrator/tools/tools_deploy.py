@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.remote import text as remote_text
 from orchestrator.tools.facts_catalog import blocked, gb_number, size_class, warn, with_blocker
 from orchestrator.tools.job_audit import audited_job
 from orchestrator.tools.output import ToolOutput, count, fact
@@ -105,28 +106,16 @@ def hide_paths(text: str, labels: Dict[str, str]) -> str:
 
 def event_text(event: Any, label: str) -> str:
     """A running deploy's event (DeploymentManager.DeployEvent) as plain English for the job's progress: the device by
-    its label, never its address or account."""
-    if event.kind == "uploading":
-        return f"uploading to {label}: {_size(event.done)} of {_size(event.total)}"
-    if event.kind == "waiting":
-        what = "the upload continues" if event.step != "install" else "the installation is followed again"
-        return (f"waiting for the board {label}: {int(event.elapsed)} s of at most {int(event.limit)} s (the network "
-                f"dropped; {what} when it answers)")
-    if event.kind == "back" and event.step == "install":
-        return f"{label} answers again: the installation on the board is followed again (it is never started twice)"
-    if event.kind == "back":
-        return f"{label} answers again: the upload continues at {_size(event.done)} of {_size(event.total)}"
-    return f"installing on {label}"
+    its label, never its address or account (remote/text.py event_text for an AI)."""
+    return remote_text.event_text(event, label, audience="ai")
 
 
 def unreachable_error(device: Any, error: BaseException) -> ToolError:
     """The refusal for a board whose host key could not be read: the SSH reason code of the failure (N6) with the
     AI's next step, never the address, the account or the exception's text."""
-    from orchestrator.runtime.device import reasons
-    reason = reasons.classify(error)
-    if reason is None and isinstance(error, OSError):
-        reason = reasons.HOST_DOWN
-    if reason is None:
+    from orchestrator.remote import reasons
+    reason = reasons.reach_code(error)
+    if not reason:
         return ToolError(f"The host key of {device.label} could not be read ({error.__class__.__name__}).",
                          code="failed", field="device_id", next="Tell the person; the framework's log has the details.")
     return blocked(reason, f"The device {device.label} cannot be reached to read its host key ({reason}).",
@@ -134,9 +123,7 @@ def unreachable_error(device: Any, error: BaseException) -> ToolError:
 
 
 def _size(n: Optional[int]) -> str:
-    if n is None:
-        return "size unknown"
-    return f"{n / 1000 ** 3:.2f} GB" if n >= 10 ** 8 else f"{n / 1000 ** 2:.1f} MB"
+    return remote_text.ai_size(n)
 
 
 # --- inputs and outputs ---------------------------------------------------------------------------------------------
@@ -469,13 +456,13 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
     def read_host_key(device):
         """The key the device presents now (a key read, no login) and its state against the framework's known_hosts.
         Nothing is written: an unknown or changed key is refused, never trusted."""
-        from orchestrator.runtime.device import reasons
+        from orchestrator.remote import reasons
         from orchestrator.utils import ssh_trust
         try:
             key = ssh_trust.fetch_host_key(device.host, device.port)
             status = ssh_trust.check_host_key(devices().state_dir, device.host, device.port, key)
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
-            code = reasons.classify(e) or (reasons.HOST_DOWN if isinstance(e, OSError) else "")
+            code = reasons.reach_code(e)
             if code:  # recorded for Mojo, which reads it instead of contacting the board (W1)
                 devices().note_reach(device.device_id, "deploy", code)
             raise unreachable_error(device, e) from None

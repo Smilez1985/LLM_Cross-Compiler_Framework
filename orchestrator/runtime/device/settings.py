@@ -24,11 +24,11 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Mapping, Optional
 
+from orchestrator.remote.address import valid_user
 from orchestrator.runtime.server_policy import DEVICE_DEFAULT_PORT, KV_CACHE_TYPES
 
 INSTALL_MODES = ("user", "systemd")
 PORT_RANGE = (1024, 65535)
-_RE_USER = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.ASCII | re.IGNORECASE)
 _RE_MODEL = re.compile(r"^[A-Za-z0-9._+/-]{1,255}$", re.ASCII)
 _RE_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
 _FIELDS = ("install", "ssh_user", "port", "model", "sudo_confirmed_at", "kv_cache")
@@ -40,7 +40,7 @@ class SettingsError(ValueError):
 
 def check_ssh_user(user: Any) -> str:
     """An account name on the device (no option, no shell character); root is refused."""
-    if not isinstance(user, str) or not _RE_USER.fullmatch(user):
+    if not valid_user(user, allow_root=True):
         raise SettingsError("the SSH user must be an account name (letters, digits, '_', '.', '-'; at most 32)")
     if user == "root":
         raise SettingsError("the runtime never runs as root: use an unprivileged account on the device (on DietPi, "

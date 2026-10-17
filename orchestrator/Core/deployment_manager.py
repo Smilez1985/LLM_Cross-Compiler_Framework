@@ -11,7 +11,6 @@ The knowledge base stays on this computer, where it serves Ditto: a package carr
 sidecar (nothing on the device used one).
 """
 
-import importlib.util
 import os
 import re
 import shlex
@@ -26,12 +25,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, List, Dict
 
-# paramiko is used through orchestrator.utils.ssh_trust; without it deployments fall back to OpenSSH.
-PARAMIKO_AVAILABLE = importlib.util.find_spec("paramiko") is not None
-
+from orchestrator.remote.transport import PARAMIKO_AVAILABLE   # true while paramiko imports (tested on first use)
 from orchestrator.utils.logging import get_logger
 
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
+from orchestrator.remote.address import USER_PATTERN, valid_host, valid_user
+from orchestrator.remote.text import LINE_CHARS, OUTPUT_LINES, keep_tail
 from orchestrator.utils import ssh_trust
 from orchestrator.utils.next_steps import WithSteps
 
@@ -40,14 +39,13 @@ from orchestrator.utils.next_steps import WithSteps
 DEFAULT_INFERENCE_IMAGE = "llm-framework/inference:local"
 # The device runtime's start script, relative to the device user's home (orchestrator/runtime/device/launcher.py).
 DEVICE_START_SCRIPT = ".local/share/llm-framework/llama.cpp/current/llama-server.sh"
-SSH_USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
+SSH_USER_PATTERN = USER_PATTERN   # the one account check (orchestrator/remote/address.py), kept under its old name
 MODEL_SUFFIXES = MODEL_FILE_SUFFIXES
 # An image reference pinned by its content digest (name@sha256:<64 hex>): the only form pulled for a package.
 DIGEST_REFERENCE = re.compile(r"^[a-z0-9][a-z0-9._/:-]{0,254}@sha256:[0-9a-f]{64}$", re.ASCII)
-REMOTE_OUTPUT_LINES = 100     # lines of the device's output kept for the result (the rest is in the log)
-REMOTE_LINE_CHARS = 500
-# A board's address or host name (192.168.1.50, myboard.local, an IPv6 address); the person enters what they know.
-_HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45})$", re.ASCII)
+# Lines of the device's output kept for the result (the rest is in the log), and their length (remote/text.py).
+REMOTE_OUTPUT_LINES = OUTPUT_LINES
+REMOTE_LINE_CHARS = LINE_CHARS
 # A deploy whose network drops (a Wi-Fi board) waits this long for the board to answer again (N5), trying every
 # WAIT_INTERVAL seconds, and continues at most MAX_RESUMES times.
 DEPLOY_WAIT_SECONDS = 300
@@ -599,18 +597,16 @@ class DeploymentManager:
         return result
 
     def _note_reach(self, host: str, port: int, result: DeployResult) -> None:
-        from orchestrator.runtime.device import reasons
+        from orchestrator.remote import reasons
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.runtime.device.trusted import record_reach
         # deploy.sh ran on the board and ended with its own exit status: the board was reached and logged in to (255 is
         # also what the ssh command itself returns when it cannot connect, so it says nothing)
         ran_there = result.exit_status is not None and result.exit_status != 255
         code = result.code if result.code in reasons.REASONS else ("" if result.success or ran_there else None)
         if code is None:
             return  # a failure before the board was reached (the package, a refused address): nothing to record
-        try:
-            from orchestrator.runtime.device.trusted import TrustedDevices
-            TrustedDevices(self._state_dir()).note_reach_at(host, port, "deploy", code)
-        except Exception:  # noqa: BLE001 - bookkeeping never fails a deploy
-            pass
+        record_reach(self._state_dir(), "deploy", code, endpoint=Endpoint(host, port))
 
     def _deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, password: Optional[str] = None,
                         pair: bool = True, expect_fingerprint: Optional[str] = None,
@@ -632,14 +628,13 @@ class DeploymentManager:
         again with the same host key check and continues: the upload resumes where it stopped once the sha256 of what
         arrived matches, and deploy.sh, which runs on the board on its own, is started once and never again.
         """
-        from orchestrator.runtime.remote_probe import valid_host
         stop = cancelled or (lambda: False)
         # A leading '-' would be parsed by ssh/scp as an option (e.g. -oProxyCommand=...).
-        if not isinstance(host, str) or not _HOST.fullmatch(host) or not valid_host(host):
+        if not valid_host(host):
             return DeployResult(False, reason=f"Security/Format Error: Invalid address or host name: "
                                               f"{str(host)[:64]!r} (an IPv6 address is written without brackets, "
                                               "e.g. fe80::1)")
-        if not SSH_USER_PATTERN.match(user or ""):
+        if not valid_user(user, allow_root=True):
             return DeployResult(False, reason=f"Security/Format Error: Invalid SSH user name: {user!r}")
         if not Path(package).is_file():
             return DeployResult(False, reason=f"The package {Path(package).name} does not exist.")
@@ -688,10 +683,7 @@ class DeploymentManager:
 
     @staticmethod
     def _keep(lines: List[str], line: str) -> None:
-        text = "".join(ch if ch.isprintable() else " " for ch in str(line).rstrip("\r\n"))[:REMOTE_LINE_CHARS]
-        lines.append(text)
-        if len(lines) > REMOTE_OUTPUT_LINES:
-            del lines[0]
+        keep_tail(lines, line, max_lines=REMOTE_OUTPUT_LINES, max_chars=REMOTE_LINE_CHARS)
 
     @staticmethod
     def _run(ssh, command: str) -> tuple:
@@ -845,15 +837,16 @@ class _BoardSession:
 
     # --- logging in ---
 
-    def login(self) -> Optional[DeployResult]:
-        """Reads and checks the board's host key, then logs in. None when logged in, else why not."""
-        from orchestrator.runtime.device import reasons
+    def login(self, waiting: bool = False) -> Optional[DeployResult]:
+        """Reads and checks the board's host key, then logs in. None when logged in, else why not. `waiting`: the board
+        dropped off the network before (wait_for_board), so a connection that drops again means it is not back yet."""
+        from orchestrator.remote import reasons
         state_dir = self.manager._state_dir()
         try:
             key = ssh_trust.fetch_host_key(self.host, self.port)
             status = ssh_trust.check_host_key(state_dir, self.host, self.port, key)
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko, a damaged known_hosts
-            code = reasons.classify(e) or ""
+            code = reasons.reach_code(e, while_waiting=waiting)
             return self.result(False, code=code, reason=f"Could not read the host key of {self.host}"
                                                         + (f" ({code})." if code else f": {e}"))
         if status == "unknown":
@@ -873,7 +866,7 @@ class _BoardSession:
         try:
             self.ssh = ssh_trust.connect(self.host, self.user, state_dir, port=self.port, password=self.password)
         except Exception as e:  # noqa: BLE001 - authentication, network, a host key that changed meanwhile
-            code = reasons.classify(e) or ""
+            code = reasons.reach_code(e, while_waiting=waiting)
             return self.result(False, code=code, reason=f"SSH login to {self.user}@{self.host} failed"
                                                         + (f" ({code})." if code else f": {e}"))
         if self.on_client is not None:
@@ -911,7 +904,7 @@ class _BoardSession:
             elapsed = manager._clock() - started
             self.on_event(DeployEvent("waiting", elapsed=elapsed, limit=self.wait_seconds, step=step))
             if manager._check_conn(self.host, self.port):
-                failed = self.login()
+                failed = self.login(waiting=True)
                 if failed is None:
                     self.waited += manager._clock() - started
                     return None

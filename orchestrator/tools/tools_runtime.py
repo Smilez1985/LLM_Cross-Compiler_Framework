@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.remote.address import USER_PATTERN
 # Path labelling for AIs lives in orchestrator/security/paths.py (consolidation chain c1-paths); the old names stay
 # importable here.
 from orchestrator.security.paths import (DEVICE_ACCOUNT, _undouble, device_text, home_folders,  # noqa: F401
@@ -147,6 +148,9 @@ class JobStartedOut(ToolOutput):
 
 class StopOut(ToolOutput):
     stopped_processes: int
+
+
+_ACCOUNT = USER_PATTERN   # the one account check (orchestrator/remote/address.py, ASCII only)
 
 
 def device_users(device: Any, settings: Any = None) -> List[str]:

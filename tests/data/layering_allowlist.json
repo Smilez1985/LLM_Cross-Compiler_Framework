@@ -92,6 +92,12 @@
    "until": "c5-split-core"
   },
   {
+   "from": "orchestrator.security.paths",
+   "to": "orchestrator.remote.address",
+   "reason": "device_text checks a board account with the one USER_PATTERN (imported where it runs)",
+   "until": "c2-remote-session (device_text moves to orchestrator/remote/text.py)"
+  },
+  {
    "from": "orchestrator.tools.audit",
    "to": "orchestrator.Core.chat_feed",
    "reason": "ENTRY_ID_RE lives in the chat feed (moves into the kernel)",
@@ -154,10 +160,10 @@
    "until": "c1-texts-qtfree"
   },
   {
-   "from": "orchestrator.runtime.device.reasons",
+   "from": "orchestrator.remote.reasons",
    "library": "paramiko",
-   "reason": "classify() reads paramiko's exception classes",
-   "until": "c2-remote-base"
+   "reason": "classify() reads paramiko's exception classes once paramiko is loaded",
+   "until": "c2-remote-session (the transport owns paramiko)"
   },
   {
    "from": "orchestrator.utils.localization",
