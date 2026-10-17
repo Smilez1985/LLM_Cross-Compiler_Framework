@@ -872,7 +872,9 @@ Setup commands:
     def done(self, result):
         """Closing the wizard stops a running crawl (a page still arriving is abandoned). It closes once a page
         that is being written is stored (without blocking the GUI), so the knowledge base is never shut down in the
-        middle of a write."""
+        middle of a write. A digest lookup still running is dropped: nothing is asked or saved after the window
+        closed."""
+        self._pin_request = None
         worker = self.crawl_worker
         if worker is not None and worker.isRunning():
             if self._close_result is None:
