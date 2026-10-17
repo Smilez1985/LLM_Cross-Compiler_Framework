@@ -5,6 +5,7 @@ The first part pins what every copy of the file-hash code did before they became
 or ''), the link rule, and that the bytes that are hashed are the bytes that are used (TOCTOU) with a cancel that stops
 mid-file. These tests ran green against the copies before the change and stay green after it."""
 
+import ast
 import functools
 import hashlib
 import os
@@ -18,7 +19,7 @@ POSIX = pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW and symbolic link
 SIZES = [0, 1, 4095, 4096, 4097, 8192, (1 << 20) - 1, 1 << 20, (1 << 20) + 1, (3 << 20) + 5]
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def data_of(size: int) -> bytes:
     return (bytes(range(251)) * (size // 251 + 1))[size % 7:size % 7 + size]
 
@@ -34,8 +35,15 @@ def _builder_hash(path):
 
 def _named():
     """The 15 named file-hash helpers: (name, function, error mode for a missing file)."""
-    from orchestrator.Core import artifact_output, artifact_store, build_identity, dataset_manager, deployment_manager
-    from orchestrator.Core import knowledge_snapshots, trash
+    from orchestrator.Core import (
+        artifact_output,
+        artifact_store,
+        build_identity,
+        dataset_manager,
+        deployment_manager,
+        knowledge_snapshots,
+        trash,
+    )
     from orchestrator.runtime import bench
     from orchestrator.runtime.build import executor, source, verify
     from orchestrator.runtime.device import package
@@ -211,8 +219,9 @@ class TestHashedBytesAreTheUsedBytes:
         with pytest.raises(bench.BenchError, match="cannot be opened"):
             bench.open_pinned(link, sha(b"GGUF"), "m")
 
-    def _copy(self, monkeypatch, tmp_path, data=b"GGUF" + data_of(3 << 20)):
+    def _copy(self, monkeypatch, tmp_path):
         from orchestrator.runtime import bench
+        data = b"GGUF" + data_of(3 << 20)
         monkeypatch.setattr(bench.BenchRunner, "_pinned_link", staticmethod(lambda fd, folder, model=None: None))
         model = tmp_path / "m.gguf"
         model.write_bytes(data)
@@ -416,3 +425,301 @@ class TestPinnedDownloadCompare:
         got = PinnedDownloader(session=NoNetwork()).fetch("https://example.invalid/m", dest, len(b"model bytes"),
                                                          sha(b"model bytes").upper())
         assert got == dest
+
+
+# --- The one implementation: orchestrator/utils/helpers.py -----------------------------------------------------------
+
+class TestOneImplementation:
+    def test_sha256_file_is_independent_of_the_chunk_and_reports_progress(self, tmp_path):
+        from orchestrator.utils import helpers
+        path = tmp_path / "f.bin"
+        path.write_bytes(data_of((3 << 20) + 5))
+        for chunk in (4096, 1 << 20, 1 << 24):
+            done = []
+            assert helpers.sha256_file(path, chunk=chunk, progress=done.append) == sha(data_of((3 << 20) + 5))
+            assert done[-1] == (3 << 20) + 5 and done == sorted(done)
+        small = tmp_path / "s.bin"
+        small.write_bytes(b"abc")
+        done = []
+        assert helpers.sha256_file(small, chunk=1, progress=done.append) == sha(b"abc") and done == [1, 2, 3]
+
+    def test_a_cancel_is_asked_before_every_read(self, tmp_path):
+        from orchestrator.utils import helpers
+        path = tmp_path / "f.bin"
+        path.write_bytes(data_of(3 << 20))
+        asked = []
+
+        def cancel():
+            asked.append(1)
+            return len(asked) > 2
+        with pytest.raises(helpers.HashStopped):
+            helpers.sha256_file(path, cancel=cancel)
+        assert len(asked) == 3, "stopped before the third chunk was read"
+
+        class Mine(Exception):
+            pass
+
+        def raising():
+            raise Mine()
+        with pytest.raises(Mine):
+            helpers.sha256_file(path, cancel=raising)
+        empty = tmp_path / "e.bin"
+        empty.write_bytes(b"")
+        assert helpers.sha256_file(empty, cancel=lambda: False) == sha(b"")
+
+    @POSIX
+    def test_without_following_links_a_link_is_refused(self, tmp_path):
+        from orchestrator.utils import helpers
+        real = tmp_path / "r.bin"
+        real.write_bytes(b"r")
+        link = tmp_path / "l.bin"
+        link.symlink_to(real)
+        assert helpers.sha256_file(link) == sha(b"r")
+        with pytest.raises(OSError):
+            helpers.sha256_file(link, follow_links=False)
+        assert helpers.sha256_file(real, follow_links=False) == sha(b"r")
+        assert helpers.try_sha256_file(link) is None and helpers.try_sha256_file(real) == sha(b"r")
+
+    def test_a_folder_raises_or_gives_none(self, tmp_path):
+        from orchestrator.utils import helpers
+        with pytest.raises(OSError):
+            helpers.sha256_file(tmp_path, follow_links=False)
+        assert helpers.try_sha256_file(tmp_path) is None and helpers.try_sha256_file(tmp_path / "missing") is None
+
+    def test_an_open_handle_or_its_first_bytes(self, tmp_path):
+        from orchestrator.utils import helpers
+        data = data_of(3 << 20)
+        path = tmp_path / "f.bin"
+        path.write_bytes(data)
+        with open(path, "rb") as fh:
+            assert helpers.sha256_fileobj(fh) == sha(data) and fh.tell() == len(data)
+            for limit in (0, 5, 1 << 20, len(data), len(data) + 10):
+                fh.seek(0)
+                assert helpers.sha256_fileobj(fh, limit=limit, chunk=4096) == sha(data[:limit])
+                assert fh.tell() == min(limit, len(data)), "the handle is left after the bytes read"
+            fh.seek(10)
+            assert helpers.sha256_fileobj(fh, limit=20) == sha(data[10:30]), "from the current position"
+
+    def test_a_descriptor_is_hashed_from_its_start(self, tmp_path):
+        from orchestrator.utils import helpers
+        path = tmp_path / "f.bin"
+        path.write_bytes(data_of(3 << 20))
+        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        try:
+            os.lseek(fd, 7, os.SEEK_SET)
+            assert helpers.sha256_fd(fd, chunk=1 << 16) == sha(data_of(3 << 20))
+            if hasattr(os, "pread"):
+                assert os.lseek(fd, 0, os.SEEK_CUR) == 7, "pread leaves the position"
+            with pytest.raises(helpers.HashStopped):
+                helpers.sha256_fd(fd, cancel=lambda: True)
+        finally:
+            os.close(fd)
+
+    def test_copy_hashed_from_a_path_or_a_descriptor(self, tmp_path):
+        from orchestrator.utils import helpers
+        data = data_of((2 << 20) + 3)
+        source = tmp_path / "s.bin"
+        source.write_bytes(data)
+        assert helpers.copy_hashed(source, tmp_path / "a.bin", fsync=True) == sha(data)
+        assert (tmp_path / "a.bin").read_bytes() == data
+        fd = os.open(str(source), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        try:
+            assert helpers.copy_hashed(fd, tmp_path / "b.bin", chunk=4096) == sha(data)
+            os.fstat(fd)  # a descriptor given in stays open
+        finally:
+            os.close(fd)
+        assert (tmp_path / "b.bin").read_bytes() == data
+
+    def test_copy_hashed_never_overwrites_and_never_removes(self, tmp_path):
+        from orchestrator.utils import helpers
+        source = tmp_path / "s.bin"
+        source.write_bytes(data_of(3 << 20))
+        (tmp_path / "t.bin").write_bytes(b"keep")
+        with pytest.raises(FileExistsError):
+            helpers.copy_hashed(source, tmp_path / "t.bin")
+        assert (tmp_path / "t.bin").read_bytes() == b"keep"
+        if os.name != "nt":  # Windows cannot open a folder as a file at all
+            with pytest.raises(IsADirectoryError):
+                helpers.copy_hashed(tmp_path, tmp_path / "dir.bin")
+            assert not (tmp_path / "dir.bin").exists(), "a folder is refused before the target exists"
+        calls = []
+        with pytest.raises(helpers.HashStopped):
+            helpers.copy_hashed(source, tmp_path / "c.bin", cancel=lambda: calls.append(1) or len(calls) > 1)
+        assert (tmp_path / "c.bin").stat().st_size == 1 << 20, "the caller removes a cancelled copy"
+
+    @POSIX
+    def test_copy_hashed_refuses_a_link_and_sets_the_mode(self, tmp_path):
+        from orchestrator.utils import helpers
+        real = tmp_path / "r.bin"
+        real.write_bytes(b"r")
+        link = tmp_path / "l.bin"
+        link.symlink_to(real)
+        with pytest.raises(OSError):
+            helpers.copy_hashed(link, tmp_path / "x.bin")
+        assert not (tmp_path / "x.bin").exists()
+        assert helpers.copy_hashed(link, tmp_path / "y.bin", follow_links=True) == sha(b"r")
+        old = os.umask(0o022)
+        try:
+            helpers.copy_hashed(real, tmp_path / "m.bin", mode=0o600)
+            helpers.copy_hashed(real, tmp_path / "d.bin")
+        finally:
+            os.umask(old)
+        assert (tmp_path / "m.bin").stat().st_mode & 0o777 == 0o600
+        assert (tmp_path / "d.bin").stat().st_mode & 0o777 == 0o644, "the default is open(..., 'xb')'s 0o666"
+
+    def test_a_stream_of_chunks(self):
+        from orchestrator.utils import helpers
+        got = []
+        assert helpers.hash_stream([b"ab", b"", b"c"], sink=got.append) == sha(b"abc") and got == [b"ab", b"c"]
+        assert helpers.hash_stream([]) == sha(b"") and helpers.sha256_bytes(b"abc") == sha(b"abc")
+
+    @pytest.mark.parametrize("actual, expected, same", [
+        ("ab" * 32, "ab" * 32, True), ("ab" * 32, "AB" * 32, True), ("AB" * 32, "ab" * 32, True),
+        ("ab" * 32, "ac" * 32, False), ("ab" * 32, "", False), ("ab" * 32, None, False), ("", "", False),
+        ("ab" * 32, "\u00e4" * 64, False), ("ab" * 32, "ab" * 31, False)])
+    def test_digest_matches(self, actual, expected, same):
+        from orchestrator.utils.helpers import digest_matches
+        assert digest_matches(actual, expected) is same
+
+    def test_the_hash_cache(self, tmp_path):
+        from orchestrator.utils.helpers import HashCache
+        calls = []
+
+        def hasher(path):
+            calls.append(path)
+            return sha(path.read_bytes())
+        cache = HashCache(2, hasher=hasher)
+        a = tmp_path / "a.bin"
+        a.write_bytes(b"one")
+        assert cache.sha256(a) == cache.sha256(a) == sha(b"one") and len(calls) == 1
+        a.write_bytes(b"other")
+        assert cache.sha256(a) == sha(b"other") and len(calls) == 2, "a changed file is hashed again"
+        for i in range(5):
+            (tmp_path / f"{i}.bin").write_bytes(bytes([i]))
+            cache.sha256(tmp_path / f"{i}.bin")
+        assert len(cache._items) <= 3, "more than `cap` entries start the cache over"
+        with pytest.raises(OSError):
+            cache.sha256(tmp_path / "missing.bin")
+
+    def test_the_hash_cache_is_shared_by_threads(self, tmp_path):
+        from orchestrator.utils.helpers import HashCache
+        path = tmp_path / "m.bin"
+        path.write_bytes(data_of(1 << 20))
+        cache, out = HashCache(4), []
+        threads = [threading.Thread(target=lambda: out.append(cache.sha256(path))) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert out == [sha(data_of(1 << 20))] * 8
+
+    def test_sha256sums_and_the_sidecar(self, tmp_path):
+        from orchestrator.utils import helpers
+        assert helpers.sha256sums_line("d", Path("models") / "m.gguf") == "d  models/m.gguf\n"
+        assert helpers.sha256sums_line("d", "bin" + os.sep + "x") == "d  bin/x\n"
+        assert helpers.sha256sums_text([("a", "x"), ("b", "y/z")]) == "a  x\nb  y/z\n"
+        out = tmp_path / "SHA256SUMS"
+        helpers.write_sha256sums(iter([("a", Path("x")), ("b", Path("y") / "z")]), out)
+        assert out.read_bytes() == b"a  x\nb  y/z\n"
+        tarball = tmp_path / "rt.tar.gz"
+        tarball.write_bytes(b"t")
+        sidecar = helpers.write_sha256_sidecar(tarball, sha(b"t"))
+        assert sidecar == tmp_path / "rt.tar.gz.sha256"
+        assert sidecar.read_bytes() == f"{sha(b't')}  rt.tar.gz\n".encode("ascii")
+        assert helpers.read_sha256_sidecar(tarball) == sha(b"t")
+        with pytest.raises(OSError):
+            helpers.read_sha256_sidecar(tmp_path / "none.bin")
+
+    def test_the_hash_cache_looks_the_hash_up_when_it_hashes(self, tmp_path, monkeypatch):
+        """Without its own hasher the cache calls helpers.sha256_file at each hash (one seam for tests). The deploy
+        tools' cache is pinned in tests/test_deploy_tools.py; the benchmark's in tests/test_runtime_tools.py."""
+        from orchestrator.utils import helpers
+        cache = helpers.HashCache(4)
+        monkeypatch.setattr(helpers, "sha256_file", lambda path: "f" * 64)
+        (tmp_path / "x.bin").write_bytes(b"x")
+        assert cache.sha256(tmp_path / "x.bin") == "f" * 64
+
+
+# --- Ratchet: no new hash loop beside the one implementation ---------------------------------------------------------
+
+REPO = Path(__file__).resolve().parent.parent
+# Incremental hashlib digests updated in a loop that are not a file read, each with its reason. Every file hash goes
+# through orchestrator/utils/helpers.py (sha256_file, sha256_fileobj, sha256_fd, copy_hashed, hash_stream).
+OWN_LOOPS = {
+    ("orchestrator/runtime/build/executor.py", "builder_image_tag"):
+        "the builder image tag: the Dockerfile's text and the plan's values, already in memory",
+    ("orchestrator/runtime/container_server.py", "base_tag"):
+        "Ditto's runtime base image tag: the Dockerfile's text and two values, already in memory",
+    ("orchestrator/evals/ditto_eval.py", "corpus_digest"): "one digest over names and contents of small corpus files",
+    ("orchestrator/mcp_server.py", "._files"): "one digest over the digests of two small state files (a method)",
+}
+
+
+def hash_loops(root: Path):
+    """(file, qualified function) of every hashlib hasher updated inside a loop, and of every hashlib.file_digest."""
+    found = set()
+    for path in sorted((root / "orchestrator").rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        for name, fn in _functions(ast.parse(path.read_text(encoding="utf-8")), ""):
+            if _hash_loop_in(fn):
+                found.add((rel, name))
+    return found
+
+
+def _functions(node, qual):
+    """(qualified name, node) of every function and method below `node`."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = f"{qual}.{child.name}" if qual else child.name
+            if not isinstance(child, ast.ClassDef):
+                yield name, child
+            yield from _functions(child, name)
+
+
+def _hash_loop_in(fn) -> bool:
+    hashers = set()
+    for node in ast.walk(fn):
+        call = node.value if isinstance(node, ast.Assign) else node
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and \
+                getattr(call.func.value, "id", "") == "hashlib":
+            if call.func.attr == "file_digest":
+                return True
+            if isinstance(node, ast.Assign):
+                hashers.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "update"
+               and getattr(node.func.value, "id", None) in hashers
+               for loop in ast.walk(fn) if isinstance(loop, (ast.For, ast.While, ast.AsyncFor))
+               for node in ast.walk(loop))
+
+
+def _allowed(rel: str, name: str) -> bool:
+    return any(rel == f and (name == n or (n.startswith(".") and name.endswith(n))) for f, n in OWN_LOOPS)
+
+
+def test_no_hash_loop_outside_the_one_implementation():
+    found = hash_loops(REPO)
+    new = {entry for entry in found if not _allowed(*entry)}
+    assert new == set(), f"hash loops beside utils/helpers.py (use sha256_file, sha256_fileobj, copy_hashed): {new}"
+    stale = {(f, n) for f, n in OWN_LOOPS if not any(_allowed(*entry) and entry[0] == f and
+                                                     (entry[1] == n or entry[1].endswith(n)) for entry in found)}
+    assert stale == set(), f"allowlist entries without a loop any more: {stale}"
+
+
+def test_the_ratchet_sees_a_copied_loop(tmp_path):
+    """The detector itself: a classic read loop and a hashlib.file_digest are both found; helpers.py has none."""
+    pkg = tmp_path / "orchestrator"
+    pkg.mkdir()
+    (pkg / "copy.py").write_text(
+        "import hashlib\n"
+        "def h(p):\n"
+        "    d = hashlib.sha256()\n"
+        "    with open(p, 'rb') as f:\n"
+        "        for c in iter(lambda: f.read(1), b''):\n"
+        "            d.update(c)\n"
+        "    return d.hexdigest()\n"
+        "class K:\n"
+        "    def g(self, f):\n"
+        "        return hashlib.file_digest(f, 'sha256')\n"
+        "def fine(data):\n"
+        "    return hashlib.sha256(data).hexdigest()\n", encoding="utf-8")
+    assert hash_loops(tmp_path) == {("orchestrator/copy.py", "h"), ("orchestrator/copy.py", "K.g")}

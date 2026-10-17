@@ -797,17 +797,11 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
 
     if PACKAGES["bench"]() and PACKAGES["local_runtime"]():
 
-        hashes: Dict[tuple, str] = {}
+        from orchestrator.utils.helpers import HashCache
+        hashes = HashCache(32)  # thread-safe: two benchmark questions at once share it
 
         def model_sha(path: Path) -> str:
-            from orchestrator.runtime.bench import sha256_file
-            st = path.stat()
-            key = (str(path), st.st_size, st.st_mtime_ns)
-            if key not in hashes:
-                if len(hashes) > 32:
-                    hashes.clear()
-                hashes[key] = sha256_file(path)
-            return hashes[key]
+            return hashes.sha256(path)
 
         def in_sandbox(inp: BenchmarkIn) -> bool:
             """Where the run happens: Ditto's own model natively unless the sandbox is asked for; a model built for a

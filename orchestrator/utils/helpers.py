@@ -13,13 +13,17 @@ import json
 import shutil
 import subprocess
 import platform
+import errno
 import hashlib
+import hmac
+import stat
+import threading
 import zipfile
 import tarfile
 import re
 import ctypes
 from pathlib import Path
-from typing import List, Union
+from typing import Any, Callable, List, Optional, Union
 
 from orchestrator.security import secret_patterns
 
@@ -102,12 +106,217 @@ def safe_extract_archive(archive_path: Path, dest_dir: Path):
                 tf.extractall(dest_dir, members=members)  # nosec B202
 
 def calculate_file_checksum(path: Path, algorithm="sha256") -> str:
-    """Calculates hash of a file."""
+    """Calculates hash of a file ('' when the file is missing). The original of the file-hash helpers below."""
     if not path.exists(): return ""
-    h = hashlib.new(algorithm)
     with open(path, 'rb') as f:
-        while c := f.read(8192): h.update(c)
-    return h.hexdigest()
+        return _digest(lambda: f.read(HASH_CHUNK), hashlib.new(algorithm))
+
+
+# --- File hashing: the one implementation (consolidation c1-hashing, maintainer rule R0) -----------------------------
+# Every file sha256 of the framework runs through _digest: whole files (sha256_file, try_sha256_file), open handles
+# and their first N bytes (sha256_fileobj, sha256_fd), and copies hashed while they are written (copy_hashed), so the
+# bytes that are hashed are the bytes that are used. Old names elsewhere are one-line delegates. Standard library only.
+# Not here on purpose: runtime/hardware_probe.py (runs standalone on boards), the sha256sum calls that run on a device,
+# and digests of small byte strings already in memory (sha256_bytes covers those that want a name).
+
+HASH_CHUNK = 1 << 20
+
+
+class HashStopped(Exception):
+    """A hash or hashed copy ended early because its `cancel` callback returned a true value."""
+
+
+def _digest(read: Callable[[], bytes], hasher, *, sink: Optional[Callable[[bytes], Any]] = None,
+            cancel: Optional[Callable[[], Any]] = None, progress: Optional[Callable[[int], Any]] = None) -> str:
+    """The one hashing loop: `cancel` is asked before every read (it stops by raising its own exception, or by
+    returning a true value: HashStopped); every chunk read goes to the hasher and then to `sink`; `progress` gets the
+    bytes done so far."""
+    done = 0
+    while True:
+        if cancel is not None and cancel():
+            raise HashStopped("stopped")
+        chunk = read()
+        if not chunk:
+            return hasher.hexdigest()
+        hasher.update(chunk)
+        if sink is not None:
+            sink(chunk)
+        done += len(chunk)
+        if progress is not None:
+            progress(done)
+
+
+def _open_flags(follow_links: bool) -> int:
+    return os.O_RDONLY | getattr(os, "O_BINARY", 0) | (0 if follow_links else getattr(os, "O_NOFOLLOW", 0))
+
+
+def _open_read(path: Union[str, Path], follow_links: bool):
+    """A binary reader of `path`; without follow_links never through a link (refused before the open, and by the open
+    itself where the system has O_NOFOLLOW)."""
+    if follow_links:
+        return open(path, "rb")
+    if os.path.islink(path):
+        raise OSError(errno.ELOOP, "a link is not followed", str(path))
+    fd = os.open(str(path), _open_flags(False))
+    try:
+        return open(fd, "rb")
+    except BaseException:  # a folder: the reader refuses the descriptor but leaves it open
+        os.close(fd)
+        raise
+
+
+def sha256_file(path: Union[str, Path], *, chunk: int = HASH_CHUNK, cancel: Optional[Callable[[], Any]] = None,
+                progress: Optional[Callable[[int], Any]] = None, follow_links: bool = True) -> str:
+    """sha256 (lower-case hex) of a file; OSError when it cannot be read (with follow_links=False also for a link)."""
+    with _open_read(path, follow_links) as f:
+        return _digest(lambda: f.read(chunk), hashlib.sha256(), cancel=cancel, progress=progress)
+
+
+def try_sha256_file(path: Union[str, Path]) -> Optional[str]:
+    """sha256 of a regular file, or None for a link, a folder, a missing or unreadable file."""
+    try:
+        if os.path.islink(path) or not os.path.isfile(path):
+            return None
+        return sha256_file(path, follow_links=False)
+    except OSError:
+        return None
+
+
+def sha256_fileobj(fh, *, limit: Optional[int] = None, cancel: Optional[Callable[[], Any]] = None,
+                   chunk: int = HASH_CHUNK) -> str:
+    """sha256 of what an open binary file gives from its current position: to its end, or only its next `limit` bytes
+    (fewer at its end). The handle is left after the bytes read, so the same handle can be used (or measured) next."""
+    if limit is None:
+        return _digest(lambda: fh.read(chunk), hashlib.sha256(), cancel=cancel)
+    left = [max(0, int(limit))]
+
+    def read() -> bytes:
+        data = fh.read(min(chunk, left[0])) if left[0] else b""
+        left[0] -= len(data)
+        return data
+    return _digest(read, hashlib.sha256(), cancel=cancel)
+
+
+def _read_at(fd: int, offset: int, size: int) -> bytes:
+    """Reads at an offset of a descriptor: pread where the system has it (the position stays), else seek and read."""
+    if hasattr(os, "pread"):
+        return os.pread(fd, size, offset)
+    os.lseek(fd, offset, os.SEEK_SET)  # pragma: no cover - systems without pread (Windows)
+    return os.read(fd, size)  # pragma: no cover
+
+
+def _fd_reader(fd: int, chunk: int) -> Callable[[], bytes]:
+    offset = [0]
+
+    def read() -> bytes:
+        data = _read_at(fd, offset[0], chunk)
+        offset[0] += len(data)
+        return data
+    return read
+
+
+def sha256_fd(fd: int, *, cancel: Optional[Callable[[], Any]] = None, chunk: int = HASH_CHUNK) -> str:
+    """sha256 of a whole open file descriptor, read from its start by offset; the descriptor stays open."""
+    return _digest(_fd_reader(fd, chunk), hashlib.sha256(), cancel=cancel)
+
+
+def copy_hashed(source: Union[int, str, Path], target: Union[str, Path], *, cancel: Optional[Callable[[], Any]] = None,
+                follow_links: bool = False, fsync: bool = False, mode: int = 0o666,
+                chunk: int = HASH_CHUNK) -> str:
+    """Copies `source` (an open descriptor, read from its start, or a path opened once and, unless follow_links, never
+    through a link) into the new file `target` (refused when it exists: FileExistsError) and returns the sha256 of the
+    bytes read: the copy holds exactly what was hashed. Nothing is removed here: on an error or a cancel the caller
+    removes what it made."""
+    owned = not isinstance(source, int)
+    fd = os.open(str(source), _open_flags(follow_links)) if owned else source
+    try:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):  # refused before the target exists
+            raise IsADirectoryError(errno.EISDIR, "a folder is not copied", str(source))
+        out = os.open(str(target), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), mode)
+        with open(out, "wb") as dst:
+            digest = _digest(_fd_reader(fd, chunk), hashlib.sha256(), sink=dst.write, cancel=cancel)
+            if fsync:
+                dst.flush()
+                os.fsync(dst.fileno())
+        return digest
+    finally:
+        if owned:
+            os.close(fd)
+
+
+def hash_stream(chunks, *, sink: Optional[Callable[[bytes], Any]] = None,
+                cancel: Optional[Callable[[], Any]] = None) -> str:
+    """sha256 of an iterable of byte chunks (a download), each chunk passed on to `sink` (empty chunks are skipped)."""
+    it = (c for c in chunks if c)
+    return _digest(lambda: next(it, b""), hashlib.sha256(), sink=sink, cancel=cancel)
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def digest_matches(actual: Any, expected: Any) -> bool:
+    """Constant-time comparison of two hex digests, case-insensitive; False when either is empty or not ASCII text."""
+    if not actual or not expected:
+        return False
+    a, e = str(actual).lower(), str(expected).lower()
+    if not (a.isascii() and e.isascii()):
+        return False
+    return hmac.compare_digest(a, e)
+
+
+class HashCache:
+    """sha256 of files remembered by (path, size, modification time in ns): a retried question hashes a large file
+    once. Thread-safe; the hash itself runs outside the lock. More than `cap` entries start the cache over."""
+
+    def __init__(self, cap: int = 64, hasher: Optional[Callable[[Path], str]] = None):
+        self.cap = cap
+        self._hasher = hasher  # None: sha256_file, looked up at each hash
+        self._items: dict = {}
+        self._lock = threading.Lock()
+
+    def sha256(self, path: Union[str, Path]) -> str:
+        st = os.stat(path)
+        key = (str(path), st.st_size, st.st_mtime_ns)
+        with self._lock:
+            if key in self._items:
+                return self._items[key]
+        digest = (self._hasher or sha256_file)(Path(path))
+        with self._lock:
+            if len(self._items) > self.cap:
+                self._items.clear()
+            self._items[key] = digest
+        return digest
+
+
+def sha256sums_line(digest: str, name: Union[str, Path]) -> str:
+    """One line of sha256sum's format: two spaces, POSIX separators (the file is checked on a Linux board, also when
+    it was made on Windows) and LF (sha256sum before coreutils 9.0 reads a CR as part of the name)."""
+    return f"{digest}  {Path(name).as_posix() if isinstance(name, Path) else str(name).replace(os.sep, '/')}\n"
+
+
+def sha256sums_text(entries) -> str:
+    """The text of a SHA256SUMS file from (digest, name) pairs."""
+    return "".join(sha256sums_line(digest, name) for digest, name in entries)
+
+
+def write_sha256sums(entries, out: Union[str, Path]) -> None:
+    """Writes a SHA256SUMS file from (digest, name) pairs; `entries` may be a generator that hashes as it goes."""
+    with open(out, "w", newline="\n", encoding="utf-8") as f:
+        for digest, name in entries:
+            f.write(sha256sums_line(digest, name))
+
+
+def write_sha256_sidecar(path: Union[str, Path], digest: str) -> Path:
+    """<file>.sha256 beside a file, in sha256sum's format (LF on every host)."""
+    sidecar = Path(path).with_name(Path(path).name + ".sha256")
+    sidecar.write_text(sha256sums_line(digest, Path(path).name), encoding="ascii", newline="\n")
+    return sidecar
+
+
+def read_sha256_sidecar(path: Union[str, Path]) -> str:
+    """The digest a <file>.sha256 beside `path` names (OSError, IndexError or UnicodeDecodeError when it cannot)."""
+    return Path(path).with_name(Path(path).name + ".sha256").read_text(encoding="ascii").split()[0]
 
 def is_admin() -> bool:
     """Checks for administrative privileges (Windows/Linux)."""

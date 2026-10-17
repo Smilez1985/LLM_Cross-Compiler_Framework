@@ -20,7 +20,6 @@ device.
 """
 
 import gzip
-import hashlib
 import io
 import json
 import os
@@ -37,6 +36,9 @@ from orchestrator.runtime.build.store import BuildStore, StoredBuild
 from orchestrator.runtime.catalog import RuntimeCatalog
 from orchestrator.runtime.device.launcher import START_SCRIPT, render_start_script
 from orchestrator.runtime.profile import DEVICE_ID, HardwareProfile
+from orchestrator.utils.helpers import read_sha256_sidecar, sha256sums_text, write_sha256_sidecar
+from orchestrator.utils.helpers import sha256_bytes as _sha256_bytes
+from orchestrator.utils.helpers import sha256_file as _sha256_file
 
 LICENCE_NAME = "LICENSE-llama.cpp"
 SUMS_NAME = "SHA256SUMS"
@@ -81,18 +83,6 @@ def tarball_name(build: StoredBuild) -> str:
     if arch not in ("x86_64", "arm64"):
         raise PackageError(f"the build is for {arch or 'an unknown architecture'}, not a device architecture")
     return f"llama-runtime-{arch}-{build.build_id[:16]}.tar.gz"
-
-
-def _sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _mtime(build: StoredBuild) -> int:
@@ -156,11 +146,9 @@ def package_runtime(store: BuildStore, build: StoredBuild, *, licence: Path, out
     for name in ("build.json", "manifest.json"):
         entries.append((name, build.path / name, 0o644))
     entries.append((LICENCE_NAME, licence_text, 0o644))
-    sums = []
-    for rel, content, _mode in entries:
-        digest = _sha256_bytes(content) if isinstance(content, bytes) else _sha256_file(content)
-        sums.append(f"{digest}  {rel}\n")
-    entries.append((SUMS_NAME, "".join(sums).encode("ascii"), 0o644))
+    sums = sha256sums_text((_sha256_bytes(content) if isinstance(content, bytes) else _sha256_file(content), rel)
+                           for rel, content, _mode in entries)
+    entries.append((SUMS_NAME, sums.encode("ascii"), 0o644))
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -197,8 +185,7 @@ def package_runtime(store: BuildStore, build: StoredBuild, *, licence: Path, out
     finally:
         if tmp.exists():
             tmp.unlink()
-    target.with_name(target.name + ".sha256").write_text(f"{digest}  {target.name}\n", encoding="ascii",
-                                                        newline="\n")  # sha256sum's format, LF on every host
+    write_sha256_sidecar(target, digest)  # sha256sum's format, LF on every host
     return PackagedRuntime(path=target, sha256=digest, build_id=build.build_id, members=tuple(members))
 
 
@@ -216,9 +203,8 @@ class DeviceRuntimeStore:
     def tarball(self, build: StoredBuild) -> Optional[PackagedRuntime]:
         """The packaged tarball of this build when it is there and matches its .sha256 file."""
         path = self.root / tarball_name(build)
-        sums = path.with_name(path.name + ".sha256")
         try:
-            want = sums.read_text(encoding="ascii").split()[0]
+            want = read_sha256_sidecar(path)
             got = _sha256_file(path)
         except (OSError, IndexError, UnicodeDecodeError):
             return None

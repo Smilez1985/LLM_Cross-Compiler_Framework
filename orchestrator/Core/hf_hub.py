@@ -21,7 +21,6 @@ Rules that hold for every call here:
   lists for that commit. A stop event ends the transfer between two chunks and keeps the `.part` file.
 """
 
-import hmac
 import os
 import re
 import shutil
@@ -33,6 +32,7 @@ from urllib.parse import quote, urlparse
 
 from orchestrator.tools.grants import PERMISSIVE_LICENSES
 from orchestrator.utils.download import DownloadError, IntegrityError, PinnedDownloader, _Retry, sha256_file
+from orchestrator.utils.helpers import digest_matches
 
 HUB_HOST = "huggingface.co"
 HUB_URL = f"https://{HUB_HOST}"
@@ -375,7 +375,7 @@ class HubFetcher(PinnedDownloader):
         with self.lock_class(dest.with_name(f".{dest.name}.lock"), sleep=self._sleep):
             if dest.is_file() and dest.stat().st_size == file.size:
                 digest = sha256_file(dest)
-                if file.sha256 is None or hmac.compare_digest(digest, file.sha256):
+                if file.sha256 is None or digest_matches(digest, file.sha256):
                     return dest, digest  # complete and verified by an earlier run
             part = dest.with_name(dest.name + ".part")
             if file.size == 0:
@@ -400,7 +400,7 @@ class HubFetcher(PinnedDownloader):
                 self._sleep(min(2 ** attempt, 15))
             actual = part.stat().st_size
             digest = sha256_file(part)
-            if actual != file.size or (file.sha256 is not None and not hmac.compare_digest(digest, file.sha256)):
+            if actual != file.size or (file.sha256 is not None and not digest_matches(digest, file.sha256)):
                 part.unlink(missing_ok=True)
                 raise IntegrityError(f"{file.name} does not match what Hugging Face lists for commit {commit[:12]} "
                                      f"(expected {file.size} bytes" + (f", sha256 {file.sha256}" if file.sha256 else "")

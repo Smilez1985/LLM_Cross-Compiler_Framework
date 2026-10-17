@@ -22,7 +22,6 @@ empties the trash. In the mode "permanent" they are deleted for good.
 Nothing here follows a link inside the folder: shutil.rmtree removes links, never their targets.
 """
 
-import hashlib
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -31,6 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from orchestrator.Core.deletion import AcceptedDeletion, require_person, require_same
 from orchestrator.tools.spec import DeletionItem, DeletionPlan
+from orchestrator.utils.helpers import try_sha256_file as _sha256  # None for a link, a non-file or OSError
 from orchestrator.utils.next_steps import WithSteps
 
 
@@ -76,19 +76,6 @@ def _tree_size(folder: Path) -> int:
             except OSError:
                 continue
     return total
-
-
-def _sha256(path: Path) -> Optional[str]:
-    try:
-        if path.is_symlink() or not path.is_file():
-            return None
-        digest = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(1 << 20), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-    except OSError:
-        return None
 
 
 class ArtifactStore:
