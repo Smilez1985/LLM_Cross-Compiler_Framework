@@ -8,18 +8,6 @@
    "until": "c1-imports"
   },
   {
-   "from": "orchestrator.Core.build_service",
-   "to": "orchestrator.tools.tools_runtime",
-   "reason": "label_paths (path labels for AIs) lives in the runtime tool module",
-   "until": "c1-paths"
-  },
-  {
-   "from": "orchestrator.Core.builder",
-   "to": "orchestrator.tools.tools_runtime",
-   "reason": "label_paths (path labels for AIs) lives in the runtime tool module",
-   "until": "c1-paths"
-  },
-  {
    "from": "orchestrator.Core.chat_feed",
    "to": "orchestrator.tools.framework_tools",
    "reason": "the audit key comes from the private framework_tools._audit_key",
@@ -30,12 +18,6 @@
    "to": "orchestrator.tools.framework_tools",
    "reason": "the composition root builds the tool registry with every tool definition",
    "until": "c5-split-core"
-  },
-  {
-   "from": "orchestrator.Core.mojo.views",
-   "to": "orchestrator.tools.tools_runtime",
-   "reason": "label_paths (path labels for AIs) lives in the runtime tool module",
-   "until": "c1-paths"
   },
   {
    "from": "orchestrator.cli",
@@ -210,12 +192,6 @@
    "to": "orchestrator.runtime.catalog",
    "reason": "a next step offers the model tiers of the runtime catalogue (w6-a0)",
    "until": "c5-split-core"
-  },
-  {
-   "from": "orchestrator.utils.wording",
-   "to": "orchestrator.tools.tools_runtime",
-   "reason": "shorten_home lives in the runtime tool module (w6-fwords)",
-   "until": "c1-paths"
   }
  ],
  "third_party": [

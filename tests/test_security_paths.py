@@ -530,3 +530,36 @@ def test_each_scrubber_keeps_its_policy(name, home):
     assert len(expected) == len(CASES)
     for text, want in zip(CASES, expected):
         assert fn(text) == want, (name, home, text)
+
+
+# --- one implementation: orchestrator/security/paths.py -------------------------------------------------------------
+
+def test_the_old_names_are_the_one_implementation():
+    """tools_runtime keeps the old names (callers and tests import them there); each is the object in
+    security.paths, the one implementation the Core, the utils and the tools use."""
+    from orchestrator.security import paths
+    for name in ("label_paths", "shorten_home", "home_folders", "replace_folder", "device_text", "DEVICE_ACCOUNT",
+                 "_undouble", "scrub_for_ai"):
+        assert getattr(tools_runtime, name) is getattr(paths, name), name
+    assert paths.undouble("'C:\\\\Users\\\\x'") == paths._undouble("'C:\\\\Users\\\\x'") == "'C:\\Users\\x'"
+
+
+def test_scrub_for_ai_is_the_status_scrub_and_with_roots_the_runtime_tools_scrub(home):
+    from orchestrator.security.paths import label_paths, scrub_for_ai, shorten_home
+    from orchestrator.utils.helpers import redact_secrets
+    from orchestrator.utils.untrusted import sanitize_untrusted
+    for text in CASES:
+        assert scrub_for_ai(text) == tools_status._scrub_paths(text) == \
+            sanitize_untrusted(redact_secrets(shorten_home(text)), 500)
+        assert scrub_for_ai(text, ROOTS) == \
+            sanitize_untrusted(redact_secrets(shorten_home(label_paths(text, ROOTS))), 500)
+        assert scrub_for_ai(text, limit=40) == sanitize_untrusted(redact_secrets(shorten_home(text)), 40)
+
+
+def test_the_home_patterns_are_shared():
+    """The GUI tool's form values, the pack export and the privacy masks build their home-folder patterns from the
+    shared parts (each keeps its policy: the outputs above are unchanged)."""
+    from orchestrator.security.paths import ACCOUNT_NAME, HOME_ROOT
+    assert HOME_ROOT in tools_gui.HOME_FOLDERS.pattern and ACCOUNT_NAME in tools_gui.HOME_FOLDERS.pattern
+    assert HOME_ROOT in community_pack._HOME_DIRS.pattern and ACCOUNT_NAME in community_pack._HOME_DIRS.pattern
+    assert privacy._HOME.pattern.endswith(f"({ACCOUNT_NAME})")

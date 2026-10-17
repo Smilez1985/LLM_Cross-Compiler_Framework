@@ -70,7 +70,7 @@ def ai_findings(framework, report: MojoReport) -> List[Dict[str, Any]]:
 def labeller(framework) -> Callable[[Any], str]:
     """How any text of Mojo reaches an AI: the framework's folders by label, any other path by its file name only,
     secrets redacted (the rule of ai_findings, for Mojo's other views)."""
-    from orchestrator.tools.tools_runtime import label_paths
+    from orchestrator.security.paths import label_paths
     from orchestrator.utils.helpers import redact_secrets
     roots = ai_folder_labels(framework)
 

@@ -42,6 +42,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from orchestrator import __version__
+from orchestrator.security.paths import ACCOUNT_NAME, HOME_ROOT
 from orchestrator.utils.helpers import calculate_file_checksum
 from orchestrator.utils.next_steps import WithSteps
 
@@ -766,8 +767,7 @@ class UserKeys:
 # Extended: Windows and macOS home folders, IPv6, MAC and e-mail addresses (LCF's privacy detectors), the host
 # name and the user name, and LCF's secret patterns.
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")
-_HOME_DIRS = re.compile(r"((?:(?<![\w.])/home|(?<![\w.])/Users|\b[A-Za-z]:\\Users|\b[A-Za-z]:/Users)([/\\]))"
-                        r"([^/\\\s\"'<>|:]+)")
+_HOME_DIRS = re.compile(rf"({HOME_ROOT}([/\\]))({ACCOUNT_NAME})")   # the shared patterns (security/paths.py)
 # Text the detectors must not touch is shielded with private-use characters while they run: image digests
 # (name@sha256:..., which the validators require) are no user@host logins, and default accounts are no persons.
 # A scrubbed git@ remote or digest would break the script it is in.
