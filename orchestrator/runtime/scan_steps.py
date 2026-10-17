@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
+from orchestrator.remote.errors import RemoteFailure
 from orchestrator.remote.reasons import reach_code  # noqa: F401 - the SSH reason code, also under this module's name
 from orchestrator.utils.next_steps import WithSteps
 
@@ -108,14 +109,13 @@ def import_probe(probes: Any, path: Path, label: Optional[str] = None, target_ma
 
 # --- a board over SSH (`llmcf scan --device HOST --user U [--port] [--password] [--label]`) ---------------------------
 
-class DeviceScanError(WithSteps, RuntimeError):
+class DeviceScanError(WithSteps, RemoteFailure):
     """A board scan that could not be done. `kind`: login (the board could not be reached or logged in to; `reason`
     is its SSH reason code when it has one), probe (the probe on the board failed) or save (the profile could not be
     stored or written). `error` is the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None):
-        super().__init__(message)
-        self.kind, self.reason, self.error = kind, reason, error
+        super().__init__(message, kind, reason, error)
 
 
 @dataclass
@@ -133,12 +133,10 @@ class DeviceScan:
 
 
 def _note_reach(state_dir: Path, host: str, port: int, code: str) -> None:
-    """Mojo's record of this contact with the board at host:port (W1); never fails the scan."""
-    try:
-        from orchestrator.runtime.device.trusted import TrustedDevices
-        TrustedDevices(Path(state_dir)).note_reach_at(host, port, "probe", code)
-    except Exception:  # noqa: BLE001 - bookkeeping never changes what the scan does
-        pass
+    """Mojo's record of this contact with the board at host:port (W1); never fails the scan (trusted.record_reach)."""
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.runtime.device.trusted import record_reach
+    record_reach(state_dir, "probe", code, endpoint=Endpoint(host, port))
 
 
 def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = None, *, password: Optional[str] = None,

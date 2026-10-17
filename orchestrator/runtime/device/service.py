@@ -13,11 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from orchestrator.remote.errors import RemoteFailure
 from orchestrator.runtime.device.trusted import TrustedDevice
 from orchestrator.utils.next_steps import WithSteps
 
 
-class DeviceRuntimeError(WithSteps, RuntimeError):
+class DeviceRuntimeError(WithSteps, RemoteFailure):
     """A device step that cannot be done; `code` is a tool reason code, `next` the step that helps, `reason` one of the
     SSH reason codes of orchestrator/runtime/device/reasons.py when the board could not be reached or logged in to.
     `external_text` holds what the device answered (its stderr, a check's output): never part of the message,
@@ -25,18 +26,17 @@ class DeviceRuntimeError(WithSteps, RuntimeError):
 
     def __init__(self, message: str, code: str = "failed", next: str = "",
                  external_text: Optional[List[str]] = None, reason: str = ""):
-        super().__init__(message)
-        self.code, self.next, self.reason = code, next, reason
+        super().__init__(message, reason=reason)
+        self.code, self.next = code, next
         self.external_text = list(external_text or [])
 
 
 def note_reach(state_dir: Path, device: TrustedDevice, step: str, reason: str) -> None:
     """Records for Mojo what this contact with the board found (W1: Mojo reads it instead of contacting the board): a
-    reason code keeps the problem of the step, "" (reached and logged in) ends it. Nothing when `step` is empty."""
-    if not step:
-        return
-    from orchestrator.runtime.device.trusted import TrustedDevices
-    TrustedDevices(Path(state_dir)).note_reach(device.device_id, step, reason)
+    reason code keeps the problem of the step, "" (reached and logged in) ends it. Nothing when `step` is empty; never
+    fails the step (trusted.record_reach)."""
+    from orchestrator.runtime.device.trusted import record_reach
+    record_reach(state_dir, step, reason, device_id=device.device_id)
 
 
 def unreachable(device: TrustedDevice, reason: str, state_dir: Optional[Path] = None,

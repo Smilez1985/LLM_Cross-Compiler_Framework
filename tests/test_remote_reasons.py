@@ -357,3 +357,71 @@ def test_an_eof_at_the_first_login_is_still_no_reason_code(manager, board, packa
     monkeypatch.setattr(ssh_trust, "fetch_host_key", fetch)
     result, _events = run(manager, package)
     assert not result.success and result.code == "" and "Could not read the host key" in result.reason
+
+
+# --- the one reach recorder and the one failure type -----------------------------------------------------------------
+
+def test_every_contact_records_through_record_reach(monkeypatch, tmp_path):
+    """The six note_reach helpers are calls of trusted.record_reach (by device ID, else by endpoint)."""
+    from orchestrator.Core.config_manager import ConfigManager
+    from orchestrator.Core.deployment_manager import DeployResult, DeploymentManager
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.runtime import scan_steps
+    from orchestrator.runtime.device import person_steps, service, trusted
+    import orchestrator.cli as cli
+    from test_deployment import FakeFramework
+    seen = []
+    monkeypatch.setattr(trusted, "record_reach", lambda state, step, code, device_id="", endpoint=None:
+                        seen.append((step, code, device_id, endpoint)))
+    DeploymentManager(FakeFramework(ConfigManager(tmp_path / "configs")))._note_reach(
+        HOST, PORT, DeployResult(False, code=reasons.HOST_DOWN))
+    service.note_reach(tmp_path, SimpleNamespace(device_id="0123456789abcdef"), "probe", "")
+    person_steps._note(tmp_path, "0123456789abcdef", "verify", reasons.AUTH_FAILED)
+    scan_steps._note_reach(tmp_path, HOST, PORT, "")
+    cli._note_reach(None, HOST, PORT, "verify", reasons.PORT_CLOSED, "", tmp_path)
+    at = Endpoint(HOST, PORT)
+    assert seen == [("deploy", reasons.HOST_DOWN, "", at), ("probe", "", "0123456789abcdef", None),
+                    ("verify", reasons.AUTH_FAILED, "0123456789abcdef", None), ("probe", "", "", at),
+                    ("verify", reasons.PORT_CLOSED, "", at)]
+    pytest.importorskip("PySide6")
+    from orchestrator.gui import host_key
+    host_key._note(tmp_path, HOST, PORT, "deploy", reasons.HOST_KEY_CHANGED)
+    assert seen[-1] == ("deploy", reasons.HOST_KEY_CHANGED, "", at)
+
+
+def test_record_reach_never_fails_and_needs_a_step(rows, monkeypatch, tmp_path):
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.runtime.device import service
+    from orchestrator.runtime.device.trusted import TrustedDevices, record_reach
+    record_reach(tmp_path, "", reasons.HOST_DOWN, device_id="0123456789abcdef")
+    record_reach(tmp_path, "probe", reasons.HOST_DOWN)   # neither a device ID nor an endpoint: nothing to record
+    record_reach(tmp_path, "probe", reasons.HOST_DOWN, endpoint=Endpoint(HOST, PORT))
+    assert rows == [("at", HOST, PORT, "probe", reasons.HOST_DOWN)]
+
+    def broken(*a, **k):
+        raise RuntimeError("the store is broken")
+    monkeypatch.setattr(TrustedDevices, "note_reach", broken)
+    record_reach(tmp_path, "probe", reasons.HOST_DOWN, device_id="0123456789abcdef")
+    service.note_reach(tmp_path, SimpleNamespace(device_id="0123456789abcdef"), "probe", reasons.HOST_DOWN)
+
+
+def test_every_board_step_failure_is_a_remote_failure():
+    from orchestrator.remote.errors import RemoteFailure
+    from orchestrator.runtime.device.person_steps import BoardStepError
+    from orchestrator.runtime.device.service import DeviceRuntimeError
+    from orchestrator.runtime.scan_steps import DeviceScanError
+    cause = socket.timeout("timed out")
+    failures = [BoardStepError("Could not reach it", "unreachable", reason=reasons.HOST_DOWN, error=cause, a=1),
+                DeviceScanError("Could not log in", "login", reason=reasons.HOST_DOWN, error=cause),
+                DeviceRuntimeError("cannot be used now", code="hardware_unavailable", next="Ask the person.",
+                                   reason=reasons.HOST_DOWN)]
+    for failure in failures:
+        assert isinstance(failure, RemoteFailure) and isinstance(failure, RuntimeError)
+        assert failure.reason == reasons.HOST_DOWN
+        with pytest.raises(RemoteFailure):
+            raise failure
+    assert (failures[0].kind, failures[0].error, failures[0].facts) == ("unreachable", cause, {"a": 1})
+    assert (failures[1].kind, failures[1].error) == ("login", cause)
+    assert (failures[2].kind, failures[2].error, failures[2].code, failures[2].next) == \
+        ("", None, "hardware_unavailable", "Ask the person.")
+    assert str(failures[2]) == "cannot be used now" and failures[2].external_text == []

@@ -36,14 +36,13 @@ def read_host_key(folder: Path, host: str, port: int) -> Tuple[Any, str]:
 
 
 def _note(folder: Path, host: str, port: int, step: str, code: str) -> None:
-    """Mojo's record of this contact (W1); never fails the question."""
-    if not step or not code:
+    """Mojo's record of a problem of this contact (W1; reading a key is no login, so it ends no problem); never fails
+    the question (trusted.record_reach)."""
+    if not code:
         return
-    try:
-        from orchestrator.runtime.device.trusted import TrustedDevices
-        TrustedDevices(Path(folder)).note_reach_at(host, port, step, code)
-    except Exception:  # noqa: BLE001 - bookkeeping only
-        pass
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.runtime.device.trusted import record_reach
+    record_reach(folder, step, code, endpoint=Endpoint(host, port))
 
 
 def unreachable_text(host: str, port: int, error: BaseException, lang: Optional[str] = None) -> str:

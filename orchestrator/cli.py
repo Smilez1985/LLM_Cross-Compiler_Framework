@@ -4509,19 +4509,16 @@ def _note_reach(ctx: Optional[FrameworkContext], host: str, port: int, step: str
                 device_id: str = "", state_dir: Optional[Path] = None) -> None:
     """Records for Mojo what this contact with a trusted board found (W1: Mojo reads it instead of contacting the
     board): a reason code keeps the problem, "" (the board was reached and logged in to) ends it. `state_dir`: the
-    state folder the command works in (else the context's). Never fails."""
+    state folder the command works in (else the context's). Never fails (trusted.record_reach)."""
     if not step:
         return
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.runtime.device.trusted import record_reach
     try:
-        from orchestrator.runtime.device.trusted import TrustedDevices
         folder = state_dir or (_state_dir(ctx) if ctx is not None else _default_state_dir())
-        store = TrustedDevices(Path(folder))
-        if device_id:
-            store.note_reach(device_id, step, code)
-        else:
-            store.note_reach_at(host, port, step, code)
     except Exception:  # noqa: BLE001 - bookkeeping never changes what the command does
-        pass
+        return
+    record_reach(folder, step, code, device_id=device_id, endpoint=Endpoint(host, port))
 
 
 def _default_state_dir() -> Path:
