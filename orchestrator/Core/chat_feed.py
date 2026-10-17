@@ -1220,12 +1220,17 @@ class FeedWriter:
 
     def write_entry(self, entry: FeedEntry, *, timeout: Optional[float] = None) -> StoredEntry:
         """Writes a row built with entry() and fails open: a row that could not be saved comes back with row id -1
-        (logged, `problem` set), so who shows it can say it was not saved."""
+        (logged, `problem` set), so who shows it can say it was not saved. That includes a row the store refuses while
+        saving it (every string is redacted once more there: a value that looks like a key no longer fits its field)."""
         try:
             stored = self.store.append(entry, timeout=timeout)
         except FeedWriteError as e:
             self.problem = str(e)
             logger.warning(f"A chat entry was not saved ({e.reason}): {e}")
+            return StoredEntry(-1, entry)
+        except ValueError as e:   # pydantic's ValidationError of the redacted row; its text is not logged
+            self.problem = "the entry does not fit the feed once redacted"
+            logger.warning(f"A chat entry was not saved ({e.__class__.__name__}): {self.problem}")
             return StoredEntry(-1, entry)
         self.problem = None
         return stored
