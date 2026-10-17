@@ -358,7 +358,8 @@ def test_the_target_tools_load_no_tool_hub(tmp_path):
     """Stage-B integration (open item of the cleanup chain): the target tool module took TargetIn and
     TargetCapabilitiesOut from framework_tools, so importing it (module create in the CLI, the GUI wizard's save,
     target_marks of the deploy tools) loaded the whole tool hub with the HF, knowledge, Mojo and status tools and the
-    job service. The two models live in schemas/targets.py; framework_tools keeps the names."""
+    job service. TargetIn lives in schemas/targets.py, TargetCapabilitiesOut in the target tool module itself;
+    framework_tools keeps the names."""
     code = ("import sys\n"
             "from orchestrator.tools.tools_targets import TargetCheckIn, TargetDetailsOut, target_marks\n"
             "from orchestrator.Core.module_generator import record_module_saved\n")

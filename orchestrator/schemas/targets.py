@@ -14,7 +14,7 @@ from typing import Annotated, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from orchestrator.tools.output import ToolOutput, UntrustedText, untrusted_text
+from orchestrator.tools.output import UntrustedText, untrusted_text
 
 # Labels, notes and board descriptions are free text from target.yml, which a community target pack installs: they
 # are marked as external text (UntrustedText), so tool results clean, cap and mark them like a pack's other texts.
@@ -251,16 +251,12 @@ class TargetRuntime(BaseModel):
     advisory: Optional[RuntimeAdvisory] = None
 
 
-# --- the target tools' shared models ----------------------------------------------------------------------------------
-# The input of the tools that name one target and the capabilities output with the framework's notes (ToolOutput).
-# They were first written in tools/framework_tools.py, which keeps the names; they live here so the target tool module
-# (tools/tools_targets.py, which builds its models on them) does not import the tool hub. Their JSON schema, which an
-# AI reads, is unchanged; a class docstring would become part of it, so the comments stay comments.
+# --- the input of the tools that name one target ----------------------------------------------------------------------
+# First written in tools/framework_tools.py, which keeps the name; it lives here so the target tool module
+# (tools/tools_targets.py, whose TargetCheckIn builds on it) does not import the tool hub. Its JSON schema, which an AI
+# reads, is unchanged; a class docstring would become part of it, so the comment stays a comment. The capabilities
+# result (TargetCapabilitiesOut) lives with the target tools: this bottom layer defines no ToolOutput.
 
 class TargetIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target: str = Field(min_length=1, max_length=64, description="Target id, e.g. Rockchip")
-
-
-class TargetCapabilitiesOut(TargetCapabilities, ToolOutput):
-    pass

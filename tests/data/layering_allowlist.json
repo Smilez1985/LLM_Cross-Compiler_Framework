@@ -88,7 +88,7 @@
   {
    "from": "orchestrator.schemas.targets",
    "to": "orchestrator.tools.output",
-   "reason": "the untrusted-text annotations and ToolOutput (the base of TargetCapabilitiesOut) live in tools/output.py (move to schemas/)",
+   "reason": "the untrusted-text annotations live in tools/output.py (move to schemas/)",
    "until": "c5-split-core"
   },
   {
@@ -143,7 +143,7 @@
    "from": "orchestrator.utils.localization",
    "to": "orchestrator.gui.localization",
    "reason": "the old names LocalizationManager/get_instance resolve lazily (PEP 562) to the GUI Qt object",
-   "until": "c4-qt-optional (callers import gui.localization directly)"
+   "until": "a later chain that moves the windows and tests to gui.localization (c4-qt-optional landed with the shim; no chain owns this yet)"
   },
   {
    "from": "orchestrator.utils.next_steps",
