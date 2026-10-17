@@ -1,4 +1,4 @@
-Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-16
+Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-17
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -30,6 +30,7 @@ Back to the [README](../README.md) · All commands: [CLI_Usage.md](CLI_Usage.md)
 - [Tool permissions and audit log](#tool-permissions-and-audit-log)
 - [Secrets and personal state](#secrets-and-personal-state)
 - [Input history](#input-history)
+- [Technical terms, errors and the form of address](#technical-terms-errors-and-the-form-of-address)
 - [Deleting and the trash](#deleting-and-the-trash)
 - [Hardware probe and new targets](#hardware-probe-and-new-targets)
 - [Health check (Mojo)](#health-check-mojo)
@@ -2411,6 +2412,33 @@ The GUI's input fields offer what you used recently, newest first.
 - A damaged file starts an empty history; the old file is kept as `input_history.json.bad`.
 - **Tools > Clear Input History...** first lists the file and the `.bad` copy (full path, file name, size, what it
   is; "No" is the default), then deletes only what it listed, and the fields are refilled at once.
+
+---
+
+## Technical terms, errors and the form of address
+
+Technical terms stay English in both languages, so they match what you find elsewhere; the framework explains them
+where they appear (unreleased).
+
+- **Explanations on mouse-over:** rest the mouse on a marked label (the mouse pointer shows a question mark), and a
+  small card shows the term, one or two plain sentences in your language and a link to the page that explains it
+  best: Wikipedia, the term's own documentation (Qdrant, the llama.cpp and ggml docs, Rockchip's RKLLM and RKNN
+  repositories, modelcontextprotocol.io) or this manual. The card stays while the mouse is on the label or on the
+  card, so you can reach the link; it opens in your web browser only when you click it. With the keyboard, press
+  **F1** in the field (or the small **?** button where a window has one); **Escape** closes the card. Screen readers
+  read the explanation and the link from the field's description. The glossary has 74 terms (for example GGUF,
+  quantization and its types such as Q4_K_M, importance matrix, calibration dataset, KV cache, RKLLM, RKNN, NPU,
+  Qdrant, MCP, SSH host key, fingerprint, digest, keyring, standing approval); the Builder's **Format** and
+  **Quantization** labels use it now, the other windows follow.
+- **Error messages:** an error box says what happened in your language, why when it is known, and one next step (a
+  sentence or a button). The English technical details (the framework's message, a traceback) are folded away under
+  **Technical details**; **Copy details** copies them with secrets removed and your home folder written as `~`, for a
+  bug report or to ask Ditto, who can explain them in German.
+- **"du" or "Sie":** German texts address you with "du". **File > Settings...** has a **General** tab where you choose
+  "Sie" instead; the choice is saved (setting `form_of_address`, `du` or `sie`) and used at once for every text read
+  from then on. A window that is already open keeps its texts until you open it again.
+- **Sizes** are shown in decimal units in your language's notation (`1.5 GB`, German `1,5 GB`); the command line
+  keeps English.
 
 ---
 

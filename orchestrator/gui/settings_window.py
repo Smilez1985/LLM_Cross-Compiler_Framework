@@ -99,9 +99,8 @@ class SettingsDialog(QDialog):
 
     def _form_changed(self, form: str) -> None:
         """The person picked du or Sie: saved in config.yml and used at once (windows that retranslate follow)."""
-        from orchestrator.gui.form_of_address import apply_language_and_form
-        language = str(self.config.get("language", None) or current_language())
-        saved = apply_language_and_form(self.config, language, form)
+        from orchestrator.gui.form_of_address import apply_form
+        saved = apply_form(self.config, form)
         self.lbl_general_result.setText(self._t("words.address.saved" if saved else "words.address.not_saved"))
         self.refresh_effective()
 
