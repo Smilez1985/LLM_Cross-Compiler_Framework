@@ -12,8 +12,9 @@ Each module belongs to a layer, and an import may only point to its own layer or
     5 adapters      orchestrator.cli, orchestrator.mcp_server (and a later orchestrator.mcp), orchestrator.gui with
                     orchestrator.main (its start); an adapter never imports another adapter
 
-Every import counts: at module level, inside a function, under `if TYPE_CHECKING:`, and a module named as a string
-in a module that imports by name (importlib.import_module, lazy_attributes, LazyModule). Third-party libraries have
+Every import counts: at module level, inside a function, under `if TYPE_CHECKING:`, and a module or a library named
+as a string to a call that imports by name (importlib.import_module, lazy_attributes, LazyModule), also through the
+names, loops, parameter defaults and tables (+= too) the call reads. Third-party libraries have
 their one home: PySide6 and shiboken6 only in the GUI, click and rich only in the CLI, mcp and uvicorn only in the MCP
 adapter, paramiko only in the SSH layer.
 
@@ -182,19 +183,41 @@ def imports_of(path: Path, modules: Set[str]) -> Iterator[Import]:
         for name in (node.value, f"{source}.{node.value}"):
             if name in modules and name != source:
                 yield Import(source, name, node.lineno, "by_name")
+        # A library named as text ("PySide6.QtCore" given to import_module) is imported as well.
+        library = node.value.split(".")[0]
+        if library in THIRD_PARTY_HOMES and all(part.isidentifier() for part in node.value.split(".")):
+            yield Import(source, library, node.lineno, "by_name")
 
 
 def _texts_given_to(calls: List[ast.Call], tree: ast.AST) -> List[ast.Constant]:
-    """The text constants that reach `calls`: in their arguments and, transitively, in the values assigned to the
-    names their arguments (and those values) read."""
+    """The text constants that reach `calls`: in their arguments and, transitively, in the values bound to the names
+    their arguments (and those values) read: assigned (also with += and :=), taken by a loop or a comprehension from
+    what it walks, or a parameter's default."""
     assigned: Dict[str, List[ast.AST]] = {}
+
+    def bind(target: ast.AST, value: Optional[ast.AST]) -> None:
+        if value is None:
+            return
+        for name in ast.walk(target):
+            if isinstance(name, ast.Name):
+                assigned.setdefault(name.id, []).append(value)
+
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                for name in ast.walk(target):
-                    if isinstance(name, ast.Name):
-                        assigned.setdefault(name.id, []).append(node.value)
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                bind(target, node.value)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+            bind(node.target, node.value)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            bind(node.target, node.iter)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            args = node.args
+            positional = [*args.posonlyargs, *args.args]
+            for arg, default in zip(positional[len(positional) - len(args.defaults):], args.defaults):
+                assigned.setdefault(arg.arg, []).append(default)
+            for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+                if default is not None:
+                    assigned.setdefault(arg.arg, []).append(default)
     todo: List[ast.AST] = [arg for call in calls for arg in (*call.args, *(k.value for k in call.keywords))]
     seen_names: Set[str] = set()
     found: List[ast.Constant] = []
@@ -434,6 +457,38 @@ def test_the_walk_finds_every_kind_of_import(sample):
     cycle = strongly_connected(g.edges())[0]
     assert cycle == ["orchestrator.Core.high", "orchestrator.Core.other", "orchestrator.tools.tools_x",
                      "orchestrator.utils.low"]
+
+
+def test_the_walk_follows_the_tables_a_loop_reads(sample):
+    """A module table read by a loop, a parameter's default or a table extended with += (utils/localization.py's
+    TEXT_MODULES: merge_text_modules(modules=TEXT_MODULES) imports `for name in dict.fromkeys(modules)`) names
+    modules that are imported, and a library named as text to import_module is imported too."""
+    g = sample({
+        "orchestrator/__init__.py": "",
+        "orchestrator/utils/__init__.py": "",
+        "orchestrator/utils/texts.py": (
+            "import importlib\n"
+            "TABLE = ('orchestrator.utils.texts_a',)\n"
+            "TABLE += ('orchestrator.gui.texts_b',)\n"
+            "def merge(modules=TABLE):\n"
+            "    for name in dict.fromkeys(modules):\n"
+            "        importlib.import_module(name)\n"
+            "def merge_kw(*, extra=('orchestrator.cli',)):\n"
+            "    return [importlib.import_module(m) for m in extra]\n"
+            "def qt():\n"
+            "    return importlib.import_module('PySide6.QtCore')\n"),
+        "orchestrator/utils/texts_a.py": "",
+        "orchestrator/gui/__init__.py": "",
+        "orchestrator/gui/texts_b.py": "",
+        "orchestrator/cli.py": "",
+    })
+    found = {(i.source, i.target) for i in g.imports if i.kind == "by_name"}
+    assert {("orchestrator.utils.texts", "orchestrator.utils.texts_a"),
+            ("orchestrator.utils.texts", "orchestrator.gui.texts_b"),
+            ("orchestrator.utils.texts", "orchestrator.cli")} <= found
+    assert set(layer_violations(g)) == {("orchestrator.utils.texts", "orchestrator.gui.texts_b"),
+                                        ("orchestrator.utils.texts", "orchestrator.cli")}
+    assert set(third_party_violations(g)) == {("orchestrator.utils.texts", "PySide6")}
 
 
 def test_the_layers_of_the_tools_package():
