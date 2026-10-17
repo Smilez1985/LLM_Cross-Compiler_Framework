@@ -22,7 +22,6 @@ from typing import Dict
 from orchestrator.gui.menus import place
 from orchestrator.utils.localization import ui_text
 
-TOOLS_MENU_NAMES = (place.MENU_TOOLS,)
 TOOLS_MENU_TITLES = ("Tools",)
 ACT_SNAPSHOTS = "act_knowledge_snapshots"
 ACT_SOURCES = "act_knowledge_sources"

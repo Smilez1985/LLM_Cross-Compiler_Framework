@@ -37,8 +37,6 @@ DURATION_LABELS = {"revoke": "until I revoke it (it lapses after 90 days without
 # Every local stdio client shares the caller "mcp": no open-ended standing approval for it (round 4 item 5).
 SHARED_CALLER = "mcp"
 SHARED_CALLER_DURATIONS = ("30d", "24h")
-WIDTH_LABELS = {"this": "this one only", "any": "any"}
-REQUEST_TTL = timedelta(minutes=15)       # a request from an elicitation waits this long for the person
 DECLINED_COOLDOWN = timedelta(hours=24)   # a declined scope cannot be requested again before this
 CREATED_VIA = ("gui", "cli", "ditto-gui", "ditto-cli")
 

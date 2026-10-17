@@ -10,9 +10,7 @@ Vermeidet zirkuläre Abhängigkeiten durch strikte Trennung von Business-Logik.
 
 import os
 import json
-import shutil
 import subprocess
-import platform
 import errno
 import hashlib
 import hmac
@@ -21,7 +19,6 @@ import threading
 import zipfile
 import tarfile
 import re
-import ctypes
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Union
 
@@ -37,32 +34,28 @@ def ensure_directory(path: Union[str, Path], mode: int = 0o755) -> Path:
         except Exception: pass
     return p
 
-def safe_json_load(path: Path, default=None):
-    """Loads JSON with error suppression."""
-    if not path.exists(): return default
+def safe_json_load(path: Path, default: Any = None, kind: Optional[type] = None) -> Any:
+    """The JSON in the file `path`, or `default` when it is missing, cannot be read or is no JSON; with `kind` (for
+    example dict) also when the JSON is of another type. Never raises for the file's state."""
     try:
-        with open(path, 'r', encoding='utf-8') as f: return json.load(f)
-    except: return default
-
-def check_command_exists(cmd: str) -> bool:
-    """Checks if a binary is in PATH."""
-    return shutil.which(cmd) is not None
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return default
+    return data if kind is None or isinstance(data, kind) else default
 
 def execute_command(command: List[str], cwd=None, timeout=None, env=None):
-    """Executes a subprocess securely."""
+    """Runs a command without a shell and returns (returncode, stdout, stderr); never raises for the command: a
+    missing program, a hang past `timeout` or another failure to start gives (-1, "", the reason). stdin is closed (a
+    command that asks for input ends instead of waiting), output that is not UTF-8 is decoded with replacement
+    characters, and on Windows no console window opens."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     try:
-        res = subprocess.run(
-            command, 
-            cwd=cwd, 
-            timeout=timeout, 
-            env=env, 
-            capture_output=True, 
-            text=True,
-            check=False 
-        )
-        return res.returncode, res.stdout, res.stderr
-    except Exception as e:
+        res = subprocess.run(list(command), cwd=cwd, timeout=timeout, env=env, capture_output=True, text=True,
+                             errors="replace", check=False, stdin=subprocess.DEVNULL, creationflags=flags)
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
         return -1, "", str(e)
+    return res.returncode, res.stdout or "", res.stderr or ""
 
 def safe_extract_archive(archive_path: Path, dest_dir: Path):
     """
@@ -318,16 +311,6 @@ def write_sha256_sidecar(path: Union[str, Path], digest: str) -> Path:
 def read_sha256_sidecar(path: Union[str, Path]) -> str:
     """The digest a <file>.sha256 beside `path` names (OSError, IndexError or UnicodeDecodeError when it cannot)."""
     return Path(path).with_name(Path(path).name + ".sha256").read_text(encoding="ascii").split()[0]
-
-def is_admin() -> bool:
-    """Checks for administrative privileges (Windows/Linux)."""
-    try:
-        if platform.system() == "Windows":
-            return ctypes.windll.shell32.IsUserAnAdmin() != 0
-        else:
-            return os.geteuid() == 0
-    except:
-        return False
 
 # The one table of secret formats, shared with scripts/secret_scan.py.
 SECRET_PATTERNS = secret_patterns.PATTERNS

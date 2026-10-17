@@ -27,6 +27,7 @@ import qdrant_edge as qe
 
 from orchestrator.rag.embeddings import SparseVec
 from orchestrator.rag.errors import KnowledgeBaseError
+from orchestrator.utils.helpers import safe_json_load
 from orchestrator.rag.storage_lock import LOCK_SUFFIX, lock_path, remove_tree, storage_lock, try_lock  # noqa: F401
 from orchestrator.rag.store import (DENSE, FORMAT_EDGE, RRF_K, SCHEMA_VERSION, SPARSE, KnowledgeStore, ScoredHit,
                                     StoredRecord)
@@ -62,11 +63,8 @@ def _write_json(path: Path, data: Dict[str, Any]) -> None:
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    """A shard file's object, {} when it is missing, unreadable or no JSON object (utils/helpers.safe_json_load)."""
+    return safe_json_load(path, None, dict) or {}
 
 
 def _busy(error: Exception) -> bool:

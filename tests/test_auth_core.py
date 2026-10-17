@@ -453,11 +453,15 @@ class TestClientUsesTheResolver:
         moved.chat(ask())
         assert http.last.headers["authorization"] == "Bearer not-needed"
 
-    def test_check_credentials_stores_when_and_as_whom(self, tmp_path, vault, catalog):
+    def test_the_sign_in_check_of_the_stored_key_stores_when_and_as_whom(self, tmp_path, vault, catalog):
+        """The one zero-cost check (SignIn.check, behind "Check" in the GUI and `ditto auth status --check`) on the
+        configured provider's stored key, reached through the chat client's own settings and transport."""
+        from orchestrator.llm.auth.signin import SignIn
         anthropic = catalog.get("anthropic")
         CredentialStore(vault).save_api_key(anthropic, anthropic.method("api_key"), CLAUDE_KEY)
         http = FakeHTTP().add(MODELS, headers={"anthropic-workspace-id": WORKSPACE})
-        result = client_for(tmp_path, http, vault, ai_provider="anthropic").check_credentials()
+        client = client_for(tmp_path, http, vault, ai_provider="anthropic")
+        result = SignIn(client.config, vault, client=client).check(anthropic, anthropic.method("api_key"))
         assert result.ok and result.models == 3 and result.account_label == f"workspace {WORKSPACE}"
         assert result.message == f"Valid, workspace {WORKSPACE}, 3 models"
         assert http.last.method == "GET" and http.last.path == "/v1/models"

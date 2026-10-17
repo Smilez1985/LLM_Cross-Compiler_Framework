@@ -327,17 +327,16 @@ class BuildEngine:
         return default
     
     def _validate_docker_environment(self):
-        try:
-            self.docker_client.ping()
-            if shutil.which("docker"):
-                try:
-                    subprocess.run(["docker", "buildx", "version"], capture_output=True, check=True)
-                except Exception:
-                    self.logger.warning("Docker BuildX not available, standard build will be used.")
-            else:
-                 self.logger.warning("Docker executable not found in PATH.")
-        except Exception as e:
-            self.logger.warning(f"Docker environment check failed: {e}")
+        """Logs what the Docker check finds at the start (the check itself: validation.check_docker_environment,
+        which Mojo's Docker check shares)."""
+        from orchestrator.utils.validation import check_docker_environment
+        docker = check_docker_environment(self.docker_client)
+        if not docker.reachable:
+            self.logger.warning(f"Docker environment check failed: {docker.error}")
+        elif not docker.docker_cli:
+            self.logger.warning("Docker executable not found in PATH.")
+        elif not docker.buildx:
+            self.logger.warning("Docker BuildX not available, standard build will be used.")
 
     def resolve_target_dir(self, name: str) -> Optional[Path]:
         """The folder of a target given by id or folder name (any letter case), through the same id -> folder map

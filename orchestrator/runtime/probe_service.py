@@ -25,8 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from orchestrator.runtime.profile import (DEVICE_ID, HardwareProfile, ProfileError, ProfileStore, default_state_dir,
-                                          new_device_id, parse_profile, read_profile)
+from orchestrator.runtime.profile import (PROFILE_FILE_NAME, HardwareProfile, ProfileError, ProfileStore,
+                                          default_state_dir, new_device_id, parse_profile, read_profile)
 from orchestrator.utils.next_steps import WithSteps
 
 PROBE_TIMEOUT = 120.0            # seconds for a whole local probe
@@ -309,7 +309,7 @@ class HardwareProbes:
             raise ProbeError("The fallback probe script is missing from this installation.", code="failed",
                              next="Reinstall the framework or run the Python probe.")
         work = self.work_dir()
-        out = Path(output) if output is not None else work / "target_hardware_config.txt"
+        out = Path(output) if output is not None else work / PROFILE_FILE_NAME
         out.parent.mkdir(parents=True, exist_ok=True)
         out.unlink(missing_ok=True)  # a file of an earlier run must not count as this run's result
         cmd = (["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
@@ -334,6 +334,3 @@ class HardwareProbes:
             raise ProbeError(f"The probe script wrote a file the framework cannot read: {e}", code="failed",
                              next="Run 'llm-cli scan' again.") from None
 
-
-def is_probe_id(value: str) -> bool:
-    return bool(PROBE_ID_RE.fullmatch(str(value or ""))) and (value == LOCAL_ID or bool(DEVICE_ID.fullmatch(value)))

@@ -62,7 +62,7 @@ from orchestrator.runtime.server_policy import (LOOPBACK, PolicyError, check_ser
 from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloader
 from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
 from orchestrator.utils.atomic import write_private_exclusive
-from orchestrator.utils.helpers import redact_secrets, safe_extract_archive
+from orchestrator.utils.helpers import redact_secrets, safe_extract_archive, safe_json_load
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.next_steps import WithSteps
 
@@ -195,11 +195,8 @@ _write_private = write_private_exclusive
 
 
 def _read_json(path: Path) -> Optional[dict]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+    """A state file's object, None when it is missing, unreadable or no JSON object (utils/helpers.safe_json_load)."""
+    return safe_json_load(path, None, dict)
 
 
 _RE_PLATFORM_PART = re.compile(r"^[a-z0-9_]{1,16}$", re.ASCII)

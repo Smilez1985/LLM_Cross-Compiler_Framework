@@ -566,19 +566,6 @@ class DeploymentManager:
         """Stores a host key the user confirmed by comparing its fingerprint."""
         ssh_trust.trust_host_key(self._state_dir(), target_ip, port, key)
 
-    def deploy_artifact(self, artifact_path: Path, host: str, user: str, password: Optional[str] = None,
-                        port: int = 22, pair: bool = True) -> bool:
-        """
-        Uploads the package and runs its deploy.sh on the device (see deploy_package, which also says why it failed).
-        `host` is the board's address or host name (e.g. 192.168.1.50 or myboard.local). The device's host key must
-        be trusted already (host_key_status/trust_host); a password is used for this connection only and, with
-        pair=True, to install the framework's SSH key so later deployments need none.
-        """
-        result = self.deploy_package(Path(artifact_path), host, user, port=port, password=password, pair=pair)
-        if not result.success and result.reason:
-            self.logger.error(result.reason)
-        return result.success
-
     def deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, **options: Any) -> DeployResult:
         """Uploads the package and runs its deploy.sh on the device (_deploy_package says how), and records for Mojo
         what this contact with the board found (W1): a failure with an SSH reason code is kept with the trusted board

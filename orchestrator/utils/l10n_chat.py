@@ -59,7 +59,6 @@ TEXTS = {
         "chat.view.since": "New since you last looked",
         "chat.view.empty": "Nothing here yet. Ask Ditto something; what AI apps do for you also appears here.",
         "chat.view.needs_you": "Needs you",
-        "chat.view.feed_name": "Chat messages",
         "chat.view.not_stored": "A message was shown but not saved in the chat ({reason}).",
         "chat.view.feed_problem": "The chat file cannot be used ({reason}); messages are shown but not kept.",
 
@@ -99,7 +98,6 @@ TEXTS = {
         "chat.bubble.open_address_question": "Open this address in your browser?\n\n{url}\n\nIt comes from a chat "
                                              "message; the framework did not check it.",
         "chat.bubble.legend": "Names of the ids in the code:",
-        "chat.bubble.not_kept": "Shown, not saved.",
         "chat.bubble.local": "Only shown in this window",
         "chat.group.title": "{who} did {n} things",
         "chat.group.show": "Show",
@@ -179,7 +177,6 @@ TEXTS = {
         "chat.clear.changed": "The chat changed while you were asked; nothing was deleted. Look at the list again.",
         "chat.clear.history_failed": "The chat messages were deleted, but Ditto's conversation could not be cleared "
                                      "({reason}).",
-        "chat.clear.done": "Chat cleared.",
         "chat.clear.no_audit": "the audit log is not available",
         "chat.clear.history_unlisted": "this window holds a conversation with Ditto that its file chat_history.json "
                                        "does not show, so it cannot be listed. Restart the program and try again",
@@ -255,7 +252,6 @@ TEXTS = {
         "chat.view.since": "Neu, seit du zuletzt geschaut hast",
         "chat.view.empty": "Noch nichts da. Frag Ditto etwas; was KI-Apps für dich tun, erscheint auch hier.",
         "chat.view.needs_you": "Braucht dich",
-        "chat.view.feed_name": "Chat-Nachrichten",
         "chat.view.not_stored": "Eine Nachricht wurde angezeigt, aber nicht im Chat gespeichert ({reason}).",
         "chat.view.feed_problem": "Die Chat-Datei ist nicht nutzbar ({reason}); Nachrichten werden angezeigt, aber "
                                   "nicht behalten.",
@@ -294,7 +290,6 @@ TEXTS = {
         "chat.bubble.open_address_question": "Diese Adresse im Browser öffnen?\n\n{url}\n\nSie stammt aus einer "
                                              "Chat-Nachricht; das Framework hat sie nicht geprüft.",
         "chat.bubble.legend": "Namen der Kennungen im Code:",
-        "chat.bubble.not_kept": "Angezeigt, nicht gespeichert.",
         "chat.bubble.local": "Nur in diesem Fenster angezeigt",
         "chat.group.title": "{who} hat {n} Dinge erledigt",
         "chat.group.show": "Zeigen",
@@ -370,7 +365,6 @@ TEXTS = {
                               "die Liste noch einmal an.",
         "chat.clear.history_failed": "Die Chat-Nachrichten wurden gelöscht, aber Dittos Gespräch konnte nicht geleert "
                                      "werden ({reason}).",
-        "chat.clear.done": "Chat geleert.",
         "chat.clear.no_audit": "das Prüfprotokoll ist nicht verfügbar",
         "chat.clear.history_unlisted": "dieses Fenster hält ein Gespräch mit Ditto, das seine Datei chat_history.json "
                                        "nicht zeigt, also kann es nicht aufgezählt werden. Starte das Programm neu "

@@ -75,6 +75,15 @@ uv run llm-cli --help
 uv run llm-gui
 ```
 
+### Eine neue Umgebung prüfen
+
+`uv run llmcf mojo` prüft, was ein Build auf diesem Rechner braucht (Python 3.11 bis 3.14, Docker und buildx, freien
+Speicherplatz, Targets, den State-Ordner, Secrets und Schlüsselbund, Tool-Berechtigungen), und sagt zu jedem
+Problem, was zu tun ist. `make test` führt danach die Tests aus ([Abschnitt 3](#3-tests-ausführen)), und
+`scripts/mcp_client_smoke.sh` ist der Smoke-Test mit einem echten KI-Client
+([weiter unten](#der-smoke-test-mit-einem-echten-client)). Die CI testet die Build-Images mit Smoke-Tests. Ein
+eigenes Schnellprüf-Skript gibt es nicht.
+
 ### Entwicklungsumgebung von der echten trennen
 
 - `LLM_FRAMEWORK_CONFIG_DIR=/ein/ordner` lässt das Framework diesen Ordner für seine Einstellungen nutzen. Ohne die
@@ -563,6 +572,11 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 
 ## 8. Regeln für den Code
 
+- **Erst nutzen, was es gibt.** Bevor du einen Helfer, eine Prüfung, ein Modell oder eine Suche schreibst, such
+  im Repository nach einem, der die Aufgabe schon erledigt (`git log -S` zeigt, was zuerst da war). Nutze ihn,
+  erweitere ihn und verdrahte ihn; etwas Neues daneben baust du nur, wenn es nichts Passendes gibt, und sagst im
+  Pull Request, warum. Zwei Umsetzungen einer Aufgabe werden zur besseren zusammengeführt (zur älteren, wenn sie
+  genügt), und jeder Aufrufer wird an sie verdrahtet. Fertig heißt verdrahtet und getestet, nicht nur geschrieben.
 - Nutze Typangaben für neue Funktionen.
 - Protokolliere mit `orchestrator.utils.logging.get_logger`, nicht mit `print()`. CLI-Ausgaben laufen über `rich`;
   maskiere externen Text vor der Ausgabe mit `rich.markup.escape`.

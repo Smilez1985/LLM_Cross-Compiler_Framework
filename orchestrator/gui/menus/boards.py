@@ -70,7 +70,6 @@ MACHINE_ONLY: Dict[str, str] = {
     "device settings --confirm-sudo": "script switch: the window asks the sudo question instead",
     "device runtime deploy --password-stdin": "script switch: the window asks for the password each time",
 }
-BUILD_MENU_NAMES = (place.MENU_BUILD,)
 BUILD_MENU_TITLES = ("Build", "Bauen")
 
 
