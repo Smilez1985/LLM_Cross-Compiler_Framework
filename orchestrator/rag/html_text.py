@@ -10,10 +10,12 @@ Text a person reading the page does not see never reaches the knowledge base (hi
 recon P1). strip_boilerplate drops the page furniture and then, through strip_hidden, every element hidden by its
 inline style (display:none, visibility:hidden, a zero or near-zero font size or opacity, off-screen positioning, a clip
 that leaves no visible box, text in the colour of its own background), by the hidden attribute or aria-hidden="true",
-and <template> and <noscript>. An inactive tab panel stays (role="tabpanel" on a page with tabs: the person opens it
-with a click). strip_hidden_markup applies the same rule (hidden_kind) to HTML carried inside Markdown or plain text,
-such as a knowledge pack's page. Rules in style sheets and classes (.sr-only, ...) are not seen: there is no CSS engine,
-so the removal is partial. What was removed is counted by kind (HIDDEN_KINDS) and never kept.
+and <template> and <noscript>; and CDATA sections, which a browser shows as comments. An inactive tab panel stays
+(role="tabpanel" on a page with tabs: the person opens it with a click). strip_hidden_markup applies the same rule
+(hidden_kind) to HTML carried inside Markdown or plain text, such as a knowledge pack's page, and also cuts out
+comments, marked sections and processing instructions there. Rules in style sheets and classes (.sr-only, ...) are
+not seen: there is no CSS engine, so the removal is partial. What was removed is counted by kind (HIDDEN_KINDS) and
+never kept.
 """
 
 import re
@@ -21,7 +23,7 @@ from html.parser import HTMLParser
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
-from bs4.element import Declaration, Doctype, ProcessingInstruction
+from bs4.element import CData, Declaration, Doctype, ProcessingInstruction
 
 _HEADINGS = {f"h{i}": i for i in range(1, 7)}
 _BLOCK_TAGS = {"p", "div", "section", "article", "main", "blockquote", "figure", "figcaption", "dl", "dt", "dd",
@@ -214,7 +216,8 @@ def _count(removed: Dict[str, int], kind: str) -> None:
 
 def strip_hidden(soup: Union[BeautifulSoup, Tag]) -> Dict[str, int]:
     """Removes every element of a parsed page that hidden_kind finds hidden, with its content; returns how many
-    elements with text were removed, by kind (HIDDEN_KINDS; a kind with none is left out)."""
+    elements with text were removed, by kind (HIDDEN_KINDS; a kind with none is left out). A CDATA section outside
+    MathML is a comment to a browser, so it goes too (counted as html_comments); comments themselves are never read."""
     tabs = soup.find(attrs={"role": "tab"}) is not None
     removed: Dict[str, int] = {}
     for tag in soup.find_all(True):
@@ -226,6 +229,11 @@ def strip_hidden(soup: Union[BeautifulSoup, Tag]) -> Dict[str, int]:
         if tag.get_text().strip():
             _count(removed, kind)
         tag.decompose()
+    for section in soup.find_all(string=lambda s: isinstance(s, CData)):
+        if section.find_parent(["math", "svg"]) is None:
+            if section.strip():
+                _count(removed, "html_comments")
+            section.extract()
     return removed
 
 
@@ -285,7 +293,8 @@ class _HiddenSpans(HTMLParser):
         self._open: List[str] = []
         self._hidden: Optional[Tuple[int, int, str]] = None   # (depth, start, kind) of the hidden element open now
         self._tabs = re.search(r"""\brole\s*=\s*["']?tab["'\s/>]""", text, re.IGNORECASE) is not None
-        self.spans: List[Tuple[int, int, str]] = []
+        # (start, end, kind, the text a comment-like span holds; None for an element, whose tags are stripped)
+        self.spans: List[Tuple[int, int, str, Optional[str]]] = []
 
     def _offset(self) -> int:
         line, column = self.getpos()
@@ -296,11 +305,28 @@ class _HiddenSpans(HTMLParser):
         if self._hidden is None:
             kind = hidden_kind(tag, {key: value or "" for key, value in attrs}, self._tabs)
             if kind is not None and tag in _VOID:
-                self.spans.append((start, start + len(self.get_starttag_text() or ""), kind))
+                self.spans.append((start, start + len(self.get_starttag_text() or ""), kind, None))
             elif kind is not None:
                 self._hidden = (len(self._open), start, kind)
         if tag not in _VOID:
             self._open.append(tag)
+
+    def _comment_like(self, close: str, data: str) -> None:
+        """A comment, a CDATA or other marked section, or a processing instruction: a browser shows none of it."""
+        if self._hidden is None:
+            start = self._offset()
+            end = self.text.find(close, start + 2)
+            self.spans.append((start, len(self.text) if end < 0 else end + len(close), "html_comments", data))
+
+    def handle_comment(self, data):   # <!-- ... --> and bogus comments such as <!x>
+        self._comment_like("-->" if self.text.startswith("<!--", self._offset()) else ">", data)
+
+    def unknown_decl(self, data):   # <![CDATA[ ... ]]>, <![if ...]>
+        cdata = data.upper().startswith("CDATA[")
+        self._comment_like("]]>" if cdata else "]>", data[6:] if cdata else "")
+
+    def handle_pi(self, data):   # <? ... >
+        self._comment_like(">", data)
 
     def handle_endtag(self, tag):
         if tag not in self._open:   # a stray end tag closes nothing
@@ -310,32 +336,33 @@ class _HiddenSpans(HTMLParser):
         if self._hidden is not None and len(self._open) <= self._hidden[0]:
             _, start, kind = self._hidden
             end = self.text.find(">", self._offset())
-            self.spans.append((start, len(self.text) if end < 0 else end + 1, kind))
+            self.spans.append((start, len(self.text) if end < 0 else end + 1, kind, None))
             self._hidden = None
 
-    def scan(self) -> List[Tuple[int, int, str]]:
+    def scan(self) -> List[Tuple[int, int, str, Optional[str]]]:
         self.feed(self.text)
         self.close()
         if self._hidden is not None:   # never closed: hidden up to the end, as a browser renders it
-            self.spans.append((self._hidden[1], len(self.text), self._hidden[2]))
+            self.spans.append((self._hidden[1], len(self.text), self._hidden[2], None))
             self._hidden = None
-        return sorted(self.spans)
+        return sorted(self.spans, key=lambda span: span[:2])
 
 
 def strip_hidden_markup(text: str) -> Tuple[str, Dict[str, int]]:
     """Text that may carry HTML (Markdown renders it, as in a knowledge pack's page): every element hidden_kind finds
-    hidden is cut out with its content, and every other character stays as it was. HTML inside code spans and fenced
-    code blocks is shown, never rendered, so it stays too. Returns the text and how many elements with text were
-    removed, by kind."""
+    hidden is cut out with its content, and so is what a browser shows nothing of (comments, CDATA and other marked
+    sections, processing instructions); every other character stays as it was. HTML inside code spans and fenced code
+    blocks is shown, never rendered, so it stays too. Returns the text and how many pieces with text were removed, by
+    kind (comment-like ones as html_comments)."""
     text = text or ""
     if "<" not in text:
         return text, {}
     removed: Dict[str, int] = {}
     kept, position = [], 0
-    for start, end, kind in _HiddenSpans(_mask_code(text)).scan():
+    for start, end, kind, held in _HiddenSpans(_mask_code(text)).scan():
         if start < position:
             continue
-        if re.sub(r"<[^>]*>", "", text[start:end]).strip():
+        if (re.sub(r"<[^>]*>", "", text[start:end]) if held is None else held).strip():
             _count(removed, kind)
         kept.append(text[position:start])
         position = end

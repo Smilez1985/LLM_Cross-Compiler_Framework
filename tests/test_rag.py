@@ -1144,7 +1144,16 @@ class TestHiddenElements:
                          "</div>\n```\n\n after. Placeholder <repository or path> and a < b > c stay.\n")
         assert removed == {"display_none": 1, "aria_hidden": 1, "hidden_attribute": 1}
         assert strip_hidden_markup("no markup at all") == ("no markup at all", {})
+        # What a browser shows nothing of: comments, CDATA sections, processing instructions, bogus comments.
+        assert strip_hidden_markup("a <!-- x --> b <![CDATA[y]]> c <?php z ?> d <!w> e <!----> `<!-- kept -->`") == (
+            "a  b  c  d  e  `<!-- kept -->`", {"html_comments": 4})
+        assert strip_hidden_markup("a <![if mso]>shown<![endif]> b") == ("a shown b", {})
         assert is_html_document("<!-- x -->\n<!DOCTYPE html><html>") and not is_html_document("# T\n\n<html>")
+
+    def test_cdata_is_a_comment_outside_mathml(self):
+        from orchestrator.rag.html_text import page_markdown
+        _, text, removed = page_markdown("<p>Seen <![CDATA[gone]]> text.</p><math><mi><![CDATA[x]]></mi></math>")
+        assert text == "Seen text.\n\nx" and removed == {"html_comments": 1}
 
 
 class TestUntrustedCleaning:
