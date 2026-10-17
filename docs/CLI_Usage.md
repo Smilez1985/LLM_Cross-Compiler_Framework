@@ -424,9 +424,11 @@ target install.
 llm-cli build start -m MODEL -t TARGET [options]
 ```
 
-Converts and quantizes a model for a target in Docker. The request is checked against the target's capabilities
-first: an unsupported combination stops with exit code 2 and the reason, before anything runs. Missing board and
-quantization are filled with the target's defaults.
+Converts and quantizes a model for a target in Docker. The request is checked by the build service first, the same
+check the Builder tab and AI clients get: an unsupported combination of the target's capabilities, a model that is
+neither an existing local folder or file (that looks like a model) nor a Hugging Face ID, or a dataset that is not a
+file stops with exit code 2 and the reason, before anything runs. Missing board and quantization are filled with the
+target's defaults. A target without a capabilities block is built unchecked.
 
 | Option | Meaning |
 |---|---|

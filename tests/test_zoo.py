@@ -1219,6 +1219,44 @@ def test_hub_smoke(qapp, world, tmp_path, monkeypatch):
         hub.close()
 
 
+def test_hub_build_checks_the_recipe_when_it_is_clicked(qapp, world, tmp_path, monkeypatch):
+    """Build reads the recipe through BuildService.installed_recipe (c3-build-path, CHANGELOG Security): a recipe the
+    community index revoked after the list was shown is refused at the click, not only by the button the listing
+    disabled."""
+    from orchestrator.gui import community_hub
+    from test_recipes import recipe_data
+    world.publish()
+    root = tmp_path / "r"
+    root.mkdir()
+    data = recipe_data()
+    data.update(id="demo-recipe", target={"id": "demo-board", "pack_sha256": "a" * 64}, format="gguf",
+                board="demo", quantization="Q8_0")
+    (root / "recipe.yml").write_text(json.dumps(data))
+    (tmp_path / "r.zip").write_bytes(pack_bytes(root, kind="recipe", pack_id="demo-recipe", version="1.0.0"))
+    world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "r.zip"))
+    built, errors = [], []
+    framework = SimpleNamespace(community_manager=world.cm, target_manager=None, secrets_manager=world.secrets)
+    hub = community_hub.CommunityHubWindow(framework, on_build_recipe=built.append)
+    try:
+        wait(hub, qapp)
+        monkeypatch.setattr(hub, "on_error", errors.append)
+        (item,) = [i for i in hub.shown_items if i.kind == "recipe"]
+        world.revoked.append({"kind": "recipe", "id": "demo-recipe", "reason": "broken"})
+        world.publish(version=2)
+        world.cm.load_index(refresh=True)
+        hub.build_recipe(item)
+        assert built == [] and "revoked" in errors[0]
+        (installed,) = [folder for folder, prov in world.cm.installed() if prov.kind == "recipe"]
+        (installed / "recipe.yml").write_text("not: [a recipe")  # unreadable: refused as well
+        world.revoked.clear()
+        world.publish(version=3)
+        world.cm.load_index(refresh=True)
+        hub.build_recipe(item)
+        assert built == [] and "cannot be read" in errors[1]
+    finally:
+        hub.close()
+
+
 def test_hub_never_renders_pack_text_as_html(qapp, world, tmp_path, monkeypatch):
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QTextDocument
@@ -1261,6 +1299,9 @@ def test_builder_fills_in_a_recipe_with_its_commit(qapp, booted_framework, monke
     data.update(target={"id": "Rockchip", "pack_sha256": "a" * 64}, format="rkllm", board="rk3576",
                 quantization="w4a16")
     recipe = Recipe.model_validate(data)
+    # Start Build builds a recipe through BuildService.start_recipe: it must be installed (and not revoked) now
+    monkeypatch.setattr(booted_framework.build_service, "installed_recipe",
+                        lambda recipe_id: (recipe, SimpleNamespace(id=recipe.id)))
     tab.apply_recipe(recipe)
     req = submit(tab)
     assert (req.models, req.targets, req.target_board, req.quantization_options) == (

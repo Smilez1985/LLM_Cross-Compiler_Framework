@@ -1285,6 +1285,26 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   engine, `BuildService.live_resources`), and the rest of that older path (start, monitor, stop, a healing trigger
   and six Qt signals nothing listened to) was removed because the one build path does all of it (decision round 12,
   item 6). The AI's build status is unchanged.
+- **One AI-settings change service for every channel** (`orchestrator/llm/settings_change.py`,
+  `AISettingsChange`): the rules the AI settings dialog kept to itself (known providers in the fallback chain, no
+  cloud provider in offline mode, a key required and not an admin key, the workspace ID's form, the server address,
+  a model, the plain-http question for a key, the key stored for its address, the settings written, the knowledge
+  base started and Ditto reloaded) now live in one Qt-free place. The dialog keeps only its message boxes and its
+  question; sign-in and `llmcf ditto login` use the same address rules, and MCP `update_settings` the same
+  tighten-only rule, which moved there from the tool module (`direction_problem`, still importable from
+  `orchestrator.tools.tools_status`). `AISettingsChange.current()` and `with_setting()` are ready for a change of
+  one setting at a time (the coming `llmcf config set`).
+- **One build-submission path for the CLI, the GUI and AI callers**: `llmcf build start` and the Builder tab's
+  **Start Build** queue their build through `BuildService.start_build`, the path the MCP server and Ditto already
+  used, instead of building their own orchestrator request each. The CLI and the GUI therefore check a request the
+  same way before anything starts: a request without a model, a local model that does not exist (or does not look
+  like a model), a calibration dataset that is not a file and a revision for a local model are refused with the
+  reason (the CLI exits with code 2, the GUI shows it in a message box) instead of failing later in the build. What
+  each window sets stays as it was: the CLI's priority, optimization and destination prompt, the GUI's priority,
+  parallel builds and build folder, a target without capabilities built unchecked, and the person's own builds are
+  never refused by the queue limit for AI callers. The CLI's follow loop reads the build through the same service.
+  The Builder's check for an earlier build with the same options now also covers a target without capabilities
+  (before, the service refused to compare such a request and the Builder only logged that).
 - **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
   `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
   and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the
@@ -1692,6 +1712,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and prints a warning. `--optimization` stays; its help now says that the Rockchip target ignores it.
 
 ### Removed
+- The Builder tab's unused `LocalProbeWorker`, a second runner of the fallback probe script (its own subprocess call
+  without a time limit, with the inherited stdin, in the GUI's working folder). Every local scan runs the script
+  through `HardwareProbes.run_local` (the one runner `llmcf scan --script` and the scan menu use); its tests moved
+  there.
 - The stale copy `Docker Setup/pyproject.toml` (version 1.6.0, read by nothing): the container image is built from
   the repository's own `pyproject.toml` and `requirements.txt`.
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
@@ -2108,6 +2132,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   only, the whole name, root only where it is allowed): the deploy, adding a board, the Deployment tab, the
   trusted-board records, the deploy settings, the systemd unit and the account names an AI never reads
   (`device_text`). Adding a board no longer loads the build engine and the Docker SDK for this check.
+- **The AI settings dialog refuses a server address with a user name or password in it**, as sign-in and
+  `llmcf ditto login` already did (the same address rule from `AISettingsChange`): before, such an address (or one
+  with a space or a backslash, which parsers can read as two different hosts) was saved to `config.yml` as typed.
+- **A community recipe built from the GUI is checked when it is built, as over MCP**: the Community Hub's **Build**
+  button and the Builder tab's **Start Build** go through `BuildService.installed_recipe` and
+  `BuildService.start_recipe`, the path `start_recipe_build` uses. A recipe the community index revoked after the
+  Hub's list was shown, or one that can no longer be read, is refused at the click and again at Start Build; before,
+  only the Build button the list had disabled stood in the way, and the GUI parsed `recipe.yml` itself. A build that
+  keeps every value of the recipe now pins its calibration dataset: a file other than the one the recipe's sha256
+  names is refused, and the build engine checks the copy it uses. A recipe that changed since it filled the form is
+  refused too. Changing a value of the recipe in the form still builds your own values at the recipe's commit,
+  after the same revocation check; so does a calibration dataset for a recipe that names none, or none for a recipe
+  that names one, as before.
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI

@@ -435,9 +435,12 @@ nach der Installation eines Targets aus dem Community Hub.
 llm-cli build start -m MODELL -t TARGET [Optionen]
 ```
 
-Konvertiert und quantisiert ein Modell für ein Target in Docker. Die Anfrage wird zuerst gegen die Capabilities des
-Targets geprüft: Eine nicht unterstützte Kombination stoppt mit Exit-Code 2 und dem Grund, bevor etwas läuft.
-Fehlendes Board und fehlende Quantisierung werden mit den Standardwerten des Targets ergänzt.
+Konvertiert und quantisiert ein Modell für ein Target in Docker. Die Anfrage prüft zuerst der Build-Dienst, mit
+derselben Prüfung, die der Builder-Tab und KI-Clients bekommen: Eine Kombination, die die Capabilities des Targets
+nicht unterstützen, ein Modell, das weder ein vorhandener lokaler Ordner bzw. eine Datei ist (die wie ein Modell
+aussieht) noch eine Hugging-Face-ID, oder ein Datensatz, der keine Datei ist, stoppt mit Exit-Code 2 und dem Grund,
+bevor etwas läuft. Fehlendes Board und fehlende Quantisierung werden mit den Standardwerten des Targets ergänzt. Ein
+Target ohne Capabilities-Block wird ungeprüft gebaut.
 
 | Option | Bedeutung |
 |---|---|
