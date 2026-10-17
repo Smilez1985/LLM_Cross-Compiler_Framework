@@ -115,11 +115,14 @@ def _describe(widget: QWidget, terms: List[str], lang: Optional[str]) -> None:
 
 class HoverCard(QFrame):
     """The card for `terms` (glossary ids): the term, its explanation and a link button per term, after the widget's
-    own tooltip text (`context`). `pinned`: opened by F1 or a "?" button, a popup that takes the focus."""
+    own tooltip text (`context`). `pinned`: opened by F1 or a "?" button, a popup that takes the focus. `owner`: the
+    widget it explains; the card is a window that belongs to the owner's window, so a modal dialog does not block it
+    (the mouse reaches it and its link can be clicked) and it goes when that window goes."""
 
-    def __init__(self, terms: Iterable[str], *, context: str = "", lang: Optional[str] = None, pinned: bool = False):
+    def __init__(self, terms: Iterable[str], *, context: str = "", lang: Optional[str] = None, pinned: bool = False,
+                 owner: Optional[QWidget] = None):
         flags = (Qt.Popup if pinned else Qt.ToolTip) | Qt.FramelessWindowHint
-        super().__init__(None, flags)
+        super().__init__(owner.window() if owner is not None else None, flags)
         self.terms = [t for t in terms if t in TERMS]
         self.lang = lang or current_language()
         self.pinned = pinned
@@ -241,7 +244,7 @@ class _HoverController(QObject):
         self.close_card()
         terms = terms if terms is not None else _terms_of(widget)
         lang = widget.property(LANG_PROPERTY) or None
-        card = HoverCard(terms, context=_tooltip_text(widget), lang=lang, pinned=pinned)
+        card = HoverCard(terms, context=_tooltip_text(widget), lang=lang, pinned=pinned, owner=widget)
         card.installEventFilter(self)
         card.destroyed.connect(lambda *_: self._forget(card))
         self.card, self.owner = card, widget

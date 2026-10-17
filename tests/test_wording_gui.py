@@ -118,6 +118,37 @@ def test_a_widget_deleted_while_waiting_or_showing_is_forgotten(opened):
     assert controller.card is None and controller.owner is None, "the card goes with its window"
 
 
+def test_the_card_of_a_field_in_a_modal_dialog_can_be_used(opened):
+    """Review fix: the card was a window of its own without a parent, so while a modal dialog was open (File >
+    Settings..., the deletion list, a wizard, the error box) Qt blocked it like any other window: the mouse could not
+    reach it (it went away 400 ms after leaving the label) and its link could not be clicked. The card now belongs to
+    the window of the widget it explains."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
+    main = QWidget()
+    main.resize(300, 200)
+    main.show()
+    dialog = QDialog(main)
+    dialog.setWindowModality(Qt.ApplicationModal)
+    label = explain.term_label("Quantization:", "quantization", parent=dialog)
+    QVBoxLayout(dialog).addWidget(label)
+    dialog.show()
+    assert QTest.qWaitForWindowExposed(dialog)
+    controller = explain.hover_controller()
+    card = controller.show_for(label)
+    assert QTest.qWaitForWindowExposed(card)
+    assert card.window() is card and card.windowFlags() & Qt.ToolTip, "still a hover card, not part of the dialog"
+    assert card.windowHandle().transientParent() is dialog.windowHandle(), \
+        "it belongs to the dialog, so the dialog's modality does not block it (mouse, Enter and Leave)"
+    link = card.links[0]
+    center = link.mapTo(card, link.rect().center())
+    QTest.mouseClick(card.windowHandle(), Qt.LeftButton, Qt.NoModifier, QPoint(center.x(), center.y()))
+    assert opened == [TERMS["quantization"].link], "its link opens on a click, also over a modal dialog"
+    dialog.close()
+    main.close()
+
+
 def test_the_link_opens_only_on_a_click_and_only_glossary_links(opened):
     from PySide6.QtWidgets import QPushButton
     card = explain.HoverCard(["qdrant"], lang="en")
