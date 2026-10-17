@@ -28,7 +28,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Advanced, Tools with Knowledge and Maintenance; translated titles with mnemonics, every entry named and labelled
   where it is created, one layout table, `retranslate_menus()`. The hand-written menu paths of the texts (30 keys in
   English and German) became `{path:<objectName>}`, filled from the live labels; `tests/test_no_command_texts.py`
-  guards the texts and counts the rest against a baseline that only goes down.
+  guards the texts and counts the rest against a baseline that only goes down. The catalogue's German texts follow
+  the chosen form of address: a module's `FORMAL` table holds the "Sie" form of each text that differs.
 - **What Ditto and AI apps do becomes entries of the chat feed, in every process** (wave 6, DECISIONS round 9 U1,
   consequence b): `orchestrator/Core/activity.py` writes one signed entry per event, from the process that did the
   work (the GUI, `llm-cli`, every stdio MCP server and the HTTP child): a call that changed something (the new
@@ -37,8 +38,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   approvals, pending approvals and their end, and refused work (`blocked`). The person's own calls make no entries;
   the sender is the trusted caller id, an app's own name only its claim; entries hold closed values only and name the
   window that shows the result (`orchestrator/tools/tool_windows.py`: the closed window list, a window for every tool
-  that changes something, checked by a registry-wide test, for every job kind, and what opens each window) plus step
-  ids by pattern; `refs.asked_in` marks Ditto's turns in the GUI's own chat. It fails open, and the same refusal is
+  that changes something, checked by a registry-wide test, for every job kind, and what opens each window) plus the
+  step ids of the next-step catalogue (never a text key that looks like one); `refs.asked_in` marks Ditto's turns in the GUI's own chat. It fails open, and the same refusal is
   written once in 30 seconds. `ActivityProducer.add_listener` hands the GUI its own process's entries at once, and
   `ConfigManager.reload_user_config` takes settings another process saved, except values this process holds itself
   (reported as conflicts). The GUI side (showing windows, notices with Show) follows in wave 6.
@@ -49,10 +50,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (Wikipedia, the term's own documentation such as qdrant.tech or the llama.cpp docs, or this manual). Resting the
   mouse on a marked label shows a hover card with the explanation; it stays while the mouse is on it, and its link
   opens in the web browser only when you click it. F1 on the field opens the same card for the keyboard. The Builder's
-  **Format** and **Quantization** labels are the first; the other windows follow. A new error box says what happened
-  in your language, why, and one next step, with the English **Technical details** folded away (secrets and your home
-  folder removed) to copy into a bug report or ask Ditto about. German texts say "du"; **File > Settings...** now has
-  a **General** tab where you choose "Sie" instead (setting `form_of_address`), used at once. Sizes in the deletion
+  **Format** and **Quantization** labels are the first; the other windows follow (a menu path in a text is not
+  searched for terms). A new error box says what happened in your language, why, and one next step (a sentence, or
+  the place with its menu path and an **Open** button), with the English **Technical details** folded away (secrets
+  and your home folder removed) to copy into a bug report or ask Ditto about. German texts say "du";
+  **File > Settings...** now has a **General** tab where you choose "Sie" instead (setting `form_of_address`), used
+  at once, also for the next steps. Sizes in the deletion
   dialog follow your language ("1,5 GB" in German).
 - **`tests/test_cli_gui_parity.py`: every person-facing CLI command and option has a mouse path** (W1', round 9
   U2): the test walks the whole command tree of `llm-cli` (294 paths: commands, subcommands and options) and reads

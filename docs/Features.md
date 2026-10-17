@@ -2432,15 +2432,17 @@ where they appear (unreleased).
   description, after what the window itself says about the field. The glossary has 74 terms (for example GGUF,
   quantization and its types such as Q4_K_M, importance matrix, calibration dataset, KV cache, RKLLM, RKNN, NPU,
   Qdrant, MCP, SSH host key, fingerprint, digest, keyring, standing approval); the Builder's **Format** and
-  **Quantization** labels use it now, the other windows follow.
+  **Quantization** labels use it now, the other windows follow. A text that tells you where to click explains only
+  the terms it uses itself, not the menu titles on the way.
 - **Error messages:** an error box says what happened in your language, why when it is known, and one next step (a
-  sentence or a button). The English technical details (the framework's message, a traceback) are folded away under
+  sentence, a button, or the place to go with its menu path and an **Open** button). The English technical details (the framework's message, a traceback) are folded away under
   **Technical details**; **Copy details** copies them with secrets removed and your home folder written as `~`, for a
   bug report or to ask Ditto, who can explain them in German. No part of the box shows a secret, also where it
   repeats an error's message.
 - **"du" or "Sie":** German texts address you with "du". **File > Settings...** has a **General** tab where you choose
   "Sie" instead; the choice is saved (setting `form_of_address`, `du` or `sie`) and used at once for every text read
-  from then on. A window that is already open keeps its texts until you open it again.
+  from then on, the next steps and error summaries included. A window that is already open keeps its texts until you
+  open it again.
 - **Sizes** are shown in decimal units in your language's notation (`1.5 GB`, German `1,5 GB`); the command line
   keeps English.
 
