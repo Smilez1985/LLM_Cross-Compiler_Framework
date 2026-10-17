@@ -322,6 +322,19 @@ def test_the_docker_manager_needs_qt_only_for_its_signals(tmp_path):
     assert present(modules, ("PySide6",)) == []
 
 
+def test_the_key_storage_names_load_no_file_lock_library(tmp_path):
+    """Review fix (consolidation chain c1-imports): Core/vault_key is imported for its storage names by the CLI's
+    secret commands, the sign-in and the GUI start. The audit key that moved there from framework_tools brought a
+    module-level import of the file lock (the filelock package, which loads asyncio and sqlite3); only the key's
+    get-or-create needs it, so it is imported there, as framework_tools' import was only paid by the tool registry."""
+    code = ("import sys\n"
+            "from orchestrator.Core.vault_key import STORAGE_CHOICES, StorageError, audit_key\n"
+            "assert 'filelock' not in sys.modules, 'the lock library loaded with the storage names'\n")
+    modules, run = loaded_modules(tmp_path, code)
+    assert run.returncode == 0, run.stderr[-3000:]
+    assert present(modules, ("filelock", "orchestrator.utils.file_lock")) == []
+
+
 def test_the_command_lines_sizes_need_no_qt(tmp_path):
     """Review fix (wave 6, f-words): deletion.size_text, used by the command line, Mojo and the board steps, went
     through the GUI's language tables (localization imports Qt) and so loaded Qt into llmcf and the MCP server."""

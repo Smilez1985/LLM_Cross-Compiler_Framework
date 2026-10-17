@@ -61,18 +61,20 @@ try:
 except ImportError:
     detect = None
 
-from requests.adapters import HTTPAdapter
 from requests.utils import requote_uri
 from urllib3.exceptions import HTTPError as Urllib3Error, ReadTimeoutError
-from urllib3.connection import HTTPConnection, HTTPSConnection
-from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from orchestrator import __version__
 from orchestrator.rag import licences
 from orchestrator.rag.html_text import html_to_markdown
+# The SSRF-safe adapter lives in orchestrator/security/http.py (consolidation chain c1-imports); the names stay
+# importable here.
+from orchestrator.security.http import (PublicOnlyAdapter, _PinnedConnectionMixin,  # noqa: F401
+                                        _PinnedHTTPConnection, _PinnedHTTPConnectionPool, _PinnedHTTPSConnection,
+                                        _PinnedHTTPSConnectionPool)
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils.logging import get_logger
-from orchestrator.utils.validation import validate_public_url, resolve_public_addresses
+from orchestrator.utils.validation import validate_public_url
 
 DEFAULT_LANGUAGES = ("en", "de")
 
@@ -315,43 +317,6 @@ class Document:
     page_content: str
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
-class _PinnedConnectionMixin:
-    """Re-checks the address at connect time and connects to exactly that IP (defeats DNS rebinding).
-    TLS still verifies against the original host name, which urllib3 reads after _new_conn()."""
-
-    def _new_conn(self):
-        vetted = resolve_public_addresses(self._dns_host, self.port)[0]
-        original, self._dns_host = self._dns_host, vetted
-        try:
-            return super()._new_conn()
-        finally:
-            self._dns_host = original
-
-
-class _PinnedHTTPConnection(_PinnedConnectionMixin, HTTPConnection):
-    pass
-
-
-class _PinnedHTTPSConnection(_PinnedConnectionMixin, HTTPSConnection):
-    pass
-
-
-class _PinnedHTTPConnectionPool(HTTPConnectionPool):
-    ConnectionCls = _PinnedHTTPConnection
-
-
-class _PinnedHTTPSConnectionPool(HTTPSConnectionPool):
-    ConnectionCls = _PinnedHTTPSConnection
-
-
-class PublicOnlyAdapter(HTTPAdapter):
-    """Direct connections only reach public addresses. Requests through a configured proxy are
-    resolved by the proxy and therefore only covered by the URL check."""
-
-    def init_poolmanager(self, *args, **kwargs):
-        super().init_poolmanager(*args, **kwargs)
-        self.poolmanager.pool_classes_by_scheme = {"http": _PinnedHTTPConnectionPool, "https": _PinnedHTTPSConnectionPool}
 
 class CrawlerManager:
     """

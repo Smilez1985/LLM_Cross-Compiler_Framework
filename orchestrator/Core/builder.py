@@ -1043,7 +1043,7 @@ class BuildEngine:
         except Exception as e:
             self._check_cancelled(progress)
             # Docker and the file system name the archive's host path; build warnings reach AI clients too.
-            from orchestrator.tools.tools_runtime import label_paths
+            from orchestrator.security.paths import label_paths
             progress.add_warning(f"Security scan failed to run: {label_paths(str(e), {str(self.cache_dir): 'cache'})}")
         finally:
             if container is not None:

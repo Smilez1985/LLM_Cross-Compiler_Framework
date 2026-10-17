@@ -31,6 +31,8 @@ from orchestrator.Core.module_generator import (ARCHITECTURES, DEFAULT_BASE, INP
                                                 SHIPPED_TEMPLATE, ModuleGenerator, effective_base, generator_input,
                                                 module_slug, soft_cap_warnings, target_name_collision, uses_gpu_template,
                                                 validate_module_data, vendor_fact_lines)
+# The audit row of a module the person saved lives in Core/module_generator.py (chain c1-imports); the old name stays.
+from orchestrator.Core.module_generator import record_module_saved  # noqa: F401
 from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_ID, PROBE_TIMEOUT, HardwareProbes,
                                                 ProbeError, match_target)
 from orchestrator.schemas.build import TargetOut
@@ -402,7 +404,7 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         fields, every value the generator checks, the base image's form, its reason, and that every address is
         public. Refused before the question with the field and the fix."""
         from orchestrator.Core.ditto_manager import PREBUILT_CUDA_IMAGE, PREBUILT_CUDA_REFUSAL, dangerous_command
-        from orchestrator.llm.task_prompts import is_official_image
+        from orchestrator.utils.image_ref import is_official_image
         from orchestrator.utils.prebuilt_llama import is_prebuilt_llama_image
         from orchestrator.utils.validation import validate_public_url
         data = generator_input(inp.model_dump(mode="json"), inp.module_name, inp.supported_boards or None)
@@ -544,7 +546,7 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         if soft_cap_warnings(data):
             ctx.notes.append("The person approved going above a soft limit for this module.")
         ctx.notes.append("The module is untested: tell the user what to check first (its assumptions).")
-        from orchestrator.llm.task_prompts import split_image
+        from orchestrator.utils.image_ref import split_image
         image = split_image(bound["image"])
         return CreateModuleOut(target=tid, folder=folder.name, base_image=BaseImageOut(
             registry=image["registry"], image=image["repository"], tag=image["tag"], digest=image["digest"],
@@ -666,19 +668,3 @@ def mark_created_under(folder: Path, channel: str, definition: str) -> None:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 
-def record_module_saved(framework: Any, actor: str, data: Dict[str, Any], folder: Path, channel: str) -> None:
-    """Audits a module the person saved from an AI proposal outside the registry (the GUI wizard, the CLI): actor,
-    that it is AI-generated, the definition's sha256 and the base image (design 6.7). Never fails the save."""
-    registry = getattr(framework, "tool_registry", None)
-    audit = getattr(registry, "audit", None)
-    if audit is None:
-        return
-    text = json.dumps({k: data.get(k) for k in sorted(data) if k != "description"}, sort_keys=True, default=str)
-    try:
-        audit.record(actor, "module_saved", ToolTier.LOCAL_WRITE.value, Decision.ASK.value, "ok",
-                     arguments={"target": Path(folder).name, "ai_generated": data.get("provenance") == "ai-generated",
-                                "definition_sha256": hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
-                                "base_image": str(data.get("base_os") or "")},
-                     approved=True, extra={"confirm_channel": channel, "answer": "accepted"})
-    except Exception:  # noqa: BLE001 - the module exists; the audit failure is logged by the audit log itself
-        pass

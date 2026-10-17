@@ -165,6 +165,28 @@ flowchart TB
     DEP -->|"SSH, Vertrauen beim ersten Kontakt"| DEV
 ```
 
+### Schichten (unveröffentlicht)
+
+GUI, CLI und MCP-Server bleiben in einem Repository (Entscheidung des Maintainers vom 2026-10-17); die Kopplung
+halten Schichten im Zaum, von denen jede nur sich selbst und die darunter importiert:
+
+| Schicht | Pakete | Darf importieren |
+|---|---|---|
+| 1. Unten | `orchestrator/utils/`, `orchestrator/security/`, `orchestrator/schemas/` | Schicht 1 |
+| 2. Remote | `orchestrator/remote/`, `orchestrator/utils/ssh_trust.py` | Schichten 1 und 2 |
+| 3. Kern | die Module von `orchestrator/tools/`, die keine Tools festlegen (Registry, Richtlinie, Audit, Freigaben, Signaturen, spec, ...) | Schichten 1 bis 3 |
+| 4. Fachlogik | `orchestrator/Core/`, `runtime/`, `rag/`, `llm/`, `evals/` (`llm` und `rag` importieren nie `Core`) | Schichten 1 bis 4 |
+| 5. Tool-Definitionen | `orchestrator/tools/tools_*`, `framework_*`, `gui_bridge`, `gui_surface` | Schichten 1 bis 5 |
+| 6. Adapter | `orchestrator/cli.py`, `orchestrator/mcp_server.py`, `orchestrator/gui/` mit `main.py` | alles außer einem anderen Adapter |
+
+PySide6 gibt es nur in der GUI, click und rich nur in der CLI, mcp und uvicorn nur im MCP-Server, paramiko nur im
+SSH-Transport (`utils/ssh_trust.py`, später `remote/transport.py`). `tests/test_layering.py` prüft jeden Import (auch in
+Funktionen und verzögerte) gegen diese Regeln; die heutigen Ausnahmen stehen in `tests/data/layering_allowlist.json` mit
+ihrem Grund und der Kette, die sie entfernt, und die Liste und der größte Import-Zyklus dürfen nur schrumpfen.
+Gemeinsame Helfer liegen deshalb unterhalb der Tools: Pfad-Labels für KIs in `security/paths.py`, private atomare
+Dateien in `utils/atomic.py`, einmalige Hinweise in `utils/notice_store.py`, Image-Referenzen in `utils/image_ref.py`,
+der SSRF-sichere HTTP-Adapter in `security/http.py`, der Audit-Schlüssel in `Core/vault_key.py`.
+
 ### Bausteine
 
 | Baustein | Wo | Aufgabe |

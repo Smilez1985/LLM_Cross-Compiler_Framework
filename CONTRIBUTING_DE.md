@@ -559,6 +559,30 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   Shell-Befehle auf entfernten Rechnern setzt du mit `shlex.quote` in Anführungszeichen.
 - Externer Text (Webseiten, Logs, Probe-Dateien, Wissensbasis, Tool-Ergebnisse) erreicht ein Sprachmodell nur über
   `orchestrator/utils/untrusted.py` und nie in einem System-Prompt.
+- **Imports zeigen die Schichten hinunter.** Jedes Modul von `orchestrator/` hat eine Schicht und importiert nur seine
+  eigene oder eine tiefere: (1) unten: `utils/`, `security/`, `schemas/`; (2) remote: `remote/` und
+  `utils/ssh_trust.py`; (3) Kern: die Module von `tools/`, die keine Tools festlegen (Registry, Richtlinie, Audit,
+  Freigaben, Signaturen, spec, ...); (4) Fachlogik: `Core/`, `runtime/`, `rag/`, `llm/`, `evals/`, wobei `llm` und `rag`
+  nie `Core` importieren; (5) Tool-Definitionen: `tools/tools_*`, `framework_*`, `gui_bridge`, `gui_surface`; (6)
+  Adapter: `cli.py`, `mcp_server.py`, `gui/` mit `main.py`, und kein Adapter importiert einen anderen. PySide6 gibt es
+  nur in der GUI, click und rich nur in der CLI, mcp und uvicorn nur im MCP-Server, paramiko nur im SSH-Transport
+  (`utils/ssh_trust.py`, später `remote/transport.py`). `tests/test_layering.py` liest jeden Import (auch in Funktionen,
+  unter `TYPE_CHECKING` und Modulnamen, die `import_module`, `lazy_attributes` oder `LazyModule` bekommen). Was heute
+  eine Regel bricht, steht in `tests/data/layering_allowlist.json`, jeder Eintrag mit seinem Grund und der Kette, die
+  ihn entfernt; der Test schlägt bei einem neuen Verstoß fehl und bei einem Eintrag, den es nicht mehr gibt (entferne
+  ihn), und der größte Import-Zyklus darf nur schrumpfen (senke `largest_cycle`, wenn er es tut).
+  `python tests/test_layering.py` gibt die heutigen Listen aus. Gemeinsamer Code, den eine tiefere Schicht braucht,
+  zieht nach unten, statt nach oben importiert zu werden; der alte Ort behält den Namen als Re-Export.
+- **Gemeinsame Helfer haben ein Zuhause unterhalb der Tools.** Pfade in Text, den eine KI liest:
+  `orchestrator/security/paths.py` (`label_paths`, `shorten_home`, `device_text`, `scrub_for_ai` und die
+  Home-Ordner-Muster `HOME_ROOT` und `ACCOUNT_NAME`, auf denen andere Bereiniger aufbauen). Private atomare Dateien:
+  `orchestrator/utils/atomic.py` (`replace_file` mit dem Windows-Wiederholen, `write_private`,
+  `write_private_exclusive`). Einmalige Hinweise: `orchestrator/utils/notice_store.py` (`OneTimeNotice`).
+  Docker-Image-Referenzen: `orchestrator/utils/image_ref.py`. HTTP, das nur öffentliche Adressen erreicht:
+  `orchestrator/security/http.py` (`PublicOnlyAdapter`). Der Audit-Schlüssel: `Core/vault_key.audit_key`; die
+  Basis-Images eines Pakets: `Core/community_pack.py`; die Snapshot-Prüfung vor einem Index:
+  `Core/knowledge_snapshots.snapshot_space`; das Audit eines gespeicherten Moduls:
+  `Core/module_generator.record_module_saved`.
 - **KI-Aufrufe laufen über die Anbieterschicht.** Nutze `LLMClient` aus `orchestrator/llm`; baue nie einen eigenen
   SDK-Client. Antworten, nach denen das Framework handelt, sind pydantic-Modelle (strukturierte Antworten), nie
   ausgewerteter freier Text. Neue Anbieter oder Modelle sind Vorlagen in `configs/llm_providers.yml`.

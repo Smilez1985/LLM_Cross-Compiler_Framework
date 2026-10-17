@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """The framework's own tools (targets, builds, artifacts, logs, healing, knowledge base)."""
 
-import contextlib
 import dataclasses
-import os
-import secrets
-import threading
-import time
 from pathlib import Path
 from typing import List, Literal, Optional
 
@@ -30,7 +25,6 @@ from orchestrator.tools.tools_hf import register_hf_tools
 from orchestrator.tools.tools_knowledge import EMPTY_SEARCH_NOTE, register_knowledge_tools  # noqa: F401
 from orchestrator.tools.tools_mojo import DoctorFinding, DoctorOut, mojo_tool_specs  # noqa: F401 - their old home
 from orchestrator.tools.spec import BUILD_QUOTA, CallFacts, Choices, Fact, FieldMeta, ToolLimits
-from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import redact_secrets
 
 
@@ -553,72 +547,11 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     return registry
 
 
-AUDIT_KEY_ID = "audit-hmac-key"
-_KEY_THREAD_LOCK = threading.Lock()
-
-
-@contextlib.contextmanager
-def _key_lock(state_dir: Path, timeout: float = 30.0):
-    """Serializes the audit key's get-or-create between threads and processes (GUI, CLI, MCP servers) with a
-    lock file in the per-user folder (the shared file_lock helper). Without a usable lock file it goes on
-    unlocked."""
-    deadline = time.monotonic() + timeout
-    if not _KEY_THREAD_LOCK.acquire(timeout=timeout):
-        raise TimeoutError("another thread holds the audit key lock")
-    try:
-        with contextlib.ExitStack() as stack:
-            try:
-                remaining = max(0.0, deadline - time.monotonic())
-                stack.enter_context(file_lock(Path(state_dir) / "audit-key.lock", timeout=remaining))
-            except TimeoutError:  # LockTimeout: another process holds it
-                raise
-            except (OSError, NotImplementedError):
-                pass  # no usable lock file (a file in the way, a read-only folder): go on unlocked
-            yield
-    finally:
-        _KEY_THREAD_LOCK.release()
-
-
-def _state_dir(framework) -> Path:
-    try:
-        path = getattr(getattr(framework, "config", None), "user_state_dir", None)
-    except OSError:
-        path = None
-    if isinstance(path, (str, Path)):
-        return Path(path)
-    return Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
-
-
-def _audit_key(framework, state_dir: Optional[Path] = None) -> Optional[bytes]:
-    """The audit HMAC key: its own entry in the OS keyring, per user like the audit database itself, and
-    never in a file an editor of the database could also read. None (an unkeyed chain, reported by
-    `llm-cli doctor`) when no keyring is available. A key is created under a lock, so two first starts at
-    the same time (GUI and MCP server) end up with the same key. A key kept under the keyring service name from
-    before the rename is used and copied to the new name (read_entry), so the existing audit chain stays verifiable."""
-    from orchestrator.Core.vault_key import keyring_usable, read_entry
-    if not keyring_usable():  # probed once per process; a hung keyring must not stop the boot
-        return None
-    try:
-        import keyring
-        from orchestrator.Core.secrets_manager import SecretsManager
-        service = SecretsManager.SERVICE_ID
-        key = read_entry(keyring, service, AUDIT_KEY_ID)
-        if not key:
-            with _key_lock(Path(state_dir) if state_dir else _state_dir(framework)):
-                key = read_entry(keyring, service, AUDIT_KEY_ID)  # another process may have been first
-                if not key:
-                    legacy = None
-                    sm = getattr(framework, "secrets_manager", None)
-                    if sm is not None:  # 3.0.0 development builds kept the key in the secrets store
-                        try:
-                            legacy = sm.get_secret("audit_hmac_key")
-                        except Exception:
-                            legacy = None
-                    keyring.set_password(service, AUDIT_KEY_ID, legacy or secrets.token_hex(32))
-                    key = keyring.get_password(service, AUDIT_KEY_ID)  # None if the backend keeps nothing
-        return key.encode("utf-8") if key else None
-    except Exception:
-        return None
+# The audit HMAC key (its keyring entry, created once under a lock) lives in Core/vault_key.py next to the other
+# keyring entries (consolidation chain c1-imports), so the chat feed and the CLI no longer import this tool module;
+# the old names stay here (build_tool_registry reads the key through _audit_key).
+from orchestrator.Core.vault_key import (AUDIT_KEY_ID, _KEY_THREAD_LOCK, _key_lock,  # noqa: E402,F401
+                                         audit_key as _audit_key)
 
 
 def _revision_anchor(kind: str) -> RevisionAnchor:

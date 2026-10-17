@@ -153,7 +153,6 @@ def test_the_posix_snippet_follows_posix_rules_on_a_windows_host(monkeypatch):
 def test_an_approval_is_stored_while_a_reader_holds_the_file(tmp_path, monkeypatch):
     """The approval watcher (and every other window) reads tool_approvals.json without the lock; on Windows
     os.replace onto a file that is open for reading fails with 'Access is denied'. The store tries again."""
-    from orchestrator.Core import vault_key
     from orchestrator.tools.approvals import ApprovalRecord, ApprovalStore
     now = datetime.now(timezone.utc)
     record = ApprovalRecord(id="ap_0123456789abcdef", caller="mcp", client="", tool="start_build", title="Start",
@@ -163,7 +162,8 @@ def test_an_approval_is_stored_while_a_reader_holds_the_file(tmp_path, monkeypat
                             state="pending", pid=os.getpid())
     store = ApprovalStore(tmp_path / "approvals", key=KEY)
     store.add(record)
-    monkeypatch.setattr(vault_key, "REPLACE_RETRIES", 10)  # what a Windows host uses
+    from orchestrator.utils import atomic   # the retry lives there since chain c1-imports
+    monkeypatch.setattr(atomic, "REPLACE_RETRIES", 10)  # what a Windows host uses
     real_replace, refused = os.replace, []
 
     def busy_once(src, dst):

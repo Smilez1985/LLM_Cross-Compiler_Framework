@@ -33,13 +33,13 @@ on a reconnect), so a tool that appeared only while the window is open would be 
 before the window, and an AI would have no honest reason to give.
 """
 
-import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
+from orchestrator.security.paths import ACCOUNT_NAME, HOME_ROOT, shorten_home
 from orchestrator.tools import gui_surface
 from orchestrator.tools.gui_surface import DITTO, Filler
 from orchestrator.tools.output import ToolOutput, fact, untrusted_text, UntrustedText
@@ -69,9 +69,10 @@ HF_REPO = re.compile(r"^[A-Za-z0-9][\w.-]{0,95}/[\w.-]{1,96}$")
 FILLS_PER_MINUTE = 30
 FILLED_WORDS = ("", "you", "ditto", "another_app")
 # The home folder of any account (/home/<name>, /Users/<name>, C:\Users\<name>): the person typing in the window may
-# use another account than the framework, and the name never reaches the AI
-_ACCOUNT = r"(?:[^/\\\s\"'<>|:]+(?: [^/\\\s\"'<>|:]+)?(?=[/\\])|[^/\\\s\"'<>|:]+)"   # 'Jane Roe\' too
-HOME_FOLDERS = re.compile(r"(?:(?<![\w.])/home|(?<![\w.])/Users|\b[A-Za-z]:[\\/]Users)[\\/]" + _ACCOUNT)
+# use another account than the framework, and the name never reaches the AI (the shared patterns of
+# orchestrator/security/paths.py)
+_ACCOUNT = rf"(?:{ACCOUNT_NAME}(?: {ACCOUNT_NAME})?(?=[/\\])|{ACCOUNT_NAME})"   # 'Jane Roe\' too
+HOME_FOLDERS = re.compile(HOME_ROOT + r"[\\/]" + _ACCOUNT)
 NOT_OPEN = "The framework's window is not open, so its forms cannot be read or filled. Nothing was changed."
 NOT_OPEN_NEXT = ("Tell the person: please open the framework window (the program's GUI); then call gui again. The "
                  "tool works while the window is open.")
@@ -226,12 +227,10 @@ def _not_open() -> ToolError:
 
 
 def _no_home(text: str) -> str:
-    """Text the person typed, with every home folder (it names the user) as '~'."""
-    home = str(Path.home())
-    for form in {home, os.path.realpath(home)}:
-        if form and form not in ("/", "\\"):
-            text = text.replace(form, "~")
-    return HOME_FOLDERS.sub("~", text)
+    """Text the person typed, with every home folder (it names the user) as '~': this computer's in every spelling
+    (security.paths.shorten_home: HOME and USERPROFILE too, either separator, a Windows path in any case, doubled
+    backslashes), any other account's by HOME_FOLDERS."""
+    return HOME_FOLDERS.sub("~", shorten_home(text))
 
 
 def plain_facts(inp: GuiIn, by: Filler) -> Optional[CallFacts]:
@@ -315,7 +314,7 @@ class GuiCore:
             label = None
         if label:
             return label
-        from orchestrator.tools.tools_runtime import label_paths
+        from orchestrator.security.paths import label_paths
         return _no_home(label_paths(text, self._folder_roots()))
 
     def _value_for_ai(self, row: Dict[str, Any]) -> str:

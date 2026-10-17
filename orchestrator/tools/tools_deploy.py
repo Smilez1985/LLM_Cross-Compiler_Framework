@@ -91,17 +91,16 @@ def hide_paths(text: str, labels: Dict[str, str]) -> str:
     """Framework text for an AI caller with host paths replaced: each folder in `labels` by its label (longest
     first, also resolved), then the home folder by ~ (design 6.4: ids and labels, never paths). A folder is found
     with either separator, a Windows folder in any case, and as Python quotes a Windows path (doubled backslashes)."""
-    from orchestrator.tools.tools_runtime import _undouble, replace_folder
-    from orchestrator.tools.tools_status import _scrub_paths
+    from orchestrator.security.paths import replace_folder, scrub_for_ai, undouble
     pairs = []
     for folder, label in labels.items():
         for form in {str(folder), str(Path(folder).resolve())}:
             if form and form != "/":
                 pairs.append((form, label))
-    text = _undouble(text)
+    text = undouble(text)
     for form, label in sorted(pairs, key=lambda p: -len(p[0])):
         text = replace_folder(text, form, label)
-    return _scrub_paths(text)
+    return scrub_for_ai(text)
 
 
 def event_text(event: Any, label: str) -> str:
@@ -570,7 +569,7 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         def work(handle) -> Dict[str, Any]:
             from orchestrator.Core.job_service import EXTERNAL_KEY, JobCancelled
             handle.progress(None, None, f"deploying to {device.label}")
-            from orchestrator.tools.tools_runtime import device_text
+            from orchestrator.security.paths import device_text
             users = [device.user, bound["user"]]
             shown: Dict[str, Any] = {}
 

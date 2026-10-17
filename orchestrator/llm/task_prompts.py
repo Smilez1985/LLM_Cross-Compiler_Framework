@@ -15,6 +15,7 @@ to state, not a reason to refuse.
 
 from typing import Any, Dict, List, Optional, Sequence
 
+from orchestrator.utils.image_ref import is_official_image, split_image  # noqa: F401 (moved there, re-exported)
 from orchestrator.utils.untrusted import UNTRUSTED_RULE, sanitize_untrusted, wrap_untrusted
 
 FRAMEWORK = ("The LLM Cross-Compiler Framework converts and quantizes language models for edge hardware (GGUF for "
@@ -188,29 +189,8 @@ def optimizer_parts(model: str, target: str, board: Optional[str], listing: str,
 
 
 # --- base images of AI-proposed modules (DECISIONS round 3) ---------------------------------------------------------
-
-def split_image(reference: str) -> Dict[str, str]:
-    """registry, repository, tag and digest of an image reference, and whether it is a Docker Official Image (on
-    Docker Hub without a namespace, e.g. debian:bookworm-slim). Nothing is looked up."""
-    rest, _, digest = (reference or "").strip().partition("@")
-    first, slash, remainder = rest.partition("/")
-    if slash and ("." in first or ":" in first or first == "localhost"):
-        registry, path = first, remainder
-    else:
-        registry, path = "docker.io", rest
-    last = path.rsplit("/", 1)[-1]
-    tag = last.rpartition(":")[2] if ":" in last else ""
-    repository = path[:-(len(tag) + 1)] if tag else path
-    if registry == "docker.io" and repository.startswith("library/"):
-        repository = repository[len("library/"):]
-    official = registry == "docker.io" and bool(repository) and "/" not in repository
-    return {"registry": registry, "repository": repository, "tag": tag, "digest": digest,
-            "official": "yes" if official else ""}
-
-
-def is_official_image(reference: str) -> bool:
-    return bool(split_image(reference)["official"])
-
+# split_image and is_official_image live in orchestrator/utils/image_ref.py (consolidation chain c1-imports); the
+# names stay importable here.
 
 def _digest_text(reference: str, digest: str) -> str:
     """What the module generator does with the image, said plainly: the person decides on this line, so an image the

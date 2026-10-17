@@ -40,7 +40,7 @@ def label_problem(label: Optional[str]) -> bool:
 
 def write_profile_file(profile: Any, output_file: Path, as_json: bool = False) -> None:
     """Writes a probe's profile file (KEY=VALUE lines, or the JSON view) readable only by this user."""
-    from orchestrator.Core.vault_key import write_private
+    from orchestrator.utils.atomic import write_private
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     write_private(output_file, profile.to_json() + "\n" if as_json else profile.to_text())

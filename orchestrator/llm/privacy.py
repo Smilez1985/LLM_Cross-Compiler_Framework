@@ -18,6 +18,7 @@ import re
 import secrets
 from typing import Callable, Dict, List, Optional, Tuple
 
+from orchestrator.security.paths import ACCOUNT_NAME
 from orchestrator.utils.helpers import redact_secrets
 
 LEVELS = ("STRICT", "BALANCED", "OFF")
@@ -32,7 +33,9 @@ _MAC = re.compile(r"(?<![\w:.-])(?:[0-9A-Fa-f]{2}([:-])[0-9A-Fa-f]{2}(?:\1[0-9A-
 _IPV4 = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w]|\.\d)")
 _IPV6 = re.compile(r"(?<![\w:.])(?:[0-9A-Fa-f]{0,4}:){2,7}(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{1,4})?"
                    r"(?:%[\w-]+)?(?![\w:]|\.\d)")
-_HOME = re.compile(r"(?:(?<![\w.])/home/|(?<![\w.])/Users/|\b[A-Za-z]:\\Users\\|\b[A-Za-z]:/Users/)([^/\\\s\"'<>|:]+)")
+# A home folder's account name (ACCOUNT_NAME, shared in orchestrator/security/paths.py); here the separator after the
+# folder above it is the one before it.
+_HOME = re.compile(rf"(?:(?<![\w.])/home/|(?<![\w.])/Users/|\b[A-Za-z]:\\Users\\|\b[A-Za-z]:/Users/)({ACCOUNT_NAME})")
 _HOSTNAME_DECL = re.compile(r"^[ \t]*(?:export[ \t]+)?(?:HOSTNAME|hostname|Hostname|NODENAME|nodename|"
                             r"Static hostname|Transient hostname)[ \t]*[=:][ \t]*[\"']?"
                             r"([A-Za-z0-9][A-Za-z0-9.-]{0,252})",

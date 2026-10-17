@@ -22,7 +22,7 @@ from urllib.parse import unquote_plus, urlsplit
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from orchestrator.Core.vault_key import write_private
+from orchestrator.utils.atomic import write_private
 from orchestrator.utils.helpers import redact_secrets
 
 Field = Literal["model", "target", "board", "url", "device", "dataset"]
