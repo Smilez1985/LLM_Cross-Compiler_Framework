@@ -168,8 +168,8 @@ class LLMClient:
         """The managed llama-server of this user (started by `llm-cli ditto runtime start` or the GUI)."""
         if provider != MANAGED_RUNTIME_PROVIDER:
             return None
-        from orchestrator.runtime.llama_server import read_endpoint, runtime_root
-        endpoint = read_endpoint(runtime_root(self._state_path("")))
+        from orchestrator.runtime.llama_server import managed_endpoint
+        endpoint = managed_endpoint(self._state_path(""))
         return (endpoint.base_url, endpoint.api_key, endpoint.model) if endpoint else None
 
     def _runtime_endpoint(self, preset: ProviderPreset) -> Optional[RuntimeEndpoint]:

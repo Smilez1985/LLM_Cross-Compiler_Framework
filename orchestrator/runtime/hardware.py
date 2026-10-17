@@ -22,7 +22,6 @@ import importlib
 import logging
 import os
 import platform
-import subprocess
 import threading
 from pathlib import Path
 from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple
@@ -96,14 +95,9 @@ class BackendChoice(BaseModel):
 
 
 def _default_runner(cmd: Sequence[str], timeout: float) -> Tuple[int, str, str]:
-    """Runs a probe command; a missing tool or a hang counts as "not available"."""
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-    try:
-        res = subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout, check=False,
-                             stdin=subprocess.DEVNULL, creationflags=flags, errors="replace")
-        return res.returncode, res.stdout or "", res.stderr or ""
-    except (OSError, subprocess.SubprocessError) as e:
-        return -1, "", str(e)
+    """Runs a probe command; a missing tool or a hang counts as "not available" (utils/helpers.execute_command)."""
+    from orchestrator.utils.helpers import execute_command
+    return execute_command(cmd, timeout=timeout)
 
 
 def normalize_platform(system: Optional[str] = None, machine: Optional[str] = None) -> Tuple[str, str]:

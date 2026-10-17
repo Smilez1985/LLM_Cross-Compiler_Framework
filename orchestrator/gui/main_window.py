@@ -568,11 +568,8 @@ class MainOrchestrator(QMainWindow):
         orch = self.framework.orchestrator
         if not orch: return
 
-        # Since orchestrator methods are async, we can't await them directly in QTimer.
-        # We assume the Orchestrator exposes a synchronous state property or we peek into internal dicts for GUI.
-        # Ideally, Orchestrator should have a thread-safe property. 
-        # Accessing private _workflows for GUI speed (Python is single process here usually).
-        active_flows = list(orch._workflows.values())
+        # The orchestrator's synchronous snapshot of its workflows (a QTimer cannot await its async methods).
+        active_flows = orch.list_workflows()
         self._announce_saved_builds(active_flows)
         
         if not active_flows:

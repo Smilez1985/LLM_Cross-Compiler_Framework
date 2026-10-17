@@ -42,7 +42,6 @@ PENDING_CODES = ("waiting_for_approval", "question_changed")
 
 _NAME_CHARS = re.compile(r"^[A-Za-z0-9_\-. ]{1,80}$")
 _NAME_SEPARATORS = re.compile(r"[_\-. ]")
-_KEY_SEPARATORS = re.compile(r"[-_]")
 _EMPTY = ("", "null", "none", "default")
 _TRUE = ("true", "yes", "on", "1")
 _FALSE = ("false", "no", "off", "0")
@@ -116,11 +115,6 @@ def _short(value: Any, limit: int = 80) -> str:
 def canonical_name(name: str) -> str:
     """Letter case and the separators `_`, `-`, space and `.` ignored."""
     return _NAME_SEPARATORS.sub("", name.lower())
-
-
-def canonical_key(key: str) -> str:
-    """Letter case ignored, `-` and `_` treated alike (removed)."""
-    return _KEY_SEPARATORS.sub("", key.lower())
 
 
 def canonical_value(value: str) -> str:

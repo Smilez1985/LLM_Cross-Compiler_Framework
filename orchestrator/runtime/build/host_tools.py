@@ -52,6 +52,11 @@ class HostTools:
     reason: str                    # one line for the build log
     notes: Tuple[str, ...] = field(default_factory=tuple)
 
+    def __post_init__(self) -> None:
+        # build_info.json keeps the tuning: only the words of TUNINGS are ever written there
+        if self.tuning not in TUNINGS:
+            raise PlanError(f"unknown tuning {self.tuning!r} (build_info.json knows {', '.join(TUNINGS)})")
+
     def build_args(self) -> Dict[str, str]:
         args = {"LLAMA_CPP_TAG": self.tag, "LLAMA_CPP_COMMIT": self.commit}
         if self.plan is not None:

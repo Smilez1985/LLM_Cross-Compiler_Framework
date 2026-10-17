@@ -2,6 +2,7 @@
 working. Each block names the audit item; the characterization tests were written before the change and pass on
 both sides of it."""
 
+import os
 import sys
 import types
 
@@ -233,3 +234,143 @@ def test_the_pinned_downloader_checks_what_network_guard_left_optional(tmp_path)
 def test_network_guard_is_gone():
     import importlib.util
     assert importlib.util.find_spec("orchestrator.utils.network") is None
+
+
+# --- item 13: the small helpers that newer code now uses again (characterization: same results before and after) ----
+
+CHILD = [sys.executable, "-c"]
+
+
+@pytest.mark.parametrize("runner_name", ["hardware", "toolchain"])
+def test_the_command_runners_keep_their_results(runner_name, tmp_path):
+    from orchestrator.runtime import hardware
+    from orchestrator.runtime.build import toolchain
+    if runner_name == "hardware":
+        def run(cmd, timeout):
+            return hardware._default_runner(cmd, timeout)
+    else:
+        def run(cmd, timeout):
+            return toolchain.default_tool_runner(cmd, timeout, str(tmp_path))
+    code, out, err = run(CHILD + ["import sys; print('out'); sys.stderr.write('err'); sys.exit(3)"], 30)
+    assert (code, out.strip(), err) == (3, "out", "err")
+    # stdin is closed: a command that reads it ends at once instead of waiting
+    assert run(CHILD + ["import sys; print(repr(sys.stdin.read()))"], 30)[1].strip() == "''"
+    # undecodable output is replaced, never an exception
+    code, out, _ = run(CHILD + ["import sys; sys.stdout.buffer.write(b'\\xff\\xfeok')"], 30)
+    assert code == 0 and out.endswith("ok")
+    missing = run([str(tmp_path / "no-such-program")], 30)
+    assert missing[0] == -1 and missing[1] == "" and missing[2]
+    slow = run(CHILD + ["import time; time.sleep(30)"], 0.5)
+    assert slow[0] == -1 and slow[1] == "" and "timed out" in slow[2]
+
+
+def test_the_tool_runner_still_clears_the_environment(tmp_path, monkeypatch):
+    from orchestrator.runtime.build import toolchain
+    monkeypatch.setenv("LCF_CLEANUP_SECRET", "x")
+    code, out, _ = toolchain.default_tool_runner(
+        CHILD + ["import os; print(sorted(k for k in os.environ if k in ('LCF_CLEANUP_SECRET', 'LANG', 'LC_ALL')));"
+                 "print(os.getcwd())"], 30, str(tmp_path))
+    lines = out.splitlines()
+    assert code == 0 and lines[0] == "['LANG', 'LC_ALL']"
+    assert os.path.samefile(lines[1], tmp_path)
+
+
+@pytest.mark.parametrize("module, empty", [("orchestrator.runtime.llama_server", None),
+                                           ("orchestrator.rag.edge_store", {})])
+def test_the_json_readers_keep_their_defaults(module, empty, tmp_path):
+    import importlib
+    read = importlib.import_module(module)._read_json
+    assert read(tmp_path / "missing.json") == empty
+    (tmp_path / "bad.json").write_text("{not json", encoding="utf-8")
+    assert read(tmp_path / "bad.json") == empty
+    (tmp_path / "list.json").write_text("[1, 2]", encoding="utf-8")
+    assert read(tmp_path / "list.json") == empty
+    (tmp_path / "ok.json").write_text('{"a": 1}', encoding="utf-8")
+    assert read(tmp_path / "ok.json") == {"a": 1}
+    assert read(tmp_path) == empty   # a folder, not a file
+
+
+def test_the_chat_client_finds_the_managed_server_of_its_state_folder(tmp_path, monkeypatch):
+    from orchestrator.llm.client import LLMClient
+    from orchestrator.runtime import llama_server
+    seen = []
+    endpoint = types.SimpleNamespace(base_url="http://127.0.0.1:8099/v1", api_key="k", model="m")
+    monkeypatch.setattr(llama_server, "read_endpoint", lambda root, docker=None: seen.append(root) or endpoint)
+    client = LLMClient(types.SimpleNamespace(get=lambda key, default=None: default, user_state_dir=None),
+                       None, state_dir=tmp_path / "state")
+    assert client._managed_runtime_endpoint("local") == ("http://127.0.0.1:8099/v1", "k", "m")
+    assert seen == [llama_server.runtime_root(tmp_path / "state")]
+    assert client._managed_runtime_endpoint("openai") is None and len(seen) == 1
+
+
+def test_the_target_tool_models_keep_their_schemas():
+    from orchestrator.tools.tools_targets import TargetCheckIn, TargetDetailsOut
+    assert list(TargetCheckIn.model_fields) == ["target", "check_files"]
+    assert list(TargetDetailsOut.model_fields) == [
+        "notes", "schema_version", "support_level", "boards", "formats", "default_board", "target", "trust",
+        "untested", "description", "assumptions", "base_image", "base_image_reason", "checked_files", "problems"]
+    schema = TargetCheckIn.model_json_schema()
+    assert schema["additionalProperties"] is False and schema["required"] == ["target"]
+    assert schema["properties"]["target"] == {"description": "Target id, e.g. Rockchip", "maxLength": 64,
+                                              "minLength": 1, "title": "Target", "type": "string"}
+
+
+def test_the_original_helpers_do_the_job_of_their_copies(tmp_path):
+    from orchestrator.utils.helpers import execute_command, safe_json_load
+    (tmp_path / "a.json").write_text('[1, 2]', encoding="utf-8")
+    assert safe_json_load(tmp_path / "a.json") == [1, 2]
+    assert safe_json_load(tmp_path / "a.json", "fallback", dict) == "fallback"
+    assert safe_json_load(tmp_path / "missing.json", {"x": 1}) == {"x": 1}
+    code, out, err = execute_command(CHILD + ["print('hi')"], cwd=str(tmp_path), timeout=30)
+    assert (code, out.strip(), err) == (0, "hi", "")
+
+
+def test_host_tools_record_only_known_tunings():
+    from orchestrator.runtime.build.host_tools import TUNINGS, HostTools
+    from orchestrator.runtime.build.recipe import PlanError
+    for tuning in TUNINGS:
+        assert HostTools("b1", "0" * 40, None, tuning, "why").record()["tuning"] == tuning
+    with pytest.raises(PlanError, match="unknown tuning 'fast'"):
+        HostTools("b1", "0" * 40, None, "fast", "why")
+
+
+def test_grant_facts_is_the_one_standing_approval_check(monkeypatch):
+    from orchestrator.Core import build_plan
+    fits = []
+    monkeypatch.setattr(build_plan, "_standing_fits", lambda plan, service, ledger: fits.append(plan) or True)
+    monkeypatch.setattr(build_plan, "grant_scope", lambda *a, **k: pytest.fail("the given scope is not worked out again"))
+    plan = types.SimpleNamespace()
+    assert build_plan.grant_facts(plan, None, None, None, None, None, scope={"k": 1}) == {"k": 1}
+    assert build_plan.grant_facts(plan, None, None, None, None, None, scope=None) is None
+    assert fits == [plan]   # no scope (a plan problem): no disk check either
+
+
+def test_list_workflows_is_a_plain_snapshot():
+    from orchestrator.Core.orchestrator import LLMOrchestrator
+    orchestrator = object.__new__(LLMOrchestrator)
+    orchestrator._workflows = {"a": "first", "b": "second"}
+    flows = orchestrator.list_workflows()
+    assert flows == ["first", "second"]
+    orchestrator._workflows["c"] = "third"
+    assert flows == ["first", "second"], "a snapshot: the caller's list does not change under it"
+
+
+def test_the_leftovers_of_moved_code_are_gone():
+    import importlib
+    gone = {"orchestrator.utils.helpers": ("check_command_exists", "is_admin"),
+            "orchestrator.tools.normalize": ("canonical_key",),
+            "orchestrator.tools.registry": ("_with_message",),
+            "orchestrator.schemas.build": ("BoardOut",),
+            "orchestrator.runtime.probe_service": ("is_probe_id",),
+            "orchestrator.Core.rag_manager": ("SOURCE_KINDS",),
+            "orchestrator.cli": ("_write_profile_file",),
+            "orchestrator.tools.grants": ("WIDTH_LABELS", "REQUEST_TTL")}
+    for module, names in gone.items():
+        loaded = importlib.import_module(module)
+        for name in names:
+            assert not hasattr(loaded, name), f"{module}.{name}"
+    from orchestrator.Core.deployment_manager import DeploymentManager
+    from orchestrator.Core.rag_manager import RAGManager
+    from orchestrator.tools.mcp_tokens import TokenStore
+    assert not hasattr(DeploymentManager, "deploy_artifact") and not hasattr(RAGManager, "snapshot_listing")
+    assert not hasattr(TokenStore, "policy_of")

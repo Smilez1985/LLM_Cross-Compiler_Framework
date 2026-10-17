@@ -35,8 +35,8 @@ from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_I
                                                 ProbeError, match_target)
 from orchestrator.schemas.build import TargetOut
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
-from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.facts_catalog import warn
+from orchestrator.tools.framework_tools import TargetCapabilitiesOut, TargetIn
 from orchestrator.tools.grants import tool_rule
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
 from orchestrator.tools.policy import Decision, ToolTier
@@ -52,9 +52,8 @@ AI_TEXT = "written by the AI"
 
 # --- inputs and outputs -------------------------------------------------------------------------------------------
 
-class TargetCheckIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target: str = Field(min_length=1, max_length=64, description="Target id, e.g. Rockchip")
+class TargetCheckIn(TargetIn):
+    """get_target_capabilities' input: the original TargetIn (framework_tools) and whether to check the files."""
     check_files: bool = Field(default=False, description="Also check the target's files (target.yml, Dockerfile "
                                                          "pins, scripts) the way a module or pack is checked")
 
@@ -68,7 +67,7 @@ class TargetListOut(ToolOutput):
     targets: List[TargetSummary]
 
 
-class TargetDetailsOut(TargetCapabilities, ToolOutput):
+class TargetDetailsOut(TargetCapabilitiesOut):
     target: str = ""
     trust: Literal[TRUST_VALUES] = "unknown"
     untested: bool = False

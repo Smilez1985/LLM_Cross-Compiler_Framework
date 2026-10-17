@@ -314,7 +314,7 @@ class TestSSHDeployment:
     @pytest.mark.parametrize("ip", ["999.999.999.999", "192.168.1.300", "192.168.1", "not a host", "", "10.20.30.1; reboot",
                                     "-oProxyCommand=touch", "board..local", "[fe80::1]", "$(reboot)"])
     def test_invalid_ip_is_rejected_before_connecting(self, dm, artifact, ip):
-        assert dm.deploy_artifact(artifact, ip, "root") is False
+        assert dm.deploy_package(artifact, ip, "root").success is False
 
     @pytest.mark.parametrize("host", ["myboard.local", "radxa-zero3", "192.168.1.50", "fe80::1"])
     def test_an_address_or_a_host_name_reaches_the_board(self, config, artifact, monkeypatch, host):
@@ -327,7 +327,7 @@ class TestSSHDeployment:
 
     @pytest.mark.parametrize("user", ["-oProxyCommand=touch /tmp/pwned", "root;reboot", "", "a b"])
     def test_invalid_user_is_rejected_before_connecting(self, dm, artifact, user):
-        assert dm.deploy_artifact(artifact, "192.168.1.50", user) is False
+        assert dm.deploy_package(artifact, "192.168.1.50", user).success is False
 
     def test_remote_command_quotes_package_name(self):
         cmd = DeploymentManager._remote_install_cmd("/tmp/llm_deploy", "evil; rm -rf ~.zip")
@@ -365,7 +365,7 @@ class TestSSHDeployment:
         pkg = tmp_path / "deploy_model_1.zip"
         pkg.write_bytes(b"zip")
 
-        assert dm.deploy_artifact(pkg, "192.168.1.50", "radxa") is True
+        assert dm.deploy_package(pkg, "192.168.1.50", "radxa").success is True
         # mktemp, the upload, the installation, and a look for the old Qdrant sidecar (never a removal)
         assert [c[0] for c in calls] == ["ssh", "scp", "ssh", "ssh"]
         from orchestrator.Core.deployment_manager import OLD_SIDECAR_CHECK
@@ -384,7 +384,7 @@ class TestSSHDeployment:
         monkeypatch.setattr("orchestrator.utils.ssh_trust.connect", lambda *a, **k: connected.append(a))
         pkg = tmp_path / "deploy_model_1.zip"
         pkg.write_bytes(b"zip")
-        assert dm.deploy_artifact(pkg, "192.168.1.50", "radxa", password="secret") is False
+        assert dm.deploy_package(pkg, "192.168.1.50", "radxa", password="secret").success is False
         assert connected == []
 
 

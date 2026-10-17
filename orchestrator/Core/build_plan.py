@@ -485,15 +485,20 @@ def confirm_record(plan: "BuildPlan", framework, target_folder: Optional[Path],
     return record
 
 
+_COMPUTE = object()   # grant_facts: no grant_scope given, work it out
+
+
 def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[Path], pin, ledger,
-                record: Optional[Dict[str, Any]] = None) -> Optional[dict]:
+                record: Optional[Dict[str, Any]] = None, scope: Any = _COMPUTE) -> Optional[dict]:
     """What a standing approval for start_build is matched against (grants.BUILD_RULE, design 6.10): target trust
     (shipped: no pack provenance, not AI-generated, support level official; verified: a verified pack), how the target
     (and a recipe) was installed and whether the person has since confirmed a build of it, the weights type, the
     base images (Docker Official Images, or a digest-pinned image the person confirmed in a build of this target
     before), the source with gating, base-model gating and licence, and the download size. None (the person is asked)
-    when the plan has a problem or the disk does not keep the larger reserve of a standing approval (20 GiB or 10 %)."""
-    scope = grant_scope(plan, framework, target_folder, pin, record)
+    when the plan has a problem or the disk does not keep the larger reserve of a standing approval (20 GiB or 10 %).
+    `scope`: the grant_scope the caller has already worked out (computed here when it is not given)."""
+    if scope is _COMPUTE:
+        scope = grant_scope(plan, framework, target_folder, pin, record)
     return scope if scope is not None and _standing_fits(plan, service, ledger) else None
 
 
@@ -726,7 +731,8 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     plan.outside_images = [i for i in plan.confirm_record.get("base_images") or [] if not _official(i)]
     plan.first_build = [(kind, item) for kind, item, _via in pending]
     plan.grant_scope = grant_scope(plan, framework, target_folder, pin, plan.confirm_record)
-    plan.grant = plan.grant_scope if plan.grant_scope is not None and _standing_fits(plan, service, ledger) else None
+    plan.grant = grant_facts(plan, service, framework, target_folder, pin, ledger, plan.confirm_record,
+                             scope=plan.grant_scope)
 
     # hardware estimate (never a refusal)
     params, basis = disk_plan.parameters_from(size, plan.facts.parameters if plan.facts else None)

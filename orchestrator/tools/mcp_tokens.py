@@ -31,7 +31,7 @@ from typing import Callable, Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from orchestrator.tools.mcp_env import ENV_VAR  # noqa: F401 - re-exported: the token of a stdio client
-from orchestrator.tools.policy import Decision, ToolPolicy, ToolTier, restrictive_policy
+from orchestrator.tools.policy import Decision, ToolPolicy, ToolTier
 from orchestrator.tools.signing import SIGNATURE_FIELD, RevisionAnchor, SignatureError, sign, verify
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.next_steps import WithSteps
@@ -221,19 +221,6 @@ class TokenStore:
         except TokenStoreError:
             return False
         return record is not None and hmac.compare_digest(digest, record.sha256)
-
-    def policy_of(self, name: str, linked: Callable[[str], ToolPolicy]) -> ToolPolicy:
-        """The tool policy of the token `name`: its own, or the linked caller's (`linked(caller)`). An unknown or
-        revoked token, or a store that cannot be read, gets a policy that denies everything."""
-        try:
-            record = self._read().get(name)
-        except TokenStoreError:
-            return restrictive_policy()
-        if record is None:
-            return restrictive_policy()
-        if record.link is not None:
-            return linked(record.link)
-        return record.policy
 
     def private_problem(self) -> Optional[str]:
         """On POSIX: a message when other users could read or change the store (group or other permission bits, or

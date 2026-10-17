@@ -353,7 +353,7 @@ class ChatPanel(QWidget):
         history_dir.mkdir(parents=True, exist_ok=True)
         self.history_file = history_dir / ChatHistory.FILE_NAME
         self._migrate_legacy_history(config)
-        self.history = ChatHistory.load(self.history_file)
+        self.history = ChatHistory.in_state_dir(history_dir)
 
         self.feed = getattr(framework_manager, "chat_feed", None)
         self.writer = FeedWriter(self.feed, "gui")

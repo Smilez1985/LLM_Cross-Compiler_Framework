@@ -5,7 +5,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orchestrator.schemas.targets import BoardInfo, SupportLevel
+from orchestrator.schemas.targets import SupportLevel
 from orchestrator.tools.output import Untrusted, UntrustedText, untrusted_text
 
 # Fields with external text are marked (UntrustedText): build logs and stage names come from the build container,
@@ -185,10 +185,6 @@ class TargetOut(BaseModel):
 
 class TargetList(BaseModel):
     targets: List[TargetOut]
-
-
-class BoardOut(BoardInfo):
-    id: str
 
 
 class LogTail(BaseModel):
