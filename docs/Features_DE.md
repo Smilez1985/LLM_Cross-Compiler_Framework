@@ -2692,16 +2692,18 @@ erklärt sie dort, wo sie stehen (unveröffentlicht).
   nach dem, was das Fenster selbst über das Feld sagt. Das Glossar hat 74 Begriffe (zum Beispiel GGUF, Quantization und ihre Typen
   wie Q4_K_M, Importance Matrix, Calibration Dataset, KV Cache, RKLLM, RKNN, NPU, Qdrant, MCP, SSH Host Key,
   Fingerprint, Digest, Keyring, Standing Approval); die Beschriftungen **Format** und **Quantization** im Builder
-  nutzen es jetzt, die übrigen Fenster folgen.
+  nutzen es jetzt, die übrigen Fenster folgen. Ein Text, der dir sagt, wo du klickst, erklärt nur die Begriffe, die er
+  selbst nutzt, nicht die Menütitel auf dem Weg.
 - **Fehlermeldungen:** Ein Fehlerfenster sagt in deiner Sprache, was passiert ist, warum, wenn es bekannt ist, und
-  einen nächsten Schritt (einen Satz oder einen Knopf). Die englischen technischen Details (die Meldung des Frameworks,
+  einen nächsten Schritt (einen Satz, einen Knopf oder den Ort, an den du gehst, mit seinem Menüpfad und einem Knopf
+  **Öffnen**). Die englischen technischen Details (die Meldung des Frameworks,
   ein Traceback) sind unter **Technische Details** eingeklappt; **Details kopieren** kopiert sie ohne Geheimnisse und
   mit `~` statt deines Home-Ordners, für einen Fehlerbericht oder um Ditto zu fragen, der sie dir auf Deutsch erklären
   kann. Kein Teil des Fensters zeigt ein Geheimnis, auch nicht dort, wo er die Meldung eines Fehlers wiederholt.
 - **„du“ oder „Sie“:** Deutsche Texte sprechen dich mit „du“ an. **Datei > Einstellungen…** hat einen Reiter
   **Allgemein**, in dem du stattdessen „Sie“ wählst; die Wahl wird gespeichert (Einstellung `form_of_address`, `du`
-  oder `sie`) und gilt sofort für jeden Text, der danach gelesen wird. Ein Fenster, das schon offen ist, behält seine
-  Texte, bis du es neu öffnest.
+  oder `sie`) und gilt sofort für jeden Text, der danach gelesen wird, auch für die nächsten Schritte und die
+  Zusammenfassungen von Fehlern. Ein Fenster, das schon offen ist, behält seine Texte, bis du es neu öffnest.
 - **Größen** erscheinen in Dezimaleinheiten in der Schreibweise deiner Sprache (`1,5 GB`, englisch `1.5 GB`); die
   Kommandozeile bleibt Englisch.
 

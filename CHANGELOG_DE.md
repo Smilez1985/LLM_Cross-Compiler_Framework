@@ -31,7 +31,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   mit Tastenkürzeln, jeder Eintrag dort benannt und beschriftet, wo er entsteht, eine Layout-Tabelle,
   `retranslate_menus()`. Die von Hand geschriebenen Menüpfade der Texte (30 Schlüssel auf Englisch und Deutsch) sind
   jetzt `{path:<objectName>}` und werden aus den Beschriftungen auf dem Bildschirm gefüllt; `tests/test_no_command_texts.py`
-  bewacht die Texte und zählt den Rest gegen eine Ausgangslage, die nur sinken darf.
+  bewacht die Texte und zählt den Rest gegen eine Ausgangslage, die nur sinken darf. Die deutschen Texte des Katalogs
+  folgen der gewählten Anrede: Die Tabelle `FORMAL` eines Moduls hält die Sie-Form jedes Textes, der anders lautet.
 - **Was Ditto und KI-Apps tun, wird zu Einträgen des Chat-Verlaufs, in jedem Prozess** (Welle 6, DECISIONS Runde 9
   U1, Folge b): `orchestrator/Core/activity.py` schreibt einen signierten Eintrag je Ereignis, aus dem Prozess, der die
   Arbeit getan hat (der GUI, `llm-cli`, jedem stdio-MCP-Server und dem HTTP-Kindprozess): ein Aufruf, der etwas
@@ -42,7 +43,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Aufrufer-ID, der eigene Name einer App nur ihre Angabe; Einträge enthalten nur geschlossene Werte und nennen das
   Fenster, das das Ergebnis zeigt (`orchestrator/tools/tool_windows.py`: die geschlossene Fensterliste, ein Fenster für
   jedes Werkzeug, das etwas ändert, geprüft von einem Test über die ganze Registry, für jede Job-Art, und was jedes
-  Fenster öffnet), dazu Schritt-IDs nach Muster; `refs.asked_in` markiert Dittos Runden im eigenen Chat der GUI. Er
+  Fenster öffnet), dazu die Schritt-IDs des Katalogs der nächsten Schritte (nie ein Textschlüssel, der wie eine
+  aussieht); `refs.asked_in` markiert Dittos Runden im eigenen Chat der GUI. Er
   versagt offen, und dieselbe Ablehnung wird einmal in 30 Sekunden geschrieben. `ActivityProducer.add_listener` gibt
   der GUI die Einträge ihres eigenen Prozesses sofort, und `ConfigManager.reload_user_config` übernimmt Einstellungen,
   die ein anderer Prozess gespeichert hat, außer Werten, die dieser Prozess selbst hält (als Konflikte gemeldet). Die
@@ -55,11 +57,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wie qdrant.tech oder die llama.cpp-Doku, oder dieses Handbuch). Ruht die Maus auf einer markierten Beschriftung,
   zeigt eine Hover-Karte die Erklärung; sie bleibt, solange die Maus auf ihr ist, und ihr Link öffnet sich erst im
   Webbrowser, wenn du ihn anklickst. F1 im Feld öffnet dieselbe Karte für die Tastatur. Die Beschriftungen **Format**
-  und **Quantization** im Builder sind die ersten; die übrigen Fenster folgen. Ein neues Fehlerfenster sagt in deiner
-  Sprache, was passiert ist, warum, und einen nächsten Schritt, mit den englischen **Technischen Details**
-  eingeklappt (ohne Geheimnisse und ohne deinen Home-Ordner), zum Kopieren in einen Fehlerbericht oder um Ditto zu
-  fragen. Deutsche Texte sagen „du“; **Datei > Einstellungen…** hat jetzt einen Reiter **Allgemein**, in dem du
-  stattdessen „Sie“ wählst (Einstellung `form_of_address`), sofort wirksam. Größen im Löschdialog folgen deiner
+  und **Quantization** im Builder sind die ersten; die übrigen Fenster folgen (ein Menüpfad in einem Text wird nicht
+  nach Begriffen durchsucht). Ein neues Fehlerfenster sagt in deiner Sprache, was passiert ist, warum, und einen
+  nächsten Schritt (einen Satz oder den Ort mit seinem Menüpfad und einem Knopf **Öffnen**), mit den englischen
+  **Technischen Details** eingeklappt (ohne Geheimnisse und ohne deinen Home-Ordner), zum Kopieren in einen
+  Fehlerbericht oder um Ditto zu fragen. Deutsche Texte sagen „du“; **Datei > Einstellungen…** hat jetzt einen Reiter
+  **Allgemein**, in dem du stattdessen „Sie“ wählst (Einstellung `form_of_address`), sofort wirksam, auch für die
+  nächsten Schritte. Größen im Löschdialog folgen deiner
   Sprache („1,5 GB“ auf Deutsch).
 - **`tests/test_cli_gui_parity.py`: Jeder Befehl und jede Option der CLI für Personen hat einen Weg mit der Maus**
   (W1', Runde 9 U2): Der Test geht den ganzen Befehlsbaum von `llm-cli` durch (294 Pfade: Befehle, Unterbefehle und

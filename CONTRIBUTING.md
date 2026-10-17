@@ -573,10 +573,12 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   `term_label("Quantization:", "quantization", buddy=field)`, `help_button(term)` or `mark_terms_in(window)` from
   `orchestrator/gui/explain.py`. A marked label needs a buddy (F1 in its field opens the card) or a `help_button()`;
   `accessibility_problems(window)` names one that no key reaches. `find_terms` reads "KV-Cache" like "KV cache", but
-  a German word for a term ("Wissensbasis") is not found: mark it by id. Errors for the person go through
+  a German word for a term ("Wissensbasis") is not found: mark it by id. `mark_terms` skips the words of a filled
+  `{path:...}` (the menu titles on the way to a place are not terms of the text). Errors for the person go through
   `show_error()` / `show_exception()` (`orchestrator/gui/error_dialog.py`, also `plain.plain_error()`, GUI thread
   only): a localized summary, one next step (a sentence or chain a0's catalogue steps), the English details folded
-  away, every text of the box redacted; an empty list shows `EmptyState` (`orchestrator/gui/empty_state.py`); sizes come from
+  away, every text of the box redacted. A0's `error_report(e, lang).dialog_kwargs()` fills it; sentences stay plain
+  "Next step:" lines and catalogue steps get a `StepsRow` with [Open]; an empty list shows `EmptyState` (`orchestrator/gui/empty_state.py`); sizes come from
   `orchestrator/utils/sizes.py`; a label with a keyboard mnemonic and inserted values uses `plain.mnemonic_text()`;
   `orchestrator/gui/accessible.py` pairs labels with fields and names icon-only buttons. Plain text everywhere: no
   label, box or tooltip ever draws HTML from data.
@@ -593,13 +595,17 @@ text:
   the object the window's [Open] goes to (`target`, which must be `CLI_PATHS[cli]`), and its texts in English and
   German (`step.<id>`; `step.<id>.what` and `.why` for a command the person may allow). An object the step names needs
   its place in `MOUSE_LABELS` (its parent object and its label's ui_text key, from an `l10n_*` module); a menu entry
-  gets it from `MENU_LAYOUT` in `common.py`. The catalogue never imports PySide6 or `localization.py` itself: an MCP
+  gets it from `MENU_LAYOUT` in `common.py`. Step texts say "du" like every German text; a German text that differs
+  in the "Sie" form gets it in the module's `FORMAL = {"de": {...}}` (same placeholders, its own du text; the
+  catalogue reads it while the window's form of address is "Sie"). The catalogue never imports PySide6 or
+  `localization.py` itself: an MCP
   tool call renders its steps in a worker thread, and the first Qt import there breaks a window made later in the
   same process; without the window it reads the `l10n_*` tables directly.
 - **Carry the step, not the words:** raise a core exception with `.with_steps("runtime.install")` (the `WithSteps`
   mixin), give a `ToolError` `steps=[...]`, a result line `Line(text, steps)`, a Mojo finding `steps=(...)`. The
   renderer writes the command for the CLI (`_say_error` in `cli.py`), the menu path for the window (`StepsRow`) and the
-  tool or the place for an AI (`ToolContext.channel`).
+  tool or the place for an AI (`ToolContext.channel`). A blocked row of the AI activity carries only step ids the
+  catalogue knows (`refs.steps`); a `person_action` key of `facts_catalog` is not a step.
 - **A text that names a place** writes `{path:<objectName>}`; `ui_text` fills it from the live labels in the text's
   language.
 - **A command the person may allow** (V1) is built only with `next_steps.proposal(step, values)` and run with

@@ -601,10 +601,13 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   buddy=field)`, `help_button(term)` oder `mark_terms_in(window)` aus `orchestrator/gui/explain.py`. Eine markierte
   Beschriftung braucht einen Buddy (F1 in ihrem Feld öffnet die Karte) oder einen `help_button()`;
   `accessibility_problems(window)` nennt eine, die keine Taste erreicht. `find_terms` liest „KV-Cache“ wie „KV cache“,
-  findet aber kein deutsches Wort für einen Begriff („Wissensbasis“): markiere es über die ID. Fehler für die Person
-  laufen über `show_error()` / `show_exception()` (`orchestrator/gui/error_dialog.py`, auch `plain.plain_error()`,
-  nur im GUI-Thread): eine übersetzte Zusammenfassung, ein nächster Schritt (ein Satz oder Schritte aus dem Katalog
-  von Chain a0), die englischen Details eingeklappt, jeder Text des Fensters ohne Geheimnisse;
+  findet aber kein deutsches Wort für einen Begriff („Wissensbasis“): markiere es über die ID. `mark_terms`
+  überspringt die Wörter eines ausgefüllten `{path:...}` (die Menütitel auf dem Weg zu einem Ort sind keine Begriffe
+  des Textes). Fehler für die Person laufen über `show_error()` / `show_exception()`
+  (`orchestrator/gui/error_dialog.py`, auch `plain.plain_error()`, nur im GUI-Thread): eine übersetzte
+  Zusammenfassung, ein nächster Schritt (ein Satz oder Schritte aus dem Katalog von Chain a0), die englischen Details
+  eingeklappt, jeder Text des Fensters ohne Geheimnisse. `error_report(e, lang).dialog_kwargs()` von a0 füllt es;
+  Sätze bleiben einfache Zeilen „Nächster Schritt:“, Schritte aus dem Katalog bekommen eine `StepsRow` mit [Öffnen];
   eine leere Liste zeigt `EmptyState` (`orchestrator/gui/empty_state.py`); Größen kommen aus
   `orchestrator/utils/sizes.py`; eine Beschriftung mit Tastenkürzel und eingesetzten Werten nutzt
   `plain.mnemonic_text()`; `orchestrator/gui/accessible.py` verbindet Beschriftungen mit Feldern und benennt Knöpfe
@@ -623,13 +626,17 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   `CLI_PATHS[cli]` sein muss), und seine Texte auf Englisch und Deutsch (`step.<id>`; `step.<id>.what` und `.why` für
   einen Befehl, den die Person zulassen kann). Ein Objekt, das der Schritt nennt, braucht seinen Platz in
   `MOUSE_LABELS` (sein Elternobjekt und den ui_text-Schlüssel seiner Beschriftung, aus einem `l10n_*`-Modul); ein
-  Menüeintrag bekommt ihn aus `MENU_LAYOUT` in `common.py`. Der Katalog importiert PySide6 oder `localization.py`
-  nie selbst: Ein Tool-Aufruf über MCP stellt seine Schritte in einem Worker-Thread dar, und der erste Qt-Import dort
+  Menüeintrag bekommt ihn aus `MENU_LAYOUT` in `common.py`. Die Texte der Schritte duzen wie jeder deutsche Text;
+  ein deutscher Text, der in der Sie-Form anders lautet, bekommt sie im `FORMAL = {"de": {...}}` des Moduls (dieselben
+  Platzhalter, ein eigener Du-Text; der Katalog liest sie, solange die Anrede des Fensters „Sie“ ist). Der Katalog
+  importiert PySide6 oder `localization.py` nie selbst: Ein Tool-Aufruf über MCP stellt seine Schritte in einem Worker-Thread dar, und der erste Qt-Import dort
   macht ein Fenster kaputt, das derselbe Prozess später öffnet; ohne Fenster liest er die `l10n_*`-Tabellen direkt.
 - **Den Schritt mitgeben, nicht die Worte:** Eine Kern-Ausnahme mit `.with_steps("runtime.install")` auslösen (das
   Mixin `WithSteps`), einem `ToolError` `steps=[...]` geben, einer Ergebniszeile `Line(text, steps)`, einem
   Mojo-Befund `steps=(...)`. Der Renderer schreibt den Befehl für die CLI (`_say_error` in `cli.py`), den Menüpfad für
-  das Fenster (`StepsRow`) und das Tool oder den Ort für eine KI (`ToolContext.channel`).
+  das Fenster (`StepsRow`) und das Tool oder den Ort für eine KI (`ToolContext.channel`). Eine blockierte Zeile der
+  KI-Aktivität trägt nur Schritt-IDs, die der Katalog kennt (`refs.steps`); ein `person_action`-Schlüssel aus
+  `facts_catalog` ist kein Schritt.
 - **Ein Text, der einen Ort nennt,** schreibt `{path:<objectName>}`; `ui_text` füllt ihn aus den Beschriftungen auf
   dem Bildschirm in der Sprache des Texts.
 - **Ein Befehl, den die Person zulassen kann** (V1), wird nur mit `next_steps.proposal(step, values)` gebaut und mit
