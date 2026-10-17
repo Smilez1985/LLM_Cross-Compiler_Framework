@@ -17,3 +17,20 @@ def test_the_audit_key_lives_next_to_the_other_keyring_entries():
         names = {(n.module, a.name) for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
         assert ("orchestrator.tools.framework_tools", "_audit_key") not in names, rel
         assert ("orchestrator.Core.vault_key", "audit_key") in names, rel
+
+
+def test_the_snapshot_check_before_an_index_lives_with_the_snapshots():
+    """snapshot_space (with files_size and folder_size) is in Core/knowledge_snapshots.py; the index tool, the GUI's
+    action and the CLI use that one; tools_framework_docs keeps the names."""
+    from orchestrator.Core import knowledge_snapshots
+    from orchestrator.tools import tools_framework_docs
+    for name in ("snapshot_space", "files_size", "folder_size"):
+        assert getattr(tools_framework_docs, name) is getattr(knowledge_snapshots, name), name
+
+
+def test_the_module_saved_audit_lives_with_the_module_generator():
+    """record_module_saved is in Core/module_generator.py; the GUI wizard and the CLI call it there; tools_targets
+    keeps the name."""
+    from orchestrator.Core import module_generator
+    from orchestrator.tools import tools_targets
+    assert tools_targets.record_module_saved is module_generator.record_module_saved
