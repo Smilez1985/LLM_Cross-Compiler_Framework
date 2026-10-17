@@ -317,8 +317,9 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   `deploy.sh`. Only model files are deployed (`.gguf`, `.rkllm`, `.rknn`, `.onnx`, `.safetensors`, `.bin`); a
   build with several weight files is refused.
 - **A package without a board** (`llm-cli deploy package`; GUI: Deployment tab > **Create package only…**): the
-  package of the selected build (or a model file you choose) for the chosen profile, with Docker images for a board
-  without network if you tick **Use Docker Containerization?**. No board is contacted. The GUI opens the folder
+  package of the selected build for the chosen profile, with Docker images for a board without network if you tick
+  **Use Docker Containerization?**. Like the CLI, the GUI takes any path: **Other build or model file…** adds a build
+  folder or a model file to the build list. No board is contacted. The GUI opens the folder
   dialog at the output folder, as for every golden artifact, and names the package's full path, or the reason and
   the next step when it cannot be made. Copy it to the board and run `deploy.sh` there, or deploy it later.
 - **An existing package** (`llm-cli deploy run PACKAGE_PATH`; GUI: Deployment tab > **Deploy existing package…**):
@@ -2334,7 +2335,8 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   profile under the board's ID; the SSH user becomes the board's deploy user (never root). GUI: Builder tab >
   **Scan / Import...** runs the same steps as the CLI: **Scan Local Host** (the Python probe, kept as `local`),
   **Scan Local Host with the Fallback Script** (`--script`), **Scan Local Host and Save the Profile As...**
-  (`--output`, a `.json` file for `--json`), **Remote Scan via SSH...** (`--device`, with **Port** and **Name**; the
+  (`--output`, a `.json` file for `--json`), **Scan Local Host with the Fallback Script and Save the Profile As...**
+  (`--script --output`), **Remote Scan via SSH...** (`--device`, with **Port** and **Name**; the
   same trust-on-first-use rules as deployment, the host key read in the background, and the board added to the
   trusted devices as by the CLI) and **Import from File (USB/Disk)...** (`--import`, asking for the board's name).
   It keeps a copy of each result in `<cache_dir>/probes/` for the target match. The GUI's SSH scan runs the same
