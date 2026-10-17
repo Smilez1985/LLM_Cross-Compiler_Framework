@@ -582,6 +582,37 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   ...“), und bekommt einen Eintrag mit der Lizenz dieses Projekts in `THIRD_PARTY_NOTICES.md`.
 - Schwäche nicht die Build-Sandbox, den Datenschutzfilter oder die Regeln für SSH-Vertrauen.
 
+### Nächste Schritte statt Befehlen
+
+Das Fenster sagt einer Person nie, dass sie einen Befehl tippen soll (DECISIONS Runde 9 U2). Eine Meldung sagt, was
+nicht stimmt; was zu tun ist, ist ein **nächster Schritt** des Katalogs in `orchestrator/utils/next_steps/`, nie ein
+Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
+
+- **Ein neuer Hinweis** ist ein `Step` im Bereichsmodul seines Teils (`runtime.py`, `boards.py`, `knowledge.py`, ...;
+  ein neues Modul wird von selbst gefunden): seine ID (`runtime.install`), der CLI-Befehl (`cli`, ein Schlüssel von
+  `CLI_PATHS`, und die Argumentvorlage `cli_args` mit geprüften `params`), das Tool, das eine KI aufruft, oder warum
+  nur die Person es tun kann (`person_only`), das Objekt, zu dem [Öffnen] im Fenster führt (`target`, das
+  `CLI_PATHS[cli]` sein muss), und seine Texte auf Englisch und Deutsch (`step.<id>`; `step.<id>.what` und `.why` für
+  einen Befehl, den die Person zulassen kann). Ein Objekt, das der Schritt nennt, braucht seinen Platz in
+  `MOUSE_LABELS` (sein Elternobjekt und den ui_text-Schlüssel seiner Beschriftung, aus einem `l10n_*`-Modul); ein
+  Menüeintrag bekommt ihn aus `MENU_LAYOUT` in `common.py`. Der Katalog importiert PySide6 oder `localization.py`
+  nie selbst: Ein Tool-Aufruf über MCP stellt seine Schritte in einem Worker-Thread dar, und der erste Qt-Import dort
+  macht ein Fenster kaputt, das derselbe Prozess später öffnet; ohne Fenster liest er die `l10n_*`-Tabellen direkt.
+- **Den Schritt mitgeben, nicht die Worte:** Eine Kern-Ausnahme mit `.with_steps("runtime.install")` auslösen (das
+  Mixin `WithSteps`), einem `ToolError` `steps=[...]` geben, einer Ergebniszeile `Line(text, steps)`, einem
+  Mojo-Befund `steps=(...)`. Der Renderer schreibt den Befehl für die CLI (`_say_error` in `cli.py`), den Menüpfad für
+  das Fenster (`StepsRow`) und das Tool oder den Ort für eine KI (`ToolContext.channel`).
+- **Ein Text, der einen Ort nennt,** schreibt `{path:<objectName>}`; `ui_text` füllt ihn aus den Beschriftungen auf
+  dem Bildschirm in der Sprache des Texts.
+- **Ein Befehl, den die Person zulassen kann** (V1), wird nur mit `next_steps.proposal(step, values)` gebaut und mit
+  `run_proposal()` ausgeführt: nie aus freiem KI-Text; eine Löschung öffnet die Löschliste, ein Geheimnis geht über
+  die Standardeingabe.
+- `tests/test_no_command_texts.py` schlägt bei einem Befehl oder einem von Hand geschriebenen Pfad in einem Text der
+  Person fehl und bei mehr Befehlen oder Pfaden in einem anderen Literal, als `tests/data/command_text_baseline.json`
+  erlaubt (nur nach unten; die Integration zieht es an, eine Änderung hebt es nie an). `tests/test_cli_gui_parity.py`
+  prüft jeden Schritt gegen die CLI, die Tools und die Fenster und jede Mausbeschriftung gegen die echten Menüs und
+  Schaltflächen.
+
 ---
 
 ## 9. Commits und Pull-Requests

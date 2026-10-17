@@ -10,6 +10,25 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Nächste Schritte statt Befehlen, Befehle zum Zulassen und übersetzte, neu geordnete Menüs** (Welle 6, Kette
+  a0; DECISIONS Runde 10 V1, V2, Q2, Q7): Der Qt-freie Katalog `orchestrator/utils/next_steps/` enthält jeden nächsten
+  Schritt, den das Audit der Welle 6 nennt (104 Schritte in neun Bereichsmodulen, die von selbst gefunden werden,
+  Texte auf Englisch und Deutsch), und ein Renderer macht aus einem Schritt den Befehl für die Kommandozeile
+  (`Next: ... llmcf ...`), den Menüpfad in der Sprache der Person für das Fenster (`StepsRow` mit Öffnen, Kopieren für
+  einen Befehl auf dem Board, mit Administratorrechten oder eines anderen Programms, Seite öffnen) und das Tool oder
+  den Ort für eine KI (`ToolContext.channel`: eine KI, die für das Fenster arbeitet, bekommt nie einen Befehl).
+  `proposal()` baut aus einem Schritt des Katalogs und geprüften Werten einen Befehl zum Zulassen (der genaue Befehl,
+  was er tut und warum, übersetzt), `run_proposal()` führt genau diesen Befehl mit dem eigenen Python des Frameworks aus und reicht
+  seine Zeilen weiter (Löschungen öffnen die Löschliste, Geheimnisse gehen über die Standardeingabe, andere Orte werden
+  nur gezeigt, jede Entscheidung kann protokolliert werden); `error_report()` gibt der Fehlerbox eine übersetzte
+  Zusammenfassung, den nächsten Schritt und das englische technische Detail. Träger: `ToolError(steps=...)`, an der
+  Grenze der Registry für den Kanal des Aufrufers dargestellt, `BlockerSpec.step`, `WithSteps` an den Kern-Ausnahmen,
+  `Line`, `Finding.steps`, `_say_error` in der CLI. Die Menüs: die KI-Verwaltung im Menü Ditto („Ditto einrichten..."
+  zuerst), Laufzeit, Modelle und Bewertung unter Ditto > Erweitert, Extras mit Wissen und Wartung; übersetzte Titel
+  mit Tastenkürzeln, jeder Eintrag dort benannt und beschriftet, wo er entsteht, eine Layout-Tabelle,
+  `retranslate_menus()`. Die von Hand geschriebenen Menüpfade der Texte (30 Schlüssel auf Englisch und Deutsch) sind
+  jetzt `{path:<objectName>}` und werden aus den Beschriftungen auf dem Bildschirm gefüllt; `tests/test_no_command_texts.py`
+  bewacht die Texte und zählt den Rest gegen eine Ausgangslage, die nur sinken darf.
 - **Was Ditto und KI-Apps tun, wird zu Einträgen des Chat-Verlaufs, in jedem Prozess** (Welle 6, DECISIONS Runde 9
   U1, Folge b): `orchestrator/Core/activity.py` schreibt einen signierten Eintrag je Ereignis, aus dem Prozess, der die
   Arbeit getan hat (der GUI, `llm-cli`, jedem stdio-MCP-Server und dem HTTP-Kindprozess): ein Aufruf, der etwas

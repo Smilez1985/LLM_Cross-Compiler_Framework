@@ -34,6 +34,7 @@ Back to the [README](../README.md) · All commands: [CLI_Usage.md](CLI_Usage.md)
 - [Hardware probe and new targets](#hardware-probe-and-new-targets)
 - [Health check (Mojo)](#health-check-mojo)
 - [Community zoo](#community-zoo)
+- [Next steps and the menu bar](#next-steps-and-the-menu-bar)
 - [Secret scan for contributors](#secret-scan-for-contributors)
 - [Known gaps](#known-gaps)
 
@@ -2921,6 +2922,57 @@ For the community repository, not for users:
   with a warning.
 - Installing hand-copied module folders from `community/`. Community packs are installed with `llm-cli zoo install`
   or the hub.
+
+---
+
+## Next steps and the menu bar
+
+The window never tells you to type a command. A message says what is wrong; a separate **next step** says what to do,
+and the same step reads differently for each audience:
+
+- **In the window** you read where to click, in your language, with an **Open** button that goes there: "Build
+  Ditto's local model program: Ditto > Advanced > Local Runtime... > Build llama-server…". Inside that window the
+  step names only the button.
+- **On the command line** the same step prints the command, as before: `Next: Build Ditto's local model program: llmcf ditto
+  runtime install --yes`.
+- **An AI** gets the tool to call, or "only the person can do this" with the place in the window; an AI that
+  works for the window (the call's channel is the window's chat or the window) is never told a command, an AI app on
+  a command line also gets the command. (The chat marks its calls with that channel in a later step of wave 6.)
+
+Steps that belong to another place (a command on the board, an administrator's command, another program's own
+command) are shown with that command and a **Copy** button; the framework never runs them.
+
+**Allow a command (human in the loop):** when Ditto or Mojo needs a step only you may allow, the framework prepares
+the exact command from its own catalogue and asks: "Allow `llmcf ...`? What it does. Why it is needed now." Yes runs
+exactly that command with the framework's own Python and shows its output; No runs nothing. The command is never free
+text from an AI: it is a catalogue step with checked values (choices, names, ids; never a path you did not choose).
+A step that deletes something opens the list of what goes (No is the default), a password or key is asked in a hidden
+field and handed over through standard input, never on the command line. Each decision is recorded in the activity
+record. (The question and its console in the window come with the Ditto console.)
+
+**Errors in your language:** an error is shown with a plain summary in your language, the next step, and the English
+technical detail to expand and copy (Ditto reads the English detail and explains it to you).
+
+**The menu bar** (translated, with Alt shortcuts; the object names of the entries stay the same, so every path of the
+command line keeps its mouse path):
+
+- **File:** Trash..., Output Folder..., Settings..., Exit.
+- **Build:** Targets..., Build History....
+- **Boards:** Boards and Devices....
+- **Ditto:** Set up Ditto... (first; it opens the AI settings until the setup guide comes), AI Settings..., Tool
+  Permissions..., Folders the AI May Use..., Pending Approvals..., Fix Proposals from AI Apps..., and **Advanced**:
+  Local Runtime..., Local Models..., Evaluation....
+- **Security:** Set OpenAI API Key..., Secrets..., Sign-in Overview..., Key Storage..., Audit Log..., AI App
+  Connections (MCP)....
+- **View:** the chat panel and writing in the chat.
+- **Tools:** Create Hardware Module..., Hugging Face Model Browser..., **Knowledge** (Open Community Hub,
+  Knowledge Snapshots..., Knowledge Sources..., Index the Framework's Documentation..., Deep Ingest Notice...), **Maintenance**
+  (Framework Build Images..., Mojo Health Check...), Spoken Announcements, Clear Input History....
+- **Help:** About....
+
+A text that names a place writes `{path:<objectName>}`; the window fills it from the labels on screen in your
+language, so a path in a message always matches the menu you see. For contributors:
+[CONTRIBUTING.md](../CONTRIBUTING.md#next-steps-instead-of-commands).
 
 ---
 

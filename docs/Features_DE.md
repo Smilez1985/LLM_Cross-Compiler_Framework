@@ -34,6 +34,7 @@ Zurück zur [README](../README_DE.md) · Alle Befehle: [CLI_Usage_DE.md](CLI_Usa
 - [Hardware-Probe und neue Targets](#hardware-probe-und-neue-targets)
 - [Gesundheitscheck (Mojo)](#gesundheitscheck-mojo)
 - [Community-Zoo](#community-zoo)
+- [Nächste Schritte und die Menüleiste](#nächste-schritte-und-die-menüleiste)
 - [Secret-Scan für Mitwirkende](#secret-scan-für-mitwirkende)
 - [Bekannte Lücken](#bekannte-lücken)
 
@@ -3225,6 +3226,62 @@ Für das Community-Repository, nicht für Benutzer:
   Swarm-Pakete in `community/knowledge/` werden mit einer Warnung übersprungen.
 - Das Installieren von Hand kopierter Modulordner aus `community/`. Community-Packs werden mit `llm-cli zoo install`
   oder dem Hub installiert.
+
+---
+
+## Nächste Schritte und die Menüleiste
+
+Das Fenster sagt dir nie, dass du einen Befehl tippen sollst. Eine Meldung sagt, was nicht stimmt; ein eigener
+**nächster Schritt** sagt, was zu tun ist, und derselbe Schritt liest sich für jedes Publikum anders:
+
+- **Im Fenster** liest du, wo du klickst, in deiner Sprache, mit einer Schaltfläche **Öffnen**, die dorthin führt:
+  „Dittos lokales Modellprogramm bauen: Ditto > Erweitert > Lokale Laufzeit... > llama-server bauen…". Im selben
+  Fenster nennt der Schritt nur die Schaltfläche.
+- **Auf der Kommandozeile** gibt derselbe Schritt wie bisher den Befehl aus: `Nächster Schritt: Dittos lokales
+  Modellprogramm bauen: llmcf ditto runtime install --yes`.
+- **Eine KI** bekommt das Tool, das sie aufrufen kann, oder „das kann nur die Person" mit dem Ort im Fenster; eine
+  KI, die für das Fenster arbeitet (der Kanal des Aufrufs ist der Chat des Fensters oder das Fenster), bekommt nie
+  einen Befehl, eine KI-App an einer Kommandozeile bekommt auch den Befehl. (Der Chat kennzeichnet seine Aufrufe mit
+  diesem Kanal in einem späteren Schritt der Welle 6.)
+
+Schritte, die an einen anderen Ort gehören (ein Befehl auf dem Board, ein Befehl mit Administratorrechten, der eigene
+Befehl eines anderen Programms), stehen mit diesem Befehl und einer Schaltfläche **Kopieren** da; das Framework führt
+sie nie aus.
+
+**Einen Befehl zulassen (Mensch entscheidet):** Braucht Ditto oder Mojo einen Schritt, den nur du zulassen darfst,
+bereitet das Framework den genauen Befehl aus seinem eigenen Katalog vor und fragt: „`llmcf ...` zulassen? Was er tut.
+Warum er jetzt nötig ist." Ja führt genau diesen Befehl mit dem eigenen Python des Frameworks aus und zeigt seine
+Ausgabe; Nein führt nichts aus. Der Befehl ist nie freier Text einer KI: Er ist ein Schritt des Katalogs mit
+geprüften Werten (Auswahlen, Namen, IDs; nie ein Pfad, den du nicht gewählt hast). Ein Schritt, der etwas löscht,
+öffnet die Liste dessen, was gelöscht wird (Nein ist vorgewählt); ein Passwort oder Schlüssel wird in einem verdeckten
+Feld abgefragt und über die Standardeingabe übergeben, nie auf der Kommandozeile. Jede Entscheidung steht im
+Aktivitätsprotokoll. (Die Frage und ihre Konsole im Fenster kommen mit der Ditto-Konsole.)
+
+**Fehler in deiner Sprache:** Ein Fehler erscheint mit einer verständlichen Zusammenfassung in deiner Sprache, dem
+nächsten Schritt und dem englischen technischen Detail zum Aufklappen und Kopieren (Ditto liest das englische Detail
+und erklärt es dir auf Deutsch).
+
+**Die Menüleiste** (übersetzt, mit Alt-Tastenkürzeln; die Objektnamen der Einträge bleiben gleich, so behält jeder
+Pfad der Kommandozeile seinen Mausweg):
+
+- **Datei:** Papierkorb..., Ausgabeordner..., Einstellungen…, Beenden.
+- **Build:** Targets…, Build-Verlauf….
+- **Boards:** Boards und Geräte....
+- **Ditto:** Ditto einrichten... (zuerst; öffnet die KI-Einstellungen, bis die Einrichtungshilfe kommt),
+  KI-Einstellungen..., Tool-Berechtigungen..., Ordner, die die KI nutzen darf..., Offene Freigaben...,
+  Korrekturvorschläge von KI-Apps... und **Erweitert**: Lokale Laufzeit..., Lokale Modelle..., Bewertung....
+- **Sicherheit:** OpenAI-API-Key festlegen..., Geheimnisse..., Anmeldeübersicht..., Schlüsselspeicher...,
+  Prüfprotokoll..., Verbindungen zu KI-Apps (MCP)....
+- **Ansicht:** der Chat-Bereich und das Schreiben im Chat.
+- **Extras:** Hardware-Modul erstellen..., Hugging-Face-Modellbrowser..., **Wissen** (Community Hub öffnen,
+  Wissens-Snapshots..., Wissensquellen..., Dokumentation des Frameworks indexieren..., Hinweis zu Deep Ingest...),
+  **Wartung** (Build-Images des Frameworks..., Mojo-Gesundheitscheck...), Gesprochene Ansagen, Eingabeverlauf
+  löschen....
+- **Hilfe:** Über....
+
+Ein Text, der einen Ort nennt, schreibt `{path:<objectName>}`; das Fenster füllt ihn aus den Beschriftungen auf dem
+Bildschirm in deiner Sprache, so passt ein Pfad in einer Meldung immer zum Menü, das du siehst. Für Mitwirkende:
+[CONTRIBUTING_DE.md](../CONTRIBUTING_DE.md#nächste-schritte-statt-befehlen).
 
 ---
 
