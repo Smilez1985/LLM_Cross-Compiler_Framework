@@ -557,6 +557,53 @@ def test_the_error_box_never_shows_a_step_object_as_its_repr(boxes, monkeypatch)
     assert "NextStep(" not in boxes[-1].next.text()
 
 
+def test_the_error_box_shows_a0s_error_report_in_german_with_the_english_details(boxes, language_state):
+    """Merge seam (Q7): a0's error_report() fills f-words' box. The person reads the German summary, the next step
+    as its German mouse path with an [Open] button (a0's StepsRow), never a command, and the English technical
+    detail folded away, redacted."""
+    from PySide6.QtWidgets import QLabel, QPushButton
+    from orchestrator.gui.next_step_widgets import StepsRow
+    from orchestrator.utils import next_steps as ns
+
+    class DiskFull(ns.WithSteps, OSError):
+        code = "insufficient_resources"
+
+    token = "hf_" + "D1s" * 12   # the shape of a Hugging Face token, made up
+    error = DiskFull(f"No space left on device while saving (token={token})").with_steps("images.free")
+    error_dialog.show_error(None, lang="de", **ns.error_report(error, "de").dialog_kwargs())
+    box = boxes[-1]
+    assert box.windowTitle() == "Etwas hat nicht geklappt"
+    assert box.summary.text() == "Es ist nicht genug Platz da (Speicherplatz oder Arbeitsspeicher)."
+    assert box.next.heading.text() == "Nächster Schritt:" and box.next.lines is None
+    assert isinstance(box.next.row, StepsRow) and [r.step_id for r in box.next.row.rows] == ["images.free"]
+    shown = [w.text() for w in box.findChildren(QLabel) + box.findChildren(QPushButton)]
+    step = next(t for t in shown if t.startswith("Speicherplatz freigeben"))
+    assert " > " in step, "the German mouse path"
+    assert "Öffnen" in [b.text() for b in box.next.row.buttons]
+    assert not any("llmcf" in t or "llm-cli" in t for t in shown), "never a command for the person"
+    assert box.details.isHidden() and "DiskFull: No space left on device" in box.details_text, "English, folded"
+    assert token not in box.details_text and all(token not in t for t in shown)
+
+
+def test_the_error_box_keeps_every_plain_sentence_beside_a0s_steps(boxes):
+    """Merge fix: f-words gave every step to a0's StepsRow once it existed, but StepsRow reads step ids only, so a
+    plain sentence vanished from the box (and its "Next step:" line with it). Sentences stay plain lines, a Line's
+    own steps and a bare step id go to the row, and nothing unknown shows as an id."""
+    from orchestrator.utils import next_steps as ns
+    error_dialog.show_error(None, "Saving failed.", lang="en",
+                            steps=["Close the other program first.", ns.NextStep("images.free")])
+    box = boxes[-1]
+    assert box.next.lines.text() == "Next step: Close the other program first."
+    assert box.next.heading.text() == "Next step:" and [r.step_id for r in box.next.row.rows] == ["images.free"]
+    error_dialog.show_error(None, "Saving failed.", lang="en",
+                            steps=[ns.Line("The disk is full.", steps=["images.free"]), "trash.empty"])
+    box = boxes[-1]
+    assert box.next.lines.text() == "Next step: The disk is full."
+    assert [r.step_id for r in box.next.row.rows] == ["trash.empty", "images.free"]
+    error_dialog.show_error(None, "Saving failed.", lang="en", steps=[ns.NextStep("nothing.known")])
+    assert boxes[-1].next is None, "a step no version knows shows nothing, never its id"
+
+
 # --- empty states ---------------------------------------------------------------------------------------------------
 
 def test_an_empty_state_has_one_sentence_and_one_button():

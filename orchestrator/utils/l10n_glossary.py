@@ -201,6 +201,7 @@ TEXTS = {
         # the error box (gui/error_dialog.py)
         "words.error.title": "Something went wrong",
         "words.error.next": "Next step: {step}",
+        "words.error.next_heading": "Next step:",
         "words.error.details": "Technical details",
         "words.error.details_hint": "In English, without secrets and without your home folder: copy it into a bug "
                                     "report or ask Ditto to explain it.",
@@ -382,6 +383,7 @@ TEXTS = {
         "words.help.tip": "Was ist {term}? (F1)",
         "words.error.title": "Etwas ist schiefgelaufen",
         "words.error.next": "Nächster Schritt: {step}",
+        "words.error.next_heading": "Nächster Schritt:",
         "words.error.details": "Technische Details",
         "words.error.details_hint": "Auf Englisch, ohne Geheimnisse und ohne deinen Home-Ordner: Kopiere sie in "
                                     "einen Fehlerbericht oder lass sie dir von Ditto erklären.",
