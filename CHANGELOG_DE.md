@@ -1395,6 +1395,23 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Der Code ist in Schichten geordnet, und ein Test hält sie ein** (Konsolidierung; Entscheidung des Maintainers vom
+  2026-10-17: ein Repository, Schichten per Test durchgesetzt). `tests/test_layering.py` ordnet jedes Modul von
+  `orchestrator/` einer Schicht zu (unten, remote, Kern, Fachlogik, Tool-Definitionen, Adapter), liest jeden Import
+  (auch in Funktionen, unter `TYPE_CHECKING` und verzögerte) und schlägt fehl bei einem Import, der nach oben zeigt,
+  bei einem Adapter, der einen anderen importiert, bei PySide6, click/rich, mcp/uvicorn oder paramiko außerhalb ihres
+  Zuhauses und bei einem größeren Import-Zyklus; die heutigen Ausnahmen stehen mit ihrem Grund in
+  `tests/data/layering_allowlist.json`, die nur schrumpfen darf. Gemeinsame Helfer sind aus den Tool-Modulen in die
+  Schicht gezogen, die sie braucht, und die alten Namen bleiben: Pfad-Labels für KIs nach
+  `orchestrator/security/paths.py` (mit `scrub_for_ai`, der einen Status-Bereinigung KI-seitiger Texte, und den
+  Home-Ordner-Mustern, die das GUI-Werkzeug, der Paket-Export und die Datenschutz-Masken teilen), die privaten
+  atomaren Schreiber nach `orchestrator/utils/atomic.py`, die einmaligen Hinweise nach
+  `orchestrator/utils/notice_store.py`, Docker-Image-Referenzen nach `orchestrator/utils/image_ref.py`, der
+  SSRF-sichere HTTP-Adapter nach `orchestrator/security/http.py`, der Audit-Schlüssel nach `Core/vault_key.audit_key`,
+  die Basis-Images eines Pakets nach `Core/community_pack.py`, die Snapshot-Prüfung vor einem Index nach
+  `Core/knowledge_snapshots.py` und das Audit eines gespeicherten Moduls nach `Core/module_generator.py`. Für die
+  Person ändert sich nichts; die Fachlogik importiert dafür keine Tool-Definitionen mehr, und der größte
+  Import-Zyklus schrumpfte von 81 auf 9 Module.
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:
