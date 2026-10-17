@@ -106,9 +106,9 @@ CONTACT INFORMATION
 
 For questions about this license or the LLM Cross-Compiler Framework:
 
-- Project Repository: https://github.com/llm-framework/llm-cross-compiler-framework
-- Issue Tracker: https://github.com/llm-framework/llm-cross-compiler-framework/issues
-- Discussions: https://github.com/llm-framework/llm-cross-compiler-framework/discussions
+- Project Repository: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework
+- Issue Tracker: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/issues
+- Discussions: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/discussions
 - Email: legal@llm-framework.org
 
 For security issues, please use our security contact: security@llm-framework.org

@@ -1,4 +1,4 @@
-Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-12
+Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-17
 
 **English** · [Deutsch](Container_Setup_DE.md)
 
@@ -50,7 +50,7 @@ What happens:
    - a user `lcf` with your user and group id (never 0, root), so files in a bind-mounted data folder belong to you;
      when your group id exists in Debian already (for example 100, `users`), that group is used;
    - `install.sh` runs as on a Debian computer, as if started with `sudo` by `lcf`: it installs Python with `apt`,
-     copies the program to `/opt/llm-conversion-framework`, creates `.venv` there with the pinned
+     copies the program to `/opt/llm-cross-compiler-framework`, creates `.venv` there with the pinned
      `requirements.txt` and writes the `llm-framework` launcher. Only the Docker engine and the `docker` group are
      left out (`LCF_CONTAINER_BUILD=1`);
    - `llm-cli` is put on the PATH, and `llmcf`, its new name (unreleased);
@@ -145,7 +145,7 @@ Everything personal lives in the Docker volume `lcf-data`, mounted at `/data`:
 
 Back the volume up like any Docker volume.
 
-The program folder `/opt/llm-conversion-framework` belongs to `lcf`, as it belongs to your user on bare metal.
+The program folder `/opt/llm-cross-compiler-framework` belongs to `lcf`, as it belongs to your user on bare metal.
 Targets you create with the module wizard or `llm-cli module create` and community packs you install are written
 there, so they live in the container itself, not in the volume, and are lost when the container is removed or
 replaced. The make targets therefore never remove or replace a container that holds files of yours outside the
@@ -157,6 +157,8 @@ volume:
 - `make clean` removes only containers that hold nothing of yours. For each other one it lists every file (full path,
   file name, size and what it is) and the command to remove the container yourself; it never removes the volume.
 - `make kept-files` shows those files at any time ([`scripts/container_kept_files.sh`](../scripts/container_kept_files.sh)).
+- A container made from an image built before the repository was renamed has its program folder at
+  `/opt/llm-conversion-framework`. Files of yours there count the same way: make keeps that container and lists them.
 
 ## 6. The GUI (optional)
 

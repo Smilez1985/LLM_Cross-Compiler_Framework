@@ -1,4 +1,4 @@
-Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-11
+Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-17
 
 [English](BLUEPRINT.md) · **Deutsch**
 
@@ -593,10 +593,10 @@ Das musst du nicht selbst beurteilen.
    als fünf Weiterleitungen zählen als Fehler, und ein Crawl stellt höchstens fünfmal `crawler_max_pages`
    Seitenanfragen (das Laden von robots.txt und `tdmrep.json` zählt nicht mit).
 6. **Prüfungen nach der Antwort.** Zuerst der Header `X-Robots-Tag` und der TDMRep-Header `tdm-reservation`; dann
-   bei HTML `<meta name="robots">`, `<meta name="llm-conversion-framework-bot">` und
-   `<meta name="tdm-reservation">`, bei einem PDF `tdm:reservation` in seinen Metadaten. `noindex`, `none`,
-   `noai` und `noimageai` halten die Seite heraus; `nofollow` und `none` verhindern, dass der Crawler ihren Links
-   folgt.
+   bei HTML `<meta name="robots">`, `<meta name="llm-cross-compiler-framework-bot">` (und das frühere
+   `<meta name="llm-conversion-framework-bot">`) und `<meta name="tdm-reservation">`, bei einem PDF
+   `tdm:reservation` in seinen Metadaten. `noindex`, `none`, `noai` und `noimageai` halten die Seite heraus;
+   `nofollow` und `none` verhindern, dass der Crawler ihren Links folgt.
 7. **Speichern.** Eine HTML-Seite wird in Markdown umgewandelt (Überschriften, Codeblöcke und Tabellen bleiben
    erhalten) und nach Sprache gefiltert (`crawler_languages`), ein PDF wird als Text gelesen; jede Seite wird
    sofort gespeichert und ersetzt ihre frühere Fassung, mit ihrer Quelladresse und dem, was sie über ihre Lizenz und
@@ -614,10 +614,10 @@ Welche Signale zählen und wann sie gelesen werden:
 
 | Signal | Wann | Regel |
 |---|---|---|
-| robots.txt ([RFC 9309](https://www.rfc-editor.org/rfc/rfc9309)) | vor der Anfrage, einmal je Ursprung (Schema, Host und Port) | Es zählen die Gruppen, deren User-Agent dem Produkt-Token dieses Crawlers gleicht (`LLM-Conversion-Framework-Bot`, gleich in welcher Schreibweise; eine Gruppe für `bot` ist nicht unsere), sonst alle `*`-Gruppen zusammen; Muster mit `*` und `$` wirken; die längste passende Regel entscheidet, bei Gleichstand gewinnt `Allow`. Ein 401, ein 403, ein Serverfehler oder eine unerreichbare Datei heißen „alles verboten“ (bei 401 und 403 ist das strenger als RFC 9309, das Crawlen erlaubt, wenn die Datei mit einem 4xx-Code nicht verfügbar ist); eine fehlende Datei (404) heißt, alles ist erlaubt. Eine Datei, die der SSRF-Schutz blockiert oder die hinter mehr als fünf Weiterleitungen liegt, gilt als nicht verfügbar, was RFC 9309 als erlaubt behandelt. |
+| robots.txt ([RFC 9309](https://www.rfc-editor.org/rfc/rfc9309)) | vor der Anfrage, einmal je Ursprung (Schema, Host und Port) | Es zählen die Gruppen, deren User-Agent einem der Produkt-Tokens dieses Crawlers gleicht (`LLM-Cross-Compiler-Framework-Bot` oder `LLM-Conversion-Framework-Bot` von vor der Umbenennung des Repositorys, damit ein früherer Vorbehalt bestehen bleibt; gleich in welcher Schreibweise; eine Gruppe für `bot` ist nicht unsere), zusammengeführt, sonst alle `*`-Gruppen zusammen; Muster mit `*` und `$` wirken; die längste passende Regel entscheidet, bei Gleichstand gewinnt `Allow`. Ein 401, ein 403, ein Serverfehler oder eine unerreichbare Datei heißen „alles verboten“ (bei 401 und 403 ist das strenger als RFC 9309, das Crawlen erlaubt, wenn die Datei mit einem 4xx-Code nicht verfügbar ist); eine fehlende Datei (404) heißt, alles ist erlaubt. Eine Datei, die der SSRF-Schutz blockiert oder die hinter mehr als fünf Weiterleitungen liegt, gilt als nicht verfügbar, was RFC 9309 als erlaubt behandelt. |
 | TDMRep-Datei `/.well-known/tdmrep.json` | vor der Anfrage, einmal je Ursprung | Die erste Regel, deren Ort zum Pfad passt, entscheidet; `"tdm-reservation": 1` behält die Seite vor. Eine fehlende oder unlesbare Datei heißt, die Website nutzt das Protokoll nicht. |
 | Header `X-Robots-Tag` und `tdm-reservation` | nach der Antwort | `noindex`, `none`, `noai`, `noimageai` oder `tdm-reservation: 1` behalten die Seite vor. Anweisungen für andere Crawler (`otherbot: noindex`) werden übergangen. |
-| Robots-Meta-Tags (`robots` und `llm-conversion-framework-bot`), Meta-Tag `tdm-reservation` | nach der Antwort, HTML | wie bei den Headern |
+| Robots-Meta-Tags (`robots`, `llm-cross-compiler-framework-bot` und das frühere `llm-conversion-framework-bot`), Meta-Tag `tdm-reservation` | nach der Antwort, HTML | wie bei den Headern |
 | `tdm:reservation` in den PDF-Metadaten | nach der Antwort, PDF | der Wert 1 behält das PDF vor |
 
 Ein Vorbehalt aus irgendeiner Quelle gewinnt. TDMRep erlaubt einer späteren Quelle, einen Vorbehalt aus einer
