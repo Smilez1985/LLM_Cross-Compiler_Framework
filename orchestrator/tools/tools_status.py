@@ -731,7 +731,8 @@ AI_SETTINGS_NEXT = ("Tell the person: the AI settings decide this together with 
 
 def settings_facts(framework, inp: UpdateSettingsIn):
     """The question's facts (old and new value of every change) and what the handler applies; refuses before the
-    question a value that is not one, a schema violation and every loosening of a tighten-only setting."""
+    question a value that is not one, a schema violation, every loosening of a tighten-only setting and what the AI
+    settings' rules refuse (ai_settings_problem)."""
     from orchestrator.tools.facts_catalog import blocked
     from orchestrator.tools.spec import CallFacts, Fact
     seen, changes, facts, problems = set(), [], [], []
