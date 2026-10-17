@@ -121,7 +121,7 @@ def check_board_entry(host: str, user: str, label: Optional[str]) -> Optional[st
     a label of 1-64 printable characters. Returns the cleaned label (None: none given)."""
     from orchestrator.Core.deployment_manager import SSH_USER_PATTERN
     from orchestrator.runtime.device.trusted import DeviceStoreError, clean_label
-    from orchestrator.runtime.remote_probe import valid_host
+    from orchestrator.remote.address import valid_host
     if not valid_host(host) or not SSH_USER_PATTERN.fullmatch(user or ""):
         raise BoardStepError("HOST must be an address or a host name (e.g. 192.168.1.50, fe80::1 without brackets or "
                              "myboard.local) and the user an account name", "host_user")

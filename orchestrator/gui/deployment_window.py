@@ -627,7 +627,7 @@ class DeploymentWindow(QWidget):
         checks them; None after a plain-text warning."""
         from types import SimpleNamespace
         from orchestrator.Core.deployment_manager import SSH_USER_PATTERN
-        from orchestrator.runtime.remote_probe import valid_host
+        from orchestrator.remote.address import valid_host
         from orchestrator.runtime.scan_steps import label_problem
         host = self.cb_device.currentText().strip()
         user = self.txt_user.text().strip()

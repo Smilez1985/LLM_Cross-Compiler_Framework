@@ -265,3 +265,48 @@ def test_the_boards_window_names_a_board_by_its_stored_form(qapp, window, monkey
     window.add_board("myboard.local", "dietpi", 22, None)
     wait(qapp, window)
     assert "myboard.local" in boxes.asked[-1].text and "myboard.local:" not in boxes.asked[-1].text
+
+
+# --- the one implementation (orchestrator/remote/address.py) ---------------------------------------------------------
+
+@pytest.mark.parametrize("host, port, known_hosts, stored", [
+    ("192.0.2.10", 22, "192.0.2.10", "192.0.2.10"),
+    ("192.0.2.10", 2222, "[192.0.2.10]:2222", "192.0.2.10:2222"),
+    ("fe80::1", 22, "fe80::1", "fe80::1"),
+    ("fe80::1", 2222, "[fe80::1]:2222", "[fe80::1]:2222"),
+])
+def test_endpoint_forms(host, port, known_hosts, stored):
+    from orchestrator.remote.address import Endpoint
+    endpoint = Endpoint(host, port)
+    assert endpoint.known_hosts_entry == known_hosts and endpoint.store_form == stored
+    assert endpoint.display == f"{host}:{port}"
+    assert Endpoint.parse(stored) == endpoint
+    assert Endpoint(host) == Endpoint(host, 22)
+
+
+def test_endpoint_parse_refuses_what_is_not_host_and_port():
+    from orchestrator.remote.address import Endpoint
+    for bad in (None, "", 22, "host:99999", "host:0", "host:x", ":22", "[]:22"):
+        with pytest.raises(ValueError):
+            Endpoint.parse(bad)
+
+
+def test_the_checks():
+    from orchestrator.remote.address import host_shaped, valid_host, valid_port, valid_user
+    assert valid_host("myboard.local") and not valid_host("192.168.1.300") and host_shaped("192.168.1.300")
+    assert not host_shaped("-x") and not host_shaped(None)
+    assert valid_port(1) and valid_port(65535) and not valid_port(0) and not valid_port(65536)
+    assert not valid_port(True) and not valid_port("22") and not valid_port(22.0)
+    assert valid_user("dietpi") and not valid_user("root") and valid_user("root", allow_root=True)
+    assert not valid_user(None) and not valid_user("dietpi\n") and not valid_user("ſudo")
+
+
+def test_every_place_uses_the_one_implementation():
+    """The old names are calls of remote.address, not copies."""
+    from orchestrator.remote import address
+    from orchestrator.runtime import remote_probe
+    assert remote_probe.valid_host is address.valid_host
+    from orchestrator.runtime.device import launcher, settings, trusted
+    for module in (remote_probe, trusted, settings, launcher):
+        for name in ("_HOST", "_USER", "_RE_USER"):
+            assert not hasattr(module, name), (module.__name__, name)

@@ -12,7 +12,6 @@ The caller brings an authenticated SSH client whose host key is trusted (orchest
 this module never trusts a host key or asks for a password itself.
 """
 
-import ipaddress
 import re
 import shlex
 import socket
@@ -20,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from orchestrator.remote.address import Endpoint, valid_host  # noqa: F401 - valid_host keeps its old import path
 from orchestrator.runtime.profile import HardwareProfile, ProfileError, load_schema, parse_profile
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
@@ -33,8 +33,6 @@ PYTHON_CHECK = "sh -c " + shlex.quote(
     "command -v python3 >/dev/null 2>&1 && python3 -I -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])'")
 PYTHON_COMMAND = "sh -c " + shlex.quote("exec python3 -I - --output - 2>/dev/null")
 SHELL_COMMAND = "sh -c " + shlex.quote("exec sh -s -- --output - 2>/dev/null")
-# The deploy's own check (deployment_manager._HOST) is the same: an IPv6 address without brackets.
-_HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45})$", re.ASCII)
 
 
 class RemoteProbeError(RuntimeError):
@@ -48,34 +46,9 @@ class RemoteProbeResult:
     notes: List[str] = field(default_factory=list)  # why the fallback was used, for the user
 
 
-def valid_host(host: str) -> bool:
-    """A board's address or host name as the person entered it (eighth round N4): an IPv4 or IPv6 address, or a host
-    name such as myboard.local; never an option (a leading '-' would read as one) or a shell character. Digits and
-    dots alone must be a valid IPv4 address (192.168.1.300 is a typo, not a name), and a name has no empty part. An
-    IPv6 address is written without brackets (fe80::1, never [fe80::1]): the port is a field of its own, and the deploy
-    refuses brackets too, so a CLI or GUI check never passes an address the deploy then refuses."""
-    if not isinstance(host, str) or not _HOST.fullmatch(host) or host.startswith("-"):
-        return False
-    if ":" in host:
-        try:
-            ipaddress.IPv6Address(host)
-        except ValueError:
-            return False
-        return True
-    if re.fullmatch(r"[0-9.]+", host):
-        try:
-            ipaddress.IPv4Address(host)
-        except ValueError:
-            return False
-        return True
-    return ".." not in host
-
-
 def store_address(host: str, port: int) -> str:
-    """The address as the profile store keeps it: host, host:port, or [IPv6]:port."""
-    if port == 22:
-        return host
-    return f"[{host.strip('[]')}]:{port}" if ":" in host else f"{host}:{port}"
+    """The address as the profile store keeps it: host, host:port, or [IPv6]:port (Endpoint.store_form)."""
+    return Endpoint(host, port).store_form
 
 
 def _read_limited(stream, limit: int) -> bytes:

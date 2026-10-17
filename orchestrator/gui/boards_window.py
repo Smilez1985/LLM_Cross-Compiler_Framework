@@ -517,7 +517,8 @@ class BoardsWindow(QDialog):
             self._info(self._t("boards.add.bad_entry" if e.kind == "host_user" else "boards.add.bad_label"),
                        "warning")
             return
-        address = host if port == 22 else (f"[{host}]:{port}" if ":" in host else f"{host}:{port}")
+        from orchestrator.remote.address import Endpoint
+        address = Endpoint(host, port).store_form
         state = self.state_dir
 
         def read():

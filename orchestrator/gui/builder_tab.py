@@ -258,7 +258,7 @@ class SSHProbeWorker(QThread):
             self.finished.emit(False, "Paramiko library missing. Cannot use SSH.", "")
             return
         from orchestrator.runtime.device import reasons
-        from orchestrator.runtime.remote_probe import valid_host
+        from orchestrator.remote.address import valid_host
         from orchestrator.runtime.scan_steps import DeviceScanError, scan_device
         if not valid_host(self.ip):
             self.finished.emit(False, "Enter a host name or an IP address (an IPv6 address without brackets, e.g. "
@@ -750,7 +750,7 @@ class BuilderTab(QWidget):
         """Option 2: Remote SSH Scan (`llmcf scan --device HOST --user U --port --label`): the host key is read off
         the GUI thread and trusted only after the person's "Yes"; the probe runs in SSHProbeWorker."""
         from orchestrator.gui.plain import plain_box
-        from orchestrator.runtime.remote_probe import valid_host
+        from orchestrator.remote.address import valid_host
         from orchestrator.runtime.scan_steps import label_problem
         dlg = SSHConnectDialog(self, recent=self._recent("device"))
         if not dlg.exec():

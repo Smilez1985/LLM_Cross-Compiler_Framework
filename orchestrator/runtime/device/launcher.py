@@ -24,6 +24,7 @@ import re
 import shlex
 from typing import Dict, List, Mapping, Optional, Tuple
 
+from orchestrator.remote.address import valid_user
 from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, FORBIDDEN_FLAGS, KV_CACHE_TYPES, LOOPBACK,
                                                 POSIX_CLEARED_PATH, SERVER_FIXED, START_SCRIPT_OPTIONS, check_command,
                                                 check_server_command, kv_cache_args, posix_cleared_env)
@@ -43,7 +44,6 @@ DEVICE_FOLDER_MAX = 1024
 DEVICE_PATH_MAX = DEVICE_FOLDER_MAX + 512
 _RE_OPTION = re.compile(r"^-{1,2}[a-z][a-z0-9-]{0,40}$", re.ASCII | re.IGNORECASE)
 _RE_PATH = re.compile(r"^/[A-Za-z0-9._+/-]{1,%d}$" % DEVICE_PATH_MAX, re.ASCII)
-_RE_USER = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.ASCII | re.IGNORECASE)
 _KINDS = ("uint", "sint", "hex", "bit", "layers", "switch", "loadmode", "name", "cachetype")
 _RE_CACHE_TYPE = re.compile(r"^[a-z0-9_]{1,16}$", re.ASCII)
 
@@ -284,7 +284,7 @@ def render_systemd_unit(*, user: str, home: str, model: str, port: int, kv_cache
     same fixed arguments (plus the KV-cache type of the deploy settings, checked again by the script), no
     Environment= or EnvironmentFile= (the script clears the environment anyway), and the server limited to loopback
     by systemd itself. Every value is checked; none comes from the device unchecked."""
-    if not isinstance(user, str) or not _RE_USER.fullmatch(user) or user == "root":
+    if not valid_user(user):   # an account name, never root
         raise LauncherError("the unit runs as an unprivileged account name, never root")
     for what, path in (("home", home), ("model", model)):
         if not isinstance(path, str) or not _RE_PATH.fullmatch(path) or ".." in path.split("/"):

@@ -22,6 +22,8 @@ import threading
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from orchestrator.remote.address import Endpoint
+
 try:
     import paramiko
 except ImportError:  # deployment and remote probing are optional features
@@ -42,14 +44,16 @@ class UnknownHostKey(HostKeyError):
         self.host, self.port, self.key = host, port, key
         self.key_type = key.get_name()
         self.fingerprint = fingerprint(key)
-        super().__init__(f"The device {host}:{port} is not known yet ({self.key_type} {self.fingerprint}).")
+        super().__init__(f"The device {Endpoint(host, port).display} is not known yet ({self.key_type} "
+                         f"{self.fingerprint}).")
 
 
 class HostKeyChanged(HostKeyError):
     def __init__(self, host: str, port: int):
         super().__init__(
-            f"The host key of {host}:{port} has CHANGED. This can be a reinstalled device - or someone in between. "
-            f"Check the device, then remove its line from the framework's known_hosts file to trust it again.")
+            f"The host key of {Endpoint(host, port).display} has CHANGED. This can be a reinstalled device - or "
+            f"someone in between. Check the device, then remove its line from the framework's known_hosts file to "
+            f"trust it again.")
 
 
 def _require_paramiko():
@@ -64,7 +68,8 @@ def fingerprint(key) -> str:
 
 
 def host_entry(host: str, port: int = 22) -> str:
-    return host if port == 22 else f"[{host}]:{port}"
+    """The host as known_hosts keeps it (Endpoint.known_hosts_entry)."""
+    return Endpoint(host, port).known_hosts_entry
 
 
 def known_hosts_path(state_dir: Path) -> Path:
