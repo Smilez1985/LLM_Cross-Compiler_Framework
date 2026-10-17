@@ -88,7 +88,7 @@ class TestPathsWithSpaces:
         outside = tmp_path / "elsewhere" / "a dir"
         outside.mkdir(parents=True)
         looked = []
-        import orchestrator.tools.tools_runtime as tr
+        import orchestrator.security.paths as tr   # label_paths' home since chain c1-paths (tools_runtime re-exports it)
         monkeypatch.setattr(tr, "_path_exists", lambda p: looked.append(p) or True)
         label_paths(f"x {tmp_path}/elsewhere/a dir/y", {})
         assert looked == []

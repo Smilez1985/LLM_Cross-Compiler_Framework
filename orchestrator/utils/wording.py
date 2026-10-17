@@ -79,7 +79,7 @@ def menu_path_problems(text: str) -> List[str]:
 def technical_details(text: Optional[str]) -> str:
     """`text` with secrets redacted and this computer's home folder written as "~": what the error box shows under
     "Technical details" and copies."""
-    from orchestrator.tools.tools_runtime import shorten_home
+    from orchestrator.security.paths import shorten_home
     from orchestrator.utils.helpers import redact_secrets
     return shorten_home(redact_secrets(str(text or "")))
 

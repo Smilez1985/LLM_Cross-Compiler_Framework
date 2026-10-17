@@ -493,9 +493,9 @@ def host_section(framework, hardware: Callable[[], Any]) -> Optional[HostSection
 
 def _scrub_paths(text: str) -> str:
     """Framework text about the local runtime with the home folder shortened to ~ (no user name; in every spelling a
-    Windows host's texts have, tools_runtime.shorten_home), cleaned."""
-    from orchestrator.tools.tools_runtime import shorten_home
-    return sanitize_untrusted(redact_secrets(shorten_home(text)), 500)
+    Windows host's texts have), secrets redacted, cleaned and capped: security.paths.scrub_for_ai."""
+    from orchestrator.security.paths import scrub_for_ai
+    return scrub_for_ai(text)
 
 
 def local_runtime_section(framework) -> LocalRuntimeSection:

@@ -687,7 +687,7 @@ class BuildService:
         computer too, so a local model on a USB disk or in another user's folder is named by its file name."""
         import os
         from orchestrator.Core.mojo.views import ai_folder_labels
-        from orchestrator.tools.tools_runtime import label_paths
+        from orchestrator.security.paths import label_paths
         roots = ai_folder_labels(self.framework)
         home = str(Path.home())
         marks = [r for r in roots if r not in ("", "/", "\\")]
