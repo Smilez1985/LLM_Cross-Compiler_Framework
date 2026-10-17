@@ -134,6 +134,47 @@ def test_qt_standard_buttons_follow_the_language(qapp, monkeypatch):
         gui_localization.install_qt_translation("en")
 
 
+def test_the_language_chosen_at_the_first_start_applies_at_once(qapp, monkeypatch, tmp_path):
+    """Bug found on the way (chain qt): the first-run dialog runs with an English instance, and get_instance(choice)
+    returned that instance unchanged, so the window (and Qt's own buttons) stayed English until the next start."""
+    import orchestrator.main as gui_main
+    from orchestrator.gui import localization as gui_localization
+    monkeypatch.setattr(localization, "_instance", None)
+    monkeypatch.setattr(gui_main, "root_dir", tmp_path)
+    monkeypatch.setattr(gui_main, "QApplication", lambda argv: qapp)
+    monkeypatch.setattr(gui_main, "PassphrasePrompt", lambda app: None)
+    monkeypatch.setattr(gui_main, "set_passphrase_prompt", lambda prompt: None)
+    monkeypatch.setattr(gui_main, "save_language", lambda cfg, lang: True)
+    class Dialog:
+        selected_lang = "de"
+
+        def exec(self):
+            return gui_main.QDialog.Accepted
+    monkeypatch.setattr(gui_main, "LanguageSelectionDialog", Dialog)
+    import orchestrator.gui.form_of_address as form_of_address
+    monkeypatch.setattr(form_of_address, "apply_saved_form", lambda cfg: None)
+    seen = []
+
+    class Window:
+        def __init__(self, app_root):
+            seen.append(localization.current_language())
+
+        def show(self):
+            raise SystemExit(0)
+    monkeypatch.setattr(gui_main, "MainOrchestrator", Window)
+    monkeypatch.setenv("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+    monkeypatch.setattr(sys, "argv", ["llm-gui"])
+    qt_has_german = gui_localization.install_qt_translation("de")
+    gui_localization.install_qt_translation("en")
+    try:
+        with pytest.raises(SystemExit):
+            gui_main.main()
+        assert seen == ["de"], "the main window starts in the chosen language"
+        assert (gui_localization.qt_translator() is not None) == qt_has_german, "Qt's own buttons in German too"
+    finally:
+        gui_localization.install_qt_translation("en")
+
+
 # --- without PySide6 at all -----------------------------------------------------------------------------------------
 
 BLOCK_QT = "import sys\nsys.modules['PySide6'] = None\nsys.modules['shiboken6'] = None\n"

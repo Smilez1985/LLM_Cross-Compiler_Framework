@@ -1667,6 +1667,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **The language chosen at the first start applies at once**: the first-start dialog ran with the window's texts in
+  English, and choosing German left them English (also Qt's own buttons) until the next start. The window now
+  switches to the chosen language before it opens (`orchestrator/gui/app.py`).
 - **A board whose home folder has a long path can be deployed to**: the device runtime refused a board user's home
   folder longer than 200 characters (and its staging folder and models below 400), so a home on a deep mount point
   stopped the deployment with "not a plain absolute path". The characters are checked as before; the length is now

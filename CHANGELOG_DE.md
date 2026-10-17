@@ -1887,6 +1887,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Die beim ersten Start gewählte Sprache gilt sofort**: Der Dialog beim ersten Start lief mit englischen Texten des
+  Fensters, und die Wahl Deutsch ließ sie bis zum nächsten Start englisch (auch Qts eigene Schaltflächen). Das Fenster
+  wechselt jetzt in die gewählte Sprache, bevor es sich öffnet (`orchestrator/gui/app.py`).
 - **Auf ein Board, dessen Home-Ordner einen langen Pfad hat, lässt sich deployen**: Die Geräte-Laufzeit lehnte einen
   Home-Ordner des Board-Benutzers mit mehr als 200 Zeichen ab (und dessen Staging-Ordner sowie Modelle darunter ab
   400), deshalb brach ein Home auf einem tief liegenden Einhängepunkt das Deployment mit „not a plain absolute path“
