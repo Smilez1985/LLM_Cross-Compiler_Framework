@@ -305,4 +305,5 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
                                              "orchestrator.utils.l10n_artifacts", "orchestrator.utils.l10n_device",
                                              "orchestrator.utils.l10n_gui", "orchestrator.utils.l10n_knowledge",
                                              "orchestrator.utils.l10n_mojo",
-                                             "orchestrator.utils.l10n_boards"}
+                                             "orchestrator.utils.l10n_boards",
+                                             "orchestrator.utils.l10n_tools_mcp"}

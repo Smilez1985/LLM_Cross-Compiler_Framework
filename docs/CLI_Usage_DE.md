@@ -1273,6 +1273,10 @@ kann (`at most`), ob es neu ist (noch nicht gesehen: es nutzt seine eigene Vorga
 eine Bestätigung eine dauerhafte Freigabe anbieten darf. Ohne `--caller` zeigt es die gemeinsamen Berechtigungen und
 nennt die Aufrufer, die eigene haben. Der Titel sagt, wenn die Berechtigungen noch nicht eingerichtet sind.
 
+In der GUI: **Tools > Tool Permissions (Ditto / MCP)...**: die Spalte **Gilt jetzt** zeigt die Entscheidung jedes
+Tools, mit dem Grund als Tooltip, und ein Hinweis nennt die Aufrufer mit eigenen Berechtigungen; **Wessen
+Berechtigungen** zeigt die von Ditto oder den lokalen MCP-Clients (`--caller`).
+
 ### tools permissions
 
 ```
@@ -1297,6 +1301,15 @@ geantwortet hast. Eine Berechtigungsdatei, die beschädigt, von Hand bearbeitet 
 | `--caller ditto\|mcp` | Die Berechtigungen eines Aufrufers setzen (Ditto oder lokale MCP-Clients über stdio) statt der gemeinsamen. Die ersten Berechtigungen eines Aufrufers beginnen mit den gemeinsamen, samt den Einstellungen für einzelne Tools. |
 | `--token TEXT` | Stattdessen die Berechtigungen dieses [benannten MCP-Tokens](#mcp-token) setzen (nicht zusammen mit `--caller`). Braucht ein Terminal; bei einem an Ditto gebundenen Token wird zuerst gefragt, ob es eigene bekommen soll. Es führt dieselben Angaben zu den Tools für dieses Token auf. Protokolliert mit dem Akteur `cli`. |
 | `--reset` | Zurück zu den empfohlenen Standardwerten (die Einrichtung fragt beim nächsten Mal erneut). Mit `--caller`: Dieser Aufrufer nutzt wieder die gemeinsamen Berechtigungen. Mit `--token`: zurück auf nur lesen. |
+
+In der GUI: **Tools > Tool Permissions (Ditto / MCP)...** (dieselben Angaben je Tool, gespeichert mit dem Akteur
+`gui`): **Wessen Berechtigungen** für `--caller`, **Auf die empfohlenen Standards zurücksetzen...** für `--reset`,
+**Wieder die gemeinsamen Berechtigungen nutzen...** für `--reset --caller`, und im Abschnitt „MCP-Tokens (eines je
+Client)“ **Berechtigungen...** für `--token` und **Zurück auf nur lesen...** für `--reset --token` (das Token ist
+wieder ein neues Token, keins mit von Hand gesetztem Allow/Deny). Jedes Zurücksetzen nennt, was sich ändert, und fragt
+zuerst („Nein“ ist vorgewählt); eine Änderung, die woanders gespeichert wurde, während du liest, wird abgelehnt. Die Spalte **Ask in
+the framework** ist `--confirm-in-framework`, die Liste der dauerhaften Freigaben `--grants` und **Revoke selected
+standing approval** `--revoke-grant`.
 
 ### tools audit
 
@@ -1325,6 +1338,11 @@ llm-cli tools audit --summary
 llm-cli tools audit --archive
 ```
 
+In der GUI: **Security > Prüfprotokoll...**: dieselben Zeilen Seite für Seite (**Einträge pro Seite**, **Neuere**,
+**Ältere**), **Details** für `--details`, **Unversehrtheit prüfen** für `--verify` (das Ergebnis in einfachen
+Worten), **Archivieren...** für `--archive` (fragt zuerst; das alte Log bleibt neben dem neuen erhalten) und der
+Reiter **Übersicht je Aufrufer** für `--summary`. Prüfung, Archivieren und Übersicht laufen im Hintergrund.
+
 ### tools approvals
 
 ```
@@ -1346,6 +1364,9 @@ beendet ist, sich ihre Frage inzwischen geändert hat oder das Audit-Log die Ent
 einem Rechner ohne Bildschirm, etwa im Docker-Image, führst du es dort in einem Terminal aus
 (`docker exec -it <container> llm-cli tools approvals`). Die GUI zeigt dieselben Aufrufe unter
 **Tools > Pending Approvals...**.
+
+In der GUI: **Tools > Pending Approvals...** (**Approve once**, **Approve and do not ask again...** für `--always` mit
+Umfang und Dauer, **Decline**).
 
 `approve ID --always [--width this|any] [--duration revoke|30d|24h]` gibt den Aufruf frei und speichert eine
 dauerhafte Freigabe („nicht mehr fragen“) im Rahmen, den das Framework dafür angeboten hat, nachdem Rahmen und
@@ -1399,6 +1420,10 @@ llm-cli tools folders list
 llm-cli tools folders remove mymodels
 ```
 
+In der GUI: **Tools > Folders the AI May Use...**: **Add folder...** fragt nach dem Ordner, seinem Label und was darin
+liegt (`--kind`: Modell-Dateien, Datensatz-Dateien oder beides), dann folgt dieselbe Warnung; **Remove** für
+`remove`.
+
 ### tools crawl-notice
 
 ```
@@ -1412,6 +1437,10 @@ der GUI; kein Tool kann ihn bestätigen. Der Befehl braucht ein Terminal (weiter
 abgelehnt); die Bestätigung wird mit `via: cli` in `~/.llm-framework/crawl_notice.json` gespeichert und ins
 Audit-Log geschrieben (Akteur `cli`). Ist der Hinweis schon gelesen, wird er gezeigt und nichts ändert sich; nach
 einer Änderung seines Textes muss er erneut gelesen werden.
+
+In der GUI: **Tools > Hinweis zu Deep Ingest...** zeigt den Hinweis jederzeit; solange er noch nötig ist, bittet es
+dich zu bestätigen, dass du ihn gelesen hast („Nein“ ist vorgewählt), und hält das mit `via: gui` fest (Akteur `gui`).
+Der Deep Ingest des Modul-Assistenten zeigt ihn vor dem ersten Crawl, auch solange die Wissensdatenbank aus ist.
 
 ---
 
@@ -1465,6 +1494,12 @@ laufender Server antwortet nicht mehr, sobald sein Token widerrufen oder rotiert
 llm-cli mcp serve --transport http --port 8765
 ```
 
+In der GUI: **Security > Verbindungen zu KI-Apps (MCP)...**, Kasten „Lokaler HTTP-Server“: **Adresse**, **Port** und
+**Container-Bindung** (`--container`), **Server starten** und **Server stoppen**. Die GUI führt diesen Befehl als
+eigenen Kindprozess aus, lehnt vor dem Start ab, was der Befehl ablehnt, zeigt Adresse, Zustand und die Ausgabe des
+Servers und fragt, bevor das Framework schließt, solange der Server noch läuft („Nein“ lässt das Framework offen; „Ja“
+stoppt den Server wie Strg+C, nach 15 Sekunden sofort). Den stdio-Transport startet die KI-App selbst.
+
 ### mcp config
 
 ```
@@ -1489,6 +1524,11 @@ llm-cli mcp config --write claude-desktop
 
 An diesen Clients meldest du dich mit deinem eigenen Konto oder Schlüssel an; das Framework sieht das nie.
 
+In der GUI: **Security > Verbindungen zu KI-Apps (MCP)...** zeigt die drei Einträge, jeden mit einer Schaltfläche
+**Kopieren**, und den Pfad der Konfigurationsdatei von Claude Desktop. **In Claude Desktop eintragen...** (`--write
+claude-desktop`) zeigt die Datei, ob es sie gibt, die Änderung, die Einträge, die bleiben, und die Sicherung, fragt
+zuerst („Nein“ ist vorgewählt) und schreibt genau das; eine inzwischen geänderte Datei wird nicht überschrieben.
+
 ### mcp token
 
 ```
@@ -1504,7 +1544,8 @@ einmal gezeigt, wenn es angelegt oder rotiert wird; das Framework behält nur se
 Aufrufer `mcp:<Name>` im Audit-Log, und es hat eigene Berechtigungen. `add`, `rotate` und `revoke` brauchen einen
 Menschen an einem Terminal (`add` und `rotate` geben außerdem nur auf ein Terminal aus) und werden mit dem Akteur
 `cli` protokolliert, ohne das Token. Kein Tool kann Tokens anlegen, auflisten, ändern oder lesen. Die GUI kann
-dasselbe unter Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens“ (protokolliert mit dem Akteur `gui`).
+dasselbe unter Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP-Tokens (eines je Client)“ (protokolliert mit dem
+Akteur `gui`).
 
 | Befehl / Option | Bedeutung |
 |---|---|
@@ -1513,7 +1554,7 @@ dasselbe unter Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens�
 | `--link ditto` | Nutzt Dittos Berechtigungen per Verweis, für einen Client, der genau Dittos Berechtigungen haben soll: Eine Änderung an Dittos Berechtigungen gilt sofort. |
 | `list` | Namen, Audit-Akteure, Berechtigungen, Zeit des Anlegens und Rotierens; nie ein Token oder sein Hash. |
 | `rotate NAME` | Ein neues Token für denselben Namen und dieselben Berechtigungen; das alte funktioniert sofort nicht mehr. |
-| `revoke NAME` | Löscht das Token und seine Berechtigungen nach einer Rückfrage; sein Client verliert sofort den Zugang. |
+| `revoke NAME` | Löscht das Token, seine Berechtigungen und seine dauerhaften Freigaben nach einer Rückfrage; sein Client verliert sofort den Zugang. |
 
 ```bash
 llm-cli mcp token add laptop                          # nur lesen
@@ -1521,6 +1562,13 @@ llm-cli tools permissions --token laptop              # mehr erlauben
 llm-cli mcp token add helper --link ditto             # genau Dittos Berechtigungen
 claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
 ```
+
+In der GUI: **Security > Verbindungen zu KI-Apps (MCP)...** und **Tools > Tool Permissions (Ditto / MCP)...**,
+Abschnitt „MCP-Tokens (eines je Client)“: **Hinzufügen...** (nur lesen, eine Kopie der Berechtigungen der lokalen
+stdio-Clients, Dittos oder der eigenen eines anderen Tokens, oder Dittos per Verweis), **Rotieren**, **Widerrufen** (das
+Token, seine Berechtigungen und seine dauerhaften Freigaben, nach einer Rückfrage, die sie zählt), **Zurück auf nur
+lesen...** und **Berechtigungen...**.
+Ein Token wird einmal gezeigt, direkt nachdem es angelegt oder rotiert wurde; die Liste zeigt nur Namen.
 
 ---
 

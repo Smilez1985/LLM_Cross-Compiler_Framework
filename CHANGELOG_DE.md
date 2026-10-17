@@ -41,6 +41,38 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (Mojo). Jeder Kontakt mit einem Board und jeder Build laufen im Hintergrund. Die Laufzeit-Tools der KI bauen und
   installieren mit denselben Schritten. Beschädigte Deploy-Einstellungen ("damaged; set them again") lassen sich jetzt
   neu festlegen, im Fenster und mit `device settings`, nach einer Frage, die die Datei mit vollem Pfad und Größe nennt.
+- **Tools > Tool Permissions (Ditto / MCP)...: jede Option von `tools list` und `tools permissions` per Maus** (W1'):
+  eine Spalte „Gilt jetzt“ zeigt die Entscheidung jedes Tools mit ihrem Grund (wie `tools list` sie ausgibt), und ein
+  Hinweis nennt die Aufrufer mit eigenen Berechtigungen; „Wessen Berechtigungen“ zeigt und bearbeitet die gemeinsamen
+  Berechtigungen oder den eigenen Abschnitt von Ditto oder den lokalen MCP-Clients (`--caller`); „Auf die empfohlenen
+  Standards zurücksetzen...“ (`--reset`), „Wieder die gemeinsamen Berechtigungen nutzen...“ (`--reset --caller`) und
+  „Zurück auf nur lesen...“ für ein Token (`--reset --token`: wieder ein neues Token, keins mit von Hand gesetztem
+  Allow/Deny) nennen, was sich ändert, und fragen zuerst („Nein“ ist vorgewählt; eine inzwischen woanders
+  gespeicherte Änderung wird abgelehnt). Ein neues Token kann als Kopie der eigenen Berechtigungen eines anderen
+  Tokens beginnen (`mcp token add --policy-from TOKEN`). CLI und GUI teilen sich die Kernfunktionen
+  (`policy.with_section`, `reset_policy`, `reset_changes`, `mcp_tokens.add_token`, `copied_policy`,
+  `set_token_policy`, `reset_token_policy`, `revoke_token`); die Ausgabe der CLI bleibt gleich.
+- **Security > Prüfprotokoll...: jede Option von `tools audit` per Maus** (W1'): die Zeilen des Audit-Logs, wie die
+  CLI sie zeigt (gemeinsames `tools/audit_view.py`), Seite für Seite mit „Einträge pro Seite“, „Neuere“ und
+  „Ältere“; „Details“ (`--details`); „Unversehrtheit prüfen“ (`--verify`) mit dem Ergebnis in einfachen Worten;
+  „Archivieren...“ (`--archive`) nach einer Rückfrage, nichts wird gelöscht; und der Reiter „Übersicht je Aufrufer“
+  (`--summary`). Prüfung, Archivieren und Übersicht laufen im Hintergrund. `AuditLog.entries` nimmt einen Versatz,
+  und `AuditLog.count` nennt die Größe, zum Blättern.
+- **Security > Verbindungen zu KI-Apps (MCP)...: jede Aktion von `mcp config`, `mcp serve --transport http` und
+  `mcp token` per Maus** (W1'): die Einträge für Claude Code, Claude Desktop (mit dem Pfad seiner
+  Konfigurationsdatei) und VS Code, jeder mit einer Schaltfläche zum Kopieren; „In Claude Desktop eintragen...“ zeigt
+  die Datei, ob es sie gibt, die Änderung, die Einträge, die bleiben, und die Sicherung, fragt zuerst und schreibt
+  genau das (`mcp_server.plan_claude_desktop_config`, eine inzwischen geänderte Datei wird abgelehnt); der lokale
+  HTTP-Server (Adresse, Port, Container-Bindung) als Kindprozess der GUI mit dem eigenen Einstieg und den Ablehnungen
+  der CLI, Adresse, Zustand und Ausgabe zu sehen, gestoppt auf Wunsch oder wenn das Framework nach einer Rückfrage
+  schließt („Nein“ lässt es offen); und die Liste der Tokens (Hinzufügen, auch als Kopie der Berechtigungen eines
+  anderen Tokens, Rotieren, Widerrufen, Zurück auf nur lesen, Berechtigungen). Ein Token wird einmal gezeigt, direkt
+  nachdem es angelegt oder rotiert wurde.
+- **Tools > Hinweis zu Deep Ingest... und die Art eines KI-Ordners** (W1'): der Deep-Ingest-Hinweis hat einen eigenen
+  Eintrag und lässt sich jederzeit lesen (`tools crawl-notice`; bestätigt auf das Ja der Person, „Nein“ ist
+  vorgewählt, mit der Funktion der CLI `crawl_notice.acknowledge_and_audit`); der Modul-Assistent zeigt ihn vor der
+  Prüfung der Wissensdatenbank. Tools > Folders the AI May Use... > Add folder... fragt, was im Ordner liegt
+  (Modell-Dateien, Datensatz-Dateien oder beides: `tools folders add --kind`).
 - **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
@@ -1598,6 +1630,29 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Das Widerrufen eines MCP-Tokens in der GUI entfernt auch seine dauerhaften Freigaben, und der neue eigene
+  Abschnitt eines Aufrufers behält die Tools, die nur im Framework gefragt werden**: Widerrufen in der GUI löschte das
+  Token, ließ aber seine dauerhaften Freigaben (die von `mcp:NAME`) in der Berechtigungsdatei stehen, aufgelistet, bis
+  man sie einzeln widerrief (sie galten nicht mehr); das Token, seine Berechtigungen und seine dauerhaften Freigaben
+  gehen jetzt in einer Kernfunktion, die sich GUI und `llm-cli mcp token revoke` teilen. `llm-cli tools permissions
+  --caller ditto|mcp` legte den neuen Abschnitt eines Aufrufers ohne die gemeinsame Liste der Tools an, deren Fragen
+  dir nur im Framework gestellt werden, sodass diese Fragen für diesen Aufrufer wieder im eigenen Dialog des
+  KI-Clients landen konnten; der neue Abschnitt beginnt jetzt auch mit dieser Liste, wie bei `--confirm-in-framework`.
+- **Die Liste der Tools, die nur im Framework gefragt werden, geht nicht mehr durch einen zweiten Aufruf, eine Kopie
+  oder die ersten eigenen Berechtigungen eines Tokens verloren**: `llm-cli tools permissions --caller ditto|mcp` für
+  einen Aufrufer, der schon eigene Berechtigungen hatte, baute dessen Abschnitt ohne diese Liste neu; ein Token, das
+  als Kopie der Berechtigungen Dittos oder der lokalen MCP-Clients entstand (`llm-cli mcp token add --policy-from`
+  oder Hinzufügen... in der GUI), bekam keine; und ein neues Token, das der gemeinsamen Liste folgt, verlor sie bei
+  seinem ersten `tools permissions --token NAME` (oder Berechtigungen... in der GUI), das mit einer leeren Liste
+  begann. Jedes Mal konnten die Fragen zu diesen Tools wieder im eigenen Dialog des KI-Clients landen. Die
+  Berechtigungen, die für einen Aufrufer gezeigt und kopiert werden, tragen jetzt die Liste, die für ihn gilt
+  (`ToolRegistry.policy`).
+- **Die Token-Liste spricht die Sprache des Fensters, und „Server starten“ sagt, warum es nicht geht**: der Abschnitt
+  „MCP-Tokens (eines je Client)“ in Security > Verbindungen zu KI-Apps (MCP)... und in Tools > Tool Permissions (Ditto
+  / MCP)... war nur englisch (Überschrift, Hinweis, Spalten, Schaltflächen, die Fragen beim Hinzufügen und Rotieren);
+  er ist jetzt englisch und deutsch, und Rotieren sowie die Frage zu einem verknüpften Token kommen als reiner Text mit
+  „Nein“ als Vorwahl. Ein Installationspfad, den PYTHONPATH nicht aufnehmen kann, ließ „Server starten“ ohne jede
+  Meldung scheitern; jetzt sagt das Fenster den Grund, und nichts wird gestartet.
 - **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
   seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
   (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein

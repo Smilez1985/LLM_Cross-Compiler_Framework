@@ -79,3 +79,19 @@ class CrawlNotice:
             return None
         via = data.get("via")
         return via if via in VIA else None
+
+
+def acknowledge_and_audit(notice: CrawlNotice, via: str, audit=None) -> Optional[str]:
+    """A person read the notice in the framework's window `via` (gui or cli): remembers it and records it in the
+    audit log (actor `via`), so AI clients may ask to crawl. OSError when it cannot be remembered (nothing recorded
+    then). Returns why the audit log could not record it, or None (also without an audit log)."""
+    notice.acknowledge(via)
+    if audit is None:
+        return None
+    try:
+        audit.record(via, "crawl_notice_acknowledged", "framework", "person", "ok", arguments={"via": via},
+                     approved=True)
+    except Exception as e:  # noqa: BLE001 - acknowledged; the person is told it is not recorded
+        from orchestrator.utils.helpers import redact_secrets
+        return redact_secrets(str(e)) or type(e).__name__
+    return None
