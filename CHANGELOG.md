@@ -1225,6 +1225,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0:
+  the existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops) run through the
+  oldest one's module, `orchestrator/utils/helpers.py` (where `calculate_file_checksum` was), which gained one hashing
+  loop with optional cancel and progress callbacks, hashing of an open handle or its first bytes (the deploy's resume
+  check), copy-while-hashing (the recipe dataset, saved artifacts, the benchmark sandbox's model copy), a
+  case-insensitive constant-time compare, a hash cache with a lock (the benchmark tool's had none), the `SHA256SUMS`
+  writer and the `.sha256` sidecar. Every old name stays as a delegate with its error mode (an error, None or an
+  empty text) and link rule; `tests/test_hashing.py` pins each of them and refuses a new hash loop beside the one
+  implementation. The disk watchdog's texts and checks moved from the build engine into `orchestrator/Core/disk_plan.py`
+  (`low_disk_text`, `disk_full_text`, `is_disk_full`, `low_disk_floor`, `free_space`, `nearest_existing` and
+  `DiskWatchdog`, which the container watchdog and the staging watcher now are); the build engine keeps its old
+  method names as delegates, the texts are unchanged and keep "No space left on device", which the self-healing
+  pattern (now built from the same phrases) matches. Margins are unchanged.
 - **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
   `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
   and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the
