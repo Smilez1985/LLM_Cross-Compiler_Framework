@@ -869,7 +869,8 @@ class TestReviewFindings:
                 raise PermissionError(13, "The process cannot access the file")
             return real_replace(src, dst)
 
-        monkeypatch.setattr(vault_key, "REPLACE_RETRIES", 3)
+        from orchestrator.utils import atomic   # the retry lives there since chain c1-imports
+        monkeypatch.setattr(atomic, "REPLACE_RETRIES", 3)
         monkeypatch.setattr(os, "replace", sharing_violation)
         assert sm.set_secret("github_token", "gh-placeholder-token")
         busy["left"] = 10

@@ -1194,7 +1194,7 @@ def remove_leftovers(rt: Any, plan: Any, *, actor: str, audit: Any, before_switc
 
 def _forget_keys(rt: Any, path: Path, keys: Tuple[str, ...]) -> None:
     """Drops the old mode's keys from one of Ditto's records (the file stays)."""
-    from orchestrator.runtime.llama_server import _write_private
+    from orchestrator.utils.atomic import write_private_exclusive as _write_private
     with rt._lock():
         data = _read(path)
         kept = {k: v for k, v in data.items() if k not in keys}

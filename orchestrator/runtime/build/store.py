@@ -364,7 +364,7 @@ class BuildStore:
         problems = self.check_files(build)
         if problems:
             raise StoreError(f"build {build.build_id[:16]} does not match its manifest: {'; '.join(problems[:3])}")
-        from orchestrator.runtime.llama_server import _write_private
+        from orchestrator.utils.atomic import write_private_exclusive as _write_private
         with self._lock(".lock", timeout=60):
             data = self._read_active()
             data["build_id" if role == "active" else "fallback_build_id"] = build.build_id
@@ -377,7 +377,7 @@ class BuildStore:
         becomes the active build by this: a build verified only in the container is not started on this machine."""
         if build_id is not None and self.get(build_id) is None:
             raise StoreError(f"there is no stored build {build_id[:16]}")
-        from orchestrator.runtime.llama_server import _write_private
+        from orchestrator.utils.atomic import write_private_exclusive as _write_private
         with self._lock(".lock", timeout=60):
             data = self._read_active()
             if build_id is None:
@@ -390,7 +390,7 @@ class BuildStore:
         """Removes the references of active.json to a build (its ID or the 16-character folder name) whose folder the
         person removed; returns the roles it had."""
         keys = {"active": "build_id", "fallback": "fallback_build_id", "docker": "docker_build_id"}
-        from orchestrator.runtime.llama_server import _write_private
+        from orchestrator.utils.atomic import write_private_exclusive as _write_private
         with self._lock(".lock", timeout=60):
             data = self._read_active()
             gone = [role for role, key in keys.items()

@@ -104,12 +104,6 @@
    "until": "c5-split-core"
   },
   {
-   "from": "orchestrator.tools.approvals",
-   "to": "orchestrator.Core.vault_key",
-   "reason": "replace_file (the Windows replace retry) lives in Core/vault_key.py",
-   "until": "c1-imports"
-  },
-  {
    "from": "orchestrator.tools.audit",
    "to": "orchestrator.Core.chat_feed",
    "reason": "ENTRY_ID_RE lives in the chat feed (moves into the kernel)",
@@ -152,18 +146,6 @@
    "until": "c5-split-core"
   },
   {
-   "from": "orchestrator.utils.crawl_notice",
-   "to": "orchestrator.Core.vault_key",
-   "reason": "write_private lives in Core/vault_key.py",
-   "until": "c1-imports"
-  },
-  {
-   "from": "orchestrator.utils.ditto_notice",
-   "to": "orchestrator.Core.vault_key",
-   "reason": "write_private lives in Core/vault_key.py",
-   "until": "c1-imports"
-  },
-  {
    "from": "orchestrator.utils.image_registry",
    "to": "orchestrator.Core.crawler_manager",
    "reason": "PublicOnlyAdapter (the SSRF-safe HTTP adapter) lives in the crawler",
@@ -173,12 +155,6 @@
    "from": "orchestrator.utils.image_registry",
    "to": "orchestrator.llm.task_prompts",
    "reason": "split_image and is_official_image live in the LLM prompt module",
-   "until": "c1-imports"
-  },
-  {
-   "from": "orchestrator.utils.input_history",
-   "to": "orchestrator.Core.vault_key",
-   "reason": "write_private lives in Core/vault_key.py",
    "until": "c1-imports"
   },
   {
