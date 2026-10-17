@@ -423,10 +423,9 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
     # -- list_packs ------------------------------------------------------------------------------------------------
 
     def recipe_values(folder: Path) -> Optional[Dict[str, str]]:
-        import yaml
-        from orchestrator.schemas.recipes import Recipe
+        from orchestrator.Core.community_manager import read_recipe
         try:
-            recipe = Recipe.model_validate(yaml.safe_load((Path(folder) / "recipe.yml").read_text(encoding="utf-8")))
+            recipe = read_recipe(Path(folder))
         except Exception:  # noqa: BLE001 - an unreadable recipe shows no values; verify reports it
             return None
         data = recipe.model_dump(mode="json")
