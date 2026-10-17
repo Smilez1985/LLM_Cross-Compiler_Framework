@@ -553,7 +553,9 @@ class DockerEnvironment:
 def check_docker_environment(client: Any) -> DockerEnvironment:
     """The one Docker check of the build engine (its start, since 2025) and of Mojo: ping the framework's Docker
     client, the one builds use (the docker command can be set to another daemon by a docker context), then, when the
-    docker command is on PATH, ask for BuildKit's buildx (at most 15 seconds)."""
+    docker command is on PATH, ask for BuildKit's buildx (at most 15 seconds). Never raises: the engine runs it while
+    the framework starts. The question goes through helpers.execute_command, the one runner of a short command
+    (stdin closed, so an MCP server's stdio stream never reaches docker; no console window on Windows)."""
     if client is None:
         return DockerEnvironment(False, "no client")
     try:
@@ -562,11 +564,11 @@ def check_docker_environment(client: Any) -> DockerEnvironment:
         return DockerEnvironment(False, str(e))
     if not shutil.which("docker"):
         return DockerEnvironment(True)
-    try:
-        buildx = subprocess.run(["docker", "buildx", "version"], capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.SubprocessError):
+    from orchestrator.utils.helpers import execute_command
+    code, _out, _err = execute_command(["docker", "buildx", "version"], timeout=15)
+    if code == -1:  # docker could not be started or gave no answer in time: buildx unknown
         return DockerEnvironment(True, docker_cli=True)
-    return DockerEnvironment(True, docker_cli=True, buildx=buildx.returncode == 0)
+    return DockerEnvironment(True, docker_cli=True, buildx=code == 0)
 
 
 def _validate_docker_version() -> ValidationResult:

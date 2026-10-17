@@ -149,6 +149,32 @@ def test_build_engine_start_warns_about_docker_as_before(monkeypatch):
     assert _engine_warnings(_Client(ConnectionError("refused"))) == ["Docker environment check failed: refused"]
 
 
+def test_build_engine_start_never_fails_on_an_odd_buildx_answer(monkeypatch):
+    """The engine's original check swallowed every failure of the buildx question (a warning, never an exception:
+    the engine is built when the framework starts, for the CLI, the GUI and the MCP server). Output the locale cannot
+    decode raises UnicodeDecodeError, a ValueError, not an OSError."""
+    _docker_host(monkeypatch, buildx=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"))
+    assert _engine_warnings(_Client()) == ["Docker BuildX not available, standard build will be used."]
+    # Mojo treats it like a buildx that does not answer: no buildx line (before: a crashed check)
+    assert _mojo_docker(monkeypatch, _Client()) == [("docker.daemon", "ok")]
+
+
+def test_the_buildx_question_runs_through_the_one_command_runner(monkeypatch):
+    """helpers.execute_command (round 12: the one runner of a short command): stdin closed, so the MCP server's stdio
+    stream is never handed to docker (rule G25), output decoded with replacement characters, at most 15 seconds."""
+    import subprocess
+    from orchestrator.utils import validation
+    seen = []
+    runs = _docker_host(monkeypatch)
+    real_fake = subprocess.run
+    monkeypatch.setattr(subprocess, "run", lambda args, *a, **k: seen.append(k) or real_fake(args, *a, **k))
+    assert validation.check_docker_environment(_Client()) == validation.DockerEnvironment(True, "", True, True)
+    assert runs == [["docker", "buildx", "version"]]
+    (options,) = seen
+    assert options["stdin"] == subprocess.DEVNULL and options["timeout"] == 15 and options["errors"] == "replace"
+    assert options["capture_output"] is True and options["text"] is True
+
+
 # --- item 11: what covers each job of the former utils/network.NetworkGuard ----------------------------------------
 # NetworkGuard (2025) pinged 8.8.8.8:53, waited without limit until that answered, and downloaded with an optional
 # hash. PinnedDownloader (utils/download.py) does each job through the session the download itself uses.
@@ -313,6 +339,20 @@ def test_the_target_tool_models_keep_their_schemas():
     assert schema["additionalProperties"] is False and schema["required"] == ["target"]
     assert schema["properties"]["target"] == {"description": "Target id, e.g. Rockchip", "maxLength": 64,
                                               "minLength": 1, "title": "Target", "type": "string"}
+
+
+def test_the_target_tool_input_schema_an_ai_reads_is_the_one_of_before():
+    """MCP clients and Ditto get the input model's JSON schema (mcp_server.closed_schema, ToolSpecLLM.from_model),
+    so a class docstring becomes text an AI reads. Sharing the original TargetIn changes nothing an AI sees."""
+    from orchestrator.tools.tools_targets import TargetCheckIn
+    assert TargetCheckIn.model_json_schema() == {
+        "additionalProperties": False, "required": ["target"], "title": "TargetCheckIn", "type": "object",
+        "properties": {
+            "target": {"description": "Target id, e.g. Rockchip", "maxLength": 64, "minLength": 1, "title": "Target",
+                       "type": "string"},
+            "check_files": {"default": False, "description": "Also check the target's files (target.yml, Dockerfile "
+                                                             "pins, scripts) the way a module or pack is checked",
+                            "title": "Check Files", "type": "boolean"}}}
 
 
 def test_the_original_helpers_do_the_job_of_their_copies(tmp_path):
