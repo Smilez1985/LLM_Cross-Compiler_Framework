@@ -783,6 +783,11 @@ def test_every_german_step_text_that_says_du_has_its_sie_form():
         assert text != cat.texts["de"][key], f"{key}: a formal text equal to its du text is not needed"
     assert [key for key, text in cat.texts["de"].items() if wording.formal_forms(text)] == []
     assert ns.FORMAL_LANGUAGES == localization.FORMAL_LANGUAGES
+    # the menu bar's texts (l10n_main, chain a0) address nobody: an empty overlay, and it stays right
+    from orchestrator.utils import l10n_main
+    assert l10n_main.FORMAL == {"de": {}}
+    assert [key for key, text in l10n_main.TEXTS["de"].items()
+            if wording.informal_forms(text) or wording.formal_forms(text)] == []
 
 
 @pytest.mark.parametrize("lang", ["en", "de"])
