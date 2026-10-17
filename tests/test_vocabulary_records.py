@@ -313,4 +313,5 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
                                              "orchestrator.utils.l10n_signin",
                                              "orchestrator.utils.l10n_deploy",
                                              "orchestrator.utils.l10n_build", "orchestrator.utils.l10n_ditto_runtime",
-                                             "orchestrator.utils.l10n_ditto_models"}
+                                             "orchestrator.utils.l10n_ditto_models",
+                                             "orchestrator.utils.l10n_glossary"}

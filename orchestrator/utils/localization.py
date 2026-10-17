@@ -13,7 +13,8 @@ Updates v2.3.0:
 - Enhanced fallback mechanism.
 """
 
-from typing import Any, Dict, Optional, Sequence
+from collections import ChainMap
+from typing import Any, Dict, FrozenSet, Mapping, Optional, Sequence
 
 from PySide6.QtCore import QObject, Signal
 
@@ -527,7 +528,7 @@ class LocalizationManager(QObject):
     def get_text(self, key: str, default: str = None) -> str:
         """Gibt den übersetzten Text für einen Key zurück."""
         # Fallback auf Englisch, falls Key im Deutschen fehlt
-        text = self.TRANSLATIONS.get(self.current_lang, {}).get(key)
+        text = text_tables().get(self.current_lang, {}).get(key)
         if text is None:
             text = self.TRANSLATIONS.get("en", {}).get(key)
         
@@ -561,8 +562,8 @@ def current_language() -> str:
 def ui_text(key: str, lang: Optional[str] = None, **values: Any) -> str:
     """The text of key in lang (default: the UI language; English when missing) with {placeholders} filled.
     Unlike tr() it also works before the GUI created the LocalizationManager, e.g. in worker threads."""
-    table = LocalizationManager.TRANSLATIONS
-    text = table.get(lang or current_language(), {}).get(key) or table["en"].get(key, key)
+    table = text_tables()   # German in the person's form of address (form_of_address)
+    text =table.get(lang or current_language(), {}).get(key) or table["en"].get(key, key)
     return text.format(**values) if values else text
 
 
@@ -587,16 +588,24 @@ TEXT_MODULES += ("orchestrator.utils.l10n_deploy",)   # Deployment tab and hardw
 TEXT_MODULES += ("orchestrator.utils.l10n_build",)   # Build menu, File > Settings..., the Builder, the module wizard
 TEXT_MODULES += ("orchestrator.utils.l10n_ditto_runtime",)   # Ditto > Local Runtime...
 TEXT_MODULES += ("orchestrator.utils.l10n_ditto_models",)   # Ditto > Local Models..., Evaluation..., chat options
+TEXT_MODULES += ("orchestrator.utils.l10n_glossary",)   # glossary, hover card, error box, sizes, du/Sie
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
-                       modules: Sequence[str] = TEXT_MODULES) -> Dict[str, Dict[str, str]]:
+                       modules: Sequence[str] = TEXT_MODULES,
+                       formal: Optional[Dict[str, Dict[str, str]]] = None) -> Dict[str, Dict[str, str]]:
     """Merges the TEXTS of `modules` into `table` (default: LocalizationManager.TRANSLATIONS) and returns it. A key
     that already exists, a language the table does not have or a value that is not text is refused (ValueError): a
-    text is never replaced silently."""
+    text is never replaced silently. A module named twice is merged once.
+
+    A module's FORMAL (the "Sie" form of its German texts that address the person, Q1) goes into `formal` (default:
+    FORMAL_TEXTS when `table` is the default one): each of its keys must name a text of the same language in the du
+    table with the same {placeholders}, and is never replaced either."""
     import importlib
+    if formal is None:
+        formal = FORMAL_TEXTS if table is None else {}
     table = LocalizationManager.TRANSLATIONS if table is None else table
-    for name in modules:
+    for name in dict.fromkeys(modules):
         try:
             module = importlib.import_module(name)
         except ModuleNotFoundError as e:
@@ -614,9 +623,71 @@ def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
                     raise ValueError(f"{name}: {key!r} in {lang} is not text")
                 if key in table[lang]:
                     raise ValueError(f"{name}: the text {key!r} in {lang} exists already")
+        overlay = getattr(module, "FORMAL", None) or {}
+        if not isinstance(overlay, dict):
+            raise ValueError(f"{name}: FORMAL is not a table")
+        for lang, entries in overlay.items():
+            if lang not in table or not isinstance(entries, dict):
+                raise ValueError(f"{name}: unknown language {lang!r} in FORMAL")
+            for key, text in entries.items():
+                if not isinstance(key, str) or not isinstance(text, str):
+                    raise ValueError(f"{name}: FORMAL {key!r} in {lang} is not text")
+                du = texts.get(lang, {}).get(key, table[lang].get(key))
+                if du is None:
+                    raise ValueError(f"{name}: FORMAL {key!r} in {lang} has no du text")
+                if placeholders(text) != placeholders(du):
+                    raise ValueError(f"{name}: FORMAL {key!r} in {lang} has other placeholders than its du text")
+                if key in formal.get(lang, {}):
+                    raise ValueError(f"{name}: FORMAL {key!r} in {lang} exists already")
         for lang, entries in texts.items():
             table[lang].update(entries)
+        for lang, entries in overlay.items():
+            formal.setdefault(lang, {}).update(entries)
     return table
+
+
+# --- German form of address (DECISIONS round 10, Q1) -----------------------------------------------------------------
+# German texts say "du" (every TEXTS table and the table above). A module may add FORMAL = {"de": {key: text}}: the
+# "Sie" form of the texts that differ, and only those. The setting form_of_address ("du" or "sie", File > Settings...,
+# asked at the first start) chooses; the GUI applies it with set_form_of_address(), and ui_text(), tr() and
+# get_text() then read German through the overlay. English has one form.
+
+FORMS_OF_ADDRESS = ("du", "sie")
+FORMAL_TEXTS: Dict[str, Dict[str, str]] = {"de": {}}
+_form_of_address = "du"
+
+
+def form_of_address() -> str:
+    """The German form of address the texts use now: "du" (the default) or "sie"."""
+    return _form_of_address
+
+
+def set_form_of_address(form: Optional[str]) -> str:
+    """Uses `form` ("du" or "sie", any case) for the German texts from now on and returns the form in use; anything
+    else (an unset or damaged setting) is "du"."""
+    global _form_of_address
+    value = str(form or "").strip().lower()
+    _form_of_address = value if value in FORMS_OF_ADDRESS else "du"
+    return _form_of_address
+
+
+def text_tables(form: Optional[str] = None) -> Mapping[str, Mapping[str, str]]:
+    """The language tables as the person reads them: with `form` (default: the one in use) "sie", German reads the
+    formal overlay first and the du text for every key the overlay does not have."""
+    table = LocalizationManager.TRANSLATIONS
+    if (form or _form_of_address) != "sie" or not FORMAL_TEXTS.get("de"):
+        return table
+    return {**table, "de": ChainMap(FORMAL_TEXTS["de"], table["de"])}
+
+
+def placeholders(text: str) -> FrozenSet[str]:
+    """The {placeholders} of a text (name, conversion and format spec), so two texts can be compared; a text whose
+    braces are not a valid format string counts as its own placeholder and never equals a valid one."""
+    import string
+    try:
+        return frozenset(f"{n}!{c or ''}:{f or ''}" for _, n, f, c in string.Formatter().parse(text) if n is not None)
+    except ValueError:
+        return frozenset({"<invalid>" + text})
 
 
 merge_text_modules()
