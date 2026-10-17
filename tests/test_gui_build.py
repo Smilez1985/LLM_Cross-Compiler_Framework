@@ -765,6 +765,15 @@ def test_a_base_image_whose_digest_cannot_be_looked_up_is_not_saved(qapp, wizard
     assert "ubuntu:24.04" in text and "offline mode is on" in text and "Turn offline mode off." in text
 
 
+def test_closing_the_wizard_during_the_lookup_asks_and_saves_nothing(qapp, wizard, pin_lookup):
+    assert wizard.gui_form.fill({"base_image": "ubuntu:24.04"}).filled == ["base_image"]
+    wizard.name_edit.setText("Board_C")
+    wizard.accept()
+    wizard.reject()   # the answer of the lookup is still on its way
+    qapp.processEvents()
+    assert pin_lookup.boxes == [] and wizard.generated == []
+
+
 def test_a_pinned_ai_image_and_the_person_s_own_image_are_saved_without_a_lookup(qapp, wizard, pin_lookup):
     assert wizard.gui_form.fill({"base_image": f"ubuntu:24.04@{DIGEST}"}).filled == ["base_image"]
     wizard.name_edit.setText("Board_R")
