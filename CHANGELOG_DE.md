@@ -1479,7 +1479,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ändern darf: Offline-Modus mit einem Cloud-Provider wird jetzt mit dem Text des Dialogs abgelehnt (vorher wurde nur
   die Richtung geprüft, sodass eine KI den Offline-Modus einschalten konnte, während ein Cloud-Provider eingestellt
   war), erneut geprüft, wenn die Person geantwortet hat; ein Problem, das die gespeicherten Einstellungen schon haben
-  (etwa ein fehlender Schlüssel), lehnt nichts ab.
+  (etwa ein fehlender Schlüssel), lehnt nichts ab. Die Ablehnung nennt Ordner nur mit ihrem Label und Dateien nur mit
+  ihrem Namen: Eine unlesbare Provider-Liste (`llm_providers.yml`) zeigt der KI nicht mehr den Pfad des
+  Konfigurationsordners.
 - **Ein Weg, Builds zu starten, für CLI, GUI und KI-Aufrufer**: `llmcf build start` und **Start Build** im
   Builder-Tab reihen ihren Build über `BuildService.start_build` ein, den Weg, den der MCP-Server und Ditto schon
   nutzten, statt jeweils einen eigenen Auftrag an den Orchestrator zu bauen. CLI und GUI prüfen einen Auftrag deshalb

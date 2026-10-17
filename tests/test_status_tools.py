@@ -206,6 +206,31 @@ class TestUpdateSettings:
         assert fw.config.get("offline_mode") is False
         assert [a.key for a in out.applied] == ["language"] and fw.config.get("language") == "de"
 
+    def test_the_ai_settings_refusal_names_no_host_path(self, fw):
+        """Stage-B review: the AI settings' check loads the person's provider catalog (llm_providers.yml in their
+        config folder), whose errors name the file with its full path; update_settings handed that text to the AI,
+        before the question and when the change was applied. It names the file only (D0: no host paths)."""
+        from orchestrator.llm.catalog import CATALOG_FILENAME
+        fw.config.set("ai_provider", "ollama")
+        folder = Path(fw.config.config_dir)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / CATALOG_FILENAME).write_text("version: 99\nproviders: {}\n", encoding="utf-8")
+        error, shown = refused(fw, "update_settings", {"changes": [{"key": "offline_mode", "value": "true"}]})
+        assert shown == [] and fw.config.get("offline_mode") is False
+        assert CATALOG_FILENAME in str(error) and str(folder) not in str(error) and str(folder.parent) not in str(error)
+
+        good = (folder / CATALOG_FILENAME)
+        good.unlink()
+
+        def broken_meanwhile(summary, inp):   # the file breaks while the question is open
+            good.write_text("version: 99\nproviders: {}\n", encoding="utf-8")
+            return True
+        out = fw.tool_registry.call("update_settings", {"changes": [{"key": "offline_mode", "value": "true"}]},
+                                    ToolContext("ditto", session="s1", confirm=broken_meanwhile))
+        assert [r.key for r in out.rejected] == ["offline_mode"] and fw.config.get("offline_mode") is False
+        text = out.model_dump_json()
+        assert CATALOG_FILENAME in text and str(folder) not in text and str(folder.parent) not in text
+
 
 class TestReportCannotDo:
 
