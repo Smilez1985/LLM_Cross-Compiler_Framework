@@ -213,7 +213,6 @@ def test_the_mcp_server_answers_without_qt(tmp_path):
     assert any(tool["name"] == "get_settings" for tool in answers[1]["result"]["tools"]), errors[-3000:]
 
 
-@pytest.mark.xfail(strict=True, reason="until orchestrator/main.py becomes the shim of orchestrator/gui/app.py")
 def test_the_gui_entry_point_says_what_is_missing_without_qt(tmp_path):
     """`llm-gui` without the 'gui' extra prints one plain line on how to install it instead of a traceback."""
     code = BLOCK_QT + "from orchestrator.main import main\nraise SystemExit(main())"
@@ -223,7 +222,6 @@ def test_the_gui_entry_point_says_what_is_missing_without_qt(tmp_path):
     assert "gui" in run.stderr and "requirements-gui.txt" in run.stderr and "llmcf" in run.stderr, run.stderr
 
 
-@pytest.mark.xfail(strict=True, reason="until the Docker signals and the GUI entry point leave the core")
 def test_only_the_gui_imports_qt():
     """PySide6 and shiboken6 are imported only below orchestrator/gui (and by the GUI's entry point shim, which
     catches the missing package): every other module, also inside a function, stays Qt-free."""
