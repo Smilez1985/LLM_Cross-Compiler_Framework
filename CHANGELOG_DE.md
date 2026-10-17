@@ -1460,7 +1460,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Stufen-Container läuft („Build-Container: CPU 251 % · Arbeitsspeicher 2,0 GB von 8,0 GB“), und das Build-Protokoll
   warnt einmal, wenn der Container 90 % seiner Speichergrenze nutzt (der von Docker oder der VM von WSL2 / Docker
   Desktop), mit dem, was zu tun ist. Die Werte stammen aus dem älteren Build-Weg des Docker-Managers, den nichts mehr
-  aufrief; sie misst jetzt der eine Build-Weg (die Build-Engine, `BuildService.live_resources`), und der Rest des
+  aufrief; sie misst jetzt der eine Build-Weg (die Build-Engine, `BuildService.live_resources`, gelesen vom
+  Orchestrator, mit dem der Build-Dienst arbeitet, wie der Status des Builds), und der Rest des
   älteren Wegs (Start, Überwachung, Stopp, ein Self-Healing-Auslöser und sechs Qt-Signale, auf die niemand hörte) wurde
   entfernt, weil der eine Build-Weg all das tut (Entscheidung Runde 12, Punkt 6). Der Build-Status für die KI bleibt
   gleich.

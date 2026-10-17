@@ -1283,7 +1283,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   ("Build container: CPU 251 % · memory 2.0 GB of 8.0 GB"), and the build log warns once when the container uses 90 %
   of its memory limit (Docker's, or the WSL2 / Docker Desktop VM's), with what to do. The figures came from the Docker
   manager's older build path, which nothing called any more; they are now sampled by the one build path (the build
-  engine, `BuildService.live_resources`), and the rest of that older path (start, monitor, stop, a healing trigger
+  engine, `BuildService.live_resources`, read from the orchestrator the build service works on, like the build's
+  status), and the rest of that older path (start, monitor, stop, a healing trigger
   and six Qt signals nothing listened to) was removed because the one build path does all of it (decision round 12,
   item 6). The AI's build status is unchanged.
 - **One AI-settings change service for every channel** (`orchestrator/llm/settings_change.py`,

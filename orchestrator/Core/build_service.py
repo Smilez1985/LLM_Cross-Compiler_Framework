@@ -295,9 +295,12 @@ class BuildService:
         """The CPU and memory of the request's running build container (cpu_percent, memory_bytes,
         memory_limit_bytes; BuildEngine samples them while a stage container runs), or None while none runs or for a
         request of another process. For the person's Builder under the progress bar (DECISIONS round 12, item 6);
-        not part of the AI's build status."""
-        orchestrator = getattr(self.framework, "orchestrator", None)
-        state = orchestrator._workflows.get(request_id) if orchestrator is not None else None
+        not part of the AI's build status. Read from the orchestrator this service is bound to, like its status."""
+        try:
+            orchestrator = self._orchestrator
+        except BuildServiceError:   # the framework is not booted: no build runs here
+            return None
+        state = orchestrator._workflows.get(request_id)
         if state is None or state.status not in self._RUNNING or not state.build_ids:
             return None
         try:

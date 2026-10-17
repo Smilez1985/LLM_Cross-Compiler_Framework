@@ -239,6 +239,23 @@ def test_the_build_service_hands_the_running_builds_figures_to_the_window():
     assert BuildService(SimpleNamespace()).live_resources("req_1") is None, "the framework not booted"
 
 
+def test_a_service_bound_to_another_orchestrator_reads_the_figures_there():
+    """Stage-B seam of the chains qt and build: a BuildService bound to an orchestrator (the CLI binds the one its
+    command context holds) reads every request from that orchestrator, its status as well as its container's figures;
+    live_resources read the framework's own orchestrator instead."""
+    from orchestrator.Core.build_service import BuildService
+    mine = {"cpu_percent": 120.0, "memory_bytes": 1e9, "memory_limit_bytes": 4e9}
+    theirs = {"cpu_percent": 5.0, "memory_bytes": 1e6, "memory_limit_bytes": 4e9}
+    bound = service_with(running_state(), BuildProgress("b1", BuildStatus.BUILDING, "Converting",
+                                                        resources=mine))._orchestrator
+    framework_own = service_with(running_state(), BuildProgress("b1", BuildStatus.BUILDING, "Converting",
+                                                                resources=theirs))._orchestrator
+    service = BuildService(SimpleNamespace(orchestrator=framework_own), orchestrator=bound)
+    assert service._state("req_1") is bound._workflows["req_1"], "the status comes from the bound orchestrator"
+    assert service.live_resources("req_1") == mine
+    assert BuildService(SimpleNamespace(), orchestrator=bound).live_resources("req_1") == mine
+
+
 def test_the_builder_shows_the_containers_cpu_and_memory_under_the_progress_bar(qapp):
     from orchestrator.gui.builder_parts import BuildProgressPanel
     figures = {"cpu_percent": 251.4, "memory_bytes": 2_000_000_000.0, "memory_limit_bytes": 8_000_000_000.0}
