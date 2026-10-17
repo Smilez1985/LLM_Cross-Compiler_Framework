@@ -440,8 +440,50 @@ def export_snapshots(folder: Path, names: Iterable[str], destination: Path) -> L
     return results
 
 
+
+# --- the snapshot check before an index (moved unchanged from tools/tools_framework_docs.py, chain c1-imports) ---
+
+def files_size(paths: List) -> int:
+    total = 0
+    for path in paths:
+        try:
+            total += path.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def folder_size(folder: Path) -> int:
+    """The bytes of the files below `folder` (linked folders are not followed); 0 for a folder that is not there."""
+    total = 0
+    for base, _dirs, names in os.walk(folder):
+        total += files_size([Path(base) / name for name in names])
+    return total
+
+
+def snapshot_space(rag, disk_usage=None) -> List:
+    """The disk check (disk_plan.DiskCheck per file system) of the snapshot taken before the index: about the size of
+    the largest snapshot so far or of the next snapshot as the knowledge base estimates it (rag.snapshot_estimate, the
+    same estimate create_snapshot checks), whichever is larger, so the first snapshot is checked too. When the
+    knowledge base cannot give an estimate, the size of its own storage folder stands in. A check that does not fit
+    means: nothing is indexed (no snapshot, no "continue anyway"); "tight" is a situation warning. Its sentences name
+    labels, never a path."""
+    from orchestrator.Core.disk_plan import DiskNeed, check_disk
+    folder = Path(rag.snapshot_dir)
+    largest = max((files_size([p]) for p in folder.glob("*.jsonl.gz")), default=0) if folder.is_dir() else 0
+    estimate = getattr(rag, "snapshot_estimate", None)
+    try:
+        held = int(estimate()) if callable(estimate) else None
+    except Exception:  # the knowledge base cannot be read now: its storage folder gives the size
+        held = None
+    if held is None:
+        storage = getattr(rag, "storage_dir", None)
+        held = folder_size(Path(storage)) if storage is not None else 0
+    return check_disk([DiskNeed("knowledge snapshots", folder, max(largest, held), "snapshot taken first")],
+                      disk_usage=disk_usage)
+
 __all__ = ["DISK_LINE", "ExportedSnapshot", "FOLDER", "FREE_SPACE_STEP", "KEEPING_NOTE", "NEXT_DOES_NOT_FIT",
            "NEXT_TIGHT", "SUFFIX", "SnapshotDeletion", "SnapshotDisk", "SnapshotFile", "SnapshotNoRoom", "SnapshotRoom",
-           "delete_snapshots", "export_snapshots", "folder_bytes", "list_snapshots", "newest_size", "require_room",
+           "delete_snapshots", "export_snapshots", "files_size", "folder_bytes", "folder_size", "list_snapshots", "newest_size", "require_room",
            "room_before", "size_text", "snapshot_disk", "snapshot_files", "snapshot_folder", "snapshot_plan",
-           "snapshot_room"]
+           "snapshot_room", "snapshot_space"]

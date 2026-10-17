@@ -66,7 +66,7 @@ class FrameworkDocsAction(QObject):
                                                     "Agent (Ditto) first.")
             return False
         from orchestrator.Core.rag_manager import framework_documents
-        from orchestrator.tools.tools_framework_docs import snapshot_space
+        from orchestrator.Core.knowledge_snapshots import snapshot_space
         docs, code = framework_documents(rag.app_root, True)
         service = getattr(self.framework, "build_service", None)
         checks = snapshot_space(rag, getattr(service, "disk_usage", None))

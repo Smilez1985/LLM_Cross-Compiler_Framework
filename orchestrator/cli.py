@@ -3808,7 +3808,7 @@ def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
                       "settings first.[/red]")
         sys.exit(1)
     docs, code = framework_documents(rag.app_root, with_code)
-    from orchestrator.tools.tools_framework_docs import snapshot_space
+    from orchestrator.Core.knowledge_snapshots import snapshot_space
     service = getattr(ctx.framework_manager, "build_service", None)
     checks = snapshot_space(rag, getattr(service, "disk_usage", None))
     short = [c for c in checks if not c.fits]
