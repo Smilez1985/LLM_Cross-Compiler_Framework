@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-16
+Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-17
 
 [English](Features.md) · **Deutsch**
 
@@ -30,6 +30,7 @@ Zurück zur [README](../README_DE.md) · Alle Befehle: [CLI_Usage_DE.md](CLI_Usa
 - [Tool-Berechtigungen und Audit-Log](#tool-berechtigungen-und-audit-log)
 - [Geheimnisse und persönlicher Zustand](#geheimnisse-und-persönlicher-zustand)
 - [Eingabeverlauf](#eingabeverlauf)
+- [Fachbegriffe, Fehlermeldungen und Anrede](#fachbegriffe-fehlermeldungen-und-anrede)
 - [Löschen und der Papierkorb](#löschen-und-der-papierkorb)
 - [Hardware-Probe und neue Targets](#hardware-probe-und-neue-targets)
 - [Gesundheitscheck (Mojo)](#gesundheitscheck-mojo)
@@ -2670,6 +2671,37 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 - **Tools > Eingabeverlauf löschen...** (englische Oberfläche: *Clear Input History...*) zählt zuerst die Datei und
   die `.bad`-Kopie auf (vollständiger Pfad, Dateiname, Größe, was es ist; „Nein“ ist die Vorgabe), löscht dann nur, was
   es aufgezählt hat, und die Felder werden sofort neu gefüllt.
+
+---
+
+## Fachbegriffe, Fehlermeldungen und Anrede
+
+Fachbegriffe bleiben in beiden Sprachen Englisch, damit sie zu dem passen, was du anderswo findest; das Framework
+erklärt sie dort, wo sie stehen (unveröffentlicht).
+
+- **Erklärungen beim Überfahren mit der Maus:** Lass die Maus auf einer markierten Beschriftung ruhen (der Mauszeiger
+  zeigt ein Fragezeichen), und eine kleine Karte zeigt den Begriff, ein oder zwei einfache Sätze in deiner Sprache und
+  einen Link auf die Seite, die ihn am besten erklärt: Wikipedia, die eigene Dokumentation des Begriffs (Qdrant, die
+  Doku von llama.cpp und ggml, die RKLLM- und RKNN-Repositories von Rockchip, modelcontextprotocol.io) oder dieses
+  Handbuch. Die Karte bleibt, solange die Maus auf der Beschriftung oder auf der Karte ist, damit du den Link erreichst;
+  er öffnet sich erst in deinem Webbrowser, wenn du ihn anklickst. Mit der Tastatur drückst du **F1** im Feld (oder den
+  kleinen Knopf **?**, wo ein Fenster einen hat); **Escape** schließt die Karte. Die Karte funktioniert auch in einem
+  Dialog, der auf deine Antwort wartet. Screenreader lesen die Erklärung und den Link aus der Beschreibung des Felds,
+  nach dem, was das Fenster selbst über das Feld sagt. Das Glossar hat 74 Begriffe (zum Beispiel GGUF, Quantization und ihre Typen
+  wie Q4_K_M, Importance Matrix, Calibration Dataset, KV Cache, RKLLM, RKNN, NPU, Qdrant, MCP, SSH Host Key,
+  Fingerprint, Digest, Keyring, Standing Approval); die Beschriftungen **Format** und **Quantization** im Builder
+  nutzen es jetzt, die übrigen Fenster folgen.
+- **Fehlermeldungen:** Ein Fehlerfenster sagt in deiner Sprache, was passiert ist, warum, wenn es bekannt ist, und
+  einen nächsten Schritt (einen Satz oder einen Knopf). Die englischen technischen Details (die Meldung des Frameworks,
+  ein Traceback) sind unter **Technische Details** eingeklappt; **Details kopieren** kopiert sie ohne Geheimnisse und
+  mit `~` statt deines Home-Ordners, für einen Fehlerbericht oder um Ditto zu fragen, der sie dir auf Deutsch erklären
+  kann. Kein Teil des Fensters zeigt ein Geheimnis, auch nicht dort, wo er die Meldung eines Fehlers wiederholt.
+- **„du“ oder „Sie“:** Deutsche Texte sprechen dich mit „du“ an. **Datei > Einstellungen…** hat einen Reiter
+  **Allgemein**, in dem du stattdessen „Sie“ wählst; die Wahl wird gespeichert (Einstellung `form_of_address`, `du`
+  oder `sie`) und gilt sofort für jeden Text, der danach gelesen wird. Ein Fenster, das schon offen ist, behält seine
+  Texte, bis du es neu öffnest.
+- **Größen** erscheinen in Dezimaleinheiten in der Schreibweise deiner Sprache (`1,5 GB`, englisch `1.5 GB`); die
+  Kommandozeile bleibt Englisch.
 
 ---
 

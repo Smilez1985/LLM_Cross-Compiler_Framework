@@ -60,7 +60,7 @@ class DeletionConfirmDialog(QDialog):
         offered = tuple(plan.mode_offered)
         if "trash" in offered and "permanent" in offered:
             self.radio_trash = QRadioButton(self._t("deletion.mode.trash"))
-            self.radio_permanent = QRadioButton(self._t("deletion.mode.permanent", size=size_text(0)))
+            self.radio_permanent = QRadioButton(self._t("deletion.mode.permanent", size=size_text(0, self.lang)))
             group = QButtonGroup(self)
             group.addButton(self.radio_trash)
             group.addButton(self.radio_permanent)
@@ -124,7 +124,7 @@ class DeletionConfirmDialog(QDialog):
             ident.setFont(QFont("monospace"))
             box.addWidget(ident)
         box.addWidget(plain_label(self._t("deletion.file", name=one_line(item.file_name))))
-        box.addWidget(plain_label(self._t("deletion.size", size=size_text(item.size_bytes))))
+        box.addWidget(plain_label(self._t("deletion.size", size=size_text(item.size_bytes, self.lang))))
         box.addWidget(plain_label(self._t("deletion.what", what=one_line(item.what))))
         return frame
 
@@ -153,12 +153,13 @@ class DeletionConfirmDialog(QDialog):
         chosen = self.chosen_plan()
         if self.radio_permanent is not None:
             self.radio_permanent.setText(self._t("deletion.mode.permanent",
-                                                 size=size_text(chosen.total_bytes if chosen else 0)))
+                                                 size=size_text(chosen.total_bytes if chosen else 0, self.lang)))
         if chosen is None:
             self.btn_yes.setText(button_text(self._t("deletion.yes.none")))
         else:
             key = "deletion.yes.trash" if self.mode() == "trash" else "deletion.yes.permanent"
-            self.btn_yes.setText(button_text(self._t(key, n=len(chosen.items), size=size_text(chosen.total_bytes))))
+            size = size_text(chosen.total_bytes, self.lang)
+            self.btn_yes.setText(button_text(self._t(key, n=len(chosen.items), size=size)))
         self.btn_yes.setEnabled(self._armed and chosen is not None)
 
     def _yes(self) -> None:
@@ -220,7 +221,7 @@ def free_framework_images(parent: Optional[QWidget], framework, lang: Optional[s
         return None
     lines = [ui_text("deletion.done.permanent", lang, name=one_line(n)) for n in result.deleted]
     lines += [ui_text("deletion.kept", lang, name=one_line(n), reason=one_line(r)) for n, r in result.failed]
-    lines.append(ui_text("images.done", lang, n=len(result.deleted), size=size_text(result.freed_bytes)))
+    lines.append(ui_text("images.done", lang, n=len(result.deleted), size=size_text(result.freed_bytes, lang)))
     plain_box(parent, "information", title, "\n".join(lines))
     return result
 

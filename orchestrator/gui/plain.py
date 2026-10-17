@@ -14,6 +14,8 @@ styles. Everything here keeps text literal:
                     guess can never turn it into markup).
 * `button_text()`   a button label with every "&" doubled: a name with an ampersand never becomes a keyboard
                     mnemonic (bubble buttons have none at all, so no key approves anything).
+* `mnemonic_text()` a label that keeps the mnemonic of its fixed template and escapes "&" in inserted values.
+* `plain_error()`   the error box: what happened, why, one next step, technical details (gui/error_dialog.py).
 * `notify()`        a desktop notification with framework text only, markup characters replaced (some systems draw
                     a notification body as markup).
 * `display_text()`  multi-line text with hidden characters shown as escapes, line by line; `one_line()` the same
@@ -116,6 +118,24 @@ def button_text(template: str, **params: Any) -> str:
     return text.replace("&", "&&")
 
 
+def mnemonic_text(template: str, **params: Any) -> str:
+    """A label for a menu entry, button, check box or form label that keeps the keyboard mnemonic of its fixed
+    template ("&Save", "&Language:") while every "&" in an inserted value is doubled, so a name never creates one.
+    Bubbles that approve something use button_text() instead: they have no mnemonic at all."""
+    if not params:
+        return template
+    return template.format(**{k: one_line(v).replace("&", "&&") for k, v in params.items()})
+
+
+def plain_error(parent: Optional[QWidget], what: str, why: str = "", steps: Any = None,
+                action: Any = None, **options: Any) -> int:
+    """The error box for the person (Q7): what happened, why, one next step (catalogue steps, or one button
+    `action=(label, callable)`), and the English technical details to expand and copy; plain text only. See
+    gui/error_dialog.py show_error() for the options (details, next_step, title, lang)."""
+    from orchestrator.gui.error_dialog import show_error
+    return show_error(parent, what, why=why, steps=steps, action=action, **options)
+
+
 def notification_text(text: Any) -> str:
     """Framework text for a desktop notification: one line per line, hidden characters escaped, and the characters
     some systems read as markup replaced by look-alikes."""
@@ -131,4 +151,4 @@ def notify(tray: Any, title: str, body: str) -> str:
 
 
 __all__ = ["TOOLTIP_PREFIX", "display_text", "one_line", "plain_label", "plain_box", "ask", "plain_tooltip",
-           "button_text", "notification_text", "notify"]
+           "button_text", "mnemonic_text", "plain_error", "notification_text", "notify"]

@@ -42,6 +42,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   written once in 30 seconds. `ActivityProducer.add_listener` hands the GUI its own process's entries at once, and
   `ConfigManager.reload_user_config` takes settings another process saved, except values this process holds itself
   (reported as conflicts). The GUI side (showing windows, notices with Show) follows in wave 6.
+- **Technical terms explained on mouse-over, a plain error box, and "du" or "Sie" in German** (wave 6, DECISIONS
+  round 10, V6, Q1, Q7): a glossary of 74 technical terms (`orchestrator/utils/l10n_glossary.py`, for example GGUF,
+  quantization and its types, importance matrix, KV cache, RKLLM, RKNN, Qdrant, MCP, SSH host key, fingerprint,
+  digest, keyring), each with a short explanation in English and German and a link to the page that explains it best
+  (Wikipedia, the term's own documentation such as qdrant.tech or the llama.cpp docs, or this manual). Resting the
+  mouse on a marked label shows a hover card with the explanation; it stays while the mouse is on it, and its link
+  opens in the web browser only when you click it. F1 on the field opens the same card for the keyboard. The Builder's
+  **Format** and **Quantization** labels are the first; the other windows follow. A new error box says what happened
+  in your language, why, and one next step, with the English **Technical details** folded away (secrets and your home
+  folder removed) to copy into a bug report or ask Ditto about. German texts say "du"; **File > Settings...** now has
+  a **General** tab where you choose "Sie" instead (setting `form_of_address`), used at once. Sizes in the deletion
+  dialog follow your language ("1,5 GB" in German).
 - **`tests/test_cli_gui_parity.py`: every person-facing CLI command and option has a mouse path** (W1', round 9
   U2): the test walks the whole command tree of `llm-cli` (294 paths: commands, subcommands and options) and reads
   `CLI_PATHS`, `MACHINE_ONLY` and the window and tab tables of every module in `orchestrator/gui/menus/`. It fails

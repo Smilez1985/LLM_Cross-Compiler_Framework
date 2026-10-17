@@ -47,6 +47,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   der GUI die Einträge ihres eigenen Prozesses sofort, und `ConfigManager.reload_user_config` übernimmt Einstellungen,
   die ein anderer Prozess gespeichert hat, außer Werten, die dieser Prozess selbst hält (als Konflikte gemeldet). Die
   Seite der GUI (Fenster zeigen, Hinweise mit Zeigen) folgt in Welle 6.
+- **Fachbegriffe beim Überfahren mit der Maus erklärt, ein verständliches Fehlerfenster und „du“ oder „Sie“ auf
+  Deutsch** (Welle 6, DECISIONS Runde 10, V6, Q1, Q7): ein Glossar mit 74 Fachbegriffen
+  (`orchestrator/utils/l10n_glossary.py`, zum Beispiel GGUF, Quantization und ihre Typen, Importance Matrix, KV Cache,
+  RKLLM, RKNN, Qdrant, MCP, SSH Host Key, Fingerprint, Digest, Keyring), jeder mit einer kurzen Erklärung auf Englisch
+  und Deutsch und einem Link auf die Seite, die ihn am besten erklärt (Wikipedia, die eigene Dokumentation des Begriffs
+  wie qdrant.tech oder die llama.cpp-Doku, oder dieses Handbuch). Ruht die Maus auf einer markierten Beschriftung,
+  zeigt eine Hover-Karte die Erklärung; sie bleibt, solange die Maus auf ihr ist, und ihr Link öffnet sich erst im
+  Webbrowser, wenn du ihn anklickst. F1 im Feld öffnet dieselbe Karte für die Tastatur. Die Beschriftungen **Format**
+  und **Quantization** im Builder sind die ersten; die übrigen Fenster folgen. Ein neues Fehlerfenster sagt in deiner
+  Sprache, was passiert ist, warum, und einen nächsten Schritt, mit den englischen **Technischen Details**
+  eingeklappt (ohne Geheimnisse und ohne deinen Home-Ordner), zum Kopieren in einen Fehlerbericht oder um Ditto zu
+  fragen. Deutsche Texte sagen „du“; **Datei > Einstellungen…** hat jetzt einen Reiter **Allgemein**, in dem du
+  stattdessen „Sie“ wählst (Einstellung `form_of_address`), sofort wirksam. Größen im Löschdialog folgen deiner
+  Sprache („1,5 GB“ auf Deutsch).
 - **`tests/test_cli_gui_parity.py`: Jeder Befehl und jede Option der CLI für Personen hat einen Weg mit der Maus**
   (W1', Runde 9 U2): Der Test geht den ganzen Befehlsbaum von `llm-cli` durch (294 Pfade: Befehle, Unterbefehle und
   Optionen) und liest `CLI_PATHS`, `MACHINE_ONLY` und die Fenster- und Reitertabellen jedes Moduls in

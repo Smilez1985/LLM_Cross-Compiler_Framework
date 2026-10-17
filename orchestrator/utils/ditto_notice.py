@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from orchestrator.Core.vault_key import write_private
-from orchestrator.utils.localization import LocalizationManager, ui_text
+from orchestrator.utils.localization import texts_in_every_form, ui_text
 
 TEXT_KEYS = ("chat.ditto.notice.title", "chat.ditto.notice.text")
 VIA = ("gui", "cli")   # the framework's own windows where a person reads the notice
@@ -40,9 +40,8 @@ def notice_text(lang: Optional[str] = None) -> Tuple[str, str]:
 
 
 def notice_sha256() -> str:
-    """Changes whenever the text in any language changes."""
-    texts = {lang: [table.get(key, "") for key in TEXT_KEYS]
-             for lang, table in sorted(LocalizationManager.TRANSLATIONS.items())}
+    """Changes whenever the text in any language changes, also its formal ("Sie") form."""
+    texts = texts_in_every_form(TEXT_KEYS)
     return hashlib.sha256(json.dumps(texts, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
