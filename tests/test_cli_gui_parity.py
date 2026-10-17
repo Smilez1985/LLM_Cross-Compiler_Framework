@@ -297,12 +297,16 @@ def object_problems(qapp, win, tables: SimpleNamespace, names: Optional[Iterable
 
     def open_window(opener: str) -> List[QWidget]:
         if opener not in opened:
-            before = set(map(id, QApplication.topLevelWidgets())) | set(map(id, win.findChildren(QWidget)))
+            # The widgets that existed before are held while comparing: the id of a freed wrapper can be given to a
+            # new one, and the window the entry opens would then count as old.
+            existing = [*QApplication.topLevelWidgets(), *win.findChildren(QWidget)]
+            before = set(map(id, existing))
             action = win.findChild(QAction, opener)
             action.trigger()
             qapp.processEvents()
             opened[opener] = [w for w in {*QApplication.topLevelWidgets(), *win.findChildren(QWidget)}
-                              if id(w) not in before and w.isWindow()]
+                              if id(w) not in before and w.isWindow() and w.isVisible()]
+            del existing
         return opened[opener]
 
     tabs = [t for t in win.findChildren(QTabWidget)]
@@ -331,7 +335,8 @@ def object_problems(qapp, win, tables: SimpleNamespace, names: Optional[Iterable
             found = [w.findChild(QObject, name) for w in windows]
             found = [f for f in found if f is not None]
             if not found:
-                problems.append(f"{name}: not in the window {opener} opens")
+                kinds = ", ".join(sorted(type(w).__name__ for w in windows))
+                problems.append(f"{name}: not in the window {opener} opens ({kinds})")
                 continue
             if stats is not None:
                 stats["in_windows"] = stats.get("in_windows", 0) + 1
@@ -392,4 +397,4 @@ def test_a_removed_menu_entry_is_found(qapp, window):
     ghost.cli_paths = dict(tables.cli_paths, **{"trash restore": "btn_trash_gone"})
     ghost.window_objects = dict(tables.window_objects, btn_trash_gone="act_file_trash")
     assert object_problems(qapp, window, ghost, names=["btn_trash_gone"]) == [
-        "btn_trash_gone: not in the window act_file_trash opens"]
+        "btn_trash_gone: not in the window act_file_trash opens (TrashDialog)"]
