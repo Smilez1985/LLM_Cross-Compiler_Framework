@@ -299,6 +299,24 @@ class TrustedDevices:
         write_private(path, text)
 
 
+def record_reach(state_dir: Path, step: str, code: str, *, device_id: str = "",
+                 endpoint: Optional[Endpoint] = None) -> None:
+    """The one recorder of what a contact with a board found, for Mojo (W1: Mojo reads it instead of contacting the
+    board): by the board's device ID when the caller knows it, else for every trusted board at `endpoint`. A reason code
+    keeps the step's problem, "" (the board was reached and logged in to) ends it. Nothing when `step` is empty; it
+    never fails the caller's work."""
+    if not step:
+        return
+    try:
+        store = TrustedDevices(Path(state_dir))
+        if device_id:
+            store.note_reach(device_id, step, code)
+        elif endpoint is not None:
+            store.note_reach_at(endpoint.host, endpoint.port, step, code)
+    except Exception:  # noqa: BLE001 - bookkeeping never changes what the step does
+        pass
+
+
 def record_trusted_device(state_dir: Path, host: str, port: int, user: str, key: Any, *, via: str, paired: bool,
                           label: Optional[str] = None, audit: Any = None, actor: str = "") -> Optional[TrustedDevice]:
     """For the GUI and the CLI after a successful login to a device the person trusted: stores its record and writes

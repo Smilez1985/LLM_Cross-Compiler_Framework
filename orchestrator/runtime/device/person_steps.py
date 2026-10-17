@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from orchestrator.remote.errors import RemoteFailure
 from orchestrator.utils.next_steps import WithSteps
 
 # The question before the systemd unit is allowed (CLI and GUI ask exactly this; "No" is the default).
@@ -37,7 +38,7 @@ UNTRUSTED_CONSENT = ("device_runtime_untrusted_model",
                      "an untrusted model may run natively on the device for the short llama-bench run")
 
 
-class BoardStepError(WithSteps, RuntimeError):
+class BoardStepError(WithSteps, RemoteFailure):
     """A board step that cannot be done. `kind` names the case (no_paramiko, unreachable, host_key_changed,
     not_trusted, other_device, login_failed, key_install, host_user, label, not_known, no_systemd, sudo_declined,
     not_saved, damaged, no_user, no_address); `reason` is the SSH reason code when the board could not be reached or
@@ -45,19 +46,14 @@ class BoardStepError(WithSteps, RuntimeError):
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None,
                  **facts: Any):
-        super().__init__(message)
-        self.kind, self.reason, self.error, self.facts = kind, reason, error, facts
+        super().__init__(message, kind, reason, error)
+        self.facts = facts
 
 
 def _note(state_dir: Path, device_id: str, step: str, code: str) -> None:
-    """Mojo's record of this contact with the board (W1); never fails the step."""
-    if not step:
-        return
-    try:
-        from orchestrator.runtime.device.trusted import TrustedDevices
-        TrustedDevices(Path(state_dir)).note_reach(device_id, step, code)
-    except Exception:  # noqa: BLE001 - bookkeeping never changes what the step does
-        pass
+    """Mojo's record of this contact with the board (W1); never fails the step (trusted.record_reach)."""
+    from orchestrator.runtime.device.trusted import record_reach
+    record_reach(state_dir, step, code, device_id=device_id)
 
 
 def unreachable_error(error: BaseException, host: str, port: int, *, state_dir: Optional[Path] = None,

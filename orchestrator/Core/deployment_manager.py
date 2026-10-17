@@ -597,18 +597,16 @@ class DeploymentManager:
         return result
 
     def _note_reach(self, host: str, port: int, result: DeployResult) -> None:
-        from orchestrator.runtime.device import reasons
+        from orchestrator.remote import reasons
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.runtime.device.trusted import record_reach
         # deploy.sh ran on the board and ended with its own exit status: the board was reached and logged in to (255 is
         # also what the ssh command itself returns when it cannot connect, so it says nothing)
         ran_there = result.exit_status is not None and result.exit_status != 255
         code = result.code if result.code in reasons.REASONS else ("" if result.success or ran_there else None)
         if code is None:
             return  # a failure before the board was reached (the package, a refused address): nothing to record
-        try:
-            from orchestrator.runtime.device.trusted import TrustedDevices
-            TrustedDevices(self._state_dir()).note_reach_at(host, port, "deploy", code)
-        except Exception:  # noqa: BLE001 - bookkeeping never fails a deploy
-            pass
+        record_reach(self._state_dir(), "deploy", code, endpoint=Endpoint(host, port))
 
     def _deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, password: Optional[str] = None,
                         pair: bool = True, expect_fingerprint: Optional[str] = None,
