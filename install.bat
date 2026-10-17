@@ -160,13 +160,20 @@ $Shortcut.Save()
 # Marker for scripts\Uninstall-LLM-Cross-Compiler-Framework.bat: the installation folder, kept next to this script. The
 # first line is this installation; the lines after it name other installations that still exist (the one under the
 # old name, or one an earlier marker named), so the uninstaller finds them too.
+# Reading the earlier marker never stops the installation: without it, only the old folder is added.
 $MarkerFile = Join-Path $ScriptPath ".install_complete"
 $OtherInstalls = @()
-if (Test-Path $MarkerFile) {
-    $OtherInstalls += @(Get-Content $MarkerFile | ForEach-Object { $_.Trim().Trim('"') } | Where-Object { $_ })
+try {
+    if (Test-Path -LiteralPath $MarkerFile) {
+        $OtherInstalls += @(Get-Content -LiteralPath $MarkerFile | ForEach-Object { $_.Trim().Trim('"') } | Where-Object { $_ })
+    }
+    if (Test-Path $OldInstallDir) { $OtherInstalls += $OldInstallDir }
+    $OtherInstalls = @($OtherInstalls | Where-Object {
+        ($_ -ne $InstallDir) -and (Test-Path -LiteralPath $_ -ErrorAction SilentlyContinue) } | Sort-Object -Unique)
+} catch {
+    $OtherInstalls = @()
+    if (Test-Path $OldInstallDir) { $OtherInstalls = @($OldInstallDir) }
 }
-if (Test-Path $OldInstallDir) { $OtherInstalls += $OldInstallDir }
-$OtherInstalls = @($OtherInstalls | Where-Object { ($_ -ne $InstallDir) -and (Test-Path -LiteralPath $_) } | Sort-Object -Unique)
 try {
     Set-Content -Path (Join-Path $ScriptPath ".install_complete") -Value $InstallDir -Encoding ASCII
     if ($OtherInstalls.Count -gt 0) { Add-Content -Path $MarkerFile -Value $OtherInstalls -Encoding ASCII }
