@@ -1061,3 +1061,120 @@ class TestReviewFindings:
         assert result.returncode == 5 and "Traceback" not in result.stderr  # storage unavailable
         shown = result.stderr.replace("\n", "").split("Failed to initialize framework:", 1)[1]
         assert "[bold]project" in shown, "rich markup ate part of the path"
+
+
+# ======================================================================================================
+# The keyring service name before the rename (llm-conversion-framework)
+# ======================================================================================================
+
+LEGACY = vault_key.LEGACY_KEYRING_SERVICE
+
+
+def move_to_old_name(memory_keyring) -> dict:
+    """Moves every entry of the framework to the service name from before the rename, as an installation of the
+    LLM Conversion Framework left them. Returns the entries under the old names."""
+    for (service, user) in list(memory_keyring.store):
+        if service == SERVICE or service.startswith(SERVICE + "-"):
+            old = LEGACY + service[len(SERVICE):]
+            memory_keyring.store[(old, user)] = memory_keyring.store.pop((service, user))
+    return {slot: value for slot, value in memory_keyring.store.items() if slot[0].startswith(LEGACY)}
+
+
+class TestServiceNameBeforeTheRename:
+
+    def test_the_names(self):
+        assert SERVICE == "llm-cross-compiler-framework" and LEGACY == "llm-conversion-framework"
+        assert vault_key.legacy_service(vault_key.vault_service("ab12")) == "llm-conversion-framework-vault-ab12"
+        assert vault_key.legacy_service("another-service") is None
+
+    def test_an_existing_vault_from_the_old_name_still_opens(self, memory_keyring, tmp_path):
+        sm = vault(tmp_path)
+        assert sm.set_secret("hf_token", HF) and sm.set_secret("openai_api_key", KEY)
+        slot = key_slot(sm)
+        old_entries = move_to_old_name(memory_keyring)
+        assert old_entries and slot not in memory_keyring.store
+
+        fresh = vault(tmp_path)
+
+        assert fresh.get_secret("hf_token") == HF and fresh.get_secret("openai_api_key") == KEY
+        assert memory_keyring.store[slot] == old_entries[(LEGACY + slot[0][len(SERVICE):], slot[1])], \
+            "the key is copied to the new name on the first use"
+        assert all(memory_keyring.store.get(old) == value for old, value in old_entries.items()), \
+            "the entries under the old name are never removed"
+        assert fresh.set_secret("github_token", "gh-placeholder-token")
+        assert vault(tmp_path).get_secret("github_token") == "gh-placeholder-token"
+
+    def test_a_rotation_unfinished_under_the_old_name_finishes_and_stays_finished(self, memory_keyring, tmp_path,
+                                                                                   monkeypatch):
+        sm = vault(tmp_path)
+        assert sm.set_secret("hf_token", HF)
+
+        def crash(path, data):
+            raise OSError(28, "No space left on device")
+
+        with monkeypatch.context() as m:
+            m.setattr(SecretsManager, "_write_atomic", staticmethod(crash))
+            assert sm.rotate_key() is False
+        current, previous = key_slot(sm), key_slot(sm, previous=True)
+        old_entries = move_to_old_name(memory_keyring)
+        assert len(old_entries) == 2, "the new key and the previous one, both under the old name"
+
+        fresh = vault(tmp_path)
+
+        assert fresh.get_secret("hf_token") == HF, "the entries still under the previous key are read"
+        assert current in memory_keyring.store and previous not in memory_keyring.store, "rotation finished"
+        assert all(memory_keyring.store.get(old) == value for old, value in old_entries.items())
+        # The previous key under the old name does not come back once the new name is in use.
+        again = vault(tmp_path)
+        assert again.get_secret("hf_token") == HF and previous not in memory_keyring.store
+
+    def test_a_v1_store_with_its_shared_key_under_the_old_name(self, memory_keyring, tmp_path):
+        legacy_key = Fernet.generate_key()
+        memory_keyring.store[(LEGACY, vault_key.KEY_ENTRY)] = legacy_key.decode()
+        store = tmp_path / "state" / "secrets.store"
+        store.parent.mkdir(parents=True)
+        store.write_text(json.dumps({"hf_token": Fernet(legacy_key).encrypt(HF.encode()).decode()}))
+
+        assert vault(tmp_path).get_secret("hf_token") == HF
+        assert memory_keyring.store[(SERVICE, vault_key.KEY_ENTRY)] == legacy_key.decode()
+        assert memory_keyring.store[(LEGACY, vault_key.KEY_ENTRY)] == legacy_key.decode()
+
+    def test_moving_away_from_the_keyring_leaves_the_old_entry_and_says_so(self, memory_keyring, tmp_path, caplog):
+        sm = vault(tmp_path)
+        assert sm.set_secret("hf_token", HF)
+        slot = key_slot(sm)
+        old_entries = move_to_old_name(memory_keyring)
+        fresh = vault(tmp_path)
+        assert fresh.get_secret("hf_token") == HF
+
+        assert fresh.change_storage("insecure")
+
+        assert slot not in memory_keyring.store, "the copy under the new name goes with the move"
+        assert all(memory_keyring.store.get(old) == value for old, value in old_entries.items())
+        old_service = LEGACY + slot[0][len(SERVICE):]
+        assert old_service in caplog.text and "does not remove it" in caplog.text
+        assert vault(tmp_path, storage="insecure").get_secret("hf_token") == HF
+
+    def test_the_check_token_of_a_vault_made_before_the_rename_still_matches(self):
+        """CHECK_PLAINTEXT is a stored format value: a passphrase or helper vault made before the rename holds it
+        encrypted, so it must not follow the new name."""
+        params = {**vault_key.new_scrypt_params(), "n": 2 ** 14}
+        key = vault_key.derive_key("a passphrase from before", params)
+        check = Fernet(key).encrypt(b"llm-conversion-framework vault v2").decode()
+        provider = vault_key.DerivedKeyProvider("passphrase", lambda new: "a passphrase from before", "test-cache")
+        material = provider.load({"kdf": params, "kid": "abcd1234", "check": check})
+        assert material.keys[0].key == key
+
+    def test_the_audit_key_and_the_revision_anchors_carry_over(self, memory_keyring, tmp_path):
+        from orchestrator.tools import framework_tools
+        audit_key = "ab" * 32
+        memory_keyring.store[(LEGACY, framework_tools.AUDIT_KEY_ID)] = audit_key
+        memory_keyring.store[(LEGACY, "policy-revision")] = "7"
+
+        assert framework_tools._audit_key(SimpleNamespace(secrets_manager=None), tmp_path / "state") == \
+            audit_key.encode(), "the existing audit chain stays verifiable"
+        assert memory_keyring.store[(SERVICE, framework_tools.AUDIT_KEY_ID)] == audit_key
+        assert framework_tools._revision_anchor("policy").current(tmp_path / "policy.json") == 7
+        assert memory_keyring.store[(SERVICE, "policy-revision")] == "7"
+        assert memory_keyring.store[(LEGACY, framework_tools.AUDIT_KEY_ID)] == audit_key
+        assert memory_keyring.store[(LEGACY, "policy-revision")] == "7"

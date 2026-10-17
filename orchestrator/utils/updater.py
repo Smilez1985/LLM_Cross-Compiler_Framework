@@ -104,7 +104,7 @@ class UpdateManager:
             
             # WICHTIG: Launcher Sync
             # Wir kopieren das Start-Skript aus scripts/ ins Root, damit der Entrypoint aktuell bleibt.
-            launcher_sync_cmd = 'copy /Y "scripts\\start-llm_convertion_framework.bat" .'
+            launcher_sync_cmd = 'copy /Y "scripts\\start-llm_cross_compiler_framework.bat" .'
             
             # Batch Inhalt erstellen
             # 1. Wait (optional, falls File-Locks existieren)
