@@ -508,6 +508,19 @@ class TestRows:
             "activity.tool.update_settings", "language, offline_mode", "settings")
         assert odd.text_key == "activity.action" and "keys" not in odd.params, "a value never passes as a key"
 
+    def test_a_settings_change_that_changed_nothing_claims_no_change(self, tmp_path):
+        """Review b0 (w6-b0-v): update_settings ends ok with nothing applied when every change is refused right
+        before it is set (the person moved the value while the question was open). The row said "Changed
+        something." then; a call that changed nothing makes no row (the audit log keeps the call)."""
+        out = SettingsOut(applied=[])
+        registry = registry_with(tmp_path, changing("update_settings", handler=lambda i: out, output=SettingsOut))
+        prod, store = producer(tmp_path)
+        prod.attach(registry)
+        registry.call("update_settings", {}, ToolContext("mcp"))
+        assert prod.flush()
+        assert rows(store) == []
+        assert row_for_call(call_done(tool="update_settings", request_id=""), program="mcp") is None
+
     def test_rows_hold_closed_values_only(self):
         params = closed_params({"tool": "start build", "keys": "language,de", "saved": "D:\\llmcf\\out",
                                 "by": "Claude", "state": "done", "kind": "hf_download", "free_text": "anything",

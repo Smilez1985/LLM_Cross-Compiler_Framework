@@ -194,6 +194,8 @@ def row_for_call(data: Mapping[str, Any], *, program: str, job_window: Optional[
     refs["window"] = (job_window if tool == "cancel_job" and job_window else
                       window_for_tool(tool, form=str(data.get("form") or ""), window=str(data.get("window") or "")))
     keys = ", ".join(k for k in str(data.get("keys") or "").split(",") if k)
+    if tool == "update_settings" and not keys:
+        return None   # every change was refused right before it was set: nothing changed, the audit log has the call
     return _row("ai_action", caller, f"activity.tool.{TEXT_NAMES.get(tool, tool)}", "activity.action",
                 {"tool": tool, "keys": keys}, refs, needs=("keys",) if tool == "update_settings" else (),
                 client=data.get("client", ""), asked_in=asked_in)
