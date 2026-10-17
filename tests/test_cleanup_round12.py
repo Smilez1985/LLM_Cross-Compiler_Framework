@@ -146,3 +146,90 @@ def test_build_engine_start_warns_about_docker_as_before(monkeypatch):
     assert _engine_warnings(_Client()) == ["Docker executable not found in PATH."]
     _docker_host(monkeypatch)
     assert _engine_warnings(_Client(ConnectionError("refused"))) == ["Docker environment check failed: refused"]
+
+
+# --- item 11: what covers each job of the former utils/network.NetworkGuard ----------------------------------------
+# NetworkGuard (2025) pinged 8.8.8.8:53, waited without limit until that answered, and downloaded with an optional
+# hash. PinnedDownloader (utils/download.py) does each job through the session the download itself uses.
+
+class _Response:
+    def __init__(self, status, body=b"", headers=None, drop_after=None, url="https://files.example/model.bin"):
+        self.status_code, self.body, self.headers, self.url = status, body, headers or {}, url
+        self.drop_after = drop_after
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_content(self, chunk_size=1):
+        import requests
+        sent = 0
+        for i in range(0, len(self.body), 10):
+            if self.drop_after is not None and sent >= self.drop_after:
+                raise requests.exceptions.ChunkedEncodingError("connection dropped")
+            yield self.body[i:i + 10]
+            sent += 10
+
+
+class _Session:
+    def __init__(self, script):
+        self.script, self.ranges = list(script), []
+
+    def get(self, url, headers=None, **kwargs):
+        self.ranges.append((headers or {}).get("Range"))
+        step = self.script.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        return step
+
+
+def test_the_pinned_downloader_rides_out_a_lost_connection_and_resumes(tmp_path):
+    import hashlib
+    import requests
+    from orchestrator.utils.download import PinnedDownloader
+    data = bytes(range(100))
+    session = _Session([_Response(200, data, {"Content-Length": "100"}, drop_after=40),
+                        requests.ConnectionError("network unreachable"),
+                        _Response(206, data[40:], {"Content-Range": "bytes 40-99/100"})])
+    sleeps = []
+    dest = PinnedDownloader(session, sleep=sleeps.append).fetch("https://files.example/model.bin",
+                                                                tmp_path / "model.bin", 100,
+                                                                hashlib.sha256(data).hexdigest())
+    assert dest.read_bytes() == data and session.ranges == [None, "bytes=40-", "bytes=40-"]
+    assert sleeps == [2, 4], "a bounded wait between attempts, never an endless loop"
+
+
+def test_the_pinned_downloader_gives_up_with_a_plain_reason_and_keeps_the_part(tmp_path):
+    import hashlib
+    import requests
+    from orchestrator.utils.download import DownloadError, PinnedDownloader
+    data = bytes(range(100))
+    session = _Session([_Response(200, data, {"Content-Length": "100"}, drop_after=40)]
+                       + [requests.ConnectionError("offline")] * 4)
+    with pytest.raises(DownloadError, match="did not complete after 5 attempts; run the command again to resume"):
+        PinnedDownloader(session, sleep=lambda s: None).fetch("https://files.example/model.bin",
+                                                              tmp_path / "model.bin", 100,
+                                                              hashlib.sha256(data).hexdigest())
+    assert (tmp_path / "model.bin.part").stat().st_size == 40 and not (tmp_path / "model.bin").exists()
+
+
+def test_the_pinned_downloader_checks_what_network_guard_left_optional(tmp_path):
+    from orchestrator.utils.download import IntegrityError, PinnedDownloader
+    data = bytes(range(100))
+    with pytest.raises(IntegrityError, match="No sha256 and size pinned"):
+        PinnedDownloader(_Session([])).fetch("https://files.example/model.bin", tmp_path / "a.bin", None, None)
+    with pytest.raises(IntegrityError, match="does not match its pin"):
+        PinnedDownloader(_Session([_Response(200, data, {"Content-Length": "100"})]), sleep=lambda s: None).fetch(
+            "https://files.example/model.bin", tmp_path / "b.bin", 100, "0" * 64)
+    assert not (tmp_path / "b.bin").exists() and not (tmp_path / "b.bin.part").exists()
+    redirected = _Response(200, data, {"Content-Length": "100"}, url="http://files.example/model.bin")
+    with pytest.raises(Exception, match="redirected away from HTTPS"):
+        PinnedDownloader(_Session([redirected]), sleep=lambda s: None).fetch(
+            "https://files.example/model.bin", tmp_path / "c.bin", 100, "0" * 64)
+
+
+def test_network_guard_is_gone():
+    import importlib.util
+    assert importlib.util.find_spec("orchestrator.utils.network") is None
