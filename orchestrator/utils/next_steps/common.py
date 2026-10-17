@@ -179,3 +179,15 @@ TEXTS = {
         "step.log.folder": "Das Protokoll des Frameworks ansehen",
     },
 }
+
+# The "Sie" form of the German texts above that address the person (Q1); only the texts that differ.
+FORMAL = {
+    "de": {
+        "step.docker.group": "Ihrem Benutzerkonto Docker erlauben, dann neu anmelden",
+        "step.images.free": "Speicherplatz freigeben, indem Sie Build-Images des Frameworks löschen, die Sie nicht "
+                            "mehr brauchen",
+        "step.images.free.what": "Listet die Docker-Build-Images des Frameworks mit ihrer Größe; Sie haken an, was "
+                                 "gelöscht wird.",
+        "step.trash.empty": "Den Papierkorb leeren (Sie haken an, was gelöscht wird)",
+    },
+}

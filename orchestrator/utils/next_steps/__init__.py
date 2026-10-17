@@ -34,6 +34,11 @@ board/administrator/other-program steps are only shown, secrets go through stdin
 
 Error presentation (Q7): :func:`error_report` gives a localized summary, the next steps and the English technical
 detail of an error, for the error dialog of orchestrator/gui (chain f-words).
+
+Form of address (Q1): German texts say "du". A module (this one or an area module) may add ``FORMAL = {"de": {key:
+text}}``, the "Sie" form of each of its German texts that differs, with the same placeholders. The catalogue reads it
+when the window's setting form_of_address is "sie" (orchestrator.utils.localization, only when the process loaded it
+already); everywhere else the du text stays.
 """
 
 from __future__ import annotations
@@ -155,6 +160,21 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "error.network": "Das Netzwerk oder ein Dienst hat nicht geantwortet.",
         "error.storage": "Der Schlüsseltresor kann nicht benutzt werden.",
         "error.details": "Technische Details",
+    },
+}
+
+# The "Sie" form of the frames above that address the person (Q1); only the texts that differ.
+FORMAL_LANGUAGES: Tuple[str, ...] = ("de",)   # = orchestrator.utils.localization.FORMAL_LANGUAGES
+FORMAL: Dict[str, Dict[str, str]] = {
+    "de": {
+        "steps.only_person": "Das können nur Sie tun",
+        "steps.shown_only": "Das Framework führt diesen Befehl nicht aus; kopieren Sie ihn und führen Sie ihn {where} "
+                            "aus.",
+        "steps.declined": "Nicht ausgeführt: Sie haben Nein gesagt.",
+        "error.permission_denied": "Ihre Einstellungen erlauben das nicht.",
+        "error.needs_person": "Das können nur Sie tun.",
+        "error.limit_reached": "Eine Grenze ist erreicht; versuchen Sie es später noch einmal.",
+        "error.waiting_for_approval": "Das wartet auf Ihre Zustimmung.",
     },
 }
 
@@ -341,9 +361,11 @@ class Catalogue:
         self.steps: Dict[str, Step] = {}
         self.owner: Dict[str, str] = {}
         self.texts: Dict[str, Dict[str, str]] = {lang: dict(table) for lang, table in TEXTS.items()}
+        self.formal: Dict[str, Dict[str, str]] = {lang: {} for lang in FORMAL_LANGUAGES}
         self.labels: Dict[str, Tuple[Optional[str], Tuple[str, ...]]] = {}
         self.layout: Tuple[Any, ...] = ()
         self.problems: List[str] = []
+        self._add_formal(FORMAL, TEXTS, "next_steps")
         for module in self.modules:
             self._add(module)
         for menu in self.layout:
@@ -364,6 +386,7 @@ class Catalogue:
                     self.problems.append(f"text {key} ({lang}) of {name} exists already")
                     continue
                 target[key] = text
+        self._add_formal(getattr(module, "FORMAL", None) or {}, getattr(module, "TEXTS", None) or {}, name)
         for obj, entry in (getattr(module, "MOUSE_LABELS", None) or {}).items():
             self._label(obj, entry, name)
         layout = getattr(module, "MENU_LAYOUT", None)
@@ -372,6 +395,26 @@ class Catalogue:
                 self.problems.append(f"{name} has a second MENU_LAYOUT")
             else:
                 self.layout = tuple(layout)
+
+    def _add_formal(self, overlay: Mapping[str, Mapping[str, str]], texts: Mapping[str, Mapping[str, str]],
+                    name: str) -> None:
+        """The module's "Sie" texts: German only, each for a du text of the same module with the same placeholders,
+        never given twice."""
+        for lang, table in overlay.items():
+            if lang not in FORMAL_LANGUAGES or not isinstance(table, Mapping):
+                self.problems.append(f"FORMAL of {name}: {lang!r} has one form of address")
+                continue
+            for key, text in table.items():
+                du = (texts.get(lang) or {}).get(key)
+                if not isinstance(text, str) or du is None:
+                    self.problems.append(f"FORMAL text {key} ({lang}) of {name} has no du text in {name}")
+                elif _placeholders(text) != _placeholders(du):
+                    self.problems.append(f"FORMAL text {key} ({lang}) of {name} has other placeholders than its du "
+                                         f"text")
+                elif key in self.formal[lang]:
+                    self.problems.append(f"FORMAL text {key} ({lang}) of {name} exists already")
+                else:
+                    self.formal[lang][key] = text
 
     def _label(self, obj: str, entry: Any, owner: str) -> None:
         parent, keys = entry[0], entry[1]
@@ -390,8 +433,32 @@ class Catalogue:
             elif isinstance(item, tuple) and len(item) == 2:
                 self._label(item[0], (obj, item[1]), "MENU_LAYOUT")
 
-    def text(self, key: str, lang: str) -> Optional[str]:
+    def text(self, key: str, lang: str, form: Optional[str] = None) -> Optional[str]:
+        """The text of `key` in `lang` (English when missing); German in the form of address `form` (default: the
+        window's setting), so "sie" reads the FORMAL text where one exists."""
+        if lang in self.formal and (form or form_of_address()) == "sie":
+            text = self.formal[lang].get(key)
+            if text is not None:
+                return text
         return self.texts.get(lang, {}).get(key) or self.texts["en"].get(key)
+
+
+def _placeholders(text: str) -> Tuple[Any, ...]:
+    """The {placeholders} and {path:...} places of a text, to compare a FORMAL text with its du text."""
+    return tuple(sorted(set(PLACEHOLDER_RE.findall(text)) | {f"path:{n}" for n in PATH_RE.findall(text)}))
+
+
+def form_of_address() -> str:
+    """The German form of address of the window ("du" or "sie"), read from orchestrator.utils.localization when this
+    process loaded it (the catalogue never imports it itself, see _loaded_localization); "du" everywhere else."""
+    localization = _loaded_localization()
+    if localization is None:
+        return "du"
+    try:
+        form = localization.form_of_address()
+    except Exception:   # noqa: BLE001 - a text never fails because of its form
+        return "du"
+    return form if form in ("du", "sie") else "du"
 
 
 _CATALOGUE: Optional[Catalogue] = None
@@ -1277,10 +1344,11 @@ def _text_belongs(key: str, steps_: Mapping[str, Step]) -> bool:
     return False
 
 
-__all__ = ["AUDIENCES", "CHANNELS", "CommandProposal", "ErrorReport", "GUI_CHANNELS", "Line", "NextStep",
+__all__ = ["AUDIENCES", "CHANNELS", "CommandProposal", "ErrorReport", "FORMAL_LANGUAGES", "GUI_CHANNELS", "Line",
+           "NextStep",
            "PERSON_ONLY", "PROGRAM", "Param", "ProposalRefused", "ProposalResult", "Rendered", "SHOWN_ONLY", "Step",
            "WithSteps", "as_next_steps", "audit_proposal", "button_label", "catalogue", "catalogue_problems",
            "checked_values", "child_argv", "clean_label", "command_line", "error_report", "fill_paths",
-           "framework_python", "get", "label_chain", "menu_layout", "mouse_labels", "mouse_path", "own_text",
+           "form_of_address", "framework_python", "get", "label_chain", "menu_layout", "mouse_labels", "mouse_path", "own_text",
            "proposal", "render", "rendered", "run_proposal", "shown_values", "step_text", "steps", "steps_of",
            "validate", "window_of"]

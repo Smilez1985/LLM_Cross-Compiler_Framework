@@ -81,3 +81,11 @@ TEXTS = {
         "step.proposals.show": "Die Korrekturvorschläge der KI-Apps lesen",
     },
 }
+
+# The "Sie" form of the German texts above that address the person (Q1); only the texts that differ.
+FORMAL = {
+    "de": {
+        "step.approvals.list": "Die Aufrufe ansehen, die auf Ihre Freigabe warten",
+        "step.approvals.list.what": "Listet die Aufrufe der KI-Apps, die auf Ihre Freigabe warten.",
+    },
+}

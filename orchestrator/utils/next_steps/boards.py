@@ -106,3 +106,10 @@ TEXTS = {
         "step.board.login": "Benutzernamen und Passwort des Boards prüfen",
     },
 }
+
+# The "Sie" form of the German texts above that address the person (Q1); only the texts that differ.
+FORMAL = {
+    "de": {
+        "step.board.prune_on_device": "Ältere Builds auf dem Board entfernen (Sie haken an, was gelöscht wird)",
+    },
+}

@@ -718,3 +718,69 @@ def test_the_menu_mnemonics_are_unique_on_every_level(lang):
             if len(item) == 3:
                 walk(item[2], item[0])
     walk(ns.menu_layout(), "the menu bar")
+
+
+# --- the form of address (wave-6 base: a0's catalogue meets f-words' du/Sie) ------------------------------------------
+
+@pytest.fixture
+def sie():
+    """The window's form of address set to "Sie" for one test; "du" (the default) is back afterwards."""
+    from orchestrator.utils import localization
+    before = localization.form_of_address()
+    localization.set_form_of_address("sie")
+    yield localization
+    localization.set_form_of_address(before)
+
+
+def test_a_person_who_chose_sie_reads_the_steps_in_the_formal_form(sie):
+    """Merge fix: the catalogue's German texts said "du" even when the person chose "Sie" in the settings (Q1),
+    because f-words' overlay only reaches the l10n modules of TEXT_MODULES. The catalogue now has FORMAL tables of its
+    own and reads them by the window's setting: in the steps of a window, the error box and an allow-to-run question."""
+    row = ns.rendered(["trash.empty"], "gui", "de")[0]
+    assert row.text.startswith("Den Papierkorb leeren (Sie haken an, was gelöscht wird): ")
+    assert ns.own_text("error.needs_person", "de") == "Das können nur Sie tun."
+    assert ns.error_report(type("E", (Exception,), {"code": "permission_denied"})("x"), "de").summary == \
+        "Ihre Einstellungen erlauben das nicht."
+    assert "gilt für Sie." in ns.proposal("models.download", {"tier": "small"}, "de").what
+    assert ns.rendered(["trash.empty"], "gui", "en")[0].text.startswith("Empty the trash"), "English has one form"
+    assert ns.own_text("steps.next", "de") == "Nächster Schritt", "a text without a formal form stays"
+    sie.set_form_of_address("du")
+    assert ns.rendered(["trash.empty"], "gui", "de")[0].text.startswith("Den Papierkorb leeren (du hakst an, ")
+
+
+def test_without_the_window_the_steps_keep_the_du_form(sie, monkeypatch):
+    """A process without the window (llmcf, the MCP server) has no setting to read: the catalogue never imports the
+    localization module itself, so it keeps the du texts there."""
+    monkeypatch.setattr(ns, "_loaded_localization", lambda: None)
+    assert ns.form_of_address() == "du"
+    assert ns.own_text("error.needs_person", "de") == "Das kannst nur du tun."
+
+
+def test_every_german_step_text_that_says_du_has_its_sie_form():
+    """The completeness rule of f-words (l10n_glossary) for the catalogue's own texts: a German text with a du pronoun
+    has its FORMAL text, a formal text says Sie and never du, and no du text says Sie."""
+    from orchestrator.utils import localization, wording
+    cat = ns.catalogue()
+    missing = [key for key, text in cat.texts["de"].items()
+               if wording.informal_forms(text) and key not in cat.formal["de"]]
+    assert missing == []
+    for key, text in cat.formal["de"].items():
+        assert not wording.informal_forms(text), (key, text)
+        assert text != cat.texts["de"][key], f"{key}: a formal text equal to its du text is not needed"
+    assert [key for key, text in cat.texts["de"].items() if wording.formal_forms(text)] == []
+    assert ns.FORMAL_LANGUAGES == localization.FORMAL_LANGUAGES
+
+
+def test_a_wrong_formal_text_is_a_catalogue_problem():
+    import types
+    module = types.ModuleType("orchestrator.utils.next_steps.fake_area")
+    module.TEXTS = {"en": {"step.fake.one": "One {x}"},
+                    "de": {"step.fake.one": "Eins {x} für dich", "step.fake.two": "Zwei"}}
+    module.FORMAL = {"en": {"step.fake.one": "One"},
+                     "de": {"step.fake.one": "Eins für Sie", "step.fake.ghost": "Geist", "step.trash.empty": "x"}}
+    problems = ns.Catalogue([module]).problems
+    assert any("'en' has one form of address" in p for p in problems), problems
+    assert any("step.fake.one (de) of fake_area has other placeholders" in p for p in problems), problems
+    assert any("step.fake.ghost (de) of fake_area has no du text" in p for p in problems), problems
+    assert any("step.trash.empty (de) of fake_area has no du text" in p for p in problems), "only its own texts"
+    assert ns.catalogue_problems() == []

@@ -77,3 +77,15 @@ TEXTS = {
         "step.signin.ollama": "Dich bei Ollama anmelden",
     },
 }
+
+# The "Sie" form of the German texts above that address the person (Q1); only the texts that differ.
+FORMAL = {
+    "de": {
+        "step.secrets.set.what": "Speichert das Geheimnis {name} im verschlüsselten Schlüsseltresor; den Wert geben "
+                                 "Sie in ein verdecktes Feld ein.",
+        "step.signin.anthropic_cli": "Sich zuerst mit dem Kommandozeilenwerkzeug von Anthropic anmelden",
+        "step.signin.ollama": "Sich bei Ollama anmelden",
+        "step.signin.overview.what": "Listet jeden KI-Dienst mit Ihrer Anmeldung und ob der Schlüsseltresor "
+                                     "funktioniert.",
+    },
+}

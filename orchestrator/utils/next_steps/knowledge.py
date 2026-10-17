@@ -111,3 +111,14 @@ TEXTS = {
         "step.keys.new": "Neue Schlüssel erstellen",
     },
 }
+
+# The "Sie" form of the German texts above that address the person (Q1); only the texts that differ.
+FORMAL = {
+    "de": {
+        "step.keys.show": "Ihre öffentlichen Schlüssel anzeigen",
+        "step.snapshots.free": "Platz schaffen: Wissens-Snapshots löschen, die Sie nicht mehr brauchen (Sie haken an, "
+                               "was gelöscht wird)",
+        "step.storage.convert.what": "Wandelt den Speicher der Wissensdatenbank einer früheren Version in den jetzigen "
+                                     "um; der alte Speicher bleibt, bis Sie ihn löschen.",
+    },
+}

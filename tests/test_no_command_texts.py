@@ -139,6 +139,8 @@ def test_the_catalogues_own_texts_name_no_command_and_no_hand_written_path():
     the same guard reads them (review w6-a0-v: they were outside both guards)."""
     from orchestrator.utils.next_steps import catalogue
     assert text_problems(catalogue().texts) == []
+    # their "Sie" forms (FORMAL, wave-6 base) are what a person who chose Sie reads instead
+    assert catalogue().formal["de"] and text_problems(catalogue().formal) == []
 
 
 def test_every_path_placeholder_is_filled_in_both_languages():
