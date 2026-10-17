@@ -537,6 +537,11 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 
 ## 8. Code guidelines
 
+- **Use what exists before building it again.** Before you write a helper, a check, a model or a lookup, search
+  the repository for one that does the job (`git log -S` shows which came first). Use it, extend it and wire it;
+  build something new beside it only when nothing suitable exists, and say why in the pull request. Two
+  implementations of one job are merged into the better one (the older one when it is adequate), and every caller
+  is wired to it. Done means wired and tested, not only written.
 - Use type hints for new functions.
 - Log with `orchestrator.utils.logging.get_logger`, not `print()`. CLI output goes through `rich`; escape external
   text with `rich.markup.escape` before printing it.
