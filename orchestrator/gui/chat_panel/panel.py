@@ -33,7 +33,7 @@ from orchestrator.Core.chat_feed import (ClearPlan, ClearPlanChanged, FeedRefs, 
                                          FeedWriter, StoredEntry, import_chat_history)
 from orchestrator.Core.ditto_manager import ChatHistory
 from orchestrator.Core.speaking_names import SpeakingNames
-from orchestrator.gui.chat_panel.bubbles import confirm_open_link, make_button, text, text_label
+from orchestrator.gui.chat_panel.bubbles import make_button, text, text_label
 from orchestrator.gui.chat_panel.composer import Composer
 from orchestrator.gui.chat_panel.feed_view import PAGE, FeedView, away_summary
 from orchestrator.gui.chat_panel.question_options import QuestionChoice, QuestionOptions
@@ -768,10 +768,6 @@ class ChatPanel(QWidget):
         entry = self.writer.entry("notice", FeedSender(role="framework"), text_key="chat.notice.error",
                                   params={"error": error_msg}, external=["error"], level="warning")
         self.feed_view.append_entries([StoredEntry(-1 if self.feed is not None else 0, entry)])
-
-    def _confirm_open_link(self, url: Any) -> bool:
-        """The former chat tab's link question (an address is opened only after the person saw it whole)."""
-        return confirm_open_link(self, url.toString() if hasattr(url, "toString") else str(url), self.lang)
 
     def _set_thinking(self, active: bool) -> None:
         self.composer.set_busy(active)
