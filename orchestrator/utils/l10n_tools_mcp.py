@@ -4,8 +4,8 @@ Texts of the tool permissions, the audit log, the AI folders, the Deep Ingest no
 GUI (wave 5, GUI parity: every `llmcf tools` and `llmcf mcp` action also by mouse), English and German.
 LocalizationManager merges them (localization.TEXT_MODULES); a key that exists already is refused there.
 
-Every key has the same {placeholders} in both languages (tests/test_tools_mcp_gui.py). The main window's menu titles
-are not translated ("Tools", "Security"), so a German text names a menu as it is shown. German terms: "Prüfprotokoll"
+Every key has the same {placeholders} in both languages (tests/test_tools_mcp_gui.py). A text names a place with
+{path:<objectName>} (wave 6: the menus are translated). German terms: "Prüfprotokoll"
 (audit log), "dauerhafte Freigabe" (standing approval), "Aufrufer" (caller). This module imports nothing from the
 framework.
 """

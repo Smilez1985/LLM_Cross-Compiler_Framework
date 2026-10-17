@@ -56,6 +56,14 @@ TEXTS = {
         "main.builder.scan.local": "Scan Local Host",
         "main.hub.import": "Import file...",
         "main.hub.install": "Install (in the pack's row)",
+        "main.deploy.run": "Deploy to Target",
+        # the next steps under a message (orchestrator/gui/next_step_widgets.py)
+        "main.steps.open": "Open",
+        "main.steps.open.name": "Open: {step}",
+        "main.steps.copy": "Copy",
+        "main.steps.copy.name": "Copy the command: {step}",
+        "main.steps.page": "Open page",
+        "main.steps.page.name": "Open the page in the browser: {step}",
         "main.folders.add": "Add folder...",
     },
     "de": {
@@ -95,6 +103,13 @@ TEXTS = {
         "main.builder.scan.local": "Lokalen Rechner scannen",
         "main.hub.import": "Datei importieren...",
         "main.hub.install": "Installieren (in der Zeile des Pakets)",
+        "main.deploy.run": "Auf das Target deployen",
+        "main.steps.open": "Öffnen",
+        "main.steps.open.name": "Öffnen: {step}",
+        "main.steps.copy": "Kopieren",
+        "main.steps.copy.name": "Den Befehl kopieren: {step}",
+        "main.steps.page": "Seite öffnen",
+        "main.steps.page.name": "Die Seite im Browser öffnen: {step}",
         "main.folders.add": "Ordner hinzufügen...",
     },
 }

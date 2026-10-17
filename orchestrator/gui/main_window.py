@@ -158,97 +158,113 @@ class MainOrchestrator(QMainWindow):
         if registry is not None and not registry.policy().configured:
             QTimer.singleShot(0, lambda: self._open_tool_permissions(first_run=True))
 
+    def _menu(self, menubar, name: str, key: str):
+        """A menu of the menu bar with its object name and its translated title (MENU_LAYOUT names its place)."""
+        menu = menubar.addMenu(ui_text(key))
+        menu.setObjectName(name)
+        return menu
+
+    def _entry(self, menu, name: str, key: str, slot) -> QAction:
+        """An entry with its object name (the CLI_PATHS name, found in any language) and its translated label."""
+        action = menu_place.new_action(self, name, ui_text(key), slot)
+        menu.addAction(action)
+        return action
+
     def _setup_menu(self):
+        """The menu bar (wave 6, DECISIONS round 10 Q2): every entry is created with its object name and a translated
+        label; the order of the menus and their entries is one table, MENU_LAYOUT (orchestrator/utils/next_steps/
+        common.py), applied by place.arrange() once the area modules and the chat dock added theirs. The AI
+        administration lives in the Ditto menu ("Set up Ditto..." first, Ditto's local runtime, models and evaluation
+        under Ditto > Advanced), Tools has the submenus Knowledge and Maintenance."""
         menubar = self.menuBar()
-        
+
         # The menus carry object names, so the area modules (orchestrator/gui/menus/place.py) find them in any language
-        file_menu = menubar.addMenu(self.i18n.t("menu.file", "File"))
-        file_menu.setObjectName(menu_place.MENU_FILE)
+        file_menu = self._menu(menubar, menu_place.MENU_FILE, "main.menu.file")
         self._add_trash_action(file_menu)
         self._add_output_folder_action(file_menu)
-        exit_action = QAction(self.i18n.t("menu.exit", "Exit"), self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-        
-        sec_menu = menubar.addMenu("Security")
-        sec_menu.setObjectName(menu_place.MENU_SECURITY)
-        act_openai = QAction("Set OpenAI API Key", self)
-        act_openai.triggered.connect(lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))
-        sec_menu.addAction(act_openai)
-        
+        self.act_exit = self._entry(file_menu, "act_file_exit", "menu.exit", self.close)
 
-        self.view_menu = menubar.addMenu(ui_text("chat.view.menu"))  # filled by _setup_chat_dock
-        self.view_menu.setObjectName(menu_place.MENU_VIEW)
+        ditto_menu = self._menu(menubar, menu_place.MENU_DITTO, "main.menu.ditto")
+        self.menu_ditto = ditto_menu
+        # Set up Ditto... opens the AI settings until the setup guide exists (chain ditto-setup: menus/ditto_setup.py
+        # connects the guide to act_ditto_setup in its install()).
+        self.act_ditto_setup = self._entry(ditto_menu, "act_ditto_setup", "main.ditto.setup", self._open_ditto_setup)
+        self.act_ditto_settings = self._entry(ditto_menu, "act_ditto_settings", "main.ditto.settings",
+                                              self._open_ai_config)
+        self.act_tools_permissions = self._entry(ditto_menu, "act_tools_permissions", "main.ditto.permissions",
+                                                 self._open_tool_permissions)
+        self.act_tools_folders = self._entry(ditto_menu, "act_tools_folders", "main.ditto.folders",
+                                             self._open_ai_folders)
+        # calls of AI apps that could not ask you
+        self.act_tools_approvals = self._entry(ditto_menu, "act_tools_approvals", "main.ditto.approvals",
+                                               self._open_approvals)
+        # propose_healing_fix: manual steps an AI app proposed, never run
+        self.act_tools_proposals = self._entry(ditto_menu, "act_tools_proposals", "main.ditto.proposals",
+                                               self._open_client_proposals)
+        advanced = ditto_menu.addMenu(ui_text("main.menu.ditto_advanced"))
+        advanced.setObjectName("menu_ditto_advanced")   # Local Runtime..., Local Models..., Evaluation... (menus/)
 
-        tools_menu = menubar.addMenu("Tools")
-        tools_menu.setObjectName(menu_place.MENU_TOOLS)
-        act_ai = QAction("Configure AI Agent (Ditto)...", self)
-        act_ai.triggered.connect(self._open_ai_config)
-        tools_menu.addAction(act_ai)
+        sec_menu = self._menu(menubar, menu_place.MENU_SECURITY, "main.menu.security")
+        self.act_signin_openai_key = self._entry(
+            sec_menu, "act_signin_openai_key", "main.security.openai",
+            lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))
 
-        act_wizard = QAction("Create Hardware Module...", self)
-        act_wizard.triggered.connect(self._open_module_wizard)
-        tools_menu.addAction(act_wizard)
+        self.view_menu = self._menu(menubar, menu_place.MENU_VIEW, "main.menu.view")  # filled by _setup_chat_dock
 
-        act_hf = QAction("Hugging Face Model Browser...", self)
-        act_hf.triggered.connect(self._open_hf_browser)
-        tools_menu.addAction(act_hf)
-
-        act_hub = QAction(self.i18n.t("menu.open_hub", "Community Hub"), self)
-        act_hub.triggered.connect(self._open_community_hub)
-        tools_menu.addAction(act_hub)
-
-        act_perms = QAction("Tool Permissions (Ditto / MCP)...", self)
-        act_perms.triggered.connect(self._open_tool_permissions)
-        tools_menu.addAction(act_perms)
-
-        act_folders = QAction("Folders the AI May Use...", self)
-        act_folders.triggered.connect(self._open_ai_folders)
-        tools_menu.addAction(act_folders)
-
-        act_approvals = QAction("Pending Approvals...", self)  # calls of AI clients that could not ask you
-        act_approvals.triggered.connect(self._open_approvals)
-        tools_menu.addAction(act_approvals)
-
-        act_proposals = QAction("Fix Proposals from AI Clients...", self)  # propose_healing_fix, never run
-        act_proposals.triggered.connect(self._open_client_proposals)
-        tools_menu.addAction(act_proposals)
-
-        self._add_knowledge_snapshots_action(tools_menu)
-        self._add_framework_images_action(tools_menu)
-        self._add_framework_docs_action(tools_menu)
+        tools_menu = self._menu(menubar, menu_place.MENU_TOOLS, "main.menu.tools")
+        self.act_tools_module_wizard = self._entry(tools_menu, "act_tools_module_wizard", "main.tools.module_wizard",
+                                                   self._open_module_wizard)
+        self.act_tools_hf_browser = self._entry(tools_menu, "act_tools_hf_browser", "main.tools.hf_browser",
+                                                self._open_hf_browser)
+        knowledge = tools_menu.addMenu(ui_text("main.menu.tools_knowledge"))
+        knowledge.setObjectName("menu_tools_knowledge")
+        self.act_knowledge_hub = self._entry(knowledge, "act_knowledge_hub", "menu.open_hub", self._open_community_hub)
+        self._add_knowledge_snapshots_action(knowledge)
+        self._add_framework_docs_action(knowledge)
+        maintenance = tools_menu.addMenu(ui_text("main.menu.tools_maintenance"))
+        maintenance.setObjectName("menu_tools_maintenance")
+        self._add_framework_images_action(maintenance)
 
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
-        self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
+        self.act_audio = QAction(ui_text("menu.audio"), self)
+        self.act_audio.setObjectName("act_tools_audio")
         self.act_audio.setCheckable(True)
         self.act_audio.setChecked(bool(self.framework.config.get(AUDIO_SETTING, True)))
         self.act_audio.toggled.connect(self._set_audio_announcements)
         tools_menu.addAction(self.act_audio)
 
         # Recent models, targets, boards, URLs, devices and datasets offered in the input fields (per user)
-        self.act_clear_history = QAction(self.i18n.t("menu.clear_history", "Clear Input History..."), self)
-        self.act_clear_history.triggered.connect(self._clear_input_history)
-        tools_menu.addAction(self.act_clear_history)
+        self.act_clear_history = self._entry(tools_menu, "act_tools_clear_history", "menu.clear_history",
+                                             self._clear_input_history)
 
-        help_menu = menubar.addMenu("Help")
-        help_menu.setObjectName(menu_place.MENU_HELP)
-        about_action = QAction("About", self)
-        about_action.setObjectName("act_help_about")   # shows the version, as `llm-cli --version` (menus/existing.py)
-        about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
+        help_menu = self._menu(menubar, menu_place.MENU_HELP, "main.menu.help")
+        # shows the version, as `llm-cli --version` (menus/existing.py)
+        self.act_help_about = self._entry(help_menu, "act_help_about", "main.help.about", self._show_about)
 
-        # GUI parity (W1'): one install line per area, in the menu order of the design (GUI_PARITY.md): File, Build,
-        # Boards, Ditto, Security, View, Tools, Help. Each module finds or makes its menu and puts it and its entries
-        # in place (Build after File, Boards after Build, Ditto before Security, entries next to the ones they
-        # follow). The deploy area's paths are buttons of the Deployment and Builder tabs (menus/deploy.py).
-        menu_build.install(self, menubar)  # File > Settings... (above Exit); Build > Targets..., Build History...
+        # GUI parity (W1'): one install line per area. Each module finds its menu by its object name and adds its
+        # entries; place.arrange() then puts every menu and entry where MENU_LAYOUT says (File, Build, Boards, Ditto,
+        # Security, View, Tools, Help). The deploy area's paths are buttons of the Deployment and Builder tabs
+        # (menus/deploy.py).
+        menu_build.install(self, menubar)  # File > Settings...; Build > Targets..., Build History...
         menu_boards.install(self, menubar)  # Boards > Boards and Devices...
-        menu_ditto_runtime.install(self, menubar)  # Ditto > Local Runtime...
-        menu_ditto_models.install(self, menubar)  # Ditto > Local Models..., Evaluation... (after Local Runtime...)
+        menu_ditto_runtime.install(self, menubar)  # Ditto > Advanced > Local Runtime...
+        menu_ditto_models.install(self, menubar)  # Ditto > Advanced > Local Models..., Evaluation...
         menu_signin.install(self, menubar)  # Security > Secrets..., Sign-in Overview..., Key Storage...
-        menu_tools_mcp.install(self, menubar)  # Security > Audit Log..., AI App Connections...; Tools > Deep Ingest
-        menu_knowledge.install(self, menubar)  # Tools > Knowledge Sources... (below Knowledge Snapshots...)
-        menu_mojo.install(self, menubar)  # Tools > Mojo Health Check... (after Framework Build Images...)
+        menu_tools_mcp.install(self, menubar)  # Security > Audit Log..., AI App Connections...; Deep Ingest Notice...
+        menu_knowledge.install(self, menubar)  # Tools > Knowledge > Knowledge Sources...
+        menu_mojo.install(self, menubar)  # Tools > Maintenance > Mojo Health Check...
+        # Optional install hooks of later chains (no shared list to edit): Set up Ditto's guide and the Help menu.
+        for optional in ("ditto_setup", "help"):
+            module = menu_place.optional_module(optional)
+            if module is not None:
+                module.install(self, menubar)
+        menu_place.arrange(menubar)
+        if self.i18n is not None:   # the menus and the tab titles follow the language (the shell chain's switch)
+            self.i18n.language_changed.connect(lambda lang: menu_place.retranslate_menus(self, lang))
+
+    def _open_ditto_setup(self):
+        """Ditto > Set up Ditto...: the AI settings until chain ditto-setup's guide takes this entry over."""
+        self._open_ai_config()
 
     def _setup_toolbar(self):
         toolbar = QToolBar("Main Toolbar")
@@ -288,19 +304,23 @@ class MainOrchestrator(QMainWindow):
         
         # 1. Builder Tab (Modified for IMatrix)
         self.builder_tab = BuilderTab(self.framework)
-        self.tabs.addTab(self.builder_tab, "🏗️ Builder")
-        
+        self.tabs.addTab(self.builder_tab, "")
+
         # 2. Deployment Window (the AI chat moved into the panel on the right: _setup_chat_dock)
         self.deployment_window = DeploymentWindow(self.framework)
-        self.tabs.addTab(self.deployment_window, "🚀 Deployment")
-        
+        self.tabs.addTab(self.deployment_window, "")
+
         # 3. NEW: Hyperparameter Tuning (Roadmap)
         self.tuning_tab = QLabel("\n\n🚧 Hyperparameter Auto-Tuning Module\n\nComing soon: Automated quantization matrix benchmarking.")
         self.tuning_tab.setAlignment(Qt.AlignCenter)
-        self.tabs.addTab(self.tuning_tab, "🛠️ Auto-Tuning")
+        self.tabs.addTab(self.tuning_tab, "")
 
         # 4. Model Manager Placeholder
-        self.tabs.addTab(QLabel("Model Manager (Local Library)"), "🧠 Models")
+        self.models_tab = QLabel("Model Manager (Local Library)")
+        self.tabs.addTab(self.models_tab, "")
+        # The tab titles from ui_text keys (menus/place.py TAB_TITLES): the emoji in front, the text alone for screen
+        # readers; they follow a language change with the menus (retranslate_menus).
+        menu_place.retitle_tabs(self)
 
     # --- the chat panel on the right (delegation design 5.1, 5.9) ---------------------------------------------------
 
@@ -314,8 +334,10 @@ class MainOrchestrator(QMainWindow):
         self.chat_dock = ChatDock(self.chat_window, self, lang=self.chat_window.lang)
         self.addDockWidget(Qt.RightDockWidgetArea, self.chat_dock)
         self.resizeDocks([self.chat_dock], [DEFAULT_WIDTH], Qt.Horizontal)
+        self.chat_dock.toggleViewAction().setObjectName("act_view_chat")   # mouse paths name it (MENU_LAYOUT)
         self.view_menu.addAction(self.chat_dock.toggleViewAction())
         self.act_focus_chat = QAction(ui_text("chat.view.focus"), self)
+        self.act_focus_chat.setObjectName("act_view_focus_chat")
         self.act_focus_chat.setShortcut(QKeySequence("Ctrl+Shift+C"))
         self.act_focus_chat.setShortcutContext(Qt.ApplicationShortcut)
         self.act_focus_chat.triggered.connect(self._focus_chat)
@@ -636,7 +658,8 @@ class MainOrchestrator(QMainWindow):
 
     def _add_knowledge_snapshots_action(self, menu):
         """Tools > Knowledge Snapshots...: the snapshots with full path, name and size; it deletes nothing."""
-        self.act_snapshots = QAction("Knowledge Snapshots...", self)
+        self.act_snapshots = QAction(ui_text("main.tools.snapshots"), self)
+        self.act_snapshots.setObjectName("act_knowledge_snapshots")
         self.act_snapshots.triggered.connect(self._open_knowledge_snapshots)
         menu.addAction(self.act_snapshots)
 
@@ -645,7 +668,8 @@ class MainOrchestrator(QMainWindow):
         a question (N12)."""
         from orchestrator.gui.framework_docs_action import FrameworkDocsAction
         self.framework_docs = FrameworkDocsAction(self, self.framework)
-        self.act_framework_docs = QAction("Index the Framework's Documentation...", self)
+        self.act_framework_docs = QAction(ui_text("main.tools.index_docs"), self)
+        self.act_framework_docs.setObjectName("act_knowledge_index_docs")
         self.act_framework_docs.triggered.connect(lambda: self.framework_docs.run())
         menu.addAction(self.act_framework_docs)
 
@@ -658,7 +682,7 @@ class MainOrchestrator(QMainWindow):
 
     def _add_trash_action(self, menu):
         """File > Trash...: what deletions moved to the trash; only the person restores or empties it."""
-        self.act_trash = QAction("Trash...", self)
+        self.act_trash = QAction(ui_text("main.file.trash"), self)
         self.act_trash.setObjectName("act_file_trash")   # `llm-cli trash` by mouse (menus/existing.py)
         self.act_trash.triggered.connect(self._open_trash)
         menu.addAction(self.act_trash)
@@ -674,7 +698,8 @@ class MainOrchestrator(QMainWindow):
     def _add_output_folder_action(self, menu):
         """File > Output Folder...: where finished models are saved (eighth round, answer 3); set once by the person,
         never by an AI. Models in the old folder stay where they are and stay listed."""
-        self.act_output_folder = QAction("Output Folder...", self)
+        self.act_output_folder = QAction(ui_text("main.file.output_folder"), self)
+        self.act_output_folder.setObjectName("act_file_output_folder")
         self.act_output_folder.triggered.connect(self._choose_output_folder)
         menu.addAction(self.act_output_folder)
 
@@ -697,7 +722,8 @@ class MainOrchestrator(QMainWindow):
 
     def _add_framework_images_action(self, menu):
         """Tools > Framework Build Images...: the framework's Docker images, deleted only as the person ticks them."""
-        self.act_images = QAction("Framework Build Images...", self)
+        self.act_images = QAction(ui_text("main.tools.images"), self)
+        self.act_images.setObjectName("act_framework_images")
         self.act_images.triggered.connect(self._open_framework_images)
         menu.addAction(self.act_images)
 

@@ -155,8 +155,11 @@ def test_tools_mojo_health_check_opens_the_window_next_to_the_image_list(qapp, t
     win = main_window.MainOrchestrator(REPO_ROOT)
     qapp.processEvents()
     try:
-        tools = next(m.menu() for m in win.menuBar().actions() if m.text() == "Tools")
-        texts = [a.text() for a in tools.actions()]
+        # wave 6 (Q2): Mojo sits in Tools > Maintenance, next to the image list
+        tools = next(m.menu() for m in win.menuBar().actions() if m.menu().objectName() == "menu_tools")
+        maintenance = next(a.menu() for a in tools.actions() if a.menu() is not None
+                           and a.menu().objectName() == "menu_tools_maintenance")
+        texts = [a.text() for a in maintenance.actions()]
         assert texts.index("Mojo Health Check...") == texts.index("Framework Build Images...") + 1
         action = win.findChild(QAction, "act_mojo_health")
         assert action is win.act_mojo_health and action.text() == "Mojo Health Check..."

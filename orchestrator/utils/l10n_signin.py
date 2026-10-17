@@ -7,8 +7,8 @@ Security > Key Storage... (the vault's protection, switching it, Rotate key...).
 (localization.TEXT_MODULES); a key that exists already is refused there, so these never replace another text.
 
 Every key has the same {placeholders} in both languages (tests/test_signin_gui.py). Where the CLI asks or reports,
-the English text uses the CLI's words. The Security menu itself is not translated, so a German text names it as it
-is shown ("Security > Anmeldeübersicht..."). German terms follow the sign-in panel: "Tresor für Zugangsdaten"
+the English text uses the CLI's words. A text names a place with
+{path:<objectName>} (wave 6: the menus are translated). German terms follow the sign-in panel: "Tresor für Zugangsdaten"
 (credential vault), "Tresorschlüssel" (vault key), "Anmeldung" (sign-in). This module imports nothing from the
 framework.
 """
@@ -24,8 +24,8 @@ TEXTS = {
         # Security > Secrets...
         "secrets.title": "Secrets",
         "secrets.intro": "The secrets in the encrypted credential vault ({file}): each name with 'stored' or 'not "
-                         "stored'. Values are never shown. Ditto's AI provider keys are signed in under Security > "
-                         "Sign-in Overview..., where they are checked first.",
+                         "stored'. Values are never shown. Ditto's AI provider keys are signed in under "
+                         "{path:act_signin_overview}, where they are checked first.",
         "secrets.col.name": "Name",
         "secrets.col.state": "State",
         "secrets.col.what": "What it is",
@@ -39,7 +39,7 @@ TEXTS = {
                                               "by hand only to replace a damaged key)",
         "secrets.what.community_age_identity": "Your key for receiving encrypted community packs (created on first "
                                                "use; set it by hand only to replace a damaged key)",
-        "secrets.what.provider": "Sign-in of the AI provider {provider} (Security > Sign-in Overview...)",
+        "secrets.what.provider": "Sign-in of the AI provider {provider} ({path:act_signin_overview})",
         "secrets.what.other": "Stored under this name",
         "secrets.set_title": "Set a secret",
         "secrets.name": "Name:",
@@ -76,8 +76,7 @@ TEXTS = {
         "signin.overview.col.account": "Account / key",
         "signin.overview.col.status": "Status",
         "signin.overview.col.check": "Check",
-        "signin.overview.primary": "* Ditto's provider (the AI settings choose it: Tools > Configure AI Agent "
-                                   "(Ditto)...)",
+        "signin.overview.primary": "* Ditto's provider (the AI settings choose it: {path:act_ditto_settings})",
         "signin.overview.vault": "Credential vault: {mode}, {file}",
         "signin.overview.vault_mode": "Credential vault: {mode}",
         "signin.overview.vault_problem": "The credential vault cannot be used: {reason}",
@@ -168,8 +167,7 @@ TEXTS = {
         "secrets.title": "Geheimnisse",
         "secrets.intro": "Die Geheimnisse im verschlüsselten Tresor für Zugangsdaten ({file}): jeder Name mit "
                          "'gespeichert' oder 'nicht gespeichert'. Werte werden nie angezeigt. Dittos Schlüssel für "
-                         "KI-Anbieter meldest du unter Security > Anmeldeübersicht... an, wo sie zuerst geprüft "
-                         "werden.",
+                         "KI-Anbieter meldest du unter {path:act_signin_overview} an, wo sie zuerst geprüft werden.",
         "secrets.col.name": "Name",
         "secrets.col.state": "Zustand",
         "secrets.col.what": "Wofür",
@@ -185,7 +183,7 @@ TEXTS = {
         "secrets.what.community_age_identity": "Dein Schlüssel zum Empfangen verschlüsselter Community-Pakete (beim "
                                                "ersten Gebrauch erzeugt; setze ihn nur von Hand, um einen "
                                                "beschädigten Schlüssel zu ersetzen)",
-        "secrets.what.provider": "Anmeldung beim KI-Anbieter {provider} (Security > Anmeldeübersicht...)",
+        "secrets.what.provider": "Anmeldung beim KI-Anbieter {provider} ({path:act_signin_overview})",
         "secrets.what.other": "Unter diesem Namen gespeichert",
         "secrets.set_title": "Ein Geheimnis setzen",
         "secrets.name": "Name:",
@@ -222,8 +220,7 @@ TEXTS = {
         "signin.overview.col.account": "Konto / Schlüssel",
         "signin.overview.col.status": "Zustand",
         "signin.overview.col.check": "Prüfung",
-        "signin.overview.primary": "* Dittos Anbieter (die KI-Einstellungen wählen ihn: Tools > Configure AI Agent "
-                                   "(Ditto)...)",
+        "signin.overview.primary": "* Dittos Anbieter (die KI-Einstellungen wählen ihn: {path:act_ditto_settings})",
         "signin.overview.vault": "Tresor für Zugangsdaten: {mode}, {file}",
         "signin.overview.vault_mode": "Tresor für Zugangsdaten: {mode}",
         "signin.overview.vault_problem": "Der Tresor für Zugangsdaten kann nicht genutzt werden: {reason}",

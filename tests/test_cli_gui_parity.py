@@ -398,3 +398,178 @@ def test_a_removed_menu_entry_is_found(qapp, window):
     ghost.window_objects = dict(tables.window_objects, btn_trash_gone="act_file_trash")
     assert object_problems(qapp, window, ghost, names=["btn_trash_gone"]) == [
         "btn_trash_gone: not in the window act_file_trash opens (TrashDialog)"]
+
+
+# --- the next steps' mouse paths (wave 6, chain a0; DECISIONS round 10 V2) -------------------------------------------
+
+def test_every_next_step_names_a_real_command_object_tool_window_and_text():
+    """Every catalogue step's command is a CLI_PATHS key whose object is the step's target, its tool is a known tool,
+    its window a known window, and its texts exist in English and German with the same placeholders."""
+    from orchestrator.tools.framework_tools import KNOWN_TOOLS
+    from orchestrator.tools.tool_windows import WINDOW_IDS
+    from orchestrator.utils.next_steps import catalogue_problems
+    assert catalogue_problems(KNOWN_TOOLS, collect(area_modules()).cli_paths, WINDOW_IDS) == []
+
+
+def live_text(obj) -> str:
+    """What an object reads on screen (a menu's title, an entry's or a button's text)."""
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QAbstractButton, QMenu
+    if isinstance(obj, QMenu):
+        return obj.title()
+    if isinstance(obj, (QAction, QAbstractButton)):
+        return obj.text()
+    return ""
+
+
+def mouse_label_problems(qapp, win, lang: str) -> List[str]:
+    """Where a mouse label of the next-step catalogue disagrees with the live main window in `lang`: an object that
+    does not exist, a parent it does not sit in, or a label that is not the text on screen (menus, entries, buttons and
+    tabs; a field's own label is not compared). Windows are opened through their entries."""
+    from PySide6.QtCore import QObject
+    from PySide6.QtWidgets import QApplication, QMenu, QWidget
+    from orchestrator.gui.menus import place
+    from orchestrator.utils.localization import ui_text
+    from orchestrator.utils.next_steps import clean_label, mouse_labels, steps
+    labels = mouse_labels()
+    planned = {s.target for s in steps().values() if s.planned}
+    tables = collect(area_modules())
+    menubar = win.menuBar()
+    problems, opened = [], {}
+
+    def window_widgets(opener: str) -> List[QWidget]:
+        if opener not in opened:
+            existing = [*QApplication.topLevelWidgets(), *win.findChildren(QWidget)]
+            before = set(map(id, existing))
+            from PySide6.QtGui import QAction
+            action = win.findChild(QAction, opener)
+            if action is not None:
+                action.trigger()
+                qapp.processEvents()
+            opened[opener] = [w for w in {*QApplication.topLevelWidgets(), *win.findChildren(QWidget)}
+                              if id(w) not in before and w.isWindow()]
+            del existing
+        return opened[opener]
+
+    def find(name: str, parent: Optional[str]):
+        menu_entry = place.find_entry(menubar, name)
+        if menu_entry is not None:
+            return menu_entry
+        menu = next((m for m in place.all_menus(menubar) if m.objectName() == name), None)
+        if menu is not None:
+            return menu
+        if name in place.TAB_TITLES:
+            return getattr(win, name, None)
+        if parent in tables.window_objects.values() or (parent and parent.startswith("act_")):
+            found = [w.findChild(QObject, name) for w in window_widgets(parent)]
+            found = [f for f in found if f is not None]
+            if found:
+                return found[0]
+        return win.findChild(QObject, name)
+
+    for name, (parent, keys) in sorted(labels.items()):
+        if name in planned:
+            continue
+        obj = find(name, parent)
+        if obj is None:
+            problems.append(f"{name}: not found (parent {parent})")
+            continue
+        if isinstance(obj, QMenu) or place.find_entry(menubar, name) is not None:
+            holder = place.menu_holding(menubar, obj.menuAction() if isinstance(obj, QMenu) else obj)
+            where = holder.objectName() if holder is not None else None
+            if where != parent:
+                problems.append(f"{name}: sits in {where}, its mouse label says {parent}")
+        elif name in place.TAB_TITLES:
+            index = win.tabs.indexOf(obj)
+            text = win.tabs.tabText(index) if index >= 0 else ""
+            if clean_label(text) != clean_label(ui_text(keys[0], lang)):
+                problems.append(f"{name}: tab reads {text!r}, its label {ui_text(keys[0], lang)!r}")
+            continue
+        text = live_text(obj)
+        if text and clean_label(text) not in {clean_label(ui_text(k, lang)) for k in keys}:
+            problems.append(f"{name}: reads {text!r}, its mouse label says {ui_text(keys[0], lang)!r}")
+    return problems
+
+
+def test_the_mouse_paths_are_the_live_labels(qapp, window):
+    """V2: a path a text names is built from the same labels the window shows; every mouse label of the catalogue
+    names an object that exists where the label says, with the text on screen (English: every window; German: the
+    menus, their entries and the tabs, which follow the language)."""
+    from orchestrator.gui.menus import place
+    from orchestrator.utils.next_steps import mouse_path
+    assert mouse_label_problems(qapp, window, "en") == []
+    place.retranslate_menus(window, "de")
+    try:
+        bar = window.menuBar()
+        in_bar = {a.objectName() for m in place.all_menus(bar) for a in m.actions()}
+        in_bar |= {m.objectName() for m in place.all_menus(bar)} | set(place.TAB_TITLES)
+        # windows created in English keep their texts until they are opened again (the shell chain offers that)
+        menu_problems = [p for p in mouse_label_problems(qapp, window, "de") if p.split(":")[0] in in_bar]
+        assert menu_problems == []
+        assert mouse_path("act_tools_permissions", "de") == "Ditto > Tool-Berechtigungen..."
+    finally:
+        place.retranslate_menus(window, "en")
+
+
+def test_a_wrong_mouse_label_is_found(qapp, window, monkeypatch):
+    """The check bites: a label that names another parent or another text is reported."""
+    from orchestrator.utils import next_steps
+    labels = dict(next_steps.mouse_labels())
+    labels["act_mojo_health"] = ("menu_tools_knowledge", ("mojo.menu",))
+    labels["btn_trash_restore"] = ("act_file_trash", ("trash.delete",))
+    monkeypatch.setattr(next_steps, "mouse_labels", lambda: labels)
+    problems = mouse_label_problems(qapp, window, "en")
+    assert any(p.startswith("act_mojo_health: sits in menu_tools_maintenance") for p in problems), problems
+    assert any(p.startswith("btn_trash_restore: reads") for p in problems), problems
+
+
+def test_the_menus_follow_the_language_by_object_name(qapp, window):
+    """Q2: translated titles with mnemonics, the entries found by their object names in any language."""
+    from orchestrator.gui.menus import place
+    titles = {m.objectName(): m.title() for m in place.menus(window.menuBar())}
+    assert titles[place.MENU_TOOLS] == "&Tools" and titles[place.MENU_DITTO] == "&Ditto"
+    place.retranslate_menus(window, "de")
+    try:
+        titles = {m.objectName(): m.title() for m in place.menus(window.menuBar())}
+        assert titles[place.MENU_TOOLS] == "E&xtras" and titles[place.MENU_SECURITY] == "&Sicherheit"
+        assert place.find_entry(window.menuBar(), "act_tools_permissions").text() == "Tool-Berechtigungen..."
+        assert window.tabs.tabText(window.tabs.indexOf(window.models_tab)) == "🧠 Modelle"
+        assert window.tabs.tabBar().accessibleTabName(window.tabs.indexOf(window.models_tab)) == "Modelle"
+    finally:
+        place.retranslate_menus(window, "en")
+    ditto = [a.objectName() for a in window.menu_ditto.actions() if not a.isSeparator()]
+    assert ditto[:2] == ["act_ditto_setup", "act_ditto_settings"], "Set up Ditto... comes first"
+    advanced = window.menu_ditto.actions()[-1].menu()
+    assert [a.objectName() for a in advanced.actions()] == ["act_ditto_runtime_open", "act_ditto_models_open",
+                                                            "act_ditto_eval_open"]
+
+
+def test_a_steps_row_names_the_place_and_opens_it(qapp, window):
+    """The next steps under a message: the German path with [Open], another program's command with [Copy], a page
+    with [Open page]; nothing takes the focus when the row appears, and no command of the framework is shown."""
+    from PySide6.QtWidgets import QApplication, QLabel, QPushButton
+    from orchestrator.gui.next_step_widgets import StepsRow, open_object
+    row = StepsRow(["runtime.install", "docker.start", "hf.access"], lang="de", window=window)
+    try:
+        texts = [label.text() for label in row.findChildren(QLabel)]
+        assert texts[0] == ("Dittos lokales Modellprogramm bauen: Ditto > Erweitert > Lokale Laufzeit... > "
+                            "llama-server bauen…")
+        assert "sudo systemctl start docker" in texts[1] and not any("llmcf" in t for t in texts)
+        names = sorted(b.text() for b in row.findChildren(QPushButton))
+        assert names == ["Kopieren", "Seite öffnen", "Öffnen"]
+        assert all(b.accessibleName() and not b.hasFocus() for b in row.buttons)
+        opened = []
+        row.open_requested.connect(opened.append)
+        next(b for b in row.buttons if b.text() == "Öffnen").click()
+        qapp.processEvents()
+        assert opened == ["btn_ditto_runtime_build"]
+        assert window.ditto_runtime_window.isVisible(), "[Open] opened the window the button lives in"
+        next(b for b in row.buttons if b.text() == "Kopieren").click()
+        assert QApplication.clipboard().text() == "sudo systemctl start docker"
+    finally:
+        row.deleteLater()
+    assert open_object(window, "act_deploy_scan_remote") is True
+    assert window.tabs.currentWidget() is window.builder_tab, "an entry of the Builder's scan menu: the Builder tab"
+    window.tabs.setCurrentWidget(window.deployment_window)
+    assert open_object(window, "btn_deploy_package") is True and window.tabs.currentWidget() is window.deployment_window
+    assert open_object(window, "act_does_not_exist") is False

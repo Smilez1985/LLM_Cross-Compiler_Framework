@@ -17,7 +17,7 @@ TEXTS = {
         # the dock, its header and the "..." menu
         "chat.panel.title": "AI Chat",
         "chat.panel.heading": "Ditto and your AI apps",
-        "chat.panel.access_tip": "The provider and sign-in Ditto uses (Tools > Configure AI Agent)",
+        "chat.panel.access_tip": "The provider and sign-in Ditto uses ({path:act_ditto_settings})",
         "chat.panel.thinking": "Ditto is thinking…",
         "chat.menu.button": "More",
         "chat.menu.clear": "Clear chat…",
@@ -51,7 +51,7 @@ TEXTS = {
         "chat.composer.remove_about_tip": "Removes the reference (Escape)",
         "chat.composer.input_name": "Your message to Ditto",
         "chat.composer.no_ditto": "Ditto is not available: the AI assistant did not start (see the log).",
-        "chat.composer.not_set_up": "Ditto cannot answer yet: set up an AI in Tools > Configure AI Agent (Ditto)…",
+        "chat.composer.not_set_up": "Ditto cannot answer yet: set it up in {path:act_ditto_setup}",
 
         # the feed view
         "chat.view.earlier": "Show earlier messages",
@@ -122,13 +122,13 @@ TEXTS = {
                                              "new conversation.",
         # (end of the legacy keys)
         "chat.notice.error": "Ditto could not answer: {error}",
-        "chat.notice.proposal": "{who} proposed a fix for the build {build} (AI-generated). Read it in Tools > Fix "
-                                "Proposals from AI Clients.",
+        "chat.notice.proposal": "{who} proposed a fix for the build {build} (AI-generated). Read it in "
+                                "{path:act_tools_proposals}.",
         "chat.notice.grant_used": "{who} ran '{title}' under your standing approval ({covers}).",
         "chat.notice.grant_used_plain": "{who} ran '{title}' under your standing approval.",
         # the same notices under the app's own bubble (its name is the bubble's header)
-        "chat.notice.proposal_by": "Proposed a fix for the build {build} (AI-generated). Read it in Tools > Fix "
-                                   "Proposals from AI Clients.",
+        "chat.notice.proposal_by": "Proposed a fix for the build {build} (AI-generated). Read it in "
+                                   "{path:act_tools_proposals}.",
         "chat.notice.grant_used_by": "Ran '{title}' under your standing approval ({covers}).",
         "chat.notice.grant_used_by_plain": "Ran '{title}' under your standing approval.",
 
@@ -216,7 +216,7 @@ TEXTS = {
     "de": {
         "chat.panel.title": "KI-Chat",
         "chat.panel.heading": "Ditto und deine KI-Apps",
-        "chat.panel.access_tip": "Anbieter und Anmeldung, die Ditto nutzt (Tools > Configure AI Agent)",
+        "chat.panel.access_tip": "Anbieter und Anmeldung, die Ditto nutzt ({path:act_ditto_settings})",
         "chat.panel.thinking": "Ditto denkt nach…",
         "chat.menu.button": "Mehr",
         "chat.menu.clear": "Chat leeren…",
@@ -248,8 +248,7 @@ TEXTS = {
         "chat.composer.remove_about_tip": "Entfernt den Bezug (Escape)",
         "chat.composer.input_name": "Deine Nachricht an Ditto",
         "chat.composer.no_ditto": "Ditto ist nicht verfügbar: der KI-Assistent ist nicht gestartet (siehe Protokoll).",
-        "chat.composer.not_set_up": "Ditto kann noch nicht antworten: richte eine KI ein unter Tools > Configure AI "
-                                    "Agent (Ditto)…",
+        "chat.composer.not_set_up": "Ditto kann noch nicht antworten: richte es ein unter {path:act_ditto_setup}",
 
         "chat.view.earlier": "Frühere Nachrichten zeigen",
         "chat.view.new_messages": "Neue Nachrichten ↓",
@@ -318,11 +317,11 @@ TEXTS = {
         # (end of the legacy keys)
         "chat.notice.error": "Ditto konnte nicht antworten: {error}",
         "chat.notice.proposal": "{who} hat eine Korrektur für den Build {build} vorgeschlagen (KI-erzeugt). Lies sie "
-                                "unter Tools > Fix Proposals from AI Clients.",
+                                "unter {path:act_tools_proposals}.",
         "chat.notice.grant_used": "{who} hat „{title}“ mit deiner Dauerfreigabe ausgeführt ({covers}).",
         "chat.notice.grant_used_plain": "{who} hat „{title}“ mit deiner Dauerfreigabe ausgeführt.",
         "chat.notice.proposal_by": "Hat eine Korrektur für den Build {build} vorgeschlagen (KI-erzeugt). Lies sie "
-                                   "unter Tools > Fix Proposals from AI Clients.",
+                                   "unter {path:act_tools_proposals}.",
         "chat.notice.grant_used_by": "Hat „{title}“ mit deiner Dauerfreigabe ausgeführt ({covers}).",
         "chat.notice.grant_used_by_plain": "Hat „{title}“ mit deiner Dauerfreigabe ausgeführt.",
 

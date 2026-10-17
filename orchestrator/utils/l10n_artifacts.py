@@ -5,9 +5,8 @@ before a knowledge snapshot and of the note about an identical earlier build (DE
 3, N11, N13), English and German. LocalizationManager merges them (localization.TEXT_MODULES); a key that exists
 already is refused there, so these never replace another text.
 
-Every key has the same {placeholders} in both languages (tests/test_artifact_output.py). The main window's menus are
-not translated, so a German text names a menu as it is shown ("File > Output Folder..."). This module imports nothing
-from the framework.
+Every key has the same {placeholders} in both languages (tests/test_artifact_output.py). A text names a place with
+{path:<objectName>} (wave 6: the menus are translated). This module imports nothing from the framework.
 """
 
 TEXTS = {

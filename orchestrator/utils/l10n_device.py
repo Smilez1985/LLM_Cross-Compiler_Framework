@@ -80,7 +80,7 @@ TEXTS = {
         "device.bench.title": "Benchmark on a board",
         "device.bench.intro": "Models built for a board are measured on the board itself, for real values. Nothing "
                               "runs on this computer. Deploy the model first; the board needs the framework's model "
-                              "server (llm-cli device runtime deploy).",
+                              "server ({path:btn_boards_deploy}).",
         "device.bench.device": "Board:",
         "device.bench.model": "Model on the board:",
         "device.bench.model_hint": "path on the board, e.g. models/model.gguf (relative: in the home folder)",
@@ -173,7 +173,7 @@ TEXTS = {
         "device.bench.title": "Benchmark auf einem Board",
         "device.bench.intro": "Für ein Board gebaute Modelle werden auf dem Board selbst gemessen, für echte Werte. "
                               "Auf diesem Computer läuft nichts. Erst das Modell deployen; das Board braucht den "
-                              "Modellserver des Frameworks (llm-cli device runtime deploy).",
+                              "Modellserver des Frameworks ({path:btn_boards_deploy}).",
         "device.bench.device": "Board:",
         "device.bench.model": "Modell auf dem Board:",
         "device.bench.model_hint": "Pfad auf dem Board, z. B. models/model.gguf (relativ: im Home-Ordner)",

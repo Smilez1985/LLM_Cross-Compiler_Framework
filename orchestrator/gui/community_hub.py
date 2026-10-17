@@ -100,7 +100,7 @@ class CommunityHubWindow(QMainWindow):
         self.refresh_btn = QPushButton(tr("btn.refresh", "Refresh"))
         self.refresh_btn.clicked.connect(lambda: self.refresh_list(refresh=True))
         hbox.addWidget(self.refresh_btn)
-        self.import_btn = QPushButton("Import file...")
+        self.import_btn = QPushButton(ui_text("main.hub.import"))
         self.import_btn.setToolTip(plain_tooltip("Install a pack file someone gave you (trust: local unless the signed "
                                                  "index lists it), or an encrypted pack sent to your key or protected "
                                                  "with a passphrase."))

@@ -115,13 +115,14 @@ def install(window, menubar) -> None:
             existing.setObjectName(name)
     i18n = getattr(window, "i18n", None)
     hub_text = i18n.t("menu.open_hub", "Community Hub") if i18n is not None else "Community Hub"
-    hub = place.entry(tools, hub_text)
+    hub = place.entry(tools, hub_text, ACT_HUB, menubar)
     if hub is not None:
         hub.setObjectName(ACT_HUB)
         window.act_knowledge_hub = hub
     action = place.new_action(window, ACT_SOURCES, ui_text("knowledge.menu.sources"),
                               lambda: open_sources_window(window))
-    place.insert_after(tools, getattr(window, "act_snapshots", None), action)
+    snapshots = getattr(window, "act_snapshots", None)
+    place.insert_after(place.menu_holding(menubar, snapshots) or tools, snapshots, action)
     window.act_knowledge_sources = action
 
 

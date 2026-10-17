@@ -106,6 +106,14 @@ def _menus(window):
     return [(a.text().replace("&", ""), a.menu()) for a in window.menuBar().actions() if a.menu() is not None]
 
 
+def _deep_actions(menu):
+    """A menu's entries with those of its submenus in place (wave 6: Ditto > Advanced, Tools > Knowledge)."""
+    found = []
+    for action in menu.actions():
+        found.extend(_deep_actions(action.menu()) if action.menu() is not None else [action])
+    return found
+
+
 def test_every_menu_of_the_design_once_in_its_order_with_every_entry_once(window):
     menus = _menus(window)
     titles = [title for title, _ in menus]
@@ -115,12 +123,15 @@ def test_every_menu_of_the_design_once_in_its_order_with_every_entry_once(window
     for title, menu in menus:
         texts = [a.text() for a in menu.actions() if not a.isSeparator()]
         assert len(texts) == len(set(texts)), (title, texts)
-    entries = {title: [a.objectName() for a in menu.actions() if a.objectName()] for title, menu in menus}
-    assert entries["File"][-1:] == ["act_file_settings"] and "act_file_output_folder" in entries["File"]
-    file_texts = [a.text() for a in dict(menus)["File"].actions()]
+    # Wave 6 (Q2, changed on purpose): Exit got its object name, Ditto's runtime, models and evaluation moved under
+    # Ditto > Advanced, the knowledge entries under Tools > Knowledge (submenus included below).
+    entries = {title: [a.objectName() for a in _deep_actions(menu) if a.objectName()] for title, menu in menus}
+    assert entries["File"][-2:] == ["act_file_settings", "act_file_exit"]
+    assert "act_file_output_folder" in entries["File"]
+    file_texts = [a.text() for a in dict(menus)["File"].actions() if not a.isSeparator()]
     assert file_texts[-2:] == ["Settings...", "Exit"]
     assert entries["Build"] == ["act_build_targets", "act_build_history"]
-    assert entries["Ditto"] == ["act_ditto_runtime_open", "act_ditto_models_open", "act_ditto_eval_open"]
+    assert entries["Ditto"][-3:] == ["act_ditto_runtime_open", "act_ditto_models_open", "act_ditto_eval_open"]
     tools = entries["Tools"]
     assert tools.index("act_knowledge_sources") == tools.index("act_knowledge_snapshots") + 1
     for name in ("act_tools_module_wizard", "act_knowledge_hub", "act_knowledge_index_docs"):

@@ -151,11 +151,14 @@ class TestMenu:
         win = main_window.MainOrchestrator(REPO_ROOT)
         qapp.processEvents()
         try:
-            titles = [a.text() for a in win.menuBar().actions()]
+            titles = [a.text().replace("&", "") for a in win.menuBar().actions()]   # wave 6: titles with mnemonics
             assert "Ditto" in titles and titles.index("Ditto") < titles.index("Security")
-            ditto = next(a.menu() for a in win.menuBar().actions() if a.text() == "Ditto")
+            ditto = next(a.menu() for a in win.menuBar().actions() if a.text().replace("&", "") == "Ditto")
             assert ditto.objectName() == menu.DITTO_MENU
-            names = {a.objectName(): a for a in ditto.actions()}
+            # wave 6 (Q2): the local models and the evaluation sit under Ditto > Advanced
+            advanced = next(a.menu() for a in ditto.actions() if a.menu() is not None)
+            assert advanced.objectName() == "menu_ditto_advanced"
+            names = {a.objectName(): a for a in advanced.actions()}
             assert names[menu.MODELS_ACTION].text() == "Local Models..." and win.act_ditto_models is \
                 names[menu.MODELS_ACTION]
             assert names[menu.EVAL_ACTION].text() == "Evaluation..." and win.act_ditto_eval is names[menu.EVAL_ACTION]
@@ -708,7 +711,7 @@ class TestEvaluation:
         tick(win.lst_tiers, "default")   # not downloaded
         assert win.start() is False
         assert eval_ui.shown == [("warning", "These local model tiers are not downloaded yet: default. Download "
-                                             "them first in Ditto > Local Models..., or untick them.")]
+                                             "them first in Ditto > Advanced > Local Models..., or untick them.")]
         assert eval_ui.asked == [] and eval_ui.run.calls == [] and "llm-cli" not in eval_ui.shown[0][1]
         win.chk_kinds["healing"].setChecked(False)
         win.chk_kinds["retrieval"].setChecked(True)   # retrieval needs no tier: nothing to refuse
@@ -914,7 +917,9 @@ class TestTexts:
 
     def test_the_install_question_names_the_window_not_the_cli(self):
         from orchestrator.utils.localization import ui_text
-        for lang, window in (("en", "Ditto > Local Models..."), ("de", "Ditto > Lokale Modelle...")):
+        # wave 6 (V2): the path is built from the live menu labels (Ditto > Advanced since Q2)
+        for lang, window in (("en", "Ditto > Advanced > Local Models..."),
+                             ("de", "Ditto > Erweitert > Lokale Modelle...")):
             text = ui_text("runtime.mode.install_question", lang, mode="x")
             assert window in text and "llm-cli ditto models" not in text
 

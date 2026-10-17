@@ -58,10 +58,12 @@ def test_every_text_exists_in_english_and_german_with_the_same_placeholders():
     def names(text):
         return {name for _, name, _, _ in fields.parse(text) if name}
 
+    from orchestrator.utils.next_steps import fill_paths
     assert set(TEXTS["en"]) == set(TEXTS["de"])
     for key, english in TEXTS["en"].items():
         assert names(english) == names(TEXTS["de"][key]), key
-        assert localization.ui_text(key, "de") == TEXTS["de"][key]
+        # merged; a {path:...} place is filled from the live labels (wave 6, V2)
+        assert localization.ui_text(key, "de") == fill_paths(TEXTS["de"][key], "de")
     assert "orchestrator.utils.l10n_build" in localization.TEXT_MODULES
 
 
@@ -100,11 +102,11 @@ def window(qapp, tmp_path, monkeypatch, memory_keyring):
 def test_the_build_menu_follows_file_and_settings_sits_above_exit(window):
     from PySide6.QtCore import QObject
     from orchestrator.gui.menus.build import CLI_PATHS
-    titles = [a.text() for a in window.menuBar().actions()]
+    titles = [a.text().replace("&", "") for a in window.menuBar().actions()]   # wave 6: titles with mnemonics
     assert titles[:2] == ["File", "Build"], titles
     assert [a.text() for a in window.menu_build.actions()] == ["Targets...", "Build History..."]
     file_menu = window.menuBar().actions()[0].menu()
-    assert [a.text() for a in file_menu.actions()][-2:] == ["Settings...", "Exit"]
+    assert [a.text() for a in file_menu.actions() if not a.isSeparator()][-2:] == ["Settings...", "Exit"]
     assert (window.act_build_targets.objectName(), window.act_build_history.objectName(),
             window.act_file_settings.objectName()) == ("act_build_targets", "act_build_history", "act_file_settings")
     missing = [name for name in set(CLI_PATHS.values()) if window.findChild(QObject, name) is None]

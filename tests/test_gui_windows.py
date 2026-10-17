@@ -72,8 +72,10 @@ class TestHuggingFaceBrowser:
         win = main_window.MainOrchestrator(REPO_ROOT)
         qapp.processEvents()  # the first-run permissions call is queued; it must not fire in a later test
         try:
-            action = next(a for m in win.menuBar().actions() if m.text() == "Tools"
-                          for a in m.menu().actions() if a.text() == "Hugging Face Model Browser...")
+            # wave 6: the entry is found by its object name (the titles are translated, with mnemonics)
+            tools = next(m.menu() for m in win.menuBar().actions() if m.menu().objectName() == "menu_tools")
+            action = next(a for a in tools.actions() if a.text() == "Hugging Face Model Browser...")
+            assert action.objectName() == "act_tools_hf_browser"
             action.trigger()
             assert isinstance(win.hf_browser, HuggingFaceWindow) and win.hf_browser.isVisible()
             assert win.hf_browser.model_manager is win.framework.model_manager

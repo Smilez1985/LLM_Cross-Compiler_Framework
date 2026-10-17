@@ -5,8 +5,8 @@ action of `llmcf deploy package`, `llmcf deploy run` and `llmcf scan` also by mo
 "deploy"), and of the host-key question (gui/host_key.py), English and German. LocalizationManager merges them
 (localization.TEXT_MODULES); a key that exists already is refused there, so these never replace another text.
 
-Every key has the same {placeholders} in both languages (tests/test_deploy_parity.py). The main window's menus and
-tabs are not translated, so a German text names a button as it is shown. The host-key question uses the words of
+Every key has the same {placeholders} in both languages (tests/test_deploy_parity.py). A text names a place with
+{path:<objectName>} (wave 6: the menus are translated). The host-key question uses the words of
 the CLI: compare the fingerprint with ssh-keygen on the board, then trust it. This module imports nothing from the
 framework.
 """
@@ -55,8 +55,8 @@ TEXTS = {
         "deploy.package.failed": "No package was made: {reason}",
         # Other build or model file... (deploy package ARTIFACT / deploy run: any path, not only a listed build)
         "deploy.source.button": "Other build or model file…",
-        "deploy.source.tip": "Adds a build folder or a model file from anywhere to the list above (as llmcf deploy "
-                             "package takes any path); select it, then Create package only… or Deploy to Target.",
+        "deploy.source.tip": "Adds a build folder or a model file from anywhere to the list above; select it, then "
+                             "Create package only… or Deploy to Target.",
         "deploy.source.folder": "Build Folder…",
         "deploy.source.model": "Model File…",
         "deploy.source.folder_title": "Choose the build folder to package or deploy",
@@ -65,7 +65,7 @@ TEXTS = {
 
         # Deploy existing package... (deploy run PACKAGE_PATH)
         "deploy.existing.button": "Deploy existing package…",
-        "deploy.existing.tip": "Uploads a deployment ZIP made earlier (here or with llmcf deploy package) to the "
+        "deploy.existing.tip": "Uploads a deployment ZIP made earlier (here with {path:btn_deploy_package}) to the "
                                "board named above and runs its deploy.sh.",
         "deploy.existing.title": "Choose the deployment package",
         "deploy.existing.filter": "Deployment packages (*.zip)",
@@ -156,9 +156,8 @@ TEXTS = {
         "deploy.package.failed": "Es wurde kein Paket erstellt: {reason}",
 
         "deploy.source.button": "Anderer Build oder Modelldatei…",
-        "deploy.source.tip": "Fügt der Liste oben einen Build-Ordner oder eine Modelldatei von irgendwo hinzu (wie "
-                             "llmcf deploy package jeden Pfad nimmt); wähle ihn aus, dann Nur Paket erstellen… oder "
-                             "Deploy to Target.",
+        "deploy.source.tip": "Fügt der Liste oben einen Build-Ordner oder eine Modelldatei von irgendwo hinzu; wähle "
+                             "ihn aus, dann Nur Paket erstellen… oder Deploy to Target.",
         "deploy.source.folder": "Build-Ordner…",
         "deploy.source.model": "Modelldatei…",
         "deploy.source.folder_title": "Build-Ordner zum Packen oder Deployen wählen",
@@ -166,7 +165,7 @@ TEXTS = {
         "deploy.source.chosen": "von dir gewählt",
 
         "deploy.existing.button": "Vorhandenes Paket deployen…",
-        "deploy.existing.tip": "Lädt ein früher erstelltes Deployment-ZIP (hier oder mit llmcf deploy package) auf "
+        "deploy.existing.tip": "Lädt ein früher erstelltes Deployment-ZIP (hier mit {path:btn_deploy_package}) auf "
                                "das oben genannte Board und startet dort sein deploy.sh.",
         "deploy.existing.title": "Deployment-Paket wählen",
         "deploy.existing.filter": "Deployment-Pakete (*.zip)",

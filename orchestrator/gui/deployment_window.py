@@ -487,7 +487,7 @@ class DeploymentWindow(QWidget):
         # --- 4. Action Buttons ---
         btn_layout = QHBoxLayout()
         
-        self.btn_deploy = QPushButton("🚀 Deploy to Target")
+        self.btn_deploy = QPushButton("🚀 " + ui_text("main.deploy.run"))
         self.btn_deploy.setObjectName("btn_deploy_run")   # `llmcf deploy package` + `deploy run` in one step
         self.btn_deploy.clicked.connect(self._on_deploy)
         self.btn_deploy.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; padding: 10px;")
@@ -967,7 +967,7 @@ class DeploymentWindow(QWidget):
 
     def _on_finished(self, success, msg):
         self._set_busy(False)
-        self.btn_deploy.setText("🚀 Deploy to Target")
+        self.btn_deploy.setText("🚀 " + ui_text("main.deploy.run"))
         self.btn_cancel.setVisible(False)
         
         if success:

@@ -135,7 +135,7 @@ def test_the_boards_menu_opens_the_window_from_the_menu_bar(qapp, tmp_path, monk
     win = main_window.MainOrchestrator(REPO_ROOT)
     qapp.processEvents()
     try:
-        titles = [a.text() for a in win.menuBar().actions()]
+        titles = [a.text().replace("&", "") for a in win.menuBar().actions()]   # wave 6: titles with mnemonics
         # the design's order: File, Build, Boards (with the Build menu of wave 5b, Boards follows Build)
         assert titles.index("Build") == titles.index(win.i18n.t("menu.file", "File")) + 1, titles
         assert titles.index("Boards") == titles.index("Build") + 1, titles

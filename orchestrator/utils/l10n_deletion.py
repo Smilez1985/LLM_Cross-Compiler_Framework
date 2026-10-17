@@ -4,8 +4,8 @@ Texts of the deletion dialog, the trash window, the knowledge snapshots window a
 (delegation design 3.10, round 5 f; round 6 10.4), English and German. LocalizationManager merges them
 (localization.TEXT_MODULES); a key that exists already is refused there, so these never replace another text.
 
-Every key has the same {placeholders} in both languages (tests/test_deletion_dialog.py). The main window's menus are
-not translated, so a German text names a menu as it is shown ("File > Trash..."). German terms: "Papierkorb"
+Every key has the same {placeholders} in both languages (tests/test_deletion_dialog.py). A text names a place with
+{path:<objectName>} (wave 6: the menus are translated). German terms: "Papierkorb"
 (trash), "endgültig löschen" (delete for good), "wiederherstellen" (restore). This module imports nothing from the
 framework.
 """

@@ -143,9 +143,10 @@ def test_the_security_menu_opens_the_three_windows(qapp, tmp_path, monkeypatch, 
     qapp.processEvents()
     try:
         menu = win.menu_security
-        assert menu.objectName() == menu_module.MENU_NAME and menu.title() == "Security"
+        # wave 6: a translated title with its mnemonic; the entry opens a window, so it ends with "..."
+        assert menu.objectName() == menu_module.MENU_NAME and menu.title() == "&Security"
         actions = {a.objectName(): a for a in menu.actions() if a.objectName()}
-        assert actions[menu_module.ACT_OPENAI_KEY].text() == "Set OpenAI API Key"
+        assert actions[menu_module.ACT_OPENAI_KEY].text() == "Set OpenAI API Key..."
         expected = {menu_module.ACT_SECRETS: ("Secrets...", SecretsWindow),
                     menu_module.ACT_OVERVIEW: ("Sign-in Overview...", SignInOverviewWindow),
                     menu_module.ACT_KEY_STORAGE: ("Key Storage...", KeyStorageWindow)}

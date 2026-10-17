@@ -12,6 +12,7 @@ MOUSE_LABELS = {
     "btn_deploy_package": (_TAB, "deploy.package.button"),
     "btn_deploy_existing": (_TAB, "deploy.existing.button"),
     "btn_deploy_save": (_TAB, "save.button"),
+    "btn_deploy_run": (_TAB, "main.deploy.run"),
 }
 
 STEPS = (

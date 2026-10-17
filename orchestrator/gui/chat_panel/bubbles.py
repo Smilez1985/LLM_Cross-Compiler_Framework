@@ -72,6 +72,9 @@ def text(key: str, lang: str = "en", **values: Any) -> str:
     else:
         table = LocalizationManager.TRANSLATIONS
         template = table.get(lang, {}).get(key) or table["en"].get(key) or key
+    if "{path:" in template:   # a place in the window, from the live labels in `lang` (wave 6, V2)
+        from orchestrator.utils.next_steps import fill_paths
+        template = fill_paths(template, lang)
     return template.format_map(_Fill(values)) if values else template
 
 
