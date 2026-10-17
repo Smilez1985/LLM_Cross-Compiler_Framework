@@ -510,6 +510,51 @@ class TestDeploymentTab:
         win._on_package()
         assert win.package_worker.wait(5000) and threads[0] is not threading.main_thread()
 
+    # --- review (w5-deploy-v): `deploy package ARTIFACT` takes any path, also after a listed build was clicked ---
+
+    def test_another_build_folder_or_model_file_can_be_chosen_by_mouse(self, window_framework, monkeypatch, tmp_path,
+                                                                       told):
+        """Once a listed build was clicked, no click clears the list's current item, so "with no build selected, a
+        model file" was out of reach; and a build folder the list does not name could not be packaged at all (the CLI
+        takes any path). Other build or model file... adds either to the list for both deploy buttons."""
+        from orchestrator.gui import deployment_window
+        win, calls = self.package_window(window_framework, monkeypatch, lambda start: start)
+        self.select_build(win, a_build(tmp_path / "listed"))
+        assert win.btn_add_source.objectName() == "btn_deploy_add_source"
+        assert [a.objectName() for a in win.btn_add_source.menu().actions()] == ["act_deploy_add_folder",
+                                                                                 "act_deploy_add_model"]
+        other = a_build(tmp_path / "copied from another computer", "build-x")
+        titles = []
+        monkeypatch.setattr(deployment_window, "choose_directory", lambda parent, title, start: titles.append(title)
+                            or str(other))
+        win.act_add_folder.trigger()
+        assert win.list_artifacts.currentItem().data(deployment_window.Qt.UserRole) == str(other)
+        assert str(other) in win.list_artifacts.currentItem().toolTip(), "the full path"
+        win._on_package()
+        assert calls[-1][0] == other.resolve(), "the chosen folder, with its manifest and model card"
+        win.refresh_data()
+        assert str(other) in [win.list_artifacts.item(i).data(deployment_window.Qt.UserRole)
+                              for i in range(win.list_artifacts.count())], "kept when the list is read again"
+
+        model = tmp_path / "loose" / "model.gguf"
+        model.parent.mkdir()
+        model.write_bytes(b"GGUF")
+        filters = []
+        monkeypatch.setattr(deployment_window, "choose_file", lambda parent, title, start, flt: filters.append(flt) or
+                            str(model))
+        win.act_add_model.trigger()
+        win._on_package()
+        assert calls[-1][0] == model.resolve() and ".gguf" in filters[0]
+        win.act_add_model.trigger()
+        assert win.list_artifacts.count() == 2, "a path chosen twice is listed once"
+
+        before = len(calls)
+        monkeypatch.setattr(deployment_window, "choose_directory", lambda *a: "")
+        win.act_add_folder.trigger()
+        assert win.list_artifacts.currentItem().data(deployment_window.Qt.UserRole) == str(model), "Cancel adds nothing"
+        win._on_save()
+        assert len(calls) == before and "build folder" in told[-1][0], "Save... stays for builds in the build folder"
+
 
 # --- the Builder tab's hardware scan ------------------------------------------------------------------------------
 
@@ -526,7 +571,7 @@ class TestScanMenu:
     def test_the_menu_entries(self, tab):
         names = [a.objectName() for a in tab.scan_menu.actions() if a.objectName()]
         assert names == ["act_deploy_scan_import", "act_deploy_scan_remote", "act_deploy_scan_local",
-                         "act_deploy_scan_script", "act_deploy_scan_save"]
+                         "act_deploy_scan_script", "act_deploy_scan_save", "act_deploy_scan_script_save"]
         assert tab.act_scan_script.text().endswith("Fallback Script")
         assert tab.scan_btn.objectName() == "btn_deploy_scan" and tab.scan_btn.menu() is tab.scan_menu
 
@@ -604,6 +649,51 @@ class TestScanMenu:
         assert started[2] == (tmp_path / "probe.json", {"use_script": False, "as_json": True, "gui_copy": gui_copy})
         assert started[3][0] == tmp_path / "plain.txt" and started[3][1]["as_json"] is False
         assert len(started) == 4, "Cancel in the save dialog scans nothing"
+
+    def test_the_fallback_script_can_save_the_profile_too(self, tab, window_framework, monkeypatch, tmp_path):
+        """Review (w5-deploy-v): `llmcf scan --script --output FILE` (the script writes the file itself; a .json file
+        gets the JSON view) was not possible by mouse: the script entry wrote only the tab's copy."""
+        from orchestrator.gui import builder_tab
+        started = []
+
+        class Worker:
+            def __init__(self, framework, output, **options):
+                started.append((Path(output), options))
+                self.finished = SimpleNamespace(connect=lambda slot: None)
+
+            def start(self):
+                pass
+
+        monkeypatch.setattr(builder_tab, "LocalScanWorker", Worker)
+        answers = iter([(str(tmp_path / "probe.txt"), "Probe file"), (str(tmp_path / "probe.json"), "JSON view"),
+                        ("", "")])
+        monkeypatch.setattr(builder_tab, "choose_save_file", lambda *a: next(answers))
+        gui_copy = builder_tab.probe_result_dir(window_framework) / builder_tab.LOCAL_PROBE_FILE
+        for _ in range(3):
+            tab.act_scan_script_save.trigger()
+        assert started == [(tmp_path / "probe.txt", {"use_script": True, "as_json": False, "gui_copy": gui_copy}),
+                           (tmp_path / "probe.json", {"use_script": True, "as_json": True, "gui_copy": gui_copy})]
+        assert "Fallback Script" in tab.act_scan_script_save.text()
+
+    def test_a_failed_import_names_the_next_step(self, tab, monkeypatch, tmp_path):
+        """Review (w5-deploy-v): `llmcf scan --import` prints the refusal and its next step; the GUI logged only the
+        refusal."""
+        from PySide6.QtWidgets import QInputDialog
+        from orchestrator.gui import builder_tab
+        from orchestrator.runtime import probe_service
+        broken = tmp_path / "not_a_probe.txt"
+        broken.write_text("hello\n", encoding="utf-8")
+
+        def refuse(self, path, label=None):
+            raise probe_service.ProbeError("This is not a probe file.", next="Run the probe script on the board.")
+
+        monkeypatch.setattr(probe_service.HardwareProbes, "import_file", refuse)
+        monkeypatch.setattr(builder_tab.QFileDialog, "getOpenFileName", lambda *a: (str(broken), ""))
+        monkeypatch.setattr(QInputDialog, "getText", lambda *a: ("", True))
+        monkeypatch.setattr(tab, "_load_probe_config", lambda path: None)
+        tab.act_scan_import.trigger()
+        log = tab.log_area.toPlainText()
+        assert "This is not a probe file." in log and "Run the probe script on the board." in log
 
     def test_the_local_scan_runs_off_the_gui_thread(self, tab, monkeypatch):
         from orchestrator.runtime import scan_steps

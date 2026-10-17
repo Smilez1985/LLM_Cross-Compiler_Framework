@@ -7,11 +7,12 @@ These paths are contextual and live in two tabs of the main window, which `_setu
 menu bar, so this module adds no menu entry of its own (GUI_PARITY.md's menu layout has none for this area):
 
 - Deployment tab (main_window.deployment_window, orchestrator/gui/deployment_window.py): the build list, Save...,
-  the Port, Name and "Wait for the board" fields, Deploy to Target, Create package only..., Deploy existing
-  package... and Cancel.
+  Other build or model file... (any path, as `deploy package ARTIFACT` takes it), the Port, Name and "Wait for the
+  board" fields, Deploy to Target, Create package only..., Deploy existing package... and Cancel.
 - Builder tab (main_window.builder_tab, orchestrator/gui/builder_tab.py) > Scan / Import...: Import from File
   (with the board's name), Remote Scan via SSH... (with Port and Name), Scan Local Host (the Python probe), Scan
-  Local Host with the Fallback Script and Scan Local Host and Save the Profile As....
+  Local Host with the Fallback Script, Scan Local Host and Save the Profile As... and Scan Local Host with the
+  Fallback Script and Save the Profile As....
 
 CLI_PATHS names, for each `llmcf` command path of this area, the object that does it by mouse (the main window finds
 every one of them with findChild: the tabs are its children). TAB_OBJECTS names the tab each object lives in.
@@ -55,6 +56,12 @@ TAB_OBJECTS: Dict[str, str] = {name: (BUILDER_TAB if name.startswith("act_deploy
                                for name in set(CLI_PATHS.values())}
 TAB_OBJECTS["btn_deploy_scan"] = BUILDER_TAB               # the Scan / Import... button that opens the scan menu
 TAB_OBJECTS["btn_deploy_cancel"] = DEPLOYMENT_TAB          # Cancel of a running deploy or package (Ctrl+C in the CLI)
+# `deploy package ARTIFACT` takes any path: Other build or model file... adds a build folder (act_deploy_add_folder)
+# or a model file (act_deploy_add_model) to the build list for Create package only... and Deploy to Target.
+TAB_OBJECTS["btn_deploy_add_source"] = DEPLOYMENT_TAB
+TAB_OBJECTS["act_deploy_add_folder"] = DEPLOYMENT_TAB
+TAB_OBJECTS["act_deploy_add_model"] = DEPLOYMENT_TAB
+TAB_OBJECTS["act_deploy_scan_script_save"] = BUILDER_TAB   # `scan --script --output FILE` together
 MACHINE_ONLY: Dict[str, str] = {
     "deploy run --ip": "compatibility alias of --host (the same field)",
     "deploy run --password-stdin": "script switch: the GUI asks for the password with hidden input",

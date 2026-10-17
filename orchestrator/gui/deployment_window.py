@@ -78,6 +78,11 @@ def choose_file(parent, title: str, start: str, filter_text: str) -> str:
     return QFileDialog.getOpenFileName(parent, title, start, filter_text)[0]
 
 
+def choose_directory(parent, title: str, start: str) -> str:
+    """The operating system's own folder dialog; "" when the person cancels (tests replace it)."""
+    return QFileDialog.getExistingDirectory(parent, title, start, QFileDialog.ShowDirsOnly)
+
+
 def tested_suffix(build_dir: Path) -> str:
     """" · tested on <boards>" for a build that passed its benchmark on a board (N3; the names come from the boards'
     probes, shown as plain text), else ""."""
@@ -393,6 +398,7 @@ class DeploymentWindow(QWidget):
         self.btn_save.clicked.connect(self._on_save)
         layout_art.addWidget(self.btn_save)
         self._save_workers = []
+        self._init_source_button(layout_art)   # Other build or model file... (deploy package/run take any path)
         grp_artifact.setLayout(layout_art)
         layout.addWidget(grp_artifact)
         
@@ -544,6 +550,63 @@ class DeploymentWindow(QWidget):
         btn_layout.addWidget(self.btn_existing)
         self.package_worker = None
         self.host_keys = HostKeyCheck(self, self.framework)
+
+    def _init_source_button(self, layout_art):
+        """Other build or model file...: `llmcf deploy package ARTIFACT` takes any path, not only a build the list
+        names. A build folder or a model file the person picks joins the list (kept for this session) and is selected;
+        Create package only... and Deploy to Target then take it like a listed build. The button's menu has two
+        entries: the folder dialog and the file dialog."""
+        from PySide6.QtGui import QAction
+        from PySide6.QtWidgets import QMenu
+        self._chosen_sources = []
+        self.btn_add_source = QPushButton(ui_text("deploy.source.button").replace("&", "&&"))
+        self.btn_add_source.setObjectName("btn_deploy_add_source")
+        self.btn_add_source.setToolTip(plain_tooltip(ui_text("deploy.source.tip")))
+        menu = QMenu(self.btn_add_source)
+        self.act_add_folder = QAction(ui_text("deploy.source.folder").replace("&", "&&"), self)
+        self.act_add_folder.setObjectName("act_deploy_add_folder")
+        self.act_add_folder.triggered.connect(lambda _=False: self._add_source(folder=True))
+        menu.addAction(self.act_add_folder)
+        self.act_add_model = QAction(ui_text("deploy.source.model").replace("&", "&&"), self)
+        self.act_add_model.setObjectName("act_deploy_add_model")
+        self.act_add_model.triggered.connect(lambda _=False: self._add_source(folder=False))
+        menu.addAction(self.act_add_model)
+        self.btn_add_source.setMenu(menu)
+        layout_art.addWidget(self.btn_add_source)
+
+    def _add_source(self, folder: bool) -> None:
+        """The folder or the file dialog, opened at the output folder; the chosen path joins the list, selected.
+        Nothing is read here: packaging finds the model and says why when there is none."""
+        from orchestrator.Core.artifact_output import output_folder
+        from orchestrator.Core.deployment_manager import MODEL_SUFFIXES
+        out = output_folder(self.framework)
+        start = str(out) if out.is_dir() else ""
+        if folder:
+            path = choose_directory(self, ui_text("deploy.source.folder_title"), start)
+        else:
+            patterns = " ".join(f"*{suffix}" for suffix in MODEL_SUFFIXES)
+            path = choose_file(self, ui_text("deploy.source.model_title"), start,
+                               ui_text("deploy.package.models", patterns=patterns))
+        if not path:
+            return
+        chosen = str(Path(path))
+        if chosen not in self._chosen_sources:
+            self._chosen_sources.append(chosen)
+        self.list_artifacts.setCurrentItem(self._list_source(chosen))
+
+    def _list_source(self, chosen: str):
+        """The list entry of a path the person added (one per path): its name and "chosen by you", the full path as
+        its tooltip."""
+        for row in range(self.list_artifacts.count()):
+            item = self.list_artifacts.item(row)
+            if item.data(Qt.UserRole + 1) == "chosen" and item.data(Qt.UserRole) == chosen:
+                return item
+        item = QListWidgetItem(f"📂 {Path(chosen).name} ({ui_text('deploy.source.chosen')})")
+        item.setData(Qt.UserRole, chosen)
+        item.setData(Qt.UserRole + 1, "chosen")
+        item.setToolTip(plain_tooltip(chosen))
+        self.list_artifacts.addItem(item)
+        return item
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         """One step at a time: the three action buttons wait while a host key is read, a package is made or a deploy
@@ -794,6 +857,8 @@ class DeploymentWindow(QWidget):
             list_item.setData(Qt.UserRole + 1, item.where)
             list_item.setToolTip(f"{build['path']}\n{build.get('primary')}\n{build.get('created', '')}")
             self.list_artifacts.addItem(list_item)
+        for chosen in getattr(self, "_chosen_sources", []):   # a build folder or model file the person added
+            self._list_source(chosen)
 
         # Profiles (target ids): keep the selection, else preselect the most recently used target
         previous = self.cb_profiles.currentText()

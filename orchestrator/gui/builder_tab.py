@@ -650,6 +650,11 @@ class BuilderTab(QWidget):
         self.act_scan_save.setObjectName("act_deploy_scan_save")
         self.act_scan_save.triggered.connect(lambda _=False: self._scan_local_save_as())
         self.scan_menu.addAction(self.act_scan_save)
+        # `scan --script --output FILE`: the script writes the chosen file itself (a .json file gets the JSON view)
+        self.act_scan_script_save = QAction(ui_text("deploy.scan.script_save"), self)
+        self.act_scan_script_save.setObjectName("act_deploy_scan_script_save")
+        self.act_scan_script_save.triggered.connect(lambda _=False: self._scan_local_save_as(use_script=True))
+        self.scan_menu.addAction(self.act_scan_script_save)
         self.host_keys = HostKeyCheck(self, self.framework)
 
     def _import_probe_file(self):
@@ -680,6 +685,8 @@ class BuilderTab(QWidget):
                 self._log(ui_text("deploy.import.reprobe"))
         except Exception as e:  # not a probe file the framework can read: the match below still runs
             self._log(ui_text("deploy.import.failed", reason=str(e)))
+            if getattr(e, "next", ""):   # the next step, as `llmcf scan --import` prints it
+                self._log(str(e.next))
         self._load_probe_config(Path(path))
 
     def _open_ssh_dialog(self):
@@ -738,9 +745,10 @@ class BuilderTab(QWidget):
         self.probe_worker.finished.connect(self._on_probe_finished)
         self.probe_worker.start()
 
-    def _scan_local_save_as(self):
-        """Scan Local Host and Save the Profile As...: the save dialog for the profile file (`llmcf scan --output
-        FILE`; a .json file gets the JSON view, `--json`), then the Python probe."""
+    def _scan_local_save_as(self, use_script=False):
+        """Scan Local Host (with the Fallback Script) and Save the Profile As...: the save dialog for the profile file
+        (`llmcf scan [--script] --output FILE`; a .json file gets the JSON view, `--json`), then the Python probe or,
+        with `use_script`, the fallback script."""
         start = str(Path.home() / "target_hardware_config.txt")
         path, chosen = choose_save_file(self, ui_text("deploy.scan.save_title"), start,
                                         ui_text("deploy.scan.save_filter"))
@@ -749,7 +757,7 @@ class BuilderTab(QWidget):
         target = Path(path)
         if not target.suffix:
             target = target.with_suffix(".json" if "json" in str(chosen).lower() else ".txt")
-        self._run_local_scan(output=target, as_json=target.suffix.lower() == ".json")
+        self._run_local_scan(use_script=use_script, output=target, as_json=target.suffix.lower() == ".json")
 
     def _on_probe_finished(self, success, msg, output_path):
         self.scan_btn.setEnabled(True)
