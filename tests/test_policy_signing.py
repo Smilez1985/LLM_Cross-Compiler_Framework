@@ -187,8 +187,11 @@ class TestTokenStore:
         tokens.add("laptop")
         hand_edit(tokens.path, lambda d: d["tokens"][0]["policy"].__setitem__(
             "tiers", {"read": "allow", "local_write": "allow", "external": "ask"}))
-        assert TokenStore(tmp_path, key=KEY).policy_of("laptop", lambda c: ToolPolicy()).decide(
-            "start_build", ToolTier.LOCAL_WRITE) == Decision.DENY
+        # decided where every call is decided (ToolRegistry._policy_of; TokenStore.policy_of, its first version, is gone)
+        registry = ToolRegistry(store_at(tmp_path), AuditLog(tmp_path / "audit.db", key=KEY),
+                                tokens=TokenStore(tmp_path, key=KEY))
+        spec = ToolSpec("start_build", "Start build", "", ToolTier.LOCAL_WRITE, In, Out, lambda i: Out(echoed="b"))
+        assert registry.decide(spec, caller="mcp:laptop") == Decision.DENY
 
     def test_an_unsigned_token_file_accepts_no_token(self, tmp_path):
         tokens = TokenStore(tmp_path, key=KEY)

@@ -207,11 +207,6 @@ class LimitHit(ToolError):
     code = "limit_reached"
 
 
-def _with_message(error: ToolError, message: str) -> ToolError:
-    """The same kind of error (denied, invalid input, ...) with another message."""
-    return error.with_text(message)
-
-
 # The person's own setting: the next step names where they decide, not a command for the AI to suggest.
 DENIED_HINT = ("Tell the person it is not allowed by their tool permissions; only they can change that, in Tool "
                "Permissions. get_status shows why.")
