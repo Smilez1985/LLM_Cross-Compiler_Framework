@@ -47,7 +47,7 @@ from orchestrator.Core.chat_feed import FeedEntry, FeedSender, StoredEntry, call
 from orchestrator.Core.speaking_names import SpeakingNames
 from orchestrator.gui.chat_panel.segments import blocks, has_marks, has_names, shown_blocks, split_segments
 from orchestrator.gui.plain import ask, button_text, display_text, one_line, plain_label
-from orchestrator.utils.localization import LocalizationManager
+from orchestrator.utils.localization import LocalizationManager, text_tables
 
 MAX_LINES = 20                       # lines shown in a bubble before "Show all"
 ASSETS = Path(__file__).resolve().parents[3] / "assets"
@@ -70,7 +70,7 @@ def text(key: str, lang: str = "en", **values: Any) -> str:
     if key in FEED_TEXTS["en"]:
         template = FEED_TEXTS.get(lang, {}).get(key) or FEED_TEXTS["en"][key]
     else:
-        table = LocalizationManager.TRANSLATIONS
+        table = text_tables()   # German in the person's form of address, as ui_text reads it
         template = table.get(lang, {}).get(key) or table["en"].get(key) or key
     return template.format_map(_Fill(values)) if values else template
 

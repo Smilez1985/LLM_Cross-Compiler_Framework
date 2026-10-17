@@ -69,6 +69,46 @@ def test_names_and_aliases_are_unique():
             key = name.casefold()
             assert key not in seen, f"{name!r} names {seen.get(key)} and {term_id}"
             seen[key] = term_id
+    # find_terms reads a hyphen like a space ("KV-Cache"), so two names must differ in more than that
+    normalized = {}
+    for name, term_id in seen.items():
+        key = " ".join(name.replace("-", " ").split())
+        assert key not in normalized or normalized[key] == term_id, f"{name!r} names {normalized[key]} and {term_id}"
+        normalized[key] = term_id
+
+
+def test_a_hugging_face_access_token_is_not_explained_as_an_app_access_code():
+    """Review fix: the alias "access token" made the Hugging Face token field ("Access Token:", dlg.token.label)
+    show the explanation of the framework's own app access code (a code an AI app presents over HTTP)."""
+    assert "app_access_code" not in glossary.find_terms("Access Token:")
+    assert glossary.find_terms("Please enter your Hugging Face Access Token.") == ["hugging_face"]
+    assert glossary.find_terms("Add an MCP token for Claude Desktop") == ["app_access_code"], "the longest name"
+    for term_id, entry in TERMS.items():
+        assert "access token" not in {a.casefold() for a in entry.aliases}, term_id
+
+
+def test_the_app_access_code_link_explains_the_frameworks_own_code():
+    """Review fix: the link went to Wikipedia's "Access token" stub, which explains a Windows logon session token,
+    not the code an AI app presents to the framework; the framework's manual explains that one (MCP server)."""
+    entry = TERMS["app_access_code"]
+    assert entry.link == f"{REPO_DOCS}Features.md#mcp-server"
+    assert entry.link_de == f"{REPO_DOCS}Features_DE.md#mcp-server"
+    assert "Access_token" not in entry.link
+
+
+def test_find_terms_reads_the_hyphenated_spelling_of_german_texts():
+    """Review fix: German writes the English terms with hyphens ("KV-Cache", "Audit-Log", "Build-Sandbox",
+    "Docker-Image", as the German windows do), and find_terms found none of them, so mark_terms_in marked nothing in
+    a German window where the English one was marked."""
+    assert glossary.find_terms("KV-Cache:") == ["kv_cache"]
+    assert glossary.find_terms("Das Audit-Log ist intakt.") == ["audit_log"]
+    assert glossary.find_terms("Die Build-Sandbox ist aus; das Docker-Image fehlt.") == ["build_sandbox",
+                                                                                          "docker_image"]
+    assert glossary.find_terms("Bestätige den SSH-Host-Key") == ["ssh_host_key"], "the longest name still wins"
+    assert glossary.find_terms("SHA 256 and llama server") == ["sha256", "llama_server"]
+    assert glossary.find_terms("llama-server, SHA-256, Self-healing") == ["llama_server", "sha256", "self_healing"]
+    assert glossary.find_terms("KV-Cache-Typ") == [], "never inside a longer compound"
+    assert glossary.find_terms("the llm-cli program") == [], "never inside a hyphenated name"
 
 
 def test_links_into_the_manual_name_existing_headings():
@@ -170,6 +210,34 @@ def test_merge_takes_formal_overlays_of_du_texts_only(monkeypatch):
                     {"de": {"a.x": "Guten Tag"}})
     with pytest.raises(ValueError, match="exists already"):
         localization.merge_text_modules(table, (again,), formal)
+
+
+def test_a_formal_overlay_is_german_only(monkeypatch):
+    """Review fix: English has one form; an overlay for English was merged and then silently never used, so a module
+    could believe it changed an English text."""
+    table = {"en": {"a.x": "Hello"}, "de": {"a.x": "Hallo du"}}
+    english = _module(monkeypatch, "lcf_formal_english", {"en": {"e.q": "Open"}, "de": {"e.q": "Öffne"}},
+                      {"en": {"a.x": "Good day"}})
+    formal = {}
+    with pytest.raises(ValueError, match="only German"):
+        localization.merge_text_modules(table, (english,), formal)
+    assert formal == {} and "e.q" not in table["en"]
+
+
+def test_the_notices_ask_again_when_their_formal_text_changes(monkeypatch):
+    """Review fix: the Deep Ingest and Ditto notices are shown in the person's form of address, but whether a notice
+    must be shown again was decided on the du texts only: a changed Sie text was never shown to a person who had
+    acknowledged the old one. Without a Sie text the value stays what it was, so nobody is asked again today."""
+    from orchestrator.utils import crawl_notice, ditto_notice
+    for notice in (crawl_notice, ditto_notice):
+        before = notice.notice_sha256()
+        monkeypatch.setitem(localization.FORMAL_TEXTS, "de", dict(localization.FORMAL_TEXTS["de"]))
+        assert notice.notice_sha256() == before, "no Sie text: unchanged"
+        localization.FORMAL_TEXTS["de"][notice.TEXT_KEYS[1]] = "Bitte lesen Sie diesen Hinweis."
+        changed = notice.notice_sha256()
+        assert changed != before
+        localization.FORMAL_TEXTS["de"][notice.TEXT_KEYS[1]] = "Bitte lesen Sie diesen Hinweis genau."
+        assert notice.notice_sha256() not in (before, changed)
 
 
 def test_formal_overlays_name_du_texts_with_the_same_placeholders():
