@@ -16,6 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 POSIX = pytest.mark.skipif(os.name == "nt", reason="O_NOFOLLOW and symbolic links without privileges are POSIX")
+# Windows refuses to remove or rename a file while a descriptor on it is open (os.open shares no delete access), so
+# the path is swapped under an open descriptor only on POSIX systems; the rest of such a test runs everywhere.
+SWAP_WHILE_OPEN = os.name != "nt"
 SIZES = [0, 1, 4095, 4096, 4097, 8192, (1 << 20) - 1, 1 << 20, (1 << 20) + 1, (3 << 20) + 5]
 
 
@@ -187,8 +190,9 @@ class TestHashedBytesAreTheUsedBytes:
         model.write_bytes(b"GGUF" + data_of(2 << 20))
         fd = bench.open_pinned(model, sha(model.read_bytes()), "m")
         try:
-            model.unlink()
-            model.write_bytes(b"swapped")  # a new file under the old name
+            if SWAP_WHILE_OPEN:
+                model.unlink()
+                model.write_bytes(b"swapped")  # a new file under the old name
             assert os.fstat(fd).st_size == (2 << 20) + 4
         finally:
             os.close(fd)
@@ -233,8 +237,9 @@ class TestHashedBytesAreTheUsedBytes:
     def test_the_pinned_copy_is_the_open_file(self, monkeypatch, tmp_path):
         bench, model, folder, fd, data = self._copy(monkeypatch, tmp_path)
         try:
-            os.replace(tmp_path / "m.gguf", tmp_path / "old.gguf")
-            model.write_bytes(b"swapped")
+            if SWAP_WHILE_OPEN:
+                os.replace(tmp_path / "m.gguf", tmp_path / "old.gguf")
+                model.write_bytes(b"swapped")
             copy = bench.BenchRunner._pinned_copy(model, fd, folder, sha256=sha(data))
             assert copy.read_bytes() == data and copy.parent == folder
         finally:
