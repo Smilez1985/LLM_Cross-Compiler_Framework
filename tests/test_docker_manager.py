@@ -108,6 +108,18 @@ def test_container_resources_count_memory_as_docker_stats_does():
     assert not docker_manager.memory_near_limit(None)
 
 
+def test_memory_on_a_cgroup_v1_host_leaves_out_the_hierarchical_cache_as_docker_stats_does():
+    """Review of chain qt: a cgroup v1 host reports both inactive_file (the container's own cgroup) and
+    total_inactive_file (with its child cgroups). `docker stats` subtracts total_inactive_file there, and inactive_file
+    only when the v1 figure is missing or not below the usage (cgroup v2); the first version took inactive_file first,
+    so a container with child cgroups counted their page cache as memory the build needs."""
+    v1 = stats_sample(usage=900 * MIB, inactive=100 * MIB, v1_inactive=300 * MIB)
+    assert docker_manager.container_resources(v1)["memory_bytes"] == 600.0 * MIB
+    odd = stats_sample(usage=900 * MIB, inactive=100 * MIB, v1_inactive=900 * MIB)
+    assert docker_manager.container_resources(odd)["memory_bytes"] == 800.0 * MIB, "then the v2 figure, as docker does"
+    assert docker_manager.memory_used({"usage": 900, "stats": {"inactive_file": 950}}) == 900, "never below zero"
+
+
 class StatsContainer:
     """A stage container whose statistics the engine reads; it runs until the engine read them `reads_before_end`
     times."""

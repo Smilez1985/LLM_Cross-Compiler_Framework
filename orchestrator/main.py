@@ -18,11 +18,13 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:   # started as a script: python orchestrator/main.py
     sys.path.insert(0, str(_ROOT))
 
+# Only the hash-pinned way: the framework is installed from its checkout, not from the package index, so a
+# `pip install <project>[gui]` would fetch whatever carries that name there, unpinned (review of chain qt).
 GUI_EXTRA_MISSING = (
     "The graphical interface needs PySide6, the optional 'gui' extra, and this installation does not have it. "
-    "Install it into this environment with: pip install --require-hashes -r requirements-gui.txt (from the "
-    "framework's folder; or pip install 'llm-cross-compiler-framework[gui]'), or run the installer again without "
-    "--headless. The command line (llmcf) and its MCP server work without it.")
+    "Run the installer again without --headless, or install the hash-pinned list from the framework's folder with "
+    "the pip of this environment: pip install --require-hashes -r requirements-gui.txt. The command line (llmcf) "
+    "and its MCP server work without it.")
 
 
 def qt_installed() -> bool:
