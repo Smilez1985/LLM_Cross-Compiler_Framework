@@ -58,6 +58,18 @@ class SourceError(RuntimeError):
     """The pinned source could not be fetched, verified, exported or imported; the message says why and what to do."""
 
 
+def catalog_pin(catalog=None) -> LlamaCppSource:
+    """The llama.cpp pin of configs/llama_runtime.yml (or of `catalog`): what export-source, import-source and every
+    build use (CLI and GUI). Raises SourceError when the catalog has none."""
+    if catalog is None:
+        from orchestrator.runtime.catalog import load_catalog
+        catalog = load_catalog()
+    source = catalog.llama_cpp.source
+    if source is None:
+        raise SourceError("configs/llama_runtime.yml has no llama_cpp.source (the pinned commit).")
+    return source
+
+
 def runtime_source_root(state_dir: Union[str, Path]) -> Path:
     """<state dir>/runtime/llama.cpp/src (next to the runtime installs of llama_server.runtime_root)."""
     return Path(state_dir) / "runtime" / "llama.cpp" / "src"

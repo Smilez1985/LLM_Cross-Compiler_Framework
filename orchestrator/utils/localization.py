@@ -570,7 +570,10 @@ def ui_text(key: str, lang: Optional[str] = None, **values: Any) -> str:
 # warnings and blockers (l10n_facts), the chat panel (l10n_chat), deleting and the trash (l10n_deletion), Ditto's
 # runtime mode in the AI settings (l10n_runtime), golden artifacts and the snapshot disk check (l10n_artifacts), the
 # board deployment (l10n_device), the GUI tools, the board recommendation and the build progress (l10n_gui), the
-# knowledge base's storage and its old folder (l10n_knowledge). Each
+# knowledge base's storage and its old folder (l10n_knowledge), the Build menu, File > Settings..., the Builder and
+# the module wizard (l10n_build), Ditto > Local Runtime... (l10n_ditto_runtime), Ditto > Local Models... and
+# Evaluation... and the chat's options for one question (l10n_ditto_models), and the other wave-5 mouse paths
+# (l10n_mojo, l10n_boards, l10n_tools_mcp, l10n_signin, l10n_deploy; one line each below). Each
 # holds a plain `TEXTS = {"en": {...}, "de": {...}}` and imports nothing from the framework. A module that does not
 # exist yet is skipped.
 TEXT_MODULES = ("orchestrator.utils.l10n_facts", "orchestrator.utils.l10n_chat", "orchestrator.utils.l10n_deletion",
@@ -581,6 +584,9 @@ TEXT_MODULES += ("orchestrator.utils.l10n_boards",)   # Boards > Boards and Devi
 TEXT_MODULES += ("orchestrator.utils.l10n_tools_mcp",)   # tool permissions, audit log, AI folders, MCP connections
 TEXT_MODULES += ("orchestrator.utils.l10n_signin",)   # Security > Secrets..., Sign-in Overview..., Key Storage...
 TEXT_MODULES += ("orchestrator.utils.l10n_deploy",)   # Deployment tab and hardware scan by mouse (GUI parity)
+TEXT_MODULES += ("orchestrator.utils.l10n_build",)   # Build menu, File > Settings..., the Builder, the module wizard
+TEXT_MODULES += ("orchestrator.utils.l10n_ditto_runtime",)   # Ditto > Local Runtime...
+TEXT_MODULES += ("orchestrator.utils.l10n_ditto_models",)   # Ditto > Local Models..., Evaluation..., chat options
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

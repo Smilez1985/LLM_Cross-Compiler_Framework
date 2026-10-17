@@ -35,6 +35,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Type,
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, field_validator, model_validator
 
+from orchestrator.Core.ai_override import SettingsOverlay as RunSettings, provider_problem  # noqa: F401 - shared
 from orchestrator.Core.module_generator import ARCHITECTURES, INPUT_LIST_BOUNDS, MODULE_NAME_RE, ModuleGenerator
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
 from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest, InvalidOutput, LLMClient, LLMError,
@@ -373,15 +374,35 @@ def proposal_facts(definition: Union["ModuleDefinition", Dict[str, Any]]) -> str
     return "\n".join(lines)
 
 
-def ai_module_description(name: str, assumptions: Sequence[Any]) -> str:
+def ai_module_description(name: str, assumptions: Sequence[Any], lead: str = "") -> str:
     """The description of a target module made from Ditto's proposal (`llm-cli module generate-ai` and the module
     wizard alike): untested is a fact to state, not a reason to refuse, so it says so, with the values Ditto guessed
-    (brackets removed: target.yml must not look like a template placeholder)."""
+    (brackets removed: target.yml must not look like a template placeholder). `lead`: the person's own words for the
+    module (the module wizard's Description field), kept in front of that note."""
     cleaned = [re.sub(r"[\[\]{}]", "", str(a)).strip() for a in assumptions or [] if str(a).strip()]
     description = f"AI-generated target for {name}, untested on real hardware"
     if cleaned:
         description += ". Assumptions: " + "; ".join(cleaned)[:1500]
-    return description
+    lead = " ".join(str(lead or "").split()).rstrip(".")
+    return f"{lead}. {description}" if lead else description
+
+
+# provider_problem() and the settings overlay for one run (RunSettings) are the shared ones of Core/ai_override.py
+# (imported above): `module generate-ai --provider --model`, the module wizard's "for this analysis only", `ditto
+# ask/eval --provider --model`, the chat panel's "For this question" and Ditto > Evaluation... check a provider with
+# the same words and read the chosen values over the saved settings the same way.
+
+
+def pin_base_image(definition: "ModuleDefinition", offline: bool = False, client: Any = None) -> "ModuleDefinition":
+    """The proposal with its base image pinned to the digest its tag points at now (DECISIONS round 3), before the
+    person is asked: the module is written with exactly the digest shown (`llm-cli module generate-ai` and the
+    module wizard's AI import alike). A reference with a digest stays as it is. Raises ImageLookupError (with
+    .next) when the tag cannot be resolved (offline mode, the registry cannot be reached)."""
+    if "@sha256:" in definition.base_os:
+        return definition
+    from orchestrator.utils.image_registry import inspect_image
+    image = inspect_image(definition.base_os, offline=offline, client=client)
+    return definition.model_copy(update={"base_os": image.pinned})
 
 
 class OptimizerRecommendation(BaseModel):
@@ -687,6 +708,23 @@ class DittoCoder:
         self._attach_local_runtime(client)
         return client
 
+    def for_run(self, provider: Optional[str] = None, model: Optional[str] = None) -> "DittoCoder":
+        """Ditto with the AI provider and/or model chosen for one run only (`--provider/--model`, the module wizard's
+        "for this analysis only"): a Ditto of its own on the shared settings overlay (Core/ai_override.ditto_with, the
+        same path as the chat panel's "For this question" and Ditto > Evaluation...), so the saved AI settings stay
+        unchanged. This Ditto itself when neither is given. DittoError when the provider is unknown or removed."""
+        if not provider and not model:
+            return self
+        problem = provider_problem(self.client.catalog, provider)
+        if problem:
+            raise DittoError(problem)
+        from orchestrator.Core.ai_override import ditto_with, override_values
+        return ditto_with(self, override_values(provider, model))
+
+    def pin_base_image(self, definition: "ModuleDefinition") -> "ModuleDefinition":
+        """pin_base_image() in this Ditto's offline mode (the settings' offline_mode)."""
+        return pin_base_image(definition, offline=self.offline_mode)
+
     def describe(self, task: str = "chat") -> Dict[str, Any]:
         """Provider and model a call would use (no secrets); raises DittoError when not set up."""
         try:
@@ -825,11 +863,16 @@ class DittoCoder:
                                        optimization=answer.optimization, explanation=answer.explanation)
 
     def save_module(self, definition: Union[ModuleDefinition, Dict[str, Any]], targets_dir: Path,
-                    module_name: Optional[str] = None, profile=None) -> Path:
+                    module_name: Optional[str] = None, profile=None, knowledge_roots=None,
+                    generator: Any = None, description: str = "") -> Path:
         """Creates the module through the module generator (which validates every value again). `profile` is the
         parsed hardware probe of the target, when the probe file was one: the runtime: block of the module is the
         build recipe's plan from it. The proposal's cpu_flags and cmake_flags are kept there as advisory text and
-        never applied (decision D20). A proposal never opts in to a prebuilt nvidia/cuda image (decision D6)."""
+        never applied (decision D20). A proposal never opts in to a prebuilt nvidia/cuda image (decision D6). The one
+        save of an AI-made module (`llm-cli module generate-ai` and the module wizard); knowledge_roots: the pages
+        crawled for this target that the person chose to attach (the wizard's opt-in); generator: the module
+        generator class the caller uses (default ModuleGenerator); description: the person's own words for the
+        module (the wizard's Description field), kept in front of the framework's untested note."""
         data = definition.model_dump() if isinstance(definition, BaseModel) else dict(definition)
         if PREBUILT_CUDA_IMAGE.search(str(data.get("base_os") or "")):
             raise ValueError(f"base_os: {PREBUILT_CUDA_REFUSAL}")
@@ -841,8 +884,10 @@ class DittoCoder:
             raise ValueError(f"base_os: '{base}' is not a Docker Official Image, so base_image_reason is required "
                              "(why this image); or use an official image with the vendor's package_sources.")
         from orchestrator.Core.module_generator import generator_input
-        return ModuleGenerator(Path(targets_dir)).generate_module(generator_input(data, module_name), self.framework,
-                                                                  profile=profile)
+        data = generator_input(data, module_name, description=description)
+        return (generator or ModuleGenerator)(Path(targets_dir)).generate_module(data, self.framework,
+                                                                                knowledge_roots=knowledge_roots,
+                                                                                profile=profile)
 
     # --- chat ---------------------------------------------------------------------------------------------
     def _context_limit(self) -> int:

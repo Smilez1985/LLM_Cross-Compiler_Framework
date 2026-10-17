@@ -110,6 +110,104 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   --device`, writes the board's trusted, paired record (audited), so the board appears in the benchmark list and AI
   deploys can name it; the CLI and the GUI share one core step (`scan_steps.scan_device`). **Import from File** asks
   for the board's name (`--label`).
+- **Build > Targets...** (GUI parity, every CLI action by mouse): every target with its ID (the value for `--target`),
+  name, architecture, boards, formats and support level, or "no capabilities declared" (or that its capabilities block
+  is invalid), from the query of `llm-cli targets list`. **Check target** (there and next to the Builder's target list,
+  beside the new **Targets...** button) checks the selected target as `llm-cli targets validate` does, through one core
+  function (`TargetManager.validate`, which the CLI now calls too) with its `target.yml` read again, and names each
+  schema error by field. The same check runs after the module wizard created a target and after a Community Hub target
+  install, and its result is shown.
+- **Build > Build History...**: every build of every program (GUI, CLI, MCP server), all of them as `llm-cli build
+  status --all`, failed, cancelled, interrupted and queued ones included; **Show details** (or a double click) shows
+  one build as `build status REQUEST_ID`: its request with errors and notes, every attempt with its output folder
+  (full path) and error, and the AI clients' fix proposals, marked AI-generated. The CLI and the window read one query
+  (`orchestrator/Core/build_history.py`). The status bar now names this window instead of a command for builds of
+  other programs.
+- **File > Settings...**: the effective settings with where each value comes from, secrets redacted (as `llm-cli config
+  show`), and the source repository overrides with the variable each becomes, to add and remove (as `llm-cli config
+  repos`; removing asks first, "No" is the default). Both use one core module (`orchestrator/Core/settings_view.py`)
+  that the CLI now calls too; a save that fails leaves the setting unchanged in the running program as well.
+- **The Builder offers what the CLI offers**: a target without capabilities gets every format of `--format` (not only
+  GGUF, RKLLM and RKNN), with the note that its boards, formats and quantizations are not checked (for a target whose
+  capabilities block is invalid the note says so, and **Check target** names each error); the optimization level
+  `FAST`; a **Priority** list (`--priority`, default normal; a failed critical build stops the pipeline).
+- **Module wizard: description, and provider and model for one analysis**: the hardware page has a **Description** field
+  (`llm-cli module create` asks for one; empty gives "Target for <name>"). Only you fill it: for a module an AI helped
+  with, your description leads and the framework's note that the module is AI-generated and untested follows. The first
+  page offers provider and model **for this analysis only** (`module generate-ai --provider --model`): Ditto runs on
+  them through `DittoManager.for_run`, which the CLI's `generate-ai` now uses too, and the saved AI settings stay
+  unchanged. `for_run` uses the same provider check and settings overlay as the chat panel's choice for one
+  question and Ditto > Evaluation... (`orchestrator/Core/ai_override.py`): one code path for every such choice.
+- **Ditto > Local Runtime...: every `llm-cli ditto runtime` command by mouse** (W1'): one window shows what `ditto
+  runtime status` shows (hardware, mode, the build in use and its checks, problems and the rebuild advice, the
+  self-built plan, the prebuilt option, the server with address, model and context, the recommended and the chosen
+  model, the log file) and does `install` (**Build llama-server...** with GPU backend, where the build runs and
+  compile jobs; **Install the official prebuilt archive...** with "Download it again"), `ensure` (mode Automatic,
+  Bare metal or In Docker, the same build options, and the model offer afterwards with its size and licence, unticked
+  like `--no-model`), **Start** (model tier or the recommendation, context length, idle unload; the model chosen
+  earlier is named) and **Stop**, **Import a build...** and **Export the build...**, **Remove older builds...** (the
+  deletion dialog with the full list, nothing ticked, "No" by default), **Export the source...** (with an optional
+  mirror) and **Import the source...**. The same core functions as the CLI run (the status overview, the model offer
+  and the llama.cpp pin now are core functions the CLI calls too; its output is unchanged); builds, downloads, Docker
+  and the server start run in the background with a progress line and Cancel where the command can be interrupted;
+  every question the CLI asks is asked with the same words and "No" as the default (also the one before the pinned
+  source is fetched); one runtime task runs at a time in the whole GUI. The box "Ditto's local server"
+  (here and in the AI settings) no longer refuses the installed mode: **Check and repair...** checks it and installs it
+  again only when it cannot be used (an old llama.cpp build after an update, for example), and installs and switches
+  now take the build options; the switch keeps the space check and the complete removal of the old mode. Its new
+  button **Status and more...** opens the window from the AI settings. A stopped local server and a declined source
+  fetch now name the GUI path next to the command.
+- **Tools > Knowledge Snapshots... says beforehand whether the next snapshot fits, and shows the storage in every
+  state** (W1'): the disk line now says, in the words of `llm-cli knowledge snapshots`, when the next snapshot (about
+  the size of the newest) would not fit, so Deep Ingest, a restore and a pack import would be refused, or would leave
+  little space. The storage line is shown in every state, as `llm-cli knowledge storage` shows it (Qdrant Edge with its
+  folder, the old storage with its reason, a Qdrant server, Qdrant Edge that cannot be loaded), and **Convert now** is
+  offered also before the first attempt, on the condition of `llm-cli knowledge storage convert`. The CLI and the
+  window call the same new core functions (`knowledge_snapshots.snapshot_disk`, `migration.storage_status`,
+  `storage_lines` and `convert_refusal`); the CLI's output is unchanged apart from a set Qdrant server (see Fixed).
+- **Tools > Knowledge Sources...: every source of the knowledge base by mouse** (W1'): a new window lists every
+  source with its kind, the licence and copyright notice it shows, and what a knowledge pack would carry of it (full
+  text, link and short facts, not exported) and why, with a kind filter (web pages, knowledge pack pages, framework
+  documents, other). It reads the list in the background through the new `knowledge_sources` core module, which
+  `llm-cli knowledge sources` uses too, so both show the same words. The menu wiring lives in
+  `orchestrator/gui/menus/knowledge.py`, whose `CLI_PATHS` names the mouse path of every `knowledge` and `zoo`
+  command.
+- **Community Hub: every `llm-cli zoo` action by mouse** (W1'): **Details...** (or a double click) shows what `zoo
+  show` shows (licence, trust, installed folder, download address, size, sha256, an installed recipe's `recipe.yml`);
+  **Import file...** takes a passphrase (never stored or shown) and the key files of the only senders to accept, as
+  `zoo install --file --passphrase / --from` does; **Check installed packs** and **Check a pack file...** run `zoo
+  verify` with and without a file; **Export...** exports any target folder (also an existing or installed one), a
+  finished build or the knowledge base with its pack id, plain or encrypted to the keys in key files or with a
+  passphrase, into a folder you choose; **My public keys...** shows `zoo keys` with Copy and Save.... Each calls the
+  core function of the CLI (new: `CommunityManager.details`, `exportable_targets`, `read_public_key_files`,
+  `needs_passphrase`) in the background; questions keep "No" as the default, and an encrypted pack is never submitted.
+- **Ditto > Local Models...: `llm-cli ditto models list` and `download` by mouse** (W1'): every tier of Ditto's
+  pinned catalogue with file, size, licence, whether it is downloaded (and verified) and its note (recommended for
+  this computer, chosen, on request, not pinned), the reason for the recommendation and the full models folder;
+  **Download the recommended model...** or **Download selected...** after the CLI's question (repo, file, licence,
+  size, folder; "No" by default), in the background with progress and **Cancel** (the part is kept for a resume). The
+  recommended download takes the recommendation the window shows (read with the list in the background), so no
+  hardware probe runs on the GUI thread. The catalogue rows and the model a download is for are core functions the CLI
+  calls too (its output is unchanged). The runtime install question of the AI settings names this window instead of
+  the CLI command. A download is a task of Ditto's local runtime: it waits while a build, a server start or another
+  download runs in Ditto > Local Runtime... or the AI settings, and they wait for it.
+- **Ditto > Evaluation...: `llm-cli ditto eval` by mouse** (W1'): kinds and retrieval variants (fused, rerank),
+  single cases, another cases file, runs per case, several local tiers, or provider, model and reasoning effort for
+  this run only (the saved AI settings stay unchanged); a question before the run says what is called and whether it
+  costs money, also when the fallback chain of the AI settings names a cloud provider, and that retrieval downloads
+  its models on first use ("No" by default); a tier that is not downloaded yet is refused with a pointer to Ditto >
+  Local Models... (starting it would stop your server first); a run of local tiers is a task of Ditto's local
+  runtime and waits while another one runs; the run goes in the background with progress and
+  **Cancel** (before the next attempt; Cancel while indexing loads no reranker), the window shows the CLI's tables,
+  and **Save report...** writes its JSON report. The run itself (case selection, the tier loop with the server
+  restore, the retrieval runs, the tables and the report) moved into `orchestrator/evals/eval_run.py`, which the CLI
+  calls too; its output and exit codes are unchanged, except that a server of yours replaced by a tier is now also
+  reported when the run stops early (a later tier that does not start in the CLI, Cancel in the window).
+- **Chat panel: options for one question** (W1', `llm-cli ditto ask --no-tools/--provider/--model` by mouse):
+  **Options for this question** above the message field give **Answer without tools**, a provider and a model for the
+  next question only. The saved AI settings stay unchanged (the question goes to a Ditto with these values over the
+  settings, `orchestrator/Core/ai_override.py`, which also checks the provider like the CLI), the panel says what the
+  question used, and the options are reset after it is sent; feed, questions and approvals work as before.
 - **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record
@@ -1506,6 +1604,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   now, and Rotate and the question about a linked token are plain text with "No" as the default. An installation path
   that PYTHONPATH cannot hold made "Start server" fail without any message; the window now says why, and nothing is
   started.
+- **Community Hub and knowledge storage: installs in the background, the pull request question, a Qdrant server**
+  (W1' review): installing a pack (Install, Import file...) moved it into place on the GUI thread after your "Yes",
+  which for a knowledge pack meant a snapshot of the knowledge base and the import of every page with the window
+  frozen; it now runs in the background, and the status line names the snapshot taken first, as `llm-cli zoo install`
+  does. **Open pull request** in the export window handed the pack to a public pull request at once; it now asks the
+  question of `llm-cli zoo export --pr` first ("Submit this pack to the public community repository?", "No" is the
+  default). With a Qdrant server set (`qdrant_url`), `llm-cli knowledge storage` and **Tools > Knowledge
+  Snapshots...** named the local storage and offered to convert it, which opened the server and converted nothing;
+  both now name the server, and the conversion is refused while it is set. A passphrase typed into **Import file...**
+  or the export window no longer stays in the hidden window after Cancel or Close.
 - **A build no longer replaces an earlier build of the same name**: in 3.0.0 a completed build moved its files into
   the folder `<target>/<model>/<quantization>` and replaced the files of an earlier build there (for example one for
   another board), so a finished golden artifact was lost without being asked. A later build now goes next to it
@@ -1823,6 +1931,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **The module wizard saves Ditto's proposal the way `llm-cli module generate-ai` does**: it saved an AI-made module
+  through the module generator alone, so DittoManager.save_module's checks were skipped (the refusal of any prebuilt
+  `nvidia/cuda` image in an AI proposal, and the AI's reason required for an image that is not a Docker Official
+  Image), and it did not pin the proposed base image to its digest. Now the proposal's base image is pinned in the
+  analysis worker before you see it (`pin_base_image`, the CLI's function), and the module is saved through
+  `DittoManager.save_module` and audited as on the command line; a base image an AI filled into the wizard through the
+  GUI tools takes the same path. A prebuilt image you choose yourself stays your explicit opt-in. A rule-based probe
+  import after Ditto's proposal now also replaces Ditto's packages, setup commands and quantization logic: they stayed
+  in their fields and went into a module saved as yours, unmarked and not audited.
 - **Pairing a board sends only a checked key line** (bandit B601): the command that adds the framework's public key
   to the board's `authorized_keys` is fixed, and its one value, the key line, was shell-quoted. Now the line must also
   be a plain SSH public key (type, key, an optional simple comment); anything else is refused before the command is

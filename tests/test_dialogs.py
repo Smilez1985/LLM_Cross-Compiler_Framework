@@ -1280,10 +1280,13 @@ class TestMainWindowWiring:
                                       "Open Community Hub", "Tool Permissions (Ditto / MCP)...",
                                       "Folders the AI May Use...", "Deep Ingest Notice...", "Pending Approvals...",
                                       "Fix Proposals from AI Clients...", "Knowledge Snapshots...",
+                                      "Knowledge Sources...",   # wave 5 (W1'): llm-cli knowledge sources by mouse
                                       "Framework Build Images...", "Mojo Health Check...",
                                       "Index the Framework's Documentation...",
                                       "Spoken Announcements", "Clear Input History..."]
-            assert menus["File"] == ["Trash...", "Output Folder...", "Exit"]
+            # File > Settings... (GUI parity, wave 5: config show / config repos by mouse) sits above Exit
+            assert menus["File"] == ["Trash...", "Output Folder...", "Settings...", "Exit"]
+            assert menus["Build"] == ["Targets...", "Build History..."]
             # The audio switch is a persisted setting, on by default.
             assert win.act_audio.isCheckable() and win.act_audio.isChecked()
             win.act_audio.setChecked(False)

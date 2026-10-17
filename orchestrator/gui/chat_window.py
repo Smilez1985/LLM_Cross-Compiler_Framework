@@ -31,10 +31,13 @@ logger = get_logger("ChatWindow")
 
 
 class ChatWorker(QThread):
-    """Runs one chat turn in the background. The history is only read here; the GUI thread appends the reply."""
+    """Runs one chat turn in the background. The history is only read here; the GUI thread appends the reply.
+    `use_tools` False answers this one question without the framework tools (`llm-cli ditto ask --no-tools`; the
+    panel sets it from "Options for this question")."""
     answered = Signal(object)   # ChatReply
     failed = Signal(str)
     tool_used = Signal(object)  # ToolUse, while the turn is running
+    use_tools = True
 
     def __init__(self, ditto, question, history, confirm):
         super().__init__()
@@ -47,7 +50,8 @@ class ChatWorker(QThread):
         try:
             if not self.ditto:
                 raise DittoError("The AI assistant (Ditto) is not initialized.")
-            reply = self.ditto.chat(self.question, self.history, confirm=self.confirm, on_tool=self.tool_used.emit)
+            reply = self.ditto.chat(self.question, self.history, confirm=self.confirm, use_tools=self.use_tools,
+                                    on_tool=self.tool_used.emit)
             self.answered.emit(reply)
         except DittoError as e:
             self.failed.emit(str(e))

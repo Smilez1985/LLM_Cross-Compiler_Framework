@@ -201,6 +201,52 @@ def room_before(state_dir: Any, estimate: Optional[int] = None, disk_usage: Any 
     return snapshot_room(folder, newest_size(folder) if estimate is None else estimate, Path(state_dir), disk_usage)
 
 
+# What the person's listings say about the disk and the next snapshot (`llm-cli knowledge snapshots` and Tools >
+# Knowledge Snapshots... show the same words; the GUI has them in both languages, l10n_artifacts and l10n_knowledge).
+DISK_LINE = "The snapshots use {size}; {free} are free on that disk."
+NEXT_DOES_NOT_FIT = ("The next snapshot (about {size}) does not fit: Deep Ingest, restoring a snapshot and importing a "
+                     "knowledge pack are refused until there is room.")
+NEXT_TIGHT = "The next snapshot (about {size}) still fits, but leaves little free space."
+
+
+@dataclass(frozen=True)
+class SnapshotDisk:
+    """What the snapshots use (`total`) against the free space of their disk, and whether the next snapshot fits
+    (`room`: room_before, the newest snapshot's size as the estimate)."""
+    total: int
+    room: SnapshotRoom
+
+    @property
+    def verdict(self) -> str:
+        return self.room.verdict
+
+    def line(self) -> str:
+        return DISK_LINE.format(size=size_text(self.total), free=size_text(self.room.free))
+
+    def warning(self) -> str:
+        """The warning about the next snapshot ("" when it fits with room to spare); a snapshot that does not fit names
+        the person's way to free space (FREE_SPACE_STEP)."""
+        size = size_text(self.room.estimate)
+        if self.verdict == "does_not_fit":
+            return f"{NEXT_DOES_NOT_FIT.format(size=size)} {FREE_SPACE_STEP}"
+        if self.verdict == "tight":
+            return NEXT_TIGHT.format(size=size)
+        return ""
+
+
+def snapshot_disk(state_dir: Any, total: Optional[int] = None, disk_usage: Any = None) -> Optional[SnapshotDisk]:
+    """The disk line of the snapshot listings (CLI and GUI): what the snapshots use (`total`, default: the folder's
+    snapshots) against the free space of their disk, and the room for the next snapshot (room_before). None when there
+    is no per-user folder or the disk cannot be read. Reads only; nothing is deleted."""
+    try:
+        room = room_before(state_dir, disk_usage=disk_usage)
+    except OSError:
+        return None
+    if room is None or room.check is None:
+        return None
+    return SnapshotDisk(total=room.folder_bytes if total is None else int(total), room=room)
+
+
 def require_room(room: SnapshotRoom, what: str = "the change") -> SnapshotRoom:
     """SnapshotNoRoom when the snapshot does not fit; the room otherwise (its verdict may be tight)."""
     if not room.fits:
@@ -393,7 +439,8 @@ def export_snapshots(folder: Path, names: Iterable[str], destination: Path) -> L
     return results
 
 
-__all__ = ["ExportedSnapshot", "FOLDER", "FREE_SPACE_STEP", "KEEPING_NOTE", "SUFFIX", "SnapshotDeletion",
-           "SnapshotFile", "SnapshotNoRoom", "SnapshotRoom", "delete_snapshots", "export_snapshots", "folder_bytes",
-           "list_snapshots", "newest_size", "require_room", "room_before", "size_text", "snapshot_files",
-           "snapshot_folder", "snapshot_plan", "snapshot_room"]
+__all__ = ["DISK_LINE", "ExportedSnapshot", "FOLDER", "FREE_SPACE_STEP", "KEEPING_NOTE", "NEXT_DOES_NOT_FIT",
+           "NEXT_TIGHT", "SUFFIX", "SnapshotDeletion", "SnapshotDisk", "SnapshotFile", "SnapshotNoRoom", "SnapshotRoom",
+           "delete_snapshots", "export_snapshots", "folder_bytes", "list_snapshots", "newest_size", "require_room",
+           "room_before", "size_text", "snapshot_disk", "snapshot_files", "snapshot_folder", "snapshot_plan",
+           "snapshot_room"]

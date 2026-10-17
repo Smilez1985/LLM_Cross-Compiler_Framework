@@ -12,7 +12,6 @@ import sys
 import json
 import asyncio
 import os
-import re
 import time
 import shutil
 from pathlib import Path
@@ -326,34 +325,29 @@ def list_targets(ctx: FrameworkContext, format: str):
 @pass_context
 def validate_target(ctx: FrameworkContext, target_name: str):
     """Check that a target loads and that its capabilities block passes the schema (exit code 1 if not)"""
-    from pydantic import ValidationError
-    from orchestrator.schemas.targets import TargetCapabilities
     ctx.require_framework()
     tm = ctx.framework_manager.get_component("target_manager")
     if not tm:
         console.print("[red]Target Manager not available[/red]")
         sys.exit(1)
-    tid = tm.resolve(target_name)
-    if tid is None:
+    check = tm.validate(target_name)  # the one check (the GUI's Check target calls it too)
+    if not check.found:
         console.print(f"[red]❌ Target '{escape(target_name)}' not found (or its target.yml cannot be read; "
                       f"see the log).[/red]")
         sys.exit(1)
-    data = tm.get_target(tid) or {}
-    if "capabilities" not in data:
+    tid = check.target_id
+    if check.no_capabilities:
         console.print(f"[yellow]Target '{escape(tid)}' loads but declares no capabilities: boards, formats and "
                       "quantizations are not checked before a build. Add a 'capabilities:' block "
                       "(see targets/Rockchip/target.yml).[/yellow]")
         return
-    try:
-        caps = TargetCapabilities.model_validate(data["capabilities"])
-    except ValidationError as e:
+    if check.errors:
         console.print(f"[red]❌ Target '{escape(tid)}': its capabilities block is invalid:[/red]")
-        for err in e.errors():
-            where = ".".join(str(part) for part in err.get("loc", ())) or "capabilities"
-            console.print(f"[red]  capabilities.{escape(where)}: {escape(str(err.get('msg', '')))}[/red]")
+        for where, message in check.errors:
+            console.print(f"[red]  {escape(where)}: {escape(message)}[/red]")
         sys.exit(1)
-    console.print(f"[green]✅ Target '{escape(tid)}' is valid ({len(caps.boards)} boards, formats: "
-                  f"{escape(', '.join(caps.formats))})[/green]")
+    console.print(f"[green]✅ Target '{escape(tid)}' is valid ({check.boards} boards, formats: "
+                  f"{escape(', '.join(check.formats))})[/green]")
 
 
 # ============================================================================
@@ -443,23 +437,37 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_f
 
 
 def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional[str]):
-    """Ditto with provider/model chosen for this command only (the saved AI settings stay unchanged)."""
+    """Ditto with provider/model chosen for this command only (the saved AI settings stay unchanged: they are set in
+    this short-lived process; the GUI uses Core/ai_override.ditto_with instead, and DittoManager.for_run goes through
+    it too)."""
+    from orchestrator.Core.ai_override import override_values, provider_problem
     fm = ctx.framework_manager
     ditto = fm.get_component("ditto_manager")
     if ditto is None:
         console.print("[red]The AI assistant (Ditto) is not available.[/red]")
         sys.exit(1)
-    if provider:
-        if ditto.client.catalog.get(provider) is None:
-            removed = ditto.client.catalog.removed_message(provider)
-            console.print(f"[red]{escape(removed)}[/red]" if removed else
-                          f"[red]Unknown AI provider '{escape(provider)}'. Choose one of: "
-                          f"{escape(', '.join(ditto.client.catalog.ids()))}.[/red]")
-            sys.exit(2)
-        fm.config.set("ai_provider", provider)
-    if model:
-        fm.config.set("ai_model", model)
+    problem = provider_problem(ditto.client.catalog, provider) if provider else None
+    if problem:
+        console.print(f"[red]{escape(problem)}[/red]")
+        sys.exit(2)
+    for key, value in override_values(provider, model).items():
+        fm.config.set(key, value)
     return ditto
+
+
+def _run_ditto(ctx: FrameworkContext, provider: Optional[str], model: Optional[str]):
+    """Ditto with provider/model chosen for this run only, through DittoManager.for_run (the module wizard's "for this
+    analysis only" takes the same path): the settings themselves are not changed."""
+    from orchestrator.Core.ditto_manager import DittoError
+    ditto = ctx.framework_manager.get_component("ditto_manager")
+    if ditto is None:
+        console.print("[red]The AI assistant (Ditto) is not available.[/red]")
+        sys.exit(1)
+    try:
+        return ditto.for_run(provider, model)
+    except DittoError as e:  # an unknown or removed provider
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
 
 
 PAGED_QUESTION_LINES = 30  # a longer question (up to 16,000 characters) is shown through the pager first
@@ -532,7 +540,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     from orchestrator.Core.ditto_manager import DittoError, proposal_facts
     _ditto_notice_once()   # Ditto at work outside the ditto group: the notice comes first here too
     ctx.require_framework()
-    ditto = _ai_override(ctx, provider, model)
+    ditto = _run_ditto(ctx, provider, model)
     try:
         info = ditto.describe("json")
     except DittoError as e:
@@ -548,17 +556,15 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
         sys.exit(1)
 
     # The base image is pinned to the digest its tag points at now, before the question (DECISIONS round 3): the
-    # module is written with exactly the digest shown.
-    if "@sha256:" not in definition.base_os:
-        from orchestrator.utils.image_registry import ImageLookupError, inspect_image
-        try:
-            image = inspect_image(definition.base_os,
-                                  offline=bool(ctx.framework_manager.config.get("offline_mode", False)))
-        except ImageLookupError as e:
-            console.print(f"[red]The base image {escape(definition.base_os)} cannot be pinned: {escape(str(e))}[/red]")
-            console.print(escape(e.next))
-            sys.exit(1)
-        definition = definition.model_copy(update={"base_os": image.pinned})
+    # module is written with exactly the digest shown (the module wizard's AI import pins it the same way).
+    from orchestrator.Core.ditto_manager import pin_base_image
+    from orchestrator.utils.image_registry import ImageLookupError
+    try:
+        definition = pin_base_image(definition, offline=bool(ctx.framework_manager.config.get("offline_mode", False)))
+    except ImageLookupError as e:
+        console.print(f"[red]The base image {escape(definition.base_os)} cannot be pinned: {escape(str(e))}[/red]")
+        console.print(escape(e.next))
+        sys.exit(1)
     # The definition is shown in full before anything is written; the module generator checks it again.
     console.print("\n[bold green]AI analysis finished. Review the proposal:[/bold green]")
     click.echo(json.dumps(definition.model_dump(exclude={"cannot"}), indent=2, ensure_ascii=False))
@@ -910,83 +916,60 @@ def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
     """Status of builds, including those the GUI, the MCP server or another CLI call started (the shared build state
     in the per-user folder, and the build records in the cache folder). REQUEST_ID: a request id (req_...) or a
     build id."""
-    from orchestrator.Core.build_records import read_records, records_dir
+    from orchestrator.Core.build_history import client_proposals, read_history
     config, resolve = _settings(ctx)
-    folder = records_dir(resolve(config.get("cache_dir", "cache")))
-    records = read_records(folder)
-    requests = _shared_requests(config)
-    by_request = {r.get("request_id"): r for r in requests}
-    with_builds = {r.get("request_id") for r in records}
-    # Requests without a build record yet (queued, preparing, or ended before a build ran)
-    waiting = [r for r in requests if r.get("request_id") not in with_builds]
+    history = read_history(config, resolve)  # the one query (the GUI's Build History reads it too)
+    folder = history.folder
     if request_id:
-        matches = [r for r in records if request_id in (r.get("request_id"), r.get("build_id"))]
-        request = by_request.get(request_id)
-        if not matches and request is None:
+        details = history.details(request_id)
+        if details is None:
             console.print(f"[red]Build '{escape(request_id)}' not found in {escape(str(folder))}.[/red]")
             sys.exit(1)
-        if request is not None:
-            _print_request_summary(request)
-        for record in reversed(matches):  # attempts in order
+        if details.request is not None:
+            _print_request_summary(details.request)
+        for record in details.attempts:  # attempts in order
             _print_build_record(record)
-        for rid in dict.fromkeys([r.get("request_id") for r in matches if r.get("request_id")]
-                                 + ([request_id] if request is not None else [])):
-            _print_client_proposals(_client_proposals(config, rid))
+        for rid in details.proposal_requests:
+            _print_client_proposals(client_proposals(config, rid))
         return
-    if not records and not waiting:
+    rows = history.rows()
+    if not rows:
         console.print(f"[yellow]No builds found in {escape(str(folder))}.[/yellow]")
         return
-    rows = sorted([("b", r) for r in records] + [("r", r) for r in waiting],
-                  key=lambda pair: str(pair[1].get("started") or ""), reverse=True)
     shown = rows if all else rows[:STATUS_ROWS]
     table = Table(title="Builds")
+    columns = ("request", "build", "status", "progress", "target", "format", "quantization", "model", "started",
+               "where")
     for column in ("Request", "Build", "Status", "Progress", "Target", "Format", "Quantization", "Model",
                    "Started", "Where"):
         table.add_column(column)
-    for kind, r in shown:
-        if kind == "r":
-            summary = r.get("summary") if isinstance(r.get("summary"), dict) else {}
-            table.add_row(escape(str(r.get("request_id"))), "-", escape(str(r.get("status"))),
-                          f"{r.get('progress') or 0}%", escape(str(summary.get("target") or "-")),
-                          escape(str(summary.get("format") or "-")), escape(str(summary.get("quantization") or "-")),
-                          escape(str(summary.get("model") or "-")), escape(str(r.get("started") or "-")),
-                          escape(str(r.get("program") or "-")))
-            continue
-        where = (by_request.get(r.get("request_id")) or {}).get("program") or "-"
-        table.add_row(escape(str(r.get("request_id") or "-")), escape(str(r.get("build_id"))),
-                      escape(str(r.get("status"))), f"{r.get('progress') or 0}%", escape(str(r.get("target") or "-")),
-                      escape(str(r.get("format") or "-")), escape(str(r.get("quantization") or "-")),
-                      escape(str(r.get("model") or "-")), escape(str(r.get("started") or "-")), escape(str(where)))
+    for row in shown:
+        values = row.values()
+        table.add_row(*(values[c] if c == "progress" else escape(values[c]) for c in columns))
     console.print(table)
     if len(rows) > len(shown):
         console.print(f"{len(rows) - len(shown)} older builds: llm-cli build status --all")
-    proposed = sorted({p.request_id for p in _client_proposals(config)})
+    proposed = sorted({p.request_id for p in client_proposals(config)})
     if proposed:
         console.print(f"[magenta]AI clients proposed fixes for {len(proposed)} failed build(s): "
                       f"llm-cli build status {escape(proposed[-1])}[/magenta]")
 
 
-def _shared_requests(config) -> list:
-    """The build request summaries every framework process writes into the per-user folder (request_store)."""
-    from orchestrator.Core.request_store import for_config
-    try:
-        store = for_config(config)
-        return store.read() if store is not None else []
-    except OSError:
-        return []
+# The CLI's labels of the fields build_history lists (the GUI labels them in the person's language).
+_BUILD_FIELD_LABELS = {"request": "Request", "build": "Build", "status": "Status", "stage": "Stage",
+                       "progress": "Progress", "model": "Model", "target": "Target", "board": "Board",
+                       "format": "Format", "quantization": "Quantization", "optimization": "Optimization",
+                       "owner": "Started by", "where": "Where", "started": "Started", "ended": "Ended",
+                       "output": "Output", "process": "Process", "error": "Error"}
 
 
 def _print_request_summary(r: dict) -> None:
-    summary = r.get("summary") if isinstance(r.get("summary"), dict) else {}
-    rows = [("Request", r.get("request_id")), ("Status", r.get("status")), ("Stage", r.get("stage")),
-            ("Progress", f"{r.get('progress') or 0}%"), ("Model", summary.get("model")),
-            ("Target", summary.get("target")), ("Board", summary.get("board")), ("Format", summary.get("format")),
-            ("Quantization", summary.get("quantization")), ("Optimization", summary.get("optimization")),
-            ("Started by", r.get("owner") or "the person"), ("Where", r.get("program")),
-            ("Started", r.get("started")), ("Ended", r.get("ended"))]
-    for label, value in rows:
+    from orchestrator.Core.build_history import request_rows
+    for name, value in request_rows(r):
+        if name == "owner":
+            value = value or "the person"
         if value not in (None, ""):
-            console.print(f"[bold]{label}:[/bold] {escape(str(value))}")
+            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(str(value))}")
     for error in r.get("errors") or []:
         console.print(f"[bold]Error:[/bold] {escape(str(error))}")
     if r.get("status") == "interrupted":
@@ -995,13 +978,6 @@ def _print_request_summary(r: dict) -> None:
         console.print(f"[yellow]Waits for a decision on a self-healing proposal in the {escape(str(r.get('program')))}"
                       " that started it.[/yellow]")
     console.print("")
-
-
-def _client_proposals(config, request_id: Optional[str] = None) -> list:
-    """The fix proposals AI clients made (propose_healing_fix), kept in the per-user folder."""
-    from orchestrator.Core.client_proposals import ClientProposalStore
-    state_dir = getattr(config, "user_state_dir", None)
-    return ClientProposalStore(Path(state_dir)).list(request_id) if state_dir else []
 
 
 def _print_client_proposals(proposals: list) -> None:
@@ -1024,15 +1000,10 @@ def _print_client_proposals(proposals: list) -> None:
 
 
 def _print_build_record(r: dict) -> None:
-    rows = [("Build", r.get("build_id")), ("Request", r.get("request_id")), ("Status", r.get("status")),
-            ("Stage", r.get("stage")), ("Progress", f"{r.get('progress') or 0}%"), ("Model", r.get("model")),
-            ("Target", r.get("target")), ("Board", r.get("board")), ("Format", r.get("format")),
-            ("Quantization", r.get("quantization")), ("Output", r.get("output_dir")),
-            ("Started", r.get("started")), ("Ended", r.get("ended")), ("Process", r.get("pid")),
-            ("Error", r.get("error"))]
-    for label, value in rows:
+    from orchestrator.Core.build_history import record_rows
+    for name, value in record_rows(r):
         if value not in (None, ""):
-            console.print(f"[bold]{label}:[/bold] {escape(str(value))}")
+            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(str(value))}")
     if r.get("status") == "interrupted":
         console.print("[yellow]The process that ran this build has ended before the build finished.[/yellow]")
     console.print("")
@@ -1770,26 +1741,10 @@ def ditto_runtime():
     pass
 
 
-def _installed_json(inst) -> Optional[dict]:
-    if inst is None:
-        return None
-    data = inst.model_dump(mode="json", include={"origin", "build_id", "commit", "backend", "variant", "asset_id",
-                                                 "role", "placement", "built_on", "built_at", "verified_at",
-                                                 "duration_s", "devices", "notes"})
-    data["label"] = inst.label
-    data["path"] = str(inst.path)
-    return data
-
-
 def _installed_line(inst) -> str:
     """origin label, build, backend and commit of the build in use (escaped for rich)."""
-    if inst.build_id:
-        role = ", CPU fallback" if inst.role == "fallback" else ""
-        text = (f"{inst.label}: build {inst.build_id[:16]} ({inst.backend}{role}), llama.cpp {inst.build} commit "
-                f"{(inst.commit or '')[:8]}")
-    else:
-        text = f"{inst.label}: {inst.asset_id} ({inst.backend})"
-    return escape(text)
+    from orchestrator.runtime.runtime_overview import installed_summary
+    return escape(installed_summary(inst))
 
 
 @ditto_runtime.command('status')
@@ -1797,27 +1752,15 @@ def _installed_line(inst) -> str:
 @pass_context
 def runtime_status(ctx: FrameworkContext, as_json: bool):
     """Hardware, the build in use (self-built, imported or prebuilt), the recommended model, and the server"""
+    from orchestrator.runtime.runtime_overview import overview
     rt = _local_runtime(ctx)
     with console.status("Checking the hardware and the builds ..."):
-        status = rt.status(check_rebuild=True)
-        hardware = rt.hardware()
-        backend, backend_reason = rt.recommend_backend()
-        prebuilt = rt.select_backend()
-        model, why = rt.choose_tier()
-    preferred = rt.preferred_tier()
-    inst = status.installed
+        view = overview(rt)   # the same call as the GUI's Ditto > Local Runtime... window
     if as_json:
-        click.echo(json.dumps({
-            "build": status.build, "hardware": hardware.model_dump(mode="json"), "mode": status.mode,
-            "docker": status.docker, "container": status.container,
-            "installed": _installed_json(inst), "problems": status.problems, "rebuild": status.rebuild,
-            "recommended_backend": backend, "backend_reason": backend_reason,
-            "prebuilt_option": prebuilt.asset.id if prebuilt.asset else None, "prebuilt_reason": prebuilt.reason,
-            "running": status.running, "healthy": status.healthy, "base_url": status.base_url, "pid": status.pid,
-            "model": status.model, "tier": status.tier, "ctx": status.ctx,
-            "recommended_tier": model.tier, "tier_reason": why, "preferred_tier": preferred,
-            "log_file": str(status.log_file)}, indent=2))
+        click.echo(json.dumps(view.as_json(), indent=2))
         return
+    status, hardware, prebuilt, model, why = view.status, view.hardware, view.prebuilt, view.model, view.tier_reason
+    backend, backend_reason, preferred, inst = view.backend, view.backend_reason, view.preferred, status.installed
     table = Table(title=f"Local runtime (llama.cpp {escape(status.build)})", show_header=False)
     table.add_column("", style="cyan")
     table.add_column("")
@@ -1827,14 +1770,15 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
         style = "yellow" if inst.origin == "prebuilt" else "green"
         table.add_row("In use" if status.mode != "docker" else "Bare metal",
                       f"[{style}]{_installed_line(inst)}[/{style}]")
-        if inst.build_id:
-            built = [f"{inst.placement or '?'} build"]
-            if inst.duration_s is not None:
-                built.append(f"{inst.duration_s:.0f} s")
-            if inst.built_on and inst.origin == "imported":
-                built.append(f"on {inst.built_on}")
-            if inst.built_at:
-                built.append(inst.built_at)
+        facts = view.build_facts()
+        if facts is not None:
+            built = [f"{facts['placement'] or '?'} build"]
+            if facts["duration_s"] is not None:
+                built.append(f"{facts['duration_s']:.0f} s")
+            if facts["built_on"]:
+                built.append(f"on {facts['built_on']}")
+            if facts["built_at"]:
+                built.append(facts["built_at"])
             table.add_row("Built", escape(", ".join(built)))
             devices = ", ".join(inst.devices) or "CPU only"
             table.add_row("Verified", escape(f"{inst.verified_at or '?'}; devices: {devices}"))
@@ -1842,13 +1786,12 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
             table.add_row("Note", f"[yellow]{escape(note)}[/yellow]")
     else:
         table.add_row("In use", "[yellow]nothing[/yellow] (llm-cli ditto runtime install builds llama-server)")
-    for problem in status.problems:
-        if inst is None or problem not in inst.notes:
-            table.add_row("Problem", f"[red]{escape(problem)}[/red]")
+    for problem in view.extra_problems():
+        table.add_row("Problem", f"[red]{escape(problem)}[/red]")
     if status.rebuild:
         table.add_row("Rebuild", f"[yellow]{escape(status.rebuild)}[/yellow]")
-    table.add_row("Self-built plan", escape(f"{backend}: {backend_reason}" if backend == "cpu" or not backend_reason
-                                            else f"CPU build, then {backend}: {backend_reason}"))
+    table.add_row("Self-built plan", escape(f"CPU build, then {backend}: {backend_reason}" if view.gpu_after_cpu
+                                            else f"{backend}: {backend_reason}"))
     table.add_row("Prebuilt opt-in", escape(f"{prebuilt.asset.id if prebuilt.asset else '-'} (--prebuilt, not "
                                             f"self-built): {prebuilt.reason}"))
     if status.running:
@@ -1859,7 +1802,7 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
     else:
         table.add_row("Server", "stopped")
     table.add_row("Recommended model", escape(f"{model.file} - {why}"))
-    if preferred and preferred != model.tier:
+    if view.chosen_differs:
         table.add_row("Chosen model", escape(f"{preferred} (llm-cli ditto runtime start --model auto resets it)"))
     table.add_row("Log", escape(str(status.log_file)))
     console.print(table)
@@ -1988,7 +1931,7 @@ def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str
                    no_model: bool, yes: bool):
     """Install Ditto's local runtime when it is not there, bare metal or in Docker (running it again does nothing)"""
     from orchestrator.runtime.llama_server import LocalRuntimeError
-    from orchestrator.runtime.runtime_mode import RuntimeModeError, SpaceShortage, ensure
+    from orchestrator.runtime.runtime_mode import RuntimeModeError, SpaceShortage, container_build_requested, ensure
     if force and mode == "auto":
         _usage("--force needs a mode: --mode bare-metal or --mode docker.")
     if force:
@@ -2010,7 +1953,7 @@ def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str
     def run(wanted: str, forced: bool):
         return ensure(rt, mode=wanted, force=forced, placement=placement, backend=backend, jobs=jobs,
                       log=lambda msg: console.print(escape(msg)), fetch_source=fetch_ok,
-                      container_build=os.environ.get("LCF_CONTAINER_BUILD") == "1")
+                      container_build=container_build_requested())
 
     try:
         result = run(mode, force)
@@ -2156,10 +2099,10 @@ def _offer_ditto_model(rt, yes: bool) -> None:
     first, then the download after your yes (with -y only under a permissive licence; any other licence is yours to
     accept with 'llm-cli ditto models download')."""
     from orchestrator.runtime.llama_server import LocalRuntimeError
-    from orchestrator.runtime.runtime_mode import PERMISSIVE_LICENCES
-    preferred = rt.preferred_tier()
-    model, why = (rt.catalog.model(preferred), "chosen earlier") if preferred else rt.choose_tier()
-    if rt.model_state(model) != "missing":
+    from orchestrator.runtime.runtime_mode import model_offer
+    offer = model_offer(rt)   # the same offer as the GUI's after its install
+    model, why = offer.model, offer.why
+    if not offer.needed:
         console.print(f"Model: {escape(model.file)} is there; nothing to download (the models folder is shared by "
                       "both modes).")
         return
@@ -2168,7 +2111,7 @@ def _offer_ditto_model(rt, yes: bool) -> None:
     if not model.pinned:
         console.print("[red]It has no pinned size and sha256, so it is not downloaded.[/red]")
         return
-    if yes and model.license.lower() in PERMISSIVE_LICENCES:
+    if yes and offer.permissive:
         console.print(f"Downloading it into {escape(str(rt.models_dir))} (checked by size and sha256).")
     elif not _interactive():
         console.print(f"Not downloaded without a terminal. Download it yourself: llm-cli ditto models download "
@@ -2293,12 +2236,12 @@ def runtime_stop(ctx: FrameworkContext):
 
 def _pinned_llama_source():
     """The llama.cpp pin of configs/llama_runtime.yml (exits with 1 when the catalog has none)."""
-    from orchestrator.runtime.catalog import load_catalog
-    source = load_catalog().llama_cpp.source
-    if source is None:
-        console.print("[red]configs/llama_runtime.yml has no llama_cpp.source (the pinned commit).[/red]")
+    from orchestrator.runtime.build.source import SourceError, catalog_pin
+    try:
+        return catalog_pin()
+    except SourceError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    return source
 
 
 @ditto_runtime.command('export-source')
@@ -2356,27 +2299,19 @@ def ditto_models():
 @pass_context
 def models_list(ctx: FrameworkContext):
     """Pinned models, their size and whether they are downloaded"""
-    rt = _local_runtime(ctx)
-    recommended, why = rt.choose_tier()
-    preferred = rt.preferred_tier()
+    from orchestrator.runtime.ditto_models import models_overview
+    view = models_overview(_local_runtime(ctx))  # the GUI's Ditto > Local Models... shows the same
     table = Table(title="Ditto models")
     for column in ("Tier", "File", "Size", "License", "Status", "Note"):
         table.add_column(column)
     labels = {"ready": "[green]downloaded[/green]", "unverified": "[yellow]not verified yet[/yellow]", "missing": "-"}
-    for m in rt.catalog.models:
-        notes = []
-        if m.tier == recommended.tier:
-            notes.append("recommended")
-        if m.tier == preferred:
-            notes.append("chosen")
-        if m.on_request and not notes:
-            notes.append("on request")
-        if not m.pinned:
-            notes.append("[red]not pinned[/red]")
-        table.add_row(escape(m.tier), escape(m.file), _gib(m.size), escape(m.license), labels[rt.model_state(m)],
+    for row in view.rows:
+        m = row.model
+        notes = ["[red]not pinned[/red]" if note == "not pinned" else note for note in row.notes()]
+        table.add_row(escape(m.tier), escape(m.file), _gib(m.size), escape(m.license), labels[row.state],
                       ", ".join(notes))
     console.print(table)
-    console.print(f"Recommended for this machine: {escape(why)}")
+    console.print(f"Recommended for this machine: {escape(view.why)}")
 
 
 @ditto_models.command('download')
@@ -2385,17 +2320,16 @@ def models_list(ctx: FrameworkContext):
 @pass_context
 def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
     """Download a model at its pinned revision and check size and sha256 (default: the recommended tier)"""
+    from orchestrator.runtime.ditto_models import model_to_download
     from orchestrator.runtime.llama_server import LocalRuntimeError
     rt = _local_runtime(ctx)
-    if tier is None:
-        model, why = rt.choose_tier()
+    try:
+        model, why = model_to_download(rt, tier)  # the GUI's Ditto > Local Models... asks for the same model
+    except KeyError as e:
+        console.print(f"[red]{escape(str(e.args[0]))}[/red]")
+        sys.exit(2)
+    if why is not None:
         console.print(f"Recommended: {escape(why)}")
-    else:
-        try:
-            model = rt.catalog.model(tier)
-        except KeyError as e:
-            console.print(f"[red]{escape(str(e.args[0]))}[/red]")
-            sys.exit(2)
     if rt.model_ready(model):
         console.print(f"[green]{escape(model.file)} is already downloaded.[/green]")
         return
@@ -2485,181 +2419,86 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
     """Grade Ditto on fixed cases with the chosen provider/model, e.g. to check whether a 2-bit local model is
     good enough, or the knowledge-base search (--kind retrieval, works offline once the embedding model is
     downloaded). Nothing is built or changed. Cloud providers bill every request (about 20 per run and repeat)."""
-    from orchestrator.evals.ditto_eval import DEFAULT_CASES, RETRIEVAL_CASES, DittoEval, load_cases, run_setup
+    from orchestrator.Core.ai_override import override_values
+    from orchestrator.Core.ditto_manager import DittoError
+    from orchestrator.evals.eval_run import (EvalEvents, EvalRunError, check_choice, retrieval_table, run_evaluation,
+                                             select_cases, summary_table, write_report)
+    from orchestrator.runtime.llama_server import LocalRuntimeError
     ctx.require_framework()
-    if tiers and (provider or model):
-        console.print("[red]--tier runs the managed local model; it cannot be combined with --provider/--model.[/red]")
-        sys.exit(2)
-    if cases_file:
-        files = [cases_file]
-    else:  # retrieval cases need the embedding model, not an AI model: only when asked for
-        files = [] if set(kinds) == {"retrieval"} else [DEFAULT_CASES]
-        if "retrieval" in kinds or (case_ids and not kinds):
-            files.append(RETRIEVAL_CASES)
+    # The same run as the GUI's Ditto > Evaluation... (evals/eval_run.py); this command prints it.
     try:
-        cases = [c for path in files for c in load_cases(path)]
-    except (OSError, ValueError) as e:
-        console.print(f"[red]Cannot read the cases: {escape(str(e))}[/red]")
-        sys.exit(2)
-    cases = [c for c in cases if (not kinds or c.kind in kinds) and (not case_ids or c.id in case_ids)]
-    if not cases:
-        console.print("[red]No case matches the filters.[/red]")
-        sys.exit(2)
-    ai_cases = [c for c in cases if c.kind != "retrieval"]
-    retrieval_cases = [c for c in cases if c.kind == "retrieval"]
+        check_choice(tiers, provider, model)
+        cases = select_cases(cases_file, kinds, case_ids)
+    except EvalRunError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(e.exit_code)
     fm = ctx.framework_manager
-    runs = []
 
-    def progress(result):
-        mark = "[green]pass[/green]" if result.pass_rate == 1 else (
-            "[red]fail[/red]" if result.pass_rate == 0 else f"[yellow]{result.pass_rate:.0%}[/yellow]")
-        note = f"  [dim]{escape(result.first_problem()[:160])}[/dim]" if result.pass_rate < 1 else ""
-        console.print(f"  {mark} {escape(result.case.id)} ({result.seconds:.1f}s){note}")
+    class Printed(EvalEvents):
+        def busy(self, step, **values):
+            text = {"start_tier": f"Starting llama-server with {values.get('tier')} ...",
+                    "index": f"Indexing {values.get('documents')} corpus documents into a temporary knowledge base "
+                             "(the embedding model is downloaded on first use) ...",
+                    "reranker": f"Loading the reranker {values.get('model')} (downloaded on first use) ..."}[step]
+            return console.status(text)
 
-    if ai_cases:
+        def run_started(self, label, name, run_model, count, times):
+            what = f"{escape(name)} / {escape(run_model)}" if name is not None else escape(run_model)
+            console.print(f"[bold]{escape(label)}[/bold]: {what}, {count} cases x {times}")
+
+        def result(self, result):
+            mark = "[green]pass[/green]" if result.pass_rate == 1 else (
+                "[red]fail[/red]" if result.pass_rate == 0 else f"[yellow]{result.pass_rate:.0%}[/yellow]")
+            note = f"  [dim]{escape(result.first_problem()[:160])}[/dim]" if result.pass_rate < 1 else ""
+            console.print(f"  {mark} {escape(result.case.id)} ({result.seconds:.1f}s){note}")
+
+        def server_replaced(self, served):
+            console.print(f"[yellow]Your llama-server ({escape(served)}) was replaced for the evaluation; "
+                          "start it again with: llm-cli ditto runtime start[/yellow]")
+
+        def unused_options(self):
+            console.print("[dim]--tier, --provider, --model and --effort apply to AI cases; retrieval needs none.[/dim]")
+
+    def make_ditto():
         ditto = _ai_override(ctx, "local" if tiers else provider, model)
-        if effort:
-            for key in ("ai_effort", "ai_effort_chat", "ai_effort_tools", "ai_effort_json", "ai_effort_healing"):
-                fm.config.set(key, effort)  # this run only; the saved settings stay unchanged
-        targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
+        for key, value in override_values(effort=effort).items():
+            fm.config.set(key, value)  # this run only; the saved settings stay unchanged
+        return ditto
 
-        def run_once(label: str):
-            from orchestrator.Core.ditto_manager import DittoError
-            ditto.reload()
-            try:
-                setup = ditto.describe("chat")
-            except DittoError as e:
-                console.print(f"[red]{escape(str(e))}[/red]")
-                sys.exit(1)
-            console.print(f"[bold]{escape(label)}[/bold]: {escape(setup['label'])} / {escape(setup['model'])}, "
-                          f"{len(ai_cases)} cases x {repeat}")
-            report = DittoEval(ditto, targets_dir).run(ai_cases, repeat=repeat, on_result=progress)
-            models = {}
-            for task in ("chat", "json", "healing"):  # each task may use its own model
-                try:
-                    models[task] = ditto.describe(task).get("model", "")
-                except DittoError:
-                    models[task] = ""
-            report.setup = run_setup(label, setup.get("provider", ""), setup.get("model", ""), cases_file, ai_cases,
-                                     repeat, task_models=models, effort=effort or "settings")
-            runs.append(report)
+    try:
+        runs = run_evaluation(fm, cases, make_ditto=make_ditto, make_runtime=lambda: _local_runtime(ctx), tiers=tiers,
+                              provider=provider, model=model, effort=effort, cases_file=cases_file,
+                              rag_variants=rag_variants, repeat=repeat, events=Printed())
+    except EvalRunError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(e.exit_code)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    except DittoError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
 
-        if tiers:
-            from orchestrator.runtime.llama_server import LocalRuntimeError
-            rt = _local_runtime(ctx)
-            before = rt.endpoint()  # a server you started yourself keeps running
-
-            def same_server(a, b) -> bool:
-                # pid and port: a server in Ditto's container has no process of this computer (pid 0)
-                return (a.pid, getattr(a, "port", None)) == (b.pid, getattr(b, "port", None))
-            for tier in tiers:
-                try:
-                    with console.status(f"Starting llama-server with {tier} ..."):
-                        rt.start(tier=tier, remember=False)
-                    run_once(f"tier {tier}")
-                except LocalRuntimeError as e:
-                    _runtime_failure(e)
-                finally:
-                    running = rt.endpoint()
-                    if before is None or running is None or not same_server(running, before):
-                        rt.stop()  # the eval's own server (or what is left of a failed start)
-            after = rt.endpoint()
-            if before is not None and (after is None or not same_server(after, before)):
-                console.print(f"[yellow]Your llama-server ({escape(before.model)}) was replaced for the evaluation; "
-                              "start it again with: llm-cli ditto runtime start[/yellow]")
-        else:
-            run_once("configured model" if not (provider or model) else f"{provider or ''} {model or ''}".strip())
-    elif tiers or provider or model or effort:
-        console.print("[dim]--tier, --provider, --model and --effort apply to AI cases; retrieval needs none.[/dim]")
-    if retrieval_cases:
-        runs += _eval_retrieval(fm, retrieval_cases, cases_file or RETRIEVAL_CASES, rag_variants or ("fused",),
-                                repeat, progress)
-
-    all_kinds = sorted({c.kind for c in cases})
+    columns, rows = summary_table(runs, sorted({c.kind for c in cases}))
     table = Table(title="Ditto evaluation")
-    for column in ("Run", "Model", "Passed", *all_kinds, "Avg s/case"):
+    for column in columns:
         table.add_column(column)
-    for report in runs:
-        kinds_rate = report.by_kind()
-        avg = sum(r.seconds for r in report.results) / len(report.results)
-        table.add_row(escape(report.setup["label"]), escape(report.setup["model"]), f"{report.pass_rate:.0%}",
-                      *[f"{kinds_rate[k]:.0%}" if k in kinds_rate else "-" for k in all_kinds], f"{avg:.1f}")
+    for row in rows:
+        table.add_row(escape(row[0]), escape(row[1]), *row[2:])
     console.print(table)
-    metrics = [(report, report.retrieval()) for report in runs if report.retrieval() is not None]
-    if metrics:
-        def share(value):
-            return "-" if value is None else f"{value:.0%}"
-
+    retrieval = retrieval_table(runs)
+    if retrieval is not None:
+        columns, rows = retrieval
         table = Table(title="Retrieval")
-        for column in ("Run", "hit@1", "hit@3", "hit@k", "MRR", "Unrelated: no excerpt", "p50 ms"):
+        for column in columns:
             table.add_column(column)
-        for report, m in metrics:
-            table.add_row(escape(report.setup["label"]), share(m["hit@1"]), share(m["hit@3"]), share(m["hit@k"]),
-                          "-" if m["mrr"] is None else f"{m['mrr']:.3f}", share(m["empty_when_irrelevant"]),
-                          f"{m['latency_p50_ms']:.0f}")
+        for row in rows:
+            table.add_row(escape(row[0]), *row[1:])
         console.print(table)
     if json_out:
-        json_out.write_text(json.dumps({"runs": [r.to_dict() for r in runs]}, indent=2, ensure_ascii=False),
-                            encoding="utf-8")
+        write_report(json_out, runs)
         console.print(f"Report written to {escape(str(json_out))}")
     if min_pass is not None and any(r.pass_rate < min_pass for r in runs):
         sys.exit(1)
-
-
-def _eval_retrieval(fm, cases, source: Path, variants, repeat: int, progress) -> list:
-    """Retrieval cases: the corpus is indexed once into a temporary knowledge base, one report per variant."""
-    import time
-    from orchestrator.evals.ditto_eval import (RetrievalEval, RetrievalEvalError, check_retrieval_cases,
-                                               corpus_digest, corpus_dir, load_corpus, run_setup,
-                                               temporary_knowledge_base)
-    try:
-        folder = corpus_dir(source)
-        docs = load_corpus(folder)
-        check_retrieval_cases(cases, docs)
-    except (OSError, ValueError) as e:
-        console.print(f"[red]Cannot read the retrieval corpus: {escape(str(e))}[/red]")
-        sys.exit(2)
-    reports = []
-    with temporary_knowledge_base(fm) as knowledge:
-        ev = RetrievalEval(knowledge, docs)
-        start = time.monotonic()
-        try:
-            with console.status(f"Indexing {len(docs)} corpus documents into a temporary knowledge base "
-                                "(the embedding model is downloaded on first use) ..."):
-                ev.ingest()
-        except RetrievalEvalError as e:
-            console.print(f"[red]{escape(str(e))}[/red]")
-            sys.exit(1)
-        index_seconds = round(time.monotonic() - start, 1)
-        embedding = str(knowledge.get_status().get("embedding_model", ""))
-        reranker = knowledge.reranker() if "rerank" in variants else None
-        if "rerank" in variants:
-            if reranker is None:
-                console.print(f"[red]The rerank variant needs a reranker: {escape(knowledge.reranker_reason)}. Set "
-                              "rag_reranker to a model id to grade one anyway.[/red]")
-                sys.exit(2)
-            with console.status(f"Loading the reranker {reranker.model_id} (downloaded on first use) ..."):
-                ready = knowledge.prepare_models()
-            if not ready:
-                console.print(f"[red]{escape(knowledge.last_error)}[/red]")
-                sys.exit(1)
-        for variant in dict.fromkeys(variants):
-            label, reranked = f"retrieval {variant}", variant == "rerank"
-            model = f"{embedding} + {reranker.model_id}" if reranked else embedding
-            console.print(f"[bold]{escape(label)}[/bold]: {escape(model)}, {len(cases)} cases x {repeat}")
-            report = ev.run(cases, variant=variant, repeat=repeat, on_result=progress)
-            try:
-                import psutil
-                rss_mb = round(psutil.Process().memory_info().rss / 2 ** 20)  # models loaded
-            except Exception:
-                rss_mb = None
-            used = {"model": reranker.model_id, "min_score": knowledge.rerank_floor(reranker)} if reranked else None
-            report.setup = run_setup(
-                label, "knowledge base", model, source, cases, repeat, variant=variant, reranker=used,
-                model_reason=knowledge.model_reason, corpus_sha256=corpus_digest(folder), corpus_documents=len(docs),
-                index_seconds=index_seconds, rss_mb=rss_mb)
-            reports.append(report)
-    return reports
 
 
 # ============================================================================
@@ -3749,21 +3588,14 @@ def knowledge_snapshots_list(ctx: FrameworkContext):
 def _print_snapshot_disk(ctx: FrameworkContext, total: int) -> None:
     """What the snapshots use against the free space of their disk, and whether the next one fits (eighth round,
     answer 2: a snapshot that does not fit stops the change that needs it; nothing is deleted by itself)."""
-    from orchestrator.Core.knowledge_snapshots import FREE_SPACE_STEP, room_before, size_text
-    try:
-        room = room_before(ctx.framework_manager.config.user_state_dir)
-    except OSError:
+    from orchestrator.Core.knowledge_snapshots import snapshot_disk
+    disk = snapshot_disk(ctx.framework_manager.config.user_state_dir, total)  # the GUI's line says the same
+    if disk is None:
         return
-    if room is None or room.check is None:
-        return
-    console.print(f"The snapshots use {size_text(total)}; {size_text(room.free)} are free on that disk.")
-    if room.verdict == "does_not_fit":
-        console.print(f"[yellow]The next snapshot (about {size_text(room.estimate)}) does not fit: Deep Ingest, "
-                      f"restoring a snapshot and importing a knowledge pack are refused until there is room. "
-                      f"{escape(FREE_SPACE_STEP)}[/yellow]")
-    elif room.verdict == "tight":
-        console.print(f"[yellow]The next snapshot (about {size_text(room.estimate)}) still fits, but leaves little "
-                      "free space.[/yellow]")
+    console.print(escape(disk.line()))
+    warning = disk.warning()
+    if warning:
+        console.print(f"[yellow]{escape(warning)}[/yellow]")
 
 
 def _delete_snapshots_cli(ctx: FrameworkContext, names: Optional[Tuple[str, ...]]) -> None:
@@ -3853,46 +3685,14 @@ def knowledge_storage(click_ctx):
         click_ctx.invoke(knowledge_storage_show)
 
 
-def _print_storage_summary(info: Dict[str, Any], state_dir: Path, used: Optional[str] = None) -> None:
+def _print_storage_summary(info: Dict[str, Any], state_dir: Path, used: Optional[str] = None,
+                           server: bool = False) -> None:
     """The storage the knowledge base really uses (`used`: qdrant-edge, old-local or server, as an open knowledge base
-    named it; else as the records say, nothing opened), the conversion and the old folder."""
-    from orchestrator.Core.knowledge_snapshots import size_text
+    named it; else a Qdrant server when `server` (setting qdrant_url), else as the records say, nothing opened), the
+    conversion and the old folder (migration.storage_status: Tools > Knowledge Snapshots... shows the same status)."""
     from orchestrator.rag import migration
-    from orchestrator.rag.errors import KnowledgeBaseError
-    reason = ""
-    if not used:
-        try:
-            use, reason = migration.current(state_dir)
-            used = "qdrant-edge" if use == "edge" else "old-local"
-        except KnowledgeBaseError as e:
-            used, reason = "", str(e)
-    state = info.get("state")
-    if used == "qdrant-edge":
-        console.print(f"Storage: Qdrant Edge in {escape(str(migration.edge_folder(state_dir)))}.")
-    elif used == "old-local":
-        console.print("Storage: the storage of earlier versions (qdrant-client's local mode) in "
-                      f"{escape(str(migration.old_folder(state_dir)))}.")
-        if reason and state != "failed":
-            console.print(f"{escape(reason)}.")
-    elif used == "server":
-        console.print("Storage: a Qdrant server (setting qdrant_url); the local storage is not used.")
-    else:
-        console.print(f"[red]{escape(reason)}[/red]")
-    if state == "converted":
-        console.print(f"Converted from the old storage on {escape(str(info.get('converted_at', '')))} "
-                      f"({int(info.get('points') or 0)} excerpts, counts and sample searches checked).")
-    elif state == "failed":
-        console.print(f"[yellow]The old storage is still in use: its conversion failed on "
-                      f"{escape(str(info.get('failed_at', '')))}: {escape(str(info.get('reason', '')))}[/yellow]")
-        console.print(escape(migration.retry_sentence(str(info.get("code") or ""))))
-    if info.get("old_folder"):
-        kept = size_text(int(info.get("old_folder_bytes") or 0))
-        if state == "converted":
-            console.print(f"The old folder {escape(str(info['old_folder']))} ({kept}) is kept until you delete it: "
-                          "'llm-cli knowledge storage delete-old' (or Tools > Knowledge Snapshots... > Delete the old "
-                          "storage... in the GUI) lists it and asks you first.")
-        else:
-            console.print(f"Old storage folder: {escape(str(info['old_folder']))} ({kept}).")
+    for style, line in migration.storage_lines(migration.storage_status(state_dir, info, used, server=server)):
+        console.print(f"[{style}]{escape(line)}[/{style}]" if style else escape(line))
 
 
 @knowledge_storage.command('show')
@@ -3903,7 +3703,8 @@ def knowledge_storage_show(ctx: FrameworkContext):
     from orchestrator.rag import migration
     ctx.require_framework()
     state_dir = Path(ctx.framework_manager.config.user_state_dir)
-    _print_storage_summary(migration.summary(state_dir), state_dir)
+    _print_storage_summary(migration.summary(state_dir), state_dir,
+                           server=migration.server_configured(ctx.framework_manager.config))
 
 
 @knowledge_storage.command('convert')
@@ -3914,11 +3715,16 @@ def knowledge_storage_convert(ctx: FrameworkContext):
     from orchestrator.rag import migration
     ctx.require_framework()
     state_dir = Path(ctx.framework_manager.config.user_state_dir)
-    if not migration.old_store_present(state_dir) or migration.edge_in_use(state_dir):
+    server = migration.server_configured(ctx.framework_manager.config)
+    refusal = migration.convert_refusal(state_dir, server)   # the GUI's [Convert now] is offered on the same condition
+    if refusal == "nothing":
         console.print("There is no old storage to convert.")
-        _print_storage_summary(migration.summary(state_dir), state_dir)
+        _print_storage_summary(migration.summary(state_dir), state_dir, server=server)
         return
-    if not migration.engine_available():
+    if refusal == "server":   # the knowledge base would open the server: nothing would be converted
+        console.print(f"[red]{escape(migration.SERVER_IN_USE)}; nothing was converted.[/red]")
+        sys.exit(1)
+    if refusal == "engine_missing":
         console.print(f"[red]{escape(migration.ENGINE_MISSING)}; nothing can be converted.[/red]")
         sys.exit(1)
     ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
@@ -4023,35 +3829,30 @@ def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
 def knowledge_sources(ctx: FrameworkContext, kind: str):
     """What the knowledge base holds: every source with the licence and copyright notice it shows, and what a
     knowledge pack would carry of it (full text, or only its address and short facts) and why"""
+    from orchestrator.Core import knowledge_sources as ks   # Tools > Knowledge Sources... lists the same
     from orchestrator.rag.errors import KnowledgeBaseError
     ctx.require_framework()
-    ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
-    rag = ensure() if callable(ensure) else None
-    if rag is None:
-        console.print("[red]The knowledge base is off (setting enable_rag_knowledge). Switch it on in the GUI's AI "
-                      "settings first.[/red]")
+    try:
+        rag = ks.knowledge_base(ctx.framework_manager)
+    except ks.KnowledgeOff as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     try:
-        entries = [e for e in rag.list_sources() if kind in ("any", e["kind"])]
+        entries = ks.sources(rag, kind)
     except KnowledgeBaseError as e:
         console.print(f"[red]The knowledge base cannot be read: {escape(str(e))}[/red]")
         sys.exit(1)
     if not entries:
-        console.print("The knowledge base holds no source" + ("." if kind == "any" else f" of kind {kind}."))
+        console.print(ks.empty_sentence(kind))
         return
-    carried = {"full_text": "full text", "link_and_facts": "link and short facts", "not_exported": "not exported"}
     table = Table(title="Knowledge sources, their licence and what a knowledge pack carries of them")
     for column in ("Source", "Kind", "Licence", "Copyright notice", "In a pack", "Why"):
         table.add_column(column, overflow="fold")
     for e in entries:   # addresses, titles and notices are site text: escaped, never markup
         table.add_row(escape(e["source"]), e["kind"], escape(e.get("licence") or "-"),
-                      escape(e.get("copyright") or "-"), carried.get(e.get("pack_share", ""), "-"),
-                      escape(e.get("share_reason") or ""))
+                      escape(e.get("copyright") or "-"), ks.carried(e), escape(e.get("share_reason") or ""))
     console.print(table)
-    full = sum(1 for e in entries if e.get("pack_share") == "full_text")
-    facts = sum(1 for e in entries if e.get("pack_share") == "link_and_facts")
-    console.print(f"{len(entries)} source(s): a knowledge pack would carry {full} with their full text and {facts} "
-                  "only as their address and short facts (llm-cli zoo export knowledge lists them again).")
+    console.print(escape(ks.totals_sentence(entries)))
 
 
 # ============================================================================
@@ -5753,40 +5554,9 @@ def config():
 def show_config(ctx: FrameworkContext):
     """Show the effective settings (config.yml, a -c file, LLM_FRAMEWORK_* variables, defaults) as JSON, each with
     its source; secrets are redacted"""
+    from orchestrator.Core.settings_view import effective_settings
     config, _ = _settings(ctx)
-    click.echo(json.dumps(_effective_settings(config), indent=2, default=str, ensure_ascii=False))
-
-
-# Settings that are not part of the schema but look like credentials are never printed.
-SECRET_NAME = re.compile(r"(?i)(^|[_.-])(token|password|passwd|secret|api_?key|access_key|private_key|credentials?)"
-                         r"($|[_.-])")
-
-
-def _redacted(value: Any) -> Any:
-    if isinstance(value, str):
-        return redact_secrets(value)
-    if isinstance(value, dict):  # below a key that names a credential, even a value no pattern recognizes
-        return {k: "REDACTED" if v and SECRET_NAME.search(str(k)) else _redacted(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_redacted(v) for v in value]
-    return value
-
-
-def _effective_settings(config) -> Dict[str, Any]:
-    """Every setting with its value and source (default, a file, the environment, or changed in this run)."""
-    result = {}
-    values = getattr(config, "config_values", {})
-    for key in sorted(values):
-        entry = values[key]
-        src = entry.source
-        source = f"file {src.source_path}" if src.source_type == "file" and src.source_path else src.source_type
-        unknown = getattr(entry, "schema", None) is None
-        if getattr(entry, "is_secret", False) or (unknown and SECRET_NAME.search(key) and entry.value):
-            value = "REDACTED"
-        else:
-            value = _redacted(entry.value)
-        result[key] = {"value": value, "source": source}
-    return result
+    click.echo(json.dumps(effective_settings(config), indent=2, default=str, ensure_ascii=False))
 
 
 @config.command('output-folder')
@@ -5822,48 +5592,36 @@ def config_output_folder(ctx: FrameworkContext, folder: Optional[str]):
 @pass_context
 def config_repos(ctx: FrameworkContext, add, remove):
     """Manage SSOT Source Repositories"""
+    from orchestrator.Core.settings_view import (RepoOverrideError, add_repo_override, remove_repo_override,
+                                                 repo_overrides)
     ctx.require_framework()
     cm = ctx.framework_manager.config
-    current_repos = dict(cm.get("source_repositories", {}) or {})
-    
-    def save():
-        if not (cm.set("source_repositories", current_repos) and cm.save_user_config()):
-            console.print(f"[red]Not saved: {escape(str(Path(cm.config_dir) / 'config.yml'))} could not be updated "
-                          f"(see the log); the repository overrides are unchanged.[/red]")
-            sys.exit(1)
-
-    if add:
-        name, url = add
-        from orchestrator.Core.builder import repo_override_names
-        variables = repo_override_names(name)
-        if not variables:  # the build engine could not pass it on under any name
-            console.print(f"[red]Invalid name {escape(repr(name))}: it needs ASCII letters or digits (it becomes "
-                          f"<NAME>_REPO_OVERRIDE, e.g. llama.cpp -> LLAMA_CPP_REPO_OVERRIDE).[/red]")
-            sys.exit(2)
-        # The shape the build engine passes on as <NAME>_REPO_OVERRIDE (plain URLs of earlier versions still work).
-        current_repos[name.lower()] = {"url": url}
-        save()
-        console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(redact_secrets(url))} (passed to "
-                      f"builds as {escape(variables[0])})[/green]")
-    elif remove:
-        if remove.lower() in current_repos:
-            del current_repos[remove.lower()]
-            save()
-            console.print(f"[green]Removed repo override: {escape(remove)}[/green]")
+    # The same functions as File > Settings... in the GUI.
+    try:
+        if add:
+            name, url = add
+            variable = add_repo_override(cm, name, url)
+            console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(redact_secrets(url))} "
+                          f"(passed to builds as {escape(variable)})[/green]")
+        elif remove:
+            if remove_repo_override(cm, remove):
+                console.print(f"[green]Removed repo override: {escape(remove)}[/green]")
+            else:
+                console.print(f"[yellow]Repo {escape(remove)} not found.[/yellow]")
         else:
-            console.print(f"[yellow]Repo {escape(remove)} not found.[/yellow]")
-    else:
-        # List
-        if not current_repos:
-            console.print("[yellow]No repository overrides defined.[/yellow]")
-        else:
-            table = Table(title="Source Repositories (SSOT)")
-            table.add_column("Key", style="cyan")
-            table.add_column("URL", style="green")
-            for k, v in current_repos.items():
-                url = v.get('url') if isinstance(v, dict) else v
-                table.add_row(escape(str(k)), escape(redact_secrets(str(url or "-"))))
-            console.print(table)
+            current_repos = repo_overrides(cm)
+            if not current_repos:
+                console.print("[yellow]No repository overrides defined.[/yellow]")
+            else:
+                table = Table(title="Source Repositories (SSOT)")
+                table.add_column("Key", style="cyan")
+                table.add_column("URL", style="green")
+                for k, url in current_repos.items():
+                    table.add_row(escape(k), escape(redact_secrets(url)))
+                console.print(table)
+    except RepoOverrideError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2 if e.code == "invalid_name" else 1)
 
 # ============================================================================
 # COMMUNITY ZOO (signed community packs: targets, recipes, knowledge)
@@ -5893,17 +5651,11 @@ def _zoo_fail(error: Exception, code: int = 1):
 
 
 def _public_keys(files, kind):
-    from orchestrator.Core.community_pack import parse_public_keys
-    keys = []
-    for f in files:
-        try:
-            text = Path(f).read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            _zoo_fail(click.UsageError(f"{f} is not a text file with public keys (see 'llm-cli zoo keys')."), 2)
-        keys += [k for k in parse_public_keys(text) if isinstance(k, kind)]
-    if files and not keys:
-        _zoo_fail(ValueError("The key files contain no usable public key (see 'llm-cli zoo keys')."), 2)
-    return keys
+    from orchestrator.Core.community_pack import KeyFileError, read_public_key_files
+    try:
+        return read_public_key_files(files, kind)   # the Community Hub reads key files the same way
+    except KeyFileError as e:
+        _zoo_fail(click.UsageError(str(e)) if e.code == "not_text" else ValueError(str(e)), 2)
 
 
 @zoo.command('list')
@@ -5936,22 +5688,11 @@ def zoo_list(ctx: FrameworkContext, kind: Optional[str], refresh: bool, as_json:
 @pass_context
 def zoo_show(ctx: FrameworkContext, pack_id: str, kind: Optional[str]):
     """Show one entry of the zoo (and an installed recipe)"""
-    cm = _zoo(ctx)
-    items = [i for i in cm.list_items(cm.cached_index())
-             if i.id.casefold() == pack_id.casefold() and (not kind or i.kind == kind)]
-    if not items:
+    found = _zoo(ctx).details(pack_id, kind)   # the Community Hub's Details... shows the same
+    if not found:
         _zoo_fail(ValueError(f"'{pack_id}' is neither in the cached index nor installed (llm-cli zoo list --refresh)."))
-    for i in items:
-        lines = [f"{i.kind} {i.id} {i.version} by {i.author} ({i.license or 'licence unknown'})",
-                 f"Trust: {i.trust.value}" + (f" - revoked: {i.revoked}" if i.revoked else ""),
-                 f"Installed: {i.installed_version or 'no'}" + (f" in {i.path}" if i.path else "")]
-        if i.entry:
-            lines += [f"Download: {i.entry.url} ({i.entry.size} bytes, sha256 {i.entry.sha256})"]
-        if i.description:
-            lines.append(i.description)
-        if i.kind == "recipe" and i.path and (i.path / "recipe.yml").is_file():
-            lines += ["", (i.path / "recipe.yml").read_text(encoding="utf-8")]
-        console.print(Panel(escape("\n".join(lines)), title=escape(i.title)))
+    for details in found:
+        console.print(Panel(escape("\n".join(details.lines())), title=escape(details.item.title)))
 
 
 @zoo.command('install')

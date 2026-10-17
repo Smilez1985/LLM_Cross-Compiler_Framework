@@ -136,7 +136,9 @@ def test_the_boards_menu_opens_the_window_from_the_menu_bar(qapp, tmp_path, monk
     qapp.processEvents()
     try:
         titles = [a.text() for a in win.menuBar().actions()]
-        assert titles.index("Boards") == titles.index(win.i18n.t("menu.file", "File")) + 1, titles
+        # the design's order: File, Build, Boards (with the Build menu of wave 5b, Boards follows Build)
+        assert titles.index("Build") == titles.index(win.i18n.t("menu.file", "File")) + 1, titles
+        assert titles.index("Boards") == titles.index("Build") + 1, titles
         action = win.findChild(type(win.act_boards_devices), menu_module.ACTION_NAME)
         assert action is win.act_boards_devices and action.text() == "Boards and Devices..."
         assert action in win.menu_boards.actions()
