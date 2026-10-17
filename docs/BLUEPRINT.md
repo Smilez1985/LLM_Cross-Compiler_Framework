@@ -175,13 +175,13 @@ in check by layers, each importing only itself and the ones below it:
 | 5. Tool definitions | `orchestrator/tools/tools_*`, `framework_*`, `gui_bridge`, `gui_surface` | layers 1 to 5 |
 | 6. Adapters | `orchestrator/cli.py`, `orchestrator/mcp_server.py`, `orchestrator/gui/` with `main.py` | everything except another adapter |
 
-PySide6 lives only in the GUI, click and rich only in the CLI, mcp and uvicorn only in the MCP server, paramiko only
-in the SSH layer. `tests/test_layering.py` checks every import (also inside functions and lazy ones) against these
-rules; today's exceptions stand in `tests/data/layering_allowlist.json` with their reason and the chain that removes
-them, and the list and the largest import cycle may only shrink. Shared helpers therefore live below the tools: path
-labels for AIs in `security/paths.py`, private atomic files in `utils/atomic.py`, one-time notices in
-`utils/notice_store.py`, image references in `utils/image_ref.py`, the SSRF-safe HTTP adapter in `security/http.py`,
-the audit key in `Core/vault_key.py`.
+PySide6 lives only in the GUI, click and rich only in the CLI, mcp and uvicorn only in the MCP server, paramiko only in
+the SSH transport (`utils/ssh_trust.py`, later `remote/transport.py`). `tests/test_layering.py` checks every import
+(also inside functions and lazy ones) against these rules; today's exceptions stand in
+`tests/data/layering_allowlist.json` with their reason and the chain that removes them, and the list and the largest
+import cycle may only shrink. Shared helpers therefore live below the tools: path labels for AIs in `security/paths.py`,
+private atomic files in `utils/atomic.py`, one-time notices in `utils/notice_store.py`, image references in
+`utils/image_ref.py`, the SSRF-safe HTTP adapter in `security/http.py`, the audit key in `Core/vault_key.py`.
 
 ### Components
 

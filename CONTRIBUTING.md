@@ -536,19 +536,19 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   shell commands with `shlex.quote`.
 - External text (web pages, logs, probe files, knowledge base, tool results) reaches a language model only through
   `orchestrator/utils/untrusted.py`, and never in a system prompt.
-- **Imports point down the layers.** Every module of `orchestrator/` has a layer, and it imports only its own layer
-  or a lower one: (1) bottom: `utils/`, `security/`, `schemas/`; (2) remote: `remote/` and `utils/ssh_trust.py`;
-  (3) kernel: the modules of `tools/` that define no tools (registry, policy, audit, approvals, signing, spec, ...);
-  (4) domain: `Core/`, `runtime/`, `rag/`, `llm/`, `evals/`, where `llm` and `rag` never import `Core`; (5) tool
+- **Imports point down the layers.** Every module of `orchestrator/` has a layer, and it imports only its own layer or
+  a lower one: (1) bottom: `utils/`, `security/`, `schemas/`; (2) remote: `remote/` and `utils/ssh_trust.py`; (3)
+  kernel: the modules of `tools/` that define no tools (registry, policy, audit, approvals, signing, spec, ...); (4)
+  domain: `Core/`, `runtime/`, `rag/`, `llm/`, `evals/`, where `llm` and `rag` never import `Core`; (5) tool
   definitions: `tools/tools_*`, `framework_*`, `gui_bridge`, `gui_surface`; (6) adapters: `cli.py`, `mcp_server.py`,
-  `gui/` with `main.py`, and no adapter imports another. PySide6 lives only in the GUI, click and rich only in the
-  CLI, mcp and uvicorn only in the MCP server, paramiko only in the SSH layer. `tests/test_layering.py` reads every
-  import (also inside functions, under `TYPE_CHECKING` and module names handed to `import_module`,
-  `lazy_attributes` or `LazyModule`). What breaks a rule today stands in `tests/data/layering_allowlist.json`, each
-  entry with its reason and the chain that removes it; the test fails on a new violation and on an entry that no
-  longer happens (remove it), and the largest import cycle may only shrink (lower `largest_cycle` when it does).
-  `python tests/test_layering.py` prints today's lists. Shared code a lower layer needs moves down instead of being
-  imported upward; the old place keeps the name as a re-export.
+  `gui/` with `main.py`, and no adapter imports another. PySide6 lives only in the GUI, click and rich only in the CLI,
+  mcp and uvicorn only in the MCP server, paramiko only in the SSH transport (`utils/ssh_trust.py`, later
+  `remote/transport.py`). `tests/test_layering.py` reads every import (also inside functions, under `TYPE_CHECKING` and
+  module names handed to `import_module`, `lazy_attributes` or `LazyModule`). What breaks a rule today stands in
+  `tests/data/layering_allowlist.json`, each entry with its reason and the chain that removes it; the test fails on a
+  new violation and on an entry that no longer happens (remove it), and the largest import cycle may only shrink (lower
+  `largest_cycle` when it does). `python tests/test_layering.py` prints today's lists. Shared code a lower layer needs
+  moves down instead of being imported upward; the old place keeps the name as a re-export.
 - **Shared helpers have one home below the tools.** Paths in text an AI reads: `orchestrator/security/paths.py`
   (`label_paths`, `shorten_home`, `device_text`, `scrub_for_ai`, and the home-folder patterns `HOME_ROOT` and
   `ACCOUNT_NAME` that other scrubbers build on). Private atomic files: `orchestrator/utils/atomic.py`
