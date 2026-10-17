@@ -227,6 +227,46 @@ def test_marking_keeps_the_widgets_own_description_and_tooltip_for_screen_reader
     assert TERMS["gguf"].link in button.accessibleDescription()
 
 
+def test_a_retranslated_tooltip_replaces_the_old_one_in_the_description():
+    """Review fix: the widget's own part of the description was remembered at the first mark, so after a language
+    switch (new tooltip, explain() again in the new language) the screen reader still read the old tooltip. Only a
+    description the window set itself is remembered; a tooltip is read anew each time."""
+    from PySide6.QtWidgets import QComboBox
+    combo = QComboBox()
+    combo.setToolTip(plain.plain_tooltip("Pick the quantization type"))
+    explain.explain(combo, "q4_k_m", lang="en")
+    assert combo.accessibleDescription().startswith("Pick the quantization type About 4.5 bits")
+    combo.setToolTip(plain.plain_tooltip("Wähle den Quantization-Typ"))
+    explain.explain(combo, "q4_k_m", lang="de")
+    description = combo.accessibleDescription()
+    assert description.startswith("Wähle den Quantization-Typ Etwa 4,5 Bit") and "Pick the" not in description
+    combo.setAccessibleDescription("Eigene Beschreibung des Fensters.")   # the window sets its own text again
+    explain.explain(combo, "q4_k_m", lang="de")
+    assert combo.accessibleDescription().startswith("Eigene Beschreibung des Fensters. Etwa 4,5 Bit")
+
+
+def test_only_plain_f1_opens_the_card(opened):
+    """Review fix: Shift+F1, Ctrl+F1 and the like were taken too (and kept from window shortcuts); only F1 itself is
+    the glossary's key."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication, QComboBox
+    combo = QComboBox()
+    explain.explain(combo, "gguf")
+    combo.show()
+    for modifier in (Qt.ShiftModifier, Qt.ControlModifier, Qt.AltModifier):
+        QApplication.sendEvent(combo, QKeyEvent(QEvent.KeyPress, Qt.Key_F1, modifier))
+        assert explain.hover_controller().card is None, modifier
+        override = QKeyEvent(QEvent.ShortcutOverride, Qt.Key_F1, modifier)
+        override.ignore()
+        QApplication.sendEvent(combo, override)
+        assert not override.isAccepted(), modifier
+    QApplication.sendEvent(combo, QKeyEvent(QEvent.KeyPress, Qt.Key_F1, Qt.KeypadModifier))
+    assert explain.hover_controller().card is not None, "F1 itself, wherever the key sits"
+    explain.hover_controller().close_card()
+    combo.close()
+
+
 def test_f1_and_the_help_button_open_a_pinned_card_for_the_keyboard(opened):
     from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QKeyEvent
