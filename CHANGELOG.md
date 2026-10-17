@@ -11,8 +11,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 
 ### Added
 - **Deployment tab: every `deploy package` and `deploy run` option by mouse** (W1', GUI parity): **Create package
-  only…** makes the package of the selected build (or a model file you choose) for the chosen profile without
-  contacting any board, with Docker images for a board without network if you tick Docker; the folder dialog opens at
+  only…** makes the package of the selected build for the chosen profile without contacting any board, with Docker
+  images for a board without network if you tick Docker, and **Other build or model file…** adds any build folder or
+  model file to the build list (the CLI takes any path, too); the folder dialog opens at
   the output folder as for every golden artifact, and the message names the package's full path or the reason and
   the next step (`llm-cli deploy package`, the same core step). **Deploy existing package…** uploads a ZIP made
   earlier (`deploy run PACKAGE_PATH`). The new **Port**, **Name** and **Wait for the board** fields are `--port`,
@@ -22,8 +23,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Builder tab > Scan / Import...: every `llm-cli scan` option by mouse** (W1', GUI parity): **Scan Local Host** now
   runs the CLI's own step, the Python probe, and stores the result as this computer's probe (probe id `local`, the one
   AI clients and Ditto name), with its notes and the "run the probe again" warning in the log; **Scan Local Host with
-  the Fallback Script** (`--script`) and **Scan Local Host and Save the Profile As...** (`--output`; a `.json` file
-  gets the JSON view, `--json`) are new. **Remote Scan via SSH...** gets **Port** and **Name** fields and, like `scan
+  the Fallback Script** (`--script`), **Scan Local Host and Save the Profile As...** (`--output`; a `.json` file
+  gets the JSON view, `--json`) and both together are new. **Remote Scan via SSH...** gets **Port** and **Name** fields and, like `scan
   --device`, writes the board's trusted, paired record (audited), so the board appears in the benchmark list and AI
   deploys can name it; the CLI and the GUI share one core step (`scan_steps.scan_device`). **Import from File** asks
   for the board's name (`--label`).

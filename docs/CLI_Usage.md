@@ -549,8 +549,10 @@ Only model files are deployed without Docker; builds that produced several weigh
 cannot be made prints the reason and exits with 1; the ZIP is written under a temporary name and renamed when it is
 complete.
 
-In the GUI: Deployment tab > **Create package only…**: the selected build (with none selected, a model file you
-choose), the tab's **Profile** and **Use Docker Containerization?** for `--docker`. No board is contacted, so this is
+In the GUI: Deployment tab > **Create package only…**: the selected build, the tab's **Profile** and **Use Docker
+Containerization?** for `--docker`. Any other build folder or model file (`ARTIFACT` takes any path) joins the list
+with **Other build or model file…** > **Build Folder…** or **Model File…**, for this button and for **Deploy to
+Target**; with no build selected, the button asks for a model file. No board is contacted, so this is
 the way for a board without network. A folder dialog opens at the output folder: OK keeps it, another folder is
 checked as for every golden artifact (Cancel makes nothing). The message names the package's full path, or the reason
 and the next step; **Cancel** stops the packaging and no partial file stays.
@@ -1636,7 +1638,8 @@ A machine without network access runs a probe by hand, and you import its file
 
 In the GUI: Builder tab > **Scan / Import...**: **Scan Local Host** (the Python probe, stored as this computer's
 profile, as `llm-cli scan` does), **Scan Local Host with the Fallback Script** (`--script`), **Scan Local Host and
-Save the Profile As...** (`--output`; a `.json` file gets the JSON view of `--json`), **Remote Scan via SSH...**
+Save the Profile As...** (`--output`; a `.json` file gets the JSON view of `--json`), **Scan Local Host with the
+Fallback Script and Save the Profile As...** (`--script --output`), **Remote Scan via SSH...**
 (`--device` with **Port** and **Name** for `--port` and `--label`; the same remote probe, so boards with `/tmp`
 mounted `noexec` work, and the board is added to the trusted devices as by the CLI) and **Import from File
 (USB/Disk)...** (`--import`; asks for the board's name, `--label`). The host key and every probe run in the

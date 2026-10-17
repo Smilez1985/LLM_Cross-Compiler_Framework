@@ -567,8 +567,11 @@ Ohne Docker werden nur Modelldateien übertragen; Builds mit mehreren Gewichtsda
 das nicht erstellt werden kann, gibt den Grund aus und endet mit 1; das ZIP wird unter einem vorläufigen Namen
 geschrieben und erst umbenannt, wenn es vollständig ist.
 
-In der GUI: Tab Deployment > **Nur Paket erstellen…**: der ausgewählte Build (ist keiner ausgewählt, eine Modelldatei,
-die du wählst), das **Profile** des Tabs und **Use Docker Containerization?** für `--docker`. Kein Board wird
+In der GUI: Tab Deployment > **Nur Paket erstellen…**: der ausgewählte Build, das **Profile** des Tabs und **Use Docker
+Containerization?** für `--docker`. Jeder andere Build-Ordner und jede Modelldatei (`ARTIFACT` nimmt jeden Pfad)
+kommt mit **Anderer Build oder Modelldatei…** > **Build-Ordner…** oder **Modelldatei…** in die Liste, für diese
+Schaltfläche und für **Deploy to Target**; ist kein Build ausgewählt, fragt die Schaltfläche nach einer Modelldatei.
+Kein Board wird
 kontaktiert, so geht es auch für ein Board ohne Netz. Ein Ordnerdialog öffnet sich beim Ausgabeordner: OK behält ihn,
 ein anderer Ordner wird geprüft wie für jedes Golden Artifact (Abbrechen erstellt nichts). Die Meldung nennt den vollen
 Pfad des Pakets oder den Grund und den nächsten Schritt; **Abbrechen** stoppt das Packen, und keine halbe Datei bleibt.
@@ -1698,6 +1701,7 @@ Ein Rechner ohne Netzzugang führt eine Probe von Hand aus, und du importierst i
 In der GUI: Tab Builder > **Scan / Import...**: **Scan Local Host** (die Python-Probe, als Profil dieses Rechners
 gespeichert, wie `llm-cli scan` es tut), **Lokalen Rechner mit dem Ersatz-Skript scannen** (`--script`), **Lokalen
 Rechner scannen und Profil speichern unter...** (`--output`; eine `.json`-Datei bekommt die JSON-Ansicht von `--json`),
+**Lokalen Rechner mit dem Ersatz-Skript scannen und Profil speichern unter...** (`--script --output`),
 **Remote Scan via SSH...** (`--device` mit **Port** und **Name** für `--port` und `--label`; dieselbe entfernte Probe,
 also auch auf Boards, die `/tmp` mit `noexec` einhängen, und das Board kommt wie über die CLI zu den vertrauten
 Geräten) und **Import from File (USB/Disk)...** (`--import`; fragt nach dem Namen des Boards, `--label`). Der
