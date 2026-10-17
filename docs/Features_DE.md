@@ -335,6 +335,18 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
 - **Paket:** eine ZIP-Datei mit der Modelldatei, Manifest und Model Card des Builds, `checksums.sha256` und einem
   erzeugten `deploy.sh`. Übertragen werden nur Modelldateien (`.gguf`, `.rkllm`, `.rknn`, `.onnx`, `.safetensors`,
   `.bin`); ein Build mit mehreren Gewichtsdateien wird abgelehnt.
+- **Ein Paket ohne Board** (`llm-cli deploy package`; GUI: Tab Deployment > **Nur Paket erstellen…**): das Paket des
+  ausgewählten Builds für das gewählte Profil, mit Docker-Images für ein Board ohne Netz, wenn du **Use Docker
+  Containerization?** ankreuzt. Wie die CLI nimmt die GUI jeden Pfad: **Anderer Build oder Modelldatei…** fügt der
+  Build-Liste einen Build-Ordner oder eine Modelldatei hinzu. Kein Board wird kontaktiert. Die GUI öffnet den
+  Ordnerdialog beim Ausgabeordner, wie für jedes Golden Artifact, und nennt den vollen Pfad des Pakets oder, wenn es
+  nicht erstellt werden kann, den Grund und den nächsten Schritt. Kopiere es auf das Board und starte dort
+  `deploy.sh`, oder deploye es später.
+- **Ein vorhandenes Paket** (`llm-cli deploy run PACKAGE_PATH`; GUI: Tab Deployment > **Vorhandenes Paket
+  deployen…**): ein früher erstelltes ZIP geht an das Board im Adressfeld, mit derselben Frage zum Host-Schlüssel,
+  demselben einmaligen Passwort, demselben Warten und demselben Eintrag bei den vertrauten Geräten wie **Deploy to
+  Target**. Die Felder **Port**, **Name** und **Auf das Board warten** des Tabs sind `--port`, `--label` und `--wait`
+  der CLI, für beide Schaltflächen.
 - **Auf dem Board:** Das Paket kommt in einen privaten temporären Ordner (`mktemp -d`), `deploy.sh` (mit `sh`
   ausgeführt, also auch auf Boards, die `/tmp` mit `noexec` einhängen oder kein bash haben) prüft jede Prüfsumme mit
   `sha256sum -c`, kopiert das Modell nach `~/models` (oder `$MODEL_DIR`), und der temporäre Ordner wird
@@ -2622,9 +2634,15 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   Python-Probe und behält das Profil als `local`; `llm-cli scan --device` führt sie per SSH auf einem Board aus (die
   Python-Probe mit `python3 -I`, wenn das Board Python 3.8 oder neuer hat, sonst die Shell-Probe; auf dem Board wird
   nichts installiert) und behält das Profil unter der ID des Boards; der SSH-Benutzer wird zum Deploy-Benutzer des
-  Boards (nie root). In der GUI importiert **Scan / Import...** eine Probe-Datei, untersucht ein Board per SSH mit
-  denselben Regeln für das Vertrauen beim ersten Kontakt wie beim Deployment oder untersucht diesen PC; die
-  Scan-Ergebnisse legt sie in `<cache_dir>/probes/` ab. Der SSH-Scan der GUI nutzt dieselbe entfernte Probe wie
+  Boards (nie root). GUI: Tab Builder > **Scan / Import...** führt dieselben Schritte aus wie die CLI: **Scan Local
+  Host** (die Python-Probe, als `local` behalten), **Lokalen Rechner mit dem Ersatz-Skript scannen** (`--script`),
+  **Lokalen Rechner scannen und Profil speichern unter...** (`--output`, eine `.json`-Datei für `--json`), **Lokalen
+  Rechner mit dem Ersatz-Skript scannen und Profil speichern unter...** (`--script --output`), **Remote
+  Scan via SSH...** (`--device`, mit **Port** und **Name**; dieselben Regeln für das Vertrauen beim ersten Kontakt wie
+  beim Deployment, der Host-Schlüssel im Hintergrund gelesen, und das Board kommt wie über die CLI zu den vertrauten
+  Geräten) und **Import from File (USB/Disk)...** (`--import`, fragt nach dem Namen des Boards). Eine Kopie jedes
+  Ergebnisses legt sie für den Target-Abgleich in `<cache_dir>/probes/` ab. Der SSH-Scan der GUI nutzt dieselbe
+  entfernte Probe wie
   `llm-cli scan --device`: Das Skript kommt über den SSH-Kanal, also funktioniert er auch auf Boards, die `/tmp` mit
   `noexec` einhängen, und das Profil wird unter der ID des Boards abgelegt. Rechner ohne
   Netzzugang führen eine Probe von Hand aus ([README](../README_DE.md#die-hardware-des-boards-untersuchen)).

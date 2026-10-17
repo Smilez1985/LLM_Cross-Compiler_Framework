@@ -83,18 +83,47 @@ class SSHConnectDialog(QDialog):
         layout.addRow("Username:", self.user_input)
         self.pass_input.setPlaceholderText("first connection only - never stored")
         layout.addRow("Password:", self.pass_input)
-        
+        self._add_port_and_label(layout)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        
+
+    def _add_port_and_label(self, layout):
+        """The board's SSH port and the person's name for it (`llmcf scan --device ... --port --label`)."""
+        from PySide6.QtWidgets import QSpinBox
+        from orchestrator.gui.plain import plain_tooltip
+        self.setFixedWidth(360)
+        self.port_input = QSpinBox()
+        self.port_input.setObjectName("spin_scan_port")
+        self.port_input.setRange(1, 65535)
+        self.port_input.setValue(22)
+        self.port_input.setToolTip(plain_tooltip(ui_text("deploy.port.tip")))
+        layout.addRow(ui_text("deploy.port"), self.port_input)
+        self.label_input = QLineEdit()
+        self.label_input.setObjectName("txt_scan_label")
+        self.label_input.setMaxLength(64)
+        self.label_input.setPlaceholderText(ui_text("deploy.label.hint"))
+        self.label_input.setToolTip(plain_tooltip(ui_text("deploy.label.tip")))
+        layout.addRow(ui_text("deploy.label"), self.label_input)
+
     def get_data(self):
         return self.ip_input.currentText().strip(), self.user_input.text(), self.pass_input.text()
+
+    def get_options(self):
+        """(port, the person's name for the board or None)."""
+        return int(self.port_input.value()), " ".join(self.label_input.text().split()) or None
 
 # --- WORKERS ---
 
 LOCAL_PROBE_FILE = "target_hardware_config_local.txt"  # the probe of this computer, in probe_result_dir()
+
+
+def choose_save_file(parent, title: str, start: str, filters: str):
+    """The operating system's own save dialog: (path, chosen filter); ("", "") when the person cancels (tests
+    replace it)."""
+    return QFileDialog.getSaveFileName(parent, title, start, filters)
 
 
 def probe_result_dir(framework) -> Path:
@@ -108,7 +137,9 @@ def probe_result_dir(framework) -> Path:
 
 
 class LocalProbeWorker(QThread):
-    """Runs the hardware probe on this computer; the probe writes output_file (see probe_result_dir)."""
+    """Runs the fallback probe script on this computer; the probe writes output_file (see probe_result_dir). The scan
+    menu now uses LocalScanWorker (the CLI's own step: the Python probe by default, the result stored as this
+    computer's probe); this worker stays for callers that run the script file directly."""
     finished = Signal(bool, str, str) # success, message, file_path
     
     def __init__(self, script_path, output_file):
@@ -143,63 +174,105 @@ class LocalProbeWorker(QThread):
         except Exception as e:
             self.finished.emit(False, str(e), "")
 
+class LocalScanWorker(QThread):
+    """Runs the hardware probe on this computer the way `llmcf scan` does (orchestrator/runtime/scan_steps.scan_local:
+    the Python probe, or the fallback script with `use_script`), stores it as this computer's probe (probe id local,
+    the one AI clients and Ditto name) and writes the profile file (`--output`, with `as_json` the JSON view). The tab
+    loads a KEY=VALUE copy in probe_result_dir (`gui_copy`) for the target match and the module wizard."""
+    finished = Signal(bool, str, str)  # success, message, the file the tab loads
+
+    def __init__(self, framework, output_file, *, use_script=False, as_json=False, gui_copy=None):
+        super().__init__()
+        self.framework = framework
+        self.output_file = Path(output_file)
+        self.use_script, self.as_json = bool(use_script), bool(as_json)
+        self.gui_copy = Path(gui_copy) if gui_copy else None
+
+    def run(self):
+        from orchestrator.runtime.probe_service import HardwareProbes, ProbeError
+        from orchestrator.runtime.scan_steps import ProfileWriteError, scan_local, write_profile_file
+        try:
+            scan = scan_local(HardwareProbes.for_framework(self.framework), self.output_file, as_json=self.as_json,
+                              use_script=self.use_script)
+            load = self.output_file
+            if self.gui_copy is not None and (self.as_json or self.gui_copy != self.output_file):
+                write_profile_file(scan.profile, self.gui_copy)
+                load = self.gui_copy
+        except ProbeError as e:
+            self.finished.emit(False, "\n".join(p for p in (ui_text("deploy.scan.failed", reason=str(e)), e.detail,
+                                                              e.next) if p), "")
+            return
+        except ProfileWriteError as e:
+            self.finished.emit(False, ui_text("deploy.scan.write_failed", path=str(e.path), reason=str(e)), "")
+            return
+        except Exception as e:  # noqa: BLE001 - shown to the person
+            self.finished.emit(False, ui_text("deploy.scan.failed", reason=str(e)), "")
+            return
+        how = ui_text("deploy.scan.how.script" if scan.how == "fallback script" else "deploy.scan.how.python")
+        lines = [ui_text("deploy.scan.done", how=how, path=str(scan.output_file))]
+        lines += [ui_text("deploy.scan.note", note=note) for note in scan.notes]
+        lines.append(ui_text("deploy.scan.stored", path=str(scan.local_path)))
+        if scan.needs_reprobe:
+            lines.append(ui_text("deploy.scan.reprobe"))
+        self.finished.emit(True, "\n".join(lines), str(load))
+
+
 class SSHProbeWorker(QThread):
-    """Runs the hardware probe on a trusted device over SSH, the way `llm-cli scan --device` does: the probe script
-    travels on the command's stdin (the Python probe with python3 -I when the device has Python 3.8 or newer, else
-    the shell probe), so nothing is written on the device, also where /tmp is mounted noexec. The profile is kept
-    under the device's ID (from its host key) and written to result_dir for the GUI."""
+    """Runs the hardware probe on a trusted device over SSH, the way `llm-cli scan --device` does (the same core step,
+    orchestrator/runtime/scan_steps.scan_device): the probe script travels on the command's stdin (the Python probe
+    with python3 -I when the device has Python 3.8 or newer, else the shell probe), so nothing is written on the
+    device, also where /tmp is mounted noexec. The profile is kept under the device's ID (from its host key) with the
+    person's label, written to result_dir for the GUI, the SSH user becomes the board's deploy user and the board's
+    trusted, paired record is written (audited as the person's decision in the GUI)."""
     finished = Signal(bool, str, str) # success, message, file_path
 
-    def __init__(self, ip, user, password, state_dir, result_dir, port=22):
+    def __init__(self, ip, user, password, state_dir, result_dir, port=22, *, label=None, audit=None):
         super().__init__()
         self.ip = ip
         self.user = user
         self.password = password
         self.port = port
+        self.label = label
+        self.audit = audit
         self.state_dir = Path(state_dir)
         self.result_dir = Path(result_dir)
 
     def run(self):
+        password, self.password = self.password, None   # used once for this scan, never kept
         if not PARAMIKO_AVAILABLE:
             self.finished.emit(False, "Paramiko library missing. Cannot use SSH.", "")
             return
-        from orchestrator.Core.vault_key import write_private
-        from orchestrator.runtime.device.settings import remember_ssh_user
-        from orchestrator.runtime.profile import ProfileStore, device_id_for_host_key
-        from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh, store_address, valid_host
-        from orchestrator.utils import ssh_trust
+        from orchestrator.runtime.device import reasons
+        from orchestrator.runtime.remote_probe import valid_host
+        from orchestrator.runtime.scan_steps import DeviceScanError, scan_device
         if not valid_host(self.ip):
             self.finished.emit(False, "Enter a host name or an IP address (an IPv6 address without brackets, e.g. "
                                       "fe80::1).", "")
             return
+        # valid_host() allows no path separators, so the name stays inside result_dir.
+        local_output = self.result_dir / f"target_hardware_config_{self.ip.replace(':', '_')}.txt"
         try:
-            ssh = ssh_trust.connect(self.ip, self.user, self.state_dir, port=self.port, password=self.password)
-        except Exception as e:
-            self.finished.emit(False, f"SSH login failed: {e}", "")
+            scan = scan_device(self.state_dir, self.ip, int(self.port), self.user, None, password=password,
+                               label=self.label, output_file=local_output, via="gui", actor="gui", audit=self.audit)
+        except DeviceScanError as e:
+            if e.kind == "login":
+                text = (reasons.person_text(e.reason, address=self.ip, port=int(self.port))
+                        if e.reason in reasons.REASONS else ui_text("deploy.remote.login_failed", reason=str(e.error)))
+            elif e.kind == "probe":
+                text = ui_text("deploy.remote.probe_failed", address=self.ip, reason=str(e.error))
+            else:
+                text = ui_text("deploy.remote.save_failed", reason=str(e.error))
+            self.finished.emit(False, text, "")
             return
-        try:
-            if self.password:
-                ssh_trust.install_public_key(ssh, ssh_trust.client_key(self.state_dir)[1])
-            result = probe_over_ssh(ssh)
-            key = ssh.get_transport().get_remote_server_key()
-            device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
-            store = ProfileStore(self.state_dir)
-            store.save_device(device_id, result.profile, address=store_address(self.ip, self.port))
-            remember_ssh_user(store, device_id, self.user)  # the deploy user of the device runtime (never root)
-            self.result_dir.mkdir(parents=True, exist_ok=True)
-            # valid_host() allows no path separators, so the name stays inside result_dir.
-            local_output = self.result_dir / f"target_hardware_config_{self.ip.replace(':', '_')}.txt"
-            write_private(local_output, result.profile.to_text())
-            tool = "Python probe" if result.tool == "python" else "shell probe"
-            notes = "".join(f" {note}." for note in result.notes)
-            self.finished.emit(True, f"Remote scan successful from {self.ip} ({tool}; stored as device "
-                                     f"{device_id}).{notes}", str(local_output))
-        except (RemoteProbeError, ssh_trust.HostKeyError) as e:
-            self.finished.emit(False, f"The probe on {self.ip} failed: {e}", "")
         except Exception as e:
             self.finished.emit(False, f"SSH Error: {e}", "")
-        finally:
-            ssh.close()
+            return
+        tool = ui_text(f"deploy.remote.tool.{'python' if scan.tool == 'python' else 'sh'}")
+        lines = [ui_text("deploy.remote.done", address=self.ip, tool=tool, device_id=scan.device_id)]
+        lines += [ui_text("deploy.scan.note", note=note) for note in scan.notes]
+        if scan.trusted is not None:
+            lines.append(ui_text("deploy.trusted", device_id=scan.trusted.device_id, label=scan.trusted.label))
+        self.finished.emit(True, "\n".join(lines), str(local_output))
 
 
 class CommitLookupWorker(QThread):
@@ -381,6 +454,7 @@ class BuilderTab(QWidget):
         act_local = QAction("💻 Scan Local Host", self)
         act_local.triggered.connect(self._run_local_probe)
         self.scan_menu.addAction(act_local)
+        self._add_scan_entries(act_import, act_ssh, act_local)  # GUI parity: scan --script, --output, port, label
         
         self.scan_btn.setMenu(self.scan_menu)
         h_layout.addWidget(self.scan_btn)
@@ -559,53 +633,132 @@ class BuilderTab(QWidget):
 
     # --- NEW SCAN LOGIC ---
 
+    def _add_scan_entries(self, act_import, act_ssh, act_local):
+        """GUI parity (W1'): names the scan menu's entries for the CLI paths they do (`llmcf scan --import`,
+        `scan --device`, `scan`) and adds the fallback script (`scan --script`) and Save the Profile As...
+        (`scan --output FILE`, `--json`). The host key of a board is read off the GUI thread (gui/host_key.py)."""
+        from orchestrator.gui.host_key import HostKeyCheck
+        self.scan_btn.setObjectName("btn_deploy_scan")
+        for action, name in ((act_import, "act_deploy_scan_import"), (act_ssh, "act_deploy_scan_remote"),
+                             (act_local, "act_deploy_scan_local")):
+            action.setObjectName(name)
+        self.act_scan_import, self.act_scan_remote, self.act_scan_local = act_import, act_ssh, act_local
+        self.act_scan_script = QAction(ui_text("deploy.scan.script"), self)
+        self.act_scan_script.setObjectName("act_deploy_scan_script")
+        self.act_scan_script.triggered.connect(lambda _=False: self._run_local_scan(use_script=True))
+        self.scan_menu.addAction(self.act_scan_script)
+        self.act_scan_save = QAction(ui_text("deploy.scan.save"), self)
+        self.act_scan_save.setObjectName("act_deploy_scan_save")
+        self.act_scan_save.triggered.connect(lambda _=False: self._scan_local_save_as())
+        self.scan_menu.addAction(self.act_scan_save)
+        # `scan --script --output FILE`: the script writes the chosen file itself (a .json file gets the JSON view)
+        self.act_scan_script_save = QAction(ui_text("deploy.scan.script_save"), self)
+        self.act_scan_script_save.setObjectName("act_deploy_scan_script_save")
+        self.act_scan_script_save.triggered.connect(lambda _=False: self._scan_local_save_as(use_script=True))
+        self.scan_menu.addAction(self.act_scan_script_save)
+        self.host_keys = HostKeyCheck(self, self.framework)
+
     def _import_probe_file(self):
-        """Option 1: Import existing file (USB/Network)"""
+        """Option 1: Import existing file (USB/Network), with the person's name for the board (`llmcf scan --import
+        FILE --label`, the same core step scan_steps.import_probe)."""
+        from PySide6.QtWidgets import QInputDialog
+        from orchestrator.gui.plain import plain_box
+        from orchestrator.runtime.scan_steps import import_probe, label_problem
         path, _ = QFileDialog.getOpenFileName(self, "Import Hardware Config", "", "Config Files (*.txt);;All Files (*)")
-        if path:
-            self._log(f"Importing config from {path}...")
-            # A copy in the probe store (validated, no host name): AI clients and Ditto name it by its id (design T5).
-            try:
-                from orchestrator.runtime.probe_service import HardwareProbes
-                probe_id = HardwareProbes.for_framework(self.framework).import_file(path)
-                self._log(f"Stored as probe {probe_id}: AI clients and Ditto can use the board's probe by this id.")
-            except Exception as e:  # not a probe file the framework can read: the match below still runs
-                self._log(f"Not stored as a probe: {e}")
-            self._load_probe_config(Path(path))
+        if not path:
+            return
+        text, ok = QInputDialog.getText(self, ui_text("deploy.import.label_title"), ui_text("deploy.import.label_text"))
+        if not ok:
+            self._log(ui_text("deploy.import.cancelled"))
+            return
+        label = " ".join(str(text or "").split()) or None
+        if label_problem(label):
+            plain_box(self, "warning", ui_text("deploy.import.label_title"), ui_text("deploy.label.bad"))
+            return
+        self._log(f"Importing config from {path}...")
+        # A copy in the probe store (validated, no host name): AI clients and Ditto name it by its id (design T5).
+        try:
+            from orchestrator.runtime.probe_service import HardwareProbes
+            tm = self.framework.get_component("target_manager") if hasattr(self.framework, "get_component") else None
+            imported = import_probe(HardwareProbes.for_framework(self.framework), path, label, tm)
+            self._log(ui_text("deploy.import.done", probe_id=imported.probe_id, label=imported.info.label))
+            if imported.profile.needs_reprobe:
+                self._log(ui_text("deploy.import.reprobe"))
+        except Exception as e:  # not a probe file the framework can read: the match below still runs
+            self._log(ui_text("deploy.import.failed", reason=str(e)))
+            if getattr(e, "next", ""):   # the next step, as `llmcf scan --import` prints it
+                self._log(str(e.next))
+        self._load_probe_config(Path(path))
 
     def _open_ssh_dialog(self):
-        """Option 2: Remote SSH Scan"""
+        """Option 2: Remote SSH Scan (`llmcf scan --device HOST --user U --port --label`): the host key is read off
+        the GUI thread and trusted only after the person's "Yes"; the probe runs in SSHProbeWorker."""
+        from orchestrator.gui.plain import plain_box
+        from orchestrator.runtime.remote_probe import valid_host
+        from orchestrator.runtime.scan_steps import label_problem
         dlg = SSHConnectDialog(self, recent=self._recent("device"))
-        if dlg.exec():
-            ip, user, password = dlg.get_data()
-            if not ip or not user: return
-            if not confirm_host_key(self, self.framework, ip):
+        if not dlg.exec():
+            return
+        ip, user, password = dlg.get_data()
+        port, label = dlg.get_options()
+        if not ip or not user:
+            return
+        if not valid_host(ip) or label_problem(label):
+            plain_box(self, "warning", ui_text("deploy.remote.title"),
+                      ui_text("deploy.bad_address" if not valid_host(ip) else "deploy.label.bad"))
+            return
+        self.scan_btn.setEnabled(False)
+        self._log(ui_text("deploy.reading_key", address=ip, port=port))
+
+        def trusted(ok: bool) -> None:
+            if not ok:
+                self.scan_btn.setEnabled(True)
                 return
             if self.history:
                 self.history.add("device", ip)  # a trusted, reachable device
-            
             self._set_state("read")
-            self._log(f"Connecting to {user}@{ip}...")
-            self.scan_btn.setEnabled(False)
-            
+            self._log(ui_text("deploy.remote.running", user=user, address=ip, port=port))
             config = self.framework.config
             state_dir = getattr(config, "user_state_dir", Path.home() / ".llm-framework")
             result_dir = probe_result_dir(self.framework)
-            self.probe_worker = SSHProbeWorker(ip, user, password or None, state_dir, result_dir)
+            audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+            self.probe_worker = SSHProbeWorker(ip, user, password or None, state_dir, result_dir, port=port,
+                                               label=label, audit=audit)
             self.probe_worker.finished.connect(self._on_probe_finished)
             self.probe_worker.start()
 
+        self.host_keys.start(ip, port, trusted, step="probe")
+
     def _run_local_probe(self):
-        """Option 3: Local Scan"""
+        """Option 3: Local Scan: the Python probe, as `llmcf scan` runs it by default."""
+        self._run_local_scan()
+
+    def _run_local_scan(self, use_script=False, output=None, as_json=False):
+        """The scan of this computer (`llmcf scan`, `--script`, `--output FILE`, `--json`) in LocalScanWorker; the
+        profile file goes to `output` (default: the GUI's copy in probe_result_dir, which the tab also loads)."""
         self._set_state("read")
-        self._log("Starting Local Hardware Probe...")
+        how = ui_text("deploy.scan.how.script" if use_script else "deploy.scan.how.python")
+        self._log(ui_text("deploy.scan.running", how=how))
         self.scan_btn.setEnabled(False)
-        
-        script = self.app_root / "scripts" / ("hardware_probe.ps1" if platform.system() == "Windows" else "hardware_probe.sh")
-        
-        self.probe_worker = LocalProbeWorker(script, probe_result_dir(self.framework) / LOCAL_PROBE_FILE)
+        gui_copy = probe_result_dir(self.framework) / LOCAL_PROBE_FILE
+        self.probe_worker = LocalScanWorker(self.framework, Path(output) if output else gui_copy,
+                                            use_script=use_script, as_json=as_json, gui_copy=gui_copy)
         self.probe_worker.finished.connect(self._on_probe_finished)
         self.probe_worker.start()
+
+    def _scan_local_save_as(self, use_script=False):
+        """Scan Local Host (with the Fallback Script) and Save the Profile As...: the save dialog for the profile file
+        (`llmcf scan [--script] --output FILE`; a .json file gets the JSON view, `--json`), then the Python probe or,
+        with `use_script`, the fallback script."""
+        start = str(Path.home() / "target_hardware_config.txt")
+        path, chosen = choose_save_file(self, ui_text("deploy.scan.save_title"), start,
+                                        ui_text("deploy.scan.save_filter"))
+        if not path:
+            return
+        target = Path(path)
+        if not target.suffix:
+            target = target.with_suffix(".json" if "json" in str(chosen).lower() else ".txt")
+        self._run_local_scan(use_script=use_script, output=target, as_json=target.suffix.lower() == ".json")
 
     def _on_probe_finished(self, success, msg, output_path):
         self.scan_btn.setEnabled(True)

@@ -558,6 +558,10 @@ nicht gespeichert“: GUI-Builds, die du nicht gespeichert hast, und jeder früh
 Ordnern, in die du Builds gespeichert hast. Jede Zeile zeigt den Ordner (relativ zu seinem Ordner), wo er liegt, Modell,
 Format, Quantisierung, Board, Größe und den vollen Pfad.
 
+In der GUI: die Liste **1. Select Golden Artifact** im Tab **Deployment** (dieselben Builds, „noch nicht gespeichert“
+für einen im Build-Ordner und „getestet auf“ einem Board nach seinem Benchmark dort; der Tooltip zeigt den vollen
+Pfad); **Refresh** liest sie neu.
+
 ### deploy package
 
 ```
@@ -577,6 +581,15 @@ geschrieben.
 Ohne Docker werden nur Modelldateien übertragen; Builds mit mehreren Gewichtsdateien werden abgelehnt. Ein Paket,
 das nicht erstellt werden kann, gibt den Grund aus und endet mit 1; das ZIP wird unter einem vorläufigen Namen
 geschrieben und erst umbenannt, wenn es vollständig ist.
+
+In der GUI: Tab Deployment > **Nur Paket erstellen…**: der ausgewählte Build, das **Profile** des Tabs und **Use Docker
+Containerization?** für `--docker`. Jeder andere Build-Ordner und jede Modelldatei (`ARTIFACT` nimmt jeden Pfad)
+kommt mit **Anderer Build oder Modelldatei…** > **Build-Ordner…** oder **Modelldatei…** in die Liste, für diese
+Schaltfläche und für **Deploy to Target**; ist kein Build ausgewählt, fragt die Schaltfläche nach einer Modelldatei.
+Kein Board wird
+kontaktiert, so geht es auch für ein Board ohne Netz. Ein Ordnerdialog öffnet sich beim Ausgabeordner: OK behält ihn,
+ein anderer Ordner wird geprüft wie für jedes Golden Artifact (Abbrechen erstellt nichts). Die Meldung nennt den vollen
+Pfad des Pakets oder den Grund und den nächsten Schritt; **Abbrechen** stoppt das Packen, und keine halbe Datei bleibt.
 
 ```bash
 llm-cli deploy package Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
@@ -623,6 +636,12 @@ wird nichts übertragen. Ein Board, dessen Host-Schlüssel sich geändert hat, w
 erfolgreichen Deployment kommt das Board zu den [vertrauten Geräten](#deploy-devices) (im Audit-Log vermerkt), so dass
 ein KI-Client später dorthin übertragen darf, jedes Mal mit deiner Bestätigung. `ssh` und `scp` (genutzt, wenn
 paramiko fehlt) bekommen nie die Standardeingabe des Frameworks.
+
+In der GUI: Tab Deployment > **Vorhandenes Paket deployen…** (ein ZIP aus `deploy package` oder **Nur Paket
+erstellen…**) oder **Deploy to Target**, das den ausgewählten Build vorher packt. Das Board sind die Felder **Adresse
+oder Hostname** und **User**; **Port**, **Name** und **Auf das Board warten** sind `--port`, `--label` und `--wait`. Der
+Host-Schlüssel wird im Hintergrund gelesen und sein Fingerabdruck zum Vergleichen gezeigt (**Nein** ist vorgewählt);
+das Passwort wird verdeckt abgefragt, einmal benutzt und nie gespeichert. **Abbrechen** tut, was hier Strg+C tut.
 
 ```bash
 llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --host 192.168.1.50 --user rock
@@ -1782,9 +1801,17 @@ scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
 | `--import DATEI` | Die Probe-Datei eines Boards im Probe-Speicher ablegen und ihre Probe-ID zeigen (nicht zusammen mit `--device`). |
 
 Ein Rechner ohne Netzzugang führt eine Probe von Hand aus, und du importierst ihre Datei
-([README](../README_DE.md#die-hardware-des-boards-untersuchen)). In der GUI importiert **Scan / Import...** eine
-Probe-Datei, untersucht ein Board per SSH (mit derselben entfernten Probe, also auch auf Boards, die `/tmp` mit
-`noexec` einhängen) oder diesen PC.
+([README](../README_DE.md#die-hardware-des-boards-untersuchen)).
+
+In der GUI: Tab Builder > **Scan / Import...**: **Scan Local Host** (die Python-Probe, als Profil dieses Rechners
+gespeichert, wie `llm-cli scan` es tut), **Lokalen Rechner mit dem Ersatz-Skript scannen** (`--script`), **Lokalen
+Rechner scannen und Profil speichern unter...** (`--output`; eine `.json`-Datei bekommt die JSON-Ansicht von `--json`),
+**Lokalen Rechner mit dem Ersatz-Skript scannen und Profil speichern unter...** (`--script --output`),
+**Remote Scan via SSH...** (`--device` mit **Port** und **Name** für `--port` und `--label`; dieselbe entfernte Probe,
+also auch auf Boards, die `/tmp` mit `noexec` einhängen, und das Board kommt wie über die CLI zu den vertrauten
+Geräten) und **Import from File (USB/Disk)...** (`--import`; fragt nach dem Namen des Boards, `--label`). Der
+Host-Schlüssel und jede Probe laufen im Hintergrund; das Protokoll rechts zeigt das Ergebnis, seine Hinweise und wo das
+Profil gespeichert wurde.
 
 ```bash
 llm-cli scan                                        # dieser Rechner, gespeichert als „local“
