@@ -1,0 +1,1579 @@
+diff --git a/configs/llama_runtime.yml b/configs/llama_runtime.yml
+new file mode 100644
+index 0000000..0f391c0
+--- /dev/null
++++ b/configs/llama_runtime.yml
+@@ -0,0 +1,216 @@
++# Managed local LLM runtime for Ditto's offline mode: a pinned llama.cpp build (llama-server) and
++# pinned GGUF models. This file is data: a newer build or another model is added here, not in code.
++#
++# Every download needs a pinned sha256 and is verified before it is unpacked or used; entries without
++# one are refused (fail closed). Models are pinned to a Hugging Face commit, never to a branch.
++#
++# Sources (checked 2026-10-10):
++# - llama.cpp assets: names and sizes from the release download URLs of tag b11429 (the v0.6.0 tag
++#   points at the same commit; binaries are only published under the b-number). The sha256 values were
++#   computed from complete, TLS-verified downloads of each asset because the GitHub API (whose assets
++#   carry a "digest" field) was not reachable from the session that pinned them. To cross-check:
++#   gh api repos/ggml-org/llama.cpp/releases/tags/b11429 --jq '.assets[] | [.name, .digest] | @tsv'
++# - Models: HfApi().model_info(repo, revision, files_metadata=True) -> siblings[].lfs.sha256 and size.
++schema_version: 1
++
++llama_cpp:
++  build: b11429
++  version: "0.6.0"
++  base_url: https://github.com/ggml-org/llama.cpp/releases/download/b11429/
++  # Server options that exist in this build (checked in tools/server and common/arg.cpp at the tag).
++  features:
++    sleep_idle_seconds: true
++    fit: true
++  # CUDA minor-version compatibility (NVIDIA CUDA Toolkit release notes, table 3): 13.x needs driver
++  # >= 580 and dropped GPUs before Turing (compute capability < 7.5); 12.x runs on drivers >= 525.
++  assets:
++    # --- Linux x86_64 ---
++    - id: linux-x64-cpu
++      os: linux
++      arch: x86_64
++      backend: cpu
++      files:
++        - {name: llama-b11429-bin-ubuntu-x64.tar.gz, size: 17693462, sha256: f6d25dde8f51133143d1453da4fd5f73b145127177612a283bf7995957af3392}
++    - id: linux-x64-vulkan
++      os: linux
++      arch: x86_64
++      backend: vulkan
++      files:
++        - {name: llama-b11429-bin-ubuntu-vulkan-x64.tar.gz, size: 31636673, sha256: 632c4e98feba2b94407a2130e3133e0c3aefb0ea1ab41337e926d8bfafdd0b74}
++    - id: linux-x64-cuda-13.4
++      os: linux
++      arch: x86_64
++      backend: cuda
++      cuda: "13.4"
++      min_driver: 580
++      min_compute_cap: 7.5
++      files:
++        - {name: llama-b11429-bin-ubuntu-cuda-13.4-x64.tar.gz, size: 152519318, sha256: 8082b7eaa74a714c9fecca19128f751c8e32da763ee8096b8ad1e824da7621d3}
++    - id: linux-x64-cuda-12.8
++      os: linux
++      arch: x86_64
++      backend: cuda
++      cuda: "12.8"
++      min_driver: 525
++      min_compute_cap: 5.0
++      files:
++        - {name: llama-b11429-bin-ubuntu-cuda-12.8-x64.tar.gz, size: 171651873, sha256: b13c64b9224d3c89d9993945d70cc21177ad00178c21b8d34237e3bc139834f1}
++    - id: linux-x64-rocm-10.0
++      os: linux
++      arch: x86_64
++      backend: rocm
++      opt_in: true   # only when asked for: needs a matching ROCm installation and a supported GPU
++      files:
++        - {name: llama-b11429-bin-ubuntu-rocm-10.0-x64.tar.gz, size: 243892368, sha256: bd73e52146551f07a4c539bbe9da42f3b680c44ddc252fce61ab86d567a5932a}
++
++    # --- Linux arm64 ---
++    - id: linux-arm64-cpu
++      os: linux
++      arch: arm64
++      backend: cpu
++      files:
++        - {name: llama-b11429-bin-ubuntu-arm64.tar.gz, size: 13682895, sha256: ed44c0f79c3d02424f62bdc87e106318b0b89f49050e2e80c5f352723d14e00b}
++    - id: linux-arm64-vulkan
++      os: linux
++      arch: arm64
++      backend: vulkan
++      files:
++        - {name: llama-b11429-bin-ubuntu-vulkan-arm64.tar.gz, size: 24845090, sha256: 702d99c4219b4314cc6d3b10fb41ae96cbfc68226305c2681269dfb51487af34}
++
++    # --- Windows x86_64 ---
++    - id: windows-x64-cpu
++      os: windows
++      arch: x86_64
++      backend: cpu
++      files:
++        - {name: llama-b11429-bin-win-cpu-x64.zip, size: 19398918, sha256: 1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe}
++    - id: windows-x64-vulkan
++      os: windows
++      arch: x86_64
++      backend: vulkan
++      files:
++        - {name: llama-b11429-bin-win-vulkan-x64.zip, size: 33337769, sha256: 1bfe78ad9168b79fa02bf67f6af9f5e17a966d824d77238517f7bef12ac73b36}
++    - id: windows-x64-cuda-13.4
++      os: windows
++      arch: x86_64
++      backend: cuda
++      cuda: "13.4"
++      min_driver: 580
++      min_compute_cap: 7.5
++      files:   # the CUDA runtime DLLs ship as a separate archive and go into the same folder
++        - {name: llama-b11429-bin-win-cuda-13.4-x64.zip, size: 153089864, sha256: 76ddc6eff2389570789ed608881efc6977751a722015d8e8c94f302224ff1a3a}
++        - {name: cudart-llama-bin-win-cuda-13.4-x64.zip, size: 423535356, sha256: 738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668}
++    - id: windows-x64-cuda-12.4
++      os: windows
++      arch: x86_64
++      backend: cuda
++      cuda: "12.4"
++      min_driver: 525
++      min_compute_cap: 5.0
++      files:
++        - {name: llama-b11429-bin-win-cuda-12.4-x64.zip, size: 264478423, sha256: dd6df685c1024e6aa55ca55ad35038692d5e284d4dc895e7a646c3245d3d14ff}
++        - {name: cudart-llama-bin-win-cuda-12.4-x64.zip, size: 391443627, sha256: 8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6}
++    - id: windows-x64-rocm-10.0
++      os: windows
++      arch: x86_64
++      backend: rocm
++      opt_in: true
++      files:
++        - {name: llama-b11429-bin-win-rocm-10.0-x64.zip, size: 256958369, sha256: 289a8453bb222f0648f91eff3d55133c934119c841eb369b704aafae1d4719d2}
++
++    # --- Windows arm64 ---
++    - id: windows-arm64-cpu
++      os: windows
++      arch: arm64
++      backend: cpu
++      files:
++        - {name: llama-b11429-bin-win-cpu-arm64.zip, size: 12229035, sha256: ee0f631a9e58b146ff50714099d9cb498906af3143a773b580093a9214a8d1e5}
++
++    # --- macOS (Apple Silicon builds include Metal) ---
++    - id: macos-arm64-metal
++      os: macos
++      arch: arm64
++      backend: metal
++      files:
++        - {name: llama-b11429-bin-macos-arm64.tar.gz, size: 11971406, sha256: 740288ec6887be94280a5dfa25b5e23a78285cab104519e6c7e218904ee82459}
++    - id: macos-x64-cpu
++      os: macos
++      arch: x86_64
++      backend: cpu
++      files:
++        - {name: llama-b11429-bin-macos-x64.tar.gz, size: 11487431, sha256: 29ac3ea02be6bd143e824973f2cc5fa74bc4094393a9eaab0ff6814f19dd8522}
++
++# Server defaults. The context is computed from free memory and the model, then capped here;
++# the models' native context (up to 262144 tokens) would not fit on a desktop.
++server:
++  ctx_cap: 32768
++  ctx_min: 4096
++  sleep_idle_seconds: 600   # unload the model after 10 idle minutes (0 = never); reloads on the next request
++  health_timeout_seconds: 300
++
++# Ditto models. kv_bytes_per_token: f16 KV cache per token, 2 (K,V) * attention layers * KV heads *
++# head dim * 2 bytes, from the base model's config.json (Qwen3.5 has full attention in 1 of 4 layers).
++models:
++  - tier: small
++    repo: unsloth/Qwen3.5-2B-GGUF
++    revision: f6d5376be1edb4d416d56da11e5397a961aca8ae
++    file: Qwen3.5-2B-Q4_K_M.gguf
++    size: 1280835840
++    sha256: aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223
++    license: apache-2.0
++    native_context: 262144
++    kv_bytes_per_token: 12288    # 6 full-attention layers * 2 KV heads * 256
++    description: Qwen3.5 2B (Q4_K_M) for machines with up to 4 GB RAM
++
++  - tier: default
++    repo: unsloth/Qwen3.5-4B-GGUF
++    revision: e87f176479d0855a907a41277aca2f8ee7a09523
++    file: Qwen3.5-4B-Q4_K_M.gguf
++    size: 2740937888
++    sha256: 00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4
++    license: apache-2.0
++    native_context: 262144
++    kv_bytes_per_token: 32768    # 8 full-attention layers * 4 KV heads * 256
++    description: Qwen3.5 4B (Q4_K_M), the default
++
++  - tier: large
++    repo: unsloth/Qwen3.5-9B-GGUF
++    revision: 3885219b6810b007914f3a7950a8d1b469d598a5
++    file: Qwen3.5-9B-Q4_K_M.gguf
++    size: 5680522464
++    sha256: 03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8
++    license: apache-2.0
++    native_context: 262144
++    kv_bytes_per_token: 32768
++    description: Qwen3.5 9B (Q4_K_M) for GPUs with 8 GB VRAM or more (e.g. RTX 2080 Ti, RTX 3090)
++
++  - tier: large-iq2
++    on_request: true
++    repo: unsloth/Qwen3.5-9B-GGUF
++    revision: 3885219b6810b007914f3a7950a8d1b469d598a5
++    file: Qwen3.5-9B-UD-IQ2_M.gguf
++    size: 3649365216
++    sha256: a31b6b4c603ddd66b5496ee065c9dd13b2b6de77dce9e5d59609aef8d39868e7
++    license: apache-2.0
++    native_context: 262144
++    kv_bytes_per_token: 32768
++    description: Qwen3.5 9B at 2-bit (UD-IQ2_M), only on request; noticeably less accurate
++
++  - tier: granite
++    on_request: true
++    repo: ibm-granite/granite-4.2-3b-GGUF
++    revision: c40945d71cd90f249a56985e8155551a9188dc30
++    file: granite-4.2-3b-Q4_K_M.gguf
++    size: 2244011552
++    sha256: e0406663965846ae22a403456eb826ccce5f450840491f71952f18a7cb78e7d5
++    license: apache-2.0
++    native_context: 131072
++    kv_bytes_per_token: 81920    # 40 layers * 8 KV heads * 64
++    description: IBM Granite 4.2 3B (Q4_K_M), fallback model family
++
++# Automatic tier choice: the first rule whose conditions all hold wins (GiB; machines sold with 4 GB
++# report about 3.6-3.9 GiB). VRAM counts only when a GPU backend was selected.
++tier_rules:
++  - {tier: large, min_vram_gib: 7.5}
++  - {tier: small, max_ram_gib: 4.5}
++  - {tier: default}
+diff --git a/orchestrator/cli.py b/orchestrator/cli.py
+index 18cc11f..59532bb 100644
+--- a/orchestrator/cli.py
++++ b/orchestrator/cli.py
+@@ -851,6 +851,176 @@ def ditto():
+     pass
+ 
+ 
++def _local_runtime(ctx: FrameworkContext):
++    """The managed llama-server; needs neither the keyring nor Docker, so the framework is not booted."""
++    from orchestrator.runtime.llama_server import LocalLLMRuntime, framework_models_dir
++    models = framework_models_dir(os.environ.get("LLM_FRAMEWORK_MODELS_DIR") or ctx.config.get("models_dir"))
++    return LocalLLMRuntime(models_dir=models / "ditto")
++
++
++def _download_progress():
++    from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
++    bar = Progress(TextColumn("{task.description}"), BarColumn(), DownloadColumn(), TransferSpeedColumn(),
++                   console=console, transient=True)
++    tasks = {}
++
++    def update(name: str, done: int, total: Optional[int]):
++        if name not in tasks:
++            tasks[name] = bar.add_task(escape(name), total=total)
++        bar.update(tasks[name], completed=done)
++    return bar, update
++
++
++def _gib(size: Optional[int]) -> str:
++    return f"{size / 1024 ** 3:.1f} GiB" if size else "?"
++
++
++@ditto.group('runtime')
++def ditto_runtime():
++    """Local model server (llama.cpp) for offline use"""
++    pass
++
++
++@ditto_runtime.command('status')
++@pass_context
++def runtime_status(ctx: FrameworkContext):
++    """Hardware, recommended build and model, and whether the server is running"""
++    rt = _local_runtime(ctx)
++    status = rt.status()
++    choice = rt.select_backend()
++    model, why = rt.choose_tier()
++    table = Table(title=f"Local runtime (llama.cpp {escape(status.build)})", show_header=False)
++    table.add_column("", style="cyan")
++    table.add_column("")
++    table.add_row("Hardware", escape(rt.hardware().summary()))
++    table.add_row("Recommended build", escape(f"{choice.asset.id if choice.asset else '-'}: {choice.reason}"))
++    inst = status.installed
++    table.add_row("Installed", escape(f"{inst.asset_id} ({inst.path})") if inst else "[yellow]no[/yellow]")
++    if status.running:
++        health = "[green]ready[/green]" if status.healthy else "[yellow]starting / not answering[/yellow]"
++        table.add_row("Server", f"{health} {escape(str(status.base_url))} (pid {status.pid}, "
++                                f"model {escape(str(status.model))}, ctx {status.ctx})")
++    else:
++        table.add_row("Server", "stopped")
++    table.add_row("Recommended model", escape(f"{model.file} - {why}"))
++    table.add_row("Log", escape(str(status.log_file)))
++    console.print(table)
++
++
++@ditto_runtime.command('install')
++@click.option('--backend', type=click.Choice(['auto', 'cpu', 'vulkan', 'cuda', 'rocm', 'metal']), default='auto',
++              show_default=True, help='Build to install (ROCm only when chosen here)')
++@click.option('--force', is_flag=True, help='Download and unpack again even if it is installed')
++@click.option('--yes', '-y', is_flag=True, help='Do not ask before downloading')
++@pass_context
++def runtime_install(ctx: FrameworkContext, backend: str, force: bool, yes: bool):
++    """Download the pinned llama.cpp build (sha256-verified before unpacking)"""
++    from orchestrator.runtime.llama_server import LocalRuntimeError
++    rt = _local_runtime(ctx)
++    choice = rt.select_backend(backend)
++    if choice.asset is None:
++        console.print(f"[red]{escape(choice.reason)}[/red]")
++        sys.exit(1)
++    console.print(f"llama.cpp {escape(rt.build)} - {escape(choice.asset.id)}: {escape(choice.reason)}")
++    if not yes and not click.confirm(f"Download {_gib(choice.asset.download_size)}?", default=True):
++        return
++    bar, update = _download_progress()
++    try:
++        with bar:
++            inst = rt.install(prefer=backend, force=force, progress=update)
++    except LocalRuntimeError as e:
++        console.print(f"[red]{escape(str(e))}[/red]")
++        sys.exit(1)
++    console.print(f"[green]Installed {escape(inst.asset_id)} in {escape(str(inst.path))}[/green]")
++
++
++@ditto_runtime.command('start')
++@click.option('--model', 'tier', default=None, help='Model tier (llm-cli ditto models list); default: chosen for '
++              'this machine')
++@click.option('--ctx', 'ctx_len', type=click.IntRange(256, 1048576), default=None,
++              help='Context length in tokens (default: from free memory, at most 32768)')
++@click.option('--sleep-idle', type=click.IntRange(0, None), default=None,
++              help='Unload the model after this many idle seconds (0 = never)')
++@pass_context
++def runtime_start(ctx: FrameworkContext, tier: Optional[str], ctx_len: Optional[int], sleep_idle: Optional[int]):
++    """Start llama-server on 127.0.0.1 (random port, API key in a private file)"""
++    from orchestrator.runtime.llama_server import LocalRuntimeError
++    rt = _local_runtime(ctx)
++    try:
++        with console.status("Starting llama-server ..."):
++            ep = rt.start(tier=tier, ctx=ctx_len, sleep_idle_seconds=sleep_idle)
++    except LocalRuntimeError as e:
++        console.print(f"[red]{escape(str(e))}[/red]")
++        sys.exit(1)
++    console.print(f"[green]Running:[/green] {escape(ep.base_url)} model {escape(ep.model)} (pid {ep.pid})")
++    console.print(f"API key: {escape(str(rt.key_file))} (readable only by you)")
++
++
++@ditto_runtime.command('stop')
++@pass_context
++def runtime_stop(ctx: FrameworkContext):
++    """Stop the llama-server started by the framework"""
++    console.print("Stopped." if _local_runtime(ctx).stop() else "Not running.")
++
++
++@ditto.group('models')
++def ditto_models():
++    """Models for Ditto's local mode"""
++    pass
++
++
++@ditto_models.command('list')
++@pass_context
++def models_list(ctx: FrameworkContext):
++    """Pinned models, their size and whether they are downloaded"""
++    rt = _local_runtime(ctx)
++    recommended, why = rt.choose_tier()
++    table = Table(title="Ditto models")
++    for column in ("Tier", "File", "Size", "License", "Status", "Note"):
++        table.add_column(column)
++    for m in rt.catalog.models:
++        status = "[green]downloaded[/green]" if rt.model_ready(m) else "-"
++        note = "recommended" if m.tier == recommended.tier else ("on request" if m.on_request else "")
++        table.add_row(escape(m.tier), escape(m.file), _gib(m.size), escape(m.license), status, note)
++    console.print(table)
++    console.print(f"Recommended for this machine: {escape(why)}")
++
++
++@ditto_models.command('download')
++@click.argument('tier', required=False)
++@click.option('--yes', '-y', is_flag=True, help='Do not ask before downloading')
++@pass_context
++def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
++    """Download a model at its pinned revision and check its sha256 (default: the recommended tier)"""
++    from orchestrator.runtime.llama_server import LocalRuntimeError
++    from orchestrator.utils.helpers import redact_secrets
++    rt = _local_runtime(ctx)
++    if tier is None:
++        model, why = rt.choose_tier()
++        console.print(f"Recommended: {escape(why)}")
++    else:
++        try:
++            model = rt.catalog.model(tier)
++        except KeyError as e:
++            console.print(f"[red]{escape(str(e.args[0]))}[/red]")
++            sys.exit(2)
++    if rt.model_ready(model):
++        console.print(f"[green]{escape(model.file)} is already downloaded.[/green]")
++        return
++    console.print(f"{escape(model.repo)} / {escape(model.file)} ({escape(model.license)})")
++    if not yes and not click.confirm(f"Download {_gib(model.size)}?", default=True):
++        return
++    try:
++        path = rt.download_model(model.tier)
++    except LocalRuntimeError as e:
++        console.print(f"[red]{escape(str(e))}[/red]")
++        sys.exit(1)
++    except Exception as e:  # network and Hub errors from huggingface_hub
++        console.print(f"[red]Download failed: {escape(redact_secrets(str(e)))}[/red]")
++        sys.exit(1)
++    console.print(f"[green]Verified and saved: {escape(str(path))}[/green]")
++
++
+ @ditto.command('setup')
+ @pass_context
+ def ditto_setup(ctx: FrameworkContext):
+diff --git a/orchestrator/runtime/__init__.py b/orchestrator/runtime/__init__.py
+new file mode 100644
+index 0000000..4868fea
+--- /dev/null
++++ b/orchestrator/runtime/__init__.py
+@@ -0,0 +1,13 @@
++"""Managed local LLM runtime (llama-server from llama.cpp) for Ditto's offline mode."""
++
++from orchestrator.runtime.catalog import RuntimeCatalog, load_catalog
++from orchestrator.runtime.hardware import (BackendChoice, HardwareInfo, choose_model_tier, compute_context,
++                                           detect_hardware, select_backend)
++from orchestrator.runtime.llama_server import (IntegrityError, LocalEndpoint, LocalLLMRuntime, LocalRuntimeError,
++                                               RuntimeStatus)
++
++__all__ = [
++    "BackendChoice", "HardwareInfo", "IntegrityError", "LocalEndpoint", "LocalLLMRuntime", "LocalRuntimeError",
++    "RuntimeCatalog", "RuntimeStatus", "choose_model_tier", "compute_context", "detect_hardware", "load_catalog",
++    "select_backend",
++]
+diff --git a/orchestrator/runtime/catalog.py b/orchestrator/runtime/catalog.py
+new file mode 100644
+index 0000000..2f0ab7a
+--- /dev/null
++++ b/orchestrator/runtime/catalog.py
+@@ -0,0 +1,136 @@
++#!/usr/bin/env python3
++"""Pinned llama.cpp build and Ditto models (configs/llama_runtime.yml), validated with pydantic."""
++
++from pathlib import Path
++from typing import Dict, List, Literal, Optional
++
++import yaml
++from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
++
++CATALOG_PATH = Path(__file__).resolve().parents[2] / "configs" / "llama_runtime.yml"
++
++OsName = Literal["linux", "windows", "macos"]
++ArchName = Literal["x86_64", "arm64"]
++Backend = Literal["cpu", "vulkan", "cuda", "rocm", "metal"]
++GPU_BACKENDS = ("vulkan", "cuda", "rocm", "metal")
++
++_SHA256 = r"^[0-9a-f]{64}$"
++_FILE_NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # a plain file name: no paths, no traversal
++
++
++class _Strict(BaseModel):
++    model_config = ConfigDict(extra="forbid", frozen=True)
++
++
++class AssetFile(_Strict):
++    name: str = Field(pattern=_FILE_NAME, max_length=200)
++    size: Optional[int] = Field(default=None, gt=0)
++    # Optional in the schema so that an unpinned entry can be listed; installing it is refused.
++    sha256: Optional[str] = Field(default=None, pattern=_SHA256)
++
++
++class RuntimeAsset(_Strict):
++    id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
++    os: OsName
++    arch: ArchName
++    backend: Backend
++    cuda: Optional[str] = Field(default=None, pattern=r"^\d+\.\d+$")
++    min_driver: Optional[float] = None
++    min_compute_cap: Optional[float] = None
++    opt_in: bool = False
++    files: List[AssetFile] = Field(min_length=1)
++
++    @property
++    def variant(self) -> str:
++        """Folder suffix: cpu, vulkan, cuda-13.4, ..."""
++        return f"{self.backend}-{self.cuda}" if self.cuda else self.backend
++
++    @property
++    def pinned(self) -> bool:
++        return all(f.sha256 for f in self.files)
++
++    @property
++    def download_size(self) -> int:
++        return sum(f.size or 0 for f in self.files)
++
++
++class LlamaCppBuild(_Strict):
++    build: str = Field(pattern=r"^b\d+$")
++    version: Optional[str] = None
++    base_url: str
++    features: Dict[str, bool] = Field(default_factory=dict)
++    assets: List[RuntimeAsset]
++
++    @field_validator("base_url")
++    @classmethod
++    def _https_only(cls, v: str) -> str:
++        if not v.startswith("https://") or not v.endswith("/"):
++            raise ValueError("base_url must be an https:// URL ending with '/'")
++        return v
++
++    def supports(self, feature: str) -> bool:
++        return bool(self.features.get(feature, False))
++
++
++class ServerDefaults(_Strict):
++    ctx_cap: int = Field(default=32768, ge=512, le=1_048_576)
++    ctx_min: int = Field(default=4096, ge=256)
++    sleep_idle_seconds: int = Field(default=0, ge=0)
++    health_timeout_seconds: int = Field(default=300, ge=5)
++
++
++class ModelEntry(_Strict):
++    tier: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
++    repo: str = Field(pattern=r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
++    # A commit, never a branch or tag: the pinned sha256 belongs to exactly this revision.
++    revision: str = Field(pattern=r"^[0-9a-f]{40}$")
++    file: str = Field(pattern=_FILE_NAME, max_length=200)
++    size: Optional[int] = Field(default=None, gt=0)
++    sha256: Optional[str] = Field(default=None, pattern=_SHA256)
++    license: str = "unknown"
++    native_context: int = Field(default=8192, gt=0)
++    kv_bytes_per_token: int = Field(default=131072, gt=0)
++    on_request: bool = False
++    description: str = ""
++
++
++class TierRule(_Strict):
++    tier: str
++    min_vram_gib: Optional[float] = None
++    min_ram_gib: Optional[float] = None
++    max_ram_gib: Optional[float] = None
++
++
++class RuntimeCatalog(_Strict):
++    schema_version: Literal[1] = 1
++    llama_cpp: LlamaCppBuild
++    server: ServerDefaults = ServerDefaults()
++    models: List[ModelEntry]
++    tier_rules: List[TierRule] = Field(min_length=1)
++
++    @model_validator(mode="after")
++    def _consistent(self) -> "RuntimeCatalog":
++        tiers = [m.tier for m in self.models]
++        if len(tiers) != len(set(tiers)):
++            raise ValueError("model tiers must be unique")
++        ids = [a.id for a in self.llama_cpp.assets]
++        if len(ids) != len(set(ids)):
++            raise ValueError("asset ids must be unique")
++        for rule in self.tier_rules:
++            if rule.tier not in tiers:
++                raise ValueError(f"tier rule refers to unknown tier '{rule.tier}'")
++        return self
++
++    def model(self, tier: str) -> ModelEntry:
++        for m in self.models:
++            if m.tier == tier:
++                return m
++        raise KeyError(f"Unknown model tier '{tier}'. Known: {', '.join(m.tier for m in self.models)}")
++
++    def assets_for(self, os_name: str, arch: str) -> List[RuntimeAsset]:
++        return [a for a in self.llama_cpp.assets if a.os == os_name and a.arch == arch]
++
++
++def load_catalog(path: Optional[Path] = None) -> RuntimeCatalog:
++    with open(path or CATALOG_PATH, "r", encoding="utf-8") as f:
++        return RuntimeCatalog.model_validate(yaml.safe_load(f))
+diff --git a/orchestrator/runtime/hardware.py b/orchestrator/runtime/hardware.py
+new file mode 100644
+index 0000000..172da2c
+--- /dev/null
++++ b/orchestrator/runtime/hardware.py
+@@ -0,0 +1,384 @@
++#!/usr/bin/env python3
++"""
++Hardware detection for the local runtime: which llama.cpp build fits this machine, which Ditto model
++tier, and how much context fits next to the model. Every decision carries a human-readable reason.
++"""
++
++import ctypes.util
++import json
++import os
++import platform
++import re
++import subprocess
++from pathlib import Path
++from typing import Callable, List, Literal, Optional, Sequence, Tuple
++
++import psutil
++from pydantic import BaseModel
++
++from orchestrator.runtime.catalog import GPU_BACKENDS, ModelEntry, RuntimeAsset, RuntimeCatalog, ServerDefaults
++
++GIB = 1024 ** 3
++MIB = 1024 ** 2
++
++# (command, timeout) -> (returncode, stdout, stderr); injectable for tests.
++Runner = Callable[[Sequence[str], float], Tuple[int, str, str]]
++
++
++class GpuInfo(BaseModel):
++    vendor: Literal["nvidia", "amd", "intel", "apple", "other"]
++    name: str
++    discrete: Optional[bool] = None
++    vram_mib: Optional[int] = None
++    vram_free_mib: Optional[int] = None
++    driver_version: Optional[str] = None
++    compute_cap: Optional[float] = None
++    source: str = ""
++
++    def label(self) -> str:
++        vram = f", {self.vram_mib / 1024:.1f} GiB" if self.vram_mib else ""
++        return f"{self.name}{vram}"
++
++
++class HardwareInfo(BaseModel):
++    os: str
++    arch: str
++    ram_total: int
++    ram_available: int
++    gpus: List[GpuInfo] = []
++    vulkan: bool = False   # a Vulkan loader or Vulkan device was seen
++
++    def summary(self) -> str:
++        gpus = "; ".join(g.label() for g in self.gpus) or "no GPU found"
++        return f"{self.os}/{self.arch}, {self.ram_total / GIB:.1f} GiB RAM, {gpus}"
++
++
++class BackendChoice(BaseModel):
++    asset: Optional[RuntimeAsset] = None
++    backend: Optional[str] = None
++    gpu: Optional[GpuInfo] = None
++    reason: str
++
++
++def _default_runner(cmd: Sequence[str], timeout: float) -> Tuple[int, str, str]:
++    """Runs a probe command; a missing tool or a hang counts as "not available"."""
++    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
++    try:
++        res = subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout, check=False,
++                             stdin=subprocess.DEVNULL, creationflags=flags)
++        return res.returncode, res.stdout or "", res.stderr or ""
++    except (OSError, subprocess.SubprocessError) as e:
++        return -1, "", str(e)
++
++
++def normalize_platform(system: Optional[str] = None, machine: Optional[str] = None) -> Tuple[str, str]:
++    system = (system or platform.system()).lower()
++    os_name = {"darwin": "macos"}.get(system, system)
++    machine = (machine or platform.machine()).lower()
++    arch = {"amd64": "x86_64", "x64": "x86_64", "aarch64": "arm64", "arm64e": "arm64"}.get(machine, machine)
++    return os_name, arch
++
++
++# --- probes ------------------------------------------------------------------------------------------------
++
++def _float(text: str) -> Optional[float]:
++    try:
++        return float(text.strip())
++    except (TypeError, ValueError):
++        return None
++
++
++def parse_nvidia_smi(output: str) -> List[GpuInfo]:
++    """Lines of `--query-gpu=driver_version,compute_cap,memory.total,memory.free,name --format=csv,noheader,nounits`."""
++    gpus = []
++    for line in output.splitlines():
++        parts = [p.strip() for p in line.split(",", 4)]
++        if len(parts) != 5 or not parts[0] or parts[0].startswith("["):
++            continue
++        driver, cap, total, free, name = parts
++        total_f, free_f = _float(total), _float(free)
++        gpus.append(GpuInfo(vendor="nvidia", name=name, discrete=True, driver_version=driver,
++                            compute_cap=_float(cap), vram_mib=int(total_f) if total_f else None,
++                            vram_free_mib=int(free_f) if free_f is not None else None, source="nvidia-smi"))
++    return gpus
++
++
++def probe_nvidia(run: Runner) -> List[GpuInfo]:
++    fields = "driver_version,compute_cap,memory.total,memory.free,name"
++    rc, out, err = run(["nvidia-smi", f"--query-gpu={fields}", "--format=csv,noheader,nounits"], 15)
++    if rc != 0 and "compute_cap" in (out + err):
++        # Drivers before R510 do not know compute_cap; ask without it and leave the column empty.
++        rc, out, _ = run(["nvidia-smi", "--query-gpu=driver_version,memory.total,memory.free,name",
++                          "--format=csv,noheader,nounits"], 15)
++        out = "\n".join(line.replace(",", ",,", 1) for line in out.splitlines())
++    return parse_nvidia_smi(out) if rc == 0 else []
++
++
++_VENDORS = {"0x10de": "nvidia", "0x1002": "amd", "0x1022": "amd", "0x8086": "intel", "0x106b": "apple"}
++
++
++def parse_vulkaninfo_summary(output: str) -> List[GpuInfo]:
++    """The "Devices:" section of `vulkaninfo --summary` (GPU0: ... key = value lines)."""
++    gpus, current = [], None
++    for raw in output.splitlines():
++        line = raw.strip()
++        if re.fullmatch(r"GPU\d+:", line):
++            current = {}
++            gpus.append(current)
++        elif current is not None and " = " in line:
++            key, _, value = line.partition(" = ")
++            current[key.strip()] = value.strip()
++    result = []
++    for dev in gpus:
++        dtype = dev.get("deviceType", "")
++        if dtype.endswith(("_CPU", "_OTHER")) or not dev.get("deviceName"):
++            continue  # llvmpipe/lavapipe and other software renderers
++        result.append(GpuInfo(vendor=_VENDORS.get(dev.get("vendorID", "").lower(), "other"), name=dev["deviceName"],
++                              discrete=dtype.endswith("DISCRETE_GPU"), driver_version=dev.get("driverInfo") or None,
++                              source="vulkaninfo"))
++    return result
++
++
++def probe_vulkaninfo(run: Runner) -> Tuple[bool, List[GpuInfo]]:
++    rc, out, _ = run(["vulkaninfo", "--summary"], 20)
++    if rc != 0 or "Devices" not in out:
++        return False, []
++    return True, parse_vulkaninfo_summary(out)
++
++
++def _guess_discrete(vendor: str, name: str) -> Optional[bool]:
++    """Windows adapter names only: dedicated Radeon RX/PRO and Arc A/B cards; plain "Graphics" is integrated."""
++    if vendor == "amd":
++        return bool(re.search(r"\b(RX|PRO W|PRO V|Instinct)\b", name, re.I))
++    if vendor == "intel":
++        return bool(re.search(r"\bArc\b.*\b[AB]\d{3}", name, re.I))
++    return None
++
++
++def probe_windows_adapters(run: Runner) -> List[GpuInfo]:
++    """Display adapters from WMI. Every current AMD/Intel/NVIDIA driver on Windows ships the Vulkan runtime."""
++    script = ("Get-CimInstance Win32_VideoController | Select-Object Name,AdapterCompatibility,DriverVersion "
++              "| ConvertTo-Json -Compress")
++    rc, out, _ = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], 20)
++    if rc != 0 or not out.strip():
++        return []
++    try:
++        data = json.loads(out)
++    except ValueError:
++        return []
++    gpus = []
++    for item in data if isinstance(data, list) else [data]:
++        name = str(item.get("Name") or "")
++        maker = f"{item.get('AdapterCompatibility') or ''} {name}".lower()
++        vendor = ("nvidia" if "nvidia" in maker else "amd" if ("advanced micro" in maker or "amd" in maker)
++                  else "intel" if "intel" in maker else "other")
++        if vendor == "other" or not name:
++            continue  # Microsoft Basic Display Adapter, remote display drivers
++        gpus.append(GpuInfo(vendor=vendor, name=name, discrete=_guess_discrete(vendor, name),
++                            driver_version=item.get("DriverVersion"), source="windows"))
++    return gpus
++
++
++def probe_linux_sysfs(root: Path) -> List[GpuInfo]:
++    """AMD GPUs from /sys/class/drm (amdgpu reports dedicated VRAM; APUs only a small carve-out)."""
++    gpus = []
++    for card in sorted((root / "class" / "drm").glob("card[0-9]*")):
++        if "-" in card.name:
++            continue  # connectors such as card0-DP-1
++        dev = card / "device"
++        try:
++            vendor = (dev / "vendor").read_text().strip().lower()
++        except OSError:
++            continue
++        if _VENDORS.get(vendor) != "amd":
++            continue
++        try:
++            vram = int((dev / "mem_info_vram_total").read_text().strip())
++        except (OSError, ValueError):
++            vram = 0
++        gpus.append(GpuInfo(vendor="amd", name=f"AMD GPU ({card.name})", discrete=vram >= 2 * GIB,
++                            vram_mib=vram // MIB or None, source="sysfs"))
++    return gpus
++
++
++def detect_hardware(run: Optional[Runner] = None, system: Optional[str] = None, machine: Optional[str] = None,
++                    memory: Optional[Tuple[int, int]] = None, sysfs_root: Path = Path("/sys")) -> HardwareInfo:
++    """Probes RAM and GPUs. Probe tools that are missing or fail simply contribute nothing."""
++    run = run or _default_runner
++    os_name, arch = normalize_platform(system, machine)
++    if memory is None:
++        vm = psutil.virtual_memory()
++        memory = (vm.total, vm.available)
++    ram_total, ram_available = memory
++
++    if os_name == "macos":
++        gpus = []
++        if arch == "arm64":
++            # Unified memory: Metal may use roughly two thirds of the RAM for buffers.
++            gpus.append(GpuInfo(vendor="apple", name="Apple GPU (unified memory)", discrete=False,
++                                vram_mib=int(ram_total * 2 / 3) // MIB, source="macos"))
++        return HardwareInfo(os=os_name, arch=arch, ram_total=ram_total, ram_available=ram_available, gpus=gpus)
++
++    gpus = probe_nvidia(run)
++    vulkan, vk_gpus = probe_vulkaninfo(run)
++    others = [g for g in vk_gpus if g.vendor != "nvidia" or not gpus]
++    if not vk_gpus:
++        if os_name == "windows":
++            adapters = probe_windows_adapters(run)
++            others = [g for g in adapters if g.vendor != "nvidia" or not gpus]
++            vulkan = vulkan or bool(adapters)
++        elif os_name == "linux":
++            others = probe_linux_sysfs(sysfs_root)
++            vulkan = vulkan or bool(others and ctypes.util.find_library("vulkan"))
++    elif os_name == "linux":
++        # vulkaninfo has no memory sizes; amdgpu's sysfs does. Matched only when the count agrees.
++        amd_vk = [g for g in others if g.vendor == "amd"]
++        amd_fs = probe_linux_sysfs(sysfs_root)
++        if amd_vk and len(amd_vk) == len(amd_fs):
++            for g, fs in zip(amd_vk, amd_fs):
++                g.vram_mib = fs.vram_mib
++    return HardwareInfo(os=os_name, arch=arch, ram_total=ram_total, ram_available=ram_available,
++                        gpus=gpus + others, vulkan=vulkan or bool(vk_gpus))
++
++
++# --- decisions ---------------------------------------------------------------------------------------------
++
++def _driver_major(version: Optional[str]) -> Optional[float]:
++    m = re.match(r"(\d+)(?:\.(\d+))?", version or "")
++    return float(f"{m.group(1)}.{m.group(2) or 0}") if m else None
++
++
++def _best(gpus: List[GpuInfo]) -> Optional[GpuInfo]:
++    return max(gpus, key=lambda g: (g.discrete is True, g.vram_mib or 0), default=None)
++
++
++def select_backend(hw: HardwareInfo, catalog: RuntimeCatalog, prefer: Optional[str] = None) -> BackendChoice:
++    """Picks the llama.cpp build for this machine. ROCm builds are only used when asked for (prefer="rocm")."""
++    assets = catalog.assets_for(hw.os, hw.arch)
++    if not assets:
++        return BackendChoice(reason=f"No llama.cpp build for {hw.os}/{hw.arch} in the catalog.")
++    by_backend = {}
++    for a in assets:
++        by_backend.setdefault(a.backend, []).append(a)
++    for group in by_backend.values():
++        group.sort(key=lambda a: tuple(int(x) for x in (a.cuda or "0.0").split(".")), reverse=True)
++
++    nvidia = _best([g for g in hw.gpus if g.vendor == "nvidia"])
++
++    def cuda_asset() -> Tuple[Optional[RuntimeAsset], str]:
++        if not nvidia:
++            return None, "no NVIDIA GPU found (nvidia-smi)"
++        driver = _driver_major(nvidia.driver_version)
++        cap = nvidia.compute_cap
++        notes = []
++        for asset in by_backend.get("cuda", []):
++            if asset.min_driver and (driver is None or driver < asset.min_driver):
++                notes.append(f"CUDA {asset.cuda} needs driver >= {asset.min_driver:g}")
++                continue
++            if asset.min_compute_cap and cap is not None and cap < asset.min_compute_cap:
++                notes.append(f"CUDA {asset.cuda} needs compute capability >= {asset.min_compute_cap:g}")
++                continue
++            return asset, (f"NVIDIA {nvidia.label()} (driver {nvidia.driver_version}"
++                           f"{f', compute {cap:g}' if cap else ''}) -> CUDA {asset.cuda} build")
++        why = "; ".join(notes) or f"no CUDA build for {hw.os}/{hw.arch}"
++        return None, f"NVIDIA {nvidia.name} with driver {nvidia.driver_version}: {why}"
++
++    def pick(backend: str, gpu: Optional[GpuInfo], reason: str) -> BackendChoice:
++        return BackendChoice(asset=by_backend[backend][0], backend=backend, gpu=gpu, reason=reason)
++
++    if prefer and prefer != "auto":
++        if prefer == "cuda":
++            asset, reason = cuda_asset()
++            if asset:
++                return BackendChoice(asset=asset, backend="cuda", gpu=nvidia, reason=reason)
++            return BackendChoice(reason=f"CUDA requested, but {reason}.")
++        if prefer not in by_backend:
++            have = ", ".join(sorted(by_backend))
++            return BackendChoice(reason=f"No '{prefer}' build for {hw.os}/{hw.arch} (available: {have}).")
++        gpu = _best([g for g in hw.gpus if g.vendor != "nvidia"]) if prefer in ("vulkan", "rocm") else None
++        return pick(prefer, gpu or (nvidia if prefer == "vulkan" else None), f"{prefer} build requested")
++
++    if "metal" in by_backend:
++        apple = _best([g for g in hw.gpus if g.vendor == "apple"])
++        return pick("metal", apple, "Apple Silicon -> Metal build (GPU with unified memory)")
++
++    fallback_note = ""
++    if nvidia:
++        asset, reason = cuda_asset()
++        if asset:
++            return BackendChoice(asset=asset, backend="cuda", gpu=nvidia, reason=reason)
++        fallback_note = reason + "; "
++
++    if "vulkan" in by_backend and hw.vulkan:
++        discrete = _best([g for g in hw.gpus if g.discrete])
++        if discrete:
++            return pick("vulkan", discrete, f"{fallback_note}{discrete.vendor.upper()} {discrete.label()} "
++                                            f"-> Vulkan build")
++        integrated = _best(hw.gpus)
++        if integrated:
++            fallback_note += (f"only an integrated GPU ({integrated.name}); try '--backend vulkan' to use it; ")
++
++    if "cpu" in by_backend:
++        return pick("cpu", None, f"{fallback_note}CPU build (no usable GPU backend)")
++    return BackendChoice(reason=f"{fallback_note}No CPU build for {hw.os}/{hw.arch} in the catalog.")
++
++
++def usable_vram_gib(choice: Optional[BackendChoice]) -> Optional[float]:
++    """GPU memory that counts for model choice: only with a GPU backend and a known size."""
++    if not choice or choice.backend not in GPU_BACKENDS or not choice.gpu or not choice.gpu.vram_mib:
++        return None
++    return choice.gpu.vram_mib / 1024
++
++
++def choose_model_tier(hw: HardwareInfo, catalog: RuntimeCatalog,
++                      choice: Optional[BackendChoice] = None) -> Tuple[ModelEntry, str]:
++    """First matching rule from the catalog's tier_rules, with the reason."""
++    ram = hw.ram_total / GIB
++    vram = usable_vram_gib(choice)
++    for rule in catalog.tier_rules:
++        why = []
++        if rule.min_vram_gib is not None:
++            if vram is None or vram < rule.min_vram_gib:
++                continue
++            why.append(f"{vram:.1f} GiB GPU memory (>= {rule.min_vram_gib:g})")
++        if rule.min_ram_gib is not None:
++            if ram < rule.min_ram_gib:
++                continue
++            why.append(f"{ram:.1f} GiB RAM (>= {rule.min_ram_gib:g})")
++        if rule.max_ram_gib is not None:
++            if ram > rule.max_ram_gib:
++                continue
++            why.append(f"{ram:.1f} GiB RAM (<= {rule.max_ram_gib:g})")
++        model = catalog.model(rule.tier)
++        if not why:
++            gpu = f"{vram:.1f} GiB GPU memory" if vram is not None else "no GPU memory usable by the runtime"
++            why.append(f"{ram:.1f} GiB RAM, {gpu}")
++        return model, f"{model.tier}: {', '.join(why)}"
++    raise ValueError("No tier rule matched; the catalog needs a final rule without conditions.")
++
++
++def compute_context(model: ModelEntry, hw: HardwareInfo, choice: Optional[BackendChoice],
++                    defaults: ServerDefaults, cap: Optional[int] = None,
++                    model_bytes: Optional[int] = None) -> Tuple[int, str]:
++    """Context length (-c) that fits next to the model: never the native context, never above the cap."""
++    cap = min(cap or defaults.ctx_cap, model.native_context)
++    floor = min(defaults.ctx_min, cap)
++    weights = int((model_bytes or model.size or 0) * 1.05)
++    gpu = choice.gpu if choice and choice.backend in ("cuda", "vulkan", "rocm") else None
++    if gpu and gpu.vram_mib:
++        vram = (gpu.vram_free_mib if gpu.vram_free_mib is not None else gpu.vram_mib * 0.9) * MIB
++        if weights + 512 * MIB <= vram:
++            budget, where = vram - weights - 512 * MIB, f"{vram / GIB:.1f} GiB free GPU memory"
++        else:
++            # Partial offload: layers that do not fit stay in RAM.
++            budget = vram + hw.ram_available - weights - 1536 * MIB
++            where = f"{vram / GIB:.1f} GiB GPU + {hw.ram_available / GIB:.1f} GiB free RAM"
++    else:
++        budget = hw.ram_available - weights - GIB  # leaves room for the OS and the framework
++        where = f"{hw.ram_available / GIB:.1f} GiB free RAM"
++    fits = max(int(budget), 0) // model.kv_bytes_per_token
++    ctx = min(fits, cap) // 256 * 256
++    if ctx < floor:
++        return floor, f"{floor} tokens (minimum; only ~{fits} fit in {where} next to the model)"
++    limit = "cap" if ctx == cap else "memory"
++    return ctx, f"{ctx} tokens ({limit}; {where}, {model.kv_bytes_per_token // 1024} KiB KV cache per token)"
+diff --git a/orchestrator/runtime/llama_server.py b/orchestrator/runtime/llama_server.py
+new file mode 100644
+index 0000000..114f8db
+--- /dev/null
++++ b/orchestrator/runtime/llama_server.py
+@@ -0,0 +1,619 @@
++#!/usr/bin/env python3
++"""
++Managed llama-server (llama.cpp) for Ditto's local/offline mode.
++
++Downloads a pinned llama.cpp build and pinned GGUF models (hashes verified before anything is unpacked
++or loaded), starts llama-server on loopback with a random port and a per-start API key passed via a
++0600 key file, and hands base_url/api_key/model to the provider layer. The server never gets its own
++tools, agent mode or MCP servers: Ditto's tools run inside the framework, where approval is enforced.
++"""
++
++import hmac
++import json
++import os
++import re
++import secrets
++import shutil
++import socket
++import subprocess
++import time
++from datetime import datetime, timezone
++from pathlib import Path
++from typing import Callable, Dict, List, Optional, Tuple
++
++import psutil
++import requests
++from pydantic import BaseModel, Field
++
++from orchestrator.runtime.catalog import GPU_BACKENDS, ModelEntry, RuntimeAsset, RuntimeCatalog, load_catalog
++from orchestrator.runtime.hardware import (BackendChoice, HardwareInfo, Runner, choose_model_tier, compute_context,
++                                           detect_hardware, select_backend)
++from orchestrator.utils.helpers import calculate_file_checksum, redact_secrets, safe_extract_archive
++from orchestrator.utils.logging import get_logger
++
++APP_ROOT = Path(__file__).resolve().parents[2]
++LOOPBACK = "127.0.0.1"
++
++# llama-server options that give the model its own tools, file/shell access, MCP clients, a web UI or a
++# command-line key. None of them may ever reach the command line.
++FORBIDDEN_FLAGS = frozenset({
++    "--tools", "--tools-runtime", "-ag", "--agent", "--mcp-servers-config", "--mcp-servers-json",
++    "--ui-mcp-proxy", "--webui-mcp-proxy", "--ui", "--webui", "--api-key", "--props", "--media-path",
++    "--slot-save-path", "--models-dir", "--models-preset", "--path", "-hf", "--hf-repo", "-mu", "--model-url",
++})
++# Environment variables are a second way to set every llama-server option (LLAMA_ARG_*, LLAMA_API_KEY);
++# secrets of other programs have no business in the server's environment either.
++_SECRET_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH", re.IGNORECASE)
++
++ProgressFn = Callable[[str, int, Optional[int]], None]
++
++
++class LocalRuntimeError(Exception):
++    """User-facing runtime problem (message is safe to show)."""
++
++
++class IntegrityError(LocalRuntimeError):
++    """A download is not pinned or does not match its pinned hash; nothing was installed."""
++
++
++class InstalledRuntime(BaseModel):
++    build: str
++    asset_id: str
++    variant: str
++    backend: str
++    path: Path
++    server: Path
++    files: Dict[str, str]
++
++
++class LocalEndpoint(BaseModel):
++    """What the provider layer needs (orchestrator.llm client.set_runtime_endpoint("local", ...))."""
++    base_url: str
++    api_key: str = Field(repr=False)
++    model: str
++    port: int
++    pid: int
++
++
++class RuntimeStatus(BaseModel):
++    build: str
++    installed: Optional[InstalledRuntime] = None
++    running: bool = False
++    healthy: bool = False
++    pid: Optional[int] = None
++    port: Optional[int] = None
++    model: Optional[str] = None
++    ctx: Optional[int] = None
++    base_url: Optional[str] = None
++    log_file: Path
++
++
++def user_data_dir() -> Path:
++    """Per-user framework directory (same rule as ConfigManager.user_state_dir)."""
++    path = Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
++    path.mkdir(parents=True, exist_ok=True)
++    if os.name == "posix":
++        try:
++            path.chmod(0o700)
++        except OSError:
++            pass
++    return path
++
++
++def framework_models_dir(value: Optional[str] = None) -> Path:
++    """The framework's models directory; relative values are relative to the installation, not the cwd."""
++    path = Path(value or os.environ.get("LLM_FRAMEWORK_MODELS_DIR") or "models").expanduser()
++    return path if path.is_absolute() else APP_ROOT / path
++
++
++def _write_private(path: Path, text: str) -> None:
++    """Writes a file only the current user can read (created 0600, replaced atomically)."""
++    path.parent.mkdir(parents=True, exist_ok=True)
++    tmp = path.with_name(path.name + ".tmp")
++    tmp.unlink(missing_ok=True)
++    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
++    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
++        f.write(text)
++    os.replace(tmp, path)
++
++
++def _free_port() -> int:
++    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
++        s.bind((LOOPBACK, 0))
++        return s.getsockname()[1]
++
++
++def server_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
++    env = dict(os.environ if base is None else base)
++    return {k: v for k, v in env.items() if not k.upper().startswith("LLAMA_") and not _SECRET_ENV.search(k)}
++
++
++def build_server_command(server: Path, model: Path, port: int, key_file: Path, ctx: int, alias: str,
++                         gpu: bool, cache_ram_mib: int, sleep_idle_seconds: Optional[int] = None) -> List[str]:
++    """The complete llama-server command line. Only loopback, only the key file, no tools/agent/MCP/web UI."""
++    cmd = [str(server), "-m", str(model), "--alias", alias,
++           "--host", LOOPBACK, "--port", str(port),
++           "--api-key-file", str(key_file),
++           "--no-webui",
++           "--jinja",              # chat template engine; OpenAI-style tool calls need it
++           "--offline",            # never fetch anything; the model is a local file
++           "-c", str(ctx),
++           "--cache-ram", str(cache_ram_mib)]
++    if gpu:
++        cmd += ["-ngl", "auto"]    # offload as many layers as fit (llama.cpp's --fit is on by default)
++    if sleep_idle_seconds:
++        cmd += ["--sleep-idle-seconds", str(sleep_idle_seconds)]
++    bad = FORBIDDEN_FLAGS.intersection(cmd)
++    if bad:
++        raise LocalRuntimeError(f"Refusing to start llama-server with {sorted(bad)}")
++    return cmd
++
++
++class LocalLLMRuntime:
++    """Install, start and stop the managed llama-server; choose Ditto's model for this machine."""
++
++    def __init__(self, data_dir: Optional[Path] = None, models_dir: Optional[Path] = None,
++                 catalog: Optional[RuntimeCatalog] = None, hardware: Optional[HardwareInfo] = None,
++                 session: Optional[requests.Session] = None, runner: Optional[Runner] = None,
++                 hf_download: Optional[Callable[..., str]] = None):
++        self.logger = get_logger("LocalLLMRuntime")
++        self.catalog = catalog or load_catalog()
++        self.data_dir = Path(data_dir) if data_dir else user_data_dir()
++        self.models_dir = Path(models_dir) if models_dir else framework_models_dir() / "ditto"
++        self.root = self.data_dir / "runtime" / "llama.cpp"
++        self.state_file = self.root / "server.json"
++        self.key_file = self.root / "server.key"
++        self.active_file = self.root / "active.json"
++        self.log_file = self.data_dir / "logs" / "llama-server.log"
++        self._hardware = hardware
++        self._runner = runner
++        self._session = session
++        self._hf_download = hf_download
++        self._proc: Optional[subprocess.Popen] = None
++        # Loopback calls must never go through an HTTP(S)_PROXY from the environment.
++        self._local = requests.Session()
++        self._local.trust_env = False
++
++    @classmethod
++    def from_framework(cls, framework, **kwargs) -> "LocalLLMRuntime":
++        """Uses the framework's per-user directory and models directory."""
++        return cls(data_dir=framework.config.user_state_dir,
++                   models_dir=framework.resolve_path(framework.config.get("models_dir", "models")) / "ditto",
++                   **kwargs)
++
++    # --- decisions ------------------------------------------------------------------------------------------
++    @property
++    def build(self) -> str:
++        return self.catalog.llama_cpp.build
++
++    def hardware(self, refresh: bool = False) -> HardwareInfo:
++        if self._hardware is None or refresh:
++            self._hardware = detect_hardware(self._runner)
++        return self._hardware
++
++    def select_backend(self, prefer: Optional[str] = None) -> BackendChoice:
++        return select_backend(self.hardware(), self.catalog, prefer)
++
++    def choose_tier(self, prefer: Optional[str] = None) -> Tuple[ModelEntry, str]:
++        """Default Ditto model for this machine (RAM, and VRAM when a GPU build is used), with the reason."""
++        installed = self.installed()
++        choice = self.select_backend(installed.backend if installed else prefer)
++        return choose_model_tier(self.hardware(), self.catalog, choice)
++
++    # --- runtime install --------------------------------------------------------------------------------------
++    def install_dir(self, asset: RuntimeAsset) -> Path:
++        return self.root / f"{self.build}-{asset.variant}"
++
++    def _read_manifest(self, path: Path) -> Optional[InstalledRuntime]:
++        try:
++            data = json.loads((path / "runtime.json").read_text(encoding="utf-8"))
++            inst = InstalledRuntime(path=path, server=path / data["server"], **{
++                k: data[k] for k in ("build", "asset_id", "variant", "backend", "files")})
++        except (OSError, ValueError, KeyError, TypeError):
++            return None
++        return inst if inst.server.is_file() and inst.build == self.build else None
++
++    def installed(self) -> Optional[InstalledRuntime]:
++        """The runtime chosen by the last install, if it is still complete and belongs to the pinned build."""
++        try:
++            variant = json.loads(self.active_file.read_text(encoding="utf-8"))["variant"]
++        except (OSError, ValueError, KeyError, TypeError):
++            return None
++        return self._read_manifest(self.root / f"{self.build}-{variant}")
++
++    def install(self, prefer: Optional[str] = None, force: bool = False,
++                progress: Optional[ProgressFn] = None) -> InstalledRuntime:
++        """Downloads, verifies and unpacks the llama.cpp build for this machine (or the requested backend)."""
++        choice = self.select_backend(prefer)
++        asset = choice.asset
++        if asset is None:
++            raise LocalRuntimeError(choice.reason)
++        unpinned = [f.name for f in asset.files if not f.sha256]
++        if unpinned:
++            raise IntegrityError(f"No sha256 pinned for {', '.join(unpinned)} in the runtime catalog; "
++                                 "refusing to download unverifiable binaries.")
++        target = self.install_dir(asset)
++        current = self._read_manifest(target)
++        if current and not force and current.files == {f.name: f.sha256 for f in asset.files}:
++            self._set_active(asset)
++            return current
++        if self.status().running:
++            raise LocalRuntimeError("The local model server is running; stop it before reinstalling.")
++
++        downloads = self.root / "downloads"
++        archives = [self._fetch(self.catalog.llama_cpp.base_url + f.name, downloads / f.name, f.size, f.sha256,
++                                progress) for f in asset.files]
++        staging = self.root / f".staging-{asset.variant}-{secrets.token_hex(4)}"
++        try:
++            for archive in archives:
++                try:
++                    safe_extract_archive(archive, staging)
++                except Exception as e:
++                    raise IntegrityError(f"Unsafe or broken archive {archive.name}: {e}") from e
++            server = self._find_server(staging, asset)
++            self._make_executable(server.parent)
++            manifest = {"build": self.build, "asset_id": asset.id, "variant": asset.variant,
++                        "backend": asset.backend, "server": server.relative_to(staging).as_posix(),
++                        "files": {f.name: f.sha256 for f in asset.files},
++                        "installed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
++            (staging / "runtime.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
++            if target.exists():
++                shutil.rmtree(target)
++            os.replace(staging, target)
++        finally:
++            shutil.rmtree(staging, ignore_errors=True)
++        for archive in archives:
++            archive.unlink(missing_ok=True)
++        self._set_active(asset)
++        inst = self._read_manifest(target)
++        if inst is None:
++            raise LocalRuntimeError(f"Installation in {target} is incomplete.")
++        self.logger.info(f"Installed llama.cpp {self.build} ({asset.id}) in {target}")
++        return inst
++
++    def _set_active(self, asset: RuntimeAsset) -> None:
++        self.root.mkdir(parents=True, exist_ok=True)
++        self.active_file.write_text(json.dumps({"variant": asset.variant, "asset_id": asset.id}), encoding="utf-8")
++
++    @staticmethod
++    def _find_server(staging: Path, asset: RuntimeAsset) -> Path:
++        name = "llama-server.exe" if asset.os == "windows" else "llama-server"
++        found = sorted((p for p in staging.rglob(name) if p.is_file() and not p.is_symlink()),
++                       key=lambda p: len(p.parts))
++        if not found:
++            raise LocalRuntimeError(f"{name} not found in the downloaded archive.")
++        return found[0]
++
++    @staticmethod
++    def _make_executable(bin_dir: Path) -> None:
++        """Zip archives carry no permission bits; executables and shared libraries need +x on POSIX."""
++        if os.name != "posix":
++            return
++        for p in bin_dir.iterdir():
++            if not p.is_file() or p.is_symlink() or p.name.upper().startswith("LICENSE"):
++                continue
++            if not p.suffix or ".so" in p.name or p.suffix == ".dylib":
++                p.chmod(p.stat().st_mode | 0o755)
++
++    def _http(self) -> requests.Session:
++        if self._session is None:
++            self._session = requests.Session()
++        return self._session
++
++    def _fetch(self, url: str, dest: Path, size: Optional[int], sha256: Optional[str],
++               progress: Optional[ProgressFn] = None, attempts: int = 5) -> Path:
++        """Resumable download into <dest>.part; the file only gets its final name after the hash matched."""
++        if not sha256:
++            raise IntegrityError(f"No sha256 pinned for {dest.name}; refusing to download it.")
++        dest.parent.mkdir(parents=True, exist_ok=True)
++        part = dest.with_name(dest.name + ".part")
++        for attempt in range(1, attempts + 1):
++            have = part.stat().st_size if part.exists() else 0
++            if size and have > size:
++                part.unlink()
++                have = 0
++            if size and have == size:
++                break
++            try:
++                self._download_range(url, part, have, size, progress)
++                if not size or part.stat().st_size >= size:
++                    break
++            except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as e:
++                self.logger.warning(f"Download of {dest.name} interrupted ({e.__class__.__name__}), "
++                                    f"attempt {attempt}/{attempts}")
++            if attempt == attempts:
++                raise LocalRuntimeError(f"Download of {dest.name} did not complete after {attempts} attempts; "
++                                        "run the command again to resume.")
++            time.sleep(min(2 ** attempt, 15))
++        self._verify(part, size, sha256)
++        os.replace(part, dest)
++        return dest
++
++    def _download_range(self, url: str, part: Path, have: int, size: Optional[int],
++                        progress: Optional[ProgressFn]) -> None:
++        headers = {"Range": f"bytes={have}-"} if have else {}
++        with self._http().get(url, headers=headers, stream=True, timeout=(15, 60), allow_redirects=True) as r:
++            if not str(r.url).startswith("https://"):
++                raise LocalRuntimeError(f"Refusing a download that was redirected away from HTTPS: {r.url}")
++            if r.status_code not in (200, 206):
++                raise LocalRuntimeError(f"Download of {part.name[:-5]} failed: HTTP {r.status_code}")
++            resumed = bool(have) and r.status_code == 206
++            if resumed and not str(r.headers.get("Content-Range", "")).startswith(f"bytes {have}-"):
++                part.unlink(missing_ok=True)  # a range we did not ask for: start over
++                raise requests.ConnectionError("unexpected Content-Range")
++            if not resumed:
++                have = 0
++            with open(part, "ab" if resumed else "wb") as f:
++                for chunk in r.iter_content(chunk_size=1 << 20):
++                    if not chunk:
++                        continue
++                    f.write(chunk)
++                    have += len(chunk)
++                    if size and have > size:
++                        break  # more than pinned: the hash check below refuses it
++                    if progress:
++                        progress(part.name[:-5], have, size)
++
++    @staticmethod
++    def _verify(path: Path, size: Optional[int], sha256: str) -> None:
++        actual_size = path.stat().st_size
++        digest = calculate_file_checksum(path, "sha256")
++        if (size and actual_size != size) or not hmac.compare_digest(digest, sha256.lower()):
++            path.unlink(missing_ok=True)
++            name = path.name[:-5] if path.name.endswith(".part") else path.name
++            raise IntegrityError(f"{name} does not match its pinned hash (expected sha256 {sha256}, got {digest}, "
++                                 f"{actual_size} bytes). The file was deleted and will not be used.")
++
++    # --- models -----------------------------------------------------------------------------------------------
++    def model_path(self, model: ModelEntry) -> Path:
++        return self.models_dir / model.file
++
++    def _marker(self, model: ModelEntry) -> Path:
++        return self.models_dir / f".{model.file}.verified.json"
++
++    def model_ready(self, model: ModelEntry) -> bool:
++        """Downloaded and verified (the marker records size and mtime, so a changed file is checked again)."""
++        path = self.model_path(model)
++        try:
++            marker = json.loads(self._marker(model).read_text(encoding="utf-8"))
++            st = path.stat()
++        except (OSError, ValueError):
++            return False
++        return (marker.get("sha256") == model.sha256 and marker.get("size") == st.st_size
++                and marker.get("mtime_ns") == st.st_mtime_ns)
++
++    def download_model(self, tier: str) -> Path:
++        """hf_hub_download at the pinned commit, then the pinned sha256 is checked before the file is used."""
++        model = self.catalog.model(tier)
++        if not model.sha256:
++            raise IntegrityError(f"No sha256 pinned for {model.repo}/{model.file}; refusing to download it.")
++        path = self.model_path(model)
++        if self.model_ready(model):
++            return path
++        download = self._hf_download
++        if download is None:
++            from huggingface_hub import hf_hub_download as download
++        self.models_dir.mkdir(parents=True, exist_ok=True)
++        got = Path(download(repo_id=model.repo, filename=model.file, revision=model.revision,
++                            local_dir=str(self.models_dir), token=False))
++        if got.resolve() != path.resolve():
++            raise LocalRuntimeError(f"Unexpected download location {got}")
++        self._verify(path, model.size, model.sha256)
++        st = path.stat()
++        self._marker(model).write_text(json.dumps({"sha256": model.sha256, "size": st.st_size,
++                                                   "mtime_ns": st.st_mtime_ns}), encoding="utf-8")
++        return path
++
++    def _ensure_model_verified(self, model: ModelEntry) -> Path:
++        path = self.model_path(model)
++        if not path.is_file():
++            raise LocalRuntimeError(f"Model {model.tier} is not downloaded. Run: llm-cli ditto models download "
++                                    f"{model.tier}")
++        if not self.model_ready(model):
++            if not model.sha256:
++                raise IntegrityError(f"No sha256 pinned for {model.file}; refusing to load it.")
++            self._verify(path, model.size, model.sha256)
++            st = path.stat()
++            self._marker(model).write_text(json.dumps({"sha256": model.sha256, "size": st.st_size,
++                                                       "mtime_ns": st.st_mtime_ns}), encoding="utf-8")
++        return path
++
++    # --- process ----------------------------------------------------------------------------------------------
++    def _load_state(self) -> Optional[dict]:
++        try:
++            return json.loads(self.state_file.read_text(encoding="utf-8"))
++        except (OSError, ValueError):
++            return None
++
++    def _owned_process(self, state: Optional[dict]) -> Optional[psutil.Process]:
++        """The recorded server process, only if pid, start time and executable still match (pids get reused)."""
++        if not state:
++            return None
++        try:
++            proc = psutil.Process(int(state["pid"]))
++            if abs(proc.create_time() - float(state["create_time"])) > 0.01:
++                return None
++            if proc.status() == psutil.STATUS_ZOMBIE:
++                return None
++            server = Path(state["server"]).resolve()
++            candidates = (proc.cmdline() or [])[:2]
++            try:
++                candidates.append(proc.exe())
++            except psutil.AccessDenied:
++                pass
++            if not any(c and Path(c).resolve() == server for c in candidates):
++                return None
++            return proc
++        except (psutil.Error, KeyError, ValueError, TypeError, OSError):
++            return None
++
++    def _health(self, port: int) -> Optional[int]:
++        try:
++            return self._local.get(f"http://{LOOPBACK}:{port}/health", timeout=2).status_code
++        except requests.RequestException:
++            return None
++
++    def _check_auth(self, port: int, key: str) -> None:
++        """Fail closed if the server answers API calls without (or ignores) the key."""
++        url = f"http://{LOOPBACK}:{port}/v1/models"
++        anonymous = self._local.get(url, timeout=5).status_code
++        authorized = self._local.get(url, headers={"Authorization": f"Bearer {key}"}, timeout=5).status_code
++        if anonymous != 401 or authorized != 200:
++            raise LocalRuntimeError(f"llama-server did not enforce its API key (HTTP {anonymous} without, "
++                                    f"{authorized} with the key); stopped it.")
++
++    def _log_tail(self, lines: int = 25) -> str:
++        try:
++            with open(self.log_file, "rb") as f:
++                f.seek(max(0, f.seek(0, os.SEEK_END) - 16384))
++                text = f.read().decode("utf-8", errors="replace")
++        except OSError:
++            return ""
++        return redact_secrets("\n".join(text.splitlines()[-lines:]))
++
++    def _open_log(self):
++        self.log_file.parent.mkdir(parents=True, exist_ok=True)
++        try:
++            if self.log_file.stat().st_size > 5 * 1024 * 1024:
++                os.replace(self.log_file, self.log_file.with_name(self.log_file.name + ".1"))
++        except OSError:
++            pass
++        log = open(self.log_file, "ab")
++        log.write(f"\n=== llama-server start {datetime.now().isoformat(timespec='seconds')} ===\n".encode())
++        log.flush()
++        return log
++
++    def endpoint(self) -> Optional[LocalEndpoint]:
++        """base_url, api key and model of the running server, or None."""
++        state = self._load_state()
++        if not self._owned_process(state):
++            return None
++        try:
++            key = self.key_file.read_text(encoding="utf-8").strip()
++        except OSError:
++            return None
++        return LocalEndpoint(base_url=f"http://{LOOPBACK}:{state['port']}/v1", api_key=key, model=state["alias"],
++                             port=state["port"], pid=state["pid"])
++
++    def status(self) -> RuntimeStatus:
++        state = self._load_state()
++        proc = self._owned_process(state)
++        status = RuntimeStatus(build=self.build, installed=self.installed(), log_file=self.log_file)
++        if proc:
++            status.running, status.pid, status.port = True, state["pid"], state["port"]
++            status.model, status.ctx = state.get("alias"), state.get("ctx")
++            status.base_url = f"http://{LOOPBACK}:{state['port']}/v1"
++            status.healthy = self._health(state["port"]) == 200
++        return status
++
++    def start(self, tier: Optional[str] = None, ctx: Optional[int] = None,
++              sleep_idle_seconds: Optional[int] = None, timeout: Optional[float] = None) -> LocalEndpoint:
++        """Starts llama-server (or returns the running one if it already serves this model)."""
++        installed = self.installed()
++        if installed is None:
++            raise LocalRuntimeError("The local runtime is not installed. Run: llm-cli ditto runtime install")
++        try:
++            model = self.catalog.model(tier) if tier else self.choose_tier()[0]
++        except KeyError as e:
++            raise LocalRuntimeError(e.args[0]) from None
++        alias = Path(model.file).stem
++        running = self.endpoint()
++        if running and running.model == alias and self._health(running.port) == 200:
++            return running
++        if running:
++            self.stop()
++        model_path = self._ensure_model_verified(model)
++
++        hw = self.hardware()
++        choice = select_backend(hw, self.catalog, installed.backend)
++        if ctx is None:
++            ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)
++        else:
++            ctx, why = max(256, min(int(ctx), model.native_context)), "set explicitly"
++        if sleep_idle_seconds is None:
++            sleep_idle_seconds = self.catalog.server.sleep_idle_seconds
++        if not self.catalog.llama_cpp.supports("sleep_idle_seconds"):
++            sleep_idle_seconds = 0
++        cache_ram = max(256, min(8192, hw.ram_total // (8 * 1024 * 1024)))
++        timeout = timeout or self.catalog.server.health_timeout_seconds
++
++        for _ in range(3):  # a random free port can be taken between choosing and binding
++            key = secrets.token_urlsafe(32)
++            _write_private(self.key_file, key + "\n")
++            port = _free_port()
++            cmd = build_server_command(installed.server, model_path, port, self.key_file, ctx, alias,
++                                       gpu=installed.backend in GPU_BACKENDS, cache_ram_mib=cache_ram,
++                                       sleep_idle_seconds=sleep_idle_seconds or None)
++            self.logger.info(f"Starting llama-server {self.build} ({installed.variant}) on {LOOPBACK}:{port}, "
++                             f"model {model.file}, ctx {why}")
++            with self._open_log() as log:
++                kwargs = {"start_new_session": True} if os.name == "posix" else {
++                    "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)
++                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
++                proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
++                                        cwd=str(installed.server.parent), env=server_env(), close_fds=True, **kwargs)
++            self._proc = proc
++            try:
++                created = psutil.Process(proc.pid).create_time()
++            except psutil.Error:
++                created = 0.0  # already gone; the health wait reports it
++            _write_private(self.state_file, json.dumps({
++                "pid": proc.pid, "create_time": created, "port": port,
++                "server": str(installed.server), "variant": installed.variant, "tier": model.tier, "alias": alias,
++                "ctx": ctx, "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
++            outcome = self._wait_healthy(proc, port, timeout)
++            if outcome == "ok":
++                try:
++                    self._check_auth(port, key)
++                except (LocalRuntimeError, requests.RequestException) as e:
++                    self.stop()
++                    raise LocalRuntimeError(str(e)) from e
++                return self.endpoint() or LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key,
++                                                        model=alias, port=port, pid=proc.pid)
++            tail = self._log_tail()
++            self.stop()
++            if outcome == "exited" and "couldn't bind" in tail:
++                continue
++            what = "did not become ready in time" if outcome == "timeout" else "exited during startup"
++            raise LocalRuntimeError(f"llama-server {what}. Log ({self.log_file}):\n{tail}")
++        raise LocalRuntimeError("Could not find a free local port for llama-server.")
++
++    def _wait_healthy(self, proc: subprocess.Popen, port: int, timeout: float) -> str:
++        deadline = time.monotonic() + timeout
++        while time.monotonic() < deadline:
++            if proc.poll() is not None:
++                return "exited"
++            if self._health(port) == 200:
++                return "ok"
++            time.sleep(0.25)
++        return "timeout"
++
++    def stop(self, timeout: float = 15) -> bool:
++        """Stops the server this runtime started. A recorded pid that now belongs to another process is left alone."""
++        state = self._load_state()
++        proc = self._owned_process(state)
++        stopped = False
++        if proc:
++            try:
++                proc.terminate()
++                try:
++                    proc.wait(timeout)
++                except psutil.TimeoutExpired:
++                    proc.kill()
++                    proc.wait(5)
++                stopped = True
++            except psutil.NoSuchProcess:
++                stopped = True
++        if self._proc is not None:
++            try:
++                self._proc.wait(1)  # reap our own child so it does not linger as a zombie
++            except subprocess.TimeoutExpired:
++                pass
++            self._proc = None
++        self.state_file.unlink(missing_ok=True)
++        self.key_file.unlink(missing_ok=True)
++        return stopped
++
++    def restart(self, **kwargs) -> LocalEndpoint:
++        self.stop()
++        return self.start(**kwargs)

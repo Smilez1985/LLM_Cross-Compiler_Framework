@@ -18,6 +18,14 @@ export LLAMA_CPP_PATH="${LLAMA_CPP_PATH:-/usr/src/llama.cpp}"
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 export DEBUG="${DEBUG:-0}"
 
+# The su fallback below resets PATH; keep the image's Python venv first so python3/pip resolve to it.
+if [ -n "${VIRTUAL_ENV:-}" ] && [ -d "$VIRTUAL_ENV/bin" ]; then
+    case ":$PATH:" in
+        *":$VIRTUAL_ENV/bin:"*) ;;
+        *) export PATH="$VIRTUAL_ENV/bin:$PATH" ;;
+    esac
+fi
+
 # User ID Mapping Defaults (werden von docker run -e PUID=... überschrieben)
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
@@ -82,11 +90,14 @@ fix_permissions() {
     # Recursive chown auf /app kann langsam sein, daher Vorsicht.
     log_info "Applying permissions to storage locations..."
     
-    chown -R llmbuilder:llmbuilder "$BUILD_CACHE_DIR"
+    # Read-only bind mounts (dataset, imatrix) cannot be chowned; that must not abort the container.
+    chown -R llmbuilder:llmbuilder "$BUILD_CACHE_DIR" 2>/dev/null \
+        || log_warn "Some files in $BUILD_CACHE_DIR were not chowned (read-only mounts are expected)."
     
     # Optional: /app ownership fixen, falls Code gemountet wird (Dev Mode)
     if [ -w "/app" ] || [ "$DEBUG" = "1" ]; then
-         chown -R llmbuilder:llmbuilder /app
+         chown -R llmbuilder:llmbuilder /app 2>/dev/null \
+             || log_warn "Some files in /app were not chowned (read-only mounts are expected)."
     fi
     
     log_success "Permission fix completed."
@@ -117,13 +128,17 @@ initialize_container() {
         
         # Neustart des Skripts als llmbuilder User
         # Priorität: su-exec (leichtgewichtiger) -> gosu -> su
+        # With PUID=0 llmbuilder is mapped to uid 0, so the restarted script is root again;
+        # the marker stops it from initializing (and re-executing) forever.
+        export LLM_ENTRYPOINT_INITIALIZED=1
         if command -v su-exec >/dev/null; then
             exec su-exec llmbuilder "$0" "$@"
         elif command -v gosu >/dev/null; then
             exec gosu llmbuilder "$0" "$@"
         else
             log_warn "Neither su-exec nor gosu found. Falling back to standard su."
-            exec su llmbuilder -c "$0 $@"
+            # Arguments are passed separately; interpolating them into the -c string would split and execute them.
+            exec su llmbuilder -s /bin/bash -c 'exec "$0" "$@"' -- "$0" "$@"
         fi
     fi
 
@@ -217,8 +232,34 @@ run_module() {
 
 run_system_tests() {
     log_info "Running system integrity tests..."
-    python3 -c "import torch; print('✅ PyTorch Version: ' + torch.__version__)" || exit 1
-    
+    python3 -c "import torch, gguf; print('✅ GGUF toolchain: torch ' + torch.__version__)" || exit 1
+
+    local llama="${LLAMA_CPP_PATH:-/usr/src/llama.cpp}"
+    for tool in llama-quantize llama-imatrix; do
+        if [ -x "$llama/build/bin/$tool" ]; then
+            echo "✅ $tool present"
+        else
+            log_error "$tool missing in $llama/build/bin"
+            exit 1
+        fi
+    done
+    [ -f "$llama/convert_hf_to_gguf.py" ] || { log_error "convert_hf_to_gguf.py missing"; exit 1; }
+
+    # Optional SDK venvs (only targets that ship them)
+    if [ -n "${RKLLM_PYTHON:-}" ]; then
+        "$RKLLM_PYTHON" -c "from rkllm.api import RKLLM; RKLLM()" >/dev/null && echo "✅ RKLLM toolkit" || { log_error "RKLLM toolkit broken"; exit 1; }
+    fi
+    if [ -n "${RKNN_PYTHON:-}" ]; then
+        "$RKNN_PYTHON" -c "from rknn.api import RKNN; RKNN(verbose=False)" >/dev/null && echo "✅ RKNN toolkit" || { log_error "RKNN toolkit broken"; exit 1; }
+    fi
+
+    # Each toolchain venv must be internally consistent (the SDKs pin conflicting torch versions).
+    local py
+    for py in python3 ${RKLLM_PYTHON:-} ${RKNN_PYTHON:-}; do
+        "$py" -m pip check >/dev/null || { log_error "Broken requirements in $("$py" -c 'import sys; print(sys.prefix)')"; "$py" -m pip check; exit 1; }
+    done
+    echo "✅ Python environments consistent (pip check)"
+
     if command -v aarch64-linux-gnu-gcc >/dev/null; then
         echo "✅ Cross-Compiler (GCC aarch64) detected"
     else
@@ -234,7 +275,7 @@ run_system_tests() {
 
 main() {
     # Check for root -> Initialize & Switch User
-    if [ "$(id -u)" = "0" ]; then
+    if [ "$(id -u)" = "0" ] && [ -z "${LLM_ENTRYPOINT_INITIALIZED:-}" ]; then
         initialize_container "$@"
         # initialize_container uses exec, so this code is unreachable
     fi

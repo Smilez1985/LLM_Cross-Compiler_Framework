@@ -7,39 +7,81 @@ Der Kernel des Systems. Initialisiert alle Manager in strikter,
 sicherheitskritischer Reihenfolge und verknüpft die Komponenten.
 
 Updates v2.4.0:
-- Dependency Injection für DittoManager in Orchestrator (für IMatrix-Flow).
 - Version Bump auf v2.4.0 (Smart Calibration Update).
 """
 
-import os
-import sys
-import logging
+import asyncio
+import threading
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Any
 
 # Utils
+from orchestrator import __version__
+from orchestrator.utils.lazy_imports import lazy_attributes, lazy_value
 from orchestrator.utils.logging import setup_logging, get_logger
-from orchestrator.utils.telemetry import TelemetryManager
-from orchestrator.utils.updater import UpdateManager
 
-# Managers
+# Managers: imported when the framework boots (initialize), not when this module is imported, so a command that only
+# reads the settings or the paths starts without them; the knowledge base (RAGManager) only once it is enabled. The
+# names stay attributes of this module (framework.RAGManager, ...; a test may replace one).
 from orchestrator.Core.config_manager import ConfigManager
-from orchestrator.Core.secrets_manager import SecretsManager
-from orchestrator.Core.docker_manager import DockerManager
-from orchestrator.Core.target_manager import TargetManager
-from orchestrator.Core.model_manager import ModelManager
-from orchestrator.Core.rag_manager import RAGManager
-from orchestrator.Core.ditto_manager import DittoCoder
-from orchestrator.Core.self_healing_manager import SelfHealingManager
-from orchestrator.Core.deployment_manager import DeploymentManager
-from orchestrator.Core.community_manager import CommunityManager
-from orchestrator.Core.orchestrator import LLMOrchestrator
+_LAZY = {
+    "TelemetryManager": "orchestrator.utils.telemetry",
+    "UpdateManager": "orchestrator.utils.updater",
+    "SecretsManager": "orchestrator.Core.secrets_manager",
+    "DockerManager": "orchestrator.Core.docker_manager",
+    "BuildEngine": "orchestrator.Core.builder",
+    "TargetManager": "orchestrator.Core.target_manager",
+    "ModelManager": "orchestrator.Core.model_manager",
+    "RAGManager": "orchestrator.Core.rag_manager",
+    "DittoCoder": "orchestrator.Core.ditto_manager",
+    "SelfHealingManager": "orchestrator.Core.self_healing_manager",
+    "DeploymentManager": "orchestrator.Core.deployment_manager",
+    "CommunityManager": "orchestrator.Core.community_manager",
+    "LLMOrchestrator": "orchestrator.Core.orchestrator",
+    "BuildService": "orchestrator.Core.build_service",
+    "JobService": "orchestrator.Core.job_service",
+    "build_tool_registry": "orchestrator.tools.framework_tools",
+}
+
+__getattr__ = lazy_attributes(__name__, _LAZY)
+
+if TYPE_CHECKING:  # annotations only
+    from orchestrator.Core.build_service import BuildService
+    from orchestrator.Core.community_manager import CommunityManager
+    from orchestrator.Core.deployment_manager import DeploymentManager
+    from orchestrator.Core.ditto_manager import DittoCoder
+    from orchestrator.Core.docker_manager import DockerManager
+    from orchestrator.Core.job_service import JobService
+    from orchestrator.Core.model_manager import ModelManager
+    from orchestrator.Core.orchestrator import LLMOrchestrator
+    from orchestrator.Core.rag_manager import RAGManager
+    from orchestrator.Core.secrets_manager import SecretsManager
+    from orchestrator.Core.self_healing_manager import SelfHealingManager
+    from orchestrator.Core.target_manager import TargetManager
+    from orchestrator.utils.telemetry import TelemetryManager
+    from orchestrator.utils.updater import UpdateManager
+
+
+def _component(name: str) -> Any:
+    """`name` of _LAZY: the value set on this module (imported earlier, or a test's stand-in), else imported now."""
+    return lazy_value(globals(), name, __getattr__)
+
+
+APP_ROOT = Path(__file__).resolve().parents[2]
+
+
+def resolve_install_path(value, root=APP_ROOT) -> Path:
+    """A configured path: "~" is the user's home, relative paths are relative to the installation (`root`), never
+    the working directory."""
+    path = Path(str(value)).expanduser()
+    return path if path.is_absolute() else Path(root) / path
+
 
 @dataclass
 class FrameworkInfo:
     name: str = "LLM Cross-Compiler Framework"
-    version: str = "2.4.0"
+    version: str = __version__
     edition: str = "Enterprise"
     installation_path: Path = Path(".")
 
@@ -48,19 +90,20 @@ class FrameworkManager:
     Zentrale Instanz, die den Lebenszyklus aller Sub-Systeme steuert.
     """
     
-    def __init__(self, config_file: Optional[str] = None):
+    def __init__(self, config_file: Optional[str] = None, log_level: Optional[str] = None):
         # 0. Basic Setup (Pfade)
-        self.app_root = Path(__file__).resolve().parents[2] # Root dir calculation
+        self.app_root = APP_ROOT
         self.info = FrameworkInfo(installation_path=self.app_root)
-        
+
         # Init Config & Logger first
         self.config = ConfigManager(config_file)
-        setup_logging(self.config.log_level, self.config.logs_dir)
+        level = (log_level or self.config.get("log_level", "INFO") or "INFO").upper()
+        setup_logging(level=level if level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL") else "INFO")
         self.logger = get_logger("FrameworkKernel")
         
         self.logger.info(f"Booting {self.info.name} v{self.info.version} ({self.info.edition})...")
 
-        # Manager Placeholders
+        # Manager Placeholders (the annotations name the classes of _LAZY; they are not evaluated here)
         self.secrets_manager: Optional[SecretsManager] = None
         self.telemetry: Optional[TelemetryManager] = None
         self.docker_manager: Optional[DockerManager] = None
@@ -72,14 +115,36 @@ class FrameworkManager:
         self.deployment_manager: Optional[DeploymentManager] = None
         self.community_manager: Optional[CommunityManager] = None
         self.orchestrator: Optional[LLMOrchestrator] = None
+        self.build_service: Optional[BuildService] = None
+        self.job_service: Optional[JobService] = None
+        self.tool_registry = None
+        self.chat_feed = None  # Core.chat_feed.FeedStore: what arrives in the chat panel
         self.updater: Optional[UpdateManager] = None
 
         self._initialized = False
+        self.init_error: Optional[Exception] = None  # why initialize() failed (e.g. a StorageError)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_thread: Optional[threading.Thread] = None
 
     def initialize(self) -> bool:
         """Führt die Boot-Sequenz durch."""
         if self._initialized: return True
-        
+
+        # The managers are imported here, at boot (see _LAZY), RAGManager in ensure_rag_manager. A broken
+        # installation (a module that cannot be imported) stops the boot with that cause as init_error, like every
+        # other boot error: the CLI prints it and exits with 1, the GUI shows it (no traceback).
+        try:
+            SecretsManager, TelemetryManager, DockerManager, BuildEngine, TargetManager, ModelManager, DittoCoder, \
+                SelfHealingManager, DeploymentManager, CommunityManager, LLMOrchestrator, BuildService, JobService, \
+                UpdateManager, build_tool_registry = map(_component, (
+                    "SecretsManager", "TelemetryManager", "DockerManager", "BuildEngine", "TargetManager",
+                    "ModelManager", "DittoCoder", "SelfHealingManager", "DeploymentManager", "CommunityManager",
+                    "LLMOrchestrator", "BuildService", "JobService", "UpdateManager", "build_tool_registry"))
+        except ImportError as e:
+            self.init_error = e
+            self.logger.critical(f"A part of the framework cannot be imported (broken installation?): {e}")
+            return False
+
         try:
             # === PHASE 1: SECURITY & BASE ===
             self.logger.info("[Boot Phase 1] Security & Infrastructure")
@@ -87,14 +152,18 @@ class FrameworkManager:
             # 1. Secrets (Keyring) - MUSS ZUERST KOMMEN
             self.secrets_manager = SecretsManager(self)
             if not self.secrets_manager.initialize():
+                self.init_error = self.secrets_manager.storage_error
                 self.logger.critical("Failed to initialize SecretsManager. Aborting for security reasons.")
                 return False
 
             # 2. Telemetry (Opt-In check happens inside)
-            self.telemetry = TelemetryManager(self.config)
+            self.telemetry = TelemetryManager(self)
             
             # 3. Docker Connectivity
-            self.docker_manager = DockerManager(self.config)
+            # Relative data paths (targets, output, cache, models) resolve against the installation path,
+            # never the working directory (the MCP server, for instance, is started from anywhere).
+            self.docker_manager = DockerManager(self.config, base_dir=self.info.installation_path,
+                                                secrets_manager=self.secrets_manager)
             if not self.docker_manager.initialize():
                 self.logger.warning("Docker Engine not reachable. Build capabilities will be disabled.")
             
@@ -104,24 +173,18 @@ class FrameworkManager:
             self.target_manager = TargetManager(self)
             self.target_manager.initialize() # Lädt Profile & Targets
             
-            self.model_manager = ModelManager(self.config)
+            self.model_manager = ModelManager(self)  # models_dir resolves against the installation
             
-            self.community_manager = CommunityManager(self) # Swarm Logic
+            self.community_manager = CommunityManager(self)  # community modules and knowledge packs
             
             # === PHASE 3: AI SERVICES ===
             self.logger.info("[Boot Phase 3] AI & Knowledge Services")
             
             # RAG (Optional)
-            if self.config.enable_rag_knowledge:
-                self.rag_manager = RAGManager(self.config)
-                # Async Connect via Thread or check later? For CLI speed, we lazy load or check quick.
-                # Hier simple init.
-            
-            # Ditto (The Brain) - needs Secrets!
-            self.ditto_manager = DittoCoder(
-                config_manager=self.config,
-                framework_manager=self # Pass self to access secrets_manager
-            )
+            self.ensure_rag_manager()
+
+            # Ditto (the AI assistant): reads provider, model and keys from the settings on every call.
+            self.ditto_manager = DittoCoder(self)
             
             # === PHASE 4: GUARDIANS & OPS ===
             self.logger.info("[Boot Phase 4] Guardians & Operations")
@@ -133,16 +196,41 @@ class FrameworkManager:
             self.deployment_manager = DeploymentManager(self)
             
             # Orchestrator - needs everything
-            self.orchestrator = LLMOrchestrator(self.config)
-            
+            build_engine = self.docker_manager.builder or BuildEngine(
+                self.config, base_dir=self.info.installation_path, secrets_manager=self.secrets_manager)
+            # One id -> folder map for the CLI, the build service, the orchestrator and the engine.
+            build_engine.target_manager = self.target_manager
+            self.orchestrator = LLMOrchestrator(self.config, build_engine=build_engine)
+            # Typed entry point for tools (MCP server, Ditto) on top of the orchestrator
+            self.build_service = BuildService(self)
+            # Long operations other than builds (jobs); their summaries are kept in the per-user folder
+            try:
+                self.job_service = JobService(Path(self.config.user_state_dir) / "jobs")
+            except OSError as e:
+                self.logger.warning(f"Job summaries are not kept (per-user folder: {e}).")
+                self.job_service = JobService()
+            # One tool registry with the user's permissions and the audit log, for Ditto and MCP.
+            # Without it (e.g. an unusable per-user folder) only the AI tools are unavailable.
+            try:
+                self.tool_registry = build_tool_registry(self)
+            except Exception as e:
+                self.tool_registry = None
+                self.logger.error(f"AI tools unavailable (tool permissions/audit log in the per-user folder): {e}")
+            # The chat feed (messages, AI decisions with their reasons), signed with the permissions' key; opened on
+            # first use, so a damaged file never stops the boot (`llm-cli doctor` reports it).
+            try:
+                from orchestrator.Core.chat_feed import open_chat_feed
+                self.chat_feed = open_chat_feed(self)
+            except Exception as e:
+                self.chat_feed = None
+                self.logger.error(f"The chat feed is unavailable (per-user folder): {e}")
+
             # === DEPENDENCY INJECTION ===
-            # Connect the Brain (Ditto) and the Guardian (Self-Healing) to the Orchestrator
+            # Connect the Guardian (Self-Healing, which asks Ditto) to the Orchestrator
             self.orchestrator.inject_self_healing(self.self_healing_manager)
-            if self.ditto_manager:
-                self.orchestrator.inject_ditto(self.ditto_manager) # NEW: IMatrix Dataset Provider
-            
-            # Updater
-            self.updater = UpdateManager(self)
+
+            # Updater (in development: not wired yet, see the roadmap)
+            self.updater = UpdateManager(self.app_root)
 
             self._initialized = True
             self.logger.info("Framework successfully initialized.")
@@ -151,6 +239,59 @@ class FrameworkManager:
         except Exception as e:
             self.logger.critical(f"Fatal Error during framework initialization: {e}", exc_info=True)
             return False
+
+    def run_coroutine(self, coro, timeout: Optional[float] = None):
+        """Runs a coroutine on a long-lived background event loop and waits for its result.
+        The orchestrator keeps build tasks on its loop, so that loop must outlive the caller (e.g. a GUI slot)."""
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+            self._loop_thread = threading.Thread(target=self._loop.run_forever, name="framework-asyncio", daemon=True)
+            self._loop_thread.start()
+        return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout)
+
+    def _stop_loop(self, timeout: float = 10.0):
+        """Ends the background event loop of run_coroutine: cancels what still runs on it (a request whose build is
+        not finished stops being followed; the build itself is the engine's), stops the loop and waits for its
+        thread. Without this every framework left a thread running until the process ended."""
+        loop, thread = self._loop, self._loop_thread
+        if loop is None:
+            return
+        self._loop, self._loop_thread = None, None
+        if thread is threading.current_thread():  # called on the loop itself: it can only be told to stop
+            loop.call_soon(loop.stop)
+            return
+
+        async def cancel_tasks():
+            for _ in range(3):  # a cancelled worker may start the next one (the orchestrator's queue worker)
+                tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+                if not tasks:
+                    break
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        if loop.is_running():
+            try:
+                asyncio.run_coroutine_threadsafe(cancel_tasks(), loop).result(timeout)
+            except Exception as e:  # a task that ignores its cancellation: stop the loop anyway
+                self.logger.warning(f"Background tasks did not end: {e.__class__.__name__}")
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None:
+            thread.join(timeout)
+        if thread is None or not thread.is_alive():
+            loop.close()
+
+    def ensure_rag_manager(self) -> Optional["RAGManager"]:
+        """Creates the RAG manager on demand once RAG is enabled (also at runtime via GUI)."""
+        if self.rag_manager is None and self.config.get("enable_rag_knowledge", False):
+            self.rag_manager = _component("RAGManager")(self)
+            if self.community_manager is not None:  # knowledge packs installed while it was off
+                self.community_manager.sync_knowledge_base(self.rag_manager)
+        return self.rag_manager
+
+    def resolve_path(self, value) -> Path:
+        """A configured path; relative ones are relative to the installation path, not the working directory."""
+        return resolve_install_path(value, self.info.installation_path)
 
     def get_component(self, name: str) -> Any:
         """Service Locator für CLI/GUI Zugriff."""
@@ -168,14 +309,26 @@ class FrameworkManager:
             "deployment_manager": self.deployment_manager,
             "community_manager": self.community_manager,
             "orchestrator": self.orchestrator,
-            "docker_client": self.docker_manager.client if self.docker_manager else None
+            "build_service": self.build_service,
+            "job_service": self.job_service,
+            "tool_registry": self.tool_registry,
+            "chat_feed": self.chat_feed,
+            "docker_client": getattr(getattr(self.docker_manager, "builder", None), "docker_client", None)
         }
         return components.get(name)
 
     def shutdown(self):
         """Graceful Shutdown."""
         self.logger.info("Shutting down Framework...")
-        # Close DB connections, stop threads if needed
-        if self.telemetry:
-            self.telemetry.flush()
+        if self.rag_manager is not None:
+            self.rag_manager.close()  # releases the lock on the embedded knowledge base storage
+        approvals = getattr(self.tool_registry, "approvals", None)
+        if approvals is not None:  # calls still waiting for the person end (audited); nothing runs after this
+            try:
+                approvals.close()
+            except Exception as e:
+                self.logger.warning(f"Pending approvals not closed: {e}")
+        if self.chat_feed is not None:
+            self.chat_feed.close()
+        self._stop_loop()
         self.logger.info("Shutdown complete.")

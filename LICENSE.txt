@@ -49,10 +49,12 @@ ADDITIONAL TERMS AND CONDITIONS FOR LLM CROSS-COMPILER FRAMEWORK
    - Transformers (Hugging Face): Apache License 2.0
    - Docker: Apache License 2.0
    - PySide6: LGPL/Commercial License
-   - Poetry: MIT License
+   - uv (development tool): MIT or Apache License 2.0
    - Rich: MIT License
    - Click: BSD License
    - PyYAML: MIT License
+   - pyrage (age encryption; bundles rage and other Rust crates under MIT,
+     Apache-2.0, BSD-3-Clause and Unicode licences): MIT License
 
 5. DOCKER IMAGES AND CONTAINERS
    Docker images built using this framework may include additional software

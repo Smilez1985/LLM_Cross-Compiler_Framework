@@ -16,13 +16,8 @@ import logging
 import threading
 import time
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Dict, Any
 from pathlib import Path
-
-import docker
-from docker.errors import NotFound, APIError
-
-from PySide6.QtCore import QObject, Signal
 
 # Import Builder types
 try:
@@ -40,30 +35,73 @@ try:
 except ImportError:
     SelfHealingManager = None
 
-class DockerManager(QObject):
+_SIGNALS_CLASS = None
+
+
+def _signals_class():
+    """The Qt object that carries DockerManager's signals. PySide6 is imported here, when a signal is first used (the
+    GUI connects to them), so the CLI and the MCP server boot without Qt (lazy loading)."""
+    global _SIGNALS_CLASS
+    if _SIGNALS_CLASS is None:
+        from PySide6.QtCore import QObject, Signal
+
+        class DockerSignals(QObject):
+            # Signals for GUI updates
+            build_started = Signal(str)
+            build_progress = Signal(str, int)
+            build_completed = Signal(str, bool, str)
+            build_output = Signal(str, str)
+            build_stats = Signal(str, float, float, float)
+
+            # Signal when AI finds a fix for an error
+            healing_requested = Signal(object)  # Payload: HealingProposal
+
+        _SIGNALS_CLASS = DockerSignals
+    return _SIGNALS_CLASS
+
+
+class _QtSignal:
+    """`manager.build_started` is the bound Qt signal of the manager's DockerSignals object (connect, emit), which is
+    made on first use."""
+
+    def __set_name__(self, owner, name):
+        self.name = name
+
+    def __get__(self, manager, owner=None):
+        if manager is None:
+            return self
+        with manager._signals_lock:
+            if manager._signals is None:
+                manager._signals = _signals_class()()
+        return getattr(manager._signals, self.name)
+
+
+class DockerManager:
     """
     Manages Docker lifecycle and build process via BuildEngine.
     Bridge between GUI and Core Logic.
     """
     # Signals for GUI updates
-    build_started = Signal(str)
-    build_progress = Signal(str, int)
-    build_completed = Signal(str, bool, str)
-    build_output = Signal(str, str)
-    build_stats = Signal(str, float, float, float)
-    sidecar_status = Signal(str, str)
+    build_started = _QtSignal()
+    build_progress = _QtSignal()
+    build_completed = _QtSignal()
+    build_output = _QtSignal()
+    build_stats = _QtSignal()
     
     # Signal when AI finds a fix for an error
-    healing_requested = Signal(object) # Payload: HealingProposal
+    healing_requested = _QtSignal()  # Payload: HealingProposal
     
-    def __init__(self, config_manager=None): 
-        super().__init__()
+    def __init__(self, config_manager=None, base_dir=None, secrets_manager=None):
+        self._signals = None  # DockerSignals, made when a signal is first used
+        self._signals_lock = threading.Lock()
         self.logger = logging.getLogger("DockerManager")
         self.framework = None
         self.builder = None
         self.healing_manager = None
         self._monitor_active = False
-        self.config_manager = config_manager 
+        self.config_manager = config_manager
+        self._base_dir = base_dir
+        self._secrets_manager = secrets_manager
 
     def initialize(self, framework_manager=None) -> bool:
         """
@@ -77,7 +115,12 @@ class DockerManager(QObject):
         try:
             # Lazy import to avoid circular dependency
             from orchestrator.Core.builder import BuildEngine
-            self.builder = BuildEngine(framework_manager if framework_manager else self.config_manager)
+            if framework_manager:
+                self.builder = BuildEngine(framework_manager)
+            else:
+                # One engine for the whole app: the framework hands it to the orchestrator as well.
+                self.builder = BuildEngine(self.config_manager, base_dir=self._base_dir,
+                                           secrets_manager=self._secrets_manager)
         except Exception as e:
             self.logger.error(f"Failed to initialize BuildEngine: {e}")
             return False
@@ -103,56 +146,6 @@ class DockerManager(QObject):
             return False
             
         return True
-
-    def ensure_qdrant_service(self) -> Optional[str]:
-        """DYNAMIC SIDECAR LOGIC: Checks if Qdrant is required and running."""
-        # Use config_manager directly for robustness
-        rag_enabled = self.config_manager.get("enable_rag_knowledge", False)
-
-        if not rag_enabled:
-            return None
-
-        self.sidecar_status.emit("Qdrant", "Starting...")
-        
-        if not self.builder or not self.builder.docker_client:
-            self.sidecar_status.emit("Qdrant", "No Docker")
-            return None
-
-        client = self.builder.docker_client
-        container_name = "llm-qdrant"
-        
-        # v2.3.0: Load Image from Config (No Hardcoding)
-        image_tag = self.config_manager.get("image_qdrant", "qdrant/qdrant:latest")
-
-        try:
-            # Check if running
-            try:
-                container = client.containers.get(container_name)
-                if container.status != "running":
-                    container.start()
-                self.sidecar_status.emit("Qdrant", "Running")
-                return f"http://{container_name}:6333"
-            except NotFound:
-                # Create new
-                self.logger.info(f"Pulling Qdrant image: {image_tag}")
-                try: client.images.get(image_tag)
-                except NotFound: client.images.pull(image_tag)
-
-                client.containers.run(
-                    image_tag, 
-                    name=container_name, 
-                    ports={'6333/tcp': 6333},
-                    volumes={'llm_qdrant_data': {'bind': '/qdrant/storage', 'mode': 'rw'}},
-                    network="llm-framework", 
-                    detach=True, 
-                    restart_policy={"Name": "on-failure"}
-                )
-                self.sidecar_status.emit("Qdrant", "Running")
-                return f"http://{container_name}:6333"
-        except Exception as e:
-            self.logger.error(f"Failed to start Qdrant: {e}")
-            self.sidecar_status.emit("Qdrant", "Error")
-            return None
 
     def start_build(self, gui_config: Dict[str, Any]):
         """Starts a build process based on GUI input dictionary."""
@@ -273,7 +266,7 @@ class DockerManager(QObject):
                     )
                     
                     if proposal:
-                        self.logger.info(f"Healing Proposal found: {proposal.error_summary}")
+                        self.logger.info(f"Healing Proposal found: {proposal.summary}")
                         self.healing_requested.emit(proposal)
                     else:
                         self.logger.warning("Self-Healing: No fix found.")

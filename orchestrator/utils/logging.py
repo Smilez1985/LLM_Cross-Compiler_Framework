@@ -16,7 +16,6 @@ Key Responsibilities:
 - Debug trace collection
 """
 
-import os
 import sys
 import json
 import logging
@@ -25,14 +24,16 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union, Callable
+from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 import queue
-import inspect
 
 import yaml
+
+from orchestrator.security.redaction import configure_sdk_loggers, install_log_redaction
+from orchestrator.security.secret_patterns import redact
 
 
 # ============================================================================
@@ -161,6 +162,23 @@ class LoggingStats:
 # CUSTOM FORMATTERS
 # ============================================================================
 
+def _redacted_extra(value: Any) -> Any:
+    """An `extra=` field for the JSON log. Extra fields are set after the record is created, so the redaction
+    of the message does not cover them."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return redact(value)
+    try:
+        text = redact(json.dumps(value, default=str))
+    except (TypeError, ValueError):  # e.g. a circular structure
+        return redact(repr(value))
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
+
+
 class StructuredFormatter(logging.Formatter):
     """Structured formatter for enhanced logging"""
     
@@ -211,8 +229,8 @@ class StructuredFormatter(logging.Formatter):
         # Add exception information if present
         if record.exc_info:
             log_entry.exception_type = record.exc_info[0].__name__
-            log_entry.exception_message = str(record.exc_info[1])
-            log_entry.stack_trace = "".join(traceback.format_exception(*record.exc_info))
+            log_entry.exception_message = redact(str(record.exc_info[1]))
+            log_entry.stack_trace = record.exc_text or redact("".join(traceback.format_exception(*record.exc_info)))
         
         # Add extra fields
         for key, value in record.__dict__.items():
@@ -220,7 +238,7 @@ class StructuredFormatter(logging.Formatter):
                            'module', 'lineno', 'funcName', 'created', 'msecs', 'relativeCreated',
                            'thread', 'threadName', 'processName', 'process', 'message', 'exc_info',
                            'exc_text', 'stack_info', 'thread_id']:
-                log_entry.extra_fields[key] = value
+                log_entry.extra_fields[key] = _redacted_extra(value)
         
         return log_entry.to_json()
     
@@ -481,7 +499,7 @@ class LoggingManager:
                 
         except Exception as e:
             # Fallback to default configuration
-            print(f"Failed to load logging config: {e}")
+            print(f"Failed to load logging config: {e}", file=sys.stderr)
             self._setup_default_configuration(LogLevel.INFO)
     
     def _setup_default_configuration(self, default_level: LogLevel):
@@ -599,7 +617,8 @@ class LoggingManager:
         """Create appropriate handler for destination"""
         
         if destination == LogDestination.CONSOLE:
-            return logging.StreamHandler(sys.stdout)
+            # stdout is reserved for command output (e.g. `cli ... -f json`).
+            return logging.StreamHandler(sys.stderr)
         
         elif destination == LogDestination.FILE:
             if config.file_path:
@@ -738,7 +757,7 @@ class LoggingManager:
             return True
             
         except Exception as e:
-            print(f"Failed to export logs: {e}")
+            print(f"Failed to export logs: {e}", file=sys.stderr)
             return False
     
     def cleanup(self):
@@ -764,17 +783,19 @@ class LoggingManager:
 _logging_manager: Optional[LoggingManager] = None
 
 
-def setup_logging(config_file: Optional[Path] = None, 
+def setup_logging(config_file: Optional[Path] = None,
                  level: Union[str, LogLevel] = LogLevel.INFO,
-                 enable_memory_handler: bool = True) -> LoggingManager:
+                 enable_memory_handler: bool = True,
+                 debug_http: Optional[bool] = None) -> LoggingManager:
     """
     Setup framework logging system.
-    
+
     Args:
         config_file: Optional configuration file
         level: Default logging level
         enable_memory_handler: Enable in-memory handler for GUI
-        
+        debug_http: Let the HTTP and provider SDK loggers log DEBUG (--debug-http); None keeps the last choice
+
     Returns:
         LoggingManager: Configured logging manager
     """
@@ -787,12 +808,19 @@ def setup_logging(config_file: Optional[Path] = None,
     if isinstance(level, str):
         level = LogLevel[level.upper()]
     
-    _logging_manager.initialize(
-        config_file=config_file,
-        default_level=level,
-        enable_memory_handler=enable_memory_handler
-    )
-    
+    if _logging_manager._initialized:
+        # get_logger() auto-initializes with INFO, so later calls must still apply their level.
+        _logging_manager.set_global_level(level)
+    else:
+        _logging_manager.initialize(
+            config_file=config_file,
+            default_level=level,
+            enable_memory_handler=enable_memory_handler
+        )
+
+    # Credentials never reach a log; set_global_level() above also reset the SDK loggers.
+    install_log_redaction()
+    configure_sdk_loggers(level.value, debug_http)
     return _logging_manager
 
 

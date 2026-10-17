@@ -1,0 +1,685 @@
+"""Audit chain follow-ups: archiving a log, logs from before per-entry key ids, key ids and unkeyed entries
+that were changed, removals that stay detected, a lagging anchor, damaged values, and the lock around
+the creation of the audit key."""
+
+import functools
+import hashlib
+import hmac
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+import textwrap
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from conftest import REPO_ROOT
+from orchestrator.Core.doctor import Doctor, Severity, check_tool_policy
+from orchestrator.tools import audit as audit_module
+from orchestrator.tools import framework_tools
+from orchestrator.tools.audit import GENESIS, AuditKeyMismatch, AuditLog
+from orchestrator.tools.policy import PolicyStore
+from orchestrator.tools.registry import ToolRegistry
+
+KEY = b"audit-key"
+FIELDS = ("ts", "actor", "tool", "tier", "decision", "approved", "args_sha256", "args_preview", "outcome", "detail")
+
+
+def filled_log(path: Path, n=3, key=KEY) -> AuditLog:
+    log = AuditLog(path, key=key)
+    for i in range(n):
+        log.record("mcp", "start_build", "local_write", "ask", "ok", arguments={"i": i}, approved=True)
+    return log
+
+
+def run_sql(path: Path, statement: str, params=()):
+    db = sqlite3.connect(path)
+    try:
+        with db:
+            db.execute(statement, params)
+    finally:
+        db.close()
+
+
+def query(path: Path, statement: str):
+    db = sqlite3.connect(path)
+    try:
+        return db.execute(statement).fetchall()
+    finally:
+        db.close()
+
+
+def audit_finding(log: AuditLog, tmp_path: Path):
+    registry = ToolRegistry(PolicyStore(tmp_path), log)
+    return next(f for f in Doctor(SimpleNamespace(tool_registry=registry), [check_tool_policy]).run().findings
+                if f.code == "tools.audit")
+
+
+def invoke_cli(log: AuditLog, tmp_path: Path, *args):
+    from click.testing import CliRunner
+    from orchestrator import cli as cli_module
+
+    registry = ToolRegistry(PolicyStore(tmp_path), log)
+
+    class Ctx(cli_module.FrameworkContext):
+        def require_framework(self):
+            self.framework_manager = SimpleNamespace(tool_registry=registry)
+            return self
+
+    return CliRunner().invoke(cli_module.cli, ["-q", *args], obj=Ctx())
+
+
+def flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+class TestArchive:
+
+    def test_archive_keeps_the_old_log_checkable_and_starts_a_new_chain(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db")
+        run_sql(log.path, "DELETE FROM events WHERE id = 3")
+        assert log.check().problem == "removed"
+
+        target = log.archive()
+
+        assert target is not None and target.parent == tmp_path and target.name.startswith("audit.db.")
+        assert log.entries() == [] and not log.anchor_path.exists()  # emptied in place, not renamed
+        archived = AuditLog(target, key=KEY).check()  # its anchor moved along, so the evidence is kept
+        assert archived.problem == "removed" and archived.entry == 3
+        log.record("cli", "list_targets", "read", "allow", "ok")
+        result = log.check()
+        assert result.intact and result.entries == 1, result.message
+
+    def test_two_archives_in_the_same_second_do_not_overwrite_each_other(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db", n=1)
+        first = log.archive()
+        log.record("cli", "list_targets", "read", "allow", "ok")
+        second = log.archive()
+        assert first != second and first.exists() and second.exists()
+        assert log.archive() is None
+
+    def test_a_damaged_database_is_moved_as_it_is(self, tmp_path):
+        db = tmp_path / "audit.db"
+        db.write_bytes(b"garbage, not SQLite" * 64)
+        target = AuditLog(db, key=KEY).archive()
+        assert target.read_bytes() == b"garbage, not SQLite" * 64 and not db.exists()
+
+    def test_cli_archive(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db")
+        result = invoke_cli(log, tmp_path, "tools", "audit", "--archive")
+        assert result.exit_code == 0, result.output
+        assert "Audit log moved to" in flat(result.output) and log.entries() == []
+        assert len(list(tmp_path.glob("audit.db.*.anchor"))) == 1
+        result = invoke_cli(log, tmp_path, "tools", "audit", "--archive")
+        assert result.exit_code == 0 and "No audit log to archive" in result.output
+
+    @pytest.mark.parametrize("pause", ["connected", "anchor-not-moved-yet"])
+    def test_an_archive_while_another_process_writes_leaves_no_false_alarm(self, tmp_path, pause):
+        """The GUI or an MCP server writes while 'tools audit --archive' runs. Its entry belongs to the old or
+        the new log, and neither of them may report removed entries or a missing anchor afterwards."""
+        log = filled_log(tmp_path / "audit.db")
+        writer = AuditLog(log.path, key=KEY)  # another process
+        reached, go = threading.Event(), threading.Event()
+        real_connect, real_move = writer._connect, writer._move_anchor
+
+        def connect_then_wait():
+            db = real_connect()
+            reached.set()
+            go.wait(20)
+            return db
+
+        def wait_then_move(*args):
+            reached.set()
+            go.wait(20)
+            return real_move(*args)
+
+        if pause == "connected":
+            writer._connect = connect_then_wait
+        else:
+            writer._move_anchor = wait_then_move
+        thread = threading.Thread(target=writer.record, args=("mcp", "start_build", "local_write", "ask", "ok"))
+        thread.start()
+        assert reached.wait(20)
+
+        target = log.archive()
+        log.record("cli", "list_targets", "read", "allow", "ok")  # the new log's first entry
+        go.set()
+        thread.join(20)
+        log.record("cli", "list_targets", "read", "allow", "ok")
+
+        archived, live = AuditLog(target, key=KEY).check(), log.check()
+        assert archived.intact, archived.message
+        assert live.intact, live.message
+        assert archived.entries + live.entries == 6  # every entry is in one of the two logs
+
+    @pytest.mark.parametrize("failure", ["anchor-in-use", "commit-fails"])
+    def test_a_failed_archive_changes_nothing(self, tmp_path, monkeypatch, failure):
+        log = filled_log(tmp_path / "audit.db")
+        real_replace, real_connect = os.replace, sqlite3.connect
+
+        def sharing_violation(src, dst):
+            if str(dst).endswith(".anchor"):
+                raise PermissionError(13, "The process cannot access the file because it is being used by "
+                                          "another process")
+            return real_replace(src, dst)
+
+        class CommitFails:
+            def __init__(self, con):
+                self._con = con
+
+            def execute(self, sql, *args):
+                if sql == "COMMIT":
+                    raise sqlite3.OperationalError("disk I/O error")
+                return self._con.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._con, name)
+
+        def connect(*args, **kwargs):  # only the log's own connection, not the one the copy is read with
+            con = real_connect(*args, **kwargs)
+            return CommitFails(con) if kwargs.get("isolation_level", "") is None else con
+
+        with monkeypatch.context() as m:
+            if failure == "anchor-in-use":
+                m.setattr(audit_module.os, "replace", sharing_violation)
+            else:
+                m.setattr(sqlite3, "connect", connect)
+            with pytest.raises((OSError, sqlite3.Error)):
+                log.archive()
+
+        assert [p.name for p in tmp_path.glob("audit.db.*") if p != log.anchor_path] == []  # no half copy
+        assert log.anchor_path.exists()
+        result = log.check()
+        assert result.intact and result.entries == 3, result.message
+
+    @pytest.mark.parametrize("reader_key, problem", [(b"old-key", "removed"), (b"new-key", "key_mismatch")])
+    def test_doctor_points_to_the_archive_command(self, tmp_path, reader_key, problem):
+        log = filled_log(tmp_path / "audit.db", key=b"old-key")
+        run_sql(log.path, "DELETE FROM events WHERE id = 3")
+        reader = AuditLog(log.path, key=reader_key)
+        assert reader.check().problem == problem
+        finding = audit_finding(reader, tmp_path)
+        assert finding.severity == Severity.ERROR and "tools audit --archive" in finding.fix_hint
+
+
+def legacy_log(path: Path, key, n=2) -> None:
+    """A database as 3.0.0 development builds wrote it: no key_id column, key id only in meta."""
+    db = sqlite3.connect(path)
+    db.execute("""CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL,
+                  tool TEXT NOT NULL, tier TEXT NOT NULL, decision TEXT NOT NULL, approved INTEGER,
+                  args_sha256 TEXT NOT NULL, args_preview TEXT NOT NULL, outcome TEXT NOT NULL,
+                  detail TEXT NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL)""")
+    db.execute("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
+    key_id = hmac.new(key, b"llm-framework-audit-key-id", hashlib.sha256).hexdigest()[:16] if key else "unkeyed"
+    db.execute("INSERT INTO meta (k, v) VALUES ('key_id', ?)", (key_id,))
+    prev = GENESIS
+    for i in range(n):
+        row = {"ts": f"2026-10-0{i + 1}T00:00:00.000+00:00", "actor": "gui", "tool": "start_build",
+               "tier": "local_write", "decision": "ask", "approved": 1,
+               "args_sha256": hashlib.sha256(b"").hexdigest(), "args_preview": "", "outcome": "ok", "detail": ""}
+        payload = (prev + json.dumps([row[f] for f in FIELDS], ensure_ascii=False)).encode("utf-8")
+        digest = hmac.new(key, payload, hashlib.sha256).hexdigest() if key else hashlib.sha256(payload).hexdigest()
+        db.execute("INSERT INTO events (ts, actor, tool, tier, decision, approved, args_sha256, args_preview, "
+                   "outcome, detail, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   [row[f] for f in FIELDS] + [prev, digest])
+        prev = digest
+    db.commit()
+    db.close()
+    mac_payload = f"anchor:{n}:{prev}".encode()
+    mac = hmac.new(key, mac_payload, hashlib.sha256).hexdigest() if key else hashlib.sha256(mac_payload).hexdigest()
+    path.with_name(path.name + ".anchor").write_text(json.dumps({"id": n, "hash": prev, "mac": mac}))
+
+
+class TestLogsFromBeforePerEntryKeyIds:
+
+    @pytest.mark.parametrize("key", [KEY, None], ids=["keyed", "unkeyed"])
+    def test_an_old_log_is_migrated_and_stays_verifiable(self, tmp_path, key):
+        legacy_log(tmp_path / "audit.db", key)
+        log = AuditLog(tmp_path / "audit.db", key=key)
+        assert log.check().intact
+
+        log.record("cli", "list_targets", "read", "allow", "ok")
+
+        result = log.check()
+        assert result.intact and result.entries == 3, result.message
+        assert [r[0] for r in query(log.path, "SELECT key_id FROM events ORDER BY id")][:2] == [None, None]
+
+    def test_an_old_unkeyed_log_continues_with_a_key(self, tmp_path):
+        legacy_log(tmp_path / "audit.db", None)
+        keyed = AuditLog(tmp_path / "audit.db", key=KEY)
+        keyed.record("gui", "start_build", "local_write", "ask", "ok", approved=True)
+        result = keyed.check()
+        assert result.intact and result.keyed and result.entries == 3, result.message
+
+    def test_a_changed_old_entry_is_still_modified(self, tmp_path):
+        legacy_log(tmp_path / "audit.db", KEY)
+        run_sql(tmp_path / "audit.db", "UPDATE events SET approved = 0 WHERE id = 1")
+        result = AuditLog(tmp_path / "audit.db", key=KEY).check()
+        assert result.problem == "modified" and result.entry == 1
+
+    def test_an_entry_from_a_process_still_running_the_old_version_is_accepted(self, tmp_path):
+        """After an update the GUI or an MCP server runs the previous version until it is restarted. Its entries
+        have no key id, but they verify with this key."""
+        log = filled_log(tmp_path / "audit.db", n=2)
+        append_old_format(log.path, KEY)
+        result = log.check()
+        assert result.intact and result.entries == 3, result.message
+        log.record("cli", "list_targets", "read", "allow", "ok")
+        result = log.check()
+        assert result.intact and result.entries == 4, result.message
+
+    def test_an_unkeyed_old_format_entry_after_keyed_ones_is_still_modified(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db", n=2)
+        append_old_format(log.path, None)
+        result = log.check()
+        assert result.problem == "modified" and result.entry == 3
+
+
+def append_old_format(path: Path, key) -> None:
+    """One entry as the previous version's record() wrote it: no key id, anchor written with it."""
+    head_id, head = query(path, "SELECT id, hash FROM events ORDER BY id DESC LIMIT 1")[0]
+    row = {"ts": "2026-10-10T00:00:00.000+00:00", "actor": "mcp", "tool": "list_targets", "tier": "read",
+           "decision": "allow", "approved": None, "args_sha256": hashlib.sha256(b"").hexdigest(), "args_preview": "",
+           "outcome": "ok", "detail": ""}
+    payload = (head + json.dumps([row[f] for f in FIELDS], ensure_ascii=False)).encode("utf-8")
+    digest = hmac.new(key, payload, hashlib.sha256).hexdigest() if key else hashlib.sha256(payload).hexdigest()
+    run_sql(path, "INSERT INTO events (ts, actor, tool, tier, decision, approved, args_sha256, args_preview, "
+                  "outcome, detail, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [row[f] for f in FIELDS] + [head, digest])
+    mac_payload = f"anchor:{head_id + 1}:{digest}".encode()
+    mac = hmac.new(key, mac_payload, hashlib.sha256).hexdigest() if key else hashlib.sha256(mac_payload).hexdigest()
+    path.with_name(path.name + ".anchor").write_text(json.dumps({"id": head_id + 1, "hash": digest, "mac": mac}))
+
+
+class TestKeyIdsAndUnkeyedEntries:
+
+    @pytest.mark.parametrize("entry", [1, 2, 3])
+    def test_changing_an_entrys_key_id_is_modified_not_another_key(self, tmp_path, entry):
+        log = filled_log(tmp_path / "audit.db")
+        run_sql(log.path, "UPDATE events SET key_id = 'deadbeefdeadbeef' WHERE id = ?", (entry,))
+        result = log.check()
+        assert result.problem == "modified" and result.entry == entry, result.message
+
+    def test_an_unkeyed_entry_after_keyed_ones_is_modified(self, tmp_path):
+        """Someone without the key appends (or rewrites the newest entries as) unkeyed entries."""
+        log = filled_log(tmp_path / "audit.db", n=2)
+        head = query(log.path, "SELECT hash FROM events WHERE id = 2")[0][0]
+        row = dict(zip(FIELDS, ["2026-10-10T00:00:00.000+00:00", "mcp", "list_targets", "read", "allow", None,
+                                hashlib.sha256(b"").hexdigest(), "", "ok", ""]))
+        digest = hashlib.sha256((head + json.dumps([row[f] for f in FIELDS] + ["unkeyed"], ensure_ascii=False))
+                                .encode()).hexdigest()
+        run_sql(log.path, "INSERT INTO events (ts, actor, tool, tier, decision, approved, args_sha256, args_preview, "
+                          "outcome, detail, prev_hash, hash, key_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [row[f] for f in FIELDS] + [head, digest, "unkeyed"])
+        result = log.check()
+        assert result.problem == "modified" and result.entry == 3
+
+    def test_a_writer_without_the_key_is_refused_and_told_how_to_recover(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db", n=1)
+        with pytest.raises(AuditKeyMismatch, match="tools audit --archive"):
+            AuditLog(log.path).record("mcp", "list_targets", "read", "allow", "ok")
+        assert log.check().intact and log.check().entries == 1
+
+    def test_an_unkeyed_log_read_with_a_key_says_the_next_entry_is_keyed(self, tmp_path):
+        filled_log(tmp_path / "audit.db", n=2, key=None)
+        reader = AuditLog(tmp_path / "audit.db", key=KEY)
+        result = reader.check()
+        assert result.intact and not result.keyed and result.key_available
+        assert "next entry is keyed" in result.message
+        finding = audit_finding(reader, tmp_path)
+        assert finding.severity == Severity.WARN and "keyring" not in finding.fix_hint.lower()
+
+
+class TestRemovalsStayDetected:
+
+    def test_newest_entries_removed_with_the_anchor_are_reported_as_removed(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db")
+        run_sql(log.path, "DELETE FROM events WHERE id = 3")
+        log.anchor_path.unlink()
+        result = log.check()
+        assert result.problem == "removed" and result.entry == 3
+
+    def test_deleting_the_stored_break_does_not_hide_the_removal(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db")
+        run_sql(log.path, "DELETE FROM events WHERE id = 3")
+        log.record("mcp", "list_targets", "read", "allow", "ok")
+        run_sql(log.path, "DELETE FROM meta WHERE k = 'break'")
+        result = log.check()
+        assert result.problem == "removed" and result.entry == 3
+
+    def test_a_removed_anchor_stays_reported_after_the_next_call(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db")
+        log.anchor_path.unlink()
+        log.record("mcp", "list_targets", "read", "allow", "ok")
+        result = log.check()
+        assert result.problem == "anchor_missing" and result.entry == 4 and "anchor" in result.message
+        assert audit_finding(log, tmp_path).severity == Severity.WARN
+
+    def test_a_lagging_anchor_is_no_break(self, tmp_path, monkeypatch):
+        log = filled_log(tmp_path / "audit.db", n=1)
+        real_replace = os.replace
+
+        def fail_for_anchor(src, dst):
+            if str(dst).endswith(".anchor"):
+                raise PermissionError(13, "in use")
+            return real_replace(src, dst)
+
+        with monkeypatch.context() as m:
+            m.setattr(audit_module.os, "replace", fail_for_anchor)
+            log.record("mcp", "start_build", "local_write", "ask", "ok", approved=True)
+        assert json.loads(log.anchor_path.read_text())["id"] == 1 and log.check().intact
+
+        log.record("mcp", "list_targets", "read", "allow", "ok")
+
+        assert json.loads(log.anchor_path.read_text())["id"] == 3
+        assert log.check().intact and not query(log.path, "SELECT v FROM meta WHERE k = 'break'")
+
+    def test_a_failed_commit_that_ended_the_transaction_reports_the_real_error(self, tmp_path, monkeypatch):
+        """SQLite rolls back by itself after some COMMIT errors; the ROLLBACK in record() must not replace the
+        real error with 'cannot rollback - no transaction is active'."""
+        log = filled_log(tmp_path / "audit.db", n=1)
+        real_connect = sqlite3.connect
+
+        class CommitRollsBack:
+            def __init__(self, con):
+                self._con = con
+
+            def execute(self, sql, *args):
+                if sql == "COMMIT":
+                    self._con.execute("ROLLBACK")
+                    raise sqlite3.OperationalError("database or disk is full")
+                return self._con.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._con, name)
+
+        with monkeypatch.context() as m:
+            m.setattr(sqlite3, "connect", lambda *a, **kw: CommitRollsBack(real_connect(*a, **kw)))
+            with pytest.raises(sqlite3.OperationalError, match="disk is full"):
+                log.record("mcp", "start_build", "local_write", "ask", "ok", approved=True)
+        result = log.check()
+        assert result.intact and result.entries == 1, result.message
+
+
+DIES_AT_COMMIT = textwrap.dedent("""
+    import os
+    import sqlite3
+    import sys
+    from pathlib import Path
+    from orchestrator.tools.audit import AuditLog
+    path, when = sys.argv[1:]
+    real_connect = sqlite3.connect
+
+    class Dies:
+        def __init__(self, con):
+            self._con = con
+
+        def execute(self, sql, *args):
+            if sql == "COMMIT":
+                if when == "after":
+                    self._con.execute(sql)
+                os._exit(3)  # killed: no except or finally block runs
+            return self._con.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._con, name)
+
+    sqlite3.connect = lambda *a, **kw: Dies(real_connect(*a, **kw))
+    AuditLog(Path(path), key=b"audit-key").record("mcp", "start_build", "local_write", "ask", "ok", approved=True)
+""")
+
+
+class TestKilledWriter:
+
+    @pytest.mark.parametrize("when, entries", [("before", 2), ("after", 3)])
+    def test_a_writer_killed_at_the_commit_leaves_no_false_alarm(self, tmp_path, when, entries):
+        log = filled_log(tmp_path / "audit.db", n=2)
+        script = tmp_path / "dies.py"
+        script.write_text(DIES_AT_COMMIT)
+        proc = subprocess.run([sys.executable, str(script), str(log.path), when], capture_output=True, text=True,
+                              env=dict(os.environ, PYTHONPATH=str(REPO_ROOT)), timeout=60)
+        assert proc.returncode == 3, proc.stderr
+
+        result = log.check()
+        assert result.intact and result.entries == entries, result.message
+        log.record("cli", "list_targets", "read", "allow", "ok")  # and the next append finds nothing either
+        result = log.check()
+        assert result.intact and result.entries == entries + 1, result.message
+
+
+class TestDamagedValues:
+
+    def test_a_binary_value_is_reported_as_modified_not_a_crash(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db")
+        run_sql(log.path, "UPDATE events SET detail = X'00ff' WHERE id = 2")
+        result = log.check()
+        assert result.problem == "modified" and result.entry == 2
+        cli = invoke_cli(log, tmp_path, "tools", "audit", "--verify")
+        assert cli.exit_code == 1 and "Traceback" not in cli.output and "modified" in cli.output
+
+    @pytest.mark.parametrize("anchor", ['{"id": 3, "hash": "\\u00e9", "mac": "x"}',
+                                        '{"id": 3, "hash": "\\ud800", "mac": "\\ud800"}'])
+    def test_non_ascii_anchor_text_counts_as_unreadable(self, tmp_path, anchor):
+        log = filled_log(tmp_path / "audit.db")
+        log.anchor_path.write_text(anchor)
+        assert log.check().problem == "anchor_missing"
+
+    @pytest.mark.parametrize("anchor", ["[" * 100_000 + "]" * 100_000, '{"id": 3, "hash": "' + "a" * 10**6 + '"}'],
+                             ids=["deeply-nested", "huge"])
+    def test_a_hostile_anchor_file_counts_as_unreadable_not_a_crash(self, tmp_path, anchor):
+        log = filled_log(tmp_path / "audit.db")
+        log.anchor_path.write_text(anchor)
+        assert log.check().problem == "anchor_missing"
+        cli = invoke_cli(log, tmp_path, "tools", "audit", "--verify")
+        assert cli.exit_code == 1 and "Traceback" not in cli.output and "anchor" in cli.output
+
+    @pytest.mark.parametrize("damage, problem, entry", [
+        ('{"id": 1e30, "hash": "x", "mac": "y"}', "anchor_missing", 4),      # beyond SQLite's integers
+        ('{"id": Infinity, "hash": "x", "mac": "y"}', "anchor_missing", 4),  # Python's json accepts it
+        ("UPDATE events SET hash = X'00ff' WHERE id = 3", "modified", 3),
+    ], ids=["anchor-id-out-of-range", "anchor-id-infinity", "binary-hash-at-the-head"])
+    def test_hostile_values_do_not_stop_auditing(self, tmp_path, damage, problem, entry):
+        """record() reads the anchor and the newest entry before each append; what an editor put there must
+        not make every later tool call fail to be audited, nor crash the check."""
+        log = filled_log(tmp_path / "audit.db")
+        if damage.startswith("UPDATE"):
+            run_sql(log.path, damage)
+        else:
+            log.anchor_path.write_text(damage)
+
+        log.record("mcp", "list_targets", "read", "allow", "ok")
+
+        assert len(log.entries()) == 4
+        result = log.check()
+        assert result.problem == problem and result.entry == entry, result.message
+        cli = invoke_cli(log, tmp_path, "tools", "audit", "--verify")
+        assert cli.exit_code == 1 and "Traceback" not in cli.output, cli.output
+
+    def test_a_hostile_stored_break_is_reported_as_modified(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db")
+        run_sql(log.path, "INSERT INTO meta (k, v) VALUES ('break', ?)", ("[" * 100_000 + "]" * 100_000,))
+        assert log.check().problem == "modified"
+
+    def test_non_ascii_hash_in_the_database_is_reported(self, tmp_path):
+        log = filled_log(tmp_path / "audit.db")
+        run_sql(log.path, "UPDATE events SET hash = 'é' WHERE id = 3")
+        assert log.check().problem == "modified"
+
+
+HOLDER = textwrap.dedent("""
+    import sys
+    from pathlib import Path
+    from orchestrator.tools.framework_tools import _key_lock
+    with _key_lock(Path(sys.argv[1])):
+        print("locked", flush=True)
+        sys.stdin.read()
+""")
+
+
+class TestAuditKeyLock:
+
+    @pytest.fixture
+    def holder(self, tmp_path):
+        """Another process holding the audit key lock until its stdin is closed."""
+        script = tmp_path / "holder.py"
+        script.write_text(HOLDER)
+        state = tmp_path / "state"
+        proc = subprocess.Popen([sys.executable, str(script), str(state)], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, text=True, env=dict(os.environ, PYTHONPATH=str(REPO_ROOT)))
+        assert proc.stdout.readline().strip() == "locked"
+        yield state, proc
+        if proc.poll() is None:
+            proc.stdin.close()
+            proc.wait(timeout=20)
+        proc.stdout.close()
+
+    def test_the_lock_is_held_across_processes(self, holder):
+        state, proc = holder
+        with pytest.raises(TimeoutError):
+            with framework_tools._key_lock(state, timeout=0.3):
+                pass
+        proc.stdin.close()
+        assert proc.wait(timeout=20) == 0
+        with framework_tools._key_lock(state, timeout=5):
+            pass
+
+    def test_no_key_is_created_while_another_process_creates_one(self, holder, memory_keyring, monkeypatch):
+        state, _proc = holder
+        monkeypatch.setattr(framework_tools, "_key_lock", functools.partial(framework_tools._key_lock, timeout=0.3))
+        assert framework_tools._audit_key(SimpleNamespace(secrets_manager=None), state) is None
+        assert not memory_keyring.store  # an unkeyed process, never a second key
+
+    def test_the_shared_file_lock_and_the_audit_key_lock_exclude_each_other(self, tmp_path):
+        # The audit key lock is built on the shared helper; a process holding either one blocks the other.
+        from orchestrator.utils.file_lock import file_lock
+        state = tmp_path / "state"
+        with file_lock(state / "audit-key.lock"):
+            with pytest.raises(TimeoutError):
+                with framework_tools._key_lock(state, timeout=0.3):
+                    pass
+        with framework_tools._key_lock(state, timeout=5):
+            pass
+
+    def test_an_unusable_state_folder_does_not_stop_key_creation(self, tmp_path, memory_keyring):
+        blocker = tmp_path / "a-file"
+        blocker.write_text("")
+        key = framework_tools._audit_key(SimpleNamespace(secrets_manager=None), blocker / "state")
+        assert key and len(key) >= 32
+
+
+# --- delegations, the chat feed and the hybrid (delegation design 3.11, WP1) -----------------------------------------
+
+D_ID = "d_" + "0123456789abcdef"
+
+
+def test_new_extra_fields_and_channel(tmp_path):
+    """The new outcomes, answers, the delegation channel and the new fields are recorded and bound to the chain; each
+    field takes only its documented values (anything else is a caller's bug, refused like an unknown field)."""
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    entry = log.record("mcp:laptop", "start_build", "local_write", "ask", "ai_answered", arguments={"a": 1},
+                       extra={"confirm_channel": "approval:ap_0123456789abcdef", "answer": "escalated",
+                              "answered_by": "ai", "delegation": D_ID, "reason_sha256": "a" * 64,
+                              "facts_sha256": "b" * 64, "warnings": ["disk_tight"], "version": 2,
+                              "feed_entry": "fe_" + "1" * 16, "deletion_sha256": "c" * 64})
+    started = log.record("mcp:laptop", "start_build", "local_write", "ask", "started",
+                         extra={"confirm_channel": f"delegation:{D_ID}", "answered_by": "ai", "delegation": D_ID,
+                                "links": [entry]})
+    for outcome in ("delegation_lapsed", "trash_restored", "trash_emptied", "snapshots_pruned", "feed_cleared",
+                    "relay_question"):
+        log.record("gui", "trash", "framework", "person", outcome)
+    log.record("ditto", "start_build", "local_write", "ask", "not_confirmed", extra={"answer": "withdrawn"})
+    assert log.check().intact
+    rows = {r["id"]: r for r in log.entries(20)}
+    assert rows[entry]["answered_by"] == "ai" and rows[entry]["delegation"] == D_ID
+    assert rows[entry]["warnings"] == ["disk_tight"] and rows[entry]["version"] == 2
+    assert rows[started]["confirm_channel"] == f"delegation:{D_ID}"
+    bad = [{"answered_by": "client"}, {"delegation": "d_123"}, {"delegation": "g_" + "0" * 16},
+           {"reason_sha256": "not-a-hash"}, {"facts_sha256": "A" * 64}, {"version": 0}, {"version": True},
+           {"warnings": "disk_tight"}, {"warnings": ["Disk tight!"]}, {"feed_entry": "fe_1"},
+           {"confirm_channel": "delegation:d_123"},
+           # the removed remote mode's fields: no new entry carries them
+           {"taint": False}, {"place": "build box"}, {"remote_server": "build box"}, {"transfer": "tf_" + "2" * 16},
+           {"confirm_channel": "delegation:" + "0" * 16}, {"answer": "maybe"},
+           # "$" alone also matches before a final newline: a channel is matched as a whole
+           {"confirm_channel": f"delegation:{D_ID}\n"}, {"confirm_channel": "grant:g_0123456789abcdef\n"}]
+    for extra in bad:
+        with pytest.raises(ValueError):
+            log.record("mcp", "start_build", "local_write", "ask", "ok", extra=extra)
+    with pytest.raises(ValueError):
+        log.record("mcp", "start_build", "local_write", "ask", "delegation_used")
+    # a use of a delegation is read from the audit (its started entries), never stored in the delegation file
+    assert log.delegation_uses(D_ID) == (1, rows[started]["ts"])
+    assert log.delegation_uses("d_" + "f" * 16) == (0, None) and log.delegation_uses("not an id") == (0, None)
+
+
+def test_old_entries_with_the_removed_remote_fields_still_verify_and_show(tmp_path, monkeypatch):
+    """Entries the remote mode wrote (place, taint, remote_server) stay in the chain: they verify and are listed with
+    their fields, while new entries can no longer carry them."""
+    from orchestrator.tools import audit as audit_module
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    old_fields = audit_module.EXTRA_FIELDS | {"place", "taint", "remote_server"}
+    monkeypatch.setattr(audit_module, "EXTRA_FIELDS", old_fields)
+    old = log.record("ditto", "start_build", "local_write", "ask", "ok",
+                     extra={"place": "this_computer", "taint": ["remote_result"], "remote_server": "build box"})
+    monkeypatch.undo()
+    log.record("ditto", "get_status", "read", "allow", "ok")
+    assert log.check().intact
+    row = next(r for r in log.entries(5) if r["id"] == old)
+    assert row["place"] == "this_computer" and row["remote_server"] == "build box"
+    with pytest.raises(ValueError):
+        log.record("ditto", "start_build", "local_write", "ask", "ok", extra={"remote_server": "build box"})
+
+
+def test_warnings_must_be_catalogue_codes_once_the_catalogue_exists(tmp_path, monkeypatch):
+    from orchestrator.tools import spec as spec_module
+    monkeypatch.setattr(spec_module, "_catalog", lambda: SimpleNamespace(WARNINGS={"disk_tight": object()}))
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    log.record("mcp", "start_build", "local_write", "ask", "ok", extra={"warnings": ["disk_tight"]})
+    with pytest.raises(ValueError, match="unknown warning codes"):
+        log.record("mcp", "start_build", "local_write", "ask", "ok", extra={"warnings": ["made_up"]})
+
+
+def test_truncation_keeps_delegation_fields(tmp_path):
+    """Extra fields too long for an entry are cut, but never what ties it to its decision: who answered, under which
+    delegation, the reason and facts hashes, the feed row and the deletion plan (SEC-M4)."""
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    kept = {"answered_by": "ai", "delegation": D_ID, "reason_sha256": "a" * 64, "facts_sha256": "b" * 64,
+            "feed_entry": "fe_" + "1" * 16, "deletion_sha256": "c" * 64,
+            "confirm_channel": f"delegation:{D_ID}", "answer": "accepted"}
+    entry = log.record("mcp:laptop", "start_build", "local_write", "ask", "started",
+                       extra={**kept, "repairs": [{"field": "x" * 50, "kind": "alias"}] * 60})
+    row = next(r for r in log.entries(5) if r["id"] == entry)
+    assert "repairs" in row["truncated"] and "repairs" not in audit_module.extra_fields(row)
+    for key, value in kept.items():
+        assert row[key] == value, key
+    assert log.check().intact
+
+
+def test_entries_after_is_an_id_cursor(tmp_path):
+    """A watcher reads every entry after the last one it saw, oldest first: a burst never hides one (SEC-M4)."""
+    log = filled_log(tmp_path / "audit.db", n=5)
+    first = log.entries_after(0, limit=2)
+    assert [json.loads(r["args_preview"])["i"] for r in first] == [0, 1]
+    rest = log.entries_after(first[-1]["id"], limit=100)
+    assert [json.loads(r["args_preview"])["i"] for r in rest] == [2, 3, 4]
+    assert log.entries_after(rest[-1]["id"]) == []
+    assert AuditLog(tmp_path / "none.db").entries_after(0) == []
+    assert not (tmp_path / "none.db").exists(), "reading never creates a log"
+
+
+def test_an_unaudited_field_stays_out_of_the_preview_but_is_covered_by_the_hash(tmp_path):
+    """FieldMeta(audit=False) (a transfer's data chunk): the preview never holds the value; args_sha256 still covers
+    exactly what was sent."""
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    arguments = {"transfer_id": "tf_1", "data_b64": "QUJD" * 100}
+    entry = log.record("mcp", "put_transfer_chunk", "local_write", "allow", "ok", arguments=arguments,
+                       omit=("data_b64",))
+    row = next(r for r in log.entries(1) if r["id"] == entry)
+    assert "QUJD" not in row["args_preview"] and "not recorded" in row["args_preview"] and "tf_1" in row["args_preview"]
+    full = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str)
+    assert row["args_sha256"] == hashlib.sha256(full.encode("utf-8")).hexdigest()
+    assert log.check().intact

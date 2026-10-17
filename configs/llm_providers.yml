@@ -1,0 +1,226 @@
+# LLM providers for Ditto (read by orchestrator/llm/catalog.py).
+#
+# Presets are data: a new model or an OpenAI-compatible server needs no code change. Every model field also
+# accepts free text, and providers with live_models: true list what the account can use (GET /models).
+# A file with the same name in the user's config directory adds or overrides presets by id (schema 1 or 2).
+#
+# label       name shown in the AI settings; group: the vendor (GUI grouping)
+# category    cloud_api | cloud_platform | aggregator | local_engine | mcp_reverse
+# adapter     anthropic | openai_responses | openai_compat
+# location    cloud (privacy filter applies) | local (never filtered) | auto (decided from the base_url host)
+# secret      the name earlier versions stored the API key under (the AI settings and `llm-cli secrets set` still
+#             accept it); the vault keeps the key as cred/<provider>/<method>
+# models      default model per task profile (chat, tools, json, healing); "default" for the rest
+# efforts     default effort per task when the request does not set one
+# effort_map  our level -> the value this provider understands (missing = sent unchanged)
+# reasoning   how effort is sent: none | reasoning_effort (top level) | reasoning_object ({"reasoning": {...}})
+#
+# auth        sign-in methods in preferred order; the first usable one is picked unless ai_auth_<provider> names
+#             one. Schema 1 lists names (auth: [api_key, none]); schema 2 lists mappings:
+#   id              unique in the preset; the vault entry is cred/<provider>/<id>
+#   type            none | bearer_optional (local engine, key optional) | api_key | cli_session (an official
+#                   vendor CLI owns the session) | oauth_pkce_loopback | oauth_other | oauth_device_code |
+#                   cloud_credential_chain | short_lived_token (types without a sign-in flow yet are refused)
+#   label           shown on the method's card
+#   key_page        where the user creates and revokes the key
+#   env             documented environment variables used when no key is stored (shown as the key's source)
+#   reject_prefixes key kinds refused before any request (admin keys cannot be used for chat)
+#   fields          non-secret values: id, label, pattern (full match), header (sent with the key; never a
+#                   credential header such as Authorization or x-api-key), setting (a setting that holds the
+#                   value too and wins while set), invalid_code (error code)
+#   validate        the zero-cost GET behind "Check": path (below base_url) or url, account_field or
+#                   account_header (names the account), models_field (counted), public (answers without a key)
+#   opt_in          never picked automatically (an `ant auth login` profile always is opt-in)
+#   note            a policy or usage note shown with the method (`llm-cli ditto auth methods`, the GUI card)
+#   cli             install (URL) and login/logout (argv) of the vendor CLI
+#   sources         primary sources of the method's facts
+# Keys of presets whose base URL can be changed (and of bearer_optional methods) are bound to that address:
+# changing the base URL never carries a key over, and their env variables apply only at the preset's base_url.
+
+version: 2
+
+providers:
+  anthropic:
+    label: "Anthropic Claude (API)"
+    group: anthropic
+    category: cloud_api
+    adapter: anthropic
+    base_url: https://api.anthropic.com
+    location: cloud
+    secret: anthropic_api_key
+    auth:
+      - id: api_key
+        type: api_key
+        label: "API key"
+        key_page: https://platform.claude.com/settings/keys
+        env: [ANTHROPIC_API_KEY]
+        reject_prefixes: [sk-ant-admin01-]
+        fields:
+          - id: workspace_id
+            label: "Workspace ID (only for keys valid in all workspaces)"
+            pattern: "^wrkspc_[A-Za-z0-9]+$"
+            header: anthropic-workspace-id
+            setting: ai_anthropic_workspace_id
+            invalid_code: anthropic.workspace_invalid
+        validate: {path: /v1/models, account_header: anthropic-workspace-id}
+        sources:
+          - https://platform.claude.com/docs/en/manage-claude/authentication.md
+          - https://platform.claude.com/docs/en/api/errors.md
+      - id: ant_profile
+        type: cli_session
+        label: "Anthropic CLI profile (advanced)"
+        opt_in: true    # never auto-selected: a profile on disk must not switch the billed account
+        note: >-
+          Uses the profile of Anthropic's own `ant` CLI (sign in there with `ant auth login`). Anthropic has not
+          confirmed that other apps may use these profiles; it is never picked automatically.
+        cli:
+          install: https://platform.claude.com/docs/en/cli-sdks-libraries/cli/quickstart.md
+          login: [ant, auth, login]
+          logout: [ant, auth, logout]
+        validate: {path: /v1/models}
+        sources: [https://platform.claude.com/docs/en/cli-sdks-libraries/cli/authentication.md]
+    models:
+      default: claude-opus-5-5
+      json: claude-sonnet-5-5
+      healing: claude-opus-5-5
+    suggested_models: [claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5, claude-fable-5-1]
+    efforts: {chat: medium, tools: medium, json: low, healing: high}
+    # Server-side refusal fallback (fallbacks: "default", beta server-side-fallback-2026-07-01), Claude API only.
+    # Claude Haiku 5.5 has no server-side fallback and must not get the parameter.
+    server_fallback_models: [claude-opus-5-5, claude-sonnet-5-5, claude-fable-5-1]
+    # Models that reject output_config.effort (prefix match).
+    no_effort_models: [claude-haiku-4-5, claude-3-, claude-opus-4-0, claude-opus-4-1, claude-sonnet-4-0]
+    docs_url: https://platform.claude.com/docs
+
+  openai:
+    label: "OpenAI (Responses API)"
+    group: openai
+    category: cloud_api
+    adapter: openai_responses
+    base_url: https://api.openai.com/v1
+    location: cloud
+    secret: openai_api_key
+    auth:
+      - id: api_key
+        type: api_key
+        label: "API key"
+        key_page: https://platform.openai.com/settings/organization/api-keys
+        env: [OPENAI_API_KEY]
+        fields:
+          - {id: organization, label: "Organization ID (optional)", pattern: "^org-[A-Za-z0-9_-]+$",
+             header: OpenAI-Organization}
+          - {id: project, label: "Project ID (optional)", pattern: "^proj_[A-Za-z0-9_-]+$", header: OpenAI-Project}
+        # Listing models needs the api.model.read permission; a 403 means "the key works, type the model id".
+        validate: {path: /models}
+        sources:
+          - https://developers.openai.com/api/reference/overview.md
+          - https://developers.openai.com/api/docs/guides/rbac.md
+    models:
+      default: gpt-6.1-sol
+      json: gpt-6-luna
+    suggested_models: [gpt-6.1-sol, gpt-6-luna, gpt-6-astra]
+    efforts: {chat: medium, tools: medium, json: low, healing: high}
+    docs_url: https://developers.openai.com/api/docs/models
+
+  google:
+    label: "Google Gemini (OpenAI-compatible endpoint)"
+    group: google
+    category: cloud_api
+    adapter: openai_compat
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    location: cloud
+    secret: gemini_api_key
+    auth:
+      - id: api_key
+        type: api_key
+        label: "Gemini API key (AI Studio)"
+        key_page: https://aistudio.google.com/apikey
+        env: [GEMINI_API_KEY]
+        validate: {path: /models}
+        sources: [https://ai.google.dev/gemini-api/docs/api-key, https://ai.google.dev/gemini-api/docs/openai]
+    models:
+      default: gemini-3.8-flash
+    suggested_models: [gemini-3.8-flash]
+    reasoning: reasoning_effort
+    effort_map: {xhigh: high, max: high}
+    docs_url: https://ai.google.dev/gemini-api/docs/openai
+
+  openrouter:
+    label: "OpenRouter"
+    group: openrouter
+    category: aggregator
+    adapter: openai_compat
+    base_url: https://openrouter.ai/api/v1
+    location: cloud
+    secret: openrouter_api_key
+    auth:
+      - id: api_key
+        type: api_key
+        label: "API key"
+        key_page: https://openrouter.ai/keys
+        env: [OPENROUTER_API_KEY]
+        # GET /api/v1/key checks the key and names it; the model list is public and would check nothing.
+        validate: {path: /key, account_field: data.label, models_field: null}
+        sources: [https://openrouter.ai/docs/api_reference/limits.md]
+    models: {}          # any model: pick one from the live list
+    reasoning: reasoning_object
+    headers:
+      X-OpenRouter-Title: "LLM Cross-Compiler Framework"
+    docs_url: https://openrouter.ai/docs
+
+  ollama:
+    label: "Ollama (local)"
+    group: ollama
+    category: local_engine
+    adapter: openai_compat
+    base_url: http://localhost:11434/v1
+    base_url_configurable: true
+    location: local
+    auth:
+      - {id: none, type: none, label: "No key needed", validate: {path: /models}}
+    models:
+      default: "qwen3.5:4b"
+    suggested_models: ["qwen3.5:4b"]
+    reasoning: reasoning_effort
+    docs_url: https://docs.ollama.com/api/openai-compatibility
+
+  local:
+    label: "Local model (managed llama-server)"
+    group: local
+    category: local_engine
+    adapter: openai_compat
+    location: local
+    auth:
+      # The managed server gets a new key at every start; the framework passes it and never shows it.
+      - {id: runtime_key, type: bearer_optional, label: "Key of the managed server (automatic)"}
+    runtime_endpoint: true   # base_url and api key come from the running server, not from the settings
+    reasoning: reasoning_effort
+    # llama-server: "none" turns thinking off; Qwen3.5's template ignores "low" and thinks at full length,
+    # which takes minutes on a CPU. So low = no thinking, medium and up = thinking.
+    effort_map: {low: none, xhigh: high, max: high}
+    no_tools_with_response_format: true   # llama-server ignores tools when a JSON schema is set
+
+  custom:
+    label: "Custom OpenAI-compatible server (vLLM, LM Studio, ...)"
+    group: custom
+    category: local_engine
+    adapter: openai_compat
+    base_url_configurable: true
+    location: auto
+    secret: custom_api_key
+    auth:
+      # The key belongs to the server address it was stored for (a new address needs its own key).
+      - {id: api_key, type: api_key, label: "API key of the server", validate: {path: /models}}
+      - {id: none, type: none, label: "No key"}
+
+aliases:   # earlier ai_provider values
+  OpenAI: openai
+  Anthropic: anthropic
+  Claude: anthropic
+  Google: google
+  Gemini: google
+  Ollama: ollama
+  Custom: custom
+  LocalAI: custom
+  Compatible: custom
+  OpenRouter: openrouter

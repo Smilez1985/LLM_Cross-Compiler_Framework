@@ -12,7 +12,6 @@ Launches the GUI Application.
 
 import sys
 import os
-import yaml
 from pathlib import Path
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
@@ -25,67 +24,69 @@ if str(root_dir) not in sys.path:
 
 # Core Imports
 from orchestrator.Core.config_manager import ConfigManager
+from orchestrator.Core.vault_key import set_passphrase_prompt
+from orchestrator.llm.sdk_env import guard_sdk_environment
+from orchestrator.utils.logging import setup_logging
 
 # GUI Imports
 # Note: These will fail if files are missing. We wrap them for better error messages.
 try:
     from orchestrator.gui.main_window import MainOrchestrator
     from orchestrator.gui.dialogs import LanguageSelectionDialog
+    from orchestrator.gui.sign_in import PassphrasePrompt
     from orchestrator.utils.localization import get_instance as get_i18n
 except ImportError as e:
     print(f"CRITICAL ERROR: Missing GUI components.\n{e}")
     print("Please ensure 'orchestrator/gui/main_window.py', 'dialogs.py' and 'utils/localization.py' exist.")
     sys.exit(1)
 
+def save_language(cfg_mgr: ConfigManager, language: str) -> bool:
+    """Saves the first-run language choice to config.yml in the effective config folder (other settings there
+    are kept). False if it could not be written."""
+    return bool(cfg_mgr.set("language", language)) and bool(cfg_mgr.save_user_config())
+
+
 def main():
     # High DPI Scaling for modern screens
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    
-    app = QApplication(sys.argv)
-    app.setApplicationName("LLM Cross-Compiler")
-    
+
     # Determine App Root
     app_root = root_dir
-    
-    # 1. Load Config (User Preferences)
-    # We look for config.yml in the 'configs' folder
-    configs_dir = app_root / "configs"
-    config_file = configs_dir / "config.yml"
-    
-    # Initialize ConfigManager (v2.3.0 API: takes path string or None)
-    # If file doesn't exist yet, it loads defaults
-    cfg_mgr = ConfigManager(str(config_file) if config_file.exists() else None)
-    
+    from orchestrator.Core.request_store import set_program
+    set_program("gui")  # shown with this window's builds in the shared build state
+
+    # 1. Load Config (User Preferences) from the effective config folder: LLM_FRAMEWORK_CONFIG_DIR, else the
+    # installation's configs/ if this user may write there, else the per-user folder (C:\Program Files is
+    # read-only for standard users). The framework started below uses the same folder.
+    cfg_mgr = ConfigManager()
+
+    # Before Qt or the framework start threads: SDK environment guard (orchestrator/llm/sdk_env.py).
+    debug_http = "--debug-http" in sys.argv[1:]
+    for warning in guard_sdk_environment(cfg_mgr.get("ai_allow_sdk_env_headers", False), debug_http):
+        print(f"Warning: {warning}", file=sys.stderr)
+    # The SDK logger levels follow the flag too; the framework's later setup_logging() keeps the choice.
+    setup_logging(debug_http=debug_http)
+
+    app = QApplication([arg for arg in sys.argv if arg != "--debug-http"])
+    app.setApplicationName("LLM Cross-Compiler")
+    # A vault protected by a passphrase asks for it in a dialog (also when it opens in a worker thread).
+    set_passphrase_prompt(PassphrasePrompt(app))
+
     language = cfg_mgr.get("language")
-    
+    # The schema default 'en' is always loaded, so a first run is detected by where the value came from.
+    language_value = cfg_mgr.config_values.get("language")
+    first_run = language_value is None or language_value.source.source_type == "default"
+
     # 2. First Run / Language Selection
-    if not language:
+    if first_run:
         # Initialize I18n with default English for the dialog
         get_i18n("en")
         
         dlg = LanguageSelectionDialog()
         if dlg.exec() == QDialog.Accepted:
             language = dlg.selected_lang
-            
-            # Persist Language Selection manually to ensure it's saved immediately
-            try:
-                configs_dir.mkdir(parents=True, exist_ok=True)
-                data = {}
-                
-                if config_file.exists():
-                    with open(config_file, 'r', encoding='utf-8') as f:
-                        data = yaml.safe_load(f) or {}
-                
-                data["language"] = language
-                
-                with open(config_file, 'w', encoding='utf-8') as f:
-                    yaml.dump(data, f)
-                    
-                # Update runtime config manager
-                cfg_mgr.set("language", language)
-                
-            except Exception as e:
-                print(f"Warning: Could not save language preference: {e}")
+            if not save_language(cfg_mgr, language):
+                print(f"Warning: Could not save language preference to {cfg_mgr.config_dir}", file=sys.stderr)
         else:
             # User cancelled setup
             sys.exit(0)

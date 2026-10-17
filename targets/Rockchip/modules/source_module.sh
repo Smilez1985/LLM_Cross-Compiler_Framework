@@ -7,8 +7,8 @@ readonly BUILD_CACHE_DIR="${BUILD_CACHE_DIR:-/build-cache}"
 readonly REPO_DIR="${BUILD_CACHE_DIR}/repos"
 
 # Quellen aus Environment (injiziert durch Orchestrator aus project_sources.yml)
-readonly LLAMA_CPP_REPO="${LLAMA_CPP_REPO_OVERRIDE:-https://github.com/ggerganov/llama.cpp.git}"
-readonly LLAMA_CPP_COMMIT="${LLAMA_CPP_COMMIT:-b3626}" 
+readonly LLAMA_CPP_REPO="${LLAMA_CPP_REPO_OVERRIDE:-https://github.com/ggml-org/llama.cpp.git}"
+readonly LLAMA_CPP_COMMIT="${LLAMA_CPP_COMMIT:-v0.6.0}" 
 
 # Logging
 log_info() { echo "ℹ️  [$(date '+%H:%M:%S')] [SOURCE] $1"; }

@@ -55,7 +55,7 @@ supported_boards:
       gpu: "Mali-G52"
       npu: "6 TOPS"
       memory_max: "16GB LPDDR5"
-      typical_boards: ["ROCK 5ITX"]
+      typical_boards: ["ROCK 4D"]
       
   - name: "RK3588"
     description: "Octa-core ARM (4xA76 + 4xA55), Mali-G610 GPU"
@@ -72,18 +72,22 @@ supported_boards:
 
 # Docker configuration
 docker:
+  # A local image name: the builder builds its images on this computer under this name
+  # (llm-framework/rockchip:<tag>); they are never pushed or pulled.
   image_name: "llm-framework/rockchip"
-  registry: "ghcr.io"
+  # No registry: the framework publishes no images. Nothing reads this field.
+  registry: ""
   build_context: "."
   dockerfile: "Dockerfile"
   
   # Build arguments
   build_args:
-    LLAMA_CPP_COMMIT: "b3626"
+    LLAMA_CPP_TAG: "b11429"   # the llama.cpp pin of configs/llama_runtime.yml (llama_cpp.source.tag)
+    LLAMA_CPP_COMMIT: "d81235049384534c167caea52b85a694f6103d14"   # llama_cpp.source.commit, fetched and checked
     BUILD_JOBS: "4"
     PYTHON_VERSION: "3.11"
     
-  # Image tags
+  # Local tag names only: nothing reads them, and no image is published under them.
   tags:
     - "latest"
     - "v1.0.0"
@@ -130,7 +134,8 @@ modules:
       inputs: ["model.fp16.gguf", "cmake_toolchain"]
       outputs: ["deployment_package.zip"]
 
-# Hardware optimization profiles
+# Hardware optimization profiles. Legacy: read only by the legacy four-module chain (modules/*_module.sh); the
+# active build takes llama.cpp's options from the build recipe (orchestrator/runtime/build/recipe.py).
 optimization_profiles:
   rk3566_default:
     cpu_flags: "-mcpu=cortex-a55 -mfpu=neon-fp-armv8"
@@ -162,7 +167,6 @@ requirements:
     docker_version: ">=20.10"
     docker_compose_version: ">=2.0"
     python_version: ">=3.10"
-    poetry_version: ">=1.5"
     
   host_system:
     memory_gb: 8
@@ -174,6 +178,88 @@ requirements:
     kernel_version: ">=5.10"
     memory_mb: ">=512"
     
+# Machine-readable capabilities (schema: orchestrator/schemas/targets.py). GUI, CLI, the build
+# service, Ditto and the MCP server offer and validate exactly what is listed here.
+# Keep in sync with modules/build.sh (GGUF types) and scripts/export_rkllm.py (RKLLM types);
+# tests/test_foundation.py (TestCapabilities) and tests/test_review_capabilities_paths.py check that.
+capabilities:
+  schema_version: 1
+  support_level: official
+  default_board: rk3588   # what build.sh uses when no board is given (TARGET_BOARD empty)
+  boards:
+    rk3566:
+      label: "RK3566 (4x Cortex-A55)"
+      cpu: "4x Cortex-A55"
+      ram_max_gb: 8
+      npu: "1 TOPS"
+      gpu: "Mali-G52"
+      examples: ["Radxa ZERO 3W", "Radxa CM3", "ROCK 3C"]
+    rk3568:
+      label: "RK3568 (4x Cortex-A55)"
+      cpu: "4x Cortex-A55"
+      ram_max_gb: 8
+      npu: "1 TOPS"
+      gpu: "Mali-G52"
+      examples: ["ROCK 3A", "Radxa E25"]
+    rk3576:
+      label: "RK3576 (4x A72 + 4x A53)"
+      cpu: "4x Cortex-A72 + 4x Cortex-A53"
+      ram_max_gb: 16
+      npu: "6 TOPS"
+      gpu: "Mali-G52"
+      examples: ["Radxa ROCK 4D"]
+    rk3588:
+      label: "RK3588 (4x A76 + 4x A55)"
+      cpu: "4x Cortex-A76 + 4x Cortex-A55"
+      ram_max_gb: 32
+      npu: "6 TOPS"
+      gpu: "Mali-G610"
+      examples: ["Radxa ROCK 5B", "Radxa ROCK 5ITX", "Orange Pi 5"]
+  formats:
+    gguf:
+      label: "GGUF (llama.cpp, CPU)"
+      input: [hf]
+      quantizations: [Q4_K_M, Q4_0, IQ4_NL, IQ4_XS, Q5_K_M, Q6_K, Q8_0, Q4_1, Q5_0, Q5_1, Q2_K, Q2_K_S,
+                      Q3_K_S, Q3_K_M, Q3_K_L, Q4_K_S, Q5_K_S, IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M,
+                      IQ3_XXS, IQ3_XS, IQ3_S, IQ3_M, TQ1_0, TQ2_0, MXFP4_MOE, F16, BF16, F32]
+      default_quantization: Q4_K_M
+      board_default_quantization:
+        rk3566: Q4_0
+        rk3568: Q4_0
+      imatrix: true
+      needs_imatrix: [IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S]
+      dataset: optional
+      dataset_kind: text
+      aliases: {FP16: F16, FP32: F32, INT8: Q8_0, Q8: Q8_0, INT4: Q4_K_M, Q4: Q4_K_M, Q5: Q5_K_M}   # build.sh normalize_gguf_type
+      notes: "Runs on the CPU of every board. Q4_0 and IQ4_NL are repacked for fast ARM kernels."
+    rkllm:
+      label: "RKLLM (Rockchip NPU, LLMs)"
+      input: [hf]
+      quantizations: [w8a8, w8a8_g128, w8a8_g256, w8a8_g512, w4a16, w4a16_g32, w4a16_g64, w4a16_g128]
+      default_quantization: w8a8
+      boards: [rk3588, rk3576]
+      board_quantizations:
+        rk3588: [w8a8, w8a8_g128, w8a8_g256, w8a8_g512]
+        rk3576: [w4a16, w4a16_g32, w4a16_g64, w4a16_g128, w8a8]
+      board_default_quantization:
+        rk3588: w8a8
+        rk3576: w4a16
+      dataset: optional
+      dataset_kind: text
+      aliases: {int8: w8a8, q8: w8a8, q8_0: w8a8, int4: w4a16, q4: w4a16, q4_0: w4a16, q4_k_m: w4a16}   # rkllm_module.sh
+      notes: "RKLLM-Toolkit 1.3.1. RK3566/RK3568 are not supported by RKLLM; use GGUF there."
+    rknn:
+      label: "RKNN (Rockchip NPU, ONNX vision/audio models)"
+      input: [onnx]
+      quantizations: [fp16, i8]
+      default_quantization: fp16
+      boards: [rk3566, rk3568, rk3576, rk3588]
+      dataset: optional
+      dataset_kind: sample_list
+      dataset_required_for: [i8]
+      aliases: {int8: i8, q8: i8, q8_0: i8, f16: fp16}   # rknn_module.sh
+      notes: "RKNN-Toolkit2 2.3.2. i8 needs a list of sample inputs (paths relative to the list file)."
+
 # Supported model formats
 supported_formats:
   input:

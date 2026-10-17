@@ -1,0 +1,75 @@
+# Workflow template for the community repository (copy it to .github/workflows/ there; this repository does not
+# run it). It checks every file a pull request adds under contributions/ with the framework at a pinned tag:
+#   - only pack files (.zip), each at most 5 MB;
+#   - `llm-cli zoo verify`: manifest and hashes, no links, no extra or binary files, the target validators
+#     (capabilities, every FROM pinned by digest, the shell deny-list, bash -n, no template placeholders), the
+#     recipe and knowledge schemas, an included author signature, and the privacy scrub over every file in the
+#     pack (no home folders, addresses, host or user names, and no key of the framework's secret table: a pack
+#     with a key is rejected). The repository's secret scan is not run on the zips: it skips binary files, so it
+#     would check nothing inside a pack.
+# A maintainer then reviews the pack, merges it, adds its entry to index.json and signs the index offline with
+# scripts/zoo_sign_index.py (the signing key never reaches CI).
+name: Validate contribution
+
+on:
+  pull_request:
+    paths: ["contributions/**"]
+
+permissions:
+  contents: read
+
+env:
+  # The framework release whose `llm-cli zoo verify` checks the packs: set it to the tag of a published release
+  # (the first one with the community zoo, later the newest one). The placeholder makes the checkout fail until then.
+  LCF_REF: SET-TO-A-RELEASE-TAG
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Smilez1985/llm_conversion_framework
+          ref: ${{ env.LCF_REF }}
+          path: .lcf
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install the framework
+        run: |
+          python -m pip install --require-hashes -r .lcf/requirements.txt
+          python -m pip install --no-deps ./.lcf
+
+      - name: Changed files
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git diff --name-only --diff-filter=AMR "origin/${BASE_REF}...HEAD" -- contributions > changed.txt
+
+      - name: Check every added pack
+        run: |
+          status=0
+          while IFS= read -r file; do
+            case "$file" in
+              contributions/target/*.zip|contributions/recipe/*.zip|contributions/knowledge/*.zip)
+                if [ "$(stat -c %s "$file")" -gt 5000000 ]; then
+                  echo "::error file=$file::larger than 5 MB; packs carry scripts, recipes and text only"
+                  status=1
+                elif ! llm-cli zoo verify "$file"; then
+                  echo "::error file=$file::the pack was rejected (see the log above)"
+                  status=1
+                fi ;;
+              *)
+                echo "::error file=$file::only pack files (contributions/<kind>/*.zip) belong here"
+                status=1 ;;
+            esac
+          done < changed.txt
+          exit "$status"

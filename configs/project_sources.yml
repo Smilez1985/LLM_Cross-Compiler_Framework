@@ -1,22 +1,28 @@
 # ============================================================================
-# LLM CONVERSION FRAMEWORK - SINGLE SOURCE OF TRUTH (SSOT)
+# LLM CONVERSION FRAMEWORK - CATALOGUE OF UPSTREAM PROJECTS
 # ============================================================================
 # Version: 2.1.0
 # Last Updated: 2025-12-28
-# Purpose: Central registry of all external tools, SDKs, and documentation
+# Purpose: Reference list of the external tools, SDKs and documentation that the framework uses, learns from
+#          or might integrate. Written for people; see configs/SSOT_ARCHITECTURE.md.
 #
-# USAGE:
-# - Orchestrator: Reads this file → ENV variables for Docker containers
-# - Crawler: Follows all docs_* links → Extracts knowledge → Stores in RAG
-# - Ditto (AI): Uses docs_workflow as primary reference + RAG queries
+# WHO READS THIS FILE:
+# - At run time only the docs_* links of hardware_targets are read (orchestrator/Core/doc_sources.py): they fill the
+#   Deep Ingest window for a probe's vendor and SDK and the read-only resource lcf://knowledge/doc-sources. Nothing
+#   is crawled until a person starts it. The file is not turned into environment variables for the build containers.
+# - scripts/validate_ssot.py checks it, and scripts/sync_ssot.py copies its pinned values (commit, version,
+#   pypi_package, docker_tag, metadata) into detailed_project_sources.yml.
+# - Its versions are references, not the versions builds use: builds use what a target's Dockerfile pins and the
+#   setting llama_cpp_version; the local model server uses llama_runtime.yml.
+# - The project's roadmap is in docs/BLUEPRINT.md (section "Roadmap"), not here.
 #
 # STRUCTURE:
-# - Each entry: Links only (no detailed knowledge - that's in RAG!)
-# - repo_url: For git operations
-# - commit: For reproducibility (pinned versions)
-# - docs_workflow: PRIMARY link (Ditto uses this)
-# - docs_*: Additional links (Crawler extracts all)
-# - priority: CRITICAL/HIGH/MEDIUM/LOW (framework decision making)
+# - Each entry: links and short notes
+# - repo_url: the repository
+# - commit: the version this catalogue refers to
+# - docs_workflow: the main documentation link
+# - docs_*: further documentation links
+# - priority: CRITICAL/HIGH/MEDIUM/LOW
 # - integration_status: ACTIVE/PLANNED/LEARN_FROM/REFERENCE
 # - note: Brief context (1-2 sentences max)
 
@@ -29,9 +35,8 @@ metadata:
   maintainer: "LLM Conversion Framework"
   
   purpose: |
-    Central registry of external tools and documentation.
-    Crawler extracts knowledge from linked docs into RAG.
-    Framework uses this for builds, not as knowledge base.
+    Reference catalogue of external tools and documentation links for developers.
+    At run time only the hardware documentation links are read (see the header).
   
   architecture_note: |
     SSOT = Links + Metadata (lightweight)
@@ -43,11 +48,10 @@ metadata:
 # ============================================================================
 # Tools used by framework build system
 build_tools:
-  poetry:
-    url: "https://install.python-poetry.org"
-    sha256: "3b5842cd6318176812455429c6c109909d21b184579720f154506f6734828455"
-    docs_workflow: "https://python-poetry.org/docs/"
-    note: "Python dependency management"
+  uv:
+    url: "https://github.com/astral-sh/uv"
+    docs_workflow: "https://docs.astral.sh/uv/"
+    note: "Python dependency lock (uv.lock) and the hash-pinned requirements export the installers use"
   
   cmake:
     url: "https://cmake.org/download/"
@@ -66,11 +70,11 @@ build_tools:
 # Framework supports multiple backends per target
 inference_backends:
   llama_cpp:
-    repo_url: "https://github.com/ggerganov/llama.cpp"
-    commit: "b4009"
-    docs_workflow: "https://github.com/ggerganov/llama.cpp/blob/master/docs/build.md"
-    docs_quantization: "https://github.com/ggerganov/llama.cpp/blob/master/examples/quantize/README.md"
-    docs_backends: "https://github.com/ggerganov/llama.cpp/blob/master/docs/backend.md"
+    repo_url: "https://github.com/ggml-org/llama.cpp"
+    commit: "b11429"            # the llama.cpp pin of llama_runtime.yml (llama_cpp.source.tag)
+    docs_workflow: "https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md"
+    docs_quantization: "https://github.com/ggml-org/llama.cpp/blob/master/examples/quantize/README.md"
+    docs_backends: "https://github.com/ggml-org/llama.cpp/blob/master/docs/backend.md"
     docs_gguf_spec: "https://github.com/ggerganov/ggml/blob/master/docs/gguf.md"
     priority: "CRITICAL"
     integration_status: "ACTIVE"
@@ -269,7 +273,8 @@ hardware_targets:
       supported_platforms: ["Jetson Orin", "Jetson Xavier", "Jetson Nano"]
       priority: "CRITICAL"
       integration_status: "ACTIVE"
-      note: "TensorRT-LLM for Jetson. FP16/INT8/AWQ quantization. GPU-optimized."
+      note: "TensorRT-LLM for Jetson. FP16/INT8/AWQ quantization. GPU-optimized. The pin v0.10.0 is old and not
+        checked against current releases: pick and pin a current release when the NVIDIA target is drafted."
     
     jetson_inference:
       repo_url: "https://github.com/dusty-nv/jetson-inference"
@@ -358,7 +363,8 @@ hardware_targets:
       supported_platforms: ["Hailo-8", "Hailo-8L", "Raspberry Pi 5 + Hailo"]
       priority: "LOW"
       integration_status: "REFERENCE"
-      note: "⚠️ Vision/Voice only. NOT for LLM inference. Document for completeness."
+      note: "Noted for Hailo-8/8L (HailoRT 4.17): vision and voice models. Not checked against Hailo's current
+        documentation: check there whether newer Hailo accelerators run LLMs before a Hailo target is drafted."
     
     hailo_model_zoo:
       repo_url: "https://github.com/hailo-ai/hailo_model_zoo"
@@ -654,34 +660,13 @@ quality_tools:
     note: "Security scanning. Reference only."
 
 # ============================================================================
-# FRAMEWORK INTEGRATION ROADMAP
-# ============================================================================
-roadmap:
-  v2.2_current:
-    - "llama.cpp backend (ACTIVE)"
-    - "OpenVINO backend (ACTIVE - Intel)"
-    - "TensorRT-LLM (ACTIVE - NVIDIA)"
-    - "RKNN toolkit (ACTIVE - Rockchip)"
-  
-  v2.3_next:
-    - "ncnn backend (mobile)"
-    - "ONNX input format"
-    - "Auto-tuner (TVM-inspired)"
-  
-  v2.4_future:
-    - "Knowledge Snapshot v2.0 schema"
-    - "Multi-backend wizard"
-    - "AMD ROCm support"
-    - "RISC-V experimental"
-
-# ============================================================================
 # FRAMEWORK NOTES
 # ============================================================================
 # These are framework-level decisions, NOT detailed knowledge
 notes:
   backend_selection_logic:
     - "Universal fallback: llama.cpp (works everywhere)"
-    - "Intel hardware: OpenVINO (2-5x faster)"
+    - "Intel hardware: OpenVINO"
     - "NVIDIA GPU: TensorRT-LLM (best performance)"
     - "Rockchip NPU: RKNN (NPU acceleration)"
     - "Mobile: ncnn (lightweight) or llama.cpp"
