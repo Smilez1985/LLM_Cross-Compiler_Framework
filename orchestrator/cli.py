@@ -5100,7 +5100,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
         with console.status(f"Running the hardware probe on {escape(host)}...", spinner="dots"):
             scan = scan_device(state_dir, host, port, user, key, password=password, label=label,
                                output_file=output_file, as_json=as_json, store=store, record=ctx is not None,
-                               via="cli", actor="cli", audit=_device_audit(ctx, state_dir) if ctx is not None else None)
+                               via="cli", actor="cli",   # the audit log is opened only for the record, as before
+                               audit_factory=(lambda: _device_audit(ctx, state_dir)) if ctx is not None else None)
     except DeviceScanError as e:
         if e.kind == "login":   # recorded for Mojo by the core step already
             _unreachable(ctx, host, port, e.error, doing=f"log in to {user}@", state_dir=state_dir)

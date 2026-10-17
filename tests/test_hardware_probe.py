@@ -1068,6 +1068,33 @@ class TestScanDevice:
                              "SHA256:" + "A" * 43)
         assert wrong.code == 1 and "does not match" in wrong.out
 
+    def test_the_audit_log_is_opened_only_after_a_successful_probe(self, tmp_path, monkeypatch):
+        """Review (w5-deploy-v): moving the flow into scan_steps.scan_device opened the audit log (and with it the
+        OS keyring's audit key) before the login; as before, a failed scan does not touch it."""
+        from orchestrator import cli as cli_module
+        from orchestrator.runtime import remote_probe as rp
+        from orchestrator.runtime.profile import parse_profile
+        from orchestrator.utils import ssh_trust
+        from test_cli_builds import invoke_plain
+        self.fake_ssh(monkeypatch)
+        opened = []
+        monkeypatch.setattr(cli_module, "_device_audit", lambda ctx, state: opened.append(state) or None)
+
+        def refuse(host, user, state, port=22, password=None):
+            raise ConnectionRefusedError(111, "refused")
+
+        monkeypatch.setattr(ssh_trust, "connect", refuse)
+        fp = ssh_trust.fingerprint(FakeHostKey())
+        monkeypatch.chdir(tmp_path)
+        failed = invoke_plain("scan", "--device", "192.0.2.10", "--user", "dietpi", "--trust-fingerprint", fp)
+        assert failed.code == 1 and opened == []
+        self.fake_ssh(monkeypatch)
+        board = parse_profile((FIXTURES / "schema2_rk3566_dietpi.txt").read_text())
+        monkeypatch.setattr(rp, "probe_over_ssh", lambda client: rp.RemoteProbeResult(board, "sh", []))
+        done = invoke_plain("scan", "--device", "192.0.2.10", "--user", "dietpi", "--trust-fingerprint", fp)
+        assert done.code == 0, done.out
+        assert len(opened) == 1 and "Trusted device" in done.out
+
     def test_a_changed_host_key_stops(self, tmp_path, monkeypatch):
         from test_cli_builds import invoke_plain
         _trusted, connected = self.fake_ssh(monkeypatch, status="changed")
