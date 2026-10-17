@@ -668,11 +668,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Deep Ingest honours machine-readable opt-outs.** Text and data mining of public pages is allowed unless
   the rightsholder reserved it in machine-readable form (EU DSM Directive Art. 4, German UrhG § 44b), so
   besides robots.txt the crawler skips pages marked `noindex`, `none`, `noai` or `noimageai` in an
-  `X-Robots-Tag` header or in `<meta name="robots">` / `<meta name="llm-conversion-framework-bot">`, does not
-  follow the links of `nofollow` pages, and honours the W3C TDM Reservation Protocol (`/.well-known/tdmrep.json`
-  per site, the `tdm-reservation` header and meta tag, PDF metadata). Redirect targets on other hosts are
-  checked the same way. Every page that is not stored is named in the crawl log with its reason. None of these
-  checks can be switched off.
+  `X-Robots-Tag` header or in `<meta name="robots">` / `<meta name="llm-cross-compiler-framework-bot">` (also under
+  its earlier name `llm-conversion-framework-bot`), does not follow the links of `nofollow` pages, and honours the
+  W3C TDM Reservation Protocol (`/.well-known/tdmrep.json` per site, the `tdm-reservation` header and meta tag, PDF
+  metadata). Redirect targets on other hosts are checked the same way. Every page that is not stored is named in
+  the crawl log with its reason. None of these checks can be switched off.
 - **Notice before the first Deep Ingest** (English and German): what is read (only publicly reachable pages),
   which opt-outs are honoured, that the knowledge stays on this computer, and that sharing it keeps source and
   licence and needs your explicit release. It is information, not a legal confirmation: one "Understood"
@@ -1177,6 +1177,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
+  `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
+  and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the
+  error report and in the community repository's workflow; the install folders (Linux
+  `/opt/llm-cross-compiler-framework`, Windows `C:\Program Files\LLM-Cross-Compiler-Framework` with the desktop
+  shortcut **LLM-Cross-Compiler-Framework**, and the program folder of the framework image); the Python distribution
+  `llm-cross-compiler-framework`; the Windows scripts `scripts/Uninstall-LLM-Cross-Compiler-Framework.bat` and
+  `scripts/start-llm_cross_compiler_framework.bat`; the crawler's product token `LLM-Cross-Compiler-Framework-Bot`
+  (robots.txt groups, `X-Robots-Tag` scopes and meta tags written for `LLM-Conversion-Framework-Bot` still apply, so
+  an opt-out a site made earlier holds); and the keyring service `llm-cross-compiler-framework` (vault keys, the audit
+  key and the revision anchors still under `llm-conversion-framework` are read and copied to the new name on first
+  use, the old entries are never removed, and the vault's stored check value keeps its text, so every existing vault
+  opens). How an existing installation moves: an installation in the old folder is never changed or deleted.
+  `install.sh` copies its `configs/config.yml` when the new installation has none (never over an existing file), says
+  what it did not take over (builds, cache, models, your own targets and packs) and how to remove the old folder after
+  looking inside. `install.bat` names the old folder and the uninstaller, which now finds both installations, lists
+  for each one what it removes and asks first (no answer: nothing is removed). `make` keeps a container built before
+  the rename while it holds files of yours in the old program folder. See
+  [README: An installation from before the rename](README.md#an-installation-from-before-the-rename).
 - **Faster start: heavy parts load when they are first used** (unreleased; maintainer decision RG1, lazy loading):
   `llm-cli`, the MCP server and the GUI imported the whole framework at start. Now a CLI command imports the
   framework, the build engine and the managers only when it uses them; the framework imports its managers when it
@@ -1792,12 +1811,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   installation) instead of `output/` in the working folder.
 - The AI settings dialog warns when the settings could not be saved to `config.yml` (they apply until the program
   ends); before, only the log said so.
-- Windows: the uninstaller (`scripts/Uninstall-LLM-Conversion-Framework.bat`) finds the installation. `install.bat`
+- Windows: the uninstaller (`scripts/Uninstall-LLM-Cross-Compiler-Framework.bat`) finds the installation. `install.bat`
   now writes the marker with the installation folder that the uninstaller reads, next to `install.bat`, where the
   uninstaller looks for it; before, no installer wrote it and the uninstaller always reported that nothing was
   installed. When PowerShell reports no script path (the PowerShell part of `install.bat` runs through
   `Invoke-Expression`), `install.bat` uses the current folder, which its batch part has set to its own. The start script
-  `scripts/start-llm_convertion_framework.bat` also works from `scripts\` (it looked for `orchestrator\main.py`
+  `scripts/start-llm_cross_compiler_framework.bat` also works from `scripts\` (it looked for `orchestrator\main.py`
   and `.venv` there).
 - `llm-cli targets list` shows each target's id (the value for `--target`), name, boards and formats from its
   capabilities instead of placeholders; `llm-cli targets validate` checks the capabilities block against the
@@ -2101,10 +2120,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Deep Ingest reads robots.txt as RFC 9309 describes it, with one cautious deviation. Rules with `*` or `$` (such
   as `Disallow: /*.pdf$`), an `Allow` listed before a longer `Disallow`, every `User-agent: *` group after the
   first and a file that starts with a byte order mark used to be ignored, so the crawler fetched pages the site had
-  excluded. Its groups are found by the exact product token `LLM-Conversion-Framework-Bot` (any case), so a group
-  for `bot` no longer overrides `*`, and each scheme, host and port has its own robots.txt. The deviation: a
-  robots.txt that answers 401 or 403 means "disallow everything", where RFC 9309 would allow crawling; a
-  reservation the crawler cannot read still counts.
+  excluded. Its groups are found by the exact product token `LLM-Cross-Compiler-Framework-Bot` or its earlier name
+  `LLM-Conversion-Framework-Bot` (any case), so a group for `bot` no longer overrides `*`, and each scheme, host and
+  port has its own robots.txt. The deviation: a robots.txt that answers 401 or 403 means "disallow everything", where
+  RFC 9309 would allow crawling; a reservation the crawler cannot read still counts.
 - Deep Ingest reads every response up to a limit (HTML pages 8 MiB, PDFs 64 MiB, robots.txt 500 KiB,
   `tdmrep.json` 1 MiB) and within a deadline for the whole request (60 s, PDFs 180 s). Before, a site could send an
   endless or dripping response that filled the memory or held the crawl, and Stop or closing the wizard, forever:
