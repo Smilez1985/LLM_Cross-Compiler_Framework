@@ -65,6 +65,7 @@ class SettingsDialog(QDialog):
         self.resize(1100, 560)
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget(self)
+        self.tabs.addTab(self._general_tab(), self._t("words.settings.tab.general"))
         self.tabs.addTab(self._effective_tab(), self._t("bld.settings.tab.effective"))
         self.tabs.addTab(self._repos_tab(), self._t("bld.settings.tab.repos"))
         layout.addWidget(self.tabs)
@@ -78,6 +79,31 @@ class SettingsDialog(QDialog):
 
     def _config_file(self) -> str:
         return str(Path(getattr(self.config, "config_dir", ".")) / "config.yml")
+
+    # --- General: the German form of address (Q1); the shell chain adds language, theme and the rest here ---------
+
+    def _general_tab(self) -> QWidget:
+        from orchestrator.gui.form_of_address import FormOfAddressChooser
+        page = QWidget(self)
+        page.setObjectName("tab_settings_general")
+        layout = QVBoxLayout(page)
+        self.chooser_form = FormOfAddressChooser(str(self.config.get("form_of_address", "du") or "du"), page,
+                                                 self.lang)
+        self.chooser_form.changed.connect(self._form_changed)
+        layout.addWidget(self.chooser_form)
+        self.lbl_general_result = plain_label("", page)
+        self.lbl_general_result.setObjectName("lbl_settings_general_result")
+        layout.addWidget(self.lbl_general_result)
+        layout.addStretch(1)
+        return page
+
+    def _form_changed(self, form: str) -> None:
+        """The person picked du or Sie: saved in config.yml and used at once (windows that retranslate follow)."""
+        from orchestrator.gui.form_of_address import apply_language_and_form
+        language = str(self.config.get("language", None) or current_language())
+        saved = apply_language_and_form(self.config, language, form)
+        self.lbl_general_result.setText(self._t("words.address.saved" if saved else "words.address.not_saved"))
+        self.refresh_effective()
 
     # --- effective settings (config show) -------------------------------------------------------------------
 

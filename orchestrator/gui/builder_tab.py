@@ -27,6 +27,7 @@ from PySide6.QtGui import QPixmap, QAction
 from orchestrator.gui.builder_parts import (BoardAdvice, BuildProgressPanel, after_probe, apply_ditto_settings,
                                             bind_builder_form, board_confirmed, person_target, read_probe)
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
+from orchestrator.gui.explain import term_label
 from orchestrator.gui.plain import button_text, plain_label, plain_tooltip
 from orchestrator.utils import input_history
 from orchestrator.utils.localization import ui_text
@@ -579,9 +580,14 @@ class BuilderTab(QWidget):
         row_dataset.addWidget(self.dataset_combo, 1)
         row_dataset.addWidget(self.btn_dataset)
 
-        build_layout.addRow("Format:", self.format_combo)
+        # Technical terms explained on mouse-over (F1 on the field), with a link to the page that explains them
+        self.lbl_format = term_label("Format:", "model_format", buddy=self.format_combo)
+        self.lbl_format.setObjectName("lbl_builder_format")
+        self.lbl_quant = term_label("Quantization:", "quantization", buddy=self.quant_combo)
+        self.lbl_quant.setObjectName("lbl_builder_quantization")
+        build_layout.addRow(self.lbl_format, self.format_combo)
         build_layout.addRow("Board:", self.board_combo)
-        build_layout.addRow("Quantization:", self.quant_combo)
+        build_layout.addRow(self.lbl_quant, self.quant_combo)
         build_layout.addRow("Optimization:", self.opt_combo)
         build_layout.addRow(ui_text("bld.builder.priority"), self.priority_combo)
         build_layout.addRow("Calibration:", row_dataset)
