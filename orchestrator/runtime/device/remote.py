@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from orchestrator.remote.text import one_line as _tail   # a board's answer as one plain line
 from orchestrator.runtime.build.verify import Check, VerifyReport, parse_bench_json, parse_devices, parse_version
 from orchestrator.runtime.device.launcher import (DEVICE_FOLDER_MAX, DEVICE_PATH_MAX, KEY_REL, START_SCRIPT,
                                                   UNIT_NAME, UNIT_PATH, install_root,
@@ -88,11 +89,6 @@ def _read_limited(stream: Any, limit: int) -> bytes:
 
 def _text(data: bytes) -> str:
     return data.decode("utf-8", "replace")
-
-
-def _tail(text: str, limit: int = 300) -> str:
-    clean = " ".join("".join(ch if ch.isprintable() else " " for ch in (text or "")).split())
-    return clean[-limit:] if clean else "no output"
 
 
 class RemoteShell:

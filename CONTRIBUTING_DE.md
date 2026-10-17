@@ -616,6 +616,15 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 - Code, der aus einem anderen Projekt übernommen ist, behält einen Kommentar, der seine Quelle nennt („Adapted from
   ...“), und bekommt einen Eintrag mit der Lizenz dieses Projekts in `THIRD_PARTY_NOTICES.md`.
 - Schwäche nicht die Build-Sandbox, den Datenschutzfilter oder die Regeln für SSH-Vertrauen.
+- **Code, der mit einem Board spricht, nutzt `orchestrator/remote/`.** Prüfe Adresse, Port oder SSH-Benutzer eines
+  Boards mit `remote.address` (`valid_host`, `valid_port`, `valid_user`; die Schreibweisen kommen von `Endpoint`),
+  mach aus einem fehlgeschlagenen Kontakt seinen Grundcode mit `remote.reasons.reach_code` (`while_waiting=True` in
+  einem Warten auf das Board), halte fest, was ein Kontakt ergab, mit `record_reach`
+  (`orchestrator/runtime/device/trusted.py`), leite den Fehler eines Board-Schritts von
+  `remote.errors.RemoteFailure` ab, zeig den Fortschritt eines Deployments mit `remote.text.event_text` und frag
+  `remote.transport.available()`, ob SSH geht; importiere paramiko nie auf Modulebene. Schreib nie einen zweiten
+  regulären Ausdruck, eine zweite Grundtabelle oder einen zweiten Recorder daneben. Das Paket importiert nur
+  `orchestrator/utils` und `orchestrator/security` (`tests/test_remote_layer.py`).
 - **Texte, die die Person liest.** Jeder sichtbare Text ist Englisch und Deutsch über `ui_text` (eine Tabelle `TEXTS`
   in einem Modul `orchestrator/utils/l10n_*.py`, das in `TEXT_MODULES` steht). Deutsch sagt „du“; ein Modul ergänzt
   `FORMAL = {"de": {key: text}}` mit der „Sie“-Form genau der Texte, die die Person ansprechen (gleiche

@@ -1412,6 +1412,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `Core/knowledge_snapshots.py` und das Audit eines gespeicherten Moduls nach `Core/module_generator.py`. Für die
   Person ändert sich nichts; die Fachlogik importiert dafür keine Tool-Definitionen mehr, und der größte
   Import-Zyklus schrumpfte von 81 auf 9 Module.
+- **Der Code, der mit einem Board spricht, bekommt sein eigenes Paket, `orchestrator/remote/`**
+  (Konsolidierungskette c2-remote-base; für die Person und eine KI ändert sich nichts). Die vorhandenen
+  Umsetzungen sind dorthin umgezogen, statt eine zweite Kopie zu bekommen: die Host-Prüfung der Remote-Probe, die
+  Speicher- und die known_hosts-Schreibweise und das Lesen einer gespeicherten Adresse (`address.py`), die Grundcodes
+  aus `orchestrator/runtime/device/reasons.py` mit dem Code, den jeder Aufrufer festhält (`reasons.py`,
+  `reach_code`; der alte Pfad ist dasselbe Modul), das einzeilige Ende einer Board-Antwort, die behaltenen
+  Ausgabezeilen des Deployments und die drei Kopien des Texts eines laufenden Deployments für den Deployment-Tab,
+  `llm-cli deploy run` und das Deploy-Tool (`text.py`). Die Kopien der Benutzerprüfung (fünf), der Host-Prüfung
+  (drei), des Ersatzcodes (sechs) und des Kontakt-Eintrags für Mojo (sechs, jetzt `record_reach`) rufen die eine
+  Umsetzung auf; die Fehler der Board-Schritte teilen sich `RemoteFailure`. paramiko wird erst bei der ersten Nutzung
+  importiert, deshalb laden `orchestrator/utils/ssh_trust.py` und alles, was es importiert, keine SSH-Bibliothek, und
+  das Deployment und der Builder-Tab fragen mit einem echten Import, ob SSH geht (eine kaputte Installation galt dort
+  als vorhanden und bei der Anmeldung als fehlend).
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:
@@ -1904,6 +1917,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Ein Deployment wartet weiter, während der SSH-Server des Boards neu startet**: Nach einem Netzabbruch wartet das
+  Deployment auf das Board (N5). Antwortete das Board wieder, während sein SSH-Server noch startete, öffnete sich die
+  Verbindung und brach wieder ab (ein Reset, ein Abbruch, eine unterbrochene Pipe oder EOF beim Schlüsselaustausch);
+  keiner dieser Fälle hatte einen Grundcode, deshalb gab das Deployment sofort auf, statt weiter zu warten. Während es
+  wartet, heißt ein solcher Abbruch jetzt „noch nicht zurück“, und das Warten geht weiter
+  (`orchestrator/remote/reasons.py`, `reach_code(..., while_waiting=True)`). Der erste Kontakt des Deployments nutzt
+  außerdem die Regel aller anderen Wege: Ein Verbindungsfehler, der keiner der vier Codes ist, heißt, dass das Board
+  nicht antwortet (`device_host_down`, für Mojo festgehalten), statt eines leeren Codes.
 - **Auf ein Board, dessen Home-Ordner einen langen Pfad hat, lässt sich deployen**: Die Geräte-Laufzeit lehnte einen
   Home-Ordner des Board-Benutzers mit mehr als 200 Zeichen ab (und dessen Staging-Ordner sowie Modelle darunter ab
   400), deshalb brach ein Home auf einem tief liegenden Einhängepunkt das Deployment mit „not a plain absolute path“
@@ -2309,6 +2330,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   doppelten Backslashes, wie Python einen Pfad zitiert, erreichte er die KI mit dem Kontonamen. `tools_gui._no_home`
   nutzt jetzt das gemeinsame `security.paths.shorten_home` (dasselbe wie die Laufzeit- und Deploy-Tools) vor dem
   Muster für die Home-Ordner anderer Konten.
+- **Jede Stelle nimmt dieselben SSH-Benutzernamen an**: Das Deployment (`llm-cli deploy run`, **Deploy to Target**
+  im Deployment-Tab) und `llm-cli deploy devices add` prüften den Benutzernamen ohne `re.ASCII`, deshalb ließ Pythons
+  Groß-/Kleinschreibungs-Faltung ein langes s (`ſ`) oder das Kelvin-Zeichen als `s` und `k` durch, und das `match()`
+  des Deployments ließ auch einen Zeilenumbruch am Ende durch. Ein solches Deployment lief, und der vertrauenswürdige
+  Eintrag des Boards lehnte denselben Namen danach wortlos ab, sodass KI-Tools das Board nicht nennen konnten. Eine
+  Prüfung dient jetzt jeder Stelle (`orchestrator/remote/address.py`, `valid_user`: nur ASCII, der ganze Name, root
+  nur, wo es erlaubt ist): dem Deployment, dem Hinzufügen eines Boards, dem Deployment-Tab, den Einträgen
+  vertrauenswürdiger Boards, den Deploy-Einstellungen, der systemd-Unit und den Kontonamen, die eine KI nie liest
+  (`device_text`). Das Hinzufügen eines Boards lädt für diese Prüfung nicht mehr die Build-Engine und das Docker-SDK.
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI

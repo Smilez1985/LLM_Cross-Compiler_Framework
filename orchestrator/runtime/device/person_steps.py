@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from orchestrator.remote.errors import RemoteFailure
 from orchestrator.utils.next_steps import WithSteps
 
 # The question before the systemd unit is allowed (CLI and GUI ask exactly this; "No" is the default).
@@ -37,7 +38,7 @@ UNTRUSTED_CONSENT = ("device_runtime_untrusted_model",
                      "an untrusted model may run natively on the device for the short llama-bench run")
 
 
-class BoardStepError(WithSteps, RuntimeError):
+class BoardStepError(WithSteps, RemoteFailure):
     """A board step that cannot be done. `kind` names the case (no_paramiko, unreachable, host_key_changed,
     not_trusted, other_device, login_failed, key_install, host_user, label, not_known, no_systemd, sudo_declined,
     not_saved, damaged, no_user, no_address); `reason` is the SSH reason code when the board could not be reached or
@@ -45,32 +46,25 @@ class BoardStepError(WithSteps, RuntimeError):
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None,
                  **facts: Any):
-        super().__init__(message)
-        self.kind, self.reason, self.error, self.facts = kind, reason, error, facts
+        super().__init__(message, kind, reason, error)
+        self.facts = facts
 
 
 def _note(state_dir: Path, device_id: str, step: str, code: str) -> None:
-    """Mojo's record of this contact with the board (W1); never fails the step."""
-    if not step:
-        return
-    try:
-        from orchestrator.runtime.device.trusted import TrustedDevices
-        TrustedDevices(Path(state_dir)).note_reach(device_id, step, code)
-    except Exception:  # noqa: BLE001 - bookkeeping never changes what the step does
-        pass
+    """Mojo's record of this contact with the board (W1); never fails the step (trusted.record_reach)."""
+    from orchestrator.runtime.device.trusted import record_reach
+    record_reach(state_dir, step, code, device_id=device_id)
 
 
 def unreachable_error(error: BaseException, host: str, port: int, *, state_dir: Optional[Path] = None,
                       device_id: str = "", step: str = "") -> BoardStepError:
     """The refusal after a failed connection: its SSH reason code when it has one (OSError: the board does not
     answer), recorded for Mojo when the contact is named."""
-    from orchestrator.runtime.device import reasons
-    code = reasons.classify(error)
-    if code is None and isinstance(error, OSError):
-        code = reasons.HOST_DOWN
-    if code is not None and state_dir is not None and device_id:
+    from orchestrator.remote import reasons
+    code = reasons.reach_code(error)
+    if code and state_dir is not None and device_id:
         _note(state_dir, device_id, step, code)
-    return BoardStepError(f"Could not reach {host}:{port}: {error}", "unreachable", reason=code or "", error=error)
+    return BoardStepError(f"Could not reach {host}:{port}: {error}", "unreachable", reason=code, error=error)
 
 
 def _need_paramiko() -> None:
@@ -119,10 +113,9 @@ def remove_trust(state_dir: Path, device_id: str, *, audit: Any, actor: str, cha
 def check_board_entry(host: str, user: str, label: Optional[str]) -> Optional[str]:
     """The checks of `llmcf deploy devices add HOST --user U [--label L]`: an address or host name, an account name and
     a label of 1-64 printable characters. Returns the cleaned label (None: none given)."""
-    from orchestrator.Core.deployment_manager import SSH_USER_PATTERN
+    from orchestrator.remote.address import valid_host, valid_user
     from orchestrator.runtime.device.trusted import DeviceStoreError, clean_label
-    from orchestrator.runtime.remote_probe import valid_host
-    if not valid_host(host) or not SSH_USER_PATTERN.fullmatch(user or ""):
+    if not valid_host(host) or not valid_user(user, allow_root=True):
         raise BoardStepError("HOST must be an address or a host name (e.g. 192.168.1.50, fe80::1 without brackets or "
                              "myboard.local) and the user an account name", "host_user")
     if label is None:

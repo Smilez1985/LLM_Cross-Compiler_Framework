@@ -7,6 +7,11 @@ SSH trust for device probing and deployment.
   own known_hosts file. A changed key always fails.
 - Authentication: a framework Ed25519 key, installed on the device once ("pairing") with a password that
   is used for that single connection and never stored.
+
+paramiko is imported on first use (orchestrator/remote/transport.py, decision RG1): importing this module, the deploy
+or the probe code loads no SSH library. `ssh_trust.paramiko` (None without it: what the person steps, the CLI's
+`scan --device` and Mojo ask) and `ssh_trust.TofuPolicy` stay readable under their old names; a test that sets
+`ssh_trust.paramiko = None` makes this module behave as without paramiko, as before.
 """
 
 import base64
@@ -22,10 +27,8 @@ import threading
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-try:
-    import paramiko
-except ImportError:  # deployment and remote probing are optional features
-    paramiko = None
+from orchestrator.remote import transport
+from orchestrator.remote.address import Endpoint
 
 KEY_NAME = "id_ed25519_llm_framework"
 # A public key line as client_key writes it: key type, base64 key, an optional plain comment.
@@ -42,19 +45,62 @@ class UnknownHostKey(HostKeyError):
         self.host, self.port, self.key = host, port, key
         self.key_type = key.get_name()
         self.fingerprint = fingerprint(key)
-        super().__init__(f"The device {host}:{port} is not known yet ({self.key_type} {self.fingerprint}).")
+        super().__init__(f"The device {Endpoint(host, port).display} is not known yet ({self.key_type} "
+                         f"{self.fingerprint}).")
 
 
 class HostKeyChanged(HostKeyError):
     def __init__(self, host: str, port: int):
         super().__init__(
-            f"The host key of {host}:{port} has CHANGED. This can be a reinstalled device - or someone in between. "
-            f"Check the device, then remove its line from the framework's known_hosts file to trust it again.")
+            f"The host key of {Endpoint(host, port).display} has CHANGED. This can be a reinstalled device - or "
+            f"someone in between. Check the device, then remove its line from the framework's known_hosts file to "
+            f"trust it again.")
+
+
+def _paramiko():
+    """paramiko for this module: imported on first use (transport.paramiko_module), or what ssh_trust.paramiko was
+    set to."""
+    return globals()["paramiko"] if "paramiko" in globals() else transport.paramiko_module()
 
 
 def _require_paramiko():
+    """The paramiko module (imported on first use); HostKeyError when it cannot be imported."""
+    paramiko = _paramiko()
     if paramiko is None:
         raise HostKeyError("SSH needs the 'paramiko' package.")
+    return paramiko
+
+
+_tofu_class = None
+
+
+def _tofu_policy():
+    """The TofuPolicy class, made on first use (it subclasses paramiko's MissingHostKeyPolicy)."""
+    global _tofu_class
+    if _tofu_class is None:
+        paramiko = _require_paramiko()
+
+        class TofuPolicy(paramiko.MissingHostKeyPolicy):
+            """Refuses unknown host keys; the caller shows the fingerprint and asks the user first."""
+
+            def missing_host_key(self, client, hostname, key):
+                host, _, port = hostname.rpartition(":") if hostname.startswith("[") else (hostname, "", "22")
+                raise UnknownHostKey(host.strip("[]"), int(port or 22), key)
+
+        _tofu_class = TofuPolicy
+    return _tofu_class
+
+
+def __getattr__(name):
+    """The module's old attributes that need paramiko, loaded on first use: `paramiko` (None without it) and
+    `TofuPolicy` (missing without it, as before)."""
+    if name == "paramiko":
+        return transport.paramiko_module()
+    if name == "TofuPolicy":
+        if _paramiko() is None:
+            raise AttributeError(name)
+        return _tofu_policy()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def fingerprint(key) -> str:
@@ -64,7 +110,8 @@ def fingerprint(key) -> str:
 
 
 def host_entry(host: str, port: int = 22) -> str:
-    return host if port == 22 else f"[{host}]:{port}"
+    """The host as known_hosts keeps it (Endpoint.known_hosts_entry)."""
+    return Endpoint(host, port).known_hosts_entry
 
 
 def known_hosts_path(state_dir: Path) -> Path:
@@ -72,7 +119,7 @@ def known_hosts_path(state_dir: Path) -> Path:
 
 
 def _host_keys(state_dir: Path):
-    _require_paramiko()
+    paramiko = _require_paramiko()
     keys = paramiko.HostKeys()
     path = known_hosts_path(state_dir)
     if path.exists():
@@ -107,7 +154,7 @@ def trust_host_key(state_dir: Path, host: str, port: int, key) -> None:
 
 def fetch_host_key(host: str, port: int = 22, timeout: float = 10.0):
     """The key the device presents, without authenticating (to show its fingerprint before trusting it)."""
-    _require_paramiko()
+    paramiko = _require_paramiko()
     sock = socket.create_connection((host, port), timeout=timeout)
     transport = paramiko.Transport(sock)
     try:
@@ -134,15 +181,6 @@ def client_key(state_dir: Path) -> Tuple[Path, str]:
         line = key.public_key().public_bytes(serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH)
         public.write_text(line.decode("ascii") + " llm-cross-compiler-framework\n", encoding="ascii")
     return private, public.read_text(encoding="ascii").strip()
-
-
-if paramiko is not None:
-    class TofuPolicy(paramiko.MissingHostKeyPolicy):
-        """Refuses unknown host keys; the caller shows the fingerprint and asks the user first."""
-
-        def missing_host_key(self, client, hostname, key):
-            host, _, port = hostname.rpartition(":") if hostname.startswith("[") else (hostname, "", "22")
-            raise UnknownHostKey(host.strip("[]"), int(port or 22), key)
 
 
 _quiet_lock = threading.Lock()
@@ -182,13 +220,13 @@ def connect(host: str, user: str, state_dir: Path, port: int = 22, password: Opt
             timeout: float = 10.0):
     """An authenticated SSHClient for a device whose host key is already trusted.
     Uses the framework key; a password (pairing) is used for this connection only."""
-    _require_paramiko()
+    paramiko = _require_paramiko()
     private, _ = client_key(state_dir)
     client = paramiko.SSHClient()
     path = known_hosts_path(state_dir)
     if path.exists():
         client.load_host_keys(str(path))
-    client.set_missing_host_key_policy(TofuPolicy())
+    client.set_missing_host_key_policy(_tofu_policy()())
     try:
         with paramiko_quiet():
             client.connect(host, port=port, username=user, key_filename=str(private), password=password,

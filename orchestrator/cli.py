@@ -4385,7 +4385,7 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
     Upload and execute a deployment package on the target (its address or host name).
     """
     from orchestrator.runtime.device import reasons
-    from orchestrator.runtime.remote_probe import valid_host
+    from orchestrator.remote.address import valid_host
     from orchestrator.utils import ssh_trust
     if not valid_host(host):
         raise click.UsageError("--host takes an address or a host name, e.g. 192.168.1.50, fe80::1 (no brackets) or "
@@ -4509,19 +4509,16 @@ def _note_reach(ctx: Optional[FrameworkContext], host: str, port: int, step: str
                 device_id: str = "", state_dir: Optional[Path] = None) -> None:
     """Records for Mojo what this contact with a trusted board found (W1: Mojo reads it instead of contacting the
     board): a reason code keeps the problem, "" (the board was reached and logged in to) ends it. `state_dir`: the
-    state folder the command works in (else the context's). Never fails."""
+    state folder the command works in (else the context's). Never fails (trusted.record_reach)."""
     if not step:
         return
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.runtime.device.trusted import record_reach
     try:
-        from orchestrator.runtime.device.trusted import TrustedDevices
         folder = state_dir or (_state_dir(ctx) if ctx is not None else _default_state_dir())
-        store = TrustedDevices(Path(folder))
-        if device_id:
-            store.note_reach(device_id, step, code)
-        else:
-            store.note_reach_at(host, port, step, code)
     except Exception:  # noqa: BLE001 - bookkeeping never changes what the command does
-        pass
+        return
+    record_reach(folder, step, code, device_id=device_id, endpoint=Endpoint(host, port))
 
 
 def _default_state_dir() -> Path:
@@ -4533,11 +4530,9 @@ def _unreachable(ctx: Optional[FrameworkContext], host: str, port: int, error: B
                  doing: str = "reach", step: str = "", device_id: str = "", state_dir: Optional[Path] = None) -> None:
     """Exits after a failed connection or login: its reason code with the next step when it has one (recorded for
     Mojo with the board, in `state_dir`, when `step` names the contact)."""
-    from orchestrator.runtime.device import reasons
-    code = reasons.classify(error)
-    if code is None and isinstance(error, OSError):
-        code = reasons.HOST_DOWN
-    if code is not None:
+    from orchestrator.remote import reasons
+    code = reasons.reach_code(error)
+    if code:
         _note_reach(ctx, host, port, step, code, device_id, state_dir)
         _print_reason(ctx, code, host, port)
     else:
@@ -4546,27 +4541,11 @@ def _unreachable(ctx: Optional[FrameworkContext], host: str, port: int, error: B
 
 
 def _deploy_event_text(ctx: FrameworkContext, event, host: str) -> str:
-    """The console line of a running deploy: the upload's progress, or the wait for the board (N5)."""
-    from orchestrator.utils.localization import ui_text
-    lang = _config_language(ctx)
-
-    def size(n):
-        return f"{n / 1000 ** 2:.1f} MB"
-
-    def clock(seconds):
-        return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
-
-    if event.kind == "waiting":
-        key = "device.wait.status_install" if event.step == "install" else "device.wait.status"
-        return escape(ui_text(key, lang, address=host, elapsed=clock(event.elapsed), limit=clock(event.limit))
-                      + " (Ctrl+C)")
-    if event.kind == "back":
-        if event.step == "install":
-            return escape(ui_text("device.wait.install", lang))
-        return escape(ui_text("device.wait.back", lang, done=size(event.done), total=size(event.total)))
-    if event.kind == "uploading":
-        return escape(ui_text("device.deploy.uploading", lang, done=size(event.done), total=size(event.total)))
-    return escape(ui_text("device.deploy.installing", lang))
+    """The console line of a running deploy: the upload's progress, or the wait for the board (N5), with the key that
+    cancels a wait (remote/text.py event_text)."""
+    from orchestrator.remote.text import event_text
+    text = event_text(event, host, _config_language(ctx))
+    return escape(text + " (Ctrl+C)" if event.kind == "waiting" else text)
 
 
 def _device_audit(ctx: FrameworkContext, state_dir: Path):
@@ -4756,7 +4735,7 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
 def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
                  password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str],
                  ctx: Optional[FrameworkContext] = None) -> None:
-    from orchestrator.runtime.remote_probe import valid_host
+    from orchestrator.remote.address import valid_host
     from orchestrator.runtime.scan_steps import DeviceScanError, label_problem, scan_device
     from orchestrator.utils import ssh_trust
     if not user:

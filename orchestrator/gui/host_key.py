@@ -36,21 +36,19 @@ def read_host_key(folder: Path, host: str, port: int) -> Tuple[Any, str]:
 
 
 def _note(folder: Path, host: str, port: int, step: str, code: str) -> None:
-    """Mojo's record of this contact (W1); never fails the question."""
-    if not step or not code:
+    """Mojo's record of a problem of this contact (W1; reading a key is no login, so it ends no problem); never fails
+    the question (trusted.record_reach)."""
+    if not code:
         return
-    try:
-        from orchestrator.runtime.device.trusted import TrustedDevices
-        TrustedDevices(Path(folder)).note_reach_at(host, port, step, code)
-    except Exception:  # noqa: BLE001 - bookkeeping only
-        pass
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.runtime.device.trusted import record_reach
+    record_reach(folder, step, code, endpoint=Endpoint(host, port))
 
 
 def unreachable_text(host: str, port: int, error: BaseException, lang: Optional[str] = None) -> str:
     """Why the board's key could not be read: its reason code's title and next step, else the error itself."""
-    from orchestrator.runtime.scan_steps import reach_code
-    from orchestrator.runtime.device import reasons
-    code = reach_code(error)
+    from orchestrator.remote import reasons
+    code = reasons.reach_code(error)
     if code in reasons.REASONS:
         return reasons.person_text(code, lang, address=host, port=port)
     return ui_text("deploy.hostkey.unreachable", lang, address=host, port=port, error=str(error))
@@ -86,8 +84,8 @@ def ask_trust(parent: Any, framework: Any, host: str, port: int, key: Any, statu
 def show_unreachable(parent: Any, framework: Any, host: str, port: int, error: BaseException, *, step: str = "",
                      lang: Optional[str] = None) -> None:
     from orchestrator.gui.plain import plain_box
-    from orchestrator.runtime.scan_steps import reach_code
-    _note(state_dir(framework), host, port, step, reach_code(error))
+    from orchestrator.remote import reasons
+    _note(state_dir(framework), host, port, step, reasons.reach_code(error))
     plain_box(parent, "critical", ui_text("deploy.hostkey.title", lang), unreachable_text(host, port, error, lang))
 
 

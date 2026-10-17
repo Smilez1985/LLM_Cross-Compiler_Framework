@@ -1240,6 +1240,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   an index to `Core/knowledge_snapshots.py` and the audit of a saved module to `Core/module_generator.py`. Nothing
   changes for the person; the Core no longer imports tool definitions for these, and the largest import cycle shrank
   from 81 to 9 modules.
+- **The code that talks to a board starts its own package, `orchestrator/remote/`** (consolidation chain
+  c2-remote-base; nothing changes for the person or an AI). The existing implementations moved there instead of
+  getting a second copy: the host check of the remote probe, the store and known_hosts forms and the reading of a
+  stored address (`address.py`), the reason codes of `orchestrator/runtime/device/reasons.py` with the code every
+  caller records (`reasons.py`, `reach_code`; the old path is the same module), the one-line tail of a board's answer,
+  the deploy's kept output lines and the three copies of a running deploy's text for the Deployment tab, `llm-cli
+  deploy run` and the deploy tool (`text.py`). The copies of the user check (five), the host check (three), the
+  reason-code fallback (six) and the reach record for Mojo (six, now `record_reach`) call the one implementation;
+  the board steps' errors share `RemoteFailure`. paramiko is imported on first use only, so `orchestrator/utils/
+  ssh_trust.py` and everything that imports it load no SSH library, and the deploy and the Builder tab ask with a
+  real import whether SSH works (a broken installation counted as present there and as missing at the login).
 - **The repository and the product identifiers carry the name LLM Cross-Compiler Framework.** The repository is now
   `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub forwards the old address `Smilez1985/llm_conversion_framework`),
   and what was still named after the LLM Conversion Framework follows: the links in the crawler's user agent, in the
@@ -1682,6 +1693,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **A deploy keeps waiting while the board's SSH server starts again**: after the network dropped, the deploy waits
+  for the board (N5). When the board answered again but its SSH server was still starting, the connection opened and
+  dropped (a reset, an abort, a broken pipe or EOF in the key exchange); none of these had a reason code, so the deploy
+  gave up at once instead of waiting on. While it waits, such a drop now means "not back yet" and the wait goes on
+  (`orchestrator/remote/reasons.py`, `reach_code(..., while_waiting=True)`). The deploy's first contact also uses the
+  rule every other path uses: a connection error that is none of the four codes means the board does not answer
+  (`device_host_down`, recorded for Mojo) instead of an empty code.
 - **A board whose home folder has a long path can be deployed to**: the device runtime refused a board user's home
   folder longer than 200 characters (and its staging folder and models below 400), so a home on a deep mount point
   stopped the deployment with "not a plain absolute path". The characters are checked as before; the length is now
@@ -2045,6 +2063,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`c:/users/<name>`) or with doubled backslashes as Python quotes a path, it reached the AI with the account name.
   `tools_gui._no_home` now uses the shared `security.paths.shorten_home` (the one the runtime and deploy tools use)
   before the pattern for other accounts' home folders.
+- **Every place takes the same SSH user names**: the deploy (`llm-cli deploy run`, **Deploy to Target** in the
+  Deployment tab) and `llm-cli deploy devices add` checked the user name without `re.ASCII`, so Python's case folding
+  let a long s (`ſ`) or the Kelvin sign pass as `s` and `k`, and the deploy's `match()` also let a trailing line break
+  through. Such a deploy ran, and the board's trusted record then refused the same name without a word, so AI tools
+  could not name the board. One check now serves every place (`orchestrator/remote/address.py`, `valid_user`: ASCII
+  only, the whole name, root only where it is allowed): the deploy, adding a board, the Deployment tab, the
+  trusted-board records, the deploy settings, the systemd unit and the account names an AI never reads
+  (`device_text`). Adding a board no longer loads the build engine and the Docker SDK for this check.
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI

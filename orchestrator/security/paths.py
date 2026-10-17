@@ -294,7 +294,6 @@ def scrub_for_ai(text: str, roots: Optional[Dict[str, str]] = None, limit: int =
 
 # What an AI reads instead of the account name the framework logs in with on a device ("dietpi", "orangepi", ...).
 DEVICE_ACCOUNT = "device account"
-_ACCOUNT = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
 _HOME_ROOTS = ("/home", "/Users", "/usr/home", "/var/home", "/export/home")
 _WORD_END = r"(?=$|[\s/'\"`:;,()\[\]{}<>|=@])"
 
@@ -304,8 +303,11 @@ def device_text(text: Any, users: Sequence[str], roots: Optional[Dict[str, str]]
     account's home folder becomes '~' and every path is reduced to its file name (label_paths; this computer's own
     folders by their labels), then the account name itself becomes "device account". Secrets are redacted and host
     paths scrubbed as everywhere. The person's own window shows the real names."""
+    # The one account check (orchestrator/remote/address.py, ASCII only), looked up where it runs: the bottom layer
+    # imports nothing above it at import time.
+    from orchestrator.remote.address import USER_PATTERN
     out = str(text if text is not None else "")
-    names = sorted({u for u in users if isinstance(u, str) and _ACCOUNT.fullmatch(u)}, key=len, reverse=True)
+    names = sorted({u for u in users if isinstance(u, str) and USER_PATTERN.fullmatch(u)}, key=len, reverse=True)
     for user in names:
         u = re.escape(user)
         out = re.sub("(?:" + "|".join(re.escape(r) for r in _HOME_ROOTS) + ")/" + u + _WORD_END, "~", out)
