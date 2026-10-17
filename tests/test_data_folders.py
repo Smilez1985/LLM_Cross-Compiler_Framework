@@ -6,6 +6,7 @@ keeps what the user and the framework created in the installation."""
 
 import getpass
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -302,7 +303,8 @@ class TestInstallSh:
         """install.sh used rsync --delete with a few excludes: running it again deleted the targets made with the
         module wizard or `module create`, community packs installed into targets/ and community/, and anything
         else in /opt that the repository does not ship. Now only files an earlier install.sh copied are removed."""
-        repo, install, outside = tmp_path / "repo", tmp_path / "opt" / "llm-conversion-framework", tmp_path / "outside"
+        repo, outside = tmp_path / "repo", tmp_path / "outside"
+        install = tmp_path / "opt" / "llm-cross-compiler-framework"
         shipped = {"README.md": "v1", "orchestrator/main.py": "v1", "orchestrator/old.py": "old",
                    "targets/Rockchip/target.yml": "v1", "targets/Rockchip/modules/build.sh": "v1",
                    "community/knowledge/.gitkeep": "", "configs/llm_providers.yml": "v1"}
@@ -366,7 +368,8 @@ class TestInstallSh:
         as shipped (own targets and packs included), so the next update from the repository deleted them; a listing
         that failed or came back empty removed the whole installed program; and a stale entry that is a link
         deleted the file it points to instead of the link."""
-        repo, install, bin_dir = tmp_path / "repo", tmp_path / "opt" / "llm-conversion-framework", tmp_path / "bin"
+        repo, bin_dir = tmp_path / "repo", tmp_path / "bin"
+        install = tmp_path / "opt" / "llm-cross-compiler-framework"
         shipped = {"README.md": "v1", "install.sh": INSTALL_SH.read_text(encoding="utf-8"),
                    "orchestrator/main.py": "v1", "orchestrator/old.md": "old", "targets/Rockchip/target.yml": "v1"}
         for rel, text in shipped.items():
@@ -400,7 +403,7 @@ class TestInstallSh:
             (install / rel).write_text(text)
         manifest, before = (install / ".lcf-installed-files").read_bytes(), files()
 
-        run = deploy(install / "install.sh", install)  # sudo /opt/llm-conversion-framework/install.sh
+        run = deploy(install / "install.sh", install)  # sudo /opt/llm-cross-compiler-framework/install.sh
         assert run.returncode == 0, run.stdout + run.stderr
         assert (install / ".lcf-installed-files").read_bytes() == manifest and files() == before
 
@@ -420,6 +423,94 @@ class TestInstallSh:
         assert not (install / "orchestrator" / "old.md").is_symlink(), "the stale link itself is removed"
         assert (install / "README.md").read_text() == "v1", "never the file it points to"
         assert {rel: (install / rel).read_text() for rel in own} == own
+
+
+    # --- the installation before the rename (/opt/llm-conversion-framework) ----------------------------------
+
+    @staticmethod
+    def old_and_new(tmp_path: Path):
+        old, new = tmp_path / "opt" / "llm-conversion-framework", tmp_path / "opt" / "llm-cross-compiler-framework"
+        for rel, text in {"orchestrator/main.py": "old code", "configs/config.yml": "language: de\n",
+                          "output/build_1/model.gguf": "build", "targets/my-board/target.yml": "module wizard",
+                          ".lcf-installed-files": "orchestrator/main.py\0"}.items():
+            (old / rel).parent.mkdir(parents=True, exist_ok=True)
+            (old / rel).write_text(text)
+        new.mkdir(parents=True)
+        return old, new
+
+    @staticmethod
+    def tree(folder: Path) -> dict:
+        return {p.relative_to(folder).as_posix(): (p.read_bytes() if p.is_file() else None)
+                for p in sorted(folder.rglob("*"))}
+
+    @staticmethod
+    def run_old_steps(old: Path, new: Path, home: Path):
+        # sudo -u USER CMD runs CMD as that user; here the test user is that user already.
+        script = ('source "$1"; INSTALL_DIR="$2"; OLD_INSTALL_DIR="$3"; '
+                  'sudo() { shift 2; "$@"; }; adopt_old_settings; old_installation_note')
+        user = os.environ.get("USER") or getpass.getuser()
+        return subprocess.run(["/bin/bash", "-c", script, "test", str(INSTALL_SH), str(new), str(old)],
+                              env={"PATH": os.environ["PATH"], "HOME": str(home), "USER": user, "SUDO_USER": user},
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+
+    def test_the_old_installation_is_named_its_settings_copied_and_nothing_of_it_removed(self, tmp_path):
+        old, new = self.old_and_new(tmp_path)
+        before = self.tree(old)
+
+        run = self.run_old_steps(old, new, tmp_path)
+
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert self.tree(old) == before, "the installer never changes or deletes the old installation"
+        assert (new / "configs" / "config.yml").read_text() == "language: de\n", "the settings are copied"
+        assert not (new / "output").exists() and not (new / "targets").exists(), "builds and targets stay"
+        out = run.stdout
+        assert str(old) in out and "löscht sie nicht" in out and str(new) in out
+        assert "configs/config.yml" in out and f"{old}/output" in out and "targets/" in out
+        assert f"sudo rm -rf {old}" in out and f"ls -la {old}" in out, "how to remove it, after looking inside"
+
+    def test_existing_settings_of_the_new_installation_are_never_overwritten(self, tmp_path):
+        old, new = self.old_and_new(tmp_path)
+        (new / "configs").mkdir()
+        (new / "configs" / "config.yml").write_text("language: en\n")
+
+        run = self.run_old_steps(old, new, tmp_path)
+
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert (new / "configs" / "config.yml").read_text() == "language: en\n"
+        assert "wurden in die neue Installation kopiert" not in run.stdout
+
+    def test_a_linked_settings_file_is_not_copied(self, tmp_path):
+        old, new = self.old_and_new(tmp_path)
+        secret = tmp_path / "elsewhere.txt"
+        secret.write_text("not a settings file")
+        (old / "configs" / "config.yml").unlink()
+        (old / "configs" / "config.yml").symlink_to(secret)
+
+        run = self.run_old_steps(old, new, tmp_path)
+
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert not (new / "configs" / "config.yml").exists() and not (new / "configs" / "config.yml").is_symlink()
+
+    def test_without_an_old_installation_nothing_is_said_or_copied(self, tmp_path):
+        old, new = self.old_and_new(tmp_path)
+        shutil.rmtree(old)
+
+        run = self.run_old_steps(old, new, tmp_path)
+
+        assert run.returncode == 0 and run.stdout == "", run.stdout + run.stderr
+        assert not (new / "configs").exists()
+
+    def test_main_runs_both_steps_and_no_command_removes_the_old_folder(self):
+        text = INSTALL_SH.read_text(encoding="utf-8")
+        main = text[text.index("main() {"):]
+        assert main.index("deploy_files") < main.index("adopt_old_settings") < main.index("setup_venv")
+        finish = text[text.index("finish() {"):text.index("main() {")]
+        assert "old_installation_note" in finish
+        assert 'OLD_INSTALL_DIR="/opt/llm-conversion-framework"' in text
+        assert 'APP_NAME="llm-cross-compiler-framework"' in text
+        for line in text.splitlines():
+            if "OLD_INSTALL_DIR" in line and re.search(r"\brm\b", line):
+                assert line.strip().startswith("echo "), f"only said, never run: {line}"
 
 
 class TestInstallBat:

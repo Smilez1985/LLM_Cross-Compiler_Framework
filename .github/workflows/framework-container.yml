@@ -59,6 +59,6 @@ jobs:
           test "$(docker run --rm --pull never lcf-framework:local id -u)" != 0
           docker run --rm --pull never lcf-framework:local llm-cli --version
           docker run --rm --pull never lcf-framework:local sh -c 'test ! -e /usr/bin/dockerd && test -d /data && test -w /data'
-          docker run --rm --pull never lcf-framework:local sh -c 'test -x /opt/llm-conversion-framework/.venv/bin/python'
+          docker run --rm --pull never lcf-framework:local sh -c 'test -x /opt/llm-cross-compiler-framework/.venv/bin/python'
           # No keyring in a container and nothing chosen for the person: a vault in memory for this check only.
           docker run --rm --pull never -e LLM_SECRET_STORAGE=ephemeral lcf-framework:local llm-cli targets list
