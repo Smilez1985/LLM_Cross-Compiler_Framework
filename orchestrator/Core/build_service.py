@@ -29,7 +29,7 @@ from orchestrator.tools.local_files import (LocalFileError, LocalFiles, LocalInp
                                             looks_like_reference, split_reference)
 from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
 from orchestrator.utils.any_path import is_absolute_anywhere, last_part
-from orchestrator.utils.helpers import redact_secrets
+from orchestrator.utils.helpers import digest_matches, redact_secrets, sha256_file
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.next_steps import WithSteps
 
@@ -865,19 +865,15 @@ class BuildService:
     @staticmethod
     def check_recipe_dataset(recipe, dataset_file: Optional[str]) -> None:
         """The calibration dataset must be exactly the file the recipe pins (its sha256)."""
-        import hmac
         named = recipe.options.dataset
         if named is None or not dataset_file:
             return
-        h = hashlib.sha256()
         try:
-            with open(dataset_file, "rb") as f:
-                for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                    h.update(chunk)
+            digest = sha256_file(dataset_file)
         except OSError:
             raise BuildServiceError("The calibration dataset cannot be read.", code="invalid_value",
                                     field="dataset_path", next="Name an existing dataset file.") from None
-        if not hmac.compare_digest(h.hexdigest(), named.sha256):
+        if not digest_matches(digest, named.sha256):
             raise BuildServiceError(f"The calibration dataset is not the file the recipe {recipe.id} pins (its sha256 "
                                     f"differs from {named.sha256[:16]}...).", code="invalid_value",
                                     field="dataset_path", next=f"Give exactly the file {named.name} the recipe names.")

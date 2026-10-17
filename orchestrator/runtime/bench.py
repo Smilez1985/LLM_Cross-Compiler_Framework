@@ -29,7 +29,6 @@ later run. When no private file can be made, the error says why (reason code ins
 """
 
 import contextlib
-import hashlib
 import json
 import os
 import secrets
@@ -42,6 +41,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from orchestrator.utils.helpers import copy_hashed, digest_matches, sha256_fd, sha256_file
 
 BENCH = "llama-bench"
 SCHEMA = "llm-framework.bench/1"
@@ -90,21 +91,11 @@ class BenchRun:
     records: List[Dict[str, Any]] = field(default_factory=list)
 
 
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def open_pinned(model: Path, sha256: str, label: str) -> int:
     """Opens the model file once (never following a link), hashes exactly that open file and returns its descriptor
     when the hash is `sha256`; BenchError otherwise. The run then reads this descriptor, never the path again, so the
     file cannot be swapped between the check and the run (a catalog model's hash decides that it runs natively without
     a question)."""
-    import hmac
-    import os
     import stat
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     try:
@@ -114,15 +105,7 @@ def open_pinned(model: Path, sha256: str, label: str) -> int:
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise BenchError(f"{label} is not a regular file.", code="not_supported")
-        h = hashlib.sha256()
-        offset = 0
-        while True:
-            chunk = os.pread(fd, 1 << 20, offset) if hasattr(os, "pread") else _read_at(fd, offset)
-            if not chunk:
-                break
-            h.update(chunk)
-            offset += len(chunk)
-        if not sha256 or not hmac.compare_digest(h.hexdigest(), str(sha256)):
+        if not digest_matches(sha256_fd(fd), sha256):
             raise BenchError(f"{label} changed after it was checked (its sha256 differs); nothing ran.",
                              code="failed", next="Call run_benchmark again; the person is asked again.")
     except BaseException:
@@ -131,10 +114,11 @@ def open_pinned(model: Path, sha256: str, label: str) -> int:
     return fd
 
 
-def _read_at(fd: int, offset: int) -> bytes:  # pragma: no cover - systems without pread (Windows)
-    import os
-    os.lseek(fd, offset, os.SEEK_SET)
-    return os.read(fd, 1 << 20)
+def _read_at(fd: int, offset: int) -> bytes:
+    """1 MiB of `fd` from `offset`; a delegate of the one read by offset in utils/helpers.py (pread, or seek and read
+    where the system has no pread)."""
+    from orchestrator.utils import helpers
+    return helpers._read_at(fd, offset, 1 << 20)
 
 
 def fd_path(fd: int) -> Optional[str]:
@@ -385,30 +369,23 @@ class BenchRunner:
         where the system allows it, else a copy read from it. With `sha256` the copy is hashed while it is written and
         must have that sha256 (BenchError otherwise; the copy is removed). A set `stop` (a cancel) ends the copy at
         once (BenchStopped; the partial copy is removed)."""
-        import hmac
         linked = BenchRunner._pinned_link(fd, folder, model)
         if linked is not None:
             return linked
         target = folder / "model.gguf"
-        h = hashlib.sha256()
-        out = os.open(str(target), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+
+        def stopped() -> None:
+            if stop is not None and stop.is_set():
+                raise BenchStopped()
         try:
-            with os.fdopen(out, "wb") as dst:
-                offset = 0
-                while True:
-                    if stop is not None and stop.is_set():
-                        raise BenchStopped()
-                    chunk = os.pread(fd, 1 << 20, offset) if hasattr(os, "pread") else _read_at(fd, offset)
-                    if not chunk:
-                        break
-                    h.update(chunk)
-                    dst.write(chunk)
-                    offset += len(chunk)
+            digest = copy_hashed(fd, target, cancel=stopped, mode=0o644)
+        except FileExistsError:
+            raise  # not this copy's file
         except BaseException:
             with contextlib.suppress(OSError):
                 target.unlink()
             raise
-        if sha256 is not None and not hmac.compare_digest(h.hexdigest(), str(sha256)):
+        if sha256 is not None and not digest_matches(digest, sha256):
             with contextlib.suppress(OSError):
                 target.unlink()
             raise BenchError("The model changed after it was checked (the copy for the sandbox has another sha256); "

@@ -20,7 +20,6 @@ temporary working folder and a cleared environment (server_policy.cleared_env). 
 builds) get step 1 here; steps 2-5 run on that machine.
 """
 
-import hashlib
 import json
 import os
 import re
@@ -35,6 +34,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from orchestrator.runtime.server_policy import (SERVER_TOOLS_REFUSAL, check_command, cleared_env,
                                                 server_tools_check_command)
+from orchestrator.utils.helpers import sha256_file  # also verify.sha256_file for the build store and Ditto's server
 
 VERSION_TIMEOUT = 60
 DEVICES_TIMEOUT = 180
@@ -322,14 +322,6 @@ def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 # --- the verifier -------------------------------------------------------------------------------------------------

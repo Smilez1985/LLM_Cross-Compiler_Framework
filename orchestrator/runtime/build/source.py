@@ -20,7 +20,6 @@ no credential helpers or prompts, and only the https transport (plus local files
 Bundle files and remote output are untrusted: sizes are capped and every value is checked before it is used.
 """
 
-import hashlib
 import json
 import os
 import re
@@ -35,6 +34,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, Union
 
 from orchestrator import __version__
 from orchestrator.runtime.catalog import LlamaCppSource
+from orchestrator.utils.helpers import sha256_file as _sha256
 
 GIT_TIMEOUT = 3600            # seconds for a fetch (about 215 MB at the pin)
 LOCAL_TIMEOUT = 300           # seconds for local git commands
@@ -302,14 +302,6 @@ def fetch_source(source: LlamaCppSource, state_dir: Union[str, Path], *, url: Op
 
 def manifest_path(bundle: Path) -> Path:
     return bundle.with_name(bundle.name + ".json")
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def export_source(source: LlamaCppSource, state_dir: Union[str, Path], out: Path, *, url: Optional[str] = None,
