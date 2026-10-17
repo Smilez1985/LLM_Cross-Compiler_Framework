@@ -1395,6 +1395,30 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Die GUI ist ein optionales Extra; Kommandozeile, MCP-Server und Kern laufen ohne Qt.** PySide6 ist das Extra
+  `gui` in `pyproject.toml` (die per Hash festgelegte `requirements-gui.txt`, ein Export von `uv.lock` wie
+  `requirements.txt`). Die Installer für Linux und Windows installieren es wie bisher; `sudo ./install.sh --headless`
+  (`LCF_HEADLESS=1`) und das Framework-Image ohne `--gui` lassen Qt und seine Systembibliotheken weg (das Image ohne
+  Oberfläche installiert kein libglib mehr, und sein Build lehnt eine Installation mit Qt ab). Die Texte, die jeder
+  Prozess liest (`ui_text`, `tr`, `current_language`, die eine Tabelle `TRANSLATIONS` in
+  `orchestrator/utils/localization.py`), importieren kein Qt mehr; das Sprachobjekt des Fensters (`LocalizationManager`,
+  `get_instance`) liegt in `orchestrator/gui/localization.py`, und der alte Importpfad findet es weiter. Die GUI startet
+  in `orchestrator/gui/app.py`; `orchestrator/main.py` bleibt der Einstieg der Starter und sagt ohne das Extra, wie du
+  es installierst, statt eines Tracebacks. Der Katalog der nächsten Schritte liest seine Beschriftungen aus der einen
+  Texttabelle statt mit einem zweiten Leser der `l10n_*`-Module. Ein CI-Job führt die Qt-freien Prüfungen und die ganze
+  Testsuite ohne PySide6 aus.
+- **Qts eigene Schaltflächen sprechen die Sprache des Fensters**: Deutsche Dialoge zeigten Qts
+  Standard-Schaltflächen auf Englisch („Close“, „Cancel“, „Yes“, „No“). Das Fenster installiert jetzt Qts eigene
+  Übersetzung (`qtbase_de`, mit PySide6 geliefert) mit seiner Sprache und tauscht sie beim Sprachwechsel; ein offener
+  Dialog folgt.
+- **Der Builder zeigt CPU und Speicher des Build-Containers**, unter dem Fortschrittsbalken, solange ein
+  Stufen-Container läuft („Build-Container: CPU 251 % · Arbeitsspeicher 2,0 GB von 8,0 GB“), und das Build-Protokoll
+  warnt einmal, wenn der Container 90 % seiner Speichergrenze nutzt (der von Docker oder der VM von WSL2 / Docker
+  Desktop), mit dem, was zu tun ist. Die Werte stammen aus dem älteren Build-Weg des Docker-Managers, den nichts mehr
+  aufrief; sie misst jetzt der eine Build-Weg (die Build-Engine, `BuildService.live_resources`), und der Rest des
+  älteren Wegs (Start, Überwachung, Stopp, ein Self-Healing-Auslöser und sechs Qt-Signale, auf die niemand hörte) wurde
+  entfernt, weil der eine Build-Weg all das tut (Entscheidung Runde 12, Punkt 6). Der Build-Status für die KI bleibt
+  gleich.
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:

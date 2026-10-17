@@ -133,7 +133,9 @@ Der Installer:
    andere dort bleibt: deine eigenen Targets (Modul-Assistent, `llm-cli module create`), installierte
    Community-Packs, `configs/config.yml`, Builds, Cache und Modelle. Starte Updates im Repository-Ordner: Die
    Kopie von `install.sh` in `/opt` kopiert und entfernt nichts,
-4. legt dort eine virtuelle Umgebung (`.venv`) an und installiert die festgelegten Pakete aus `requirements.txt`,
+4. legt dort eine virtuelle Umgebung (`.venv`) an und installiert die festgelegten Pakete aus
+   `requirements-gui.txt` (alles aus `requirements.txt` plus PySide6 für die GUI; mit `--headless` nur
+   `requirements.txt`),
 5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet,
 6. richtet Dittos lokalen Modellserver ein (`llm-cli ditto runtime ensure`, als du, nie als root): standardmäßig
    direkt, in Docker, wenn du das wählst oder wenn es direkt hier nicht geht. Ist Ditto schon da, tut der Schritt
@@ -145,6 +147,9 @@ unbeaufsichtigten Lauf setzt du stattdessen `LCF_DITTO` (zum Beispiel `sudo LCF_
 nichts gefragt, und ein Modell unter einer freien Lizenz (etwa Apache 2.0) wird heruntergeladen, nachdem Größe und
 Lizenz angezeigt wurden.
 
+Auf einem Server ohne Bildschirm lässt `sudo ./install.sh --headless` (unbeaufsichtigt: `LCF_HEADLESS=1`) die GUI
+weg: Kommandozeile und MCP-Server brauchen kein Qt. `llm-framework` sagt dann, wie du die GUI später ergänzt.
+
 Melde dich einmal ab und wieder an, damit die Gruppe `docker` wirkt. Danach startest du die GUI mit
 `llm-framework`.
 
@@ -155,7 +160,8 @@ Melde dich einmal ab und wieder an, damit die Gruppe `docker` wirkt. Danach star
 
 Der Installer sucht Python (installiert Python 3.13 mit `winget`, wenn keines gefunden wird, und verlangt dann
 3.11 bis 3.14), kopiert das Framework nach `C:\Program Files\LLM-Cross-Compiler-Framework`, legt dort `.venv` an,
-installiert `requirements.txt` und legt eine Verknüpfung **LLM-Cross-Compiler-Framework** auf den Desktop. Die
+installiert `requirements-gui.txt` (mit der GUI) und legt eine Verknüpfung **LLM-Cross-Compiler-Framework** auf
+den Desktop. Die
 Verknüpfung startet `start_framework.bat` und damit die GUI. Der Ditto-Schritt ist derselbe wie unter Linux
 (`install.bat --ditto=...` oder `LCF_DITTO`); er läuft nur für die angemeldete Person. In dieser Version hat Windows
 noch keinen selbst gebauten Server und keinen Docker-Modus für Ditto, also sagt der Schritt das, und die
