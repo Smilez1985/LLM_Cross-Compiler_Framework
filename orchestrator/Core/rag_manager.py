@@ -90,12 +90,17 @@ _USER_CONFIG_NAMES = frozenset({"config.yml", "framework.yml"})
 SOURCES_TTL = 60.0  # seconds a list of the knowledge sources is reused (cleared at once by every write)
 SOURCE_ID_PREFIX = "ks_"
 SOURCE_KINDS = ("web", "pack", "docs", "other")
+# Provenance of outside text (a crawled page or PDF, a knowledge pack's page): how much hidden text was left out before
+# it was stored, {kind: count} with the kinds of rag/html_text.REMOVED_KINDS. Written by the framework only (a pack's
+# metadata cannot set it), on every excerpt of what one ingest stored; shown to the person in Knowledge Sources and
+# never given to an AI (search results and source listings for AI callers have fixed fields without it).
+REMOVED_FIELD = "hidden_removed"
 # Payload fields a source listing reads (never the chunk text): provenance, and what the page says about its licence.
 _SOURCE_FIELDS = ["source", "title", "content_type", "type", "origin_pack", "root_url", "ingested_at",
-                  *licences.META_KEYS]
+                  *licences.META_KEYS, REMOVED_FIELD, "chunk_index"]
 NOT_EXPORTED = "not_exported"   # a source no knowledge pack carries (an installed pack's page, the framework's docs)
 _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
-                     "fused_score", "reranker"}
+                     "fused_score", "reranker", REMOVED_FIELD}
 
 
 _LOCAL = threading.local()
@@ -250,6 +255,35 @@ def _clean_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         elif isinstance(value, (list, tuple)) and all(isinstance(v, (str, int, float, bool)) for v in value):
             clean[key] = [v[:200] if isinstance(v, str) else v for v in list(value)[:50]]
     return clean
+
+
+def _add_counts(total: Dict[str, int], found: Dict[str, Any]) -> Dict[str, int]:
+    for kind, count in (found or {}).items():
+        if isinstance(count, int) and not isinstance(count, bool) and count > 0:
+            total[str(kind)] = total.get(str(kind), 0) + count
+    return total
+
+
+def clean_outside_text(content: str, markup: bool = True,
+                       removed: Optional[Dict[str, int]] = None) -> Tuple[str, str, Dict[str, int]]:
+    """Outside text the way the knowledge base stores it (recon P1). With markup (Markdown or text that may carry
+    HTML, e.g. a knowledge pack's page): a whole HTML page is read like a crawled one (rag/html_text.page_markdown),
+    and the hidden elements of HTML inside Markdown are cut out (strip_hidden_markup). Then always the untrusted-text
+    cleaning that a model's view of the text gets too (utils/untrusted.clean_untrusted: NFKC, invisible characters,
+    HTML comments), without a length limit. Returns (the title of a whole HTML page or "", the text, the counts by kind:
+    `removed`, e.g. what the crawler left out of the page, plus what was found here)."""
+    from orchestrator.utils.untrusted import clean_untrusted
+    counts = _add_counts({}, removed or {})
+    title = ""
+    if markup and "<" in content:   # bs4 loads only for text that may carry HTML
+        from orchestrator.rag.html_text import is_html_document, page_markdown, strip_hidden_markup
+        if is_html_document(content):
+            title, content, found = page_markdown(content)
+        else:
+            content, found = strip_hidden_markup(content)
+        _add_counts(counts, found)
+    content, found = clean_untrusted(content)
+    return title, content, _add_counts(counts, found)
 
 
 def _restart_timer(timer: Optional[threading.Timer], seconds: float, function=None) -> Optional[threading.Timer]:
@@ -734,20 +768,37 @@ class RAGManager:
     # --- ingestion ---
 
     def ingest_document(self, source_name: str, content: str, metadata: Optional[Dict[str, Any]] = None,
-                        replace: bool = False) -> bool:
+                        replace: bool = False, *, outside: bool = False) -> bool:
         """
         Indexes a document; re-ingesting the same content updates it in place. replace=True also removes
         chunks only its previous version had - only for complete documents (a page, a file), never for
         callers that ingest one document piece by piece (community packs).
+        outside=True: outside text is stored cleaned (clean_outside_text: hidden HTML elements, invisible characters
+        and HTML comments left out), with how much was left out (REMOVED_FIELD). A knowledge pack's page (metadata
+        with origin_pack) always counts as outside text, whoever stores it.
         """
         try:
-            return self._ingest(source_name, content, metadata, replace) > 0
+            return self._ingest(source_name, content, metadata, replace, outside=outside) > 0
         except KnowledgeBaseError as e:
             self._fail(e)
             return False
 
+    def ingest_page(self, doc: Any, root_url: str = "") -> int:
+        """Stores one page the crawler extracted (a crawler Document: page_content, metadata and hidden_removed, the
+        hidden elements it left out), replacing its earlier version, as outside text: cleaned like every outside text,
+        with what was left out in REMOVED_FIELD. root_url: the address the crawl started at. Returns the number of
+        excerpts stored; raises KnowledgeBaseError. Deep Ingest (ingest_url) stores every page through this."""
+        meta = dict(getattr(doc, "metadata", None) or {})
+        if root_url:
+            meta["root_url"] = root_url
+        return self._ingest(meta.get("source", root_url), doc.page_content, meta, replace=True, outside=True,
+                            markup=False, removed=getattr(doc, "hidden_removed", None))
+
     @_uses_models
-    def _ingest(self, source_name: str, content: str, metadata: Optional[Dict[str, Any]], replace: bool) -> int:
+    def _ingest(self, source_name: str, content: str, metadata: Optional[Dict[str, Any]], replace: bool,
+                outside: bool = False, markup: bool = True, removed: Optional[Dict[str, int]] = None) -> int:
+        """outside: clean the text first (clean_outside_text; markup: it may carry HTML) and record what was left out
+        (`removed`, e.g. by the crawler, plus what the cleaning found) in REMOVED_FIELD of every excerpt."""
         if not isinstance(content, str) or not content.strip():
             return 0
         if not isinstance(metadata, dict):
@@ -755,6 +806,16 @@ class RAGManager:
         source = str(source_name or "").strip()[:500] or "unknown"
         base_section = str(metadata.get("section") or "")
         meta = _clean_metadata(metadata)
+        if outside or meta.get("origin_pack"):   # a pack's page is outside text, whoever stores it
+            from orchestrator.utils.untrusted import clean_untrusted
+            page_title, content, removed = clean_outside_text(content, markup and _kind_of(meta) == "markdown",
+                                                              removed)
+            if not content.strip():
+                return 0
+            title = clean_untrusted(str(meta.get("title") or page_title))[0]
+            meta.update({"title": title} if title else {})
+            base_section = clean_untrusted(base_section)[0]
+            meta[REMOVED_FIELD] = removed
         embedder, sparse = self._models()
         spec = getattr(embedder, "spec", None)
         budget = int(getattr(spec, "chunk_tokens", 384))
@@ -821,9 +882,7 @@ class RAGManager:
             crawler = crawler_class(self.framework, crawler_options)
             self.logger.info(f"Invoking Crawler for {url}...")
             for doc in crawler.iter_crawl(url, stop=stop, progress=progress):
-                meta = dict(doc.metadata or {})
-                meta["root_url"] = url
-                added = self._ingest(meta.get("source", url), doc.page_content, meta, replace=True)
+                added = self.ingest_page(doc, url)
                 if added:
                     pages += 1
                     chunks += added
@@ -1193,9 +1252,12 @@ class RAGManager:
     def list_sources(self) -> List[Dict[str, Any]]:
         """Every source of the knowledge base with its provenance: source_id, source (address, pack entry or file
         label), title, kind (web, pack, docs, other), origin_pack, root (the crawl's start address or the pack),
-        ingested_at (the newest chunk) and chunks; and its licence (licence_view: licence, copyright, licence_state,
-        pack_share, share_reason). Reads payload fields only, never the chunk text; the list is reused for
-        SOURCES_TTL seconds and dropped by every write. Raises KnowledgeBaseError."""
+        ingested_at (the newest chunk) and chunks; its licence (licence_view: licence, copyright, licence_state,
+        pack_share, share_reason); and hidden_removed: how much hidden text was left out before it was stored, by kind
+        (the counts of every stored piece added up: a crawled page is one piece, a pack page may be several), None
+        for a source stored without that check (the framework's documents, pages stored before it existed). Reads
+        payload fields only, never the chunk text; the list is reused for SOURCES_TTL seconds and dropped by every
+        write. Raises KnowledgeBaseError."""
         with self._lock:
             cached = self._sources
             if cached is not None and time.monotonic() - cached[0] < SOURCES_TTL:
@@ -1212,7 +1274,13 @@ class RAGManager:
                         "source_id": source_id(source), "source": source, "title": "", "kind": kind,
                         "origin_pack": str(payload.get("origin_pack") or ""),
                         "root": str(payload.get("origin_pack") or payload.get("root_url") or ""),
-                        "ingested_at": "", "chunks": 0}
+                        "ingested_at": "", "chunks": 0, REMOVED_FIELD: None}
+                removed = payload.get(REMOVED_FIELD)
+                if isinstance(removed, dict):
+                    # Each stored piece carries its counts on every excerpt: its first excerpt counts them once.
+                    total = entry[REMOVED_FIELD] if entry[REMOVED_FIELD] is not None else {}
+                    entry[REMOVED_FIELD] = _add_counts(total, removed) if payload.get("chunk_index") in (0, None) \
+                        else total
                 meta = metas.setdefault(source, {})
                 for key in (*licences.META_KEYS, "root_url"):
                     if key not in meta and payload.get(key) not in (None, ""):

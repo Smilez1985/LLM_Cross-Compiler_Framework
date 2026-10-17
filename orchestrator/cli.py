@@ -3842,8 +3842,9 @@ def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
               help='Only sources of this kind')
 @pass_context
 def knowledge_sources(ctx: FrameworkContext, kind: str):
-    """What the knowledge base holds: every source with the licence and copyright notice it shows, and what a
-    knowledge pack would carry of it (full text, or only its address and short facts) and why"""
+    """What the knowledge base holds: every source with the licence and copyright notice it shows, what a
+    knowledge pack would carry of it (full text, or only its address and short facts) and why, and how much hidden
+    text was left out of it before it was stored"""
     from orchestrator.Core import knowledge_sources as ks   # Tools > Knowledge Sources... lists the same
     from orchestrator.rag.errors import KnowledgeBaseError
     ctx.require_framework()
@@ -3861,10 +3862,10 @@ def knowledge_sources(ctx: FrameworkContext, kind: str):
         console.print(ks.empty_sentence(kind))
         return
     table = Table(title="Knowledge sources, their licence and what a knowledge pack carries of them")
-    for column in ("Source", "Kind", "Licence", "Copyright notice", "In a pack", "Why"):
+    for column in ("Source", "Kind", "Hidden text left out", "Licence", "Copyright notice", "In a pack", "Why"):
         table.add_column(column, overflow="fold")
     for e in entries:   # addresses, titles and notices are site text: escaped, never markup
-        table.add_row(escape(e["source"]), e["kind"], escape(e.get("licence") or "-"),
+        table.add_row(escape(e["source"]), e["kind"], ks.removed_text(e), escape(e.get("licence") or "-"),
                       escape(e.get("copyright") or "-"), ks.carried(e), escape(e.get("share_reason") or ""))
     console.print(table)
     console.print(escape(ks.totals_sentence(entries)))

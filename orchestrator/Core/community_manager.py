@@ -1214,6 +1214,8 @@ class CommunityManager:
                         meta = entry.get("metadata", {})
                         meta["origin_pack"] = json_file.name if json_file.parent == self.knowledge_dir else \
                             json_file.parent.name
+                        # A page with origin_pack is outside text: the knowledge base stores it cleaned (hidden HTML,
+                        # invisible characters and HTML comments left out; RAGManager.ingest_document)
                         if rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""), meta):
                             imported_count += 1
                         elif str(entry.get("content") or "").strip():
@@ -1251,10 +1253,12 @@ class CommunityManager:
         if root_urls is not None:
             roots = {str(u) for u in root_urls}
             records = [r for r in records if (r.get("metadata") or {}).get("root_url") in roots]
-        from orchestrator.Core.rag_manager import source_kind
+        from orchestrator.Core.rag_manager import REMOVED_FIELD, source_kind
         records = [r for r in records
                    if source_kind({**(r.get("metadata") or {}), "source": r.get("source", "")}) != "docs"]
-        own = [r for r in records if not (r.get("metadata") or {}).get("origin_pack")]
+        # What this installation left out of a page (REMOVED_FIELD) is its own provenance, not part of the page.
+        own = [{**r, "metadata": {k: v for k, v in (r.get("metadata") or {}).items() if k != REMOVED_FIELD}}
+               for r in records if not (r.get("metadata") or {}).get("origin_pack")]
         pages, shares = share_pages(own)   # scrubbed, also URLs with tokens in the query
         left_out = {str(r.get("source") or "") for r in records if (r.get("metadata") or {}).get("origin_pack")}
         return pages, len(left_out), shares

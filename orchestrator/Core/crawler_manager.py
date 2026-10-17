@@ -69,7 +69,7 @@ from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from orchestrator import __version__
 from orchestrator.rag import licences
-from orchestrator.rag.html_text import html_to_markdown
+from orchestrator.rag.html_text import html_to_markdown, strip_boilerplate
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.validation import validate_public_url, resolve_public_addresses
@@ -311,9 +311,11 @@ def _remote_text(value: Any, limit: int = 200) -> str:
 
 @dataclass
 class Document:
-    """A crawled page or PDF (replaces langchain_core's Document; only these two fields are used)."""
+    """A crawled page or PDF (replaces langchain_core's Document). hidden_removed: how many hidden elements with text
+    the extraction left out, by kind (rag/html_text.HIDDEN_KINDS); the knowledge base records it with the page."""
     page_content: str
     metadata: Dict[str, Any] = field(default_factory=dict)
+    hidden_removed: Dict[str, int] = field(default_factory=dict)
 
 
 class _PinnedConnectionMixin:
@@ -768,10 +770,11 @@ class CrawlerManager:
             return None
 
     @staticmethod
-    def _strip_boilerplate(soup: BeautifulSoup) -> None:
-        """Removes navigation, footers, scripts and similar (their links are not followed either)."""
-        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'noscript', 'template', 'svg']):
-            tag.decompose()
+    def _strip_boilerplate(soup: BeautifulSoup) -> Dict[str, int]:
+        """Removes navigation, footers, scripts and similar, and every element a person reading the page does not see
+        (rag/html_text.strip_boilerplate); the links of both are not followed either. Returns how many hidden
+        elements with text were removed, by kind."""
+        return strip_boilerplate(soup)
 
     @staticmethod
     def _html_links(soup: BeautifulSoup, url: str, allowed_hosts: Set[str]) -> List[str]:
@@ -787,10 +790,14 @@ class CrawlerManager:
     def _process_html(self, html_content: Any, url: str, allowed_hosts: Set[str],
                       headers: Optional[Any] = None) -> tuple[Optional[Document], List[str]]:
         """Extracts the page (HTML text or parsed soup) as Markdown (headings, code blocks, tables kept) and
-        its links. Its licence and copyright notice are read first, from the whole page (the footer included)."""
+        its links. Its licence and copyright notice are read first, from the whole page (the footer included). Text
+        hidden from a person reading the page is left out; how much, by kind, is the Document's hidden_removed."""
         soup = html_content if isinstance(html_content, BeautifulSoup) else BeautifulSoup(html_content, 'html.parser')
         licence = licences.from_html(soup, url, headers)
-        self._strip_boilerplate(soup)
+        removed = self._strip_boilerplate(soup)
+        if removed:
+            self.logger.info(f"Left out hidden text of {_remote_text(url, 500)}: "
+                             + ", ".join(f"{kind} {count}" for kind, count in removed.items()))
         links = self._html_links(soup, url, allowed_hosts)
         title, text = html_to_markdown(soup)
 
@@ -805,7 +812,7 @@ class CrawlerManager:
         metadata = {"source": url, "content_type": "html", "title": title, **licence}
         if lang:
             metadata["language"] = lang
-        return Document(page_content=text, metadata=metadata), links
+        return Document(page_content=text, metadata=metadata, hidden_removed=removed), links
 
     def _process_pdf(self, pdf_bytes: bytes, url: str, headers: Optional[Any] = None) -> Optional[Document]:
         """The PDF's text with its licence and copyright notice; a PDF without text (e.g. scanned) is skipped, an
