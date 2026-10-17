@@ -38,43 +38,105 @@ def _shown(text: Any) -> str:
     return redact_secrets(str(text or ""))
 
 
+def _known_steps() -> Any:
+    """The step ids of chain a0's catalogue (empty without it)."""
+    try:
+        from orchestrator.utils.next_steps import catalogue
+        return catalogue().steps
+    except Exception:  # noqa: BLE001 - without the catalogue every text is a sentence
+        return {}
+
+
+def _as_list(steps: Any) -> List[Any]:
+    if isinstance(steps, tuple) and len(steps) == 2 and isinstance(steps[0], str) and isinstance(steps[1], dict):
+        return [steps]   # one (id, values) pair, not two steps
+    return list(steps) if isinstance(steps, (list, tuple)) else [steps]
+
+
+def _is_catalogue_step(step: Any, known: Any) -> bool:
+    """A step of chain a0's catalogue: a NextStep, an (id, values) pair, or a plain str that is exactly a known step
+    id. A sentence (a0's Line included: it is its text) is not one."""
+    if isinstance(step, str):
+        return type(step) is str and step in known
+    return step is not None
+
+
 def _step_lines(steps: Any, lang: str) -> List[str]:
-    """Each step as one line for the person: a plain sentence as it is (a0's Line is text too); a catalogue step
-    (chain a0's NextStep) in the GUI's words through a0's renderer (a mouse path, never a command). A step that no
-    renderer can show is left out rather than shown as its Python repr."""
+    """Each step as one line for the person, in the order given: a plain sentence as it is (a0's Line is text too,
+    and its own steps follow it); a catalogue step (chain a0's NextStep, or its id) in the GUI's words through a0's
+    renderer (a mouse path, never a command). A step that no renderer can show is left out rather than shown as its
+    Python repr or its id."""
     try:
         from orchestrator.utils.next_steps import rendered
     except ImportError:
         rendered = None
+    known = _known_steps()
     lines: List[str] = []
-    for step in (steps if isinstance(steps, (list, tuple)) else [steps]):
-        text = ""
-        if not isinstance(step, str) and rendered is not None:
-            try:
-                text = "\n".join(r.text for r in rendered([step], "gui", lang))
-            except Exception:  # noqa: BLE001 - an error box never fails because of its next step
-                text = ""
-        elif isinstance(step, str):
-            text = step
+
+    def add(text: str) -> None:
         if text.strip():
             lines.append(_shown(text.strip()))
+
+    def add_rendered(step: Any) -> None:
+        if rendered is None:
+            return
+        try:
+            add("\n".join(r.text for r in rendered([step], "gui", lang)))
+        except Exception:  # noqa: BLE001 - an error box never fails because of its next step
+            pass
+
+    for step in _as_list(steps):
+        if _is_catalogue_step(step, known):
+            add_rendered(step)
+        elif isinstance(step, str):
+            add(step)
+            for carried in getattr(step, "steps", ()) or ():
+                add_rendered(carried)
     return lines
 
 
 def _steps_widget(steps: Any, parent: QWidget, lang: str) -> Optional[QWidget]:
-    """Chain a0's row of next steps ([Open] buttons) when it exists; else the steps as plain lines."""
+    """The next step part of the box. With chain a0's StepsRow: the plain sentences as "Next step: ..." lines, then
+    the catalogue steps (a Line's own steps too) under a "Next step:" heading in a StepsRow, each with its mouse path
+    and an [Open] button. StepsRow reads step ids only, so a sentence never goes there (it would vanish). Without
+    StepsRow, or when it shows nothing, every step is a plain line in the order given."""
+    known = _known_steps()
+    items = _as_list(steps)
+    sentences = [s for s in items if isinstance(s, str) and not _is_catalogue_step(s, known)]
+    found = [s for s in items if _is_catalogue_step(s, known)]
+    found += [carried for s in sentences for carried in (getattr(s, "steps", ()) or ())]
     try:
         from orchestrator.gui.next_step_widgets import StepsRow
     except ImportError:
         StepsRow = None
-    if StepsRow is not None:
+    row = None
+    if found and StepsRow is not None:
         try:
-            return StepsRow(steps, parent=parent, lang=lang)
+            row = StepsRow(found, parent=parent, lang=lang)
         except Exception:  # noqa: BLE001 - an error box never fails because of its next step
-            pass
-    lines = _step_lines(steps, lang)
-    return plain_label("\n".join(ui_text("words.error.next", lang, step=line) for line in lines), parent) \
-        if lines else None
+            row = None
+        if row is not None and not row.rows:   # no step the catalogue knows (an older or newer id)
+            row.deleteLater()
+            row = None
+    lines = _step_lines([str(s) for s in sentences] if row is not None else items, lang)
+    text = "\n".join(ui_text("words.error.next", lang, step=line) for line in lines)
+    if row is None:
+        return plain_label(text, parent) if lines else None
+    part = QWidget(parent)
+    layout = QVBoxLayout(part)
+    layout.setContentsMargins(0, 0, 0, 0)
+    part.lines = None
+    if lines:
+        part.lines = plain_label(text, part)
+        part.lines.setObjectName("error_next_lines")
+        layout.addWidget(part.lines)
+    part.heading = plain_label(ui_text("words.error.next_heading", lang), part)
+    part.heading.setObjectName("error_next_heading")
+    layout.addWidget(part.heading)
+    part.row = row
+    row.setParent(part)
+    layout.addWidget(row)
+    return part
 
 
 class ErrorDialog(QDialog):
