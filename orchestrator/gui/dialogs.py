@@ -1627,7 +1627,7 @@ class AIFoldersDialog(QDialog):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self.table)
         row = QHBoxLayout()
-        self.add_button = QPushButton("Add folder...")
+        self.add_button = QPushButton(ui_text("main.folders.add"))
         self.add_button.setObjectName("btn_ai_folders_add")
         self.add_button.clicked.connect(self._choose_folder)
         self.remove_button = QPushButton("Remove")

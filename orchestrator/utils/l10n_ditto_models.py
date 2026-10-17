@@ -107,7 +107,7 @@ TEXTS = {
         "ditto_eval.tier_item": "{tier} ({file}, {size}, {state})",
         "ditto_eval.tiers_failed": "The local models could not be listed: {reason}",
         "ditto_eval.tiers_missing": "These local model tiers are not downloaded yet: {tiers}. Download them first in "
-                                    "Ditto > Local Models..., or untick them.",
+                                    "{path:act_ditto_models_open}, or untick them.",
         "ditto_eval.provider": "Provider:",
         "ditto_eval.model": "Model:",
         "ditto_eval.effort": "Reasoning effort:",
@@ -152,7 +152,7 @@ TEXTS = {
         "ditto_eval.log.fail": "fail {id} ({seconds}s): {problem}",
         "ditto_eval.log.partial": "{rate} {id} ({seconds}s): {problem}",
         "ditto_eval.log.replaced": "Your local server ({model}) was replaced for the evaluation and is not running "
-                                   "now; start it again in Ditto > Local Runtime...",
+                                   "now; start it again in {path:act_ditto_runtime_open}",
         "ditto_eval.log.unused": "The tiers, provider, model and effort apply to AI cases; retrieval needs none.",
         "ditto_eval.working": "The evaluation runs…",
         "ditto_eval.done": "Done: {runs} runs.",
@@ -269,7 +269,7 @@ TEXTS = {
         "ditto_eval.tier_item": "{tier} ({file}, {size}, {state})",
         "ditto_eval.tiers_failed": "Die lokalen Modelle konnten nicht aufgelistet werden: {reason}",
         "ditto_eval.tiers_missing": "Diese lokalen Modellstufen sind noch nicht heruntergeladen: {tiers}. Lade sie "
-                                    "zuerst unter Ditto > Lokale Modelle... herunter, oder nimm die Haken weg.",
+                                    "zuerst unter {path:act_ditto_models_open} herunter, oder nimm die Haken weg.",
         "ditto_eval.provider": "Anbieter:",
         "ditto_eval.model": "Modell:",
         "ditto_eval.effort": "Denkaufwand:",
@@ -317,7 +317,7 @@ TEXTS = {
         "ditto_eval.log.fail": "nicht bestanden {id} ({seconds} s): {problem}",
         "ditto_eval.log.partial": "{rate} {id} ({seconds} s): {problem}",
         "ditto_eval.log.replaced": "Dein lokaler Server ({model}) wurde für die Bewertung ersetzt und läuft jetzt "
-                                   "nicht; starte ihn wieder unter Ditto > Lokale Laufzeit...",
+                                   "nicht; starte ihn wieder unter {path:act_ditto_runtime_open}",
         "ditto_eval.log.unused": "Stufen, Anbieter, Modell und Denkaufwand gelten für KI-Fälle; Retrieval braucht "
                                  "keine davon.",
         "ditto_eval.working": "Die Bewertung läuft …",

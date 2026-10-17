@@ -14,7 +14,7 @@ MOUSE_LABELS = {
     "btn_knowledge_snapshots_delete": (_SNAP, "snapshots.delete"),
     "btn_knowledge_snapshots_export": (_SNAP, "snapshots.export"),
     "btn_knowledge_storage_delete_old": (_SNAP, "storage.old.delete"),
-    "btn_knowledge_storage_convert": (_SNAP, "storage.convert"),
+    "btn_knowledge_storage_convert": (_SNAP, ("storage.convert", "storage.convert.now")),
     "btn_zoo_import": (_HUB, "main.hub.import"),
     "btn_zoo_export": (_HUB, "zoo.export"),
     "btn_zoo_keys": (_HUB, "zoo.keys"),

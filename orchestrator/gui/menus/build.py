@@ -83,12 +83,13 @@ def install(window, menubar) -> None:
     window.act_file_settings = place.new_action(window, "act_file_settings", ui_text("bld.menu.settings", lang),
                                                 lambda: open_settings(window))
     if file_menu is not None:
-        place.insert_before(file_menu, place.entry(file_menu, window.i18n.t("menu.exit", "Exit")),
+        place.insert_before(file_menu, place.entry(file_menu, window.i18n.t("menu.exit", "Exit"), "act_file_exit"),
                             window.act_file_settings)
 
     place.name_entry(getattr(window, "act_output_folder", None), "act_file_output_folder")
     tools = place.find_menu(menubar, place.MENU_TOOLS, ("Tools",))
-    place.name_entry(place.entry(tools, "Create Hardware Module..."), "act_tools_module_wizard")
+    place.name_entry(place.entry(tools, "Create Hardware Module...", "act_tools_module_wizard", menubar),
+                     "act_tools_module_wizard")
 
 
 def _refresh_target_lists(window) -> None:

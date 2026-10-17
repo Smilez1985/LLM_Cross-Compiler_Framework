@@ -1274,19 +1274,25 @@ class TestMainWindowWiring:
         try:
             qapp.processEvents()
             assert opened == [True], "the permissions are asked once at the first start"
-            menus = {m.title(): [a.text() for a in m.actions()] for m in win.findChildren(QMenu) if m.title()}
-            assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module...",
-                                      "Hugging Face Model Browser...",
-                                      "Open Community Hub", "Tool Permissions (Ditto / MCP)...",
-                                      "Folders the AI May Use...", "Deep Ingest Notice...", "Pending Approvals...",
-                                      "Fix Proposals from AI Clients...", "Knowledge Snapshots...",
-                                      "Knowledge Sources...",   # wave 5 (W1'): llm-cli knowledge sources by mouse
-                                      "Framework Build Images...", "Mojo Health Check...",
-                                      "Index the Framework's Documentation...",
-                                      "Spoken Announcements", "Clear Input History..."]
+            # Wave 6 (DECISIONS round 10 Q2, changed on purpose): the AI administration moved into the Ditto menu
+            # ("Set up Ditto..." first, runtime/models/evaluation under Ditto > Advanced), Tools has submenus, the
+            # titles carry mnemonics; menus are named by their object names, entries compared without separators.
+            menus = {m.objectName(): [a.text() for a in m.actions() if not a.isSeparator()]
+                     for m in win.findChildren(QMenu) if m.objectName()}
+            assert menus["menu_ditto"] == ["Set up Ditto...", "AI Settings...", "Tool Permissions...",
+                                           "Folders the AI May Use...", "Pending Approvals...",
+                                           "Fix Proposals from AI Apps...", "&Advanced"]
+            assert menus["menu_ditto_advanced"] == ["Local Runtime...", "Local Models...", "Evaluation..."]
+            assert menus["menu_tools"] == ["Create Hardware Module...", "Hugging Face Model Browser...", "&Knowledge",
+                                           "&Maintenance", "Spoken Announcements", "Clear Input History..."]
+            assert menus["menu_tools_knowledge"] == ["Open Community Hub", "Knowledge Snapshots...",
+                                                     "Knowledge Sources...",   # wave 5 (W1'): knowledge sources
+                                                     "Index the Framework's Documentation...",
+                                                     "Deep Ingest Notice..."]
+            assert menus["menu_tools_maintenance"] == ["Framework Build Images...", "Mojo Health Check..."]
             # File > Settings... (GUI parity, wave 5: config show / config repos by mouse) sits above Exit
-            assert menus["File"] == ["Trash...", "Output Folder...", "Settings...", "Exit"]
-            assert menus["Build"] == ["Targets...", "Build History..."]
+            assert menus["menu_file"] == ["Trash...", "Output Folder...", "Settings...", "Exit"]
+            assert menus["menu_build"] == ["Targets...", "Build History..."]
             # The audio switch is a persisted setting, on by default.
             assert win.act_audio.isCheckable() and win.act_audio.isChecked()
             win.act_audio.setChecked(False)

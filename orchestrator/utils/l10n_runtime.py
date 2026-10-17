@@ -35,10 +35,9 @@ TEXTS = {
         "runtime.mode.install_question": "Ditto's server will be installed {mode}: built from the pinned llama.cpp "
                                          "source with the build options below (a few minutes; when the source, about "
                                          "215 MB, is not there yet, you are asked before it is fetched). Afterwards "
-                                         "Ditto's model is "
-                                         "offered with its size and licence, unless you untick that below (you can "
-                                         "also download it later in Ditto > Local Models...).\n\n"
-                                         "Continue?",
+                                         "Ditto's model is offered with its size and licence, unless you untick that "
+                                         "below (you can also download it later in "
+                                         "{path:act_ditto_models_open}).\n\nContinue?",
         "runtime.mode.working": "Working… this can take minutes; the window can stay open.",
         "runtime.mode.failed": "Nothing was switched: {reason}",
         "runtime.mode.leftovers.question": "The new mode works. Delete every object of the old mode for good: exactly "
@@ -69,8 +68,7 @@ TEXTS = {
         "runtime.mode.space.removed": "{old} was deleted. {new} is made now; Ditto is unavailable until it works.",
         "runtime.mode.space.failed": "{new} could not be made: {reason}\n\nDitto has no local runtime now: {old} was "
                                      "deleted before. The models are still there.\n\nMake {old} again now?",
-        "runtime.mode.space.later": "You can make it again here later, or in a terminal: llm-cli ditto runtime ensure "
-                                    "--mode {mode}",
+        "runtime.mode.space.later": "You can make it again here later.",
     },
     "de": {
         "runtime.mode.title": "Dittos lokaler Server",
@@ -100,8 +98,8 @@ TEXTS = {
                                          "llama.cpp-Quellcode mit den Build-Optionen unten gebaut (einige Minuten; "
                                          "fehlt der Quellcode, etwa 215 MB, wirst du gefragt, bevor er geholt wird). "
                                          "Danach wird Dittos Modell mit Größe und Lizenz angeboten, außer du nimmst "
-                                         "unten den Haken weg (du kannst es auch später unter Ditto > Lokale "
-                                         "Modelle... herunterladen).\n\nWeiter?",
+                                         "unten den Haken weg (du kannst es auch später unter "
+                                         "{path:act_ditto_models_open} herunterladen).\n\nWeiter?",
         "runtime.mode.working": "Läuft … das kann Minuten dauern; das Fenster kann offen bleiben.",
         "runtime.mode.failed": "Nichts wurde gewechselt: {reason}",
         "runtime.mode.leftovers.question": "Die neue Art funktioniert. Jedes Objekt der alten Art endgültig löschen, "
@@ -139,7 +137,6 @@ TEXTS = {
         "runtime.mode.space.failed": "{new} ließ sich nicht erzeugen: {reason}\n\nDitto hat jetzt keine lokale "
                                      "Laufzeit: {old} wurde vorher gelöscht. Die Modelle sind noch da.\n\n{old} jetzt "
                                      "wieder herstellen?",
-        "runtime.mode.space.later": "Du kannst es später hier wieder herstellen, oder in einem Terminal: llm-cli ditto "
-                                    "runtime ensure --mode {mode}",
+        "runtime.mode.space.later": "Du kannst es später hier wieder herstellen.",
     },
 }

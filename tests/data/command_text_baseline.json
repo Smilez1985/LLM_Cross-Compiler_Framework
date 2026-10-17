@@ -1,0 +1,286 @@
+{
+ "orchestrator/Core/artifact_store.py": {
+  "command": 1,
+  "menu_path": 1
+ },
+ "orchestrator/Core/build_service.py": {
+  "command": 2,
+  "menu_path": 0
+ },
+ "orchestrator/Core/builder.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/community_pack.py": {
+  "command": 6,
+  "menu_path": 0
+ },
+ "orchestrator/Core/crawl_jobs.py": {
+  "command": 1,
+  "menu_path": 1
+ },
+ "orchestrator/Core/dataset_manager.py": {
+  "command": 3,
+  "menu_path": 0
+ },
+ "orchestrator/Core/deployment_manager.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/disk_plan.py": {
+  "command": 2,
+  "menu_path": 1
+ },
+ "orchestrator/Core/ditto_manager.py": {
+  "command": 4,
+  "menu_path": 2
+ },
+ "orchestrator/Core/hf_hub.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/hf_lookup.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/knowledge_snapshots.py": {
+  "command": 1,
+  "menu_path": 1
+ },
+ "orchestrator/Core/knowledge_sources.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/module_generator.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/mojo/checks/chat_feed.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/mojo/checks/community.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/mojo/checks/devices.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/mojo/checks/disk.py": {
+  "command": 1,
+  "menu_path": 1
+ },
+ "orchestrator/Core/mojo/checks/docker.py": {
+  "command": 1,
+  "menu_path": 1
+ },
+ "orchestrator/Core/mojo/checks/knowledge.py": {
+  "command": 2,
+  "menu_path": 1
+ },
+ "orchestrator/Core/mojo/checks/runtime.py": {
+  "command": 4,
+  "menu_path": 0
+ },
+ "orchestrator/Core/mojo/checks/secrets.py": {
+  "command": 3,
+  "menu_path": 0
+ },
+ "orchestrator/Core/mojo/checks/tools.py": {
+  "command": 4,
+  "menu_path": 2
+ },
+ "orchestrator/Core/mojo/offers.py": {
+  "command": 3,
+  "menu_path": 3
+ },
+ "orchestrator/Core/mojo/repairs/__init__.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/mojo/views.py": {
+  "command": 1,
+  "menu_path": 1
+ },
+ "orchestrator/Core/self_healing_manager.py": {
+  "command": 1,
+  "menu_path": 1
+ },
+ "orchestrator/Core/settings_view.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/Core/trash.py": {
+  "command": 1,
+  "menu_path": 1
+ },
+ "orchestrator/gui/framework_docs_action.py": {
+  "command": 0,
+  "menu_path": 3
+ },
+ "orchestrator/gui/main_window.py": {
+  "command": 0,
+  "menu_path": 2
+ },
+ "orchestrator/gui/menus/build.py": {
+  "command": 0,
+  "menu_path": 1
+ },
+ "orchestrator/gui/menus/existing.py": {
+  "command": 0,
+  "menu_path": 1
+ },
+ "orchestrator/gui/proposals_window.py": {
+  "command": 0,
+  "menu_path": 1
+ },
+ "orchestrator/llm/auth/resolver.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/llm/catalog.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/llm/client.py": {
+  "command": 1,
+  "menu_path": 1
+ },
+ "orchestrator/mcp_server.py": {
+  "command": 5,
+  "menu_path": 0
+ },
+ "orchestrator/rag/migration.py": {
+  "command": 4,
+  "menu_path": 3
+ },
+ "orchestrator/runtime/bench.py": {
+  "command": 4,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/build/host.py": {
+  "command": 6,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/build/target_runtime.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/device/devices.py": {
+  "command": 3,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/device/person_steps.py": {
+  "command": 2,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/device/remote.py": {
+  "command": 3,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/device/service.py": {
+  "command": 6,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/device/settings.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/hardware.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/llama_server.py": {
+  "command": 13,
+  "menu_path": 1
+ },
+ "orchestrator/runtime/probe_service.py": {
+  "command": 9,
+  "menu_path": 0
+ },
+ "orchestrator/runtime/runtime_mode.py": {
+  "command": 7,
+  "menu_path": 0
+ },
+ "orchestrator/tools/approvals.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/tools/audit.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/tools/framework_prompts.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/tools/framework_resources.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/tools/framework_tools.py": {
+  "command": 8,
+  "menu_path": 3
+ },
+ "orchestrator/tools/grants.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/tools/local_files.py": {
+  "command": 2,
+  "menu_path": 1
+ },
+ "orchestrator/tools/mcp_tokens.py": {
+  "command": 5,
+  "menu_path": 0
+ },
+ "orchestrator/tools/policy.py": {
+  "command": 4,
+  "menu_path": 0
+ },
+ "orchestrator/tools/tools_community.py": {
+  "command": 4,
+  "menu_path": 0
+ },
+ "orchestrator/tools/tools_deploy.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/tools/tools_framework_docs.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/tools/tools_hf.py": {
+  "command": 4,
+  "menu_path": 0
+ },
+ "orchestrator/tools/tools_knowledge.py": {
+  "command": 2,
+  "menu_path": 0
+ },
+ "orchestrator/tools/tools_optional.py": {
+  "command": 3,
+  "menu_path": 4
+ },
+ "orchestrator/tools/tools_runtime.py": {
+  "command": 5,
+  "menu_path": 0
+ },
+ "orchestrator/tools/tools_status.py": {
+  "command": 4,
+  "menu_path": 1
+ },
+ "orchestrator/tools/tools_targets.py": {
+  "command": 2,
+  "menu_path": 0
+ },
+ "orchestrator/utils/download.py": {
+  "command": 1,
+  "menu_path": 0
+ },
+ "orchestrator/utils/image_registry.py": {
+  "command": 1,
+  "menu_path": 0
+ }
+}

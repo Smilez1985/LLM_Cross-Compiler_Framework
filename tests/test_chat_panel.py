@@ -419,7 +419,7 @@ def test_the_chat_tab_is_gone_and_the_panel_has_the_chat(main_window, qapp):
     dock = win.findChild(QDockWidget, "chatDock")
     assert dock is win.chat_dock and isinstance(dock.widget(), ChatWindow) and dock.widget() is win.chat_window
     assert win.dockWidgetArea(dock) == Qt.RightDockWidgetArea and dock.widget().minimumWidth() >= 300
-    menus = {m.title(): m for m in win.findChildren(QMenu) if m.title()}
+    menus = {m.title().replace("&", ""): m for m in win.findChildren(QMenu) if m.title()}   # wave 6: mnemonics
     view = [a for a in menus["View"].actions()]
     assert view[0] is dock.toggleViewAction() and view[0].shortcut() == QKeySequence("F9")
     assert view[1].shortcut() == QKeySequence("Ctrl+Shift+C")
@@ -1100,13 +1100,16 @@ def test_notices_about_an_app_name_it_by_its_caller_in_the_persons_language(make
 
 
 def test_german_texts_name_the_menus_the_window_shows():
-    """The main window's menus are not translated: a German text that points to one names it as it is shown."""
+    """Wave 6 (V2, changed on purpose: the menus are translated now): a text that points to a menu writes
+    {path:<objectName>}, which ui_text fills from the live labels in the text's language, never a hand-written path."""
     from orchestrator.utils.l10n_chat import TEXTS
-    source = (GUI / "main_window.py").read_text(encoding="utf-8")
+    from orchestrator.utils.localization import ui_text
     for key, german in TEXTS["de"].items():
-        assert "Werkzeuge >" not in german, key
-        for entry in re.findall(r"Tools > ([A-Z][A-Za-z ]+)", german + " " + TEXTS["en"][key]):
-            assert f'"{entry.strip()}' in source, (key, entry)
+        for text in (german, TEXTS["en"][key]):
+            assert not re.search(r"(Tools|Werkzeuge|Extras|Ditto|Security|Sicherheit) > ", text), key
+    assert ui_text("chat.notice.proposal_by", "de", build="b").endswith("Ditto > Korrekturvorschläge von KI-Apps....")
+    assert ui_text("chat.notice.proposal_by", "en", build="b").endswith("Ditto > Fix Proposals from AI Apps....")
+    assert ui_text("chat.composer.not_set_up", "de").endswith("Ditto > Ditto einrichten...")
 
 
 def test_clearing_the_input_history_lists_every_file_it_deletes(tmp_path, monkeypatch):

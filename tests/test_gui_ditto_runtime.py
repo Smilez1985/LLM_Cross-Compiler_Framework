@@ -159,11 +159,13 @@ class TestMenu:
         win = main_window.MainOrchestrator(REPO_ROOT)
         qapp.processEvents()
         try:
-            titles = [a.text() for a in win.menuBar().actions()]
+            titles = [a.text().replace("&", "") for a in win.menuBar().actions()]   # wave 6: titles with mnemonics
             assert "Ditto" in titles and titles.index("Ditto") < titles.index("Security")
-            ditto = next(a.menu() for a in win.menuBar().actions() if a.text() == "Ditto")
+            ditto = next(a.menu() for a in win.menuBar().actions() if a.text().replace("&", "") == "Ditto")
             assert ditto.objectName() == menu.DITTO_MENU
-            action = next(a for a in ditto.actions() if a.objectName() == "act_ditto_runtime_open")
+            # wave 6 (Q2): Ditto's local runtime sits under Ditto > Advanced
+            advanced = next(a.menu() for a in ditto.actions() if a.menu() is not None)
+            action = next(a for a in advanced.actions() if a.objectName() == "act_ditto_runtime_open")
             assert action.text() == "Local Runtime..." and win.act_ditto_runtime is action
             assert menu.ditto_menu(win, win.menuBar()) is ditto, "the shared menu is found, not made twice"
             action.trigger()
@@ -620,7 +622,8 @@ class TestBuilds:
         ui.win.btn_export.click()
         done(ui)
         assert rt.called("export_build") == [{"path": tmp_path / "mybuild.tar.gz"}]
-        assert rt.threads("export_build") == [False] and "Import a build..." in ui.shown[-1][1]
+        # wave 6 (V2): the path ends with the button's own label (Ditto > Advanced > Local Runtime... > Import...)
+        assert rt.threads("export_build") == [False] and "Local Runtime... > Import a build" in ui.shown[-1][1]
         chosen[0] = str(tmp_path / "x.tgz")
         ui.win.btn_export.click()
         done(ui)

@@ -90,7 +90,7 @@ def install(window, menubar) -> None:
     """Adds Secrets..., Sign-in Overview... and Key Storage... to the Security menu (window.act_signin_*) and names the
     existing Set OpenAI API Key entry."""
     menu = place.menu_or_new(menubar, MENU_NAME, "Security", SECURITY_TITLES)
-    place.name_entry(place.entry(menu, OPENAI_KEY_TEXT), ACT_OPENAI_KEY)
+    place.name_entry(place.entry(menu, OPENAI_KEY_TEXT, ACT_OPENAI_KEY, menubar), ACT_OPENAI_KEY)
     menu.addSeparator()
     entries = ((ACT_SECRETS, "signin.menu.secrets", open_secrets_window),
                (ACT_OVERVIEW, "signin.menu.overview", open_overview_window),

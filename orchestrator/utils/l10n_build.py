@@ -53,7 +53,8 @@ TEXTS = {
 
         # the Builder tab
         "bld.builder.targets": "Targets...",
-        "bld.builder.targets.tip": "Every target with its ID, boards, formats and support level (Build > Targets...)",
+        "bld.builder.targets.tip": "Every target with its ID, boards, formats and support level "
+                                   "({path:act_build_targets})",
         "bld.builder.check": "Check target",
         "bld.builder.check.tip": "Checks that the selected target loads and that its capabilities block passes the "
                                  "schema",
@@ -105,7 +106,7 @@ TEXTS = {
         "bld.history.proposal_cause": "Cause: {text}",
         "bld.history.proposal_step": "Manual step ({where}, not run by the framework): {text}",
         "bld.history.proposal_confidence": "Confidence: {value}",
-        "bld.history.status_hint": "Details: Build > Build History...",
+        "bld.history.status_hint": "Details: {path:act_build_history}",
         "bld.field.request": "Request",
         "bld.field.build": "Build",
         "bld.field.status": "Status",
@@ -160,7 +161,7 @@ TEXTS = {
         "bld.settings.repos.pick": "Choose a repository override in the list first.",
         "bld.settings.repos.credential": "Not added: the URL contains {what} ({url}).\n\nSettings are saved as plain "
                                          "text, so a repository URL never takes a credential. Keep passwords and "
-                                         "tokens in the secrets store (Security > Secrets...) and enter the URL "
+                                         "tokens in the secrets store ({path:act_signin_secrets}) and enter the URL "
                                          "without them.",
         "bld.settings.repos.password": "a password",
         "bld.settings.repos.token": "a token",
@@ -179,8 +180,8 @@ TEXTS = {
         "bld.wizard.run_model_hint": "model (empty: the AI settings' one)",
         "bld.wizard.run_tip": "Provider and model for this one analysis; the saved AI settings stay unchanged.",
         "bld.wizard.run_refused": "Not started: {reason}",
-        "bld.wizard.run_not_ready": "{provider} is not set up for this analysis. Sign in under Tools > Configure AI "
-                                    "Agent (Ditto)... or choose another provider.",
+        "bld.wizard.run_not_ready": "{provider} is not set up for this analysis. Sign in under "
+                                    "{path:act_ditto_settings} or choose another provider.",
         "bld.wizard.pin_failed": "The base image {image} cannot be pinned: {reason} {next}",
         "bld.wizard.pin_title": "Base image chosen by an AI",
         "bld.wizard.pin_question": "An AI chose the base image {image} for this module. Like every module an AI "
@@ -227,7 +228,8 @@ TEXTS = {
         "bld.check.after_install": "Prüfung des installierten Targets:",
 
         "bld.builder.targets": "Targets…",
-        "bld.builder.targets.tip": "Alle Targets mit ID, Boards, Formaten und Unterstützungsgrad (Build > Targets…)",
+        "bld.builder.targets.tip": "Alle Targets mit ID, Boards, Formaten und Unterstützungsgrad "
+                                   "({path:act_build_targets})",
         "bld.builder.check": "Target prüfen",
         "bld.builder.check.tip": "Prüft, ob das gewählte Target lädt und sein Fähigkeiten-Block dem Schema entspricht",
         "bld.builder.no_target": "Wähle zuerst ein Target.",
@@ -282,7 +284,7 @@ TEXTS = {
         "bld.history.proposal_cause": "Ursache: {text}",
         "bld.history.proposal_step": "Manueller Schritt ({where}, vom Framework nicht ausgeführt): {text}",
         "bld.history.proposal_confidence": "Sicherheit: {value}",
-        "bld.history.status_hint": "Details: Build > Build-Verlauf…",
+        "bld.history.status_hint": "Details: {path:act_build_history}",
         "bld.field.request": "Anfrage",
         "bld.field.build": "Build",
         "bld.field.status": "Status",
@@ -339,7 +341,7 @@ TEXTS = {
         "bld.settings.repos.credential": "Nicht hinzugefügt: Die URL enthält {what} ({url}).\n\nEinstellungen werden "
                                          "als reiner Text gespeichert, deshalb nimmt eine Repository-URL nie "
                                          "Zugangsdaten auf. Bewahre Passwörter und Tokens im Geheimnisspeicher auf "
-                                         "(Security > Geheimnisse...) und gib die URL ohne sie ein.",
+                                         "({path:act_signin_secrets}) und gib die URL ohne sie ein.",
         "bld.settings.repos.password": "ein Passwort",
         "bld.settings.repos.token": "ein Token",
         "bld.settings.repos.remove_question": "Diese Repository-Überschreibung entfernen?\n\nName: {name}\nURL: {url}"
@@ -358,8 +360,8 @@ TEXTS = {
         "bld.wizard.run_tip": "Anbieter und Modell für diese eine Analyse; die gespeicherten KI-Einstellungen bleiben "
                               "unverändert.",
         "bld.wizard.run_refused": "Nicht gestartet: {reason}",
-        "bld.wizard.run_not_ready": "{provider} ist für diese Analyse nicht eingerichtet. Melde dich unter Tools > "
-                                    "Configure AI Agent (Ditto)... an oder wähle einen anderen Anbieter.",
+        "bld.wizard.run_not_ready": "{provider} ist für diese Analyse nicht eingerichtet. Melde dich unter "
+                                    "{path:act_ditto_settings} an oder wähle einen anderen Anbieter.",
         "bld.wizard.pin_failed": "Das Basis-Image {image} lässt sich nicht festlegen: {reason} {next}",
         "bld.wizard.pin_title": "Von einer KI gewähltes Basis-Image",
         "bld.wizard.pin_question": "Eine KI hat für dieses Modul das Basis-Image {image} gewählt. Wie jedes Modul, "

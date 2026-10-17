@@ -37,10 +37,9 @@ TEXTS = {
         "snapshots.next.no_room": "The next snapshot (about {size}) does not fit: Deep Ingest, restoring a snapshot "
                                   "and importing a knowledge pack are refused until there is room.",
         "snapshots.next.tight": "The next snapshot (about {size}) still fits, but leaves little free space.",
-        "snapshots.next.step": "Free space first: delete or export the knowledge snapshots you no longer need (Tools > "
-                               "Knowledge Snapshots... in the GUI, 'llm-cli knowledge snapshots prune' or 'llm-cli "
-                               "knowledge snapshots export NAME --to FOLDER' in a terminal), or free space on that "
-                               "disk otherwise. Nothing is deleted by itself.",
+        "snapshots.next.step": "Free space first: delete or export the knowledge snapshots you no longer need "
+                               "({path:act_knowledge_snapshots}), or free space on that disk otherwise. Nothing is "
+                               "deleted by itself.",
         "storage.old.failed": "The knowledge base still uses the storage of earlier versions: its conversion to "
                               "Qdrant Edge failed ({reason}). It keeps working. It is tried again {retry}.",
         "storage.old.delete": "Delete the old storage...",
@@ -51,8 +50,8 @@ TEXTS = {
         "storage.old.done.permanent": "Deleted: the old knowledge base storage.",
         "storage.old.kept": "Kept: the old knowledge base storage ({reason}).",
         "storage.retry.start": "on the next start, or now with [Try the conversion again]",
-        "storage.retry.person": "only when you ask, because it would fail the same way: here with [Try the "
-                                "conversion again], or with 'llm-cli knowledge storage convert' in a terminal",
+        "storage.retry.person": "only when you ask, because it would fail the same way: here with [Try the conversion "
+                                "again]",
         "storage.convert": "Try the conversion again",
         "storage.converting": "Converting the knowledge base to Qdrant Edge: the texts and vectors are copied and "
                               "checked. With a large knowledge base this takes minutes. The old storage stays as it "
@@ -61,7 +60,7 @@ TEXTS = {
                                 "searches were checked). The old folder is kept until you delete it.",
         "storage.convert.failed": "The knowledge base was not converted. It keeps working in the storage of earlier "
                                   "versions. Reason: {reason}",
-        "storage.convert.off": "The knowledge base is off. Switch it on in Tools > Configure AI Agent (Ditto) first.",
+        "storage.convert.off": "The knowledge base is off. Switch it on in {path:act_ditto_settings} first.",
         # Tools > Knowledge Sources...
         "knowledge.menu.sources": "Knowledge Sources...",
         "sources.title": "Knowledge Sources",
@@ -83,7 +82,7 @@ TEXTS = {
         "sources.col.carried": "In a pack",
         "sources.col.why": "Why",
         "sources.loading": "Reading the knowledge base...",
-        "sources.off": "The knowledge base is off. Switch it on in Tools > Configure AI Agent (Ditto) first.",
+        "sources.off": "The knowledge base is off. Switch it on in {path:act_ditto_settings} first.",
         "sources.unreadable": "The knowledge base cannot be read: {reason}",
         "sources.carried.full_text": "full text",
         "sources.carried.link_and_facts": "link and short facts",
@@ -189,7 +188,7 @@ TEXTS = {
         "zoo.export.knowledge.note": "Your own pages of the knowledge base (not those of installed knowledge packs, "
                                      "not the framework's documents): each keeps its source address and licence, and "
                                      "a page goes in with its full text only where its licence allows it; the pack "
-                                     "ships the licence texts and NOTICE they ask for. Tools > Knowledge Sources... "
+                                     "ships the licence texts and NOTICE they ask for. {path:act_knowledge_sources} "
                                      "shows what each page would carry.",
         "zoo.export.next": "Continue...",
         "zoo.export.choose_target": "Choose a target first.",
@@ -209,7 +208,7 @@ TEXTS = {
         "zoo.export.folder.choose": "Choose folder...",
         "zoo.export.folder.title": "Folder for the pack",
         "zoo.export.no_recipients": "Choose the key files of the people you share the pack with (they get them from "
-                                    "My public keys... in their Community Hub, or llm-cli zoo keys).",
+                                    "My public keys... in their Community Hub).",
         "zoo.export.passphrase_empty": "Enter the passphrase twice.",
         "zoo.export.passphrase_differs": "The two passphrases differ.",
         "zoo.export.creating": "Creating the pack on this computer: scrubbing, signing and, for private sharing, "
@@ -220,8 +219,8 @@ TEXTS = {
         "zoo.export.submit.ask": "Submit this pack to the public community repository?",
         "zoo.export.submit.no": "Not submitted; the pack is ready at {path}.",
         "zoo.install.installing": "Installing {kind} {id}...",
-        "zoo.install.snapshot": "The knowledge base was saved first as the snapshot {name} (Tools > Knowledge "
-                                "Snapshots... lists it).",
+        "zoo.install.snapshot": "The knowledge base was saved first as the snapshot {name} "
+                                "({path:act_knowledge_snapshots} lists it).",
         "storage.reason.server": "The knowledge base uses the Qdrant server (setting qdrant_url), so the local storage "
                                  "is not converted while it is set.",
     },
@@ -256,10 +255,8 @@ TEXTS = {
                                   "ist.",
         "snapshots.next.tight": "Der nächste Snapshot (etwa {size}) passt noch, lässt aber wenig freien Platz.",
         "snapshots.next.step": "Schaffe zuerst Platz: lösche oder exportiere die Wissens-Snapshots, die du nicht mehr "
-                               "brauchst (Tools > Knowledge Snapshots... in der GUI, 'llm-cli knowledge snapshots "
-                               "prune' oder 'llm-cli knowledge snapshots export NAME --to FOLDER' im Terminal), oder "
-                               "schaffe auf andere Weise Platz auf dieser Festplatte. Es wird nichts von selbst "
-                               "gelöscht.",
+                               "brauchst ({path:act_knowledge_snapshots}), oder schaffe auf andere Weise Platz auf "
+                               "dieser Festplatte. Es wird nichts von selbst gelöscht.",
         "storage.old.failed": "Die Wissensdatenbank nutzt noch den Speicher früherer Versionen: die Umwandlung in "
                               "Qdrant Edge ist fehlgeschlagen ({reason}). Sie funktioniert weiter. Ein neuer Versuch "
                               "läuft {retry}.",
@@ -272,8 +269,8 @@ TEXTS = {
         "storage.old.done.permanent": "Gelöscht: der alte Speicher der Wissensdatenbank.",
         "storage.old.kept": "Behalten: der alte Speicher der Wissensdatenbank ({reason}).",
         "storage.retry.start": "beim nächsten Start, oder jetzt mit [Umwandlung erneut versuchen]",
-        "storage.retry.person": "nur, wenn du es willst, weil er genauso scheitern würde: hier mit [Umwandlung "
-                                "erneut versuchen] oder mit 'llm-cli knowledge storage convert' im Terminal",
+        "storage.retry.person": "nur, wenn du es willst, weil er genauso scheitern würde: hier mit [Umwandlung erneut "
+                                "versuchen]",
         "storage.convert": "Umwandlung erneut versuchen",
         "storage.converting": "Die Wissensdatenbank wird in Qdrant Edge umgewandelt: Texte und Vektoren werden "
                               "kopiert und geprüft. Bei einer großen Wissensdatenbank dauert das Minuten. Der alte "
@@ -282,8 +279,7 @@ TEXTS = {
                                 "Stichproben-Suchen wurden geprüft). Der alte Ordner bleibt, bis du ihn löschst.",
         "storage.convert.failed": "Die Wissensdatenbank wurde nicht umgewandelt. Sie funktioniert weiter im Speicher "
                                   "früherer Versionen. Grund: {reason}",
-        "storage.convert.off": "Die Wissensdatenbank ist aus. Schalte sie zuerst unter Tools > Configure AI Agent "
-                               "(Ditto) ein.",
+        "storage.convert.off": "Die Wissensdatenbank ist aus. Schalte sie zuerst unter {path:act_ditto_settings} ein.",
         # Tools > Knowledge Sources...
         "knowledge.menu.sources": "Wissensquellen...",
         "sources.title": "Wissensquellen",
@@ -306,8 +302,7 @@ TEXTS = {
         "sources.col.carried": "Im Paket",
         "sources.col.why": "Warum",
         "sources.loading": "Die Wissensdatenbank wird gelesen...",
-        "sources.off": "Die Wissensdatenbank ist aus. Schalte sie zuerst unter Tools > Configure AI Agent (Ditto) "
-                       "ein.",
+        "sources.off": "Die Wissensdatenbank ist aus. Schalte sie zuerst unter {path:act_ditto_settings} ein.",
         "sources.unreadable": "Die Wissensdatenbank kann nicht gelesen werden: {reason}",
         "sources.carried.full_text": "voller Text",
         "sources.carried.link_and_facts": "Link und kurze Fakten",
@@ -419,9 +414,9 @@ TEXTS = {
         "zoo.export.knowledge.note": "Deine eigenen Seiten der Wissensdatenbank (nicht die installierter "
                                      "Wissenspakete, nicht die Dokumente des Frameworks): jede behält ihre "
                                      "Quelladresse und Lizenz, und eine Seite kommt nur dort mit vollem Text hinein, "
-                                     "wo ihre Lizenz es erlaubt; das Paket liefert die Lizenztexte und die NOTICE mit, "
-                                     "die sie verlangen. Tools > Wissensquellen... zeigt, was jede Seite mitnehmen "
-                                     "würde.",
+                                     "wo ihre Lizenz es erlaubt; das Paket liefert die Lizenztexte und die NOTICE "
+                                     "mit, die sie verlangen. {path:act_knowledge_sources} zeigt, was jede Seite "
+                                     "mitnehmen würde.",
         "zoo.export.next": "Weiter...",
         "zoo.export.choose_target": "Wähle zuerst ein Target.",
         "zoo.export.choose_build": "Wähle zuerst die build_info.json eines fertigen Builds.",
@@ -439,9 +434,8 @@ TEXTS = {
         "zoo.export.folder": "Ordner:",
         "zoo.export.folder.choose": "Ordner wählen...",
         "zoo.export.folder.title": "Ordner für das Paket",
-        "zoo.export.no_recipients": "Wähle die Schlüsseldateien der Leute, mit denen du das Paket teilst (sie bekommen "
-                                    "sie über Meine öffentlichen Schlüssel... in ihrem Community Hub, oder llm-cli "
-                                    "zoo keys).",
+        "zoo.export.no_recipients": "Wähle die Schlüsseldateien der Leute, mit denen du das Paket teilst (sie "
+                                    "bekommen sie über Meine öffentlichen Schlüssel... in ihrem Community Hub).",
         "zoo.export.passphrase_empty": "Gib die Passphrase zweimal ein.",
         "zoo.export.passphrase_differs": "Die beiden Passphrasen sind verschieden.",
         "zoo.export.creating": "Das Paket wird auf diesem Computer erstellt: bereinigt, signiert und, zum privaten "
@@ -452,8 +446,8 @@ TEXTS = {
         "zoo.export.submit.ask": "Dieses Paket beim öffentlichen Community-Repository einreichen?",
         "zoo.export.submit.no": "Nicht eingereicht; das Paket liegt bereit unter {path}.",
         "zoo.install.installing": "{kind} {id} wird installiert...",
-        "zoo.install.snapshot": "Die Wissensdatenbank wurde zuerst als Snapshot {name} gesichert (Tools > Knowledge "
-                                "Snapshots... listet ihn).",
+        "zoo.install.snapshot": "Die Wissensdatenbank wurde zuerst als Snapshot {name} gesichert "
+                                "({path:act_knowledge_snapshots} listet ihn).",
         "storage.reason.server": "Die Wissensdatenbank nutzt den Qdrant-Server (Einstellung qdrant_url), daher wird "
                                  "der lokale Speicher nicht umgewandelt, solange sie gesetzt ist.",
     },

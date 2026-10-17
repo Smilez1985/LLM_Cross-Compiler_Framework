@@ -85,6 +85,7 @@ def a_build(folder: Path, name="build-p") -> Path:
 def test_every_text_exists_in_english_and_german_with_the_same_placeholders():
     from orchestrator.utils.l10n_deploy import TEXTS
     from orchestrator.utils.localization import ui_text
+    from orchestrator.utils.next_steps import fill_paths
 
     def fields(text):
         return sorted(name for _, name, _, _ in string.Formatter().parse(text) if name)
@@ -92,7 +93,9 @@ def test_every_text_exists_in_english_and_german_with_the_same_placeholders():
     assert set(TEXTS["en"]) == set(TEXTS["de"])
     for key, text in TEXTS["en"].items():
         assert fields(text) == fields(TEXTS["de"][key]), key
-        assert ui_text(key, "en") == text and ui_text(key, "de") == TEXTS["de"][key], "merged into the table"
+        # merged into the table; a {path:...} place is filled from the live labels (wave 6, V2)
+        assert ui_text(key, "en") == fill_paths(text, "en"), "merged into the table"
+        assert ui_text(key, "de") == fill_paths(TEXTS["de"][key], "de"), "merged into the table"
 
 
 def test_the_deployment_tab_follows_the_language(qapp, window_framework):

@@ -18,7 +18,7 @@ from typing import Dict, Optional
 from orchestrator.gui.menus import place
 from orchestrator.utils.localization import ui_text
 
-TOOLS_MENU = "Tools"   # the main window's menus are not translated (their titles name them in docs and tests)
+TOOLS_MENU = "Tools"   # a title is only the fallback: the menus are found by their object names
 
 CLI_PATHS: Dict[str, str] = {
     "mojo": "act_mojo_health",                    # Tools > Mojo Health Check...: Mojo Oracle runs when it opens
@@ -50,7 +50,7 @@ def install(window, menubar) -> None:
     menu = place.menu_or_new(menubar, place.MENU_TOOLS, TOOLS_MENU)
     action = place.new_action(window, "act_mojo_health", ui_text("mojo.menu"), lambda: open_mojo_window(window))
     images = getattr(window, "act_images", None)
-    place.insert_after(menu, images, action)
+    place.insert_after(place.menu_holding(menubar, images) or menu, images, action)
     place.name_entry(images, "act_framework_images")
     window.act_mojo_health = action
 

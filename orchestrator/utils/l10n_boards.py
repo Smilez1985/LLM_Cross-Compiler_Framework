@@ -4,8 +4,8 @@ Texts of the Boards menu and its window Boards > Boards and Devices... (W1' of 2
 devices` and `llmcf device` also by mouse), English and German. LocalizationManager merges them
 (localization.TEXT_MODULES); a key that exists already is refused there, so these never replace another text.
 
-Every key has the same {placeholders} in both languages (tests/test_boards_window.py). The other menus of the main
-window are not translated, so a German text names them as they are shown ("Builder > Scan / Import..."). German
+Every key has the same {placeholders} in both languages (tests/test_boards_window.py). A text names a place with
+{path:<objectName>} (wave 6: the menus are translated). German
 terms: "Board", "vertrauen" (trust), "koppeln" (pair), "Laufzeit" (runtime), "Deploy-Einstellungen" (deploy
 settings). This module imports nothing from the framework.
 """
@@ -16,11 +16,11 @@ TEXTS = {
         "boards.menu": "Boards",
         "boards.menu.devices": "Boards and Devices...",
         "boards.title": "Boards and Devices",
-        "boards.intro": "Every board you probed or trusted, once. Only the trusted boards may be named by AI tools for "
-                        "a deploy, and you still confirm each deploy. The buttons do what the 'llmcf deploy devices' "
-                        "and 'llmcf device' commands do; every contact with a board runs in the background.",
-        "boards.empty": "No board yet: probe one (Builder > Scan / Import... > Remote Scan via SSH...) or add one you "
-                        "trusted before (Add a trusted board...).",
+        "boards.intro": "Every board you probed or trusted, once. Only the trusted boards may be named by AI tools "
+                        "for a deploy, and you still confirm each deploy. Every contact with a board runs in the "
+                        "background.",
+        "boards.empty": "No board yet: probe one ({path:act_deploy_scan_remote}) or add one you trusted before (Add a "
+                        "trusted board...).",
         "boards.col.board": "Board",
         "boards.col.id": "Device ID",
         "boards.col.address": "Address",
@@ -67,21 +67,19 @@ TEXTS = {
         "boards.cancelled": "Cancelled.",
         "boards.need_selection": "Select a board in the table first.",
         "boards.need_trusted": "This board is not trusted: add it first (Add a trusted board...).",
-        "boards.need_stored": "This board has no stored probe: probe it first (Builder > Scan / Import... > Remote "
-                              "Scan via SSH...).",
+        "boards.need_stored": "This board has no stored probe: probe it first ({path:act_deploy_scan_remote}).",
         "boards.need_user": "No SSH user is set for this board: set one in Settings...",
         "boards.need_address": "The board has no usable stored address: probe it again ({reason}).",
         "boards.no_pin": "configs/llama_runtime.yml has no llama_cpp.source (the pinned commit).",
         # errors of a board contact
         "boards.err.no_paramiko": "Reaching a board needs the 'paramiko' package.",
         "boards.err.unreachable": "Could not reach {address}: {reason}",
-        "boards.err.not_trusted": "{address} is not trusted yet: probe it first (Builder > Scan / Import... > Remote "
-                                  "Scan via SSH...).",
+        "boards.err.not_trusted": "{address} is not trusted yet: probe it first ({path:act_deploy_scan_remote}).",
         "boards.err.other_device": "{address} answers with the host key of another board than {device_id}; probe it "
                                    "again before you deploy to it.",
         "boards.err.login_failed": "The login to {user} at {address} failed: {reason}",
-        "boards.err.pair": "Pair the board once with its password (Deploy runtime... asks for it) or with Builder > "
-                           "Scan / Import... > Remote Scan via SSH...",
+        "boards.err.pair": "Pair the board once with its password (Deploy runtime... asks for it) or with "
+                           "{path:act_deploy_scan_remote}",
         "boards.err.key_install": "The framework's key could not be installed on the board: {reason}",
         "boards.err.failed": "The step failed: {reason}",
         # add a trusted board (deploy devices add)
@@ -98,8 +96,8 @@ TEXTS = {
         "boards.add.bad_label": "The name has 1 to 64 printable characters.",
         "boards.add.reading": "Reading the board's host key",
         "boards.add.not_known": "{address} is not trusted yet (its host key is {status}). Trust it first with "
-                                "Deployment > Deploy to Target or Builder > Scan / Import... > Remote Scan via SSH..., "
-                                "which show the fingerprint for you to compare.",
+                                "{path:btn_deploy_run} or {path:act_deploy_scan_remote}, which show the fingerprint "
+                                "for you to compare.",
         "boards.add.question": "{address} presents the trusted key {key_type} {fingerprint}.\n\nAllow AI tools to "
                                "deploy to {user} at {host} (each deploy is still confirmed by you)? The trust is "
                                "written to the audit log.",
@@ -107,7 +105,7 @@ TEXTS = {
         "boards.add.pairing": "Testing whether the framework's key logs in",
         "boards.add.done": "Trusted board {device_id} ({label}): AI tools may deploy to it with your confirmation.",
         "boards.add.not_paired": "The framework's SSH key does not log in there yet: pair the board once with "
-                                 "Deployment > Deploy to Target (it asks for the password one time).",
+                                 "{path:btn_deploy_run} (it asks for the password one time).",
         "boards.add.key_gone": "The trusted key is not in the framework's known_hosts.",
         "boards.add.failed": "The board record could not be written.",
         # remove trust (deploy devices remove)
@@ -279,11 +277,10 @@ TEXTS = {
         "boards.menu.devices": "Boards und Geräte...",
         "boards.title": "Boards und Geräte",
         "boards.intro": "Jedes Board, das du geprüft oder dem du vertraut hast, einmal. Nur vertraute Boards dürfen "
-                        "KI-Werkzeuge für ein Deployment nennen, und du bestätigst jedes Deployment. Die Knöpfe tun, "
-                        "was die Befehle 'llmcf deploy devices' und 'llmcf device' tun; jeder Kontakt mit einem Board "
-                        "läuft im Hintergrund.",
-        "boards.empty": "Noch kein Board: prüfe eines (Builder > Scan / Import... > Remote Scan via SSH...) oder füge "
-                        "eines hinzu, dem du früher vertraut hast (Vertrautes Board hinzufügen...).",
+                        "KI-Werkzeuge für ein Deployment nennen, und du bestätigst jedes Deployment. Jeder Kontakt "
+                        "mit einem Board läuft im Hintergrund.",
+        "boards.empty": "Noch kein Board: prüfe eines ({path:act_deploy_scan_remote}) oder füge eines hinzu, dem du "
+                        "früher vertraut hast (Vertrautes Board hinzufügen...).",
         "boards.col.board": "Board",
         "boards.col.id": "Geräte-ID",
         "boards.col.address": "Adresse",
@@ -331,20 +328,19 @@ TEXTS = {
         "boards.need_selection": "Wähle zuerst ein Board in der Tabelle.",
         "boards.need_trusted": "Diesem Board wird nicht vertraut: füge es zuerst hinzu (Vertrautes Board "
                                "hinzufügen...).",
-        "boards.need_stored": "Für dieses Board gibt es kein gespeichertes Prüfprofil: prüfe es zuerst (Builder > "
-                              "Scan / Import... > Remote Scan via SSH...).",
+        "boards.need_stored": "Für dieses Board gibt es kein gespeichertes Prüfprofil: prüfe es zuerst "
+                              "({path:act_deploy_scan_remote}).",
         "boards.need_user": "Für dieses Board ist kein SSH-Benutzer gesetzt: setze einen unter Einstellungen...",
         "boards.need_address": "Das Board hat keine brauchbare gespeicherte Adresse: prüfe es erneut ({reason}).",
         "boards.no_pin": "configs/llama_runtime.yml hat keine llama_cpp.source (den festgelegten Commit).",
         "boards.err.no_paramiko": "Um ein Board zu erreichen, wird das Paket 'paramiko' gebraucht.",
         "boards.err.unreachable": "{address} ist nicht erreichbar: {reason}",
-        "boards.err.not_trusted": "{address} ist noch nicht vertraut: prüfe es zuerst (Builder > Scan / Import... > "
-                                  "Remote Scan via SSH...).",
+        "boards.err.not_trusted": "{address} ist noch nicht vertraut: prüfe es zuerst ({path:act_deploy_scan_remote}).",
         "boards.err.other_device": "{address} antwortet mit dem Host-Schlüssel eines anderen Boards als {device_id}; "
                                    "prüfe es erneut, bevor du darauf installierst.",
         "boards.err.login_failed": "Die Anmeldung als {user} bei {address} ist fehlgeschlagen: {reason}",
         "boards.err.pair": "Kopple das Board einmal mit seinem Passwort (Laufzeit installieren... fragt danach) oder "
-                           "mit Builder > Scan / Import... > Remote Scan via SSH...",
+                           "mit {path:act_deploy_scan_remote}",
         "boards.err.key_install": "Der Schlüssel des Frameworks konnte nicht auf dem Board eingerichtet werden: "
                                   "{reason}",
         "boards.err.failed": "Der Schritt ist fehlgeschlagen: {reason}",
@@ -361,8 +357,8 @@ TEXTS = {
         "boards.add.bad_label": "Der Name hat 1 bis 64 druckbare Zeichen.",
         "boards.add.reading": "Host-Schlüssel des Boards wird gelesen",
         "boards.add.not_known": "{address} ist noch nicht vertraut (sein Host-Schlüssel ist {status}). Vertraue ihm "
-                                "zuerst mit Deployment > Deploy to Target oder Builder > Scan / Import... > Remote "
-                                "Scan via SSH...; dort siehst du den Fingerabdruck zum Vergleichen.",
+                                "zuerst mit {path:btn_deploy_run} oder {path:act_deploy_scan_remote}; dort siehst du "
+                                "den Fingerabdruck zum Vergleichen.",
         "boards.add.question": "{address} zeigt den vertrauten Schlüssel {key_type} {fingerprint}.\n\nDürfen "
                                "KI-Werkzeuge auf {user} bei {host} installieren (jedes Deployment bestätigst du "
                                "weiterhin selbst)? Das Vertrauen wird im Audit-Log vermerkt.",
@@ -371,7 +367,7 @@ TEXTS = {
         "boards.add.done": "Vertrautes Board {device_id} ({label}): KI-Werkzeuge dürfen mit deiner Bestätigung darauf "
                            "installieren.",
         "boards.add.not_paired": "Der SSH-Schlüssel des Frameworks meldet sich dort noch nicht an: kopple das Board "
-                                 "einmal mit Deployment > Deploy to Target (es fragt einmal nach dem Passwort).",
+                                 "einmal mit {path:btn_deploy_run} (es fragt einmal nach dem Passwort).",
         "boards.add.key_gone": "Der vertraute Schlüssel steht nicht in der known_hosts-Datei des Frameworks.",
         "boards.add.failed": "Der Eintrag des Boards konnte nicht geschrieben werden.",
         "boards.remove.title": "Vertrauen entfernen",

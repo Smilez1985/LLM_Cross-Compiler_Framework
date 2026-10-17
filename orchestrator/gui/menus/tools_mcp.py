@@ -24,7 +24,7 @@ from PySide6.QtGui import QAction
 from orchestrator.gui.menus import place
 from orchestrator.utils.localization import current_language, ui_text
 
-SECURITY_MENU = "Security"   # the main window's menus are not translated (their titles name them in docs and tests)
+SECURITY_MENU = "Security"   # a title is only the fallback: the menus are found by their object names
 TOOLS_MENU = "Tools"
 PERMISSIONS_TEXT = "Tool Permissions (Ditto / MCP)..."
 FOLDERS_TEXT = "Folders the AI May Use..."
@@ -154,11 +154,11 @@ def install(window, menubar) -> None:
     security.addAction(window.act_tools_mcp_connections)
 
     tools = place.menu_or_new(menubar, place.MENU_TOOLS, TOOLS_MENU)
-    place.name_entry(place.entry(tools, PERMISSIONS_TEXT), ACT_PERMISSIONS)
-    place.name_entry(place.entry(tools, APPROVALS_TEXT), ACT_APPROVALS)
-    folders = place.name_entry(place.entry(tools, FOLDERS_TEXT), ACT_FOLDERS)
+    place.name_entry(place.entry(tools, PERMISSIONS_TEXT, ACT_PERMISSIONS, menubar), ACT_PERMISSIONS)
+    place.name_entry(place.entry(tools, APPROVALS_TEXT, ACT_APPROVALS, menubar), ACT_APPROVALS)
+    folders = place.name_entry(place.entry(tools, FOLDERS_TEXT, ACT_FOLDERS, menubar), ACT_FOLDERS)
     window.act_tools_mcp_crawl_notice = _action(window, ACT_CRAWL, "tmcp.menu.crawl", open_crawl_notice)
-    place.insert_after(tools, folders, window.act_tools_mcp_crawl_notice)
+    place.insert_after(place.menu_holding(menubar, folders) or tools, folders, window.act_tools_mcp_crawl_notice)
 
     guard = _CloseGuard(window)
     window.installEventFilter(guard)

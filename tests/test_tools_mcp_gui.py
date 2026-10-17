@@ -130,10 +130,13 @@ def test_every_entry_is_reachable_from_the_menu_bar_and_named(qapp, tmp_path, mo
     qapp.processEvents()
     opened = []
     try:
-        menus = {a.text(): [x.text() for x in a.menu().actions()] for a in win.menuBar().actions() if a.menu()}
-        assert menus["Security"][-2:] == ["Audit Log...", "AI App Connections (MCP)..."]
-        tools = menus["Tools"]
-        assert tools[tools.index("Folders the AI May Use...") + 1] == "Deep Ingest Notice..."
+        # wave 6 (Q2): menus by object name; the AI folders sit in the Ditto menu, the Deep Ingest notice in
+        # Tools > Knowledge
+        from orchestrator.gui.menus import place
+        menus = {m.objectName(): [x.text() for x in m.actions()] for m in place.all_menus(win.menuBar())}
+        assert menus["menu_security"][-2:] == ["Audit Log...", "AI App Connections (MCP)..."]
+        assert "Folders the AI May Use..." in menus["menu_ditto"]
+        assert menus["menu_tools_knowledge"][-1] == "Deep Ingest Notice..."
         in_window = set(tools_mcp.WINDOW_OBJECTS)
         for path, name in tools_mcp.CLI_PATHS.items():
             target = tools_mcp.WINDOW_OBJECTS.get(name, name)

@@ -128,9 +128,8 @@ WINDOW_OPENERS: Dict[str, str] = {
     "module_wizard": "act_tools_module_wizard",
     "chat": CHAT_DOCK,
 }
-# QActions that exist today without an objectName (Tools > Configure AI Agent (Ditto)..., Hugging Face Model
-# Browser..., Fix Proposals from AI Clients...): they get these names where they are created (chain a0).
-PLANNED_OPENERS: FrozenSet[str] = frozenset({"act_tools_hf_browser", "act_tools_proposals", "act_ditto_settings"})
+# QActions an opener names before they exist (none since chain a0 named every entry where it is created).
+PLANNED_OPENERS: FrozenSet[str] = frozenset()
 TAB_OPENERS: FrozenSet[str] = frozenset({BUILDER_TAB, DEPLOYMENT_TAB})
 
 

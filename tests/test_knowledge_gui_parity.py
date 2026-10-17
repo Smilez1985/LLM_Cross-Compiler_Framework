@@ -68,8 +68,11 @@ def test_the_snapshots_window_says_beforehand_whether_the_next_snapshot_fits(tmp
         assert dialog.snapshot_disk.verdict == "does_not_fit"
         assert ui_text("snapshots.next.no_room", lang, size="3.0 MB") in text
         assert ui_text("snapshots.next.step", lang) in text
-        if lang == "en":   # the same warning words as the CLI
-            assert dialog.snapshot_disk.warning() in text
+        # wave 6 (design A.1, changed on purpose): the window names the place, never the CLI's commands, which
+        # the command line's warning keeps
+        assert "llm-cli" not in text and "terminal" not in text
+        if lang == "en":
+            assert "llm-cli knowledge snapshots prune" in dialog.snapshot_disk.warning()
     finally:
         dialog.close()
     monkeypatch.setattr(ks, "_disk_usage", usage(int(3.5 * GB)))
@@ -337,8 +340,11 @@ def test_the_tools_menu_has_knowledge_sources_below_the_snapshots(qapp, main_win
     win = main_window()
     qapp.processEvents()
     win.framework.ensure_rag_manager = lambda: ListingRag()
-    tools = next(a.menu() for a in win.menuBar().actions() if a.text() == "Tools")
-    names = [a.objectName() for a in tools.actions()]
+    # wave 6 (Q2): the knowledge entries sit in Tools > Knowledge
+    tools = next(a.menu() for a in win.menuBar().actions() if a.menu().objectName() == "menu_tools")
+    knowledge = next(a.menu() for a in tools.actions() if a.menu() is not None
+                     and a.menu().objectName() == "menu_tools_knowledge")
+    names = [a.objectName() for a in knowledge.actions()]
     assert names.index(menu_module.ACT_SOURCES) == names.index(menu_module.ACT_SNAPSHOTS) + 1, names
     for name in menu_module.ACTIONS:
         assert win.findChild(QAction, name) is not None, name

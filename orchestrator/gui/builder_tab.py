@@ -463,23 +463,23 @@ class BuilderTab(QWidget):
         h_layout.addWidget(self.btn_check_target)
         
         # --- NEW SCAN MENU LOGIC ---
-        self.scan_btn = QPushButton("🔍 Scan / Import...")
+        self.scan_btn = QPushButton("🔍 " + ui_text("main.builder.scan"))
         self.scan_menu = QMenu(self)
         
         # Action 1: Import File (USB/HDD)
-        act_import = QAction("📂 Import from File (USB/Disk)...", self)
+        act_import = QAction("📂 " + ui_text("main.builder.scan.import"), self)
         act_import.triggered.connect(self._import_probe_file)
         self.scan_menu.addAction(act_import)
         
         # Action 2: Remote SSH
-        act_ssh = QAction("📡 Remote Scan via SSH...", self)
+        act_ssh = QAction("📡 " + ui_text("main.builder.scan.remote"), self)
         act_ssh.triggered.connect(self._open_ssh_dialog)
         self.scan_menu.addAction(act_ssh)
         
         self.scan_menu.addSeparator()
         
         # Action 3: Local Host
-        act_local = QAction("💻 Scan Local Host", self)
+        act_local = QAction("💻 " + ui_text("main.builder.scan.local"), self)
         act_local.triggered.connect(self._run_local_probe)
         self.scan_menu.addAction(act_local)
         self._add_scan_entries(act_import, act_ssh, act_local)  # GUI parity: scan --script, --output, port, label

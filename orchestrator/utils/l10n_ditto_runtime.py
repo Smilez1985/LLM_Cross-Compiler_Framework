@@ -117,8 +117,8 @@ TEXTS = {
         "ditto_runtime.offer_model.tip": "After the install, the model of the chosen or recommended tier is offered "
                                          "for download when it is not there yet. Untick it to skip the offer.",
         "ditto_runtime.details": "Status and more…",
-        "ditto_runtime.details.tip": "Opens Ditto > Local Runtime...: whether the server runs, the build in use and "
-                                     "its problems, Start and Stop, builds and the source for offline computers.",
+        "ditto_runtime.details.tip": "Opens {path:act_ditto_runtime_open}: whether the server runs, the build in use "
+                                     "and its problems, Start and Stop, builds and the source for offline computers.",
 
         # the model offer after ensure
         "ditto_runtime.model.offer": "Model for Ditto: {repo} / {file}, {size}, licence {licence} ({why}).",
@@ -204,8 +204,7 @@ TEXTS = {
         "ditto_runtime.export.tip": "Writes the self-built build in use to a .tar.gz for another computer of the same "
                                     "kind.",
         "ditto_runtime.export.choose": "Export the llama-server build",
-        "ditto_runtime.export.done": "Wrote {path}. On the other computer: Ditto > Local Runtime... > Import a "
-                                     "build...",
+        "ditto_runtime.export.done": "Wrote {path}. On the other computer: {path:btn_ditto_runtime_import}",
         "ditto_runtime.prune.button": "Remove older builds…",
         "ditto_runtime.prune.tip": "Lists the older builds (never the active build, the CPU fallback or the running "
                                    "one); nothing is ticked.",
@@ -226,8 +225,8 @@ TEXTS = {
         "ditto_runtime.export_source.button": "Export the source…",
         "ditto_runtime.export_source.choose": "Export the llama.cpp source",
         "ditto_runtime.export_source.done": "Wrote {path} ({size}, llama.cpp {tag}, commit {commit}) and "
-                                            "{name}.json.\n\nOn the computer without network: Ditto > Local "
-                                            "Runtime... > Import the source...",
+                                            "{name}.json.\n\nOn the computer without network: "
+                                            "{path:btn_ditto_runtime_import_source}",
         "ditto_runtime.import_source.button": "Import the source…",
         "ditto_runtime.import_source.choose": "Import the llama.cpp source",
         "ditto_runtime.import_source.done": "Verified llama.cpp {tag} (commit {commit}) in {path}",
@@ -343,9 +342,9 @@ TEXTS = {
                                          "zum Herunterladen angeboten, wenn es noch nicht da ist. Ohne Haken entfällt "
                                          "das Angebot.",
         "ditto_runtime.details": "Status und mehr…",
-        "ditto_runtime.details.tip": "Öffnet Ditto > Lokale Laufzeit...: ob der Server läuft, der Build in Gebrauch "
-                                     "und seine Probleme, Starten und Stoppen, Builds und der Quellcode für Computer "
-                                     "ohne Netz.",
+        "ditto_runtime.details.tip": "Öffnet {path:act_ditto_runtime_open}: ob der Server läuft, der Build in "
+                                     "Gebrauch und seine Probleme, Starten und Stoppen, Builds und der Quellcode für "
+                                     "Computer ohne Netz.",
 
         # das Modell nach ensure
         "ditto_runtime.model.offer": "Modell für Ditto: {repo} / {file}, {size}, Lizenz {licence} ({why}).",
@@ -437,8 +436,7 @@ TEXTS = {
         "ditto_runtime.export.tip": "Schreibt den selbst gebauten Build, der in Gebrauch ist, als .tar.gz für einen "
                                     "gleichartigen Computer.",
         "ditto_runtime.export.choose": "Den llama-server-Build exportieren",
-        "ditto_runtime.export.done": "{path} geschrieben. Auf dem anderen Computer: Ditto > Lokale Laufzeit... > Build "
-                                     "importieren...",
+        "ditto_runtime.export.done": "{path} geschrieben. Auf dem anderen Computer: {path:btn_ditto_runtime_import}",
         "ditto_runtime.prune.button": "Ältere Builds entfernen…",
         "ditto_runtime.prune.tip": "Listet die älteren Builds auf (nie den aktiven Build, den CPU-Ersatz oder den "
                                    "laufenden); nichts ist angehakt.",
@@ -459,8 +457,8 @@ TEXTS = {
         "ditto_runtime.export_source.button": "Quellcode exportieren…",
         "ditto_runtime.export_source.choose": "Den llama.cpp-Quellcode exportieren",
         "ditto_runtime.export_source.done": "{path} ({size}, llama.cpp {tag}, Commit {commit}) und {name}.json "
-                                            "geschrieben.\n\nAuf dem Computer ohne Netz: Ditto > Lokale Laufzeit... > "
-                                            "Quellcode importieren...",
+                                            "geschrieben.\n\nAuf dem Computer ohne Netz: "
+                                            "{path:btn_ditto_runtime_import_source}",
         "ditto_runtime.import_source.button": "Quellcode importieren…",
         "ditto_runtime.import_source.choose": "Den llama.cpp-Quellcode importieren",
         "ditto_runtime.import_source.done": "llama.cpp {tag} (Commit {commit}) geprüft in {path}",
