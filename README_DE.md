@@ -165,14 +165,17 @@ Konvertierungen auf einem Windows-Host sind noch nicht geprüft (siehe [Bekannte
 
 ### Eine Installation von vor der Umbenennung
 
-Bis Release 3.0.0 hieß das Projekt LLM Conversion Framework, und die Installer nutzten andere Ordner. Eine solche
-Installation bleibt, wie sie ist: Die Installer verändern oder löschen sie nie, sie sagen, dass es sie gibt und wie du
-sie entfernst.
+Bis Release 3.0.0 hieß das Repository `llm_conversion_framework`, und die Installer benannten ihre Ordner und die
+Desktop-Verknüpfung danach (LLM Conversion Framework). Eine solche Installation bleibt, wie sie ist: Die Installer
+verändern oder löschen sie nie, sie sagen, dass es sie gibt und wie du sie entfernst.
 
 - **Linux:** Die neue Installation kommt nach `/opt/llm-cross-compiler-framework`, und `llm-framework` startet die
-  neue. Gibt es `/opt/llm-conversion-framework`, kopiert `install.sh` deren Einstellungen (`configs/config.yml`),
-  wenn die neue Installation noch keine hat (nie über eine vorhandene Datei), und nennt, was es nicht übernimmt:
-  Builds, Cache und Modelle (`output/`, `cache/`, `models/`) sowie Targets oder Packs von dir unter `targets/` und
+  neue. Gibt es `/opt/llm-conversion-framework`, kopiert `install.sh` die Dateien von dir aus deren `configs/`, die
+  die neue Installation noch nicht hat (nie über eine vorhandene Datei, nie über einen Link): die Einstellungen
+  `config.yml`, eine selbst geschriebene `framework.yml` und `secrets.store`, den Tresor für Zugangsdaten einer
+  Version vor 3.0.0, den das Framework beim ersten Start in deinen persönlichen Ordner übernimmt (ein schon früher
+  übernommener Tresor bringt nichts zurück, was du seitdem gelöscht hast). Es nennt, was es nicht übernimmt: Builds,
+  Cache und Modelle (`output/`, `cache/`, `models/`) sowie Targets oder Packs von dir unter `targets/` und
   `community/`. Kopiere, was du noch brauchst, sieh dir an, was übrig ist (`ls -la /opt/llm-conversion-framework`),
   und entferne den alten Ordner selbst: `sudo rm -rf /opt/llm-conversion-framework`.
 - **Windows:** Die neue Installation kommt nach `C:\Program Files\LLM-Cross-Compiler-Framework` mit der Verknüpfung
@@ -185,6 +188,11 @@ sie entfernst.
   für Zugangsdaten liegt jetzt unter dem Schlüsselbund-Dienst `llm-cross-compiler-framework`. Ein Schlüssel, der noch
   unter dem alten Dienst `llm-conversion-framework` liegt, wird gelesen und beim ersten Gebrauch unter den neuen
   Namen kopiert; der alte Eintrag wird nie entfernt.
+- **Über MCP verbundene KI-Apps** (Claude Code, Claude Desktop, VS Code) starten das Python der Installation, aus
+  der sie eingerichtet wurden. Bevor du die alte Installation entfernst, richte sie aus der neuen ein:
+  `llm-cli mcp config` mit dem Python der neuen Installation ([Schnellstart: KI-Clients über
+  MCP](#schnellstart-ki-clients-über-mcp-claude-code-claude-desktop-vs-code)) oder **Security > Verbindungen zu
+  KI-Apps (MCP)...**.
 - **Der Framework-Container:** Ein Image, das du jetzt baust, hat seinen Programmordner unter
   `/opt/llm-cross-compiler-framework`. `make` behält einen Container von vor der Umbenennung, solange er Targets oder
   Packs von dir in `/opt/llm-conversion-framework` enthält, und führt sie auf

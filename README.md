@@ -157,16 +157,19 @@ Conversions on a Windows host have not been verified yet (see [Known gaps](#know
 
 ### An installation from before the rename
 
-Up to release 3.0.0 the project was called LLM Conversion Framework and the installers used other folders. Such an
-installation stays as it is: the installers never change or delete it, they say that it is there and how to remove
-it.
+Up to release 3.0.0 the repository was called `llm_conversion_framework`, and the installers named their folders
+and the desktop shortcut after it (LLM Conversion Framework). Such an installation stays as it is: the installers
+never change or delete it, they say that it is there and how to remove it.
 
 - **Linux:** the new installation goes to `/opt/llm-cross-compiler-framework`, and `llm-framework` starts the new
-  one. If `/opt/llm-conversion-framework` exists, `install.sh` copies its settings (`configs/config.yml`) when the
-  new installation has none yet (never over an existing file), and names what it does not take over: builds, cache
-  and models (`output/`, `cache/`, `models/`) and targets or packs of yours under `targets/` and `community/`. Copy
-  what you still need, look at what is left (`ls -la /opt/llm-conversion-framework`) and remove the old folder
-  yourself: `sudo rm -rf /opt/llm-conversion-framework`.
+  one. If `/opt/llm-conversion-framework` exists, `install.sh` copies the files of yours from its `configs/` that the
+  new installation does not have yet (never over an existing file, never through a link): the settings
+  `config.yml`, a `framework.yml` you wrote, and `secrets.store`, the credential vault of a version before 3.0.0,
+  which the framework takes over into your personal folder at the first start (a vault it took over before brings
+  back nothing you deleted since). It names what it does not take over: builds, cache and models (`output/`,
+  `cache/`, `models/`) and targets or packs of yours under `targets/` and `community/`. Copy what you still need,
+  look at what is left (`ls -la /opt/llm-conversion-framework`) and remove the old folder yourself:
+  `sudo rm -rf /opt/llm-conversion-framework`.
 - **Windows:** the new installation goes to `C:\Program Files\LLM-Cross-Compiler-Framework` with the shortcut
   **LLM-Cross-Compiler-Framework**; the old shortcut **LLM-Conversion-Framework** still starts the old installation.
   `scripts\Uninstall-LLM-Cross-Compiler-Framework.bat` finds both installations, lists for each one what it
@@ -175,6 +178,11 @@ it.
   installation and stays as it is. Your API keys and tokens stay readable: the key of the credential vault is now
   kept under the keyring service `llm-cross-compiler-framework`. A key still under the old service
   `llm-conversion-framework` is read and copied to the new name on first use; the old entry is never removed.
+- **AI apps connected over MCP** (Claude Code, Claude Desktop, VS Code) start the Python of the installation they
+  were set up from. Before you remove the old installation, set them up again from the new one: `llm-cli mcp config`
+  run with the new installation's Python ([Quick start: AI clients over
+  MCP](#quick-start-ai-clients-over-mcp-claude-code-claude-desktop-vs-code)), or **Security > AI App Connections
+  (MCP)...**.
 - **The framework container:** an image you build now has its program folder at `/opt/llm-cross-compiler-framework`.
   `make` keeps a container built before the rename as long as it holds targets or packs of yours in
   `/opt/llm-conversion-framework`, and lists them ([docs/Container_Setup.md](docs/Container_Setup.md)).
