@@ -1161,15 +1161,22 @@ class BuilderTab(QWidget):
             return
         from orchestrator.Core.build_service import BuildService, BuildServiceError
         service = self._build_service() or BuildService(self.framework)
+        recipe = values["recipe"]
+        options = dict(local_paths=True, optimization=getattr(values["opt_lvl"], "value", "balanced"),
+                       priority=values.get("priority", PriorityLevel.NORMAL), output_dir=values["output_dir"],
+                       parallel_builds=True, description="Builder Tab Job")
         try:
-            # The one build path (BuildService.start_build), as for the CLI and AI callers: the service checks the
-            # request again and queues it; the build keeps running on the framework's background loop after this
-            # slot returns.
-            rid = service.start_build(self._service_request(values), local_paths=True,
-                                      optimization=getattr(values["opt_lvl"], "value", "balanced"),
-                                      priority=values.get("priority", PriorityLevel.NORMAL),
-                                      output_dir=values["output_dir"], parallel_builds=True,
-                                      description="Builder Tab Job").request_id
+            # The one build path (BuildService), as for the CLI and AI callers: the service checks the request again
+            # and queues it; the build keeps running on the framework's background loop after this slot returns.
+            if recipe is not None and self._recipe_as_pinned(values):
+                # Exactly the recipe: the recipe as installed now (refused when the community index revoked it or it
+                # changed since it filled the form), with its calibration dataset checked against its pin.
+                rid = service.start_recipe(recipe.id, dataset_path=values["dataset"], use_gpu=values["use_gpu"],
+                                           expect=self._recipe_expect(values), **options).request_id
+            else:
+                if recipe is not None:  # the person's own values at the recipe's commit: still never a revoked one
+                    service.installed_recipe(recipe.id)
+                rid = service.start_build(self._service_request(values), **options).request_id
             self._set_state("success")
             self._log(f"Job Submitted! ID: {rid}")
             self._track_build(rid)
@@ -1182,6 +1189,33 @@ class BuilderTab(QWidget):
         except Exception as e:
             self._set_state("fail")
             self._log(f"Submission Error: {e}")
+
+    def _recipe_pins(self, recipe):
+        """(format, board, quantization) a recipe builds with, normalized like the form (the board's default type)."""
+        caps = self._capabilities()
+        if caps is None:
+            return recipe.format, recipe.board, recipe.quantization
+        return caps.normalize(recipe.format, recipe.board, recipe.quantization)
+
+    def _recipe_as_pinned(self, values) -> bool:
+        """The form still holds exactly the recipe's values (target, format, board, quantization, importance
+        matrix), so Start Build builds the recipe itself."""
+        recipe = values["recipe"]
+        fmt, board, quant = self._recipe_pins(recipe)
+        same = [(values["target"], recipe.target.id), (values["target_fmt"].value, fmt), (values["board"], board),
+                (values["quant"], quant)]
+        return (all(str(a or "").casefold() == str(b or "").casefold() for a, b in same)
+                and bool(values["use_imatrix"]) == bool(recipe.options.use_imatrix))
+
+    @staticmethod
+    def _recipe_expect(values):
+        """The recipe values the person saw in the form, for BuildService.start_recipe's check that the installed
+        recipe has not changed since."""
+        from orchestrator.Core.build_service import BuildService
+        recipe = values["recipe"]
+        return {"model": recipe.model.repo, "revision": recipe.model.revision, "target": values["target"],
+                "format": values["target_fmt"].value, "board": values["board"], "quantization": values["quant"],
+                "recipe_sha256": BuildService.recipe_digest(recipe)}
 
     @staticmethod
     def _service_request(values):

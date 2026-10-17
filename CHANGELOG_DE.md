@@ -2299,6 +2299,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Ein Community-Rezept, das du in der GUI baust, wird beim Bauen geprüft, wie über MCP**: Der Knopf **Build** im
+  Community Hub und **Start Build** im Builder-Tab gehen über `BuildService.installed_recipe` und
+  `BuildService.start_recipe`, den Weg, den `start_recipe_build` nutzt. Ein Rezept, das der Community-Index
+  zurückgezogen hat, nachdem die Liste des Hubs angezeigt wurde, oder eines, das sich nicht mehr lesen lässt, wird
+  beim Klick und noch einmal bei Start Build abgelehnt; vorher stand nur der Build-Knopf im Weg, den die Liste
+  deaktiviert hatte, und die GUI las die `recipe.yml` selbst. Ein Build, der alle Werte des Rezepts behält, legt
+  jetzt seinen Kalibrierungsdatensatz fest: Eine andere Datei als die, deren sha256 das Rezept nennt, wird abgelehnt,
+  und die Build-Engine prüft die Kopie, die sie nutzt. Ein Rezept, das sich geändert hat, seit es das Formular
+  gefüllt hat, wird ebenfalls abgelehnt. Änderst du im Formular einen Wert des Rezepts, baust du weiter deine eigenen
+  Werte auf dem Commit des Rezepts, nach derselben Prüfung auf Rückzug.
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI

@@ -825,7 +825,10 @@ class BuildService:
                                          "add one with add_pack_from_index.")
         folder, prov = found
         try:
-            index = CommunityManager.read_cached_index(Path(cm.cache_dir), revocations=True)
+            # the revocations the Community Hub's list shows too: the manager's own trusted keys
+            cached = getattr(cm, "cached_index", None)
+            index = (cached(revocations=True) if callable(cached)
+                     else CommunityManager.read_cached_index(Path(cm.cache_dir), revocations=True))
         except Exception:  # noqa: BLE001 - no cached index: no revocations known
             index = None
         trust, reason = trust_of_folder(folder, index)
@@ -891,9 +894,11 @@ class BuildService:
 
     def start_recipe(self, recipe_id: str, *, dataset_path: Optional[str] = None, use_gpu: bool = False,
                      owner: str = "", local_paths: bool = False, disk_reservation: str = "",
-                     expect: Optional[Dict[str, Any]] = None) -> BuildHandle:
-        """Builds an installed recipe exactly as pinned, through start_build. `expect`: the request values the
-        person was shown (model, revision, target, format, board, quantization); a recipe changed since is refused."""
+                     expect: Optional[Dict[str, Any]] = None, **build_options: Any) -> BuildHandle:
+        """Builds an installed recipe exactly as pinned, through start_build: the use-time revocation check, the
+        calibration-dataset pin. `expect`: the request values the person was shown (model, revision, target, format,
+        board, quantization, recipe_sha256); a recipe changed since is refused. `build_options`: start_build's
+        optimization, priority, output_dir, parallel_builds and description (the Builder tab's)."""
         request, recipe, _prov = self.recipe_request(recipe_id, dataset_path, use_gpu)
         validated, _ = self._validated(request, local_paths)
         if expect is not None:
@@ -911,7 +916,7 @@ class BuildService:
         # with exactly the pinned sha256), so a file swapped after this check is never used
         named = recipe.options.dataset
         return self.start_build(request, local_paths=local_paths, owner=owner, disk_reservation=disk_reservation,
-                                dataset_sha256=named.sha256 if named is not None else None)
+                                dataset_sha256=named.sha256 if named is not None else None, **build_options)
 
     # --- identical builds (DECISIONS, eighth round, N11) -------------------------------------------------------
 
