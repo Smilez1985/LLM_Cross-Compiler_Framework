@@ -613,6 +613,21 @@ class TestFailOpen:
         assert prod.flush()
         assert [s.row_id for s in got] == [-1] and got[0].entry.kind == "ai_action"
 
+    def test_a_row_the_feed_refuses_at_saving_still_reaches_the_listeners(self, tmp_path):
+        """Review b0 (w6-b0-v): the feed redacts every string once more when it saves a row. A connection name the
+        person gave that looks like a key ("mcp:sk-...") became "mcp:sk-REDACTED", which is no caller id, and saving
+        raised a validation error instead of FeedWriteError: write_entry did not fail open, so the listeners never
+        got the row (the module promises row id -1). Now the row comes back unsaved, and nothing raises."""
+        prod, store = producer(tmp_path)
+        got = []
+        prod.add_listener(got.append)
+        caller = "mcp:sk-" + "a1b2c3d4e5" * 2 + "abcdefghi"
+        prod.on_registry_event("call_done", call_done(actor=caller, owner=caller))
+        prod.on_registry_event("call_done", call_done())
+        assert prod.flush()
+        assert [s.row_id for s in got][0] == -1 and got[0].entry.sender.caller == caller
+        assert got[1].row_id > 0 and [e.sender.caller for e in rows(store)] == ["mcp:laptop"]
+
     def test_without_a_feed_only_the_listeners_get_rows(self):
         prod = ActivityProducer(None, program="gui")
         got = []
