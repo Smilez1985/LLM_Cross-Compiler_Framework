@@ -792,13 +792,21 @@ class CommunityManager:
         return dict(data)
 
     def _keep_damaged(self, path: Path) -> None:
-        """A copy of a damaged key store next to it (authors.json.bad; an older, different copy is kept too)."""
+        """A copy of a damaged key store next to it (authors.json.bad; an older, different copy is kept too, as
+        authors.json.<time>.bad). The same damage is kept once: an install reads the store twice (the summary, then
+        the pin), and a copy named by the time alone was made again when the second read fell into the next second."""
         bad = path.with_name(path.name + ".bad")
         try:
             if bad.exists():
-                if bad.read_bytes() == path.read_bytes():
+                damage = path.read_bytes()
+                if any(old.read_bytes() == damage for old in path.parent.glob(f"{path.name}*.bad") if old.is_file()):
                     return
-                bad = path.with_name(f"{path.name}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.bad")
+                stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+                bad = path.with_name(f"{path.name}.{stamp}.bad")
+                count = 1
+                while bad.exists():   # another damage in the same second: never overwrite a kept copy
+                    count += 1
+                    bad = path.with_name(f"{path.name}.{stamp}-{count}.bad")
             shutil.copy2(path, bad)
             self.logger.warning(f"The store of pinned author keys is damaged; a copy is kept as {bad.name}.")
         except OSError as e:

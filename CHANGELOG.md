@@ -1584,6 +1584,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **A board whose home folder has a long path can be deployed to**: the device runtime refused a board user's home
+  folder longer than 200 characters (and its staging folder and models below 400), so a home on a deep mount point
+  stopped the deployment with "not a plain absolute path". The characters are checked as before; the length is now
+  only a sanity bound far below the system limit (1024 characters for a folder, 1536 for a file in it, one place in
+  `runtime/device/launcher.py`). The device tests also pass under a long temporary folder (as on the Windows
+  runner).
+- **A damaged store of pinned author keys is copied once, not twice**: an install reads the store twice (for its
+  summary, then to pin the key), and the second copy of the same damage was made again when that read fell into the
+  next second, because the copy was named by the time alone. An identical copy is now kept once, and a different
+  damage in the same second gets its own name instead of replacing a kept copy.
 - **Revoking an MCP token in the GUI also removes its standing approvals, and a caller's new own section keeps the
   tools asked in the framework only**: the GUI's Revoke deleted the token but left its standing approvals (grants of
   `mcp:NAME`) in the permissions file, listed until revoked one by one (they no longer applied); the token, its

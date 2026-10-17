@@ -68,6 +68,49 @@ class TestDamagedAuthorKeys:
         copies = sorted(p.name for p in world.cm.cache_dir.glob("authors.json*.bad"))
         assert len(copies) == 2 and (world.cm.cache_dir / "authors.json.bad").read_text() == "older damage"
 
+    @staticmethod
+    def clock(monkeypatch, step):
+        """community_manager's clock: each call `step` seconds after the previous one (0: the same second)."""
+        from datetime import datetime, timedelta, timezone
+
+        from orchestrator.Core import community_manager
+        start = datetime(2026, 10, 17, 1, 2, 3, tzinfo=timezone.utc)
+        calls = []
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                calls.append(tz)
+                return start + timedelta(seconds=step * (len(calls) - 1))
+        monkeypatch.setattr(community_manager, "datetime", Clock)
+        return calls
+
+    def test_the_same_damage_is_kept_once_when_the_second_read_falls_into_the_next_second(self, world, tmp_path,
+                                                                                            monkeypatch):
+        """Root cause of the flaky test above: an install reads the damaged store twice (its summary, then the pin);
+        the copy was named by the time alone, so a second read in the next second kept the same damage again."""
+        calls = self.clock(monkeypatch, step=1)
+        authors = world.cm.cache_dir / "authors.json"
+        authors.parent.mkdir(parents=True, exist_ok=True)
+        (world.cm.cache_dir / "authors.json.bad").write_text("older damage", encoding="utf-8")
+        authors.write_text("new damage", encoding="utf-8")
+        world.cm.finish_install(self.install_signed(world, tmp_path))
+        copies = {p.name: p.read_text(encoding="utf-8") for p in world.cm.cache_dir.glob("authors.json*.bad")}
+        assert sorted(copies.values()) == ["new damage", "older damage"], copies
+        assert copies["authors.json.20261017T010203Z.bad"] == "new damage" and len(calls) == 1
+        assert authors.read_text(encoding="utf-8") == "new damage", "the damaged store itself is never replaced"
+
+    def test_a_different_damage_in_the_same_second_does_not_overwrite_a_kept_copy(self, world, monkeypatch):
+        self.clock(monkeypatch, step=0)
+        authors = world.cm.cache_dir / "authors.json"
+        authors.parent.mkdir(parents=True, exist_ok=True)
+        for damage in ("first", "second", "third", "second"):
+            authors.write_text(damage, encoding="utf-8")
+            world.cm._keep_damaged(authors)
+        copies = {p.name: p.read_text(encoding="utf-8") for p in world.cm.cache_dir.glob("authors.json*.bad")}
+        assert copies == {"authors.json.bad": "first", "authors.json.20261017T010203Z.bad": "second",
+                          "authors.json.20261017T010203Z-2.bad": "third"}
+
     def test_a_missing_store_still_pins_on_first_use(self, world, tmp_path):
         world.cm.finish_install(self.install_signed(world, tmp_path))
         assert set(json.loads((world.cm.cache_dir / "authors.json").read_text(encoding="utf-8"))) == {"alice"}

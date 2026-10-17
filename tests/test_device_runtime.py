@@ -1146,7 +1146,7 @@ class TestOlderBuildsOnTheBoard:
         board_builds(dev, self.A, self.B, current=self.B)
         TestCli.fake_ssh(None, monkeypatch, dev)
         from rich.console import Console
-        monkeypatch.setattr(cli_module, "console", Console(width=400, color_system=None))  # one line per row
+        monkeypatch.setattr(cli_module, "console", Console(width=1000, color_system=None))  # one row per line, also for a long temp path
         res = invoke_plain("device", "runtime", "prune", "ZERO 3W", "--on-device")
         assert res.code == 0 and f"{dev.root}/{self.A}" in res.out and self.B not in res.out
         assert "Nothing was deleted" in res.out and "kept to go back" not in res.out
@@ -1190,6 +1190,28 @@ class TestFacts:
                 read_facts(ScriptedShell(bad))
         missing = read_facts(ScriptedShell(good + "missing=sha256sum\nmissing=$(x)\n"))
         assert missing.missing == ("sha256sum",)
+
+    def test_a_deep_home_folder_is_not_refused_for_its_length(self):
+        """The length of a device path is only a sanity bound far below PATH_MAX: a home folder of 300 characters
+        (a deep mount point, or a long test folder) and a model below it are plain paths; the characters are still
+        checked, and a path past the bound is still refused (the 200-character limit refused real folders)."""
+        from orchestrator.runtime.device import launcher
+        from orchestrator.runtime.device.remote import model_sha256
+        deep = "/srv/" + "/".join(["storage-pool-0123456789"] * 12) + "/dietpi"
+        assert 290 < len(deep) < launcher.DEVICE_FOLDER_MAX
+        facts = read_facts(ScriptedShell(f"uid=1000\nhome={deep}\nmachine=aarch64\ninit=systemd\nunit=no\n"))
+        assert facts.home == deep and facts.root.startswith(deep + "/")
+        model = deep + "/models/" + "q" * 200 + ".gguf"
+        unit = launcher.render_systemd_unit(user="dietpi", home=deep, model=model, port=8080)
+        assert model in unit
+        assert model_sha256(ScriptedShell("", status=1), model) is None, "a long model path is checked on the board"
+        too_long = "/" + "d" * (launcher.DEVICE_FOLDER_MAX + 1)
+        for bad in (too_long, deep + "/a b"):
+            with pytest.raises(RemoteError, match="home folder"):
+                read_facts(ScriptedShell(f"uid=1000\nhome={bad}\nmachine=aarch64\n"))
+        with pytest.raises(launcher.LauncherError, match="model path"):
+            launcher.render_systemd_unit(user="dietpi", home=deep, model="/" + "m" * (launcher.DEVICE_PATH_MAX + 1),
+                                         port=8080)
 
     def test_missing_tools_stop_the_deployment(self, tmp_path):
         shell = ScriptedShell("uid=1000\nhome=/home/u\nmachine=aarch64\ninit=other\nunit=no\nmissing=tar\n")

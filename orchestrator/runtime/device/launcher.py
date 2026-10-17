@@ -36,8 +36,13 @@ INSTALL_REL = ".local/share/llm-framework/llama.cpp"
 KEY_REL = ".config/llm-framework/llama-server.key"
 STATE_REL = ".local/state/llm-framework"
 
+# Absolute paths on the device carry plain characters only (no shell meaning). Their length is only a sanity bound,
+# far below PATH_MAX (4096 on Linux), so a deep home folder is never refused for its length: a folder (the home, the
+# install folder, a staging folder) up to DEVICE_FOLDER_MAX characters, a file in it (a model) up to DEVICE_PATH_MAX.
+DEVICE_FOLDER_MAX = 1024
+DEVICE_PATH_MAX = DEVICE_FOLDER_MAX + 512
 _RE_OPTION = re.compile(r"^-{1,2}[a-z][a-z0-9-]{0,40}$", re.ASCII | re.IGNORECASE)
-_RE_PATH = re.compile(r"^/[A-Za-z0-9._+/-]{1,400}$", re.ASCII)
+_RE_PATH = re.compile(r"^/[A-Za-z0-9._+/-]{1,%d}$" % DEVICE_PATH_MAX, re.ASCII)
 _RE_USER = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.ASCII | re.IGNORECASE)
 _KINDS = ("uint", "sint", "hex", "bit", "layers", "switch", "loadmode", "name", "cachetype")
 _RE_CACHE_TYPE = re.compile(r"^[a-z0-9_]{1,16}$", re.ASCII)
