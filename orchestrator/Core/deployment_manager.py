@@ -46,8 +46,6 @@ MODEL_SUFFIXES = MODEL_FILE_SUFFIXES
 DIGEST_REFERENCE = re.compile(r"^[a-z0-9][a-z0-9._/:-]{0,254}@sha256:[0-9a-f]{64}$", re.ASCII)
 REMOTE_OUTPUT_LINES = 100     # lines of the device's output kept for the result (the rest is in the log)
 REMOTE_LINE_CHARS = 500
-# A board's address or host name (192.168.1.50, myboard.local, an IPv6 address); the person enters what they know.
-_HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45})$", re.ASCII)
 # A deploy whose network drops (a Wi-Fi board) waits this long for the board to answer again (N5), trying every
 # WAIT_INTERVAL seconds, and continues at most MAX_RESUMES times.
 DEPLOY_WAIT_SECONDS = 300
@@ -632,10 +630,10 @@ class DeploymentManager:
         again with the same host key check and continues: the upload resumes where it stopped once the sha256 of what
         arrived matches, and deploy.sh, which runs on the board on its own, is started once and never again.
         """
-        from orchestrator.runtime.remote_probe import valid_host
+        from orchestrator.remote.address import valid_host
         stop = cancelled or (lambda: False)
         # A leading '-' would be parsed by ssh/scp as an option (e.g. -oProxyCommand=...).
-        if not isinstance(host, str) or not _HOST.fullmatch(host) or not valid_host(host):
+        if not valid_host(host):
             return DeployResult(False, reason=f"Security/Format Error: Invalid address or host name: "
                                               f"{str(host)[:64]!r} (an IPv6 address is written without brackets, "
                                               "e.g. fe80::1)")

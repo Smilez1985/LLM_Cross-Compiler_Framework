@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from orchestrator.remote.address import Endpoint, host_shaped, valid_port, valid_user
 from orchestrator.utils.file_lock import file_lock
 
 DEVICES_FILE = "devices.json"
@@ -39,8 +40,6 @@ MAX_DEVICES = 200
 
 DEVICE_ID_RE = re.compile(r"^[0-9a-f]{16}$", re.ASCII)
 _FINGERPRINT = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$", re.ASCII)
-_HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45})$", re.ASCII)
-_USER = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.ASCII | re.IGNORECASE)
 _KEY_TYPE = re.compile(r"^[a-z0-9@.-]{3,64}$", re.ASCII)
 _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
 # What a deploy saw on the board, kept with its last deploy (note_board) until the next deploy looks again, and what the
@@ -81,9 +80,12 @@ class TrustedDevice:
     trusted_via: str
 
     @property
+    def endpoint(self) -> Endpoint:
+        return Endpoint(self.host, self.port)
+
+    @property
     def address(self) -> str:
-        return self.host if self.port == 22 else (f"[{self.host}]:{self.port}" if ":" in self.host
-                                                  else f"{self.host}:{self.port}")
+        return self.endpoint.store_form
 
     def check(self) -> "TrustedDevice":
         from orchestrator.runtime.profile import device_id_for_host_key
@@ -91,11 +93,11 @@ class TrustedDevice:
             raise DeviceStoreError("a device id is 16 lower-case hex characters")
         if not _FINGERPRINT.fullmatch(self.fingerprint) or device_id_for_host_key(self.fingerprint) != self.device_id:
             raise DeviceStoreError("the fingerprint does not belong to the device id")
-        if not _HOST.fullmatch(self.host) or self.host.startswith("-"):
+        if not host_shaped(self.host):
             raise DeviceStoreError("the host is not a host name or an IP address")
-        if not isinstance(self.port, int) or isinstance(self.port, bool) or not 1 <= self.port <= 65535:
+        if not valid_port(self.port):
             raise DeviceStoreError("the port is not between 1 and 65535")
-        if not _USER.fullmatch(self.user):
+        if not valid_user(self.user, allow_root=True):
             raise DeviceStoreError("the user is not an account name")
         if not _KEY_TYPE.fullmatch(self.key_type):
             raise DeviceStoreError("the key type is not an SSH key type")
