@@ -110,7 +110,6 @@ DELETION_SITES = {
     ("orchestrator/utils/download.py", "PinnedDownloader.fetch"): TEMP,
     ("orchestrator/utils/download.py", "PinnedDownloader.verify"): TEMP,
     ("orchestrator/utils/network.py", "NetworkGuard.download_file"): TEMP,
-    ("orchestrator/utils/validation.py", "validate_directory_writable"): TEMP,
     ("orchestrator/rag/edge_store.py", "EdgeStorage.create"): TEMP,   # the half-made shard of a create that failed
     # old records
     ("orchestrator/Core/build_records.py", "prune"): RECORDS,
