@@ -209,6 +209,18 @@ def _allow_sdk_env_headers(config_path: Optional[str]) -> Any:
         return False
 
 
+def model_format_from_string(format_str: str) -> ModelFormat:
+    """Convert string to ModelFormat enum (by name or value, any letter case; GGUF for an unknown one). Kept for its
+    callers: `build start` lets BuildService.start_build normalize the format now."""
+    try:
+        return ModelFormat[format_str.upper()]
+    except KeyError:
+        try:
+            return ModelFormat(format_str.lower())
+        except ValueError:
+            return ModelFormat.GGUF
+
+
 # ============================================================================
 # MAIN CLI GROUP
 # ============================================================================

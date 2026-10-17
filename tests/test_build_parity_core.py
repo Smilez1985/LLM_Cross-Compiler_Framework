@@ -665,6 +665,16 @@ class TestOnePath:
                     offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")
         assert offenders == []
 
+    def test_the_cli_keeps_model_format_from_string(self):
+        """`build start` no longer needs it (the service normalizes the format), but a public helper is never removed
+        without the maintainer's word (review of c3-build-path): it stays, with its behaviour."""
+        from orchestrator import cli
+        from orchestrator.Core.build_formats import ModelFormat
+        assert cli.model_format_from_string("GGUF") is ModelFormat.GGUF
+        assert cli.model_format_from_string("rkllm") is ModelFormat.RKLLM
+        assert cli.model_format_from_string("Rknn") is ModelFormat.RKNN
+        assert cli.model_format_from_string("no-such-format") is ModelFormat.GGUF, "unknown names fall back to GGUF"
+
     def test_recipe_yml_has_one_reader(self):
         """community_manager.read_recipe is the only parser of recipe.yml (the install check, the listings and
         BuildService.installed_recipe, which the Community Hub's Build button and start_recipe_build use)."""
