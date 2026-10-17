@@ -52,6 +52,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from orchestrator.runtime import container_server as cs
 from orchestrator.runtime.llama_server import PREBUILT_LABEL, LocalRuntimeError
+from orchestrator.utils.next_steps import WithSteps
 
 MODES = ("bare-metal", "docker")
 # Licences a model may be downloaded under without the person's own yes at a terminal when they chose an unattended run
@@ -63,7 +64,7 @@ PERSON_ACTORS = ("cli", "gui")
 IMAGE_LOG = "ditto-image.log"
 
 
-class RuntimeModeError(RuntimeError):
+class RuntimeModeError(WithSteps, RuntimeError):
     """A mode cannot be made here (the message says why and what to do; safe to show)."""
 
 

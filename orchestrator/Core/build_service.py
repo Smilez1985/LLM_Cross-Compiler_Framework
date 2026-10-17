@@ -31,6 +31,7 @@ from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
 from orchestrator.utils.any_path import is_absolute_anywhere, last_part
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.next_steps import WithSteps
 
 MODEL_NEXT = ("Give a Hugging Face repo id (owner/name), or a local model file or a folder with config.json as "
               "<label>:<relative path>.")
@@ -68,7 +69,7 @@ def proposal_fingerprint(proposal: Any) -> str:
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode("utf-8", "surrogatepass")).hexdigest()
 
 
-class BuildServiceError(ValueError):
+class BuildServiceError(WithSteps, ValueError):
     """A request the service refuses, with a message meant for the user (or the calling model), a reason code
     (the tool registry's codes, e.g. unknown_id, not_supported), the next step and, for an input refusal, the
     argument it is about (Ditto's loop tells a fix of another argument from a repeat by it)."""

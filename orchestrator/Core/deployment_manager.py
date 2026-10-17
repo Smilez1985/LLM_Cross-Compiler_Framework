@@ -33,6 +33,7 @@ from orchestrator.utils.logging import get_logger
 
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
 from orchestrator.utils import ssh_trust
+from orchestrator.utils.next_steps import WithSteps
 
 # A local image name: a package takes it only once it was built on this computer (image_problem); no framework image
 # is published or pulled.
@@ -92,7 +93,7 @@ def old_sidecar_state(answer: str) -> str:
     return ""
 
 
-class DeployError(ValueError):
+class DeployError(WithSteps, ValueError):
     """A package or a deployment that cannot be made; the message says why (for the person or the calling AI), `code`
     is a reason code of the tool registry and `next` the step that helps."""
 

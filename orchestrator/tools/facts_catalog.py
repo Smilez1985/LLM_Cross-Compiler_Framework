@@ -49,11 +49,14 @@ class BlockerSpec:
     """A hard fact that refuses a call before any question. `reason_code` is the code the refusal carries; `also`
     lists the other reason codes a site may use for the same fact (today's offline refusals of packs and crawls say
     not_supported, a build's needs_person). `resolved_by`: a registered tool the AI may call to clear it (then the
-    reason code is missing_information). `person_action`: the ui_text key of what the person can do."""
+    reason code is missing_information). `person_action`: the ui_text key of what the person can do. `step`: the
+    same as a next step of the catalogue (orchestrator/utils/next_steps, wave 6): blocked() puts it on the refusal,
+    so the GUI shows the place with [Open] and the AI gets the tool or the place for its channel."""
     reason_code: str
     resolved_by: Optional[str] = None
     person_action: str = ""
     also: Tuple[str, ...] = ()
+    step: str = ""
 
 
 @dataclass(frozen=True)
@@ -73,13 +76,16 @@ class WarningSpec:
 
 _PAIR = "action.pair_device"
 BLOCKERS: Dict[str, BlockerSpec] = {
-    "disk_full": BlockerSpec("insufficient_resources", person_action="action.free_disk"),
+    "disk_full": BlockerSpec("insufficient_resources", person_action="action.free_disk", step="images.free"),
     # the knowledge snapshot taken before a change does not fit (eighth round, answer 2): no snapshot, no change
-    "snapshot_no_room": BlockerSpec("insufficient_resources", person_action="action.free_snapshots"),
-    "offline_mode": BlockerSpec("needs_person", person_action="action.offline_off", also=("not_supported",)),
-    "sandbox_off": BlockerSpec("needs_person", person_action="action.sandbox_on"),
-    "knowledge_off": BlockerSpec("not_supported", person_action="action.knowledge_on", also=("needs_person",)),
-    "target_revoked": BlockerSpec("not_supported", person_action="action.remove_target"),
+    "snapshot_no_room": BlockerSpec("insufficient_resources", person_action="action.free_snapshots",
+                                    step="snapshots.free"),
+    "offline_mode": BlockerSpec("needs_person", person_action="action.offline_off", also=("not_supported",),
+                                step="settings.offline_off"),
+    "sandbox_off": BlockerSpec("needs_person", person_action="action.sandbox_on", step="settings.sandbox_on"),
+    "knowledge_off": BlockerSpec("not_supported", person_action="action.knowledge_on", also=("needs_person",),
+                                 step="settings.knowledge_on"),
+    "target_revoked": BlockerSpec("not_supported", person_action="action.remove_target", step="hub.open"),
     "pack_revoked": BlockerSpec("not_supported"),
     "pack_rejected": BlockerSpec("not_supported"),
     "no_convertible_weights": BlockerSpec("not_supported"),
@@ -87,8 +93,9 @@ BLOCKERS: Dict[str, BlockerSpec] = {
     "model_unpinned": BlockerSpec("not_supported"),
     "unsafe_filename": BlockerSpec("not_supported"),
     "size_unknown": BlockerSpec("not_supported"),
-    "image_problem": BlockerSpec("not_supported", person_action="action.pin_image"),
-    "gated_no_access": BlockerSpec("needs_person", person_action="action.hf_access", also=("permission_denied",)),
+    "image_problem": BlockerSpec("not_supported", person_action="action.pin_image", step="settings.pin_image"),
+    "gated_no_access": BlockerSpec("needs_person", person_action="action.hf_access", also=("permission_denied",),
+                                   step="hf.access"),
     "unknown_repository": BlockerSpec("unknown_id", also=("invalid_value",)),
     "pack_unknown": BlockerSpec("unknown_id"),
     "artifact_unknown": BlockerSpec("unknown_id"),
@@ -99,36 +106,41 @@ BLOCKERS: Dict[str, BlockerSpec] = {
     "url_not_public": BlockerSpec("invalid_value"),
     "crawl_caps": BlockerSpec("invalid_value"),
     "setting_invalid": BlockerSpec("invalid_value"),
-    "index_stale": BlockerSpec("failed", person_action="action.update_index"),
-    "ingest_notice_unread": BlockerSpec("needs_person", person_action="action.ingest_notice"),
+    "index_stale": BlockerSpec("failed", person_action="action.update_index", step="hub.open"),
+    "ingest_notice_unread": BlockerSpec("needs_person", person_action="action.ingest_notice", step="crawl.notice"),
     "crawl_quota": BlockerSpec("limit_reached"),
     "crawl_running": BlockerSpec("limit_reached"),
     "device_busy": BlockerSpec("limit_reached"),
     "artifact_busy": BlockerSpec("limit_reached"),
-    "device_not_trusted": BlockerSpec("needs_person", person_action=_PAIR),
-    "host_key_unknown": BlockerSpec("needs_person", person_action=_PAIR),
+    "device_not_trusted": BlockerSpec("needs_person", person_action=_PAIR, step="board.trust"),
+    "host_key_unknown": BlockerSpec("needs_person", person_action=_PAIR, step="board.trust"),
     # why a board cannot be reached over SSH (eighth round N6; orchestrator/runtime/device/reasons.py)
-    "device_host_key_changed": BlockerSpec("needs_person", person_action="action.check_device"),
-    "device_host_down": BlockerSpec("hardware_unavailable", person_action="action.device_on"),
-    "device_port_closed": BlockerSpec("needs_person", person_action="action.device_ssh"),
-    "device_auth_failed": BlockerSpec("needs_person", person_action="action.device_login"),
-    "toolchain_missing": BlockerSpec("needs_person", person_action="action.install_tools"),
-    "runtime_not_built": BlockerSpec("missing_information", resolved_by="build_local_runtime"),
+    "device_host_key_changed": BlockerSpec("needs_person", person_action="action.check_device",
+                                           step="board.forget_key"),
+    "device_host_down": BlockerSpec("hardware_unavailable", person_action="action.device_on", step="board.power_on"),
+    "device_port_closed": BlockerSpec("needs_person", person_action="action.device_ssh", step="board.ssh_enable"),
+    "device_auth_failed": BlockerSpec("needs_person", person_action="action.device_login", step="board.login"),
+    "toolchain_missing": BlockerSpec("needs_person", person_action="action.install_tools",
+                                     step="runtime.install_tools"),
+    "runtime_not_built": BlockerSpec("missing_information", resolved_by="build_local_runtime",
+                                     step="runtime.install"),
     # The catalog model of a tier is fetched by build_local_runtime(model_tier=...) (the design named
     # download_hf_file; the local runtime fetches its pinned catalog models itself).
-    "model_not_downloaded": BlockerSpec("missing_information", resolved_by="build_local_runtime"),
-    "no_device_runtime": BlockerSpec("missing_information", resolved_by="deploy_device_runtime"),
+    "model_not_downloaded": BlockerSpec("missing_information", resolved_by="build_local_runtime",
+                                        step="models.download"),
+    "no_device_runtime": BlockerSpec("missing_information", resolved_by="deploy_device_runtime",
+                                     step="board.runtime_deploy"),
     "no_device_model": BlockerSpec("missing_information", resolved_by="deploy_to_device"),
     # NEW: the deploy settings name no model for a board benchmark; only the person sets them.
-    "device_model_unset": BlockerSpec("needs_person", person_action="action.device_settings"),
+    "device_model_unset": BlockerSpec("needs_person", person_action="action.device_settings", step="board.settings"),
     "setting_loosens": BlockerSpec("permission_denied"),
-    "no_signing_key": BlockerSpec("needs_person", person_action="action.signing_key"),
+    "no_signing_key": BlockerSpec("needs_person", person_action="action.signing_key", step="keys.show"),
     "commit_required": BlockerSpec("needs_person", person_action="action.commit_required"),
-    "trash_not_yours": BlockerSpec("needs_person", person_action="action.restore_yourself"),
-    "file_outside_folders": BlockerSpec("needs_person", person_action="action.add_folder"),
+    "trash_not_yours": BlockerSpec("needs_person", person_action="action.restore_yourself", step="trash.restore"),
+    "file_outside_folders": BlockerSpec("needs_person", person_action="action.add_folder", step="folders.add"),
     "file_changed": BlockerSpec("unknown_id"),
     # the GUI tool when no framework window of the person is open (W4): only the person opens it
-    "gui_not_open": BlockerSpec("needs_person", person_action="action.open_window"),
+    "gui_not_open": BlockerSpec("needs_person", person_action="action.open_window", step="window.open"),
 }
 
 
@@ -400,7 +412,7 @@ def blocked(code: str, message: str, next: str = "", *, reason: str = "", field:
         next = (next + " " if next else "") + f"Call {spec.resolved_by} first."
     error = ToolError(message, code=reason or spec.reason_code, next=next, field=field, quoted=quoted,
                       blocker=code, person_action=person_action_text(code, "en"),
-                      details=dict(details) if details is not None else None)
+                      details=dict(details) if details is not None else None, steps=blocker_steps(code))
     return error
 
 
@@ -411,7 +423,16 @@ def with_blocker(error: Any, code: str) -> Any:
         raise ValueError(f"unknown blocker code {code!r}")
     error.blocker = code
     error.person_action = person_action_text(code, "en")
+    if blocker_steps(code) and not getattr(error, "steps", ()):
+        from orchestrator.utils.next_steps import as_next_steps
+        error.steps = as_next_steps(blocker_steps(code))
     return error
+
+
+def blocker_steps(code: str) -> Tuple[str, ...]:
+    """The next step of a blocker as catalogue ids (empty when nothing but waiting helps)."""
+    spec = BLOCKERS.get(code)
+    return (spec.step,) if spec is not None and spec.step else ()
 
 
 def warnings_of(facts: Any) -> Tuple[List[CallWarning], List[CallWarning]]:
@@ -457,5 +478,5 @@ def person_words(code: str, numbers: Mapping[str, Any], lang: Optional[str] = No
 
 __all__ = ["BLOCKERS", "BlockerSpec", "DELEGATION_RULES_VERSION", "LARGE_DOWNLOAD_BYTES",
            "MANY_PAGES", "NUMBER_KEYS", "PERSON_WORDS", "SECURITY_LEGAL", "TOOL_FACTS", "ToolFacts", "UNKNOWN_FACTS",
-           "WARNINGS", "WarningSpec", "blocked", "facts_unknown", "gb_number", "person_action_text", "person_words",
-           "size_class", "warn", "warnings_of", "with_blocker"]
+           "WARNINGS", "WarningSpec", "blocked", "blocker_steps", "facts_unknown", "gb_number", "person_action_text",
+           "person_words", "size_class", "warn", "warnings_of", "with_blocker"]

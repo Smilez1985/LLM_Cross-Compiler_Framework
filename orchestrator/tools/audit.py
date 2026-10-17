@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from orchestrator.utils.helpers import redact_secrets
+from orchestrator.utils.next_steps import WithSteps
 
 _SCHEMA = (
     """
@@ -118,7 +119,7 @@ def confirm_channel_ok(value: Any) -> bool:
     return isinstance(value, str) and bool(_CHANNEL.fullmatch(value))
 
 
-class AuditKeyMismatch(RuntimeError):
+class AuditKeyMismatch(WithSteps, RuntimeError):
     """The log is kept with another key than this process has; its entries could not be verified."""
 
 

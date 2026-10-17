@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from orchestrator.runtime.profile import (DEVICE_ID, HardwareProfile, ProfileError, ProfileStore, default_state_dir,
                                           new_device_id, parse_profile, read_profile)
+from orchestrator.utils.next_steps import WithSteps
 
 PROBE_TIMEOUT = 120.0            # seconds for a whole local probe
 MAX_PROBE_FILE = 256 * 1024      # an imported probe file (a real one is a few KiB)
@@ -38,7 +39,7 @@ IMPORT_NEXT = ("Import the board's probe with 'llm-cli scan --import FILE' or in
                "probe_local_hardware when the board is this computer.")
 
 
-class ProbeError(ValueError):
+class ProbeError(WithSteps, ValueError):
     """A refusal or failure about a probe, with a reason code and the next step (the tool registry's shape)."""
 
     def __init__(self, message: str, code: str = "failed", next: str = "", detail: str = ""):

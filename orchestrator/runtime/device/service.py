@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from orchestrator.runtime.device.trusted import TrustedDevice
+from orchestrator.utils.next_steps import WithSteps
 
 
-class DeviceRuntimeError(RuntimeError):
+class DeviceRuntimeError(WithSteps, RuntimeError):
     """A device step that cannot be done; `code` is a tool reason code, `next` the step that helps, `reason` one of the
     SSH reason codes of orchestrator/runtime/device/reasons.py when the board could not be reached or logged in to.
     `external_text` holds what the device answered (its stderr, a check's output): never part of the message,

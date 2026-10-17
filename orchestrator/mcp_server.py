@@ -487,7 +487,8 @@ def error_text(tool: str, error: ToolError, notes: bool = True) -> str:
         return error.text() + suffix
     text = error.message[:-len(quoted)] + wrap_untrusted(quoted, source=f"tool error:{tool}",
                                                          max_len=len(quoted) + 1)
-    return (f"{text} Next: {error.next}" if error.next else text) + suffix
+    following = error.next_text() if hasattr(error, "next_text") else error.next
+    return (f"{text} Next: {following}" if following else text) + suffix
 
 
 def _audited(error: Exception) -> Exception:

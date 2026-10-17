@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from orchestrator.tools.grants import Grant
 from orchestrator.tools.signing import SIGNATURE_FIELD, RevisionAnchor, SignatureError, sign, verify
+from orchestrator.utils.next_steps import WithSteps
 
 
 class ToolTier(str, Enum):
@@ -362,7 +363,7 @@ def reset_changes(policy: ToolPolicy, caller: Optional[str] = None) -> List[str]
     return policy_changes(policy, after)
 
 
-class PolicyStoreError(Exception):
+class PolicyStoreError(WithSteps, Exception):
     """The permissions could not be saved; the message is safe to show."""
 
 

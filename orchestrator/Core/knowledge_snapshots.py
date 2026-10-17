@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Iterable, List, Optional, Tuple
 
 from orchestrator.rag.errors import KnowledgeBaseError
+from orchestrator.utils.next_steps import WithSteps
 
 FOLDER = "knowledge_snapshots"
 SUFFIX = ".jsonl.gz"
@@ -147,7 +148,7 @@ class SnapshotRoom:
                 f"{size_text(self.folder_bytes)}")
 
 
-class SnapshotNoRoom(KnowledgeBaseError):
+class SnapshotNoRoom(WithSteps, KnowledgeBaseError):
     """The snapshot taken before a change does not fit on the disk: no snapshot was made and the change does not run
     (there is no "continue anyway"). Blocker `snapshot_no_room`; the message names no path."""
     blocker = "snapshot_no_room"

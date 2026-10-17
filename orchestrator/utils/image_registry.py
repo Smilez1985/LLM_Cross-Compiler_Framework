@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from orchestrator.llm.task_prompts import split_image
+from orchestrator.utils.next_steps import WithSteps
 
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 TIMEOUT = 15.0
@@ -37,7 +38,7 @@ _ARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm6
 PIN_NEXT = "Give the image with its digest (image@sha256:...), which needs no lookup."
 
 
-class ImageLookupError(ValueError):
+class ImageLookupError(WithSteps, ValueError):
     """The image could not be looked up; `code` is the reason (missing_information, needs_person, invalid_value)."""
 
     def __init__(self, message: str, code: str = "missing_information", next: str = PIN_NEXT):

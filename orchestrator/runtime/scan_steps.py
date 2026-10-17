@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
+from orchestrator.utils.next_steps import WithSteps
+
 LABEL_HINT = "1 to 64 printable characters"
 
 
@@ -105,7 +107,7 @@ def import_probe(probes: Any, path: Path, label: Optional[str] = None, target_ma
 
 # --- a board over SSH (`llmcf scan --device HOST --user U [--port] [--password] [--label]`) ---------------------------
 
-class DeviceScanError(RuntimeError):
+class DeviceScanError(WithSteps, RuntimeError):
     """A board scan that could not be done. `kind`: login (the board could not be reached or logged in to; `reason`
     is its SSH reason code when it has one), probe (the probe on the board failed) or save (the profile could not be
     stored or written). `error` is the exception behind it."""

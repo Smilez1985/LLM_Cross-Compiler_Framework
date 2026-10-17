@@ -5,11 +5,12 @@ import re
 from typing import List, Optional, Tuple
 
 from orchestrator.runtime.profile import DEVICE_ID, ProfileStore
+from orchestrator.utils.next_steps import WithSteps
 
 _RE_PORT = re.compile(r"^\d{1,5}$", re.ASCII)
 
 
-class DeviceNotFound(LookupError):
+class DeviceNotFound(WithSteps, LookupError):
     """No stored device, or more than one, matches; the message lists what is known."""
 
 

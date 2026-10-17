@@ -33,6 +33,7 @@ from orchestrator.runtime.build.toolchain import DetectedToolchain
 from orchestrator.runtime.build.verify import SmokeModelFile, Verifier
 from orchestrator.runtime.catalog import LlamaCppSource, RuntimeCatalog
 from orchestrator.runtime.profile import HardwareProfile
+from orchestrator.utils.next_steps import WithSteps
 
 PURPOSE = "host-runtime"
 PLACEMENTS = ("auto", "native", "container")
@@ -45,7 +46,7 @@ WAYS_OUT = ("install the missing tools with your package manager (on Debian or U
 _RE_VENDOR = re.compile(r"^[a-z]{2,16}$", re.ASCII)
 
 
-class HostBuildError(RuntimeError):
+class HostBuildError(WithSteps, RuntimeError):
     """The host runtime cannot be planned or built; the message says why and what to do. `log` names the build log."""
 
     def __init__(self, message: str, log: Optional[Path] = None):

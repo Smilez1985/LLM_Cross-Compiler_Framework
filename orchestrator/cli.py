@@ -2525,6 +2525,24 @@ def _say(text: str, *, err: bool = False, fg: Optional[str] = None) -> None:
     click.secho(text, err=err, fg=fg)
 
 
+def _say_error(error: BaseException, *, fg: Optional[str] = "red") -> None:
+    """An error for the command line (wave 6, design A.7): its message, then one "Next:" line per next step it carries
+    (orchestrator/utils/next_steps rendered for the CLI: they name the command, as the CLI always did) and per
+    AuthAction. A ToolError prints its message and its steps, or its own next step when it has no steps. Domain chains
+    switch their handlers to it when their messages stop naming commands."""
+    from orchestrator.utils.next_steps import render, steps_of
+    steps = steps_of(error)
+    if hasattr(error, "fill_steps"):   # a ToolError: its `next` is written for an AI
+        _say(error.message if steps or not error.next else f"{error.message} Next: {error.next}", err=True, fg=fg)
+    else:
+        _say(str(error), err=True, fg=fg)
+    for line in render(steps, "cli", "en", channel="cli").splitlines():
+        _say(line, err=True)
+    for action in getattr(error, "actions", ()) or ():
+        target = action.command or action.url
+        _say(f"Next: {action.label}" + (f": {target}" if target else ""), err=True)
+
+
 def _usage(message: str):
     _say(message, err=True, fg="red")
     sys.exit(EXIT_USAGE)
@@ -2535,10 +2553,7 @@ def _auth_fail(error: BaseException, code: Optional[int] = None, service=None):
     from orchestrator.llm.auth.signin import exit_code
     if (getattr(error, "code", None) or "").startswith("storage."):
         _storage_fail(error, service=service)
-    _say(str(error), err=True, fg="red")
-    for action in getattr(error, "actions", ()) or ():
-        target = action.command or action.url
-        _say(f"Next: {action.label}" + (f": {target}" if target else ""), err=True)
+    _say_error(error)
     sys.exit(code if code is not None else exit_code(error))
 
 
