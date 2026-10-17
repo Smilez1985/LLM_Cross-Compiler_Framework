@@ -42,7 +42,6 @@ from urllib.parse import urlparse
 
 from orchestrator.llm.auth.resolver import CredentialResolver, ResolvedCredential
 from orchestrator.llm.auth.store import CredentialStore
-from orchestrator.llm.auth.validate import ValidationResult, validate_credential
 from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
 from orchestrator.llm.errors import LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused
 from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj
@@ -309,26 +308,6 @@ class LLMClient:
                               timeout=float(self._setting("ai_timeout", 600)), **options)
                 self._adapters[key] = adapter
         return adapter
-
-    def check_credentials(self, provider: Optional[str] = None) -> ValidationResult:
-        """The zero-cost check behind "Check": resolves the provider's credential and sends the catalog's GET.
-        A success stores when it was checked and the account it belongs to (no secrets) with the key."""
-        target = self.resolve("chat", provider=provider)
-        spec = target.preset.method(target.auth)
-        credential = self.credential(target)
-        result = validate_credential(target.preset, spec, credential, target.base_url,
-                                     http_client=self._check_http_client(target),
-                                     timeout=min(float(self._setting("ai_timeout", 600)), 30.0),
-                                     list_models=lambda: self.adapter(target).list_models())
-        if result.ok and credential.source == "vault":
-            origin = credential.origin if spec.binds_origin(target.preset) else None
-            self.credentials.update_metadata(target.preset.id, spec.id, {
-                "validated_at": self.credentials.now(), "account_label": result.account_label}, origin)
-        return result
-
-    def _check_http_client(self, target: Target):
-        client = self._http_client_for(target)
-        return client if client is not self._loopback_http else None  # validate builds its own proxy-free client
 
     def _http_client_for(self, target: Target):
         """Loopback servers are reached directly: an HTTP(S)_PROXY from the environment would otherwise receive
