@@ -1152,6 +1152,7 @@ dieser Version.
 | Version | Thema | Status |
 |---|---|---|
 | 3.1.0 | Ditto-Neubau, Anmeldung und lokale KI | in Arbeit |
+| als Nächstes | Build-Dienst, Warteschlange und Modi | geplant |
 | 3.2.0 | Laufzeit auf dem Gerät und die Hardware des Maintainers | geplant |
 | 3.3.0 | LoRA und große Modelle | geplant |
 | 3.4.0 | Lieferkette und Community | geplant |
@@ -1208,6 +1209,21 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
   Schlüsselwechsel; ist kein Schlüsselbund nutzbar, wählst du einen Ausweichweg ausdrücklich.
 - **Eine Mustertabelle** für den Secret-Scan des Repositorys und die Schwärzung in Logs.
 
+### Als Nächstes - Build-Dienst, Warteschlange und Modi (geplant; beginnt direkt nach der Architektur-Konsolidierung)
+
+Die Schritte kommen in dieser Reihenfolge. Entscheidungen, die noch offen sind, stehen in ihrer Zeile; sie werden
+gefragt, wenn der Schritt beginnt.
+
+| Punkt | Status |
+|---|---|
+| **Schritt 1 - Build-Dienst**: Ein Hintergrundprogramm je Benutzerkonto führt jeden Build; die GUI, die Kommandozeile und der MCP-Server werden seine Clients. Ein Absturz der GUI beendet keinen Build mehr. Der Dienst lässt sich anhalten und neu starten, ohne dass etwas verloren geht (der Zustand liegt schon in Dateien: Build-Einträge, Build-Anfragen, das Reservierungsbuch, Job-Zusammenfassungen), und ein Build macht bei seiner letzten fertigen Stufe des Vier-Module-Builds weiter (source, config, convert, target). Warum: Heute läuft ein Build in dem Programm, das ihn gestartet hat, und endet, wenn dieses Programm endet. | geplant |
+| **Schritt 2 - Eine Warteschlange für alle Programme**: Builds warten in einer Warteschlange im Build-Dienst und werden nach RAM, CPU und Speicherplatz zugelassen. Der Teil für den Speicherplatz existiert (das Reservierungsbuch in `orchestrator/Core/disk_plan.py`); die Warteschlange erweitert, was da ist (die Warteschlange in `orchestrator/Core/orchestrator.py`, die Slots der Build-Engine, den Request Store), statt einer zweiten Struktur. Kein Celery. Warum: Mehrere Programme (GUI, CLI, KI-Apps) starten Builds auf einem Computer. | geplant |
+| **Schritt 3 - Privat- und Enterprise-Modus**: Der Privatmodus ist die Vorgabe, der Enterprise-Modus ist optional. Den Modus wählst du im Installer (`install.sh` und der Windows-Installer) und änderst ihn unter Datei > Einstellungen…; eine KI kann ihn lesen, aber nie ändern. Er nutzt das Gerüst für den erweiterten und den Enterprise-Modus, das es in `orchestrator/Core/config_manager.py` schon gibt (Entscheidung U7). Warum: Schritt 4 und 5 bringen Funktionen für Firmen, die eine private Installation standardmäßig nicht braucht. | geplant |
+| **Schritt 4 - Secret-Backends**: HashiCorp Vault und CyberArk Conjur (Enterprise-Modus; im Privatmodus als Opt-in). Werte werden abgerufen, wenn sie gebraucht werden, nur im Speicher gehalten und nie in den lokalen Tresor (`secrets.store`) geschrieben; jeder Abruf wird protokolliert, und Leases werden erneuert und widerrufen. Später: dynamische Secrets und signierte SSH-Zertifikate für Boards. Warum: Firmen halten Secrets in einem zentralen Speicher und müssen jede Nutzung sehen. Offene Entscheidungen, gefragt, wenn dieser Schritt beginnt: Audit-Zeilen im CI-Modus; ein Abruf je Vorgang; Referenzen nur im Enterprise-Modus; Backends im Internet; wo die eigene Anmeldung des Backends aufbewahrt wird. | geplant |
+| **Schritt 5 - Kubernetes und Nomad**: Orte für Builds als Opt-in, neben den lokalen Docker-Builds, die die Vorgabe bleiben. Sie nutzen Images, die die Firma selbst aus den Dockerfiles des Frameworks in ihre eigene Registry baut, per Digest festgelegt, nie Images aus dem Community Hub. Warum: Eine Firma will Builds vielleicht auf ihrem eigenen Cluster. Offene Entscheidungen: beide Modi oder nur der Enterprise-Modus; über `kubectl`/`nomad` oder ihre HTTP-APIs. | geplant |
+| **Schritt 6 - Eigener Schlüsselbund-Dienst unter Linux**: Das Framework bringt unter Linux einen eigenen Schlüsselbund-Dienst mit (beschlossen in Runde 7 am 2026-10-15, nicht gebaut; Windows behält die Windows-Anmeldeinformationsverwaltung); nach Schritt 4. Warum: Viele Linux-Installationen haben keinen nutzbaren Schlüsselbund, und der Tresor lehnt einen ab, der hängt, nichts behält oder im Klartext speichert. Offene Entscheidung: bauen oder beim Schlüsselbund des Systems bleiben. | geplant |
+| **Schritt 7 - Neueste passende Versionen, automatisch gehalten**: Jede Abhängigkeit (Python, CUDA, Docker-Basis-Images, Toolkits, GitHub Actions) bleibt auf der höchsten Version, die passt, und jedes Update wird getestet, bevor es übernommen wird. Ein Plan wird vorbereitet. Warum: Alte Versionen sammeln Sicherheitsmeldungen, und ein Update darf nichts kaputt machen. | geplant |
+
 ### 3.2.0 - Laufzeit auf dem Gerät und die Hardware des Maintainers (geplant)
 
 Die eigene Hardware des Maintainers setzt die Prioritäten: Radxa ZERO 3W (RK3566), NVIDIA RTX 2080 Ti und RTX 3090,
@@ -1250,7 +1266,7 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **Dependabot-Wartezeit** für LLM-SDKs. | geplant |
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
 | **Signierte Updates** des Frameworks selbst (`orchestrator/utils/updater.py`, in Entwicklung: Update-Prüfung, Update und Neustart; noch nicht eingebunden), fertig gebaut als geprüfte Updates einer signierten Veröffentlichung statt eines einfachen `git pull`. Werkzeugketten-Images gehören nicht dazu: Das Framework teilt Rezepte, nie kompilierte Images, daher werden sie weiter auf deinem Rechner aus dem Dockerfile des Targets gebaut; die Einstellungen `docker_registry` (standardmäßig leer) und `docker_namespace`, die nichts liest, bleiben erhalten. Keine Vorgabe nennt ein Image aus einer Registry: Die Image-Einstellungen nennen lokale Images (`llm-framework/...`) oder Images Dritter wie Trivy und Qdrant, und der Block `docker` in der `target.yml` eines Targets nennt ein lokales Image ohne Registry. | geplant |
-| **Aufräumen**: Entfernung der alten Vier-Module-Skripte (Vorlagen-`build.sh` und Vorlagen-Dockerfile folgen bereits der aktuellen Pipeline: GGUF über llama.cpp, nach dem Rezept gebaut, Zwischendateien im Arbeitsordner). | geplant |
+| **Die vier Module sind die Build-Struktur**: `build.sh` führt source, config, convert und target aus (Entscheidung U9; wird gebaut). | in Arbeit |
 | **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
 
 ### Rust-Teile (geplant)

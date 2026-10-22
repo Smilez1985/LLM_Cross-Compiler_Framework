@@ -1079,6 +1079,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 | Version | Theme | Status |
 |---|---|---|
 | 3.1.0 | Ditto rebuild, sign-in and local AI | in progress |
+| next | Build service, queue and modes | planned |
 | 3.2.0 | Device runtime and the maintainer's hardware | planned |
 | 3.3.0 | LoRA and large models | planned |
 | 3.4.0 | Supply chain and community | planned |
@@ -1134,6 +1135,21 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
   keyring is usable, you choose a fallback explicitly.
 - **One pattern table** for the repository's secret scan and the redaction in logs.
 
+### Next - build service, queue and modes (planned; starts right after the architecture consolidation)
+
+The steps come in this order. Decisions that are still open are written into their row; they are asked when that
+step starts.
+
+| Item | Status |
+|---|---|
+| **Step 1 - Build service**: one background program per account owns every build; the GUI, the command line and the MCP server become its clients. A crash of the GUI no longer ends a build. The service can be stopped and restarted without losing anything (the state is already kept in files: build records, build requests, the reservation ledger, job summaries), and a build resumes at its last finished stage of the four-module build (source, config, convert, target). Why: today a build runs inside the program that started it, and ends when that program ends. | planned |
+| **Step 2 - One queue across all programs**: builds wait in one queue in the build service and are admitted by RAM, CPU and disk. The disk part exists (the reservation ledger in `orchestrator/Core/disk_plan.py`); the queue extends what is there (the queue in `orchestrator/Core/orchestrator.py`, the build engine's slots, the request store) instead of a second structure. No Celery. Why: several programs (GUI, CLI, AI apps) start builds on one computer. | planned |
+| **Step 3 - Private and enterprise mode**: private mode is the default, enterprise mode is optional. The mode is chosen in the installer (`install.sh` and the Windows installer) and changed in File > Settings...; an AI can read it but never change it. It reuses the advanced/enterprise scaffolding that already exists in `orchestrator/Core/config_manager.py` (decision U7). Why: steps 4 and 5 bring company features that a private installation does not need by default. | planned |
+| **Step 4 - Secret backends**: HashiCorp Vault and CyberArk Conjur (enterprise mode; opt-in in private mode). Values are fetched when they are used, kept in memory only and never written to the local vault (`secrets.store`); every fetch is audited, and leases are renewed and revoked. Later: dynamic secrets and signed SSH certificates for boards. Why: companies keep secrets in a central store and must see every use. Open decisions, asked when this step starts: audit rows in CI mode; one fetch per operation; references only in enterprise mode; internet-hosted backends; where the backend's own sign-in credential is kept. | planned |
+| **Step 5 - Kubernetes and Nomad**: opt-in places to run builds, next to the local Docker builds that stay the default. They use images the company builds itself from the framework's Dockerfiles into its own registry, pinned by digest, never images from the community hub. Why: a company may want builds on its own cluster. Open decisions: both modes or enterprise mode only; through `kubectl`/`nomad` or their HTTP APIs. | planned |
+| **Step 6 - Own keyring service on Linux**: the framework ships its own keyring service on Linux (decided in round 7 on 2026-10-15, not built; Windows keeps the Windows Credential Manager); after step 4. Why: many Linux installations have no usable keyring, and the vault refuses one that hangs, keeps nothing or stores in plain text. Open decision: build it or keep the OS keyring. | planned |
+| **Step 7 - Newest fitting versions kept automatically**: every dependency (Python, CUDA, Docker base images, toolkits, GitHub Actions) stays on the highest version that fits, and each update is tested before it lands. A plan is being prepared. Why: old versions collect security advisories, and an update must not break anything. | planned |
+
 ### 3.2.0 - Device runtime and the maintainer's hardware (planned)
 
 The maintainer's own hardware sets the priorities: Radxa ZERO 3W (RK3566), NVIDIA RTX 2080 Ti and RTX 3090, AMD
@@ -1176,7 +1192,7 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **Dependabot cooldown** for LLM SDKs. | planned |
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
 | **Signed updates** of the framework itself (`orchestrator/utils/updater.py`, in development: update check, update and restart; not wired yet), finished as verified updates of a signed release instead of a plain `git pull`. Toolchain images are not part of it: the framework shares recipes, never compiled images, so they stay built on your machine from the target's Dockerfile; the settings `docker_registry` (empty by default) and `docker_namespace`, which nothing reads, are kept. No default names a registry image: the image settings name local images (`llm-framework/...`) or third-party images such as Trivy and Qdrant, and the `docker` block of a target's `target.yml` names a local image without a registry. | planned |
-| **Clean-up**: removal of the legacy four-module scripts (the template `build.sh` and Dockerfile already follow the current pipeline: GGUF through llama.cpp built from the recipe, intermediates in the work folder). | planned |
+| **The four modules are the build structure**: `build.sh` runs source, config, convert and target (decision U9; being built). | in progress |
 | **SSOT corrections** for the project-sources catalogue and its scripts. | done |
 
 ### Rust parts (planned)
