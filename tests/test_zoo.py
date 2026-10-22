@@ -5,6 +5,7 @@ import base64
 import inspect
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1331,34 +1332,287 @@ def test_hub_tooltips_show_the_description_as_plain_text(qapp):
         hub.close()
 
 
-@pytest.mark.skipif(shutil.which("bash") is None or sys.platform == "win32", reason="runs the workflow step in bash")
-def test_the_contribution_check_passes_the_folder_readmes_and_nothing_else_but_packs(tmp_path):
-    """The community repository keeps a README.md in each contributions/<kind>/ folder; the check lets those pass as
-    a notice, checks every pack with zoo verify and rejects any other file."""
-    import yaml
+# --- the community repository's check (scripts/community_repo/validate-contribution.yml) -----------------------------
+
+needs_bash_git = pytest.mark.skipif(shutil.which("bash") is None or shutil.which("git") is None
+                                    or sys.platform == "win32", reason="runs the workflow's steps in bash with git")
+HEAD_SHA_EXPRESSION = "${{ github.event.pull_request.head.sha }}"
+CHECK_KINDS = ("target", "recipe", "knowledge")
+CHECK_PACK = "contributions/target/board.zip"
+CHECK_GIT_ENV = {"GIT_AUTHOR_NAME": "Contributor", "GIT_COMMITTER_NAME": "Contributor", "GIT_AUTHOR_EMAIL": "",
+                 "GIT_COMMITTER_EMAIL": "", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+
+
+def check_workflow_text() -> str:
     from conftest import REPO_ROOT
-    workflow = yaml.safe_load((REPO_ROOT / "scripts" / "community_repo" / "validate-contribution.yml")
-                              .read_text(encoding="utf-8"))
-    step = next(s for s in workflow["jobs"]["validate"]["steps"] if s.get("name") == "Check every added pack")
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "llm-cli").write_text("#!/bin/sh\nexit 0\n")
-    (bin_dir / "llm-cli").chmod(0o755)
-    for kind in ("target", "recipe", "knowledge"):
-        (tmp_path / "contributions" / kind).mkdir(parents=True)
-        (tmp_path / "contributions" / kind / "README.md").write_text("folder\n")
-    (tmp_path / "contributions" / "target" / "board.zip").write_bytes(b"PK")
-    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    return (REPO_ROOT / "scripts" / "community_repo" / "validate-contribution.yml").read_text(encoding="utf-8")
 
-    def check(*files):
-        (tmp_path / "changed.txt").write_text("".join(f + "\n" for f in files))
-        return subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True,
-                              text=True)
 
-    ok = check("contributions/target/README.md", "contributions/recipe/README.md",
-               "contributions/knowledge/README.md", "contributions/target/board.zip")
-    assert ok.returncode == 0, ok.stdout + ok.stderr
-    assert ok.stdout.count("::notice") == 3
-    (tmp_path / "contributions" / "target" / "notes.txt").write_text("x")
-    bad = check("contributions/target/notes.txt")
-    assert bad.returncode != 0 and "only pack files" in bad.stdout
+def check_workflow() -> dict:
+    """The check workflow template as the community repository copies it (its copy there differs only in the header
+    comment and LCF_REF)."""
+    import yaml
+    return yaml.safe_load(check_workflow_text())
+
+
+def check_git(*args, cwd=None) -> str:
+    return subprocess.run(["git", *map(str, args)], cwd=cwd, capture_output=True, text=True, check=True,
+                          stdin=subprocess.DEVNULL, env={**os.environ, **CHECK_GIT_ENV}).stdout.strip()
+
+
+def run_check(origin: Path, head: str, association: str, tmp: Path, *, base_ref: str = "main",
+              llm_cli: str = "exit 0", claimed_head: str = ""):
+    """The check's steps after the pull request's checkout: the real scripts, in bash as the runner runs them (shell:
+    bash), with an llm-cli stub (`llm_cli`: its shell lines; "$3" is the pack file it is given). The checkout is made
+    the way actions/checkout makes it with fetch-depth 0: every branch of `origin` under refs/remotes/origin/, the
+    head commit detached. Returns the exit code of the first step that failed (0), the output and the stub's files."""
+    workflow = check_workflow()
+    job = workflow["jobs"]["validate"]
+    steps = job["steps"]
+    start = next(i for i, s in enumerate(steps) if (s.get("with") or {}).get("ref") == HEAD_SHA_EXPRESSION) + 1
+    workspace = tmp / "workspace"
+    data = workspace / job["env"]["PR_DATA"]
+    check_git("clone", "-q", "--no-checkout", origin, data)
+    check_git("-C", data, "fetch", "-q", "origin", "+refs/pull/*:refs/remotes/pull/*")
+    check_git("-C", data, "checkout", "-q", "--detach", head)
+    (tmp / "bin").mkdir()
+    (tmp / "runner-temp").mkdir()
+    log = tmp / "verified.txt"
+    stub = tmp / "bin" / "llm-cli"
+    stub.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$3\" >> '{log}'\n{llm_cli}\n")
+    stub.chmod(0o755)
+    values = {"github.base_ref": base_ref, "github.event.pull_request.head.sha": claimed_head or head,
+              "github.event.pull_request.author_association": association}
+
+    def resolve(value):
+        found = re.fullmatch(r"\$\{\{\s*([\w.]+)\s*\}\}", str(value))
+        assert found or "${{" not in str(value), value
+        return values[found.group(1)] if found else str(value)   # KeyError: an expression this harness does not know
+
+    env = {**os.environ, "PATH": f"{tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
+           "RUNNER_TEMP": str(tmp / "runner-temp")}
+    output, code = "", 0
+    for step in steps[start:]:
+        names = {**workflow.get("env", {}), **job.get("env", {}), **step.get("env", {})}
+        done = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]], cwd=workspace,
+                              env={**env, **{k: resolve(v) for k, v in names.items()}}, capture_output=True,
+                              text=True, errors="replace", stdin=subprocess.DEVNULL, check=False)
+        output += done.stdout + done.stderr
+        code = done.returncode
+        if code:
+            break   # a later step runs only when every step before it passed
+    return code, output, (log.read_text().splitlines() if log.exists() else [])
+
+
+class CommunityRepo:
+    """A local stand-in for the community repository: a bare origin whose main holds what the real one holds (the
+    folder READMEs, a published pack, the signed index, this workflow), and pull requests as refs/pull/<n>/head."""
+
+    def __init__(self, tmp: Path):
+        self.origin, self.work, self.number = tmp / "origin.git", tmp / "work", 0
+        check_git("init", "-q", "--bare", self.origin)
+        check_git("-C", self.origin, "symbolic-ref", "HEAD", "refs/heads/main")
+        check_git("init", "-q", self.work)
+        check_git("-C", self.work, "config", "core.autocrlf", "false")
+        check_git("-C", self.work, "remote", "add", "origin", self.origin)
+        check_git("-C", self.work, "checkout", "-q", "--orphan", "main")
+        self.change(files={"README.md": b"community\n", "packs/target/old.zip": b"PK old", "index.json": b"{}\n",
+                           "index.json.sig": b"sig\n", ".github/workflows/validate-contribution.yml":
+                           check_workflow_text().encode(),
+                           **{f"contributions/{kind}/README.md": b"folder\n" for kind in CHECK_KINDS}})
+        check_git("-C", self.work, "push", "-q", "origin", "HEAD:refs/heads/main")
+
+    def change(self, files=None, remove=(), moves=(), links=None, executable=(), message="change") -> str:
+        work = self.work
+        for path in remove:
+            check_git("-C", work, "rm", "-q", "--", path)
+        for source, target in moves:
+            (work / target).parent.mkdir(parents=True, exist_ok=True)
+            check_git("-C", work, "mv", "--", source, target)
+        for path, data in (files or {}).items():
+            (work / path).parent.mkdir(parents=True, exist_ok=True)
+            (work / path).write_bytes(data)
+        for path, target in (links or {}).items():
+            (work / path).parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(target, work / path)
+        for path in executable:
+            (work / path).parent.mkdir(parents=True, exist_ok=True)
+            (work / path).write_bytes(b"PK")
+            (work / path).chmod(0o755)
+        for path in [*(files or {}), *(links or {}), *executable]:
+            check_git("-C", work, "add", "--", path)
+        check_git("-C", work, "commit", "-q", "--allow-empty", "-m", message)
+        return check_git("-C", work, "rev-parse", "HEAD")
+
+    def _on_main(self):
+        check_git("-C", self.work, "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
+        check_git("-C", self.work, "checkout", "-q", "--detach", "refs/remotes/origin/main")
+
+    def pull_request(self, **change) -> str:
+        """A pull request on top of main as it is now; its head commit."""
+        self._on_main()
+        head = self.change(**change)
+        self.number += 1
+        check_git("-C", self.work, "push", "-q", "origin", f"HEAD:refs/pull/{self.number}/head")
+        return head
+
+    def advance_main(self, **change) -> str:
+        """A change merged into main (after the pull requests that exist were opened)."""
+        self._on_main()
+        commit = self.change(**change)
+        check_git("-C", self.work, "push", "-q", "origin", "HEAD:refs/heads/main")
+        return commit
+
+
+@needs_bash_git
+@pytest.mark.parametrize("association", ["NONE", "FIRST_TIME_CONTRIBUTOR", "CONTRIBUTOR", "OWNER", "MEMBER",
+                                         "COLLABORATOR"])
+def test_the_contribution_check_passes_new_packs_and_verifies_each_one(tmp_path, association):
+    """A pull request that adds packs under contributions/<kind>/ passes for anyone, and each pack is verified as the
+    bytes of the head commit, copied out of git's objects (never a file of the checkout)."""
+    repo = CommunityRepo(tmp_path)
+    packs = {f"contributions/{kind}/{kind}-pack-1.0.0.zip": f"PK {kind}".encode() for kind in CHECK_KINDS}
+    head = repo.pull_request(files=packs)
+    code, output, verified = run_check(repo.origin, head, association, tmp_path / "run")
+    assert code == 0, output
+    assert sorted(Path(f).name for f in verified) == sorted(Path(p).name for p in packs)
+    assert sorted(Path(f).read_bytes() for f in verified) == sorted(packs.values())
+    workspace = tmp_path / "run" / "workspace"
+    assert not any(Path(f).resolve().is_relative_to(workspace.resolve()) for f in verified), "outside the checkout"
+    assert "::error" not in output and "::notice" not in output
+
+
+@needs_bash_git
+@pytest.mark.parametrize("change,named,what", [
+    ({"files": {".github/workflows/validate-contribution.yml": b"on: pull_request\n"}},
+     ".github/workflows/validate-contribution.yml", "changes"),
+    ({"files": {"index.json": b'{"entries": []}\n'}}, "index.json", "changes"),
+    ({"files": {"packs/target/x.zip": b"PK"}}, "packs/target/x.zip", "adds"),
+    ({"files": {"README.md": b"hello\n"}}, "README.md", "changes"),
+    ({"files": {"contributions/target/README.md": b"mine\n"}}, "contributions/target/README.md", "changes"),
+    ({"remove": ["packs/target/old.zip"]}, "packs/target/old.zip", "deletes"),
+    ({"files": {"contributions/target/notes.txt": b"x\n"}}, "contributions/target/notes.txt", "adds"),
+    ({"files": {"contributions/target/sub/x.zip": b"PK"}}, "contributions/target/sub/x.zip", "adds"),
+])
+def test_a_contribution_that_changes_anything_but_new_packs_fails(tmp_path, change, named, what):
+    """From anyone but the owner, a member or a collaborator, only new packs pass: a change to the workflow, the
+    index, packs/, a README (also a kind folder's), a deletion or any other file fails with its name, and no pack of
+    that pull request is verified. The owner's same change is a notice and passes, and its pack is still verified."""
+    repo = CommunityRepo(tmp_path)
+    head = repo.pull_request(**{**change, "files": {**change.get("files", {}), CHECK_PACK: b"PK board"}})
+    code, output, verified = run_check(repo.origin, head, "NONE", tmp_path / "outsider")
+    assert code != 0 and verified == [], output
+    assert (f"::error file={named}::this pull request {what} {named}: a contribution may only add pack files "
+            "contributions/<kind>/<name>.zip") in output
+    code, output, verified = run_check(repo.origin, head, "OWNER", tmp_path / "owner")
+    assert code == 0, output
+    assert f"::notice file={named}::this pull request {what} {named} (the repository's OWNER" in output
+    assert [Path(f).name for f in verified] == ["board.zip"]
+
+
+@needs_bash_git
+@pytest.mark.parametrize("association", ["NONE", "OWNER"])
+def test_only_regular_files_with_plain_names_pass_for_anyone(tmp_path, association):
+    """A symbolic link named like a pack never makes the check read another file, an executable file or a submodule
+    is no pack either, and a file name with a control character (a newline could forge a workflow command) is
+    refused without being printed as it is."""
+    repo = CommunityRepo(tmp_path)
+    cases = {
+        "link": ({"links": {CHECK_PACK: "../../index.json"}}, "not a regular file (git mode 120000)"),
+        "executable": ({"executable": [CHECK_PACK]}, "not a regular file (git mode 100755)"),
+        "newline": ({"files": {"contributions/target/a\n::error::forged.zip": b"PK"}},
+                    "a file name with a control character is refused: $'contributions/target/a\\n::error::forged.zip'"),
+        "carriage return": ({"files": {"contributions/target/b\r::error::forged.zip": b"PK"}},
+                            ("a file name with a control character is refused: "
+                             "$'contributions/target/b\\r::error::forged.zip'")),
+    }
+    for name, (change, message) in cases.items():
+        head = repo.pull_request(**change)
+        code, output, verified = run_check(repo.origin, head, association, tmp_path / name)
+        assert code != 0 and verified == [], (name, output)
+        assert message in output, (name, output)
+        assert not any(line.startswith("::error::forged") for line in output.splitlines()), (name, output)
+
+
+@needs_bash_git
+def test_every_added_pack_is_checked_for_anyone(tmp_path):
+    """The pack checks stay as they were: at most 5 MB, then llm-cli zoo verify; also for the owner's packs."""
+    repo = CommunityRepo(tmp_path)
+    big = repo.pull_request(files={CHECK_PACK: b"PK" + b"x" * 4_999_999})
+    code, output, verified = run_check(repo.origin, big, "OWNER", tmp_path / "big")
+    assert code != 0 and verified == [], output
+    assert f"::error file={CHECK_PACK}::larger than 5 MB" in output
+    limit = repo.pull_request(files={CHECK_PACK: b"P" * 5_000_000})
+    code, output, verified = run_check(repo.origin, limit, "NONE", tmp_path / "limit")
+    assert code == 0 and len(verified) == 1, output
+    rejected = repo.pull_request(files={CHECK_PACK: b"PK BAD"})
+    for association in ("NONE", "OWNER"):
+        code, output, _ = run_check(repo.origin, rejected, association, tmp_path / f"rejected-{association}",
+                                    llm_cli='grep -q BAD "$3" && exit 1\nexit 0')
+        assert code != 0 and f"::error file={CHECK_PACK}::the pack was rejected" in output, output
+
+
+@needs_bash_git
+def test_the_publication_passes_for_the_owner_a_member_and_a_collaborator_only(tmp_path):
+    """The maintainer's publication: the pack moved from contributions/ to packs/ (git mv), index.json and
+    index.json.sig changed. For the owner, a member and a collaborator every change is a notice and nothing is
+    verified; from anyone else the same commit fails, naming each change."""
+    repo = CommunityRepo(tmp_path)
+    repo.advance_main(files={CHECK_PACK: b"PK board"})   # the contribution, merged
+    head = repo.pull_request(moves=[(CHECK_PACK, "packs/target/board.zip")],
+                             files={"index.json": b'{"version": 1}\n', "index.json.sig": b"new sig\n"})
+    changes = ((CHECK_PACK, "deletes"), ("packs/target/board.zip", "adds"), ("index.json", "changes"),
+               ("index.json.sig", "changes"))
+    for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+        code, output, verified = run_check(repo.origin, head, association, tmp_path / association)
+        assert code == 0 and verified == [], output
+        for path, what in changes:
+            assert f"::notice file={path}::this pull request {what} {path}" in output, output
+    code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "outsider")
+    assert code != 0 and output.count("::error") == len(changes), output
+
+
+@needs_bash_git
+def test_the_changes_count_from_the_merge_base_as_github_merges_them(tmp_path):
+    """main moved on after the pull request was opened (a publication changed the index): the pull request's changes
+    are still only its own, so a contribution is not blamed for main's commits. One without changes passes."""
+    repo = CommunityRepo(tmp_path)
+    head = repo.pull_request(files={CHECK_PACK: b"PK board"})
+    repo.advance_main(files={"index.json": b'{"version": 2}\n'})
+    code, output, verified = run_check(repo.origin, head, "NONE", tmp_path / "moved")
+    assert code == 0 and len(verified) == 1, output
+    empty = repo.pull_request()
+    code, output, verified = run_check(repo.origin, empty, "NONE", tmp_path / "empty")
+    assert code == 0 and verified == [], output
+    assert "No changes." in output and "No pack added: nothing to verify." in output
+
+
+@needs_bash_git
+def test_the_check_fails_closed_on_a_wrong_checkout_or_base(tmp_path):
+    repo = CommunityRepo(tmp_path)
+    head = repo.pull_request(files={CHECK_PACK: b"PK board"})
+    main = check_git("-C", repo.origin, "rev-parse", "refs/heads/main")
+    code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "other", claimed_head=main)
+    assert code != 0 and "the checkout is not the pull request's head commit" in output
+    code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "branch", base_ref="develop")
+    assert code != 0 and "the base branch develop was not fetched" in output
+    code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "name", base_ref="main;true")
+    assert code != 0 and "head commit or base branch is not usable" in output
+    code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "head", claimed_head="HEAD")
+    assert code != 0 and "head commit or base branch is not usable" in output
+
+
+@needs_bash_git
+def test_what_zoo_verify_prints_is_never_a_workflow_command(tmp_path):
+    """zoo verify prints the pack's own file names; between ::stop-commands:: and its random token the runner reads
+    no workflow command, so a pack cannot write one into the log."""
+    repo = CommunityRepo(tmp_path)
+    head = repo.pull_request(files={CHECK_PACK: b"PK board"})
+    code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "run",
+                                llm_cli='echo "::error::forged by the pack"\nexit 0')
+    assert code == 0, output
+    lines = output.splitlines()
+    at = lines.index("::error::forged by the pack")
+    stop = max(i for i in range(at) if lines[i].startswith("::stop-commands::"))
+    token = lines[stop].split("::")[2]
+    assert re.fullmatch(r"[0-9a-f]{32}", token) and f"::{token}::" in lines[at + 1:], output
