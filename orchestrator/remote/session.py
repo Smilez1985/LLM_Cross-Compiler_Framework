@@ -379,8 +379,8 @@ class RemoteSession:
         while True:
             try:
                 offset = self._resume_offset(fh, part, size)
-                self.logger.info(f"Uploading {posixpath.basename(remote_path)}..." if not offset else
-                                 f"Resuming the upload of {posixpath.basename(remote_path)} at {offset} bytes...")
+                # the deploy's words since N5 (they reach the console of `llmcf deploy run`)
+                self.logger.info("Uploading package..." if not offset else f"Resuming the upload at {offset} bytes...")
                 self._send(fh, part, offset, size)
                 result = self.run(f"sha256sum {shlex.quote(part)}", timeout=hash_timeout(size))
                 if result.status == 0 and result.out.split()[:1] == [sha256]:
@@ -417,7 +417,7 @@ class RemoteSession:
         fh.seek(0)
         prefix = sha256_fileobj(fh, limit=offset, chunk=UPLOAD_CHUNK)  # the first `offset` bytes of the file
         if result.status != 0 or result.out.split()[:1] != [prefix]:
-            self.logger.warning("What arrived on the board does not match the file here; the upload starts again.")
+            self.logger.warning("What arrived on the board does not match the package; the upload starts again.")
             return 0
         self.on_event(RemoteEvent("back", done=offset, total=size))
         return offset
