@@ -83,8 +83,21 @@ def imported_paramiko() -> Any:
     return paramiko
 
 
+_UNSET = object()
+
+
+def _ssh_trust_seam() -> Any:
+    """What orchestrator.utils.ssh_trust.paramiko was set to (its old seam: a test that sets it to None makes that
+    module behave as without paramiko), else _UNSET; read without importing anything."""
+    trust = sys.modules.get("orchestrator.utils.ssh_trust")
+    return vars(trust).get("paramiko", _UNSET) if trust is not None else _UNSET
+
+
 def available() -> Tuple[bool, str]:
-    """(True, "") when paramiko imports here, else (False, why not)."""
+    """(True, "") when paramiko imports here, else (False, why not). ssh_trust.paramiko set to None counts as
+    missing here too, so every reader (the person's board steps, `scan --device`, Mojo) agrees with that module."""
+    if _ssh_trust_seam() is None:
+        return False, "the 'paramiko' package is not installed"
     module = paramiko_module()
     return module is not None, ("" if module is not None else _loaded[1])
 

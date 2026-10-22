@@ -442,6 +442,78 @@ class TestTheOneCancel:
         assert session.ended and session.client is None
 
 
+class TestSshAvailability:
+    """The person's board steps, `scan --device` and Mojo read remote/transport.py available() (a real import), and
+    ssh_trust's old seam (ssh_trust.paramiko = None) counts as missing there too."""
+
+    def test_every_reader_asks_available(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace as NS
+        from orchestrator.Core.mojo.checks import devices as mojo_devices
+        from orchestrator.remote import transport
+        from orchestrator.runtime.device import person_steps
+        from orchestrator.runtime.device.trusted import TrustedDevice, TrustedDevices
+        monkeypatch.setattr(transport, "available", lambda: (False, "the 'paramiko' package cannot be loaded (X)"))
+        with pytest.raises(person_steps.BoardStepError) as e:
+            person_steps.read_host_key(tmp_path, "192.0.2.10", 22)
+        assert e.value.kind == "no_paramiko"
+        board = TrustedDevice("0123456789abcdef", "Shelf", "192.0.2.10", 22, "dietpi", "ssh-ed25519",
+                              "SHA256:" + "I" * 43, True, "2026-10-12T00:00:00Z", "cli")
+        monkeypatch.setattr(TrustedDevices, "list", lambda self: [board])
+        findings = mojo_devices.check_devices(NS(config=NS(user_state_dir=str(tmp_path))))
+        assert any(f.code == "devices.unchecked" for f in findings)
+
+    def test_the_cli_scan_asks_available(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
+        from orchestrator.remote import transport
+        monkeypatch.setattr(transport, "available", lambda: (False, "the 'paramiko' package is not installed"))
+        monkeypatch.setattr(cli_module, "_trust_device", lambda *a, **k: pytest.fail("contacted the board"))
+        result = CliRunner().invoke(cli_module.cli, ["scan", "--device", "192.0.2.10", "--user", "dietpi",
+                                                     "--output", str(tmp_path / "p.txt")])
+        assert result.exit_code == 1 and "needs the 'paramiko' package" in result.output
+
+    def test_the_old_seam_counts_as_missing(self, monkeypatch):
+        from orchestrator.remote import transport
+        from orchestrator.utils import ssh_trust
+        monkeypatch.setattr(ssh_trust, "paramiko", None)
+        assert transport.available() == (False, "the 'paramiko' package is not installed")
+
+
+class TestALocalProblemNamesTheFile:
+    """GUI places that show local_problem name what failed on this computer: the system's words and the file's
+    name, never its folder or the account (reasons.local_detail)."""
+
+    def test_the_person_text_names_the_file_only(self):
+        from orchestrator.remote import reasons
+        error = PermissionError(13, "Permission denied", "/var/lib/state/known_hosts")
+        text = reasons.person_text(reasons.LOCAL_PROBLEM, "en", address="192.0.2.5", port=22, error=error)
+        assert "What failed on this computer: Permission denied: known_hosts." in text
+        assert "/var/lib/state" not in text
+        de = reasons.person_text(reasons.LOCAL_PROBLEM, "de", address="192.0.2.5", port=22, error=error)
+        assert "Was auf diesem Computer nicht ging: Permission denied: known_hosts." in de
+        plain = reasons.person_text(reasons.HOST_DOWN, "en", address="192.0.2.5", port=22, error=error)
+        assert "What failed" not in plain, "only a local problem names a file"
+
+    def test_the_host_key_question_and_the_ai_path_carry_it(self, tmp_path, trusted_board, monkeypatch):
+        pytest.importorskip("PySide6")
+        from orchestrator.gui.host_key import unreachable_text
+        from orchestrator.remote import reasons
+        from orchestrator.runtime.device import service
+        from orchestrator.utils import ssh_trust
+        error = PermissionError(13, "Permission denied", "/var/lib/state/id_ed25519_llm_framework")
+        assert "id_ed25519_llm_framework" in unreachable_text("192.0.2.5", 22, error, "en")
+        device, _logins, _presented = trusted_board
+
+        def refuse(*a, **k):
+            raise error
+
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", refuse)
+        with pytest.raises(service.DeviceRuntimeError) as e:
+            service.connect(device, tmp_path, "dietpi", device.fingerprint, step="probe")
+        assert e.value.reason == reasons.LOCAL_PROBLEM and e.value.error is error
+        assert "/var/lib" not in str(e.value), "the AI's text names no path"
+
+
 class TestTheEventLines:
 
     def test_an_ais_job_gets_each_upload_percent_once_and_each_wait_line(self):

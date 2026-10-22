@@ -336,7 +336,7 @@ class BoardBenchWorker(QThread):
             self.finished.emit(False, str(e))
             return
         except dev.DeviceRuntimeError as e:
-            parts = [reasons.person_text(e.reason, address=device.host, port=device.port)
+            parts = [reasons.person_text(e.reason, address=device.host, port=device.port, error=e.error)
                      if e.reason in reasons.CODES else str(e)]
             parts += e.external_text[-10:]  # the board's own words, shown as plain text
             self.finished.emit(False, "\n".join(parts))

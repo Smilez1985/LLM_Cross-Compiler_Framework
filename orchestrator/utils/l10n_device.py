@@ -43,6 +43,7 @@ TEXTS = {
         "device.next.local_problem": "Free disk space on this computer and check that you may write to the "
                                      "framework's state folder (its SSH key and known_hosts are there) and that no "
                                      "security program on this computer blocks the connection. Then try again.",
+        "device.local.detail": "What failed on this computer: {detail}.",
         # --- waiting for the board during a deploy (N5) ---
         "device.wait.status": "Waiting for the board at {address}: {elapsed} of at most {limit}. The upload "
                               "continues where it stopped as soon as the board answers again.",
@@ -152,6 +153,7 @@ TEXTS = {
                                      "des Frameworks schreiben darfst (dort liegen sein SSH-Schlüssel und "
                                      "known_hosts) und ob kein Sicherheitsprogramm auf diesem Computer die "
                                      "Verbindung blockiert. Versuche es dann erneut.",
+        "device.local.detail": "Was auf diesem Computer nicht ging: {detail}.",
         # --- warten auf das Board während eines Deployments (N5) ---
         "device.wait.status": "Warte auf das Board unter {address}: {elapsed} von höchstens {limit}. Der Upload "
                               "geht dort weiter, wo er stehen blieb, sobald das Board wieder antwortet.",
