@@ -561,6 +561,60 @@ def test_the_import_guard_bites():
                                                           "<- orchestrator.tools.tools_x")
 
 
+# The primitives that write the framework's known_hosts or a board's authorized_keys (orchestrator/utils/ssh_trust.py).
+TRUST_WRITERS = ("trust_host_key", "save_host_keys", "install_public_key")
+# The only places a module an AI can reach names one of them: ssh_trust itself (their definitions), the session's pair(),
+# which only the person's OneTimePassword credentials reach (every AI path logs in with KeyOnly), and the old
+# DeploymentManager.trust_host, which nothing calls.
+WRITER_PLACES = {("orchestrator.remote.session", "RemoteSession.pair"),
+                 ("orchestrator.Core.deployment_manager", "DeploymentManager.trust_host")}
+
+
+def writer_uses(module: str, source: str):
+    """(module, the enclosing class.function) of every name or attribute in `source` that is one of TRUST_WRITERS."""
+    import ast
+    found = []
+
+    def walk(node, where):
+        for child in ast.iter_child_nodes(node):
+            inner = where
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                inner = f"{where}.{child.name}" if where else child.name
+            named = (child.attr if isinstance(child, ast.Attribute) else
+                     child.id if isinstance(child, ast.Name) else None)
+            if named in TRUST_WRITERS:
+                found.append((module, where))
+            walk(child, inner)
+    walk(ast.parse(source), "")
+    return found
+
+
+def test_no_module_an_ai_can_reach_writes_trust_except_the_person_s_one_time_password_session():
+    """ssh_trust's promise (stage C seam): of the modules an AI can reach, only RemoteSession.pair names a trust writer
+    (install_public_key, gated by OneTimePassword), and DeploymentManager.trust_host, the old primitive without an audit
+    row, has no caller anywhere in the framework."""
+    import test_layering
+    via = ai_reachable_closure(test_layering.build_graph().edges())
+    uses = set()
+    for module in via:
+        if module == "orchestrator.utils.ssh_trust":
+            continue
+        base = test_layering.REPO_ROOT.joinpath(*module.split("."))
+        path = base.with_suffix(".py") if base.with_suffix(".py").is_file() else base / "__init__.py"
+        if path.is_file():
+            uses.update(writer_uses(module, path.read_text(encoding="utf-8")))
+    assert uses <= WRITER_PLACES, sorted(uses - WRITER_PLACES)
+    assert ("orchestrator.remote.session", "RemoteSession.pair") in uses, "the guard reads the session"
+    callers = [p for p in test_layering.PACKAGE.rglob("*.py") if ".trust_host(" in p.read_text(encoding="utf-8")]
+    assert callers == [], callers
+
+
+def test_the_trust_writer_guard_bites():
+    source = ("from orchestrator.utils import ssh_trust\n"
+              "class Helper:\n    def go(self, key):\n        ssh_trust.trust_host_key('s', 'h', 22, key)\n")
+    assert writer_uses("orchestrator.Core.helper", source) == [("orchestrator.Core.helper", "Helper.go")]
+
+
 class TestTrustPresentedKey:
 
     def test_the_key_and_its_audit_row_are_written_in_one_step(self, tmp_path):
