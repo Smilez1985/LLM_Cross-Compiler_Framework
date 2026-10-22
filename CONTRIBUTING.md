@@ -669,10 +669,15 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   imports (`tests/test_remote_trust.py` follows the imports from the tool modules, the MCP server, the LLM layer,
   Ditto, the device service and the benchmark). Work on a board through `remote.session.RemoteSession` (login with
   the host key checked through `TrustStore` at every login, `run`, `private_dir`, `upload` with resume,
-  `wait_for_host`, `run_detached`, one `CancelToken`): an AI path passes `KeyOnly()`, only the person's
-  `OneTimePassword` can pair, and every command goes as one `sh -c` with a time limit and an output cap through
-  `remote.transport` (`sh_command`, `ParamikoTransport.run`). Never write a second regex, reason table, recorder,
-  host-key check, wait loop, upload loop or command reader next to them. The package imports only `orchestrator/utils`
+  `wait_for_host`, `run_detached` and `follow`, `run_resumable`, one `CancelToken`): an AI path passes `KeyOnly()`,
+  only the person's `OneTimePassword` can pair, and every command goes as one `sh -c` with a time limit and an output
+  cap through `remote.transport` (`sh_command`, `ParamikoTransport.run`). The runtime deploy, the checks on the board
+  and the probe use it through `runtime/device/remote.py` `RemoteShell` (mark a command `again=True` only when it may
+  run twice: it only reads, or does the same again; any other ends with "dropped" after a network drop), a job that
+  runs long on the board goes through `run_detached` (the on-board benchmark), and a Cancel holds the session with
+  `CancelToken.hold` (closing a session ends its waits). Show a wait to the person with `remote.text.wait_lines` and
+  to an AI's job with `remote.text.progress_events`. Never write a second regex, reason table, recorder, host-key
+  check, wait loop, upload loop, command reader or "hold the client so Cancel can close it" next to them. The package imports only `orchestrator/utils`
   and `orchestrator/security` (`tests/test_remote_layer.py`).
 - **Qt lives only in `orchestrator/gui/`.** PySide6 is the optional extra `gui`; the command line, the MCP server and
   everything below the GUI import no Qt, also not inside a function (`tests/test_qt_free_core.py` checks every import
