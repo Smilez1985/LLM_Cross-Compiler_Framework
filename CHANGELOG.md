@@ -2165,7 +2165,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   could not name the board. One check now serves every place (`orchestrator/remote/address.py`, `valid_user`: ASCII
   only, the whole name, root only where it is allowed): the deploy, adding a board, the Deployment tab, the
   trusted-board records, the deploy settings, the systemd unit and the account names an AI never reads
-  (`device_text`). Adding a board no longer loads the build engine and the Docker SDK for this check.
+  (`device_text`). Adding a board no longer loads the build engine and the Docker SDK for this check. The board scan
+  (`llm-cli scan --device`, **Remote Scan via SSH...** in the Builder tab) checks the name the same way before the
+  board is contacted, with the refusal in the person's language; before, such a name reached the board's login.
 - **The AI settings dialog refuses a server address with a user name or password in it**, as sign-in and
   `llmcf ditto login` already did (the same address rule from `AISettingsChange`): before, such an address (or one
   with a space or a backslash, which parsers can read as two different hosts) was saved to `config.yml` as typed.

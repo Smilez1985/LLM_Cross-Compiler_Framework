@@ -21,6 +21,9 @@ from orchestrator.remote.reasons import reach_code  # noqa: F401 - the SSH reaso
 from orchestrator.utils.next_steps import WithSteps
 
 LABEL_HINT = "1 to 64 printable characters"
+# The refusal of an SSH user that is not an account name (the CLI's words; the GUI shows deploy.bad_user).
+USER_HINT = ("The SSH user must be an account name on the board (letters, digits, '.', '_' or '-'; it starts with a "
+             "letter or '_').")
 
 
 class ProfileWriteError(OSError):
@@ -110,9 +113,10 @@ def import_probe(probes: Any, path: Path, label: Optional[str] = None, target_ma
 # --- a board over SSH (`llmcf scan --device HOST --user U [--port] [--password] [--label]`) ---------------------------
 
 class DeviceScanError(WithSteps, RemoteFailure):
-    """A board scan that could not be done. `kind`: login (the board could not be reached or logged in to; `reason`
-    is its SSH reason code when it has one), probe (the probe on the board failed) or save (the profile could not be
-    stored or written). `error` is the exception behind it."""
+    """A board scan that could not be done. `kind`: user (the SSH user is not an account name: refused before any
+    contact, as on every other board path), login (the board could not be reached or logged in to; `reason` is its SSH
+    reason code when it has one), probe (the probe on the board failed) or save (the profile could not be stored or
+    written). `error` is the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None):
         super().__init__(message, kind, reason, error)
@@ -153,11 +157,14 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     `audit_factory` (instead of `audit`) opens the audit log only when that record is written, so a scan that fails
     never touches it (the CLI's audit log may create the OS keyring's audit key on first use). `on_client` gets the
     SSH session so a Cancel can close it."""
+    from orchestrator.remote.address import valid_user
     from orchestrator.runtime.device.settings import remember_ssh_user
     from orchestrator.runtime.device.trusted import record_trusted_device
     from orchestrator.runtime.profile import ProfileStore, device_id_for_host_key
     from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh, store_address
     from orchestrator.utils import ssh_trust
+    if not valid_user(user, allow_root=True):   # the account check of every board path (remote/address.py)
+        raise DeviceScanError(USER_HINT, "user")
     state_dir = Path(state_dir)
     store = store if store is not None else ProfileStore(state_dir)
     try:
@@ -201,5 +208,5 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
                       output_file=Path(output_file) if output_file is not None else None, trusted=trusted)
 
 
-__all__ = ["DeviceScan", "DeviceScanError", "ImportedProbe", "LABEL_HINT", "LocalScan", "ProfileWriteError",
+__all__ = ["DeviceScan", "DeviceScanError", "ImportedProbe", "LABEL_HINT", "LocalScan", "ProfileWriteError", "USER_HINT",
            "import_probe", "label_problem", "reach_code", "scan_device", "scan_local", "write_profile_file"]

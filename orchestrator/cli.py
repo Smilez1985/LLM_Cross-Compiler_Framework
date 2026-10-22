@@ -4790,11 +4790,13 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
 def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
                  password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str],
                  ctx: Optional[FrameworkContext] = None) -> None:
-    from orchestrator.remote.address import valid_host
-    from orchestrator.runtime.scan_steps import DeviceScanError, label_problem, scan_device
+    from orchestrator.remote.address import valid_host, valid_user
+    from orchestrator.runtime.scan_steps import USER_HINT, DeviceScanError, label_problem, scan_device
     from orchestrator.utils import ssh_trust
     if not user:
         raise click.UsageError("--device needs --user")
+    if not valid_user(user, allow_root=True):
+        raise click.UsageError(f"--user: {USER_HINT}")
     if not valid_host(host):
         raise click.UsageError("--device takes an address or a host name, e.g. 192.168.1.50, fe80::1 (no brackets) "
                                "or myboard.local")

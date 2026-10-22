@@ -907,3 +907,31 @@ class TestCliDevicesEdit:
         terminal()
         result = self.edit("Garage", "--host", "192.0.2.41")
         assert result.code == 1 and "No trusted board Garage" in result.out
+
+
+# --- scan_device checks the SSH user like every other board path (default of the stage-B reviews) ------------------
+
+@pytest.mark.parametrize("user", ["-oProxyCommand=x", "radxa\nroot", "ſudo", "bad user", ""])
+def test_scan_device_refuses_a_user_that_is_no_account_name_before_any_contact(tmp_path, monkeypatch, user):
+    from orchestrator.runtime import scan_steps
+    monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: pytest.fail("logged in"))
+    with pytest.raises(scan_steps.DeviceScanError) as e:
+        scan_steps.scan_device(tmp_path / "state", HOST, 22, user, None)
+    assert e.value.kind == "user" and str(e.value) == scan_steps.USER_HINT
+    assert not (tmp_path / "state").exists(), "nothing was written"
+
+
+def test_scan_device_takes_root_as_every_board_path_does(tmp_path, monkeypatch):
+    from orchestrator.runtime import scan_steps
+    monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: (_ for _ in ()).throw(ConnectionRefusedError(111, "x")))
+    with pytest.raises(scan_steps.DeviceScanError) as e:
+        scan_steps.scan_device(tmp_path / "state", HOST, 22, "root", None)
+    assert e.value.kind == "login"
+
+
+@pytest.mark.usefixtures("keep_logger_levels")
+def test_the_cli_refuses_such_a_user_with_its_reason(monkeypatch):
+    from test_cli_builds import invoke_plain
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda *a, **k: pytest.fail("the board was contacted"))
+    result = invoke_plain("scan", "--device", HOST, "--user", "radxaſ")
+    assert result.code == 2 and "account name on the board" in result.out
