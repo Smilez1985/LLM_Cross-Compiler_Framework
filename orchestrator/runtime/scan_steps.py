@@ -173,7 +173,8 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
         on_client(client)
     try:
         if password:
-            ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
+            from orchestrator.remote import pairing
+            pairing.pair(client, state_dir)   # the framework's key, over the one-time password session
         if key is None:
             key = client.get_transport().get_remote_server_key()
         result = probe_over_ssh(client)

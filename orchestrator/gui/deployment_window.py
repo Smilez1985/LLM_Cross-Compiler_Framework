@@ -83,7 +83,7 @@ class DeploymentWorker(QThread):
     event = Signal(object)   # DeployEvent: the upload's progress, the wait for the board
 
     def __init__(self, framework, artifact_path, profile_name, docker_config, target_ip, user, password, *,
-                 port: int = 22, label=None, wait_seconds=None, package=None):
+                 port: int = 22, label=None, wait_seconds=None, package=None, key=None):
         super().__init__()
         self.framework = framework
         self.artifact_path = artifact_path
@@ -96,6 +96,9 @@ class DeploymentWorker(QThread):
         self.label = label                # the person's name for the board (deploy run --label); None keeps it
         self.wait_seconds = wait_seconds  # how long a dropped network is waited for (deploy run --wait); None: 300 s
         self.package = Path(package) if package else None  # an existing package (deploy run PACKAGE_PATH)
+        # the host key the person trusted (or that was known) in this window's question: the deploy must reach exactly
+        # that key, and the board's record is written with it without reading the key again
+        self.key = key
         self.trusted = None               # the board's trusted record after a successful deploy
         self.kv_cache = None            # the KV-cache type named in the package's start command
         self.kv_setting = KV_KEEP       # what the board's deploy settings get: None (automatic), a type, or KV_KEEP
@@ -143,6 +146,9 @@ class DeploymentWorker(QThread):
                        "on_client": self._on_client, "on_event": self.event.emit}
             if self.wait_seconds is not None:
                 options["wait_seconds"] = self.wait_seconds
+            if self.key is not None:
+                from orchestrator.utils import ssh_trust
+                options["expect_fingerprint"] = ssh_trust.fingerprint(self.key)
             result = dep_mgr.deploy_package(Path(pkg_path), self.target_ip, self.user, **options)
 
             if result.success:
@@ -212,24 +218,27 @@ class DeploymentWorker(QThread):
         """After a deployment to a device whose host key the person confirmed in this window (confirm_host_key) and
         that the framework logged in to: its record, so AI tools may name it for deploy_to_device (each deploy is
         still confirmed). Written only here and in the CLI, never by a tool; it never fails the deployment. The KV-cache
-        choice of this window goes into the board's deploy settings."""
+        choice of this window goes into the board's deploy settings. The key is the one of this window's question (the
+        deploy reached exactly that one: expect_fingerprint); only a worker started without it reads the key again."""
         from orchestrator.remote.address import Endpoint
         from orchestrator.remote.trust import TrustStore
-        from orchestrator.runtime.device.trusted import record_trusted_device
+        from orchestrator.runtime.device.person_steps import remember_board
         port = self.port if port is None else int(port)
         state = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
         if not state:
             return
-        try:
-            check = TrustStore(Path(state)).check(Endpoint(self.target_ip, port))
-            if not check.known:
+        key = self.key
+        if key is None:
+            try:
+                check = TrustStore(Path(state)).check(Endpoint(self.target_ip, port))
+                if not check.known:
+                    return
+            except Exception:  # noqa: BLE001 - unreachable now: the next deployment records it
                 return
-        except Exception:  # noqa: BLE001 - unreachable now: the next deployment records it
-            return
-        key = check.key
+            key = check.key
         audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
-        device = record_trusted_device(Path(state), self.target_ip, port, self.user, key, via="gui", paired=True,
-                                       label=self.label, audit=audit, actor="gui")
+        device = remember_board(Path(state), self.target_ip, port, self.user, key, via="gui", audit=audit,
+                                actor="gui", label=self.label)
         if device is not None:
             self.device_id, self.trusted = device.device_id, device
             if self.kv_setting != KV_KEEP:
@@ -299,15 +308,14 @@ class BoardBenchWorker(QThread):
 
     def _consent(self, digest: str) -> None:
         """The person's yes to an untrusted model, written to the audit log before the board loads it."""
+        from orchestrator.remote.pairing import record_consent
+        from orchestrator.runtime.device.person_steps import UNTRUSTED_CONSENT
         from orchestrator.runtime.device.service import DeviceRuntimeError
         audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        tool, detail = UNTRUSTED_CONSENT
         try:
-            if audit is None:
-                raise RuntimeError("no audit log")
-            audit.record("user", "device_runtime_untrusted_model", "external", "ask", "ok",
-                         arguments={"device": self.device_id, "model_sha256": digest}, approved=True,
-                         detail="an untrusted model may run natively on the device for the short llama-bench run",
-                         extra={"answer": "accepted", "confirm_channel": "framework-gui"})
+            record_consent(audit, tool, {"device": self.device_id, "model_sha256": digest}, detail,
+                           channel="framework-gui")
         except Exception as e:  # noqa: BLE001 - without its record there is no consent
             raise DeviceRuntimeError(f"The consent could not be written to the audit log ({e}); nothing was "
                                      "loaded.") from None
@@ -632,6 +640,7 @@ class DeploymentWindow(QWidget):
 
         def done(trusted: bool) -> None:
             self._set_busy(False)
+            conn.key = self.host_keys.key if trusted else None   # the deploy reaches exactly this key
             then(trusted)
 
         self.host_keys.start(conn.host, conn.port, done, step="deploy")
@@ -649,7 +658,7 @@ class DeploymentWindow(QWidget):
         self.btn_cancel.setEnabled(True)
         self.worker = DeploymentWorker(
             self.framework, artifact_path, profile_name, docker_config or {}, conn.host, conn.user, password,
-            port=conn.port, label=conn.label, wait_seconds=conn.wait, package=package)
+            port=conn.port, label=conn.label, wait_seconds=conn.wait, package=package, key=getattr(conn, "key", None))
         if package is None:
             self.worker.kv_cache, self.worker.kv_setting = self.kv_choice()
         self.worker.progress.connect(self._update_progress)

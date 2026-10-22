@@ -4,7 +4,8 @@ Trust on first use in the GUI, never silently (MCP design 2.7): the board's host
 for the person to compare, and stored only after their "Yes" ("No" is the default); a changed key is refused.
 
 `HostKeyCheck` reads the key in a plain worker thread (a board that does not answer holds the network for up to ten
-seconds, never the window) and asks on the GUI thread through gui/worker_relay.py; `confirm_host_key` in
+seconds, never the window) and asks on the GUI thread through gui/worker_relay.py (the key of a check that went on
+stays in `HostKeyCheck.key`, so the deploy needs no second read); `confirm_host_key` in
 gui/dialogs.py does the same in one call where a window still reads the key itself. The question uses the words of
 the CLI's (`llmcf deploy run`, `llmcf scan --device`): compare with ssh-keygen on the board, then trust it.
 
@@ -65,22 +66,27 @@ def question_text(host: str, port: int, key: Any, lang: Optional[str] = None) ->
 def ask_trust(parent: Any, framework: Any, host: str, port: int, key: Any, status: str, *, step: str = "",
               lang: Optional[str] = None) -> bool:
     """The question part on the GUI thread: True for a known key, the person's "Yes" for an unknown one (then the key
-    is stored), False for a changed key (refused, recorded for Mojo) or "No"."""
+    is stored and the trust written to the audit log: remote/pairing.py first_use), False for a changed key (refused,
+    recorded for Mojo) or "No"."""
     from orchestrator.gui.plain import ask, plain_box
+    from orchestrator.remote import pairing
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import KeyCheck, TrustStore
     from orchestrator.runtime.device import reasons
     from orchestrator.utils import ssh_trust
     if status == "known":
         return True
     folder = state_dir(framework)
-    if status == "changed":
+    check = KeyCheck.of(Endpoint(host, int(port)), key, status)
+    audit = getattr(getattr(framework, "tool_registry", None), "audit", None)
+    outcome = pairing.first_use(TrustStore(folder), check, via="gui", audit=audit, actor="gui",
+                                ask=lambda c: ask(parent, ui_text("deploy.hostkey.title", lang),
+                                                  question_text(host, port, key, lang)))
+    if outcome.verdict == "changed":
         _note(folder, host, port, step, reasons.HOST_KEY_CHANGED)
         plain_box(parent, "critical", ui_text("deploy.hostkey.changed_title", lang),
                   str(ssh_trust.HostKeyChanged(host, port)))
-        return False
-    if not ask(parent, ui_text("deploy.hostkey.title", lang), question_text(host, port, key, lang)):
-        return False
-    ssh_trust.trust_host_key(folder, host, port, key)
-    return True
+    return outcome.trusted
 
 
 def show_unreachable(parent: Any, framework: Any, host: str, port: int, error: BaseException, *, step: str = "",
@@ -102,6 +108,7 @@ class HostKeyCheck(QObject):
         self._token: Optional[object] = None
         self._pending: Optional[tuple] = None
         self.thread: Optional[threading.Thread] = None
+        self.key: Any = None   # the key of the last check that went on (known or trusted now), else None
         worker_relay().done.connect(self._done, Qt.QueuedConnection)
 
     @property
@@ -111,7 +118,7 @@ class HostKeyCheck(QObject):
     def start(self, host: str, port: int, then: Callable[[bool], None], *, step: str = "") -> None:
         from orchestrator.gui.worker_relay import worker_relay
         token, relay, folder = object(), worker_relay(), state_dir(self.framework)
-        self._token, self._pending = token, (host, int(port), then, step)
+        self._token, self._pending, self.key = token, (host, int(port), then, step), None
 
         def run() -> None:
             try:
@@ -134,7 +141,9 @@ class HostKeyCheck(QObject):
             then(False)
             return
         key, status = value
-        then(ask_trust(self.window, self.framework, host, port, key, status, step=step, lang=self.lang))
+        trusted = ask_trust(self.window, self.framework, host, port, key, status, step=step, lang=self.lang)
+        self.key = key if trusted else None
+        then(trusted)
 
 
 __all__ = ["HostKeyCheck", "ask_trust", "question_text", "read_host_key", "show_unreachable", "state_dir",

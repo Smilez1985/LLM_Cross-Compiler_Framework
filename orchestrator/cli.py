@@ -4375,28 +4375,21 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         console.print("[red]Deployment Manager not loaded.[/red]")
         sys.exit(1)
 
-    # Trust on first use, never silently.
+    # Trust on first use, never silently (the one decision of remote/pairing.py first_use).
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import KeyCheck
     try:
         status, key = dep_mgr.host_key_status(host, port)
     except Exception as e:
         _unreachable(ctx, host, port, e, step="deploy")
-    if status == "changed":
+    store = _deploy_trust_store(ctx, dep_mgr) if status == "unknown" else None   # a store only to trust a key
+    outcome = _first_use(ctx, store, KeyCheck.of(Endpoint(host, port), key, status), trust_fingerprint,
+                         nothing="deployed")
+    if outcome.verdict == "changed":
         _note_reach(ctx, host, port, "deploy", reasons.HOST_KEY_CHANGED)
         _print_reason(ctx, reasons.HOST_KEY_CHANGED, host, port)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
-    if status == "unknown":
-        fp = ssh_trust.fingerprint(key)
-        console.print(f"New device {escape(host)}:{port} - {key.get_name()} {fp}")
-        if trust_fingerprint:
-            if trust_fingerprint != fp:
-                console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
-                sys.exit(1)
-        elif not (sys.stdin.isatty() and click.confirm(
-                "Compare with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the device. Trust it?", default=False)):
-            console.print("[red]Device not trusted; nothing was deployed.[/red]")
-            sys.exit(1)
-        dep_mgr.trust_host(host, key, port)
     if password is None and not password_stdin:
         password = _device_password(None, False, ask_when_omitted=True)
 
@@ -4425,6 +4418,38 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         for line in result.output[-20:]:
             console.print(f"  [dim]{escape(line)}[/dim]")
         sys.exit(1)
+
+
+def _deploy_trust_store(ctx: FrameworkContext, dep_mgr):
+    """The known_hosts the deploy logs in with (the deployment manager's folder; else the command's)."""
+    from orchestrator.remote.trust import TrustStore
+    make = getattr(dep_mgr, "trust_store", None)
+    return make() if callable(make) else TrustStore(_state_dir(ctx))
+
+
+def _first_use(ctx: Optional[FrameworkContext], store, check, trust_fingerprint: Optional[str], *, nothing: str):
+    """The CLI's prompt for trust on first use (remote/pairing.py first_use decides): an unknown key is shown with its
+    fingerprint and trusted when it has --trust-fingerprint or the person says yes at a terminal ("No" is the default);
+    the trust is written to the audit log. Exits when it is refused; returns the decision (known, trusted, changed)."""
+    from orchestrator.remote import pairing
+    if check.status == "unknown":
+        console.print(f"New device {escape(check.endpoint.host)}:{check.endpoint.port} - {escape(check.key_type)} "
+                      f"{check.fingerprint}")
+
+    def ask(_check) -> bool:
+        return _interactive() and click.confirm(
+            "Compare with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the device. Trust it?", default=False)
+
+    audit = (lambda: _device_audit(ctx, store.state_dir)) if ctx is not None else None
+    outcome = pairing.first_use(store, check, ask=ask, preset_fingerprint=trust_fingerprint, via="cli", audit=audit,
+                                actor="cli")
+    if outcome.verdict == "mismatch":
+        console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
+        sys.exit(1)
+    if outcome.verdict == "declined":
+        console.print(f"[red]Device not trusted; nothing was {nothing}.[/red]")
+        sys.exit(1)
+    return outcome
 
 
 class _ctrl_c_cancels:
@@ -4682,29 +4707,16 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
     from orchestrator.remote.address import Endpoint
     from orchestrator.remote.trust import TrustStore
     from orchestrator.utils import ssh_trust
+    store = TrustStore(state_dir)
     try:
-        check = TrustStore(state_dir).check(Endpoint(host, port))
+        check = store.check(Endpoint(host, port))
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
         _unreachable(ctx, host, port, e, step="probe", state_dir=state_dir)
-    key, status = check.key, check.status
-    if status == "changed":
+    if _first_use(ctx, store, check, trust_fingerprint, nothing="probed").verdict == "changed":
         _note_reach(ctx, host, port, "probe", "device_host_key_changed", state_dir=state_dir)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
-    if status == "unknown":
-        fp = ssh_trust.fingerprint(key)
-        console.print(f"New device {escape(host)}:{port} - {escape(key.get_name())} {fp}")
-        if trust_fingerprint:
-            if trust_fingerprint != fp:
-                console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
-                sys.exit(1)
-        elif not (sys.stdin.isatty() and click.confirm(
-                "Compare with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the device. Trust it?",
-                default=False)):
-            console.print("[red]Device not trusted; nothing was probed.[/red]")
-            sys.exit(1)
-        ssh_trust.trust_host_key(state_dir, host, port, key)
-    return key
+    return check.key
 
 
 def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
