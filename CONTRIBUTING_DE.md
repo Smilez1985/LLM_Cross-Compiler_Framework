@@ -647,7 +647,14 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   sind Delegates; `tests/test_hashing.py` schlägt bei einer neuen Hash-Schleife daneben fehl. Ein Disk-Watchdog, ein
   Text bei wenig Platz oder bei voller Platte kommt aus `orchestrator/Core/disk_plan.py` (`low_disk_text`,
   `disk_full_text`, `is_disk_full`, `DiskWatchdog`, `free_space`, `nearest_existing`); so ein Text nennt Ordner beim
-  Label und behält `DISK_FULL_PHRASE`, auf die die Self-Healing-Heuristik passt.
+  Label und behält `DISK_FULL_PHRASE`, auf die die Self-Healing-Heuristik passt. Jede Prüfung des freien Platzes
+  folgt dort der einen Speicherplatz-Regel (Entscheidung A4): `room(path, needed, ledger=...)` (eine Festplatte)
+  oder `check_disk` (mehrere) lassen die Reserve frei (`reserve_for`), neben dem, was andere Aufrufe im
+  `ReservationLedger` des Benutzerordners reserviert haben, und `refusal`/`require` sagen, was nicht passt und was zu
+  tun ist; ein Fenster zeigt die Worte für die Person mit `person_reason`. Vergleiche `shutil.disk_usage` nie mit
+  einem eigenen Spielraum. Ein Download bekommt die Regel als `PinnedDownloader(space=download_rule(ledger=...))`;
+  ein langer Aufruf, der später schreibt, hält seinen Platz mit `hf_hub.reserve_space`. Tests lesen eine geräumige
+  Festplatte (die Fixture `roomy_disk`); ein Test einer Prüfung gibt seine eigene vor.
 - **Jede CLI-Aktion hat einen Weg mit der Maus.** Viele Menschen nutzen nie ein Terminal, deshalb kann eine Person
   jeden Befehl und jede Option von `llm-cli` auch in der GUI starten, ohne einen Befehl zu tippen (einen Wert in ein
   Feld zu tippen ist in Ordnung). Ein neuer Befehl oder eine neue Option braucht ihren Weg mit der Maus, einen

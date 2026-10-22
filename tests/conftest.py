@@ -297,6 +297,16 @@ def roomy_snapshot_disk(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def roomy_disk(monkeypatch):
+    """The one disk rule (decision A4, Core/disk_plan.py) keeps the reserve free (2 GiB or 2 % of the disk) for every
+    check: downloads, the bench copy, the knowledge-base conversion, the snapshot export, Mojo and the AI's disk fact.
+    So every check reads a roomy disk (1000 GB, 600 GB free) and the free space of the disk the tests run on never
+    decides a test; a test of a check gives its own disk_usage or replaces shutil.disk_usage itself."""
+    monkeypatch.setattr(shutil, "disk_usage",
+                        lambda path: shutil._ntuple_diskusage(1000 * 10 ** 9, 400 * 10 ** 9, 600 * 10 ** 9))
+
+
+@pytest.fixture(autouse=True)
 def logger_levels_restored():
     """A CLI test with -q (or --log-level) sets the framework's loggers to ERROR process-wide (setup_logging keeps
     the last level), so a later test's caplog saw no warning, depending only on the order the files ran in. Every

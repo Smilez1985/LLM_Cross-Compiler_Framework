@@ -311,11 +311,17 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             to_build = [b for b in plan.builds if b.to_build]
             needed = (SOURCE_SIZE if plan.needs_source and not cached else 0) + BUILD_SIZE * len(to_build) + \
                 (int(model.size or 0) if fetch_model else 0)
-            disk = disk_check(rt.data_dir, needed)
+            # the one disk rule (A4): with what running builds and downloads of any process reserved there
+            from orchestrator.Core.disk_plan import ReservationLedger
+            disk = disk_check(rt.data_dir, needed, ReservationLedger(Path(rt.data_dir)))
             if not disk["fits"]:
                 raise blocked("disk_full", f"Not enough disk space: about {_size(needed)} needed (estimate), "
-                              f"{_size(disk['free'])} free, {_size(disk['reserve'])} kept free as a reserve.",
-                              "Tell the person how much space is needed.")
+                              f"{_size(disk['free'])} free, {_size(disk['reserve'])} kept free as a reserve"
+                              + (f", {_size(disk['reserved'])} reserved by other calls (running builds or "
+                                 "downloads)" if disk["reserved"] else "") + ".",
+                              "Tell the person how much space is needed" + (
+                                  "; the call fits once the running build or download has finished"
+                                  if disk["reserved"] else "") + ".")
             facts = [Fact("Plan", line) for line in plan.describe()]
             facts += [Fact("Note", scrub(n)) for n in plan.notes[:5]]
             facts.append(Fact("Source", "the pinned source is cached" if cached or not plan.needs_source else

@@ -1056,8 +1056,11 @@ class LocalLLMRuntime:
 
     # --- downloads (orchestrator/utils/download.py) ---------------------------------------------------------
     def _downloads(self) -> _Downloads:
-        from orchestrator.Core.disk_plan import download_rule
-        return _Downloads(self._session, self._sleep, self.logger, space=download_rule())
+        """The pinned downloader on the one disk rule (A4): the reserve stays free beside what running builds and
+        downloads of any process reserved (the ledger in this user's folder)."""
+        from orchestrator.Core.disk_plan import ReservationLedger, download_rule
+        return _Downloads(self._session, self._sleep, self.logger,
+                          space=download_rule(ledger=ReservationLedger(Path(self.data_dir))))
 
     def _ensure_space(self, folder: Path, needed: int, what: str = "the download") -> None:
         self._downloads().ensure_space(folder, needed, what)

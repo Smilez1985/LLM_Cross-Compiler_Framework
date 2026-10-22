@@ -1265,6 +1265,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   container watchdog and the staging watcher now are); the build engine keeps its old method names as delegates, the
   texts are unchanged and keep "No space left on device", which the self-healing pattern (now built from the same
   phrases) matches. Margins are unchanged.
+- **One disk rule for every free-space check** (architecture consolidation c3-disk-callers, maintainer decision A4).
+  Every check measures through `orchestrator/Core/disk_plan.py` (`room`, the one check of a disk, which `check_disk`
+  and `require` build on) and keeps the reserve free that builds keep, 2 GiB or 2 % of the disk (20 GiB or 10 % under
+  a standing approval), beside what accepted calls of any process reserved in the ledger of the per-user folder: the
+  local runtime's archive and model downloads and the community zoo's pack downloads (256 MiB before), the benchmark
+  sandbox's model copy and the knowledge-base conversion (512 MiB before), the knowledge snapshot export (no margin
+  before), Mojo's disk check (fixed 5 and 20 GB before; now an error below the reserve and a warning below twice the
+  reserve, in decimal GB like every other size), the AI's disk fact and the checks of the deployment package and the
+  runtime build tools. A download that a running build leaves no room for is refused with the numbers and the next
+  step (try again once that build or download has finished, or free disk space); the Local Runtime, Local Models and
+  Community Hub windows say so in English or German, and a reservation of a program that has ended never blocks (the
+  ledger drops it). A deployment package holds its space in the ledger while it is made, as an AI's Hugging Face
+  download does. The self-healing diagnosis after a full disk still names the disks below the reserve without
+  counting reservations, because it looks for the disk that ran full. The downloader in `orchestrator/utils/
+  download.py` takes its caller's disk rule (`space`), so the bottom layer imports nothing above it.
 - **The GUI is an optional extra; the command line, the MCP server and the core run without Qt.** PySide6 is the
   extra `gui` in `pyproject.toml` (the hash-pinned `requirements-gui.txt`, an export of `uv.lock` like
   `requirements.txt`). The Linux and Windows installers install it as before; `sudo ./install.sh --headless`

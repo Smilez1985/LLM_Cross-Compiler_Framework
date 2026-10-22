@@ -459,3 +459,27 @@ class Reservation:
         with _RESERVED_LOCK:
             _RESERVED.pop(self.key, None)
 
+
+class LedgerReservation:
+    """Space reserved in the ledger every process of this user shares (disk_plan.ReservationLedger), until release()."""
+
+    def __init__(self, ledger: Any, rid: str):
+        self.ledger, self.rid = ledger, rid
+
+    def release(self) -> None:
+        self.ledger.release(self.rid)
+
+
+def reserve_space(ledger: Any, folder: Path, size: int, owner: str, label: str, *, need_label: str, what: str,
+                  key: str, standing: bool = False, disk_usage: Any = None):
+    """The space an accepted call (a download, a package) will write into `folder`, held until it ends: in the ledger
+    (checked again under its lock, so two calls prepared together cannot both take the same space; a call under a
+    standing approval must leave the larger reserve; disk_plan.InsufficientSpace when the space is gone meanwhile),
+    or, without a ledger or bytes, this process's Reservation under `key`. Released with release()."""
+    if ledger is None or not size:
+        return Reservation(key, int(size))
+    from orchestrator.Core.disk_plan import DiskNeed
+    rid, _ = ledger.reserve([DiskNeed(need_label, Path(folder), int(size), what)], owner, label, standing=standing,
+                            disk_usage=disk_usage)
+    return LedgerReservation(ledger, rid)
+
