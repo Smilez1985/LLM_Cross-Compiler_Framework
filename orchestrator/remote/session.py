@@ -49,7 +49,7 @@ from orchestrator.remote.address import Endpoint
 from orchestrator.remote.errors import RemoteFailure
 from orchestrator.remote.text import OUTPUT_LINES
 from orchestrator.remote.transport import (COMMAND_TIMEOUT, HASH_TIMEOUT, KEEPALIVE_SECONDS, MAX_OUTPUT,
-                                           ParamikoTransport, Result, Transport)
+                                           ParamikoTransport, Result, Transport, timed_out)
 from orchestrator.utils.helpers import sha256_fileobj
 
 # A session whose network drops (a Wi-Fi board) waits this long for the board to answer again (N5), trying every
@@ -360,8 +360,13 @@ class RemoteSession:
             self.pause(min(WAIT_INTERVAL, max(0.1, self.wait_seconds - elapsed)))
 
     def _dropped(self, error: BaseException) -> bool:
-        """Whether `error` is a network drop to wait through (the session itself broke), within MAX_RESUMES."""
-        return self.transport is not None and not self.transport.alive() and self.resumed < MAX_RESUMES
+        """Whether `error` is a network drop to wait through, within MAX_RESUMES: the session itself broke, or the
+        board gave no answer within the command's time limit (transport.timed_out: while the network is gone the
+        connection still stands until TCP gives up, so the time limit notices first). A board that answers with an
+        error (a full disk) is no drop."""
+        if self.transport is None or self.resumed >= MAX_RESUMES:
+            return False
+        return not self.transport.alive() or timed_out(error)
 
     # --- the upload ---
 

@@ -844,3 +844,88 @@ def test_importing_the_session_loads_no_paramiko_and_no_qt():
                           stdin=subprocess.DEVNULL)
     assert done.returncode == 0, done.stderr[-2000:]
     assert json.loads(done.stdout.strip().splitlines()[-1]) == []
+
+
+# --- regression (review): a command that gets no answer within its time limit is a network drop (N5) ----------------
+# The deploy's commands now have a time limit (120 s of silence, at least 900 s for a hash). When the network drops,
+# paramiko's connection still stands until TCP gives up (on Linux after about 15 minutes), so the first thing that
+# notices is that time limit: a read that stays silent (socket.timeout) or a channel paramiko cannot open in time.
+# Before the time limits such a command simply waited, and the deploy went on when the board answered again; a time
+# limit must not turn that into the end of the deploy. It counts as a drop: the deploy waits for the board, logs in
+# again (the host key checked again) and continues, at most MAX_RESUMES times.
+
+def _silent_once(board, starts_with, error):
+    """The first command on the board that starts with `starts_with` gets no answer in time (`error`), while the
+    connection itself still stands."""
+    real_run = board.run
+    hit = {"n": 0}
+
+    def on_board(command):
+        if command.startswith(starts_with) and not hit["n"]:
+            hit["n"] += 1
+            assert board.online and board.logins == 1, "the connection still stands when its command times out"
+            raise error
+        return real_run(command)
+    board.run = on_board
+    return hit
+
+
+@pytest.mark.parametrize("error", [socket.timeout("timed out"), TimeoutError("timed out")])
+def test_a_poll_that_gets_no_answer_in_time_waits_for_the_board_and_follows_again(manager, board, package, error):
+    board.install_polls_needed = 3
+    hit = _silent_once(board, f"cat {TARGET}/{dmod.INSTALL_STATUS}", error)
+    result, events = run(manager, package)
+    assert hit["n"] == 1
+    assert result.success and result.device_state == "ok" and board.starts == 1, result.reason
+    assert result.resumed == 1 and board.logins == 2, "logged in again, with the host key checked again"
+    assert [(e.kind, e.step) for e in events if e.kind in ("waiting", "back")] == \
+        [("waiting", "install"), ("back", "install")]
+
+
+def test_a_channel_that_does_not_open_in_time_waits_for_the_board_too(manager, board, package, monkeypatch):
+    """paramiko's own time limit for opening the command's channel (SSHException 'Timeout opening channel.')."""
+    real_exec = tbd.Client.exec_command
+    hit = {"n": 0}
+
+    def exec_command(self, command, timeout=None):
+        if dmod.INSTALL_STATUS in command and "nohup" not in command and not hit["n"]:
+            hit["n"] += 1
+            raise paramiko.SSHException("Timeout opening channel.")
+        return real_exec(self, command, timeout=timeout)
+    monkeypatch.setattr(tbd.Client, "exec_command", exec_command)
+    result, _events = run(manager, package)
+    assert hit["n"] == 1 and result.success and board.starts == 1 and result.resumed == 1, result.reason
+
+
+def test_a_hash_check_that_gets_no_answer_in_time_resumes_at_what_arrived(manager, board, package):
+    commands = record_commands(board)
+    size = package.stat().st_size
+    hit = _silent_once(board, f"sha256sum {PART}", socket.timeout("timed out"))
+    result, events = run(manager, package)
+    assert hit["n"] == 1
+    assert result.success and result.resumed == 1 and board.starts == 1, result.reason
+    assert board.sent == size, "nothing was sent twice: the board's hash of what arrived matched"
+    assert f"head -c {size} {PART} | sha256sum" in commands
+    assert [(e.kind, e.step) for e in events if e.kind == "waiting"] == [("waiting", "upload")]
+
+
+def test_a_board_whose_commands_never_answer_in_time_ends_after_max_resumes(manager, board, package):
+    real_run = board.run
+
+    def on_board(command):
+        if command.startswith(f"cat {TARGET}/{dmod.INSTALL_STATUS}"):
+            raise socket.timeout("timed out")
+        return real_run(command)
+    board.run = on_board
+    result, _events = run(manager, package)
+    assert not result.success and result.device_state == "unknown" and board.starts == 1
+    assert result.resumed == dmod.MAX_RESUMES and board.logins == dmod.MAX_RESUMES + 1
+    assert result.reason == f"The installation on {HOST} could not be followed: timed out"
+
+
+def test_a_failure_on_the_board_is_still_no_drop(manager, board, package):
+    """Only a time limit or a broken connection is a drop: a board that answers with an error ends the upload."""
+    board.disk_full = True
+    result, _events = run(manager, package)
+    assert not result.success and result.resumed == 0 and board.logins == 1 and result.device_state == "ok"
+    assert result.reason == f"The upload to {HOST} failed: Failure"

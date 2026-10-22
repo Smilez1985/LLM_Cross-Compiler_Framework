@@ -1441,7 +1441,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   den Transport als Zuhause). Jeder Befehl des Deployments hat jetzt das Zeitlimit und die Ausgabegrenze, die die
   Befehle der Geräte-Laufzeit hatten (120 s Stille, 1 MiB; eine sha256-Prüfung auf dem Board wartet mindestens 900 s
   und bei einem großen Paket länger), und die Sitzung hält die Verbindung alle 15 s am Leben: Ein Board, das mitten in
-  einem Befehl nicht mehr antwortet, hält das Deployment nicht mehr fest.
+  einem Befehl nicht mehr antwortet, hält das Deployment nicht mehr fest. So ein Befehl zählt als Netzabbruch (die
+  Verbindung von paramiko steht dann noch, bis TCP aufgibt): Das Deployment wartet wie nach jedem Abbruch auf das
+  Board, meldet sich mit erneut geprüftem Host-Schlüssel wieder an und setzt den Upload fort oder verfolgt die
+  Installation weiter, höchstens 20-mal, statt mit „could not be followed“ zu enden.
 - **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
   zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9 Schleifen; die
   Schleife von `utils/network.py` ist mit diesem Modul gegangen, siehe unten) laufen über das Modul der ältesten,
