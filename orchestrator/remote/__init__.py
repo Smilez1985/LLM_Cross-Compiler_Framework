@@ -12,9 +12,11 @@ Everything that talks to a board (consolidation plan, layer 2): one Qt-free pack
 - text.py: a board's words as one line (one_line) or as kept output lines (keep_tail), and the visible state of a
   running deploy (event_text: for the person in their language, or for an AI in English with the board's label).
 - transport.py: whether SSH works here (available(), PARAMIKO_AVAILABLE; paramiko is imported on first use only),
-  sh_command (every command is one `sh -c '...'`), and the Transport interface with ParamikoTransport: run with a time
-  limit and an output cap (read_limited), the board's files over SFTP, alive, the login (open_client) and
-  paramiko_quiet.
+  sh_command (every command is one `sh -c '...'`), and the Transport interface with its two transports.
+  ParamikoTransport: run with a time limit and an output cap (read_limited), the board's files over SFTP, alive, the
+  login (open_client) and paramiko_quiet. SystemSshTransport: the same over this computer's OpenSSH client where
+  paramiko is missing (SshFailed for OpenSSH's own failures), with the one OpenSSH command-line builder
+  (openssh_argv, openssh_options with the login time limit and keepalive, config_value quoting a path).
 - session.py: RemoteSession, one session with a board: the login with the host key checked at every login, typed
   credentials (KeyOnly, OneTimePassword: only the latter can pair), the private folder, the upload that resumes after
   a network drop, the wait for the board (N5), a job that runs on the board on its own and is followed again after a
@@ -28,7 +30,7 @@ Everything that talks to a board (consolidation plan, layer 2): one Qt-free pack
   reach imports it (tests/test_remote_trust.py follows the imports).
 
 What a contact found is recorded for Mojo by orchestrator/runtime/device/trusted.py record_reach (the store of the
-trusted boards lives there; this layer imports no runtime code). The OpenSSH transport follows in consolidation
-stage C (chain c2-remote-system); the runtime deploy, the probe and the on-board benchmark move onto RemoteSession in
-chain c2-remote-callers.
+trusted boards lives there; this layer imports no runtime code). The deploy's OpenSSH fallback is a RemoteSession
+over SystemSshTransport (chain c2-remote-system, decision A5); the runtime deploy, the probe and the on-board benchmark
+move onto RemoteSession in chain c2-remote-callers.
 """

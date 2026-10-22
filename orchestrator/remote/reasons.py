@@ -16,10 +16,11 @@ One of the framework's own files or folders (its SSH key, known_hosts) could not
 no permission, a read-only disk), or this computer does not allow the connection (a PermissionError). The board is
 not to blame, so it is never recorded with the board for Mojo (REASONS are the board's four codes; CODES all five).
 
-classify() reads an exception of socket, paramiko or orchestrator.utils.ssh_trust; classify_ssh_output() reads what
-OpenSSH printed. reach_code() is the code every caller records and shows for a failed contact: classify's, local_problem
-for an error about this computer (is_local), device_host_down for any other OSError (the board does not answer), "" when
-it is none of these. check_port() tells host_down from port_closed with one TCP connection to the SSH port (no ICMP,
+classify() reads an exception of socket, paramiko, orchestrator.utils.ssh_trust or the OpenSSH transport
+(transport.SshFailed); classify_ssh_output() reads what OpenSSH printed. reach_code() is the code every caller records
+and shows for a failed contact: classify's, local_problem for an error about this computer (is_local), device_host_down
+for any other OSError (the board does not answer), "" when it is none of these (a host key not trusted yet, also as
+OpenSSH says it). check_port() tells host_down from port_closed with one TCP connection to the SSH port (no ICMP,
 which many networks block and which needs extra rights). The codes carry no account, address or path, so they reach an
 AI as they are (study 6.2 D0). The person's texts (person_text) may name the address and the port, never the account; an
 AI gets the code with AI_NEXT, English and without the address.
@@ -110,7 +111,9 @@ def classify(error: BaseException) -> Optional[str]:
     # paramiko only when something imported it already: none of its errors exists before that, so classify never
     # loads it (RG1) and works the same without it (transport.imported_paramiko, which also waits for an import
     # another thread started and has not finished).
-    from orchestrator.remote.transport import imported_paramiko
+    from orchestrator.remote.transport import SshFailed, imported_paramiko
+    if isinstance(error, SshFailed):   # OpenSSH itself failed: the code its words name (classify_ssh_output)
+        return error.reason or None
     paramiko = imported_paramiko()
     if paramiko is not None:
         if isinstance(error, paramiko.BadHostKeyException):
@@ -188,6 +191,8 @@ def reach_code(error: BaseException, *, while_waiting: bool = False) -> str:
     (N5); a connection that opens and drops again (DROPPED: its SSH server is still starting) means it is not back
     yet, so the wait goes on."""
     code = classify(error)
+    if code is None and getattr(error, "unknown_key", False):
+        return ""   # OpenSSH: the host key is not trusted yet, the first contact (as classify says for paramiko's)
     if code is None and is_local(error):
         code = LOCAL_PROBLEM
     if code is None and (isinstance(error, OSError) or (while_waiting and isinstance(error, DROPPED))):
