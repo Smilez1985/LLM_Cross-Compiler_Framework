@@ -970,11 +970,16 @@ Audit-Log festgehalten (Tool `zoo_maintainer`) und lässt sich bis zum letzten M
 Push schließt den eigenen Pull Request der Veröffentlichung und löscht seinen Branch). gh und git nutzen das
 eigene Login der Person; kein Token wird gelesen, gespeichert oder gezeigt, und kein für eine KI erreichbares Modul
 importiert den Code (ein Test sichert das ab). `scripts/community_repo/validate-contribution.yml` ist die
-Workflow-Vorlage für das Community-Repository: Sie läuft bei jedem Pull Request (die Pflichtprüfung von `main`; einer
-ohne Paket besteht sie), nimmt unter `contributions/` nur Paket-ZIPs bis 5 MB an und lässt über jedes
-`llm-cli zoo verify` laufen, das auch Pakete ablehnt, die noch Schlüssel oder persönliche Daten enthalten (der
-Secret-Scan des Repositorys überspringt Binärdateien und läuft deshalb nicht über die ZIP-Dateien). Der
-Signierschlüssel erreicht die CI nie.
+Workflow-Vorlage für das Community-Repository: die Pflichtprüfung `validate` von `main`, bei jedem Pull Request in
+`main` aus der Kopie in `main` selbst ausgeführt (`pull_request_target`, nur lesend, kein Secret), deshalb kann ein Pull
+Request sie nicht umschreiben. Der Head-Commit des Pull Requests ist nur Daten (über seine ID in ein Repository ohne
+Arbeitsverzeichnis geholt, nie ausgecheckt, nur mit git gelesen, nie ausgeführt). Die Änderungen kommen von git
+zwischen `main` und dem Head, ab ihrer einen Merge-Basis (ein Pull Request ohne oder mit mehreren fällt durch); Links,
+ausführbare Dateien und Dateinamen mit Steuerzeichen fallen durch; wer nicht Besitzer, Mitglied oder Collaborator
+ist, darf nur Paket-ZIPs unter `contributions/<kind>/` hinzufügen, deren übrige Änderungen sind Hinweise (die
+Veröffentlichung des Maintainers besteht). Jedes hinzugefügte Paket muss höchstens 5 MB groß sein und `llm-cli zoo verify` bestehen, das
+auch Pakete ablehnt, die noch Schlüssel oder persönliche Daten enthalten (der Secret-Scan des Repositorys überspringt
+Binärdateien und läuft deshalb nicht über die ZIP-Dateien). Der Signierschlüssel erreicht die CI nie.
 
 **Stand.** Das Community-Repository ist gewählt (Maintainer, 2026-10-22): `community_repo` nennt standardmäßig
 [Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), und `--pr` übergibt Pakete
