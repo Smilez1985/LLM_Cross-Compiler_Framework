@@ -2022,22 +2022,29 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   README, which the check never looked at (it listed only `contributions/`). The maintainer actions refused such a
   pull request, but a merge on the GitHub web page was not stopped. The check now runs on `pull_request_target`
   (opened, synchronize, reopened; pull requests into `main`), so the copy on `main` always checks, with
-  `contents: read` only, no secret, no cache and `persist-credentials: false` on both checkouts. The pull request's
-  head commit is data only: it is checked out into a folder of its own after the framework is installed, nothing in
-  it is run, sourced, installed or imported, git alone reads it, and no value of the pull request (title, branch,
-  body, file names) is written into a `run:` script; it comes through `env`. git computes the changes between `main`
-  and the head (`--raw -z --no-renames`, from the merge base, as GitHub merges them). A file name with a control
-  character, a symbolic link (a link named `x.zip` can no longer make the check read another file), an executable
-  file or a submodule fails for everyone. Anyone but the owner, a member or a collaborator (`author_association`) may
-  only add `contributions/<kind>/<name>.zip`, the paths the maintainer actions review; any other added, changed or
-  deleted file fails with its name, the README of a kind folder included (it passed as a notice before). The owner's,
-  a member's or a collaborator's other changes are notices, so the maintainer actions' own publication and revocation
+  `contents: read` only, no secret, no cache and `persist-credentials: false` on its one checkout, the framework's.
+  The pull request's head commit is data only and never checked out (a checkout of it under `pull_request_target` is
+  the known dangerous pattern, and actions/checkout prints its subject, where a carriage return would start a
+  workflow command): after the framework is installed, `main` and the head commit are fetched by its id, quietly and
+  without credentials, into a repository without a working tree, nothing of it is run, sourced, installed or
+  imported, git alone reads it, and no value of the pull request (title, branch, body, commit messages, file names) is
+  written into a `run:` script; it comes through `env`. git computes the changes between `main` and the head
+  (`--raw -z --no-renames`, from their one merge base, as GitHub merges them; a pull request with no or more than one
+  merge base fails, since GitHub's merge would then combine bases the check does not see, so a history that merges
+  two lines of `main` again could undo a publication unseen). A file name with a control character, a symbolic link
+  (a link named `x.zip` can no longer make the check read another file), an executable file or a submodule fails for
+  everyone. Anyone but the owner, a member or a collaborator (`author_association`) may only add
+  `contributions/<kind>/<name>.zip`, the paths the maintainer actions review; any other added, changed or deleted
+  file fails with its name, the README of a kind folder included (it passed as a notice before). The owner's, a
+  member's or a collaborator's other changes are notices, so the maintainer actions' own publication and revocation
   pull requests keep passing. Every added pack is still checked as before (at most 5 MB, `llm-cli zoo verify`), now
   from the blob of the head commit, and what zoo verify prints is never read as a workflow command. The CI's lint job
   also runs actionlint over the template. Tests run the real steps in bash against local git repositories with a stub
-  `llm-cli` (including the maintainer actions' publication through the fake GitHub) and guard the workflow's
-  structure. The community repository's copy is changed by its maintainer (the template says how to switch a copy
-  that still runs on `pull_request`).
+  `llm-cli` (including the maintainer actions' publication through the fake GitHub, a commit message with a carriage
+  return and a history with two merge bases) and guard the workflow's structure. The community repository's copy is
+  changed by its maintainer (the template says how to switch a copy that still runs on `pull_request`, and names the
+  setting the repository needs as well: fork pull request workflows only with approval, because a pull request can
+  still bring a workflow of its own with a job named `validate`).
 - **Dependencies on the newest versions that fit, with the advisories of 2026-10 fixed**: `uv lock --upgrade` moved
   every dependency to the newest version its range allows (among them pypdf 6.21.2, certifi 2026.10.19, paramiko
   5.1.0, qdrant-client 1.20.0, filelock 4.2.4), and Pillow goes to 13.0.0, which fixes 35 advisories of 12.3.0.
