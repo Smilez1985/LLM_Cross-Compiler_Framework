@@ -575,7 +575,7 @@ class BuildEngine:
         if not 1 <= number <= total or state.startswith("failed"):
             return  # a failed stage ends the container: its exit code and log tail report it
         step, low, high = band
-        if not progress.current_stage.startswith(step):
+        if not str(progress.current_stage or "").startswith(step):
             return
         done = number if state else number - 1
         progress.progress_percent = max(progress.progress_percent, low + (high - low) * done // total)
