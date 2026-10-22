@@ -682,8 +682,16 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   einem Warten auf das Board), halte fest, was ein Kontakt ergab, mit `record_reach`
   (`orchestrator/runtime/device/trusted.py`), leite den Fehler eines Board-Schritts von
   `remote.errors.RemoteFailure` ab, zeig den Fortschritt eines Deployments mit `remote.text.event_text` und frag
-  `remote.transport.available()`, ob SSH geht; importiere paramiko nie auf Modulebene. Schreib nie einen zweiten
-  regulären Ausdruck, eine zweite Grundtabelle oder einen zweiten Recorder daneben. Das Paket importiert nur
+  `remote.transport.available()`, ob SSH geht; importiere paramiko nie auf Modulebene. Lies und vergleiche den
+  Host-Schlüssel eines Boards mit `remote.trust.TrustStore` (`check` gibt einen `KeyCheck`: seinen Stand in der
+  `known_hosts` des Frameworks, den Fingerabdruck, ob es der erwartete oder der eines anderen Geräts ist) und behalte
+  darüber nur die Regel des Aufrufers: Die Person darf vertrauen, eine KI wird abgelehnt. Einem Schlüssel vertrauen,
+  koppeln, die Adresse oder den Schlüssel eines Boards ändern (Q5) und der Audit-Eintrag einer Zustimmung gehören der
+  Person: Sie laufen über `remote.pairing` (`trust_presented_key` und `first_use` mit dem Audit-Eintrag des
+  Vertrauens, `pair`, `plan_replacement`/`replace_key`, `record_consent`), das kein für eine KI erreichbares Modul
+  importiert (`tests/test_remote_trust.py` folgt den Importen der Tool-Module, des MCP-Servers, der LLM-Schicht, von
+  Ditto, des Gerätedienstes und des Benchmarks). Schreib nie einen zweiten regulären Ausdruck, eine zweite
+  Grundtabelle, einen zweiten Recorder oder eine zweite Host-Schlüssel-Prüfung daneben. Das Paket importiert nur
   `orchestrator/utils` und `orchestrator/security` (`tests/test_remote_layer.py`).
 - **Qt gibt es nur in `orchestrator/gui/`.** PySide6 ist das optionale Extra `gui`; Kommandozeile, MCP-Server und
   alles unterhalb der GUI importieren kein Qt, auch nicht in einer Funktion (`tests/test_qt_free_core.py` prüft jeden
