@@ -72,6 +72,7 @@ CLI_PATHS: Dict[str, str] = {
     "zoo export --pr": "btn_zoo_export",             # the export window's Open pull request, after the summary
     "zoo keys": "btn_zoo_keys",                      # with Copy and Save...
     # the hub's Maintainer tab: the maintainer of the community repository (gui/community_maintainer.py)
+    "zoo maintainer": "pnl_zoo_maintainer",          # the group lists its commands; the tab holds all three
     "zoo maintainer key": "btn_zoo_maint_key",       # the name, then the public entry with Copy and Save...
     "zoo maintainer key --save": "btn_zoo_maint_key",
     "zoo maintainer review": "btn_zoo_maint_load",   # without ITEM: the contributions; with ITEM: Review selected
@@ -111,6 +112,7 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "btn_zoo_verify_file": ACT_HUB,
     "btn_zoo_export": ACT_HUB,
     "btn_zoo_keys": ACT_HUB,
+    "pnl_zoo_maintainer": ACT_HUB,
     "btn_zoo_maint_key": ACT_HUB,
     "btn_zoo_maint_load": ACT_HUB,
     "btn_zoo_maint_review": ACT_HUB,

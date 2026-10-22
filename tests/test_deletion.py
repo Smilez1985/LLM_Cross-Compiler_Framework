@@ -135,6 +135,8 @@ DELETION_SITES = {
     ("orchestrator/Core/community_manager.py", "CommunityManager.prepare_install_file"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.verify_file"): STAGING,
     ("orchestrator/Core/community_manager.py", "_submit_with_gh"): STAGING,
+    # the maintainer's review folder of the framework's own (never a folder the person named)
+    ("orchestrator/Core/community_maintainer.py", "Review.discard"): STAGING,
     ("orchestrator/Core/community_pack.py", "read_pack"): STAGING,
     ("orchestrator/Core/module_generator.py", "ModuleGenerator.generate_module"): STAGING,
     ("orchestrator/tools/tools_community.py", "Quarantine._discard"): STAGING,

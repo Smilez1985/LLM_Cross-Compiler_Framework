@@ -179,7 +179,8 @@ class FakeGitHub:
                 return "", 1, 'Required status check "validate" is expected.'
             origin = str(self.origin)
             tree = git("-C", origin, "rev-parse", f"{pr['headRefOid']}^{{tree}}")
-            new = git("-C", origin, "commit-tree", tree, "-p", "refs/heads/main", "-m", f"{pr['title']} (#{pr['number']})")
+            new = git("-C", origin, "commit-tree", tree, "-p", "refs/heads/main", "-m",
+                      f"{pr['title']} (#{pr['number']})")
             git("-C", origin, "update-ref", "refs/heads/main", new)
             pr["state"] = "MERGED"
             self.merges.append(pr["number"])
@@ -787,6 +788,26 @@ def test_the_publication_pull_request_lists_no_contribution_file(tmp_path, monke
 
 
 # --- GUI -------------------------------------------------------------------------------------------------------------
+
+def test_revoke_dialog_gives_the_scope_the_person_chose(qapp):
+    from orchestrator.Core.community_manager import IndexEntry
+    from orchestrator.gui.community_maintainer import RevokeDialog
+    entry = IndexEntry(kind="target", id="demo-board", version="1.2.0", author="a", license="MIT",
+                       url="https://x.invalid/p.zip", size=3, sha256="a" * 64)
+    dialog = RevokeDialog([entry], lang="de")
+    try:
+        assert dialog.windowTitle() == "Veröffentlichtes Pack zurückziehen"
+        assert dialog.scope.currentData() == "version", "one version is the default"
+        dialog.reason.setText("  broken  ")
+        expected = {"version": ("target", "demo-board", "1.2.0", None, "broken"),
+                    "file": ("target", "demo-board", None, "a" * 64, "broken"),
+                    "all": ("target", "demo-board", None, None, "broken")}
+        for scope, values in expected.items():
+            dialog.scope.setCurrentIndex(dialog.scope.findData(scope))
+            assert dialog.values() == values, scope
+    finally:
+        dialog.close()
+
 
 def wait_tasks(owner, qapp):
     for _ in range(200):
