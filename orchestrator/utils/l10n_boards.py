@@ -161,8 +161,11 @@ TEXTS = {
         "boards.edit.err.stale": "The framework's known_hosts changed meanwhile; nothing was changed. Open Edit address "
                                  "or key... again.",
         "boards.edit.err.audit": "The change could not be written to the audit log; nothing was changed.",
+        "boards.edit.err.other_board": "The new host key is the key of the trusted board {label} ({device_id}); nothing "
+                                       "was changed. Change or remove that board instead.",
         "boards.edit.err.key_empty": "No host key was pasted.",
-        "boards.edit.err.key_several": "The pasted text holds more than one line: paste the one key line.",
+        "boards.edit.err.key_several": "The pasted text holds more than one line or more than one key: paste the one "
+                                       "key line.",
         "boards.edit.err.key_not_a_key": "The pasted text is not an SSH host key line (for example the line of "
                                          "/etc/ssh/ssh_host_ed25519_key.pub on the board).",
         "boards.edit.err.key_no_paramiko": "Reading a host key needs the 'paramiko' package.",
@@ -476,9 +479,12 @@ TEXTS = {
                                  "geändert. Öffne Adresse oder Schlüssel ändern... erneut.",
         "boards.edit.err.audit": "Die Änderung konnte nicht ins Audit-Log geschrieben werden; es wurde nichts "
                                  "geändert.",
+        "boards.edit.err.other_board": "Der neue Host-Schlüssel ist der Schlüssel des vertrauten Boards {label} "
+                                       "({device_id}); es wurde nichts geändert. Ändere oder entferne stattdessen "
+                                       "dieses Board.",
         "boards.edit.err.key_empty": "Es wurde kein Host-Schlüssel eingefügt.",
-        "boards.edit.err.key_several": "Der eingefügte Text hat mehr als eine Zeile: füge die eine Schlüsselzeile "
-                                       "ein.",
+        "boards.edit.err.key_several": "Der eingefügte Text hat mehr als eine Zeile oder mehr als einen Schlüssel: füge "
+                                       "die eine Schlüsselzeile ein.",
         "boards.edit.err.key_not_a_key": "Der eingefügte Text ist keine SSH-Host-Schlüsselzeile (zum Beispiel die "
                                          "Zeile aus /etc/ssh/ssh_host_ed25519_key.pub auf dem Board).",
         "boards.edit.err.key_no_paramiko": "Um einen Host-Schlüssel zu lesen, wird das Paket 'paramiko' gebraucht.",

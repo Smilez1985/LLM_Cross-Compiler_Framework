@@ -217,13 +217,16 @@ class TrustedDevices:
                 label: str) -> TrustedDevice:
         """Q5: the person changed the board's address or host key (orchestrator/remote/pairing.py replace_key): its
         record moves to the new address and, for a new key, to the board's new device ID; the old record goes in the
-        same write. Called only by the person's board steps (person_steps.change_board)."""
+        same write. Called only by the person's board steps (person_steps.change_board). DeviceStoreError when the new
+        key is another trusted board's: that board's record is never overwritten."""
         from orchestrator.runtime.profile import device_id_for_host_key
         from orchestrator.utils import ssh_trust
         fp = ssh_trust.fingerprint(key)
         device_id = device_id_for_host_key(fp)
         with file_lock(self.state_dir / ".devices.lock"):
             rows = self._read(self.path)
+            if device_id != old_id and device_id in rows:
+                raise DeviceStoreError("the new host key belongs to another trusted device")
             rows.pop(old_id, None)
             device = TrustedDevice(device_id=device_id, label=clean_label(label), host=host, port=int(port),
                                    user=user, key_type=key.get_name(), fingerprint=fp, paired=bool(paired),

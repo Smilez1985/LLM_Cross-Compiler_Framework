@@ -19,7 +19,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   You see the address, the host key and the device ID now and after the change
   side by side (in the window) and answer with "No" as the default; the change is written to the audit log before
   anything changes and refused when `known_hosts` changed meanwhile. A new key gives the board a new device ID: its
-  record moves there with its name and user, and whether the framework's key logs in is tested once. The work runs
+  record moves there with its name and user, and whether the framework's key logs in is tested once; the key of
+  another trusted board is refused, naming that board, so its record is never overwritten. The work runs
   in the background; the texts are English and German. No tool, the MCP server, Ditto or the device runtime steps can
   reach it (`orchestrator/remote/pairing.py` `replace_key`, an import-graph test).
 - **Next steps instead of commands, allow-to-run proposals and translated, regrouped menus** (wave 6, chain a0;

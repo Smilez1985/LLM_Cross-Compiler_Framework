@@ -1199,3 +1199,28 @@ def test_a_refused_change_says_why_in_plain_words(qapp, window, monkeypatch, pas
     window.buttons["btn_boards_edit"].click()
     wait(qapp, window)
     assert seen.questions == [] and window._t(key) in [a.text for a in boxes.asked]
+
+
+def test_the_key_of_another_trusted_board_is_refused_with_its_name(qapp, window, monkeypatch):
+    """Review (remote-trust-v): pasting the key of another trusted board would overwrite that board's record; the
+    window refuses before asking and names that board in plain words."""
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    from orchestrator.utils import ssh_trust
+    state = state_of(window)
+    device = trusted_board(state)
+    garage_key = paramiko.ECDSAKey.generate()
+    ssh_trust.trust_host_key(state, "192.168.1.51", 22, garage_key)
+    garage = TrustedDevices(state).record("192.168.1.51", 22, "radxa", garage_key, via="cli", paired=True,
+                                          label="Garage")
+    before = (state / "devices.json").read_bytes()
+    window.reload()
+    window.select(device.device_id)
+    seen = _edit_dialogs(monkeypatch, key_text=f"{garage_key.get_name()} {garage_key.get_base64()}", answer=True)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    assert seen.questions == [], "refused before the question"
+    assert window._t("boards.edit.err.other_board", label="Garage", device_id=garage.device_id) in [
+        a.text for a in boxes.asked]
+    assert (state / "devices.json").read_bytes() == before

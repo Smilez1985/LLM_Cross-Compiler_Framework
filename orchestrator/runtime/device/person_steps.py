@@ -43,7 +43,8 @@ class BoardStepError(WithSteps, RemoteFailure):
     """A board step that cannot be done. `kind` names the case (no_paramiko, unreachable, host_key_changed,
     not_trusted, other_device, login_failed, key_install, host_user, label, not_known, no_systemd, sudo_declined,
     not_saved, damaged, no_user, no_address; for a change of a board's address or key: no_board, address, key_text
-    with facts["detail"] empty, several, not_a_key or no_paramiko, unchanged, no_key, stale, audit); `reason` is the
+    with facts["detail"] empty, several, not_a_key or no_paramiko, unchanged, no_key, stale, audit, other_board with
+    facts["label"] and facts["device_id"] of the trusted board the new key belongs to); `reason` is the
     SSH reason code when the board could not be reached or logged in to; `error` the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None,
@@ -221,6 +222,14 @@ def plan_board_change(state_dir: Path, device_id: str, *, host: Optional[str] = 
         plan = pairing.plan_replacement(store, device, endpoint, key)
     except pairing.KeyReplaceError as e:
         raise BoardStepError(str(e), e.kind) from None
+    if plan.key_changed and plan.new_device_id != device.device_id:
+        # the new key is another trusted board's: its record would be overwritten with this board's name, user and
+        # address without a word, so the change is refused and names that board
+        other = TrustedDevices(state_dir).get(plan.new_device_id)
+        if other is not None:
+            raise BoardStepError(f"The new host key is the key of the trusted board {other.label} "
+                                 f"({other.device_id}); nothing was changed. Change or remove that board instead.",
+                                 "other_board", label=other.label, device_id=other.device_id)
     return BoardChange(device=device, plan=plan)
 
 
