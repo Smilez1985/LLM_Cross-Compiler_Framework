@@ -341,8 +341,8 @@ _KEY_FILE_OUTPUT = ("UNPROTECTED PRIVATE KEY FILE", "Load key", "Bad owner or pe
 
 
 def config_value(path: Any) -> str:
-    """`path` as one value of an OpenSSH -o option: in double quotes, so a space (a Windows account name with one,
-    C:\\Users\\Jane Doe) does not split it into two files. A backslash or a double quote inside is escaped as OpenSSH's
+    """`path` as one value of an OpenSSH -o option: in double quotes, so a space (a Windows account name with one, in
+    the profile folder) does not split it into two files. A backslash or a double quote inside is escaped as OpenSSH's
     option parser reads it (misc.c argv_split). A Windows path is written with forward slashes, which OpenSSH for
     Windows reads as the same path, so it holds no backslash at all."""
     text = path.as_posix() if isinstance(path, PureWindowsPath) else str(path)
