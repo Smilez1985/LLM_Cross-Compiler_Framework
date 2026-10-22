@@ -14,6 +14,7 @@ Every case runs with this computer's home folder as a POSIX path and as a Window
 import getpass
 import socket
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import SimpleNamespace
 
 import pytest
 
@@ -583,3 +584,34 @@ def test_this_computers_account_name_is_hidden_whole_in_any_root(monkeypatch):
                        ("bad uri file:///home/Jane Doe/private/a.bin", "bad uri file://a.bin")):
         assert tools_runtime.label_paths(text, ROOTS) == want, text
         assert "Doe" not in tools_runtime.device_text(text, DEVICE_USERS, ROOTS), text
+
+
+# --- the problem report (utils/telemetry.py) uses the one home-folder scrub ----------------------------------------
+
+def telemetry_sanitize(text):
+    from orchestrator.utils.telemetry import TelemetryManager
+    return TelemetryManager(SimpleNamespace(config={}))._sanitize(text)
+
+
+def test_the_problem_report_keeps_its_markers(home, monkeypatch):
+    """Characterization: secrets redacted, this computer's home folder as '~USER', the account name after a separator
+    as 'USER' (names of three characters or more), an empty text stays empty."""
+    folder = "/home/Jane Doe" if home == "posix" else r"C:\Users\Jane Doe"
+    sep = "/" if home == "posix" else "\\"
+    text = f"key sk-proj-AbCdEf0123456789_xyz-ABCDEFGHIJ in {folder}{sep}project and /srv/jdoe/x"
+    out = telemetry_sanitize(text)
+    assert "sk-proj-AbCdEf" not in out and f"~USER{sep}project" in out and "/srv/USER/x" in out
+    assert "Jane" not in out and telemetry_sanitize("") == ""
+
+
+def test_the_problem_report_hides_the_home_folder_in_every_spelling(monkeypatch):
+    """Security (R0, the Stage-B leftover): _sanitize replaced only os.path.expanduser('~') letter by letter, so a home
+    folder named by USERPROFILE, with the other separator, in another case or doubled as Python quotes a path stayed in
+    the report. It now uses security.paths (home_folders, replace_folder, undouble), keeping its '~USER' marker."""
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\Jane Doe")
+    monkeypatch.setenv("HOME", "/c/Users/Jane Doe")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: PureWindowsPath(r"C:\Users\Jane Doe")))
+    for text in ("c:/users/jane doe/models/x.gguf", "C:/Users/Jane Doe/x", "/c/Users/Jane Doe/src",
+                 "error: " + repr(r"C:\Users\Jane Doe\x.bin"), r"C:\Users\Jane Doe"):
+        out = telemetry_sanitize(text)
+        assert "jane" not in out.lower() and out.count("~USER") == 1, (text, out)

@@ -2180,7 +2180,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Named by HOME or USERPROFILE (the MSYS form `/c/Users/<name>`), with the other separator, in another case
   (`c:/users/<name>`) or with doubled backslashes as Python quotes a path, it reached the AI with the account name.
   `tools_gui._no_home` now uses the shared `security.paths.shorten_home` (the one the runtime and deploy tools use)
-  before the pattern for other accounts' home folders.
+  before the pattern for other accounts' home folders. The problem report (`utils/telemetry.py`, the GitHub issue
+  link) replaced only `os.path.expanduser("~")` letter by letter; it now replaces every spelling through the same
+  `security.paths` functions and keeps its `~USER` marker.
 - **Every place takes the same SSH user names**: the deploy (`llm-cli deploy run`, **Deploy to Target** in the
   Deployment tab) and `llm-cli deploy devices add` checked the user name without `re.ASCII`, so Python's case folding
   let a long s (`ſ`) or the Kelvin sign pass as `s` and `k`, and the deploy's `match()` also let a trailing line break
