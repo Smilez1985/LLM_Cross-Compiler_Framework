@@ -78,6 +78,15 @@ STAGING_WATCH_EVERY = 2.0    # seconds between two disk checks while a model is 
 CONTAINER_WATCH_EVERY = 5.0  # seconds between two disk checks while a stage container runs
 RESOURCES_EVERY = 5.0        # seconds between two CPU and memory samples of a running stage container
 
+# The line the stage runner (targets/*/modules/build.sh, DECISIONS U9) prints for each of its stages: started
+# ("=== Stage 3/4: convert ==="), finished ("... done in 41 s ==="), finished earlier ("... resumed ===") or stopped
+# ("... failed (exit 1) ==="). It reaches the build's step and percent like every other step.
+STAGE_LINE = re.compile(r"^=== Stage (\d{1,2})/(\d{1,2}): ([a-z][a-z0-9_-]{0,31})"
+                        r"(?: (resumed|done in \d+ s|failed \(exit \d+\)))? ===$")
+# The percent the stages of one container share, by its log prefix: the importance-matrix job from 50 to 60, the
+# build from 60 to 85 (Extracting).
+STAGE_BANDS = {"IMATRIX: ": ("Calculating IMatrix", 50, 60), "CONT: ": ("Running modules", 60, 85)}
+
 
 class BuildSlotsBusy(RuntimeError):
     """Every build slot is taken (a cancelled build keeps its slot until its worker has stopped)."""
@@ -488,7 +497,9 @@ class BuildEngine:
             def pump():
                 try:
                     for line in container.logs(stream=True, follow=True):
-                        progress.add_log(f"{prefix}{line.decode(errors='replace').rstrip()}")
+                        text = line.decode(errors='replace').rstrip()
+                        progress.add_log(f"{prefix}{text}")
+                        self._note_stage(progress, prefix, text)
                 except Exception as e:  # the container may be removed while streaming
                     self.logger.debug(f"Log stream of {config.build_id} ended: {e}")
 
@@ -548,6 +559,26 @@ class BuildEngine:
                 container.remove(force=True)
             except Exception:
                 pass
+
+    def _note_stage(self, progress: "BuildProgress", prefix: str, line: str) -> None:
+        """A progress line of the stage runner (STAGE_LINE) becomes the build's step and percent, which the build
+        status, the Builder and BuildService._live_progress show: "Running modules: convert (3/4)", and the percent
+        within the container's band. A stage that started counts the stages before it as done; one that finished or
+        resumed counts itself too. The build's record follows, so other processes see the stage as well."""
+        band = STAGE_BANDS.get(prefix)
+        match = STAGE_LINE.match(line.strip()) if band else None
+        if match is None:
+            return
+        number, total, name, state = int(match.group(1)), int(match.group(2)), match.group(3), match.group(4) or ""
+        if not 1 <= number <= total or state.startswith("failed"):
+            return  # a failed stage ends the container: its exit code and log tail report it
+        step, low, high = band
+        done = number if state else number - 1
+        progress.progress_percent = max(progress.progress_percent, low + (high - low) * done // total)
+        label = f"{step}: {name} ({number}/{total}){' resumed' if state == 'resumed' else ''}"
+        if label != progress.current_stage:
+            progress.current_stage = label
+            self._save_record(progress.build_id)
 
     @staticmethod
     def _sample_resources(container: Container, progress: "BuildProgress", prefix: str, stop: threading.Event) -> None:
@@ -1270,6 +1301,9 @@ class BuildEngine:
         }
         if config.max_context_length:
             env["MAX_CONTEXT_LENGTH"] = str(config.max_context_length)
+        if config.model_revision:
+            # The Hugging Face commit of the staged files: part of the resume digest of the stage runner (build.sh).
+            env["MODEL_REVISION"] = config.model_revision
         if sys.platform != "win32":
             # Files written to the mounted output/cache dirs then belong to the host user.
             env["PUID"], env["PGID"] = str(os.getuid()), str(os.getgid())
