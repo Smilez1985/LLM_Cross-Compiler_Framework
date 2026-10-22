@@ -601,7 +601,7 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   nie `Core` importieren; (5) Tool-Definitionen: `tools/tools_*`, `framework_*`, `gui_bridge`, `gui_surface`; (6)
   Adapter: `cli.py`, `mcp_server.py`, `gui/` mit `main.py`, und kein Adapter importiert einen anderen. PySide6 gibt es
   nur in der GUI, click und rich nur in der CLI, mcp und uvicorn nur im MCP-Server, paramiko nur im SSH-Transport
-  (`utils/ssh_trust.py`, später `remote/transport.py`). `tests/test_layering.py` liest jeden Import (auch in Funktionen,
+  (`remote/transport.py` und das `utils/ssh_trust.py`, aus dem er entstand). `tests/test_layering.py` liest jeden Import (auch in Funktionen,
   unter `TYPE_CHECKING` und Modulnamen, die `import_module`, `lazy_attributes` oder `LazyModule` bekommen). Was heute
   eine Regel bricht, steht in `tests/data/layering_allowlist.json`, jeder Eintrag mit seinem Grund und der Kette, die
   ihn entfernt; der Test schlägt bei einem neuen Verstoß fehl und bei einem Eintrag, den es nicht mehr gibt (entferne
@@ -682,9 +682,14 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   einem Warten auf das Board), halte fest, was ein Kontakt ergab, mit `record_reach`
   (`orchestrator/runtime/device/trusted.py`), leite den Fehler eines Board-Schritts von
   `remote.errors.RemoteFailure` ab, zeig den Fortschritt eines Deployments mit `remote.text.event_text` und frag
-  `remote.transport.available()`, ob SSH geht; importiere paramiko nie auf Modulebene. Schreib nie einen zweiten
-  regulären Ausdruck, eine zweite Grundtabelle oder einen zweiten Recorder daneben. Das Paket importiert nur
-  `orchestrator/utils` und `orchestrator/security` (`tests/test_remote_layer.py`).
+  `remote.transport.available()`, ob SSH geht; importiere paramiko nie auf Modulebene. Arbeite auf einem Board über
+  `remote.session.RemoteSession` (Anmeldung mit geprüftem Host-Schlüssel bei jeder Anmeldung, `run`, `private_dir`,
+  `upload` mit Fortsetzen, `wait_for_host`, `run_detached`, ein `CancelToken`): Ein KI-Weg übergibt `KeyOnly()`, nur
+  das `OneTimePassword` der Person kann koppeln, und jeder Befehl geht als ein `sh -c` mit Zeitlimit und
+  Ausgabegrenze über `remote.transport` (`sh_command`, `ParamikoTransport.run`). Schreib nie einen zweiten regulären
+  Ausdruck, eine zweite Grundtabelle, einen zweiten Recorder, eine zweite Warte- oder Upload-Schleife oder einen
+  zweiten Befehlsleser daneben. Das Paket importiert nur `orchestrator/utils` und `orchestrator/security`
+  (`tests/test_remote_layer.py`).
 - **Qt gibt es nur in `orchestrator/gui/`.** PySide6 ist das optionale Extra `gui`; Kommandozeile, MCP-Server und
   alles unterhalb der GUI importieren kein Qt, auch nicht in einer Funktion (`tests/test_qt_free_core.py` prüft jeden
   Import und führt sie in einem Prozess ohne PySide6 aus). Texte für jeden Prozess kommen aus
