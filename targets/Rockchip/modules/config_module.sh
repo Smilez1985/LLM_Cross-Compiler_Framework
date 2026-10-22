@@ -164,7 +164,23 @@ load_hardware_config() {
         HW_CONFIG["$key"]="$value"
     done < <(grep -E '^[^#]*=' "$HARDWARE_CONFIG_FILE")
 
+    # The hardware probe (scripts/hardware_probe.sh, .py and .ps1; configs/hardware_probe_schema.yml) names the system
+    # ARCH and its cores CPU_MODEL ("Cortex-A55", "Cortex-A55+Cortex-A76"); the names of version 1.x's own files
+    # (ARCHITECTURE_FULL, CPU_MODEL_NAME) still come first.
+    if [[ -z "${HW_CONFIG[ARCHITECTURE_FULL]:-}" && -n "${HW_CONFIG[ARCH]:-}" ]]; then
+        case "${HW_CONFIG[ARCH]}" in
+            arm64|aarch64) HW_CONFIG[ARCHITECTURE_FULL]="aarch64" ;;
+            *) HW_CONFIG[ARCHITECTURE_FULL]="${HW_CONFIG[ARCH]}" ;;
+        esac
+    fi
+    HW_CONFIG[CPU_MODEL_NAME]="${HW_CONFIG[CPU_MODEL_NAME]:-${HW_CONFIG[CPU_MODEL]:-}}"
     HW_CONFIG[ARCHITECTURE_FULL]="${HW_CONFIG[ARCHITECTURE_FULL]:-aarch64}"
+    # This image has the aarch64 cross compilers (the Rockchip boards) and the host's own: programs for any other
+    # system (a 32-bit OS on a board writes ARCH=armv7) could not run there.
+    case "${HW_CONFIG[ARCHITECTURE_FULL]}" in
+        aarch64|x86_64) ;;
+        *) die "The hardware profile is of a ${HW_CONFIG[ARCHITECTURE_FULL]} system; this image compiles for aarch64 (the Rockchip boards) and x86_64 only, so nothing was planned for it." ;;
+    esac
     log_info "Hardware-Konfiguration geladen (${HW_CONFIG[CPU_MODEL_NAME]:-Unknown})"
 }
 
@@ -193,6 +209,9 @@ generate_compiler_flags() {
         elif [[ "${HW_CONFIG[CPU_MODEL_NAME]:-}" =~ "Cortex-A76" ]]; then
             log_info "Optimiere für Cortex-A76"
             cflags="$cflags -mcpu=cortex-a76 -march=armv8-a"
+        elif [[ "${HW_CONFIG[CPU_MODEL_NAME]:-}" =~ "Cortex-A72" ]]; then
+            log_info "Optimiere für Cortex-A72"
+            cflags="$cflags -mcpu=cortex-a72 -march=armv8-a"
         else
             log_info "Verwende generisches ARMv8-A"
             cflags="$cflags -march=armv8-a"
@@ -208,6 +227,9 @@ generate_compiler_flags() {
         cflags="$cflags -march=native"
         if [[ "${HW_CONFIG[SUPPORTS_AVX2]:-OFF}" == "ON" ]]; then
             cmake_flags="$cmake_flags -DGGML_AVX2=ON"
+        fi
+        if [[ "${HW_CONFIG[SUPPORTS_AVX512]:-OFF}" == "ON" ]]; then
+            cmake_flags="$cmake_flags -DGGML_AVX512=ON"
         fi
     fi
 

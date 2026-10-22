@@ -831,7 +831,11 @@ are the build again, with the dispatcher's work moved into the stage it belongs 
   the entrypoint mode `pipeline`), the config stage generates the CMake toolchain and compiler flags for that board
   from it (the template's with the wizard's CPU and CMake flags), and the target stage of a GGUF build also
   cross-compiles `llama-cli` and `llama-server` from the image's llama.cpp source and packages them with the model, a
-  model card and helper scripts in `output/packages/`. A build of the framework has no profile: the board's runtime
+  model card and helper scripts in `output/packages/`. The profile is the file the hardware probe writes on the board
+  ([section 11](#11-the-hardware-probe-file)): Rockchip's config stage takes the system from `ARCH` and the cores from
+  `CPU_MODEL` (Cortex-A55, A72 and A76 get their CPU flags; `SUPPORTS_NEON`, `SUPPORTS_AVX2` and `SUPPORTS_AVX512`
+  their GGML flags) and refuses a system its image has no compiler for (only aarch64 and x86_64), for example
+  `ARCH=armv7` of a 32-bit OS on a board. A build of the framework has no profile: the board's runtime
   is built from the board's own probe (`llm-cli device runtime build`), and the board package comes from
   `llm-cli deploy package` or `llm-cli device runtime deploy`.
 - **Cloning llama.cpp.** `source_module.sh --clone-llama-cpp` (or the entrypoint mode `source --clone-llama-cpp`),

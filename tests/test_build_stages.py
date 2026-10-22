@@ -854,6 +854,78 @@ def test_config_module_by_hand_with_only_a_hardware_profile_writes_toolchain_and
     assert ("2/4", "config", "failed") in stage_lines(later)
 
 
+PROBE_FIXTURES = REPO_ROOT / "tests" / "fixtures" / "hardware_probe"
+
+
+def plan_of(image) -> dict:
+    """The board's part of the build plan the config stage wrote, read as the target stage reads it (sourced)."""
+    plan = image.work / "stages" / "build" / "build_config.sh"
+    names = ("BOARD_PACKAGE", "PROFILE_ARCH", "TARGET_CPU", "CFLAGS", "CMAKE_FLAGS")
+    shown = subprocess.run([posix_shell("bash"), "-c", 'source "$1"; shift; for n in "$@"; do printf "%s\\n" "${!n}"; '
+                            "done", "_", str(plan), *names], capture_output=True, text=True, timeout=60, check=True)
+    return dict(zip(names, shown.stdout.splitlines()))
+
+
+@needs_bash
+@pytest.mark.parametrize("fixture, text, arch, cpu, flag", [
+    ("schema2_rk3566_dietpi.txt", None, "aarch64", "Cortex-A55", "-mcpu=cortex-a55"),
+    ("schema2_rk3588_devuan_sysvinit.txt", None, "aarch64", "Cortex-A76", "-mcpu=cortex-a76"),
+    # RK3576 (target.yml: 4x Cortex-A72 + 4x Cortex-A53): the probe names both core types
+    (None, "PROBE_SCHEMA=2\nARCH=arm64\nCPU_MODEL=Cortex-A53+Cortex-A72\nSUPPORTS_NEON=ON\n", "aarch64",
+     "Cortex-A53+Cortex-A72", "-mcpu=cortex-a72"),
+    ("schema1_sh_rk3566.txt", None, "aarch64", "", "-march=armv8-a"),   # an older probe file: no core named
+])
+def test_config_module_plans_the_board_from_the_file_the_probe_writes(image, fixture, text, arch, cpu, flag):
+    """HOW2_ORIGINAL (DECISIONS round 16, U9 addendum): hardware_probe.sh on the board writes target_hardware_config.txt,
+    and `config_module.sh --hardware-config` plans the board from it: the CPU-specific flags of Cortex-A55/A72/A76.
+    The probe writes ARCH and CPU_MODEL (configs/hardware_probe_schema.yml); version 1.x's own names
+    (ARCHITECTURE_FULL, CPU_MODEL_NAME) are read as before."""
+    profile = image.root / "target_hardware_config.txt"
+    profile.write_text(text if text is not None else (PROBE_FIXTURES / fixture).read_text(encoding="utf-8"))
+
+    result = by_hand(image, "config", "--hardware-config", profile.name, MODEL_SOURCE=None)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = plan_of(image)
+    assert (plan["BOARD_PACKAGE"], plan["PROFILE_ARCH"], plan["TARGET_CPU"]) == ("1", arch, cpu)
+    assert flag in plan["CFLAGS"] and "-DGGML_NEON=ON" in plan["CMAKE_FLAGS"]
+    toolchain = (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").read_text()
+    assert "SET(CMAKE_C_COMPILER   /usr/bin/aarch64-linux-gnu-gcc)" in toolchain and flag in toolchain
+
+
+@needs_bash
+def test_config_module_plans_an_x86_64_profile_with_its_simd_flags(image):
+    """Native x86 with the SIMD the probe found (AVX2, AVX512 -> GGML flags), never the aarch64 cross toolchain."""
+    profile = image.root / "target_hardware_config.txt"
+    profile.write_text((PROBE_FIXTURES / "schema2_linux_z1_extreme.txt").read_text(encoding="utf-8"))
+
+    result = by_hand(image, "config", "--hardware-config", profile.name, MODEL_SOURCE=None)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = plan_of(image)
+    assert plan["PROFILE_ARCH"] == "x86_64" and "-march=native" in plan["CFLAGS"]
+    assert "-DGGML_AVX2=ON" in plan["CMAKE_FLAGS"] and "-DGGML_AVX512=ON" in plan["CMAKE_FLAGS"]
+    toolchain = (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").read_text()
+    assert "aarch64-linux-gnu" not in toolchain and "SET(CMAKE_C_COMPILER   /usr/bin/gcc)" in toolchain
+
+
+@needs_bash
+@pytest.mark.parametrize("arch", ["armv7", "x86", "riscv64"])
+def test_config_module_refuses_a_profile_this_image_cannot_compile_for(image, arch):
+    """A board whose userland this image has no compiler for (a 32-bit OS on an RK board writes ARCH=armv7) is refused
+    before anything is planned for it; before, it got an aarch64 or a host toolchain whose programs cannot run there."""
+    profile = image.root / "target_hardware_config.txt"
+    profile.write_text(f"PROBE_SCHEMA=2\nARCH={arch}\nCPU_MODEL=Cortex-A7\nSUPPORTS_NEON=ON\n")
+
+    result = by_hand(image, "config", "--hardware-config", profile.name, MODEL_SOURCE=None)
+
+    assert result.returncode == 1
+    assert (f"ERROR: The hardware profile is of a {arch} system; this image compiles for aarch64 (the Rockchip "
+            "boards) and x86_64 only, so nothing was planned for it.") in result.stderr
+    assert ("2/4", "config", "failed") in stage_lines(result)
+    assert not (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").exists()
+
+
 @needs_bash
 def test_a_changed_default_hardware_profile_runs_the_config_stage_again(image):
     """config_module.sh reads $BUILD_CACHE_DIR/target_hardware_config.txt when no profile is named: it is an input
