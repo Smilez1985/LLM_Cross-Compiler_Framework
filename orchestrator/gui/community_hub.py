@@ -13,6 +13,10 @@ to accept (zoo install --file --passphrase / --from: prepare_install_file), Chec
 verify_installed), Check a pack file... (zoo verify FILE: verify_file), Export... (zoo export target|recipe|knowledge
 with --id, --to, --passphrase, --out: export_pack) and My public keys... (zoo keys: UserKeys.export_public). Downloads,
 checks, exports and the keys run off the GUI thread; passphrases are never stored or shown.
+
+The second tab, Maintainer (gui/community_maintainer.py), holds the maintainer's actions on the community repository
+(`llmcf zoo maintainer key|review|revoke`): create the index signing key, review and publish contributions, revoke a
+published pack.
 """
 
 from pathlib import Path
@@ -24,7 +28,8 @@ from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtGui import Qt as QtText
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+    QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+    QWidget
 )
 
 from orchestrator.gui.plain import button_text, one_line, plain_box, plain_label, plain_tooltip
@@ -71,8 +76,12 @@ class CommunityHubWindow(QMainWindow):
         self.refresh_list()
 
     def _init_ui(self):
+        # Two tabs: the packs (everyone) and the maintainer's actions on the community repository (Maintainer).
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("tab_zoo")
+        self.setCentralWidget(self.tabs)
         central = QWidget()
-        self.setCentralWidget(central)
+        self.tabs.addTab(central, ui_text("zoo.maint.tab.packs", self.lang))
         layout = QVBoxLayout(central)
         intro = QLabel("Community targets, recipes and knowledge. Packs from the signed community index are "
                        "reviewed; a pack imported from a file is not (trust: local).")
@@ -140,6 +149,9 @@ class CommunityHubWindow(QMainWindow):
         self.status_label.setTextFormat(Qt.PlainText)  # errors quote pack contents
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
+        from orchestrator.gui.community_maintainer import MaintainerPanel
+        self.maintainer_panel = MaintainerPanel(self.framework_manager, self, self.lang)
+        self.tabs.addTab(self.maintainer_panel, ui_text("zoo.maint.tab", self.lang))
 
     def _action_button(self, key: str, slot, name: str) -> QPushButton:
         button = QPushButton(button_text(ui_text(key, self.lang)))
@@ -161,6 +173,7 @@ class CommunityHubWindow(QMainWindow):
     def closeEvent(self, event):
         for task in self._tasks:
             task.wait(30000)
+        self.maintainer_panel.shutdown()
         super().closeEvent(event)
 
     def refresh_list(self, refresh: bool = False):

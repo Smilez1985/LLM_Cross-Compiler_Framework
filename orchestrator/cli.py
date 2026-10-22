@@ -5853,5 +5853,166 @@ def zoo_keys(ctx: FrameworkContext):
         _zoo_fail(e)
 
 
+# --- the maintainer of the community repository (orchestrator/Core/community_maintainer.py; the person only) --------
+
+@zoo.group('maintainer')
+def zoo_maintainer():
+    """For the maintainer of the community repository: signing key, review and publish, revoke (your own gh login)"""
+    pass
+
+
+def _maintainer(ctx: FrameworkContext):
+    """The maintainer actions for community_repo, every step printed (the Community Hub's Maintainer tab does the
+    same)."""
+    from orchestrator.Core import community_maintainer as cmaint
+    ctx.require_framework()
+
+    def report(code: str, values: dict) -> None:
+        console.print(f"[dim]{escape(cmaint.say(f'zoo.maint.step.{code}', **values))}[/dim]")
+    try:
+        return cmaint.for_framework(ctx.framework_manager, "cli", progress=report)
+    except cmaint.MaintainerError as e:
+        _zoo_fail(e)
+
+
+def _maintainer_key(m, key_name: Optional[str]) -> str:
+    from orchestrator.Core.community_maintainer import MaintainerError
+    key = key_name or m.remembered_key()
+    if not key:
+        _zoo_fail(MaintainerError("no_key_name"))
+    return key
+
+
+@zoo_maintainer.command('key')
+@click.argument('name')
+@click.option('--save', 'save_to', type=click.Path(dir_okay=False, path_type=Path),
+              help='Also save the public entry to this text file (an existing file is never replaced)')
+@pass_context
+def zoo_maintainer_key(ctx: FrameworkContext, name: str, save_to: Optional[Path]):
+    """Once: create the index signing key in this computer's keyring and show its public entry for
+    configs/community_keys.yml (a key of that name is never replaced)"""
+    from orchestrator.Core import community_maintainer as cmaint
+    if save_to is not None and save_to.exists():
+        _zoo_fail(cmaint.MaintainerError("file_exists", path=str(save_to)))
+    ctx.require_framework()
+    audit = getattr(getattr(ctx.framework_manager, "tool_registry", None), "audit", None)
+    try:
+        entry = cmaint.create_signing_key(name, audit=audit, actor="cli")
+    except cmaint.MaintainerError as e:
+        _zoo_fail(e)
+    console.print(escape(cmaint.say("zoo.maint.key.done", name=entry.name, key_id=entry.key_id)))
+    click.echo(entry.text(), nl=False)
+    if save_to is not None:
+        try:
+            console.print(escape(cmaint.say("zoo.maint.key.saved", path=str(entry.save(save_to)))))
+        except (cmaint.MaintainerError, OSError) as e:
+            _zoo_fail(e)
+    try:
+        cmaint.for_framework(ctx.framework_manager, "cli").remember_key(entry.name)
+    except (cmaint.MaintainerError, OSError):
+        pass
+
+
+@zoo_maintainer.command('review')
+@click.argument('item', required=False)
+@click.option('--review-dir', type=click.Path(file_okay=False, path_type=Path),
+              help='Write every file of the packs to this new or empty folder instead of printing them')
+@click.option('--key', 'key_name', help='Name of the signing key (default: the one used last)')
+@click.option('--trust', type=click.Choice(["community", "verified"]), default="community", show_default=True,
+              help="verified only when someone other than the author reproduced the pack")
+@click.option('--title', help='Title shown in the hub (a contribution with one pack; default: the pack id)')
+@pass_context
+def zoo_maintainer_review(ctx: FrameworkContext, item: Optional[str], review_dir: Optional[Path],
+                          key_name: Optional[str], trust: str, title: Optional[str]):
+    """Without ITEM: the open pull requests that add packs, and merged packs not published yet. With ITEM (a pull
+    request number, or main:contributions/KIND/FILE.zip): fetch its packs, check them (zoo verify), show every file,
+    then ask "Publish?" ("No" is the default). Yes merges it, moves the pack to packs/, adds its index entry, signs the
+    index and merges that as a pull request after the required check; Ctrl+C cancels before the last merge."""
+    from orchestrator.Core import community_maintainer as cmaint
+    m = _maintainer(ctx)
+    if not item:
+        try:
+            items = m.contributions()
+        except cmaint.MaintainerError as e:
+            _zoo_fail(e)
+        if not items:
+            console.print(escape(cmaint.say("zoo.maint.none")))
+            return
+        table = Table(title=f"Contributions to {m.repo}")
+        for column in ("zoo.maint.col.item", "zoo.maint.col.title", "zoo.maint.col.author", "zoo.maint.col.packs",
+                       "zoo.maint.col.check"):
+            table.add_column(cmaint.say(column))
+        for found in items:
+            table.add_row(escape(found.label), escape(found.title), escape(found.author),
+                          escape("\n".join(found.packs)), cmaint.say(f"zoo.maint.check.{found.check}"))
+        console.print(table)
+        console.print("[dim]Review one: llmcf zoo maintainer review NUMBER[/dim]")
+        return
+    try:
+        review = m.review(m.find(item), review_dir)
+    except cmaint.MaintainerError as e:
+        _zoo_fail(e)
+    try:
+        for pack in review.packs:
+            click.echo(f"\n=== {pack.line()}")
+            if review_dir is not None:
+                click.echo(f"Written to {review.folder / pack.file_name} and {review.folder / Path(pack.file_name).stem}:")
+            for file in pack.files:
+                if review_dir is not None:
+                    click.echo(f"  {cmaint.shown_text(file.path)} ({file.size} bytes)")
+                    continue
+                click.echo(f"\n----- {cmaint.shown_text(file.path)} ({file.size} bytes) -----")
+                click.echo(cmaint.shown_text(file.text) if file.text is not None
+                           else cmaint.say("zoo.maint.binary", size=file.size))
+        problems = review.problems()
+        click.echo("")
+        if not review.ok:
+            _zoo_fail(cmaint.MaintainerError("rejected", problems="\n".join(f"- {p}" for p in problems)
+                                             or "- no pack"))
+        console.print(f"[green]{escape(cmaint.say('zoo.maint.reviewed.ok', item=review.item.label))}[/green]")
+        key = _maintainer_key(m, key_name)
+        question = cmaint.say("zoo.maint.publish.ask", packs="\n".join(p.line() for p in review.packs),
+                              item=review.item.label, trust=trust, key=key)
+        if not (_interactive() and click.confirm(question, default=False)):
+            _zoo_fail(ValueError(cmaint.say("zoo.maint.publish.no")))
+        try:
+            m.publish(review, key_name=key, trust=trust, title=title or "")
+        except cmaint.MaintainerError as e:
+            _zoo_fail(e)
+    finally:
+        review.discard()
+
+
+@zoo_maintainer.command('revoke')
+@click.argument('kind', type=click.Choice(ZOO_KINDS))
+@click.argument('pack_id')
+@click.option('--reason', required=True, help='Why (every user sees it; at most 300 characters)')
+@click.option('--version', 'version', help='Only this version (default: every version of the id)')
+@click.option('--sha256', help='Only exactly this file (its sha256 from the index)')
+@click.option('--key', 'key_name', help='Name of the signing key (default: the one used last)')
+@pass_context
+def zoo_maintainer_revoke(ctx: FrameworkContext, kind: str, pack_id: str, reason: str, version: Optional[str],
+                          sha256: Optional[str], key_name: Optional[str]):
+    """Revoke a published pack: added to the revoked list of the signed index, version raised, signed, merged as a
+    pull request after the required check ("No" is the default of the question)"""
+    from orchestrator.Core import community_maintainer as cmaint
+    if version and sha256:
+        _zoo_fail(click.UsageError("Use --version or --sha256, not both."), 2)
+    try:
+        what = cmaint.describe_revocation(cmaint.revocation(kind, pack_id, reason=reason, version=version,
+                                                            sha256=sha256))
+    except cmaint.MaintainerError as e:
+        _zoo_fail(e)
+    m = _maintainer(ctx)
+    key = _maintainer_key(m, key_name)
+    question = cmaint.say("zoo.maint.revoke.ask", what=what, reason=reason, key=key)
+    if not (_interactive() and click.confirm(question, default=False)):
+        _zoo_fail(ValueError(cmaint.say("zoo.maint.revoke.no")))
+    try:
+        m.revoke(kind, pack_id, reason=reason, version=version, sha256=sha256, key_name=key)
+    except cmaint.MaintainerError as e:
+        _zoo_fail(e)
+
+
 if __name__ == "__main__":
     cli()

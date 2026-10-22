@@ -587,6 +587,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_deploy",)   # Deployment tab and hardw
 TEXT_MODULES += ("orchestrator.utils.l10n_build",)   # Build menu, File > Settings..., the Builder, the module wizard
 TEXT_MODULES += ("orchestrator.utils.l10n_ditto_runtime",)   # Ditto > Local Runtime...
 TEXT_MODULES += ("orchestrator.utils.l10n_ditto_models",)   # Ditto > Local Models..., Evaluation..., chat options
+TEXT_MODULES += ("orchestrator.utils.l10n_maintainer",)   # Community Hub > Maintainer, llmcf zoo maintainer
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
