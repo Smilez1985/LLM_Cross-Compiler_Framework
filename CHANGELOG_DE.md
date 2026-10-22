@@ -1831,6 +1831,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Die nächtliche Retrieval-Evaluation läuft wieder**: Der Workflow `.github/workflows/retrieval-eval.yml` startete
+  das Framework auf einem GitHub-Runner, der keinen System-Keyring hat, ohne anzugeben, wie der Schlüsseltresor
+  gehalten wird; deshalb verweigerte das Framework jede Nacht den Start (Exit-Code 5). Der Job setzt jetzt
+  `LLM_SECRET_STORAGE=ephemeral` (nur im Arbeitsspeicher; die Evaluation braucht keine Zugangsdaten), und ein Test
+  schlägt fehl, wenn ein Workflow-Schritt das Framework ohne diese Angabe startet.
 - **Auf ein Board, dessen Home-Ordner einen langen Pfad hat, lässt sich deployen**: Die Geräte-Laufzeit lehnte einen
   Home-Ordner des Board-Benutzers mit mehr als 200 Zeichen ab (und dessen Staging-Ordner sowie Modelle darunter ab
   400), deshalb brach ein Home auf einem tief liegenden Einhängepunkt das Deployment mit „not a plain absolute path“
