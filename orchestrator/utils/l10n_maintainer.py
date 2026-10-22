@@ -162,7 +162,8 @@ TEXTS = {
         "zoo.maint.err.file_exists": "{path} exists already; it is never replaced.",
         "zoo.maint.next.file_exists": "choose another file name.",
         "zoo.maint.err.audit": "The audit log is not available, so nothing is changed.",
-        "zoo.maint.next.audit": "run 'llmcf audit check' and repair the audit log, then try again.",
+        "zoo.maint.next.audit": "look at it with 'llmcf tools audit --verify' (in the GUI: Security > Audit Log...), "
+                                "then try again.",
         "zoo.maint.err.clone_damaged": "{folder} is not a git clone of the community repository.",
         "zoo.maint.next.clone_damaged": "move that folder away yourself (nothing is deleted by the framework), then "
                                         "try again; a new clone is made.",
@@ -385,7 +386,8 @@ TEXTS = {
         "zoo.maint.err.file_exists": "{path} gibt es schon; die Datei wird nie ersetzt.",
         "zoo.maint.next.file_exists": "wähle einen anderen Dateinamen.",
         "zoo.maint.err.audit": "Das Audit-Log ist nicht verfügbar, deshalb wird nichts geändert.",
-        "zoo.maint.next.audit": "führe 'llmcf audit check' aus und repariere das Audit-Log, dann versuche es erneut.",
+        "zoo.maint.next.audit": "sieh es dir mit 'llmcf tools audit --verify' an (in der GUI: Sicherheit > "
+                                "Prüfprotokoll...), dann versuche es erneut.",
         "zoo.maint.err.clone_damaged": "{folder} ist kein git-Klon des Community-Repositorys.",
         "zoo.maint.next.clone_damaged": "verschiebe diesen Ordner selbst (das Framework löscht nichts) und versuche "
                                         "es erneut; dann wird neu geklont.",
