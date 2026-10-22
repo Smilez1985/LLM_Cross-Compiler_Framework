@@ -71,8 +71,10 @@ _POSIX_HOME = re.compile(r"(?:/usr|/var|/export)?/home/")
 # the spaces of the person's name ('C:\Users\Jane Doe'), whose words start with a capital letter or a digit.
 _NAME_WORD = re.compile(r" ([A-Z0-9][^\s/\\'\"`,;:()\[\]<>|=]*)")
 # A file URL and where its path begins: 'file:///home/u/x', 'file:///C:/Users/u/x', 'file://localhost/home/u/x' (after
-# the host) and 'file://server/share/x' (the share, like '\\server\share\x').
-_FILE_URL = re.compile(r"(?i)(?<![\w.+/-])file:(?://localhost(?=[/\\])|//(?=[/\\])|(?=//[^/\\\s'\"`]))")
+# the host) and 'file://server/share/x' (the share, like '\\server\share\x'); also a version-control one
+# ('git+file:///home/u/pkg', as pip and uv write it), whose scheme prefix (`vcs`) is kept.
+_FILE_URL = re.compile(r"(?i)(?<![\w.+/-])(?P<vcs>(?:git|svn|hg|bzr)\+)?"
+                       r"file:(?://localhost(?=[/\\])|//(?=[/\\])|(?=//[^/\\\s'\"`]))")
 _URL_DRIVE = re.compile(r"[/\\](?=[A-Za-z]:[/\\])")
 
 
@@ -301,7 +303,8 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
         return q + one(inner) + q
 
     def file_urls(text: str) -> str:
-        """The path of every file URL labelled like any other path; the URL keeps its 'file://' ('file://a.bin')."""
+        """The path of every file URL labelled like any other path; the URL keeps its 'file://' ('file://a.bin'), a
+        version-control one its scheme ('git+file://pkg')."""
         out, pos = [], 0
         for m in _FILE_URL.finditer(text):
             if m.start() < pos:
@@ -312,7 +315,7 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
             if start >= len(text) or text[start].isspace():
                 continue
             end = max(_path_end(text, start, bases, homes), start + 1)
-            out += [text[pos:m.start()], "file://", one(text[start:end])]
+            out += [text[pos:m.start()], m.group("vcs") or "", "file://", one(text[start:end])]
             pos = end
         return "".join(out) + text[pos:]
 
