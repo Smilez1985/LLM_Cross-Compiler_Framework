@@ -9,6 +9,8 @@ updates:
     exclude-paths:
       - "requirements.txt"
       - "requirements-dev.txt"
+    # Pull requests go to development, where the work lands; main only receives development as a whole.
+    target-branch: development
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
@@ -18,6 +20,8 @@ updates:
 
   - package-ecosystem: github-actions
     directory: "/"
+    # Pull requests go to development, where the work lands; main only receives development as a whole.
+    target-branch: development
     schedule:
       interval: weekly
     groups:
@@ -29,6 +33,8 @@ updates:
       - "/targets/Rockchip"
       - "/targets/_template"
       - "/Docker Setup"   # the base image of the framework container you build locally
+    # Pull requests go to development, where the work lands; main only receives development as a whole.
+    target-branch: development
     schedule:
       interval: weekly
     ignore:

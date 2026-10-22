@@ -2024,6 +2024,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and CI install the complete hash-pinned export with `--no-deps` so pip does not resolve it again. A test removes the
   override's reason as soon as fastembed allows Pillow 13 itself. The CI's `astral-sh/setup-uv` goes to v10.3.0
   (Dependabot PR #8). Checked with the full test suite and a real retrieval evaluation (88 % of the cases pass).
+  Later the same day: anthropic 1.15.0, openai 3.35.1, fastembed 0.9.0 (it still caps Pillow, so the override
+  stays), the build backend uv_build up to 0.13, and the Ubuntu 22.04 base of the GPU template and of the build-base
+  catalogue (`configs/llama_runtime.yml`) to its current digest, both together (Dependabot PRs #10 to #12, applied by
+  hand: Dependabot moved the template only and leaves the hash-pinned exports to us). Dependabot now opens its pull
+  requests against `development`, where the work lands, instead of `main`.
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI
