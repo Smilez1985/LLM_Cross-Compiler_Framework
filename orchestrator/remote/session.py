@@ -525,7 +525,7 @@ class RemoteSession:
             except (Stopped, SessionFailure):
                 raise
             except Exception as e:  # noqa: BLE001 - a network drop, or a failure on the board (disk full, ...)
-                if self.cancel.cancelled:
+                if self.cancel.cancelled or self.ended:
                     raise Stopped() from None
                 if not self.dropped(e):
                     raise SessionFailure(f"The upload to {self.host} failed: {e}", "upload_failed", error=e) from None
@@ -557,7 +557,7 @@ class RemoteSession:
             done = offset
             self.on_event(RemoteEvent("uploading", done=done, total=size))
             for chunk in iter(lambda: fh.read(UPLOAD_CHUNK), b""):
-                if self.cancel.cancelled:
+                if self.cancel.cancelled or self.ended:
                     raise Stopped()
                 remote.write(chunk)
                 done += len(chunk)
@@ -623,13 +623,13 @@ class RemoteSession:
                 if self._clock() - started_at > timeout:
                     raise SessionFailure(f"The job did not finish on the device within {int(timeout)} s.",
                                          "job_timeout", state="unknown")
-                if self.cancel.cancelled:
+                if self.cancel.cancelled or self.ended:
                     raise Stopped()
                 self.pause(poll)
             except (Stopped, SessionFailure):
                 raise
             except Exception as e:  # noqa: BLE001 - a network drop while the board works on its own
-                if self.cancel.cancelled:
+                if self.cancel.cancelled or self.ended:
                     raise Stopped() from None
                 if not self.dropped(e):
                     raise SessionFailure(f"The job on {self.host} could not be followed: {e}", "job_lost", error=e,
