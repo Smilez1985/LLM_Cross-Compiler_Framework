@@ -270,9 +270,44 @@ class DiskWatchdog:
         return self
 
 
+def _disk(device: str, free: int, total: int, ledger: Optional["ReservationLedger"], exclude: str, standing: bool,
+          margin: Optional[int]) -> DiskCheck:
+    """The DiskCheck of one file system before anything is counted on it: its free space, the reserve (reserve_for,
+    or a check's own fixed `margin`), what other calls reserved there (the ledger, without `exclude`) and its trash."""
+    others = ledger.outstanding(device, exclude=exclude) if ledger is not None else 0
+    reserve = int(margin) if margin is not None else reserve_for(total, standing)
+    check = DiskCheck([], 0, int(free), int(total), reserve, others, device)
+    if ledger is not None:
+        from orchestrator.Core.trash import trash_bytes_by_device
+        check.trash_bytes = trash_bytes_by_device(ledger.state_dir).get(device, 0)
+    return check
+
+
+def room(path: Path, needed: int = 0, *, label: str = "", what: str = "",
+         ledger: Optional["ReservationLedger"] = None, exclude: str = "", standing: bool = False,
+         margin: Optional[int] = None, disk_usage: Optional[DiskUsage] = None) -> DiskCheck:
+    """The DiskCheck of the file system `path` is on (its nearest existing folder) for `needed` more bytes: the one
+    rule every free-space check uses. The reserve is reserve_for (2 GiB or 2 %; 20 GiB or 10 % with `standing`);
+    `margin` is a check's own fixed reserve instead. With `ledger`, what other calls of any process reserved there
+    counts as used, and the trash there is known. OSError when the disk cannot be measured (check_disk, which checks
+    many folders at once, counts such a disk as full instead). A check with its own `margin` reads only the free
+    space, so a measurement without the disk's size does for it."""
+    du = free_space(path, disk_usage)
+    total = int(du.total) if margin is None else int(getattr(du, "total", 0) or 0)
+    check = _disk(device_of(path), int(du.free), total, ledger, exclude, standing, margin)
+    check.needed = max(0, int(needed))
+    if label:
+        check.labels.append(label)
+    if what:
+        check.what.append(what)
+    return check
+
+
 def check_disk(needs: Iterable[DiskNeed], ledger: Optional["ReservationLedger"] = None, exclude: str = "",
-               standing: bool = False, disk_usage: Optional[DiskUsage] = None) -> List[DiskCheck]:
-    """Per file system: needed, free, reserve, reserved by other calls. Never raises for a full disk (see require)."""
+               standing: bool = False, disk_usage: Optional[DiskUsage] = None,
+               margin: Optional[int] = None) -> List[DiskCheck]:
+    """Per file system: needed, free, reserve, reserved by other calls. Never raises for a full disk (see require);
+    a disk that cannot be measured counts as full. `margin`: a fixed reserve instead of reserve_for (see room)."""
     usage = disk_usage or shutil.disk_usage
     groups: Dict[str, DiskCheck] = {}
     for need in needs:
@@ -286,11 +321,7 @@ def check_disk(needs: Iterable[DiskNeed], ledger: Optional["ReservationLedger"] 
                 free, total = int(du.free), int(du.total)
             except OSError:
                 free, total = 0, 0
-            others = ledger.outstanding(device, exclude=exclude) if ledger is not None else 0
-            check = groups[device] = DiskCheck([], 0, free, total, reserve_for(total, standing), others, device)
-            if ledger is not None:
-                from orchestrator.Core.trash import trash_bytes_by_device
-                check.trash_bytes = trash_bytes_by_device(ledger.state_dir).get(device, 0)
+            check = groups[device] = _disk(device, free, total, ledger, exclude, standing, margin)
         if need.label not in check.labels:
             check.labels.append(need.label)
         check.needed += need.bytes
@@ -298,8 +329,25 @@ def check_disk(needs: Iterable[DiskNeed], ledger: Optional["ReservationLedger"] 
     return list(groups.values())
 
 
-def require(checks: List[DiskCheck]) -> None:
-    """InsufficientSpace with the numbers when a file system cannot hold its part plus the reserve."""
+DOWNLOAD_MARGIN = 256 * 1024 ** 2   # what the downloader (utils/download.py) leaves free beside a download
+
+
+def download_rule(margin: Optional[int] = DOWNLOAD_MARGIN, ledger: Optional["ReservationLedger"] = None,
+                  disk_usage: Optional[DiskUsage] = None) -> Callable[[Path, int, str], Optional[InsufficientSpace]]:
+    """The disk rule of a download (PinnedDownloader's `space`): None when `needed` more bytes fit in the folder
+    (room with `margin` and `ledger`), else the refusal (InsufficientSpace with its check)."""
+    def space(folder: Path, needed: int, what: str) -> Optional[InsufficientSpace]:
+        check = room(folder, needed, label="download", what=what, ledger=ledger, margin=margin, disk_usage=disk_usage)
+        if check.fits:
+            return None
+        return InsufficientSpace(f"Not enough free disk space in {folder} for {what}: {needed / GIB:.1f} GiB needed, "
+                                 f"{check.free / GIB:.1f} GiB free.", [check])
+    return space
+
+
+def require(checks: List[DiskCheck], what: str = "this build") -> None:
+    """InsufficientSpace with the numbers when a file system cannot hold its part plus the reserve; `what` names the
+    call in the message ("this build", "this download")."""
     short = [c for c in checks if not c.fits]
     if short:
         detail = "; ".join(f"{' and '.join(c.labels)} disk: {gb(c.needed)} needed (estimate), {gb(c.free)} free"
@@ -311,7 +359,7 @@ def require(checks: List[DiskCheck]) -> None:
             detail += (f". The trash holds {gb(sum(c.trash_bytes for c in trash))} there"
                        + (": emptying it would make room" if fits else "")
                        + " (only the person empties it: File > Trash... or 'llm-cli trash empty')")
-        raise InsufficientSpace(f"Not enough disk space for this build: {detail}.", checks)
+        raise InsufficientSpace(f"Not enough disk space for {what}: {detail}.", checks)
 
 
 # --- the reservation ledger ----------------------------------------------------------------------------------------

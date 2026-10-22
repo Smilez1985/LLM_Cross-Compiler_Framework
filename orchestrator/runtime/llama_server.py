@@ -1056,7 +1056,8 @@ class LocalLLMRuntime:
 
     # --- downloads (orchestrator/utils/download.py) ---------------------------------------------------------
     def _downloads(self) -> _Downloads:
-        return _Downloads(self._session, self._sleep, self.logger)
+        from orchestrator.Core.disk_plan import download_rule
+        return _Downloads(self._session, self._sleep, self.logger, space=download_rule())
 
     def _ensure_space(self, folder: Path, needed: int, what: str = "the download") -> None:
         self._downloads().ensure_space(folder, needed, what)

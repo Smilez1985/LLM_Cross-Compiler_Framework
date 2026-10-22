@@ -312,7 +312,8 @@ class TestFullDiskVerdicts:
         free = {str(cache): 20 * GB - 1, str(tmp_path): 20 * GB}   # the models folder is not made: its parent
         monkeypatch.setattr(self_healing_manager.shutil, "disk_usage", lambda p: usage(free[str(p)]))
         proposal = healer._disk_full_proposal()
-        assert proposal.root_cause == "A disk the build writes to is full. model cache: 0 MB (its disk has 20.0 GB free)."
+        assert proposal.root_cause == ("A disk the build writes to is full. model cache: 0 MB (its disk has 20.0 GB "
+                                       "free).")
         assert str(tmp_path) not in proposal.root_cause + proposal.fix_command
 
     def test_the_ai_disk_fact_counts_a_disk_below_the_reserve_as_full(self, tmp_path, monkeypatch):
@@ -349,7 +350,8 @@ def test_the_saved_model_is_renamed_on_its_disk_and_measured_on_the_nearest_exis
     assert artifact_output._device(tmp_path / "a") == artifact_output._device(tmp_path)
     # a folder on another disk (its stat says so) is not the same disk
     other, real_stat = SimpleNamespace(st_dev=os.stat(tmp_path).st_dev + 1), os.stat
-    monkeypatch.setattr(os, "stat", lambda p, *a, **k: other if str(p) == str(tmp_path / "a") else real_stat(p, *a, **k))
+    monkeypatch.setattr(os, "stat",
+                        lambda p, *a, **k: other if str(p) == str(tmp_path / "a") else real_stat(p, *a, **k))
     assert artifact_output._device(tmp_path / "a") != artifact_output._device(tmp_path)
 
 
@@ -395,3 +397,74 @@ def test_hf_hub_reservations_are_released_once_and_thread_safe():
     for t in threads:
         t.join()
     assert not any(k.startswith("t/") for k in hf_hub._RESERVED)
+
+
+# --- disk_plan.room: the one rule the checks above now share --------------------------------------------------------
+
+class TestRoom:
+
+    def test_the_reserve_the_margin_and_the_ledger(self, tmp_path):
+        from orchestrator.Core import disk_plan
+        check = disk_plan.room(tmp_path, 10 * GB, label="models", what="a download", disk_usage=fixed(50 * GB))
+        assert (check.free, check.total, check.needed, check.reserve) == (50 * GB, 1000 * GB, 10 * GB, 20 * GB)
+        assert check.labels == ["models"] and check.what == ["a download"] and check.verdict == "enough"
+        standing = disk_plan.room(tmp_path, 10 * GB, standing=True, disk_usage=fixed(50 * GB))
+        assert standing.reserve == 100 * GB and not standing.fits
+        own = disk_plan.room(tmp_path, 10 * GB, margin=512 * MIB, disk_usage=fixed(50 * GB))
+        assert own.reserve == 512 * MIB
+        ledger = disk_plan.ReservationLedger(tmp_path / "state")
+        rid, _ = ledger.reserve([disk_plan.DiskNeed("cache", tmp_path, 25 * GB, "a build")], "gui", "a build",
+                                disk_usage=fixed(500 * GB))
+        try:
+            counted = disk_plan.room(tmp_path, 10 * GB, ledger=ledger, disk_usage=fixed(50 * GB))
+            assert counted.reserved_by_others == 25 * GB and not counted.fits
+            assert disk_plan.room(tmp_path, 10 * GB, ledger=ledger, exclude=rid,
+                                  disk_usage=fixed(50 * GB)).reserved_by_others == 0
+        finally:
+            ledger.release(rid)
+
+    def test_an_unreadable_disk_raises_while_check_disk_counts_it_full(self, tmp_path):
+        from orchestrator.Core import disk_plan
+
+        def broken(path):
+            raise OSError("unreadable")
+        with pytest.raises(OSError):
+            disk_plan.room(tmp_path, 1, disk_usage=broken)
+        (check,) = disk_plan.check_disk([disk_plan.DiskNeed("cache", tmp_path, 1, "x")], disk_usage=broken)
+        assert (check.free, check.fits) == (0, False)
+
+    def test_check_disk_takes_a_margin_too(self, tmp_path):
+        from orchestrator.Core import disk_plan
+        (check,) = disk_plan.check_disk([disk_plan.DiskNeed("cache", tmp_path, 1, "x")], margin=7,
+                                        disk_usage=fixed(8))
+        assert check.reserve == 7 and check.fits
+
+    def test_require_names_the_call(self, tmp_path):
+        from orchestrator.Core import disk_plan
+        checks = [disk_plan.room(tmp_path, 10 * GB, label="models", disk_usage=fixed(5 * GB))]
+        with pytest.raises(disk_plan.InsufficientSpace) as e:
+            disk_plan.require(checks, what="this download")
+        assert str(e.value).startswith("Not enough disk space for this download: models disk: 10.0 GB needed")
+        with pytest.raises(disk_plan.InsufficientSpace) as e:
+            disk_plan.require(checks)
+        assert str(e.value).startswith("Not enough disk space for this build: ")
+
+    def test_the_downloads_of_the_runtime_and_the_zoo_run_on_the_disk_rule(self, tmp_path, monkeypatch):
+        """PinnedDownloader asks its caller's rule (utils imports nothing above it); the local runtime and the
+        community zoo give disk_plan's download_rule."""
+        from orchestrator.Core import disk_plan
+        from orchestrator.Core.community_manager import CommunityManager
+        from orchestrator.runtime.llama_server import LocalLLMRuntime
+        rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models")
+        zoo = CommunityManager(SimpleNamespace(config=None))
+        asked = []
+        real = disk_plan.room
+
+        def spy(path, needed=0, **kw):
+            asked.append((Path(path), needed, kw.get("margin")))
+            return real(path, needed, **kw)
+        monkeypatch.setattr(disk_plan, "room", spy)
+        monkeypatch.setattr(shutil, "disk_usage", fixed(100 * GB))
+        rt._ensure_space(tmp_path / "a", 5)
+        zoo._downloads().ensure_space(tmp_path / "b", 6)
+        assert asked == [(tmp_path / "a", 5, disk_plan.DOWNLOAD_MARGIN), (tmp_path / "b", 6, disk_plan.DOWNLOAD_MARGIN)]

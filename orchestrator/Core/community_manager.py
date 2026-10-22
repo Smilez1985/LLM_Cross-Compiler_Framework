@@ -497,7 +497,8 @@ class CommunityManager:
         return (Path(state) if state else self.community_dir / ".state") / "community"
 
     def _downloads(self) -> PinnedDownloader:
-        return PinnedDownloader(self._session, logger=self.logger)
+        from orchestrator.Core.disk_plan import download_rule
+        return PinnedDownloader(self._session, logger=self.logger, space=download_rule())
 
     def _install_root(self, kind: str) -> Path:
         return {"target": self.targets_dir, "recipe": self.recipes_dir, "knowledge": self.knowledge_dir}[kind]
