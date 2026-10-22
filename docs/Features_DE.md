@@ -2925,10 +2925,12 @@ exportiert. Befehle: `llm-cli zoo list|show|install|verify|export|keys`; in der 
 [Community Hub](#community-hub). Das Framework lädt nie etwas hoch und fragt nie nach einem Repository-Token, liest
 oder zeigt keins.
 
-**Stand heute:** Ein Community-Repository, ein Index oder ein Maintainer-Schlüssel ist noch nicht veröffentlicht.
-`configs/community_keys.yml` führt keinen Schlüssel, und die Einstellungen `community_index_url` und `community_repo`
-sind standardmäßig leer. Deshalb zeigen `llm-cli zoo list` und der Hub nur installierte Packs, installieren lassen
-sich nur Pack-Dateien (Vertrauensstufe `local`), und ein Pull Request hat kein Repository, an das er gehen kann.
+**Stand heute:** Das Community-Repository ist festgelegt: Die Einstellung `community_repo` nennt standardmäßig
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), und ein Pull Request geht
+dorthin. Sein Beitrags-Workflow, sein signierter Index und der Maintainer-Schlüssel sind noch nicht veröffentlicht:
+`configs/community_keys.yml` führt keinen Schlüssel, und die Einstellung `community_index_url` bleibt leer, bis in
+diesem Repository der erste signierte Index liegt. Deshalb zeigen `llm-cli zoo list` und der Hub nur installierte Packs,
+und installieren lassen sich nur Pack-Dateien (Vertrauensstufe `local`).
 
 ### Packs
 
@@ -3131,7 +3133,8 @@ tun, was `zoo verify`, `zoo verify DATEI`, `zoo export` und `zoo keys` tun; jede
   `gh pr create`; `gh` und `git` nutzen ihre eigenen gespeicherten Zugangsdaten. Sonst, oder wenn das scheitert,
   öffnet sich die Upload-Seite des Repositorys im Browser: Leg die Datei dort ab, und GitHub forkt das Repository für
   dich.
-- Ohne `community_repo` (heute der Standard) wird nichts übergeben; das Pack liegt fertig in seinem Ordner.
+- Der Standardwert von `community_repo` ist das Community-Repository, `Smilez1985/Edge-LLM-Knowledge-Base`. Ist die
+  Einstellung geleert, wird nichts übergeben; das Pack liegt fertig in seinem Ordner.
 
 ### Packs für KI-Clients
 
@@ -3254,9 +3257,10 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
   `search_knowledge` hinzu.
 - **Gesprochene Ansagen** sind nur mit nachgebildeten Sprachausgaben getestet, nicht mit den echten Stimmen von
   Windows, macOS oder Linux.
-- **Community-Zoo:** Ein Community-Repository, ein Index oder ein Maintainer-Schlüssel ist noch nicht veröffentlicht
-  (`configs/community_keys.yml` ist leer, `community_index_url` und `community_repo` sind leer); installieren lassen
-  sich deshalb nur Pack-Dateien, und ein Pull Request hat kein Repository, an das er gehen kann.
+- **Community-Zoo:** Das Community-Repository ist festgelegt (`community_repo`: `Smilez1985/Edge-LLM-Knowledge-Base`),
+  sein Beitrags-Workflow, sein signierter Index und der Maintainer-Schlüssel sind aber noch nicht veröffentlicht
+  (`configs/community_keys.yml` ist leer, `community_index_url` bleibt leer, bis dort der erste signierte Index
+  liegt); installieren lassen sich deshalb nur Pack-Dateien.
 - Kleinere Lücken der CLI stehen in [CLI_Usage_DE.md](CLI_Usage_DE.md#bekannte-einschränkungen).
 
 Was geplant ist: [Roadmap](BLUEPRINT_DE.md#roadmap). Was sich geändert hat: [CHANGELOG](../CHANGELOG_DE.md).

@@ -751,8 +751,8 @@ rag_rerank_default: false     # true: also rerank chat and MCP searches (default
 # rag_rerank_min_score: 0.3   # relevance floor 0..1; unset = the model's calibrated floor (0.2), 0 = no floor
 rag_model_idle_minutes: 10    # unload the knowledge-base models after this idle time; 0 = keep them loaded
 audio_announcements: true     # spoken Deep Ingest notice and outcome (Tools > Spoken Announcements)
-community_index_url: ""       # https address of the signed community index; empty until one is published
-community_repo: ""            # GitHub owner/name that receives community packs as pull requests; empty for now
+community_index_url: ""       # https address of the signed community index; empty until the first one is published
+community_repo: Smilez1985/Edge-LLM-Knowledge-Base  # GitHub owner/name that receives community packs as pull requests
 ```
 
 The knowledge-base, Deep Ingest and community settings are explained in [docs/Features.md](docs/Features.md).
@@ -770,8 +770,10 @@ The knowledge-base, Deep Ingest and community settings are explained in [docs/Fe
   keys, local engines need none, and an `ant auth login` profile is an advanced option.
 - **Deep Ingest** has no CLI command: you start it in the module wizard in the GUI, or confirm an AI client's
   `crawl_docs_site`.
-- **Community zoo:** no community repository, index or maintainer key is published yet (`configs/community_keys.yml`
-  is empty, `community_index_url` and `community_repo` are empty), so only pack files can be installed.
+- **Community zoo:** the community repository is set (`community_repo`:
+  [Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base)), but its contribution
+  workflow, signed index and maintainer key are not published yet (`configs/community_keys.yml` is empty,
+  `community_index_url` stays empty until the first signed index exists there), so only pack files can be installed.
 
 ---
 

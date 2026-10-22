@@ -1339,6 +1339,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Community-Pakete gehen an das Community-Repository
+  [Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base)**: Der Maintainer hat es
+  gewählt (2026-10-22), und es ist jetzt der Standardwert der Einstellung `community_repo`; „Open pull request“ im
+  Export-Fenster und `llm-cli zoo export --pr` übergeben ein Paket also dorthin, statt mit „No community repository is
+  configured“ abzubrechen. Sein Beitrags-Workflow, sein signierter Index und der Schlüssel des Maintainers sind noch
+  nicht veröffentlicht: `community_index_url` bleibt leer, bis in diesem Repository der erste signierte Index liegt;
+  der Zoo installiert deshalb weiterhin nur Paketdateien. Leerst du die Einstellung selbst, wird wie bisher nichts
+  übergeben. Ein Test hält den Standardwert fest und prüft ihn gegen die Regel der Einstellung und die der Übergabe.
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:

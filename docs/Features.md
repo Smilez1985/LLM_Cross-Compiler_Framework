@@ -2647,10 +2647,12 @@ installed through a quarantine folder and exported from your own work for a pull
 `llm-cli zoo list|show|install|verify|export|keys`; in the GUI the [Community Hub](#community-hub). The framework
 never uploads anything and never asks for, reads or shows a repository token.
 
-**State today:** no community repository, index or maintainer key is published yet. `configs/community_keys.yml`
-lists no key, and the settings `community_index_url` and `community_repo` are empty by default. So `llm-cli zoo
-list` and the hub show only installed packs, only pack files can be installed (trust `local`), and a pull request
-has no repository to go to.
+**State today:** the community repository is set: the setting `community_repo` names
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base) by default, and a pull
+request goes there. Its contribution workflow, its signed index and the maintainer's key are not published yet:
+`configs/community_keys.yml` lists no key, and the setting `community_index_url` stays empty until the first signed
+index exists in that repository. So `llm-cli zoo list` and the hub show only installed packs, and only pack files can be
+installed (trust `local`).
 
 ### Packs
 
@@ -2834,7 +2836,8 @@ installed version and folder, the download address with size and sha256, the des
   commits the pack as `contributions/<kind>/<file>` on a new branch and opens the pull request with `gh pr create`;
   `gh` and `git` use their own stored credentials. Otherwise, or if that fails, the repository's upload page opens in
   the browser: drop the file there, and GitHub forks the repository for you.
-- Without `community_repo` (the default today) nothing is handed over; the pack stays ready in its folder.
+- The default of `community_repo` is the community repository, `Smilez1985/Edge-LLM-Knowledge-Base`. With the
+  setting emptied nothing is handed over; the pack stays ready in its folder.
 
 ### Packs for AI clients
 
@@ -2947,9 +2950,10 @@ What does not work yet, so you are not surprised:
   `search_knowledge`.
 - **Spoken announcements** are tested with simulated speech engines only, not with the real voices of Windows,
   macOS or Linux.
-- **Community zoo:** no community repository, index or maintainer key is published yet (`configs/community_keys.yml`
-  is empty, `community_index_url` and `community_repo` are empty), so only pack files can be installed and a pull
-  request has no repository to go to.
+- **Community zoo:** the community repository is set (`community_repo`: `Smilez1985/Edge-LLM-Knowledge-Base`), but
+  its contribution workflow, signed index and maintainer key are not published yet (`configs/community_keys.yml` is
+  empty, `community_index_url` stays empty until the first signed index exists there), so only pack files can be
+  installed.
 - Smaller CLI gaps are listed in [CLI_Usage.md](CLI_Usage.md#known-limitations).
 
 What is planned: [roadmap](BLUEPRINT.md#roadmap). What changed: [CHANGELOG](../CHANGELOG.md).

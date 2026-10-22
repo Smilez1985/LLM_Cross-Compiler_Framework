@@ -502,11 +502,13 @@ siehe auch den [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.m
 Das Framework fragt nie nach einem Token, liest keines und zeigt keines an: `gh` und `git` nutzen ihre eigene
 gespeicherte Anmeldung, und die Upload-Seite nutzt die GitHub-Sitzung deines Browsers.
 
-**Aktueller Stand:** Das Community-Repository und sein signierter Index sind noch nicht veröffentlicht.
-`community_repo` und `community_index_url` sind leer, und `configs/community_keys.yml` enthält keinen Schlüssel;
-`--pr` bricht deshalb mit „No community repository is configured“ ab und lässt das Paket in
-`community/contributions/`. Bis es das Repository gibt, lässt sich ein Paket als Datei teilen
-(`llm-cli zoo install --file <Paket>` installiert es mit der Vertrauensstufe `local`).
+**Aktueller Stand:** Das Community-Repository ist festgelegt: `community_repo` nennt
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), `--pr` und „Open pull
+request“ übergeben ein Paket also dorthin. Sein Beitrags-Workflow (die CI-Prüfung aus Schritt 4), sein signierter Index
+und der Schlüssel des Maintainers sind noch nicht veröffentlicht: `community_index_url` bleibt leer, bis in diesem
+Repository der erste signierte Index liegt, und `configs/community_keys.yml` enthält keinen Schlüssel. Bis dahin lässt
+sich ein Paket auch als Datei teilen (`llm-cli zoo install --file <Paket>` installiert es mit der Vertrauensstufe
+`local`).
 
 Wissenspakete behalten die Quelladresse jeder Seite und beanspruchen keine Lizenz für die Seiten (`NOASSERTION`); die
 Seiten bleiben unter den Bedingungen ihrer Eigentümer. Seiten mit vollem Text unter einer Lizenz, die ihren Text
