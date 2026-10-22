@@ -381,3 +381,90 @@ def test_service_connect_opens_a_key_only_session(tmp_path, trusted_board):
     session = service.connect(device, tmp_path, "dietpi", device.fingerprint, step="probe")
     assert isinstance(session, RemoteSession) and isinstance(session.credentials, KeyOnly)
     assert session.expect_fingerprint == device.fingerprint and logins == [("192.0.2.20", "dietpi", 22, None)]
+
+
+class TestThePersonsLoginOnTheSession:
+
+    @pytest.fixture
+    def stored_board(self, monkeypatch):
+        from orchestrator.runtime.profile import device_id_for_host_key
+        from orchestrator.utils import ssh_trust
+        fp = "SHA256:" + "H" * 43
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: HostKey())
+        monkeypatch.setattr(ssh_trust, "check_host_key", lambda state, host, port, key: "known")
+        monkeypatch.setattr(ssh_trust, "fingerprint", lambda key: fp)
+        monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: SimpleNamespace(close=lambda: None))
+        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line: None)
+        monkeypatch.setattr(ssh_trust, "client_key", lambda state: (None, "ssh-ed25519 AAAA framework"))
+        return device_id_for_host_key(fp)
+
+    def test_a_password_is_a_one_time_password_and_none_logs_in_with_the_key_only(self, tmp_path, stored_board):
+        """Decision 2: the person's board steps may log in with a one-time password; without one the key only."""
+        from orchestrator.remote.session import KeyOnly, OneTimePassword, RemoteSession
+        from orchestrator.runtime.device import person_steps
+        session, key = person_steps.connect_stored(tmp_path, stored_board, "192.0.2.10", 22, "dietpi", "once")
+        assert isinstance(session, RemoteSession) and isinstance(session.credentials, OneTimePassword)
+        assert session.expect_device_id == stored_board and isinstance(key, HostKey)
+        assert "once" not in repr(session.credentials), "the password never shows"
+        session, _key = person_steps.connect_stored(tmp_path, stored_board, "192.0.2.10", 22, "dietpi")
+        assert isinstance(session.credentials, KeyOnly)
+
+
+class TestTheOneCancel:
+
+    def test_closing_a_session_ends_its_wait_for_the_board_at_once(self, board_session):
+        """A Cancel holds the board session (CancelToken.hold) and closes it: a wait for the board ends at once
+        (Stopped) instead of logging in again."""
+        from orchestrator.remote.session import CancelToken, Stopped
+        board, session, _events, clock = board_session
+        token = CancelToken()
+        token.hold(session)
+        board.back = False
+        seen = []
+
+        def reachable(host, port):
+            seen.append(clock[0])
+            token.cancel()   # the person presses Cancel while the session waits
+            return False
+
+        session._reachable = reachable
+        with pytest.raises(Stopped):
+            session.wait_for_host("command")
+        assert session.ended and session.client is None and len(seen) == 1 and clock[0] < 5
+        assert token.is_set() and token.cancelled
+
+    def test_a_session_handed_after_the_cancel_is_closed_at_once(self, board_session):
+        from orchestrator.remote.session import CancelToken
+        _board, session, _events, _clock = board_session
+        token = CancelToken()
+        token.cancel()
+        token.hold(session)
+        assert session.ended and session.client is None
+
+
+class TestTheEventLines:
+
+    def test_an_ais_job_gets_each_upload_percent_once_and_each_wait_line(self):
+        from orchestrator.remote.session import RemoteEvent
+        from orchestrator.remote.text import progress_events
+        seen = []
+        on_event = progress_events(lambda done, total, text: seen.append((done, total, text)), "Shelf board")
+        for event in (RemoteEvent("uploading", done=0, total=1000), RemoteEvent("uploading", done=4, total=1000),
+                      RemoteEvent("uploading", done=10, total=1000),
+                      RemoteEvent("waiting", elapsed=5, limit=300, step="command"),
+                      RemoteEvent("back", step="command")):
+            on_event(event)
+        assert [s[:2] for s in seen] == [(0, 1000), (10, 1000), (None, None), (None, None)]
+        assert all("Shelf board" in s[2] for s in seen)
+
+    def test_the_person_gets_the_first_line_of_a_wait_and_the_board_s_answer(self):
+        from orchestrator.remote.session import RemoteEvent
+        from orchestrator.remote.text import wait_lines
+        lines = []
+        on_event = wait_lines(lines.append, "192.0.2.5", "en")
+        for event in (RemoteEvent("uploading", done=1, total=2), RemoteEvent("waiting", elapsed=0, limit=300),
+                      RemoteEvent("waiting", elapsed=5, limit=300), RemoteEvent("back", done=1, total=2),
+                      RemoteEvent("waiting", elapsed=0, limit=300, step="bench")):
+            on_event(event)
+        assert len(lines) == 3 and lines[0].startswith("Waiting for the board at 192.0.2.5")
+        assert lines[1].startswith("The board answers again") and "benchmark" in lines[2]

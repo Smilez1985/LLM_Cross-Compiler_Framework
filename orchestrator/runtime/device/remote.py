@@ -18,8 +18,9 @@ The new build's programs are checked in their own folder before anything starts 
 build is never activated): as the unprivileged user with a cleared environment, --version (the pinned build and
 commit), --list-devices, the server's refusal of --tools, and a short llama-bench run when a model on the device is
 given (it runs on the board on its own and is followed to its end). A model that is not a catalog model is only
-benchmarked after the user's consent, which the caller writes to the audit log (decision D23). Only a build that passes becomes `current`; a build that fails (a SIGILL from a wrong
-CPU baseline, a C library its programs do not run with) is removed again, and the previous build stays active.
+benchmarked after the user's consent, which the caller writes to the audit log (decision D23). Only a build that
+passes becomes `current`; a build that fails (a SIGILL from a wrong CPU baseline, a C library its programs do not run
+with) is removed again, and the previous build stays active.
 After the switch every older build stays on the device: the framework removes none by itself (round 5 f). The
 result lists them (older_builds: name, size, whether a running program uses one), and only the person removes them,
 at a terminal with `llm-cli device runtime prune DEVICE --on-device`: the full list first (full path, name, size and
@@ -163,16 +164,15 @@ class RemoteShell:
             self._call(lambda: self.session.upload(fh, remote_path, size, sha256), UPLOAD_TIMEOUT)
 
     def _has_sftp(self, folder: str) -> bool:
-        """Whether the device answers over SFTP (one stat of `folder`, through a network drop)."""
-        from orchestrator.remote.session import SessionFailure, Stopped
+        """Whether the device answers over SFTP: one stat of `folder`, tried once. A board without an SFTP server
+        (Dropbear without sftp-server) or a stand-in without SFTP gets the file on stdin; a network drop at this very
+        moment shows in that upload's own command, which then ends with "dropped" once the board answers again."""
         if self.lost is not None or self.session.transport is None:
             return True   # the upload's own step says why it cannot be done
         try:
-            self.session.resumable(lambda: self.session.transport.stat_size(folder), step="upload")
+            self.session.transport.stat_size(folder)
             return True
-        except (Stopped, SessionFailure):
-            return True   # ends in upload() with its sentence
-        except Exception:  # noqa: BLE001 - no SFTP subsystem on the device (Dropbear without sftp-server), a stand-in
+        except Exception:  # noqa: BLE001 - no SFTP subsystem on the device, a stand-in without SFTP, a drop
             return False
 
     def run_detached(self, folder: str, job: str, *, timeout: float, poll: float, step: str) -> int:
