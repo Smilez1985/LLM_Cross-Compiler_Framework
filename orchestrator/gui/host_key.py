@@ -29,10 +29,12 @@ def state_dir(framework: Any) -> Path:
 
 def read_host_key(folder: Path, host: str, port: int) -> Tuple[Any, str]:
     """(the key the board presents, its state in the framework's known_hosts: known, unknown or changed): one
-    connection to the board's SSH port, no login. Network: call it off the GUI thread."""
-    from orchestrator.utils import ssh_trust
-    key = ssh_trust.fetch_host_key(host, port)
-    return key, ssh_trust.check_host_key(Path(folder), host, port, key)
+    connection to the board's SSH port, no login (remote/trust.py TrustStore.check). Network: call it off the GUI
+    thread."""
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import TrustStore
+    check = TrustStore(Path(folder)).check(Endpoint(host, int(port)))
+    return check.key, check.status
 
 
 def _note(folder: Path, host: str, port: int, step: str, code: str) -> None:

@@ -56,10 +56,13 @@ def keep_logger_levels():
 
 @pytest.fixture
 def terminal(monkeypatch):
-    """Makes the CliRunner's standard input a terminal (sys.stdin.isatty() is True), so the CLI asks."""
+    """Makes the CliRunner's standard input a terminal (sys.stdin.isatty() is True), so the CLI asks. The CLI's shared
+    console made meanwhile (it would keep a terminal's colours) is dropped again afterwards."""
     import click.testing
+    from orchestrator import cli as cli_module
 
     def make(on=True):
+        monkeypatch.setattr(cli_module.console, "_console", None)
         monkeypatch.setattr(click.testing._NamedTextIOWrapper, "isatty", lambda self: on, raising=False)
     return make
 
@@ -347,3 +350,113 @@ def test_a_gui_deploy_opens_five_connections_to_the_board_s_ssh_port(qapp, manag
     assert worker.trusted is not None and TrustedDevices(state).get(worker.trusted.device_id) is not None
     assert worker.trusted.trusted_via == "gui" and worker.trusted.fingerprint == ssh_trust.fingerprint(board.key)
     assert contacts == ["key read", "port check", "key read", "login", "key read"]
+
+
+# --- remote/trust.py: the read-only store ----------------------------------------------------------------------------
+
+class TestTrustStore:
+
+    def test_the_old_names_are_the_store_s(self):
+        from orchestrator.remote import trust
+        from orchestrator.runtime import profile
+        for name in ("HostKeyError", "UnknownHostKey", "HostKeyChanged", "fingerprint", "host_entry",
+                     "known_hosts_path", "check_host_key"):
+            assert getattr(ssh_trust, name) is getattr(trust, name), name
+        assert ssh_trust._host_keys is trust.load_host_keys
+        assert profile.device_id_for_host_key is trust.device_id_for
+        assert profile._FINGERPRINT is trust.FINGERPRINT
+
+    def test_check_reads_the_key_once_and_compares_what_was_expected(self, tmp_path, monkeypatch):
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore
+        key, other = paramiko.ECDSAKey.generate(), paramiko.ECDSAKey.generate()
+        reads = []
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: reads.append(
+            (host, port)) or key)
+        store = TrustStore(tmp_path)
+        at = Endpoint(HOST, 2222)
+        check = store.check(at)
+        assert reads == [(HOST, 2222)] and check.status == "unknown" and check.key is key
+        assert check.fingerprint == ssh_trust.fingerprint(key) and check.key_type == "ecdsa-sha2-nistp256"
+        assert not check.fingerprint_differs and not check.other_device
+        ssh_trust.trust_host_key(tmp_path, HOST, 2222, key)
+        known = store.check(at, key, expect_fingerprint=ssh_trust.fingerprint(other), expect_device_id="0" * 16)
+        assert reads == [(HOST, 2222)], "a key handed in is not read again"
+        assert known.known and known.fingerprint_differs and known.other_device
+        assert store.check(at, other).status == "changed"
+        assert store.status(Endpoint(HOST, 22), key) == "unknown", "the trust is per address and port"
+        assert list(store.keys_at(at)) == ["ecdsa-sha2-nistp256"] and store.keys_at(Endpoint(HOST, 22)) == {}
+        assert store.keys_at(at)["ecdsa-sha2-nistp256"].asbytes() == key.asbytes()
+
+    def test_status_follows_a_test_s_check_host_key(self, tmp_path, monkeypatch):
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore
+        monkeypatch.setattr(ssh_trust, "check_host_key", lambda state, host, port, k: "changed")
+        assert TrustStore(tmp_path).status(Endpoint(HOST), paramiko.ECDSAKey.generate()) == "changed"
+
+    def test_the_store_never_writes(self, tmp_path, monkeypatch):
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore
+        key = paramiko.ECDSAKey.generate()
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: key)
+        state = tmp_path / "state"
+        state.mkdir()
+        store = TrustStore(state)
+        store.check(Endpoint(HOST))
+        store.status_of(SimpleNamespace(host=HOST, port=22, key_type=key.get_name(),
+                                        fingerprint=ssh_trust.fingerprint(key)))
+        assert list(state.iterdir()) == []
+        import orchestrator.remote.trust as module
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        for writer in ("trust_host_key", "save_host_keys", ".save(", "write_", "os.replace", "open("):
+            assert writer not in source, writer
+
+
+def _ed25519_key():
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    line = Ed25519PrivateKey.generate().public_key().public_bytes(
+        serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH).decode("ascii")
+    kind, blob = line.split()
+    return paramiko.PKey.from_type_string(kind, base64.b64decode(blob))
+
+
+class TestParsePublicKey:
+
+    @pytest.fixture(params=["ed25519", "ecdsa", "rsa"])
+    def key(self, request):
+        if request.param == "ed25519":
+            return _ed25519_key()
+        return paramiko.ECDSAKey.generate() if request.param == "ecdsa" else paramiko.RSAKey.generate(1024)
+
+    def test_the_line_of_a_pub_file_known_hosts_or_keyscan(self, key):
+        from orchestrator.remote.trust import parse_public_key
+        line = f"{key.get_name()} {key.get_base64()}"
+        for text in (line, line + " root@board", f"\n  {line}  \n", f"[{HOST}]:2222 {line}", f"{HOST} {line}",
+                     f"# {HOST}:22 SSH-2.0-OpenSSH_9.2\n{HOST} {line}\n"):
+            parsed = parse_public_key(text)
+            assert parsed.get_name() == key.get_name() and parsed.asbytes() == key.asbytes(), text
+
+    @pytest.mark.parametrize("text, kind", [
+        ("", "empty"), ("\n  \n# only a comment\n", "empty"),
+        ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAJ", "several"),
+        ("hello board", "not_a_key"), ("ssh-dss AAAAB3NzaC1kc3MAAACBAP", "not_a_key"),
+        ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBroken", "not_a_key"),
+        ("@cert-authority *.lan ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGf0", "not_a_key"),
+        ("ssh-ed25519 " + "A" * 40000, "not_a_key"),
+    ])
+    def test_anything_else_is_refused_with_its_kind(self, text, kind):
+        from orchestrator.remote.trust import KeyTextError, parse_public_key
+        with pytest.raises(KeyTextError) as e:
+            parse_public_key(text)
+        assert e.value.kind == kind
+
+    def test_a_line_whose_data_is_of_another_type_is_refused(self):
+        from orchestrator.remote.trust import KeyTextError, parse_public_key
+        ecdsa = paramiko.ECDSAKey.generate()
+        with pytest.raises(KeyTextError) as e:
+            parse_public_key(f"ecdsa-sha2-nistp384 {ecdsa.get_base64()}")
+        assert e.value.kind == "not_a_key"
+        with pytest.raises(KeyTextError):
+            parse_public_key(f"ssh-ed25519 {ecdsa.get_base64()}")

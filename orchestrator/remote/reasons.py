@@ -82,10 +82,10 @@ _SSH_OUTPUT = (
 def classify(error: BaseException) -> Optional[str]:
     """The reason code of a failed connection or login (None: none of the four, e.g. a host key that is not trusted
     yet, which the caller handles as the first contact)."""
-    from orchestrator.utils import ssh_trust
-    if isinstance(error, ssh_trust.HostKeyChanged):
+    from orchestrator.remote import trust
+    if isinstance(error, trust.HostKeyChanged):
         return HOST_KEY_CHANGED
-    if isinstance(error, ssh_trust.HostKeyError):
+    if isinstance(error, trust.HostKeyError):
         return None
     # paramiko only when something imported it already: none of its errors exists before that, so classify never
     # loads it (RG1) and works the same without it. The import statement (not the sys.modules entry itself) waits

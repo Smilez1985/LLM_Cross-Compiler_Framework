@@ -213,18 +213,20 @@ class DeploymentWorker(QThread):
         that the framework logged in to: its record, so AI tools may name it for deploy_to_device (each deploy is
         still confirmed). Written only here and in the CLI, never by a tool; it never fails the deployment. The KV-cache
         choice of this window goes into the board's deploy settings."""
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore
         from orchestrator.runtime.device.trusted import record_trusted_device
-        from orchestrator.utils import ssh_trust
         port = self.port if port is None else int(port)
         state = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
         if not state:
             return
         try:
-            key = ssh_trust.fetch_host_key(self.target_ip, port)
-            if ssh_trust.check_host_key(Path(state), self.target_ip, port, key) != "known":
+            check = TrustStore(Path(state)).check(Endpoint(self.target_ip, port))
+            if not check.known:
                 return
         except Exception:  # noqa: BLE001 - unreachable now: the next deployment records it
             return
+        key = check.key
         audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
         device = record_trusted_device(Path(state), self.target_ip, port, self.user, key, via="gui", paired=True,
                                        label=self.label, audit=audit, actor="gui")
