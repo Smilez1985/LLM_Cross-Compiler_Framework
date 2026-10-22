@@ -1911,7 +1911,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and Mojo's check of the installation as the catalogue step (`orchestrator/remote/reasons.py` `is_local`,
   `LOCAL_PROBLEM`, `CODES`). It is never recorded with the board. The deploy's reason names the file without its
   folder, and a home folder or a folder with this computer's account name only by its kind, since that name is an
-  account's name and the reason reaches an AI; the CLI also prints the error itself. It is no blocker of the
+  account's name and the reason reaches an AI (the account's names are USER, USERNAME and the name of every home
+  folder `orchestrator/security/paths.py` `home_folders` knows, also USERPROFILE); the CLI also prints the error
+  itself. It is no blocker of the
   delegation rules, so no delegation is outdated.
 - **A deploy works on a board whose account uses another login shell**: sshd hands every command to the board
   account's login shell. The deploy's commands (the private folder, the hash checks, the start of the installation

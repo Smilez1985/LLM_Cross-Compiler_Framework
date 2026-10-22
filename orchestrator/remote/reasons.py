@@ -149,11 +149,15 @@ def is_local(error: BaseException) -> bool:
 
 
 def _own_accounts() -> set:
-    """The names this computer's account goes by (its home folder's name, USER, USERNAME), never shown to an AI."""
+    """The names this computer's account goes by (USER, USERNAME and the name of its home folder in every form the
+    one home-folder helper knows: orchestrator/security/paths.py home_folders, Path.home(), HOME and USERPROFILE),
+    never shown to an AI."""
     import os
+
+    from orchestrator.security.paths import home_folders
     names = {os.environ.get("USER", ""), os.environ.get("USERNAME", "")}
     try:
-        names.add(os.path.basename(os.path.expanduser("~").replace("\\", "/").rstrip("/")))
+        names.update(home.replace("\\", "/").rstrip("/").rpartition("/")[2] for home in home_folders())
     except Exception:  # noqa: BLE001 - no home folder known: the environment's names only
         pass
     return {n for n in names if n and n != "~"}

@@ -579,6 +579,20 @@ def test_the_detail_never_names_the_own_account(monkeypatch):
         "Permission denied: .ssh"
 
 
+def test_the_own_account_is_every_name_of_the_one_home_folder_helper(monkeypatch):
+    """R0 (stage C seam): this computer's home folders come from orchestrator/security/paths.py home_folders, the one
+    helper the AI-facing scrubs use (Path.home(), HOME and USERPROFILE), not from a second lookup of `~` only; so a
+    Windows profile folder other than HOME is never named either."""
+    from orchestrator.remote.reasons import local_detail
+    monkeypatch.setenv("HOME", "/srv/accounts/alice")
+    monkeypatch.setenv("USERPROFILE", "C:\\Accounts\\bob")
+    monkeypatch.setenv("USER", "carol")
+    monkeypatch.setenv("USERNAME", "carol")
+    for name in ("alice", "bob", "carol"):
+        detail = local_detail(PermissionError(errno.EACCES, "Permission denied", f"/opt/{name}"))
+        assert detail == "Permission denied: a folder named after the account", (name, detail)
+
+
 @pytest.mark.parametrize("lang", ["en", "de"])
 def test_every_code_has_the_person_s_text_and_the_ai_s_next_step(lang):
     from orchestrator.tools.facts_catalog import BLOCKERS
