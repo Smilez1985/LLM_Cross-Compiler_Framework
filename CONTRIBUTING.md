@@ -591,7 +591,9 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 - **Shared helpers have one home below the tools.** Paths in text an AI reads: `orchestrator/security/paths.py`
   (`label_paths`, `shorten_home`, `device_text`, `scrub_for_ai`, and the home-folder patterns `HOME_ROOT` and
   `ACCOUNT_NAME` that other scrubbers build on). Private atomic files: `orchestrator/utils/atomic.py`
-  (`replace_file` with the Windows retry, `write_private`, `write_private_exclusive`). One-time notices:
+  (`replace_file` with the Windows retry, `write_private`, `write_private_exclusive`, and `owner_only`, which makes
+  an existing file private to this account: group and other bits off on POSIX, a protected ACL for this account
+  alone on Windows; every "only you" file uses it, never a second chmod or ACL helper). One-time notices:
   `orchestrator/utils/notice_store.py` (`OneTimeNotice`). Docker image references:
   `orchestrator/utils/image_ref.py`. HTTP that reaches only public addresses: `orchestrator/security/http.py`
   (`PublicOnlyAdapter`). The audit key: `Core/vault_key.audit_key`; a pack's base images:
@@ -671,7 +673,10 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   the host key checked through `TrustStore` at every login, `run`, `private_dir`, `upload` with resume,
   `wait_for_host`, `run_detached`, one `CancelToken`): an AI path passes `KeyOnly()`, only the person's
   `OneTimePassword` can pair, and every command goes as one `sh -c` with a time limit and an output cap through
-  `remote.transport` (`sh_command`, `ParamikoTransport.run`). Never write a second regex, reason table, recorder,
+  `remote.transport` (`sh_command`, `ParamikoTransport.run`). Without paramiko the same session runs over this
+  computer's OpenSSH client (`RemoteSession(..., openssh=SystemSshTransport)`: `KeyOnly` only, no shown fingerprint);
+  an ssh, scp or sftp command line comes only from `remote.transport.openssh_argv` with `openssh_options`, and a path
+  in an `-o` option is quoted with `config_value`. Never write a second regex, reason table, recorder,
   host-key check, wait loop, upload loop or command reader next to them. The package imports only `orchestrator/utils`
   and `orchestrator/security` (`tests/test_remote_layer.py`).
 - **Qt lives only in `orchestrator/gui/`.** PySide6 is the optional extra `gui`; the command line, the MCP server and

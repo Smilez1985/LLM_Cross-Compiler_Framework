@@ -449,7 +449,11 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
 - **Fehler mit Grund:** Paketieren und Übertragen melden, warum sie gescheitert sind (kein Docker, ein nicht
   festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`), statt es nur zu protokollieren.
   Ein Paket wird unter einem vorläufigen Namen geschrieben und erst umbenannt, wenn es vollständig ist. Ohne paramiko
-  bekommen `ssh` und `scp` nie die Standardeingabe des Frameworks (über MCP-stdio ist das der Protokollstrom).
+  läuft das Deployment über den OpenSSH-Client dieses Computers und kann all das auch (auf das Board warten, den
+  Upload fortsetzen, `deploy.sh` selbständig), nur mit dem Schlüssel und der known_hosts des Frameworks, einem
+  Zeitlimit für die Anmeldung und Keepalive; `ssh` bekommt nie die Standardeingabe des Frameworks (über MCP-stdio ist
+  das der Protokollstrom). Ein Passwort braucht dort paramiko (OpenSSH fragt nie danach): Das Ergebnis sagt, dass es
+  nicht genutzt wurde. Ein Deployment, das an einen dir gezeigten Fingerabdruck gebunden ist, wird abgelehnt.
 
 ### Laufzeit auf dem Board (selbst gebautes llama.cpp)
 

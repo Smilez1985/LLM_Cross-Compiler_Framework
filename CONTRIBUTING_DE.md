@@ -621,7 +621,9 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   `orchestrator/security/paths.py` (`label_paths`, `shorten_home`, `device_text`, `scrub_for_ai` und die
   Home-Ordner-Muster `HOME_ROOT` und `ACCOUNT_NAME`, auf denen andere Bereiniger aufbauen). Private atomare Dateien:
   `orchestrator/utils/atomic.py` (`replace_file` mit dem Windows-Wiederholen, `write_private`,
-  `write_private_exclusive`). Einmalige Hinweise: `orchestrator/utils/notice_store.py` (`OneTimeNotice`).
+  `write_private_exclusive` und `owner_only`, das eine vorhandene Datei nur für dieses Konto lesbar macht: Gruppen- und
+  andere Bits weg unter POSIX, unter Windows eine geschützte ACL nur für dieses Konto; jede „nur du“-Datei nutzt es,
+  nie ein zweiter chmod- oder ACL-Helfer). Einmalige Hinweise: `orchestrator/utils/notice_store.py` (`OneTimeNotice`).
   Docker-Image-Referenzen: `orchestrator/utils/image_ref.py`. HTTP, das nur öffentliche Adressen erreicht:
   `orchestrator/security/http.py` (`PublicOnlyAdapter`). Der Audit-Schlüssel: `Core/vault_key.audit_key`; die
   Basis-Images eines Pakets: `Core/community_pack.py`; die Snapshot-Prüfung vor einem Index:
@@ -710,7 +712,10 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   (Anmeldung mit dem über `TrustStore` geprüften Host-Schlüssel bei jeder Anmeldung, `run`, `private_dir`, `upload`
   mit Fortsetzen, `wait_for_host`, `run_detached`, ein `CancelToken`): Ein KI-Weg übergibt `KeyOnly()`, nur das
   `OneTimePassword` der Person kann koppeln, und jeder Befehl geht als ein `sh -c` mit Zeitlimit und Ausgabegrenze
-  über `remote.transport` (`sh_command`, `ParamikoTransport.run`). Schreib nie einen zweiten regulären Ausdruck, eine
+  über `remote.transport` (`sh_command`, `ParamikoTransport.run`). Ohne paramiko läuft dieselbe Sitzung über den
+  OpenSSH-Client dieses Computers (`RemoteSession(..., openssh=SystemSshTransport)`: nur `KeyOnly`, kein gezeigter
+  Fingerabdruck); eine Befehlszeile für ssh, scp oder sftp kommt nur aus `remote.transport.openssh_argv` mit
+  `openssh_options`, und ein Pfad in einer `-o`-Option wird mit `config_value` gequotet. Schreib nie einen zweiten regulären Ausdruck, eine
   zweite Grundtabelle, einen zweiten Recorder, eine zweite Host-Schlüssel-Prüfung, eine zweite Warte- oder
   Upload-Schleife oder einen zweiten Befehlsleser daneben. Das Paket importiert nur `orchestrator/utils` und
   `orchestrator/security` (`tests/test_remote_layer.py`).

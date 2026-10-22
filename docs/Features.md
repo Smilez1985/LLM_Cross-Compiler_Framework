@@ -415,8 +415,11 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   model, and the build list shows "tested on <board>".
 - **Errors with their reason:** packaging and deploying return why they failed (no Docker, an image not pinned, the
   host key changed, `deploy.sh` exit status) instead of only logging it. A package is written under a temporary name
-  and renamed when complete. Without paramiko, `ssh` and `scp` never get the framework's standard input (over MCP
-  stdio that is the protocol stream).
+  and renamed when complete. Without paramiko the deploy runs over this computer's OpenSSH client and does all of the
+  above too (waiting for the board, resuming the upload, `deploy.sh` on its own), with the framework's key and
+  known_hosts only, a login time limit and keepalive; `ssh` never gets the framework's standard input (over MCP stdio
+  that is the protocol stream). A password needs paramiko there (OpenSSH never asks for one): the result says it was
+  not used. A deploy bound to a fingerprint you were shown is refused.
 
 ### Runtime on the board (self-built llama.cpp)
 
