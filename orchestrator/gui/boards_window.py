@@ -368,7 +368,7 @@ class BoardsWindow(QDialog):
         from orchestrator.runtime.device.person_steps import BoardStepError
         t = self._t
         if isinstance(error, BoardStepError):
-            if error.reason in reasons.REASONS:
+            if error.reason in reasons.CODES:
                 text = reasons.person_text(error.reason, self.lang, address=address, port=port)
                 if error.kind == "host_key_changed":
                     text += "\n\n" + str(error)

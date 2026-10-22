@@ -40,13 +40,20 @@ class FakeChannel:
     def recv_exit_status(self):
         return self.status
 
+    def shutdown_write(self):
+        pass
+
+    def close(self):
+        pass
+
 
 class FakeStream:
     def __init__(self, data=b"", status=0):
         self.data, self.channel = data, FakeChannel(status)
 
-    def read(self):
-        return self.data
+    def read(self, n=-1):
+        chunk, self.data = (self.data, b"") if n is None or n < 0 else (self.data[:n], self.data[n:])
+        return chunk
 
     def __iter__(self):
         return iter(self.data.decode().splitlines(True))
@@ -58,8 +65,8 @@ class FakeSsh:
     def __init__(self):
         self.closed = False
 
-    def exec_command(self, command):
-        return None, FakeStream(b"", 1), FakeStream(INJECTION.encode())
+    def exec_command(self, command, timeout=None):
+        return FakeStream(), FakeStream(b"", 1), FakeStream(INJECTION.encode())
 
     def close(self):
         self.closed = True

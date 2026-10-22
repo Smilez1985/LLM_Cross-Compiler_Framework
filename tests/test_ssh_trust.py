@@ -1,6 +1,7 @@
 """SSH trust: fingerprints, trust on first use (never silent), changed keys, framework key, pairing."""
 
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -74,9 +75,10 @@ class TestHostKeys:
         assert seen == []
         line = "ssh-ed25519 AAAAexampleonlyfortests0000 llm-cross-compiler-framework"
         ssh_trust.install_public_key(Client(), line)
-        assert seen == ["umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && "
-                        f"(grep -qxF '{line}' ~/.ssh/authorized_keys || printf '%s\\n' '{line}' >> "
-                        "~/.ssh/authorized_keys)"], seen
+        # one `sh -c '...'` (c2-remote-session, Fixed): the account's login shell never reads the && and || itself
+        assert seen == ["sh -c " + shlex.quote("umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && "
+                                               f"(grep -qxF '{line}' ~/.ssh/authorized_keys || printf '%s\\n' "
+                                               f"'{line}' >> ~/.ssh/authorized_keys)")], seen
 
     def test_the_framework_key_line_passes_the_check(self, tmp_path):
         assert ssh_trust.PUBLIC_LINE.fullmatch(ssh_trust.client_key(tmp_path / "state")[1])

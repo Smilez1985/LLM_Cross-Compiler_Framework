@@ -1425,6 +1425,26 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   importiert, deshalb laden `orchestrator/utils/ssh_trust.py` und alles, was es importiert, keine SSH-Bibliothek, und
   das Deployment und der Builder-Tab fragen mit einem echten Import, ob SSH geht (eine kaputte Installation galt dort
   als vorhanden und bei der Anmeldung als fehlend).
+- **Eine Board-Sitzung für jeden Kontakt mit einem Board, `orchestrator/remote/session.py`** (Konsolidierungskette
+  c2-remote-session, Befund 2 des Architektur-Audits). Was nur die Board-Sitzung des Deployments konnte (sich erneut
+  anmelden und dabei den Host-Schlüssel wie bei der ersten Anmeldung prüfen, auf ein Board warten, dessen Netz
+  abgebrochen ist, einen Upload bei dem fortsetzen, was angekommen ist, eine Installation verfolgen, die auf dem Board
+  selbständig läuft), ist jetzt `RemoteSession`, über eine `Transport`-Schnittstelle
+  (`orchestrator/remote/transport.py` `ParamikoTransport`), sodass das Laufzeit-Deployment, die Board-Prüfung und der
+  Benchmark auf dem Board als Nächstes dieselben Schritte nutzen können (Kette c2-remote-callers). Das Deployment
+  behält sein Paket und den Job von deploy.sh und ist ein dünner Adapter: seine Ergebnisse, Gründe und
+  Gerätezustände sind dieselben, festgehalten von `tests/test_remote_session.py` an der Sitzung vor dem Umzug. Seine
+  Zugangsdaten haben einen Typ: `KeyOnly()` (jeder KI-Weg) erreicht die Schlüssel-Installation nie, nur das
+  `OneTimePassword` der Person kann koppeln. `RemoteShell` und die Board-Prüfung lesen die Antwort eines Boards mit
+  dem einen begrenzten Leser des Transports, `ssh_trust.connect` und `paramiko_quiet` delegieren an den Transport,
+  und die Grundcodes lesen die Fehlertypen von paramiko über ihn (paramiko hat in der Remote-Schicht jetzt nur noch
+  den Transport als Zuhause). Jeder Befehl des Deployments hat jetzt das Zeitlimit und die Ausgabegrenze, die die
+  Befehle der Geräte-Laufzeit hatten (120 s Stille, 1 MiB; eine sha256-Prüfung auf dem Board wartet mindestens 900 s
+  und bei einem großen Paket länger), und die Sitzung hält die Verbindung alle 15 s am Leben: Ein Board, das mitten in
+  einem Befehl nicht mehr antwortet, hält das Deployment nicht mehr fest. So ein Befehl zählt als Netzabbruch (die
+  Verbindung von paramiko steht dann noch, bis TCP aufgibt): Das Deployment wartet wie nach jedem Abbruch auf das
+  Board, meldet sich mit erneut geprüftem Host-Schlüssel wieder an und setzt den Upload fort oder verfolgt die
+  Installation weiter, höchstens 20-mal, statt mit „could not be followed“ zu enden.
 - **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
   zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9 Schleifen; die
   Schleife von `utils/network.py` ist mit diesem Modul gegangen, siehe unten) laufen über das Modul der ältesten,
@@ -2021,6 +2041,27 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Ein Problem auf diesem Computer heißt nicht mehr „das Board antwortet nicht“**: Jeder Kontakt mit einem Board
+  zählte einen Fehler, der keiner der vier Grundcodes war, als `device_host_down`. Eine volle oder schreibgeschützte
+  Festplatte oder fehlende Rechte an den eigenen Dateien des Frameworks (sein SSH-Schlüssel, known_hosts) sagten der
+  Person deshalb, sie solle das Board einschalten, das Deployment wartete umsonst, und das Board wurde für Mojo als
+  nicht erreichbar vermerkt. Ein solcher Fehler hat jetzt einen eigenen Grund, `local_problem` („Etwas auf diesem
+  Computer hat die Verbindung verhindert, nicht das Board“), mit dem nächsten Schritt auf Deutsch und Englisch
+  (Speicherplatz freigeben, den Statusordner und die Sicherheitsprogramme dieses Computers prüfen), dem nächsten
+  Schritt für die KI und Mojos Prüfung der Installation als Schritt aus dem Katalog (`orchestrator/remote/reasons.py`
+  `is_local`, `LOCAL_PROBLEM`, `CODES`). Er wird nie beim Board vermerkt. Der Grund des Deployments nennt die Datei
+  ohne ihren Ordner, und einen Home-Ordner oder einen Ordner mit dem Kontonamen dieses Computers nur nach seiner Art,
+  denn dieser Name ist der Name eines Kontos und der Grund erreicht eine KI; die CLI zeigt zusätzlich den Fehler
+  selbst. Er ist keine Sperre der Delegationsregeln, deshalb
+  veraltet keine Delegation.
+- **Ein Deployment klappt auch auf einem Board, dessen Konto eine andere Login-Shell nutzt**: sshd gibt jeden Befehl
+  an die Login-Shell des Kontos auf dem Board. Die Befehle des Deployments (der private Ordner, die Hash-Prüfungen, der
+  Start der Installation, die auf dem Board selbständig läuft, und das Abfragen ihres Endes) und die Installation des
+  Framework-Schlüssels gingen so dorthin, wie sie waren; bei einem Konto mit fish, csh oder einer anderen Shell, die
+  nicht POSIX ist, bedeuteten ihre `&&`, `||`, `2>/dev/null` und `$?` etwas anderes oder nichts. Jeder davon kommt jetzt
+  als ein `sh -c '...'` auf dem Board an (`orchestrator/remote/transport.py` `sh_command`, die Form, die die
+  Geräte-Laufzeit und die Board-Prüfung schon nutzten), sodass das sh des Boards das Skript liest, egal welche
+  Login-Shell das Konto hat.
 - **Ein Deployment wartet weiter, während der SSH-Server des Boards neu startet**: Nach einem Netzabbruch wartet das
   Deployment auf das Board (N5). Antwortete das Board wieder, während sein SSH-Server noch startete, öffnete sich die
   Verbindung und brach wieder ab (ein Reset, ein Abbruch, eine unterbrochene Pipe oder EOF beim Schlüsselaustausch);

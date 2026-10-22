@@ -573,8 +573,8 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   domain: `Core/`, `runtime/`, `rag/`, `llm/`, `evals/`, where `llm` and `rag` never import `Core`; (5) tool
   definitions: `tools/tools_*`, `framework_*`, `gui_bridge`, `gui_surface`; (6) adapters: `cli.py`, `mcp_server.py`,
   `gui/` with `main.py`, and no adapter imports another. PySide6 lives only in the GUI, click and rich only in the CLI,
-  mcp and uvicorn only in the MCP server, paramiko only in the SSH transport (`utils/ssh_trust.py`, later
-  `remote/transport.py`). `tests/test_layering.py` reads every import (also inside functions, under `TYPE_CHECKING` and
+  mcp and uvicorn only in the MCP server, paramiko only in the SSH transport (`remote/transport.py` and the
+  `utils/ssh_trust.py` it grew out of). `tests/test_layering.py` reads every import (also inside functions, under `TYPE_CHECKING` and
   module names handed to `import_module`, `lazy_attributes` or `LazyModule`). What breaks a rule today stands in
   `tests/data/layering_allowlist.json`, each entry with its reason and the chain that removes it; the test fails on a
   new violation and on an entry that no longer happens (remove it), and the largest import cycle may only shrink (lower
@@ -646,8 +646,12 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   into its reason code with `remote.reasons.reach_code` (`while_waiting=True` inside a wait for the board), record what
   a contact found with `record_reach` (`orchestrator/runtime/device/trusted.py`), derive a board step's error from
   `remote.errors.RemoteFailure`, show a deploy's progress with `remote.text.event_text` and ask
-  `remote.transport.available()` whether SSH works; never import paramiko at module level. Never write a second
-  regex, reason table or recorder next to them. The package imports only `orchestrator/utils` and
+  `remote.transport.available()` whether SSH works; never import paramiko at module level. Work on a board through
+  `remote.session.RemoteSession` (login with the host key checked at every login, `run`, `private_dir`, `upload` with
+  resume, `wait_for_host`, `run_detached`, one `CancelToken`): an AI path passes `KeyOnly()`, only the person's
+  `OneTimePassword` can pair, and every command goes as one `sh -c` with a time limit and an output cap through
+  `remote.transport` (`sh_command`, `ParamikoTransport.run`). Never write a second regex, reason table, recorder,
+  wait loop, upload loop or command reader next to them. The package imports only `orchestrator/utils` and
   `orchestrator/security` (`tests/test_remote_layer.py`).
 - **Qt lives only in `orchestrator/gui/`.** PySide6 is the optional extra `gui`; the command line, the MCP server and
   everything below the GUI import no Qt, also not inside a function (`tests/test_qt_free_core.py` checks every import

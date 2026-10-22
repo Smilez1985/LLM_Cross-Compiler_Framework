@@ -434,6 +434,24 @@ class TestBoard:
                 call(fw, name, {"device_id": dev.device_id}, confirm=confirm)
             assert e.value.code == "needs_person" and confirm.asked == []
 
+    def test_a_problem_on_this_computer_is_refused_as_such(self, fw, device, monkeypatch):
+        """A key read that this computer stops (no permission on the framework's known_hosts) is local_problem, not
+        "the board does not answer"; the refusal names no board blocker and has Mojo's check as its next step."""
+        import errno
+        from orchestrator.remote import reasons
+        from orchestrator.utils import ssh_trust
+        dev, _presented, _ = device
+
+        def denied(*a, **k):
+            raise PermissionError(errno.EACCES, "Permission denied", "/srv/state/llm-framework/known_hosts")
+        monkeypatch.setattr(ssh_trust, "check_host_key", denied)
+        allow(fw, "probe_remote_device")
+        with pytest.raises(ToolError) as e:
+            call(fw, "probe_remote_device", {"device_id": dev.device_id}, confirm=asking(True))
+        assert e.value.code == "needs_person" and e.value.blocker == ""
+        assert reasons.LOCAL_PROBLEM in str(e.value) and "/srv/" not in str(e.value)
+        assert [s.id for s in e.value.steps] == list(reasons.LOCAL_STEPS)
+
     def test_deploying_the_runtime_needs_a_probe_of_the_board(self, fw, device):
         dev, _, _ = device
         allow(fw, "deploy_device_runtime")
