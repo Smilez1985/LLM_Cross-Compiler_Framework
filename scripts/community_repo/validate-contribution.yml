@@ -5,16 +5,22 @@
 # Why pull_request_target: a pull_request run takes this workflow from the pull request itself, so a pull request
 # from a fork could rewrite the check to pass. pull_request_target always runs the copy on main, which only the
 # maintainer changes. That event can reach the repository's token and secrets, so the job asks for contents: read only,
-# uses no secret and no cache, and keeps no credentials in either checkout (persist-credentials: false).
+# uses no secret and no cache, and keeps no credentials in its one checkout, the framework's (persist-credentials:
+# false).
 #
-# Why the pull request's checkout is data only: its head commit is checked out into its own folder (PR_DATA) after the
-# framework is installed, and nothing in it is ever run, sourced, installed or imported. The steps read it with git
-# only (rev-parse, diff, cat-file), each pack is copied out of git's objects into the runner's temporary folder before
-# it is checked, and the framework that checks it comes from LCF_REF. Nothing the pull request sets (title, branch,
-# body, file names) is written into a run: script; what a step needs comes through env.
+# Why the pull request's commits are data only and never checked out: a checkout of an untrusted commit under
+# pull_request_target is the known dangerous pattern, and actions/checkout would also print the commit's subject,
+# where a carriage return starts a workflow command. After the framework is installed, the base branch and the head
+# commit (by its id) are fetched quietly and without credentials into a repository without a working tree (PR_DATA):
+# no file of the pull request is ever written out, so nothing of it can be run, sourced, installed or imported, and no
+# git hook or configuration comes from it. The steps read it with git only (rev-parse, merge-base, diff, cat-file),
+# each pack is copied out of git's objects into the runner's temporary folder before it is checked, and the framework
+# that checks it comes from LCF_REF. Nothing the pull request sets (title, branch, body, commit messages, file names)
+# is written into a run: script; what a step needs comes through env.
 #
-# What is checked, in the changes git computes between main and the head commit (from their merge base, as GitHub
-# merges them; -z, --no-renames, so a move is a deletion and an addition):
+# What is checked, in the changes git computes between main and the head commit (from their one merge base, as GitHub
+# merges them: a pull request with no or more than one merge base fails, because GitHub's merge would then combine
+# bases this check does not see; -z, --no-renames, so a move is a deletion and an addition):
 #   - every changed path: no control character in its name (a newline could forge a workflow command), and only
 #     regular files (git mode 100644): a symbolic link, an executable file or a submodule fails, so a link named
 #     x.zip can never make the check read another file;
@@ -35,6 +41,12 @@
 # A maintainer then reviews the pack, merges it, adds its entry to index.json and signs the index on their own computer
 # (in the framework: Tools > Open Community Hub > Maintainer, or `llmcf zoo maintainer review`; by hand:
 # scripts/zoo_sign_index.py). The signing key never reaches CI.
+#
+# What the repository must set as well: a pull request can still bring a workflow of its own that runs on
+# pull_request and names its job "validate" (GitHub runs a pull request's own workflows on pull_request). In the
+# repository's Settings > Actions > General, "Approval for running fork pull request workflows from contributors"
+# must be "Require approval for all external contributors": such a workflow then never runs without the
+# maintainer's approval, while this check (pull_request_target) needs none. Never approve a fork's workflow run.
 #
 # Bringing this copy to a repository whose copy still runs on pull_request: the pull request that changes it gets no
 # "validate" from either copy (main's copy is not triggered by pull_request_target, the new one not by pull_request).
@@ -85,13 +97,27 @@ jobs:
           python -I -m pip install --require-hashes --no-deps -r .lcf/requirements.txt
           python -I -m pip install --no-deps ./.lcf
 
-      - name: The pull request's files (data only)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: ${{ env.PR_DATA }}
-          persist-credentials: false
-          fetch-depth: 0
+      - name: The pull request's commits (data only, never checked out)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          object='^[0-9a-f]{40}([0-9a-f]{24})?$'
+          if ! [[ $HEAD_SHA =~ $object && $BASE_REF =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+            echo "::error::the pull request's head commit or base branch is not usable"
+            exit 1
+          fi
+          # A repository without a working tree: no file of the pull request is ever written out, and git prints none
+          # of its texts (a checkout prints the commit's subject, and a carriage return in it would start a workflow
+          # command). Anonymous (the repository is public), quiet, by the commit's id.
+          git init -q --bare "$PR_DATA"
+          if ! git --git-dir="$PR_DATA" fetch -q --no-tags --no-recurse-submodules --no-write-fetch-head \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" \
+              "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" "+$HEAD_SHA:refs/lcf/head" < /dev/null; then
+            echo "::error::the base branch $BASE_REF or the pull request's head commit $HEAD_SHA could not be fetched"
+            exit 1
+          fi
 
       - name: Changed files
         env:
@@ -112,21 +138,29 @@ jobs:
             say error "" "the pull request's head commit or base branch is not usable"
             exit 1
           fi
-          if [ "$(git -C "$PR_DATA" rev-parse --verify --quiet "HEAD^{commit}")" != "$HEAD_SHA" ]; then
-            say error "" "the checkout is not the pull request's head commit"
+          if [ "$(git --git-dir="$PR_DATA" rev-parse --verify --quiet "refs/lcf/head^{commit}")" != "$HEAD_SHA" ]; then
+            say error "" "the fetched commit is not the pull request's head commit"
             exit 1
           fi
-          base=$(git -C "$PR_DATA" rev-parse --verify --quiet "refs/remotes/origin/$BASE_REF^{commit}") || {
+          main=$(git --git-dir="$PR_DATA" rev-parse --verify --quiet "refs/remotes/origin/$BASE_REF^{commit}") || {
             say error "" "the base branch $BASE_REF was not fetched"
             exit 1
           }
+          # Exactly one merge base, as GitHub merges: with two or more (main holds a merge of lines that do not contain
+          # each other), git diff would count from one of them while GitHub's merge combines them all, so the merge
+          # could change files this check never sees.
+          base=$(git --git-dir="$PR_DATA" merge-base --all "$main" "$HEAD_SHA") || base=
+          if ! [[ $base =~ $object ]]; then
+            say error "" "the pull request has no or more than one merge base with main ($BASE_REF); rebase it onto $BASE_REF"
+            exit 1
+          fi
           case "$AUTHOR_ASSOCIATION" in
             OWNER|MEMBER|COLLABORATOR) trusted=1 ;;
             *) trusted=0 ;;
           esac
           echo "Author association: ${AUTHOR_ASSOCIATION//[^A-Z_]/?}; the changes from $base to $HEAD_SHA:"
-          git -C "$PR_DATA" diff --raw -z --no-renames --no-abbrev --no-ext-diff --no-textconv \
-            "$base...$HEAD_SHA" > "$RUNNER_TEMP/lcf-changes"
+          git --git-dir="$PR_DATA" diff --raw -z --no-renames --no-abbrev --no-ext-diff --no-textconv \
+            "$base" "$HEAD_SHA" > "$RUNNER_TEMP/lcf-changes"
           : > "$RUNNER_TEMP/lcf-packs"
           status=0
           count=0
@@ -174,8 +208,8 @@ jobs:
               echo "::error::the list of added packs is damaged"
               exit 1
             fi
-            # The blob itself, never a file of the checkout.
-            size=$(git -C "$PR_DATA" cat-file -s "$blob" < /dev/null)
+            # The blob itself, out of git's objects (there is no checkout).
+            size=$(git --git-dir="$PR_DATA" cat-file -s "$blob" < /dev/null)
             if [ "$size" -gt "$MAX_PACK_BYTES" ]; then
               echo "::error file=$path::larger than 5 MB; packs carry scripts, recipes and text only"
               status=1
@@ -183,7 +217,7 @@ jobs:
             fi
             mkdir -p "$RUNNER_TEMP/lcf-pack-$n"
             file="$RUNNER_TEMP/lcf-pack-$n/${path##*/}"
-            git -C "$PR_DATA" cat-file blob "$blob" < /dev/null > "$file"
+            git --git-dir="$PR_DATA" cat-file blob "$blob" < /dev/null > "$file"
             echo "::group::llm-cli zoo verify $path"
             # What the pack makes zoo verify print (its file names) is never read as a workflow command.
             token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')

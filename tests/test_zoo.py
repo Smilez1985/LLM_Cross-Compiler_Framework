@@ -1360,21 +1360,38 @@ def check_git(*args, cwd=None) -> str:
                           stdin=subprocess.DEVNULL, env={**os.environ, **CHECK_GIT_ENV}).stdout.strip()
 
 
+def _checkout_as_the_action_does(origin: Path, path: Path, ref: str) -> str:
+    """What actions/checkout runs for a commit id with fetch-depth 0 and no credentials kept, and so what it prints:
+    git's output goes to the log as it is."""
+    out = ""
+    for args in (("init", path), ("-C", path, "remote", "add", "origin", origin.as_uri()),
+                 ("-C", path, "fetch", "--prune", "--no-recurse-submodules", "origin",
+                  "+refs/heads/*:refs/remotes/origin/*", "+refs/tags/*:refs/tags/*"),
+                 ("-C", path, "fetch", "--no-recurse-submodules", "origin", ref),
+                 ("-C", path, "checkout", "--progress", "--force", ref), ("-C", path, "log", "-1", "--format=%H")):
+        done = subprocess.run(["git", *map(str, args)], capture_output=True, text=True, errors="replace",
+                              stdin=subprocess.DEVNULL, env={**os.environ, **CHECK_GIT_ENV}, check=False)
+        out += done.stdout + done.stderr
+        assert done.returncode == 0, out
+    return out
+
+
 def run_check(origin: Path, head: str, association: str, tmp: Path, *, base_ref: str = "main",
               llm_cli: str = "exit 0", claimed_head: str = ""):
-    """The check's steps after the pull request's checkout: the real scripts, in bash as the runner runs them (shell:
-    bash), with an llm-cli stub (`llm_cli`: its shell lines; "$3" is the pack file it is given). The checkout is made
-    the way actions/checkout makes it with fetch-depth 0: every branch of `origin` under refs/remotes/origin/, the
-    head commit detached. Returns the exit code of the first step that failed (0), the output and the stub's files."""
+    """The check's steps after the framework is installed: the real scripts, in bash as the runner runs them (shell:
+    bash), with `origin` as the community repository (GITHUB_SERVER_URL and GITHUB_REPOSITORY name it) and an llm-cli
+    stub (`llm_cli`: its shell lines; "$3" is the pack file it is given). The event names `head` as the pull
+    request's head commit (`claimed_head` instead, if given). A checkout of the community repository, if the workflow
+    had one, is made as actions/checkout makes it, with git's output in the log. Returns the exit code of the first
+    step that failed (0), the output (text mode: a carriage return ends a line, as the runner reads it) and the stub's
+    files."""
     workflow = check_workflow()
     job = workflow["jobs"]["validate"]
     steps = job["steps"]
-    start = next(i for i, s in enumerate(steps) if (s.get("with") or {}).get("ref") == HEAD_SHA_EXPRESSION) + 1
+    start = max(i for i, s in enumerate(steps) if "pip install" in str(s.get("run", ""))) + 1
     workspace = tmp / "workspace"
-    data = workspace / job["env"]["PR_DATA"]
-    check_git("clone", "-q", "--no-checkout", origin, data)
-    check_git("-C", data, "fetch", "-q", "origin", "+refs/pull/*:refs/remotes/pull/*")
-    check_git("-C", data, "checkout", "-q", "--detach", head)
+    workspace.mkdir(parents=True)
+    assert origin.name.endswith(".git"), origin
     (tmp / "bin").mkdir()
     (tmp / "runner-temp").mkdir()
     log = tmp / "verified.txt"
@@ -1382,7 +1399,8 @@ def run_check(origin: Path, head: str, association: str, tmp: Path, *, base_ref:
     stub.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$3\" >> '{log}'\n{llm_cli}\n")
     stub.chmod(0o755)
     values = {"github.base_ref": base_ref, "github.event.pull_request.head.sha": claimed_head or head,
-              "github.event.pull_request.author_association": association}
+              "github.event.pull_request.author_association": association,
+              **{f"env.{k}": str(v) for k, v in {**workflow.get("env", {}), **job.get("env", {})}.items()}}
 
     def resolve(value):
         found = re.fullmatch(r"\$\{\{\s*([\w.]+)\s*\}\}", str(value))
@@ -1390,10 +1408,16 @@ def run_check(origin: Path, head: str, association: str, tmp: Path, *, base_ref:
         return values[found.group(1)] if found else str(value)   # KeyError: an expression this harness does not know
 
     env = {**os.environ, "PATH": f"{tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
-           "RUNNER_TEMP": str(tmp / "runner-temp")}
+           "RUNNER_TEMP": str(tmp / "runner-temp"), "GITHUB_SERVER_URL": origin.parent.as_uri(),
+           "GITHUB_REPOSITORY": origin.name[:-len(".git")], **CHECK_GIT_ENV}
     output, code = "", 0
     for step in steps[start:]:
         names = {**workflow.get("env", {}), **job.get("env", {}), **step.get("env", {})}
+        if "uses" in step:   # only a checkout of the community repository can come here
+            assert str(step["uses"]).startswith("actions/checkout@") and "repository" not in step["with"], step
+            output += _checkout_as_the_action_does(origin, workspace / resolve(step["with"].get("path", ".")),
+                                                   resolve(step["with"]["ref"]))
+            continue
         done = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]], cwd=workspace,
                               env={**env, **{k: resolve(v) for k, v in names.items()}}, capture_output=True,
                               text=True, errors="replace", stdin=subprocess.DEVNULL, check=False)
@@ -1588,14 +1612,22 @@ def test_the_changes_count_from_the_merge_base_as_github_merges_them(tmp_path):
 
 
 @needs_bash_git
-def test_the_check_fails_closed_on_a_wrong_checkout_or_base(tmp_path):
+def test_the_check_fails_closed_on_a_wrong_head_or_base(tmp_path):
+    """The check reads exactly the commit the event names, fetched by its id (there is no checkout that could be
+    another one): a head commit or base branch the repository does not have, a history without a common commit, or a
+    value that is no commit id or branch name fails the check; nothing passes unchecked."""
     repo = CommunityRepo(tmp_path)
     head = repo.pull_request(files={CHECK_PACK: b"PK board"})
-    main = check_git("-C", repo.origin, "rev-parse", "refs/heads/main")
-    code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "other", claimed_head=main)
-    assert code != 0 and "the checkout is not the pull request's head commit" in output
+    code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "unknown", claimed_head="1" * 40)
+    assert code != 0 and f"the pull request's head commit {'1' * 40} could not be fetched" in output
     code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "branch", base_ref="develop")
-    assert code != 0 and "the base branch develop was not fetched" in output
+    assert code != 0 and "the base branch develop or the pull request's head commit" in output
+    tree = check_git("-C", repo.work, "rev-parse", f"{head}^{{tree}}")
+    orphan = check_git("-C", repo.work, "commit-tree", "-m", "unrelated", tree)
+    repo.number += 1
+    check_git("-C", repo.work, "push", "-q", "origin", f"{orphan}:refs/pull/{repo.number}/head")
+    code, output, verified = run_check(repo.origin, orphan, "OWNER", tmp_path / "orphan")
+    assert code != 0 and verified == [] and "no or more than one merge base with main" in output
     code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "name", base_ref="main;true")
     assert code != 0 and "head commit or base branch is not usable" in output
     code, output, _ = run_check(repo.origin, head, "NONE", tmp_path / "head", claimed_head="HEAD")
@@ -1616,3 +1648,103 @@ def test_what_zoo_verify_prints_is_never_a_workflow_command(tmp_path):
     stop = max(i for i in range(at) if lines[i].startswith("::stop-commands::"))
     token = lines[stop].split("::")[2]
     assert re.fullmatch(r"[0-9a-f]{32}", token) and f"::{token}::" in lines[at + 1:], output
+
+
+@needs_bash_git
+def test_no_commit_text_of_the_pull_request_becomes_a_workflow_command(tmp_path):
+    """The runner ends a line at a carriage return as well as at a newline, and a line that starts with :: is a
+    workflow command. A commit message is the pull request's own text, and a checkout prints the subject of the commit
+    it checks out ("HEAD is now at <id> <subject>"), carriage returns included: so the check never checks out the
+    pull request's commits, it fetches them quietly into a repository without a working tree."""
+    repo = CommunityRepo(tmp_path)
+    forged = "::warning title=Maintainer::reviewed and approved by the maintainer"
+    head = repo.pull_request(files={CHECK_PACK: b"PK board"}, message=f"Add a pack\r{forged}\r::error::forged\n\nbody")
+    for association in ("NONE", "OWNER"):
+        code, output, verified = run_check(repo.origin, head, association, tmp_path / association)
+        assert code == 0 and len(verified) == 1, output
+        commands = [line for line in re.split(r"\r\n|\r|\n", output) if line.startswith("::")]
+        assert not [line for line in commands if line.startswith(("::warning", "::error"))], output
+
+
+@needs_bash_git
+def test_a_pull_request_with_more_than_one_merge_base_fails(tmp_path):
+    """Where main holds a merge of two lines that do not contain each other (a pull request merged while it was not up
+    to date: the strict ruleset prevents that, this check does not rely on it), a pull request can merge both lines
+    again and so have two merge bases with main. git diff counts from one of them, GitHub's merge from a combination
+    of both: the check would see only an added pack, while the merge also undoes the publication on the other line
+    (index.json and its signature back to the older signed version). Such a pull request fails for anyone; rebased
+    onto main it has one merge base."""
+    repo = CommunityRepo(tmp_path)
+    work = repo.work
+
+    def commit(files, message):
+        for path, data in files.items():
+            (work / path).parent.mkdir(parents=True, exist_ok=True)
+            (work / path).write_bytes(data)
+            check_git("-C", work, "add", "--", path)
+        check_git("-C", work, "commit", "-q", "-m", message)
+        return check_git("-C", work, "rev-parse", "HEAD")
+
+    start = check_git("-C", work, "rev-parse", "HEAD")
+    publication = commit({"index.json": b'{"version": 2}\n', "index.json.sig": b"sig 2\n"}, "Publish a pack")
+    check_git("-C", work, "checkout", "-q", "--detach", start)
+    other = commit({"README.md": b"community, newer\n"}, "README")
+    check_git("-C", work, "merge", "-q", "--no-ff", "-m", "Merge pull request #1", publication)
+    main = check_git("-C", work, "rev-parse", "HEAD")
+    check_git("-C", work, "push", "-q", "origin", "HEAD:refs/heads/main")
+    check_git("-C", work, "checkout", "-q", "--detach", other)
+    check_git("-C", work, "merge", "-q", "--no-ff", "-s", "ours", "-m", "Update", publication)   # its tree: other's
+    head = commit({CHECK_PACK: b"PK board"}, "Add a pack")
+    repo.number += 1
+    check_git("-C", work, "push", "-q", "origin", f"HEAD:refs/pull/{repo.number}/head")
+    assert len(check_git("-C", work, "merge-base", "--all", main, head).split()) == 2
+    merged = check_git("-C", work, "merge-tree", "--write-tree", main, head)   # the merge GitHub makes
+    assert {"index.json", "index.json.sig"} <= set(check_git("-C", work, "diff", "--name-only", main, merged).split())
+    for association in ("NONE", "OWNER"):
+        code, output, verified = run_check(repo.origin, head, association, tmp_path / association)
+        assert code != 0 and verified == [], output
+        assert "more than one merge base with main" in output, output
+    rebased = repo.pull_request(files={CHECK_PACK: b"PK board"})
+    code, output, verified = run_check(repo.origin, rebased, "NONE", tmp_path / "rebased")
+    assert code == 0 and len(verified) == 1, output
+
+
+@needs_bash_git
+@pytest.mark.parametrize("association", ["NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "MANNEQUIN",
+                                         "", "owner", "OWNER ", " MEMBER", "COLLABORATOR,OWNER"])
+def test_only_the_owner_a_member_and_a_collaborator_are_trusted(tmp_path, association):
+    """Every other author association, also one GitHub might add later or one spelled differently, is an outsider's:
+    a change to the index next to a valid pack fails, and the pack is not verified."""
+    repo = CommunityRepo(tmp_path)
+    head = repo.pull_request(files={CHECK_PACK: b"PK board", "index.json": b'{"entries": []}\n'})
+    code, output, verified = run_check(repo.origin, head, association, tmp_path / "run")
+    assert code != 0 and verified == [], output
+    assert "::error file=index.json::this pull request changes index.json" in output, output
+
+
+@needs_bash_git
+def test_a_contribution_adds_a_pack_only_by_its_exact_path(tmp_path):
+    """Names a contributor might try instead of contributions/<kind>/<name>.zip: other cases, a name that starts with
+    a dash or a dot, a folder named like a pack, another or no kind folder, a workflow, attributes or submodules of
+    its own, the workflow deleted, a pack of main changed. Each fails for an outsider and names the file in a form
+    that cannot end its line or its property (the file names are shown escaped)."""
+    repo = CommunityRepo(tmp_path)
+    repo.advance_main(files={"contributions/recipe/merged.zip": b"PK merged"})
+    workflow = ".github/workflows/validate-contribution.yml"
+    cases = [{"files": {path: b"PK"}} for path in (
+        "Contributions/target/x.zip", "contributions/Target/x.zip", "contributions/target/x.ZIP",
+        "contributions/target/-x.zip", "contributions/target/.x.zip", "contributions/target/x.zip/inner",
+        "contributions/tools/x.zip", "contributions/x.zip", "x.zip", ".github/workflows/own-check.yml",
+        ".gitattributes", ".gitmodules", "contributions/target/a::error::b.zip", "contributions/target/a,b%0A.zip")]
+    cases += [{"remove": [workflow]}, {"files": {"contributions/recipe/merged.zip": b"PK changed"}}]
+    for i, change in enumerate(cases):
+        head = repo.pull_request(**{**change, "files": {**change.get("files", {}), CHECK_PACK: b"PK board"}})
+        code, output, verified = run_check(repo.origin, head, "NONE", tmp_path / f"run-{i}")
+        assert code != 0 and verified == [], (change, output)
+        errors = [line for line in output.splitlines() if line.startswith("::error")]
+        assert len(errors) == 1 and "a contribution may only add pack files" in errors[0], (change, output)
+        named = re.fullmatch(r"::error file=([^:,]*)::.*", errors[0])
+        assert named, errors[0]
+        path = (change.get("remove") or [*change["files"]])[0]
+        unescaped = named.group(1).replace("%3A", ":").replace("%2C", ",").replace("%0A", "\n").replace("%25", "%")
+        assert unescaped == path, errors[0]
