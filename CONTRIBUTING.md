@@ -646,9 +646,16 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   into its reason code with `remote.reasons.reach_code` (`while_waiting=True` inside a wait for the board), record what
   a contact found with `record_reach` (`orchestrator/runtime/device/trusted.py`), derive a board step's error from
   `remote.errors.RemoteFailure`, show a deploy's progress with `remote.text.event_text` and ask
-  `remote.transport.available()` whether SSH works; never import paramiko at module level. Never write a second
-  regex, reason table or recorder next to them. The package imports only `orchestrator/utils` and
-  `orchestrator/security` (`tests/test_remote_layer.py`).
+  `remote.transport.available()` whether SSH works; never import paramiko at module level. Read and compare a board's
+  host key with `remote.trust.TrustStore` (`check` gives a `KeyCheck`: its status in the framework's `known_hosts`,
+  the fingerprint, whether it is the one expected or another device's) and keep only the caller's policy on top: the
+  person may trust, an AI is refused. Trusting a key, pairing, the change of a board's address or key (Q5) and a
+  consent's audit row are the person's: they go through `remote.pairing` (`trust_presented_key` and `first_use` with
+  the trust's audit row, `pair`, `plan_replacement`/`replace_key`, `record_consent`), which no module an AI can reach
+  imports (`tests/test_remote_trust.py` follows the imports from the tool modules, the MCP server, the LLM layer,
+  Ditto, the device service and the benchmark). Never write a second regex, reason table, recorder or host-key check
+  next to them. The package imports only `orchestrator/utils` and `orchestrator/security`
+  (`tests/test_remote_layer.py`).
 - **Qt lives only in `orchestrator/gui/`.** PySide6 is the optional extra `gui`; the command line, the MCP server and
   everything below the GUI import no Qt, also not inside a function (`tests/test_qt_free_core.py` checks every import
   and runs them in a process without PySide6). Texts for any process come from `orchestrator/utils/localization.py`

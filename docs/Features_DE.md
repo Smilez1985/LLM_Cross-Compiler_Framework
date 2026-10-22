@@ -394,7 +394,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   (ein Deployment in der GUI oder mit `llm-cli deploy run`, eine Prüfung mit `llm-cli scan --device`, ein
   `device runtime deploy`), trägt das Framework es in `~/.llm-framework/devices.json` ein: deinen Namen dafür,
   Adresse, Benutzer, den bestätigten Host-Schlüssel und ob sich der Schlüssel des Frameworks anmeldet (gekoppelt); die
-  Geräte-ID wird aus dem Host-Schlüssel abgeleitet. `llm-cli deploy devices list|add|remove` zeigt und verwaltet sie
+  Geräte-ID wird aus dem Host-Schlüssel abgeleitet. `llm-cli deploy devices list|add|edit|remove` zeigt und verwaltet
+  sie (`edit`: eine neue Adresse oder ein neuer Host-Schlüssel, eingefügt oder vom Board gelesen, alter und neuer
+  Fingerabdruck gezeigt, "Nein" als Vorgabe, im Audit-Log)
   ([CLI](CLI_Usage_DE.md#deploy-devices)). Nur diese Geräte kann ein KI-Client oder Ditto für ein Deployment nennen,
   und nur, solange die `known_hosts` des Frameworks noch genau diesen Schlüssel enthält; kein Tool vertraut einem
   Gerät, koppelt es oder trägt es ein.
@@ -403,7 +405,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   des Host-Schlüssels und ob `known_hosts` ihn noch enthält, seit wann und wie ihm vertraut wird, das letzte
   Deployment, das System aus seiner Probe, seine Deploy-Einstellungen und die installierte Laufzeit). Seine Knöpfe
   rufen dieselben Funktionen wie die CLI auf, mit denselben Fragen ("Nein" ist die Vorgabe) und Audit-Einträgen:
-  **Vertrautes Board hinzufügen...** (`deploy devices add`), **Vertrauen entfernen...** (`deploy devices remove`:
+  **Vertrautes Board hinzufügen...** (`deploy devices add`), **Adresse oder Schlüssel ändern...** (`deploy devices
+  edit`: Hostname oder IP-Adresse, Port und der Schlüssel eingefügt oder vom Board gelesen, alt und neu
+  nebeneinander), **Vertrauen entfernen...** (`deploy devices remove`:
   ohne es bleibt ein einmal gekoppeltes Board für KI-Deployments erlaubt), **Einstellungen...**,
   **Laufzeit-Plan**, **Status**, **Laufzeit bauen...**, **Laufzeit installieren...**, **Prüfen...**, **Ältere
   Laufzeit-Pakete entfernen...** und **Ältere Builds auf dem Board entfernen...** (die `device`-Befehle unten;

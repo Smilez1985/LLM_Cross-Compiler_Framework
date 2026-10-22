@@ -10,6 +10,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **A trusted board's address and host key are editable by you** (DECISIONS round 10 Q5): `llm-cli deploy devices
+  edit DEVICE [--host] [--port] [--key "KEY LINE" | --read-key]` and **Edit address or key...** in **Boards > Boards
+  and Devices...** change the board's host name or IP address, its SSH port or its host key in the framework's
+  `known_hosts`, for example after its address changed or it was reinstalled. Nobody types a key: it is pasted (the
+  line of `/etc/ssh/ssh_host_ed25519_key.pub` on the board, a `known_hosts` line or a line of `ssh-keyscan`) or read
+  from the board at its new address. You see the address, the host key and the device ID now and after the change
+  side by side (in the window) and answer with "No" as the default; the change is written to the audit log before
+  anything changes and refused when `known_hosts` changed meanwhile. A new key gives the board a new device ID: its
+  record moves there with its name and user, and whether the framework's key logs in is tested once. The work runs
+  in the background; the texts are English and German. No tool, the MCP server, Ditto or the device runtime steps can
+  reach it (`orchestrator/remote/pairing.py` `replace_key`, an import-graph test).
 - **Next steps instead of commands, allow-to-run proposals and translated, regrouped menus** (wave 6, chain a0;
   DECISIONS round 10 V1, V2, Q2, Q7): the Qt-free catalogue `orchestrator/utils/next_steps/` holds every next step
   the wave-6 audit names (104 steps in nine area modules found by themselves, English and German texts), and one
@@ -1240,6 +1251,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   an index to `Core/knowledge_snapshots.py` and the audit of a saved module to `Core/module_generator.py`. Nothing
   changes for the person; the Core no longer imports tool definitions for these, and the largest import cycle shrank
   from 81 to 9 modules.
+- **One read-only host-key store and the person's trust writers** (consolidation chain c2-remote-trust):
+  `orchestrator/remote/trust.py` (`TrustStore`: `status`, `status_of`, `check` with a `KeyCheck`,
+  `read_presented_key`; the host-key errors moved there) is what the nine copies of "read the key and check it"
+  use, each keeping only its policy (the person may trust, an AI is refused); `orchestrator/remote/pairing.py` holds
+  the person's writers, and the three trust-on-first-use flows (`llm-cli deploy run`, `llm-cli scan --device`, the
+  GUI's host-key question) are one decision with a prompt per channel, "No" by default as before. A key you trust
+  now is written to the audit log in the same step (`host_key_trusted`), also when the login after it fails; before,
+  only the board's record after a successful login was audited. The Deployment tab binds the deploy to the key you
+  confirmed in its question and records the board with it, so one GUI deploy opens four connections to the board's
+  SSH port instead of five. The old names in `orchestrator/utils/ssh_trust.py` keep working.
 - **The code that talks to a board starts its own package, `orchestrator/remote/`** (consolidation chain
   c2-remote-base; nothing changes for the person or an AI). The existing implementations moved there instead of
   getting a second copy: the host check of the remote probe, the store and known_hosts forms and the reading of a
