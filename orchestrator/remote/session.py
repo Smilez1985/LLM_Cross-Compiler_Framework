@@ -190,7 +190,7 @@ def hash_timeout(size: int) -> float:
     return max(float(HASH_TIMEOUT), float(size) / HASH_RATE)
 
 
-# --- the session --------------------------------------------------------------------------------------------------------
+# --- the session ------------------------------------------------------------------------------------------------
 
 class RemoteSession:
     """One session with the board at `endpoint` as `user` (see the module docstring). `clock` and `sleep` are the
@@ -293,7 +293,8 @@ class RemoteSession:
 
     # --- commands ---
 
-    def run(self, script: str, *, timeout: float = COMMAND_TIMEOUT, limit: int = MAX_OUTPUT, stdin: Any = None) -> Result:
+    def run(self, script: str, *, timeout: float = COMMAND_TIMEOUT, limit: int = MAX_OUTPUT,
+            stdin: Any = None) -> Result:
         """One `sh -c` on the board (the connection's own errors are raised as they are)."""
         return self.transport.run(script, stdin=stdin, timeout=timeout, limit=limit)
 

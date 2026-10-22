@@ -10,7 +10,8 @@ A board's words and the state of a running deploy as text.
 - event_text(event, place, lang, audience): a running deploy's event (session.RemoteEvent, which the deploy calls
   DeployEvent: uploading, waiting, back, installing) as one line. For the person ("person") in their language with
   the board's address, the words of the GUI's Deployment tab and `llmcf deploy run`; for an AI ("ai") in English
-  with the board's label only, never its address or account (D0). The CLI adds " (Ctrl+C)" to a wait and escapes for its console itself.
+  with the board's label only, never its address or account (D0). The CLI adds " (Ctrl+C)" to a wait and escapes
+  for its console itself.
 - ai_size(n): a size in an AI's English text ("1.23 GB", "45.6 MB", "size unknown").
 """
 
