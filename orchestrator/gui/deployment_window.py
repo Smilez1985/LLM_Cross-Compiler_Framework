@@ -202,7 +202,7 @@ class DeploymentWorker(QThread):
         """Why the deploy failed, for the person: the reason code's title and next step first, then the details."""
         from orchestrator.runtime.device import reasons
         parts = []
-        if result.code in reasons.REASONS:
+        if result.code in reasons.CODES:
             parts.append(reasons.person_text(result.code, address=self.target_ip, port=self.port))
         parts.append(ui_text("device.deploy.failed", reason=result.reason or "Deployment failed during "
                                                                             "transfer/execution."))
@@ -333,7 +333,7 @@ class BoardBenchWorker(QThread):
             return
         except dev.DeviceRuntimeError as e:
             parts = [reasons.person_text(e.reason, address=device.host, port=device.port)
-                     if e.reason in reasons.REASONS else str(e)]
+                     if e.reason in reasons.CODES else str(e)]
             parts += e.external_text[-10:]  # the board's own words, shown as plain text
             self.finished.emit(False, "\n".join(parts))
             return

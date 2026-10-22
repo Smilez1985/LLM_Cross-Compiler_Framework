@@ -2021,6 +2021,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Ein Problem auf diesem Computer heißt nicht mehr „das Board antwortet nicht“**: Jeder Kontakt mit einem Board
+  zählte einen Fehler, der keiner der vier Grundcodes war, als `device_host_down`. Eine volle oder schreibgeschützte
+  Festplatte oder fehlende Rechte an den eigenen Dateien des Frameworks (sein SSH-Schlüssel, known_hosts) sagten der
+  Person deshalb, sie solle das Board einschalten, das Deployment wartete umsonst, und das Board wurde für Mojo als
+  nicht erreichbar vermerkt. Ein solcher Fehler hat jetzt einen eigenen Grund, `local_problem` („Etwas auf diesem
+  Computer hat die Verbindung verhindert, nicht das Board“), mit dem nächsten Schritt auf Deutsch und Englisch
+  (Speicherplatz freigeben, den Statusordner und die Sicherheitsprogramme dieses Computers prüfen), dem nächsten
+  Schritt für die KI und Mojos Prüfung der Installation als Schritt aus dem Katalog (`orchestrator/remote/reasons.py`
+  `is_local`, `LOCAL_PROBLEM`, `CODES`). Er wird nie beim Board vermerkt. Der Grund des Deployments nennt die Datei
+  ohne ihren Ordner; die CLI zeigt zusätzlich den Fehler selbst. Er ist keine Sperre der Delegationsregeln, deshalb
+  veraltet keine Delegation.
 - **Ein Deployment klappt auch auf einem Board, dessen Konto eine andere Login-Shell nutzt**: sshd gibt jeden Befehl
   an die Login-Shell des Kontos auf dem Board. Die Befehle des Deployments (der private Ordner, die Hash-Prüfungen, der
   Start der Installation, die auf dem Board selbständig läuft, und das Abfragen ihres Endes) und die Installation des

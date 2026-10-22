@@ -119,6 +119,10 @@ def unreachable_error(device: Any, error: BaseException) -> ToolError:
     if not reason:
         return ToolError(f"The host key of {device.label} could not be read ({error.__class__.__name__}).",
                          code="failed", field="device_id", next="Tell the person; the framework's log has the details.")
+    if reason == reasons.LOCAL_PROBLEM:   # this computer, not the board: no blocker of the board's
+        return ToolError(f"The host key of {device.label} could not be read: a problem on this computer, not on the "
+                         f"board ({reason}).", code=reasons.TOOL_CODES[reason], field="device_id",
+                         next=reasons.AI_NEXT[reason], steps=reasons.LOCAL_STEPS)
     return blocked(reason, f"The device {device.label} cannot be reached to read its host key ({reason}).",
                    reasons.AI_NEXT[reason], field="device_id")
 
