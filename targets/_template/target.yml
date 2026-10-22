@@ -65,8 +65,9 @@ modules:
       outputs: ["build_config.sh", "cross_compile_toolchain.cmake (hardware profile only)"]
     convert:
       description: "Model conversion: the quantization logic of the module, by default HF -> GGUF; the imatrix job"
-      inputs: ["model_directory", "build_config.sh"]
-      outputs: ["<model>-<type>.gguf", "tmp-<model>-F16.gguf and quantize_jobs.sh", "imatrix.dat"]
+      inputs: ["model_directory (or a GGUF file: nothing converted)", "build_config.sh"]
+      outputs: ["<model>-<type>.gguf", "tmp-<model>-F16.gguf (or the --output file) and quantize_jobs.sh",
+                "imatrix.dat"]
     target:
       description: "Quantization, the packaging commands of the module and build_info.json"
       inputs: ["quantize_jobs.sh", "build_config.sh"]
