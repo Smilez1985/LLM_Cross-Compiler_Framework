@@ -834,9 +834,10 @@ are the build again, with the dispatcher's work moved into the stage it belongs 
   model card and helper scripts in `output/packages/`. A build of the framework has no profile: the board's runtime
   is built from the board's own probe (`llm-cli device runtime build`), and the board package comes from
   `llm-cli deploy package` or `llm-cli device runtime deploy`.
-- **Cloning llama.cpp.** `source_module.sh --clone-llama-cpp`, started by hand in a container with network, clones
-  llama.cpp at `LLAMA_CPP_COMMIT` (a full commit id) and links it as `LLAMA_CPP_PATH`, for an image without
-  llama.cpp. A build never does this: its image carries the pinned llama.cpp.
+- **Cloning llama.cpp.** `source_module.sh --clone-llama-cpp` (or the entrypoint mode `source --clone-llama-cpp`),
+  started by hand in a container with network, clones llama.cpp at `LLAMA_CPP_COMMIT` (a full commit id) and links
+  it as `LLAMA_CPP_PATH`, for an image without llama.cpp. A build never does this: its image carries the pinned
+  llama.cpp.
 - **The module options.** `--input`, `--output`, `--model-name`, `--quantization` and `--hardware-config` work on
   `build.sh`, on every stage module started by hand and on every entrypoint stage mode, as in the maintainer's 1.x
   design: `convert_module.sh --input DIR --output FILE --model-name NAME` writes the F16 GGUF to FILE (kept);

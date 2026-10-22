@@ -862,9 +862,10 @@ Funktionen aus 1.x sind geblieben:
   Modell, einer Model Card und Hilfsskripten nach `output/packages/`. Ein Build des Frameworks hat kein Profil: Die
   Runtime des Boards wird aus der eigenen Probe des Boards gebaut (`llm-cli device runtime build`), und das
   Board-Paket kommt von `llm-cli deploy package` oder `llm-cli device runtime deploy`.
-- **llama.cpp klonen.** `source_module.sh --clone-llama-cpp`, von Hand in einem Container mit Netzwerk gestartet,
-  klont llama.cpp bei `LLAMA_CPP_COMMIT` (eine vollständige Commit-ID) und verlinkt es als `LLAMA_CPP_PATH`, für ein
-  Image ohne llama.cpp. Ein Build tut das nie: Sein Image bringt das gepinnte llama.cpp mit.
+- **llama.cpp klonen.** `source_module.sh --clone-llama-cpp` (oder der Entrypoint-Modus `source
+  --clone-llama-cpp`), von Hand in einem Container mit Netzwerk gestartet, klont llama.cpp bei `LLAMA_CPP_COMMIT`
+  (eine vollständige Commit-ID) und verlinkt es als `LLAMA_CPP_PATH`, für ein Image ohne llama.cpp. Ein Build tut das
+  nie: Sein Image bringt das gepinnte llama.cpp mit.
 - **Die Moduloptionen.** `--input`, `--output`, `--model-name`, `--quantization` und `--hardware-config`
   funktionieren bei `build.sh`, bei jedem von Hand gestarteten Stufenmodul und bei jedem Stufenmodus des
   Entrypoints, wie im Entwurf des Maintainers für 1.x: `convert_module.sh --input ORDNER --output DATEI --model-name
