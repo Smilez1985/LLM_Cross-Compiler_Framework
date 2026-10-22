@@ -64,6 +64,7 @@ class MaintainerPanel(QWidget):
         self.setObjectName("pnl_zoo_maintainer")
         self.items: list = []
         self.review = None
+        self._files: list = []   # the files of the review, in the order of the file list
         self._tasks: set = set()
         self._cancel = threading.Event()
         self._token = object()
@@ -291,6 +292,7 @@ class MaintainerPanel(QWidget):
         if self.review is not None:
             self.review.discard()
         self.review = None
+        self._files = []
         self.file_list.clear()
         self.file_view.clear()
         self.publish_btn.setEnabled(False)

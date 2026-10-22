@@ -78,9 +78,9 @@ TEXTS = {
         "zoo.maint.revoke.reason.hint": "shown to every user, at most 300 characters",
         "zoo.maint.revoke.no_reason": "Enter the reason; every user sees it.",
         "zoo.maint.revoke.empty": "The signed index lists no pack yet.",
-        "zoo.maint.revoke.ask": "Revoke {what}?\n\nReason: {reason}\n\nThis adds it to the revoked list, raises the index "
-                                "version, signs it with the key {key} and merges that as a pull request after the "
-                                "check validate passed. Installing it is then blocked and installed copies are "
+        "zoo.maint.revoke.ask": "Revoke {what}?\n\nReason: {reason}\n\nThis adds it to the revoked list, raises the "
+                                "index version, signs it with the key {key} and merges that as a pull request after "
+                                "the check validate passed. Installing it is then blocked and installed copies are "
                                 "flagged.",
         "zoo.maint.revoke.no": "Not revoked. Nothing was changed.",
         "zoo.maint.key.title": "Create signing key",
@@ -284,9 +284,10 @@ TEXTS = {
         "zoo.maint.cancelling": "Breche vor dem nächsten Schritt ab...",
         "zoo.maint.publish.title": "Veröffentlichen",
         "zoo.maint.publish.ask": "Veröffentlichen?\n\n{packs}\n\nDas mergt {item}, verschiebt das Pack/die Packs nach "
-                                 "packs/, trägt sie in den Index ein (Vertrauen {trust}), erhöht die Version des Index, "
-                                 "signiert ihn mit dem Schlüssel {key} und mergt das als Pull Request, sobald die "
-                                 "Prüfung validate bestanden ist. Danach können alle das Pack/die Packs installieren.",
+                                 "packs/, trägt sie in den Index ein (Vertrauen {trust}), erhöht die Version des "
+                                 "Index, signiert ihn mit dem Schlüssel {key} und mergt das als Pull Request, sobald "
+                                 "die Prüfung validate bestanden ist. Danach können alle das Pack/die Packs "
+                                 "installieren.",
         "zoo.maint.publish.no": "Nicht veröffentlicht. Nichts wurde geändert.",
         "zoo.maint.revoke.title": "Veröffentlichtes Pack zurückziehen",
         "zoo.maint.revoke.loading": "Lese den signierten Index auf main...",
