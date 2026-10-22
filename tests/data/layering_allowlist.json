@@ -95,7 +95,7 @@
    "from": "orchestrator.security.paths",
    "to": "orchestrator.remote.address",
    "reason": "device_text checks a board account with the one USER_PATTERN (imported where it runs)",
-   "until": "c2-remote-session (device_text moves to orchestrator/remote/text.py)"
+   "until": "a later chain that moves the one account pattern (remote.address.USER_PATTERN) into the bottom layer or device_text into orchestrator/remote/text.py (c2-remote-session landed without either; no chain owns this yet)"
   },
   {
    "from": "orchestrator.tools.audit",
