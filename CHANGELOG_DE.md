@@ -2153,6 +2153,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
+  Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
+  Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie
+  unter diesem Prüfsummen-Namen ein, sodass der Build keine `.gguf`-Datei mehr sah (`config_module.sh` erkennt eine
+  GGUF-Eingabe an ihrer Endung) und sie umzuwandeln versuchte; ein Modellordner aus dem Cache, im Builder über seinen
+  Pfad gewählt, wurde als Ganzes eingebunden, und seine Links auf die Blobs außerhalb lösten sich im Container nicht
+  auf. Eine verlinkte Datei behält jetzt im Build den Namen ihres Links (`tools/local_files.py` `mount_plan` und der
+  lokale Pfad des Builders), und ein Ordner mit Links wird Datei für Datei eingebunden, wie es die Referenz eines
+  KI-Aufrufers schon wurde (`file_binds`, `linked_folder_binds`); Dateien und Ordner ohne Links werden wie bisher
+  eingebunden. Regressionstests: `tests/test_hf_gui_download.py` `TestTheOldCacheIsUsableForABuild`.
 - **Ein Problem auf diesem Computer heißt nicht mehr „das Board antwortet nicht“**: Jeder Kontakt mit einem Board
   zählte einen Fehler, der keiner der vier Grundcodes war, als `device_host_down`. Eine volle oder schreibgeschützte
   Festplatte oder fehlende Rechte an den eigenen Dateien des Frameworks (sein SSH-Schlüssel, known_hosts) sagten der

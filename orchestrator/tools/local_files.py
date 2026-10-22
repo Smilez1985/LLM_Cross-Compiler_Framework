@@ -372,38 +372,69 @@ def folder_entries(folder: Path) -> Tuple[List[Path], bool]:
 
 def mount_plan(pin: LocalFilePin, inner: str) -> Tuple[str, Dict[str, Dict[str, str]]]:
     """Docker volumes that make exactly the pinned file or folder visible at `inner` (read-only), never its parent.
-    A folder of links (a Hugging Face cache snapshot) is bound file by file, each link resolved and confined."""
+    A folder of links (a Hugging Face cache snapshot) is bound file by file, each link resolved and confined. A linked
+    file keeps the name of its link (a cache blob is named by its checksum; the build tells a GGUF file by its
+    suffix)."""
     path = pin.verify()
     if not pin.is_dir:
-        target = f"{inner}/{path.name}"
+        linked = os.path.islink(Path(pin.root) / pin.relative)
+        target = f"{inner}/{pin.relative.rsplit('/', 1)[-1] if linked else path.name}"
         return target, {str(path): {"bind": target, "mode": "ro"}}
     entries, has_links = folder_entries(path)
     if not has_links:
         return inner, {str(path): {"bind": inner, "mode": "ro"}}
     root = Path(pin.root)
     denied = pin._denied()
+    return inner, file_binds(path, entries, inner, pin.ref,
+                             confine=lambda target, rel: _confine(target, root, denied, f"{pin.ref}/{rel}"))
+
+
+def file_binds(folder: Path, entries: Iterable[Path], inner: str, name: str,
+               confine=None) -> Dict[str, Dict[str, str]]:
+    """Read-only Docker volumes that bind the files of `folder` (its `entries`) one by one at `inner`, each link
+    resolved: a link that leads out of the folder (a Hugging Face cache snapshot's link to its blob) would not resolve
+    inside the container. `confine(target, relative)` checks each resolved file (an AI caller's: inside its label
+    folder). `name` names the folder in a refusal. Folder links, broken links, two names for one file and more than
+    MAX_LINKED_BINDS files are refused (LocalFileError)."""
     binds: Dict[str, Dict[str, str]] = {}
     for entry in entries:
-        rel = entry.relative_to(path).as_posix()
+        rel = entry.relative_to(folder).as_posix()
         if entry.is_symlink() and entry.is_dir():
-            raise LocalFileError(f"{pin.ref} contains a link to a folder ({rel}); folder links are not followed.",
+            raise LocalFileError(f"{name} contains a link to a folder ({rel}); folder links are not followed.",
                                  next_step="copy the model into its own folder.")
         if entry.is_dir():
             continue
         try:
             target = entry.resolve(strict=True)
         except (OSError, RuntimeError):
-            raise LocalFileError(f"{pin.ref} contains a broken link ({rel}).",
+            raise LocalFileError(f"{name} contains a broken link ({rel}).",
                                  next_step="download the model again or copy it into its own folder.") from None
-        _confine(target, root, denied, f"{pin.ref}/{rel}")
+        if confine is not None:
+            confine(target, rel)
         if str(target) in binds:
-            raise LocalFileError(f"{pin.ref} contains two names for one file ({rel}).",
+            raise LocalFileError(f"{name} contains two names for one file ({rel}).",
                                  next_step="copy the model into its own folder.")
         binds[str(target)] = {"bind": f"{inner}/{rel}", "mode": "ro"}
         if len(binds) > MAX_LINKED_BINDS:
-            raise LocalFileError(f"{pin.ref} has more than {MAX_LINKED_BINDS} linked files.",
+            raise LocalFileError(f"{name} has more than {MAX_LINKED_BINDS} linked files.",
                                  next_step="copy the model into its own folder.")
-    return inner, binds
+    return binds
+
+
+def linked_folder_binds(folder: Path, inner: str) -> Optional[Dict[str, Dict[str, str]]]:
+    """A person's own model folder that holds links (a Hugging Face cache snapshot, whose links lead to the cache's
+    blobs): its files bound one by one at `inner` (file_binds). None when it holds no link, or more entries than a
+    folder is listed with (MAX_FOLDER_ENTRIES): then the folder itself is bound, as before."""
+    entries: List[Path] = []
+    linked = False
+    for dirpath, dirnames, filenames in os.walk(folder, followlinks=False):
+        for name in dirnames + filenames:
+            path = Path(dirpath) / name
+            entries.append(path)
+            linked = linked or path.is_symlink()
+            if len(entries) > MAX_FOLDER_ENTRIES:
+                return None
+    return file_binds(Path(folder), entries, inner, Path(folder).name) if linked else None
 
 
 def dataset_folder(pin: LocalFilePin) -> Path:
