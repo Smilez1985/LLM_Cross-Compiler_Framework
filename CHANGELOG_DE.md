@@ -2275,6 +2275,31 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Ein Pull Request kann die Pflichtprüfung des Community-Repositorys nicht mehr umschreiben**: Die Vorlage des
+  Prüf-Workflows `scripts/community_repo/validate-contribution.yml` lief bei `pull_request`, also führte ein Pull
+  Request aus einem Fork seine eigene, geänderte Kopie aus: Er konnte die Prüfung bestehen lassen und ein schlechtes
+  Pack hinzufügen, oder `.github/`, `index.json`, `packs/` oder eine README ändern, die die Prüfung nie ansah (sie
+  listete nur `contributions/`). Die Maintainer-Aktionen lehnten einen solchen Pull Request ab, ein Merge auf der
+  GitHub-Webseite wurde aber nicht verhindert. Die Prüfung läuft jetzt bei `pull_request_target` (opened,
+  synchronize, reopened; Pull Requests in `main`), also prüft immer die Kopie in `main`, nur mit `contents: read`,
+  ohne Secret, ohne Cache und mit `persist-credentials: false` in beiden Checkouts. Der Head-Commit des Pull Requests
+  ist nur Daten: Er wird in einen eigenen Ordner ausgecheckt, nachdem das Framework installiert ist, nichts darin wird
+  ausgeführt, eingelesen (`source`), installiert oder importiert, nur git liest ihn, und kein Wert des Pull Requests
+  (Titel, Branch, Text, Dateinamen) wird in ein `run:`-Skript geschrieben; er kommt über `env`. git berechnet die
+  Änderungen zwischen `main` und dem Head (`--raw -z --no-renames`, ab der Merge-Basis, so wie GitHub sie
+  zusammenführt). Ein Dateiname mit einem Steuerzeichen, ein symbolischer Link (ein Link namens `x.zip` kann die
+  Prüfung keine andere Datei mehr lesen lassen), eine ausführbare Datei oder ein Submodul fällt für jeden durch. Wer
+  nicht Besitzer, Mitglied oder Collaborator ist (`author_association`), darf nur `contributions/<kind>/<name>.zip`
+  hinzufügen, die Pfade, die die Maintainer-Aktionen prüfen; jede andere hinzugefügte, geänderte oder gelöschte Datei
+  fällt mit ihrem Namen durch, die README eines Kind-Ordners eingeschlossen (sie bestand vorher als Hinweis). Die
+  übrigen Änderungen des Besitzers, eines Mitglieds oder eines Collaborators sind Hinweise, deshalb bestehen die
+  eigenen Pull Requests der Maintainer-Aktionen für Veröffentlichen und Zurückziehen weiter. Jedes hinzugefügte Pack
+  wird geprüft wie bisher (höchstens 5 MB, `llm-cli zoo verify`), jetzt aus dem Blob des Head-Commits, und was zoo
+  verify ausgibt, wird nie als Workflow-Befehl gelesen. Der Lint-Job der CI prüft die Vorlage auch mit actionlint.
+  Tests führen die echten Schritte in bash gegen lokale git-Repositorys mit einem Stub für `llm-cli` aus (auch die
+  Veröffentlichung der Maintainer-Aktionen über das nachgebildete GitHub) und sichern den Aufbau des Workflows ab. Die
+  Kopie im Community-Repository ändert dessen Maintainer (die Vorlage sagt, wie eine Kopie umgestellt wird, die noch
+  bei `pull_request` läuft).
 - **Abhängigkeiten auf den neuesten passenden Versionen, die Advisories vom Oktober 2026 behoben**: `uv lock
   --upgrade` hob jede Abhängigkeit auf die neueste Version, die ihr Bereich erlaubt (darunter pypdf 6.21.2, certifi
   2026.10.19, paramiko 5.1.0, qdrant-client 1.20.0, filelock 4.2.4), und Pillow geht auf 13.0.0, das 35 Advisories
