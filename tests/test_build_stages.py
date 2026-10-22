@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -54,6 +55,7 @@ with open(src) as f:
     data = f.read()
 with open(dst, 'w') as f:
     f.write('quantized ' + kind + ' of ' + data + (' with imatrix' if '--imatrix' in a else ''))
+    f.write('.' * int(os.environ.get('STUB_PAD', '0')))
 """
 
 IMATRIX_STUB = """\
@@ -550,3 +552,412 @@ def stage_scripts(modules: Path):
 def test_the_build_reads_the_same_environment_variables():
     reads = environment_reads(stage_scripts(ROCKCHIP / "modules"))
     assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST == READ_TODAY
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The stage runner: stages in order, progress lines, resume markers, the rotate hook (DECISIONS U9)
+# ---------------------------------------------------------------------------------------------------------------
+
+STAGE_LINE = re.compile(r"^=== Stage (\d+)/(\d+): (\w+)(?: (done in \d+ s|resumed|failed \(exit \d+\)))? ===$")
+
+
+def stage_lines(result) -> list:
+    """The runner's progress lines, with the seconds left out: ('1/4', 'source', 'started' | 'done' | ...)."""
+    lines = []
+    for line in (result.stdout + result.stderr).splitlines():
+        m = STAGE_LINE.match(line)
+        if m:
+            state = (m.group(4) or "started").split(" in ")[0].split(" (")[0]
+            lines.append((f"{m.group(1)}/{m.group(2)}", m.group(3), state))
+    return lines
+
+
+def ran(*names, total=4, start=1):
+    """The progress lines of stages that ran (started, then done)."""
+    return [line for i, name in enumerate(names, start) for line in
+            ((f"{i}/{total}", name, "started"), (f"{i}/{total}", name, "done"))]
+
+
+def resumed(*names, total=4):
+    return [(f"{i}/{total}", name, "resumed") for i, name in enumerate(names, 1)]
+
+
+@needs_bash
+def test_a_build_runs_the_four_stages_in_order(image):
+    result = image.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert", "target")
+    assert "=== Build Started: Rockchip (stages: source config convert target) ===" in result.stdout
+    markers = sorted(p.name for p in (image.work / "stages" / "build").glob("*.done"))
+    assert markers == ["config.done", "convert.done", "source.done", "target.done"]
+
+
+@needs_bash
+def test_the_imatrix_job_runs_source_config_and_convert(image):
+    dataset = image.root / "dataset.txt"
+    dataset.write_text("calibration text")
+    image.output.rmdir()
+    result = image.run(JOB_TYPE="imatrix", DATASET_PATH=dataset)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert", total=3)
+    assert (image.work / "stages" / "imatrix" / "convert.done").is_file()
+    assert not (image.work / "stages" / "build").exists(), "the jobs keep separate markers"
+
+
+@needs_bash
+def test_a_failed_stage_writes_no_marker_and_the_next_run_resumes_after_the_last_finished_stage(image):
+    first = image.run(STUB_FAIL="quantize")
+    assert first.returncode == 4
+    assert stage_lines(first)[-1] == ("4/4", "target", "failed")
+    assert not (image.work / "stages" / "build" / "target.done").exists()
+
+    second = image.run()
+
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert stage_lines(second) == resumed("source", "config", "convert") + ran("target", start=4)
+    assert [c.split()[0] for c in image.calls()] == ["convert", "quantize", "quantize"], "converted only once"
+    assert image.outputs()["model-Q4_K_M.gguf"] == "quantized Q4_K_M of gguf f16"
+    assert image.leftovers() == []
+
+
+@needs_bash
+def test_a_finished_build_started_again_runs_nothing(image):
+    assert image.run().returncode == 0
+    before = image.sha256sums()
+
+    again = image.run()
+
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert stage_lines(again) == resumed("source", "config", "convert", "target")
+    assert len(image.calls()) == 2 and image.sha256sums() == before
+
+
+@pytest.mark.parametrize("change", ["quantization", "model file", "module script", "dataset"])
+@needs_bash
+def test_other_inputs_run_every_stage_again(image, change):
+    dataset = image.root / "dataset.txt"
+    dataset.write_text("one")
+    assert image.run(DATASET_PATH=dataset, STUB_FAIL="quantize").returncode == 4
+    values = {"DATASET_PATH": dataset}
+    if change == "quantization":
+        values["QUANTIZATION"] = "Q5_K_M"
+    elif change == "model file":
+        (image.model / "model.safetensors").write_text("other weights")
+    elif change == "module script":
+        script = image.app / "modules" / "target_module.sh"
+        script.write_text(script.read_text() + "\n# changed\n")
+    else:
+        dataset.write_text("two")
+
+    result = image.run(**values)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert", "target")
+
+
+@needs_bash
+def test_a_stage_whose_files_are_gone_runs_again(image):
+    assert image.run(STUB_FAIL="quantize").returncode == 4
+    (image.work / "tmp-model-F16.gguf").unlink()  # the intermediate the target stage needs
+
+    result = image.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == resumed("source", "config") + ran("convert", "target", start=3)
+
+
+@needs_bash
+def test_fresh_runs_every_stage(image):
+    assert image.run().returncode == 0
+    result = image.run("--fresh")
+    assert result.returncode == 0
+    assert stage_lines(result) == ran("source", "config", "convert", "target")
+
+
+@needs_bash
+def test_to_stops_after_a_stage_and_the_rest_follows_later(image):
+    first = image.run("--to", "convert")
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert stage_lines(first) == ran("source", "config", "convert")
+    assert first.stdout.rstrip().splitlines()[-1] == "Stopped after the stage convert (--to)."
+    assert not (image.output / "build_info.json").exists()
+
+    rest = image.run()
+
+    assert stage_lines(rest) == resumed("source", "config", "convert") + ran("target", start=4)
+    assert image.build_info()["quantization"] == "Q4_K_M"
+
+
+@needs_bash
+@pytest.mark.parametrize("args, message", [
+    (["--to", "package"], "'package' is not a stage of this build (source config convert target)."),
+    (["--to"], "--to needs a value"),
+    (["--bogus"], "Unknown option '--bogus'"),
+])
+def test_runner_refusals(image, args, message):
+    result = image.run(*args)
+    assert result.returncode == 1 and f"ERROR: {message}" in result.stderr
+    assert image.calls() == []
+
+
+@needs_bash
+def test_a_module_started_by_hand_runs_the_build_up_to_its_stage(image):
+    result = subprocess.run([posix_shell("bash"), str(image.app / "modules" / "convert_module.sh")], env=image.env(),
+                            capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert")
+
+
+@needs_bash
+def test_the_options_of_the_1x_modules(image):
+    other = image.root / "other-model"
+    shutil.copytree(image.model, other)
+    result = image.run("--input", str(other), "--model-name", "granite", "--quantization", "Q8_0",
+                       MODEL_SOURCE=None, MODEL_NAME=None, QUANTIZATION=None)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert image.calls() == [f"convert <root>/other-model --outfile {OUT}/granite-Q8_0.gguf --outtype q8_0"]
+
+
+ROTATE_HOOK = """#!/bin/bash
+# A rotation step of a target (none is shipped): changes the full-precision intermediate before quantization.
+set -euo pipefail
+source "$STAGE_DIR/build_config.sh"
+f16="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
+echo "rotate $f16" >> "$STUB_LOG"
+[ "${STUB_FAIL:-}" != rotate ] || exit 7
+printf ' rotated' >> "$f16"
+stage_output "$f16"
+"""
+
+
+@needs_bash
+def test_the_rotate_hook_runs_between_convert_and_target_only_when_the_target_has_it(image):
+    (image.app / "modules" / "rotate_module.sh").write_text(ROTATE_HOOK)
+
+    result = image.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert", "rotate", "target", total=5)
+    assert [c.split()[0] for c in image.calls()] == ["convert", "rotate", "quantize"]
+    assert image.outputs()["model-Q4_K_M.gguf"] == "quantized Q4_K_M of gguf f16 rotated"
+
+
+@needs_bash
+def test_a_failing_rotate_hook_stops_the_build_before_quantization(image):
+    (image.app / "modules" / "rotate_module.sh").write_text(ROTATE_HOOK)
+    result = image.run(STUB_FAIL="rotate")
+    assert result.returncode == 7
+    assert stage_lines(result)[-1] == ("4/5", "rotate", "failed")
+    assert [c.split()[0] for c in image.calls()] == ["convert", "rotate"]
+
+
+@needs_bash
+def test_without_a_hook_there_is_no_rotate_stage(image):
+    result = image.run()
+    assert "rotate" not in [name for _, name, _ in stage_lines(result)]
+
+
+@needs_bash
+def test_a_build_never_runs_the_host_benchmark(image):
+    shutil.copy(REPO_ROOT / "targets" / "_template" / "modules" / "benchmark_module.sh", image.app / "modules")
+    probe = image.root / "benchmark-ran"
+    script = image.app / "modules" / "benchmark_module.sh"
+    script.write_text(script.read_text().replace("set -euo pipefail", f"set -euo pipefail\ntouch {probe}", 1))
+    result = image.run()
+    assert result.returncode == 0 and not probe.exists()
+    code = "\n".join(line for line in (ROCKCHIP / "modules" / "build.sh").read_text().splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "benchmark" not in code
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# What the modules of version 1.x did, on request: the llama.cpp clone and the package for the board
+# ---------------------------------------------------------------------------------------------------------------
+
+GIT_STUB = """\
+import os, sys
+a = sys.argv[1:]
+with open(os.environ["STUB_LOG"], 'a') as f:
+    f.write('git ' + ' '.join(a) + '\\n')
+if a[0] == 'clone':
+    os.makedirs(os.path.join(a[2], '.git'))
+"""
+
+
+@needs_bash
+def test_source_module_clones_llama_cpp_by_hand(image):
+    bin_dir = image.root / "bin"
+    _script(bin_dir / "git", GIT_STUB)
+    commit = "d81235049384534c167caea52b85a694f6103d14"
+    link = image.root / "src" / "llama.cpp"
+    env = image.env(PATH=f"{bin_dir}{os.pathsep}{image.env()['PATH']}", LLAMA_CPP_COMMIT=commit, LLAMA_CPP_PATH=link)
+    command = [posix_shell("bash"), str(image.app / "modules" / "source_module.sh"), "--clone-llama-cpp"]
+    result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    repo = "<root>/build-cache/repos/llama.cpp"
+    assert image.calls() == [f"git clone https://github.com/ggml-org/llama.cpp.git {repo}",
+                             f"git checkout -f {commit}", "git submodule update --init --recursive"]
+    assert link.is_symlink() and link.resolve() == (image.cache / "repos" / "llama.cpp").resolve()
+
+    env["LLAMA_CPP_COMMIT"] = "b11429"
+    refused = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+    assert refused.returncode == 1 and "must be a full commit id" in refused.stderr
+
+
+CMAKE_STUB = """\
+import os, sys
+with open(os.environ["STUB_LOG"], 'a') as f:
+    f.write('cmake ' + ' '.join(sys.argv[1:]) + '\\n')
+"""
+MAKE_STUB = """\
+import os, sys
+with open(os.environ["STUB_LOG"], 'a') as f:
+    f.write('make ' + ' '.join(sys.argv[1:]) + '\\n')
+os.makedirs('bin', exist_ok=True)
+for name in sys.argv[2:]:
+    open(os.path.join('bin', name), 'w').write(name)
+"""
+
+
+@needs_bash
+def test_a_hardware_profile_also_packages_the_model_for_the_board(image):
+    bin_dir = image.root / "bin"
+    _script(bin_dir / "cmake", CMAKE_STUB)
+    _script(bin_dir / "make", MAKE_STUB)
+    profile = image.root / "target_hardware_config.txt"
+    profile.write_text("# probe\nARCHITECTURE_FULL=aarch64\nCPU_MODEL_NAME=Cortex-A55\nSUPPORTS_NEON=ON\nCPU_CORES=4\n")
+
+    result = image.run("--hardware-config", str(profile), STUB_PAD=1 << 20,
+                       PATH=f"{bin_dir}{os.pathsep}{image.env()['PATH']}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    toolchain = (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").read_text()
+    assert "SET(CMAKE_C_COMPILER   /usr/bin/aarch64-linux-gnu-gcc)" in toolchain and "-mcpu=cortex-a55" in toolchain
+    cmake = next(c for c in image.calls() if c.startswith("cmake "))
+    assert cmake.startswith("cmake <root>/llama.cpp ") and "-DCMAKE_TOOLCHAIN_FILE=" in cmake
+    assert "-DGGML_NEON=ON" in cmake and "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in cmake
+    assert "make -j4 llama-cli llama-server" in image.calls()
+    packages = image.output / "packages"
+    (package,) = [p for p in packages.iterdir() if not p.is_symlink()]
+    assert sorted(p.name for p in package.iterdir()) == [
+        "MANIFEST.json", "README.md", "cmake_toolchain.cmake", "deploy.sh", "llama-cli", "llama-server",
+        "model-Q4_K_M.gguf", "target_hardware_config.txt", "test_model.sh"]
+    assert "./llama-cli -m model-Q4_K_M.gguf" in (package / "README.md").read_text()
+    assert (packages / "model_q4_k_m_latest").is_symlink()
+    assert image.build_info()["quantization"] == "Q4_K_M", "build_info.json as without a profile"
+
+
+@needs_bash
+def test_without_a_hardware_profile_nothing_is_cross_compiled(image):
+    result = image.run()
+    assert result.returncode == 0
+    assert not (image.output / "packages").exists()
+    assert not (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").exists()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The BuildEngine reads the stage lines (its one progress channel: the container log) and gives the resume inputs
+# ---------------------------------------------------------------------------------------------------------------
+
+@pytest.fixture
+def engine(tmp_path, monkeypatch):
+    from orchestrator.Core.builder import BuildEngine
+    from orchestrator.Core.config_manager import ConfigManager
+    monkeypatch.setattr("orchestrator.Core.builder.docker.from_env",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
+    engine = BuildEngine(ConfigManager(tmp_path / "configs"), base_dir=tmp_path)
+    yield engine
+    engine._executor.shutdown(wait=True, cancel_futures=True)
+
+
+def follow(engine, progress, prefix, lines):
+    """Feeds container log lines to the engine as _run_container does; gives (step, percent) at each record write."""
+    seen = []
+    engine._save_record = lambda build_id: seen.append((progress.current_stage, progress.progress_percent))
+    for line in lines:
+        engine._note_stage(progress, prefix, line)
+    return seen
+
+
+@needs_bash
+def test_the_engine_turns_the_runners_lines_into_step_and_percent(image, engine):
+    from orchestrator.Core.builder import BuildProgress, BuildStatus
+    first = image.run(STUB_FAIL="quantize")
+    progress = BuildProgress("b1", BuildStatus.BUILDING, "Running modules", 60)
+
+    seen = follow(engine, progress, "CONT: ", first.stdout.splitlines() + first.stderr.splitlines())
+
+    assert seen == [("Running modules: source (1/4)", 60), ("Running modules: config (2/4)", 66),
+                    ("Running modules: convert (3/4)", 72), ("Running modules: target (4/4)", 78)]
+    assert progress.progress_percent == 78, "a failed stage moves nothing"
+
+    again = image.run()
+    progress = BuildProgress("b1", BuildStatus.BUILDING, "Running modules", 60)
+    seen = follow(engine, progress, "CONT: ", again.stdout.splitlines())
+    assert seen == [("Running modules: source (1/4) resumed", 66), ("Running modules: config (2/4) resumed", 72),
+                    ("Running modules: convert (3/4) resumed", 78), ("Running modules: target (4/4)", 78)]
+    assert progress.progress_percent == 85
+
+
+def test_a_stage_container_s_log_moves_the_build_s_step(engine, tmp_path):
+    from orchestrator.Core.builder import BuildProgress, BuildStatus
+    from test_review_build_engine import FakeContainer, FakeDockerClient, config_for
+    client = FakeDockerClient()
+    container = FakeContainer(client, "llm-build-b1", lines=[
+        "=== Build Started: Rockchip (stages: source config convert target) ===", "=== Stage 1/4: source ===",
+        "=== Stage 1/4: source done in 0 s ===", "=== Stage 4/4: target ===", ">> Quantizing -> Q4_K_M"])
+    progress = BuildProgress("b1", BuildStatus.BUILDING, "Running modules", 60)
+    engine._builds["b1"] = progress
+    try:
+        assert engine._run_container(config_for(tmp_path), progress, container, "CONT: ") == 0
+    finally:
+        client.release_all()
+    assert progress.current_stage == "Running modules: target (4/4)" and progress.progress_percent == 78
+    assert "CONT: >> Quantizing -> Q4_K_M" in progress.logs[-1], "every line still reaches the build log"
+
+
+def test_the_imatrix_container_has_its_own_band_and_other_lines_change_nothing(engine):
+    from orchestrator.Core.builder import BuildProgress, BuildStatus
+    progress = BuildProgress("b1", BuildStatus.CALIBRATING, "Calculating IMatrix", 50)
+    seen = follow(engine, progress, "IMATRIX: ", [
+        "=== Stage 1/3: source ===", "=== Stage 3/3: convert ===", ">> Computing importance matrix...",
+        "=== Stage 3/3: convert done in 12 s ===", "=== Stage 9/3: bogus ===", "=== Stage 2/3: config", "Stage 1/3"])
+    assert seen == [("Calculating IMatrix: source (1/3)", 50), ("Calculating IMatrix: convert (3/3)", 56)]
+    assert progress.progress_percent == 60
+    assert follow(engine, progress, "BUILD: ", ["=== Stage 1/4: source ==="]) == [], "no stages in an image build"
+
+
+def test_a_running_build_shows_its_stage_in_the_build_status(engine):
+    from datetime import datetime
+    from orchestrator.Core.build_service import BuildService
+    from orchestrator.Core.builder import BuildProgress, BuildStatus
+    from orchestrator.Core.orchestrator import OrchestrationStatus, WorkflowState
+    state = WorkflowState("req_1", OrchestrationStatus.BUILDING, datetime.now(),
+                          current_stage="Building org/m for Rockchip", total_builds=1, build_ids=["req_1_001"])
+    build = BuildProgress("req_1_001", BuildStatus.BUILDING, "Running modules", 60)
+    follow(engine, build, "CONT: ", ["=== Stage 3/4: convert ==="])
+    service = BuildService(SimpleNamespace(orchestrator=SimpleNamespace(
+        _workflows={"req_1": state}, build_engine=SimpleNamespace(get_build_status=lambda bid: build))))
+    status = service.get_status("req_1")
+    assert status.stage == "Building org/m for Rockchip: Running modules: convert (3/4)"
+    assert status.progress_percent == 72
+
+
+def test_the_build_record_carries_the_stage_for_other_processes(engine, tmp_path):
+    from orchestrator.Core import build_records
+    from orchestrator.Core.builder import BuildProgress, BuildStatus
+    progress = BuildProgress("b1", BuildStatus.BUILDING, "Running modules", 60)
+    engine._builds["b1"] = progress
+    engine._records["b1"] = {"build_id": "b1", **build_records.this_process()}
+    engine._note_stage(progress, "CONT: ", "=== Stage 2/4: config ===")
+    record = json.loads((engine.records_dir / "b1.json").read_text())
+    assert record["stage"] == "Running modules: config (2/4)" and record["progress"] == 66
+
+
+def test_the_engine_gives_the_model_revision_to_the_stage_runner(engine):
+    from orchestrator.Core.builder import BuildConfiguration, ModelFormat
+    config = BuildConfiguration(build_id="b1", timestamp="t", model_source="org/model", target_arch="Rockchip",
+                                target_format=ModelFormat.GGUF, output_dir="out")
+    assert "MODEL_REVISION" not in engine._container_env(config, "/build-cache/models/x")
+    config.model_revision = "0123456789abcdef0123456789abcdef01234567"
+    assert engine._container_env(config, "/x")["MODEL_REVISION"] == config.model_revision
