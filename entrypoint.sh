@@ -165,69 +165,55 @@ verify_environment() {
 # RUNTIME MODES
 # ============================================================================
 
+# Both modes run the canonical build structure (DECISIONS U9): /app/modules/build.sh, the stage runner, runs the
+# stages source -> config -> convert -> target of the target's modules; a stage that finished before with the same
+# inputs is resumed, not run again (markers in $BUILD_SCRATCH_DIR/stages, see build.sh).
+readonly STAGE_RUNNER_SCRIPT="${STAGE_RUNNER_SCRIPT:-/app/modules/build.sh}"
+
 run_pipeline() {
-    local input_path="$1"
-    local model_name="$2"
+    local input_path="${1:-}"
+    local model_name="${2:-}"
     local quant_method="${3:-Q4_K_M}"
     local hardware_config="${4:-}"
-    
+
+    if [[ -z "$input_path" ]] || [[ -z "$model_name" ]]; then
+        log_error "Usage: pipeline INPUT_PATH MODEL_NAME [QUANTIZATION] [HARDWARE_CONFIG]"
+        exit 2
+    fi
+
     log_info ">>> Starting PIPELINE for model: $model_name"
     log_info ">>> Quantization: $quant_method"
-    
-    export MODEL_NAME="$model_name"
-    export QUANT_METHOD="$quant_method"
-    export INPUT_PATH="$input_path"
-    
-    if [[ -n "$hardware_config" ]] && [[ -f "$hardware_config" ]]; then
-        export HARDWARE_CONFIG_FILE="$hardware_config"
-    fi
-    
-    local start_time=$SECONDS
-    
-    # Error Trap für die Pipeline
-    trap 'log_error "Pipeline failed at step: $BASH_COMMAND"' ERR
 
-    # Stage 1
-    log_info "[1/4] Environment Setup"
-    /app/modules/source_module.sh
-    
-    # Stage 2
-    log_info "[2/4] Hardware Configuration"
-    /app/modules/config_module.sh
-    
-    # Stage 3
-    log_info "[3/4] Model Conversion"
-    /app/modules/convert_module.sh --input "$input_path" --model-name "$model_name"
-    
-    # Stage 4
-    log_info "[4/4] Quantization & Packaging"
-    local gguf_file="$BUILD_CACHE_DIR/output/${model_name}.fp16.gguf"
-    
-    # Check if conversion actually produced the file
-    if [ ! -f "$gguf_file" ]; then
-        log_error "Conversion output not found: $gguf_file"
-        exit 1
+    local args=(--input "$input_path" --model-name "$model_name" --quantization "$quant_method")
+    if [[ -n "$hardware_config" ]] && [[ -f "$hardware_config" ]]; then
+        args+=(--hardware-config "$hardware_config")
     fi
-    
-    /app/modules/target_module.sh --input "$gguf_file" --quantization "$quant_method" --model-name "$model_name"
-    
+
+    local start_time=$SECONDS
+    local rc=0
+    bash "$STAGE_RUNNER_SCRIPT" "${args[@]}" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        log_error "Pipeline failed (exit $rc); the stage that failed is named above."
+        exit "$rc"
+    fi
+
     local total_time=$((SECONDS - start_time))
     log_success ">>> Pipeline COMPLETED successfully in ${total_time}s"
-    
-    # Trap entfernen
-    trap - ERR
 }
 
+# One stage: the build up to that stage (the stages before it resume when they finished before). The options of the
+# 1.x modules (--input, --model-name, --quantization, --hardware-config) are passed to the stage runner.
 run_module() {
     local module_name="$1"
     shift
-    local module_path="/app/modules/${module_name}_module.sh"
+    local module_path
+    module_path="$(dirname "$STAGE_RUNNER_SCRIPT")/${module_name}_module.sh"
     if [[ ! -f "$module_path" ]]; then
         log_error "Module not found: $module_name"
         exit 1
     fi
-    log_info "Executing Module: $module_name"
-    "$module_path" "$@"
+    log_info "Executing Module: $module_name (the build up to this stage)"
+    exec bash "$STAGE_RUNNER_SCRIPT" --to "$module_name" "$@"
 }
 
 run_system_tests() {

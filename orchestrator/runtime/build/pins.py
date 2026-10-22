@@ -7,8 +7,9 @@ Every place in the repository that names the llama.cpp version, checked against 
   (orchestrator/utils/llama_pin.py); the Dockerfile ARG and the target.yml build arguments are fallbacks for builds
   outside the framework and are compared here.
 - reference: the catalogue of upstream projects (not read while the framework runs); compared as well.
-- legacy: the four-module chain (targets/*/modules/source_module.sh) stays untouched (decision D20); its default is
-  reported, never a failure.
+- legacy: a target whose modules/source_module.sh still has the LLAMA_CPP_COMMIT default of version 1.x (an older
+  community target; decision D20): reported, never a failure. The shipped stage modules name no version of their own:
+  the source stage reports the pin of the image (DECISIONS U9).
 
 tests/test_build_recipe.py fails on any derived or reference mismatch; scripts/llama_cpp_pin.py prints the table.
 """
@@ -93,7 +94,7 @@ def pin_places(source: LlamaCppSource, root: Path = REPO_ROOT) -> List[PinPlace]
         if legacy.is_file():
             found = _LEGACY_DEFAULT.findall(legacy.read_text(encoding="utf-8"))
             if found:
-                places.append(PinPlace(rel(legacy), "LLAMA_CPP_COMMIT default (legacy four-module chain, D20)",
+                places.append(PinPlace(rel(legacy), "LLAMA_CPP_COMMIT default (source_module.sh of version 1.x, D20)",
                                        "legacy", found[0], tag))
 
     for name in ("project_sources.yml", "detailed_project_sources.yml"):

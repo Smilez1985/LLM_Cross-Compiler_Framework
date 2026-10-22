@@ -771,6 +771,46 @@ def test_a_build_never_runs_the_host_benchmark(image):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# entrypoint.sh: the modes pipeline and source|config|convert|target run the stage runner
+# ---------------------------------------------------------------------------------------------------------------
+
+def entrypoint(image, *args, **values):
+    env = image.env(**values)
+    env.update(LLM_ENTRYPOINT_INITIALIZED="1", STAGE_RUNNER_SCRIPT=str(image.app / "modules" / "build.sh"),
+               STUB_TOOL="rkllm")
+    return subprocess.run([posix_shell("bash"), str(REPO_ROOT / "entrypoint.sh"), *map(str, args)], env=env,
+                          capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+
+
+@needs_bash
+def test_the_pipeline_mode_runs_the_stages(image):
+    result = entrypoint(image, "pipeline", image.model, "granite", "Q5_K_M", MODEL_SOURCE=None, MODEL_NAME=None,
+                        QUANTIZATION=None)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert", "target")
+    assert sorted(image.outputs()) == ["build_info.json", "granite-Q5_K_M.gguf"]
+    assert ">>> Pipeline COMPLETED successfully" in result.stderr
+
+
+@needs_bash
+def test_the_pipeline_mode_keeps_the_stages_exit_code_and_needs_its_arguments(image):
+    failed = entrypoint(image, "pipeline", image.model, "granite", STUB_FAIL="quantize")
+    assert failed.returncode == 4 and "Pipeline failed (exit 4)" in failed.stderr
+    usage = entrypoint(image, "pipeline")
+    assert usage.returncode == 2 and "Usage: pipeline INPUT_PATH MODEL_NAME" in usage.stderr
+
+
+@needs_bash
+def test_a_stage_mode_runs_the_build_up_to_that_stage(image):
+    result = entrypoint(image, "convert")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert")
+    target = entrypoint(image, "target", "--quantization", "Q4_K_M")
+    assert stage_lines(target) == resumed("source", "config", "convert") + ran("target", start=4)
+    assert entrypoint(image, "package").returncode != 0
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # What the modules of version 1.x did, on request: the llama.cpp clone and the package for the board
 # ---------------------------------------------------------------------------------------------------------------
 

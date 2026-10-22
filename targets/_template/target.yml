@@ -43,31 +43,37 @@ docker:
     BUILD_JOBS: "4"
     PYTHON_VERSION: "3.11"
 
-# Modul-Definitionen (Standard-Pipeline)
+# Modul-Definitionen: the build (DECISIONS U9). modules/build.sh, the stage runner, runs the four stage modules in
+# this order inside the image; each module's header says what its stage does. This block describes the folder;
+# nothing reads it.
 modules:
+  runner: "modules/build.sh"
   source: "modules/source_module.sh"
   config: "modules/config_module.sh"
-  convert: "modules/convert_module.sh" 
+  convert: "modules/convert_module.sh"
   target: "modules/target_module.sh"
-  
+  # Optional hook between convert and target (roadmap: rotation): runs only when the target has this file.
+  rotate: "modules/rotate_module.sh"
+
   module_info:
     source:
-      description: "Environment & Tools Setup"
+      description: "Toolchain sources of the image and the SDK setup commands (their exports reach the later stages)"
+      outputs: ["sdk_environment.sh"]
     config:
-      description: "Hardware Detection & CMake Toolchain Generation"
-      inputs: ["target_hardware_config.txt"]
-      outputs: ["cross_compile_toolchain.cmake", "build_config.sh"]
+      description: "Request checks and the build plan; with a hardware profile also the CMake toolchain"
+      inputs: ["the request (environment)", "target_hardware_config.txt (optional)"]
+      outputs: ["build_config.sh", "cross_compile_toolchain.cmake (hardware profile only)"]
     convert:
-      description: "Model Format Conversion (HF/ONNX/PyTorch → GGUF)"
-      inputs: ["model_directory"]
-      outputs: ["model.fp16.gguf"]
+      description: "Model conversion: the quantization logic of the module, by default HF -> GGUF; the imatrix job"
+      inputs: ["model_directory", "build_config.sh"]
+      outputs: ["<model>-<type>.gguf", "tmp-<model>-F16.gguf and quantize_jobs.sh", "imatrix.dat"]
     target:
-      description: "Quantization & Cross-Compilation"
-      inputs: ["model.fp16.gguf", "cmake_toolchain"]
-      outputs: ["deployment_package.zip"]
+      description: "Quantization, the packaging commands of the module and build_info.json"
+      inputs: ["quantize_jobs.sh", "build_config.sh"]
+      outputs: ["<model>-<type>.gguf", "build_info.json", "packages/ (hardware profile only)"]
 
-# Hardware optimization profiles. Legacy: read only by the legacy four-module chain (modules/*_module.sh); the
-# active build takes llama.cpp's options from the build recipe (orchestrator/runtime/build/recipe.py).
+# Hardware optimization profiles: descriptive, nothing reads them. The board's runtime takes llama.cpp's options from
+# the build recipe (orchestrator/runtime/build/recipe.py).
 optimization_profiles:
   default:
     cpu_flags: "-mcpu=native -march=native"
