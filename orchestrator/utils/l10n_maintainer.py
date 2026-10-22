@@ -141,8 +141,8 @@ TEXTS = {
         "zoo.maint.next.offline": "check the internet connection, then try again.",
         "zoo.maint.err.tool_failed": "{tool} failed: {detail}",
         "zoo.maint.next.tool_failed": "read the message above; fix what it names (for example the git name and "
-                                      "e-mail with 'git config --global user.name', or your write access to the "
-                                      "repository), then try again.",
+                                      "e-mail with 'git config --global user.name', git's login to GitHub with 'gh "
+                                      "auth setup-git', or your write access to the repository), then try again.",
         "zoo.maint.err.bad_answer": "The GitHub CLI gave an answer that cannot be read ({what}).",
         "zoo.maint.next.bad_answer": "update the GitHub CLI, then try again.",
         "zoo.maint.err.keyring": "The keyring of this computer cannot be used: {detail}",
@@ -394,8 +394,9 @@ TEXTS = {
         "zoo.maint.next.offline": "prüfe die Internetverbindung und versuche es erneut.",
         "zoo.maint.err.tool_failed": "{tool} ist fehlgeschlagen: {detail}",
         "zoo.maint.next.tool_failed": "lies die Meldung oben und behebe, was sie nennt (zum Beispiel Name und E-Mail "
-                                      "für git mit 'git config --global user.name' oder deine Schreibrechte am "
-                                      "Repository), dann versuche es erneut.",
+                                      "für git mit 'git config --global user.name', das Login von git bei GitHub mit "
+                                      "'gh auth setup-git' oder deine Schreibrechte am Repository), dann versuche es "
+                                      "erneut.",
         "zoo.maint.err.bad_answer": "Die GitHub CLI hat eine Antwort gegeben, die sich nicht lesen lässt ({what}).",
         "zoo.maint.next.bad_answer": "aktualisiere die GitHub CLI und versuche es erneut.",
         "zoo.maint.err.keyring": "Der Schlüsselbund dieses Computers lässt sich nicht nutzen: {detail}",

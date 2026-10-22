@@ -896,13 +896,15 @@ or shows a token.
 (`keygen`, `entry`, `sign`) is a thin wrapper over the same code. **Create signing key** puts the index key into the OS
 keyring (service `lcf-community-index`, never replaced) and shows its public entry for `configs/community_keys.yml`.
 **Review and publish** lists the open pull requests that add packs under `contributions/<kind>/` (and packs merged
-there but not published), checks a pack with `zoo verify` and shows every file, and after the person's "Yes" merges
+there but not published), checks a pack with `zoo verify` and shows every member of the pack file (a pull request
+that changes anything besides new packs is not merged from here), and after the person's "Yes" merges
 the contribution (its required check `validate` passed, its head unchanged since the review), moves the pack to
 `packs/<kind>/` in a local clone in the per-user folder, adds the index entry with the raw address, raises version
 and time, signs, and merges that as a pull request from a new branch after the required check. **Revoke** adds a
 revocation the same way. `main` is protected, so nothing is ever pushed to it; each merge pins the checked commit; the
 index on `main` must verify with the maintainer's key or a trusted key before anything is signed on top of it; every
-step is reported, audited (tool `zoo_maintainer`) and can be cancelled before the last merge. gh and git use the
+step is reported, audited (tool `zoo_maintainer`) and can be cancelled before the last merge (a cancel after the push
+closes the publication's own pull request and deletes its branch). gh and git use the
 person's own login; no token is read, stored or shown, and no AI-reachable module imports the code (a test guards it).
 `scripts/community_repo/validate-contribution.yml` is the workflow template for the community repository: it runs on
 every pull request (the required check of `main`; one that adds no pack passes), accepts under `contributions/` only

@@ -2909,8 +2909,11 @@ tool, no Ditto path and no other tool calls it (a test guards it).
    add packs under `contributions/<kind>/`, with the state of the required check `validate`, and packs merged there
    but not published yet. **Review selected** fetches the packs from the pull request's head into a local clone of
    the repository in the per-user folder, checks each one with `zoo verify` and shows every file (`pack.json`,
-   `pack.sig` and each file of the pack) in a list with a read-only text view (the CLI prints them, or writes them to
-   a new or empty folder you name with `--review-dir`). **Publish...** asks "Publish?" ("No" is the default). On yes
+   `pack.sig`, each file of the pack and any other member of the pack file) in a list with a read-only text view (the
+   CLI prints them, or writes them to a new or empty folder you name with `--review-dir`). Only new pack files under
+   `contributions/<kind>/` are merged from here: a pull request that also changes anything else (the check workflow,
+   the index, a README, a deletion) or that goes into another branch than `main` is not published, and the review
+   names that change. **Publish...** asks "Publish?" ("No" is the default). On yes
    the contribution is merged (only when the check passed and its head is still the reviewed commit), the clone is
    updated, the pack moves to `packs/<kind>/`, its index entry gets the raw address
    (`https://raw.githubusercontent.com/<repo>/main/packs/<kind>/<file>`), the trust (`community`, or `verified` when
@@ -2923,7 +2926,9 @@ tool, no Ditto path and no other tool calls it (a test guards it).
    the signed index on the same route. The entry stays, so the hub shows the pack as revoked.
 
 Every step is shown as it happens and written to the audit log (tool `zoo_maintainer`; without the audit log nothing
-starts). **Cancel** (Ctrl+C at a terminal) stops before the next step, up to the last merge. Before anything is signed,
+starts). **Cancel** (Ctrl+C at a terminal) stops before the next step, up to the last merge; after the push it also
+closes the publication's own pull request and deletes its branch, so nothing half-published stays behind (a merged
+contribution waits under `contributions/` and is listed again). Before anything is signed,
 the index on `main` must verify with your key or a trusted key of this framework. A refusal names the reason, what has
 happened on GitHub so far (for example a pull request that stays open) and the next step: no `gh` or `git`, not logged
 in (`gh auth login`), offline, a check that has not passed, a pack `zoo verify` rejects, a published file of the same

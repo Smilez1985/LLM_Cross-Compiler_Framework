@@ -2532,7 +2532,8 @@ Unveröffentlicht. Für den Maintainer des Community-Repositorys (`community_rep
 deinem eigenen Login der GitHub CLI (`gh`) und git erreicht, beide installiert und angemeldet (`gh auth login`); das
 Framework liest, speichert und zeigt nie einen Token. Kein KI-Client und kein Weg von Ditto erreicht diese Befehle. Jeder
 Schritt wird ausgegeben und ins Audit-Log geschrieben; Strg+C bricht vor dem nächsten Schritt ab, bis zum letzten
-Merge. Eine Ablehnung sagt, was auf GitHub bis dahin geschehen ist, und nennt den nächsten Schritt.
+Merge (nach dem Push schließt es auch den eigenen Pull Request der Veröffentlichung und löscht seinen Branch). Eine
+Ablehnung sagt, was auf GitHub bis dahin geschehen ist, und nennt den nächsten Schritt.
 
 - **`key NAME`** (einmalig): ein neuer Ed25519-Signaturschlüssel für den Index im Schlüsselbund des Betriebssystems
   (Dienst `lcf-community-index`). Ein Name, den es schon gibt, wird abgelehnt; ein Schlüssel wird nie ersetzt. Der
@@ -2544,7 +2545,9 @@ Merge. Eine Ablehnung sagt, was auf GitHub bis dahin geschehen ist, und nennt de
   (`main:contributions/...`).
 - **`review ITEM`** (eine Pull-Request-Nummer wie `7` oder `#7`, oder `main:contributions/KIND/DATEI.zip`): holt die
   Pakete dieses Commits in den lokalen Klon im benutzereigenen Ordner, prüft jedes mit `zoo verify` und gibt jede Datei
-  des Pakets aus (`pack.json`, `pack.sig` und jede Datei; versteckte Zeichen erscheinen als Escape). Mit
+  des Pakets aus (`pack.json`, `pack.sig`, jede Datei und jedes andere Element der Paket-Datei; versteckte Zeichen
+  erscheinen als Escape). Ein Pull Request, der außer neuen Paketen unter `contributions/<kind>/` noch etwas ändert
+  oder in einen anderen Branch als `main` geht, wird nicht veröffentlicht; die Prüfung nennt diese Änderung. Mit
   `--review-dir ORDNER` werden die Dateien stattdessen in diesen neuen oder leeren Ordner geschrieben, damit du sie
   dort liest. Dann fragt er „Publish?“ („Nein“ ist die Vorgabe; ohne Terminal wird nichts veröffentlicht). Ja mergt
   den Beitrag (nur wenn seine Prüfung bestanden ist und sein Stand der geprüfte Commit ist), verschiebt das Paket nach

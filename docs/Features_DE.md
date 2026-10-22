@@ -3213,9 +3213,12 @@ sichert das ab).
    Requests, die Packs unter `contributions/<kind>/` hinzufügen, mit dem Stand der Pflichtprüfung `validate`, und
    Packs, die dort gemergt, aber noch nicht veröffentlicht sind. **Auswahl prüfen** holt die Packs vom Stand des Pull
    Requests in einen lokalen Klon des Repositorys im benutzereigenen Ordner, prüft jedes mit `zoo verify` und zeigt
-   jede Datei (`pack.json`, `pack.sig` und jede Datei des Packs) in einer Liste mit einer schreibgeschützten
-   Textansicht (die CLI gibt sie aus oder schreibt sie mit `--review-dir` in einen neuen oder leeren Ordner, den du
-   nennst). **Veröffentlichen...** fragt „Veröffentlichen?“ („Nein“ ist die Vorgabe). Bei Ja wird der Beitrag
+   jede Datei (`pack.json`, `pack.sig`, jede Datei des Packs und jedes andere Element der Pack-Datei) in einer Liste
+   mit einer schreibgeschützten Textansicht (die CLI gibt sie aus oder schreibt sie mit `--review-dir` in einen neuen
+   oder leeren Ordner, den du nennst). Von hier werden nur neue Pack-Dateien unter `contributions/<kind>/` gemergt:
+   Ein Pull Request, der auch etwas anderes ändert (den Prüf-Workflow, den Index, eine README, eine Löschung) oder in
+   einen anderen Branch als `main` geht, wird nicht veröffentlicht, und die Prüfung nennt diese Änderung.
+   **Veröffentlichen...** fragt „Veröffentlichen?“ („Nein“ ist die Vorgabe). Bei Ja wird der Beitrag
    gemergt (nur wenn die Prüfung bestanden ist und sein Stand noch der geprüfte Commit ist), der Klon aktualisiert,
    das Pack nach `packs/<kind>/` verschoben, sein Index-Eintrag bekommt die Raw-Adresse
    (`https://raw.githubusercontent.com/<repo>/main/packs/<kind>/<datei>`), das Vertrauen (`community`, oder
@@ -3229,8 +3232,10 @@ sichert das ab).
    demselben Weg in den signierten Index. Der Eintrag bleibt, damit der Hub das Pack als zurückgezogen zeigt.
 
 Jeder Schritt wird gezeigt, sobald er geschieht, und ins Audit-Log geschrieben (Tool `zoo_maintainer`; ohne Audit-Log
-beginnt nichts). **Abbrechen** (Strg+C im Terminal) hält vor dem nächsten Schritt an, bis zum letzten Merge. Bevor
-etwas signiert wird, muss sich der Index auf `main` mit deinem Schlüssel oder einem vertrauenswürdigen Schlüssel dieses
+beginnt nichts). **Abbrechen** (Strg+C im Terminal) hält vor dem nächsten Schritt an, bis zum letzten Merge; nach
+dem Push schließt es auch den eigenen Pull Request der Veröffentlichung und löscht seinen Branch, damit nichts halb
+Veröffentlichtes zurückbleibt (ein gemergter Beitrag wartet unter `contributions/` und steht wieder in der Liste).
+Bevor etwas signiert wird, muss sich der Index auf `main` mit deinem Schlüssel oder einem vertrauenswürdigen Schlüssel dieses
 Frameworks prüfen lassen. Eine Ablehnung nennt den Grund, was auf GitHub bis dahin geschehen ist (zum Beispiel ein Pull
 Request, der offen bleibt) und den nächsten Schritt: kein `gh` oder `git`, nicht angemeldet (`gh auth login`), offline,
 eine nicht bestandene Prüfung, ein Pack, das `zoo verify` ablehnt, eine veröffentlichte Datei gleichen Namens, ein Klon

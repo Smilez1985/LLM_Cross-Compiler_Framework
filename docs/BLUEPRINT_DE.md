@@ -958,14 +958,16 @@ ihre eigenen Zugangsdaten; das Framework fragt nie nach einem Token, liest keine
 **Signaturschlüssel anlegen** legt den Index-Schlüssel im Schlüsselbund des Systems an (Dienst `lcf-community-index`,
 nie ersetzt) und zeigt seinen öffentlichen Eintrag für `configs/community_keys.yml`. **Prüfen und veröffentlichen**
 listet die offenen Pull Requests, die Pakete unter `contributions/<kind>/` hinzufügen (und dort gemergte, nicht
-veröffentlichte Pakete), prüft ein Paket mit `zoo verify` und zeigt jede Datei, und nach dem „Ja“ der Person mergt es
+veröffentlichte Pakete), prüft ein Paket mit `zoo verify` und zeigt jedes Element der Paket-Datei (ein Pull Request,
+der außer neuen Paketen noch etwas ändert, wird von hier nicht gemergt), und nach dem „Ja“ der Person mergt es
 den Beitrag (seine Pflichtprüfung `validate` bestanden, sein Stand seit der Prüfung unverändert), verschiebt das Paket
 in einem lokalen Klon im benutzereigenen Ordner nach `packs/<kind>/`, trägt es mit der Raw-Adresse in den Index ein,
 erhöht Version und Zeit, signiert und mergt das als Pull Request von einem neuen Branch nach der Pflichtprüfung.
 **Zurückziehen** trägt einen Rückzug auf demselben Weg ein. `main` ist geschützt, also wird nie dorthin gepusht; jeder
 Merge legt den geprüften Commit fest; der Index auf `main` muss sich mit dem Schlüssel des Maintainers oder einem
 vertrauenswürdigen Schlüssel prüfen lassen, bevor etwas darauf signiert wird; jeder Schritt wird gemeldet, im
-Audit-Log festgehalten (Tool `zoo_maintainer`) und lässt sich bis zum letzten Merge abbrechen. gh und git nutzen das
+Audit-Log festgehalten (Tool `zoo_maintainer`) und lässt sich bis zum letzten Merge abbrechen (ein Abbruch nach dem
+Push schließt den eigenen Pull Request der Veröffentlichung und löscht seinen Branch). gh und git nutzen das
 eigene Login der Person; kein Token wird gelesen, gespeichert oder gezeigt, und kein für eine KI erreichbares Modul
 importiert den Code (ein Test sichert das ab). `scripts/community_repo/validate-contribution.yml` ist die
 Workflow-Vorlage für das Community-Repository: Sie läuft bei jedem Pull Request (die Pflichtprüfung von `main`; einer
