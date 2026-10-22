@@ -1619,6 +1619,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **The nightly retrieval evaluation runs again**: the workflow `.github/workflows/retrieval-eval.yml` started the
+  framework on a GitHub runner, which has no system keyring, without saying how the credential vault is kept, so the
+  framework refused to start (exit code 5) every night. The job now sets `LLM_SECRET_STORAGE=ephemeral` (memory
+  only; the evaluation needs no credentials), and a test fails when a workflow step starts the framework without it.
 - **A board whose home folder has a long path can be deployed to**: the device runtime refused a board user's home
   folder longer than 200 characters (and its staging folder and models below 400), so a home on a deep mount point
   stopped the deployment with "not a plain absolute path". The characters are checked as before; the length is now
