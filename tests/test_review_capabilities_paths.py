@@ -56,7 +56,7 @@ def no_docker(monkeypatch):
 # Capabilities: normalize() and check_request() for the shipped Rockchip target
 # ---------------------------------------------------------------------------------------------------------------
 
-# (format, board, what the user typed, canonical type) - every alias spelling of build.sh, rkllm_module.sh and
+# (format, board, what the user typed, canonical type) - every alias spelling of config_module.sh, rkllm_module.sh and
 # rknn_module.sh, in several letter cases, on a board where the canonical type is allowed.
 ALIAS_CASES = [
     ("gguf", "rk3588", "INT8", "Q8_0"), ("gguf", "rk3588", "int8", "Q8_0"), ("gguf", "rk3566", "Q8", "Q8_0"),
@@ -138,7 +138,7 @@ class TestBoardsAndFormats:
 
     @pytest.mark.parametrize("quant", ["w4a16", "W4A16", "w4a16_g32", "w4a16_g128", "int4", "q4_k_m"])
     def test_rkllm_w4a16_without_a_board_is_refused(self, rockchip, quant):
-        # Without a board build.sh builds for rk3588, where w4a16 does not exist (finding 18/27).
+        # Without a board the build is for rk3588, where w4a16 does not exist (finding 18/27).
         problems = rockchip.check_request("rkllm", None, quant)
         assert problems and all("rk3588" in p for p in problems), problems
         assert rockchip.check_request("rkllm", "rk3576", quant) == []
@@ -277,7 +277,7 @@ def _case_arms(block):
 
 def _script_aliases(fmt):
     if fmt == "gguf":
-        arms = _case_arms(_block(_script("build.sh"), "normalize_gguf_type() {", "\n}"))
+        arms = _case_arms(_block(_script("config_module.sh"), "normalize_gguf_type() {", "\n}"))
     elif fmt == "rkllm":
         arms = _case_arms(_block(_script("rkllm_module.sh"), 'case "$Q" in'))
     else:
@@ -287,7 +287,7 @@ def _script_aliases(fmt):
 
 class TestScriptConsistency:
 
-    @pytest.mark.parametrize("script", ["build.sh", "rkllm_module.sh", "rknn_module.sh"])
+    @pytest.mark.parametrize("script", ["config_module.sh", "rkllm_module.sh", "rknn_module.sh"])
     def test_scripts_default_board_is_the_declared_default_board(self, rockchip, script):
         match = re.search(r'BOARD="\$\(echo "\$\{TARGET_BOARD:-([^}]*)\}"', _script(script))
         assert match, f"no TARGET_BOARD default in {script}"
@@ -314,8 +314,10 @@ class TestScriptConsistency:
             assert cap.canonical(pattern) == value, f"{fmt}: the validator does not accept {pattern} ({value})"
 
     def test_rkllm_dispatch_boards_match_the_capabilities(self, rockchip):
-        dispatch = re.search(r'case "\$BOARD" in\s*\n\s*([^)\n]*)\)\s*/app/modules/rkllm_module\.sh', _script("build.sh"))
+        # The config stage refuses other boards; the convert stage hands the request to rkllm_module.sh.
+        dispatch = re.search(r'rkllm\)\s*\n\s*case "\$BOARD" in\s*\n\s*([^)\n]*)\)\s*;;', _script("config_module.sh"))
         assert dispatch
+        assert re.search(r'rkllm\)\s*\n[^;]*\n\s*bash "\$MODULES_DIR/rkllm_module\.sh"', _script("convert_module.sh"))
         assert {p.strip("*") for p in dispatch.group(1).split("|")} == set(rockchip.boards_for("rkllm"))
         platforms = set(re.findall(r'\*(rk\d+)\*\)\s*PLATFORM="(rk\d+)"', _script("rkllm_module.sh")))
         assert {p for p, _ in platforms} == {q for _, q in platforms} == set(rockchip.boards_for("rkllm"))

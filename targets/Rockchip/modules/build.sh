@@ -1,156 +1,239 @@
 #!/bin/bash
-# build.sh - Rockchip build dispatcher (run by BuildEngine inside the target image)
+# build.sh - the stage runner of the Rockchip target (run by the BuildEngine inside the target image as
+# /app/modules/build.sh, and by entrypoint.sh's modes pipeline, source, config, convert and target)
 #
-# Inputs (environment, set by BuildEngine):
-#   MODEL_SOURCE   local HF model directory inside the container (staged by the host)
-#   TARGET_FORMAT  gguf | rkllm | rknn                       (default: gguf)
-#   TARGET_BOARD   rk3588 | rk3576 | rk3566 | ...            (default: rk3588)
-#   QUANTIZATION   e.g. Q4_K_M, IQ4_XS, F16 (gguf) / w4a16, w8a8 (rkllm) / i8, fp16 (rknn)
-#   JOB_TYPE       build | imatrix
-#   USE_IMATRIX / IMATRIX_PATH, DATASET_PATH, MODEL_NAME (optional)
-#   OPTIMIZATION_LEVEL is set as well but not used: the Rockchip conversions have no matching setting.
-# Outputs go to $BUILD_CACHE_DIR/output (mounted from the host).
+# A build is the four modules of this folder, run in this order. Each module's header says which image it runs in,
+# which system the result is for and what its stage does; this runner only runs them (DECISIONS U9).
+#   1. source   source_module.sh   the toolchain sources the image was built from (llama.cpp pin, SDK venvs)
+#   2. config   config_module.sh   checks the request and writes the build plan (build_config.sh in the work folder)
+#   3. convert  convert_module.sh  the model in full precision (a GGUF F16 intermediate) or, through the format
+#                                  helpers rkllm_module.sh (RKLLM) and rknn_module.sh (RKNN), the finished model
+#      rotate   rotate_module.sh   optional hook between convert and target, for a rotation such as SpinQuant or
+#                                  QuaRot (roadmap): it runs only when the target has this file, and none is shipped
+#   4. target   target_module.sh   quantization, build_info.json and the list of results
+# JOB_TYPE=imatrix (the importance matrix of a GGUF build) runs source, config and convert; any other job runs them all.
+# benchmark_module.sh never runs in a build: it would measure this build host's CPU, and a model for a board is
+# measured on the board (llm-cli device runtime verify --bench-model, or Boards > Boards and Devices... > Verify...).
+#
+# Resume. When a stage has really finished, a marker in $BUILD_SCRATCH_DIR/stages/<job>/ records a digest of its
+# inputs and the files it wrote. The inputs are the request (format, board, quantization, model folder and file
+# sizes, model revision and name, context length, importance matrix, calibration dataset, hardware profile), the
+# toolchain (the llama.cpp pin of the image, the SDK paths) and the SHA-256 of every file in modules/ and scripts/.
+# Started again on the same work folder, a stage whose marker has the same digest and whose files are still there is
+# not run again (resumed); every stage after one that runs again runs again. --fresh forgets the markers.
+#
+# Progress. One line per stage, read by the BuildEngine (orchestrator/Core/builder.py, STAGE_LINE):
+#   === Stage 3/4: convert ===                  started
+#   === Stage 3/4: convert done in 41 s ===     finished
+#   === Stage 1/4: source resumed ===           finished in an earlier run with the same inputs
+#   === Stage 3/4: convert failed (exit 1) ===  stopped; the build ends with the stage's exit code
+#
+# Usage: build.sh [--to STAGE] [--fresh] [--input PATH] [--model-name NAME] [--quantization TYPE]
+#                 [--hardware-config FILE]
+#   --to STAGE   run the stages up to STAGE (source, config, convert, rotate or target) and stop there
+#   --fresh      run every stage, also the ones a marker says have finished
+#   --input, --model-name, --quantization, --hardware-config
+#                set MODEL_SOURCE, MODEL_NAME, QUANTIZATION and HARDWARE_CONFIG_FILE (the options of the modules of
+#                version 1.x)
+# The inputs the stages read from the environment are listed in config_module.sh. Results go to
+# $BUILD_CACHE_DIR/output, intermediates to $BUILD_SCRATCH_DIR.
 
 set -euo pipefail
 
-WORK_DIR="${BUILD_CACHE_DIR:-/build-cache}"
-OUTPUT_DIR="${WORK_DIR}/output"
-IMATRIX_DIR="${WORK_DIR}/imatrix"
-# Large intermediates (F16 GGUF) go to the mounted work folder; the image filesystem may be read-only.
-SCRATCH_DIR="${BUILD_SCRATCH_DIR:-$WORK_DIR}"
-mkdir -p "$SCRATCH_DIR"
-
-FORMAT="$(echo "${TARGET_FORMAT:-gguf}" | tr '[:upper:]' '[:lower:]')"
-BOARD="$(echo "${TARGET_BOARD:-rk3588}" | tr '[:upper:]' '[:lower:]')"
-QUANT="${QUANTIZATION:-}"
-JOB_TYPE="${JOB_TYPE:-build}"
-MODEL_SOURCE="${MODEL_SOURCE:-}"
-MODEL_NAME="${MODEL_NAME:-$(basename "${MODEL_SOURCE%/}")}"
-
-LLAMA_BASE="${LLAMA_CPP_PATH:-/usr/src/llama.cpp}"
-CONVERT_SCRIPT="$LLAMA_BASE/convert_hf_to_gguf.py"
-QUANTIZE_BIN="$LLAMA_BASE/build/bin/llama-quantize"
-IMATRIX_BIN="$LLAMA_BASE/build/bin/llama-imatrix"
+TARGET_LABEL="Rockchip"
+MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="$(dirname "$MODULES_DIR")/scripts"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-echo "=== Rockchip Build Dispatcher ==="
-echo "Model:        $MODEL_SOURCE"
-echo "Format:       $FORMAT"
-echo "Board:        $BOARD"
-echo "Quantization: ${QUANT:-<default>}"
-echo "Job:          $JOB_TYPE"
+usage() {
+    echo "Usage: build.sh [--to STAGE] [--fresh] [--input PATH] [--model-name NAME] [--quantization TYPE]"
+    echo "                [--hardware-config FILE]"
+    echo "Runs the stages source, config, convert, (rotate,) target of this target; see the header of build.sh."
+}
 
-[ -n "$MODEL_SOURCE" ] && [ -e "$MODEL_SOURCE" ] || die "MODEL_SOURCE '$MODEL_SOURCE' does not exist in the container."
+value_of() {  # OPTION VALUE...: the option's value, or a refusal when it has none
+    [ $# -ge 2 ] || die "$1 needs a value (build.sh --help lists the options)."
+    printf '%s' "$2"
+}
 
-# --- GGUF helpers ------------------------------------------------------------
-
-# Output types convert_hf_to_gguf.py writes directly.
-GGUF_CONVERT_TYPES=" f32 f16 bf16 q8_0 auto "
-# Types accepted by llama-quantize (llama.cpp v0.6.0).
-GGUF_QUANT_TYPES=" Q4_0 Q4_1 Q5_0 Q5_1 Q8_0 Q2_K Q2_K_S Q3_K_S Q3_K_M Q3_K_L Q4_K_S Q4_K_M Q5_K_S Q5_K_M Q6_K \
-IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS TQ1_0 TQ2_0 MXFP4_MOE "
-# Very low-bit i-quants are unusable without an importance matrix; other i-quants lose quality without one.
-GGUF_NEEDS_IMATRIX=" IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S "
-GGUF_WANTS_IMATRIX=" IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS "
-
-normalize_gguf_type() {
-    local q
-    q="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
-    case "$q" in
-        ""|F16|FP16) echo "F16" ;;
-        BF16) echo "BF16" ;;
-        F32|FP32) echo "F32" ;;
-        INT8|Q8) echo "Q8_0" ;;
-        INT4|Q4) echo "Q4_K_M" ;;
-        Q5) echo "Q5_K_M" ;;
-        *) echo "$q" ;;
+STOP_AT=""
+FRESH=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --to) STOP_AT="$(value_of "$@")"; shift 2 ;;
+        --fresh) FRESH=1; shift ;;
+        --input) MODEL_SOURCE="$(value_of "$@")"; export MODEL_SOURCE; shift 2 ;;
+        --model-name) MODEL_NAME="$(value_of "$@")"; export MODEL_NAME; shift 2 ;;
+        --quantization) QUANTIZATION="$(value_of "$@")"; export QUANTIZATION; shift 2 ;;
+        --hardware-config) HARDWARE_CONFIG_FILE="$(value_of "$@")"; export HARDWARE_CONFIG_FILE; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "Unknown option '$1' (build.sh --help lists the options)." ;;
     esac
-}
+done
 
-convert_to_gguf() {
-    local outtype="$1" outfile="$2"
-    [ -f "$CONVERT_SCRIPT" ] || die "llama.cpp converter not found at $CONVERT_SCRIPT"
-    echo ">> Converting HF -> GGUF ($outtype)..."
-    python3 "$CONVERT_SCRIPT" "$MODEL_SOURCE" --outfile "$outfile" --outtype "$outtype"
-}
+# --- The stages of this job ---------------------------------------------------------------------------------------
 
-build_gguf() {
-    local q f16_file out_file
-    q="$(normalize_gguf_type "$QUANT")"
-    local q_lower
-    q_lower="$(echo "$q" | tr '[:upper:]' '[:lower:]')"
-
-    if [[ "$GGUF_CONVERT_TYPES" == *" $q_lower "* ]]; then
-        convert_to_gguf "$q_lower" "$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf"
-        return
+JOB="build"
+if [ "${JOB_TYPE:-build}" = "imatrix" ]; then
+    JOB="imatrix"
+fi
+STAGES=(source config convert)
+if [ "$JOB" = "build" ]; then
+    if [ -f "$MODULES_DIR/rotate_module.sh" ]; then
+        STAGES+=(rotate)
     fi
-    [[ "$GGUF_QUANT_TYPES" == *" $q "* ]] || die "Unsupported GGUF quantization '$QUANT'. Supported: F16 BF16 F32 Q8_0 and$GGUF_QUANT_TYPES"
-    [ -x "$QUANTIZE_BIN" ] || die "llama-quantize not found at $QUANTIZE_BIN"
-
-    local imatrix_args=()
-    if [[ "${USE_IMATRIX:-0}" == "1" ]]; then
-        [ -f "${IMATRIX_PATH:-}" ] || die "USE_IMATRIX=1 but importance matrix '${IMATRIX_PATH:-}' is missing."
-        imatrix_args=(--imatrix "$IMATRIX_PATH")
-    elif [[ "$GGUF_NEEDS_IMATRIX" == *" $q "* ]]; then
-        die "$q needs an importance matrix; enable IMatrix calibration for this build."
-    elif [[ "$GGUF_WANTS_IMATRIX" == *" $q "* ]]; then
-        echo "WARNING: $q without an importance matrix loses quality; enable IMatrix calibration for better results." >&2
-    fi
-
-    f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
-    out_file="$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf"
-    convert_to_gguf f16 "$f16_file"
-    echo ">> Quantizing -> $q"
-    "$QUANTIZE_BIN" "${imatrix_args[@]}" "$f16_file" "$out_file" "$q"
-    rm -f "$f16_file"
-}
-
-build_imatrix() {
-    local dataset="${DATASET_PATH:-}" f16_file
-    [ -f "$dataset" ] || die "Calibration dataset not found at '$dataset'."
-    [ -x "$IMATRIX_BIN" ] || die "llama-imatrix not found at $IMATRIX_BIN"
-    mkdir -p "$IMATRIX_DIR"
-    f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
-    convert_to_gguf f16 "$f16_file"
-    echo ">> Computing importance matrix..."
-    # -o *.dat keeps the legacy format, which llama-quantize --imatrix accepts.
-    "$IMATRIX_BIN" -m "$f16_file" -f "$dataset" -o "$IMATRIX_DIR/imatrix.dat" --chunks 100
-    rm -f "$f16_file"
-}
-
-# --- Dispatch ----------------------------------------------------------------
-
-if [[ "$JOB_TYPE" == "imatrix" ]]; then
-    build_imatrix
-    echo "Done (imatrix)."
-    exit 0
+    STAGES+=(target)
+fi
+TOTAL=${#STAGES[@]}
+LAST=$TOTAL
+if [ -n "$STOP_AT" ]; then
+    LAST=0
+    for i in "${!STAGES[@]}"; do
+        if [ "${STAGES[$i]}" = "$STOP_AT" ]; then
+            LAST=$((i + 1))
+        fi
+    done
+    [ "$LAST" -gt 0 ] || die "'$STOP_AT' is not a stage of this build (${STAGES[*]})."
 fi
 
-mkdir -p "$OUTPUT_DIR"
+WORK_DIR="${BUILD_SCRATCH_DIR:-${BUILD_CACHE_DIR:-/build-cache}}"
+STAGE_DIR="$WORK_DIR/stages/$JOB"
+mkdir -p "$STAGE_DIR"
+STAGE_RUNNER=1
+export STAGE_RUNNER STAGE_DIR MODULES_DIR
 
-case "$FORMAT" in
-    gguf)
-        build_gguf
-        ;;
-    rkllm)
-        case "$BOARD" in
-            *rk3588*|*rk3576*) /app/modules/rkllm_module.sh ;;
-            *) die "RKLLM needs an RK3588 or RK3576 NPU; board '$BOARD' should use the gguf format (CPU)." ;;
-        esac
-        ;;
-    rknn)
-        /app/modules/rknn_module.sh
-        ;;
-    *)
-        die "Format '$FORMAT' is not supported by the Rockchip target (gguf, rkllm, rknn)."
-        ;;
-esac
+# The stage scripts' one call into the runner: `stage_output FILE` names a file the stage wrote. A resume runs the
+# stage again when such a file is gone or has another size.
+stage_output() { printf '%s\n' "$1" >> "$STAGE_DIR/$STAGE_NAME.outputs"; }
+export -f stage_output
 
-cat > "$OUTPUT_DIR/build_info.json" <<EOF
-{"model": "$MODEL_NAME", "format": "$FORMAT", "board": "$BOARD", "quantization": "${QUANT:-default}", "llama_cpp": "$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)"}
-EOF
+# --- Resume markers -------------------------------------------------------------------------------------------------
 
-echo "=== Artifacts ==="
-ls -la "$OUTPUT_DIR"
-echo "Done."
+file_digest() {
+    if [ -f "$1" ]; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        echo "-"
+    fi
+}
+
+file_size() { wc -c < "$1" | tr -d ' '; }
+
+model_files() {  # every file of the model with its size and modification time
+    local source="${MODEL_SOURCE:-}" f
+    if [ -z "$source" ] || [ ! -e "$source" ]; then
+        echo "model: none"
+        return 0
+    fi
+    { find -L "$source" -type f 2>/dev/null || true; } | LC_ALL=C sort | while IFS= read -r f; do
+        printf 'model: %s %s\n' "${f#"$source"}" "$(stat -L -c '%s %Y' "$f" 2>/dev/null || file_size "$f")"
+    done
+}
+
+inputs_digest() {
+    local f
+    {
+        echo "stage-runner 1, job $JOB"
+        printf 'format=%s board=%s quantization=%s\n' "${TARGET_FORMAT:-}" "${TARGET_BOARD:-}" "${QUANTIZATION:-}"
+        printf 'model=%s name=%s revision=%s\n' "${MODEL_SOURCE:-}" "${MODEL_NAME:-}" "${MODEL_REVISION:-}"
+        printf 'context=%s imatrix=%s %s %s\n' "${MAX_CONTEXT_LENGTH:-}" "${USE_IMATRIX:-}" "${IMATRIX_PATH:-}" \
+            "$(file_digest "${IMATRIX_PATH:-}")"
+        printf 'dataset=%s %s\n' "${DATASET_PATH:-}" "$(file_digest "${DATASET_PATH:-}")"
+        printf 'hardware=%s %s\n' "${HARDWARE_CONFIG_FILE:-}" "$(file_digest "${HARDWARE_CONFIG_FILE:-}")"
+        printf 'llama.cpp=%s %s %s\n' "${LLAMA_CPP_PATH:-}" "$(file_digest "${LLAMA_CPP_PATH:-/usr/src/llama.cpp}/.llama_cpp_tag")" \
+            "$(file_digest "${LLAMA_CPP_PATH:-/usr/src/llama.cpp}/.llama_cpp_commit")"
+        printf 'sdk=%s %s\n' "${RKLLM_PYTHON:-}" "${RKNN_PYTHON:-}"
+        model_files
+        for f in "$MODULES_DIR"/* "$SCRIPTS_DIR"/*; do
+            if [ -f "$f" ]; then
+                printf 'script: %s %s\n' "${f#"$(dirname "$MODULES_DIR")"/}" "$(file_digest "$f")"
+            fi
+        done
+    } | sha256sum | cut -d' ' -f1
+}
+
+marker_matches() {  # STAGE: finished with the same inputs
+    [ -f "$STAGE_DIR/$1.done" ] && [ "$(sed -n 's/^inputs //p' "$STAGE_DIR/$1.done")" = "$DIGEST" ]
+}
+
+outputs_present() {  # STAGE: every file the stage wrote is still there, with the same size
+    local kind size path
+    [ -f "$STAGE_DIR/$1.done" ] || return 1
+    while IFS=' ' read -r kind size path; do
+        if [ "$kind" = "output" ]; then
+            [ -f "$path" ] && [ "$(file_size "$path")" = "$size" ] || return 1
+        fi
+    done < "$STAGE_DIR/$1.done"
+}
+
+write_marker() {  # STAGE: written only after the stage exited 0
+    local stage="$1" f
+    {
+        echo "stage $stage"
+        echo "inputs $DIGEST"
+        echo "finished $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        if [ -f "$STAGE_DIR/$stage.outputs" ]; then
+            LC_ALL=C sort -u "$STAGE_DIR/$stage.outputs" | while IFS= read -r f; do
+                if [ -f "$f" ]; then
+                    echo "output $(file_size "$f") $f"
+                fi
+            done
+        fi
+    } > "$STAGE_DIR/$stage.done.tmp"
+    mv -f "$STAGE_DIR/$stage.done.tmp" "$STAGE_DIR/$stage.done"
+}
+
+# --- Run ------------------------------------------------------------------------------------------------------------
+
+echo "=== Build Started: $TARGET_LABEL (stages: ${STAGES[*]}) ==="
+
+DIGEST="$(inputs_digest)"
+# The first stage to run: the first one without a matching marker, moved back over every finished stage whose files
+# are gone (the stage after it needs them). With every marker matching, the last stage's files decide.
+START=0
+if [ "$FRESH" = "0" ]; then
+    while [ "$START" -lt "$LAST" ] && marker_matches "${STAGES[$START]}"; do
+        START=$((START + 1))
+    done
+    if [ "$START" -eq "$LAST" ] && ! outputs_present "${STAGES[$((LAST - 1))]}"; then
+        START=$((LAST - 1))
+    fi
+    while [ "$START" -gt 0 ] && ! outputs_present "${STAGES[$((START - 1))]}"; do
+        START=$((START - 1))
+    done
+fi
+for i in "${!STAGES[@]}"; do
+    if [ "$i" -ge "$START" ]; then
+        rm -f "$STAGE_DIR/${STAGES[$i]}.done"
+    fi
+done
+
+for i in "${!STAGES[@]}"; do
+    [ "$i" -lt "$LAST" ] || break
+    name="${STAGES[$i]}"
+    number="$((i + 1))/$TOTAL"
+    if [ "$i" -lt "$START" ]; then
+        echo "=== Stage $number: $name resumed ==="
+        continue
+    fi
+    echo "=== Stage $number: $name ==="
+    started=$SECONDS
+    rm -f "$STAGE_DIR/$name.outputs"
+    rc=0
+    STAGE_NAME="$name" bash "$MODULES_DIR/${name}_module.sh" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "=== Stage $number: $name failed (exit $rc) ===" >&2
+        exit "$rc"
+    fi
+    write_marker "$name"
+    echo "=== Stage $number: $name done in $((SECONDS - started)) s ==="
+done
+
+if [ "$LAST" -lt "$TOTAL" ]; then
+    echo "Stopped after the stage ${STAGES[$((LAST - 1))]} (--to)."
+elif [ "$JOB" = "imatrix" ]; then
+    echo "Done (imatrix)."
+else
+    echo "Done."
+fi

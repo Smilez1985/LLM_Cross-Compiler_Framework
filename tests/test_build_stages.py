@@ -126,7 +126,8 @@ class Image:
             folder.mkdir(parents=True)
         self.model = root / "input-model"
         self.model.mkdir()
-        (self.model / "config.json").write_text("{}")
+        for name, text in (("config.json", "{}"), ("tokenizer.json", "{}"), ("model.safetensors", "weights")):
+            (self.model / name).write_text(text)
         self.log = root / "calls.log"
 
     def env(self, **values) -> dict:
@@ -478,33 +479,74 @@ READ_TODAY = {
     "TARGET_FORMAT", "TARGET_BOARD", "QUANTIZATION", "JOB_TYPE", "MODEL_SOURCE", "MODEL_NAME", "OUTPUT_DIR",
     "USE_IMATRIX", "IMATRIX_PATH", "DATASET_PATH", "MAX_CONTEXT_LENGTH",
 }
-NEW_FOR_THE_STAGE_RUNNER: set = set()
-# Read by stage code that runs only on request (a module started by hand with its own options), never in a build.
-ONLY_ON_REQUEST: set = set()
-BUILD_SCRIPTS = ("build.sh", "rkllm_module.sh", "rknn_module.sh")
+# Read by the stage runner for its resume digest (MODEL_REVISION: the BuildEngine sets it for a Hugging Face model;
+# HARDWARE_CONFIG_FILE: the hardware profile of version 1.x, never set by the BuildEngine) and by the source stage,
+# which says that a llama.cpp repository override has no effect inside a build container.
+NEW_FOR_THE_STAGE_RUNNER = {"MODEL_REVISION", "HARDWARE_CONFIG_FILE", "LLAMA_CPP_REPO_OVERRIDE"}
+# Read only by stage code started by hand with an option (source_module.sh --clone-llama-cpp), never in a build.
+ONLY_ON_REQUEST = {"LLAMA_CPP_COMMIT"}
+# What the runner hands its stages (build.sh): not read from the build container's environment.
+RUNNER_API = {"STAGE_DIR", "STAGE_NAME", "STAGE_RUNNER", "MODULES_DIR"}
+BASH_VARIABLES = {"BASH_SOURCE", "SECONDS", "RANDOM", "LINENO", "FUNCNAME", "PIPESTATUS", "BASH_REMATCH", "PWD", "IFS"}
+BUILD_SCRIPTS = ("build.sh", "source_module.sh", "config_module.sh", "convert_module.sh", "rotate_module.sh",
+                 "target_module.sh", "rkllm_module.sh", "rknn_module.sh")
 
-_ASSIGNED = re.compile(r"(?:^|[\s;()&|])([A-Z][A-Z0-9_]*)(?:\[[^\]]*\])?\+?=", re.MULTILINE)
-_USED = re.compile(r"\$\{?([A-Z][A-Z0-9_]*)")
+_ASSIGNED = re.compile(r"(?:^|(?<=[\s;()&|]))([A-Z][A-Z0-9_]*)(?:\[[^\]]*\])?\+?="
+                       r"|\bdeclare\s+(?:-\w+\s+)*([A-Z][A-Z0-9_]*)|\bfor\s+([A-Z][A-Z0-9_]*)\s+in\b", re.MULTILINE)
+_USED = re.compile(r"(?<!\\)\$\{?([A-Z][A-Z0-9_]*)")  # not an escaped \${...} that a heredoc writes for CMake
+
+
+def _code(script: Path) -> str:
+    return "\n".join(line for line in script.read_text(encoding="utf-8").splitlines()
+                     if not line.lstrip().startswith("#"))
+
+
+def _assigned(text: str) -> set:
+    return {name for match in _ASSIGNED.finditer(text) for name in match.groups() if name}
 
 
 def environment_reads(scripts) -> set:
-    """The variables a set of scripts reads from the environment: every $NAME the scripts never assign themselves,
-    every ${NAME:-...} of such a name, and every name whose assignment reads its own value (NAME="${NAME:-x}",
-    PYTHONPATH="a${PYTHONPATH:+:$PYTHONPATH}")."""
-    texts = ["\n".join(line for line in s.read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#"))
-             for s in scripts]
-    assigned = {name for text in texts for name in _ASSIGNED.findall(text)}
-    assigned |= {name for text in texts for name in re.findall(r"\bfor\s+([A-Z][A-Z0-9_]*)\s+in\b", text)}
-    used = {name for text in texts for name in _USED.findall(text)}
-    own = {name for text in texts for line in text.splitlines() for name in _ASSIGNED.findall(line)
-           if re.search(rf"\b{name}\+?=.*\$\{{?{name}\b", line)}
-    return (used - assigned) | own
+    """The variables a set of scripts reads from the environment. In each script: every $NAME it never assigns, and
+    every name whose assignment reads its own value (NAME="${NAME:-x}", PYTHONPATH="a${PYTHONPATH:+:$PYTHONPATH}").
+    A script that sources a module of the set has that module's names, and one that sources the build plan the plan's
+    (plan_line NAME in config_module.sh); the runner's hand-over to its stages and bash's own variables are no input
+    from outside either."""
+    texts = {script.name: _code(script) for script in scripts}
+    plan = {name for text in texts.values() for name in re.findall(r"\bplan_line\s+([A-Z][A-Z0-9_]*)\b", text)}
+
+    def provided(name, seen=()):
+        text = texts.get(name, "")
+        names = _assigned(text) | (plan if 'source "$BUILD_PLAN"' in text else set())
+        for module in re.findall(r'source "\$MODULES_DIR/([\w.]+)"', text):
+            if module not in seen:
+                names |= provided(module, seen + (name,))
+        return names
+
+    reads = set()
+    for name, text in texts.items():
+        used = set(_USED.findall(text))
+        reads |= used - provided(name)
+        reads |= {n for line in text.splitlines() for n in re.findall(r"\b([A-Z][A-Z0-9_]*)\+?=", line)
+                  if re.search(rf"\b{n}\+?=.*\$\{{?{n}\b", line)}
+    return reads - RUNNER_API - BASH_VARIABLES
 
 
 def stage_scripts(modules: Path):
-    return [modules / name for name in BUILD_SCRIPTS if (modules / name).is_file()]
+    """build.sh and every script a build runs from it: the modules of its stages (STAGES=(...)) and the scripts they
+    name, transitively."""
+    found, todo = [], ["build.sh"]
+    while todo:
+        name = todo.pop(0)
+        if name in found or not (modules / name).is_file():
+            continue
+        found.append(name)
+        text = _code(modules / name)
+        stages = [s for group in re.findall(r"\bSTAGES\+?=\(([^)]*)\)", text) for s in group.split()]
+        todo += [f"{stage}_module.sh" for stage in stages] + re.findall(r"\b(\w+_module\.sh)\b", text)
+    assert set(found) <= set(BUILD_SCRIPTS), found
+    return [modules / name for name in found]
 
 
 def test_the_build_reads_the_same_environment_variables():
     reads = environment_reads(stage_scripts(ROCKCHIP / "modules"))
-    assert reads - NEW_FOR_THE_STAGE_RUNNER == READ_TODAY
+    assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST == READ_TODAY

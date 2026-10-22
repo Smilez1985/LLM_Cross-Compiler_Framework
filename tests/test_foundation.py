@@ -29,7 +29,7 @@ def rockchip():
 class TestCapabilities:
 
     def test_gguf_types_match_the_build_script(self, rockchip):
-        script = (REPO_ROOT / "targets/Rockchip/modules/build.sh").read_text()
+        script = (REPO_ROOT / "targets/Rockchip/modules/config_module.sh").read_text()  # the config stage (U9)
         quant = set(re.search(r'GGUF_QUANT_TYPES=" (.*?) "', script, re.S).group(1).replace("\\\n", " ").split())
         convert = {t.upper() for t in re.search(r'GGUF_CONVERT_TYPES=" (.*?) "', script).group(1).split()} - {"AUTO"}
         needs = set(re.search(r'GGUF_NEEDS_IMATRIX=" (.*?) "', script).group(1).split())
