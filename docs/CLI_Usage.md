@@ -198,7 +198,7 @@ failed). A problem the check afterwards finds for the first time is listed as ne
 | `--json` | Machine-readable output: the keys of `doctor --json` plus `mode`, `summary` and, per finding, `where`, `why`, `repair_id`, `cannot` and `miracle`, and `check_board` (the board, its device ID and the command that checks it) for a board a recorded fact points to; with `--miracle` also `repaired`, `already_gone`, `not_repaired` and `new_problems`. Never asks, never deletes and contacts no board. |
 | `--board NAME` | Check this one trusted board now: its label, device ID or address (one connection to its SSH port, no login). Only with `--oracle`. A name that fits no board, or several, lists the trusted boards and exits with 2. |
 
-Disk space: below 20 GB free is a warning, below 5 GB an error.
+Disk space: one rule for every check (the framework's disk rule): a disk keeps its reserve free, 2 GiB or 2 % of the disk, whichever is larger, after what running builds and downloads have reserved there. Less than the reserve is an error, less than twice the reserve a warning.
 
 ```bash
 llmcf mojo

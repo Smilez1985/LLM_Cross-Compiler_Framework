@@ -127,12 +127,16 @@ class PinnedDownloader:
 
     def ensure_space(self, folder: Path, needed: int, what: str = "the download") -> None:
         """Makes `folder` and raises self.error when `needed` more bytes do not fit there: by the caller's disk rule
-        (`space`), else SPACE_MARGIN."""
+        (`space`; the refusal's reason code, next step, steps and disk checks go with the error), else SPACE_MARGIN."""
         folder.mkdir(parents=True, exist_ok=True)
         if self.space is not None:
             refusal = self.space(folder, int(needed), what)
             if refusal is not None:
-                raise self.error(str(refusal))
+                error = self.error(str(refusal))
+                for name in ("code", "next", "steps", "checks"):
+                    if getattr(refusal, name, None):
+                        setattr(error, name, getattr(refusal, name))
+                raise error
             return
         free = shutil.disk_usage(folder).free
         if free < needed + SPACE_MARGIN:

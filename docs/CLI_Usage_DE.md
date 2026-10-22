@@ -201,7 +201,7 @@ Problem, das die Prüfung danach zum ersten Mal findet, wird als neu genannt. Ei
 | `--json` | Maschinenlesbare Ausgabe: die Schlüssel von `doctor --json` plus `mode`, `summary` und je Befund `where`, `why`, `repair_id`, `cannot` und `miracle`, und `check_board` (das Board, seine Geräte-ID und der Befehl, der es prüft) für ein Board, auf das ein aufgezeichneter Fakt zeigt; mit `--miracle` auch `repaired`, `already_gone`, `not_repaired` und `new_problems`. Fragt nie, löscht nie und nimmt keinen Kontakt zu einem Board auf. |
 | `--board NAME` | Dieses eine vertraute Board sofort prüfen: seine Bezeichnung, Geräte-ID oder Adresse (eine Verbindung zu seinem SSH-Port, keine Anmeldung). Nur mit `--oracle`. Ein Name, der zu keinem oder zu mehreren Boards passt, listet die vertrauten Boards auf und endet mit 2. |
 
-Speicherplatz: Unter 20 GB frei gibt es eine Warnung, unter 5 GB einen Fehler.
+Speicherplatz: Eine Regel für jede Prüfung (die Speicherplatz-Regel des Frameworks): Eine Festplatte behält ihre Reserve frei, 2 GiB oder 2 % der Festplatte, je nachdem, was größer ist, nach dem, was laufende Builds und Downloads dort reserviert haben. Weniger als die Reserve ist ein Fehler, weniger als die doppelte Reserve eine Warnung.
 
 ```bash
 llmcf mojo

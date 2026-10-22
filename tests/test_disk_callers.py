@@ -1,16 +1,19 @@
 """The free-space checks outside the build engine (consolidation chain c3-disk-callers, finding 5).
 
-Characterization first: these tests pin each check's margin and verdict text as it is before the checks delegate to
-Core/disk_plan.py, and they stay green after the delegation (each margin becomes an explicit parameter there).
+Characterization first: these tests pinned each check's margin and verdict text before the checks delegated to
+Core/disk_plan.py, and stayed green through the delegation (each margin an explicit parameter there).
 - hf_hub.disk_check: reserve_for (2 GiB or 2 %; 20 GiB or 10 % for a standing approval), what other calls reserved
   (the ledger, else this process's downloads), the nearest existing folder's disk, an unreadable disk raises.
-- PinnedDownloader.ensure_space (the local runtime's and the community zoo's downloads): 256 MiB beside the download.
-- the bench sandbox's private copy: 512 MiB; the knowledge-base conversion: 512 MiB left free afterwards.
-- the knowledge snapshot export: no margin at all.
-- Mojo's disk check: 5 and 20 "GB", which are binary values (Core/mojo/findings.GB).
+- PinnedDownloader.ensure_space without a disk rule of its caller: 256 MiB beside the download.
 - the self-healing diagnosis and the AI's disk fact: below reserve_for is "full".
 - the saved model: a rename on the same disk (artifact_output._device), a copy otherwise.
 Also: an AI reads labels, never paths, and the disk_usage test seams the suite relies on keep working.
+
+Then the maintainer's decision A4 (one disk rule for every free-space check) changed these on purpose, and their
+tests here pin the new rule: the local runtime's and the community zoo's downloads (256 MiB before), the bench
+sandbox's private copy and the knowledge-base conversion (512 MiB before), the knowledge snapshot export (no margin
+before) and Mojo's disk check (5 and 20 binary GB before) keep the reserve free beside what running builds and
+downloads reserved. tests/test_disk_rule.py pins the rest of the decision.
 """
 
 import os
@@ -131,13 +134,17 @@ class TestDownloadSpace:
         assert str(e.value) == f"Not enough free disk space in {folder} for the download: 3.0 GiB needed, 3.2 GiB free."
 
     def test_the_runtime_raises_its_own_error_with_what_it_needs_the_space_for(self, tmp_path, monkeypatch):
+        """A4 (decided): the reserve stays free (was 256 MiB); the text names no folder and says what to do."""
         from orchestrator.runtime.llama_server import LocalLLMRuntime, LocalRuntimeError
         from orchestrator.utils import download
         monkeypatch.setattr(download.shutil, "disk_usage", fixed(1 * GIB))
         rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models")
         with pytest.raises(LocalRuntimeError) as e:
             rt._ensure_space(rt.root, 2 * GIB, what="unpacking")
-        assert str(e.value) == f"Not enough free disk space in {rt.root} for unpacking: 2.0 GiB needed, 1.0 GiB free."
+        assert str(e.value) == ("Not enough disk space for unpacking: download disk: 2.1 GB needed, 1.1 GB free, "
+                                "20.0 GB must stay free. Free disk space (old builds, the model cache, the trash), or "
+                                "choose a smaller model.")
+        assert e.value.code == "insufficient_resources" and str(tmp_path) not in str(e.value)
 
     def test_fetch_checks_what_is_still_to_download_next_to_the_part(self, tmp_path, monkeypatch):
         from orchestrator.utils import download
@@ -168,20 +175,20 @@ class TestBenchCopyRoom:
                                       sha256=env.digest, sandbox=True)
         return result, engine
 
-    def test_a_copy_leaves_512_mib(self, sandbox_bench, monkeypatch):
+    def test_a_copy_leaves_the_reserve(self, sandbox_bench, monkeypatch):
+        """A4 (decided): a copy leaves the disk's reserve free (2 % of 1000 GB here; was 512 MiB)."""
         env = sandbox_bench
         size = env.model.stat().st_size
-        assert env.bench.COPY_RESERVE == 512 * MIB
-        result, engine = self.run(env, size + 512 * MIB, monkeypatch)
+        result, engine = self.run(env, size + 20 * GB, monkeypatch)
         assert result.gen_ts == 10.0 and len(engine.runs) == 1
 
     def test_one_byte_less_is_no_room(self, sandbox_bench, monkeypatch):
         env = sandbox_bench
         size = env.model.stat().st_size
         with pytest.raises(env.bench.BenchError) as e:
-            self.run(env, size + 512 * MIB - 1, monkeypatch)
+            self.run(env, size + 20 * GB - 1, monkeypatch)
         assert e.value.code == "insufficient_resources"
-        assert "(about 0.5 GB needed)" in str(e.value), "the copy plus what it leaves, in decimal GB"
+        assert "(about 20.0 GB needed: the copy and the 20.0 GB that must stay free; 20.0 GB free)" in str(e.value)
 
 
 @pytest.fixture
@@ -194,21 +201,21 @@ def sandbox_bench(tmp_path, monkeypatch):
 
 class TestConversionRoom:
 
-    def test_512_mib_stay_free_afterwards(self, tmp_path):
+    def test_the_reserve_stays_free_afterwards(self, tmp_path):
+        """A4 (decided): the disk's reserve stays free (2 GiB on a 50 GB disk; was 512 MiB)."""
         from orchestrator.rag import migration
-        assert migration.FREE_AFTER == 512 * MIB
-        migration._check_room(tmp_path, 4 * GB, disk_usage=fixed(4 * GB + 512 * MIB))
+        migration._check_room(tmp_path, 4 * GB, disk_usage=fixed(4 * GB + 2 * GIB, total=50 * GB))
         with pytest.raises(migration.ConversionFailed) as e:
-            migration._check_room(tmp_path, 4 * GB, disk_usage=fixed(4 * GB + 512 * MIB - 1))
+            migration._check_room(tmp_path, 4 * GB, disk_usage=fixed(4 * GB + 2 * GIB - 1, total=50 * GB))
         assert e.value.code == "disk_space"
         assert str(e.value) == ("Not enough disk space to convert the knowledge base to Qdrant Edge: it needs about "
-                                "4.0 GB beside the old storage and 537 MB left free, 4.5 GB are free. It keeps working "
+                                "4.0 GB beside the old storage and 2.1 GB left free, 6.1 GB are free. It keeps working "
                                 "in the old storage; the conversion is tried again on the next start.")
 
     def test_measured_on_the_nearest_existing_folder_and_unreadable_is_unchecked(self, tmp_path):
         from orchestrator.rag import migration
         seen = []
-        migration._check_room(tmp_path / "not" / "yet", 1, disk_usage=fixed(10 * GB, seen=seen))
+        migration._check_room(tmp_path / "not" / "yet", 1, disk_usage=fixed(30 * GB, seen=seen))
         assert seen == [str(tmp_path)]
 
         def broken(path):
@@ -230,20 +237,29 @@ class TestSnapshotExportRoom:
         target.mkdir()
         return ks, folder, target
 
-    def test_no_margin_exactly_the_bytes_fit(self, tmp_path, monkeypatch):
+    def test_the_copies_and_the_reserve_fit(self, tmp_path, monkeypatch):
+        """A4 (decided): the destination keeps its reserve free too (was no margin)."""
         ks, folder, target = self.snapshot(tmp_path)
         name = ks.list_snapshots(folder)[0].name
-        monkeypatch.setattr(ks.shutil, "disk_usage", lambda p: SimpleNamespace(free=1000))
+        monkeypatch.setattr(ks.shutil, "disk_usage", fixed(2 * GIB + 1000, total=16 * GB))
         (result,) = ks.export_snapshots(folder, [name], target)
         assert result.ok
 
     def test_one_byte_short_is_refused_naming_the_destination(self, tmp_path, monkeypatch):
         ks, folder, target = self.snapshot(tmp_path)
         name = ks.list_snapshots(folder)[0].name
-        monkeypatch.setattr(ks.shutil, "disk_usage", lambda p: SimpleNamespace(free=999))
+        monkeypatch.setattr(ks.shutil, "disk_usage", fixed(2 * GIB + 999, total=16 * GB))
         with pytest.raises(ValueError) as e:
             ks.export_snapshots(folder, [name], target)
-        assert str(e.value) == f"{target} has 0.0 MB free; the export needs 0.0 MB."
+        assert str(e.value) == f"{target} has 2.1 GB free; the export needs 0.0 MB and 2.1 GB must stay free there."
+
+    def test_nothing_to_copy_is_never_refused(self, tmp_path, monkeypatch):
+        ks, folder, target = self.snapshot(tmp_path)
+        snap = ks.list_snapshots(folder)[0]
+        (target / snap.file_name).write_bytes((folder / snap.file_name).read_bytes())   # there already, same bytes
+        monkeypatch.setattr(ks.shutil, "disk_usage", fixed(0, total=16 * GB))
+        (result,) = ks.export_snapshots(folder, [snap.name], target)
+        assert result.ok
 
 
 # --- Mojo's disk check ----------------------------------------------------------------------------------------------
@@ -257,29 +273,41 @@ class TestMojoDisk:
         engine = SimpleNamespace(cache_dir=cache, output_dir=out, build_dir=None)
         return SimpleNamespace(orchestrator=SimpleNamespace(build_engine=engine)), cache, out
 
-    @pytest.mark.parametrize("free_gib, severity", [(4.9, "error"), (5, "warn"), (19.9, "warn"), (20, "ok")])
-    def test_five_and_twenty_binary_gb(self, tmp_path, monkeypatch, free_gib, severity):
+    @pytest.mark.parametrize("free, severity", [(20 * GB - 1, "error"), (20 * GB, "warn"), (40 * GB - 1, "warn"),
+                                                (40 * GB, "ok")])
+    def test_the_reserve_and_twice_the_reserve(self, tmp_path, monkeypatch, free, severity):
+        """A4 (decided): below the reserve (2 % of 1000 GB here) an error, below twice that a warning (were fixed 5
+        and 20 binary GB)."""
         from orchestrator.Core.mojo.checks import disk as mojo_disk
         framework, cache, _out = self.framework(tmp_path)
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(free_gib * GIB)))
+        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(free))
         (finding,) = mojo_disk.check_disk(framework)   # cache and output (not made yet) share a disk: one line
         assert finding.severity.value == severity and finding.code == "disk.cache"
+
+    def test_a_small_disk_keeps_two_gib(self, tmp_path, monkeypatch):
+        from orchestrator.Core.mojo.checks import disk as mojo_disk
+        framework, cache, _out = self.framework(tmp_path)
+        for free, severity in ((2 * GIB - 1, "error"), (2 * GIB, "warn"), (4 * GIB, "ok")):
+            monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(free, total=64 * GB))
+            (finding,) = mojo_disk.check_disk(framework)
+            assert finding.severity.value == severity, free
 
     def test_the_texts(self, tmp_path, monkeypatch):
         from orchestrator.Core.mojo.checks import disk as mojo_disk
         framework, cache, _out = self.framework(tmp_path)
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(4.25 * GIB)))
+        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(4.25 * GB)))
         (error,) = mojo_disk.check_disk(framework)
-        assert error.message == f"Only 4.2 GB free for the cache folder ({cache})."
+        assert error.message == f"The disk of the cache folder ({cache}) has only 4.2 GB free; 20.0 GB must stay free."
         assert error.fix_hint.startswith("Free disk space; large models need 2-3x their size during conversion. ")
         assert error.where == str(cache) and error.fix_tier == 2 and error.cannot == "deletion_list"
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(12.25 * GIB)))
+        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(32.25 * GB)))
         (warn,) = mojo_disk.check_disk(framework)
-        assert warn.message == "12.2 GB free for the cache folder; large models need more."
+        assert warn.message == ("The disk of the cache folder has 32.2 GB free: less than twice the 20.0 GB that must "
+                                "stay free; large models need more.")
         assert warn.fix_hint.startswith("Free disk space before converting models larger than a few GB. ")
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(40.4 * GIB)))
+        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(40.4 * GB)))
         (ok,) = mojo_disk.check_disk(framework)
-        assert ok.message == "40 GB free for cache"
+        assert ok.message == "40.4 GB free for cache"
 
     def test_one_line_per_disk_and_an_unreadable_disk_is_left_out(self, tmp_path, monkeypatch):
         from orchestrator.Core.mojo.checks import disk as mojo_disk
@@ -467,4 +495,4 @@ class TestRoom:
         monkeypatch.setattr(shutil, "disk_usage", fixed(100 * GB))
         rt._ensure_space(tmp_path / "a", 5)
         zoo._downloads().ensure_space(tmp_path / "b", 6)
-        assert asked == [(tmp_path / "a", 5, disk_plan.DOWNLOAD_MARGIN), (tmp_path / "b", 6, disk_plan.DOWNLOAD_MARGIN)]
+        assert asked == [(tmp_path / "a", 5, None), (tmp_path / "b", 6, None)], "the reserve, no margin of their own"

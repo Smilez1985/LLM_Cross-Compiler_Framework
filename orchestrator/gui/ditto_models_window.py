@@ -280,8 +280,10 @@ class LocalModelsWindow(QDialog):
                 self.lbl_busy.setText(self._t("ditto_models.saved", path=str(value)))
             elif isinstance(value, DownloadStopped):   # the .part file stays for a resume
                 self.lbl_busy.setText(self._t("ditto_models.cancelled"))
-            else:
-                self.lbl_busy.setText(self._t("ditto_models.failed", reason=one_line(value)))
+            else:   # a disk that cannot hold the model in the person's language (disk_plan.person_reason)
+                from orchestrator.Core.disk_plan import person_reason
+                reason = person_reason(value, self.lang) if isinstance(value, BaseException) else value
+                self.lbl_busy.setText(self._t("ditto_models.failed", reason=one_line(reason)))
                 self._tell("warning", self.lbl_busy.text())
             self.refresh()
 

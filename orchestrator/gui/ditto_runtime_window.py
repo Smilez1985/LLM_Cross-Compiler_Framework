@@ -395,8 +395,11 @@ class LocalRuntimeWindow(QDialog):
             self.refresh_status()
 
     def _failed(self, error: Any) -> None:
-        """A job's error as the CLI prints it: the message, and the server log's last lines when there are any."""
-        self._box("warning", self._t("ditto_runtime.failed", reason=one_line(str(error))[:800]),
+        """A job's error as the CLI prints it: the message, and the server log's last lines when there are any. A disk
+        that cannot hold the download or build is said in the person's language (disk_plan.person_reason)."""
+        from orchestrator.Core.disk_plan import person_reason
+        reason = person_reason(error, self.lang) if isinstance(error, BaseException) else str(error)
+        self._box("warning", self._t("ditto_runtime.failed", reason=one_line(reason)[:800]),
                   details=str(getattr(error, "log_tail", "") or ""))
 
     # --- status -----------------------------------------------------------------------------------------------------

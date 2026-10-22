@@ -30,7 +30,7 @@ ALL = LOCAL + BOARD
 def roomy_disk(monkeypatch):
     """The disk of the test machine does not decide."""
     from orchestrator.Core import hf_hub
-    monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed: {
+    monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed, ledger=None: {
         "free": 500 * 10 ** 9, "reserve": 2 * 10 ** 9, "reserved": 0, "needed": needed, "fits": True,
         "fits_standing": True})
 

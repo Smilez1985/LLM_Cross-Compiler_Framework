@@ -29,7 +29,7 @@ paramiko = pytest.importorskip("paramiko")
 def roomy_disk(monkeypatch):
     """The disk of the test machine does not decide: a fitting disk unless a test says otherwise."""
     from orchestrator.Core import hf_hub
-    monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed: {
+    monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed, ledger=None: {
         "free": 500 * 10 ** 9, "reserve": 2 * 10 ** 9, "reserved": 0, "needed": needed, "fits": True,
         "fits_standing": True})
 
@@ -227,7 +227,7 @@ class TestCreatePackage:
     def test_a_disk_that_cannot_hold_twice_the_model_is_refused_before_the_question(self, fw, monkeypatch):
         from orchestrator.Core import hf_hub
         aid = build(fw)
-        monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed: {
+        monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed, ledger=None: {
             "free": 10, "reserve": 5, "reserved": 0, "needed": needed, "fits": False, "fits_standing": False})
         confirm = asking(True)
         with pytest.raises(ToolError) as e:

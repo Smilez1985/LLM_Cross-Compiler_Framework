@@ -497,8 +497,12 @@ class CommunityManager:
         return (Path(state) if state else self.community_dir / ".state") / "community"
 
     def _downloads(self) -> PinnedDownloader:
-        from orchestrator.Core.disk_plan import download_rule
-        return PinnedDownloader(self._session, logger=self.logger, space=download_rule())
+        """The pinned downloader on the one disk rule (A4): the reserve stays free beside what running builds and
+        downloads of any process reserved (the ledger in the per-user folder, when there is one)."""
+        from orchestrator.Core.disk_plan import ReservationLedger, download_rule
+        state = getattr(self.config, "user_state_dir", None)
+        ledger = ReservationLedger(Path(state)) if isinstance(state, (str, Path)) and str(state) else None
+        return PinnedDownloader(self._session, logger=self.logger, space=download_rule(ledger=ledger))
 
     def _install_root(self, kind: str) -> Path:
         return {"target": self.targets_dir, "recipe": self.recipes_dir, "knowledge": self.knowledge_dir}[kind]

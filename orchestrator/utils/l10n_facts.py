@@ -112,6 +112,12 @@ TEXTS = {
         "blocker.gui_not_open": "The framework window is not open.",
         # --- what the person can do ---
         "action.free_disk": "Free disk space (old builds, the model cache, the trash), or choose a smaller model.",
+        # a call the disk cannot hold (Core/disk_plan.person_text: the one disk rule, A4)
+        "disk.no_room": "Not enough disk space: {needed} needed, {free} free, {reserve} must stay free.",
+        "disk.no_room.reserved": "A running build or download has reserved {reserved} on that disk: try again once "
+                                 "it has finished (its reservation ends with it, also when its program has ended), or "
+                                 "free disk space.",
+        "disk.no_room.trash": "The trash holds {trash} on that disk; emptying it ({path:act_file_trash}) frees it.",
         "action.free_snapshots": "Delete or export knowledge snapshots you no longer need "
                                  "({path:act_knowledge_snapshots}), or free space on that disk otherwise.",
         "action.offline_off": "Switch offline mode off ({path:act_ditto_settings}), or use a model already on this "
@@ -295,6 +301,13 @@ TEXTS = {
         # --- was die Person tun kann ---
         "action.free_disk": "Speicherplatz freigeben (alte Builds, den Modell-Cache, den Papierkorb) oder ein "
                             "kleineres Modell wählen.",
+        # ein Aufruf, für den der Speicherplatz nicht reicht (Core/disk_plan.person_text: die eine Regel, A4)
+        "disk.no_room": "Nicht genug Speicherplatz: {needed} nötig, {free} frei, {reserve} müssen frei bleiben.",
+        "disk.no_room.reserved": "Ein laufender Build oder Download hat {reserved} auf dieser Festplatte reserviert: "
+                                 "noch einmal versuchen, sobald er fertig ist (seine Reservierung endet mit ihm, auch "
+                                 "wenn sein Programm beendet wurde), oder Speicherplatz freigeben.",
+        "disk.no_room.trash": "Im Papierkorb liegen {trash} auf dieser Festplatte; ihn zu leeren "
+                              "({path:act_file_trash}) gibt sie frei.",
         "action.free_snapshots": "Wissens-Snapshots, die du nicht mehr brauchst, löschen oder exportieren "
                                  "({path:act_knowledge_snapshots}) oder auf dieser Festplatte anders Platz schaffen.",
         "action.offline_off": "Den Offline-Modus ausschalten ({path:act_ditto_settings}) oder ein Modell nehmen, das "
