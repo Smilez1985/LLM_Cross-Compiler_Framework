@@ -59,7 +59,7 @@ MODULE_TASK = (
     "module: architecture, SDK, a Docker base image, Debian package names, CPU and CMake flags for llama.cpp (kept "
     "as advisory notes: the framework builds llama.cpp with its own recipe from the device probe), "
     "optional setup commands (the source stage runs them once; what they export reaches the later stages) and the "
-    "quantization case block of the convert stage (modules/convert_module.sh). Base image: prefer a Docker Official "
+    "quantization case block of the convert stage. Base image: prefer a Docker Official "
     "Image (for example debian:bookworm-slim or ubuntu:24.04) with the vendor's packages. Any other image is "
     "allowed, for example a vendor's toolchain image on nvcr.io when the vendor ships its toolchain only that way; "
     "then give your reason in base_image_reason. CUDA comes from the framework's pinned redist archives: never propose a prebuilt nvidia/cuda image (that is the person's own opt-in). Write the image as image:tag and never invent a digest: the person "
