@@ -1443,8 +1443,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   DATEI --model-name NAME` schreibt das F16-GGUF nach DATEI, `target_module.sh --input DATEI.gguf --quantization TYP
   --model-name NAME` quantisiert dieses GGUF, ohne es erneut zu konvertieren, und behält es (Vorgaben aus 1.x: Q4_K_M
   und der Name der Datei), und `config_module.sh --hardware-config DATEI` schreibt Toolchain und Plan ohne Modell; ein
-  Pfad als Option wird absolut gemacht. Die Prüfsumme zum Fortsetzen umfasst auch den Ausgabeordner und das
-  Hardware-Profil, das die Stufe config liest, wenn keins genannt ist, und eine verspätete Stufenzeile eines fertigen
+  Pfad als Option wird absolut gemacht. Die Stufe config liest die Datei, die die Hardware-Probe auf dem Board
+  schreibt (ihre Schlüssel `ARCH` und `CPU_MODEL`; die Namen aus 1.x, `ARCHITECTURE_FULL` und `CPU_MODEL_NAME`, gehen
+  weiter vor): Eine echte Probe-Datei bekam die allgemeinen ARMv8-A-Flags und eine für x86_64 die
+  aarch64-Cross-Compiler, weil die Stufe nur die Namen aus 1.x las. Jetzt bekommt ein Cortex-A55, A72 (RK3576) oder
+  A76 seine CPU-Flags, ein x86_64-Profil seine GGML-Flags für AVX2 und AVX512, und ein System, für das das Image keinen
+  Compiler hat (ein 32-Bit-System auf einem Board schreibt `ARCH=armv7`), wird abgelehnt, bevor etwas geplant ist,
+  statt Programme zu bekommen, die dort nicht laufen. Die Prüfsumme zum Fortsetzen umfasst auch den Ausgabeordner
+  und das Hardware-Profil, das die Stufe config liest, wenn keins genannt ist, und eine verspätete Stufenzeile eines fertigen
   Containers nimmt dem Build seinen nächsten Schritt nicht mehr weg.
 - **Neue Targets bekommen funktionierende Stufenmodule, und die Entrypoint-Modi führen den Stage-Runner aus.** Das
   `build.sh` der Vorlage ist derselbe Runner wie der von Rockchip (ein Test hält sie gleich), und ihre vier

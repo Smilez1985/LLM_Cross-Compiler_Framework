@@ -1269,8 +1269,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   writes the F16 GGUF to FILE, `target_module.sh --input FILE.gguf --quantization TYPE --model-name NAME` quantizes
   that GGUF without converting it again and keeps it (1.x defaults Q4_K_M and the file's name), and
   `config_module.sh --hardware-config FILE` writes the toolchain and the plan without a model; a path given as an
-  option is made absolute. The resume digest also covers the output folder and the hardware profile that the
-  config stage reads when none is named, and a late stage line of a finished container no longer takes back the
+  option is made absolute. The config stage reads the file the hardware probe writes on the board (its `ARCH` and
+  `CPU_MODEL`; the 1.x names `ARCHITECTURE_FULL` and `CPU_MODEL_NAME` still come first): a real probe file got the
+  generic ARMv8-A flags and an x86_64 one the aarch64 cross compilers, because the stage read only the 1.x names.
+  Now a Cortex-A55, A72 (RK3576) or A76 gets its CPU flags, an x86_64 profile its AVX2 and AVX512 GGML flags, and a
+  system the image has no compiler for (a 32-bit OS on a board writes `ARCH=armv7`) is refused before anything is
+  planned, instead of getting programs that cannot run there. The resume digest also covers the output folder and
+  the hardware profile that the config stage reads when none is named, and a late stage line of a finished container no longer takes back the
   build's next step.
 - **New targets get working stage modules, and the entrypoint modes run the stage runner.** The template's
   `build.sh` is the same runner as Rockchip's (a test keeps them equal), and its four stage modules take the

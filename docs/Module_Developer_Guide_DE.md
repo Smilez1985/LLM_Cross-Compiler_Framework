@@ -859,7 +859,12 @@ Funktionen aus 1.x sind geblieben:
   Entrypoint-Modus `pipeline`) erzeugt die Stufe config daraus die CMake-Toolchain und die Compiler-Flags für dieses
   Board (die der Vorlage mit den CPU- und CMake-Flags des Wizards), und die Stufe target eines GGUF-Builds
   cross-kompiliert außerdem `llama-cli` und `llama-server` aus den llama.cpp-Quellen des Images und packt sie mit dem
-  Modell, einer Model Card und Hilfsskripten nach `output/packages/`. Ein Build des Frameworks hat kein Profil: Die
+  Modell, einer Model Card und Hilfsskripten nach `output/packages/`. Das Profil ist die Datei, die die Hardware-Probe
+  auf dem Board schreibt ([Abschnitt 11](#11-die-datei-der-hardware-probe)): Die Stufe config von Rockchip nimmt das
+  System aus `ARCH` und die Kerne aus `CPU_MODEL` (Cortex-A55, A72 und A76 bekommen ihre CPU-Flags,
+  `SUPPORTS_NEON`, `SUPPORTS_AVX2` und `SUPPORTS_AVX512` ihre GGML-Flags) und lehnt ein System ab, für das ihr Image
+  keinen Compiler hat (nur aarch64 und x86_64), zum Beispiel `ARCH=armv7` eines 32-Bit-Systems auf einem Board. Ein
+  Build des Frameworks hat kein Profil: Die
   Runtime des Boards wird aus der eigenen Probe des Boards gebaut (`llm-cli device runtime build`), und das
   Board-Paket kommt von `llm-cli deploy package` oder `llm-cli device runtime deploy`.
 - **llama.cpp klonen.** `source_module.sh --clone-llama-cpp` (oder der Entrypoint-Modus `source
