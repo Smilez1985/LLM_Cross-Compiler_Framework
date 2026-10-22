@@ -2463,7 +2463,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `/c/Users/<Name>`), mit dem anderen Trennzeichen, in anderer Groß- und Kleinschreibung (`c:/users/<Name>`) oder mit
   doppelten Backslashes, wie Python einen Pfad zitiert, erreichte er die KI mit dem Kontonamen. `tools_gui._no_home`
   nutzt jetzt das gemeinsame `security.paths.shorten_home` (dasselbe wie die Laufzeit- und Deploy-Tools) vor dem
-  Muster für die Home-Ordner anderer Konten.
+  Muster für die Home-Ordner anderer Konten. Der Fehlerbericht (`utils/telemetry.py`, der Link zum GitHub-Issue)
+  ersetzte nur `os.path.expanduser("~")` Buchstabe für Buchstabe; er ersetzt jetzt jede Schreibweise über dieselben
+  Funktionen aus `security.paths` und behält seine Markierung `~USER`.
 - **Jede Stelle nimmt dieselben SSH-Benutzernamen an**: Das Deployment (`llm-cli deploy run`, **Deploy to Target**
   im Deployment-Tab) und `llm-cli deploy devices add` prüften den Benutzernamen ohne `re.ASCII`, deshalb ließ Pythons
   Groß-/Kleinschreibungs-Faltung ein langes s (`ſ`) oder das Kelvin-Zeichen als `s` und `k` durch, und das `match()`

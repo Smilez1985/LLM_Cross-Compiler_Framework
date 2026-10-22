@@ -122,14 +122,13 @@ class TelemetryManager:
         # 1. API Keys / Tokens
         text = redact_secrets(text)
         
-        # 2. User Paths (Robust)
-        # Replaces /home/username with /home/USER
-        try:
-            home = os.path.expanduser("~")
-            if home and len(home) > 1: # Avoid replacing "/" if home is weird
-                text = text.replace(home, "~USER")
-        except:
-            pass # Fallback if env is broken
+        # 2. This computer's home folder as "~USER", in every spelling a text can name it (orchestrator/security/paths:
+        # HOME, USERPROFILE and Path.home() with their real paths, either separator, a Windows path in any case, and
+        # doubled as Python quotes a Windows path); the one scrub the AI-facing texts use too
+        from orchestrator.security.paths import home_folders, replace_folder, undouble
+        text = undouble(text)
+        for home in home_folders():
+            text = replace_folder(text, home, "~USER")
             
         # Fallback Username check
         username = os.getenv("USERNAME") or os.getenv("USER")
