@@ -13,6 +13,8 @@ and the person's board steps (other_device), the reach rows each writes for Mojo
 opens to the board's SSH port.
 """
 
+import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -319,14 +321,16 @@ class TestDeviceSteps:
 
 # --- characterization: the connections one GUI deploy opens to the board's SSH port ------------------------------
 
-def test_a_gui_deploy_opens_five_connections_to_the_board_s_ssh_port(qapp, manager, board, package, monkeypatch):
+def test_a_gui_deploy_opens_four_connections_to_the_board_s_ssh_port(qapp, manager, board, package, monkeypatch):
     """The Deployment tab's deploy on the fake board of tests/test_board_deploy.py: the key read before the question
-    (gui/host_key.HostKeyCheck), the deploy's port check, the key read of its login and the login, and the key read
-    again for the board's record afterwards."""
+    (gui/host_key.HostKeyCheck), the deploy's port check, the key read of its login and the login. Characterized with
+    five connections; since c2-remote-trust (on purpose) the window hands the key of its question to the deploy, which
+    must reach exactly that key (expect_fingerprint), and records the board with it instead of reading it a fifth time.
+    A worker started without that key (no question before it) still reads it again."""
     from orchestrator.gui import host_key
     from orchestrator.gui.deployment_window import DeploymentWorker
     from orchestrator.runtime.device.trusted import TrustedDevices
-    contacts = []
+    contacts, deploys = [], []
 
     def counted(name, function):
         def call(*args, **kwargs):
@@ -337,19 +341,47 @@ def test_a_gui_deploy_opens_five_connections_to_the_board_s_ssh_port(qapp, manag
     monkeypatch.setattr(ssh_trust, "fetch_host_key", counted("key read", ssh_trust.fetch_host_key))
     monkeypatch.setattr(ssh_trust, "connect", counted("login", ssh_trust.connect))
     monkeypatch.setattr(reasons, "check_port", counted("port check", reasons.check_port))
+    real_deploy = manager.deploy_package
+    monkeypatch.setattr(manager, "deploy_package", lambda *a, **k: deploys.append(k) or real_deploy(*a, **k))
     framework = manager.framework
     framework._components["deployment_manager"] = manager
     state = Path(framework.config.user_state_dir)
-    key, status = host_key.read_host_key(state, BOARD_HOST, 22)
-    assert status == "known" and key is board.key
-    worker = DeploymentWorker(framework, None, "", {}, BOARD_HOST, "radxa", None, port=22, package=package)
-    done = []
-    worker.finished.connect(lambda ok, text: done.append((ok, text)))
-    worker.run()
-    assert done and done[0][0] is True, done
-    assert worker.trusted is not None and TrustedDevices(state).get(worker.trusted.device_id) is not None
-    assert worker.trusted.trusted_via == "gui" and worker.trusted.fingerprint == ssh_trust.fingerprint(board.key)
-    assert contacts == ["key read", "port check", "key read", "login", "key read"]
+    for hand_over in (True, False):
+        contacts.clear()
+        key, status = host_key.read_host_key(state, BOARD_HOST, 22)   # the question's read
+        assert status == "known" and key is board.key
+        worker = DeploymentWorker(framework, None, "", {}, BOARD_HOST, "radxa", None, port=22, package=package,
+                                  key=key if hand_over else None)
+        done = []
+        worker.finished.connect(lambda ok, text: done.append((ok, text)))
+        worker.run()
+        assert done and done[0][0] is True, done
+        assert worker.trusted is not None and TrustedDevices(state).get(worker.trusted.device_id) is not None
+        assert worker.trusted.trusted_via == "gui" and worker.trusted.fingerprint == ssh_trust.fingerprint(board.key)
+        expected = ["key read", "port check", "key read", "login"] + ([] if hand_over else ["key read"])
+        assert contacts == expected, hand_over
+        assert deploys[-1].get("expect_fingerprint") == (ssh_trust.fingerprint(key) if hand_over else None)
+
+
+def test_the_host_key_check_keeps_the_key_of_a_check_that_went_on(qapp, monkeypatch):
+    """HostKeyCheck.key: the key the deploy of the Deployment tab is bound to (None after "No" or a changed key)."""
+    from PySide6.QtWidgets import QWidget
+    from orchestrator.gui import host_key, plain
+    from test_deploy_parity import wait_for
+    key = paramiko.ECDSAKey.generate()
+    status = {"value": "known"}
+    monkeypatch.setattr(host_key, "read_host_key", lambda folder, host, port: (key, status["value"]))
+    monkeypatch.setattr(host_key, "_note", lambda *a: None)
+    monkeypatch.setattr(plain, "_exec", lambda box: plain.QMessageBox.No)
+    framework = SimpleNamespace(config=SimpleNamespace(user_state_dir="unused"))
+    parent = QWidget()
+    check = host_key.HostKeyCheck(parent, framework)
+    answers = []
+    check.start(HOST, 22, answers.append)
+    assert wait_for(qapp, lambda: answers) and answers == [True] and check.key is key
+    status["value"] = "changed"
+    check.start(HOST, 22, answers.append)
+    assert wait_for(qapp, lambda: len(answers) == 2) and answers[1] is False and check.key is None
 
 
 # --- remote/trust.py: the read-only store ----------------------------------------------------------------------------
@@ -460,3 +492,263 @@ class TestParsePublicKey:
         assert e.value.kind == "not_a_key"
         with pytest.raises(KeyTextError):
             parse_public_key(f"ssh-ed25519 {ecdsa.get_base64()}")
+
+
+# --- remote/pairing.py: the person's writers ----------------------------------------------------------------------
+
+class Audit:
+    """An audit log that keeps its rows (or fails when told to)."""
+
+    def __init__(self, fail=False):
+        self.rows, self.fail = [], fail
+
+    def record(self, actor, tool, tier, decision, outcome, arguments=None, approved=None, detail="", extra=None):
+        if self.fail:
+            raise RuntimeError("audit log locked")
+        self.rows.append({"actor": actor, "tool": tool, "outcome": outcome, "arguments": arguments,
+                          "approved": approved, "detail": detail, "extra": extra})
+
+
+def ai_reachable_closure(edges):
+    """Every module an AI can reach through imports (every kind the layering test counts): the tool modules, the MCP
+    server, the language-model layer, Ditto and the device runtime steps the tools call, with one path to each."""
+    roots = [m for m in edges if m.startswith(("orchestrator.tools.", "orchestrator.llm.", "orchestrator.mcp."))
+             or m in ("orchestrator.tools", "orchestrator.llm", "orchestrator.mcp", "orchestrator.mcp_server",
+                      "orchestrator.Core.ditto_manager", "orchestrator.runtime.device.service",
+                      "orchestrator.runtime.bench")]
+    via, stack = {m: None for m in roots}, list(roots)
+    while stack:
+        module = stack.pop()
+        for target in edges.get(module, ()):
+            if target not in via:
+                via[target] = module
+                stack.append(target)
+    return via
+
+
+def path_to(via, module):
+    chain = [module]
+    while via.get(chain[-1]) is not None:
+        chain.append(via[chain[-1]])
+    return " <- ".join(chain)
+
+
+PERSON_ONLY = ("orchestrator.remote.pairing", "orchestrator.runtime.device.person_steps",
+               "orchestrator.runtime.scan_steps")
+
+
+def test_no_module_an_ai_can_reach_imports_the_person_s_trust_writers():
+    """Q5 and decision 2: trusting a key, pairing and replacing a board's key or address are the person's. Nothing an
+    AI can reach (tools/tools_*, the MCP server, Ditto, runtime/device/service.py) imports remote/pairing.py or the
+    person's board and scan steps, at module level, inside a function or by name."""
+    import test_layering
+    via = ai_reachable_closure(test_layering.build_graph().edges())
+    assert "orchestrator.tools.tools_deploy" in via and "orchestrator.runtime.device.service" in via
+    assert "orchestrator.remote.trust" in via, "the read-only store is what the AI side uses"
+    for module in PERSON_ONLY:
+        assert module not in via, path_to(via, module)
+
+
+def test_the_import_guard_bites():
+    edges = {"orchestrator.tools.tools_x": {"orchestrator.Core.helper"},
+             "orchestrator.Core.helper": {"orchestrator.remote.pairing"}}
+    via = ai_reachable_closure(edges)
+    assert "orchestrator.remote.pairing" in via
+    assert path_to(via, "orchestrator.remote.pairing") == ("orchestrator.remote.pairing <- orchestrator.Core.helper "
+                                                          "<- orchestrator.tools.tools_x")
+
+
+class TestTrustPresentedKey:
+
+    def test_the_key_and_its_audit_row_are_written_in_one_step(self, tmp_path):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore, device_id_for
+        key, audit = paramiko.ECDSAKey.generate(), Audit()
+        store = TrustStore(tmp_path / "state")
+        pairing.trust_presented_key(store, Endpoint(HOST, 2222), key, via="cli", audit=audit, actor="cli")
+        assert store.status(Endpoint(HOST, 2222), key) == "known"
+        if sys.platform != "win32":
+            assert store.path.stat().st_mode & 0o077 == 0
+        (row,) = audit.rows
+        fp = ssh_trust.fingerprint(key)
+        assert (row["actor"], row["tool"], row["outcome"], row["approved"]) == ("cli", "host_key_trusted", "ok", True)
+        assert row["arguments"] == {"device_id": device_id_for(fp), "fingerprint": fp,
+                                    "key_type": "ecdsa-sha2-nistp256"}
+        assert row["extra"] == {"confirm_channel": "framework-cli", "answer": "accepted"}
+        assert HOST not in json.dumps(row), "an audit row names the board by its key, never by its address (D0)"
+
+    def test_the_audit_log_is_opened_only_to_write_and_never_fails_the_trust(self, tmp_path):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore
+        store = TrustStore(tmp_path / "state")
+        opened = []
+        for audit in (None, Audit(fail=True), lambda: opened.append("opened") or None,
+                      lambda: (_ for _ in ()).throw(OSError("no keyring"))):
+            key = paramiko.ECDSAKey.generate()
+            pairing.trust_presented_key(store, Endpoint(HOST), key, via="gui", audit=audit)
+            assert store.status(Endpoint(HOST), key) == "known"
+        assert opened == ["opened"]
+
+
+class TestFirstUse:
+
+    def decide(self, tmp_path, status, **kwargs):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import KeyCheck, TrustStore
+        key = paramiko.ECDSAKey.generate()
+        self.calls = getattr(self, "calls", 0) + 1
+        store, audit = TrustStore(tmp_path / f"state{self.calls}"), Audit()   # a fresh known_hosts each time
+        check = KeyCheck.of(Endpoint(HOST), key, status)
+        outcome = pairing.first_use(store, check, via="cli", audit=audit, **kwargs)
+        return outcome, store.status(Endpoint(HOST), key), audit.rows
+
+    def test_known_goes_on_and_changed_is_refused_without_a_question(self, tmp_path):
+        asked = []
+        for status, verdict in (("known", "known"), ("changed", "changed")):
+            outcome, _stored, rows = self.decide(tmp_path, status, ask=asked.append)
+            assert outcome.verdict == verdict and outcome.trusted is (status == "known") and rows == []
+        assert asked == []
+
+    def test_an_unknown_key_needs_the_fingerprint_or_the_person_s_yes(self, tmp_path):
+        outcome, stored, rows = self.decide(tmp_path, "unknown", ask=None)
+        assert (outcome.verdict, stored, rows) == ("declined", "unknown", [])
+        outcome, stored, rows = self.decide(tmp_path, "unknown", ask=lambda check: False)
+        assert (outcome.verdict, stored, rows) == ("declined", "unknown", [])
+        outcome, stored, rows = self.decide(tmp_path, "unknown", ask=lambda check: True)
+        assert (outcome.verdict, stored, len(rows)) == ("trusted", "known", 1) and outcome.trusted
+        outcome, stored, rows = self.decide(tmp_path, "unknown", ask=lambda c: pytest.fail("asked"),
+                                            preset_fingerprint="SHA256:" + "C" * 43)
+        assert (outcome.verdict, stored, rows) == ("mismatch", "unknown", [])
+
+    def test_the_matching_preset_fingerprint_trusts_without_a_question(self, tmp_path, monkeypatch):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import KeyCheck, TrustStore
+        key = paramiko.ECDSAKey.generate()
+        store = TrustStore(tmp_path / "state")
+        check = KeyCheck.of(Endpoint(HOST), key, "unknown")
+        outcome = pairing.first_use(store, check, ask=lambda c: pytest.fail("asked"),
+                                    preset_fingerprint=check.fingerprint, via="cli")
+        assert outcome.verdict == "trusted" and store.status(Endpoint(HOST), key) == "known"
+
+
+def test_pair_installs_the_framework_s_own_key_line(tmp_path, monkeypatch):
+    from orchestrator.remote import pairing
+    seen = []
+    monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line: seen.append((client, line)))
+    pairing.pair("session", tmp_path / "state")
+    ((client, line),) = seen
+    assert client == "session" and line == ssh_trust.client_key(tmp_path / "state")[1]
+    assert ssh_trust.PUBLIC_LINE.fullmatch(line)
+
+
+def test_the_consent_writer_is_the_one_of_pairing():
+    from orchestrator.remote import pairing
+    from orchestrator.runtime.device import person_steps
+    assert person_steps.record_consent is pairing.record_consent
+    with pytest.raises(RuntimeError):
+        pairing.record_consent(None, "device_runtime_systemd", {}, "detail", channel="framework-gui")
+    audit = Audit()
+    pairing.record_consent(audit, "device_runtime_systemd", {"device": "0" * 16}, "detail", channel="framework-gui")
+    assert audit.rows[0]["actor"] == "user" and audit.rows[0]["extra"]["confirm_channel"] == "framework-gui"
+
+
+class TestReplaceKey:
+    """Q5: the person's change of a trusted board's address and host key in the framework's known_hosts."""
+
+    @pytest.fixture
+    def trusted_board(self, tmp_path):
+        from orchestrator.remote.trust import TrustStore
+        state = tmp_path / "state"
+        key = paramiko.ECDSAKey.generate()
+        device = record(state, key)
+        neighbour = paramiko.ECDSAKey.generate()
+        ssh_trust.trust_host_key(state, "192.0.2.99", 22, neighbour)   # another board: never touched
+        return SimpleNamespace(state=state, key=key, device=device, store=TrustStore(state), neighbour=neighbour)
+
+    def lines(self, state):
+        return sorted((state / "known_hosts").read_text().splitlines())
+
+    def test_a_new_address_moves_the_key(self, trusted_board):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        b, audit = trusted_board, Audit()
+        plan = pairing.plan_replacement(b.store, b.device, Endpoint("myboard.local", 2222))
+        assert plan.address_changed and not plan.key_changed and plan.displaced == ""
+        assert plan.old_fingerprint == plan.new_fingerprint == b.device.fingerprint
+        pairing.replace_key(b.store, plan, via="gui", audit=audit, actor="gui")
+        assert b.store.status(Endpoint("myboard.local", 2222), b.key) == "known"
+        assert b.store.status(Endpoint(HOST), b.key) == "unknown", "the old address no longer maps to the board"
+        assert b.store.status(Endpoint("192.0.2.99"), b.neighbour) == "known"
+        (row,) = audit.rows
+        assert row["tool"] == "host_key_replaced" and row["arguments"]["address_changed"] is True
+        assert row["arguments"]["old_device_id"] == row["arguments"]["new_device_id"] == b.device.device_id
+        assert HOST not in json.dumps(row) and "myboard.local" not in json.dumps(row)
+
+    def test_a_new_key_replaces_the_old_one_at_the_same_address(self, trusted_board):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        b, audit = trusted_board, Audit()
+        new = paramiko.ECDSAKey.generate()
+        plan = pairing.plan_replacement(b.store, b.device, None, new)
+        assert plan.key_changed and not plan.address_changed and plan.displaced == ""
+        assert (plan.old_fingerprint, plan.new_fingerprint) == (b.device.fingerprint, ssh_trust.fingerprint(new))
+        assert plan.new_device_id != plan.old_device_id
+        pairing.replace_key(b.store, plan, via="cli", audit=audit)
+        assert b.store.status(Endpoint(HOST), new) == "known" and b.store.status(Endpoint(HOST), b.key) == "changed"
+        assert audit.rows[0]["arguments"]["new_fingerprint"] == ssh_trust.fingerprint(new)
+
+    def test_a_key_of_another_type_leaves_no_old_key_behind(self, trusted_board):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        b = trusted_board
+        new = _ed25519_key()
+        pairing.replace_key(b.store, pairing.plan_replacement(b.store, b.device, None, new), via="cli",
+                            audit=Audit())
+        assert b.store.keys_at(Endpoint(HOST)).keys() == {"ssh-ed25519"}
+
+    def test_a_key_the_new_address_held_is_named_and_replaced(self, trusted_board):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        b = trusted_board
+        plan = pairing.plan_replacement(b.store, b.device, Endpoint("192.0.2.99"))
+        assert plan.displaced == ssh_trust.fingerprint(b.neighbour)
+        pairing.replace_key(b.store, plan, via="gui", audit=Audit())
+        assert b.store.status(Endpoint("192.0.2.99"), b.key) == "known"
+
+    @pytest.mark.parametrize("change, kind", [("nothing", "unchanged"), ("bad address", "address"),
+                                              ("gone", "no_key")])
+    def test_what_cannot_be_planned(self, trusted_board, change, kind):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        b = trusted_board
+        target = {"nothing": None, "bad address": Endpoint("-oProxyCommand=x"), "gone": None}[change]
+        if change == "gone":
+            (b.state / "known_hosts").write_text("")
+            target = Endpoint("192.0.2.98")
+        with pytest.raises(pairing.KeyReplaceError) as e:
+            pairing.plan_replacement(b.store, b.device, target)
+        assert e.value.kind == kind
+
+    @pytest.mark.parametrize("audit", [None, Audit(fail=True)], ids=["no audit log", "audit log fails"])
+    def test_without_its_audit_row_nothing_changes(self, trusted_board, audit):
+        from orchestrator.remote import pairing
+        b = trusted_board
+        before = self.lines(b.state)
+        plan = pairing.plan_replacement(b.store, b.device, None, paramiko.ECDSAKey.generate())
+        with pytest.raises(pairing.KeyReplaceError) as e:
+            pairing.replace_key(b.store, plan, via="gui", audit=audit)
+        assert e.value.kind == "audit" and self.lines(b.state) == before
+
+    def test_a_known_hosts_changed_since_the_plan_is_refused(self, trusted_board):
+        from orchestrator.remote import pairing
+        b, audit = trusted_board, Audit()
+        plan = pairing.plan_replacement(b.store, b.device, None, paramiko.ECDSAKey.generate())
+        ssh_trust.trust_host_key(b.state, HOST, 22, paramiko.ECDSAKey.generate())   # another writer meanwhile
+        before = self.lines(b.state)
+        with pytest.raises(pairing.KeyReplaceError) as e:
+            pairing.replace_key(b.store, plan, via="gui", audit=audit)
+        assert e.value.kind == "stale" and self.lines(b.state) == before and audit.rows == []

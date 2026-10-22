@@ -82,6 +82,9 @@ def test_no_ai_reachable_code_imports_the_persons_board_steps():
         for file in ([path] if path.is_file() else sorted(path.rglob("*.py"))):
             text = file.read_text(encoding="utf-8")
             assert "person_steps" not in text, f"{file.relative_to(ROOT)} reaches the person's board steps"
+            # the person's writers of a board's trust (remote/pairing.py: trust, pair, Q5's key change, consents)
+            assert "remote.pairing" not in text and "import pairing" not in text and "pairing import" not in text, \
+                f"{file.relative_to(ROOT)} reaches the person's trust writers"
     tree = ast.parse((ROOT / "orchestrator/runtime/device/steps.py").read_text(encoding="utf-8"))
     names = {getattr(n.func, "attr", getattr(n.func, "id", "")) for n in ast.walk(tree) if isinstance(n, ast.Call)}
     assert not names & (WRITERS | {"remove_older_builds", "remove", "connect"})

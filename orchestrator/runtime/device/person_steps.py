@@ -214,13 +214,9 @@ def boards_overview(state_dir: Path) -> List[Dict[str, Any]]:
 
 # --- deploy settings (device settings) --------------------------------------------------------------------------
 
-def record_consent(audit: Any, tool: str, arguments: Dict[str, Any], detail: str, *, channel: str) -> None:
-    """Writes a person's consent to the audit log (actor "user"); RuntimeError when it cannot be written: without its
-    record there is no consent, and the caller changes nothing."""
-    if audit is None or not callable(getattr(audit, "record", None)):
-        raise RuntimeError("no audit log")
-    audit.record("user", tool, "external", "ask", "ok", arguments=arguments, approved=True, detail=detail,
-                 extra={"answer": "accepted", "confirm_channel": channel})
+# A person's consent in the audit log (actor "user"; RuntimeError when it cannot be written: without its record there
+# is no consent, and the caller changes nothing): the one writer of orchestrator/remote/pairing.py.
+from orchestrator.remote.pairing import record_consent  # noqa: E402 - kept under this module's name
 
 
 def load_settings(store: Any, device_id: str):
@@ -330,8 +326,9 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
     if on_client is not None:
         on_client(client)
     if password:
+        from orchestrator.remote import pairing
         try:
-            ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
+            pairing.pair(client, state_dir)
         except ssh_trust.HostKeyError as e:
             client.close()
             raise BoardStepError(str(e), "key_install", error=e) from None
@@ -340,12 +337,13 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
 
 
 def remember_board(state_dir: Path, host: str, port: int, user: str, key: Any, *, via: str, audit: Any,
-                   actor: str):
-    """After a login to a stored board with the framework's key (a deploy; a verify only checks): its trusted record,
-    so AI tools may name it (each deploy is still confirmed by the person). Never fails the caller's work."""
+                   actor: str, label: Optional[str] = None):
+    """After a login to a board with the framework's key (a deploy; a verify only checks) whose host key `key` the
+    person trusted: its trusted record, so AI tools may name it (each deploy is still confirmed by the person). `label`
+    None keeps the board's name. Never fails the caller's work."""
     from orchestrator.runtime.device.trusted import record_trusted_device
     return record_trusted_device(Path(state_dir), host, port, user, key, via=via, paired=True, audit=audit,
-                                 actor=actor)
+                                 actor=actor, label=label)
 
 
 # --- older builds on the board (device runtime prune --on-device) ------------------------------------------------
