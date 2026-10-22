@@ -128,20 +128,22 @@ def check_host_key(state_dir: Path, host: str, port: int, key) -> str:
 class KeyCheck:
     """What the board at `endpoint` presents (`key`) against the framework's known_hosts: `status` known, unknown or
     changed. `expected` is the fingerprint the caller was shown (or the record holds), `expected_device` the device ID
-    the caller means ("" when none was given)."""
+    the caller means (None when it means none; a device ID that was given is always compared, so an empty one never
+    matches, as the person's board steps compared it before)."""
     endpoint: Endpoint
     key: Any
     status: str
     fingerprint: str
     expected: str = ""
-    expected_device: str = ""
+    expected_device: Optional[str] = None
 
     @classmethod
     def of(cls, endpoint: Endpoint, key: Any, status: str, *, expect_fingerprint: Optional[str] = None,
            expect_device_id: Optional[str] = None) -> "KeyCheck":
         from orchestrator.utils import ssh_trust   # looked up now: tests replace fingerprint there
         return cls(endpoint=endpoint, key=key, status=status, fingerprint=ssh_trust.fingerprint(key),
-                   expected=expect_fingerprint or "", expected_device=expect_device_id or "")
+                   expected=expect_fingerprint or "",
+                   expected_device=None if expect_device_id is None else str(expect_device_id))
 
     @property
     def key_type(self) -> str:
@@ -162,8 +164,8 @@ class KeyCheck:
 
     @property
     def other_device(self) -> bool:
-        """The key belongs to another device than the one the caller means."""
-        return bool(self.expected_device) and self.device_id != self.expected_device
+        """The key belongs to another device than the one the caller means (always when it means "" by mistake)."""
+        return self.expected_device is not None and self.device_id != self.expected_device
 
 
 class TrustStore:
