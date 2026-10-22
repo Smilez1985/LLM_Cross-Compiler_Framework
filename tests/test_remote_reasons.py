@@ -555,6 +555,30 @@ def test_the_detail_names_the_file_never_its_folder():
         == "Access is denied: known_hosts"
 
 
+@pytest.mark.parametrize("folder", ["/home/jroe", "/home/jroe/", "/Users/jroe", "C:\\Users\\jroe", "/usr/home/jroe",
+                                    "/var/home/jroe", "/export/home/jroe"])
+def test_the_detail_never_names_an_account_s_home_folder(folder):
+    """A state folder whose home folder cannot be made (a service account without one): the file name would be the
+    account's name, and the deploy's reason reaches an AI (no host account name, D0). It says which kind of folder."""
+    from orchestrator.remote.reasons import local_detail
+    from orchestrator.remote.session import failed_because
+    error = PermissionError(errno.EACCES, "Permission denied", folder)
+    assert local_detail(error) == "Permission denied: a home folder"
+    assert "jroe" not in failed_because(reasons.LOCAL_PROBLEM, error)
+
+
+def test_the_detail_never_names_the_own_account(monkeypatch):
+    from orchestrator.remote.reasons import local_detail
+    monkeypatch.setenv("HOME", "/srv/accounts/jroe")
+    monkeypatch.setenv("USERPROFILE", "C:\\Accounts\\jroe")
+    monkeypatch.setenv("USER", "jroe")
+    monkeypatch.setenv("USERNAME", "jroe")
+    for path in ("/srv/accounts/jroe", "C:\\Accounts\\jroe", "/opt/jroe"):
+        assert "jroe" not in local_detail(PermissionError(errno.EACCES, "Permission denied", path)), path
+    assert local_detail(PermissionError(errno.EACCES, "Permission denied", "/srv/accounts/jroe/.ssh")) == \
+        "Permission denied: .ssh"
+
+
 @pytest.mark.parametrize("lang", ["en", "de"])
 def test_every_code_has_the_person_s_text_and_the_ai_s_next_step(lang):
     from orchestrator.tools.facts_catalog import BLOCKERS

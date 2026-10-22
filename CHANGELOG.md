@@ -1810,7 +1810,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and German (free disk space, check the state folder and the security software of this computer), the AI's next step
   and Mojo's check of the installation as the catalogue step (`orchestrator/remote/reasons.py` `is_local`,
   `LOCAL_PROBLEM`, `CODES`). It is never recorded with the board. The deploy's reason names the file without its
-  folder; the CLI also prints the error itself. It is no blocker of the delegation rules, so no delegation is outdated.
+  folder, and a home folder or a folder with this computer's account name only by its kind, since that name is an
+  account's name and the reason reaches an AI; the CLI also prints the error itself. It is no blocker of the
+  delegation rules, so no delegation is outdated.
 - **A deploy works on a board whose account uses another login shell**: sshd hands every command to the board
   account's login shell. The deploy's commands (the private folder, the hash checks, the start of the installation
   that runs on its own and the polls of its end) and the installation of the framework key went there as they were,

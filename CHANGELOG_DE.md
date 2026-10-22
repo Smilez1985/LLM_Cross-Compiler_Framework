@@ -2050,7 +2050,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (Speicherplatz freigeben, den Statusordner und die Sicherheitsprogramme dieses Computers prüfen), dem nächsten
   Schritt für die KI und Mojos Prüfung der Installation als Schritt aus dem Katalog (`orchestrator/remote/reasons.py`
   `is_local`, `LOCAL_PROBLEM`, `CODES`). Er wird nie beim Board vermerkt. Der Grund des Deployments nennt die Datei
-  ohne ihren Ordner; die CLI zeigt zusätzlich den Fehler selbst. Er ist keine Sperre der Delegationsregeln, deshalb
+  ohne ihren Ordner, und einen Home-Ordner oder einen Ordner mit dem Kontonamen dieses Computers nur nach seiner Art,
+  denn dieser Name ist der Name eines Kontos und der Grund erreicht eine KI; die CLI zeigt zusätzlich den Fehler
+  selbst. Er ist keine Sperre der Delegationsregeln, deshalb
   veraltet keine Delegation.
 - **Ein Deployment klappt auch auf einem Board, dessen Konto eine andere Login-Shell nutzt**: sshd gibt jeden Befehl
   an die Login-Shell des Kontos auf dem Board. Die Befehle des Deployments (der private Ordner, die Hash-Prüfungen, der
