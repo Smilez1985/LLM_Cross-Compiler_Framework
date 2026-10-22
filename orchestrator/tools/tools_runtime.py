@@ -730,23 +730,17 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     Fact("Host key", f"{device.key_type} {fp}, the key you trusted; read from the device just now")]
 
         def session_hooks():
-            holder: Dict[str, Any] = {}
-            stop = threading.Event()
+            """(on_client, cancel, stop): the one cancel of a board job (remote/session.py CancelToken). on_client
+            holds the board session, so the job's cancel closes it at once (also one handed after the cancel) and ends
+            any wait for the board; stop is the token."""
+            from orchestrator.remote.session import CancelToken
+            stop = CancelToken()
+            return stop.hold, stop.cancel, stop
 
-            def on_client(client):
-                holder["client"] = client
-                if stop.is_set():
-                    client.close()
-
-            def cancel():
-                stop.set()
-                client = holder.get("client")
-                if client is not None:
-                    try:
-                        client.close()
-                    except Exception:  # noqa: BLE001
-                        pass
-            return on_client, cancel, stop
+        def board_events(handle, device):
+            """The board session's events as the job's progress (the board by its label only, D0)."""
+            from orchestrator.remote.text import progress_events
+            return progress_events(handle.progress, device.label)
 
         def probe_facts(inp: DeviceIn, ctx: ToolContext) -> CallFacts:
             from orchestrator.runtime.device import service as dev
@@ -774,6 +768,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 from orchestrator.Core.job_service import JobCancelled
                 handle.progress(None, None, f"probing {device.label}")
                 try:
+                    # the cancel holds the probe's session: closing it ends the probe and any wait for the board
                     out = dev.probe(device, state_dir(), bound["fingerprint"], on_client=on_client)
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set():
@@ -861,7 +856,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     out = dev.deploy(state_dir(), device, profile, settings, bound["fingerprint"], bound["build_id"],
                                      on_client=on_client, cancelled=lambda: stop.is_set() or handle.cancelled,
                                      say=lambda msg: handle.progress(None, None, device_text(msg, users,
-                                                                                             folder_labels())[:200]))
+                                                                                             folder_labels())[:200]),
+                                     on_event=board_events(handle, device))
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set() or handle.cancelled:
                         raise JobCancelled() from None
@@ -963,7 +959,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     handle.progress(None, None, f"checking the runtime on {device.label}")
                     out = dev.benchmark(state_dir(), device, profile, settings, bound["fingerprint"],
                                         allow_untrusted=True, on_client=on_client, consent=consent,
-                                        output_dirs=output_folders())
+                                        output_dirs=output_folders(), on_event=board_events(handle, device))
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set():
                         raise JobCancelled() from None

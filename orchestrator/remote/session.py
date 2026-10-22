@@ -6,11 +6,12 @@ the probe and the on-board benchmark can use the same steps (chain c2-remote-cal
 
 - open(): reads the host key the board presents, checks it against the framework's known_hosts (and against the
   fingerprint the person was shown, `expect_fingerprint`, and the board the caller means, `expect_device_id`), then
-  logs in; `last_check` keeps that KeyCheck (also of a refused login) and `key` the key that passed. Every login after a network drop checks the
-  key again the same way. The credentials are typed: KeyOnly() logs in with the framework's key only (every AI path),
-  OneTimePassword(password) also sends a password the person typed for these logins, and only with it can pair()
-  install the framework's key on the board. An AI path that holds no OneTimePassword cannot pair, not even
-  indirectly.
+  logs in; `last_check` keeps that KeyCheck (also of a refused login) and `key` the key that passed. Every login
+  after a network drop checks the key again the same way. adopt(client, key) takes over a login the caller made
+  itself (the person's scan), so later logins are the session's own. The credentials are typed: KeyOnly() logs
+  in with the framework's key only (every AI path), OneTimePassword(password) also sends a password the person
+  typed for these logins, and only with it can pair() install the framework's key on the board. An AI path that
+  holds no OneTimePassword cannot pair, not even indirectly.
 - run(script): one `sh -c` on the board with a time limit and an output cap (transport.ParamikoTransport.run).
 - private_dir(parent, prefix): a private, unpredictable folder made by mktemp, its answer checked strictly.
 - upload(fh, remote_path, size, sha256): sends an open file as <remote_path>.part in pipelined chunks of
@@ -32,7 +33,8 @@ the probe and the on-board benchmark can use the same steps (chain c2-remote-cal
   this way (runtime/device/remote.py RemoteShell is their facade).
 - attached(client): a session over a client someone else logged in (a stand-in in tests): it runs, uploads and follows
   jobs like any session, but cannot log in again, so a network drop ends it as it always did.
-- CancelToken: one cancel for the whole session; every wait ends at once on it.
+- CancelToken: one cancel for the whole session; every wait ends at once on it. close() ends the session the same
+  way for whoever holds it (the Cancel of a window or a tool job that holds the session with CancelToken.hold).
 - RemoteEvent: what a running session reports (uploading, waiting, back); DeploymentManager.DeployEvent is this
   class. remote/text.py event_text renders it for the person or an AI.
 
@@ -149,6 +151,11 @@ class CancelToken:
     def __call__(self) -> bool:
         return self.cancelled
 
+    def is_set(self) -> bool:
+        """The same as `cancelled`, so the token stands where a threading.Event was the cancel flag (the Boards
+        window, the Deployment tab's worker, the board tools' jobs)."""
+        return self.cancelled
+
     def cancel(self) -> None:
         self._event.set()
         with self._lock:
@@ -252,6 +259,7 @@ class RemoteSession:
         self.last_check: Any = None  # the KeyCheck of the last login (also of one that was refused)
         self.key: Any = None         # the host key that passed the check at the last login
         self.can_relogin = True      # False for attached(): a drop is the end
+        self.ended = False           # close() ended it: a step that runs or waits never logs in again
 
     @classmethod
     def attached(cls, client: Any, *, host: str = "the device", cancel: Optional[CancelToken] = None,
@@ -285,6 +293,8 @@ class RemoteSession:
         from orchestrator.remote import reasons
         from orchestrator.remote.trust import HostKeyChanged, TrustStore
         from orchestrator.utils import ssh_trust
+        if not waiting:
+            self.ended = False   # the owner opens it (again)
         try:
             # The one host-key read and check (remote/trust.py): the key the board presents against the framework's
             # known_hosts and against the fingerprint the person was shown.
@@ -324,6 +334,18 @@ class RemoteSession:
         if self.on_client is not None:
             self.on_client(self.client)
 
+    def adopt(self, client: Any, key: Any = None) -> None:
+        """Takes over `client`, which the caller logged in to this session's board with the host key checked by that
+        login (ssh_trust.connect checks it against the framework's known_hosts): the session's steps run over it, and
+        after a network drop the session logs in again itself, the key checked as at open() and against `key`'s
+        fingerprint (the key of that first login)."""
+        from orchestrator.utils import ssh_trust
+        self.client, self.transport = client, self._factory(client)
+        if key is not None:
+            self.key, self.fingerprint = key, ssh_trust.fingerprint(key)
+            if self.expect_fingerprint is None:
+                self.expect_fingerprint = self.fingerprint
+
     def pair(self) -> bool:
         """Installs the framework's key on the board (its authorized_keys), only with OneTimePassword credentials
         that ask for it; True when it was installed. KeyOnly credentials never reach the key installation."""
@@ -334,6 +356,12 @@ class RemoteSession:
         return True
 
     def close(self) -> None:
+        """Ends the session: its connection closes, and a step that runs or waits for the board ends (Stopped)
+        instead of logging in again. A Cancel that holds the session (CancelToken.hold) ends it this way."""
+        self.ended = True
+        self._disconnect()
+
+    def _disconnect(self) -> None:
         if self.transport is not None:
             self.transport.close()
         elif self.client is not None:
@@ -368,7 +396,7 @@ class RemoteSession:
     def pause(self, seconds: float) -> None:
         """Sleeps, but ends at once on a cancel."""
         end = self._clock() + seconds
-        while not self.cancel.cancelled:
+        while not self.cancel.cancelled and not self.ended:
             left = end - self._clock()
             if left <= 0:
                 return
@@ -385,11 +413,11 @@ class RemoteSession:
         SessionFailure "wait" (with the reason code) after wait_seconds. A login refused for another reason (a changed
         key, a refused password) ends the wait with its own failure; a cancel ends it at once (Stopped)."""
         from orchestrator.remote import reasons
-        self.close()
+        self._disconnect()
         started = self._clock()
         code: Optional[str] = None
         while True:
-            if self.cancel.cancelled:
+            if self.cancel.cancelled or self.ended:
                 raise Stopped()
             elapsed = self._clock() - started
             self.on_event(RemoteEvent("waiting", elapsed=elapsed, limit=self.wait_seconds, step=step))
@@ -402,6 +430,9 @@ class RemoteSession:
                     code = failed.reason  # the SSH server is not up yet: keep waiting
                 else:
                     self.waited += self._clock() - started
+                    if self.ended:   # closed while it logged in again
+                        self._disconnect()
+                        raise Stopped()
                     return
             elapsed = self._clock() - started
             if elapsed >= self.wait_seconds:
@@ -416,7 +447,7 @@ class RemoteSession:
         board gave no answer within the command's time limit (transport.timed_out: while the network is gone the
         connection still stands until TCP gives up, so the time limit notices first). A board that answers with an
         error (a full disk) is no drop, and an attached() session never waits."""
-        if not self.can_relogin or self.transport is None or self.resumed >= MAX_RESUMES:
+        if self.ended or not self.can_relogin or self.transport is None or self.resumed >= MAX_RESUMES:
             return False
         return not self.transport.alive() or timed_out(error)
 
@@ -442,7 +473,7 @@ class RemoteSession:
             except (Stopped, SessionFailure):
                 raise
             except Exception as e:  # noqa: BLE001 - a network drop, or the board's or the connection's own error
-                if self.cancel.cancelled:
+                if self.cancel.cancelled or self.ended:
                     raise Stopped() from None
                 if not self.dropped(e):
                     raise

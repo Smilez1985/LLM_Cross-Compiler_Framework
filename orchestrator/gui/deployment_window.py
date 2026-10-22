@@ -104,23 +104,17 @@ class DeploymentWorker(QThread):
         self.kv_setting = KV_KEEP       # what the board's deploy settings get: None (automatic), a type, or KV_KEEP
         self.device_id = None           # the board's record after a successful deploy
         self.model_name = None          # the GGUF model the package installed (for the benchmark on the board)
-        self._stop = threading.Event()
-        self._client = None
+        # the one cancel of a board step (remote/session.py CancelToken): it holds the deploy's SSH session
+        from orchestrator.remote.session import CancelToken
+        self._stop = CancelToken()
 
     def cancel(self) -> None:
         """Stops the deploy: the wait for the board ends at once, a running upload stops and its session closes."""
-        self._stop.set()
-        client = self._client
-        if client is not None:
-            try:
-                client.close()
-            except Exception:  # noqa: BLE001 - the session is closed anyway
-                pass
+        self._stop.cancel()
 
     def _on_client(self, client) -> None:
-        self._client = client
-        if self._stop.is_set():
-            client.close()
+        """The deploy's SSH session, so Cancel can close it (at once when Cancel came first)."""
+        self._stop.hold(client)
 
     def run(self):
         password, self.password = self.password, None   # the one-time password: used once, never kept

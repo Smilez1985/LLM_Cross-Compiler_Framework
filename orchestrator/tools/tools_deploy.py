@@ -548,22 +548,11 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         if path.name != bound["package"]:
             raise ToolError("The package changed after the person was asked; nothing was deployed.", code="failed",
                             next="Call deploy_to_device again.")
-        session: Dict[str, Any] = {}
-        stop = threading.Event()
-
-        def on_client(client) -> None:
-            session["client"] = client
-            if stop.is_set():
-                client.close()
-
-        def close_session() -> None:
-            stop.set()
-            client = session.get("client")
-            if client is not None:
-                try:
-                    client.close()
-                except Exception:  # noqa: BLE001
-                    pass
+        # the one cancel of a board step (remote/session.py CancelToken): it holds the deploy's SSH session, so the
+        # job's cancel closes it at once (also one handed after the cancel)
+        from orchestrator.remote.session import CancelToken
+        stop = CancelToken()
+        on_client, close_session = stop.hold, stop.cancel
 
         arguments = inp.model_dump(mode="json")
         seen: Dict[str, Any] = {}
@@ -573,18 +562,9 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             handle.progress(None, None, f"deploying to {device.label}")
             from orchestrator.security.paths import device_text
             users = [device.user, bound["user"]]
-            shown: Dict[str, Any] = {}
-
-            def on_event(event) -> None:
-                # the visible state of the deploy (N5), by the device's label only: whole percents of the upload, the
-                # wait for a board whose network dropped
-                text = event_text(event, device.label)
-                key = (text if event.kind != "uploading" else
-                       f"up {event.done * 100 // max(event.total, 1)}")
-                if shown.get("last") != key:
-                    shown["last"] = key
-                    handle.progress(event.done if event.kind == "uploading" else None,
-                                    event.total if event.kind == "uploading" else None, text)
+            # the visible state of the deploy (N5), by the device's label only: whole percents of the upload, the
+            # wait for a board whose network dropped
+            on_event = remote_text.progress_events(handle.progress, device.label)
 
             try:
                 result = manager().deploy_package(path, bound["host"], bound["user"], port=int(bound["port"]),

@@ -410,56 +410,64 @@ def board_address(store: Any, device_id: str) -> Tuple[str, int]:
 
 def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: str,
                    password: Optional[str] = None, *, step: str = "",
-                   on_client: Optional[Callable[[Any], None]] = None) -> Tuple[Any, Any]:
-    """(SSH client, host key) of the stored board `device_id` at host:port as `user`. Its host key must be the trusted
-    one the board was probed with (the device ID derives from it), so a step never reaches another machine at the same
-    address. A `password` is used once to install the framework's key and is never stored. `step` names the contact
-    for Mojo's record of the board (W1). The caller closes the client (`on_client` gets it at once, so a Cancel can
-    close it)."""
+                   on_client: Optional[Callable[[Any], None]] = None, cancel: Any = None,
+                   on_event: Optional[Callable[[Any], None]] = None) -> Tuple[Any, Any]:
+    """(board session, host key) of the stored board `device_id` at host:port as `user`: the logged-in RemoteSession
+    (orchestrator/remote/session.py; RemoteShell runs the steps over it). Its host key must be the trusted one the
+    board was probed with (the device ID derives from it), at this login and at every login after a network drop, so a
+    step never reaches another machine at the same address; while the board's network is gone the session waits for
+    it (N5; `on_event` gets its events, `cancel`, a session.CancelToken, ends the wait at once). A `password` is the
+    person's one-time password (OneTimePassword credentials: used for this session's logins only, never stored) and
+    installs the framework's key once. `step` names the contact for Mojo's record of the board (W1). The caller closes
+    the session (`on_client` gets it at once, so a Cancel can close it)."""
     from orchestrator.remote.address import Endpoint
-    from orchestrator.remote.trust import TrustStore
+    from orchestrator.remote.session import KeyOnly, OneTimePassword, RemoteSession, SessionFailure, Stopped
     from orchestrator.runtime.device import reasons
     from orchestrator.utils import ssh_trust
     state_dir = Path(state_dir)
     _need_paramiko()
+    credentials = OneTimePassword(password) if password else KeyOnly()
+    # the board this step means is always compared: a missing device ID matches no key (as before)
+    session = RemoteSession(Endpoint(host, port), user, state_dir, credentials=credentials,
+                            expect_device_id=str(device_id or ""), cancel=cancel, on_event=on_event)
     try:
-        # the board this step means is always compared: a missing device ID matches no key (as before)
-        check = TrustStore(state_dir).check(Endpoint(host, port), expect_device_id=str(device_id or ""))
-    except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
-        raise unreachable_error(e, host, port, state_dir=state_dir, device_id=device_id, step=step) from None
-    key = check.key
-    if check.status == "changed":
-        _note(state_dir, device_id, step, reasons.HOST_KEY_CHANGED)
-        raise BoardStepError(str(ssh_trust.HostKeyChanged(host, port)), "host_key_changed",
-                             reason=reasons.HOST_KEY_CHANGED)
-    if not check.known:
-        raise BoardStepError(f"{host}:{port} is not trusted yet: probe it first with llm-cli scan --device {host} "
-                             "--user USER.", "not_trusted")
-    if check.other_device:
-        raise BoardStepError(f"{host}:{port} answers with the host key of another device than {device_id}; probe it "
-                             "again before deploying to it.", "other_device")
-    try:
-        client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
-    except Exception as e:  # authentication, network, a host key that changed meanwhile
-        code = reasons.classify(e)
+        session.open()
+    except Stopped:
+        raise BoardStepError("The contact with the board was cancelled.", "cancelled") from None
+    except SessionFailure as failed:
+        e = failed.error
+        if failed.kind == "key_read":   # unreachable, no SSH server, a broken known_hosts file
+            raise unreachable_error(e, host, port, state_dir=state_dir, device_id=device_id, step=step) from None
+        if failed.kind == "key_changed":
+            _note(state_dir, device_id, step, reasons.HOST_KEY_CHANGED)
+            raise BoardStepError(str(ssh_trust.HostKeyChanged(host, port)), "host_key_changed",
+                                 reason=reasons.HOST_KEY_CHANGED) from None
+        if failed.kind == "not_trusted":
+            raise BoardStepError(f"{host}:{port} is not trusted yet: probe it first with llm-cli scan --device {host} "
+                                 "--user USER.", "not_trusted") from None
+        if failed.kind == "other_device":
+            raise BoardStepError(f"{host}:{port} answers with the host key of another device than {device_id}; probe "
+                                 "it again before deploying to it.", "other_device") from None
+        # the login: authentication, network, a host key that changed meanwhile
+        code = reasons.classify(e) if e is not None else None
         if code not in (None, reasons.AUTH_FAILED):
             raise unreachable_error(e, host, port, state_dir=state_dir, device_id=device_id, step=step) from None
         if code == reasons.AUTH_FAILED:
             _note(state_dir, device_id, step, reasons.AUTH_FAILED)
         # none of the four reasons: shown as it is, never relabelled as a refused login
-        raise BoardStepError(f"SSH login to {user}@{host} failed: {e}", "login_failed", reason=code or "",
-                             error=e) from None
+        raise BoardStepError(f"SSH login to {user}@{host} failed: {e if e is not None else failed}", "login_failed",
+                             reason=code or "", error=e) from None
     if on_client is not None:
-        on_client(client)
+        on_client(session)
     if password:
         from orchestrator.remote import pairing
         try:
-            pairing.pair(client, state_dir)
+            pairing.pair(session.client, state_dir)   # the person's writer: the framework's key, installed once
         except ssh_trust.HostKeyError as e:
-            client.close()
+            session.close()
             raise BoardStepError(str(e), "key_install", error=e) from None
     _note(state_dir, device_id, step, "")   # reached and logged in: a recorded problem ends
-    return client, key
+    return session, session.key
 
 
 def remember_board(state_dir: Path, host: str, port: int, user: str, key: Any, *, via: str, audit: Any,

@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label
+from orchestrator.remote.session import CancelToken
 from orchestrator.gui.worker_relay import WorkerQuestion, ask_from_worker
 from orchestrator.utils.localization import current_language, ui_text
 
@@ -160,8 +161,8 @@ class BoardsWindow(QDialog):
         self._progress_token: Optional[object] = None
         self._done: Optional[Callable[[Any], None]] = None
         self._failed: Optional[Callable[[BaseException], bool]] = None
-        self._cancel = threading.Event()
-        self._client: Any = None
+        # the one cancel of the running step (remote/session.py CancelToken): it holds the step's board session
+        self._cancel = CancelToken()
         self._worker: Optional[threading.Thread] = None
         from orchestrator.gui.worker_relay import worker_relay
         worker_relay().done.connect(self._finished, Qt.QueuedConnection)
@@ -289,8 +290,7 @@ class BoardsWindow(QDialog):
         from orchestrator.gui.worker_relay import worker_relay
         token, progress, relay = object(), object(), worker_relay()
         self._token, self._progress_token, self._done, self._failed = token, progress, done, failed
-        self._cancel = threading.Event()
-        self._client = None
+        self._cancel = CancelToken()
 
         def run() -> None:
             try:
@@ -323,25 +323,24 @@ class BoardsWindow(QDialog):
         return ask_from_worker(token, title, text, stop=self._check_cancel)
 
     def _keep_client(self, client: Any) -> None:
-        """The SSH session of the running step, so Cancel can close it."""
-        self._client = client
-        if self._cancel.is_set():
-            client.close()
+        """The board session of the running step, so Cancel can close it (at once when Cancel came first); closing it
+        also ends a wait for the board."""
+        self._cancel.hold(client)
+
+    def _board_lines(self, host: str) -> Callable[[Any], None]:
+        """The running step's wait for the board (N5) as lines of the output pane: when the network drops and when
+        the board answers again (remote/text.py wait_lines, in the window's language)."""
+        from orchestrator.remote.text import wait_lines
+        return wait_lines(self._progress, host, self.lang)
 
     def _check_cancel(self) -> None:
         if self._cancel.is_set():
             raise Cancelled()
 
     def _on_cancel(self) -> None:
-        self._cancel.set()
+        self._cancel.cancel()   # closes the step's board session: a running command and a wait for the board end
         self.btn_cancel.setEnabled(False)
         self.lbl_busy.setText(self._t("boards.cancelling"))
-        client = self._client
-        if client is not None:
-            try:
-                client.close()
-            except Exception:  # noqa: BLE001 - the session is gone anyway
-                pass
 
     def _finished(self, token: object, result: Any) -> None:
         if token is not None and token is self._progress_token and isinstance(result, str):
@@ -354,7 +353,6 @@ class BoardsWindow(QDialog):
             return
         done, failed, cancelled = self._done, self._failed, self._cancel.is_set()
         self._token = self._progress_token = self._done = self._failed = None
-        self._client = None
         self.lbl_busy.setText("")
         self.btn_cancel.setVisible(False)
         self._update_buttons()
@@ -1110,7 +1108,8 @@ class BoardsWindow(QDialog):
 
         def read():
             client, _key = person_steps.connect_stored(state, device_id, host, port, user, None,
-                                                       on_client=self._keep_client)
+                                                       on_client=self._keep_client, cancel=self._cancel,
+                                                       on_event=self._board_lines(host))
             try:
                 self._check_cancel()
                 return person_steps.list_board_builds(RemoteShell(client), state, device_id)
@@ -1141,7 +1140,8 @@ class BoardsWindow(QDialog):
 
         def remove():
             client, _key = person_steps.connect_stored(state, device_id, host, port, user, None,
-                                                       on_client=self._keep_client)
+                                                       on_client=self._keep_client, cancel=self._cancel,
+                                                       on_event=self._board_lines(host))
             try:
                 self._check_cancel()
                 return person_steps.remove_board_builds(RemoteShell(client), accepted, prune, device_id, audit)
@@ -1253,7 +1253,8 @@ class BoardsWindow(QDialog):
 
         def work(plan: Any, build: Any, devices: Any, packaged: Any):
             client, key = person_steps.connect_stored(state, device_id, host, port, settings.ssh_user, password,
-                                                      step="runtime_deploy", on_client=self._keep_client)
+                                                      step="runtime_deploy", on_client=self._keep_client,
+                                                      cancel=self._cancel, on_event=self._board_lines(host))
             try:
                 person_steps.remember_board(state, host, port, settings.ssh_user, key, via="gui", audit=audit,
                                             actor="gui")
@@ -1369,7 +1370,8 @@ class BoardsWindow(QDialog):
         def work():
             plan_verify = steps.deployed_verify_plan(state, record, lambda: steps.plan_runtime(profile))
             client, _key = person_steps.connect_stored(state, device_id, host, port, user, None, step="verify",
-                                                       on_client=self._keep_client)
+                                                       on_client=self._keep_client, cancel=self._cancel,
+                                                       on_event=self._board_lines(host))
             try:   # a verify only checks: it never rewrites the board's trust record
                 from orchestrator.runtime.device.remote import RemoteShell, read_facts
                 shell = RemoteShell(client)

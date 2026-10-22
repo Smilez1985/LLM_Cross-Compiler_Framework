@@ -301,8 +301,12 @@ class TestCancelHoldsTheClient:
         pytest.importorskip("PySide6")
         from orchestrator.gui.boards_window import BoardsWindow
         closed = []
-        window = SimpleNamespace(_cancel=__import__("threading").Event(), _client=None)
-        window._cancel.set()
+        # the window's cancel flag: a threading.Event before the move, the one CancelToken since (the stand-in
+        # follows the window; what is pinned, a client handed after the cancel is closed at once, stays)
+        from orchestrator.remote.session import CancelToken
+        flag = CancelToken()
+        flag.cancel()
+        window = SimpleNamespace(_cancel=flag, _client=None)
         BoardsWindow._keep_client(window, SimpleNamespace(close=lambda: closed.append("closed")))
         assert closed == ["closed"]
 

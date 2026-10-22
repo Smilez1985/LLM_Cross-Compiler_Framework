@@ -14,10 +14,13 @@ A board's words and the state of a running deploy as text.
   the board's address, the words of the GUI's Deployment tab and `llmcf deploy run`; for an AI ("ai") in English
   with the board's label only, never its address or account (D0). The CLI adds " (Ctrl+C)" to a wait and escapes
   for its console itself.
+- progress_events(progress, label) and wait_lines(say, place, lang): a board session's on_event for a tool job an AI
+  follows (its progress, the board by its label) and for the person's output pane or console (the first line of a wait
+  and the line when the board answers again).
 - ai_size(n): a size in an AI's English text ("1.23 GB", "45.6 MB", "size unknown").
 """
 
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 OUTPUT_LINES = 100     # lines of a board's output a deploy keeps for its result (the rest is in the log)
 LINE_CHARS = 500
@@ -80,6 +83,41 @@ def event_text(event: Any, place: str, lang: Optional[str] = None, *, audience: 
     return ui_text("device.deploy.installing", lang)
 
 
+def progress_events(progress: Callable[[Optional[int], Optional[int], str], Any],
+                    label: str) -> Callable[[Any], None]:
+    """A board session's on_event for a tool job an AI follows: `progress(done, total, text)` gets the event's AI
+    text (the board by its label only), an upload once per whole percent with its bytes, every other event once per
+    text (the deploy_to_device job's progress, now shared by the board tools)."""
+    shown: dict = {}
+
+    def on_event(event: Any) -> None:
+        text = event_text(event, label, audience="ai")
+        key = text if event.kind != "uploading" else f"up {event.done * 100 // max(event.total, 1)}"
+        if shown.get("last") != key:
+            shown["last"] = key
+            uploading = event.kind == "uploading"
+            progress(event.done if uploading else None, event.total if uploading else None, text)
+    return on_event
+
+
+def wait_lines(say: Callable[[str], Any], place: str, lang: Optional[str] = None) -> Callable[[Any], None]:
+    """A board session's on_event for the person's output pane or console: `say(line)` gets the first line of each
+    wait for the board (in the person's language, `place` the board's address) and the line when it answers again;
+    the upload's progress and the wait's later seconds are left out (the CLI's spinner and the Deployment tab show
+    those themselves)."""
+    seen = {"waiting": False}
+
+    def on_event(event: Any) -> None:
+        if event.kind == "waiting":
+            if not seen["waiting"]:
+                seen["waiting"] = True
+                say(event_text(event, place, lang))
+        elif event.kind == "back":
+            seen["waiting"] = False
+            say(event_text(event, place, lang))
+    return on_event
+
+
 def _ai_event_text(event: Any, label: str) -> str:
     if event.kind == "uploading":
         return f"uploading to {label}: {ai_size(event.done)} of {ai_size(event.total)}"
@@ -99,4 +137,5 @@ def _ai_event_text(event: Any, label: str) -> str:
     return f"installing on {label}"
 
 
-__all__ = ["LINE_CHARS", "OUTPUT_LINES", "ai_size", "event_text", "keep_tail", "one_line"]
+__all__ = ["LINE_CHARS", "OUTPUT_LINES", "ai_size", "event_text", "keep_tail", "one_line", "progress_events",
+           "wait_lines"]
