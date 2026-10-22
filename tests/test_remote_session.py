@@ -65,7 +65,7 @@ def answer(board, needle, reply):
     board.run = on_board
 
 
-# --- the numbers -------------------------------------------------------------------------------------------------------
+# --- the numbers ------------------------------------------------------------------------------------------------
 
 def test_the_waiting_and_upload_numbers():
     assert dmod.DEPLOY_WAIT_SECONDS == 300 and dmod.WAIT_INTERVAL == 5.0 and dmod.MAX_RESUMES == 20

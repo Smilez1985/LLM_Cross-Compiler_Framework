@@ -1803,7 +1803,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **A problem on this computer is no longer "the board does not answer"**: every contact with a board counted an
   error that was none of the four reason codes as `device_host_down`. A full or read-only disk, or no permission on
   the framework's own files (its SSH key, known_hosts), therefore told the person to switch the board on, the deploy
-  stopped waiting for nothing, and the board was recorded as down for Mojo. Such an error now has its own reason,
+  waited for the board in vain, and the board was recorded as down for Mojo. Such an error now has its own reason,
   `local_problem` ("Something on this computer stopped the contact, not the board"), with its next step in English
   and German (free disk space, check the state folder and the security software of this computer), the AI's next step
   and Mojo's check of the installation as the catalogue step (`orchestrator/remote/reasons.py` `is_local`,

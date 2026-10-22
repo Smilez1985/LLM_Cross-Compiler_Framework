@@ -8,11 +8,12 @@ SSH trust for device probing and deployment.
 - Authentication: a framework Ed25519 key, installed on the device once ("pairing") with a password that
   is used for that single connection and never stored.
 
-paramiko is imported on first use (orchestrator/remote/transport.py, decision RG1): importing this module, the deploy
-or the probe code loads no SSH library. The login (connect) and paramiko_quiet live in orchestrator/remote/transport.py;
-the names here delegate, so every caller and every test that patches ssh_trust.connect reaches the one login. `ssh_trust.paramiko` (None without it: what the person steps, the CLI's
-`scan --device` and Mojo ask) and `ssh_trust.TofuPolicy` stay readable under their old names; a test that sets
-`ssh_trust.paramiko = None` makes this module behave as without paramiko, as before.
+paramiko is imported on first use (orchestrator/remote/transport.py, decision RG1): importing this module, the deploy or
+the probe code loads no SSH library. The login (connect) and paramiko_quiet live in orchestrator/remote/transport.py;
+the names here delegate, so every caller and every test that patches ssh_trust.connect reaches the one login.
+`ssh_trust.paramiko` (None without it: what the person steps, the CLI's `scan --device` and Mojo ask) and
+`ssh_trust.TofuPolicy` stay readable under their old names; a test that sets `ssh_trust.paramiko = None` makes this
+module behave as without paramiko, as before.
 """
 
 import base64

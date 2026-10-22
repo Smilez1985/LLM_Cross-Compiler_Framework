@@ -17,12 +17,12 @@ no permission, a read-only disk), or this computer does not allow the connection
 not to blame, so it is never recorded with the board for Mojo (REASONS are the board's four codes; CODES all five).
 
 classify() reads an exception of socket, paramiko or orchestrator.utils.ssh_trust; classify_ssh_output() reads what
-OpenSSH printed. reach_code() is the code every caller records and shows for a failed contact: classify's,
-local_problem for an error about this computer (is_local), device_host_down for any other OSError (the board does
-not answer), "" when it is none of these. check_port() tells host_down from port_closed with one TCP connection to the
-SSH port (no ICMP, which many networks block and which needs extra rights). The codes carry no account, address or path, so they reach an AI as they are (study 6.2 D0). The
-person's texts (person_text) may name the address and the port, never the account; an AI gets the code with AI_NEXT,
-English and without the address.
+OpenSSH printed. reach_code() is the code every caller records and shows for a failed contact: classify's, local_problem
+for an error about this computer (is_local), device_host_down for any other OSError (the board does not answer), "" when
+it is none of these. check_port() tells host_down from port_closed with one TCP connection to the SSH port (no ICMP,
+which many networks block and which needs extra rights). The codes carry no account, address or path, so they reach an
+AI as they are (study 6.2 D0). The person's texts (person_text) may name the address and the port, never the account; an
+AI gets the code with AI_NEXT, English and without the address.
 
 This module moved here from orchestrator/runtime/device/reasons.py (consolidation chain c2-remote-base); that name
 is this module itself, so every old import and every test that patches it reaches the same functions.
@@ -36,7 +36,7 @@ HOST_DOWN = "device_host_down"
 PORT_CLOSED = "device_port_closed"
 AUTH_FAILED = "device_auth_failed"
 HOST_KEY_CHANGED = "device_host_key_changed"
-REASONS = (HOST_DOWN, PORT_CLOSED, AUTH_FAILED, HOST_KEY_CHANGED)   # why the board cannot be reached (recorded for Mojo)
+REASONS = (HOST_DOWN, PORT_CLOSED, AUTH_FAILED, HOST_KEY_CHANGED)   # why the board cannot be reached (Mojo keeps it)
 LOCAL_PROBLEM = "local_problem"   # something on this computer, not the board (never recorded with a board)
 CODES = REASONS + (LOCAL_PROBLEM,)  # every code reach_code gives, each with the person's text and the AI's next step
 # The next step of a local problem in the catalogue (orchestrator/utils/next_steps): Mojo's check of the installation
@@ -210,5 +210,6 @@ def person_text(code: str, lang: Optional[str] = None, *, address: str = "", por
 
 
 __all__ = ["AI_NEXT", "AUTH_FAILED", "CODES", "CONNECT_TIMEOUT", "DROPPED", "HOST_DOWN", "HOST_KEY_CHANGED",
-           "LOCAL_PROBLEM", "LOCAL_STEPS", "PORT_CLOSED", "REASONS", "TOOL_CODES", "check_port", "classify", "classify_ssh_output",
+           "LOCAL_PROBLEM", "LOCAL_STEPS", "PORT_CLOSED", "REASONS", "TOOL_CODES", "check_port", "classify",
+           "classify_ssh_output",
            "is_local", "local_detail", "person_next", "person_text", "person_title", "reach_code"]
