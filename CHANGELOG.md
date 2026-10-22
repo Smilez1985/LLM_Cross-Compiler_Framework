@@ -1619,6 +1619,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **Dependabot no longer proposes another Ubuntu release for the GPU template**: `targets/_template/Dockerfile.gpu`
+  builds on the Ubuntu release its CUDA redist archives and the build-base catalogue are pinned to (decision D6),
+  so a bump to 25.10 broke the tests. `.github/dependabot.yml` ignores Ubuntu release changes (major and minor);
+  a test keeps the rule.
 - **The nightly retrieval evaluation runs again**: the workflow `.github/workflows/retrieval-eval.yml` started the
   framework on a GitHub runner, which has no system keyring, without saying how the credential vault is kept, so the
   framework refused to start (exit code 5) every night. The job now sets `LLM_SECRET_STORAGE=ephemeral` (memory

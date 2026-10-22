@@ -1831,6 +1831,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Dependabot schlägt für die GPU-Vorlage kein anderes Ubuntu-Release mehr vor**:
+  `targets/_template/Dockerfile.gpu` baut auf dem Ubuntu-Release auf, auf das die CUDA-Redist-Archive und der
+  Katalog der Build-Basen festgelegt sind (Entscheidung D6), deshalb brach ein Sprung auf 25.10 die Tests.
+  `.github/dependabot.yml` ignoriert Wechsel des Ubuntu-Releases (major und minor); ein Test hält die Regel fest.
 - **Die nächtliche Retrieval-Evaluation läuft wieder**: Der Workflow `.github/workflows/retrieval-eval.yml` startete
   das Framework auf einem GitHub-Runner, der keinen System-Keyring hat, ohne anzugeben, wie der Schlüsseltresor
   gehalten wird; deshalb verweigerte das Framework jede Nacht den Start (Exit-Code 5). Der Job setzt jetzt

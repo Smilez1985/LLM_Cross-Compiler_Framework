@@ -122,6 +122,16 @@ class TestTheRecipeInTheDockerfiles:
             if folder.is_dir():
                 assert scan_target_folder(folder) == [], folder.name
 
+    def test_dependabot_never_proposes_another_ubuntu_release_for_the_pinned_build_base(self):
+        """The GPU template's Ubuntu release is pinned with the CUDA archives (D6); a Dependabot bump to another
+        release (it proposed 25.10) only breaks that pairing, so the release is never bumped by Dependabot."""
+        import yaml
+        config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+        docker = next(u for u in config["updates"] if u["package-ecosystem"] == "docker")
+        assert "/targets/_template" in docker["directories"]
+        rules = [r for r in docker.get("ignore") or [] if r.get("dependency-name") == "ubuntu"]
+        assert rules and {"version-update:semver-major", "version-update:semver-minor"} <= set(rules[0]["update-types"])
+
     def test_the_gpu_template_takes_cuda_from_the_pinned_redist_archives(self):
         """Decision D6: CUDA from NVIDIA's redist archives pinned through the manifest; the prebuilt development image
         only as a labelled opt-in pinned by digest. Every value comes from configs/llama_runtime.yml."""
