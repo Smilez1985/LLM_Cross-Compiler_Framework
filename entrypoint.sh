@@ -212,6 +212,11 @@ run_module() {
         log_error "Module not found: $module_name"
         exit 1
     fi
+    if [[ "$module_name" == "source" ]] && [[ "${1:-}" == "--clone-llama-cpp" ]]; then
+        # The source setup of version 1.x (clone llama.cpp, needs network): the module itself, never a build stage
+        log_info "Executing Module: source --clone-llama-cpp"
+        exec bash "$module_path" "$@"
+    fi
     log_info "Executing Module: $module_name (the build up to this stage)"
     exec bash "$STAGE_RUNNER_SCRIPT" --to "$module_name" "$@"
 }

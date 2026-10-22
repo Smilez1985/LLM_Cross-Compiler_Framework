@@ -1417,8 +1417,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Benchmarks bleiben auf dem Board: Keine Stufe führt `benchmark_module.sh` aus, das das in seinem Kopf sagt und auf
   `llm-cli device runtime verify --bench-model` verweist. Die Funktionen der Module aus 1.x sind wieder erreichbar
   (mit nachgebauten Werkzeugketten getestet): Ein Hardware-Profil des Boards (`build.sh --hardware-config DATEI`) ergibt die CMake-Toolchain und
-  das Board-Paket mit cross-kompiliertem `llama-cli` und `llama-server`, und `source_module.sh --clone-llama-cpp`,
-  von Hand gestartet, klont llama.cpp bei einem angegebenen Commit; vier versteckte Fehler dieser 1.x-Wege sind dabei
+  das Board-Paket mit cross-kompiliertem `llama-cli` und `llama-server`, und `source_module.sh --clone-llama-cpp`
+  (auch der Entrypoint-Modus `source --clone-llama-cpp`), von Hand gestartet, klont llama.cpp bei einem angegebenen
+  Commit; vier versteckte Fehler dieser 1.x-Wege sind dabei
   behoben (eine nicht definierte Cross-Compile-Funktion, CMake-Flags als ein gequotetes Wort übergeben, eine
   Profilprüfung, die das Skript unter `set -e` beendete, Schreibzugriffe in den schreibgeschützten Cache-Ordner). Was
   sie taten und ein Build nicht mehr braucht (llama.cpp-Werkzeuge im Build bauen: Das Image hat sie; der alte

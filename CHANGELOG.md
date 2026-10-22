@@ -1246,7 +1246,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   says so in its header and points to `llm-cli device runtime verify --bench-model`. The 1.x functions of the
   modules are reachable again (tested with stub toolchains): a board's hardware profile (`build.sh --hardware-config FILE`) gives the
   CMake toolchain and the board package with cross-compiled `llama-cli` and `llama-server`, and
-  `source_module.sh --clone-llama-cpp`, started by hand, clones llama.cpp at a given commit; four latent faults of
+  `source_module.sh --clone-llama-cpp` (also the entrypoint mode `source --clone-llama-cpp`), started by hand,
+  clones llama.cpp at a given commit; four latent faults of
   those 1.x paths were fixed on the way (an undefined cross-compile function, CMake flags passed as one quoted
   word, a profile check that ended the script under `set -e`, writes into the read-only cache folder). What they
   did and that a build no longer needs (building llama.cpp tools inside the build: the image has them; the old

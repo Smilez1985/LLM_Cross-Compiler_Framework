@@ -54,6 +54,7 @@ JOB_TYPE=build). Von Hand, im Container:
 
   pipeline EINGABEPFAD MODELLNAME [QUANTISIERUNG] [HARDWARE_PROFIL]   der ganze Build über build.sh
   source | config | convert | target [Optionen]                     der Build bis zu dieser Stufe
+  source --clone-llama-cpp                                          klont llama.cpp (von Hand, mit Netzwerk)
   test                                                              prüft die Werkzeuge des Images
 
 

@@ -227,11 +227,14 @@ if [ "$FRESH" = "0" ]; then
         START=$((START - 1))
     done
 fi
-for i in "${!STAGES[@]}"; do
-    if [ "$i" -ge "$START" ]; then
-        rm -f "$STAGE_DIR/${STAGES[$i]}.done"
-    fi
-done
+# A stage that runs makes every later marker stale; when every stage up to --to resumes, the later ones stay valid.
+if [ "$START" -lt "$LAST" ]; then
+    for i in "${!STAGES[@]}"; do
+        if [ "$i" -ge "$START" ]; then
+            rm -f "$STAGE_DIR/${STAGES[$i]}.done"
+        fi
+    done
+fi
 
 for i in "${!STAGES[@]}"; do
     [ "$i" -lt "$LAST" ] || break

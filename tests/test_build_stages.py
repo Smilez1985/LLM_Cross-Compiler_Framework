@@ -690,6 +690,20 @@ def test_to_stops_after_a_stage_and_the_rest_follows_later(image):
 
 
 @needs_bash
+def test_to_with_every_stage_resumed_keeps_the_later_markers(image):
+    """`--to config` after a finished build runs nothing, so the markers of convert and target stay valid: the next
+    full run resumes every stage instead of converting the model again."""
+    assert image.run().returncode == 0
+
+    stop = image.run("--to", "config")
+    assert stage_lines(stop) == resumed("source", "config")
+    again = image.run()
+
+    assert stage_lines(again) == resumed("source", "config", "convert", "target")
+    assert len(image.calls()) == 2, "converted and quantized once"
+
+
+@needs_bash
 @pytest.mark.parametrize("args, message", [
     (["--to", "package"], "'package' is not a stage of this build (source config convert target)."),
     (["--to"], "--to needs a value"),
@@ -1027,6 +1041,19 @@ def test_source_module_clones_llama_cpp_by_hand(image):
     assert image.calls() == [f"git clone https://github.com/ggml-org/llama.cpp.git {repo}",
                              f"git checkout -f {commit}", "git submodule update --init --recursive"]
     assert link.is_symlink() and link.resolve() == (image.cache / "repos" / "llama.cpp").resolve()
+
+    # The entrypoint mode `source` cloned llama.cpp in 1.x: `source --clone-llama-cpp` still does
+    (image.cache / "repos").rename(image.root / "first-clone")
+    link.unlink()
+    log = image.log.read_text()
+    image.log.unlink()
+    mode = subprocess.run([posix_shell("bash"), str(REPO_ROOT / "entrypoint.sh"), "source", "--clone-llama-cpp"],
+                          env={**env, "LLM_ENTRYPOINT_INITIALIZED": "1",
+                               "STAGE_RUNNER_SCRIPT": str(image.app / "modules" / "build.sh")},
+                          capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+    assert mode.returncode == 0, mode.stdout + mode.stderr
+    assert image.calls() == log.replace(str(image.root), "<root>").splitlines()
+    assert link.is_symlink()
 
     env["LLAMA_CPP_COMMIT"] = "b11429"
     refused = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
