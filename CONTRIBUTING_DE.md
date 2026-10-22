@@ -1,4 +1,4 @@
-Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-11
+Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-17
 
 [English](CONTRIBUTING.md) · **Deutsch**
 
@@ -36,6 +36,17 @@ Möglichkeiten mitzuhelfen:
 
 ## 1. Entwicklungsumgebung
 
+Den Code holen:
+
+```bash
+git clone https://github.com/Smilez1985/LLM_Cross-Compiler_Framework.git
+cd LLM_Cross-Compiler_Framework
+```
+
+Bis Release 3.0.0 hieß das Repository `llm_conversion_framework`. GitHub leitet die alte Adresse weiter, ein
+vorhandener Klon funktioniert also weiter; auf die neue Adresse umstellen:
+`git remote set-url origin https://github.com/Smilez1985/LLM_Cross-Compiler_Framework.git`.
+
 Du brauchst **Python 3.11 bis 3.14**, Git und für echte Builds Docker. Auf einem Linux-Rechner ohne Desktop brauchen
 die Qt-Tests der GUI ein paar Systembibliotheken; die CI installiert
 `libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0`.
@@ -47,7 +58,7 @@ Installiert genau die festgelegten Versionen mit Hashes aus den Requirements-Dat
 ```bash
 uv venv --python 3.13
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
-uv pip install -r requirements.txt -r requirements-dev.txt
+uv pip sync requirements.txt requirements-dev.txt   # exactly the hash-pinned exports of uv.lock
 
 python -m orchestrator.cli --help      # Kommandozeile
 python -m orchestrator.main            # GUI
@@ -586,7 +597,10 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 
 ## 9. Commits und Pull-Requests
 
-- Zweige von `main` ab; ein Thema je Pull-Request.
+- Branches: die laufende Arbeit geschieht auf `development`; `main` hält den stabilen Stand und übernimmt
+  `development` per Pull-Request, sobald es stabil ist (CI grün unter Linux und Windows, geprüft). Zweige von
+  `development` ab und richte deinen Pull-Request darauf; ein Thema je Pull-Request. Die CI läuft bei jedem Push
+  auf `main` und `development` und bei jedem Pull-Request.
 - Commit-Nachrichten: eine Zusammenfassungszeile auf Englisch, im Imperativ, nur der erste Buchstabe groß, ohne
   Typ-Präfix, möglichst nicht länger als etwa 72 Zeichen. Beispiele aus der Historie: `Add a secret scan:
   pre-commit and pre-push hooks and a CI job` und `Pin the provider SDKs and local embeddings, drop LiteLLM and

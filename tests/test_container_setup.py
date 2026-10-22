@@ -130,6 +130,49 @@ def test_every_workflow_build_has_push_false():
                     assert (step.get("with") or {}).get("push") is False, f"{workflow.name}: push must be false"
 
 
+# A step that starts the framework (not pytest, which fakes the vault) on a runner without a system keyring stops
+# with exit code 5 unless the workflow says how the vault is kept (the nightly retrieval evaluation failed so).
+FRAMEWORK_RUN = re.compile(r"orchestrator\.cli\b|\bllm-cli\b|\bllmcf\b|\bllm-gui\b")
+
+
+def framework_steps_without_secret_storage(data: dict) -> list:
+    """The steps that start the framework without LLM_SECRET_STORAGE in the workflow's, the job's or the step's env
+    (or a docker run -e)."""
+    missing = []
+    workflow_env = data.get("env") or {}
+    for job_name, job in (data.get("jobs") or {}).items():
+        job_env = {**workflow_env, **(job.get("env") or {})}
+        for step in job.get("steps") or []:
+            run = str(step.get("run") or "")
+            if not FRAMEWORK_RUN.search(run):
+                continue
+            env = {**job_env, **(step.get("env") or {})}
+            if "LLM_SECRET_STORAGE" not in env and "LLM_SECRET_STORAGE=" not in run:
+                missing.append(f"{job_name}: {step.get('name') or run.strip()[:60]}")
+    return missing
+
+
+def test_every_workflow_that_starts_the_framework_says_how_the_vault_is_kept():
+    found = []
+    for workflow in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        found += [f"{workflow.name}: {step}" for step in framework_steps_without_secret_storage(data)]
+    assert not found, ("set LLM_SECRET_STORAGE (e.g. ephemeral) for these steps, a runner has no keyring:\n  "
+                       + "\n  ".join(found))
+
+
+def test_the_vault_guard_finds_a_framework_step_without_secret_storage():
+    step = {"name": "eval", "run": "python -m orchestrator.cli -q ditto eval --kind retrieval"}
+    assert framework_steps_without_secret_storage({"jobs": {"j": {"steps": [step]}}}) == ["j: eval"]
+    assert framework_steps_without_secret_storage(
+        {"jobs": {"j": {"env": {"LLM_SECRET_STORAGE": "ephemeral"}, "steps": [step]}}}) == []
+    assert framework_steps_without_secret_storage(
+        {"env": {"LLM_SECRET_STORAGE": "ephemeral"}, "jobs": {"j": {"steps": [step]}}}) == []
+    assert framework_steps_without_secret_storage({"jobs": {"j": {"steps": [
+        {"run": "docker run --rm -e LLM_SECRET_STORAGE=ephemeral lcf-framework:local llm-cli targets list"},
+        {"run": "python -m pytest -q"}]}}}) == []
+
+
 def test_the_guard_finds_a_push_and_a_framework_pull():
     for line in ["docker push lcf-framework:local", "docker buildx build --push -t x .", "docker image push x",
                  "docker compose push", "uses: docker/login-action@v3", "docker pull ghcr.io/smilez1985/llm-runtime",
@@ -285,7 +328,7 @@ def _build_check(install_dir: Path) -> str:
     assert run, "the Dockerfile checks the installation after install.sh"
     install_at = next(i for i, line in enumerate(lines) if "/src/install.sh" in line)
     assert lines.index(run) > install_at
-    return "set -o pipefail\n" + run[4:].replace("/opt/llm-conversion-framework", str(install_dir))
+    return "set -o pipefail\n" + run[4:].replace("/opt/llm-cross-compiler-framework", str(install_dir))
 
 
 @needs_bash
@@ -412,7 +455,9 @@ def test_make_down_stops_the_containers_and_removes_none():
 # --- what a container holds outside the data volume --------------------------------------------------------------
 
 KEPT = REPO_ROOT / "scripts" / "container_kept_files.sh"
-PROGRAM = "/opt/llm-conversion-framework"
+PROGRAM = "/opt/llm-cross-compiler-framework"
+# The program folder of images built before the repository was renamed.
+OLD_PROGRAM = "/opt/llm-conversion-framework"
 
 FAKE_ENGINE = r"""#!/bin/bash
 # A fake docker for the containers lcf-framework and lcf-framework-gui; $FAKE holds their state.
@@ -447,7 +492,7 @@ def _tar(path: Path, members):
                 archive.addfile(info, io.BytesIO(b"x" * size))
 
 
-def _engine(tmp_path: Path, holds_files: bool, image: str = "sha256:old") -> dict:
+def _engine(tmp_path: Path, holds_files: bool, image: str = "sha256:old", program: str = PROGRAM) -> dict:
     fake = tmp_path / "fake"
     fake.mkdir()
     bin_dir = tmp_path / "bin"
@@ -456,16 +501,16 @@ def _engine(tmp_path: Path, holds_files: bool, image: str = "sha256:old") -> dic
     (bin_dir / "docker").chmod(0o755)
     (fake / "exists-lcf-framework").write_text("")
     (fake / "image-lcf-framework").write_text(image + "\n")
-    noise = [f"C {PROGRAM}", f"A {PROGRAM}/orchestrator/__pycache__", f"A {PROGRAM}/orchestrator/__pycache__/x.pyc",
+    noise = [f"C {program}", f"A {program}/orchestrator/__pycache__", f"A {program}/orchestrator/__pycache__/x.pyc",
              "A /tmp/build.lock", "C /home/lcf", "A /home/lcf/.bash_history"]
-    mine = [f"C {PROGRAM}/targets", f"A {PROGRAM}/targets/my_board", f"A {PROGRAM}/targets/my_board/target.yml",
-            f"A {PROGRAM}/targets/my_board/modules", f"A {PROGRAM}/targets/my_board/modules/build.sh",
-            f"C {PROGRAM}/targets/Rockchip", f"C {PROGRAM}/targets/Rockchip/target.yml", "A /home/lcf/notes.txt"]
+    mine = [f"C {program}/targets", f"A {program}/targets/my_board", f"A {program}/targets/my_board/target.yml",
+            f"A {program}/targets/my_board/modules", f"A {program}/targets/my_board/modules/build.sh",
+            f"C {program}/targets/Rockchip", f"C {program}/targets/Rockchip/target.yml", "A /home/lcf/notes.txt"]
     (fake / "diff-lcf-framework").write_text("\n".join(noise + (mine if holds_files else [])) + "\n")
-    _tar(fake / f"cp{PROGRAM.replace('/', '_')}_targets_my_board.tar",
+    _tar(fake / f"cp{program.replace('/', '_')}_targets_my_board.tar",
          [("my_board/", 0), ("my_board/target.yml", 2048), ("my_board/modules/", 0),
           ("my_board/modules/build.sh", 300)])
-    _tar(fake / f"cp{PROGRAM.replace('/', '_')}_targets_Rockchip_target.yml.tar", [("target.yml", 5000)])
+    _tar(fake / f"cp{program.replace('/', '_')}_targets_Rockchip_target.yml.tar", [("target.yml", 5000)])
     _tar(fake / "cp_home_lcf_notes.txt.tar", [("notes.txt", 12)])
     log = tmp_path / "docker.log"
     return {"PATH": f"{bin_dir}:/usr/bin:/bin", "FAKE": str(fake), "LOG": str(log), "HOME": str(tmp_path)}
@@ -491,8 +536,24 @@ class TestKeptFiles:
         assert any(line.startswith(f"{PROGRAM}/targets/Rockchip/target.yml ") and "4.9KB" in line for line in lines)
         assert any(line.startswith("/home/lcf/notes.txt ") and "home folder" in line for line in lines)
         assert not [line for line in lines if "__pycache__" in line or "/tmp/" in line or "bash_history" in line]
-        assert "cp lcf-framework:/opt/llm-conversion-framework " not in Path(env["LOG"]).read_text(), \
+        assert f"cp lcf-framework:{PROGRAM} " not in Path(env["LOG"]).read_text(), \
             "a changed folder is never copied whole"
+
+    def test_a_container_from_an_image_built_before_the_rename_keeps_its_files_too(self, tmp_path):
+        """Images built before the repository was renamed have their program folder at /opt/llm-conversion-framework.
+        Targets and packs of yours in a container made from such an image are listed as well, so make keeps it."""
+        (tmp_path / "with").mkdir()
+        env = _engine(tmp_path / "with", holds_files=True, program=OLD_PROGRAM)
+        run = _kept(env)
+        assert run.returncode == 3, run.stdout + run.stderr
+        lines = [line.strip() for line in run.stdout.splitlines() if line.strip()]
+        assert len(lines) == 4, lines
+        target = next(line for line in lines if line.startswith(f"{OLD_PROGRAM}/targets/my_board/target.yml "))
+        assert "2.0KB" in target and "target" in target.split(":", 1)[1]
+        assert not [line for line in lines if "__pycache__" in line]
+        (tmp_path / "without").mkdir()
+        run = _kept(_engine(tmp_path / "without", holds_files=False, program=OLD_PROGRAM))
+        assert run.returncode == 0 and run.stdout == "", run.stdout + run.stderr
 
     def test_what_cannot_be_read_counts_as_yours_and_a_folder_detail_change_does_not(self, tmp_path):
         """Fail closed: an entry of yours that docker cp cannot read is listed (size unknown), so make keeps the

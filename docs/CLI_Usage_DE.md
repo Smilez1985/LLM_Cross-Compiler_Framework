@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-16
+Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-17
 
 [English](CLI_Usage.md) · **Deutsch**
 
@@ -42,15 +42,15 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 
 | Installation | Befehl |
 |---|---|
-| Linux-Installer (`install.sh`) | `cd /opt/llm-conversion-framework`, dann `.venv/bin/python -m orchestrator.cli ...` |
-| Windows-Installer (`install.bat`) | `cd /d "C:\Program Files\LLM-Conversion-Framework"`, dann `.venv\Scripts\python.exe -m orchestrator.cli ...` |
+| Linux-Installer (`install.sh`) | `cd /opt/llm-cross-compiler-framework`, dann `.venv/bin/python -m orchestrator.cli ...` |
+| Windows-Installer (`install.bat`) | `cd /d "C:\Program Files\LLM-Cross-Compiler-Framework"`, dann `.venv\Scripts\python.exe -m orchestrator.cli ...` |
 | Entwicklungsumgebung (`uv sync`) | `llm-cli ...` |
 
 `python -m orchestrator.cli` braucht den Installationsordner im Suchpfad von Python. Ruf es entweder in diesem
 Ordner auf oder setze `PYTHONPATH`. Unter Linux funktioniert dieser Alias aus jedem Ordner:
 
 ```bash
-alias llm-cli='PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv/bin/python -m orchestrator.cli'
+alias llm-cli='PYTHONPATH=/opt/llm-cross-compiler-framework /opt/llm-cross-compiler-framework/.venv/bin/python -m orchestrator.cli'
 ```
 
 Die Beispiele unten verwenden `llm-cli`. `llmcf` ist dasselbe Programm unter seinem neuen Namen (unveröffentlicht):
@@ -2310,7 +2310,7 @@ target my-board 1.0.0 by <author> (licence MIT)
 Trust: community
 Source: https://<address of the pack>
 Files: 14 (48213 bytes)
-Installs to: /opt/llm-conversion-framework/targets/my-board
+Installs to: /opt/llm-cross-compiler-framework/targets/my-board
 Note: signed by author key 0123456789abcdef (first pack seen from this author)
 ```
 

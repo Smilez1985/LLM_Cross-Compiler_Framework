@@ -24,6 +24,9 @@ jobs:
       QT_QPA_PLATFORM: offscreen
       PYTHONUTF8: "1"
       LLM_FRAMEWORK_NO_AUDIO: "1"
+      # A runner has no system keyring: the framework refuses to start without a protected vault (exit code 5).
+      # The evaluation needs no credentials, so the vault lives in memory only.
+      LLM_SECRET_STORAGE: ephemeral
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,7 +39,7 @@ jobs:
           cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install --no-deps -r requirements.txt
 
       - name: Cache the embedding and reranking models
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

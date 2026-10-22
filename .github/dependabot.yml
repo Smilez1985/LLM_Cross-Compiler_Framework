@@ -4,6 +4,11 @@ updates:
   # again on its branch (CONTRIBUTING.md, section 2); the CI job "Lock files" fails until they match uv.lock.
   - package-ecosystem: uv
     directory: "/"
+    # The hash-pinned exports are made by `uv export` from uv.lock, not edited by Dependabot (its pip-compile updater
+    # fails on them: "unknown url type: '/pypi/<package>/json'").
+    exclude-paths:
+      - "requirements.txt"
+      - "requirements-dev.txt"
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
@@ -26,3 +31,10 @@ updates:
       - "/Docker Setup"   # the base image of the framework container you build locally
     schedule:
       interval: weekly
+    ignore:
+      # The GPU template builds on the Ubuntu release the CUDA redist archives and the build-base catalogue
+      # (configs/llama_runtime.yml, build_bases ubuntu-22.04, decision D6) are pinned to: another release (for
+      # example 25.10, which is not even an LTS) breaks that pairing. A release change is a deliberate step in the
+      # catalogue and the template together, not a Dependabot bump.
+      - dependency-name: "ubuntu"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

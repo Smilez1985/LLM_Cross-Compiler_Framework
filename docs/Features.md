@@ -1,4 +1,4 @@
-Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-16
+Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-17
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -1596,9 +1596,9 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
 
 | Signal | Where it is read | Effect |
 |---|---|---|
-| robots.txt (RFC 9309) | `/robots.txt` of each site, once per scheme, host and port | Disallowed paths are not fetched. The groups whose `User-agent` is `LLM-Conversion-Framework-Bot` (any case) apply, otherwise all `*` groups (a group for `bot` is another crawler's); `*` and `$` patterns work; the longest rule wins, `Allow` wins a tie. A robots.txt that cannot be reached or answers a server error, 401 or 403 counts as "disallow everything" (for 401 and 403 stricter than RFC 9309, which allows crawling: a locked robots.txt may hold a reservation). |
-| `X-Robots-Tag` header | every response | `noindex`, `none`, `noai` and `noimageai` keep the page out; `nofollow` and `none` stop following its links. Directives for this crawler (`LLM-Conversion-Framework-Bot: noai`) count, those for other crawlers do not. |
-| `<meta name="robots">` and `<meta name="llm-conversion-framework-bot">` | HTML pages | the same directives as the header |
+| robots.txt (RFC 9309) | `/robots.txt` of each site, once per scheme, host and port | Disallowed paths are not fetched. The groups whose `User-agent` is `LLM-Cross-Compiler-Framework-Bot` or, from before the rename, `LLM-Conversion-Framework-Bot` (any case) apply, otherwise all `*` groups (a group for `bot` is another crawler's); `*` and `$` patterns work; the longest rule wins, `Allow` wins a tie. A robots.txt that cannot be reached or answers a server error, 401 or 403 counts as "disallow everything" (for 401 and 403 stricter than RFC 9309, which allows crawling: a locked robots.txt may hold a reservation). |
+| `X-Robots-Tag` header | every response | `noindex`, `none`, `noai` and `noimageai` keep the page out; `nofollow` and `none` stop following its links. Directives for this crawler (`LLM-Cross-Compiler-Framework-Bot: noai`, or its earlier name `LLM-Conversion-Framework-Bot`) count, those for other crawlers do not. |
+| `<meta name="robots">`, `<meta name="llm-cross-compiler-framework-bot">` and the earlier `<meta name="llm-conversion-framework-bot">` | HTML pages | the same directives as the header |
 | TDM Reservation Protocol (W3C TDMRep 1.0) | `/.well-known/tdmrep.json` per site (the first matching rule decides), the `tdm-reservation` header, `<meta name="tdm-reservation">`, `tdm:reservation` in PDF metadata | A reservation keeps the page out; a `tdm-policy` is named in the log. |
 
 - A reservation from any of these sources wins. TDMRep lets a later source lift an earlier reservation; the crawler
@@ -1607,9 +1607,10 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   robots.txt and `tdmrep.json` of their own host. A link that redirects to another host is skipped; only a redirect
   of the start URL (for example `example.com` to `www.example.com`) moves the crawl to that host. At most 5
   redirects per address.
-- The crawler names itself `LLM-Conversion-Framework-Bot/<version> (Open Source;
-  +https://github.com/Smilez1985/llm_conversion_framework)`, with the real framework version. Site operators can
-  address it in robots.txt and in a meta tag with that name.
+- The crawler names itself `LLM-Cross-Compiler-Framework-Bot/<version> (Open Source;
+  +https://github.com/Smilez1985/LLM_Cross-Compiler_Framework)`, with the real framework version. Site operators can
+  address it in robots.txt and in a meta tag with that name. Rules a site wrote for its name before the repository
+  was renamed, `LLM-Conversion-Framework-Bot`, still apply to it, so an opt-out made earlier holds.
 
 ### Licences and copyright
 
