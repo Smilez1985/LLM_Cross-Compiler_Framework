@@ -391,13 +391,15 @@ class TestTheFallbacksGuarantees:
     def test_every_call_uses_the_framework_key_and_known_hosts_only(self, sys_manager, system_board, package):
         assert deploy(sys_manager, package)[0].success
         state = sys_manager._state_dir()
+        known_hosts = ssh_trust.known_hosts_path(state)
         calls = system_board.fake.calls
         assert calls and {c.program for c in calls} <= {"ssh", "scp"}
         for call in calls:
             assert call.option("BatchMode") == ["yes"], "OpenSSH never asks for a password or a passphrase"
             assert call.option("StrictHostKeyChecking") == ["yes"], "a new or changed host key is never taken"
             assert call.option("IdentitiesOnly") == ["yes"]
-            assert call.option("UserKnownHostsFile") == [str(ssh_trust.known_hosts_path(state))]
+            # the path as OpenSSH reads it back (the 1.x code passed it as it is; a Windows path now with /)
+            assert call.option("UserKnownHostsFile") in ([str(known_hosts)], [known_hosts.as_posix()])
             assert call.option("-i") == [str(state / ssh_trust.KEY_NAME)]
 
     def test_no_call_inherits_this_process_stdin_or_goes_through_a_shell(self, sys_manager, system_board, package):
@@ -487,10 +489,11 @@ class TestTheSecondTransport:
         assert deploy(manager, package)[0].success
         known_hosts = ssh_trust.known_hosts_path(manager._state_dir())
         assert " " in str(known_hosts)
+        written = known_hosts.as_posix() if os.name == "nt" else str(known_hosts)   # OpenSSH for Windows takes /
         for call in board.fake.calls:
             raw = [value for flag, value in call.options if value.startswith("UserKnownHostsFile=")]
-            assert raw == ['UserKnownHostsFile="' + str(known_hosts).replace("\\", "/") + '"'] or os.name != "nt"
-            assert call.option("UserKnownHostsFile") in ([str(known_hosts)], [known_hosts.as_posix()])
+            assert raw == [f'UserKnownHostsFile="{written}"']
+            assert call.option("UserKnownHostsFile") == [written]
 
     def test_an_upload_that_drops_waits_for_the_board_and_resumes(self, sys_manager, system_board, package):
         system_board.drop_after = 1_300_000
@@ -629,6 +632,9 @@ class TestTheOpenSshTransport:
             ["-P", "22", f"{USER}@[fe80::1]"]
         with pytest.raises(ValueError):
             openssh_argv("rsh", v6, USER, options)
+        assert openssh_argv("/usr/local/bin/ssh", v6, USER, options)[:1] == ["/usr/local/bin/ssh"]
+        assert openssh_argv(r"C:\Program Files\OpenSSH\scp.exe", v6, USER, options, "a", "b")[-4:] == \
+            ["-P", "22", "a", "b"]
 
     @pytest.mark.parametrize("path, value", [
         ("/home/radxa/.llm-framework/known_hosts", '"/home/radxa/.llm-framework/known_hosts"'),
@@ -873,12 +879,15 @@ class TestTheSessionOverOpenSsh:
             session.open()
         assert e.value.kind == "needs_paramiko" and system_board.fake.calls == []
 
-    def test_no_openssh_on_this_computer_is_a_local_problem(self, monkeypatch, tmp_path):
+    def test_no_openssh_on_this_computer_is_a_local_problem(self, tmp_path):
         from orchestrator.remote.address import Endpoint
         from orchestrator.remote.session import RemoteSession, SessionFailure
         from orchestrator.remote.transport import SystemSshTransport
-        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
-        session = RemoteSession(Endpoint(HOST), USER, tmp_path, openssh=SystemSshTransport)
+        missing = str(tmp_path / "no-openssh" / "ssh")
+
+        def openssh(endpoint, user, state_dir):
+            return SystemSshTransport(endpoint, user, state_dir, program=missing)
+        session = RemoteSession(Endpoint(HOST), USER, tmp_path, openssh=openssh)
         with pytest.raises(SessionFailure) as e:
             session.open()
         assert e.value.kind == "login" and e.value.reason == reasons.LOCAL_PROBLEM
@@ -915,7 +924,7 @@ def real_sshd(tmp_path):
                    stdin=subprocess.DEVNULL, capture_output=True)
     state = tmp_path / "Jane Doe" / ".llm-framework"
     state.mkdir(parents=True)
-    _, public = ssh_trust.client_key(state)
+    private, public = ssh_trust.client_key(state)
     (server / "authorized_keys").write_text(public + "\n")
     port = _free_port()
     config_file = server / "sshd_config"
@@ -937,9 +946,21 @@ def real_sshd(tmp_path):
         why = process.stderr.read().decode(errors="replace")[-300:]
         process.stderr.close()
         pytest.skip(f"sshd does not start here: {why}")
+    user = getpass.getuser()
+    # Whether this account can log in to a local sshd at all (a locked account, a policy of this computer), checked
+    # with plain OpenSSH options of the test's own, so a fault of the framework's options is never skipped as one.
+    probe = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o",
+                            "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-o", "IdentitiesOnly=yes",
+                            "-i", str(private), "-p", str(port), f"{user}@127.0.0.1", "true"],
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    if probe.returncode != 0:
+        process.kill()
+        process.wait(10)
+        process.stderr.close()
+        pytest.skip(f"this account cannot log in to a local sshd here: {probe.stderr.strip()[-300:]}")
     line = host_key.with_suffix(".pub").read_text().split()
     ssh_trust.known_hosts_path(state).write_text(f"[127.0.0.1]:{port} {line[0]} {line[1]}\n")
-    yield {"state": state, "port": port, "user": getpass.getuser()}
+    yield {"state": state, "port": port, "user": user}
     process.kill()
     process.wait(10)
     process.stderr.close()
