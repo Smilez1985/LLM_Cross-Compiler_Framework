@@ -1422,12 +1422,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   behoben (eine nicht definierte Cross-Compile-Funktion, CMake-Flags als ein gequotetes Wort übergeben, eine
   Profilprüfung, die das Skript unter `set -e` beendete, Schreibzugriffe in den schreibgeschützten Cache-Ordner). Was
   sie taten und ein Build nicht mehr braucht (llama.cpp-Werkzeuge im Build bauen: Das Image hat sie; der alte
-  Rückfall auf `convert.py`: Das gepinnte llama.cpp hat diese Datei nicht), läuft nicht wieder.
+  Rückfall auf `convert.py`: Das gepinnte llama.cpp hat diese Datei nicht), läuft nicht wieder. Jedes Modul läuft
+  auch allein mit seinen Optionen aus 1.x, wie im Entwurf des Maintainers: `convert_module.sh --input ORDNER --output
+  DATEI --model-name NAME` schreibt das F16-GGUF nach DATEI, `target_module.sh --input DATEI.gguf --quantization TYP
+  --model-name NAME` quantisiert dieses GGUF, ohne es erneut zu konvertieren, und behält es (Vorgaben aus 1.x: Q4_K_M
+  und der Name der Datei), und `config_module.sh --hardware-config DATEI` schreibt Toolchain und Plan ohne Modell; ein
+  Pfad als Option wird absolut gemacht. Die Prüfsumme zum Fortsetzen umfasst auch den Ausgabeordner und das
+  Hardware-Profil, das die Stufe config liest, wenn keins genannt ist, und eine verspätete Stufenzeile eines fertigen
+  Containers nimmt dem Build seinen nächsten Schritt nicht mehr weg.
 - **Neue Targets bekommen funktionierende Stufenmodule, und die Entrypoint-Modi führen den Stage-Runner aus.** Das
   `build.sh` der Vorlage ist derselbe Runner wie der von Rockchip (ein Test hält sie gleich), und ihre vier
   Stufenmodule nehmen die Werte des Wizards auf: Die Einrichtungsbefehle laufen einmal in der Stufe source (was sie
   exportieren, erreicht die späteren Stufen, auch beim Fortsetzen), die Quantisierungslogik ist das `case` der Stufe
-  convert, die Packbefehle laufen in der Stufe target. Der Modulgenerator schreibt die convert- und target-Module der
+  convert, die Packbefehle laufen in der Stufe target, und beide dürfen weiter `$QUANT` neben `$QUANT_TYPE` nutzen,
+  wie beim Verteiler. Der Modulgenerator schreibt die convert- und target-Module der
   Vorlage statt „Placeholder“-Skripten, die mit Exit-Code 0 endeten; eine Stufe ohne Vorlage beendet den Build mit
   dem Grund. `entrypoint.sh pipeline EINGABE NAME [QUANTISIERUNG] [PROFIL]` und die Modi `source`, `config`,
   `convert` und `target` führen `build.sh` aus (Letztere bis zu dieser Stufe, mit den Moduloptionen aus 1.x). Die

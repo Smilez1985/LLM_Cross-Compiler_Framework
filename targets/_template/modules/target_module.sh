@@ -7,7 +7,8 @@
 #         is the image's own (build/bin of the pinned llama.cpp, built for the build host).
 # Target: [MODULE_NAME] ([IHRE_ARCHITEKTUR] Linux).
 # Stage:  quantizes what the convert stage left for it (quantize_jobs.sh: the F16 intermediate to the requested GGUF
-#         type, with the importance matrix when the build has one) and removes the intermediate; runs the packaging
+#         type, with the importance matrix when the build has one) and removes the intermediate (a GGUF input and a
+#         file named with --output stay); runs the packaging
 #         commands of the module definition (after the SDK setup of the source stage); a build that wrote no artifact
 #         fails; writes build_info.json, which the BuildEngine completes with the file list, the hashes and the build
 #         data; and lists the results.
@@ -32,14 +33,20 @@ QUANTIZED_FROM=()
 log_info() { echo "ℹ️  [TARGET] $1"; }
 log_success() { echo "✅ [TARGET] $1"; }
 
-# One job of quantize_jobs.sh: TYPE F16_FILE OUTPUT_FILE [llama-quantize options, e.g. --imatrix FILE]
-quantize_gguf() {
+# One job of quantize_jobs.sh: TYPE F16_FILE OUTPUT_FILE [llama-quantize options, e.g. --imatrix FILE].
+# quantize_kept_gguf keeps the F16 file (a GGUF input, or the file named with --output); quantize_gguf removes it
+# afterwards (the intermediate of the convert stage).
+quantize_kept_gguf() {
     local q="$1" f16_file="$2" out_file="$3"
     shift 3
     echo ">> Quantizing -> $q"
     "$QUANTIZE_BIN" "$@" "$f16_file" "$out_file" "$q"
-    QUANTIZED_FROM+=("$f16_file")
     TARGET_CONFIG[OUTPUT_GGUF]="$out_file"
+}
+
+quantize_gguf() {
+    quantize_kept_gguf "$@"
+    QUANTIZED_FROM+=("$2")
 }
 
 quantize_model() {
@@ -114,7 +121,7 @@ create_package() {
 package_for_board() {
     local f
     if [ -z "${TARGET_CONFIG[OUTPUT_GGUF]:-}" ]; then
-        for f in "$OUTPUT_DIR"/*.gguf; do
+        for f in "$OUTPUT_DIR"/*.gguf "${CONVERT_OUTPUT:-}"; do
             if [ -f "$f" ]; then
                 TARGET_CONFIG[OUTPUT_GGUF]="$f"
                 break
@@ -138,8 +145,9 @@ main() {
     # --- PACKAGING ---
     # [PACKAGING_COMMANDS]
 
-    # A branch that wrote nothing is a failed build, not an empty success.
-    [ -n "$(ls -A "$OUTPUT_DIR")" ] || die "No artifact in $OUTPUT_DIR for quantization '$QUANT_TYPE'."
+    # A branch that wrote nothing is a failed build, not an empty success (the model may be the --output file).
+    [ -n "$(ls -A "$OUTPUT_DIR")" ] || [ -f "${CONVERT_OUTPUT:-}" ] \
+        || die "No artifact in $OUTPUT_DIR for quantization '$QUANT_TYPE'."
 
     write_build_info
     if [ "$BOARD_PACKAGE" = "1" ] && [ "$FORMAT" = "gguf" ]; then

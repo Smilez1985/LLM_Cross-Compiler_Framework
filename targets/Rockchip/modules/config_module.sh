@@ -14,7 +14,8 @@
 #         runtime is planned from the board's own probe by the runtime builder (orchestrator/runtime/build/recipe.py).
 #
 # Inputs (environment, set by BuildEngine):
-#   MODEL_SOURCE   local HF model directory inside the container (staged by the host); an ONNX file or folder (rknn)
+#   MODEL_SOURCE   local HF model directory inside the container (staged by the host); an ONNX file or folder (rknn);
+#                  or a GGUF file (gguf: quantized by the target stage, nothing converted)
 #   TARGET_FORMAT  gguf | rkllm | rknn                       (default: gguf)
 #   TARGET_BOARD   rk3588 | rk3576 | rk3566 | ...            (default: rk3588)
 #   QUANTIZATION   e.g. Q4_K_M, IQ4_XS, F16 (gguf) / w4a16, w8a8 (rkllm) / i8, fp16 (rknn)
@@ -98,7 +99,24 @@ plan_request() {
     QUANT="${QUANTIZATION:-}"
     JOB="${JOB_TYPE:-build}"
     MODEL_SOURCE="${MODEL_SOURCE:-}"
-    MODEL_NAME="${MODEL_NAME:-$(basename "${MODEL_SOURCE%/}")}"
+    # The input: a model for the converters (a Hugging Face folder; RKNN: an ONNX file or folder), or a GGUF file,
+    # the F16 GGUF that target_module.sh of version 1.x took (the convert stage then converts nothing).
+    INPUT_FORMAT="model"
+    if [ -f "$MODEL_SOURCE" ] && [[ "$MODEL_SOURCE" == *.[gG][gG][uU][fF] ]]; then
+        INPUT_FORMAT="gguf"
+    fi
+    if [ "$INPUT_FORMAT" = "gguf" ]; then
+        # The defaults of target_module.sh of version 1.x: the file name without .gguf and .fp16, and Q4_K_M
+        local name
+        name="$(basename "$MODEL_SOURCE")"
+        name="${name%.*}"
+        MODEL_NAME="${MODEL_NAME:-${name%.fp16}}"
+        if [ "$FORMAT" = "gguf" ] && [ -z "$QUANT" ]; then
+            QUANT="Q4_K_M"
+        fi
+    else
+        MODEL_NAME="${MODEL_NAME:-$(basename "${MODEL_SOURCE%/}")}"
+    fi
 
     echo "Model:        $MODEL_SOURCE"
     echo "Format:       $FORMAT"
@@ -106,7 +124,12 @@ plan_request() {
     echo "Quantization: ${QUANT:-<default>}"
     echo "Job:          $JOB"
 
-    [ -n "$MODEL_SOURCE" ] && [ -e "$MODEL_SOURCE" ] || die "MODEL_SOURCE '$MODEL_SOURCE' does not exist in the container."
+    if [ -z "$MODEL_SOURCE" ] && [ "${STAGE_LAST:-}" = "config" ]; then
+        # config_module.sh --hardware-config FILE (version 1.x): the toolchain and the plan of the board only
+        echo "No model (--input): the build plan holds the hardware profile only."
+    else
+        [ -n "$MODEL_SOURCE" ] && [ -e "$MODEL_SOURCE" ] || die "MODEL_SOURCE '$MODEL_SOURCE' does not exist in the container."
+    fi
 
     # The importance-matrix job converts and measures only; its container has no output folder.
     [ "$JOB" = "imatrix" ] && return 0
@@ -280,6 +303,7 @@ generate_build_config() {
         plan_line QUANT "$QUANT"
         plan_line JOB "$JOB"
         plan_line MODEL_SOURCE "$MODEL_SOURCE"
+        plan_line INPUT_FORMAT "$INPUT_FORMAT"
         plan_line MODEL_NAME "$MODEL_NAME"
         plan_line OUTPUT_DIR "$OUTPUT_DIR"
         plan_line IMATRIX_DIR "$IMATRIX_DIR"

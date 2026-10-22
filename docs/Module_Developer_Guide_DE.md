@@ -566,7 +566,8 @@ Verify...**).
 `$BUILD_SCRATCH_DIR/stages/<Auftrag>/` mit einer Prüfsumme der Eingaben der Stufe und der Größe jeder Datei, die die
 Stufe mit `stage_output DATEI` genannt hat. Die Eingaben sind der Auftrag (Format, Board, Quantisierung, Modellordner
 mit Größe und Zeit seiner Dateien, Revision und Name des Modells, Kontextlänge, Importance-Matrix,
-Kalibrierdatensatz, Hardware-Profil), die Werkzeuge (der llama.cpp-Pin des Images, die SDK-Pfade) und der SHA-256
+Kalibrierdatensatz, Hardware-Profil, auch das, das die Stufe config liest, wenn keins genannt ist, Ausgabeordner),
+die Werkzeuge (der llama.cpp-Pin des Images, die SDK-Pfade) und der SHA-256
 jeder Datei in `modules/` und `scripts/`. Erneut auf demselben Arbeitsordner gestartet, überspringt der Runner jede
 Stufe, deren Marke dieselbe Prüfsumme hat und deren Dateien noch da sind; läuft eine Stufe erneut, laufen auch alle
 späteren erneut. Eine Stufe, die scheitert, schreibt keine Marke. `build.sh --fresh` übergeht die Marken.
@@ -864,8 +865,14 @@ Funktionen aus 1.x sind geblieben:
 - **llama.cpp klonen.** `source_module.sh --clone-llama-cpp`, von Hand in einem Container mit Netzwerk gestartet,
   klont llama.cpp bei `LLAMA_CPP_COMMIT` (eine vollständige Commit-ID) und verlinkt es als `LLAMA_CPP_PATH`, für ein
   Image ohne llama.cpp. Ein Build tut das nie: Sein Image bringt das gepinnte llama.cpp mit.
-- **Die Moduloptionen.** `--input`, `--model-name`, `--quantization` und `--hardware-config` funktionieren bei
-  `build.sh` und bei jedem Stufenmodus des Entrypoints.
+- **Die Moduloptionen.** `--input`, `--output`, `--model-name`, `--quantization` und `--hardware-config`
+  funktionieren bei `build.sh`, bei jedem von Hand gestarteten Stufenmodul und bei jedem Stufenmodus des
+  Entrypoints, wie im Entwurf des Maintainers für 1.x: `convert_module.sh --input ORDNER --output DATEI --model-name
+  NAME` schreibt das F16-GGUF nach DATEI (es bleibt); `target_module.sh --input DATEI.gguf --quantization TYP
+  --model-name NAME` quantisiert ein GGUF, ohne es erneut zu konvertieren, und behält es (ohne `--quantization`
+  Q4_K_M, ohne `--model-name` der Dateiname ohne `.gguf` und `.fp16`); `config_module.sh --hardware-config DATEI`
+  braucht kein Modell und schreibt Toolchain und Plan in den Stufenordner. Ein Pfad als Option wird vom aktuellen
+  Ordner aus absolut gemacht.
 
 Ein Target, das vor dieser Änderung erzeugt wurde, behält sein eigenes `build.sh`, das weiter wie bisher läuft.
 

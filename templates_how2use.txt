@@ -40,6 +40,13 @@ JOB_TYPE=build). Von Hand, im Container:
   # Ein Stufenmodul von Hand gestartet tut dasselbe wie build.sh --to STUFE
   bash /app/modules/convert_module.sh --input /build-cache/input-model --model-name MODELL
 
+  # Die Module mit ihren Optionen aus Version 1.x
+  bash /app/modules/convert_module.sh --input /build-cache/input-model --output /build-cache/output/MODELL.fp16.gguf --model-name MODELL
+  bash /app/modules/target_module.sh --input /build-cache/output/MODELL.fp16.gguf --quantization Q4_K_M --model-name MODELL
+  bash /app/modules/config_module.sh --hardware-config PROFIL     (ohne Modell: Toolchain und Build-Plan des Boards)
+  Ein GGUF als --input wird nicht erneut konvertiert, die Stufe target quantisiert es und lässt es liegen. Pfade in
+  Optionen werden vom aktuellen Ordner aus absolut gemacht.
+
   # Alle Stufen erneut, auch die schon fertigen
   /app/modules/build.sh --fresh --input /build-cache/input-model --model-name MODELL
 
@@ -55,7 +62,7 @@ Fortsetzen
 
 Wenn eine Stufe fertig ist, schreibt der Runner eine Marke nach $BUILD_SCRATCH_DIR/stages/<Auftrag>/: eine
 Prüfsumme der Eingaben (Format, Board, Quantisierung, Modellordner, Modell-Revision, Kontextlänge, Importance-Matrix,
-Kalibrierdatensatz, Hardware-Profil, llama.cpp-Pin des Images, SDK-Pfade, SHA-256 jeder Datei in modules/ und
+Kalibrierdatensatz, Hardware-Profil, Ausgabeordner, llama.cpp-Pin des Images, SDK-Pfade, SHA-256 jeder Datei in modules/ und
 scripts/) und die Dateien, die die Stufe mit stage_output genannt hat. Erneut auf demselben Arbeitsordner gestartet,
 überspringt der Runner jede Stufe, deren Marke passt und deren Dateien noch da sind. Eine Stufe, die scheitert,
 schreibt keine Marke; der Build endet mit ihrem Exit-Code.

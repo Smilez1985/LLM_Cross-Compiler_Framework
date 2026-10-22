@@ -1250,11 +1250,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   those 1.x paths were fixed on the way (an undefined cross-compile function, CMake flags passed as one quoted
   word, a profile check that ended the script under `set -e`, writes into the read-only cache folder). What they
   did and that a build no longer needs (building llama.cpp tools inside the build: the image has them; the old
-  `convert.py` fallback: the pinned llama.cpp has no such file) is not run again.
+  `convert.py` fallback: the pinned llama.cpp has no such file) is not run again. Each module also runs on its own
+  with its 1.x options, as in the maintainer's design: `convert_module.sh --input DIR --output FILE --model-name NAME`
+  writes the F16 GGUF to FILE, `target_module.sh --input FILE.gguf --quantization TYPE --model-name NAME` quantizes
+  that GGUF without converting it again and keeps it (1.x defaults Q4_K_M and the file's name), and
+  `config_module.sh --hardware-config FILE` writes the toolchain and the plan without a model; a path given as an
+  option is made absolute. The resume digest also covers the output folder and the hardware profile that the
+  config stage reads when none is named, and a late stage line of a finished container no longer takes back the
+  build's next step.
 - **New targets get working stage modules, and the entrypoint modes run the stage runner.** The template's
   `build.sh` is the same runner as Rockchip's (a test keeps them equal), and its four stage modules take the
   wizard's values: the setup commands run once in the source stage (what they export reaches the later stages, also
-  on a resume), the quantization logic is the convert stage's case, the packaging commands run in the target stage.
+  on a resume), the quantization logic is the convert stage's case, the packaging commands run in the target stage,
+  and both may still use `$QUANT` next to `$QUANT_TYPE`, as with the dispatcher.
   The module generator writes the template's convert and target modules instead of "Placeholder" scripts that ended
   with exit code 0; a stage without a template stops the build with the reason. `entrypoint.sh pipeline INPUT NAME
   [QUANTIZATION] [PROFILE]` and the modes `source`, `config`, `convert` and `target` run `build.sh` (the latter up

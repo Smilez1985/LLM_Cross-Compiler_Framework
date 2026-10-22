@@ -564,7 +564,9 @@ class BuildEngine:
         """A progress line of the stage runner (STAGE_LINE) becomes the build's step and percent, which the build
         status, the Builder and BuildService._live_progress show: "Running modules: convert (3/4)", and the percent
         within the container's band. A stage that started counts the stages before it as done; one that finished or
-        resumed counts itself too. The build's record follows, so other processes see the stage as well."""
+        resumed counts itself too. The build's record follows, so other processes see the stage as well. A line the log
+        reader delivers after the build moved on to its next step (the reader may lag behind the container's end)
+        changes nothing."""
         band = STAGE_BANDS.get(prefix)
         match = STAGE_LINE.match(line.strip()) if band else None
         if match is None:
@@ -573,6 +575,8 @@ class BuildEngine:
         if not 1 <= number <= total or state.startswith("failed"):
             return  # a failed stage ends the container: its exit code and log tail report it
         step, low, high = band
+        if not progress.current_stage.startswith(step):
+            return
         done = number if state else number - 1
         progress.progress_percent = max(progress.progress_percent, low + (high - low) * done // total)
         label = f"{step}: {name} ({number}/{total}){' resumed' if state == 'resumed' else ''}"

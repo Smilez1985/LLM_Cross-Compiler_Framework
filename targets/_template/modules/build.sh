@@ -30,13 +30,19 @@
 #   === Stage 1/4: source resumed ===           finished in an earlier run with the same inputs
 #   === Stage 3/4: convert failed (exit 1) ===  stopped; the build ends with the stage's exit code
 #
-# Usage: build.sh [--to STAGE] [--fresh] [--input PATH] [--model-name NAME] [--quantization TYPE]
+# Usage: build.sh [--to STAGE] [--fresh] [--input PATH] [--output FILE] [--model-name NAME] [--quantization TYPE]
 #                 [--hardware-config FILE]
 #   --to STAGE   run the stages up to STAGE (source, config, convert, rotate or target) and stop there
 #   --fresh      run every stage, also the ones a marker says have finished
 #   --input, --model-name, --quantization, --hardware-config
 #                set MODEL_SOURCE, MODEL_NAME, QUANTIZATION and HARDWARE_CONFIG_FILE (the options of the modules of
-#                version 1.x)
+#                version 1.x). The input may also be a GGUF file (the F16 GGUF that target_module.sh of 1.x took):
+#                the convert stage then converts nothing, and the target stage quantizes that file and keeps it.
+#   --output FILE  where the convert stage writes its GGUF (convert_module.sh --output of 1.x): the type the
+#                converter writes itself, or the F16 file that the target stage quantizes; a file named here is kept
+# A path given as an option is made absolute (from the current folder). A module started by hand passes its options
+# here: `convert_module.sh --input DIR --output FILE` is `build.sh --to convert --input DIR --output FILE`, and
+# `config_module.sh --hardware-config FILE` needs no model (the plan then holds the hardware profile only).
 # The inputs the stages read from the environment are listed in config_module.sh. Results go to
 # $BUILD_CACHE_DIR/output, intermediates to $BUILD_SCRATCH_DIR (never /tmp, a small tmpfs in the build sandbox).
 
@@ -49,8 +55,8 @@ SCRIPTS_DIR="$(dirname "$MODULES_DIR")/scripts"
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 usage() {
-    echo "Usage: build.sh [--to STAGE] [--fresh] [--input PATH] [--model-name NAME] [--quantization TYPE]"
-    echo "                [--hardware-config FILE]"
+    echo "Usage: build.sh [--to STAGE] [--fresh] [--input PATH] [--output FILE] [--model-name NAME]"
+    echo "                [--quantization TYPE] [--hardware-config FILE]"
     echo "Runs the stages source, config, convert, (rotate,) target of this target; see the header of build.sh."
 }
 
@@ -59,16 +65,26 @@ value_of() {  # OPTION VALUE...: the option's value, or a refusal when it has no
     printf '%s' "$2"
 }
 
+path_of() {  # OPTION VALUE...: the option's value as an absolute path (a stage may change its folder)
+    [ $# -ge 2 ] || die "$1 needs a value (build.sh --help lists the options)."
+    case "$2" in
+        /*|"") printf '%s' "$2" ;;
+        *) printf '%s/%s' "$PWD" "$2" ;;
+    esac
+}
+
 STOP_AT=""
 FRESH=0
+CONVERT_OUTPUT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --to) STOP_AT="$(value_of "$@")"; shift 2 ;;
         --fresh) FRESH=1; shift ;;
-        --input) MODEL_SOURCE="$(value_of "$@")"; export MODEL_SOURCE; shift 2 ;;
+        --input) MODEL_SOURCE="$(path_of "$@")"; export MODEL_SOURCE; shift 2 ;;
+        --output) CONVERT_OUTPUT="$(path_of "$@")"; shift 2 ;;
         --model-name) MODEL_NAME="$(value_of "$@")"; export MODEL_NAME; shift 2 ;;
         --quantization) QUANTIZATION="$(value_of "$@")"; export QUANTIZATION; shift 2 ;;
-        --hardware-config) HARDWARE_CONFIG_FILE="$(value_of "$@")"; export HARDWARE_CONFIG_FILE; shift 2 ;;
+        --hardware-config) HARDWARE_CONFIG_FILE="$(path_of "$@")"; export HARDWARE_CONFIG_FILE; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown option '$1' (build.sh --help lists the options)." ;;
     esac
@@ -103,7 +119,8 @@ WORK_DIR="${BUILD_SCRATCH_DIR:-${BUILD_CACHE_DIR:-/build-cache}}"
 STAGE_DIR="$WORK_DIR/stages/$JOB"
 mkdir -p "$STAGE_DIR"
 STAGE_RUNNER=1
-export STAGE_RUNNER STAGE_DIR MODULES_DIR
+STAGE_LAST="${STAGES[$((LAST - 1))]}"
+export STAGE_RUNNER STAGE_DIR MODULES_DIR STAGE_LAST CONVERT_OUTPUT
 
 # The stage scripts' one call into the runner: `stage_output FILE` names a file the stage wrote. A resume runs the
 # stage again when such a file is gone or has another size.
@@ -134,7 +151,7 @@ model_files() {  # every file of the model with its size and modification time
 }
 
 inputs_digest() {
-    local f
+    local f profile
     {
         echo "stage-runner 1, job $JOB"
         printf 'format=%s board=%s quantization=%s\n' "${TARGET_FORMAT:-}" "${TARGET_BOARD:-}" "${QUANTIZATION:-}"
@@ -142,7 +159,14 @@ inputs_digest() {
         printf 'context=%s imatrix=%s %s %s\n' "${MAX_CONTEXT_LENGTH:-}" "${USE_IMATRIX:-}" "${IMATRIX_PATH:-}" \
             "$(file_digest "${IMATRIX_PATH:-}")"
         printf 'dataset=%s %s\n' "${DATASET_PATH:-}" "$(file_digest "${DATASET_PATH:-}")"
-        printf 'hardware=%s %s\n' "${HARDWARE_CONFIG_FILE:-}" "$(file_digest "${HARDWARE_CONFIG_FILE:-}")"
+        # The profile config_module.sh reads, also the one it reads when none is named
+        profile="${HARDWARE_CONFIG_FILE:-${BUILD_CACHE_DIR:-/build-cache}/target_hardware_config.txt}"
+        printf 'hardware=%s %s\n' "$profile" "$(file_digest "$profile")"
+        printf 'output=%s %s %s\n' "${BUILD_CACHE_DIR:-}" "${OUTPUT_DIR:-}" "$CONVERT_OUTPUT"
+        printf 'pythonpath=%s\n' "${PYTHONPATH:-}"
+        if [ -z "${MODEL_SOURCE:-}" ] && [ "$STAGE_LAST" = config ]; then
+            echo "a plan without a model"  # config_module.sh --hardware-config: never resumed into a build
+        fi
         printf 'llama.cpp=%s %s %s\n' "${LLAMA_CPP_PATH:-}" "$(file_digest "${LLAMA_CPP_PATH:-/usr/src/llama.cpp}/.llama_cpp_tag")" \
             "$(file_digest "${LLAMA_CPP_PATH:-/usr/src/llama.cpp}/.llama_cpp_commit")"
         printf 'sdk=%s %s\n' "${RKLLM_PYTHON:-}" "${RKNN_PYTHON:-}"
