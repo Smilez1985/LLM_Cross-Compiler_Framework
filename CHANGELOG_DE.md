@@ -2446,6 +2446,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nur, wo es erlaubt ist): dem Deployment, dem Hinzufügen eines Boards, dem Deployment-Tab, den Einträgen
   vertrauenswürdiger Boards, den Deploy-Einstellungen, der systemd-Unit und den Kontonamen, die eine KI nie liest
   (`device_text`). Das Hinzufügen eines Boards lädt für diese Prüfung nicht mehr die Build-Engine und das Docker-SDK.
+  Der Board-Scan (`llm-cli scan --device`, **Remote Scan via SSH...** im Builder-Tab) prüft den Namen genauso, bevor
+  das Board kontaktiert wird, mit der Ablehnung in der Sprache der Person; vorher erreichte ein solcher Name die
+  Anmeldung des Boards.
 - **Der Dialog der KI-Einstellungen lehnt eine Serveradresse mit Benutzername oder Passwort darin ab**, wie es die
   Anmeldung und `llmcf ditto login` schon taten (dieselbe Adressregel aus `AISettingsChange`): Vorher wurde eine
   solche Adresse (oder eine mit Leerzeichen oder Backslash, die Parser als zwei verschiedene Hosts lesen können) so,

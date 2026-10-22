@@ -824,6 +824,46 @@ class TestScanMenu:
         (ok, msg), = done
         assert not ok and "192.0.2.92" in msg and "password" in msg.lower()
 
+    @pytest.mark.parametrize("user", ["-oProxyCommand=x", "radxa\nroot", "\u017fudo", "bad user"])
+    def test_remote_scan_refuses_a_user_that_is_no_account_name_before_any_contact(self, tab, monkeypatch, told,
+                                                                                    user):
+        """The default taken from the stage-B review: Remote Scan checks the SSH user with valid_user like every
+        other board path, in plain words in the person's language, before the board's key is read."""
+        from orchestrator.gui import builder_tab
+        from orchestrator.utils.localization import ui_text
+
+        class Dialog:
+            def __init__(self, parent=None, recent=()):
+                pass
+
+            def exec(self):
+                return 1
+
+            def get_data(self):
+                return "192.0.2.93", user, None
+
+            def get_options(self):
+                return 22, None
+
+        monkeypatch.setattr(builder_tab, "SSHConnectDialog", Dialog)
+        monkeypatch.setattr(tab.host_keys, "start", lambda *a, **k: pytest.fail("the board was contacted"))
+        tab._open_ssh_dialog()
+        ((text, _default),) = told
+        assert text == ui_text("deploy.bad_user")
+
+    def test_the_ssh_probe_worker_refuses_such_a_user_too(self, window_framework, monkeypatch, tmp_path):
+        from orchestrator.gui import builder_tab
+        from orchestrator.utils import ssh_trust
+        from orchestrator.utils.localization import ui_text
+        monkeypatch.setattr(builder_tab, "PARAMIKO_AVAILABLE", True)
+        monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: pytest.fail("logged in"))
+        worker = builder_tab.SSHProbeWorker("192.0.2.94", "-oProxyCommand=x", None, tmp_path / "state",
+                                            tmp_path / "probes")
+        done = []
+        worker.finished.connect(lambda ok, msg, path: done.append((ok, msg)))
+        worker.run()
+        assert done == [(False, ui_text("deploy.bad_user"))]
+
     def test_import_asks_for_the_board_s_name(self, tab, window_framework, monkeypatch):
         from PySide6.QtWidgets import QInputDialog
         from orchestrator.gui import builder_tab
