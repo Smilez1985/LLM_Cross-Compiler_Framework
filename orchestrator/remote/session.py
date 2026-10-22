@@ -5,7 +5,8 @@ the architecture audit). It is what DeploymentManager's board session could do a
 the probe and the on-board benchmark can use the same steps (chain c2-remote-callers):
 
 - open(): reads the host key the board presents, checks it against the framework's known_hosts (and against the
-  fingerprint the person was shown, `expect_fingerprint`), then logs in. Every login after a network drop checks the
+  fingerprint the person was shown, `expect_fingerprint`, and the board the caller means, `expect_device_id`), then
+  logs in; `last_check` keeps that KeyCheck (also of a refused login) and `key` the key that passed. Every login after a network drop checks the
   key again the same way. The credentials are typed: KeyOnly() logs in with the framework's key only (every AI path),
   OneTimePassword(password) also sends a password the person typed for these logins, and only with it can pair()
   install the framework's key on the board. An AI path that holds no OneTimePassword cannot pair, not even
@@ -19,8 +20,18 @@ the probe and the on-board benchmark can use the same steps (chain c2-remote-cal
 - wait_for_host(step): after a drop, waits up to `wait_seconds` until the board's SSH port answers and the login
   works again (N5), with a "waiting" event about every WAIT_INTERVAL seconds; a connection that opens and drops
   again while the SSH server starts counts as not back yet (reasons.reach_code(..., while_waiting=True)).
-- run_detached(folder, job) and its follow: starts `job` once on the board on its own (nohup, behind a marker, so the
-  start is never repeated even when its command arrives twice) and follows it to its exit status, again after a drop.
+- run_detached(folder, job) and follow(folder): starts `job` once on the board on its own (nohup, behind a marker, so
+  the start is never repeated even when its command arrives twice) and follows it to its exit status, again after a
+  drop; follow() alone follows a job started before (the work keeps running on the board while nobody watches, round
+  16 G4). The deploy's deploy.sh and the on-board benchmark (runtime/device/remote.py verify_on_device) run this way.
+- run_resumable(script, again=...) and resumable(action): one command (or any action on the board) through a network
+  drop: the session waits for the board, logs in again and, for a command that may run twice (it only reads, or does
+  the same again), runs it once more; for one that may not, it raises SessionFailure "dropped" once the board answers
+  again (so the caller can still clean up). A command that stays silent while its connection stands is tried once
+  more, then its timeout is the end. The runtime deploy, the probe and the checks on the board run their commands
+  this way (runtime/device/remote.py RemoteShell is their facade).
+- attached(client): a session over a client someone else logged in (a stand-in in tests): it runs, uploads and follows
+  jobs like any session, but cannot log in again, so a network drop ends it as it always did.
 - CancelToken: one cancel for the whole session; every wait ends at once on it.
 - RemoteEvent: what a running session reports (uploading, waiting, back); DeploymentManager.DeployEvent is this
   class. remote/text.py event_text renders it for the person or an AI.
@@ -72,6 +83,13 @@ JOB_STATUS = ".lcf-install.status"
 JOB_LOG = ".lcf-install.log"
 PRIVATE_PARENT = "/tmp"        # nosec B108 - a folder on the board, made by mktemp with a random name
 PRIVATE_PREFIX = "llm_deploy"
+# How often a command that stays silent while its connection stands is tried again (resumable): once, then the board
+# is taken to be busy, not gone, and the time limit is the end.
+SILENT_TRIES = 1
+# The steps whose work runs on the board on its own (a job): a wait that fails leaves the board's state unknown.
+JOB_STEPS = ("install", "bench")
+# What a step is called in the log line of a drop.
+_DOING = {"install": "the installation", "bench": "the benchmark", "upload": "the upload"}
 
 
 @dataclass(frozen=True)
@@ -203,7 +221,8 @@ class RemoteSession:
     `on_event` each RemoteEvent, `transport_factory(client)` makes the Transport of a client."""
 
     def __init__(self, endpoint: Endpoint, user: str, state_dir: Path, *, credentials: Any = None,
-                 expect_fingerprint: Optional[str] = None, cancel: Optional[CancelToken] = None,
+                 expect_fingerprint: Optional[str] = None, expect_device_id: Optional[str] = None,
+                 cancel: Optional[CancelToken] = None,
                  clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], Any] = time.sleep,
                  reachable: Optional[Callable[[str, int], bool]] = None,
                  on_event: Optional[Callable[[RemoteEvent], Any]] = None,
@@ -215,6 +234,7 @@ class RemoteSession:
         if not isinstance(self.credentials, (KeyOnly, OneTimePassword)):
             raise TypeError("credentials are KeyOnly() or OneTimePassword(password)")
         self.expect_fingerprint = expect_fingerprint
+        self.expect_device_id = expect_device_id   # the board the caller means (its device ID); None: any board
         self.cancel = cancel if cancel is not None else CancelToken()
         self._clock, self._sleep = clock, sleep
         self._reachable = reachable
@@ -229,6 +249,25 @@ class RemoteSession:
         self.waited = 0.0          # seconds it waited for the board
         self.fingerprint = ""      # the host key the board presented at the last login
         self.detached_sent = False  # a detached job's start command is on its way: it may run on the board
+        self.last_check: Any = None  # the KeyCheck of the last login (also of one that was refused)
+        self.key: Any = None         # the host key that passed the check at the last login
+        self.can_relogin = True      # False for attached(): a drop is the end
+
+    @classmethod
+    def attached(cls, client: Any, *, host: str = "the device", cancel: Optional[CancelToken] = None,
+                 clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], Any] = time.sleep,
+                 on_event: Optional[Callable[[RemoteEvent], Any]] = None,
+                 transport_factory: Optional[Callable[[Any], Transport]] = None,
+                 logger: Optional[logging.Logger] = None) -> "RemoteSession":
+        """A session over `client`, which someone else logged in (an authenticated paramiko client or a stand-in with
+        exec_command): every step works as in any session, but it cannot log in again, so a network drop ends a step
+        with the connection's own error, as before. Its transport has no keepalive of its own (the client's owner
+        decides)."""
+        session = cls(Endpoint(host), "", Path("."), cancel=cancel, clock=clock, sleep=sleep, on_event=on_event,
+                      transport_factory=transport_factory or ParamikoTransport, logger=logger)
+        session.client, session.transport = client, session._factory(client)
+        session.can_relogin = False
+        return session
 
     @property
     def host(self) -> str:
@@ -249,22 +288,29 @@ class RemoteSession:
         try:
             # The one host-key read and check (remote/trust.py): the key the board presents against the framework's
             # known_hosts and against the fingerprint the person was shown.
-            check = TrustStore(self.state_dir).check(self.endpoint, expect_fingerprint=self.expect_fingerprint)
+            expect = {"expect_fingerprint": self.expect_fingerprint}
+            if self.expect_device_id is not None:   # the board the caller means; never "" by mistake for none
+                expect["expect_device_id"] = self.expect_device_id
+            check = TrustStore(self.state_dir).check(self.endpoint, **expect)
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko, a damaged known_hosts
             code = reasons.reach_code(e, while_waiting=waiting)
             raise SessionFailure(f"Could not read the host key of {self.host}" + failed_because(code, e), "key_read",
                                  code, e) from None
+        self.last_check = check
         if check.status == "unknown":
             raise SessionFailure(f"The device {self.host} is not trusted yet: confirm its host key fingerprint first.",
                                  "not_trusted")
         if check.status == "changed":
             raise SessionFailure(str(HostKeyChanged(self.host, self.port)), "key_changed",
                                  reasons.HOST_KEY_CHANGED)
+        if check.other_device:
+            raise SessionFailure(f"{self.endpoint.display} answers with the host key of another device than "
+                                 f"{self.expect_device_id}.", "other_device")
         fp = check.fingerprint
         if check.fingerprint_differs:
             raise SessionFailure(f"The device {self.host} now presents another host key than the one shown ({fp}, "
                                  f"not {self.expect_fingerprint})", "other_key", reasons.HOST_KEY_CHANGED)
-        self.fingerprint = fp
+        self.fingerprint, self.key = fp, check.key
         if self.cancel.cancelled:
             raise Stopped()
         try:
@@ -362,17 +408,63 @@ class RemoteSession:
                 self.waited += elapsed
                 code = code or reasons.check_port(self.host, self.port) or reasons.HOST_DOWN
                 raise SessionFailure(f"The board did not answer again within {int(self.wait_seconds)} s ({code})",
-                                     "wait", code, state="unknown" if step == "install" else "ok", step=step)
+                                     "wait", code, state="unknown" if step in JOB_STEPS else "ok", step=step)
             self.pause(min(WAIT_INTERVAL, max(0.1, self.wait_seconds - elapsed)))
 
-    def _dropped(self, error: BaseException) -> bool:
+    def dropped(self, error: BaseException) -> bool:
         """Whether `error` is a network drop to wait through, within MAX_RESUMES: the session itself broke, or the
         board gave no answer within the command's time limit (transport.timed_out: while the network is gone the
         connection still stands until TCP gives up, so the time limit notices first). A board that answers with an
-        error (a full disk) is no drop."""
-        if self.transport is None or self.resumed >= MAX_RESUMES:
+        error (a full disk) is no drop, and an attached() session never waits."""
+        if not self.can_relogin or self.transport is None or self.resumed >= MAX_RESUMES:
             return False
         return not self.transport.alive() or timed_out(error)
+
+    _dropped = dropped   # its first name
+
+    def _say_dropped(self, step: str) -> None:
+        self.logger.warning(f"The connection to {self.host} dropped during {_DOING.get(step, 'a step on the board')}; "
+                            "waiting for the board.")
+
+    # --- a step through a network drop ---
+
+    def resumable(self, action: Callable[[], Any], *, step: str = "command", again: bool = True) -> Any:
+        """`action()` (a command or a file operation on the board through self.transport) through a network drop:
+        the session waits for the board (wait_for_host(step)), logs in again and, with `again`, does it once more (a
+        "back" event with `step` first). Without `again` (a step that must not run twice) it raises SessionFailure
+        "dropped" (state unknown) once the board answers again, so the caller can still clean up. A command that stays
+        silent while its connection stands is tried SILENT_TRIES more times, then its timeout is raised. Anything else
+        (the board's own error, too much output) is raised as it is; a cancel raises Stopped."""
+        silent = 0
+        while True:
+            try:
+                return action()
+            except (Stopped, SessionFailure):
+                raise
+            except Exception as e:  # noqa: BLE001 - a network drop, or the board's or the connection's own error
+                if self.cancel.cancelled:
+                    raise Stopped() from None
+                if not self.dropped(e):
+                    raise
+                if timed_out(e) and self.transport.alive():
+                    silent += 1
+                    if silent > SILENT_TRIES:
+                        raise   # the board keeps the connection but does not answer this command: no drop
+                self._say_dropped(step)
+                self.wait_for_host(step)
+                self.resumed += 1
+                if not again:
+                    raise SessionFailure("The connection to the board dropped during this step. The board answers "
+                                         "again, but whether the step ran there is unknown, so it is not repeated.",
+                                         "dropped", error=e, state="unknown", step=step) from None
+                self.on_event(RemoteEvent("back", step=step))
+
+    def run_resumable(self, script: str, *, again: bool = True, step: str = "command",
+                      timeout: float = COMMAND_TIMEOUT, limit: int = MAX_OUTPUT, stdin: Any = None) -> Result:
+        """run() through a network drop (resumable): `again` for a command that may run twice (it only reads, or does
+        the same again); `stdin` is sent again then, so it must be a list, not a one-time iterator."""
+        return self.resumable(lambda: self.run(script, timeout=timeout, limit=limit, stdin=stdin), step=step,
+                              again=again)
 
     # --- the upload ---
 
@@ -404,9 +496,9 @@ class RemoteSession:
             except Exception as e:  # noqa: BLE001 - a network drop, or a failure on the board (disk full, ...)
                 if self.cancel.cancelled:
                     raise Stopped() from None
-                if not self._dropped(e):
+                if not self.dropped(e):
                     raise SessionFailure(f"The upload to {self.host} failed: {e}", "upload_failed", error=e) from None
-                self.logger.warning(f"The connection to {self.host} dropped during the upload; waiting for the board.")
+                self._say_dropped("upload")
                 self.wait_for_host("upload")
                 self.resumed += 1
                 if self.run(f"[ -d {shlex.quote(folder)} ]").status != 0:
@@ -457,13 +549,25 @@ class RemoteSession:
         d = shlex.quote(folder)
         return f"cat {d}/{JOB_STATUS} 2>/dev/null || {{ [ -d {d} ] && echo running || echo gone; }}"
 
-    def run_detached(self, folder: str, job: str, *, timeout: float = JOB_TIMEOUT, poll: float = JOB_POLL) -> int:
+    def run_detached(self, folder: str, job: str, *, timeout: float = JOB_TIMEOUT, poll: float = JOB_POLL,
+                     step: str = "install") -> int:
         """Starts `job` once (detached_command) and waits for its exit status; after a network drop it waits for the
         board, logs in again and keeps following the same job. Once the start command is on its way, the job may run
-        on the board even when its answer is lost (detached_sent): from then on a failure says the state is unknown."""
-        start = self.detached_command(folder, job)
+        on the board even when its answer is lost (detached_sent): from then on a failure says the state is unknown.
+        `step` names the job in the wait's events ("install": deploy.sh; "bench": the benchmark on the board)."""
+        return self._follow(folder, self.detached_command(folder, job), timeout, poll, step)
+
+    def follow(self, folder: str, *, timeout: float = JOB_TIMEOUT, poll: float = JOB_POLL,
+               step: str = "install") -> int:
+        """Follows a job that run_detached started in `folder` before (maybe in another session: the job ran on while
+        nobody watched) to its exit status, again after a network drop; it is never started here."""
+        return self._follow(folder, None, timeout, poll, step)
+
+    def _follow(self, folder: str, start: Optional[str], timeout: float, poll: float, step: str) -> int:
         started_at = self._clock()
-        sent = False
+        sent = start is None
+        if sent:
+            self.detached_sent = True   # a job that was started before may run on the board
         first = True
         while True:
             try:
@@ -496,20 +600,19 @@ class RemoteSession:
             except Exception as e:  # noqa: BLE001 - a network drop while the board works on its own
                 if self.cancel.cancelled:
                     raise Stopped() from None
-                if not self._dropped(e):
+                if not self.dropped(e):
                     raise SessionFailure(f"The job on {self.host} could not be followed: {e}", "job_lost", error=e,
                                          state="unknown" if self.detached_sent else "ok") from None
-                self.logger.warning(f"The connection to {self.host} dropped during the installation; waiting for "
-                                    "the board.")
-                self.wait_for_host("install")
+                self._say_dropped(step)
+                self.wait_for_host(step)
                 self.resumed += 1
                 first = False
                 # the start command is sent again only when its answer never came: the marker on the board makes it
                 # answer started=already instead of starting the job a second time
-                self.on_event(RemoteEvent("back", step="install"))
+                self.on_event(RemoteEvent("back", step=step))
 
 
-__all__ = ["CancelToken", "HASH_RATE", "JOB_LOG", "JOB_POLL", "JOB_STARTED", "JOB_STATUS", "JOB_TIMEOUT", "KeyOnly",
-           "MAX_RESUMES", "OneTimePassword", "PRIVATE_PARENT", "PRIVATE_PREFIX", "RemoteEvent", "RemoteSession",
-           "SessionFailure", "Stopped", "UPLOAD_CHUNK", "WAIT_INTERVAL", "WAIT_SECONDS", "failed_because",
-           "hash_timeout"]
+__all__ = ["CancelToken", "HASH_RATE", "JOB_LOG", "JOB_POLL", "JOB_STARTED", "JOB_STATUS", "JOB_STEPS", "JOB_TIMEOUT",
+           "KeyOnly", "MAX_RESUMES", "OneTimePassword", "PRIVATE_PARENT", "PRIVATE_PREFIX", "RemoteEvent",
+           "RemoteSession", "SILENT_TRIES", "SessionFailure", "Stopped", "UPLOAD_CHUNK", "WAIT_INTERVAL",
+           "WAIT_SECONDS", "failed_because", "hash_timeout"]
