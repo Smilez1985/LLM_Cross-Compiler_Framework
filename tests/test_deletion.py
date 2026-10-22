@@ -75,6 +75,7 @@ DELETION_SITES = {
     ("orchestrator/Core/trash.py", "Trash.restore"): TEMP,   # the empty entry folder after a restore
     ("orchestrator/Core/vault_key.py", "KeyFileHolder._write"): TEMP,
     ("orchestrator/utils/atomic.py", "write_private"): TEMP,
+    ("orchestrator/utils/ssh_trust.py", "save_host_keys"): TEMP,   # known_hosts' temporary file when writing fails
     ("orchestrator/Core/deployment_manager.py", "DeploymentManager.create_package"): TEMP,
     ("orchestrator/Core/knowledge_snapshots.py", "_copy_checked"): TEMP,   # an export's unfinished copy
     ("orchestrator/Core/artifact_output.py", "_copy_verified"): TEMP,      # a save's unfinished copy

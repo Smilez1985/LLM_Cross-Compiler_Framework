@@ -49,6 +49,7 @@ TEXTS = {
         "boards.settings.damaged": "damaged; set them again",
         "boards.runtime.row": "{build} ({install}, {at})",
         "boards.btn.add": "Add a trusted board...",
+        "boards.btn.edit": "Edit address or key...",
         "boards.btn.remove_trust": "Remove trust...",
         "boards.btn.settings": "Settings...",
         "boards.btn.check": "Check this board (Mojo)",
@@ -117,6 +118,57 @@ TEXTS = {
                                   "audit log.",
         "boards.remove.done": "Board {label} ({device_id}) was removed from the trusted boards.",
         "boards.remove.gone": "There is no trusted board {device_id} any more.",
+        # a trusted board's address and host key (deploy devices edit, Q5)
+        "boards.edit.title": "Edit address or key",
+        "boards.edit.intro": "Board {label} ({device_id}): change its host name or IP address, its SSH port or its "
+                             "host key in the framework's known_hosts, for example after its address changed or it "
+                             "was reinstalled. Paste the new key (copy the line of /etc/ssh/ssh_host_ed25519_key.pub "
+                             "on the board) or let the framework read it from the board. Empty: the key stays.",
+        "boards.edit.host": "Host name or IP address:",
+        "boards.edit.port": "SSH port:",
+        "boards.edit.key": "New host key (paste):",
+        "boards.edit.key_hint": "Paste the board's host key line here, e.g. ssh-ed25519 AAAA... from "
+                                "/etc/ssh/ssh_host_ed25519_key.pub. Empty: the key stays.",
+        "boards.edit.read": "Read the key from the board (at the address above) instead",
+        "boards.edit.checking": "Checking the change",
+        "boards.edit.reading": "Reading the board's host key",
+        "boards.edit.question": "Change board {label} ({device_id}) like this?",
+        "boards.edit.now": "Now",
+        "boards.edit.after": "After the change",
+        "boards.edit.row.address": "Address:",
+        "boards.edit.row.key": "Host key:",
+        "boards.edit.row.device": "Device ID:",
+        "boards.edit.displaced": "The framework's known_hosts holds another {key_type} key for {address} "
+                                 "({fingerprint}); it is replaced too.",
+        "boards.edit.new_id": "The board's device ID becomes {new_id}: it derives from the host key. Its probe and "
+                              "deploy settings stay under {old_id}; probe the board again "
+                              "({path:act_deploy_scan_remote}) to store its system under the new key.",
+        "boards.edit.compare": "Compare the new fingerprint with the board itself (ssh-keygen -lf "
+                               "/etc/ssh/ssh_host_ed25519_key.pub there). Your answer is written to the audit log.",
+        "boards.edit.nothing": "Nothing was changed.",
+        "boards.edit.changing": "Changing the board's address and key",
+        "boards.edit.done": "Board {label} ({device_id}): {address}, host key {key_type} {fingerprint}.",
+        "boards.edit.probe_again": "Its probe and deploy settings stay under {old_id}; probe the board again "
+                                   "({path:act_deploy_scan_remote}) to store its system under the new key.",
+        "boards.edit.record_failed": "The framework's known_hosts holds the change, but the board's record could not "
+                                     "be written: add the board again (Add a trusted board...).",
+        "boards.edit.err.no_board": "This board is not trusted any more; the list is read again.",
+        "boards.edit.err.address": "Enter an address or a host name (e.g. 192.168.1.50, fe80::1 without brackets or "
+                                   "myboard.local) and a port from 1 to 65535.",
+        "boards.edit.err.unchanged": "Nothing would change: the board already has this address and this host key.",
+        "boards.edit.err.no_key": "The framework's known_hosts no longer holds the board's trusted key for its "
+                                  "address: paste the board's host key or let the framework read it from the board.",
+        "boards.edit.err.stale": "The framework's known_hosts changed meanwhile; nothing was changed. Open Edit address "
+                                 "or key... again.",
+        "boards.edit.err.audit": "The change could not be written to the audit log; nothing was changed.",
+        "boards.edit.err.other_board": "The new host key is the key of the trusted board {label} ({device_id}); nothing "
+                                       "was changed. Change or remove that board instead.",
+        "boards.edit.err.key_empty": "No host key was pasted.",
+        "boards.edit.err.key_several": "The pasted text holds more than one line or more than one key: paste the one "
+                                       "key line.",
+        "boards.edit.err.key_not_a_key": "The pasted text is not an SSH host key line (for example the line of "
+                                         "/etc/ssh/ssh_host_ed25519_key.pub on the board).",
+        "boards.edit.err.key_no_paramiko": "Reading a host key needs the 'paramiko' package.",
         # deploy settings (device settings)
         "boards.settings.title": "Deploy settings of {label}",
         "boards.settings.current": "Current settings\nInstall: {install}\nSSH user: {user}\nPort: {port}\nModel for "
@@ -308,6 +360,7 @@ TEXTS = {
         "boards.settings.damaged": "beschädigt; neu setzen",
         "boards.runtime.row": "{build} ({install}, {at})",
         "boards.btn.add": "Vertrautes Board hinzufügen...",
+        "boards.btn.edit": "Adresse oder Schlüssel ändern...",
         "boards.btn.remove_trust": "Vertrauen entfernen...",
         "boards.btn.settings": "Einstellungen...",
         "boards.btn.check": "Dieses Board prüfen (Mojo)",
@@ -378,6 +431,63 @@ TEXTS = {
                                   "vermerkt.",
         "boards.remove.done": "Board {label} ({device_id}) wurde aus den vertrauten Boards entfernt.",
         "boards.remove.gone": "Es gibt kein vertrautes Board {device_id} mehr.",
+        "boards.edit.title": "Adresse oder Schlüssel ändern",
+        "boards.edit.intro": "Board {label} ({device_id}): ändere seinen Hostnamen oder seine IP-Adresse, seinen "
+                             "SSH-Port oder seinen Host-Schlüssel in der known_hosts-Datei des Frameworks, zum "
+                             "Beispiel nachdem sich seine Adresse geändert hat oder es neu installiert wurde. Füge den "
+                             "neuen Schlüssel ein (kopiere die Zeile aus /etc/ssh/ssh_host_ed25519_key.pub auf dem "
+                             "Board) oder lass das Framework ihn vom Board lesen. Leer: der Schlüssel bleibt.",
+        "boards.edit.host": "Hostname oder IP-Adresse:",
+        "boards.edit.port": "SSH-Port:",
+        "boards.edit.key": "Neuer Host-Schlüssel (einfügen):",
+        "boards.edit.key_hint": "Füge hier die Zeile des Host-Schlüssels ein, z. B. ssh-ed25519 AAAA... aus "
+                                "/etc/ssh/ssh_host_ed25519_key.pub. Leer: der Schlüssel bleibt.",
+        "boards.edit.read": "Stattdessen den Schlüssel vom Board lesen (unter der Adresse oben)",
+        "boards.edit.checking": "Die Änderung wird geprüft",
+        "boards.edit.reading": "Host-Schlüssel des Boards wird gelesen",
+        "boards.edit.question": "Board {label} ({device_id}) so ändern?",
+        "boards.edit.now": "Jetzt",
+        "boards.edit.after": "Nach der Änderung",
+        "boards.edit.row.address": "Adresse:",
+        "boards.edit.row.key": "Host-Schlüssel:",
+        "boards.edit.row.device": "Geräte-ID:",
+        "boards.edit.displaced": "Die known_hosts-Datei des Frameworks hält für {address} einen anderen "
+                                 "{key_type}-Schlüssel ({fingerprint}); er wird ebenfalls ersetzt.",
+        "boards.edit.new_id": "Die Geräte-ID des Boards wird {new_id}: sie leitet sich vom Host-Schlüssel ab. Seine "
+                              "Prüfung und seine Deploy-Einstellungen bleiben unter {old_id}; prüfe das Board erneut "
+                              "({path:act_deploy_scan_remote}), um sein System unter dem neuen Schlüssel zu speichern.",
+        "boards.edit.compare": "Vergleiche den neuen Fingerabdruck mit dem Board selbst (dort ssh-keygen -lf "
+                               "/etc/ssh/ssh_host_ed25519_key.pub). Deine Antwort wird ins Audit-Log geschrieben.",
+        "boards.edit.nothing": "Es wurde nichts geändert.",
+        "boards.edit.changing": "Adresse und Schlüssel des Boards werden geändert",
+        "boards.edit.done": "Board {label} ({device_id}): {address}, Host-Schlüssel {key_type} {fingerprint}.",
+        "boards.edit.probe_again": "Seine Prüfung und seine Deploy-Einstellungen bleiben unter {old_id}; prüfe das "
+                                   "Board erneut ({path:act_deploy_scan_remote}), um sein System unter dem neuen "
+                                   "Schlüssel zu speichern.",
+        "boards.edit.record_failed": "Die known_hosts-Datei des Frameworks enthält die Änderung, aber der Eintrag des "
+                                     "Boards konnte nicht geschrieben werden: füge das Board erneut hinzu (Vertrautes "
+                                     "Board hinzufügen...).",
+        "boards.edit.err.no_board": "Dieses Board ist nicht mehr vertraut; die Liste wird neu gelesen.",
+        "boards.edit.err.address": "Gib eine Adresse oder einen Hostnamen ein (z. B. 192.168.1.50, fe80::1 ohne "
+                                   "Klammern oder myboard.local) und einen Port von 1 bis 65535.",
+        "boards.edit.err.unchanged": "Es würde sich nichts ändern: das Board hat schon diese Adresse und diesen "
+                                     "Host-Schlüssel.",
+        "boards.edit.err.no_key": "Die known_hosts-Datei des Frameworks hält den vertrauten Schlüssel des Boards für "
+                                  "seine Adresse nicht mehr: füge den Host-Schlüssel des Boards ein oder lass das "
+                                  "Framework ihn vom Board lesen.",
+        "boards.edit.err.stale": "Die known_hosts-Datei des Frameworks hat sich inzwischen geändert; es wurde nichts "
+                                 "geändert. Öffne Adresse oder Schlüssel ändern... erneut.",
+        "boards.edit.err.audit": "Die Änderung konnte nicht ins Audit-Log geschrieben werden; es wurde nichts "
+                                 "geändert.",
+        "boards.edit.err.other_board": "Der neue Host-Schlüssel ist der Schlüssel des vertrauten Boards {label} "
+                                       "({device_id}); es wurde nichts geändert. Ändere oder entferne stattdessen "
+                                       "dieses Board.",
+        "boards.edit.err.key_empty": "Es wurde kein Host-Schlüssel eingefügt.",
+        "boards.edit.err.key_several": "Der eingefügte Text hat mehr als eine Zeile oder mehr als einen Schlüssel: füge "
+                                       "die eine Schlüsselzeile ein.",
+        "boards.edit.err.key_not_a_key": "Der eingefügte Text ist keine SSH-Host-Schlüsselzeile (zum Beispiel die "
+                                         "Zeile aus /etc/ssh/ssh_host_ed25519_key.pub auf dem Board).",
+        "boards.edit.err.key_no_paramiko": "Um einen Host-Schlüssel zu lesen, wird das Paket 'paramiko' gebraucht.",
         "boards.settings.title": "Deploy-Einstellungen von {label}",
         "boards.settings.current": "Aktuelle Einstellungen\nInstallation: {install}\nSSH-Benutzer: {user}\nPort: "
                                    "{port}\nModell für die systemd-Unit: {model}\nKV-Cache: {kv}",

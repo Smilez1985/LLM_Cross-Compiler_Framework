@@ -10,6 +10,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **A trusted board's address and host key are editable by you** (DECISIONS round 10 Q5): `llm-cli deploy devices
+  edit DEVICE [--host] [--port] [--key "KEY LINE" | --read-key]` and **Edit address or key...** in **Boards > Boards
+  and Devices...** change the board's host name or IP address, its SSH port or its host key in the framework's
+  `known_hosts`, for example after its address changed or it was reinstalled. Nobody types a key: it is pasted (the
+  line of `/etc/ssh/ssh_host_ed25519_key.pub` on the board, a `known_hosts` line or a line of `ssh-keyscan`) or read
+  from the board at its new address; a line with `authorized_keys` options, commands or a second key is refused.
+  You see the address, the host key and the device ID now and after the change
+  side by side (in the window) and answer with "No" as the default; the change is written to the audit log before
+  anything changes and refused when `known_hosts` changed meanwhile. A new key gives the board a new device ID: its
+  record moves there with its name and user, and whether the framework's key logs in is tested once; the key of
+  another trusted board is refused, naming that board, so its record is never overwritten. The work runs
+  in the background; the texts are English and German. No tool, the MCP server, Ditto or the device runtime steps can
+  reach it (`orchestrator/remote/pairing.py` `replace_key`, an import-graph test).
 - **Next steps instead of commands, allow-to-run proposals and translated, regrouped menus** (wave 6, chain a0;
   DECISIONS round 10 V1, V2, Q2, Q7): the Qt-free catalogue `orchestrator/utils/next_steps/` holds every next step
   the wave-6 audit names (104 steps in nine area modules found by themselves, English and German texts), and one
@@ -1240,6 +1253,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   an index to `Core/knowledge_snapshots.py` and the audit of a saved module to `Core/module_generator.py`. Nothing
   changes for the person; the Core no longer imports tool definitions for these, and the largest import cycle shrank
   from 81 to 9 modules.
+- **One read-only host-key store and the person's trust writers** (consolidation chain c2-remote-trust):
+  `orchestrator/remote/trust.py` (`TrustStore`: `status`, `status_of`, `check` with a `KeyCheck`,
+  `read_presented_key`; the host-key errors moved there) is what the nine copies of "read the key and check it"
+  use, each keeping only its policy (the person may trust, an AI is refused); `orchestrator/remote/pairing.py` holds
+  the person's writers, and the three trust-on-first-use flows (`llm-cli deploy run`, `llm-cli scan --device`, the
+  GUI's host-key question) are one decision with a prompt per channel, "No" by default as before. A key you trust
+  now is written to the audit log in the same step (`host_key_trusted`), also when the login after it fails; before,
+  only the board's record after a successful login was audited. The Deployment tab binds the deploy to the key you
+  confirmed in its question and records the board with it, so one GUI deploy opens four connections to the board's
+  SSH port instead of five. The old names in `orchestrator/utils/ssh_trust.py` keep working.
 - **The code that talks to a board starts its own package, `orchestrator/remote/`** (consolidation chain
   c2-remote-base; nothing changes for the person or an AI). The existing implementations moved there instead of
   getting a second copy: the host check of the remote probe, the store and known_hosts forms and the reading of a
@@ -1820,6 +1843,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and `$?` meant something else or nothing. Every one of them now reaches the board as one `sh -c '...'`
   (`orchestrator/remote/transport.py` `sh_command`, the form the device runtime and the board probe already used),
   so the board's sh reads the script whatever the login shell is.
+- **The framework's `known_hosts` is written like every other private file**: trusting a board's host key (and the
+  change of a board's address or key) wrote the file through a temporary file that stayed behind when writing failed
+  (for example on a full disk), and on Windows the trust failed when another program had the file open at that
+  moment. The temporary file now goes again, and the replace is the one of `orchestrator/utils/atomic.py`, tried again
+  for a moment on Windows (`orchestrator/utils/ssh_trust.py` `save_host_keys`).
 - **A deploy keeps waiting while the board's SSH server starts again**: after the network dropped, the deploy waits
   for the board (N5). When the board answered again but its SSH server was still starting, the connection opened and
   dropped (a reset, an abort, a broken pipe or EOF in the key exchange); none of these had a reason code, so the deploy
@@ -2200,7 +2228,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   could not name the board. One check now serves every place (`orchestrator/remote/address.py`, `valid_user`: ASCII
   only, the whole name, root only where it is allowed): the deploy, adding a board, the Deployment tab, the
   trusted-board records, the deploy settings, the systemd unit and the account names an AI never reads
-  (`device_text`). Adding a board no longer loads the build engine and the Docker SDK for this check.
+  (`device_text`). Adding a board no longer loads the build engine and the Docker SDK for this check. The board scan
+  (`llm-cli scan --device`, **Remote Scan via SSH...** in the Builder tab) checks the name the same way before the
+  board is contacted, with the refusal in the person's language; before, such a name reached the board's login.
 - **The AI settings dialog refuses a server address with a user name or password in it**, as sign-in and
   `llmcf ditto login` already did (the same address rule from `AISettingsChange`): before, such an address (or one
   with a space or a backslash, which parsers can read as two different hosts) was saved to `config.yml` as typed.

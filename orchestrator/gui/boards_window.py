@@ -11,6 +11,9 @@ Each button calls the same core function as its CLI command (orchestrator/runtim
 steps.py), with the same checks, refusals, questions and audit records:
 
     Add a trusted board...               llmcf deploy devices add       (fingerprint shown, "No" is the default)
+    Edit address or key...               llmcf deploy devices edit      (Q5: host name or IP address, port, the host key
+                                                                         pasted or read from the board; the old and the
+                                                                         new fingerprint side by side, "No", audited)
     Remove trust...                      llmcf deploy devices remove    (exactly what goes, "No", audited)
     Settings...                          llmcf device settings          (the sudo question and its audit record)
     Runtime plan / Status                llmcf device runtime plan / status
@@ -33,9 +36,9 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
-                               QHeaderView, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
-                               QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+                               QGridLayout, QHBoxLayout, QHeaderView, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox,
+                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label
 from orchestrator.gui.worker_relay import WorkerQuestion, ask_from_worker
@@ -48,6 +51,7 @@ KV_CHOICES = ("auto", "f16", "q8_0", "q4_0")
 # object name -> (text key, slot name, what the selected board needs: "" nothing, "trusted", "stored")
 BUTTONS = (
     ("btn_boards_add", "boards.btn.add", "_on_add", ""),
+    ("btn_boards_edit", "boards.btn.edit", "_on_edit", "trusted"),
     ("btn_boards_remove_trust", "boards.btn.remove_trust", "_on_remove_trust", "trusted"),
     ("btn_boards_settings", "boards.btn.settings", "_on_settings", "stored"),
     ("btn_boards_check", "boards.btn.check", "_on_check", "trusted"),
@@ -60,9 +64,14 @@ BUTTONS = (
     ("btn_boards_prune", "boards.btn.prune", "_on_prune", "stored"),
     ("btn_boards_prune_board", "boards.btn.prune_board", "_on_prune_board", "stored"),
 )
-ROWS = (("btn_boards_add", "btn_boards_remove_trust", "btn_boards_settings", "btn_boards_check", "btn_boards_refresh"),
+ROWS = (("btn_boards_add", "btn_boards_edit", "btn_boards_remove_trust", "btn_boards_settings", "btn_boards_check",
+         "btn_boards_refresh"),
         ("btn_boards_plan", "btn_boards_status", "btn_boards_build", "btn_boards_deploy", "btn_boards_verify"),
         ("btn_boards_prune", "btn_boards_prune_board"))
+
+
+# The refusals of Edit address or key... with their own text (boards.edit.err.<kind>); a pasted key: key_<detail>.
+EDIT_ERRORS = ("no_board", "address", "unchanged", "no_key", "stale", "audit")
 
 
 class Cancelled(Exception):
@@ -375,6 +384,13 @@ class BoardsWindow(QDialog):
                 if error.kind == "login_failed":
                     text += "\n\n" + t("boards.err.pair")
                 return text
+            if error.kind == "key_text":
+                return t(f"boards.edit.err.key_{error.facts.get('detail') or 'not_a_key'}")
+            if error.kind == "other_board":   # the new key is another trusted board's
+                return t("boards.edit.err.other_board", label=error.facts.get("label", ""),
+                         device_id=error.facts.get("device_id", ""))
+            if error.kind in EDIT_ERRORS:
+                return t(f"boards.edit.err.{error.kind}")
             simple = {"no_paramiko": t("boards.err.no_paramiko"),
                       "not_trusted": t("boards.err.not_trusted", address=address),
                       "other_device": t("boards.err.other_device", address=address, device_id=device_id),
@@ -556,6 +572,141 @@ class BoardsWindow(QDialog):
             lines.append(self._t("boards.add.not_paired"))
         elif TrustedDevices(state).key_status(device) != "known":
             lines.append(self._t("boards.add.key_gone"))
+        self._say("\n".join(lines))
+        self._info("\n\n".join(lines))
+        self.reload()
+        self.select(device.device_id)
+
+    def _on_edit(self) -> None:
+        """deploy devices edit (Q5): the board's host name or IP address, its SSH port and its host key, pasted (copy
+        and paste: nobody types a key) or read from the board; the change is asked with the old and the new fingerprint
+        side by side ("No" is the default) and audited."""
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        entry = self._need("trusted")
+        if entry is None:
+            return
+        device = TrustedDevices(self.state_dir).get(entry["device_id"])
+        if device is None:
+            self._info(self._t("boards.edit.err.no_board"), "warning")
+            self.reload()
+            return
+        dialog, form = _form_dialog(self, self._t("boards.edit.title"),
+                                    self._t("boards.edit.intro", label=device.label, device_id=device.device_id))
+        dialog.setObjectName("dlg_boards_edit")
+        host = QLineEdit(device.host, dialog)
+        host.setObjectName("txt_boards_edit_host")
+        port = QSpinBox(dialog)
+        port.setObjectName("spn_boards_edit_port")
+        port.setRange(1, 65535)
+        port.setValue(device.port)
+        key = QPlainTextEdit(dialog)   # plain text by nature: what is pasted stays text, never rich text
+        key.setObjectName("txt_boards_edit_key")
+        key.setPlaceholderText(self._t("boards.edit.key_hint"))
+        key.setTabChangesFocus(True)
+        key.setFixedHeight(80)
+        read = QCheckBox(self._t("boards.edit.read"), dialog)
+        read.setObjectName("cb_boards_edit_read")
+        read.toggled.connect(lambda on: key.setEnabled(not on))
+        form.addRow(self._t("boards.edit.host"), host)
+        form.addRow(self._t("boards.edit.port"), port)
+        form.addRow(self._t("boards.edit.key"), key)
+        form.addRow("", read)
+        if not _exec(dialog):
+            dialog.deleteLater()
+            return
+        values = (host.text().strip(), int(port.value()), key.toPlainText(), read.isChecked())
+        dialog.deleteLater()
+        self.edit_board(device.device_id, *values)
+
+    def edit_board(self, device_id: str, host: str, port: int, key_text: str, read_key: bool) -> None:
+        """The change of the board's address and key: read and checked off the GUI thread, then asked side by side,
+        then made off the GUI thread (person_steps.plan_board_change, change_board: the CLI's steps)."""
+        from orchestrator.runtime.device import person_steps
+        state = self.state_dir
+
+        def plan():
+            return person_steps.plan_board_change(state, device_id, host=host or None, port=port,
+                                                  key_text=None if read_key else (key_text or None),
+                                                  read_key=read_key)
+
+        def planned(change) -> None:
+            if not self._confirm_change(change):
+                self._say(self._t("boards.edit.nothing"))
+                return
+            audit = self.audit
+
+            def apply():
+                return person_steps.change_board(state, change, via="gui", audit=audit, actor="gui")
+
+            self._start(self._t("boards.edit.changing"), apply, lambda out: self._changed(out, change))
+
+        self._start(self._t("boards.edit.reading" if read_key else "boards.edit.checking"), plan, planned,
+                    failed=lambda e: self._show_error(e, address=host, port=port) or True)
+
+    def _confirm_change(self, change: Any) -> bool:
+        """The question before the change: the address, the host key and the device ID now and after the change side
+        by side, a key of another board the new address held, and "No" as the default (and the Escape answer)."""
+        plan, device, t = change.plan, change.device, self._t
+        dialog = QDialog(self)
+        dialog.setObjectName("dlg_boards_edit_confirm")
+        dialog.setWindowTitle(t("boards.edit.title"))
+        dialog.setMinimumWidth(640)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(plain_label(t("boards.edit.question", label=device.label, device_id=device.device_id)))
+        grid = QGridLayout()
+        cells = [("", t("boards.edit.now"), t("boards.edit.after")),
+                 (t("boards.edit.row.address"), plan.old.display, plan.new.display),
+                 (t("boards.edit.row.key"), f"{plan.old_key_type}\n{plan.old_fingerprint}",
+                  f"{plan.new_key_type}\n{plan.new_fingerprint}"),
+                 (t("boards.edit.row.device"), plan.old_device_id, plan.new_device_id)]
+        names = ("", "now", "after")
+        for row, values in enumerate(cells):
+            for column, value in enumerate(values):
+                label = plain_label(value, wrap=False)
+                label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                if row and column:
+                    label.setObjectName(f"lbl_boards_edit_{('address', 'key', 'device')[row - 1]}_{names[column]}")
+                grid.addWidget(label, row, column)
+        layout.addLayout(grid)
+        notes = []
+        if plan.displaced:
+            notes.append(t("boards.edit.displaced", address=plan.new.display, key_type=plan.new_key_type,
+                           fingerprint=plan.displaced))
+        if plan.key_changed:
+            notes.append(t("boards.edit.new_id", new_id=plan.new_device_id, old_id=plan.old_device_id))
+        notes.append(t("boards.edit.compare"))
+        layout.addWidget(plain_label("\n\n".join(notes)))
+        buttons = QDialogButtonBox(QDialogButtonBox.Yes | QDialogButtonBox.No, dialog)
+        yes, no = buttons.button(QDialogButtonBox.Yes), buttons.button(QDialogButtonBox.No)
+        yes.setObjectName("btn_boards_edit_yes")
+        no.setObjectName("btn_boards_edit_no")
+        yes.setAutoDefault(False)
+        no.setAutoDefault(True)
+        no.setDefault(True)
+        no.setFocus()
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        yes.clicked.connect(dialog.accept)
+        no.clicked.connect(dialog.reject)
+        layout.addWidget(buttons)
+        try:
+            return _exec(dialog)
+        finally:
+            dialog.deleteLater()
+
+    def _changed(self, out: Any, change: Any) -> None:
+        device, paired = out
+        plan, t = change.plan, self._t
+        if device is None:
+            self._info(t("boards.edit.record_failed"), "warning")
+            self.reload()
+            return
+        lines = [t("boards.edit.done", label=device.label, device_id=device.device_id, address=plan.new.display,
+                   key_type=plan.new_key_type, fingerprint=plan.new_fingerprint)]
+        if plan.key_changed:
+            lines.append(t("boards.edit.probe_again", old_id=plan.old_device_id))
+            if not paired:
+                lines.append(t("boards.add.not_paired"))
         self._say("\n".join(lines))
         self._info("\n\n".join(lines))
         self.reload()

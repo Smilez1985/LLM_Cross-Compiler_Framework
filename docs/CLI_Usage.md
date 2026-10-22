@@ -675,6 +675,7 @@ llm-cli deploy run output/deploy_model_1791801300.zip --host 192.168.1.50 --user
 ```
 llm-cli deploy devices list [--json]
 llm-cli deploy devices add HOST --user USER [--port 22] [--label TEXT]
+llm-cli deploy devices edit DEVICE [--host HOST] [--port PORT] [--key "KEY LINE" | --read-key]
 llm-cli deploy devices remove DEVICE_ID
 ```
 
@@ -683,22 +684,26 @@ The trusted devices (`~/.llm-framework/devices.json`): the only devices AI clien
 key you confirmed and whether the framework's own SSH key logs in there (paired); the device id is derived from the
 host key, the same id `llm-cli device list` shows. Records are written only by you: by `deploy run`,
 `scan --device` and `device runtime deploy` after a successful login, by the GUI's Deployment window after a
-deployment, and by `deploy devices add`. No tool writes, changes or removes one.
+deployment, and by `deploy devices add` and `deploy devices edit`. No tool writes, changes or removes one.
 
 | Command | Meaning |
 |---|---|
 | `list` | Every record with its host key and whether the key is still the trusted one in the framework's `known_hosts` (`trusted`, `CHANGED in known_hosts`, `not in known_hosts`), paired, and the last deploy. |
 | `add HOST --user USER` | Adds a board you trusted before this version (its host key is already in the framework's `known_hosts`). Needs a terminal: it shows the fingerprint and asks; it never trusts a new key and never asks for a password, and it marks the board as paired only when the framework's key logs in. |
+| `edit DEVICE` | Changes a trusted board's address (`--host`: host name or IP address, `--port`) or its SSH host key in the framework's `known_hosts`, e.g. after its address changed or it was reinstalled. `DEVICE` is its device ID, its label or its address. The new key is pasted with `--key` (the line of `/etc/ssh/ssh_host_ed25519_key.pub` on the board, a `known_hosts` line or a line of `ssh-keyscan`, in quotes; nobody types a key) or read from the board at its (new) address with `--read-key`; a line with `authorized_keys` options, commands or a second key, and the key of another trusted board, are refused. Needs a terminal: it shows the address and the fingerprint now and after the change and asks ("No" is the default); the change is written to the audit log first. A new key gives the board a new device ID (it derives from the key): the record moves there with its label and user, and whether the framework's key logs in is tested once; the board's probe and deploy settings stay under the old ID until you probe it again. |
 | `remove DEVICE_ID` | Removes the record (written to the audit log); AI tools can no longer name the device. Its `known_hosts` entry is kept. |
 
-A record is usable only while the framework's `known_hosts` holds exactly the key it names: after you removed a
-changed key there (to trust a reinstalled board again), trust the board again with `deploy run` or `scan --device`.
+A record is usable only while the framework's `known_hosts` holds exactly the key it names: for a reinstalled board
+whose key changed, give the record the board's new key with `deploy devices edit` (or remove the changed key there and
+trust the board again with `deploy run` or `scan --device`).
 
 In the GUI: **Boards > Boards and Devices...**: the table lists every trusted board (label, address, user, the host key with its full
 fingerprint and its state in `known_hosts`, paired, since when and how it was trusted, the last deploy), next to
 the probed boards. **Add a trusted board...** does `add` (address, user, port, label; the fingerprint is shown and
-asked, "No" is the default) and **Remove trust...** does `remove` (it names exactly what goes, "No" is the
-default, and it writes the same audit record).
+asked, "No" is the default), **Edit address or key...** does `edit` (host name or IP address, port and a field you
+paste the new key into, or **Read the key from the board** instead; the address, the host key and the device ID now
+and after the change side by side, "No" is the default) and **Remove trust...** does `remove` (it names exactly what
+goes, "No" is the default, and it writes the same audit record).
 
 ---
 

@@ -19,9 +19,16 @@ Everything that talks to a board (consolidation plan, layer 2): one Qt-free pack
   credentials (KeyOnly, OneTimePassword: only the latter can pair), the private folder, the upload that resumes after
   a network drop, the wait for the board (N5), a job that runs on the board on its own and is followed again after a
   drop, one CancelToken, and RemoteEvent (DeploymentManager.DeployEvent). The deploy is a thin adapter over it.
+- trust.py: the framework's known_hosts, read-only (TrustStore: status, status_of, check -> KeyCheck,
+  read_presented_key; fingerprint, device_id_for, parse_public_key for a pasted key; the HostKeyError classes).
+
+- pairing.py, the person's only: trust a presented key with its audit row in one step (trust_presented_key), the one
+  decision of trust on first use (first_use), pair over a one-time password session (pair), Q5's change of a board's
+  address and host key (plan_replacement, replace_key) and a consent's audit row (record_consent). No module an AI can
+  reach imports it (tests/test_remote_trust.py follows the imports).
 
 What a contact found is recorded for Mojo by orchestrator/runtime/device/trusted.py record_reach (the store of the
-trusted boards lives there; this layer imports no runtime code). The trust store, pairing and the OpenSSH transport
-follow in consolidation stage C (chains c2-remote-trust and c2-remote-system); the runtime deploy, the probe and the
-on-board benchmark move onto RemoteSession in chain c2-remote-callers.
+trusted boards lives there; this layer imports no runtime code). The OpenSSH transport follows in consolidation
+stage C (chain c2-remote-system); the runtime deploy, the probe and the on-board benchmark move onto RemoteSession in
+chain c2-remote-callers.
 """

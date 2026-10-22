@@ -36,6 +36,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import yaml
 
+from orchestrator.remote.trust import FINGERPRINT, device_id_for
 from orchestrator.utils.atomic import write_private
 
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "configs" / "hardware_probe_schema.yml"
@@ -955,7 +956,7 @@ def _from_schema1(pairs: Sequence[_Pair], schema: ProbeSchema) -> HardwareProfil
 # --- the store -----------------------------------------------------------------------------------------------------
 
 DEVICE_ID = re.compile(r"^[0-9a-f]{16}$", re.ASCII)
-_FINGERPRINT = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$", re.ASCII)
+_FINGERPRINT = FINGERPRINT   # the one fingerprint pattern (orchestrator/remote/trust.py)
 _ADDRESS = re.compile(r"^(?:\[[0-9A-Fa-f:.]{2,45}\](?::\d{1,5})?|[0-9A-Fa-f:]{2,45}|"
                       r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::\d{1,5})?)$", re.ASCII)
 _META_MAX_BYTES = 16384
@@ -966,12 +967,10 @@ def default_state_dir() -> Path:
     return Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
 
 
-def device_id_for_host_key(fingerprint: str) -> str:
-    """Device ID: the first 16 hex characters of the sha256 of the device's SSH host key fingerprint
-    ("SHA256:..." as orchestrator.utils.ssh_trust.fingerprint prints it). Stable across IP changes, no host name."""
-    if not isinstance(fingerprint, str) or not _FINGERPRINT.fullmatch(fingerprint):
-        raise ValueError("not an SSH host key fingerprint (SHA256:<43 base64 characters>)")
-    return hashlib.sha256(fingerprint.encode("ascii")).hexdigest()[:16]
+# Device ID: the first 16 hex characters of the sha256 of the device's SSH host key fingerprint ("SHA256:..." as
+# orchestrator.utils.ssh_trust.fingerprint prints it). Stable across IP changes, no host name. The one implementation
+# is orchestrator/remote/trust.py device_id_for (the trust store derives it too).
+device_id_for_host_key = device_id_for
 
 
 def new_device_id() -> str:
@@ -1076,6 +1075,17 @@ class ProfileStore:
         meta["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         write_private(self._meta_path(device_id), json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
         return path
+
+    def set_address(self, device_id: str, address: str) -> bool:
+        """The stored board's SSH address (host[:port]) after the person changed it (Q5, deploy devices edit); its probe
+        and label stay. False when no probe of this device is stored."""
+        if not self.device_path(device_id).is_file():
+            return False
+        meta = self.device_info(device_id)
+        meta["address"] = _check_address(address)
+        meta["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        write_private(self._meta_path(device_id), json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
+        return True
 
     def load_device(self, device_id: str) -> Optional[HardwareProfile]:
         return self._read(self.device_path(device_id))

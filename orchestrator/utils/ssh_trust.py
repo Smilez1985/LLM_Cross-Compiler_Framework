@@ -8,6 +8,11 @@ SSH trust for device probing and deployment.
 - Authentication: a framework Ed25519 key, installed on the device once ("pairing") with a password that
   is used for that single connection and never stored.
 
+The host-key store lives in orchestrator/remote/trust.py (read-only: fingerprint, host_entry, known_hosts_path,
+check_host_key and the HostKeyError classes, re-exported here under their old names); the person's writers that trust,
+pair and replace keys with their audit rows live in orchestrator/remote/pairing.py and call trust_host_key and
+install_public_key through this module (tests replace them here). No module an AI can reach calls those two.
+
 paramiko is imported on first use (orchestrator/remote/transport.py, decision RG1): importing this module, the deploy or
 the probe code loads no SSH library. The login (connect) and paramiko_quiet live in orchestrator/remote/transport.py;
 the names here delegate, so every caller and every test that patches ssh_trust.connect reaches the one login.
@@ -16,8 +21,6 @@ the names here delegate, so every caller and every test that patches ssh_trust.c
 module behave as without paramiko, as before.
 """
 
-import base64
-import hashlib
 import os
 import re
 import shlex
@@ -27,33 +30,14 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from orchestrator.remote import transport
-from orchestrator.remote.address import Endpoint
+from orchestrator.remote.trust import (HostKeyChanged, HostKeyError, UnknownHostKey, check_host_key,  # noqa: F401
+                                       fingerprint, host_entry, known_hosts_path)
+from orchestrator.remote.trust import load_host_keys as _host_keys
 
 KEY_NAME = "id_ed25519_llm_framework"
 # A public key line as client_key writes it: key type, base64 key, an optional plain comment.
 PUBLIC_LINE = re.compile(r"^(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) [A-Za-z0-9+/]{16,8192}={0,3}"
                          r"(?: [A-Za-z0-9._@-]{1,64})?$", re.ASCII)
-
-
-class HostKeyError(Exception):
-    """Base class for host key problems; the message is meant for the user."""
-
-
-class UnknownHostKey(HostKeyError):
-    def __init__(self, host: str, port: int, key):
-        self.host, self.port, self.key = host, port, key
-        self.key_type = key.get_name()
-        self.fingerprint = fingerprint(key)
-        super().__init__(f"The device {Endpoint(host, port).display} is not known yet ({self.key_type} "
-                         f"{self.fingerprint}).")
-
-
-class HostKeyChanged(HostKeyError):
-    def __init__(self, host: str, port: int):
-        super().__init__(
-            f"The host key of {Endpoint(host, port).display} has CHANGED. This can be a reinstalled device - or "
-            f"someone in between. Check the device, then remove its line from the framework's known_hosts file to "
-            f"trust it again.")
 
 
 def _paramiko():
@@ -102,53 +86,33 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def fingerprint(key) -> str:
-    """SHA256 fingerprint as printed by `ssh-keygen -lf`."""
-    digest = hashlib.sha256(key.asbytes()).digest()
-    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
-
-
-def host_entry(host: str, port: int = 22) -> str:
-    """The host as known_hosts keeps it (Endpoint.known_hosts_entry)."""
-    return Endpoint(host, port).known_hosts_entry
-
-
-def known_hosts_path(state_dir: Path) -> Path:
-    return Path(state_dir) / "known_hosts"
-
-
-def _host_keys(state_dir: Path):
-    paramiko = _require_paramiko()
-    keys = paramiko.HostKeys()
-    path = known_hosts_path(state_dir)
-    if path.exists():
-        keys.load(str(path))
-    return keys
-
-
-def check_host_key(state_dir: Path, host: str, port: int, key) -> str:
-    """'known', 'unknown' or 'changed'."""
-    entries = _host_keys(state_dir).lookup(host_entry(host, port))
-    if not entries:
-        return "unknown"
-    stored = entries.get(key.get_name())
-    if stored is None:
-        # A known device that now offers a different key type: treat like a change, never as new.
-        return "changed"
-    return "known" if stored.asbytes() == key.asbytes() else "changed"
-
-
 def trust_host_key(state_dir: Path, host: str, port: int, key) -> None:
     """Stores a key the user confirmed (never called without that confirmation)."""
     keys = _host_keys(state_dir)
     keys.add(host_entry(host, port), key.get_name(), key)
+    save_host_keys(state_dir, keys)
+
+
+def save_host_keys(state_dir: Path, keys) -> None:
+    """Writes the framework's known_hosts (paramiko HostKeys) atomically, readable only by this user. Only the
+    person's writers in orchestrator/remote/pairing.py call it (through trust_host_key or for a replaced key). The
+    temporary file goes again when writing fails; the replace is the one of orchestrator/utils/atomic.py (tried again
+    on Windows while another program holds the file open)."""
+    from orchestrator.utils.atomic import replace_file
     path = known_hosts_path(state_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".known_hosts.")
     os.close(fd)
-    keys.save(tmp)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    try:
+        keys.save(tmp)
+        os.chmod(tmp, 0o600)
+        replace_file(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def fetch_host_key(host: str, port: int = 22, timeout: float = 10.0):

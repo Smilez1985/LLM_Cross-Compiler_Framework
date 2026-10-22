@@ -4,8 +4,8 @@ The Boards menu of the main window (W1' of 2026-10-16: every action of `llmcf de
 by mouse).
 
 Boards > Boards and Devices... (act_boards_devices) opens one window for every board (orchestrator/gui/
-boards_window.py): the stored and the trusted boards in one table, with Add a trusted board..., Remove trust...,
-Settings..., Runtime plan, Status, Build runtime..., Deploy runtime..., Verify..., Remove older runtime packages...,
+boards_window.py): the stored and the trusted boards in one table, with Add a trusted board..., Edit address or
+key..., Remove trust..., Settings..., Runtime plan, Status, Build runtime..., Deploy runtime..., Verify..., Remove older runtime packages...,
 Remove older builds on the board... and Check this board (Mojo). The menu sits after the Build menu (after File while
 there is none). The window and the board modules load when the entry is first used (lazy loading, RG1).
 
@@ -30,6 +30,12 @@ CLI_PATHS: Dict[str, str] = {
     "deploy devices add --port": "btn_boards_add",
     "deploy devices add --label": "btn_boards_add",
     "deploy devices remove": "btn_boards_remove_trust",
+    # Q5: host name or IP address, port and the host key (pasted, or read from the board with the dialog's check box)
+    "deploy devices edit": "btn_boards_edit",
+    "deploy devices edit --host": "btn_boards_edit",
+    "deploy devices edit --port": "btn_boards_edit",
+    "deploy devices edit --key": "btn_boards_edit",
+    "deploy devices edit --read-key": "btn_boards_edit",
     "device": ACTION_NAME,
     "device list": ACTION_NAME,                      # the table: system, deploy settings, deployed runtime
     "device settings": "btn_boards_settings",

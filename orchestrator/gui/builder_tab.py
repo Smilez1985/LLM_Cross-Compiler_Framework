@@ -228,7 +228,9 @@ class SSHProbeWorker(QThread):
             scan = scan_device(self.state_dir, self.ip, int(self.port), self.user, None, password=password,
                                label=self.label, output_file=local_output, via="gui", actor="gui", audit=self.audit)
         except DeviceScanError as e:
-            if e.kind == "login":
+            if e.kind == "user":
+                text = ui_text("deploy.bad_user")
+            elif e.kind == "login":
                 text = (reasons.person_text(e.reason, address=self.ip, port=int(self.port))
                         if e.reason in reasons.CODES else ui_text("deploy.remote.login_failed", reason=str(e.error)))
             elif e.kind == "probe":
@@ -708,7 +710,7 @@ class BuilderTab(QWidget):
         """Option 2: Remote SSH Scan (`llmcf scan --device HOST --user U --port --label`): the host key is read off
         the GUI thread and trusted only after the person's "Yes"; the probe runs in SSHProbeWorker."""
         from orchestrator.gui.plain import plain_box
-        from orchestrator.remote.address import valid_host
+        from orchestrator.remote.address import valid_host, valid_user
         from orchestrator.runtime.scan_steps import label_problem
         dlg = SSHConnectDialog(self, recent=self._recent("device"))
         if not dlg.exec():
@@ -717,9 +719,11 @@ class BuilderTab(QWidget):
         port, label = dlg.get_options()
         if not ip or not user:
             return
-        if not valid_host(ip) or label_problem(label):
-            plain_box(self, "warning", ui_text("deploy.remote.title"),
-                      ui_text("deploy.bad_address" if not valid_host(ip) else "deploy.label.bad"))
+        problem = ("deploy.bad_address" if not valid_host(ip) else
+                   "deploy.bad_user" if not valid_user(user, allow_root=True) else
+                   "deploy.label.bad" if label_problem(label) else "")
+        if problem:   # the checks of `llmcf scan --device`, before the board is contacted
+            plain_box(self, "warning", ui_text("deploy.remote.title"), ui_text(problem))
             return
         self.scan_btn.setEnabled(False)
         self._log(ui_text("deploy.reading_key", address=ip, port=port))

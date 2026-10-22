@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from orchestrator.remote.address import Endpoint, host_shaped, valid_port, valid_user
+from orchestrator.remote.trust import FINGERPRINT, TrustStore
 from orchestrator.utils.file_lock import file_lock
 
 DEVICES_FILE = "devices.json"
@@ -39,7 +40,7 @@ MAX_BYTES = 256 * 1024
 MAX_DEVICES = 200
 
 DEVICE_ID_RE = re.compile(r"^[0-9a-f]{16}$", re.ASCII)
-_FINGERPRINT = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$", re.ASCII)
+_FINGERPRINT = FINGERPRINT   # the one fingerprint pattern (orchestrator/remote/trust.py)
 _KEY_TYPE = re.compile(r"^[a-z0-9@.-]{3,64}$", re.ASCII)
 _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
 # What a deploy saw on the board, kept with its last deploy (note_board) until the next deploy looks again, and what the
@@ -160,18 +161,9 @@ class TrustedDevices:
 
     def key_status(self, device: TrustedDevice) -> str:
         """'known' while the framework's known_hosts holds exactly the record's key for its address; 'changed' when
-        it holds another key there; 'unknown' when it holds none (the person removed it). Reads no network."""
-        from orchestrator.utils import ssh_trust
-        try:
-            entries = ssh_trust._host_keys(self.state_dir).lookup(ssh_trust.host_entry(device.host, device.port))
-        except Exception:  # noqa: BLE001 - no paramiko or a damaged known_hosts: nothing is known
-            return "unknown"
-        if not entries:
-            return "unknown"
-        stored = entries.get(device.key_type)
-        if stored is None:
-            return "changed"
-        return "known" if ssh_trust.fingerprint(stored) == device.fingerprint else "changed"
+        it holds another key there; 'unknown' when it holds none (the person removed it). Reads no network
+        (TrustStore.status_of)."""
+        return TrustStore(self.state_dir).status_of(device)
 
     def last_deploys(self) -> Dict[str, Dict[str, Any]]:
         rows = self._read(self.deploys_path)
@@ -218,6 +210,30 @@ class TrustedDevices:
             rows[device_id] = row
             if len(rows) > MAX_DEVICES:
                 raise DeviceStoreError(f"at most {MAX_DEVICES} devices are kept; remove one first")
+            self._write(self.path, rows)
+        return device
+
+    def replace(self, old_id: str, host: str, port: int, user: str, key: Any, *, via: str, paired: bool,
+                label: str) -> TrustedDevice:
+        """Q5: the person changed the board's address or host key (orchestrator/remote/pairing.py replace_key): its
+        record moves to the new address and, for a new key, to the board's new device ID; the old record goes in the
+        same write. Called only by the person's board steps (person_steps.change_board). DeviceStoreError when the new
+        key is another trusted board's: that board's record is never overwritten."""
+        from orchestrator.runtime.profile import device_id_for_host_key
+        from orchestrator.utils import ssh_trust
+        fp = ssh_trust.fingerprint(key)
+        device_id = device_id_for_host_key(fp)
+        with file_lock(self.state_dir / ".devices.lock"):
+            rows = self._read(self.path)
+            if device_id != old_id and device_id in rows:
+                raise DeviceStoreError("the new host key belongs to another trusted device")
+            rows.pop(old_id, None)
+            device = TrustedDevice(device_id=device_id, label=clean_label(label), host=host, port=int(port),
+                                   user=user, key_type=key.get_name(), fingerprint=fp, paired=bool(paired),
+                                   trusted_at=_now(), trusted_via=via).check()
+            row = asdict(device)
+            row.pop("device_id")
+            rows[device_id] = row
             self._write(self.path, rows)
         return device
 
