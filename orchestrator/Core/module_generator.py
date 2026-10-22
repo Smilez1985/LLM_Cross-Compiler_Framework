@@ -8,6 +8,9 @@ Zentrale Logik zur Generierung neuer Hardware-Target-Module.
 Wird sowohl von der GUI (Wizard) als auch der CLI (Command) genutzt.
 Enthält Templates für Dockerfile, target.yml und build.sh.
 
+The build of a generated target is the template's four stage modules (source, config, convert, target), which
+modules/build.sh, the stage runner, runs in this order (DECISIONS U9); the generator fills in the wizard's setup
+commands (source), quantization logic (convert) and packaging commands (target).
 The generated target.yml carries a capabilities block (support level community) and no template placeholder.
 A knowledge snapshot is attached only on request and holds only the pages crawled for this target, as the licences
 allow (full text only where a page's licence allows passing it on, otherwise its address and short facts), with the
@@ -74,6 +77,11 @@ TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_F
     r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name|VENDOR_SOURCES|PIP_PACKAGES|PINNED_DOWNLOADS"
     r"|PINNED_DOWNLOADS_COPY)\]|\{packages_str\}|YYYY-MM-DD")
 GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
+# The stages of a target's build, in the order modules/build.sh (the stage runner) runs them (DECISIONS U9).
+STAGE_MODULES = ("source", "config", "convert", "target")
+STAGE_FALLBACK = ('#!/bin/bash\n# {stage}_module.sh - the {stage} stage (no template for it was found when this target '
+                  'was generated)\necho "ERROR: the {stage} stage of this target has no script yet: write '
+                  'modules/{stage}_module.sh (see targets/_template)." >&2\nexit 1\n')
 KNOWLEDGE_SNAPSHOT = "knowledge/initial_knowledge.json"  # crawled pages: data, not template output
 # The licence texts and the NOTICE next to the snapshot (rag/pack_licences.py): data from the web and from SPDX too.
 SNAPSHOT_LICENCE_FILES = ("knowledge/NOTICE", "knowledge/LICENSES/")
@@ -455,8 +463,8 @@ def _yaml_text(text: str) -> str:
 
 
 def capabilities_block(board_names: List[str], quantization_logic: str = "") -> Dict[str, Any]:
-    """The capabilities of a generated target: its boards and GGUF with the types its build.sh handles (the
-    labels of its case branches) or common defaults. Support level community: works for its makers."""
+    """The capabilities of a generated target: its boards and GGUF with the types its convert stage handles (the
+    labels of the case branches of the quantization logic in modules/convert_module.sh) or common defaults. Support level community: works for its makers."""
     from orchestrator.schemas.targets import TargetCapabilities
     labels = re.findall(r"^\s*([A-Za-z0-9_|\"' ]+)\)", quantization_logic or "", re.MULTILINE)
     quants = [q.strip(" \"'") for label in labels for q in label.split("|")]
@@ -650,25 +658,28 @@ class ModuleGenerator:
             else:
                 self._process_template("Dockerfile", target_dir, data)
             
-            # Build Modules (Shell Scripts)
-            self._process_template("modules/config_module.sh", target_dir, data)
-            self._process_template("modules/source_module.sh", target_dir, data)
-            
-            # Build Dispatcher
+            # The four stage modules of the build (DECISIONS U9): source -> config -> convert -> target, each with the
+            # template's instructions for its stage; the wizard's setup commands go into the source stage, its
+            # quantization logic into the convert stage and its packaging commands into the target stage.
+            for stage in STAGE_MODULES:
+                self._process_template(f"modules/{stage}_module.sh", target_dir, data)
+
+            # The stage runner that runs them
             self._write_build_script(target_dir, data)
             
-            # Specialized Modules (Optional copy if template exists)
+            # Specialized Modules (Optional copy if template exists): the convert stage's format helpers, and the
+            # host benchmark that no build runs (models for a board are measured on the board)
             self._process_template("modules/rknn_module.sh", target_dir, data)
             self._process_template("modules/rkllm_module.sh", target_dir, data)
             self._process_template("modules/benchmark_module.sh", target_dir, data)
-            
+
             # 3. Generate Helper Scripts (Dynamic)
             self._write_profile_script(target_dir, data)
-            
+
             # 4. Copy Python Scripts (Static Helpers)
             self._copy_scripts(target_dir)
-            
-            # 5. Create Placeholder/Fallback Modules
+
+            # 5. Fallback stage modules, only when the template folder lacks one
             self._write_standard_modules(target_dir)
             
             # 6. Knowledge snapshot: only on request, and only the pages crawled for this target.
@@ -888,7 +899,8 @@ class ModuleGenerator:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
     def _write_build_script(self, target_dir: Path, data: Dict[str, Any]):
-        """Generates the intelligent 'build.sh' dispatcher script."""
+        """modules/build.sh: the template's stage runner; without a template folder (an incomplete installation) a
+        self-contained dispatcher of the quantization logic."""
         src = self.template_dir / "modules/build.sh"
         if src.exists():
             self._process_template("modules/build.sh", target_dir, data)
@@ -950,11 +962,12 @@ echo "Generated $OUTPUT_FILE"
                 shutil.copy2(item, dst_scripts / item.name)
 
     def _write_standard_modules(self, target_dir: Path):
-        """Creates placeholder modules."""
-        if not (target_dir / "modules/convert_module.sh").exists():
-             self._write_script(target_dir / "modules/convert_module.sh", "#!/bin/bash\n# Placeholder\nexit 0")
-        if not (target_dir / "modules/target_module.sh").exists():
-             self._write_script(target_dir / "modules" / "target_module.sh", "#!/bin/bash\n# Placeholder\nexit 0")
+        """A stage module the template folder did not have (an incomplete installation): a stage that stops the
+        build with the reason, never one that does nothing and lets the build look finished."""
+        for stage in STAGE_MODULES:
+            path = target_dir / "modules" / f"{stage}_module.sh"
+            if not path.exists():
+                self._write_script(path, STAGE_FALLBACK.format(stage=stage))
 
     def _write_script(self, path: Path, content: str):
         self._write_file(path, content)

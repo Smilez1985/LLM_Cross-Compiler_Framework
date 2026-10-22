@@ -1238,6 +1238,52 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **A build is the four stage modules again, and `build.sh` only runs them** (maintainer decision U9; consolidation
+  chain build4). `targets/Rockchip/modules/build.sh` is a stage runner over `source_module.sh` (the toolchain
+  sources the image was built from), `config_module.sh` (normalizes the request, refuses what the target cannot
+  build and writes the build plan), `convert_module.sh` (the model in full precision, the importance matrix, RKLLM
+  and RKNN through their format helpers `rkllm_module.sh` and `rknn_module.sh`) and `target_module.sh`
+  (quantization, `build_info.json`); the dispatcher's work moved into the stage it belongs to, and a GGUF, RKLLM or
+  RKNN build produces the same files with the same names as before (`tests/test_build_stages.py` pins commands,
+  outputs, `SHA256SUMS`, the environment variables read and the exit codes, before and after). New: after every
+  stage that really finished, a resume marker in the build's work folder (`stages/<job>/`) with a digest of the
+  stage's inputs (request, model revision and files, quantization, target, format, calibration data, the image's
+  llama.cpp pin and the SHA-256 of every module and script) and the files it wrote; run again on the same work
+  folder with the same inputs, finished stages are skipped, and a changed input or a missing file runs that stage
+  and every later one again (`build.sh --fresh` ignores the markers, `--to STAGE` stops after a stage). Each stage
+  prints a progress line (`=== Stage 3/4: convert ===`, `... done in 41 s`, `... resumed`, `... failed (exit 1)`),
+  and the build status, the Builder and `llm-cli build status` show the stage ("Running modules: convert (3/4)")
+  with its share of the progress bar. The engine passes the Hugging Face commit of the model as `MODEL_REVISION`.
+  An optional `modules/rotate_module.sh` runs between convert and target, the slot for a rotation such as
+  SpinQuant (no algorithm is shipped). Benchmarks stay on the board: no stage runs `benchmark_module.sh`, which
+  says so in its header and points to `llm-cli device runtime verify --bench-model`. The 1.x functions of the
+  modules are reachable again (tested with stub toolchains): a board's hardware profile (`build.sh --hardware-config FILE`) gives the
+  CMake toolchain and the board package with cross-compiled `llama-cli` and `llama-server`, and
+  `source_module.sh --clone-llama-cpp` (also the entrypoint mode `source --clone-llama-cpp`), started by hand,
+  clones llama.cpp at a given commit; four latent faults of
+  those 1.x paths were fixed on the way (an undefined cross-compile function, CMake flags passed as one quoted
+  word, a profile check that ended the script under `set -e`, writes into the read-only cache folder). What they
+  did and that a build no longer needs (building llama.cpp tools inside the build: the image has them; the old
+  `convert.py` fallback: the pinned llama.cpp has no such file) is not run again. Each module also runs on its own
+  with its 1.x options, as in the maintainer's design: `convert_module.sh --input DIR --output FILE --model-name NAME`
+  writes the F16 GGUF to FILE, `target_module.sh --input FILE.gguf --quantization TYPE --model-name NAME` quantizes
+  that GGUF without converting it again and keeps it (1.x defaults Q4_K_M and the file's name), and
+  `config_module.sh --hardware-config FILE` writes the toolchain and the plan without a model; a path given as an
+  option is made absolute. The resume digest also covers the output folder and the hardware profile that the
+  config stage reads when none is named, and a late stage line of a finished container no longer takes back the
+  build's next step.
+- **New targets get working stage modules, and the entrypoint modes run the stage runner.** The template's
+  `build.sh` is the same runner as Rockchip's (a test keeps them equal), and its four stage modules take the
+  wizard's values: the setup commands run once in the source stage (what they export reaches the later stages, also
+  on a resume), the quantization logic is the convert stage's case, the packaging commands run in the target stage,
+  and both may still use `$QUANT` next to `$QUANT_TYPE`, as with the dispatcher.
+  The module generator writes the template's convert and target modules instead of "Placeholder" scripts that ended
+  with exit code 0; a stage without a template stops the build with the reason. `entrypoint.sh pipeline INPUT NAME
+  [QUANTIZATION] [PROFILE]` and the modes `source`, `config`, `convert` and `target` run `build.sh` (the latter up
+  to that stage, with the 1.x module options). The `modules:` blocks of both `target.yml` files, the wizard, the
+  `create_target_module` tool, Ditto's module prompt, `llm-cli module create` (whose next steps no longer call the
+  modules legacy files) and the guides name the stage each part belongs to; the roadmap item to remove the
+  four-module scripts is done differently (they are the build).
 - **The code is arranged in layers, and a test keeps them** (consolidation; maintainer decision of 2026-10-17: one
   repository, layers enforced by a test). `tests/test_layering.py` maps every module of `orchestrator/` to a layer
   (bottom, remote, kernel, domain, tool definitions, adapters), reads every import (also inside functions, under

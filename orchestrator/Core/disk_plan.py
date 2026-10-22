@@ -41,8 +41,9 @@ STANDING_RESERVE_MIN = 20 * GIB  # a call under a standing approval leaves more,
 STANDING_RESERVE_SHARE = 0.10
 OUTPUT_COPIES = 3              # build cache, staged copy next to the output folder, golden ZIP
 # Conversion margins as a share of the download (estimates until measured on the Rockchip pipeline): GGUF keeps an
-# F16 intermediate until quantizing ends (targets/Rockchip/modules/build.sh); RKLLM and RKNN an export of about the
-# same size.
+# F16 intermediate until quantizing ends (the convert stage, targets/Rockchip/modules/convert_module.sh, writes it into
+# the work folder; the target stage, target_module.sh, removes it after quantizing; modules/build.sh is the stage
+# runner over them); RKLLM and RKNN an export of about the same size.
 CONVERSION_MARGIN = {"gguf": 1.0, "rkllm": 1.0, "rknn": 1.0}
 DEFAULT_MARGIN = 1.0
 LEDGER_FILE = "disk_reservations.json"

@@ -1,27 +1,54 @@
 #!/bin/bash
-# config_module.sh - Hardware Config & CMake Toolchain Generator
+# config_module.sh - stage 2 of the Rockchip build: the build plan (run by build.sh, the stage runner)
 # Part of LLM Cross-Compiler Framework
 #
-# DIREKTIVE: Goldstandard, vollständig, professionell geschrieben.
-# ZWECK: Liest target_hardware_config.txt und generiert optimierte Build-Konfiguration
-#        für Rockchip Family (und andere Architekturen)
+# Image:  targets/Rockchip/dockerfile: Debian bookworm for the build host's architecture (x86_64).
+# Target: Rockchip boards, aarch64 Linux (RK3566, RK3568: CPU; RK3576, RK3588: CPU and NPU).
+# Stage:  reads the request from the environment, normalizes it (lower-case format and board, the GGUF type names
+#         and their aliases) and refuses what this target cannot build before anything slow runs. Then it writes the
+#         build plan, build_config.sh in the stage folder, which the convert and target stages read.
+#         With a hardware profile (HARDWARE_CONFIG_FILE, or $BUILD_CACHE_DIR/target_hardware_config.txt: the file
+#         scripts/hardware_probe.sh writes on the board) it also writes the CMake toolchain and the compiler flags
+#         for that board into the plan, as the hardware agent of version 1.x did; the target stage then packages
+#         llama-cli and llama-server for the board as well. A build of the BuildEngine has no profile: the board's
+#         runtime is planned from the board's own probe by the runtime builder (orchestrator/runtime/build/recipe.py).
+#
+# Inputs (environment, set by BuildEngine):
+#   MODEL_SOURCE   local HF model directory inside the container (staged by the host); an ONNX file or folder (rknn);
+#                  or a GGUF file (gguf: quantized by the target stage, nothing converted)
+#   TARGET_FORMAT  gguf | rkllm | rknn                       (default: gguf)
+#   TARGET_BOARD   rk3588 | rk3576 | rk3566 | ...            (default: rk3588)
+#   QUANTIZATION   e.g. Q4_K_M, IQ4_XS, F16 (gguf) / w4a16, w8a8 (rkllm) / i8, fp16 (rknn)
+#   JOB_TYPE       build | imatrix
+#   USE_IMATRIX / IMATRIX_PATH, DATASET_PATH, MODEL_NAME, MODEL_REVISION, MAX_CONTEXT_LENGTH (optional)
+#   OPTIMIZATION_LEVEL is set as well but not used: the Rockchip conversions have no matching setting.
+# The image sets LLAMA_CPP_PATH, RKLLM_PYTHON and RKNN_PYTHON; the BuildEngine mounts $BUILD_CACHE_DIR/output (results)
+# and $BUILD_SCRATCH_DIR (the work folder for intermediates; the image filesystem may be read-only).
 
 set -euo pipefail
 
-# --- CONFIGURATION & GLOBALS ---
-readonly SCRIPT_NAME="config_module.sh"
-readonly BUILD_CACHE_DIR="${BUILD_CACHE_DIR:-/build-cache}"
-readonly HARDWARE_CONFIG_FILE="${BUILD_CACHE_DIR}/target_hardware_config.txt"
-readonly OUTPUT_TOOLCHAIN_FILE="${BUILD_CACHE_DIR}/cross_compile_toolchain.cmake"
-readonly OUTPUT_CONFIG_FILE="${BUILD_CACHE_DIR}/build_config.sh"
-readonly LOG_LEVEL="${LOG_LEVEL:-INFO}"
-DEBUG="${DEBUG:-0}"
+BUILD_CACHE_DIR="${BUILD_CACHE_DIR:-/build-cache}"
+WORK_DIR="$BUILD_CACHE_DIR"
+OUTPUT_DIR="${WORK_DIR}/output"
+IMATRIX_DIR="${WORK_DIR}/imatrix"
+# Large intermediates (F16 GGUF) go to the mounted work folder; the image filesystem may be read-only.
+SCRATCH_DIR="${BUILD_SCRATCH_DIR:-$WORK_DIR}"
+PLAN_DIR="${STAGE_DIR:-$SCRATCH_DIR}"
+BUILD_PLAN="$PLAN_DIR/build_config.sh"
+OUTPUT_TOOLCHAIN_FILE="$PLAN_DIR/cross_compile_toolchain.cmake"
+
+LLAMA_BASE="${LLAMA_CPP_PATH:-/usr/src/llama.cpp}"
+CONVERT_SCRIPT="$LLAMA_BASE/convert_hf_to_gguf.py"
+QUANTIZE_BIN="$LLAMA_BASE/build/bin/llama-quantize"
+IMATRIX_BIN="$LLAMA_BASE/build/bin/llama-imatrix"
 
 # Hardware-Konfiguration
 declare -A HW_CONFIG
 
 # Compiler-Konfiguration
 declare -A COMPILER_CONFIG
+
+die() { echo "ERROR: $*" >&2; exit 1; }
 
 # ============================================================================
 # LOGGING & ERROR HANDLING
@@ -30,39 +57,114 @@ declare -A COMPILER_CONFIG
 log_info() { echo "ℹ️  [$(date '+%H:%M:%S')] [CONFIG] $1"; }
 log_success() { echo "✅ [$(date '+%H:%M:%S')] [CONFIG] $1"; }
 log_warn() { echo "⚠️  [$(date '+%H:%M:%S')] [CONFIG] $1"; }
-log_error() { echo "❌ [$(date '+%H:%M:%S')] [CONFIG] $1" >&2; }
-log_debug() { [ "$DEBUG" = "1" ] && echo "🔍 [$(date '+%H:%M:%S')] [CONFIG] $1"; }
-
-die() {
-    log_error "$1"
-    exit "${2:-1}"
-}
-
-trap "die 'Config Module fehlgeschlagen'" ERR
 
 # ============================================================================
-# HARDWARE CONFIG PARSING
+# GGUF TYPES (llama.cpp; the capabilities in target.yml list the same ones)
+# ============================================================================
+
+# Used by convert_module.sh, which sources this file.
+# shellcheck disable=SC2034
+{
+# Output types convert_hf_to_gguf.py writes directly.
+GGUF_CONVERT_TYPES=" f32 f16 bf16 q8_0 auto "
+# Types accepted by llama-quantize (llama.cpp v0.6.0).
+GGUF_QUANT_TYPES=" Q4_0 Q4_1 Q5_0 Q5_1 Q8_0 Q2_K Q2_K_S Q3_K_S Q3_K_M Q3_K_L Q4_K_S Q4_K_M Q5_K_S Q5_K_M Q6_K \
+IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS TQ1_0 TQ2_0 MXFP4_MOE "
+# Very low-bit i-quants are unusable without an importance matrix; other i-quants lose quality without one.
+GGUF_NEEDS_IMATRIX=" IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S "
+GGUF_WANTS_IMATRIX=" IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS "
+}
+
+normalize_gguf_type() {
+    local q
+    q="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
+    case "$q" in
+        ""|F16|FP16) echo "F16" ;;
+        BF16) echo "BF16" ;;
+        F32|FP32) echo "F32" ;;
+        INT8|Q8) echo "Q8_0" ;;
+        INT4|Q4) echo "Q4_K_M" ;;
+        Q5) echo "Q5_K_M" ;;
+        *) echo "$q" ;;
+    esac
+}
+
+# ============================================================================
+# THE REQUEST (the checks of the former build.sh dispatcher)
+# ============================================================================
+
+plan_request() {
+    FORMAT="$(echo "${TARGET_FORMAT:-gguf}" | tr '[:upper:]' '[:lower:]')"
+    BOARD="$(echo "${TARGET_BOARD:-rk3588}" | tr '[:upper:]' '[:lower:]')"
+    QUANT="${QUANTIZATION:-}"
+    JOB="${JOB_TYPE:-build}"
+    MODEL_SOURCE="${MODEL_SOURCE:-}"
+    # The input: a model for the converters (a Hugging Face folder; RKNN: an ONNX file or folder), or a GGUF file,
+    # the F16 GGUF that target_module.sh of version 1.x took (the convert stage then converts nothing).
+    INPUT_FORMAT="model"
+    if [ -f "$MODEL_SOURCE" ] && [[ "$MODEL_SOURCE" == *.[gG][gG][uU][fF] ]]; then
+        INPUT_FORMAT="gguf"
+    fi
+    if [ "$INPUT_FORMAT" = "gguf" ]; then
+        # The defaults of target_module.sh of version 1.x: the file name without .gguf and .fp16, and Q4_K_M
+        local name
+        name="$(basename "$MODEL_SOURCE")"
+        name="${name%.*}"
+        MODEL_NAME="${MODEL_NAME:-${name%.fp16}}"
+        if [ "$FORMAT" = "gguf" ] && [ -z "$QUANT" ]; then
+            QUANT="Q4_K_M"
+        fi
+    else
+        MODEL_NAME="${MODEL_NAME:-$(basename "${MODEL_SOURCE%/}")}"
+    fi
+
+    echo "Model:        $MODEL_SOURCE"
+    echo "Format:       $FORMAT"
+    echo "Board:        $BOARD"
+    echo "Quantization: ${QUANT:-<default>}"
+    echo "Job:          $JOB"
+
+    if [ -z "$MODEL_SOURCE" ] && [ "${STAGE_LAST:-}" = "config" ]; then
+        # config_module.sh --hardware-config FILE (version 1.x): the toolchain and the plan of the board only
+        echo "No model (--input): the build plan holds the hardware profile only."
+    else
+        [ -n "$MODEL_SOURCE" ] && [ -e "$MODEL_SOURCE" ] || die "MODEL_SOURCE '$MODEL_SOURCE' does not exist in the container."
+    fi
+
+    # The importance-matrix job converts and measures only; its container has no output folder.
+    [ "$JOB" = "imatrix" ] && return 0
+
+    mkdir -p "$OUTPUT_DIR"
+    case "$FORMAT" in
+        gguf|rknn) ;;
+        rkllm)
+            case "$BOARD" in
+                *rk3588*|*rk3576*) ;;
+                *) die "RKLLM needs an RK3588 or RK3576 NPU; board '$BOARD' should use the gguf format (CPU)." ;;
+            esac
+            ;;
+        *)
+            die "Format '$FORMAT' is not supported by the Rockchip target (gguf, rkllm, rknn)."
+            ;;
+    esac
+}
+
+# ============================================================================
+# HARDWARE CONFIG PARSING (hardware profile of the board, optional)
 # ============================================================================
 
 load_hardware_config() {
     log_info "Lade Hardware-Konfiguration: $HARDWARE_CONFIG_FILE"
-    
-    if [[ ! -f "$HARDWARE_CONFIG_FILE" ]]; then
-        log_warn "Hardware-Konfigurationsdatei nicht gefunden: $HARDWARE_CONFIG_FILE"
-        log_warn "Verwende generische Fallback-Optimierungen."
-        HW_CONFIG[ARCHITECTURE_FULL]="aarch64"
-        HW_CONFIG[CPU_MODEL_NAME]="generic"
-        return 1
-    fi
-    
+
     while IFS='=' read -r key value; do
         [[ "$key" =~ ^[[:space:]]*# ]] && continue
         [[ -z "$key" ]] && continue
         key=$(echo "$key" | tr -d ' \t')
-        value=$(echo "$value" | tr -d ' \t' | sed 's/^"//;s/"$//')
+        value=$(echo "$value" | tr -d ' \t\r' | sed 's/^"//;s/"$//')
         HW_CONFIG["$key"]="$value"
     done < <(grep -E '^[^#]*=' "$HARDWARE_CONFIG_FILE")
-    
+
+    HW_CONFIG[ARCHITECTURE_FULL]="${HW_CONFIG[ARCHITECTURE_FULL]:-aarch64}"
     log_info "Hardware-Konfiguration geladen (${HW_CONFIG[CPU_MODEL_NAME]:-Unknown})"
 }
 
@@ -72,34 +174,35 @@ load_hardware_config() {
 
 generate_compiler_flags() {
     log_info "Generiere Compiler-Flags für ${HW_CONFIG[ARCHITECTURE_FULL]}"
-    
+
     local cflags="-O3 -pthread -fPIC"
     local cxxflags="-std=c++17"
-    local cmake_flags="-DGGML_NATIVE=ON"
-    local build_jobs=$(nproc) 
-    
+    local cmake_flags="-DGGML_NATIVE=OFF"
+    local build_jobs
+    build_jobs=$(nproc)
+
     # --- HARDWARE-SPEZIFISCHE LOGIK ---
-    
+
     # AArch64 (Rockchip/Jetson)
     if [[ "${HW_CONFIG[ARCHITECTURE_FULL]}" == "aarch64" ]]; then
         COMPILER_CONFIG[CROSS_PREFIX]="aarch64-linux-gnu"
-        
-        if [[ "${HW_CONFIG[CPU_MODEL_NAME]}" =~ "Cortex-A55" ]]; then
+
+        if [[ "${HW_CONFIG[CPU_MODEL_NAME]:-}" =~ "Cortex-A55" ]]; then
             log_info "Optimiere für Cortex-A55"
             cflags="$cflags -mcpu=cortex-a55 -march=armv8-a"
-        elif [[ "${HW_CONFIG[CPU_MODEL_NAME]}" =~ "Cortex-A76" ]]; then
+        elif [[ "${HW_CONFIG[CPU_MODEL_NAME]:-}" =~ "Cortex-A76" ]]; then
             log_info "Optimiere für Cortex-A76"
             cflags="$cflags -mcpu=cortex-a76 -march=armv8-a"
         else
             log_info "Verwende generisches ARMv8-A"
             cflags="$cflags -march=armv8-a"
         fi
-        
+
         if [[ "${HW_CONFIG[SUPPORTS_NEON]:-OFF}" == "ON" ]]; then
             cmake_flags="$cmake_flags -DGGML_NEON=ON"
         fi
     fi
-    
+
     # x86_64 (Intel)
     if [[ "${HW_CONFIG[ARCHITECTURE_FULL]}" == "x86_64" ]]; then
         cflags="$cflags -march=native"
@@ -107,12 +210,12 @@ generate_compiler_flags() {
             cmake_flags="$cmake_flags -DGGML_AVX2=ON"
         fi
     fi
-    
+
     # Build-Jobs basierend auf Kernen
     if [[ -n "${HW_CONFIG[CPU_CORES]:-}" ]] && [[ "${HW_CONFIG[CPU_CORES]}" -lt "$build_jobs" ]]; then
         build_jobs=${HW_CONFIG[CPU_CORES]}
     fi
-    
+
     # Speichere Konfiguration
     COMPILER_CONFIG[CFLAGS]="$cflags"
     COMPILER_CONFIG[CXXFLAGS]="$cxxflags $cflags"
@@ -126,13 +229,14 @@ generate_compiler_flags() {
 
 generate_cmake_toolchain() {
     log_info "Generiere CMake Toolchain: $OUTPUT_TOOLCHAIN_FILE"
-    
+
     # CCACHE Detection (Im Container)
-    local ccache_path=$(which ccache || echo "")
-    
+    local ccache_path
+    ccache_path=$(command -v ccache || echo "")
+
     cat > "$OUTPUT_TOOLCHAIN_FILE" << EOF
 # CMake Toolchain File
-# Generated by $SCRIPT_NAME
+# Generated by config_module.sh
 # Target: ${HW_CONFIG[CPU_MODEL_NAME]:-Unknown}
 
 SET(CMAKE_SYSTEM_NAME Linux)
@@ -169,15 +273,12 @@ EOF
         log_warn "CCACHE nicht gefunden, Build wird langsamer sein."
     fi
 
-    # Compiler Flags
+    # Compiler Flags (the CMake options are passed on the cmake command line: COMPILER_CONFIG[CMAKE_FLAGS])
     cat >> "$OUTPUT_TOOLCHAIN_FILE" << EOF
 
 # Compiler Flags
 SET(CMAKE_C_FLAGS   "\${CMAKE_C_FLAGS} ${COMPILER_CONFIG[CFLAGS]}")
 SET(CMAKE_CXX_FLAGS "\${CMAKE_CXX_FLAGS} ${COMPILER_CONFIG[CXXFLAGS]}")
-
-# llama.cpp specific optimizations
-${COMPILER_CONFIG[CMAKE_FLAGS]}
 
 # Build configuration
 SET(CMAKE_BUILD_TYPE Release)
@@ -188,37 +289,53 @@ EOF
 }
 
 # ============================================================================
-# BUILD CONFIG SCRIPT GENERATION
+# BUILD CONFIG SCRIPT GENERATION (the build plan)
 # ============================================================================
 
+plan_line() { printf '%s=%q\n' "$1" "$2"; }
+
 generate_build_config() {
-    log_info "Generiere Build Config Script: $OUTPUT_CONFIG_FILE"
-    
-    cat > "$OUTPUT_CONFIG_FILE" << EOF
-#!/bin/bash
-# Build Configuration Script
-# Generated by $SCRIPT_NAME
-# Target: ${HW_CONFIG[CPU_MODEL_NAME]:-Unknown}
-
-export TARGET_ARCH="${HW_CONFIG[ARCHITECTURE_FULL]}"
-export TARGET_CPU="${HW_CONFIG[CPU_MODEL_NAME]}"
-
-export CFLAGS="${COMPILER_CONFIG[CFLAGS]}"
-export CXXFLAGS="${COMPILER_CONFIG[CXXFLAGS]}"
-
-export CMAKE_TOOLCHAIN_FILE="$OUTPUT_TOOLCHAIN_FILE"
-export BUILD_JOBS="${COMPILER_CONFIG[BUILD_JOBS]}"
-
-# Hardware Capabilities (für target_module.sh)
-export HW_SUPPORTS_NEON="${HW_CONFIG[SUPPORTS_NEON]:-OFF}"
-export HW_SUPPORTS_AVX2="${HW_CONFIG[SUPPORTS_AVX2]:-OFF}"
-export HW_SUPPORTS_AVX512="${HW_CONFIG[SUPPORTS_AVX512]:-OFF}"
-export HW_GPU_MODEL="${HW_CONFIG[GPU_MODEL]:-None}"
-
-echo "Build configuration loaded for ${HW_CONFIG[CPU_MODEL_NAME]}"
-EOF
-
-    chmod +x "$OUTPUT_CONFIG_FILE"
+    log_info "Generiere Build Config Script: $BUILD_PLAN"
+    {
+        echo "# Build plan, written by config_module.sh; convert_module.sh and target_module.sh read it."
+        plan_line FORMAT "$FORMAT"
+        plan_line BOARD "$BOARD"
+        plan_line QUANT "$QUANT"
+        plan_line JOB "$JOB"
+        plan_line MODEL_SOURCE "$MODEL_SOURCE"
+        plan_line INPUT_FORMAT "$INPUT_FORMAT"
+        plan_line MODEL_NAME "$MODEL_NAME"
+        plan_line OUTPUT_DIR "$OUTPUT_DIR"
+        plan_line IMATRIX_DIR "$IMATRIX_DIR"
+        plan_line SCRATCH_DIR "$SCRATCH_DIR"
+        plan_line LLAMA_BASE "$LLAMA_BASE"
+        plan_line CONVERT_SCRIPT "$CONVERT_SCRIPT"
+        plan_line QUANTIZE_BIN "$QUANTIZE_BIN"
+        plan_line IMATRIX_BIN "$IMATRIX_BIN"
+        if [ -z "${HW_CONFIG[ARCHITECTURE_FULL]:-}" ]; then
+            plan_line BOARD_PACKAGE 0
+        else
+            echo "# Hardware profile of the board (for the package of llama-cli and llama-server, target stage)"
+            plan_line BOARD_PACKAGE 1
+            plan_line HARDWARE_PROFILE "$HARDWARE_CONFIG_FILE"
+            plan_line TARGET_CPU "${HW_CONFIG[CPU_MODEL_NAME]:-}"
+            plan_line PROFILE_ARCH "${HW_CONFIG[ARCHITECTURE_FULL]}"
+            plan_line CFLAGS "${COMPILER_CONFIG[CFLAGS]}"
+            plan_line CXXFLAGS "${COMPILER_CONFIG[CXXFLAGS]}"
+            plan_line CMAKE_FLAGS "${COMPILER_CONFIG[CMAKE_FLAGS]}"
+            plan_line CMAKE_TOOLCHAIN_FILE "$OUTPUT_TOOLCHAIN_FILE"
+            plan_line BUILD_JOBS "${COMPILER_CONFIG[BUILD_JOBS]}"
+            plan_line HW_SUPPORTS_NEON "${HW_CONFIG[SUPPORTS_NEON]:-OFF}"
+            plan_line HW_SUPPORTS_AVX2 "${HW_CONFIG[SUPPORTS_AVX2]:-OFF}"
+            plan_line HW_SUPPORTS_AVX512 "${HW_CONFIG[SUPPORTS_AVX512]:-OFF}"
+            plan_line HW_GPU_MODEL "${HW_CONFIG[GPU_MODEL]:-None}"
+        fi
+    } > "$BUILD_PLAN.tmp"
+    mv -f "$BUILD_PLAN.tmp" "$BUILD_PLAN"
+    stage_output "$BUILD_PLAN"
+    if [ -f "$OUTPUT_TOOLCHAIN_FILE" ]; then
+        stage_output "$OUTPUT_TOOLCHAIN_FILE"
+    fi
     log_success "Build Config Script generiert"
 }
 
@@ -226,32 +343,20 @@ EOF
 # MAIN EXECUTION
 # ============================================================================
 main() {
-    local start_time=$SECONDS
-    log_info "Starte Config Module (Hardware-Agent)..."
-    
-    # Parse arguments
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --hardware-config)
-                HARDWARE_CONFIG_FILE="$2"
-                shift 2
-                ;;
-            *)
-                die "Unbekannter Parameter: $1"
-                ;;
-        esac
-    done
-    
-    load_hardware_config
-    generate_compiler_flags
-    generate_cmake_toolchain
+    plan_request
+
+    HARDWARE_CONFIG_FILE="${HARDWARE_CONFIG_FILE:-$BUILD_CACHE_DIR/target_hardware_config.txt}"
+    rm -f "$OUTPUT_TOOLCHAIN_FILE"
+    if [ -f "$HARDWARE_CONFIG_FILE" ]; then
+        load_hardware_config
+        generate_compiler_flags
+        generate_cmake_toolchain
+    fi
     generate_build_config
-    
-    local duration=$((SECONDS - start_time))
-    log_success "Config Module abgeschlossen in ${duration}s"
-    log_info "Nächstes Modul: convert_module.sh"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # Started by hand: the build up to this stage, through the stage runner.
+    [ -n "${STAGE_RUNNER:-}" ] || exec bash "$(dirname "${BASH_SOURCE[0]}")/build.sh" --to config "$@"
     main "$@"
 fi

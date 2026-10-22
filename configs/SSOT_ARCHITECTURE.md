@@ -160,7 +160,7 @@ both `b<build_number>` and `build`. Everything else follows from this entry:
 | The setting `llama_cpp_version` | its default is derived from `tag`; it no longer moves what target images build (a different value only gives a warning in the build log) |
 | `ARG LLAMA_CPP_TAG` and `ARG LLAMA_CPP_COMMIT` in `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` and `Dockerfile.gpu` (every `Dockerfile*` of a target that sets them or clones llama.cpp is checked), `docker.build_args.LLAMA_CPP_TAG` and `LLAMA_CPP_COMMIT` in `targets/*/target.yml` | fallbacks for image builds outside the framework; must equal `tag` and `commit` |
 | `inference_backends.llama_cpp.commit` in `project_sources.yml` and `detailed_project_sources.yml` | reference catalogue; must equal `tag` |
-| `LLAMA_CPP_COMMIT` defaults in `targets/*/modules/source_module.sh` | legacy four-module chain, left untouched (decision D20); reported, not checked |
+| `LLAMA_CPP_COMMIT` defaults in `targets/*/modules/source_module.sh` | the shipped stage modules have none: their source stage reports the pin of the image, and `--clone-llama-cpp` (started by hand) needs a full commit id. A version 1.x `source_module.sh` of an older target that still has a default (decision D20) is reported, not checked |
 
 `tests/test_build_recipe.py` fails when a place disagrees. `python scripts/llama_cpp_pin.py check` prints the same
 table and checks with `git ls-remote` that upstream's tag points at the pinned commit. How to bump the pin:
@@ -300,9 +300,10 @@ eleven entries that only `project_sources.yml` has.
 `project_sources.yml`. It edits the setting `source_repositories` in `config.yml`: `--add <name> <url>` stores an
 entry, `--remove <name>` removes it, and without options it lists the entries. The build engine turns entries of
 the form `{name: {url: ...}}`, which `--add` stores, and plain URLs stored by earlier versions into variables
-`<NAME>_REPO_OVERRIDE` for the stage containers. Only the legacy `source_module.sh` reads `LLAMA_CPP_REPO_OVERRIDE`,
-and the current Rockchip `build.sh` does not call it. In practice the setting has no effect on builds at the
-moment.
+`<NAME>_REPO_OVERRIDE` for the stage containers. The source stage (`source_module.sh`) only warns when
+`LLAMA_CPP_REPO_OVERRIDE` is set, because a build uses the llama.cpp of its image; only
+`source_module.sh --clone-llama-cpp`, started by hand in a container with network, clones from it. In practice the
+setting has no effect on builds at the moment.
 
 ## Other single sources of the project
 
@@ -328,5 +329,5 @@ moment.
 | add a local model or a newer llama.cpp build | `llama_runtime.yml`, with size, SHA256 and commit | run the check above and `tests/test_runtime.py`; changelog entry |
 | move to another llama.cpp commit | `llama_cpp.source` in `llama_runtime.yml` and the places that must match it | the procedure in [CONTRIBUTING.md](../CONTRIBUTING.md#bumping-the-llamacpp-pin) |
 | add or change a key of the hardware probe file | `hardware_probe_schema.yml` and the probes that write it | run the check above, `tests/test_hardware_profile.py` and `tests/test_hardware_probe.py`; changelog entry |
-| let a target build a new board, format or type | the target's `target.yml` and `build.sh` | tests; see the [Module Developer Guide](../docs/Module_Developer_Guide.md) |
+| let a target build a new board, format or type | the target's `target.yml` and its stage modules (`modules/config_module.sh` for the names it accepts, `convert_module.sh` and `target_module.sh` for the work) | tests; see the [Module Developer Guide](../docs/Module_Developer_Guide.md) |
 | record an upstream project or a documentation link | `project_sources.yml` (new entries in the detailed file by hand) | `python ../scripts/validate_ssot.py` inside `configs/`, then `python ../scripts/sync_ssot.py --write` for changed versions |

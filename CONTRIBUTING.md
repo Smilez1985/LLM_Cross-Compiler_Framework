@@ -147,8 +147,13 @@ python -m pytest
 - `tests/test_versioning.py` checks that `orchestrator/__init__.py`, `pyproject.toml` and the newest released
   changelog entry carry the same version.
 - `tests/test_foundation.py` and `tests/test_review_capabilities_paths.py` check that the Rockchip capabilities in
-  `target.yml` match `modules/build.sh`, `modules/rkllm_module.sh`, `modules/rknn_module.sh` and
-  `scripts/export_rkllm.py`.
+  `target.yml` match the stage modules (`modules/config_module.sh`, `modules/convert_module.sh`),
+  `modules/rkllm_module.sh`, `modules/rknn_module.sh` and `scripts/export_rkllm.py`.
+- `tests/test_build_stages.py` pins what a Rockchip build produces (commands and their order, output files and
+  names, `SHA256SUMS`, the environment variables the scripts read, exit codes) with stub toolchains, and checks the
+  stage runner `modules/build.sh`: stage order, resume markers, progress lines, the rotation slot, and that no stage
+  runs a benchmark. `tests/test_target_template.py` checks the template's stage modules and that its `build.sh` is
+  the same runner as Rockchip's.
 
 ### The Python 3.11 to 3.14 matrix
 
@@ -255,8 +260,9 @@ content; a tag can be moved. A bump goes like this:
 4. Check that the commit is upstream's: `python scripts/llama_cpp_pin.py check`. It runs
    `git ls-remote https://github.com/ggml-org/llama.cpp.git refs/tags/b<N>`, which must print exactly the new commit
    (GitHub serves commits pushed to any fork through the upstream URL, so the commit alone does not prove its
-   origin), and lists every place that names the version: derived and reference places must agree, the legacy
-   `modules/source_module.sh` defaults are only reported.
+   origin), and lists every place that names the version: derived and reference places must agree, and the
+   `LLAMA_CPP_COMMIT` default of a version 1.x `modules/source_module.sh` in an older target is only reported (the
+   shipped stage modules have none).
 5. Re-check the download-capable options against the new tree. `DOWNLOAD_OPTIONS_OFF` and `NEVER_SET` in
    `orchestrator/runtime/build/recipe.py` name each option with its file and lines; search the new tree for
    `FetchContent_Declare`, `ExternalProject_Add` and `file(DOWNLOAD` and add any new one. Check the CUDA architecture

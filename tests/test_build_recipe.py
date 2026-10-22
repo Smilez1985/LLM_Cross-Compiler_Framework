@@ -638,10 +638,20 @@ class TestPin:
         assert commits == {"targets/Rockchip/dockerfile", "targets/_template/Dockerfile",
                            "targets/_template/Dockerfile.gpu"}
 
-    def test_legacy_places_are_reported_not_failed(self):
-        legacy = [p for p in pins.pin_places(PIN) if p.kind == "legacy"]
-        assert legacy, "the legacy four-module chain still names a tag"
-        assert all(p.path.endswith("modules/source_module.sh") for p in legacy)
+    def test_legacy_places_are_reported_not_failed(self, tmp_path):
+        # The shipped targets' stage modules name no llama.cpp version of their own since build.sh runs them
+        # (DECISIONS U9): the source stage reports the image's pin. A target that still has the source_module.sh of
+        # version 1.x (an older community target) is reported, never failed.
+        assert [p for p in pins.pin_places(PIN) if p.kind == "legacy"] == []
+        root = tmp_path / "repo"
+        (root / "configs").mkdir(parents=True)
+        (root / "configs" / "llama_runtime.yml").write_text(
+            (ROOT / "configs" / "llama_runtime.yml").read_text(encoding="utf-8"), encoding="utf-8")
+        (root / "targets" / "Old" / "modules").mkdir(parents=True)
+        (root / "targets" / "Old" / "modules" / "source_module.sh").write_text(
+            '#!/bin/bash\nreadonly LLAMA_CPP_COMMIT="${LLAMA_CPP_COMMIT:-v0.6.0}"\n')
+        legacy = [p for p in pins.pin_places(PIN, root) if p.kind == "legacy"]
+        assert [(p.path, p.found) for p in legacy] == [("targets/Old/modules/source_module.sh", "v0.6.0")]
         assert all(p not in pins.mismatches(legacy) for p in legacy)
 
     def test_a_mismatch_is_found(self, tmp_path):
@@ -692,7 +702,8 @@ class TestPin:
         assert module.main(["check", "--local"]) == 0
         out = capsys.readouterr().out
         assert f"Pin: {PIN.tag} = {PIN.commit}" in out and "targets/Rockchip/dockerfile" in out
-        assert "MISMATCH" not in out and "legacy" in out
+        # No shipped place is legacy any more: the stage modules read the image's pin (DECISIONS U9).
+        assert "MISMATCH" not in out and "legacy" not in out
 
     def test_image_build_without_a_pin_stops(self, tmp_path, monkeypatch):
         from orchestrator.Core import builder as builder_module

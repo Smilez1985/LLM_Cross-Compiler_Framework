@@ -19,11 +19,11 @@ Hardware (oder ihre technischen Daten).
 3. [Ein Target anlegen](#3-ein-target-anlegen)
 4. [target.yml und der Capabilities-Block](#4-targetyml-und-der-capabilities-block)
 5. [Das Dockerfile](#5-das-dockerfile)
-6. [Das Build-Skript](#6-das-build-skript)
+6. [Die Stufen des Builds](#6-die-stufen-des-builds)
 7. [Regeln der Sandbox](#7-regeln-der-sandbox)
 8. [Ein Target testen](#8-ein-target-testen)
 9. [Ein Target teilen](#9-ein-target-teilen)
-10. [Altlasten](#10-altlasten)
+10. [Was die Stufenmodule aus Version 1.x behalten haben](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)
 11. [Die Datei der Hardware-Probe](#11-die-datei-der-hardware-probe)
 
 ## 1. Wie das Framework ein Target nutzt
@@ -41,10 +41,12 @@ Hardware (oder ihre technischen Daten).
 3. **Image-Build.** Für jeden Build stellt die `BuildEngine` einen Build-Kontext zusammen (`modules/` und
    `scripts/` des Targets, das gemeinsame `entrypoint.sh` als `docker/entrypoint.sh` und das Dockerfile) und baut
    das Image `llm-framework/<Target>:<Build-ID>`. Dieser Schritt hat Netzwerk.
-4. **Stufen.** Zuerst wird das Modell auf dem Host bereitgestellt. Dann läuft `modules/build.sh` in abgeschotteten
-   Containern ohne Netzwerk: einmal mit `JOB_TYPE=imatrix`, wenn für GGUF eine Importance-Matrix gewünscht ist,
-   dann mit `JOB_TYPE=build`.
-5. **Ergebnisse.** Dateien, die `build.sh` in den Ausgabeordner schreibt, werden nach `output/` kopiert. Die Engine
+4. **Stufen.** Zuerst wird das Modell auf dem Host bereitgestellt. Dann läuft `modules/build.sh`, der Stage-Runner,
+   in abgeschotteten Containern ohne Netzwerk: einmal mit `JOB_TYPE=imatrix`, wenn für GGUF eine Importance-Matrix
+   gewünscht ist, dann mit `JOB_TYPE=build`. Er führt die vier Stufenmodule des Targets in dieser Reihenfolge aus:
+   `source`, `config`, `convert` und `target` ([Abschnitt 6](#6-die-stufen-des-builds)); der imatrix-Auftrag endet
+   nach `convert`.
+5. **Ergebnisse.** Dateien, die die Stufen in den Ausgabeordner schreiben, werden nach `output/` kopiert. Die Engine
    ergänzt `build_info.json` um Größe und SHA256-Hash jeder Modelldatei und schreibt `Model_Card.md` und ein ZIP.
    Das Deployment findet Builds über dieses Manifest.
 
@@ -55,10 +57,13 @@ targets/Rockchip/
 ├── target.yml           Metadaten und Capabilities
 ├── dockerfile           Build-Umgebung („Dockerfile“ geht ebenso)
 ├── modules/
-│   ├── build.sh         Verteiler: der einzige Einstieg jeder Stufe
-│   ├── rkllm_module.sh  RKLLM-Export (RK3588, RK3576)
-│   ├── rknn_module.sh   RKNN-Umwandlung
-│   └── source_module.sh, config_module.sh, convert_module.sh, target_module.sh   (Altlasten, nicht aufgerufen)
+│   ├── build.sh           der Stage-Runner: der Einstieg jedes Stufen-Containers
+│   ├── source_module.sh   1. source: die Quellen der Werkzeuge im Image
+│   ├── config_module.sh   2. config: Prüfung des Auftrags und der Build-Plan
+│   ├── convert_module.sh  3. convert: die Umwandlung des Modells
+│   ├── target_module.sh   4. target: Quantisierung und die Ergebnisse
+│   ├── rkllm_module.sh    RKLLM-Export (RK3588, RK3576), ein Format-Helfer der Stufe convert
+│   └── rknn_module.sh     RKNN-Umwandlung, ein Format-Helfer der Stufe convert
 └── scripts/
     ├── export_rkllm.py
     └── rknn_converter.py
@@ -70,7 +75,10 @@ targets/Rockchip/
 | Block `capabilities:` in `target.yml` | dringend empfohlen; Pflicht, um das Target zu teilen | Ohne ihn können GUI und CLI keine Einstellungen prüfen, die MCP-Tools und Ditto keine Builds für das Target starten, `llm-cli mojo` warnt, und das Target lässt sich nicht als Community-Paket exportieren oder installieren. |
 | `Dockerfile` oder `dockerfile` | ja | Das Image, in dem alle Stufen laufen. |
 | `Dockerfile.gpu` | optional | Für Builds mit durchgereichter GPU (`llm-cli build start --gpu` oder „Use Host GPU for Build Process“ in der GUI, unter Linux standardmäßig angehakt); ohne diese Datei wird das normale Dockerfile genutzt. |
-| `modules/build.sh` | ja | Läuft in jeder Stufe als `/app/modules/build.sh`. |
+| `modules/build.sh` | ja | Der Stage-Runner; läuft in jedem Stufen-Container als `/app/modules/build.sh`. Übernimm ihn unverändert aus der Vorlage. |
+| `modules/source_module.sh`, `config_module.sh`, `convert_module.sh`, `target_module.sh` | ja | Die vier Stufen des Builds ([Abschnitt 6](#6-die-stufen-des-builds)). |
+| `modules/rotate_module.sh` | optional | Ein Rotationsschritt zwischen convert und target (Roadmap); läuft nur, wenn die Datei da ist. |
+| `modules/benchmark_module.sh` | optional | Läuft in keinem Build: Es misst den Build-Rechner, und ein Modell für ein Board wird auf dem Board gemessen. |
 | `scripts/` | optional | Hilfsskripte; werden neben `modules/` ins Image kopiert. |
 
 ## 3. Ein Target anlegen
@@ -158,9 +166,12 @@ Vorlage ausgefüllt wird:
 
 Der Generator schreibt `target.yml` (Metadaten, `supported_boards`, `docker`, `modules`, `optimization_profiles`,
 `requirements`, einen Block `capabilities:` und einen Block `runtime:`), ein `Dockerfile` (aus dem `Dockerfile.gpu` der Vorlage, wenn das
-SDK „cuda“ oder das Basis-Image „nvidia“ enthält), `modules/build.sh`, `modules/config_module.sh`,
-`modules/source_module.sh`, `modules/rkllm_module.sh`, `modules/rknn_module.sh`, `modules/benchmark_module.sh`,
-Platzhalter für `convert_module.sh` und `target_module.sh`, `generate_profile.sh` und die `scripts/` der Vorlage.
+SDK „cuda“ oder das Basis-Image „nvidia“ enthält), den Stage-Runner `modules/build.sh`, die vier Stufenmodule
+`modules/source_module.sh`, `config_module.sh`, `convert_module.sh` und `target_module.sh` (mit dem Namen des Moduls,
+seiner Architektur und seinem Basis-Image in ihren Köpfen), `modules/rkllm_module.sh`, `modules/rknn_module.sh`,
+`modules/benchmark_module.sh`, `generate_profile.sh` und die `scripts/` der Vorlage. Die Felder des Assistenten
+landen in der Stufe, zu der sie gehören: die Einrichtungsbefehle in der Stufe source, die Quantisierungslogik in der
+Stufe convert und die Packbefehle in der Stufe target.
 
 **Der Capabilities-Block.** Jedes erzeugte Target bekommt einen, mit der Unterstützungsstufe `community`; so prüfen
 der Builder, die CLI und KI-Clients seine Build-Einstellungen von Anfang an. Für ein Modul namens „My Board“ sieht er
@@ -236,8 +247,8 @@ runtime:
   Geräts geplant; ein geänderter Block, auch einer in einem Community-Paket, ändert also keinen Build. Der Block eines
   Pakets muss trotzdem zum Schema passen (`TargetRuntime` in `orchestrator/schemas/targets.py`).
 - **Flags sind nur Hinweise:** CPU- und CMake-Flags aus dem Assistenten oder aus Dittos Vorschlag bleiben unter
-  `advisory` lesbar und werden nie angewendet; das alte `config_module.sh` bekommt sie weiterhin
-  (Abschnitt [10](#10-altlasten)).
+  `advisory` lesbar und werden von keinem Build angewendet; `config_module.sh` nutzt sie nur für ein von Hand
+  angegebenes Hardware-Profil (Abschnitt [10](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)).
 
 **Wissens-Schnappschuss (nur auf Wunsch).** Auf der letzten Seite des Assistenten ist das Kästchen „Attach the
 knowledge crawled for this target (Deep Ingest, privacy scrub applied)“ standardmäßig aus und lässt sich erst
@@ -260,14 +271,18 @@ Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
 
 - **Der Capabilities-Block ist ein Ausgangspunkt.** Ergänze deine echten Boards, weitere Formate, Quantisierungen je
   Board und den Bedarf an Kalibrierdaten ([Abschnitt 4](#4-targetyml-und-der-capabilities-block)), und halte den
-  Block im Einklang mit `build.sh`.
-- **Das Vorlagen-`build.sh` folgt dem Rockchip-Dispatcher** (`targets/Rockchip/modules/build.sh`):
-  `convert_hf_to_gguf.py` und `build/bin/llama-quantize` / `llama-imatrix` von llama.cpp unter `LLAMA_CPP_PATH`
-  (`/usr/src/llama.cpp`), die F16-Zwischendatei im Arbeitsordner (`BUILD_SCRATCH_DIR`, nie `/tmp`), dieselben
-  GGUF-Typlisten und Regeln für die Importance-Matrix sowie der Auftrag `imatrix`. Die Zweige deines
-  Quantisierungsblocks laufen zuerst; ein Zweig kann `build_gguf <TYP>` aufrufen, und jeder andere Typ läuft über
-  `build_gguf`, das Typen ablehnt, die llama-quantize nicht kennt. Nichts wird unverändert durchkopiert, und ein
-  Build, der kein Artefakt schreibt, scheitert.
+  Block im Einklang mit `config_module.sh` (Namen von Format, Board und Typ).
+- **Die Stufen der Vorlage folgen den Rockchip-Stufen** (`targets/Rockchip/modules/`), und ihr `build.sh` ist
+  derselbe Stage-Runner: `convert_hf_to_gguf.py` und `build/bin/llama-quantize` / `llama-imatrix` von llama.cpp unter
+  `LLAMA_CPP_PATH` (`/usr/src/llama.cpp`), die F16-Zwischendatei im Arbeitsordner (`BUILD_SCRATCH_DIR`, nie `/tmp`),
+  dieselben GGUF-Typlisten und Regeln für die Importance-Matrix sowie der Auftrag `imatrix`. Die Zweige deines
+  Quantisierungsblocks laufen zuerst, in der Stufe convert; ein Zweig kann `build_gguf <TYP>` oder
+  `convert_to_gguf <Ausgabetyp> <Datei>` aufrufen, und jeder andere Typ läuft über `build_gguf`, das Typen ablehnt,
+  die llama-quantize nicht kennt. `build_gguf` überlässt das Quantisieren der Stufe target. Nichts wird unverändert
+  durchkopiert, und ein Build, der kein Artefakt schreibt, scheitert.
+- **Einrichtungsbefehle laufen einmal,** in der Stufe source. Jede Stufe ist ein eigener Prozess: Was die Befehle
+  exportieren, erreicht die Stufen convert und target (über `sdk_environment.sh` im Stufenordner, auch wenn ein Build
+  fortgesetzt wird), eine nur gesetzte Variable nicht.
 - **Das Vorlagen-Dockerfile baut die Konvertierungswerkzeuge von llama.cpp** mit denselben Schritten wie
   `targets/Rockchip/dockerfile` ([Abschnitt 5.1](#51-llamacpp-im-image-rezepte-keine-binärdateien)): den
   festgelegten Commit in `/usr/src/llama.cpp`, `llama-quantize`, `llama-imatrix`, `llama-perplexity`,
@@ -298,7 +313,7 @@ MCP-Server leiten ihre Auswahl und ihre Prüfungen daraus ab.
 capabilities:
   schema_version: 1
   support_level: community
-  default_board: my_board        # das Board, das build.sh ohne Angabe nutzt
+  default_board: my_board        # das Board, das die Stufe config ohne Angabe nutzt
   boards:
     my_board:
       label: "My Board (4x Cortex-A76)"
@@ -325,7 +340,7 @@ Oberste Ebene:
 |---|---|
 | `schema_version` | Immer `1`. |
 | `support_level` | `official` (vom Projekt gepflegt und getestet), `community` (beigesteuert; funktioniert bei seinen Pflegern) oder `experimental` (unvollständig oder ungeprüft). Vorgabe: `official`. |
-| `default_board` | Das Board, das `build.sh` nutzt, wenn ein Auftrag keins nennt. Muss in `boards` stehen und zur Vorgabe in deinem `build.sh` passen. |
+| `default_board` | Das Board, das der Build nutzt, wenn ein Auftrag keins nennt. Muss in `boards` stehen und zur Vorgabe in deinem `config_module.sh` passen. |
 | `boards` | Mindestens ein Board: ID → `label` (Pflicht), `cpu`, `ram_max_gb` (größer als 0), `npu`, `gpu`, `examples`. |
 | `formats` | Mindestens ein Ausgabeformat: ID → die Felder unten. |
 
@@ -382,8 +397,8 @@ Probe-Datei im Build-Reiter ein passendes Target vorzuschlagen, und für Geräte
 Deployment-Pakets mit Docker-Images. Der Block `runtime:` erzeugter Module
 ([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)) zeichnet den Plan des Rezepts auf und wird gegen
 sein Schema geprüft, aber kein Build liest ihn. Die übrigen Blöcke in der Rockchip-`target.yml` (`supported_boards`,
-`docker`, `modules`, `requirements` usw.) sind beschreibend; `optimization_profiles` ist eine Altlast, die nur die
-Kette aus vier Modulen liest ([Abschnitt 10](#10-altlasten)), und `docker.build_args` wiederholt nur den Pin für
+`docker`, `modules`, `optimization_profiles`, `requirements` usw.) sind beschreibend: `modules` führt den
+Stage-Runner, die vier Stufenmodule und die Format-Helfer auf, und `docker.build_args` wiederholt nur den Pin für
 Builds außerhalb des Frameworks.
 
 `docker.image_name`, `docker.registry` und `docker.tags` sind **nur lokale Image-Namen**. Kein Framework-Image wird
@@ -418,7 +433,7 @@ mitbringt, können sie nicht ersetzen.
 
 Was das Image bieten muss (siehe `targets/Rockchip/dockerfile`):
 
-- `/app/modules/build.sh`, ausführbar (`COPY modules/ ./modules/` und `chmod +x`).
+- `/app/modules/build.sh` und die Stufenmodule daneben, ausführbar (`COPY modules/ ./modules/` und `chmod +x`).
 - Den gemeinsamen Entrypoint als `ENTRYPOINT ["/entrypoint.sh"]` und einen Benutzer `llmbuilder`; startet ein
   Container als root (alter Modus ohne Sandbox), bildet der Entrypoint ihn auf den Host-Benutzer ab und wechselt zu
   `llmbuilder`.
@@ -523,10 +538,45 @@ Container-Image ausliefern (zum Beispiel die Jetson/L4T-Images von NVIDIA auf `n
   `metadata.untested: true`, die `assumptions` und den `base_image_reason` der KI und die Support-Stufe `community`;
   Builds davon warnen. KI-erstellte Module bekommen nie eine dauerhafte Freigabe: Jedes bestätigt die Person.
 
-## 6. Das Build-Skript
+## 6. Die Stufen des Builds
 
-`modules/build.sh` ist der einzige Einstieg. Es läuft einmal je Stufe, als `/app/modules/build.sh`, in der Sandbox
-aus [Abschnitt 7](#7-regeln-der-sandbox).
+Ein Build besteht aus vier Stufenmodulen in `modules/`. `modules/build.sh`, der **Stage-Runner**, ist der Einstieg
+jedes Stufen-Containers (`/app/modules/build.sh`, in der Sandbox aus [Abschnitt 7](#7-regeln-der-sandbox)); er
+führt die Stufen in dieser Reihenfolge aus und tut sonst nichts (Entscheidung U9 des Maintainers). Der Kopf jedes
+Moduls sagt, in welchem Image es läuft, für welches System sein Ergebnis ist und was seine Stufe tut; halte diese
+Köpfe wahr, wenn du eine Stufe änderst.
+
+| Stufe | Modul | Was sie tut (Rockchip) |
+|---|---|---|
+| 1. source | `source_module.sh` | Nennt die Quellen der Werkzeuge, aus denen das Image gebaut wurde (Tag und Commit von llama.cpp, die das Dockerfile geprüft hat, die SDK-venvs); in der Vorlage führt sie außerdem einmal die Einrichtungsbefehle der Moduldefinition aus. Nichts wird heruntergeladen. |
+| 2. config | `config_module.sh` | Liest den Auftrag aus der Umgebung, vereinheitlicht die Namen von Format, Board und Typ, lehnt ab, was das Target nicht bauen kann, und schreibt den Build-Plan `build_config.sh` in den Stufenordner. |
+| 3. convert | `convert_module.sh` | Wandelt das Modell um: GGUF-Typen, die der Konverter selbst schreibt, landen direkt im Ausgabeordner; jeder andere Typ wird zu einer F16-Zwischendatei im Arbeitsordner für die Stufe target. RKLLM und RKNN führen ihre Format-Helfer `rkllm_module.sh` und `rknn_module.sh` aus. Im Auftrag `imatrix` berechnet sie die Importance-Matrix. |
+| (rotate) | `rotate_module.sh` | Optionaler Haken zwischen convert und target für eine Rotation wie SpinQuant oder QuaRot (Roadmap): läuft nur, wenn das Target diese Datei hat; mitgeliefert wird keine. Sie darf die Zwischendatei in voller Genauigkeit ändern, bevor sie quantisiert wird. |
+| 4. target | `target_module.sh` | Quantisiert, was die Stufe convert für sie hinterlassen hat (`quantize_jobs.sh`), entfernt die Zwischendatei, schreibt `build_info.json` und listet die Ergebnisse auf. |
+
+Der Auftrag `imatrix` führt source, config und convert aus; der Auftrag `build` alle Stufen. Ein von Hand
+gestartetes Stufenmodul (`bash modules/convert_module.sh`) führt über den Runner den Build bis zu seiner Stufe aus;
+`build.sh --to STUFE` tut dasselbe. Eine spätere Stufe darf die Funktionen einer früheren nutzen, indem sie deren
+Modul einliest (`config_module.sh` und `source_module.sh` führen ihr `main` nur in ihrer eigenen Stufe aus).
+`benchmark_module.sh` ist keine Stufe: Es würde die CPU des Build-Rechners messen, und ein Modell für ein Board wird
+auf dem Board gemessen (`llm-cli device runtime verify --bench-model` oder **Boards > Boards and Devices... >
+Verify...**).
+
+**Fortsetzen.** Wenn eine Stufe fertig ist (Exit-Code 0), schreibt der Runner eine Marke nach
+`$BUILD_SCRATCH_DIR/stages/<Auftrag>/` mit einer Prüfsumme der Eingaben der Stufe und der Größe jeder Datei, die die
+Stufe mit `stage_output DATEI` genannt hat. Die Eingaben sind der Auftrag (Format, Board, Quantisierung, Modellordner
+mit Größe und Zeit seiner Dateien, Revision und Name des Modells, Kontextlänge, Importance-Matrix,
+Kalibrierdatensatz, Hardware-Profil, auch das, das die Stufe config liest, wenn keins genannt ist, Ausgabeordner),
+die Werkzeuge (der llama.cpp-Pin des Images, die SDK-Pfade) und der SHA-256
+jeder Datei in `modules/` und `scripts/`. Erneut auf demselben Arbeitsordner gestartet, überspringt der Runner jede
+Stufe, deren Marke dieselbe Prüfsumme hat und deren Dateien noch da sind; läuft eine Stufe erneut, laufen auch alle
+späteren erneut. Eine Stufe, die scheitert, schreibt keine Marke. `build.sh --fresh` übergeht die Marken.
+
+**Fortschritt.** Der Runner schreibt eine Zeile, wenn eine Stufe beginnt, endet, fortgesetzt wird oder scheitert:
+`=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,
+`=== Stage 3/4: convert failed (exit 1) ===`. Die Build-Engine liest diese Zeilen aus dem Container-Log: Build-Status,
+Builder und `llm-cli build status` zeigen die Stufe („Running modules: convert (3/4)“) und ihren Prozentwert. Eine
+gescheiterte Stufe beendet den Build mit ihrem Exit-Code.
 
 ### 6.1 Eingaben
 
@@ -543,17 +593,27 @@ Umgebungsvariablen, die die Engine setzt:
 | `TARGET_ARCH` | die Target-ID |
 | `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | Aufgabe (Vorgabe `LLM`), Optimierungsstufe (`fast`, `balanced`, `size`, `speed`, `aggressive`; die Rockchip-Skripte werten sie nicht aus), Build-ID |
 | `MAX_CONTEXT_LENGTH` | nur, wenn für den Build gesetzt |
+| `MODEL_REVISION` | der Hugging-Face-Commit des bereitgestellten Modells (nicht bei einem lokalen Modell); Teil der Prüfsumme fürs Fortsetzen |
 | `USE_IMATRIX`, `IMATRIX_PATH` | Build-Stufe: `1` und der Pfad von `imatrix.dat`, wenn eine Importance-Matrix berechnet wurde |
 | `DATASET_PATH` | Kalibrierdatensatz, wenn der Build einen nutzt |
 | `BUILD_SCRATCH_DIR`, `TMPDIR`, `HOME`, `XDG_CACHE_HOME` | beschreibbarer Arbeitsordner `/build-cache/work` und seine Unterordner |
 | `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `HF_DATASETS_OFFLINE` | `1` in der Sandbox: Bibliotheken versuchen nie das Netzwerk |
 | `PUID`, `PGID` | die IDs des Host-Benutzers (nicht unter Windows) |
 
+Was der Stage-Runner jeder Stufe mitgibt:
+
+| Name | Bedeutung |
+|---|---|
+| `STAGE_DIR` | der Stufenordner `$BUILD_SCRATCH_DIR/stages/<Auftrag>/`: die Marken, der Build-Plan `build_config.sh` und was eine Stufe der nächsten übergibt (`quantize_jobs.sh`, `sdk_environment.sh`) |
+| `MODULES_DIR` | der Ordner der Stufenmodule (`/app/modules` im Image) |
+| `STAGE_RUNNER`, `STAGE_NAME` | gesetzt, solange der Runner eine Stufe ausführt; ein Modul, das ohne `STAGE_RUNNER` startet, übergibt an den Runner |
+| `stage_output DATEI` | eine Shell-Funktion: nennt eine Datei, die die Stufe geschrieben hat und die das Fortsetzen prüft |
+
 Einbindungen:
 
 | Pfad im Container | Modus | Inhalt |
 |---|---|---|
-| `/build-cache/output` | lesen und schreiben (Build-Stufe) | wohin `build.sh` seine Ergebnisse schreibt |
+| `/build-cache/output` | lesen und schreiben (Build-Stufe) | wohin die Stufen ihre Ergebnisse schreiben |
 | `/build-cache/imatrix` | lesen und schreiben in der Imatrix-Stufe, nur lesen in der Build-Stufe | `imatrix.dat` |
 | `/build-cache/work` | lesen und schreiben | Zwischenablage für große Zwischendateien |
 | `/build-cache/input-model` | nur lesen | ein lokaler Modellordner oder der Ordner einer lokalen Modelldatei |
@@ -566,73 +626,85 @@ Einbindungen:
   `.rkllm`, `.rknn`, `.onnx`, `.safetensors` oder `.bin` zählen als Modelldateien; die größte Datei mit der Endung
   des Formats wird zur Hauptdatei, die das Deployment installiert.
 - Du darfst dort eine `build_info.json` mit eigenen Feldern schreiben (Rockchip schreibt Modell, Format, Board,
-  Quantisierung und den llama.cpp-Tag); die Engine ergänzt Dateiliste, Hashes und Build-Daten.
-- In der Imatrix-Stufe schreibst du `$BUILD_CACHE_DIR/imatrix/imatrix.dat`.
-- Beende das Skript bei jedem Fehler mit einem Exit-Code ungleich 0 und schreib den Grund nach stderr. Die letzten
-  Log-Zeilen gehen an den Benutzer und an das Self-Healing; formuliere sie also klar
-  (`die "RKLLM needs an RK3588 or RK3576 NPU; ..."`).
+  Quantisierung und den llama.cpp-Tag, in seiner Stufe target); die Engine ergänzt Dateiliste, Hashes und
+  Build-Daten.
+- Im Auftrag `imatrix` schreibt die Stufe convert `$BUILD_CACHE_DIR/imatrix/imatrix.dat`.
+- Nenne jede Datei, die eine spätere Stufe braucht, und jedes Ergebnis mit `stage_output DATEI`: Ein Fortsetzen führt
+  eine Stufe erneut aus, wenn eine davon fehlt.
+- Beende das Modul bei jedem Fehler mit einem Exit-Code ungleich 0 und schreib den Grund nach stderr. Der Runner
+  beendet den Build mit diesem Code, und die letzten Log-Zeilen gehen an den Benutzer und an das Self-Healing;
+  formuliere sie also klar (`die "RKLLM needs an RK3588 or RK3576 NPU; ..."`).
 
 ### 6.3 Regeln
 
-- Beginne mit `set -euo pipefail`.
-- Schreib Format und Board klein, vereinheitliche die Quantisierung und nimm genau die Aliasse an, die du in den
-  Capabilities angegeben hast. Lehne nicht unterstützte Werte mit einer Meldung ab, die das Unterstützte nennt.
-- Nutze dasselbe Standard-Board wie `default_board`.
+- Beginne jedes Modul mit `set -euo pipefail` und lege seine Arbeit in `main`, das das Modul nur aufruft, wenn es
+  selbst gestartet wurde (`if [[ "${BASH_SOURCE[0]}" == "${0}" ]]`): Dann kann eine spätere Stufe es für seine
+  Funktionen einlesen.
+- Lass `build.sh` so, wie die Vorlage es hat; leg die Arbeit in die Stufe, zu der sie gehört, und halte den Kopf
+  jedes Moduls (Image, Zielsystem, was die Stufe tut) wahr.
+- In der Stufe config: Schreib Format und Board klein, vereinheitliche die Quantisierung und nimm genau die Aliasse
+  an, die du in den Capabilities angegeben hast. Lehne nicht unterstützte Werte mit einer Meldung ab, die das
+  Unterstützte nennt, bevor etwas Langsames läuft. Nutze dasselbe Standard-Board wie `default_board`.
+- Gib Werte über den Build-Plan an die späteren Stufen weiter (`printf '%s=%q\n'`, wie `config_module.sh` es tut),
+  nie als ungequoteten Text.
 - Schreib große Zwischendateien nach `$BUILD_SCRATCH_DIR`, nie ins Image oder an einen festen Pfad unter `/tmp`.
-- Lade nie etwas herunter; die Stufe hat kein Netzwerk.
-- Halte Capabilities und Skript mit Tests im Einklang, so wie `tests/test_foundation.py` und
-  `tests/test_review_capabilities_paths.py` es für Rockchip tun.
+- Lade nie etwas herunter; die Stufen haben kein Netzwerk.
+- Führe in einer Stufe nie einen Benchmark aus: Ein Modell für ein Board wird auf dem Board gemessen.
+- Halte Capabilities und Skripte mit Tests im Einklang, so wie `tests/test_foundation.py`,
+  `tests/test_review_capabilities_paths.py` und `tests/test_build_stages.py` es für Rockchip tun.
 
 ### 6.4 Beispiel
 
-Ein minimaler GGUF-Verteiler für die Capabilities aus [Abschnitt 4.2](#42-capabilities). Er setzt voraus, dass das
-Image llama.cpp in `/usr/src/llama.cpp` mit den Werkzeugen in `build/bin` enthält, wie das Rockchip-Image. Er besteht
-`bash -n` und ShellCheck; für F16/BF16-Ausgabe, Aliasse und weitere Prüfungen siehe
-`targets/Rockchip/modules/build.sh`.
+Die Stufen convert und target eines minimalen GGUF-Targets für die Capabilities aus
+[Abschnitt 4.2](#42-capabilities); `build.sh` und die Stufen source und config kommen unverändert aus der Vorlage
+(die Stufe config schreibt `QUANT_TYPE` und die Pfade in den Build-Plan). Sie setzen voraus, dass das Image llama.cpp
+in `/usr/src/llama.cpp` mit den Werkzeugen in `build/bin` enthält, wie das Rockchip-Image. Beide bestehen `bash -n`
+und ShellCheck; für F16/BF16-Ausgabe, die Importance-Matrix, Aliasse und weitere Prüfungen siehe
+`targets/Rockchip/modules/`.
 
 ```bash
 #!/bin/bash
-# build.sh - dispatcher of the target "my_board" (run by the BuildEngine inside the target image)
+# convert_module.sh - stage 3 of the target "my_board": the model as an F16 GGUF for the target stage
+# Image: the Dockerfile of my_board (llama.cpp in /usr/src/llama.cpp). Target: my_board (aarch64 Linux).
 set -euo pipefail
 
-WORK_DIR="${BUILD_CACHE_DIR:-/build-cache}"
-OUTPUT_DIR="$WORK_DIR/output"
-IMATRIX_DIR="$WORK_DIR/imatrix"
-SCRATCH_DIR="${BUILD_SCRATCH_DIR:-$WORK_DIR}"   # large intermediates; the image filesystem is read-only
-FORMAT="$(echo "${TARGET_FORMAT:-gguf}" | tr '[:upper:]' '[:lower:]')"
-BOARD="$(echo "${TARGET_BOARD:-my_board}" | tr '[:upper:]' '[:lower:]')"   # same as default_board
-QUANT="$(echo "${QUANTIZATION:-Q4_K_M}" | tr '[:lower:]' '[:upper:]')"
-MODEL_NAME="${MODEL_NAME:-model}"
-LLAMA_BASE="${LLAMA_CPP_PATH:-/usr/src/llama.cpp}"
+main() {
+    # The plan of the config stage: MODEL_SOURCE, MODEL_NAME, QUANT_TYPE, OUTPUT_DIR, SCRATCH_DIR, LLAMA_BASE, ...
+    # shellcheck source=/dev/null
+    source "$STAGE_DIR/build_config.sh"
+    local f16="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
+    python3 "$LLAMA_BASE/convert_hf_to_gguf.py" "$MODEL_SOURCE" --outfile "$f16" --outtype f16
+    stage_output "$f16"   # a resume runs this stage again when the file is gone
+}
 
-die() { echo "ERROR: $*" >&2; exit 1; }
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # Started by hand: the build up to this stage, through the stage runner.
+    [ -n "${STAGE_RUNNER:-}" ] || exec bash "$(dirname "${BASH_SOURCE[0]}")/build.sh" --to convert "$@"
+    main "$@"
+fi
+```
 
-[ -e "${MODEL_SOURCE:-}" ] || die "MODEL_SOURCE '${MODEL_SOURCE:-}' does not exist in the container."
-case "$FORMAT" in
-    gguf) ;;
-    *) die "Format '$FORMAT' is not supported by this target (gguf)." ;;
-esac
-echo "Board: $BOARD, format: $FORMAT, quantization: $QUANT, job: ${JOB_TYPE:-build}"
+```bash
+#!/bin/bash
+# target_module.sh - stage 4 of the target "my_board": quantization and build_info.json
+# Image: the Dockerfile of my_board (llama-quantize in /usr/src/llama.cpp/build/bin). Target: my_board.
+set -euo pipefail
 
-f16="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
-python3 "$LLAMA_BASE/convert_hf_to_gguf.py" "$MODEL_SOURCE" --outfile "$f16" --outtype f16
-
-if [ "${JOB_TYPE:-build}" = "imatrix" ]; then
-    [ -f "${DATASET_PATH:-}" ] || die "Calibration dataset not found at '${DATASET_PATH:-}'."
-    mkdir -p "$IMATRIX_DIR"
-    "$LLAMA_BASE/build/bin/llama-imatrix" -m "$f16" -f "$DATASET_PATH" -o "$IMATRIX_DIR/imatrix.dat" --chunks 100
+main() {
+    # shellcheck source=/dev/null
+    source "$STAGE_DIR/build_config.sh"
+    local f16="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf" out="$OUTPUT_DIR/${MODEL_NAME}-${QUANT_TYPE}.gguf"
+    "$LLAMA_BASE/build/bin/llama-quantize" "$f16" "$out" "$QUANT_TYPE"
     rm -f "$f16"
-    exit 0
-fi
+    printf '{"model": "%s", "quantization": "%s"}\n' "$MODEL_NAME" "$QUANT_TYPE" > "$OUTPUT_DIR/build_info.json"
+    stage_output "$out"
+    stage_output "$OUTPUT_DIR/build_info.json"
+}
 
-imatrix_args=()
-if [ "${USE_IMATRIX:-0}" = "1" ]; then
-    [ -f "${IMATRIX_PATH:-}" ] || die "USE_IMATRIX=1 but '${IMATRIX_PATH:-}' is missing."
-    imatrix_args=(--imatrix "$IMATRIX_PATH")
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    [ -n "${STAGE_RUNNER:-}" ] || exec bash "$(dirname "${BASH_SOURCE[0]}")/build.sh" --to target "$@"
+    main "$@"
 fi
-mkdir -p "$OUTPUT_DIR"
-"$LLAMA_BASE/build/bin/llama-quantize" "${imatrix_args[@]}" "$f16" "$OUTPUT_DIR/${MODEL_NAME}-${QUANT}.gguf" "$QUANT"
-rm -f "$f16"
 ```
 
 ## 7. Regeln der Sandbox
@@ -776,12 +848,34 @@ Um ein Target nur mit deinen eigenen Rechnern oder einem Team zu teilen, verschl
 es mit `llm-cli zoo install --file`. Ein Target, das du aus dem Zoo installiert hast, lässt sich nicht als deines
 exportieren: Es bleibt das Paket seines Autors.
 
-## 10. Altlasten
+## 10. Was die Stufenmodule aus Version 1.x behalten haben
 
-Version 1.x nutzte je Target eine Kette aus vier Skripten (`source_module.sh`, `config_module.sh`,
-`convert_module.sh`, `target_module.sh`), gesteuert von der Hardware-Probe. Die aktuelle Pipeline ruft nur `build.sh`
-auf; das Rockchip-`build.sh` nutzt diese Skripte nicht, und der Modulgenerator schreibt sie noch. Ihre Entfernung und
-eine überarbeitete Vorlage sind für 3.4.0 geplant.
+Version 1.x baute ein Target schon mit diesen vier Skripten, gesteuert von der Hardware-Probe; eine Zeit lang rief
+der Build nur einen einzelnen Verteiler `build.sh` auf, und die Skripte lagen beiseite. Seit der Entscheidung U9 des
+Maintainers sind sie wieder der Build, und die Arbeit des Verteilers liegt in der Stufe, zu der sie gehört. Ihre
+Funktionen aus 1.x sind geblieben:
+
+- **Hardware-Profil.** Mit einem Profil des Boards (`build.sh --hardware-config DATEI` oder das vierte Argument des
+  Entrypoint-Modus `pipeline`) erzeugt die Stufe config daraus die CMake-Toolchain und die Compiler-Flags für dieses
+  Board (die der Vorlage mit den CPU- und CMake-Flags des Wizards), und die Stufe target eines GGUF-Builds
+  cross-kompiliert außerdem `llama-cli` und `llama-server` aus den llama.cpp-Quellen des Images und packt sie mit dem
+  Modell, einer Model Card und Hilfsskripten nach `output/packages/`. Ein Build des Frameworks hat kein Profil: Die
+  Runtime des Boards wird aus der eigenen Probe des Boards gebaut (`llm-cli device runtime build`), und das
+  Board-Paket kommt von `llm-cli deploy package` oder `llm-cli device runtime deploy`.
+- **llama.cpp klonen.** `source_module.sh --clone-llama-cpp` (oder der Entrypoint-Modus `source
+  --clone-llama-cpp`), von Hand in einem Container mit Netzwerk gestartet, klont llama.cpp bei `LLAMA_CPP_COMMIT`
+  (eine vollständige Commit-ID) und verlinkt es als `LLAMA_CPP_PATH`, für ein Image ohne llama.cpp. Ein Build tut das
+  nie: Sein Image bringt das gepinnte llama.cpp mit.
+- **Die Moduloptionen.** `--input`, `--output`, `--model-name`, `--quantization` und `--hardware-config`
+  funktionieren bei `build.sh`, bei jedem von Hand gestarteten Stufenmodul und bei jedem Stufenmodus des
+  Entrypoints, wie im Entwurf des Maintainers für 1.x: `convert_module.sh --input ORDNER --output DATEI --model-name
+  NAME` schreibt das F16-GGUF nach DATEI (es bleibt); `target_module.sh --input DATEI.gguf --quantization TYP
+  --model-name NAME` quantisiert ein GGUF, ohne es erneut zu konvertieren, und behält es (ohne `--quantization`
+  Q4_K_M, ohne `--model-name` der Dateiname ohne `.gguf` und `.fp16`); `config_module.sh --hardware-config DATEI`
+  braucht kein Modell und schreibt Toolchain und Plan in den Stufenordner. Ein Pfad als Option wird vom aktuellen
+  Ordner aus absolut gemacht.
+
+Ein Target, das vor dieser Änderung erzeugt wurde, behält sein eigenes `build.sh`, das weiter wie bisher läuft.
 
 ## 11. Die Datei der Hardware-Probe
 

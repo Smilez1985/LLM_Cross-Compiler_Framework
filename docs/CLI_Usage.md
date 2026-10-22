@@ -1741,10 +1741,11 @@ target is never overwritten.
 
 The target is written to the configured targets folder (setting `targets_dir`; a relative path is relative to the
 installation, not the current folder). Its `target.yml` has a `capabilities:` block (support level `community`) with the module name as the only board and
-GGUF as the only format; add your real boards and formats there. The command's next steps name
-`modules/build.sh`, the dispatcher the build engine runs; the generated `config_module.sh` and the other
-`*_module.sh` scripts are legacy files the build pipeline does not call
-([Module Developer Guide](Module_Developer_Guide.md#10-legacy-files)).
+GGUF as the only format; add your real boards and formats there. The build is the four stage modules
+(`source_module.sh`, `config_module.sh`, `convert_module.sh`, `target_module.sh`), which `modules/build.sh`, the
+stage runner the build engine starts, runs in order; the command's next steps name the convert and target stages,
+where a new target fills in its conversion and quantization
+([Module Developer Guide](Module_Developer_Guide.md#6-the-build-stages)).
 
 In the GUI: **Tools > Create Hardware Module...**: name, architecture, SDK and **Description** on the hardware page,
 base image and packages on the Docker page, CPU and CMake flags on the flags page; the standard import on the first
@@ -2107,8 +2108,9 @@ such as `?private_token=`, exit code 2): `config.yml` is plain text, so keep pas
 | `--add TEXT...` | Add an override: `NAME URL`. |
 | `--remove TEXT` | Remove the override `NAME`. |
 
-The current Rockchip scripts read none of these variables (only the legacy `source_module.sh` reads
-`LLAMA_CPP_REPO_OVERRIDE`), so the overrides have no effect on Rockchip builds.
+The overrides have no effect on Rockchip builds: a build uses the llama.cpp of its image, and its source stage
+(`source_module.sh`) only warns when `LLAMA_CPP_REPO_OVERRIDE` is set. Only `source_module.sh --clone-llama-cpp`,
+started by hand in a container with network, clones from it.
 
 In the GUI: **File > Settings...**, tab **Source repositories**: the list, **Add** (name and URL) and **Remove
 selected...** (asks first; "No" is the default).

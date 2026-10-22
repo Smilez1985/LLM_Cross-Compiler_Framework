@@ -172,10 +172,12 @@ class CreateModuleIn(BaseModel):
                                                                    "(advisory)")
     cmake_flags: str = Field(default="", max_length=500, description="llama.cpp CMake options (advisory)")
     setup_commands: str = Field(default="", max_length=2000,
-                                description="Bash run before converting, as the unprivileged build user, without "
-                                            "network (no sudo, no downloads)")
+                                description="Bash the source stage runs once before converting, as the "
+                                            "unprivileged build user, without network (no sudo, no downloads); what "
+                                            "it exports reaches the later stages")
     quantization_logic: str = Field(default="", max_length=3000,
-                                    description="Body of the bash `case \"$QUANT\" in` block of build.sh")
+                                    description="Body of the bash `case \"$QUANT_TYPE\" in` block of the convert "
+                                                "stage (modules/convert_module.sh)")
     assumptions: List[str] = Field(default_factory=list, max_length=10,
                                    description="Values you guessed rather than read from the probe or the "
                                                "documentation, each with what to check first")

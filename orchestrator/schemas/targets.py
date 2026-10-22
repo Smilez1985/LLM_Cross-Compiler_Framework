@@ -112,7 +112,7 @@ class TargetCapabilities(BaseModel):
     support_level: SupportLevel = SupportLevel.OFFICIAL
     boards: Dict[str, BoardInfo] = Field(min_length=1)
     formats: Dict[str, FormatCapability] = Field(min_length=1)
-    # The board the build scripts use when a request names none (must match build.sh).
+    # The board the build scripts use when a request names none (must match the config stage, config_module.sh).
     default_board: Optional[str] = None
 
     @model_validator(mode="after")
