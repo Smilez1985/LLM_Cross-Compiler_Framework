@@ -354,12 +354,13 @@ def test_the_deployment_window_refuses_it_too(qapp, make_framework, tmp_path, mo
 
 def test_an_ai_sees_device_account_for_every_name_a_board_may_have(monkeypatch):
     """The AI's text of a board (security.paths.device_text, the old name in tools_runtime is the same function) hides
-    every account the one check accepts, and it asks that check itself: there is no second pattern to drift (the old
-    test only compared tools_runtime._ACCOUNT, an alias nothing reads)."""
+    every account the one check accepts, and it asks that check itself: there is no second pattern to drift. The old
+    name tools_runtime._ACCOUNT stays the one pattern too, as the test before this one asserted."""
     import re
     from orchestrator.remote import address
     from orchestrator.security import paths
     from orchestrator.tools import tools_runtime
+    assert tools_runtime._ACCOUNT is address.USER_PATTERN, "the old name is the one account check"
     assert tools_runtime.device_text is paths.device_text
     for name in ("orangepi", "dietpi", "radxa", "pi", "kiosk7", "user.name", "a-b_c", "_svc", "x" * 32, "root"):
         assert address.valid_user(name, allow_root=True), name
