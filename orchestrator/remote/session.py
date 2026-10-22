@@ -24,6 +24,12 @@ the probe and the on-board benchmark can use the same steps (chain c2-remote-cal
 - CancelToken: one cancel for the whole session; every wait ends at once on it.
 - RemoteEvent: what a running session reports (uploading, waiting, back); DeploymentManager.DeployEvent is this
   class. remote/text.py event_text renders it for the person or an AI.
+- openssh: the same session over this computer's OpenSSH client instead of paramiko (transport.SystemSshTransport,
+  chain c2-remote-system, decision A5): every step above works the same way. The login is OpenSSH's own: it checks
+  the host key against the framework's known_hosts on every call (StrictHostKeyChecking=yes), so the key is not read
+  here, a fingerprint the person was shown cannot be compared (open() refuses with "needs_paramiko"), and the
+  credentials are KeyOnly (BatchMode never asks for a password, so a OneTimePassword is refused when the session is
+  made).
 
 A step that cannot be done raises SessionFailure (a RemoteFailure) with its `kind`, the SSH reason code when the
 board could not be reached or logged in to, the board's own words apart in `output` (never in the message), and
@@ -168,11 +174,11 @@ class Stopped(RemoteFailure):
 
 
 class SessionFailure(RemoteFailure):
-    """A step on the board that cannot be done. `kind`: key_read, not_trusted, key_changed, other_key, login (the
-    login), wait (the board did not come back), private_dir, upload_failed, upload_damaged, rename, folder_gone (the
-    upload), not_started, cannot_follow, job_gone, job_timeout, job_lost (a detached job). `reason`: the SSH reason
-    code; `output`: the board's words, kept apart; `state`: "ok" or "unknown" (what may run on the board); `step`: what
-    a wait waited for ("upload" or "install")."""
+    """A step on the board that cannot be done. `kind`: key_read, not_trusted, key_changed, other_key, needs_paramiko,
+    login (the login), wait (the board did not come back), private_dir, upload_failed, upload_damaged, rename,
+    folder_gone (the upload), not_started, cannot_follow, job_gone, job_timeout, job_lost (a detached job).
+    `reason`: the SSH reason code; `output`: the board's words (over OpenSSH also what OpenSSH printed), kept apart;
+    `state`: "ok" or "unknown" (what may run on the board); `step`: what a wait waited for ("upload" or "install")."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None, *,
                  output: Optional[List[str]] = None, state: str = "ok", step: str = ""):
@@ -200,7 +206,9 @@ class RemoteSession:
     """One session with the board at `endpoint` as `user` (see the module docstring). `clock` and `sleep` are the
     session's time (tests pass a fake one), `reachable(host, port)` the quick look whether the SSH port answers again
     (reasons.check_port by default), `on_client` gets each authenticated client (so a Cancel elsewhere can close it),
-    `on_event` each RemoteEvent, `transport_factory(client)` makes the Transport of a client."""
+    `on_event` each RemoteEvent, `transport_factory(client)` makes the Transport of a client. With `openssh`, a
+    factory `openssh(endpoint, user, state_dir)` of a not yet logged-in transport.SystemSshTransport (or a stand-in
+    with login()), the session works over this computer's OpenSSH client instead (see the module docstring)."""
 
     def __init__(self, endpoint: Endpoint, user: str, state_dir: Path, *, credentials: Any = None,
                  expect_fingerprint: Optional[str] = None, cancel: Optional[CancelToken] = None,
@@ -209,11 +217,16 @@ class RemoteSession:
                  on_event: Optional[Callable[[RemoteEvent], Any]] = None,
                  on_client: Optional[Callable[[Any], Any]] = None, wait_seconds: float = WAIT_SECONDS,
                  transport_factory: Optional[Callable[[Any], Transport]] = None,
-                 logger: Optional[logging.Logger] = None):
+                 logger: Optional[logging.Logger] = None,
+                 openssh: Optional[Callable[[Endpoint, str, Path], Any]] = None):
         self.endpoint, self.user, self.state_dir = endpoint, user, Path(state_dir)
         self.credentials = credentials if credentials is not None else KeyOnly()
         if not isinstance(self.credentials, (KeyOnly, OneTimePassword)):
             raise TypeError("credentials are KeyOnly() or OneTimePassword(password)")
+        if openssh is not None and isinstance(self.credentials, OneTimePassword):
+            raise ValueError("OpenSSH runs in BatchMode and never asks for a password: a one-time password (and "
+                             "pairing with it) needs the 'paramiko' package")
+        self.openssh = openssh
         self.expect_fingerprint = expect_fingerprint
         self.cancel = cancel if cancel is not None else CancelToken()
         self._clock, self._sleep = clock, sleep
@@ -243,6 +256,9 @@ class RemoteSession:
     def open(self, *, waiting: bool = False) -> None:
         """Reads and checks the board's host key, then logs in (SessionFailure says why not). `waiting`: the board
         dropped off the network before (wait_for_host), so a connection that drops again means it is not back yet."""
+        if self.openssh is not None:
+            self._open_openssh(waiting)
+            return
         from orchestrator.remote import reasons
         from orchestrator.remote.trust import HostKeyChanged, TrustStore
         from orchestrator.utils import ssh_trust
@@ -277,6 +293,44 @@ class RemoteSession:
         self.transport = self._factory(self.client)
         if self.on_client is not None:
             self.on_client(self.client)
+
+    def _open_openssh(self, waiting: bool) -> None:
+        """open() over OpenSSH: one `true` on the board (SystemSshTransport.login), in which OpenSSH checks the host key
+        against the framework's known_hosts and logs in with the framework key. Its failures in the words of the
+        paramiko login: a changed key (key_changed), a key not trusted yet (not_trusted), the login (login, with the
+        reason code OpenSSH's words name; while waiting for the board, a connection that opens and drops again is the
+        board not being back yet)."""
+        from orchestrator.remote import reasons
+        from orchestrator.remote.trust import HostKeyChanged
+        from orchestrator.remote.transport import SshFailed
+        if self.expect_fingerprint:
+            raise SessionFailure(f"Checking the host key of {self.host} against the fingerprint shown needs the "
+                                 "'paramiko' package (OpenSSH checks it against known_hosts only).", "needs_paramiko")
+        if self.cancel.cancelled:
+            raise Stopped()
+        transport = self.openssh(self.endpoint, self.user, self.state_dir)
+        try:
+            transport.login()
+        except SshFailed as e:
+            transport.close()
+            output = e.output[-OUTPUT_LINES:]
+            if e.reason == reasons.HOST_KEY_CHANGED:
+                raise SessionFailure(str(HostKeyChanged(self.host, self.port)), "key_changed", e.reason, e,
+                                     output=output) from None
+            if e.unknown_key:
+                raise SessionFailure(f"The device {self.host} is not trusted yet: confirm its host key fingerprint "
+                                     "first.", "not_trusted", output=output) from None
+            code = reasons.reach_code(e, while_waiting=waiting)
+            raise SessionFailure(f"SSH login to {self.user}@{self.host} failed" + failed_because(code, e), "login",
+                                 code, e, output=output) from None
+        except Exception as e:  # noqa: BLE001 - no OpenSSH here, a login that gave no answer in time
+            transport.close()
+            code = reasons.reach_code(e, while_waiting=waiting)
+            raise SessionFailure(f"SSH login to {self.user}@{self.host} failed" + failed_because(code, e), "login",
+                                 code, e) from None
+        self.transport, self.client = transport, None
+        if self.on_client is not None:
+            self.on_client(transport)
 
     def pair(self) -> bool:
         """Installs the framework's key on the board (its authorized_keys), only with OneTimePassword credentials
