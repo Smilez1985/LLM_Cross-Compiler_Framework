@@ -30,9 +30,13 @@ board could not be reached or logged in to, the board's own words apart in `outp
 `state`, what is known about the board afterwards ("ok": nothing was started there; "unknown": a job may run). A
 cancel raises Stopped. The messages are the framework's sentences; DeploymentManager turns them into its results.
 
-The session imports nothing above the remote layer: the trust store and the key are read through
-orchestrator/utils/ssh_trust (looked up at call time, so tests that patch ssh_trust.fetch_host_key, check_host_key
-and connect reach every login), the reason codes through orchestrator/remote/reasons.
+The session imports nothing above the remote layer: the board's host key is read and checked by the one read-only
+trust store (orchestrator/remote/trust.py TrustStore.check, which looks up ssh_trust.fetch_host_key, check_host_key and
+fingerprint at call time), the login and the framework's key go through orchestrator/utils/ssh_trust (looked up at
+call time, so tests that patch ssh_trust.fetch_host_key, check_host_key and connect reach every login), the reason
+codes through orchestrator/remote/reasons. pair() calls the same primitive as remote/pairing.py pair
+(ssh_trust.install_public_key) without importing that module: the session is reached from AI paths, which may never
+import the person's writers (tests/test_remote_trust.py), and only OneTimePassword credentials reach it.
 """
 
 import logging
@@ -240,22 +244,24 @@ class RemoteSession:
         """Reads and checks the board's host key, then logs in (SessionFailure says why not). `waiting`: the board
         dropped off the network before (wait_for_host), so a connection that drops again means it is not back yet."""
         from orchestrator.remote import reasons
+        from orchestrator.remote.trust import HostKeyChanged, TrustStore
         from orchestrator.utils import ssh_trust
         try:
-            key = ssh_trust.fetch_host_key(self.host, self.port)
-            status = ssh_trust.check_host_key(self.state_dir, self.host, self.port, key)
+            # The one host-key read and check (remote/trust.py): the key the board presents against the framework's
+            # known_hosts and against the fingerprint the person was shown.
+            check = TrustStore(self.state_dir).check(self.endpoint, expect_fingerprint=self.expect_fingerprint)
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko, a damaged known_hosts
             code = reasons.reach_code(e, while_waiting=waiting)
             raise SessionFailure(f"Could not read the host key of {self.host}" + failed_because(code, e), "key_read",
                                  code, e) from None
-        if status == "unknown":
+        if check.status == "unknown":
             raise SessionFailure(f"The device {self.host} is not trusted yet: confirm its host key fingerprint first.",
                                  "not_trusted")
-        if status == "changed":
-            raise SessionFailure(str(ssh_trust.HostKeyChanged(self.host, self.port)), "key_changed",
+        if check.status == "changed":
+            raise SessionFailure(str(HostKeyChanged(self.host, self.port)), "key_changed",
                                  reasons.HOST_KEY_CHANGED)
-        fp = ssh_trust.fingerprint(key)
-        if self.expect_fingerprint and fp != self.expect_fingerprint:
+        fp = check.fingerprint
+        if check.fingerprint_differs:
             raise SessionFailure(f"The device {self.host} now presents another host key than the one shown ({fp}, "
                                  f"not {self.expect_fingerprint})", "other_key", reasons.HOST_KEY_CHANGED)
         self.fingerprint = fp
