@@ -15,7 +15,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and Devices...** change the board's host name or IP address, its SSH port or its host key in the framework's
   `known_hosts`, for example after its address changed or it was reinstalled. Nobody types a key: it is pasted (the
   line of `/etc/ssh/ssh_host_ed25519_key.pub` on the board, a `known_hosts` line or a line of `ssh-keyscan`) or read
-  from the board at its new address. You see the address, the host key and the device ID now and after the change
+  from the board at its new address; a line with `authorized_keys` options, commands or a second key is refused.
+  You see the address, the host key and the device ID now and after the change
   side by side (in the window) and answer with "No" as the default; the change is written to the audit log before
   anything changes and refused when `known_hosts` changed meanwhile. A new key gives the board a new device ID: its
   record moves there with its name and user, and whether the framework's key logs in is tested once. The work runs

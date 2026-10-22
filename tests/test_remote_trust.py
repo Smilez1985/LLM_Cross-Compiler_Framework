@@ -958,3 +958,34 @@ def test_connect_stored_without_a_device_id_is_refused_as_another_device(tmp_pat
     assert e.value.kind == "other_device"
     assert KeyCheck.of(Endpoint(HOST), key, "known", expect_device_id="").other_device
     assert not KeyCheck.of(Endpoint(HOST), key, "known").other_device, "None: nothing is expected"
+
+
+@pytest.mark.parametrize("prefix", ['command="/bin/sh"', 'no-pty,command="/bin/sh -c id",from="192.0.2.1"',
+                                    'environment="LD_PRELOAD=/tmp/x.so"', "$(reboot)", "`id`", "host;reboot"],
+                         ids=["command", "several options", "environment", "subshell", "backticks", "semicolon"])
+def test_a_pasted_line_with_options_or_commands_is_refused(prefix):
+    """A host key is pasted, never typed (Q5): a line with authorized_keys options or shell words in front of the key
+    is not a public key, known_hosts or ssh-keyscan line, and is refused instead of silently taking the key from it."""
+    from orchestrator.remote.trust import KeyTextError, parse_public_key
+    key = paramiko.ECDSAKey.generate()
+    with pytest.raises(KeyTextError) as e:
+        parse_public_key(f"{prefix} {key.get_name()} {key.get_base64()}")
+    assert e.value.kind == "not_a_key"
+
+
+def test_a_pasted_line_with_a_second_key_is_refused():
+    """One key only: a second key on the same line (where a comment would be) is refused like a second line."""
+    from orchestrator.remote.trust import KeyTextError, parse_public_key
+    first, second = _ed25519_key(), _ed25519_key()
+    with pytest.raises(KeyTextError) as e:
+        parse_public_key(f"{first.get_name()} {first.get_base64()} {second.get_name()} {second.get_base64()}")
+    assert e.value.kind == "several"
+
+
+@pytest.mark.parametrize("hosts", ["192.0.2.40,myboard.local", "[192.0.2.40]:2222,[myboard.local]:2222",
+                                   "fe80::1%eth0", "*.lan,!192.0.2.9", "|1|c2FsdHNhbHRzYWx0c2FsdA==|aGFzaGhhc2g="],
+                         ids=["list", "ports", "zone", "patterns", "hashed"])
+def test_the_host_fields_of_known_hosts_stay_accepted(hosts):
+    from orchestrator.remote.trust import parse_public_key
+    key = paramiko.ECDSAKey.generate()
+    assert parse_public_key(f"{hosts} {key.get_name()} {key.get_base64()}").asbytes() == key.asbytes()

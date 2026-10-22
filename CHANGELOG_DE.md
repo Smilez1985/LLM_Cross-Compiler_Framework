@@ -16,7 +16,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `known_hosts` des Frameworks, zum Beispiel nachdem sich seine Adresse geändert hat oder es neu installiert wurde.
   Niemand tippt einen Schlüssel ab: Er wird eingefügt (die Zeile aus `/etc/ssh/ssh_host_ed25519_key.pub` auf dem
   Board, eine `known_hosts`-Zeile oder eine Zeile von `ssh-keyscan`) oder vom Board unter seiner neuen Adresse
-  gelesen. Du siehst Adresse, Host-Schlüssel und Geräte-ID jetzt und nach der Änderung nebeneinander (im Fenster) und
+  gelesen; eine Zeile mit Optionen aus `authorized_keys`, Befehlen oder einem zweiten Schlüssel wird abgelehnt. Du
+  siehst Adresse, Host-Schlüssel und Geräte-ID jetzt und nach der Änderung nebeneinander (im Fenster) und
   antwortest mit "Nein" als Vorgabe; die Änderung kommt ins Audit-Log, bevor sich etwas ändert, und wird abgelehnt,
   wenn sich die `known_hosts` inzwischen geändert hat. Ein neuer Schlüssel gibt dem Board eine neue Geräte-ID: Sein
   Eintrag zieht mit Name und Benutzer dorthin, und ob sich der Schlüssel des Frameworks anmeldet, wird einmal
