@@ -37,7 +37,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from orchestrator.remote.text import one_line as _tail   # a board's answer as one plain line
-from orchestrator.remote.transport import sh_command
+from orchestrator.remote.transport import COMMAND_TIMEOUT, HASH_TIMEOUT, MAX_OUTPUT  # the one board session's limits
+from orchestrator.remote.transport import ParamikoTransport, Result, TooMuchOutput, sh_command
+from orchestrator.remote.transport import read_limited as _read_limited  # noqa: F401 - its old name here
 from orchestrator.runtime.build.verify import Check, VerifyReport, parse_bench_json, parse_devices, parse_version
 from orchestrator.runtime.device.launcher import (DEVICE_FOLDER_MAX, DEVICE_PATH_MAX, KEY_REL, START_SCRIPT,
                                                   UNIT_NAME, UNIT_PATH, install_root,
@@ -46,13 +48,10 @@ from orchestrator.runtime.device.settings import DeploySettings
 from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, POSIX_CLEARED_PATH, SERVER_TOOLS_REFUSAL,
                                                 check_command, kv_cache_args, posix_cleared_env, tools_check_args)
 
-COMMAND_TIMEOUT = 120
 UPLOAD_TIMEOUT = 1800
 VERSION_TIMEOUT = 60
 DEVICES_TIMEOUT = 180
 BENCH_TIMEOUT = 900
-HASH_TIMEOUT = 900
-MAX_OUTPUT = 1024 * 1024
 REQUIRED_TOOLS = ("tar", "gzip", "sha256sum", "od", "dd", "tr", "readlink", "awk", "mktemp")
 MACHINES = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
 
@@ -71,30 +70,11 @@ class RemoteError(RuntimeError):
     """A deployment step on the device failed; the message says which and what to do."""
 
 
-@dataclass(frozen=True)
-class Result:
-    status: int
-    out: str
-    err: str
-
-
-def _read_limited(stream: Any, limit: int) -> bytes:
-    data = b""
-    while len(data) <= limit:
-        chunk = stream.read(min(65536, limit + 1 - len(data)))
-        if not chunk:
-            break
-        data += chunk
-    return data
-
-
-def _text(data: bytes) -> str:
-    return data.decode("utf-8", "replace")
-
-
 class RemoteShell:
     """Runs fixed shell scripts on a device: `client` is an authenticated paramiko.SSHClient (or a stand-in with
-    exec_command). Every script is wrapped into one `sh -c '...'` argument."""
+    exec_command). Every script is wrapped into one `sh -c '...'` argument; the command, its time limit and its output
+    cap are the one board session's (orchestrator/remote/transport.py ParamikoTransport.run), and this shell says in
+    a RemoteError what went wrong."""
 
     def __init__(self, client: Any):
         self.client = client
@@ -106,18 +86,9 @@ class RemoteShell:
     def run(self, script: str, *, stdin: Optional[Iterable[bytes]] = None, timeout: float = COMMAND_TIMEOUT,
             limit: int = MAX_OUTPUT) -> Result:
         try:
-            ch_in, ch_out, ch_err = self.client.exec_command(self.command(script), timeout=timeout)
-            if stdin is not None:
-                for chunk in stdin:
-                    ch_in.write(chunk)
-                ch_in.flush()
-            ch_in.channel.shutdown_write()
-            out = _read_limited(ch_out, limit)
-            err = _read_limited(ch_err, limit)
-            if len(out) > limit or len(err) > limit:
-                ch_out.channel.close()
-                raise RemoteError(f"the device sent more than {limit} bytes")
-            return Result(ch_out.channel.recv_exit_status(), _text(out), _text(err))
+            return ParamikoTransport(self.client).run(script, stdin=stdin, timeout=timeout, limit=limit)
+        except TooMuchOutput as e:
+            raise RemoteError(str(e)) from None
         except (socket.timeout, TimeoutError):
             raise RemoteError(f"no answer from the device within {timeout:.0f} s") from None
         except (OSError, EOFError) as e:

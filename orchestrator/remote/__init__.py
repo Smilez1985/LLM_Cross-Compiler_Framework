@@ -11,9 +11,17 @@ Everything that talks to a board (consolidation plan, layer 2): one Qt-free pack
   DeviceRuntimeError): kind, SSH reason code and the error behind it.
 - text.py: a board's words as one line (one_line) or as kept output lines (keep_tail), and the visible state of a
   running deploy (event_text: for the person in their language, or for an AI in English with the board's label).
-- transport.py: whether SSH works here (available(), PARAMIKO_AVAILABLE); paramiko is imported on first use only.
+- transport.py: whether SSH works here (available(), PARAMIKO_AVAILABLE; paramiko is imported on first use only),
+  sh_command (every command is one `sh -c '...'`), and the Transport interface with ParamikoTransport: run with a time
+  limit and an output cap (read_limited), the board's files over SFTP, alive, the login (open_client) and
+  paramiko_quiet.
+- session.py: RemoteSession, one session with a board: the login with the host key checked at every login, typed
+  credentials (KeyOnly, OneTimePassword: only the latter can pair), the private folder, the upload that resumes after
+  a network drop, the wait for the board (N5), a job that runs on the board on its own and is followed again after a
+  drop, one CancelToken, and RemoteEvent (DeploymentManager.DeployEvent). The deploy is a thin adapter over it.
 
 What a contact found is recorded for Mojo by orchestrator/runtime/device/trusted.py record_reach (the store of the
-trusted boards lives there; this layer imports no runtime code). The trust store, pairing, the session with waiting
-and resume, and the transports follow in consolidation stage C.
+trusted boards lives there; this layer imports no runtime code). The trust store, pairing and the OpenSSH transport
+follow in consolidation stage C (chains c2-remote-trust and c2-remote-system); the runtime deploy, the probe and the
+on-board benchmark move onto RemoteSession in chain c2-remote-callers.
 """

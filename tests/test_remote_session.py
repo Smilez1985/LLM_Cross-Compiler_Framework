@@ -442,7 +442,7 @@ def test_the_board_s_answer_to_a_refused_start_stays_in_the_output(manager, boar
 
     def exec_command(self, command, *args, **kwargs):
         if "nohup" in command:
-            return None, tbd.Stream(b"", 1), tbd.Stream(BOARD_WORDS.encode())
+            return tbd.Stream(b""), tbd.Stream(b"", 1), tbd.Stream(BOARD_WORDS.encode())
         return client_exec(self, command, *args, **kwargs)
     monkeypatch.setattr(tbd.Client, "exec_command", exec_command)
     result, _events = run(manager, package)
@@ -685,3 +685,162 @@ def test_the_commands_do_their_job_under_any_login_shell(login_shell, manager, b
     assert (folder.parent / "runs").read_text().splitlines() == ["run"], "deploy.sh ran exactly once"
     assert on_board(by_tool["rm"][-1]).returncode == 0 and not folder.exists()
     assert on_board(poll).stdout.strip() == "gone"
+
+
+# --- the one board session (orchestrator/remote/session.py) and its transport ----------------------------------------
+
+def make_session(manager, board, **kw):
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.session import RemoteSession
+    kw.setdefault("clock", manager._clock)
+    kw.setdefault("sleep", manager._sleep)
+    return RemoteSession(Endpoint(HOST, 22), "radxa", manager._state_dir(), **kw)
+
+
+def test_the_deploy_is_the_session_and_its_old_names_are_the_session_s():
+    from orchestrator.remote import session
+    assert dmod.DeployEvent is session.RemoteEvent
+    assert (dmod.DEPLOY_WAIT_SECONDS, dmod.WAIT_INTERVAL, dmod.MAX_RESUMES, dmod.UPLOAD_CHUNK) == \
+        (session.WAIT_SECONDS, session.WAIT_INTERVAL, session.MAX_RESUMES, session.UPLOAD_CHUNK)
+    assert (dmod.INSTALL_TIMEOUT, dmod.INSTALL_POLL, dmod.INSTALL_STARTED, dmod.INSTALL_STATUS, dmod.INSTALL_LOG) == \
+        (session.JOB_TIMEOUT, session.JOB_POLL, session.JOB_STARTED, session.JOB_STATUS, session.JOB_LOG)
+    from orchestrator.remote import transport
+    from orchestrator.runtime import remote_probe
+    from orchestrator.runtime.device import remote
+    assert ssh_trust.paramiko_quiet is transport.paramiko_quiet, "the one quiet logging around a login"
+    assert remote._read_limited is remote_probe._read_limited is transport.read_limited, "one bounded reader"
+    assert remote.Result is transport.Result and remote.MAX_OUTPUT == transport.MAX_OUTPUT == 1024 * 1024
+    assert remote.COMMAND_TIMEOUT == transport.COMMAND_TIMEOUT == 120 and remote.HASH_TIMEOUT == 900
+
+
+def test_key_only_credentials_never_reach_the_key_installation(manager, board, monkeypatch):
+    from orchestrator.remote.session import KeyOnly
+    monkeypatch.setattr(ssh_trust, "install_public_key", lambda *a: pytest.fail("a key was installed"))
+    passwords = []
+    real_connect = ssh_trust.connect
+
+    def connect(host, user, state_dir, port=22, password=None, timeout=10.0):
+        passwords.append(password)
+        return real_connect(host, user, state_dir, port=port, password=password)
+    monkeypatch.setattr(ssh_trust, "connect", connect)
+    for session in (make_session(manager, board), make_session(manager, board, credentials=KeyOnly())):
+        session.open()
+        assert session.pair() is False
+        session.close()
+    assert passwords == [None, None], "no password is ever sent with the framework key only"
+
+
+def test_a_one_time_password_is_never_shown_and_never_empty():
+    from orchestrator.remote.session import OneTimePassword, RemoteSession
+    secret = "correct horse battery staple"
+    credentials = OneTimePassword(secret)
+    assert secret not in repr(credentials) and secret not in str(credentials)
+    for bad in ("", None, 1234):
+        with pytest.raises(ValueError):
+            OneTimePassword(bad)
+    from orchestrator.remote.address import Endpoint
+    with pytest.raises(TypeError):
+        RemoteSession(Endpoint(HOST), "radxa", ".", credentials=secret)   # a bare password is no credential
+
+
+def test_the_cancel_token_closes_what_it_holds():
+    from orchestrator.remote.session import CancelToken
+
+    class Client:
+        closed = 0
+
+        def close(self):
+            Client.closed += 1
+    asked = {"stop": False}
+    token = CancelToken(lambda: asked["stop"])
+    first, second = Client(), Client()
+    token.hold(first)
+    token.hold(second)
+    token.release(second)
+    assert not token.cancelled and not token()
+    asked["stop"] = True
+    assert token.cancelled, "the caller's own check counts"
+    asked["stop"] = False
+    token.cancel()
+    assert token.cancelled and Client.closed == 1, "held clients close at once, released ones stay"
+    token.hold(Client())
+    assert Client.closed == 2, "a client held after the cancel is closed right away"
+
+
+def test_a_private_folder_is_made_by_mktemp_and_checked_strictly(manager, board):
+    session = make_session(manager, board)
+    session.open()
+    assert session.private_dir() == TARGET
+    assert board.wire[-1] == "sh -c " + shlex.quote(DeploymentManager.REMOTE_MKTEMP)
+    real_run = board.run
+    for answer in ("/tmp/llm_deploy.Ab12Cd34/../etc\n", "/tmp/other.Ab12Cd34\n", "", "/tmp/llm_deploy.Ab12\n"):
+        board.run = lambda command, answer=answer: (0, answer) if command.startswith("mktemp") else real_run(command)
+        with pytest.raises(Exception) as caught:
+            session.private_dir()
+        assert caught.value.kind == "private_dir" and caught.value.state == "ok"
+    session.close()
+
+
+def test_the_hash_of_a_large_upload_gets_time_for_a_slow_board(manager, board, package):
+    from orchestrator.remote import session as remote_session
+    assert remote_session.hash_timeout(10) == 900.0
+    assert remote_session.hash_timeout(8_000_000_000) == 4000.0, "8 GB at 2 MB/s"
+    run(manager, package)
+    timeouts = dict(zip((shlex.split(c)[2].split()[0] for c in board.wire), board.timeouts))
+    assert timeouts["sha256sum"] == 900.0 and timeouts["mktemp"] == 120 and timeouts["cd"] == 120
+
+
+def test_a_detached_job_returns_its_exit_status(manager, board):
+    session = make_session(manager, board)
+    session.open()
+    board.dirs.add(TARGET)
+    real_run = board.run
+    board.run = lambda c: (0, "7\n") if c.startswith(f"cat {TARGET}/") else real_run(c)
+    assert session.run_detached(TARGET, "false") == 7 and board.starts == 1 and session.detached_sent
+    session.close()
+
+
+def test_every_command_has_a_time_limit_and_an_output_cap():
+    from orchestrator.remote.transport import ParamikoTransport, TooMuchOutput
+    client = ShellClient(out=b"x" * 11)
+    with pytest.raises(TooMuchOutput, match="more than 10 bytes"):
+        ParamikoTransport(client).run("yes", limit=10, timeout=3)
+    assert client.calls == [("sh -c yes", 3)] and client.stdout.channel.closed
+    for error in (TimeoutError("timed out"), OSError("Socket is closed"), EOFError()):
+        with pytest.raises(type(error)):
+            ParamikoTransport(ShellClient(fail=error)).run("true")
+
+
+def test_the_session_s_transport_keeps_the_connection_alive():
+    from orchestrator.remote.transport import KEEPALIVE_SECONDS, ParamikoTransport
+    seen = []
+
+    class Transport:
+        def set_keepalive(self, seconds):
+            seen.append(seconds)
+
+        def is_active(self):
+            return True
+
+    class Client:
+        def get_transport(self):
+            return Transport()
+    assert ParamikoTransport(Client(), keepalive=KEEPALIVE_SECONDS).alive() and seen == [KEEPALIVE_SECONDS]
+    ParamikoTransport(object(), keepalive=KEEPALIVE_SECONDS)   # a stand-in without a transport still works
+    assert not ParamikoTransport(object()).alive(), "a client that cannot say counts as broken"
+
+
+def test_importing_the_session_loads_no_paramiko_and_no_qt():
+    """RG1: the session and its transport import paramiko on first use only (the deploy module itself still loads it
+    today through the Docker SDK of the build engine, which is not the remote layer's)."""
+    import json
+    from conftest import REPO_ROOT
+    code = ("import json, sys\n"
+            "sys.modules['PySide6'] = None\n"
+            "import orchestrator.remote.session, orchestrator.remote.transport\n"
+            "print(json.dumps(sorted(m for m, v in sys.modules.items()\n"
+            "                        if v is not None and m.split('.')[0] in ('paramiko', 'PySide6'))))\n")
+    done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
+                          stdin=subprocess.DEVNULL)
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert json.loads(done.stdout.strip().splitlines()[-1]) == []

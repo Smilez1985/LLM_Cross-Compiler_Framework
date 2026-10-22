@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from orchestrator.remote.address import Endpoint, valid_host  # noqa: F401 - valid_host keeps its old import path
-from orchestrator.remote.transport import sh_command
+from orchestrator.remote.transport import read_limited as _read_limited, sh_command
 from orchestrator.runtime.profile import HardwareProfile, ProfileError, load_schema, parse_profile
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
@@ -49,16 +49,6 @@ class RemoteProbeResult:
 def store_address(host: str, port: int) -> str:
     """The address as the profile store keeps it: host, host:port, or [IPv6]:port (Endpoint.store_form)."""
     return Endpoint(host, port).store_form
-
-
-def _read_limited(stream, limit: int) -> bytes:
-    data = b""
-    while len(data) <= limit:
-        chunk = stream.read(min(65536, limit + 1 - len(data)))
-        if not chunk:
-            break
-        data += chunk
-    return data
 
 
 def _exec(client, command: str, stdin_data: Optional[bytes], timeout: float, limit: int) -> Tuple[int, bytes]:
