@@ -3,11 +3,12 @@
 LLM Cross-Compiler Framework - Mojo check: free disk space for the cache, output and build folders
 """
 
-import os
-import shutil
+import os  # noqa: F401 - tests tell the disks apart through os.stat here (disk_plan.device_of reads it)
+import shutil  # noqa: F401 - tests replace shutil.disk_usage through this module (disk_plan.free_space reads it)
 from pathlib import Path
 from typing import List
 
+from orchestrator.Core.disk_plan import device_of, free_space, nearest_existing
 from orchestrator.Core.mojo.findings import GB, Finding, Severity, _ok
 
 
@@ -21,12 +22,12 @@ def check_disk(framework) -> List[Finding]:
             continue
         path = Path(path)
         # The folders are created by the first build, so the nearest existing parent holds their disk.
-        probe = next((p for p in (path, *path.parents) if p.exists()), path)
+        probe = nearest_existing(path)
         try:
-            usage = shutil.disk_usage(probe)
+            usage = free_space(probe)
         except OSError:
             continue
-        key = (os.stat(probe).st_dev if probe.exists() else str(probe))
+        key = device_of(probe)
         if key in seen:
             continue
         seen.add(key)

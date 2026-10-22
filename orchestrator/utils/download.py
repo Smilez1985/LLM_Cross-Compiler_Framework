@@ -98,18 +98,26 @@ class FileLock:
         self.path.unlink(missing_ok=True)
 
 
+SPACE_MARGIN = 256 * MIB   # what a download leaves free when its caller gives no disk rule (`space`)
+# The caller's disk rule: space(folder, needed, what) returns None when `needed` more bytes fit in `folder`, else the
+# refusal (an exception; the domain passes Core/disk_plan's, this bottom layer imports nothing above it).
+SpaceRule = Callable[[Path, int, str], Optional[Exception]]
+
+
 class PinnedDownloader:
-    """Downloads over HTTPS only. Subclasses may raise their own error classes (error, integrity_error)."""
+    """Downloads over HTTPS only. Subclasses may raise their own error classes (error, integrity_error). `space` is
+    the caller's disk rule (SpaceRule); without one a download leaves SPACE_MARGIN free."""
 
     error = DownloadError
     integrity_error = IntegrityError
     lock_class = FileLock
 
     def __init__(self, session: Optional[requests.Session] = None, sleep: Callable[[float], None] = time.sleep,
-                 logger=None):
+                 logger=None, space: Optional[SpaceRule] = None):
         self._session = session
         self._sleep = sleep
         self.logger = logger
+        self.space = space
 
     @property
     def session(self) -> requests.Session:
@@ -118,9 +126,16 @@ class PinnedDownloader:
         return self._session
 
     def ensure_space(self, folder: Path, needed: int, what: str = "the download") -> None:
+        """Makes `folder` and raises self.error when `needed` more bytes do not fit there: by the caller's disk rule
+        (`space`), else SPACE_MARGIN."""
         folder.mkdir(parents=True, exist_ok=True)
+        if self.space is not None:
+            refusal = self.space(folder, int(needed), what)
+            if refusal is not None:
+                raise self.error(str(refusal))
+            return
         free = shutil.disk_usage(folder).free
-        if free < needed + 256 * MIB:
+        if free < needed + SPACE_MARGIN:
             raise self.error(f"Not enough free disk space in {folder} for {what}: {_gib(needed)} needed, "
                              f"{_gib(free)} free.")
 

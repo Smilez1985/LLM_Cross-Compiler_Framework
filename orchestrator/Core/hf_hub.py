@@ -23,7 +23,7 @@ Rules that hold for every call here:
 
 import os
 import re
-import shutil
+import shutil  # noqa: F401 - tests and tools_hf replace or read shutil.disk_usage through this module
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -433,24 +433,18 @@ def disk_check(folder: Path, needed: int, ledger: Any = None) -> Dict[str, int]:
     """Free space, reserve and space other accepted calls reserved on the file system of `folder`: with `ledger`
     (disk_plan.ReservationLedger in the per-user folder) every process's downloads and builds, the same ledger builds
     use; without one only this process's downloads. `fits`: the normal reserve is left; `fits_standing`: the larger
-    reserve of a standing approval is left too."""
-    probe = Path(folder)
-    while not probe.exists() and probe != probe.parent:
-        probe = probe.parent
-    usage = shutil.disk_usage(probe)
-    if ledger is not None:
-        from orchestrator.Core.disk_plan import device_of
-        others = ledger.outstanding(device_of(probe))
-    else:
+    reserve of a standing approval is left too. The numbers are disk_plan.room's (the one disk rule); OSError when the
+    disk cannot be measured."""
+    from orchestrator.Core.disk_plan import room
+    check = room(Path(folder), int(needed), ledger=ledger)
+    if ledger is None:
         with _RESERVED_LOCK:
-            others = sum(_RESERVED.values())
-    left = int(usage.free) - others - int(needed)
-    reserve = reserve_bytes(int(usage.total))
+            check.reserved_by_others = sum(_RESERVED.values())
     # `after`: what stays free after this and every reservation; `tight`: it fits, but with less than twice the
-    # reserve left (the same verdict as disk_plan.DiskCheck, a situation warning of the facts catalogue)
-    return {"free": int(usage.free), "reserve": reserve, "reserved": others,
-            "needed": int(needed), "fits": left >= reserve, "after": left, "tight": reserve <= left < 2 * reserve,
-            "fits_standing": left >= standing_reserve_bytes(int(usage.total))}
+    # reserve left (DiskCheck's verdict, a situation warning of the facts catalogue)
+    return {"free": check.free, "reserve": check.reserve, "reserved": check.reserved_by_others,
+            "needed": check.needed, "fits": check.fits, "after": check.after, "tight": check.verdict == "tight",
+            "fits_standing": check.after >= standing_reserve_bytes(check.total)}
 
 
 class Reservation:

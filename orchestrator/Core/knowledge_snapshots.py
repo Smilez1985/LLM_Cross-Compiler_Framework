@@ -405,12 +405,13 @@ def export_snapshots(folder: Path, names: Iterable[str], destination: Path) -> L
     if same:
         raise ValueError("Choose a folder other than the snapshots' own folder.")
     needed = sum(snapshots[n].size_bytes for n in wanted if not os.path.lexists(destination / snapshots[n].file_name))
+    from orchestrator.Core.disk_plan import room
     try:
-        free = shutil.disk_usage(destination).free
+        check = room(destination, needed, margin=0)   # the export keeps no reserve of its own
     except OSError:
-        free = None
-    if free is not None and needed > free:
-        raise ValueError(f"{destination} has {size_text(free)} free; the export needs {size_text(needed)}.")
+        check = None
+    if check is not None and not check.fits:
+        raise ValueError(f"{destination} has {size_text(check.free)} free; the export needs {size_text(needed)}.")
     results = []
     for name in wanted:
         snap = snapshots[name]

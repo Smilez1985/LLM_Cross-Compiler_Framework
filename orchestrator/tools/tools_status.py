@@ -17,9 +17,8 @@ Status, settings and honest limits (MCP design 2.9, work package T2; DECISIONS r
 
 import json
 import math
-import os
 import re
-import shutil
+import shutil  # noqa: F401 - tests replace shutil.disk_usage through this module (the disk rule reads it)
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 from urllib.parse import urlparse
@@ -659,26 +658,26 @@ def _known(registry, name: str) -> bool:
         return False
 
 
-def _disk_of(path: Path) -> int:
-    """Which disk (file system) a folder lies on."""
-    return os.stat(path).st_dev
+def _disk_of(path: Path) -> str:
+    """Which disk (file system) a folder lies on (disk_plan.device_of; tests replace it here)."""
+    from orchestrator.Core.disk_plan import device_of
+    return device_of(path)
 
 
 def disk_fact(framework) -> Tuple[str, List[str], List[str]]:
     """The free space of the disks builds use: the cache, the output folder and the framework's build folder, where a
-    build is written first (eighth round, answer 3). Folders on one disk are named together, by label only."""
-    from orchestrator.Core.disk_plan import gb, reserve_for
+    build is written first (eighth round, answer 3). Folders on one disk are named together, by label only. A folder
+    not made yet is measured on its nearest existing folder (disk_plan.free_space)."""
+    from orchestrator.Core.disk_plan import free_space, gb, nearest_existing, reserve_for
     disks: Dict[Any, Tuple[List[str], Any]] = {}
     for label, key in (("cache", "cache_dir"), ("output", "output_dir"), ("build", "build_dir")):
         value = _cfg(framework, key)
         if not value:
             continue
         resolve = getattr(framework, "resolve_path", None)
-        path = Path(resolve(value)) if callable(resolve) else Path(str(value))
-        while not path.exists() and path.parent != path:
-            path = path.parent
+        path = nearest_existing(Path(resolve(value)) if callable(resolve) else Path(str(value)))
         try:
-            usage = shutil.disk_usage(path)
+            usage = free_space(path)
             device = _disk_of(path)
         except OSError:
             continue

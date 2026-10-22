@@ -200,22 +200,16 @@ def _check_room(state_dir: Path, need: int, disk_usage: Any = None) -> None:
     """The new storage must fit beside the old one: about the old one's size again (DISK_FACTOR, DISK_FIXED) and
     FREE_AFTER left free afterwards. The conversion uses no reserve of its own beyond that: refusing it costs nothing
     (the old store keeps working), and the person frees the space again by deleting the old folder."""
-    import shutil as _shutil
-
-    from orchestrator.Core.disk_plan import gb
-    usage = disk_usage or _shutil.disk_usage
-    folder = Path(state_dir)
-    while not folder.exists() and folder.parent != folder:
-        folder = folder.parent
+    from orchestrator.Core.disk_plan import gb, room
     try:
-        free = int(usage(str(folder)).free)
+        check = room(Path(state_dir), need, margin=FREE_AFTER, disk_usage=disk_usage)
     except OSError:
         return
-    if free - need < FREE_AFTER:
+    if not check.fits:
         raise ConversionFailed(f"Not enough disk space to convert the knowledge base to Qdrant Edge: it needs about "
-                               f"{gb(need)} beside the old storage and {gb(FREE_AFTER)} left free, {gb(free)} are "
-                               "free. It keeps working in the old storage; the conversion is tried again on the next "
-                               "start.", code="disk_space")
+                               f"{gb(need)} beside the old storage and {gb(FREE_AFTER)} left free, {gb(check.free)} "
+                               "are free. It keeps working in the old storage; the conversion is tried again on the "
+                               "next start.", code="disk_space")
 
 
 def _open_old(folder: Path):

@@ -460,9 +460,10 @@ class BenchRunner:
             # folder last, as before: a system without descriptor links, e.g. macOS)
             no_room = False
             if source is None:
+                from orchestrator.Core.disk_plan import room
                 for parent in [*scratch, model.parent]:
                     try:
-                        if shutil.disk_usage(parent).free < open_st.st_size + COPY_RESERVE:
+                        if not room(parent, open_st.st_size, margin=COPY_RESERVE).fits:
                             no_room = True
                             continue
                     except OSError:
