@@ -10,11 +10,14 @@ and the GUI start without it).
   OpenSSH instead of failing on the first login.
 - PARAMIKO_AVAILABLE: true while paramiko imports, asked only when it is first tested. DeploymentManager and the
   Builder tab keep it under their old module attribute PARAMIKO_AVAILABLE (tests set that to True or False).
+- sh_command(script): a script as the one command the board's login shell gets, `sh -c '<script>'` (every command
+  the framework sends to a board has this form).
 
 The connection itself (login, commands, uploads, the system-ssh fallback) moves here in consolidation stage C; today
 it lives in orchestrator/utils/ssh_trust.py and orchestrator/Core/deployment_manager.py.
 """
 
+import shlex
 import threading
 from typing import Any, Optional, Tuple
 
@@ -59,4 +62,11 @@ class _Availability:
 PARAMIKO_AVAILABLE = _Availability()
 
 
-__all__ = ["PARAMIKO_AVAILABLE", "available", "paramiko_module"]
+def sh_command(script: str) -> str:
+    """`script` as the one command sent to the board: `sh -c '<script>'`. sshd hands every command to the account's
+    login shell; as one quoted word for sh, the redirections, && and $? are read by sh, so a login shell such as fish
+    or csh (where `2>/dev/null` means something else or nothing) does not matter."""
+    return "sh -c " + shlex.quote(script)
+
+
+__all__ = ["PARAMIKO_AVAILABLE", "available", "paramiko_module", "sh_command"]

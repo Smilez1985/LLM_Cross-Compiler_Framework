@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from orchestrator.remote.text import one_line as _tail   # a board's answer as one plain line
+from orchestrator.remote.transport import sh_command
 from orchestrator.runtime.build.verify import Check, VerifyReport, parse_bench_json, parse_devices, parse_version
 from orchestrator.runtime.device.launcher import (DEVICE_FOLDER_MAX, DEVICE_PATH_MAX, KEY_REL, START_SCRIPT,
                                                   UNIT_NAME, UNIT_PATH, install_root,
@@ -100,7 +101,7 @@ class RemoteShell:
 
     @staticmethod
     def command(script: str) -> str:
-        return "sh -c " + shlex.quote(script)
+        return sh_command(script)
 
     def run(self, script: str, *, stdin: Optional[Iterable[bytes]] = None, timeout: float = COMMAND_TIMEOUT,
             limit: int = MAX_OUTPUT) -> Result:

@@ -2021,6 +2021,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Ein Deployment klappt auch auf einem Board, dessen Konto eine andere Login-Shell nutzt**: sshd gibt jeden Befehl
+  an die Login-Shell des Kontos auf dem Board. Die Befehle des Deployments (der private Ordner, die Hash-Prüfungen, der
+  Start der Installation, die auf dem Board selbständig läuft, und das Abfragen ihres Endes) und die Installation des
+  Framework-Schlüssels gingen so dorthin, wie sie waren; bei einem Konto mit fish, csh oder einer anderen Shell, die
+  nicht POSIX ist, bedeuteten ihre `&&`, `||`, `2>/dev/null` und `$?` etwas anderes oder nichts. Jeder davon kommt jetzt
+  als ein `sh -c '...'` auf dem Board an (`orchestrator/remote/transport.py` `sh_command`, die Form, die die
+  Geräte-Laufzeit und die Board-Prüfung schon nutzten), sodass das sh des Boards das Skript liest, egal welche
+  Login-Shell das Konto hat.
 - **Ein Deployment wartet weiter, während der SSH-Server des Boards neu startet**: Nach einem Netzabbruch wartet das
   Deployment auf das Board (N5). Antwortete das Board wieder, während sein SSH-Server noch startete, öffnete sich die
   Verbindung und brach wieder ab (ein Reset, ein Abbruch, eine unterbrochene Pipe oder EOF beim Schlüsselaustausch);
