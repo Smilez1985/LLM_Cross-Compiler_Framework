@@ -708,11 +708,18 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   importiert (`tests/test_remote_trust.py` folgt den Importen der Tool-Module, des MCP-Servers, der LLM-Schicht, von
   Ditto, des Gerätedienstes und des Benchmarks). Arbeite auf einem Board über `remote.session.RemoteSession`
   (Anmeldung mit dem über `TrustStore` geprüften Host-Schlüssel bei jeder Anmeldung, `run`, `private_dir`, `upload`
-  mit Fortsetzen, `wait_for_host`, `run_detached`, ein `CancelToken`): Ein KI-Weg übergibt `KeyOnly()`, nur das
-  `OneTimePassword` der Person kann koppeln, und jeder Befehl geht als ein `sh -c` mit Zeitlimit und Ausgabegrenze
-  über `remote.transport` (`sh_command`, `ParamikoTransport.run`). Schreib nie einen zweiten regulären Ausdruck, eine
-  zweite Grundtabelle, einen zweiten Recorder, eine zweite Host-Schlüssel-Prüfung, eine zweite Warte- oder
-  Upload-Schleife oder einen zweiten Befehlsleser daneben. Das Paket importiert nur `orchestrator/utils` und
+  mit Fortsetzen, `wait_for_host`, `run_detached` und `follow`, `run_resumable`, ein `CancelToken`): Ein KI-Weg
+  übergibt `KeyOnly()`, nur das `OneTimePassword` der Person kann koppeln, und jeder Befehl geht als ein `sh -c` mit
+  Zeitlimit und Ausgabegrenze über `remote.transport` (`sh_command`, `ParamikoTransport.run`). Das
+  Laufzeit-Deployment, die Prüfungen auf dem Board und die Board-Prüfung nutzen sie über `runtime/device/remote.py`
+  `RemoteShell` (markiere einen Befehl nur dann mit `again=True`, wenn er zweimal laufen darf: Er liest nur oder tut
+  dasselbe noch einmal; jeder andere endet nach einem Netzabbruch mit „dropped“), ein Job, der lange auf dem Board
+  läuft, geht über `run_detached` (der Benchmark auf dem Board), und ein Abbrechen hält die Sitzung mit
+  `CancelToken.hold` (das Schließen einer Sitzung beendet ihr Warten). Zeig ein Warten der Person mit
+  `remote.text.wait_lines` und dem Job einer KI mit `remote.text.progress_events`. Schreib nie einen zweiten
+  regulären Ausdruck, eine zweite Grundtabelle, einen zweiten Recorder, eine zweite Host-Schlüssel-Prüfung, eine
+  zweite Warte- oder Upload-Schleife, einen zweiten Befehlsleser oder ein zweites „den Client halten, damit
+  Abbrechen ihn schließt“ daneben. Das Paket importiert nur `orchestrator/utils` und
   `orchestrator/security` (`tests/test_remote_layer.py`).
 - **Qt gibt es nur in `orchestrator/gui/`.** PySide6 ist das optionale Extra `gui`; Kommandozeile, MCP-Server und
   alles unterhalb der GUI importieren kein Qt, auch nicht in einer Funktion (`tests/test_qt_free_core.py` prüft jeden

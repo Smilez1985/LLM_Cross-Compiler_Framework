@@ -1344,6 +1344,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   holds the deploy. Such a command counts as a network drop (paramiko's connection still stands then until TCP gives
   up): the deploy waits for the board as after any drop, logs in again with the host key checked again and continues
   the upload or follows the installation again, at most 20 times, instead of ending with "could not be followed".
+- **The runtime deploy, the checks on the board, the on-board benchmark and the probe go through the one board
+  session** (consolidation chain c2-remote-callers). A Wi-Fi drop no longer ends them with "the SSH connection
+  failed": `runtime/device/remote.py` `RemoteShell` is a facade over `RemoteSession`, so the session waits for the
+  board (N5), logs in again with the host key checked again and goes on. The runtime tarball goes over SFTP into its
+  private staging folder and continues at what arrived (a board without SFTP gets it on a command's stdin as before);
+  the checks only read and run again; a step that must not run twice ends with a clear sentence once the board answers
+  again, and the staging folder is still removed; a board that does not answer again ends every later step at once
+  with its reason code. The short llama-bench run starts on the board on its own (`run_detached`) and is followed again
+  after a drop, never started twice (round 16 G4: work keeps running while nobody watches; a board without nohup runs
+  it attached as before); `RemoteSession.follow` follows a job started before. The probe sends its read-only commands
+  again after a drop. The AI path (`runtime/device/service.py`) opens a `KeyOnly` session (decision 2), with the same
+  refusals and texts as before; the person's board steps (`person_steps.connect_stored`, the CLI's
+  `device runtime deploy|verify|prune --on-device`, the Boards window) open one with the person's one-time password
+  when one is typed, and `scan --device` hands its login to a session. The CLI and the Boards window say when the
+  board's network dropped and when it answers again (EN/DE), an AI's job shows it by the board's label. One
+  `CancelToken` replaces the four "hold the client so Cancel can close it" copies, and closing a session ends its
+  waits. The person's board steps, `scan --device` and Mojo ask `remote.transport.available()` whether SSH works, and
+  the GUI's messages for a problem on this computer (local_problem) now also name what failed there (the system's
+  words and the file's name, never its folder or an account).
 - **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
   existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
   `utils/network.py` left with that module, see below) run through the oldest one's module,

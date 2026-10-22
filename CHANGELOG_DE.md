@@ -1530,6 +1530,28 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Verbindung von paramiko steht dann noch, bis TCP aufgibt): Das Deployment wartet wie nach jedem Abbruch auf das
   Board, meldet sich mit erneut geprüftem Host-Schlüssel wieder an und setzt den Upload fort oder verfolgt die
   Installation weiter, höchstens 20-mal, statt mit „could not be followed“ zu enden.
+- **Das Laufzeit-Deployment, die Prüfungen auf dem Board, der Benchmark auf dem Board und die Board-Prüfung laufen
+  über die eine Board-Sitzung** (Konsolidierungskette c2-remote-callers). Ein WLAN-Abbruch beendet sie nicht mehr mit
+  „the SSH connection failed“: `runtime/device/remote.py` `RemoteShell` ist eine Fassade über `RemoteSession`, also
+  wartet die Sitzung auf das Board (N5), meldet sich mit erneut geprüftem Host-Schlüssel wieder an und macht weiter.
+  Das Laufzeit-Archiv geht über SFTP in seinen privaten Staging-Ordner und geht bei dem weiter, was angekommen ist (ein
+  Board ohne SFTP bekommt es wie bisher über die Standardeingabe eines Befehls); die Prüfungen lesen nur und laufen
+  erneut; ein Schritt, der nicht zweimal laufen darf, endet mit einem klaren Satz, sobald das Board wieder antwortet,
+  und der Staging-Ordner wird trotzdem entfernt; ein Board, das nicht wieder antwortet, beendet jeden späteren Schritt
+  sofort mit seinem Grundcode. Der kurze llama-bench-Lauf startet auf dem Board für sich (`run_detached`) und wird nach
+  einem Abbruch wieder verfolgt, nie zweimal gestartet (Runde 16 G4: Arbeit läuft weiter, während niemand zusieht; ein
+  Board ohne nohup führt ihn wie bisher angehängt aus); `RemoteSession.follow` verfolgt einen schon gestarteten Job.
+  Die Board-Prüfung sendet ihre nur lesenden Befehle nach einem Abbruch erneut. Der KI-Weg
+  (`runtime/device/service.py`) öffnet eine `KeyOnly`-Sitzung (Entscheidung 2), mit denselben Ablehnungen und Texten
+  wie bisher; die Board-Schritte der Person (`person_steps.connect_stored`, `device runtime deploy|verify|prune
+  --on-device` der CLI, das Fenster Boards) öffnen eine mit dem Einmal-Passwort der Person, wenn eines eingegeben ist,
+  und `scan --device` übergibt seine Anmeldung an eine Sitzung. CLI und Fenster Boards sagen, wenn das Netz des Boards
+  abbricht und wenn es wieder antwortet (EN/DE), der Job einer KI zeigt es mit dem Label des Boards. Ein
+  `CancelToken` ersetzt die vier Kopien von „den Client halten, damit Abbrechen ihn schließt“, und das Schließen einer
+  Sitzung beendet ihr Warten. Die Board-Schritte der Person, `scan --device` und Mojo fragen
+  `remote.transport.available()`, ob SSH geht, und die Meldungen der GUI für ein Problem auf diesem Computer
+  (local_problem) nennen jetzt auch, was dort fehlschlug (die Worte des Systems und den Namen der Datei, nie ihren
+  Ordner oder ein Konto).
 - **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
   zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9 Schleifen; die
   Schleife von `utils/network.py` ist mit diesem Modul gegangen, siehe unten) laufen über das Modul der ältesten,
