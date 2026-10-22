@@ -123,7 +123,7 @@ class TestOneSourceAndTheRule:
 
 # The first 16 hex digits of each text's SHA-256: a change to a task text must update them in the same commit.
 SNAPSHOT = {"CHAT_INTRO": "3e4df5f3df2314a0", "CHAT_TOOLS": "4922b2f78ae98afa", "HEALING_SYSTEM": "6ac7efd5073f6643",
-            "MODULE_SYSTEM": "cbf23455c0f14dff", "OPTIMIZER_SYSTEM": "fd27d67997c0cc00",
+            "MODULE_SYSTEM": "bcb1ea7c2fa3a5ef", "OPTIMIZER_SYSTEM": "fd27d67997c0cc00",
             "CANNOT_RULE": "1874ad99a18df989"}
 
 
