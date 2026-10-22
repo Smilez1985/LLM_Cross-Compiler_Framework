@@ -300,8 +300,10 @@ def test_module_create_names_the_file_the_build_runs(tmp_path, monkeypatch):
     out = printed.getvalue() + result.out
     assert result.code == 0, out
     assert "config_module.sh" not in out
+    # The build runs the stage modules (DECISIONS U9): the hint names the stage a person changes, not the runner.
     hint = re.search(r"2\. Customize (\S+)", out).group(1)
-    assert hint.endswith("modules/build.sh") and Path(hint).is_file()
+    assert hint.endswith("modules/convert_module.sh") and Path(hint).is_file()
+    assert "target_module.sh" in out and Path(hint).with_name("target_module.sh").is_file()
 
 
 # ---------------------------------------------------------------------------------------------------------------

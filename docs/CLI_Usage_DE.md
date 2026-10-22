@@ -1813,10 +1813,11 @@ Target wird nie überschrieben.
 
 Das Target wird in den eingestellten Targets-Ordner geschrieben (Einstellung `targets_dir`; ein relativer Pfad
 gilt relativ zur Installation, nicht zum aktuellen Ordner). Seine `target.yml` hat einen Block `capabilities:` (Unterstützungsstufe `community`) mit dem Modulnamen als einzigem
-Board und GGUF als einzigem Format; trag dort deine echten Boards und Formate ein. Die nächsten Schritte des
-Befehls nennen `modules/build.sh`, den Dispatcher, den die Build-Engine ausführt; die erzeugte
-`config_module.sh` und die übrigen `*_module.sh`-Skripte sind Altlasten, die die Build-Pipeline nicht aufruft
-([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#10-altlasten)).
+Board und GGUF als einzigem Format; trag dort deine echten Boards und Formate ein. Der Build sind die vier
+Stufenmodule (`source_module.sh`, `config_module.sh`, `convert_module.sh`, `target_module.sh`), die
+`modules/build.sh`, der Stage-Runner, den die Build-Engine startet, der Reihe nach ausführt; die nächsten Schritte des
+Befehls nennen die Stufen convert und target, in denen ein neues Target seine Umwandlung und Quantisierung ergänzt
+([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#6-die-stufen-des-builds)).
 
 In der GUI: **Tools > Create Hardware Module...**: Name, Architektur, SDK und **Beschreibung** auf der Hardware-Seite,
 Basis-Image und Pakete auf der Docker-Seite, CPU- und CMake-Flags auf der Flags-Seite; der Standard-Import auf der
@@ -2198,8 +2199,9 @@ Zugangsdaten.
 | `--add TEXT...` | Eine Überschreibung hinzufügen: `NAME URL`. |
 | `--remove TEXT` | Die Überschreibung `NAME` entfernen. |
 
-Die aktuellen Rockchip-Skripte lesen keine dieser Variablen (nur das Altlast-Skript `source_module.sh` liest
-`LLAMA_CPP_REPO_OVERRIDE`), daher wirken sich die Überschreibungen auf Rockchip-Builds nicht aus.
+Die Überschreibungen wirken sich auf Rockchip-Builds nicht aus: Ein Build nutzt das llama.cpp seines Images, und
+seine Stufe source (`source_module.sh`) warnt nur, wenn `LLAMA_CPP_REPO_OVERRIDE` gesetzt ist. Nur
+`source_module.sh --clone-llama-cpp`, von Hand in einem Container mit Netzwerk gestartet, klont daraus.
 
 In der GUI: **Datei > Einstellungen…**, Tab **Quell-Repositorys**: die Liste, **Hinzufügen** (Name und URL) und
 **Ausgewählte entfernen…** (fragt zuerst; „Nein“ ist die Vorgabe).

@@ -428,9 +428,10 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_f
         console.print(f"Location: {output_path}")
         console.print("\nNext steps:")
         console.print(f"1. Edit {output_path}/target.yml to add supported boards")
-        # The build engine runs only this dispatcher (config_module.sh and the other *_module.sh are legacy).
-        console.print(f"2. Customize {output_path}/modules/build.sh (the build steps; the Dockerfile installs "
-                      f"the tools they use)")
+        # The build is the four stage modules, which modules/build.sh (the stage runner) runs in order (DECISIONS U9).
+        console.print(f"2. Customize {output_path}/modules/convert_module.sh and target_module.sh (the convert and "
+                      f"target stages of the build, which build.sh runs after source and config; the Dockerfile "
+                      f"installs the tools they use)")
         
     except Exception as e:
         console.print(f"[bold red]Error creating module: {e}[/bold red]")

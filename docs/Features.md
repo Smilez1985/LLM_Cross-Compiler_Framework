@@ -2603,7 +2603,8 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   follows. After **Finish** the wizard checks the new target as `llm-cli targets validate` does and shows the result.
 - **New target from a probe:** `llm-cli module generate-ai <probe file>` or the wizard's AI analysis. Ditto proposes
   architecture, SDK, base image, packages, vendor sources, pip packages and downloads, CPU and CMake flags, setup
-  commands and the quantization block of `build.sh`; you see the whole proposal first. Both take the same path: the base
+  commands (run once in the source stage) and the quantization block of the convert stage (`convert_module.sh`);
+  you see the whole proposal first. Both take the same path: the base
   image is pinned to its digest before you see the proposal (`pin_base_image`; in the wizard off the GUI thread), the
   module is saved through `DittoManager.save_module`, which refuses a prebuilt `nvidia/cuda` image and an image that is
   not a Docker Official Image without the AI's reason (also for a base image an AI filled into the wizard through the

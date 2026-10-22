@@ -266,9 +266,11 @@ class ModuleDefinition(BaseModel):
                                        "module, never applied)")
     cmake_flags: str = Field(description="CMake flags for llama.cpp, e.g. -DGGML_NATIVE=OFF (advisory: the framework "
                                          "builds llama.cpp with its own recipe from the device's probe)")
-    setup_commands: str = Field(description="Bash run before converting, as the unprivileged build user and "
-                                            "without network (e.g. exporting SDK variables); may be empty")
-    quantization_logic: str = Field(description="Body of the bash `case \"$QUANT\" in` block of build.sh")
+    setup_commands: str = Field(description="Bash the source stage runs once before converting, as the unprivileged "
+                                            "build user and without network (e.g. exporting SDK variables; what it "
+                                            "exports reaches the later stages); may be empty")
+    quantization_logic: str = Field(description="Body of the bash `case \"$QUANT_TYPE\" in` block of the convert stage "
+                                                "(modules/convert_module.sh)")
     assumptions: List[str] = Field(default_factory=list,
                                    description="Values you guessed rather than read from the probe or the "
                                                "documentation, each with what to check first; at most 10")

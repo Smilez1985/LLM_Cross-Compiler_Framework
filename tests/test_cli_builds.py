@@ -313,7 +313,8 @@ class TestParallelAndOptimization:
     def test_rockchip_scripts_do_not_read_optimization_level(self):
         # The help text says so; if a script starts using it, the help and CLI_Usage must change.
         for script in (ROCKCHIP_DIR / "modules").glob("*.sh"):
-            if script.name in ("build.sh", "rkllm_module.sh", "rknn_module.sh"):
+            if script.name in ("build.sh", "source_module.sh", "config_module.sh", "convert_module.sh",
+                               "target_module.sh", "rkllm_module.sh", "rknn_module.sh"):
                 code = "\n".join(line for line in script.read_text().splitlines()
                                  if not line.lstrip().startswith("#"))
                 assert "OPTIMIZATION_LEVEL" not in code, script
@@ -1237,16 +1238,22 @@ def test_build_scripts_do_not_read_imatrix_chunks():
     assert "IMATRIX_CHUNKS" not in engine_code
     for script in list((REPO_ROOT / "targets").glob("*/modules/*.sh")):
         assert "IMATRIX_CHUNKS" not in script.read_text(encoding="utf-8"), script
-    assert "--chunks 100" in (ROCKCHIP_DIR / "modules" / "build.sh").read_text(encoding="utf-8")
+    # The importance-matrix job lives in the convert stage since build.sh became the stage runner (DECISIONS U9).
+    assert "--chunks 100" in (ROCKCHIP_DIR / "modules" / "convert_module.sh").read_text(encoding="utf-8")
+
+
+# build.sh, the stage runner, and the modules of its stages (DECISIONS U9)
+STAGE_SCRIPTS = [ROCKCHIP_DIR / "modules" / name for name in ("build.sh", "source_module.sh", "config_module.sh",
+                                                                "convert_module.sh", "target_module.sh")]
 
 
 def test_changed_shell_scripts_keep_lf_line_endings():
     """They run on a board or in a Linux container; .gitattributes keeps them LF also in a Windows checkout."""
-    for script in (ROCKCHIP_DIR / "modules" / "build.sh", REPO_ROOT / "scripts" / "hardware_probe.sh"):
+    for script in (*STAGE_SCRIPTS, REPO_ROOT / "scripts" / "hardware_probe.sh"):
         assert b"\r" not in script.read_bytes(), script
 
 
 @pytest.mark.skipif(posix_shell("bash") is None, reason=NO_POSIX_BASH)
 def test_changed_shell_scripts_parse():
-    for script in (ROCKCHIP_DIR / "modules" / "build.sh", REPO_ROOT / "scripts" / "hardware_probe.sh"):
+    for script in (*STAGE_SCRIPTS, REPO_ROOT / "scripts" / "hardware_probe.sh"):
         assert subprocess.run([posix_shell("bash"), "-n", str(script)], check=False).returncode == 0, script

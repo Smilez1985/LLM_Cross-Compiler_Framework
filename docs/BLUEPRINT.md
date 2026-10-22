@@ -111,7 +111,7 @@ flowchart TB
     BE["BuildEngine<br/>orchestrator/Core/builder.py"]
     subgraph Docker["Docker with BuildKit"]
         IMG["Target image<br/>targets/Rockchip/dockerfile"]
-        SBX["Sandboxed stage containers<br/>imatrix + build via modules/build.sh"]
+        SBX["Sandboxed stage containers<br/>imatrix + build: modules/build.sh<br/>runs source, config, convert, target"]
     end
     TGT["targets/<br/>target.yml + modules"]
     CAL["data/calibration"]
@@ -199,7 +199,7 @@ private atomic files in `utils/atomic.py`, one-time notices in `utils/notice_sto
 | LLMOrchestrator | `orchestrator/Core/orchestrator.py` | Queue and pipeline: prepares calibration text, expands a request into jobs (model x target x format x quantization), runs them on the build engine, handles cancellation and the self-healing approval loop. |
 | BuildEngine | `orchestrator/Core/builder.py`, `orchestrator/utils/build_context.py` | Stages the Docker build context, builds the image (BuildKit when available), downloads or mounts the model, runs the optional Trivy scan, the importance-matrix stage and the build stage in sandboxed containers, writes the manifest, model card and ZIP into a hidden staging folder, moves them into the output folder once the build can no longer be cancelled, and cleans up. |
 | DockerManager | `orchestrator/Core/docker_manager.py` | Makes the framework's one build engine (with its Docker client) and checks that the Docker daemon answers; no Qt. `container_resources()` turns a `docker stats` sample of a running build container into CPU and memory figures (Docker's own formulas, memory without the inactive page cache); the build engine samples them into the build's progress, `BuildService.live_resources` hands them to the Builder (under the progress bar), and the build log warns once near the memory limit. |
-| Rockchip reference target | `targets/Rockchip/` | `dockerfile` (Debian bookworm-slim; llama.cpp v0.6.0 tools; three Python venvs), `modules/build.sh` (dispatcher for `gguf`, `rkllm`, `rknn` and the `imatrix` job), `modules/rkllm_module.sh`, `modules/rknn_module.sh`, `scripts/export_rkllm.py`, `scripts/rknn_converter.py`, `target.yml`. `targets/_template/` is the starting point for new targets ([Module Developer Guide](Module_Developer_Guide.md)). |
+| Rockchip reference target | `targets/Rockchip/` | `dockerfile` (Debian bookworm-slim; llama.cpp v0.6.0 tools; three Python venvs), `modules/build.sh` (the stage runner) with the four stage modules `source_module.sh`, `config_module.sh`, `convert_module.sh` and `target_module.sh` (`gguf`, `rkllm`, `rknn` and the `imatrix` job), `modules/rkllm_module.sh` and `modules/rknn_module.sh` (format helpers of the convert stage), `scripts/export_rkllm.py`, `scripts/rknn_converter.py`, `target.yml`. `targets/_template/` is the starting point for new targets ([Module Developer Guide](Module_Developer_Guide.md)). |
 | DeploymentManager and SSH trust | `orchestrator/Core/deployment_manager.py`, `orchestrator/utils/ssh_trust.py` | Builds the deployment package, checks the device's host key, pairs the framework's SSH key, uploads and runs the installer. |
 | Remote layer (unreleased) | `orchestrator/remote/` | Everything that talks to a board, Qt-free and importing only `orchestrator/utils` and `orchestrator/security`: the board's address (`address.py`: `Endpoint` with its known_hosts, stored and displayed forms, the one host, port and SSH-user check, ASCII only), why a board cannot be reached (`reasons.py`: the four reason codes and `local_problem` for a problem on this computer, never recorded with a board, `check_port`, `classify`, `reach_code`; a dropped connection while a deploy waits for the board counts as "not back yet"), `RemoteFailure`, the base of every board step's error (`errors.py`), a board's words and a running deploy's state as one line for the person or an AI (`text.py`), the connection (`transport.py`: whether SSH works here, paramiko imported on first use; every command as one `sh -c` with a time limit and an output cap; the login, SFTP and keepalive in `ParamikoTransport`), the framework's `known_hosts`, read-only (`trust.py`: `TrustStore` with `status`, `status_of`, `check` giving a `KeyCheck`, `read_presented_key`; `fingerprint`, `device_id_for`, `parse_public_key` for a key the person pastes; the host-key errors), the person's writers of a board's trust (`pairing.py`: a trusted key with its audit row in one step, the one decision of trust on first use behind `deploy run`, `scan --device` and the GUI's question, pairing over a one-time password session, Q5's change of a board's address or host key with the old and the new fingerprint, audited before anything changes, and a consent's audit row) and the session with a board (`session.py`: `RemoteSession` logs in with the host key checked through `TrustStore` at every login, with typed credentials, `KeyOnly` for every AI path and the person's `OneTimePassword`, the only one that can pair; a private folder, the upload that resumes after a network drop, the wait for the board (N5) and a job that runs on the board on its own; one `CancelToken`). No module an AI can reach imports `pairing.py` (an import-graph test). The deploy of a package is a thin adapter over the session; the runtime deploy, the probe and the on-board benchmark follow. The old paths `orchestrator/runtime/device/reasons.py` and `orchestrator/utils/ssh_trust.py` keep working. What a contact found is recorded for Mojo by `record_reach` in `orchestrator/runtime/device/trusted.py`. |
 | Tool registry, permissions, audit | `orchestrator/tools/` (`registry.py`, `policy.py`, `audit.py`, `confirmation.py`, `framework_tools.py`) | Eleven typed tools with risk tiers, the user's stored permissions, the confirmation text (shared by MCP and Ditto) and a hash-chained audit log. |
@@ -221,9 +221,14 @@ private atomic files in `utils/atomic.py`, one-time notices in `utils/notice_sto
 | Calibration data | `data/calibration/`, `orchestrator/utils/calibration.py` | Curated German, English and tool-use text (MIT licence) with SHA256 checks, used for importance matrices. |
 | Untrusted text handling | `orchestrator/utils/untrusted.py` | Cleans and wraps external text before it reaches a language model. |
 
-The Rockchip folder also still contains `source_module.sh`, `config_module.sh`, `convert_module.sh` and
-`target_module.sh` from the four-module chain of version 1.x. The current dispatcher `build.sh` does not call
-them; their removal is planned for 3.4.0.
+A build is the four stage modules of a target (`source_module.sh`, `config_module.sh`, `convert_module.sh`,
+`target_module.sh`, the chain of version 1.x, made the build again by the maintainer's decision U9). `build.sh` is
+only the stage runner: it runs them in order, writes a resume marker after every stage that finished (an input
+digest and the files the stage named), skips a finished stage when it is run again on the same work folder with
+the same inputs, and prints a progress line per stage that the BuildEngine reads from the container log. An
+optional `rotate_module.sh` between convert and target is the slot for a rotation such as SpinQuant (none is
+shipped). Benchmarks stay on the board: no stage runs one, and the template's `benchmark_module.sh` is no stage.
+See the [Module Developer Guide](Module_Developer_Guide.md#6-the-build-stages).
 
 `configs/project_sources.yml` is a catalogue of upstream projects and documentation links. At runtime the
 framework reads only its hardware documentation links (they fill the Deep Ingest window for a probe's vendor and
@@ -291,11 +296,15 @@ records hashes and lets you install the result on your device.
    room for it the scan is skipped with a warning. Findings produce a warning; the
    build continues. A scan that does not finish within `build_timeout` is stopped with a warning.
 7. **Importance-matrix stage** (GGUF with IMatrix only). A sandboxed container runs `modules/build.sh` with
-   `JOB_TYPE=imatrix`: it converts the model to F16 GGUF and runs `llama-imatrix` on the first 100 chunks of the
-   calibration text. If this stage fails, the build stops.
-8. **Build stage.** A second sandboxed container runs `modules/build.sh` with `JOB_TYPE=build`. The dispatcher
-   picks the toolchain: `llama-quantize` for GGUF (with the importance matrix if present), `rkllm_module.sh` for
-   RKLLM (RK3588 and RK3576 only), `rknn_module.sh` for RKNN.
+   `JOB_TYPE=imatrix`: the stage runner runs source, config and convert, and the convert stage converts the model
+   to F16 GGUF and runs `llama-imatrix` on the first 100 chunks of the calibration text. If this stage fails, the
+   build stops.
+8. **Build stage.** A second sandboxed container runs `modules/build.sh` with `JOB_TYPE=build`, and the stage
+   runner runs all four stages: source names the tools of the image, config normalizes the request and refuses
+   what the target cannot build, convert picks the toolchain (the GGUF converter, `rkllm_module.sh` for RKLLM on
+   RK3588 and RK3576 only, `rknn_module.sh` for RKNN), and target quantizes with `llama-quantize` (with the
+   importance matrix if present) and writes `build_info.json`. The progress lines of the runner show the stage in
+   the build status ("Running modules: convert (3/4)").
 9. **Manifest and golden artifact.** The engine copies the results into a hidden staging folder next to the
    output folder (links in the build output are not followed), completes `build_info.json` with every model
    file's size and SHA256 hash and the primary file, writes `Model_Card.md` and creates a ZIP of these files. Only
@@ -1003,7 +1012,8 @@ These are real limitations of the current state. Most are scheduled in the [road
   in free text, such as a name in a sentence. Use a local provider for sensitive material.
 - **Generated targets are skeletons.** The module generator writes a `capabilities:` block (support level
   community: the boards, and GGUF with the types the build script handles) and a `runtime:` block, the template
-  `build.sh` follows the Rockchip dispatcher, and the template Dockerfile builds llama.cpp's conversion tools with the
+  `build.sh` is the same stage runner as Rockchip's (its four stage modules hold the wizard's setup, quantization
+  and packaging commands), and the template Dockerfile builds llama.cpp's conversion tools with the
   same recipe as `targets/Rockchip/dockerfile`. The boards, formats and quantizations are still a starting point,
   and a generated GPU target is untested on real hardware. See the
   [Module Developer Guide](Module_Developer_Guide.md).
@@ -1041,7 +1051,7 @@ These are real limitations of the current state. Most are scheduled in the [road
 | **One venv per toolchain** in the target image | The toolchains pin conflicting versions: the llama.cpp converter uses a current torch (2.11, CPU), RKLLM-Toolkit 1.3.1 needs torch 2.6 and its own transformers, RKNN-Toolkit2 2.3.2 needs torch 2.4, setuptools below 81 and onnx 1.16.2. Separate venvs (`/opt/venv`, `/opt/venv-rkllm`, `/opt/venv-rknn`) keep each at its tested versions; the module scripts call the right interpreter. |
 | **Debian bookworm and Python 3.11 in the images** | Rockchip publishes its toolkit wheels only for CPython 3.10 to 3.12 (the image uses the cp311 RKLLM wheel); bookworm ships Python 3.11. The host side is independent and supports Python 3.11 to 3.14. |
 | **BuildKit for image builds** | Better layer caching than the legacy builder behind docker-py's `api.build`, which Docker has deprecated, and the same builder CI uses. The engine falls back to the Docker API if `docker buildx` is missing. |
-| **Capabilities as data** | One declaration in `target.yml` feeds the GUI, the CLI, the build service, Ditto and the MCP tools, so they cannot disagree. The pydantic schema rejects inconsistent declarations (for example a default that is not in the list); tests in `tests/test_foundation.py` and `tests/test_review_capabilities_paths.py` keep it in sync with `build.sh`, `rkllm_module.sh`, `rknn_module.sh` and `export_rkllm.py`. |
+| **Capabilities as data** | One declaration in `target.yml` feeds the GUI, the CLI, the build service, Ditto and the MCP tools, so they cannot disagree. The pydantic schema rejects inconsistent declarations (for example a default that is not in the list); tests in `tests/test_foundation.py` and `tests/test_review_capabilities_paths.py` keep it in sync with `config_module.sh`, `convert_module.sh`, `rkllm_module.sh`, `rknn_module.sh` and `export_rkllm.py`. |
 | **Stage models on the host, run the sandbox without network** | Downloads need network and sometimes a token. Doing them on the host lets every piece of conversion code run offline: vendor toolkits and AI-generated target scripts cannot reach the internet or your LAN, and the token never enters a container. |
 | **MCP first, one tool registry** | Many users already have a capable AI client (Claude Code, Claude Desktop, VS Code). Exposing typed tools with permissions and an audit log made the framework usable from those clients, and the client's credentials stay in the client. Ditto's tool loop uses the same registry, permissions and confirmation text, so both paths follow the same rules. |
 | **Official SDKs instead of LiteLLM** | LiteLLM brought a large dependency tree; removing it and tiktoken dropped 19 indirect packages (among others aiohttp, boto3 and jinja2). Every API key passes through this layer, and LLM tooling is a frequent supply-chain target, so fewer layers mean less risk. The official `anthropic` and `openai` SDKs cover all presets directly or through OpenAI-compatible APIs and are pinned exactly. |
@@ -1180,7 +1190,7 @@ right after them.
 | Item | Status |
 |---|---|
 | **Recipes as target templates.** A target template holds the build code; model, quantization, format and deployment are variables you pick in the build menu, and the builder uses everything a recipe holds. Why: you are never bound to the choices of the person who made the template. | planned |
-| **Rotation stage before quantization** (SpinQuant, QuaRot), right after the recipes: rotations are baked into the weights before conversion and quantization, only where the target format supports them (a capability of the format, not a fixed step). Why: 4-bit models of the Llama family keep their quality on small boards. | planned |
+| **Rotation stage before quantization** (SpinQuant, QuaRot), right after the recipes: rotations are baked into the weights before conversion and quantization, only where the target format supports them (a capability of the format, not a fixed step). Why: 4-bit models of the Llama family keep their quality on small boards. The slot is there: the stage runner runs a target's `modules/rotate_module.sh` between the convert and target stages; the algorithm is still to come. | planned |
 | **Generic ARM64 CPU target (GGUF)** with board defaults for the Raspberry Pi 4 and 5, right after the recipes. Why: Rockchip was only the start, and these boards need no vendor SDK. | planned |
 | **Targets from the hardware probe, proven on the board.** A new target starts from the probe you run on the board (also without network, the file carried back) or, if you want, from Ditto probing it over SSH; a passed benchmark on the board is the proof, shown as "tested on <board>" in the Community Hub and carried in packs. Why: the maintainer does not own most boards, and only a run on the real board shows that a target works. | planned |
 | **Runtime on the device, the rest.** The first run of the self-built board runtime on a real Radxa ZERO 3W; the device runtime inside deployment packages; the runtime image for Docker deployments built locally from a device build (instead of the pulled runtime image); device benchmarks and a measured quantization recommendation per board; a build on the board when no builder base is old enough for its C library; Vulkan on Mali only after llama-bench shows that it beats the CPU build; MCP tools for probing, deploying and benchmarking devices. | planned |
@@ -1213,7 +1223,7 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **Dependabot cooldown** for LLM SDKs. | planned |
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
 | **Signed updates** of the framework itself (`orchestrator/utils/updater.py`, in development: update check, update and restart; not wired yet), finished as verified updates of a signed release instead of a plain `git pull`. Toolchain images are not part of it: the framework shares recipes, never compiled images, so they stay built on your machine from the target's Dockerfile; the settings `docker_registry` (empty by default) and `docker_namespace`, which nothing reads, are kept. No default names a registry image: the image settings name local images (`llm-framework/...`) or third-party images such as Trivy and Qdrant, and the `docker` block of a target's `target.yml` names a local image without a registry. | planned |
-| **Clean-up**: removal of the legacy four-module scripts (the template `build.sh` and Dockerfile already follow the current pipeline: GGUF through llama.cpp built from the recipe, intermediates in the work folder). | planned |
+| **Clean-up of the four-module scripts**, done differently than planned: instead of removing them, the maintainer's decision U9 made them the build. `build.sh` of Rockchip and of the template is a stage runner over `source_module.sh`, `config_module.sh`, `convert_module.sh` and `target_module.sh`, with resume markers per stage, progress per stage and the rotation slot; the dispatcher's work moved into the stage it belongs to, and the module generator writes working stage modules instead of placeholders. | done |
 | **SSOT corrections** for the project-sources catalogue and its scripts. | done |
 
 ### Rust parts (planned)
