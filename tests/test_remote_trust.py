@@ -936,3 +936,25 @@ def test_the_cli_refuses_such_a_user_with_its_reason(monkeypatch):
     monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda *a, **k: pytest.fail("the board was contacted"))
     result = invoke_plain("scan", "--device", HOST, "--user", "radxaſ")
     assert result.code == 2 and "account name on the board" in result.out
+
+
+# --- review (remote-trust-v): regression tests -----------------------------------------------------------------------
+
+@pytest.mark.parametrize("device_id", ["", None], ids=["empty", "none"])
+def test_connect_stored_without_a_device_id_is_refused_as_another_device(tmp_path, monkeypatch, device_id):
+    """Before c2-remote-trust, connect_stored compared the presented key's device ID with the one it was given, so a
+    missing ID never matched (other_device). KeyCheck.other_device took "" for "nothing expected" and let such a call
+    log in; an expectation that was given is now always checked."""
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import KeyCheck
+    from orchestrator.runtime.device import person_steps
+    state = tmp_path / "state"
+    key = paramiko.ECDSAKey.generate()
+    ssh_trust.trust_host_key(state, HOST, 22, key)
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: key)
+    monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: pytest.fail("logged in"))
+    with pytest.raises(person_steps.BoardStepError) as e:
+        person_steps.connect_stored(state, device_id, HOST, 22, "radxa")
+    assert e.value.kind == "other_device"
+    assert KeyCheck.of(Endpoint(HOST), key, "known", expect_device_id="").other_device
+    assert not KeyCheck.of(Endpoint(HOST), key, "known").other_device, "None: nothing is expected"

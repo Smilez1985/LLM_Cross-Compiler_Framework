@@ -414,7 +414,8 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
     state_dir = Path(state_dir)
     _need_paramiko()
     try:
-        check = TrustStore(state_dir).check(Endpoint(host, port), expect_device_id=device_id)
+        # the board this step means is always compared: a missing device ID matches no key (as before)
+        check = TrustStore(state_dir).check(Endpoint(host, port), expect_device_id=str(device_id or ""))
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
         raise unreachable_error(e, host, port, state_dir=state_dir, device_id=device_id, step=step) from None
     key = check.key
