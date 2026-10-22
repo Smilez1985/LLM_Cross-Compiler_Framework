@@ -885,9 +885,10 @@ address; a page's full text goes in only where its licence allows it, every othe
 every page with what it carries and why. Pages carried in full under a licence that asks for its text get that text in
 `LICENSES/` and a `NOTICE`, and the export names each licence text and why. A target you installed from someone else
 is not re-signed as yours, and pages imported from installed community knowledge packs are left out of a knowledge
-export. "Open pull request" (`--pr`) hands the pack to the community repository (`community_repo`): through the GitHub
-CLI when it is installed and logged in, otherwise the repository's upload page opens in the browser. Both keep their
-own credentials; the framework never asks for, reads or shows a token.
+export. "Open pull request" (`--pr`) hands the pack to the community repository (`community_repo`, by default
+`Smilez1985/Edge-LLM-Knowledge-Base`): through the GitHub CLI when it is installed and logged in, otherwise the
+repository's upload page opens in the browser. Both keep their own credentials; the framework never asks for, reads
+or shows a token.
 
 **Maintainer tools.** `scripts/zoo_sign_index.py` creates the index key in the OS keyring (`keygen`), checks a pack
 and prints its index entry (`entry`) and signs `index.json` (`sign`; with `--previous` the version must be higher
@@ -896,12 +897,13 @@ community repository: it accepts only pack zips of at most 5 MB and runs `llm-cl
 rejects packs that still contain keys or personal data (the repository's secret scan skips binary files, so it
 does not run on the zips). The signing key never reaches CI.
 
-**State.** The community repository, its index and the maintainer's key are not published yet:
-`configs/community_keys.yml` lists no key, and `community_index_url` and `community_repo` are empty. Listing the
-index and installing by id therefore stop with a message (`llm-cli zoo list` still shows installed packs), and
-`--pr` only says where the pack is. The framework release the workflow template checks packs with (`LCF_REF`) is a
-placeholder that the maintainer sets. Packs can already be exchanged as files (trust `local`) and encrypted between
-users.
+**State.** The community repository is chosen (maintainer, 2026-10-22): `community_repo` names
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base) by default, and `--pr` hands
+packs to it. Its contribution workflow, its signed index and the maintainer's key are not published yet:
+`configs/community_keys.yml` lists no key, and `community_index_url` stays empty until the first signed index exists in
+that repository. Listing the index and installing by id therefore stop with a message (`llm-cli zoo list` still shows
+installed packs). The framework release the workflow template checks packs with (`LCF_REF`) is a placeholder that the
+maintainer sets. Packs can already be exchanged as files (trust `local`) and encrypted between users.
 
 ### Recent inputs (unreleased)
 
@@ -975,10 +977,11 @@ These are real limitations of the current state. Most are scheduled in the [road
   same recipe as `targets/Rockchip/dockerfile`. The boards, formats and quantizations are still a starting point,
   and a generated GPU target is untested on real hardware. See the
   [Module Developer Guide](Module_Developer_Guide.md).
-- **The community zoo has no published index yet.** The community repository, its signed index and the
-  maintainer's key are not published: `configs/community_keys.yml` lists no key, and `community_index_url` and
-  `community_repo` are empty. Listing the index and installing by id stop with a message; packs can be exchanged
-  as files (trust `local`) and encrypted between users. Publishing is planned for 3.1.0.
+- **The community zoo has no published index yet.** The community repository is set (`community_repo`:
+  `Smilez1985/Edge-LLM-Knowledge-Base`), but its contribution workflow, its signed index and the maintainer's key
+  are not published: `configs/community_keys.yml` lists no key, and `community_index_url` is empty. Listing the
+  index and installing by id stop with a message; packs can be exchanged as files (trust `local`) and encrypted
+  between users. Publishing is planned for 3.1.0.
 - **Deep Ingest has no CLI command.** A person starts it in the GUI; MCP clients and Ditto ask for one with
   `crawl_docs_site` and the person confirms each crawl.
 - **Reranking is on only for build recommendations.** The chat and the MCP search use it only with
@@ -1107,7 +1110,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 | **Better answers from the knowledge base**, taken from rag4ll and kept small: reranking with a cross-encoder on the CPU and a relevance floor that keeps unrelated excerpts out of Ditto's prompt (on for build recommendations; for the chat and MCP searches with `rag_rerank_default`), a size budget for the excerpts, splitting of oversized code and table blocks, keyword search that understands identifiers such as `-DGGML_CUDA=ON`, and unloading of idle models; measured with the retrieval evaluation (`llm-cli ditto eval --kind retrieval`). | done |
 | **Community packs with real cryptography**: packs with a manifest of every file, public packs signed with Ed25519, private packs encrypted in the age format (rage, through `pyrage`) to the recipients' keys or a passphrase, signed by the sender and readable with the standard age tools. The XOR "SwarmCipher" upload and its GitHub token prompt are removed; the framework never asks for a token. | done |
 | **Model zoo from the community**: recipes (model at a pinned commit, target fingerprint, format, quantization, toolchain image and verified hashes) generated from finished builds; a signed index with revocations, installation through a quarantine with trust levels, `llm-cli zoo`, the Community Hub, export for the community with a hand-over to a pull request, and the maintainer tools for the community repository. | done |
-| **Community repository and index published**: the community repository with the contribution workflow, the first signed index, the maintainer's key in `configs/community_keys.yml` and the settings `community_index_url` and `community_repo` filled in, shipped with a release. Until then the zoo works with pack files only. | planned |
+| **Community repository and index published**: the repository is chosen ([Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), the default of `community_repo` since 2026-10-22, so pull requests already go there). Still to do: its contribution workflow, the first signed index, the maintainer's key in `configs/community_keys.yml` and the setting `community_index_url` filled in, shipped with a release. Until then the zoo installs pack files only. | planned |
 
 Sign-in per access type, as designed. Built so far (listed in the changelog): the API key first for Anthropic,
 the credential store's second version, the one pattern table, the sign-in core (methods per provider, check,

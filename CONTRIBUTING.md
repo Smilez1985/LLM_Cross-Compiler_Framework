@@ -483,10 +483,12 @@ and options are in the [CLI guide](docs/CLI_Usage.md#zoo-export); for targets, s
 The framework never asks for, reads or shows a token: `gh` and `git` use their own stored sign-in, and the upload
 page uses your browser's GitHub session.
 
-**Current state:** the community repository and its signed index are not published yet. `community_repo` and
-`community_index_url` are empty and `configs/community_keys.yml` lists no key, so `--pr` stops with "No community
-repository is configured" and leaves the pack in `community/contributions/`. Until the repository exists, a pack
-can be shared as a file (`llm-cli zoo install --file <pack>` installs it with trust `local`).
+**Current state:** the community repository is set: `community_repo` names
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), so `--pr` and "Open pull
+request" hand a pack to it. Its contribution workflow (the CI check of step 4), its signed index and the maintainer's
+key are not published yet: `community_index_url` stays empty until the first signed index exists in that repository, and
+`configs/community_keys.yml` lists no key. Until then a pack can also be shared as a file
+(`llm-cli zoo install --file <pack>` installs it with trust `local`).
 
 Knowledge packs keep the source address of every page and claim no licence for the pages (`NOASSERTION`); the pages
 stay under their owners' terms. Pages carried in full under a licence that asks for its text (MIT, BSD, ISC,

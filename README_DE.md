@@ -798,8 +798,8 @@ rag_rerank_default: false     # true: auch Chat- und MCP-Suchen neu bewerten (St
 # rag_rerank_min_score: 0.3   # Relevanzschwelle 0..1; ohne Wert = kalibrierte Schwelle des Modells (0,2), 0 = keine
 rag_model_idle_minutes: 10    # Modelle der Wissensbasis nach dieser Leerlaufzeit entladen; 0 = geladen lassen
 audio_announcements: true     # gesprochener Deep-Ingest-Hinweis und gesprochenes Ergebnis (Tools > Gesprochene Ansagen)
-community_index_url: ""       # https-Adresse des signierten Community-Index; leer, bis einer veröffentlicht ist
-community_repo: ""            # GitHub owner/name, das Community-Packs als Pull Requests bekommt; vorerst leer
+community_index_url: ""       # https-Adresse des signierten Community-Index; leer, bis der erste veröffentlicht ist
+community_repo: Smilez1985/Edge-LLM-Knowledge-Base  # GitHub owner/name, das Community-Packs als Pull Requests bekommt
 ```
 
 Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Features_DE.md](docs/Features_DE.md).
@@ -818,9 +818,11 @@ Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Feat
   ist eine erweiterte Möglichkeit.
 - **Deep Ingest** hat keinen CLI-Befehl: Du startest es im Modul-Assistenten in der GUI oder bestätigst das
   `crawl_docs_site` eines KI-Clients.
-- **Community-Zoo:** Ein Community-Repository, ein Index oder ein Maintainer-Schlüssel ist noch nicht veröffentlicht
-  (`configs/community_keys.yml` ist leer, `community_index_url` und `community_repo` sind leer); installieren lassen
-  sich deshalb nur Pack-Dateien.
+- **Community-Zoo:** Das Community-Repository ist festgelegt (`community_repo`:
+  [Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base)), sein Beitrags-Workflow,
+  sein signierter Index und der Maintainer-Schlüssel sind aber noch nicht veröffentlicht (`configs/community_keys.yml`
+  ist leer, `community_index_url` bleibt leer, bis dort der erste signierte Index liegt); installieren lassen sich
+  deshalb nur Pack-Dateien.
 
 ---
 

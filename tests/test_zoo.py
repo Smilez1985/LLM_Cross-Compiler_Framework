@@ -803,6 +803,21 @@ class TestHandoff:
         with pytest.raises(PackError, match="community_repo"):
             submit_contribution(tmp_path / "p.zip", "", "target", opener=lambda u: pytest.fail("opened"))
 
+    def test_the_default_repository_is_the_community_repository(self, tmp_path):
+        """The community repository is decided (maintainer, 2026-10-22): the default of community_repo names it and
+        passes the setting's own rule and the handoff's; the index URL stays empty until a signed index exists."""
+        from orchestrator.Core.config_manager import ConfigManager
+        cfg = ConfigManager(tmp_path / "configs")
+        schema = cfg.config_schemas["community_repo"]
+        assert schema.default_value == cfg.get("community_repo") == "Smilez1985/Edge-LLM-Knowledge-Base"
+        assert schema.validate_value(schema.default_value) == (True, [])
+        assert zoo_mod.REPO_RE.fullmatch(schema.default_value)
+        assert cfg.get("community_index_url") == ""
+        opened = []
+        submit_contribution(tmp_path / "p.zip", cfg.get("community_repo"), "target", which=lambda name: None,
+                            opener=opened.append)
+        assert opened == ["https://github.com/Smilez1985/Edge-LLM-Knowledge-Base/upload/main/contributions/target"]
+
     def test_handoff_code_reads_no_credentials(self):
         source = inspect.getsource(zoo_mod.submit_contribution) + inspect.getsource(zoo_mod._submit_with_gh)
         for forbidden in ("environ", "getenv", "get_secret", "keyring", "getpass", "env="):
