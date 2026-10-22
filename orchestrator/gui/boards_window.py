@@ -386,6 +386,9 @@ class BoardsWindow(QDialog):
                 return text
             if error.kind == "key_text":
                 return t(f"boards.edit.err.key_{error.facts.get('detail') or 'not_a_key'}")
+            if error.kind == "other_board":   # the new key is another trusted board's
+                return t("boards.edit.err.other_board", label=error.facts.get("label", ""),
+                         device_id=error.facts.get("device_id", ""))
             if error.kind in EDIT_ERRORS:
                 return t(f"boards.edit.err.{error.kind}")
             simple = {"no_paramiko": t("boards.err.no_paramiko"),

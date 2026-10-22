@@ -1027,3 +1027,28 @@ def test_known_hosts_is_written_like_every_private_file(tmp_path, monkeypatch):
     assert len(calls) == 2 and TrustStore(state).status(Endpoint("192.0.2.41"), other) == "known"
     if sys.platform != "win32":
         assert (state / "known_hosts").stat().st_mode & 0o077 == 0
+
+
+def test_the_key_of_another_trusted_board_is_refused_before_anything_changes(tmp_path, monkeypatch):
+    """Q5: a new key gives the board the device ID of that key. When that ID is another trusted board's (its key was
+    pasted or read by mistake), the change would overwrite that board's record with this one's name, user and address
+    without saying so; it is refused instead, naming the other board, and nothing changes."""
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.runtime.device.trusted import DeviceStoreError, TrustedDevices
+    state = tmp_path / "state"
+    mine, theirs = paramiko.ECDSAKey.generate(), paramiko.ECDSAKey.generate()
+    desk = record(state, mine, label="Desk board", user="radxa")
+    garage = record(state, theirs, host="192.0.2.41", label="Garage board", user="dietpi")
+    monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: pytest.fail("logged in"))
+    before = (state / "known_hosts").read_bytes(), (state / "devices.json").read_bytes()
+    with pytest.raises(person_steps.BoardStepError) as e:
+        person_steps.plan_board_change(state, desk.device_id, key_text=f"{theirs.get_name()} {theirs.get_base64()}")
+    assert e.value.kind == "other_board"
+    assert e.value.facts == {"label": "Garage board", "device_id": garage.device_id}
+    assert "Garage board" in str(e.value) and garage.device_id in str(e.value)
+    assert ((state / "known_hosts").read_bytes(), (state / "devices.json").read_bytes()) == before
+    with pytest.raises(DeviceStoreError):   # the record store never overwrites another board's record either
+        TrustedDevices(state).replace(desk.device_id, HOST, 22, "radxa", theirs, via="cli", paired=True,
+                                      label="Desk board")
+    assert (state / "devices.json").read_bytes() == before[1]
+    assert sorted(d.label for d in TrustedDevices(state).list()) == ["Desk board", "Garage board"]
