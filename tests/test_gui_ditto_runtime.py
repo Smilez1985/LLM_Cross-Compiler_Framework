@@ -910,3 +910,22 @@ class TestOneCodePathDetails:
             rt.pinned_source(True, fetch_source=lambda: False)
         assert "Ditto > Local Runtime... > Import the source..." in str(info.value)
         assert "llm-cli ditto runtime import-source FILE" in str(info.value)
+
+
+class TestDiskRule:
+
+    def test_a_download_without_room_is_said_in_the_persons_language(self, ui):
+        """Decision A4: a download that a running build leaves no room for shows the reason and the next step in the
+        window's language (disk_plan.person_reason), not the English core text."""
+        from orchestrator.Core.disk_plan import DiskCheck
+        error = LocalRuntimeError("Not enough disk space for the download: ...")
+        error.checks = [DiskCheck(["download"], 12 * 10 ** 9, 60 * 10 ** 9, 1000 * 10 ** 9, 20 * 10 ** 9, 30 * 10 ** 9,
+                                  "1")]
+        ui.win.lang = "de"
+        ui.win._failed(error)
+        kind, text, _details = ui.shown[-1]
+        assert kind == "warning" and text.startswith("Das hat nicht geklappt: Nicht genug Speicherplatz: 12,0 GB nötig")
+        assert "Ein laufender Build oder Download hat 30,0 GB auf dieser Festplatte reserviert" in text
+        ui.win.lang = "en"
+        ui.win._failed(LocalRuntimeError("the archive is broken"))
+        assert ui.shown[-1][1] == "It did not work: the archive is broken", "any other error: its own text"

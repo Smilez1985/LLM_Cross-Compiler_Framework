@@ -92,9 +92,10 @@ GUI, CLI, Ditto und der MCP-Server bieten genau diese Optionen an und lehnen all
 - **Python 3.11 bis 3.14.**
 - **Docker:** unter Linux Docker Engine (der Installer richtet es ein, falls es fehlt); unter Windows **Docker
   Desktop** mit **WSL-2-Backend**, installiert und gestartet, bevor du das Framework installierst.
-- **Speicherplatz:** mindestens 20 GB frei für das Build-Image, heruntergeladene Modelle und Ergebnisse
-  (`llm-cli mojo` warnt unter 20 GB und meldet unter 5 GB einen Fehler). Große Modelle brauchen während der
-  Konvertierung das Zwei- bis Dreifache ihrer Größe.
+- **Speicherplatz:** mindestens 20 GB frei für das Build-Image, heruntergeladene Modelle und Ergebnisse. Jede
+  Prüfung lässt eine Reserve frei (2 GiB oder 2 % der Festplatte, je nachdem, was größer ist) neben dem, was
+  laufende Builds und Downloads reserviert haben; `llm-cli mojo` warnt unter der doppelten Reserve und meldet
+  darunter einen Fehler. Große Modelle brauchen während der Konvertierung das Zwei- bis Dreifache ihrer Größe.
 - **Internetzugang** für die Installation, den ersten Image-Build und Modell-Downloads.
 
 **Das Board (nur fürs Übertragen)**

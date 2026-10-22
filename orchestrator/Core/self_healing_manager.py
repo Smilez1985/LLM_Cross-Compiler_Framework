@@ -15,7 +15,7 @@ Updates v2.4.0:
 
 import os
 import re
-import shutil
+import shutil  # noqa: F401 - tests replace shutil.disk_usage through this module (the disk rule reads it)
 from pathlib import Path
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
@@ -241,14 +241,13 @@ class SelfHealingManager:
     def _disk_full_proposal(self) -> HealingProposal:
         """A full disk: pruning Docker is proposed only when Docker's data root is the full disk; otherwise a manual
         step names the framework's folders on the full disk with their sizes (G40)."""
-        from orchestrator.Core.disk_plan import device_of, gb, reserve_for
+        from orchestrator.Core.disk_plan import device_of, free_space, gb, reserve_for
 
         def short(path: Path) -> Optional[Tuple[bool, int]]:
-            probe = path
-            while not probe.exists() and probe.parent != probe:
-                probe = probe.parent
+            """(below the reserve, free bytes) of the disk `path` is on (its nearest existing folder); None when it
+            cannot be measured. It diagnoses a disk that ran full, so what other calls reserved is not counted."""
             try:
-                usage = shutil.disk_usage(probe)
+                usage = free_space(path)
             except OSError:
                 return None
             return usage.free < reserve_for(usage.total), usage.free

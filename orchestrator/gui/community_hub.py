@@ -46,8 +46,9 @@ class _Task(QThread):
     def run(self):
         try:
             self.done.emit(self.fn(*self.args, **self.kwargs))
-        except Exception as e:
-            self.failed.emit(str(e))
+        except Exception as e:   # a disk that cannot hold a download in the person's language
+            from orchestrator.Core.disk_plan import person_reason
+            self.failed.emit(person_reason(e))
 
 
 class CommunityHubWindow(QMainWindow):

@@ -233,7 +233,7 @@ class TestDeployEnds:
         import test_deploy_tools as dt
         from orchestrator.Core import hf_hub
         from orchestrator.tools.policy import ToolPolicy
-        monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed: {
+        monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed, ledger=None: {
             "free": 500 * 10 ** 9, "reserve": 2 * 10 ** 9, "reserved": 0, "needed": needed, "fits": True,
             "fits_standing": True})
         fm = make_framework()
@@ -398,7 +398,7 @@ class TestRuntimeEnds:
         import test_runtime_tools as rtt
         from orchestrator.Core import hf_hub
         from orchestrator.runtime import bench as bench_module
-        monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed: {
+        monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed, ledger=None: {
             "free": 500 * 10 ** 9, "reserve": 2 * 10 ** 9, "reserved": 0, "needed": needed, "fits": True,
             "fits_standing": True})
         fm = make_framework()

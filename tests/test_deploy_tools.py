@@ -10,6 +10,7 @@ text; no tool ever writes a device record or offers a standing approval for a de
 
 import ast
 import json
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -29,9 +30,15 @@ paramiko = pytest.importorskip("paramiko")
 def roomy_disk(monkeypatch):
     """The disk of the test machine does not decide: a fitting disk unless a test says otherwise."""
     from orchestrator.Core import hf_hub
-    monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed: {
+    monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed, ledger=None: {
         "free": 500 * 10 ** 9, "reserve": 2 * 10 ** 9, "reserved": 0, "needed": needed, "fits": True,
         "fits_standing": True})
+
+
+def test_the_suite_wide_roomy_disk_reaches_this_module_too():
+    """conftest's autouse disk fixture (the one disk rule, A4) must not be shadowed by this module's fixture of the
+    same name: else every check here but hf_hub.disk_check reads the test machine's real disk."""
+    assert shutil.disk_usage(".").free == 600 * 10 ** 9
 
 
 @pytest.fixture
@@ -227,7 +234,7 @@ class TestCreatePackage:
     def test_a_disk_that_cannot_hold_twice_the_model_is_refused_before_the_question(self, fw, monkeypatch):
         from orchestrator.Core import hf_hub
         aid = build(fw)
-        monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed: {
+        monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed, ledger=None: {
             "free": 10, "reserve": 5, "reserved": 0, "needed": needed, "fits": False, "fits_standing": False})
         confirm = asking(True)
         with pytest.raises(ToolError) as e:

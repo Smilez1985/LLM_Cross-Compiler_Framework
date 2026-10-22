@@ -1307,6 +1307,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   container watchdog and the staging watcher now are); the build engine keeps its old method names as delegates, the
   texts are unchanged and keep "No space left on device", which the self-healing pattern (now built from the same
   phrases) matches. Margins are unchanged.
+- **One disk rule for every free-space check** (architecture consolidation c3-disk-callers, maintainer decision A4).
+  Every check measures through `orchestrator/Core/disk_plan.py` (`room`, the one check of a disk, which `check_disk`
+  and `require` build on) and keeps the reserve free that builds keep, 2 GiB or 2 % of the disk (20 GiB or 10 % under
+  a standing approval), beside what accepted calls of any process reserved in the ledger of the per-user folder: the
+  local runtime's archive and model downloads and the community zoo's pack downloads (256 MiB before), the benchmark
+  sandbox's model copy and the knowledge-base conversion (512 MiB before), the knowledge snapshot export (no margin
+  before), Mojo's disk check (fixed 5 and 20 GB before; now an error below the reserve and a warning below twice the
+  reserve, in decimal GB like every other size), the AI's disk fact and the checks of the deployment package and the
+  runtime build tools. A download that a running build leaves no room for is refused with the numbers and the next
+  step (try again once that build or download has finished, or free disk space); the Local Runtime, Local Models and
+  Community Hub windows say so in English or German, and a reservation of a program that has ended never blocks (the
+  ledger drops it). A deployment package holds its space in the ledger while it is made, as an AI's Hugging Face
+  download does; when another call took the space while the person was asked, both are refused the same way, naming
+  the download or the package (the text said "this build"). The self-healing diagnosis after a full disk still names the disks below the reserve without
+  counting reservations, because it looks for the disk that ran full. The downloader in `orchestrator/utils/
+  download.py` takes its caller's disk rule (`space`), so the bottom layer imports nothing above it.
 - **The GUI is an optional extra; the command line, the MCP server and the core run without Qt.** PySide6 is the
   extra `gui` in `pyproject.toml` (the hash-pinned `requirements-gui.txt`, an export of `uv.lock` like
   `requirements.txt`). The Linux and Windows installers install it as before; `sudo ./install.sh --headless`
@@ -2217,12 +2233,24 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **No other account's home folder or name reaches an AI through a file URL or a space** (D0; default of
+  2026-10-17). The path labels for AIs (`security.paths.label_paths`, also inside `device_text`) left the path of a
+  `file:///` URL as it was when it named another account's home folder (`file:///home/<name>/...`,
+  `file:///C:/Users/<name>/...`, `file://localhost/...`, `file://server/Users/<name>`); its path is now labelled like
+  any other (the file name, a known folder's label, "a home folder"), and the URL keeps its `file://`; so does a
+  version-control file URL as pip and uv write it (`git+file:///home/<name>/pkg`, also `svn+`, `hg+`, `bzr+`), which
+  keeps its scheme. An account name
+  with a space was cut at the space ("a home folder Doe"): this computer's own account name is now taken whole after
+  any root, and after another account's Windows home folder the following words that start with a capital letter or
+  a digit belong to the name (a POSIX account name has no space, so `/home/pi Failed` keeps its next word).
 - **The GUI tool hides this computer's home folder in every spelling**: a form value an AI reads through the `gui`
   tool (Ditto or an AI app) showed the home folder as `~` only when it was written exactly as `Path.home()` gives it.
   Named by HOME or USERPROFILE (the MSYS form `/c/Users/<name>`), with the other separator, in another case
   (`c:/users/<name>`) or with doubled backslashes as Python quotes a path, it reached the AI with the account name.
   `tools_gui._no_home` now uses the shared `security.paths.shorten_home` (the one the runtime and deploy tools use)
-  before the pattern for other accounts' home folders.
+  before the pattern for other accounts' home folders. The problem report (`utils/telemetry.py`, the GitHub issue
+  link) replaced only `os.path.expanduser("~")` letter by letter; it now replaces every spelling through the same
+  `security.paths` functions and keeps its `~USER` marker.
 - **Every place takes the same SSH user names**: the deploy (`llm-cli deploy run`, **Deploy to Target** in the
   Deployment tab) and `llm-cli deploy devices add` checked the user name without `re.ASCII`, so Python's case folding
   let a long s (`ſ`) or the Kelvin sign pass as `s` and `k`, and the deploy's `match()` also let a trailing line break

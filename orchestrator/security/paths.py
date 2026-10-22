@@ -8,8 +8,8 @@ which keeps the old names).
 - home_folders(): this computer's home folder in every form a text can name it.
 - replace_folder(text, folder, new) and shorten_home(text): a folder (the home folder as '~') replaced wherever it
   stands, with either separator, a Windows path in any case, and as Python quotes a Windows path (undouble).
-- label_paths(text, roots): every path by its label (a known folder) or its file name; a home folder never by its
-  account name.
+- label_paths(text, roots): every path by its label (a known folder) or its file name, also the path inside a file
+  URL; a home folder never by its account name, also when the name holds spaces.
 - device_text(text, users, roots): text from or about a board, with its account and its home folder hidden (D0).
 - scrub_for_ai(text, roots=None): the status scrub of every AI-facing text: the paths labelled (with `roots`) or the
   home folder shortened to '~', secrets redacted, invisible characters removed, capped.
@@ -65,6 +65,17 @@ _DOUBLED_WINDOWS_PATH = re.compile(r"(?<![\w\\])(?:[A-Za-z]:\\\\(?!\\)|\\{4}(?=[
 _OTHER_HOME = re.compile(r"(?:/usr|/var|/export)?/home/[^/\\]+"
                          r"|(?i:(?:[a-z]:|/[a-z]|/mnt/[a-z]|[\\/]{2}[^\\/]+)?[\\/]"
                          r"(?:users|home\$?|documents and settings)[\\/][^\\/]+)")
+# The POSIX form of another account's home ('/home/bob'): an account name there has no space (useradd refuses one).
+_POSIX_HOME = re.compile(r"(?:/usr|/var|/export)?/home/")
+# A word after another account's Windows home folder that still belongs to its name: a Windows profile folder keeps
+# the spaces of the person's name ('C:\Users\Jane Doe'), whose words start with a capital letter or a digit.
+_NAME_WORD = re.compile(r" ([A-Z0-9][^\s/\\'\"`,;:()\[\]<>|=]*)")
+# A file URL and where its path begins: 'file:///home/u/x', 'file:///C:/Users/u/x', 'file://localhost/home/u/x' (after
+# the host) and 'file://server/share/x' (the share, like '\\server\share\x'); also a version-control one
+# ('git+file:///home/u/pkg', as pip and uv write it), whose scheme prefix (`vcs`) is kept.
+_FILE_URL = re.compile(r"(?i)(?<![\w.+/-])(?P<vcs>(?:git|svn|hg|bzr)\+)?"
+                       r"file:(?://localhost(?=[/\\])|//(?=[/\\])|(?=//[^/\\\s'\"`]))")
+_URL_DRIVE = re.compile(r"[/\\](?=[A-Za-z]:[/\\])")
 
 
 def _undouble(text: str) -> str:
@@ -154,6 +165,31 @@ def _known_at(text: str, at: int, bases: List[str]) -> Optional[str]:
     return None
 
 
+def _account_end(text: str, start: int, end: int, homes: Sequence[str]) -> int:
+    """Where another account's bare home folder (text[start:end], e.g. 'C:\\Users\\Jane') ends when its account name
+    holds spaces: an account name of this computer (the last part of a home folder, 'Jane Doe') is taken whole in any
+    root, and after a Windows home folder each following word that starts with a capital letter or a digit ('Bob
+    Smith 2'), so no part of the name is left in the text (D0). `end` unchanged otherwise."""
+    run = text[start:end]
+    if not _OTHER_HOME.fullmatch(run):
+        return end
+    part = _PATH_SEP.split(run)[-1]
+    at = end - len(part)
+    for name in sorted({_PATH_SEP.split(h)[-1] for h in homes}, key=len, reverse=True):
+        if " " in name and len(name) > len(part) and _fold(text[at:at + len(name)], name) == _fold(name, name):
+            k = at + len(name)
+            if k == len(text) or text[k].isspace() or text[k] in _KNOWN_END:
+                return k
+    if _POSIX_HOME.match(run):
+        return end
+    for _ in range(_PATH_MAX_SPACES):
+        m = _NAME_WORD.match(text, end)
+        if m is None:
+            break
+        end = m.end()
+    return end
+
+
 def _path_end(text: str, start: int, bases: List[str], homes: Sequence[str] = ()) -> int:
     """Where the path that begins at `start` ends. A known folder (`bases`, longest first; it may hold spaces, e.g. a
     home folder 'C:\\Users\\Jane Doe') is taken whole. A single space continues the path when the next word is clearly
@@ -161,12 +197,16 @@ def _path_end(text: str, start: int, bases: List[str], homes: Sequence[str] = ()
     (only there: text from outside cannot probe other folders). A known folder further on, where a new path can begin
     ('/usr/bin:/home/Jane Doe', 'a|/home/Jane Doe'), and the home folder (`homes`) anywhere further on
     ('/mnt/home/Jane Doe') start a path of their own and are never taken into this one, so the user name is never
-    kept as the "file name" of a longer path."""
+    kept as the "file name" of a longer path. Another account's home folder takes the rest of an account name with
+    spaces (_account_end)."""
     n = len(text)
     base = _known_at(text, start, bases)
     end = start + len(base) if base is not None else None
     if end is None:
         end = _run_end(text, start)
+        named = _account_end(text, start, end, homes)
+        if named != end:
+            end = _run_end(text, named) if named < n and text[named] in "/\\" else named
     elif end < n and text[end] in "/\\":
         end = _run_end(text, end)
     for _ in range(_PATH_MAX_SPACES):
@@ -262,7 +302,25 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
             return q + replace(inner, next_start, bases) + q
         return q + one(inner) + q
 
+    def file_urls(text: str) -> str:
+        """The path of every file URL labelled like any other path; the URL keeps its 'file://' ('file://a.bin'), a
+        version-control one its scheme ('git+file://pkg')."""
+        out, pos = [], 0
+        for m in _FILE_URL.finditer(text):
+            if m.start() < pos:
+                continue
+            start = m.end()
+            if _URL_DRIVE.match(text, start):
+                start += 1   # file:///C:/Users/...: the path is C:/Users/...
+            if start >= len(text) or text[start].isspace():
+                continue
+            end = max(_path_end(text, start, bases, homes), start + 1)
+            out += [text[pos:m.start()], m.group("vcs") or "", "file://", one(text[start:end])]
+            pos = end
+        return "".join(out) + text[pos:]
+
     text = _QUOTED_PATH.sub(quoted, _undouble(text or ""))
+    text = file_urls(text)
     text = replace(text, next_start, bases)
     # What the start rule cannot see (a "file:///home/..." URL): any path left in the home folder, by its file name.
     if homes:

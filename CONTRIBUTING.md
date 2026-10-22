@@ -615,7 +615,13 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   `.sha256` sidecar. Old names elsewhere are delegates; `tests/test_hashing.py` fails on a new hash loop beside it.
   A disk watchdog, a low-disk text or a disk-full text comes from `orchestrator/Core/disk_plan.py`
   (`low_disk_text`, `disk_full_text`, `is_disk_full`, `DiskWatchdog`, `free_space`, `nearest_existing`); such a text
-  names folders by label and keeps `DISK_FULL_PHRASE`, which the self-healing heuristic matches.
+  names folders by label and keeps `DISK_FULL_PHRASE`, which the self-healing heuristic matches. Every free-space
+  check follows the one disk rule there (decision A4): `room(path, needed, ledger=...)` (one disk) or `check_disk`
+  (several) keep the reserve free (`reserve_for`) beside what other calls reserved in the `ReservationLedger` of the
+  per-user folder, and `refusal`/`require` say what does not fit and what to do; a window shows the person's words
+  with `person_reason`. Never compare `shutil.disk_usage` with a margin of your own. A download takes the rule
+  as `PinnedDownloader(space=download_rule(ledger=...))`; a long call that writes later holds its space with
+  `hf_hub.reserve_space`. Tests read a roomy disk (the `roomy_disk_usage` fixture); a test of a check gives its own.
 - **Every CLI action has a mouse path.** Many people never use a terminal, so a person can start every command and
   option of `llm-cli` in the GUI as well, without typing a command (typing a value into a field is fine). A new
   command or option needs its mouse path, a menu entry, a button or a field that calls the same core function as the

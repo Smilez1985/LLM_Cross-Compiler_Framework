@@ -90,8 +90,10 @@ The GUI, the CLI, Ditto and the MCP server offer exactly these options and rejec
 - **Python 3.11 to 3.14.**
 - **Docker:** on Linux, Docker Engine (the installer sets it up if it is missing); on Windows, **Docker Desktop**
   with the **WSL 2 backend**, installed and running before you install the framework.
-- **Disk space:** at least 20 GB free for the build image, downloaded models and results (`llm-cli mojo` warns
-  below 20 GB and reports an error below 5 GB). Large models need 2 to 3 times their size during conversion.
+- **Disk space:** at least 20 GB free for the build image, downloaded models and results. Every check keeps a
+  reserve free (2 GiB or 2 % of the disk, whichever is larger) beside what running builds and downloads
+  reserved; `llm-cli mojo` warns below twice the reserve and reports an error below it. Large models need 2 to 3
+  times their size during conversion.
 - **Internet access** for the installation, the first image build and model downloads.
 
 **The board (only for deployment)**

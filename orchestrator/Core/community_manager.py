@@ -66,7 +66,7 @@ from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_P
                                               write_pack)
 from orchestrator.rag import licence_texts, licences, pack_licences
 from orchestrator.rag.licences import FULL_TEXT, LINK_AND_FACTS, SharePlan
-from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file
+from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file, with_reason
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import ensure_directory, redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -497,7 +497,12 @@ class CommunityManager:
         return (Path(state) if state else self.community_dir / ".state") / "community"
 
     def _downloads(self) -> PinnedDownloader:
-        return PinnedDownloader(self._session, logger=self.logger)
+        """The pinned downloader on the one disk rule (A4): the reserve stays free beside what running builds and
+        downloads of any process reserved (the ledger in the per-user folder, when there is one)."""
+        from orchestrator.Core.disk_plan import ReservationLedger, download_rule
+        state = getattr(self.config, "user_state_dir", None)
+        ledger = ReservationLedger(Path(state)) if isinstance(state, (str, Path)) and str(state) else None
+        return PinnedDownloader(self._session, logger=self.logger, space=download_rule(ledger=ledger))
 
     def _install_root(self, kind: str) -> Path:
         return {"target": self.targets_dir, "recipe": self.recipes_dir, "knowledge": self.knowledge_dir}[kind]
@@ -673,8 +678,8 @@ class CommunityManager:
                                  expected=(kind, entry.id, entry.version))
         except BaseException as e:
             shutil.rmtree(quarantine, ignore_errors=True)
-            if isinstance(e, DownloadError):
-                raise PackError(str(e)) from None
+            if isinstance(e, DownloadError):   # a disk refusal keeps its numbers for the Community Hub (A4)
+                raise with_reason(PackError(str(e)), e) from None
             raise
 
     def prepare_install_file(self, path: Path, *, identity=None, passphrase: Optional[str] = None,

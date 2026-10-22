@@ -23,7 +23,7 @@ Rules that hold for every call here:
 
 import os
 import re
-import shutil
+import shutil  # noqa: F401 - tests and tools_hf replace or read shutil.disk_usage through this module
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -433,24 +433,18 @@ def disk_check(folder: Path, needed: int, ledger: Any = None) -> Dict[str, int]:
     """Free space, reserve and space other accepted calls reserved on the file system of `folder`: with `ledger`
     (disk_plan.ReservationLedger in the per-user folder) every process's downloads and builds, the same ledger builds
     use; without one only this process's downloads. `fits`: the normal reserve is left; `fits_standing`: the larger
-    reserve of a standing approval is left too."""
-    probe = Path(folder)
-    while not probe.exists() and probe != probe.parent:
-        probe = probe.parent
-    usage = shutil.disk_usage(probe)
-    if ledger is not None:
-        from orchestrator.Core.disk_plan import device_of
-        others = ledger.outstanding(device_of(probe))
-    else:
+    reserve of a standing approval is left too. The numbers are disk_plan.room's (the one disk rule); OSError when the
+    disk cannot be measured."""
+    from orchestrator.Core.disk_plan import room
+    check = room(Path(folder), int(needed), ledger=ledger)
+    if ledger is None:
         with _RESERVED_LOCK:
-            others = sum(_RESERVED.values())
-    left = int(usage.free) - others - int(needed)
-    reserve = reserve_bytes(int(usage.total))
+            check.reserved_by_others = sum(_RESERVED.values())
     # `after`: what stays free after this and every reservation; `tight`: it fits, but with less than twice the
-    # reserve left (the same verdict as disk_plan.DiskCheck, a situation warning of the facts catalogue)
-    return {"free": int(usage.free), "reserve": reserve, "reserved": others,
-            "needed": int(needed), "fits": left >= reserve, "after": left, "tight": reserve <= left < 2 * reserve,
-            "fits_standing": left >= standing_reserve_bytes(int(usage.total))}
+    # reserve left (DiskCheck's verdict, a situation warning of the facts catalogue)
+    return {"free": check.free, "reserve": check.reserve, "reserved": check.reserved_by_others,
+            "needed": check.needed, "fits": check.fits, "after": check.after, "tight": check.verdict == "tight",
+            "fits_standing": check.after >= standing_reserve_bytes(check.total)}
 
 
 class Reservation:
@@ -464,4 +458,34 @@ class Reservation:
     def release(self) -> None:
         with _RESERVED_LOCK:
             _RESERVED.pop(self.key, None)
+
+
+class LedgerReservation:
+    """Space reserved in the ledger every process of this user shares (disk_plan.ReservationLedger), until release()."""
+
+    def __init__(self, ledger: Any, rid: str):
+        self.ledger, self.rid = ledger, rid
+
+    def release(self) -> None:
+        self.ledger.release(self.rid)
+
+
+def reserve_space(ledger: Any, folder: Path, size: int, owner: str, label: str, *, need_label: str, what: str,
+                  key: str, standing: bool = False, disk_usage: Any = None, call: str = "the download",
+                  estimate: bool = False):
+    """The space an accepted call (a download, a package) will write into `folder`, held until it ends: in the ledger
+    (checked again under its lock, so two calls prepared together cannot both take the same space; a call under a
+    standing approval must leave the larger reserve), or, without a ledger or bytes, this process's Reservation under
+    `key`. Released with release(). When the space is gone meanwhile: disk_plan.InsufficientSpace as the one disk
+    rule refuses (disk_plan.refusal): `call` named ("the download", "the deployment package"), its size marked as an
+    estimate with `estimate`, the plain next step in the message and as `next`, and the person's `steps`."""
+    if ledger is None or not size:
+        return Reservation(key, int(size))
+    from orchestrator.Core.disk_plan import DiskNeed, InsufficientSpace, refusal
+    try:
+        rid, _ = ledger.reserve([DiskNeed(need_label, Path(folder), int(size), what)], owner, label,
+                                standing=standing, disk_usage=disk_usage)
+    except InsufficientSpace as e:
+        raise (refusal(e.checks, call, estimate=estimate) or e) from None
+    return LedgerReservation(ledger, rid)
 

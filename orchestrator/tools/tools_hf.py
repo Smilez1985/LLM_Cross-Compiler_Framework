@@ -298,10 +298,12 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         if not disk["fits"]:
             raise HubError(f"Not enough disk space for {name}: {_size(disk['needed'])} needed, {_size(disk['free'])} "
                            f"free, {_size(disk['reserve'])} kept free as a reserve"
-                           + (f" and {_size(disk['reserved'])} reserved by other downloads" if disk["reserved"] else "")
+                           + (f" and {_size(disk['reserved'])} reserved by other calls (running builds or downloads)"
+                              if disk["reserved"] else "")
                            + ".", code="insufficient_resources",
                            next="Tell the person how much space is needed; they can free disk space or choose a "
-                                "smaller file.", blocker="disk_full")
+                                "smaller file" + (", or wait until the running build or download has finished"
+                                                  if disk["reserved"] else "") + ".", blocker="disk_full")
         pickle = name.lower().endswith(PICKLE_SUFFIXES)
         source = "repository text, not checked"
         lines = [Fact("File", f"{name} ({_size(file.size)}" + (", sha256 listed by the Hub)" if file.sha256 else
@@ -404,18 +406,13 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         downloads or a download and a build prepared together cannot both take the same space); released when the
         job ends, fails or is cancelled. `standing`: under a standing approval the larger reserve (20 GiB or 10 %)
         must stay free, checked under the same lock (design 6.5). Without a ledger, this process's reservation."""
-        from orchestrator.Core.disk_plan import DiskNeed, InsufficientSpace
-        from orchestrator.Core.hf_hub import Reservation
-        book = ledger()
+        from orchestrator.Core.disk_plan import InsufficientSpace
+        from orchestrator.Core.hf_hub import reserve_space
         part = dest.with_name(dest.name + ".part")
         need = max(int(size) - (part.stat().st_size if part.is_file() else 0), 0)
-        if book is None or not need:
-            return Reservation(f"{repo}/{commit}/{name}", need)
-        from orchestrator.Core import hf_hub as _hf_hub
         try:
-            rid, _ = book.reserve([DiskNeed("models", models_dir(), need, f"download {name}")], owner,
-                                  f"{repo}/{name}", standing=standing,
-                                  disk_usage=lambda p: _hf_hub.shutil.disk_usage(p))
+            return reserve_space(ledger(), models_dir(), need, owner, f"{repo}/{name}", need_label="models",
+                                 what=f"download {name}", key=f"{repo}/{commit}/{name}", standing=standing)
         except InsufficientSpace as e:
             if standing:
                 from orchestrator.tools.tools_builds import STANDING_RESERVE_TEXT
@@ -425,11 +422,6 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
                                     "disk numbers.") from None
             raise HubError(f"Not enough disk space for {name} any more: {e}", code="insufficient_resources",
                            next=e.next) from None
-
-        class LedgerReservation:
-            def release(self):
-                book.release(rid)
-        return LedgerReservation()
 
     def download_grant_facts(inp, ctx) -> Optional[Dict[str, Any]]:
         bound = getattr(getattr(ctx, "facts", None), "bound", None) or {}

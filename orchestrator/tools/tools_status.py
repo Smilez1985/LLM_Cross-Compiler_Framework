@@ -17,9 +17,8 @@ Status, settings and honest limits (MCP design 2.9, work package T2; DECISIONS r
 
 import json
 import math
-import os
 import re
-import shutil
+import shutil  # noqa: F401 - tests replace shutil.disk_usage through this module (the disk rule reads it)
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 from urllib.parse import urlparse
@@ -659,35 +658,41 @@ def _known(registry, name: str) -> bool:
         return False
 
 
-def _disk_of(path: Path) -> int:
-    """Which disk (file system) a folder lies on."""
-    return os.stat(path).st_dev
+def _disk_of(path: Path) -> str:
+    """Which disk (file system) a folder lies on (disk_plan.device_of; tests replace it here)."""
+    from orchestrator.Core.disk_plan import device_of
+    return device_of(path)
 
 
 def disk_fact(framework) -> Tuple[str, List[str], List[str]]:
     """The free space of the disks builds use: the cache, the output folder and the framework's build folder, where a
-    build is written first (eighth round, answer 3). Folders on one disk are named together, by label only."""
-    from orchestrator.Core.disk_plan import gb, reserve_for
+    build is written first (eighth round, answer 3). Folders on one disk are named together, by label only. A folder
+    not made yet is measured on its nearest existing folder. The one disk rule (A4, disk_plan.room): a disk is full
+    when less than its reserve stays free after what running builds and downloads of any process reserved there."""
+    from orchestrator.Core.build_plan import state_dir
+    from orchestrator.Core.disk_plan import ReservationLedger, gb, nearest_existing, room
+    folder = state_dir(framework)
+    ledger = ReservationLedger(folder) if folder is not None else None
     disks: Dict[Any, Tuple[List[str], Any]] = {}
     for label, key in (("cache", "cache_dir"), ("output", "output_dir"), ("build", "build_dir")):
         value = _cfg(framework, key)
         if not value:
             continue
         resolve = getattr(framework, "resolve_path", None)
-        path = Path(resolve(value)) if callable(resolve) else Path(str(value))
-        while not path.exists() and path.parent != path:
-            path = path.parent
+        path = nearest_existing(Path(resolve(value)) if callable(resolve) else Path(str(value)))
         try:
-            usage = shutil.disk_usage(path)
+            check = room(path, 0, ledger=ledger)
             device = _disk_of(path)
         except OSError:
             continue
-        disks.setdefault(device, ([], usage))[0].append(label)
+        disks.setdefault(device, ([], check))[0].append(label)
     facts, short = [], False
-    for labels, usage in disks.values():
-        if usage.free < reserve_for(usage.total):
+    for labels, check in disks.values():
+        if not check.fits:
             short = True
-        facts.append(f"The {' and '.join(labels)} disk has {gb(usage.free)} free.")
+        others = (f", {gb(check.reserved_by_others)} of it reserved by running builds or downloads"
+                  if check.reserved_by_others else "")
+        facts.append(f"The {' and '.join(labels)} disk has {gb(check.free)} free{others}.")
     if not facts:
         return "unchecked", ["The framework could not read the free disk space."], []
     return ("confirmed" if short else "contradicted"), facts, (["check_build_request"] if not short else [])
