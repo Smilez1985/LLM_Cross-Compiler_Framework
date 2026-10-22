@@ -945,6 +945,24 @@ def test_a_hash_check_that_gets_no_answer_in_time_resumes_at_what_arrived(manage
     assert [(e.kind, e.step) for e in events if e.kind == "waiting"] == [("waiting", "upload")]
 
 
+def test_a_start_whose_answer_never_came_starts_deploy_sh_once(manager, board, package):
+    """The board ran the start command, but its answer did not come in time: the start is sent again after the wait,
+    and the marker makes it answer started=already (deploy.sh runs once)."""
+    real_run = board.run
+    hit = {"n": 0}
+
+    def on_board(command):
+        reply = real_run(command)
+        if "nohup" in command and not hit["n"]:
+            hit["n"] += 1
+            raise socket.timeout("timed out")   # the board started it; the answer is lost
+        return reply
+    board.run = on_board
+    result, events = run(manager, package)
+    assert hit["n"] == 1 and result.success and board.starts == 1 and result.resumed == 1, result.reason
+    assert [(e.kind, e.step) for e in events if e.kind == "back"] == [("back", "install")]
+
+
 def test_a_board_whose_commands_never_answer_in_time_ends_after_max_resumes(manager, board, package):
     real_run = board.run
 
