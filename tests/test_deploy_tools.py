@@ -10,6 +10,7 @@ text; no tool ever writes a device record or offers a standing approval for a de
 
 import ast
 import json
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -32,6 +33,12 @@ def roomy_disk(monkeypatch):
     monkeypatch.setattr(hf_hub, "disk_check", lambda folder, needed, ledger=None: {
         "free": 500 * 10 ** 9, "reserve": 2 * 10 ** 9, "reserved": 0, "needed": needed, "fits": True,
         "fits_standing": True})
+
+
+def test_the_suite_wide_roomy_disk_reaches_this_module_too():
+    """conftest's autouse disk fixture (the one disk rule, A4) must not be shadowed by this module's fixture of the
+    same name: else every check here but hf_hub.disk_check reads the test machine's real disk."""
+    assert shutil.disk_usage(".").free == 600 * 10 ** 9
 
 
 @pytest.fixture
