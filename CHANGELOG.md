@@ -1265,7 +1265,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   layer). Every command of the deploy now has the time limit and the output cap the device runtime's commands had
   (120 s of silence, 1 MiB; a sha256 check on the board waits at least 900 s and longer for a large package), and the
   session keeps the connection alive every 15 s: a board that stops answering in the middle of a command no longer
-  holds the deploy.
+  holds the deploy. Such a command counts as a network drop (paramiko's connection still stands then until TCP gives
+  up): the deploy waits for the board as after any drop, logs in again with the host key checked again and continues
+  the upload or follows the installation again, at most 20 times, instead of ending with "could not be followed".
 - **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
   existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
   `utils/network.py` left with that module, see below) run through the oldest one's module,

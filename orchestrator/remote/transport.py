@@ -25,13 +25,15 @@ MCP server and the GUI start without it).
   around it so no password or key material reaches a log.
 
 A failure of the network (OSError, EOFError, socket.timeout) leaves run() as it is: the caller decides whether it is a
-drop to wait through (alive() is false) or the end. Only more output than the cap is the transport's own failure,
-TooMuchOutput. The OpenSSH fallback becomes a second Transport in consolidation chain c2-remote-system.
+drop to wait through (alive() is false, or timed_out(error): no answer within the time limit) or the end. Only more
+output than the cap is the transport's own failure, TooMuchOutput. The OpenSSH fallback becomes a second Transport in
+consolidation chain c2-remote-system.
 """
 
 import contextlib
 import logging
 import shlex
+import socket
 import sys
 import threading
 from dataclasses import dataclass
@@ -135,6 +137,18 @@ def read_limited(stream: Any, limit: int) -> bytes:
 
 def _text(data: bytes) -> str:
     return data.decode("utf-8", "replace")
+
+
+def timed_out(error: BaseException) -> bool:
+    """Whether `error` says the board gave no answer within a command's time limit: a read that stayed silent
+    (socket.timeout) or a command channel paramiko could not open in time. While the network is gone, paramiko's
+    connection stands until TCP gives up (on Linux after about 15 minutes), so this is what a drop looks like first;
+    RemoteSession waits through it as through a broken connection."""
+    if isinstance(error, (socket.timeout, TimeoutError)):
+        return True
+    paramiko = imported_paramiko()
+    return paramiko is not None and isinstance(error, paramiko.SSHException) and \
+        str(error).startswith("Timeout opening channel")
 
 
 # --- the interface ----------------------------------------------------------------------------------------------------
@@ -304,4 +318,4 @@ class ParamikoTransport(Transport):
 
 __all__ = ["COMMAND_TIMEOUT", "HASH_TIMEOUT", "KEEPALIVE_SECONDS", "LOGIN_TIMEOUT", "MAX_OUTPUT", "PARAMIKO_AVAILABLE",
            "ParamikoTransport", "Result", "TooMuchOutput", "Transport", "available", "imported_paramiko", "open_client",
-           "paramiko_module", "paramiko_quiet", "read_limited", "sh_command"]
+           "paramiko_module", "paramiko_quiet", "read_limited", "sh_command", "timed_out"]
