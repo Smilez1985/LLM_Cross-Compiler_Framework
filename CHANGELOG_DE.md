@@ -2448,6 +2448,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Kein Home-Ordner und kein Name eines anderen Kontos erreicht eine KI über eine Datei-URL oder ein Leerzeichen**
+  (D0; Vorgabe vom 2026-10-17). Die Pfad-Bezeichnungen für KIs (`security.paths.label_paths`, auch in `device_text`)
+  ließen den Pfad einer `file:///`-URL stehen, wenn er den Home-Ordner eines anderen Kontos nannte
+  (`file:///home/<Name>/...`, `file:///C:/Users/<Name>/...`, `file://localhost/...`, `file://server/Users/<Name>`); ihr
+  Pfad wird jetzt wie jeder andere bezeichnet (der Dateiname, das Label eines bekannten Ordners, "a home folder"), und
+  die URL behält ihr `file://`. Ein Kontoname mit Leerzeichen wurde am Leerzeichen abgeschnitten ("a home folder Doe"):
+  der eigene Kontoname dieses Computers wird jetzt nach jeder Wurzel ganz genommen, und nach dem Windows-Home-Ordner
+  eines anderen Kontos gehören die folgenden Wörter, die mit einem Großbuchstaben oder einer Ziffer beginnen, zum
+  Namen (ein POSIX-Kontoname hat kein Leerzeichen, so behält `/home/pi Failed` sein nächstes Wort).
 - **Das GUI-Werkzeug verbirgt den Home-Ordner dieses Computers in jeder Schreibweise**: Ein Formularwert, den eine KI
   über das Tool `gui` liest (Ditto oder eine KI-App), zeigte den Home-Ordner nur dann als `~`, wenn er genau so
   geschrieben war, wie `Path.home()` ihn liefert. Über HOME oder USERPROFILE benannt (die MSYS-Form

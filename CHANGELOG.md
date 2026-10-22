@@ -2167,6 +2167,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **No other account's home folder or name reaches an AI through a file URL or a space** (D0; default of
+  2026-10-17). The path labels for AIs (`security.paths.label_paths`, also inside `device_text`) left the path of a
+  `file:///` URL as it was when it named another account's home folder (`file:///home/<name>/...`,
+  `file:///C:/Users/<name>/...`, `file://localhost/...`, `file://server/Users/<name>`); its path is now labelled like
+  any other (the file name, a known folder's label, "a home folder"), and the URL keeps its `file://`. An account name
+  with a space was cut at the space ("a home folder Doe"): this computer's own account name is now taken whole after
+  any root, and after another account's Windows home folder the following words that start with a capital letter or
+  a digit belong to the name (a POSIX account name has no space, so `/home/pi Failed` keeps its next word).
 - **The GUI tool hides this computer's home folder in every spelling**: a form value an AI reads through the `gui`
   tool (Ditto or an AI app) showed the home folder as `~` only when it was written exactly as `Path.home()` gives it.
   Named by HOME or USERPROFILE (the MSYS form `/c/Users/<name>`), with the other separator, in another case

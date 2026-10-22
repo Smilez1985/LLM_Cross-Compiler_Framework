@@ -79,7 +79,9 @@ def home(request, monkeypatch):
     return request.param
 
 
-# Today's output of each scrubber for each case (characterization: the move into security/paths.py keeps it).
+# Today's output of each scrubber for each case (characterization: the move into security/paths.py keeps it). The
+# default of 2026-10-17 (D0, no host path to an AI) then changed two cases of label_paths and device_text on purpose:
+# another account's home inside a file:/// URL and another account's name with a space (tests further below).
 GOLDEN = {
     'posix': {
         'community_scrub': [
@@ -303,7 +305,7 @@ GOLDEN = {
         'device_text': [
             "cannot open 'x.gguf'",
             'load model.gguf failed',
-            'home is a home folder Doe here',
+            'home is a home folder here',
             'in llama.cpp now',
             'open m.gguf',
             "[WinError 5] Access is denied: 'x.bin'",
@@ -319,7 +321,7 @@ GOLDEN = {
             'nothing in the output folder.',
             'scp to device account@board:x.tar failed',
             'installed q.gguf for device account; chown device account:device account models',
-            'bad uri file:///home/Jane Doe/private/a.bin',
+            'bad uri file://a.bin',
             'keep 127.0.0.1:8080/x and https://x.org/a/b and and/or',
             'colour \x1b[31mred text',
             "x" * 500 + '\n[... truncated ...]',
@@ -351,7 +353,7 @@ GOLDEN = {
         'label_paths': [
             "cannot open 'x.gguf'",
             'load model.gguf failed',
-            'home is a home folder Doe here',
+            'home is a home folder here',
             'in llama.cpp now',
             'open m.gguf',
             "[WinError 5] Access is denied: 'x.bin'",
@@ -367,7 +369,7 @@ GOLDEN = {
             'nothing in the output folder.',
             'scp to dietpi@board:x.tar failed',
             'installed q.gguf for dietpi; chown dietpi:dietpi ~dietpi/models',
-            'bad uri file:///home/Jane Doe/private/a.bin',
+            'bad uri file://a.bin',
             'keep 127.0.0.1:8080/x and https://x.org/a/b and and/or',
             'colour \x1b[31mred\u200b text',
             "x" * 520 + ' end',
@@ -525,3 +527,59 @@ def test_the_gui_tool_hides_this_computers_home_folder_in_every_spelling(monkeyp
                  "error: " + repr(r"C:\Users\Jane Doe\x.bin"), r"C:\Users\Jane Doe"):
         out = tools_gui._no_home(text)
         assert "jane" not in out.lower() and out.count("~") == 1, (text, out)
+
+
+# --- D0 default of 2026-10-17: file URLs and account names with spaces ----------------------------------------------
+
+FILE_URLS = (
+    ("bad uri file:///home/bob/private/a.bin", "bad uri file://a.bin"),
+    ("file:///home/Bob%20Smith/a.bin and file:///home/Bob%20Smith", "file://a.bin and file://a home folder"),
+    ("see file:///C:/Users/Bob%20Smith/m.gguf or file:///C:/Users/Bob", "see file://m.gguf or file://a home folder"),
+    ("file://localhost/home/carol/x.gguf.", "file://x.gguf."),
+    ("share file://fs/Users/frank/m.gguf and file://fs/Users/frank", "share file://m.gguf and file://a home folder"),
+    ("url 'file:///home/dave/x.bin'", "url 'file://x.bin'"),
+    ("in file:///srv/my out/Rk/m.gguf", "in file://output:Rk/m.gguf"),
+    ("no path: file:// alone", "no path: file:// alone"),
+    ("keep https://x.org/file:///a", "keep https://x.org/file:///a"),
+)
+
+
+@pytest.mark.parametrize("text, want", FILE_URLS)
+def test_a_path_inside_a_file_url_is_labelled_like_any_other(home, text, want):
+    """Another account's home inside a file:/// URL reached an AI whole; its path is now labelled (a known folder by
+    its label, any other path by its file name, a bare home folder as 'a home folder'), the URL keeps 'file://'."""
+    assert tools_runtime.label_paths(text, ROOTS) == want
+    assert tools_runtime.device_text(text, DEVICE_USERS, ROOTS) == want
+
+
+ACCOUNTS = (
+    (r"denied: C:\Users\Bob Smith", "denied: a home folder"),
+    (r"denied: C:\Users\Bob Smith could not be read", "denied: a home folder could not be read"),
+    (r"C:\Users\Bob Smith Jr\x.gguf missing", "x.gguf missing"),
+    (r"open \\fs\Users\Ann Lee 2 now", "open a home folder now"),
+    ("WSL: /mnt/c/Users/Ann Lee and more", "WSL: a home folder and more"),
+    (r"C:\Users\bob could not", "a home folder could not"),
+    ("/home/pi Failed to start", "a home folder Failed to start"),
+)
+
+
+@pytest.mark.parametrize("text, want", ACCOUNTS)
+def test_another_accounts_name_with_a_space_is_hidden_whole(home, text, want):
+    """A Windows profile folder keeps the spaces of the person's name: the words after another account's Windows home
+    that start with a capital letter or a digit belong to it (before, 'C:\\Users\\Bob Smith' left 'Smith' for the AI).
+    A POSIX account name has no space, so '/home/pi Failed' keeps the next word; a lower-case word ends the name."""
+    assert tools_runtime.label_paths(text, ROOTS) == want
+    assert tools_runtime.device_text(text, DEVICE_USERS, ROOTS) == want
+
+
+def test_this_computers_account_name_is_hidden_whole_in_any_root(monkeypatch):
+    """This computer's account name ('Jane Doe' of C:\\Users\\Jane Doe) is taken whole after any root, also a POSIX one
+    another tool writes ('/home/Jane Doe here'), so neither of its words is left."""
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\Jane Doe")
+    monkeypatch.setenv("HOME", r"C:\Users\Jane Doe")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: PureWindowsPath(r"C:\Users\Jane Doe")))
+    for text, want in (("home is /home/Jane Doe here", "home is a home folder here"),
+                       ("wsl /mnt/c/Users/Jane Doe/x.gguf", "wsl x.gguf"),
+                       ("bad uri file:///home/Jane Doe/private/a.bin", "bad uri file://a.bin")):
+        assert tools_runtime.label_paths(text, ROOTS) == want, text
+        assert "Doe" not in tools_runtime.device_text(text, DEVICE_USERS, ROOTS), text
