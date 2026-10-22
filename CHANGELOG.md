@@ -1807,6 +1807,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **The framework's `known_hosts` is written like every other private file**: trusting a board's host key (and the
+  change of a board's address or key) wrote the file through a temporary file that stayed behind when writing failed
+  (for example on a full disk), and on Windows the trust failed when another program had the file open at that
+  moment. The temporary file now goes again, and the replace is the one of `orchestrator/utils/atomic.py`, tried again
+  for a moment on Windows (`orchestrator/utils/ssh_trust.py` `save_host_keys`).
 - **A deploy keeps waiting while the board's SSH server starts again**: after the network dropped, the deploy waits
   for the board (N5). When the board answered again but its SSH server was still starting, the connection opened and
   dropped (a reset, an abort, a broken pipe or EOF in the key exchange); none of these had a reason code, so the deploy

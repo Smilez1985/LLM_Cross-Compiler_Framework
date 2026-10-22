@@ -989,3 +989,41 @@ def test_the_host_fields_of_known_hosts_stay_accepted(hosts):
     from orchestrator.remote.trust import parse_public_key
     key = paramiko.ECDSAKey.generate()
     assert parse_public_key(f"{hosts} {key.get_name()} {key.get_base64()}").asbytes() == key.asbytes()
+
+
+def test_known_hosts_is_written_like_every_private_file(tmp_path, monkeypatch):
+    """The writer of the framework's known_hosts (trust on first use, Q5's change) leaves no temporary file behind
+    when writing fails, and on Windows tries the replace again while another program holds the file open (the one
+    replace of orchestrator/utils/atomic.py)."""
+    import os
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import TrustStore
+    from orchestrator.utils import atomic
+    state = tmp_path / "state"
+    ssh_trust.trust_host_key(state, HOST, 22, paramiko.ECDSAKey.generate())
+    before = (state / "known_hosts").read_bytes()
+
+    class Broken:
+        def save(self, path):
+            Path(path).write_text("half a file")
+            raise OSError(28, "No space left on device")
+
+    with pytest.raises(OSError):
+        ssh_trust.save_host_keys(state, Broken())
+    assert sorted(p.name for p in state.iterdir()) == ["known_hosts"], "no temporary file is left behind"
+    assert (state / "known_hosts").read_bytes() == before
+    monkeypatch.setattr(atomic, "REPLACE_RETRIES", 3)   # as on Windows
+    real, calls = os.replace, []
+
+    def held_open_once(src, dst):
+        calls.append(dst)
+        if len(calls) == 1:
+            raise PermissionError(13, "The process cannot access the file because it is being used")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", held_open_once)
+    other = paramiko.ECDSAKey.generate()
+    ssh_trust.trust_host_key(state, "192.0.2.41", 22, other)
+    assert len(calls) == 2 and TrustStore(state).status(Endpoint("192.0.2.41"), other) == "known"
+    if sys.platform != "win32":
+        assert (state / "known_hosts").stat().st_mode & 0o077 == 0

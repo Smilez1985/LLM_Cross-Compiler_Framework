@@ -96,14 +96,24 @@ def trust_host_key(state_dir: Path, host: str, port: int, key) -> None:
 
 def save_host_keys(state_dir: Path, keys) -> None:
     """Writes the framework's known_hosts (paramiko HostKeys) atomically, readable only by this user. Only the
-    person's writers in orchestrator/remote/pairing.py call it (through trust_host_key or for a replaced key)."""
+    person's writers in orchestrator/remote/pairing.py call it (through trust_host_key or for a replaced key). The
+    temporary file goes again when writing fails; the replace is the one of orchestrator/utils/atomic.py (tried again
+    on Windows while another program holds the file open)."""
+    from orchestrator.utils.atomic import replace_file
     path = known_hosts_path(state_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".known_hosts.")
     os.close(fd)
-    keys.save(tmp)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    try:
+        keys.save(tmp)
+        os.chmod(tmp, 0o600)
+        replace_file(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def fetch_host_key(host: str, port: int = 22, timeout: float = 10.0):

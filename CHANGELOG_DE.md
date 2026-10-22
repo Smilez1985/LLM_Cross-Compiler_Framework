@@ -2047,6 +2047,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Die `known_hosts` des Frameworks wird wie jede andere private Datei geschrieben**: Das Vertrauen in den
+  Host-Schlüssel eines Boards (und die Änderung von Adresse oder Schlüssel eines Boards) schrieb die Datei über eine
+  temporäre Datei, die liegen blieb, wenn das Schreiben scheiterte (zum Beispiel bei voller Platte), und unter Windows
+  scheiterte das Vertrauen, wenn ein anderes Programm die Datei gerade offen hatte. Die temporäre Datei verschwindet
+  jetzt wieder, und das Ersetzen ist das aus `orchestrator/utils/atomic.py`, das es unter Windows kurz erneut versucht
+  (`orchestrator/utils/ssh_trust.py` `save_host_keys`).
 - **Ein Deployment wartet weiter, während der SSH-Server des Boards neu startet**: Nach einem Netzabbruch wartet das
   Deployment auf das Board (N5). Antwortete das Board wieder, während sein SSH-Server noch startete, öffnete sich die
   Verbindung und brach wieder ab (ein Reset, ein Abbruch, eine unterbrochene Pipe oder EOF beim Schlüsselaustausch);
