@@ -381,14 +381,17 @@ def remote_location(endpoint: Any, user: str, path: Optional[str] = None) -> str
 def openssh_argv(program: str, endpoint: Any, user: str, options: Sequence[str], *rest: str) -> List[str]:
     """The one place the framework builds an OpenSSH command line (a list: no shell reads it):
     ssh OPTIONS -T -p PORT user@host COMMAND, scp OPTIONS -P PORT SOURCE... TARGET, sftp OPTIONS -P PORT DESTINATION.
-    For scp and sftp a board's place is remote_location(...). `endpoint` and `user` are checked ones (valid_host,
-    valid_user: neither starts with '-', so OpenSSH never reads them as an option)."""
-    if program not in _PORT_FLAG:
+    `program` is ssh, scp or sftp, or the path of one (its file name says which). For scp and sftp a board's place is
+    remote_location(...). `endpoint` and `user` are checked ones (valid_host, valid_user: neither starts with '-', so
+    OpenSSH never reads them as an option)."""
+    kind = str(program).replace("\\", "/").rpartition("/")[2].lower()
+    kind = kind[:-4] if kind.endswith(".exe") else kind
+    if kind not in _PORT_FLAG:
         raise ValueError(f"no OpenSSH program: {program!r}")
-    argv = [program, *options]
-    if program == "ssh":
-        return argv + ["-T", _PORT_FLAG[program], str(int(endpoint.port)), f"{user}@{endpoint.host}", *rest]
-    return argv + [_PORT_FLAG[program], str(int(endpoint.port)), *rest]
+    argv = [str(program), *options]
+    if kind == "ssh":
+        return argv + ["-T", _PORT_FLAG[kind], str(int(endpoint.port)), f"{user}@{endpoint.host}", *rest]
+    return argv + [_PORT_FLAG[kind], str(int(endpoint.port)), *rest]
 
 
 class SshFailed(OSError):
