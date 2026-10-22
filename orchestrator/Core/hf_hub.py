@@ -471,15 +471,21 @@ class LedgerReservation:
 
 
 def reserve_space(ledger: Any, folder: Path, size: int, owner: str, label: str, *, need_label: str, what: str,
-                  key: str, standing: bool = False, disk_usage: Any = None):
+                  key: str, standing: bool = False, disk_usage: Any = None, call: str = "the download",
+                  estimate: bool = False):
     """The space an accepted call (a download, a package) will write into `folder`, held until it ends: in the ledger
     (checked again under its lock, so two calls prepared together cannot both take the same space; a call under a
-    standing approval must leave the larger reserve; disk_plan.InsufficientSpace when the space is gone meanwhile),
-    or, without a ledger or bytes, this process's Reservation under `key`. Released with release()."""
+    standing approval must leave the larger reserve), or, without a ledger or bytes, this process's Reservation under
+    `key`. Released with release(). When the space is gone meanwhile: disk_plan.InsufficientSpace as the one disk
+    rule refuses (disk_plan.refusal): `call` named ("the download", "the deployment package"), its size marked as an
+    estimate with `estimate`, the plain next step in the message and as `next`, and the person's `steps`."""
     if ledger is None or not size:
         return Reservation(key, int(size))
-    from orchestrator.Core.disk_plan import DiskNeed
-    rid, _ = ledger.reserve([DiskNeed(need_label, Path(folder), int(size), what)], owner, label, standing=standing,
-                            disk_usage=disk_usage)
+    from orchestrator.Core.disk_plan import DiskNeed, InsufficientSpace, refusal
+    try:
+        rid, _ = ledger.reserve([DiskNeed(need_label, Path(folder), int(size), what)], owner, label,
+                                standing=standing, disk_usage=disk_usage)
+    except InsufficientSpace as e:
+        raise (refusal(e.checks, call, estimate=estimate) or e) from None
     return LedgerReservation(ledger, rid)
 

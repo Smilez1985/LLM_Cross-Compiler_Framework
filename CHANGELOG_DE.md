@@ -1454,7 +1454,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Download fertig ist, oder Speicherplatz freigeben); die Fenster Lokale Laufzeit, Lokale Modelle und Community Hub
   sagen es auf Englisch oder Deutsch, und die Reservierung eines beendeten Programms blockiert nie (das Ledger lässt
   sie fallen). Ein Deployment-Paket hält seinen Platz im Ledger, solange es entsteht, wie es der Hugging-Face-Download
-  einer KI tut. Die Self-Healing-Diagnose nach einer vollen Festplatte nennt weiter die Festplatten unter der Reserve,
+  einer KI tut; hat ein anderer Aufruf den Platz genommen, während die Person gefragt wurde, werden beide auf dieselbe
+  Weise abgelehnt und nennen den Download oder das Paket (der Text sagte „this build“). Die Self-Healing-Diagnose nach einer vollen Festplatte nennt weiter die Festplatten unter der Reserve,
   ohne Reservierungen zu zählen, weil sie die Festplatte sucht, die vollgelaufen ist. Der Downloader in
   `orchestrator/utils/download.py` nimmt die Speicherplatz-Regel seines Aufrufers (`space`), so importiert die unterste
   Schicht nichts über ihr.

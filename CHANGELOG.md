@@ -1277,7 +1277,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   step (try again once that build or download has finished, or free disk space); the Local Runtime, Local Models and
   Community Hub windows say so in English or German, and a reservation of a program that has ended never blocks (the
   ledger drops it). A deployment package holds its space in the ledger while it is made, as an AI's Hugging Face
-  download does. The self-healing diagnosis after a full disk still names the disks below the reserve without
+  download does; when another call took the space while the person was asked, both are refused the same way, naming
+  the download or the package (the text said "this build"). The self-healing diagnosis after a full disk still names the disks below the reserve without
   counting reservations, because it looks for the disk that ran full. The downloader in `orchestrator/utils/
   download.py` takes its caller's disk rule (`space`), so the bottom layer imports nothing above it.
 - **The GUI is an optional extra; the command line, the MCP server and the core run without Qt.** PySide6 is the
