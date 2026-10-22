@@ -11,7 +11,10 @@ SSH trust for device probing and deployment.
 The host-key store lives in orchestrator/remote/trust.py (read-only: fingerprint, host_entry, known_hosts_path,
 check_host_key and the HostKeyError classes, re-exported here under their old names); the person's writers that trust,
 pair and replace keys with their audit rows live in orchestrator/remote/pairing.py and call trust_host_key and
-install_public_key through this module (tests replace them here). No module an AI can reach calls those two.
+install_public_key through this module (tests replace them here). Of the modules an AI can reach, only
+orchestrator/remote/session.py RemoteSession.pair calls install_public_key, and only with the person's
+OneTimePassword credentials (every AI path logs in with KeyOnly); none calls trust_host_key on an AI's behalf
+(DeploymentManager.trust_host, the old primitive without an audit row, has no caller).
 
 paramiko is imported on first use (orchestrator/remote/transport.py, decision RG1): importing this module, the deploy or
 the probe code loads no SSH library. The login (connect) and paramiko_quiet live in orchestrator/remote/transport.py;

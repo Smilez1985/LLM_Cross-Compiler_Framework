@@ -184,6 +184,8 @@ def test_the_installers_and_workflows_install_the_export_without_resolving_again
         assert lines, name
         for line in lines:
             assert "--no-deps" in line, (name, line)
+        if name != ".github/workflows/security.yml":   # its jobs install only the dev tools
+            assert re.search(r"pip install [^\n]*requirements\.txt", text), name   # the runtime export itself
     ci = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert re.search(r"pip install --no-deps -r requirements-gui\.txt", ci), "the test jobs install the GUI extra"
     assert re.search(r"pip install --no-deps -r requirements\.txt", ci), "the headless job installs the base export"
