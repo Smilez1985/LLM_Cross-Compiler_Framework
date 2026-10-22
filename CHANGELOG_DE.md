@@ -2284,6 +2284,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   pip ihn nicht neu auflöst. Ein Test meldet, sobald fastembed Pillow 13 selbst erlaubt und die Ausnahme entfallen
   kann. `astral-sh/setup-uv` in der CI geht auf v10.3.0 (Dependabot-PR #8). Geprüft mit der vollen Testsuite und einer
   echten Retrieval-Evaluation (88 % der Fälle bestanden).
+  Am selben Tag danach: anthropic 1.15.0, openai 3.35.1, fastembed 0.9.0 (es begrenzt Pillow weiterhin, die Ausnahme
+  bleibt), das Build-Backend uv_build bis 0.13 und die Ubuntu-22.04-Basis der GPU-Vorlage und des
+  Build-Basis-Katalogs (`configs/llama_runtime.yml`) auf ihren aktuellen Digest, beide zusammen (Dependabot-PRs #10
+  bis #12, von Hand übernommen: Dependabot hatte nur die Vorlage geändert und überlässt uns die Exporte mit Hashes).
+  Dependabot öffnet seine Pull Requests jetzt gegen `development`, wo die Arbeit landet, statt gegen `main`.
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI

@@ -35,13 +35,13 @@ dependencies = [
     # --- 5. AI Agent & RAG (host side) ---
     # Ditto's provider layer uses the official SDKs only (OpenAI-compatible servers go through openai).
     # Exact pins: LLM tooling is a supply-chain target.
-    "anthropic==1.13.0",
-    "openai==3.28.0",
+    "anthropic==1.15.0",
+    "openai==3.35.1",
     # Local embeddings (ONNX on the CPU) and the knowledge base's storage: Qdrant Edge, the Rust engine of Qdrant in
     # the process (exact pin: it holds the person's knowledge base). It has no wheel for Windows on ARM: there the
     # knowledge base keeps qdrant-client's local mode. qdrant-client also serves an optional Qdrant server (setting
     # qdrant_url) and reads the local storage of earlier versions to convert it.
-    "fastembed==0.8.1",
+    "fastembed==0.9.0",
     "qdrant-edge-py==0.8.0; sys_platform != 'win32' or platform_machine != 'ARM64'",
     "qdrant-client>=1.19,<2",
     "huggingface-hub>=1.31,<3",
@@ -77,7 +77,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.11.32,<0.12"]
+requires = ["uv_build>=0.11.32,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv]
