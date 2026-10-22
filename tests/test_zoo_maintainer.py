@@ -8,10 +8,12 @@ comes from the environment of the test)."""
 
 import ast
 import inspect
+import io
 import json
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -77,7 +79,8 @@ class FakeGitHub:
         git("-C", str(self.seed), "config", "core.autocrlf", "false")
         git("-C", str(self.seed), "remote", "add", "origin", str(self.origin))
         self.prs, self.calls, self.new_checks, self.auth_ok = {}, [], ["pending", "pass"], True
-        self.merges, self.deleted = [], []
+        self.merges, self.deleted, self.closed = [], [], []
+        self.codepage = None   # e.g. "cp1252": text output decoded as Windows does without an encoding
         self.commit({"README.md": b"community\n", "contributions/target/README.md": b"targets\n"}, "refs/heads/main",
                     base=None)
 
@@ -108,12 +111,16 @@ class FakeGitHub:
     def main_files(self):
         return set(git("-C", str(self.origin), "ls-tree", "-r", "--name-only", "refs/heads/main").splitlines())
 
-    def contribution(self, data, number=7, name=PACK, check="pass", kind="target"):
+    def contribution(self, data, number=7, name=PACK, check="pass", kind="target", extra=None, remove=(),
+                     base="main", title=None):
+        """A pull request that adds the pack (and, with `extra`/`remove`, changes other files too)."""
         path = f"contributions/{kind}/{name}"
-        head = self.commit({path: data}, f"refs/pull/{number}/head")
-        self.prs[number] = {"number": number, "title": f"Add {kind} pack {name}", "author": {"login": "alice"},
-                            "url": f"https://github.com/{REPO}/pull/{number}", "headRefOid": head,
-                            "files": [{"path": path, "additions": 0, "deletions": 0}], "state": "OPEN",
+        head = self.commit({path: data, **(extra or {})}, f"refs/pull/{number}/head", remove=remove)
+        files = [path, *(extra or {}), *remove]
+        self.prs[number] = {"number": number, "title": title or f"Add {kind} pack {name}",
+                            "author": {"login": "alice"}, "url": f"https://github.com/{REPO}/pull/{number}",
+                            "headRefOid": head, "baseRefName": base,
+                            "files": [{"path": f, "additions": 0, "deletions": 0} for f in files], "state": "OPEN",
                             "checks": [check], "ref": f"refs/pull/{number}/head"}
         return head
 
@@ -135,6 +142,10 @@ class FakeGitHub:
         out, code, err = self.gh(cmd[1:])
         if not kwargs.get("text"):
             out, err = out.encode(), err.encode()
+        elif self.codepage:   # gh writes UTF-8; text mode decodes with the given encoding, else the code page
+            encoding = kwargs.get("encoding") or self.codepage
+            errors = kwargs.get("errors") or "strict"
+            out, err = out.encode().decode(encoding, errors), err.encode().decode(encoding, errors)
         if code and kwargs.get("check"):
             raise subprocess.CalledProcessError(code, cmd, out, err)
         return subprocess.CompletedProcess(cmd, code, out, err)
@@ -153,14 +164,26 @@ class FakeGitHub:
                            capture_output=True, stdin=subprocess.DEVNULL)
             return "", 0, ""
         if args[:2] == ["pr", "list"]:
+            base = args[args.index("--base") + 1] if "--base" in args else None
             rows = [{k: v for k, v in pr.items() if k not in ("checks", "ref", "state")}
                     | {"statusCheckRollup": rollup(pr["checks"][0])}
-                    for pr in self.prs.values() if pr["state"] == "OPEN"]
-            return json.dumps(rows), 0, ""
+                    for pr in self.prs.values() if pr["state"] == "OPEN" and base in (None, pr["baseRefName"])]
+            return json.dumps(rows, ensure_ascii=False), 0, ""   # gh writes UTF-8, not \u escapes
         if args[:2] == ["pr", "view"]:
             pr = self.prs[int(args[2])]
             return json.dumps({"number": pr["number"], "state": pr["state"], "headRefOid": pr["headRefOid"],
-                               "url": pr["url"], "statusCheckRollup": rollup(self._state(pr))}), 0, ""
+                               "baseRefName": pr["baseRefName"], "url": pr["url"],
+                               "statusCheckRollup": rollup(self._state(pr))}), 0, ""
+        if args[:2] == ["pr", "close"]:
+            pr = self.prs[int(args[2])]
+            assert args[args.index("--repo") + 1] == REPO and pr["state"] == "OPEN"
+            pr["state"] = "CLOSED"
+            self.closed.append(pr["number"])
+            if "--delete-branch" in args:
+                branch = pr["ref"].removeprefix("refs/heads/")
+                git("-C", str(self.origin), "update-ref", "-d", f"refs/heads/{branch}")
+                self.deleted.append(branch)
+            return "", 0, ""
         if args[:2] == ["pr", "create"]:
             branch = args[args.index("--head") + 1]
             assert args[args.index("--base") + 1] == "main" and branch != "main"
@@ -168,7 +191,8 @@ class FakeGitHub:
             number = max([7, *self.prs]) + 1
             self.prs[number] = {"number": number, "title": args[args.index("--title") + 1], "author": {"login": "m"},
                                 "url": f"https://github.com/{REPO}/pull/{number}", "headRefOid": head, "files": [],
-                                "state": "OPEN", "checks": list(self.new_checks), "ref": f"refs/heads/{branch}"}
+                                "baseRefName": "main", "state": "OPEN", "checks": list(self.new_checks),
+                                "ref": f"refs/heads/{branch}"}
             return f"https://github.com/{REPO}/pull/{number}\n", 0, ""
         if args[:2] == ["pr", "merge"]:
             pr = self.prs[int(args[2])]
@@ -386,7 +410,10 @@ def test_a_rejected_pack_is_shown_but_never_published(world):
 
 
 @needs_git
-def test_cancel_before_the_last_merge_leaves_the_pull_request_open(world):
+def test_cancel_before_the_last_merge_withdraws_the_publication(world):
+    """Cancel while the publication's pull request waits for its check: that pull request (signed, one click from
+    published) is closed and its branch deleted, so a cancel never leaves a half-published state behind; the
+    contribution merge, which cannot be undone, is still named."""
     world.github.contribution(demo_pack(world.tmp))
     review = world.m.review(world.m.find("7"))
     stop = {"now": False}
@@ -395,11 +422,16 @@ def test_cancel_before_the_last_merge_leaves_the_pull_request_open(world):
     with pytest.raises(Cancelled) as cancelled:
         world.m.publish(review, key_name=KEY, cancelled=lambda: stop["now"])
     text = str(cancelled.value)
-    assert "Cancelled." in text and "stays open" in text and "/pull/8" in text
+    assert "Cancelled." in text and "/pull/8" in text and "was closed" in text and "stays open" not in text
+    assert "#7 is merged: its pack waits under contributions/" in text, "the contribution merge is not forgotten"
     assert world.github.merges == [7], "the contribution was merged, the publication was not"
-    assert world.github.prs[8]["state"] == "OPEN" and world.github.main("index.json") is None
+    assert world.github.prs[8]["state"] == "CLOSED" and world.github.closed == [8]
+    branch = world.github.prs[8]["ref"].removeprefix("refs/heads/")
+    assert branch in world.github.deleted and world.github.main("index.json") is None
     assert audit_rows(world)[-1]["outcome"] == "cancelled"
     assert not world.m._git("status", "--porcelain").stdout.strip(), "the clone is back on main, clean"
+    (item,) = world.m.contributions()
+    assert item.check == "merged", "the pack is listed again, to publish later"
 
 
 @needs_git
@@ -872,3 +904,237 @@ def test_hub_maintainer_tab(qapp, world, monkeypatch, tmp_path):
         assert "index version 1" in panel.log.toPlainText().lower()
     finally:
         hub.close()
+
+
+# --- found in the review of the maintainer actions -------------------------------------------------------------------
+
+@needs_git
+@pytest.mark.parametrize("extra,remove,changed", [
+    ({".github/workflows/validate-contribution.yml": b"on: pull_request\n"}, (),
+     ".github/workflows/validate-contribution.yml"),
+    ({"index.json": b"{}"}, (), "index.json"),
+    ({"contributions/target/README.md": b"changed\n"}, (), "contributions/target/README.md"),
+    ({"contributions/recipe/notes.txt": b"x\n"}, (), "contributions/recipe/notes.txt"),
+    ({}, ("README.md",), "README.md"),
+])
+def test_a_pull_request_that_changes_more_than_new_packs_is_never_merged(world, extra, remove, changed):
+    """The review shows the packs. A pull request that also changes another file (the check workflow, the index, a
+    folder README, a deletion) would be merged without the person seeing that change, so it is a problem of the
+    review and nothing is merged."""
+    world.github.contribution(demo_pack(world.tmp), extra=extra, remove=remove)
+    review = world.m.review(world.m.find("7"))
+    assert not review.ok and any(changed in p for p in review.problems()), review.problems()
+    assert review.packs and review.packs[0].files, "the pack is still shown for the review"
+    with pytest.raises(MaintainerError) as refused:
+        world.m.publish(review, key_name=KEY)
+    assert refused.value.code == "rejected" and changed in str(refused.value)
+    assert world.github.merges == [] and not world.github.pushes()
+
+
+@needs_git
+def test_the_review_takes_the_packs_from_the_pull_request_itself(world):
+    """gh lists at most 100 files of a pull request: the packs reviewed (and merged) are the ones git finds added in
+    the reviewed commit, so no pack is merged unseen."""
+    other = "contribution-target-other-board-2.0.0.zip"
+    world.github.contribution(demo_pack(world.tmp),
+                              extra={f"contributions/target/{other}": demo_pack(world.tmp, name="other-board",
+                                                                                 version="2.0.0")})
+    world.github.prs[7]["files"] = world.github.prs[7]["files"][:1]   # gh's list is cut off
+    review = world.m.review(world.m.find("7"))
+    assert [p.file_name for p in review.packs] == sorted([PACK, other])
+
+
+@needs_git
+def test_a_pull_request_against_another_branch_is_neither_listed_nor_merged(world):
+    world.github.contribution(demo_pack(world.tmp), base="release")
+    assert world.m.contributions() == []
+    pr = world.github.prs[7]
+    item = cmaint.Contribution(7, pr["title"], "alice", pr["url"], pr["headRefOid"], [f"contributions/target/{PACK}"],
+                               "pass")
+    review = world.m.review(item)
+    with pytest.raises(MaintainerError) as refused:
+        world.m.publish(review, key_name=KEY)
+    assert refused.value.code == "not_main" and "release" in str(refused.value)
+    assert world.github.merges == []
+
+
+def with_member(data: bytes, name: str, content: bytes) -> bytes:
+    buffer = io.BytesIO(data)
+    with zipfile.ZipFile(buffer, "a", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(name, content)
+    return buffer.getvalue()
+
+
+@needs_git
+def test_every_member_of_the_pack_file_is_shown(world):
+    """zoo verify accepts a pack file with a member the manifest does not list (.lcf-provenance.json); it is
+    published with the file, so the review shows it too."""
+    data = with_member(demo_pack(world.tmp), ".lcf-provenance.json", b'{"note": "published, read by nobody"}')
+    pack = world.tmp / "check.zip"
+    pack.write_bytes(data)
+    assert CommunityManager(None).verify_file(pack)[1] == [], "zoo verify accepts it"
+    world.github.contribution(data)
+    review = world.m.review(world.m.find("7"))
+    assert review.ok, review.problems()
+    shown = {f.path: f for f in review.packs[0].files}
+    assert "read by nobody" in shown[".lcf-provenance.json"].text
+    assert {"pack.json", ".lcf-provenance.json", "target.yml", "modules/build.sh"} <= set(shown)
+
+
+@needs_git
+def test_a_member_too_large_to_show_is_never_published(world):
+    data = with_member(demo_pack(world.tmp), ".lcf-provenance.json", b" " * (cmaint.MAX_SHOWN_BYTES + 1))
+    world.github.contribution(data)
+    review = world.m.review(world.m.find("7"))
+    assert not review.ok and any(".lcf-provenance.json" in p for p in review.problems()), review.problems()
+    with pytest.raises(MaintainerError):
+        world.m.publish(review, key_name=KEY)
+    assert world.github.merges == []
+
+
+@needs_git
+def test_gh_output_is_read_as_utf8_whatever_the_code_page(world):
+    """Windows decodes text output with its ANSI code page unless an encoding is given; gh writes UTF-8, and a title
+    with a character like Ł (the byte 0x81 is undefined in cp1252) must still be read, not crash the listing."""
+    world.github.codepage = "cp1252"
+    world.github.contribution(demo_pack(world.tmp), title="Add the Łódź board 👍")
+    (item,) = world.m.contributions()
+    assert item.title == "Add the Łódź board 👍"
+    review = world.m.review(item)
+    assert world.m.publish(review, key_name=KEY).version == 1
+
+
+@needs_git
+def test_cancel_after_the_push_deletes_the_branch(world):
+    world.github.contribution(demo_pack(world.tmp))
+    review = world.m.review(world.m.find("7"))
+    stop = {"now": False}
+    world.m.progress = lambda code, values: world.progress.append((code, values)) or \
+        stop.update(now=stop["now"] or code == "push")
+    with pytest.raises(Cancelled) as cancelled:
+        world.m.publish(review, key_name=KEY, cancelled=lambda: stop["now"])
+    text = str(cancelled.value)
+    assert 8 not in world.github.prs, "no pull request was opened"
+    (branch,) = world.github.deleted
+    assert branch.startswith("lcf-publish-") and branch in text and "was deleted" in text
+    assert git("-C", str(world.github.origin), "branch", "--list", branch) == ""
+
+
+@needs_git
+def test_an_interrupted_merge_is_never_reported_as_nothing_changed(world):
+    """Ctrl+C while gh merges the contribution: the merge may have reached GitHub, so the state says to look."""
+    world.github.contribution(demo_pack(world.tmp))
+    review = world.m.review(world.m.find("7"))
+    gh = world.github.gh
+
+    def interrupted(args):
+        if args[:2] == ["pr", "merge"]:
+            gh(args)   # the merge reaches GitHub, then the person presses Ctrl+C
+            raise KeyboardInterrupt
+        return gh(args)
+    world.github.gh = interrupted
+    with pytest.raises(Cancelled) as cancelled:
+        world.m.publish(review, key_name=KEY)
+    text = str(cancelled.value)
+    assert "Nothing was changed on GitHub." not in text and "#7" in text and "look" in text, text
+
+
+@needs_git
+def test_an_unexpected_error_still_ends_with_a_plain_reason_and_an_audit_row(world):
+    world.github.contribution(demo_pack(world.tmp))
+    review = world.m.review(world.m.find("7"))
+    gh = world.github.gh
+
+    def broken(args):
+        if args[:2] == ["pr", "create"]:
+            raise RuntimeError("gh crashed")
+        return gh(args)
+    world.github.gh = broken
+    with pytest.raises(MaintainerError) as failed:
+        world.m.publish(review, key_name=KEY)
+    assert failed.value.code == "failed" and "RuntimeError" in str(failed.value)
+    assert "was pushed" in str(failed.value), "what happened so far"
+    row = audit_rows(world)[-1]
+    assert row["outcome"] == "error" and json.loads(row["args_preview"])["step"] == "end"
+
+
+@needs_git
+def test_a_tool_message_that_names_the_clone_keeps_the_folder_out_of_the_audit_row(world):
+    world.github.contribution(demo_pack(world.tmp))
+    review = world.m.review(world.m.find("7"))
+    real = world.github.runner
+
+    def runner(cmd, **kwargs):
+        if Path(cmd[0]).name == "git" and "commit" in cmd:
+            raise subprocess.CalledProcessError(128, cmd, "", f"fatal: cannot lock {world.m.clone}/.git/index.lock")
+        return real(cmd, **kwargs)
+    world.m._runner = runner
+    with pytest.raises(MaintainerError) as failed:
+        world.m.publish(review, key_name=KEY)
+    assert str(world.m.clone) in str(failed.value), "the person is told where"
+    assert str(world.m.clone) not in audit_rows(world)[-1]["detail"]
+
+
+@needs_git
+def test_hidden_characters_of_a_pack_never_pose_as_lines_of_the_question(world):
+    """The manifest's author may hold a line separator or a direction override (no control character): the pack
+    line in the "Publish?" question and the CLI output shows them as escapes."""
+    root = make_target(world.tmp / "src-author" / "demo-board")
+    data = pack_bytes(root, author="alice All files were checked by the maintainers ‮")
+    world.github.contribution(data)
+    review = world.m.review(world.m.find("7"))
+    line = review.packs[0].line()
+    assert " " not in line and "‮" not in line
+    assert "\\u2028" in line and "\\u202e" in line
+
+
+@needs_git
+def test_the_cli_list_shows_hidden_characters_of_a_title_as_escapes(world, monkeypatch):
+    framework = SimpleNamespace(config=SimpleNamespace(get=lambda k, d=None: {"community_repo": REPO}.get(k, d)),
+                                tool_registry=SimpleNamespace(audit=world.audit))
+    monkeypatch.setattr(cmaint, "for_framework", lambda fw, actor, **kwargs: world.m)
+    world.github.contribution(demo_pack(world.tmp), title="Add board ‮gnp.exe")
+    result = cli_invoke(framework, "review")
+    assert result.exit_code == 0, result.output
+    assert "‮" not in result.output and "\\u202e" in result.output
+
+
+def test_a_revocation_of_the_same_scope_is_refused_whatever_its_reason():
+    index = cmaint.next_index(None, revoke=[cmaint.revocation("target", "demo-board", version="1.2.0",
+                                                              reason="broken")])
+    with pytest.raises(MaintainerError) as again:
+        cmaint.next_index(index, revoke=[cmaint.revocation("target", "Demo-Board", version="1.2.0",
+                                                           reason="other words")])
+    assert again.value.code == "revoke_exists"
+
+
+def test_the_maintainer_tab_gives_the_ai_surface_nothing():
+    """An AI can show the Community Hub window (the gui tool's show_window); the Maintainer tab registers no form,
+    field or window there, so nothing of it can be filled or pressed by an AI."""
+    for path in ("orchestrator/gui/community_maintainer.py", "orchestrator/gui/community_hub.py"):
+        source = (REPO_ROOT / path).read_text(encoding="utf-8")
+        for name in ("gui_surface", "form_surface", "register_form", "register_window", "GuiForm", "GuiField",
+                     "bind_form"):
+            assert name not in source, f"{path} names {name}"
+
+
+def test_review_while_an_action_runs_keeps_the_current_review(qapp, monkeypatch):
+    from orchestrator.gui import community_maintainer as panel_module
+    monkeypatch.setattr(panel_module, "_maintainer", lambda framework, progress: SimpleNamespace(
+        remembered_key=lambda: ""))
+    framework = SimpleNamespace(config=SimpleNamespace(get=lambda k, d=None: {"community_repo": REPO}.get(k, d)))
+    panel = panel_module.MaintainerPanel(framework, lang="en")
+    try:
+        discarded = []
+        panel.review = SimpleNamespace(discard=lambda: discarded.append(True), ok=True)
+        class Running:
+            def isFinished(self):
+                return False
+        panel._tasks = {Running()}
+        panel.selected = lambda: cmaint.Contribution(7, "t", "a", "u", "h", [f"contributions/target/{PACK}"], "pass")
+        panel.review_selected()
+        assert discarded == [] and panel.review is not None, "the running publication's review stays"
+        assert "Another maintainer action is running" in panel.log.toPlainText()
+    finally:
+        panel._tasks = set()
+        panel.close()

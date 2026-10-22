@@ -5942,9 +5942,11 @@ def zoo_maintainer_review(ctx: FrameworkContext, item: Optional[str], review_dir
         for column in ("zoo.maint.col.item", "zoo.maint.col.title", "zoo.maint.col.author", "zoo.maint.col.packs",
                        "zoo.maint.col.check"):
             table.add_column(cmaint.say(column))
-        for found in items:
-            table.add_row(escape(found.label), escape(found.title), escape(found.author),
-                          escape("\n".join(found.packs)), cmaint.say(f"zoo.maint.check.{found.check}"))
+        for found in items:   # a title or author can hold a direction override: shown as escapes
+            table.add_row(escape(found.label), escape(cmaint.one_line(found.title)),
+                          escape(cmaint.one_line(found.author)),
+                          escape("\n".join(cmaint.one_line(p) for p in found.packs)),
+                          cmaint.say(f"zoo.maint.check.{found.check}"))
         console.print(table)
         console.print("[dim]Review one: llmcf zoo maintainer review NUMBER[/dim]")
         return

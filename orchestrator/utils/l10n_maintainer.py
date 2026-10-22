@@ -226,6 +226,34 @@ TEXTS = {
         "zoo.maint.state.pr_open": "The pull request {url} stays open: merge it on GitHub once the check passed, or "
                                    "close it.",
         "zoo.maint.state.pr_merged": "The pull request {url} is merged into main.",
+        "zoo.maint.state.merging_contribution": "The merge of {item} was started, but its result is not known: look "
+                                                "at {item} on GitHub. If it is merged, its pack waits under "
+                                                "contributions/ on main and is listed again in Review and publish (as "
+                                                "merged, not published).",
+        "zoo.maint.state.pushing": "The push of the branch {branch} was started, but its result is not known: look on "
+                                   "GitHub whether the branch exists, and delete it there.",
+        "zoo.maint.state.merging_pr": "The merge of {url} was started, but its result is not known: look there "
+                                      "whether it is merged.",
+        "zoo.maint.state.withdrawn": "The pull request {url} of this publication was closed and its branch {branch} "
+                                     "deleted: nothing of it was published.",
+        "zoo.maint.state.branch_deleted": "The branch {branch} of this publication was deleted (no pull request was "
+                                          "open): nothing of it was published.",
+        "zoo.maint.state.pr_closed": "The pull request {url} of this publication was closed; its branch {branch} is "
+                                     "still on GitHub: delete it there.",
+        "zoo.maint.step.pr_closed": "Closed the pull request {url}.",
+        "zoo.maint.step.branch_deleted": "Deleted the branch {branch} on GitHub.",
+        "zoo.maint.err.not_main": "#{pr} is a pull request into {base}, not into main.",
+        "zoo.maint.next.not_main": "ask the contributor to open it against main; only main is published.",
+        # a review problem: the pull request changes more than it adds packs
+        "zoo.maint.problem.other_change": "The pull request also changes {path} ({change}); only new packs under "
+                                          "contributions/<kind>/ are merged here, so it cannot be published from "
+                                          "here. Look at it on GitHub and ask the contributor for a pull request "
+                                          "that only adds the pack.",
+        "zoo.maint.change.A": "added",
+        "zoo.maint.change.M": "modified",
+        "zoo.maint.change.D": "deleted",
+        "zoo.maint.change.T": "type changed",
+        "zoo.maint.change.X": "changed",
     },
     "de": {
         "zoo.maint.tab": "Maintainer",
@@ -455,6 +483,33 @@ TEXTS = {
         "zoo.maint.state.pr_open": "Der Pull Request {url} bleibt offen: merge ihn auf GitHub, sobald die Prüfung "
                                    "bestanden ist, oder schließe ihn.",
         "zoo.maint.state.pr_merged": "Der Pull Request {url} ist in main gemergt.",
+        "zoo.maint.state.merging_contribution": "Der Merge von {item} wurde gestartet, sein Ergebnis ist aber nicht "
+                                                "bekannt: sieh dir {item} auf GitHub an. Ist er gemergt, wartet sein "
+                                                "Pack unter contributions/ auf main und steht wieder in Prüfen und "
+                                                "veröffentlichen (als gemergt, nicht veröffentlicht).",
+        "zoo.maint.state.pushing": "Der Push des Branches {branch} wurde gestartet, sein Ergebnis ist aber nicht "
+                                   "bekannt: sieh auf GitHub nach, ob es den Branch gibt, und lösche ihn dort.",
+        "zoo.maint.state.merging_pr": "Der Merge von {url} wurde gestartet, sein Ergebnis ist aber nicht bekannt: "
+                                      "sieh dort nach, ob er gemergt ist.",
+        "zoo.maint.state.withdrawn": "Der Pull Request {url} dieser Veröffentlichung wurde geschlossen und sein Branch "
+                                     "{branch} gelöscht: nichts davon wurde veröffentlicht.",
+        "zoo.maint.state.branch_deleted": "Der Branch {branch} dieser Veröffentlichung wurde gelöscht (kein Pull "
+                                          "Request war offen): nichts davon wurde veröffentlicht.",
+        "zoo.maint.state.pr_closed": "Der Pull Request {url} dieser Veröffentlichung wurde geschlossen; sein Branch "
+                                     "{branch} ist noch auf GitHub: lösche ihn dort.",
+        "zoo.maint.step.pr_closed": "Pull Request {url} geschlossen.",
+        "zoo.maint.step.branch_deleted": "Branch {branch} auf GitHub gelöscht.",
+        "zoo.maint.err.not_main": "#{pr} ist ein Pull Request nach {base}, nicht nach main.",
+        "zoo.maint.next.not_main": "bitte den Beitragenden, ihn gegen main zu öffnen; veröffentlicht wird nur main.",
+        "zoo.maint.problem.other_change": "Der Pull Request ändert auch {path} ({change}); hier werden nur neue Packs "
+                                          "unter contributions/<kind>/ gemergt, also kann er von hier aus nicht "
+                                          "veröffentlicht werden. Sieh ihn dir auf GitHub an und bitte den "
+                                          "Beitragenden um einen Pull Request, der nur das Pack hinzufügt.",
+        "zoo.maint.change.A": "hinzugefügt",
+        "zoo.maint.change.M": "geändert",
+        "zoo.maint.change.D": "gelöscht",
+        "zoo.maint.change.T": "Typ geändert",
+        "zoo.maint.change.X": "geändert",
     },
 }
 
