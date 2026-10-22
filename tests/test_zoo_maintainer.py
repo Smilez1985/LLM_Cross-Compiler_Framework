@@ -801,7 +801,7 @@ def test_the_contribution_check_runs_from_main_on_every_pull_request_into_main()
     """main of the community repository requires the check, so it runs on every pull request into main (no paths
     filter) and comes from main itself (pull_request_target): a pull request cannot change the check that checks it.
     That event can reach the repository's token, so the job reads only, uses no secret and no cache, and no checkout
-    keeps credentials."""
+    keeps credentials (the only one is the framework's: test_the_pull_requests_commits_are_never_checked_out)."""
     workflow = check_workflow()
     trigger = workflow.get("on", workflow.get(True))
     assert list(trigger) == ["pull_request_target"], "pull_request would run the pull request's own copy"
@@ -814,7 +814,7 @@ def test_the_contribution_check_runs_from_main_on_every_pull_request_into_main()
     for name in ("secrets.", "github.token", "GITHUB_TOKEN"):
         assert name not in used, name
     checkouts = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/checkout@")]
-    assert len(checkouts) == 2 and all(s["with"].get("persist-credentials") is False for s in checkouts)
+    assert checkouts and all(s["with"].get("persist-credentials") is False for s in checkouts)
     setup = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-python@")]
     assert len(setup) == 1 and set(setup[0]["with"]) == {"python-version"}, "no cache, nothing read from a file"
     framework = next(s for s in checkouts if s["with"].get("path") == ".lcf")
@@ -832,7 +832,7 @@ def test_the_check_takes_its_rules_from_the_maintainer_actions():
 def test_no_expression_of_the_pull_request_reaches_a_script():
     """An expression is expanded before the shell reads the script, so one in a run: block would make the pull
     request's title, branch, body or file names shell code. What a step needs comes through env; the pull request's
-    values appear only there and as the ref of its own checkout."""
+    values appear only there (not even as the ref of a checkout: there is none of its commits)."""
     workflow = check_workflow()
     for step in workflow["jobs"][cmaint.REQUIRED_CHECK]["steps"]:
         for key in ("run", "shell", "working-directory", "if"):
@@ -840,41 +840,80 @@ def test_no_expression_of_the_pull_request_reaches_a_script():
     found = list(_expressions(workflow))
     for where, expression in found:
         if expression.startswith("github."):
-            assert where[-2] == "env" or where[-2:] == ("with", "ref"), (where, expression)
-    assert {e for _, e in found} == {"env.LCF_REF", "env.PR_DATA", "github.base_ref",
-                                     "github.event.pull_request.head.sha",
+            assert where[-2] == "env", (where, expression)
+    assert {e for _, e in found} == {"env.LCF_REF", "github.base_ref", "github.event.pull_request.head.sha",
                                      "github.event.pull_request.author_association"}
 
 
-def test_the_pull_requests_files_are_data_only():
-    """The head commit is checked out into its own folder after the framework is installed (from its own checkout),
-    and no later step runs anything from it: no action, no working directory or shell of its own, and its folder is
-    only read by git (rev-parse, diff, cat-file); each pack is copied out of git's objects."""
+# Every git command a step after the framework's installation may run: on the pull request's repository only, and
+# only these (none writes a working tree, runs a hook or reads a configuration of the pull request).
+DATA_GIT = re.compile(r'git (?:init -q --bare "\$PR_DATA"|--git-dir="\$PR_DATA" (?:fetch|rev-parse|merge-base|diff|cat-file)\b)')
+GIT_CALL = re.compile(r'(?:^|\$\(|[;&|!{]|\b(?:if|then|do|else))\s*(git\s)', re.MULTILINE)   # git as a command
+
+
+def _commands(script: str) -> str:
+    return "\n".join(line for line in script.splitlines() if not line.strip().startswith("#"))
+
+
+def _fetches(step) -> bool:
+    return bool(re.search(r'git --git-dir="\$PR_DATA" fetch\b', _commands(str(step.get("run", "")))))
+
+
+def test_the_pull_requests_commits_are_never_checked_out():
+    """actions/checkout of the pull request's commit under pull_request_target is the known dangerous pattern, and a
+    checkout prints the commit's subject, where a carriage return starts a workflow command (test_zoo runs that
+    attack). So the only checkout is the framework's, and the pull request's commits are fetched instead: quietly,
+    without credentials, by the id the event names, into a repository without a working tree."""
+    job = check_workflow()["jobs"][cmaint.REQUIRED_CHECK]
+    checkouts = [s for s in job["steps"] if "uses" in s and str(s["uses"]).startswith("actions/checkout@")]
+    assert [s["with"].get("repository") for s in checkouts] == ["Smilez1985/LLM_Cross-Compiler_Framework"]
+    assert [s for s in job["steps"] if "uses" in s and s not in checkouts
+            and not str(s["uses"]).startswith("actions/setup-python@")] == []
+    (data,) = [s for s in job["steps"] if _fetches(s)]
+    assert data["env"]["HEAD_SHA"] == HEAD_SHA_EXPRESSION
+    script = _commands(data["run"])
+    assert 'git init -q --bare "$PR_DATA"' in script
+    fetch = re.search(r'git --git-dir="\$PR_DATA" fetch ([^;]*?); then', script, re.DOTALL).group(1)
+    for option in ("-q", "--no-tags", "--no-recurse-submodules", '"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"',
+                   '"+$HEAD_SHA:refs/lcf/head"'):
+        assert option in fetch.split(), option
+    for step in job["steps"]:
+        commands = _commands(str(step.get("run", ""))).lower()
+        for word in ("checkout", "worktree", "github_token", "extraheader", "credential", "authorization"):
+            assert word not in commands, (step.get("name"), word)
+
+
+def test_the_pull_requests_commits_are_data_only():
+    """After the framework is installed (from its own checkout), the pull request's commits are fetched into their own
+    folder, and no step runs anything from them: no action, no working directory or shell of its own, and every git
+    command reads that repository only (rev-parse, merge-base, diff, cat-file); each pack is copied out of git's
+    objects."""
     job = check_workflow()["jobs"][cmaint.REQUIRED_CHECK]
     steps, folder = job["steps"], job["env"]["PR_DATA"]
-    (at,) = [i for i, s in enumerate(steps) if (s.get("with") or {}).get("ref") == HEAD_SHA_EXPRESSION]
-    data = steps[at]
-    assert data["uses"].startswith("actions/checkout@") and "repository" not in data["with"]
-    assert data["with"]["path"] == "${{ env.PR_DATA }}" and data["with"]["fetch-depth"] == 0
+    (at,) = [i for i, s in enumerate(steps) if _fetches(s)]
     assert folder and folder not in (".", ".lcf") and "/" not in folder
     install = [i for i, s in enumerate(steps) if "pip install" in s.get("run", "")]
-    assert install and max(install) < at, "the framework is installed before any file of the pull request is there"
+    assert install and max(install) < at, "the framework is installed before any object of the pull request is there"
     for i in install:
         assert all(" .lcf/" in line or " ./.lcf" in line for line in steps[i]["run"].splitlines()
                    if "pip install" in line), steps[i]["run"]
     for step in steps[:at]:
         assert "PR_DATA" not in str(step) and folder not in str(step)
-    after = steps[at + 1:]
-    assert after, "the checks come after the checkout"
+    after = steps[at:]
+    assert len(after) > 1, "the checks come after the fetch"
     for step in after:
         assert set(step) <= {"name", "run", "env"}, step.get("name")
-        script = step["run"]
-        assert set(re.findall(r'git -C "\$PR_DATA" ([a-z-]+)', script)) <= {"rev-parse", "diff", "cat-file"}
-        rest = re.sub(r'git -C "\$PR_DATA" (rev-parse|diff|cat-file)\b', "", script)
+        script = _commands(step["run"])
+        calls = [m.start(1) for m in GIT_CALL.finditer(script)]
+        assert calls and len(calls) == len(DATA_GIT.findall(script)), step["name"]
+        for at_call in calls:
+            assert DATA_GIT.match(script, at_call), (step["name"], script[at_call:at_call + 80])
+        rest = DATA_GIT.sub("", script)
         assert "PR_DATA" not in rest and folder not in rest, step["name"]
-    diff = next(s["run"] for s in after if "diff" in s["run"])
+    diff = next(s["run"] for s in after if " diff " in s["run"])
     for option in ("--raw", "-z", "--no-renames", "--no-ext-diff", "--no-textconv"):
         assert re.search(rf" {re.escape(option)}\b", diff), option
+    assert "merge-base --all" in diff, "exactly one merge base, as GitHub merges"
     verify = next(s["run"] for s in after if "zoo verify" in s["run"])
     assert 'cat-file blob "$blob"' in verify and '"$RUNNER_TEMP/' in verify
 
