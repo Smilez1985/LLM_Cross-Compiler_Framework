@@ -1251,6 +1251,23 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the board steps' errors share `RemoteFailure`. paramiko is imported on first use only, so `orchestrator/utils/
   ssh_trust.py` and everything that imports it load no SSH library, and the deploy and the Builder tab ask with a
   real import whether SSH works (a broken installation counted as present there and as missing at the login).
+- **One board session for every contact with a board, `orchestrator/remote/session.py`** (consolidation chain
+  c2-remote-session, finding 2 of the architecture audit). What only the deploy's board session could do (log in again
+  with the host key checked as at the first login, wait for a board whose network dropped, resume an upload at what
+  arrived, follow an installation that runs on the board on its own) is now `RemoteSession`, over one `Transport`
+  interface (`orchestrator/remote/transport.py` `ParamikoTransport`), so the runtime deploy, the probe and the on-board
+  benchmark can use the same steps next (chain c2-remote-callers). The deploy keeps its package and deploy.sh's job and
+  is a thin adapter: its results, reasons and device states are the same, pinned by `tests/test_remote_session.py`
+  against the session before the move. Its credentials are typed: `KeyOnly()` (every AI path) can never reach the key
+  installation, only the person's `OneTimePassword` can pair. `RemoteShell` and the probe read a board's answer with
+  the transport's one bounded reader, `ssh_trust.connect` and `paramiko_quiet` delegate to the transport, and the
+  reason codes read paramiko's error types through it (paramiko now has the transport as its only home in the remote
+  layer). Every command of the deploy now has the time limit and the output cap the device runtime's commands had
+  (120 s of silence, 1 MiB; a sha256 check on the board waits at least 900 s and longer for a large package), and the
+  session keeps the connection alive every 15 s: a board that stops answering in the middle of a command no longer
+  holds the deploy. Such a command counts as a network drop (paramiko's connection still stands then until TCP gives
+  up): the deploy waits for the board as after any drop, logs in again with the host key checked again and continues
+  the upload or follows the installation again, at most 20 times, instead of ending with "could not be followed".
 - **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
   existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
   `utils/network.py` left with that module, see below) run through the oldest one's module,
@@ -1785,6 +1802,24 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **A problem on this computer is no longer "the board does not answer"**: every contact with a board counted an
+  error that was none of the four reason codes as `device_host_down`. A full or read-only disk, or no permission on
+  the framework's own files (its SSH key, known_hosts), therefore told the person to switch the board on, the deploy
+  waited for the board in vain, and the board was recorded as down for Mojo. Such an error now has its own reason,
+  `local_problem` ("Something on this computer stopped the contact, not the board"), with its next step in English
+  and German (free disk space, check the state folder and the security software of this computer), the AI's next step
+  and Mojo's check of the installation as the catalogue step (`orchestrator/remote/reasons.py` `is_local`,
+  `LOCAL_PROBLEM`, `CODES`). It is never recorded with the board. The deploy's reason names the file without its
+  folder, and a home folder or a folder with this computer's account name only by its kind, since that name is an
+  account's name and the reason reaches an AI; the CLI also prints the error itself. It is no blocker of the
+  delegation rules, so no delegation is outdated.
+- **A deploy works on a board whose account uses another login shell**: sshd hands every command to the board
+  account's login shell. The deploy's commands (the private folder, the hash checks, the start of the installation
+  that runs on its own and the polls of its end) and the installation of the framework key went there as they were,
+  so on an account whose login shell is fish, csh or another shell that is not POSIX, their `&&`, `||`, `2>/dev/null`
+  and `$?` meant something else or nothing. Every one of them now reaches the board as one `sh -c '...'`
+  (`orchestrator/remote/transport.py` `sh_command`, the form the device runtime and the board probe already used),
+  so the board's sh reads the script whatever the login shell is.
 - **A deploy keeps waiting while the board's SSH server starts again**: after the network dropped, the deploy waits
   for the board (N5). When the board answered again but its SSH server was still starting, the connection opened and
   dropped (a reset, an abort, a broken pipe or EOF in the key exchange); none of these had a reason code, so the deploy

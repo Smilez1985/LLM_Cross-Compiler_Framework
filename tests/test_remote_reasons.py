@@ -509,3 +509,185 @@ def test_every_board_step_failure_is_a_remote_failure():
     assert (failures[2].kind, failures[2].error, failures[2].code, failures[2].next) == \
         ("", None, "hardware_unavailable", "Ask the person.")
     assert str(failures[2]) == "cannot be used now" and failures[2].external_text == []
+
+
+# --- regression (Fixed): a problem on this computer is not "the board does not answer" ------------------------------
+# reach_code counted every OSError that is none of the four as device_host_down. A full disk, a read-only disk or no
+# permission on the framework's own files (its SSH key, known_hosts) then told the person to switch the board on, and
+# the deploy recorded the board as down for Mojo. These now have their own code, local_problem, with the person's text
+# and next step (EN/DE) and the AI's next step; they are never recorded with the board.
+
+KEY_FILE = "/srv/state/llm-framework/id_ed25519_llm_framework"   # nosec B108 - a made-up path, never opened
+LOCAL_ERRORS = [
+    PermissionError(errno.EACCES, "Permission denied", KEY_FILE),
+    OSError(errno.ENOSPC, "No space left on device", "/srv/state/llm-framework/known_hosts"),
+    OSError(errno.EROFS, "Read-only file system", "/srv/state/llm-framework/.known_hosts.tmp"),
+    OSError(errno.ENOSPC, "No space left on device"),
+    OSError(errno.EMFILE, "Too many open files"),
+    IsADirectoryError(errno.EISDIR, "Is a directory", "/srv/state/llm-framework/known_hosts"),
+    FileNotFoundError(errno.ENOENT, "No such file or directory", KEY_FILE),
+    PermissionError(errno.EPERM, "Operation not permitted"),   # this computer refuses the connection itself
+]
+
+
+@pytest.mark.parametrize("error", LOCAL_ERRORS, ids=lambda e: f"{type(e).__name__}-{e.errno}")
+def test_a_problem_on_this_computer_has_its_own_code(error):
+    from orchestrator.remote.reasons import LOCAL_PROBLEM, is_local, reach_code
+    assert is_local(error) and reach_code(error) == LOCAL_PROBLEM
+    assert reach_code(error, while_waiting=True) == LOCAL_PROBLEM, "waiting for the board does not help"
+    assert reasons.classify(error) is None and LOCAL_PROBLEM not in reasons.REASONS
+
+
+def test_the_board_s_own_errors_keep_their_codes():
+    from orchestrator.remote.reasons import is_local, reach_code
+    for error, code in ERRORS:
+        assert not is_local(error), error
+        assert reach_code(error) == expected_reach(error, code), error
+    for error in TRANSIENT + [socket.timeout("timed out"), socket.gaierror(-2, "Name or service not known")]:
+        assert not is_local(error), error
+
+
+def test_the_detail_names_the_file_never_its_folder():
+    from orchestrator.remote.reasons import local_detail
+    assert local_detail(LOCAL_ERRORS[0]) == "Permission denied: id_ed25519_llm_framework"
+    assert local_detail(OSError(errno.ENOSPC, "No space left on device")) == "No space left on device"
+    assert local_detail(PermissionError(errno.EACCES, "Access is denied", "C:\\Users\\Jane Roe\\state\\known_hosts")) \
+        == "Access is denied: known_hosts"
+
+
+@pytest.mark.parametrize("folder", ["/home/jroe", "/home/jroe/", "/Users/jroe", "C:\\Users\\jroe", "/usr/home/jroe",
+                                    "/var/home/jroe", "/export/home/jroe"])
+def test_the_detail_never_names_an_account_s_home_folder(folder):
+    """A state folder whose home folder cannot be made (a service account without one): the file name would be the
+    account's name, and the deploy's reason reaches an AI (no host account name, D0). It says which kind of folder."""
+    from orchestrator.remote.reasons import local_detail
+    from orchestrator.remote.session import failed_because
+    error = PermissionError(errno.EACCES, "Permission denied", folder)
+    assert local_detail(error) == "Permission denied: a home folder"
+    assert "jroe" not in failed_because(reasons.LOCAL_PROBLEM, error)
+
+
+def test_the_detail_never_names_the_own_account(monkeypatch):
+    from orchestrator.remote.reasons import local_detail
+    monkeypatch.setenv("HOME", "/srv/accounts/jroe")
+    monkeypatch.setenv("USERPROFILE", "C:\\Accounts\\jroe")
+    monkeypatch.setenv("USER", "jroe")
+    monkeypatch.setenv("USERNAME", "jroe")
+    for path in ("/srv/accounts/jroe", "C:\\Accounts\\jroe", "/opt/jroe"):
+        assert "jroe" not in local_detail(PermissionError(errno.EACCES, "Permission denied", path)), path
+    assert local_detail(PermissionError(errno.EACCES, "Permission denied", "/srv/accounts/jroe/.ssh")) == \
+        "Permission denied: .ssh"
+
+
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_every_code_has_the_person_s_text_and_the_ai_s_next_step(lang):
+    from orchestrator.tools.facts_catalog import BLOCKERS
+    from orchestrator.utils.l10n_device import TEXTS
+    from orchestrator.utils import next_steps
+    assert reasons.CODES == reasons.REASONS + (reasons.LOCAL_PROBLEM,)
+    for code in reasons.CODES:
+        assert TEXTS[lang].get(f"device.reason.{code}") and TEXTS[lang].get(f"device.next.{code}"), code
+        text = reasons.person_text(code, lang, address="myboard.local", port=2222)
+        assert "myboard.local" in text and "{" not in text
+        ai = reasons.AI_NEXT[code]
+        assert "{" not in ai and "/" not in ai and "@" not in ai
+        assert reasons.TOOL_CODES[code] in ("hardware_unavailable", "needs_person")
+    assert "board" in reasons.person_title(reasons.LOCAL_PROBLEM, "en", address="myboard.local") and \
+        "this computer" in reasons.person_title(reasons.LOCAL_PROBLEM, "en", address="myboard.local")
+    # a problem on this computer is no blocker of the delegation rules (it is no fact about the call); its next step
+    # is Mojo's check of the installation, which looks at this computer's disks and the state folder
+    assert reasons.LOCAL_PROBLEM not in BLOCKERS and reasons.LOCAL_STEPS == ("mojo.oracle",)
+    assert all(step in next_steps.steps() for step in reasons.LOCAL_STEPS)
+
+
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_the_local_problem_s_next_step_promises_no_log_line(lang):
+    """The person's next step of local_problem is shown by the GUI's key read (gui/host_key.py), the Boards window,
+    the remote scan, the benchmark window and Mojo's board check, and none of them writes the error to a log: a text
+    that sends the person to "the log" for the file sends them nowhere. It says what to check instead."""
+    text = reasons.person_next(reasons.LOCAL_PROBLEM, lang, address="myboard.local")
+    assert "log" not in text.lower(), text
+    assert "known_hosts" in text and ("state folder" in text or "Statusordner" in text)
+
+
+def test_check_port_tells_a_refusal_of_this_computer(monkeypatch):
+    def refused_here(address, timeout=None):
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+    monkeypatch.setattr(socket, "create_connection", refused_here)
+    assert reasons.check_port("192.0.2.10", 22) == reasons.LOCAL_PROBLEM
+
+
+@pytest.mark.parametrize("where", ["key read", "login"])
+def test_a_deploy_stopped_by_this_computer_says_so_and_blames_no_board(where, manager, board, package, monkeypatch,
+                                                                       tmp_path):
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    full = OSError(errno.ENOSPC, "No space left on device", str(tmp_path / "state" / "known_hosts"))
+
+    def fail(*a, **k):
+        raise full
+    monkeypatch.setattr(ssh_trust, "check_host_key" if where == "key read" else "connect", fail)
+    noted = []
+    monkeypatch.setattr(TrustedDevices, "note_reach_at", lambda self, *a: noted.append(a))
+    result, events = run(manager, package)
+    assert not result.success and result.code == reasons.LOCAL_PROBLEM
+    assert "a problem on this computer, not on the board (No space left on device: known_hosts; local_problem)" \
+        in result.reason
+    assert str(tmp_path) not in result.reason, "the reason names the file, never its folder"
+    assert noted == [], "the board is not recorded as down for Mojo"
+    assert not [e for e in events if e.kind == "waiting"]
+
+
+def test_a_problem_on_this_computer_during_the_wait_ends_it(manager, board, package, monkeypatch):
+    board.drop_after = 600_000
+    board.back_at = 10.0
+    real_connect = ssh_trust.connect
+
+    def connect(*a, **k):
+        if board.logins:
+            raise PermissionError(errno.EACCES, "Permission denied", KEY_FILE)
+        return real_connect(*a, **k)
+    monkeypatch.setattr(ssh_trust, "connect", connect)
+    result, events = run(manager, package)
+    assert not result.success and result.code == reasons.LOCAL_PROBLEM and board.starts == 0
+    assert max(e.elapsed for e in events if e.kind == "waiting") < 60, "it does not wait out the 300 s"
+
+
+def test_the_ai_is_told_it_is_this_computer(monkeypatch):
+    from orchestrator.tools import tools_deploy
+    error = tools_deploy.unreachable_error(SimpleNamespace(label="Shelf"), LOCAL_ERRORS[1])
+    assert error.code == "needs_person" and error.blocker == "" and "(local_problem)" in str(error)
+    assert "a problem on this computer" in str(error) and "known_hosts" not in str(error) and "/" not in str(error)
+    assert error.next == reasons.AI_NEXT[reasons.LOCAL_PROBLEM]
+    assert [s.id for s in error.steps] == ["mojo.oracle"], "the next step comes from the catalogue"
+
+
+def test_the_person_steps_record_no_board_for_a_problem_on_this_computer(tmp_path):
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    device_id = "d" * 16
+    failure = person_steps.unreachable_error(LOCAL_ERRORS[0], HOST, PORT, state_dir=tmp_path, device_id=device_id,
+                                             step="deploy")
+    assert failure.reason == reasons.LOCAL_PROBLEM and failure.kind == "unreachable"
+    assert TrustedDevices(tmp_path).last_deploys() == {}, "nothing is recorded with the board"
+    person_steps.unreachable_error(socket.timeout("timed out"), HOST, PORT, state_dir=tmp_path, device_id=device_id,
+                                   step="deploy")
+    assert TrustedDevices(tmp_path).last_deploys()[device_id]["reach"]["code"] == reasons.HOST_DOWN, \
+        "a board that does not answer still is"
+
+
+def test_the_cli_shows_the_reason_and_this_computer_s_words(tmp_path, monkeypatch):
+    from orchestrator import cli as cli_module
+    from test_cli_builds import quiet_console
+    printed = quiet_console(monkeypatch)
+    with pytest.raises(SystemExit):
+        cli_module._unreachable(None, HOST, PORT, LOCAL_ERRORS[1], state_dir=tmp_path)
+    out = printed.getvalue()
+    assert reasons.LOCAL_PROBLEM in out and "this computer" in out and "No space left on device" in out
+    assert "switched on" not in out, "never the board's next step"
+
+
+def test_the_gui_shows_the_reason_of_this_computer():
+    pytest.importorskip("PySide6")
+    from orchestrator.gui import host_key
+    assert host_key.unreachable_text(HOST, PORT, LOCAL_ERRORS[0], "de") == \
+        reasons.person_text(reasons.LOCAL_PROBLEM, "de", address=HOST, port=PORT)

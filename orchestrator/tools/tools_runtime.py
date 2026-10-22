@@ -41,7 +41,7 @@ from orchestrator.remote.address import USER_PATTERN
 # importable here.
 from orchestrator.security.paths import (DEVICE_ACCOUNT, _undouble, device_text, home_folders,  # noqa: F401
                                          label_paths, replace_folder, scrub_for_ai, shorten_home)
-from orchestrator.tools.facts_catalog import blocked, warn, with_blocker
+from orchestrator.tools.facts_catalog import BLOCKERS, blocked, warn, with_blocker
 from orchestrator.tools.job_audit import audited_job
 from orchestrator.tools.output import ToolOutput, fact
 from orchestrator.tools.policy import Decision, ToolTier
@@ -706,11 +706,14 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             return device
 
         def svc_error(e: Exception, users: Sequence[str] = ()) -> ToolError:
+            from orchestrator.remote import reasons
             text = device_text(str(e), users, folder_labels()) if users else scrub(str(e))
-            error = ToolError(text, code=getattr(e, "code", "failed"), next=getattr(e, "next", ""))
-            # the SSH reason code of a board that could not be reached or logged in to (N6) is its blocker
             reason = getattr(e, "reason", "")
-            if reason:
+            error = ToolError(text, code=getattr(e, "code", "failed"), next=getattr(e, "next", ""),
+                              steps=reasons.LOCAL_STEPS if reason == reasons.LOCAL_PROBLEM else None)
+            # the SSH reason code of a board that could not be reached or logged in to (N6) is its blocker; a
+            # problem on this computer (local_problem) is none, it keeps its next step
+            if reason in BLOCKERS:
                 with_blocker(error, reason)
             return error
 

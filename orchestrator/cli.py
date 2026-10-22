@@ -4513,6 +4513,8 @@ def _unreachable(ctx: Optional[FrameworkContext], host: str, port: int, error: B
     if code:
         _note_reach(ctx, host, port, step, code, device_id, state_dir)
         _print_reason(ctx, code, host, port)
+        if code == reasons.LOCAL_PROBLEM:   # this computer's own words: which file, and why
+            console.print(escape(str(error)))
     else:
         console.print(f"[red]Could not {doing} {escape(host)}:{port}: {escape(str(error))}[/red]")
     sys.exit(1)

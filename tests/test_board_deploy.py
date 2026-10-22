@@ -52,13 +52,28 @@ class Channel:
     def recv_exit_status(self):
         return self.status
 
+    def shutdown_write(self):
+        pass
+
+    def close(self):
+        pass
+
 
 class Stream:
+    """One end of a command's channel, as paramiko gives it (the board's stdout or stderr, or its stdin)."""
+
     def __init__(self, data=b"", status=0):
         self.data, self.channel = data, Channel(status)
 
-    def read(self):
-        return self.data
+    def read(self, n=-1):
+        chunk, self.data = (self.data, b"") if n is None or n < 0 else (self.data[:n], self.data[n:])
+        return chunk
+
+    def write(self, data):
+        pass
+
+    def flush(self):
+        pass
 
 
 class Transport:
@@ -144,11 +159,18 @@ class Client:
     def close(self):
         self.closed = True
 
-    def exec_command(self, command):
+    def exec_command(self, command, timeout=None):
         if not self.board.online or self.closed:
             raise Gone("Socket is closed")
-        status, out = self.board.run(command)
-        return None, Stream(out.encode(), status), Stream(b"")
+        self.board.wire.append(command)
+        self.board.timeouts.append(timeout)
+        # sshd hands the command to the account's login shell: every command is one `sh -c '...'`, so that shell's
+        # syntax (fish, csh) never matters; the board's sh then runs the script inside
+        words = shlex.split(command)
+        assert len(words) == 3 and words[:2] == ["sh", "-c"] and command == "sh -c " + shlex.quote(words[2]), \
+            f"a command reached the board's login shell unwrapped: {command}"
+        status, out = self.board.run(words[2])
+        return Stream(b""), Stream(out.encode(), status), Stream(b"")
 
 
 class Board:
@@ -170,6 +192,8 @@ class Board:
         self.install_polls_needed = 2
         self.docker_ps = ""            # what `docker ps -a` answers on the board (the old Qdrant sidecar's look)
         self.docker_commands = []
+        self.wire = []                 # every command as it reached the board's login shell
+        self.timeouts = []             # and the time limit each one had
 
     def go_offline(self):
         self.online = False

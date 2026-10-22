@@ -8,22 +8,21 @@ SSH trust for device probing and deployment.
 - Authentication: a framework Ed25519 key, installed on the device once ("pairing") with a password that
   is used for that single connection and never stored.
 
-paramiko is imported on first use (orchestrator/remote/transport.py, decision RG1): importing this module, the deploy
-or the probe code loads no SSH library. `ssh_trust.paramiko` (None without it: what the person steps, the CLI's
-`scan --device` and Mojo ask) and `ssh_trust.TofuPolicy` stay readable under their old names; a test that sets
-`ssh_trust.paramiko = None` makes this module behave as without paramiko, as before.
+paramiko is imported on first use (orchestrator/remote/transport.py, decision RG1): importing this module, the deploy or
+the probe code loads no SSH library. The login (connect) and paramiko_quiet live in orchestrator/remote/transport.py;
+the names here delegate, so every caller and every test that patches ssh_trust.connect reaches the one login.
+`ssh_trust.paramiko` (None without it: what the person steps, the CLI's `scan --device` and Mojo ask) and
+`ssh_trust.TofuPolicy` stay readable under their old names; a test that sets `ssh_trust.paramiko = None` makes this
+module behave as without paramiko, as before.
 """
 
 import base64
-import contextlib
 import hashlib
-import logging
 import os
 import re
 import shlex
 import socket
 import tempfile
-import threading
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -183,62 +182,17 @@ def client_key(state_dir: Path) -> Tuple[Path, str]:
     return private, public.read_text(encoding="ascii").strip()
 
 
-_quiet_lock = threading.Lock()
-_quiet_users = 0
-_quiet_saved: List[Tuple[logging.Logger, int]] = []
-
-
-@contextlib.contextmanager
-def paramiko_quiet():
-    """Holds paramiko's loggers at INFO or higher while a connection authenticates, also when the framework logs at
-    DEBUG: a password or key material must never reach a log file. Levels come back when the last login is done."""
-    global _quiet_users, _quiet_saved
-    with _quiet_lock:
-        if _quiet_users == 0:
-            known = list(logging.Logger.manager.loggerDict)  # a copy: another thread may add a logger meanwhile
-            names = ["paramiko"] + sorted(n for n in known if n.startswith("paramiko."))
-            for name in names:
-                logger = logging.getLogger(name)
-                # A child without its own level follows "paramiko"; only explicit levels below INFO are raised.
-                level = logger.getEffectiveLevel() if name == "paramiko" else logger.level or logging.INFO
-                if level < logging.INFO:
-                    _quiet_saved.append((logger, logger.level))
-                    logger.setLevel(logging.INFO)
-        _quiet_users += 1
-    try:
-        yield
-    finally:
-        with _quiet_lock:
-            _quiet_users -= 1
-            if _quiet_users == 0:
-                for logger, level in _quiet_saved:
-                    logger.setLevel(level)
-                _quiet_saved = []
+# The quiet logging while a login authenticates and the login itself moved to orchestrator/remote/transport.py
+# (consolidation chain c2-remote-session); these are their old names. Callers and tests reach connect through this
+# module (they patch ssh_trust.connect), so it stays a function here.
+paramiko_quiet = transport.paramiko_quiet
 
 
 def connect(host: str, user: str, state_dir: Path, port: int = 22, password: Optional[str] = None,
             timeout: float = 10.0):
     """An authenticated SSHClient for a device whose host key is already trusted.
-    Uses the framework key; a password (pairing) is used for this connection only."""
-    paramiko = _require_paramiko()
-    private, _ = client_key(state_dir)
-    client = paramiko.SSHClient()
-    path = known_hosts_path(state_dir)
-    if path.exists():
-        client.load_host_keys(str(path))
-    client.set_missing_host_key_policy(_tofu_policy()())
-    try:
-        with paramiko_quiet():
-            client.connect(host, port=port, username=user, key_filename=str(private), password=password,
-                           look_for_keys=False, allow_agent=False, timeout=timeout, banner_timeout=timeout,
-                           auth_timeout=timeout)
-    except paramiko.BadHostKeyException:
-        client.close()
-        raise HostKeyChanged(host, port) from None
-    except Exception:
-        client.close()
-        raise
-    return client
+    Uses the framework key; a password (pairing) is used for this connection only (transport.open_client)."""
+    return transport.open_client(host, user, state_dir, port=port, password=password, timeout=timeout)
 
 
 def install_public_key(client, public_line: str) -> None:
@@ -250,8 +204,9 @@ def install_public_key(client, public_line: str) -> None:
     q = shlex.quote(public_line)
     command = (f"umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && "
                f"(grep -qxF {q} ~/.ssh/authorized_keys || printf '%s\\n' {q} >> ~/.ssh/authorized_keys)")
-    # B601: a fixed command whose one value is the checked and quoted public key line, never outside input.
-    _, stdout, stderr = client.exec_command(command)  # nosec B601
+    # B601: a fixed command whose one value is the checked and quoted public key line, never outside input. It goes
+    # to the board as one `sh -c '...'`, so the account's login shell (fish, csh) does not read its && and ||.
+    _, stdout, stderr = client.exec_command(transport.sh_command(command))  # nosec B601
     if stdout.channel.recv_exit_status() != 0:
         raise HostKeyError(f"Could not install the framework key: {stderr.read().decode(errors='replace').strip()}")
 

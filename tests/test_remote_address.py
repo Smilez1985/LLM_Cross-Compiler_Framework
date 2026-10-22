@@ -352,12 +352,25 @@ def test_the_deployment_window_refuses_it_too(qapp, make_framework, tmp_path, mo
     assert win._connection().user == "radxa"
 
 
-def test_an_ai_sees_device_account_for_every_name_a_board_may_have():
-    from orchestrator.remote.address import USER_PATTERN
+def test_an_ai_sees_device_account_for_every_name_a_board_may_have(monkeypatch):
+    """The AI's text of a board (security.paths.device_text, the old name in tools_runtime is the same function) hides
+    every account the one check accepts, and it asks that check itself: there is no second pattern to drift. The old
+    name tools_runtime._ACCOUNT stays the one pattern too, as the test before this one asserted."""
+    import re
+    from orchestrator.remote import address
+    from orchestrator.security import paths
     from orchestrator.tools import tools_runtime
-    assert tools_runtime._ACCOUNT is USER_PATTERN
-    assert tools_runtime.device_text("login as orangepi failed", ["orangepi"]) == \
-        f"login as {tools_runtime.DEVICE_ACCOUNT} failed"
+    assert tools_runtime._ACCOUNT is address.USER_PATTERN, "the old name is the one account check"
+    assert tools_runtime.device_text is paths.device_text
+    for name in ("orangepi", "dietpi", "radxa", "pi", "kiosk7", "user.name", "a-b_c", "_svc", "x" * 32, "root"):
+        assert address.valid_user(name, allow_root=True), name
+        assert tools_runtime.device_text(f"login as {name} failed", [name]) == \
+            f"login as {tools_runtime.DEVICE_ACCOUNT} failed", name
+    for refused in ("\u017fudo", "pi\u212a", "dietpi\n"):   # the check refuses them, so no board has them to hide
+        assert not address.valid_user(refused, allow_root=True)
+    monkeypatch.setattr(address, "USER_PATTERN", re.compile(r"^never$", re.ASCII))
+    assert tools_runtime.device_text("login as orangepi failed", ["orangepi"]) == "login as orangepi failed", \
+        "device_text reads the one USER_PATTERN where it runs, no copy of its own"
 
 
 def test_adding_a_board_no_longer_loads_the_build_engine(tmp_path):

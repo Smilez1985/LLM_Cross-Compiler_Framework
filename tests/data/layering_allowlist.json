@@ -158,12 +158,5 @@
    "until": "c5-split-core"
   }
  ],
- "third_party": [
-  {
-   "from": "orchestrator.remote.reasons",
-   "library": "paramiko",
-   "reason": "classify() reads paramiko's exception classes once paramiko is loaded",
-   "until": "c2-remote-session (the transport owns paramiko)"
-  }
- ]
+ "third_party": []
 }
