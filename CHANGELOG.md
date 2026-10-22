@@ -1282,7 +1282,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   benchmark can use the same steps next (chain c2-remote-callers). The deploy keeps its package and deploy.sh's job and
   is a thin adapter: its results, reasons and device states are the same, pinned by `tests/test_remote_session.py`
   against the session before the move. Its credentials are typed: `KeyOnly()` (every AI path) can never reach the key
-  installation, only the person's `OneTimePassword` can pair. `RemoteShell` and the probe read a board's answer with
+  installation, only the person's `OneTimePassword` can pair. Every login reads and checks the board's host key
+  through the one read-only trust store (`orchestrator/remote/trust.py` `TrustStore.check`, with the fingerprint the
+  person was shown), like every other host-key check. `RemoteShell` and the probe read a board's answer with
   the transport's one bounded reader, `ssh_trust.connect` and `paramiko_quiet` delegate to the transport, and the
   reason codes read paramiko's error types through it (paramiko now has the transport as its only home in the remote
   layer). Every command of the deploy now has the time limit and the output cap the device runtime's commands had

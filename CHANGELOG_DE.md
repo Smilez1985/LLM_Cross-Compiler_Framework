@@ -1462,7 +1462,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   behält sein Paket und den Job von deploy.sh und ist ein dünner Adapter: seine Ergebnisse, Gründe und
   Gerätezustände sind dieselben, festgehalten von `tests/test_remote_session.py` an der Sitzung vor dem Umzug. Seine
   Zugangsdaten haben einen Typ: `KeyOnly()` (jeder KI-Weg) erreicht die Schlüssel-Installation nie, nur das
-  `OneTimePassword` der Person kann koppeln. `RemoteShell` und die Board-Prüfung lesen die Antwort eines Boards mit
+  `OneTimePassword` der Person kann koppeln. Jede Anmeldung liest und prüft den Host-Schlüssel des Boards über den
+  einen nur lesenden Trust-Store (`orchestrator/remote/trust.py` `TrustStore.check`, mit dem Fingerabdruck, den die
+  Person gesehen hat), wie jede andere Prüfung eines Host-Schlüssels. `RemoteShell` und die Board-Prüfung lesen die
+  Antwort eines Boards mit
   dem einen begrenzten Leser des Transports, `ssh_trust.connect` und `paramiko_quiet` delegieren an den Transport,
   und die Grundcodes lesen die Fehlertypen von paramiko über ihn (paramiko hat in der Remote-Schicht jetzt nur noch
   den Transport als Zuhause). Jeder Befehl des Deployments hat jetzt das Zeitlimit und die Ausgabegrenze, die die

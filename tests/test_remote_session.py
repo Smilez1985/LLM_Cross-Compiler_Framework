@@ -304,6 +304,28 @@ def test_the_shown_fingerprint_is_checked_at_the_re_login_too(manager, board, pa
                              f"({ssh_trust.fingerprint(other)}, not {shown}); nothing was deployed.")
 
 
+def test_every_login_checks_the_key_through_the_one_trust_store(manager, board, package, monkeypatch):
+    """Stage C seam: the session's host-key read and check is remote/trust.py TrustStore.check (the one read-only
+    store of chain c2-remote-trust), with the fingerprint the person was shown, at the first login and at each one
+    after a drop; no second fetch-and-compare next to it."""
+    from orchestrator.remote.trust import TrustStore
+    seen = []
+    real_check = TrustStore.check
+
+    def check(self, endpoint, key=None, **expect):
+        seen.append((str(self.state_dir), endpoint.host, endpoint.port, key, expect))
+        return real_check(self, endpoint, key, **expect)
+    monkeypatch.setattr(TrustStore, "check", check)
+    board.drop_on_poll = 1
+    board.back_at = 20.0
+    board.install_polls_needed = 3
+    shown = ssh_trust.fingerprint(board.key)
+    result, _events = run(manager, package, expect_fingerprint=shown)
+    assert result.success and result.resumed == 1
+    state = str(manager._state_dir())
+    assert seen == [(state, HOST, 22, None, {"expect_fingerprint": shown})] * 2
+
+
 def test_the_key_is_installed_once_with_a_password_and_never_without(manager, board, package, monkeypatch):
     installed, passwords = [], []
     real_connect = ssh_trust.connect
