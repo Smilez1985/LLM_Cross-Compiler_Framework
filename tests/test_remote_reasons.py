@@ -600,6 +600,16 @@ def test_every_code_has_the_person_s_text_and_the_ai_s_next_step(lang):
     assert all(step in next_steps.steps() for step in reasons.LOCAL_STEPS)
 
 
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_the_local_problem_s_next_step_promises_no_log_line(lang):
+    """The person's next step of local_problem is shown by the GUI's key read (gui/host_key.py), the Boards window,
+    the remote scan, the benchmark window and Mojo's board check, and none of them writes the error to a log: a text
+    that sends the person to "the log" for the file sends them nowhere. It says what to check instead."""
+    text = reasons.person_next(reasons.LOCAL_PROBLEM, lang, address="myboard.local")
+    assert "log" not in text.lower(), text
+    assert "known_hosts" in text and ("state folder" in text or "Statusordner" in text)
+
+
 def test_check_port_tells_a_refusal_of_this_computer(monkeypatch):
     def refused_here(address, timeout=None):
         raise PermissionError(errno.EPERM, "Operation not permitted")

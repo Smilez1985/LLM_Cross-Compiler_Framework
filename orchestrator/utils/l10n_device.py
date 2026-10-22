@@ -42,8 +42,7 @@ TEXTS = {
                                        "computer does not allow the connection.",
         "device.next.local_problem": "Free disk space on this computer and check that you may write to the "
                                      "framework's state folder (its SSH key and known_hosts are there) and that no "
-                                     "security program on this computer blocks the connection; the log names the "
-                                     "file and the error. Then try again.",
+                                     "security program on this computer blocks the connection. Then try again.",
         # --- waiting for the board during a deploy (N5) ---
         "device.wait.status": "Waiting for the board at {address}: {elapsed} of at most {limit}. The upload "
                               "continues where it stopped as soon as the board answers again.",
@@ -143,8 +142,7 @@ TEXTS = {
         "device.next.local_problem": "Gib Speicherplatz auf diesem Computer frei und prüfe, ob du in den Statusordner "
                                      "des Frameworks schreiben darfst (dort liegen sein SSH-Schlüssel und "
                                      "known_hosts) und ob kein Sicherheitsprogramm auf diesem Computer die "
-                                     "Verbindung blockiert; das Log nennt die Datei und den Fehler. Versuche es dann "
-                                     "erneut.",
+                                     "Verbindung blockiert. Versuche es dann erneut.",
         # --- warten auf das Board während eines Deployments (N5) ---
         "device.wait.status": "Warte auf das Board unter {address}: {elapsed} von höchstens {limit}. Der Upload "
                               "geht dort weiter, wo er stehen blieb, sobald das Board wieder antwortet.",
