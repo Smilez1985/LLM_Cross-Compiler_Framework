@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from orchestrator.remote.address import Endpoint, host_shaped, valid_port, valid_user
+from orchestrator.remote.trust import FINGERPRINT, TrustStore
 from orchestrator.utils.file_lock import file_lock
 
 DEVICES_FILE = "devices.json"
@@ -39,7 +40,7 @@ MAX_BYTES = 256 * 1024
 MAX_DEVICES = 200
 
 DEVICE_ID_RE = re.compile(r"^[0-9a-f]{16}$", re.ASCII)
-_FINGERPRINT = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$", re.ASCII)
+_FINGERPRINT = FINGERPRINT   # the one fingerprint pattern (orchestrator/remote/trust.py)
 _KEY_TYPE = re.compile(r"^[a-z0-9@.-]{3,64}$", re.ASCII)
 _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
 # What a deploy saw on the board, kept with its last deploy (note_board) until the next deploy looks again, and what the
@@ -160,18 +161,9 @@ class TrustedDevices:
 
     def key_status(self, device: TrustedDevice) -> str:
         """'known' while the framework's known_hosts holds exactly the record's key for its address; 'changed' when
-        it holds another key there; 'unknown' when it holds none (the person removed it). Reads no network."""
-        from orchestrator.utils import ssh_trust
-        try:
-            entries = ssh_trust._host_keys(self.state_dir).lookup(ssh_trust.host_entry(device.host, device.port))
-        except Exception:  # noqa: BLE001 - no paramiko or a damaged known_hosts: nothing is known
-            return "unknown"
-        if not entries:
-            return "unknown"
-        stored = entries.get(device.key_type)
-        if stored is None:
-            return "changed"
-        return "known" if ssh_trust.fingerprint(stored) == device.fingerprint else "changed"
+        it holds another key there; 'unknown' when it holds none (the person removed it). Reads no network
+        (TrustStore.status_of)."""
+        return TrustStore(self.state_dir).status_of(device)
 
     def last_deploys(self) -> Dict[str, Dict[str, Any]]:
         rows = self._read(self.deploys_path)

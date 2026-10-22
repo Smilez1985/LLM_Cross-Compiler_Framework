@@ -12,8 +12,10 @@ Everything that talks to a board (consolidation plan, layer 2): one Qt-free pack
 - text.py: a board's words as one line (one_line) or as kept output lines (keep_tail), and the visible state of a
   running deploy (event_text: for the person in their language, or for an AI in English with the board's label).
 - transport.py: whether SSH works here (available(), PARAMIKO_AVAILABLE); paramiko is imported on first use only.
+- trust.py: the framework's known_hosts, read-only (TrustStore: status, status_of, check -> KeyCheck,
+  read_presented_key; fingerprint, device_id_for, parse_public_key for a pasted key; the HostKeyError classes).
 
 What a contact found is recorded for Mojo by orchestrator/runtime/device/trusted.py record_reach (the store of the
-trusted boards lives there; this layer imports no runtime code). The trust store, pairing, the session with waiting
-and resume, and the transports follow in consolidation stage C.
+trusted boards lives there; this layer imports no runtime code). Pairing, the session with waiting and resume, and the
+transports follow in consolidation stage C.
 """

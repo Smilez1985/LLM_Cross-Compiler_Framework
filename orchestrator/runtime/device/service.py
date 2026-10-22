@@ -78,20 +78,20 @@ def read_key(device: TrustedDevice, state_dir: Path, step: str = "") -> str:
     """The fingerprint of the key the device presents now (a key read, no login); refused unless it is the trusted
     one. Nothing is written but, when `step` names the contact, a failure with an SSH reason code for Mojo."""
     from orchestrator.remote import reasons
-    from orchestrator.utils import ssh_trust
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import TrustStore
     try:
-        key = ssh_trust.fetch_host_key(device.host, device.port)
-        status = ssh_trust.check_host_key(state_dir, device.host, device.port, key)
+        check = TrustStore(state_dir).check(Endpoint(device.host, device.port))
     except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
         reason = reasons.reach_code(e)
         if reason:
             raise unreachable(device, reason, state_dir, step) from None
         raise DeviceRuntimeError(f"The host key of {device.label} could not be read ({e.__class__.__name__}).",
                                  code="failed", next="Tell the person; the framework's log has the details.") from None
-    fp = ssh_trust.fingerprint(key)
-    if status == "changed":
+    fp = check.fingerprint
+    if check.status == "changed":
         raise unreachable(device, reasons.HOST_KEY_CHANGED, state_dir, step)
-    if status != "known" or fp != device.fingerprint:
+    if not check.known or fp != device.fingerprint:
         raise DeviceRuntimeError(f"The host key of {device.label} is not the one the person trusted ({fp}); nothing "
                                  "was done.", code="needs_person",
                                  next="Tell the person: they must check the device and trust it again in the GUI or "

@@ -128,15 +128,15 @@ def check_board_entry(host: str, user: str, label: Optional[str]) -> Optional[st
 
 def read_host_key(state_dir: Path, host: str, port: int) -> Tuple[Any, str, str]:
     """(key, its state in the framework's known_hosts: known, changed or unknown, its fingerprint) of the board at
-    host:port: one key read, no login."""
-    from orchestrator.utils import ssh_trust
+    host:port: one key read, no login (remote/trust.py TrustStore.check)."""
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import TrustStore
     _need_paramiko()
     try:
-        key = ssh_trust.fetch_host_key(host, port)
-        status = ssh_trust.check_host_key(Path(state_dir), host, port, key)
+        check = TrustStore(Path(state_dir)).check(Endpoint(host, port))
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
         raise unreachable_error(e, host, port) from None
-    return key, status, ssh_trust.fingerprint(key)
+    return check.key, check.status, check.fingerprint
 
 
 def not_known_error(host: str, port: int, status: str) -> BoardStepError:
@@ -295,24 +295,25 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
     address. A `password` is used once to install the framework's key and is never stored. `step` names the contact
     for Mojo's record of the board (W1). The caller closes the client (`on_client` gets it at once, so a Cancel can
     close it)."""
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import TrustStore
     from orchestrator.runtime.device import reasons
-    from orchestrator.runtime.profile import device_id_for_host_key
     from orchestrator.utils import ssh_trust
     state_dir = Path(state_dir)
     _need_paramiko()
     try:
-        key = ssh_trust.fetch_host_key(host, port)
-        status = ssh_trust.check_host_key(state_dir, host, port, key)
+        check = TrustStore(state_dir).check(Endpoint(host, port), expect_device_id=device_id)
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
         raise unreachable_error(e, host, port, state_dir=state_dir, device_id=device_id, step=step) from None
-    if status == "changed":
+    key = check.key
+    if check.status == "changed":
         _note(state_dir, device_id, step, reasons.HOST_KEY_CHANGED)
         raise BoardStepError(str(ssh_trust.HostKeyChanged(host, port)), "host_key_changed",
                              reason=reasons.HOST_KEY_CHANGED)
-    if status != "known":
+    if not check.known:
         raise BoardStepError(f"{host}:{port} is not trusted yet: probe it first with llm-cli scan --device {host} "
                              "--user USER.", "not_trusted")
-    if device_id_for_host_key(ssh_trust.fingerprint(key)) != device_id:
+    if check.other_device:
         raise BoardStepError(f"{host}:{port} answers with the host key of another device than {device_id}; probe it "
                              "again before deploying to it.", "other_device")
     try:

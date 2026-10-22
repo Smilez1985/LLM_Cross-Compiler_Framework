@@ -4679,12 +4679,14 @@ def _profile_summary(profile) -> list:
 def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Optional[str],
                   ctx: Optional[FrameworkContext] = None):
     """The device's host key, trusted on first use but never silently (as for deploy run). Exits when refused."""
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import TrustStore
     from orchestrator.utils import ssh_trust
     try:
-        key = ssh_trust.fetch_host_key(host, port)
-        status = ssh_trust.check_host_key(state_dir, host, port, key)
+        check = TrustStore(state_dir).check(Endpoint(host, port))
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
         _unreachable(ctx, host, port, e, step="probe", state_dir=state_dir)
+    key, status = check.key, check.status
     if status == "changed":
         _note_reach(ctx, host, port, "probe", "device_host_key_changed", state_dir=state_dir)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
