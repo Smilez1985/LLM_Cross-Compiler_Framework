@@ -532,7 +532,10 @@ nutzt sie nicht.
   dem Framework in diesem Tag aus. Sie läuft bei `pull_request_target`, also prüft die Kopie in `main` jeden Pull
   Request, nur lesend und ohne Secrets, und die Dateien des Pull Requests werden nur als Daten gelesen. Besitzer,
   Mitglieder und Collaborators des Repositorys dürfen auch andere Dateien ändern (die Veröffentlichung des Maintainers
-  verschiebt das Paket nach `packs/` und ändert den signierten Index); diese Änderungen erscheinen als Hinweise. Der
+  verschiebt das Paket nach `packs/` und ändert den signierten Index); diese Änderungen erscheinen als Hinweise. Stell
+  die Actions-Option "Approval for running fork pull request workflows from contributors" des Repositorys auf
+  "Require approval for all external contributors" und gib den Lauf eines Forks nie frei: Ein Pull-Request kann einen
+  eigenen Workflow mit einem Job namens `validate` mitbringen, und die Prüfung selbst braucht keine Freigabe. Der
   Signaturschlüssel erreicht die CI nie.
 - `scripts/zoo_sign_index.py` signiert den Index. Sein Signaturschlüssel liegt nur im Schlüsselbund des
   Betriebssystems (Dienst `lcf-community-index`):

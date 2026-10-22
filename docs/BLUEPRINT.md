@@ -909,8 +909,9 @@ person's own login; no token is read, stored or shown, and no AI-reachable modul
 `scripts/community_repo/validate-contribution.yml` is the workflow template for the community repository: the
 required check `validate` of `main`, run on every pull request into `main` from `main`'s own copy
 (`pull_request_target`, read-only, no secret), so a pull request cannot rewrite it. The pull request's head commit
-is data only (checked out into its own folder, read with git alone, never run). The changes come from git between
-`main` and the head; links, executable files and file names with control characters fail; anyone but the owner, a
+is data only (fetched by its id into a repository without a working tree, never checked out, read with git alone,
+never run). The changes come from git between `main` and the head, from their one merge base (a pull request with
+none or several fails); links, executable files and file names with control characters fail; anyone but the owner, a
 member or a collaborator may only add pack zips under `contributions/<kind>/`, and their other changes are notices
 (the maintainer's publication passes). Every added pack must be at most 5 MB and pass `llm-cli zoo verify`, which
 also rejects packs that still contain keys or personal data (the repository's secret scan skips binary files, so it

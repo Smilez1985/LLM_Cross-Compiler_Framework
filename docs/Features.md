@@ -2940,24 +2940,31 @@ name, a clone with changes of its own (they are never thrown away).
 - `scripts/community_repo/validate-contribution.yml` is the CI workflow template for the community repository. It
   runs on every pull request into `main` (it is the required check `validate` of the protected `main`) and always
   comes from `main` itself (`pull_request_target`): a pull request from a fork cannot rewrite the check that checks
-  it. The job only reads (`contents: read`, no secret, no cache, no credentials kept in a checkout). The pull
-  request's files are data only: its head commit is checked out into a folder of its own after the framework is
-  installed, nothing in it is run, sourced, installed or imported, and the steps read it with git alone; nothing the
-  pull request sets (title, branch, file names) is written into a script. The changes are computed by git between
-  `main` and the head commit (from their merge base, as GitHub merges them; a move counts as a deletion and an
-  addition). A file name with a control character, a symbolic link, an executable file or a submodule fails for
-  everyone. A pull request by anyone but the repository's owner, a member or a collaborator may only add pack files
-  `contributions/<kind>/<name>.zip`; anything else it adds, changes or deletes (the workflow, `index.json`, `packs/`, a
-  README, also the README of a kind folder, a deletion) fails, and the error names the file. The other changes of
-  the owner, a member or a collaborator, such as the maintainer's publication (the pack moved to `packs/`, the signed
-  index changed), are shown as notices and pass. Every added pack, whoever adds it, is copied out of git's objects
-  (never read through the checkout) and must be at most 5 MB and pass `llm-cli zoo verify`, whose privacy scrub also
-  rejects a pack with a key in any of its files (the repository's secret scan skips binary files, so it does not run
-  on the zips); what it prints is never read as a workflow command. The signing key never reaches CI. The maintainer
-  sets the framework release the packs are checked with (`LCF_REF`); until then the template holds a placeholder, so
-  the job fails. Bringing this version to a copy that still runs on `pull_request`: the pull request that changes it
-  gets no `validate` from either copy, so add `pull_request:` next to `pull_request_target:` in that one pull request
-  and remove it again in the very next one.
+  it. The job only reads (`contents: read`, no secret, no cache, no credentials kept in its one checkout, the
+  framework's). The pull request's files are data only and never checked out: after the framework is installed, `main`
+  and the head commit (by its id) are fetched quietly and without credentials into a repository without a working
+  tree, so no file of the pull request is ever written out, nothing of it is run, sourced, installed or imported, and
+  the steps read it with git alone (a checkout would also print the commit's subject, where a carriage return starts
+  a workflow command); nothing the pull request sets (title, branch, commit messages, file names) is written into a
+  script. The changes are computed by git between `main` and the head commit (from their one merge base, as GitHub
+  merges them: a pull request with no or more than one merge base with `main` fails, because GitHub's merge would then
+  combine bases the check does not see; a move counts as a deletion and an addition). A file name with a control
+  character, a symbolic link, an executable file or a submodule fails for everyone. A pull request by anyone but the
+  repository's owner, a member or a collaborator may only add pack files `contributions/<kind>/<name>.zip`; anything
+  else it adds, changes or deletes (the workflow, `index.json`, `packs/`, a README, also the README of a kind folder,
+  a deletion) fails, and the error names the file. The other changes of the owner, a member or a collaborator, such
+  as the maintainer's publication (the pack moved to `packs/`, the signed index changed), are shown as notices and
+  pass. Every added pack, whoever adds it, is copied out of git's objects and must be at most 5 MB and pass
+  `llm-cli zoo verify`, whose privacy scrub also rejects a pack with a key in any of its files (the repository's
+  secret scan skips binary files, so it does not run on the zips); what it prints is never read as a workflow
+  command. The signing key never reaches CI. The maintainer sets the framework release the packs are checked with
+  (`LCF_REF`); until then the template holds a placeholder, so the job fails. The repository also needs one setting:
+  a pull request can still bring a workflow of its own that runs on `pull_request` with a job named `validate`, so
+  under Settings > Actions > General, "Approval for running fork pull request workflows from contributors" must be
+  "Require approval for all external contributors" (this check needs no approval, and a fork's workflow run is never
+  approved). Bringing this version to a copy that still runs on `pull_request`: the pull request that changes it gets
+  no `validate` from either copy, so add `pull_request:` next to `pull_request_target:` in that one pull request and
+  remove it again in the very next one.
 
 ### What was removed
 

@@ -509,8 +509,10 @@ not use them.
   It runs the checks of step 4 above with the framework at that tag. It runs on `pull_request_target`, so the copy on
   `main` checks every pull request, read-only and without secrets, and the pull request's files are only read as
   data. The repository's owner, members and collaborators may change other files too (the maintainer's publication
-  moves the pack to `packs/` and changes the signed index); those changes are shown as notices. The signing key never
-  reaches the CI.
+  moves the pack to `packs/` and changes the signed index); those changes are shown as notices. Set the repository's
+  Actions option "Approval for running fork pull request workflows from contributors" to "Require approval for all
+  external contributors" and never approve a fork's run: a pull request can bring a workflow of its own with a job
+  named `validate`, and the check itself needs no approval. The signing key never reaches the CI.
 - `scripts/zoo_sign_index.py` signs the index. Its signing key lives only in the operating system's keyring
   (service `lcf-community-index`):
 

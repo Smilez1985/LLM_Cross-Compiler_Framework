@@ -3248,26 +3248,34 @@ mit eigenen Änderungen (sie werden nie verworfen).
 - `scripts/community_repo/validate-contribution.yml` ist die Vorlage für den CI-Workflow des Community-Repositorys.
   Sie läuft bei jedem Pull Request in `main` (sie ist die Pflichtprüfung `validate` des geschützten `main`) und kommt
   immer aus `main` selbst (`pull_request_target`): Ein Pull Request aus einem Fork kann die Prüfung, die ihn prüft,
-  nicht umschreiben. Der Job liest nur (`contents: read`, kein Secret, kein Cache, kein Checkout behält Zugangsdaten).
-  Die Dateien des Pull Requests sind nur Daten: Sein Head-Commit wird in einen eigenen Ordner ausgecheckt, nachdem das
-  Framework installiert ist, nichts darin wird ausgeführt, eingelesen (`source`), installiert oder importiert, und die
-  Schritte lesen ihn nur mit git; nichts, was der Pull Request festlegt (Titel, Branch, Dateinamen), wird in ein
-  Skript geschrieben. Die Änderungen berechnet git zwischen `main` und dem Head-Commit (ab ihrer Merge-Basis, so wie
-  GitHub sie zusammenführt; ein Verschieben zählt als Löschen und Hinzufügen). Ein Dateiname mit einem Steuerzeichen,
-  ein symbolischer Link, eine ausführbare Datei oder ein Submodul fällt für jeden durch. Ein Pull Request von jemand
-  anderem als dem Besitzer des Repositorys, einem Mitglied oder einem Collaborator darf nur Pack-Dateien
-  `contributions/<kind>/<name>.zip` hinzufügen; alles andere, was er hinzufügt, ändert oder löscht (den Workflow,
-  `index.json`, `packs/`, eine README, auch die README eines Kind-Ordners, eine Löschung), fällt durch, und der Fehler
-  nennt die Datei. Die übrigen Änderungen des Besitzers, eines Mitglieds oder eines Collaborators, etwa die
-  Veröffentlichung des Maintainers (das Pack nach `packs/` verschoben, der signierte Index geändert), erscheinen als
-  Hinweise und bestehen. Jedes hinzugefügte Pack, egal von wem, wird aus den Objekten von git kopiert (nie über den
-  Checkout gelesen) und muss höchstens 5 MB groß sein und `llm-cli zoo verify` bestehen, dessen
-  Datenschutz-Bereinigung auch ein Pack mit einem Schlüssel in einer seiner Dateien abweist (der Secret-Scan des
+  nicht umschreiben. Der Job liest nur (`contents: read`, kein Secret, kein Cache, sein einziger Checkout, der des
+  Frameworks, behält keine Zugangsdaten). Die Dateien des Pull Requests sind nur Daten und werden nie ausgecheckt:
+  Nachdem das Framework installiert ist, werden `main` und der Head-Commit (über seine ID) still und ohne Zugangsdaten
+  in ein Repository ohne Arbeitsverzeichnis geholt, also wird keine Datei des Pull Requests je ausgeschrieben, nichts
+  davon wird ausgeführt, eingelesen (`source`), installiert oder importiert, und die Schritte lesen es nur mit git
+  (ein Checkout würde auch den Betreff des Commits ausgeben, in dem ein Wagenrücklauf einen Workflow-Befehl beginnt);
+  nichts, was der Pull Request festlegt (Titel, Branch, Commit-Nachrichten, Dateinamen), wird in ein Skript
+  geschrieben. Die Änderungen berechnet git zwischen `main` und dem Head-Commit (ab ihrer einen Merge-Basis, so wie
+  GitHub sie zusammenführt: Ein Pull Request ohne oder mit mehr als einer Merge-Basis mit `main` fällt durch, weil der
+  Merge von GitHub dann Basen verbindet, die die Prüfung nicht sieht; ein Verschieben zählt als Löschen und
+  Hinzufügen). Ein Dateiname mit einem Steuerzeichen, ein symbolischer Link, eine ausführbare Datei oder ein Submodul
+  fällt für jeden durch. Ein Pull Request von jemand anderem als dem Besitzer des Repositorys, einem Mitglied oder
+  einem Collaborator darf nur Pack-Dateien `contributions/<kind>/<name>.zip` hinzufügen; alles andere, was er
+  hinzufügt, ändert oder löscht (den Workflow, `index.json`, `packs/`, eine README, auch die README eines
+  Kind-Ordners, eine Löschung), fällt durch, und der Fehler nennt die Datei. Die übrigen Änderungen des Besitzers,
+  eines Mitglieds oder eines Collaborators, etwa die Veröffentlichung des Maintainers (das Pack nach `packs/`
+  verschoben, der signierte Index geändert), erscheinen als Hinweise und bestehen. Jedes hinzugefügte Pack, egal von
+  wem, wird aus den Objekten von git kopiert und muss höchstens 5 MB groß sein und `llm-cli zoo verify` bestehen,
+  dessen Datenschutz-Bereinigung auch ein Pack mit einem Schlüssel in einer seiner Dateien abweist (der Secret-Scan des
   Repositorys überspringt Binärdateien und läuft deshalb nicht über die ZIP-Dateien); was es ausgibt, wird nie als
   Workflow-Befehl gelesen. Der Signaturschlüssel kommt nie in die CI. Der Maintainer trägt das Framework-Release ein,
   mit dem die Packs geprüft werden (`LCF_REF`); bis dahin steht in der Vorlage ein Platzhalter, und der Job schlägt
-  fehl. Diese Fassung in eine Kopie bringen, die noch bei `pull_request` läuft: Der Pull Request, der sie ändert,
-  bekommt von keiner der beiden Kopien ein `validate`; ergänze deshalb in genau diesem Pull Request
+  fehl. Das Repository braucht außerdem eine Einstellung: Ein Pull Request kann immer noch einen eigenen Workflow
+  mitbringen, der bei `pull_request` läuft und einen Job namens `validate` hat; unter Settings > Actions > General muss
+  "Approval for running fork pull request workflows from contributors" deshalb auf "Require approval for all external
+  contributors" stehen (diese Prüfung braucht keine Freigabe, und der Workflow-Lauf eines Forks wird nie
+  freigegeben). Diese Fassung in eine Kopie bringen, die noch bei `pull_request` läuft: Der Pull Request, der sie
+  ändert, bekommt von keiner der beiden Kopien ein `validate`; ergänze deshalb in genau diesem Pull Request
   `pull_request:` neben `pull_request_target:` und entferne es im direkt folgenden wieder.
 
 ### Was entfernt wurde
