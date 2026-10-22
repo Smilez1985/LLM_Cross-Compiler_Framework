@@ -487,8 +487,9 @@ READ_TODAY = {
 NEW_FOR_THE_STAGE_RUNNER = {"MODEL_REVISION", "HARDWARE_CONFIG_FILE", "LLAMA_CPP_REPO_OVERRIDE"}
 # Read only by stage code started by hand with an option (source_module.sh --clone-llama-cpp), never in a build.
 ONLY_ON_REQUEST = {"LLAMA_CPP_COMMIT"}
-# What the runner hands its stages (build.sh): not read from the build container's environment.
-RUNNER_API = {"STAGE_DIR", "STAGE_NAME", "STAGE_RUNNER", "MODULES_DIR"}
+# What the runner hands its stages (build.sh): not read from the build container's environment. STAGE_LAST (the last
+# stage of this run) and CONVERT_OUTPUT (the --output option) are set by the runner itself, never from outside.
+RUNNER_API = {"STAGE_DIR", "STAGE_NAME", "STAGE_RUNNER", "MODULES_DIR", "STAGE_LAST", "CONVERT_OUTPUT"}
 BASH_VARIABLES = {"BASH_SOURCE", "SECONDS", "RANDOM", "LINENO", "FUNCNAME", "PIPESTATUS", "BASH_REMATCH", "PWD", "IFS"}
 BUILD_SCRIPTS = ("build.sh", "source_module.sh", "config_module.sh", "convert_module.sh", "rotate_module.sh",
                  "target_module.sh", "rkllm_module.sh", "rknn_module.sh")
@@ -718,6 +719,177 @@ def test_the_options_of_the_1x_modules(image):
     assert image.calls() == [f"convert <root>/other-model --outfile {OUT}/granite-Q8_0.gguf --outtype q8_0"]
 
 
+# Each module on its own with its options, as in version 1.x (DECISIONS round 16, U9 addendum; HOW2_ORIGINAL:
+# `./convert_module.sh --input ... --output ... --model-name ...`, `./target_module.sh --input <F16 GGUF>
+# --quantization ... --model-name ...`, `./config_module.sh --hardware-config <profile>`).
+
+def by_hand(image, module, *args, **values):
+    """A stage module started by hand in the folder <root>, with the options of its 1.x version."""
+    env = image.env(**values)
+    env["STUB_TOOL"] = "rkllm"
+    return subprocess.run([posix_shell("bash"), str(image.app / "modules" / f"{module}_module.sh"), *map(str, args)],
+                          env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
+                          cwd=image.root)
+
+
+FROM_OPTIONS = {"MODEL_SOURCE": None, "MODEL_NAME": None, "QUANTIZATION": None}  # the request comes from the options
+PROFILE = "# probe\nARCHITECTURE_FULL=aarch64\nCPU_MODEL_NAME=Cortex-A55\nSUPPORTS_NEON=ON\nCPU_CORES=4\n"
+
+
+@needs_bash
+def test_convert_module_by_hand_writes_the_f16_gguf_where_output_says(image):
+    """--output of the 1.x convert module: the GGUF F16 goes there (a relative path is the caller's folder)."""
+    result = by_hand(image, "convert", "--input", image.model, "--output", "granite.fp16.gguf",
+                     "--model-name", "granite", **FROM_OPTIONS)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert")
+    assert image.calls() == ["convert <root>/input-model --outfile <root>/granite.fp16.gguf --outtype f16"]
+    assert (image.root / "granite.fp16.gguf").read_text() == "gguf f16"
+    assert not any(image.output.iterdir()), "nothing else in the output folder"
+
+
+@needs_bash
+def test_a_build_with_output_quantizes_that_f16_file_and_keeps_it(image):
+    f16 = image.root / "granite.fp16.gguf"
+    result = image.run("--output", str(f16), "--model-name", "granite", MODEL_NAME=None)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert image.calls() == [f"convert <root>/input-model --outfile <root>/granite.fp16.gguf --outtype f16",
+                             f"quantize <root>/granite.fp16.gguf {OUT}/granite-Q4_K_M.gguf Q4_K_M"]
+    assert f16.read_text() == "gguf f16", "a file the person named is no intermediate"
+    assert sorted(image.outputs()) == ["build_info.json", "granite-Q4_K_M.gguf"]
+
+
+@needs_bash
+def test_target_module_by_hand_quantizes_a_gguf_input_and_keeps_it(image):
+    """The 1.x target module takes the F16 GGUF of the convert module: the convert stage sees a GGUF input and
+    converts nothing, the target stage quantizes it and leaves the person's file where it is."""
+    f16 = image.root / "granite.fp16.gguf"
+    f16.write_text("gguf f16")
+
+    result = by_hand(image, "target", "--input", f16, "--quantization", "Q5_K_M", "--model-name", "granite",
+                     **FROM_OPTIONS)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert", "target")
+    assert image.calls() == [f"quantize <root>/granite.fp16.gguf {OUT}/granite-Q5_K_M.gguf Q5_K_M"]
+    assert f16.read_text() == "gguf f16"
+    assert image.outputs()["granite-Q5_K_M.gguf"] == "quantized Q5_K_M of gguf f16"
+    assert image.build_info()["model"] == "granite" and image.build_info()["quantization"] == "Q5_K_M"
+
+
+@needs_bash
+def test_a_gguf_input_without_type_or_name_follows_the_1x_target_module(image):
+    """1.x defaults of target_module.sh: Q4_K_M, and the name of the input file without .gguf and .fp16."""
+    f16 = image.root / "granite.fp16.gguf"
+    f16.write_text("gguf f16")
+
+    result = by_hand(image, "target", "--input", f16, **FROM_OPTIONS)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert image.calls() == [f"quantize <root>/granite.fp16.gguf {OUT}/granite-Q4_K_M.gguf Q4_K_M"]
+    assert image.build_info()["model"] == "granite" and image.build_info()["quantization"] == "Q4_K_M"
+
+
+@needs_bash
+@pytest.mark.parametrize("quant", ["F16", "bf16"])
+def test_a_gguf_input_needs_a_type_llama_quantize_makes(image, quant):
+    f16 = image.root / "granite.fp16.gguf"
+    f16.write_text("gguf f16")
+    result = image.run(MODEL_SOURCE=f16, QUANTIZATION=quant)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "ERROR: The model is a GGUF file already; the target stage quantizes it to a type of llama-quantize" \
+        in result.stderr
+    assert image.calls() == [] and f16.read_text() == "gguf f16"
+
+
+@needs_bash
+def test_the_imatrix_job_measures_a_gguf_input_as_it_is(image):
+    dataset = image.root / "dataset.txt"
+    dataset.write_text("calibration text")
+    f16 = image.root / "granite.fp16.gguf"
+    f16.write_text("gguf f16")
+    image.output.rmdir()
+
+    result = image.run(JOB_TYPE="imatrix", DATASET_PATH=dataset, MODEL_SOURCE=f16)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert image.calls() == [f"imatrix -m <root>/granite.fp16.gguf -f <root>/dataset.txt "
+                             f"-o <root>/build-cache/imatrix/imatrix.dat --chunks 100"]
+    assert f16.read_text() == "gguf f16"
+
+
+@needs_bash
+def test_config_module_by_hand_with_only_a_hardware_profile_writes_toolchain_and_plan(image):
+    """`config_module.sh --hardware-config FILE` of 1.x needs no model; a build without a model is still refused,
+    also right after it (the plan without a model is never resumed into a build)."""
+    profile = image.root / "target_hardware_config.txt"
+    profile.write_text(PROFILE)
+
+    result = by_hand(image, "config", "--hardware-config", "target_hardware_config.txt", MODEL_SOURCE=None)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    stages = image.work / "stages" / "build"
+    assert "SET(CMAKE_C_COMPILER   /usr/bin/aarch64-linux-gnu-gcc)" in (stages / "cross_compile_toolchain.cmake").read_text()
+    assert "BOARD_PACKAGE=1" in (stages / "build_config.sh").read_text()
+    assert f"HARDWARE_PROFILE={profile}" in (stages / "build_config.sh").read_text(), "the path is made absolute"
+
+    later = image.run("--hardware-config", str(profile), MODEL_SOURCE=None)
+    assert later.returncode == 1 and "ERROR: MODEL_SOURCE '' does not exist in the container." in later.stderr
+    assert ("2/4", "config", "failed") in stage_lines(later)
+
+
+@needs_bash
+def test_a_changed_default_hardware_profile_runs_the_config_stage_again(image):
+    """config_module.sh reads $BUILD_CACHE_DIR/target_hardware_config.txt when no profile is named: it is an input
+    of the resume digest like a named one."""
+    assert image.run("--to", "config").returncode == 0
+    (image.cache / "target_hardware_config.txt").write_text(PROFILE)
+
+    result = image.run("--to", "config")
+
+    assert stage_lines(result) == ran("source", "config")
+    assert (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").is_file()
+
+
+@needs_bash
+def test_another_output_folder_runs_the_stages_again(image):
+    assert image.run().returncode == 0
+    other = image.root / "other-cache"
+    (other / "output").mkdir(parents=True)
+
+    result = image.run(BUILD_CACHE_DIR=other)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stage_lines(result) == ran("source", "config", "convert", "target")
+    assert sorted(p.name for p in (other / "output").iterdir()) == ["build_info.json", "model-Q4_K_M.gguf"]
+
+
+@needs_bash
+def test_a_model_folder_with_only_config_json_builds_as_before(image):
+    """The model folder of the characterization tests as they were written before the move (commit 7d583d5): only
+    config.json. The build is the same as before; new are only the convert stage's warnings about the missing
+    tokenizer and weights (validation of the 1.x convert module, U9 addendum), which name no path."""
+    for name in ("tokenizer.json", "model.safetensors"):
+        (image.model / name).unlink()
+    matrix = image.imatrix / "imatrix.dat"
+    matrix.write_text("imatrix")
+
+    result = image.run(QUANTIZATION="IQ4_XS", USE_IMATRIX="1", IMATRIX_PATH=matrix)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert image.calls() == [
+        f"convert <root>/input-model --outfile {F16} --outtype f16",
+        f"quantize --imatrix <root>/build-cache/imatrix/imatrix.dat {F16} {OUT}/model-IQ4_XS.gguf IQ4_XS",
+    ]
+    files = {"model-IQ4_XS.gguf": "quantized IQ4_XS of gguf f16 with imatrix", "build_info.json": info(quant="IQ4_XS")}
+    assert image.outputs() == files and image.leftovers() == []
+    assert [line for line in result.stderr.splitlines() if "WARNING" in line] == [
+        "WARNING: Missing Tokenizer files (tokenizer.json, tokenizer.model or vocab.json) in the model folder.",
+        "WARNING: No model weights found (model.safetensors, pytorch_model.bin or their shards) in the model folder."]
+
+
 ROTATE_HOOK = """#!/bin/bash
 # A rotation step of a target (none is shipped): changes the full-precision intermediate before quantization.
 set -euo pipefail
@@ -808,6 +980,23 @@ def test_a_stage_mode_runs_the_build_up_to_that_stage(image):
     target = entrypoint(image, "target", "--quantization", "Q4_K_M")
     assert stage_lines(target) == resumed("source", "config", "convert") + ran("target", start=4)
     assert entrypoint(image, "package").returncode != 0
+
+
+@needs_bash
+def test_the_stage_modes_take_the_options_of_the_1x_modules(image):
+    """`docker-compose exec <builder> convert --input ... --output ... --model-name ...` (HOW2_ORIGINAL) and the
+    target mode with the F16 GGUF of the convert mode."""
+    f16 = image.root / "granite.fp16.gguf"
+    convert = entrypoint(image, "convert", "--input", image.model, "--output", f16, "--model-name", "granite",
+                         **FROM_OPTIONS)
+    assert convert.returncode == 0, convert.stdout + convert.stderr
+    assert f16.read_text() == "gguf f16"
+
+    target = entrypoint(image, "target", "--input", f16, "--quantization", "Q4_K_M", "--model-name", "granite",
+                        **FROM_OPTIONS)
+    assert target.returncode == 0, target.stdout + target.stderr
+    assert image.calls()[-1] == f"quantize <root>/granite.fp16.gguf {OUT}/granite-Q4_K_M.gguf Q4_K_M"
+    assert f16.is_file()
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -965,6 +1154,15 @@ def test_the_imatrix_container_has_its_own_band_and_other_lines_change_nothing(e
     assert seen == [("Calculating IMatrix: source (1/3)", 50), ("Calculating IMatrix: convert (3/3)", 56)]
     assert progress.progress_percent == 60
     assert follow(engine, progress, "BUILD: ", ["=== Stage 1/4: source ==="]) == [], "no stages in an image build"
+
+
+def test_a_stage_line_read_after_the_build_moved_on_changes_nothing(engine):
+    """The log reader may still deliver the container's last lines after _run_container returned (it waits 10 s for
+    it): a stage line then never takes back the step and percent of the next step."""
+    from orchestrator.Core.builder import BuildProgress, BuildStatus
+    progress = BuildProgress("b1", BuildStatus.BUILDING, "Extracting", 85)
+    assert follow(engine, progress, "CONT: ", ["=== Stage 4/4: target done in 3 s ==="]) == []
+    assert progress.current_stage == "Extracting" and progress.progress_percent == 85
 
 
 def test_a_running_build_shows_its_stage_in_the_build_status(engine):

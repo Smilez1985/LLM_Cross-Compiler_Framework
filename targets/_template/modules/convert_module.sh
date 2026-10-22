@@ -11,7 +11,9 @@
 #         refuses types llama-quantize does not know. build_gguf writes the types the converter writes itself (F16,
 #         BF16, F32, Q8_0) straight into the output folder; for every other type it writes an F16 intermediate into
 #         the work folder and leaves the quantization to the target stage (after the rotate hook, when the target has
-#         one). Nothing is ever copied through unchanged.
+#         one). Nothing is ever copied through unchanged. With --output (1.x: convert_module.sh --input DIR --output
+#         FILE --model-name NAME) that GGUF goes to FILE and is kept. A GGUF file as input (1.x: target_module.sh
+#         --input FILE.gguf) is not converted: build_gguf leaves it to the target stage to quantize.
 # Job imatrix: the importance matrix of a GGUF build (F16 intermediate, then llama-imatrix over 100 chunks), which the
 # BuildEngine hands to the build job (USE_IMATRIX, IMATRIX_PATH).
 
@@ -58,14 +60,18 @@ convert_to_gguf() {
 }
 
 # The model for one GGUF type: written directly by the converter, or an F16 intermediate that the target stage
-# quantizes (quantize_jobs.sh lists what it has to do).
+# quantizes (quantize_jobs.sh lists what it has to do). With --output (CONVERT_OUTPUT, convert_module.sh --output of
+# version 1.x) the converter writes that file instead, and it is kept. A GGUF input (the F16 GGUF that
+# target_module.sh of 1.x took) is converted already: the target stage quantizes the file itself and keeps it.
 build_gguf() {
-    local q q_lower f16_file out_file
+    local q q_lower f16_file out_file job="quantize_gguf"
     q="$(normalize_gguf_type "${1:-$QUANT_TYPE}")"
     q_lower="$(echo "$q" | tr '[:upper:]' '[:lower:]')"
 
-    if [[ "$GGUF_CONVERT_TYPES" == *" $q_lower "* ]]; then
-        convert_to_gguf "$q_lower" "$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf"
+    if [ "${INPUT_FORMAT:-model}" = "gguf" ]; then
+        [[ "$GGUF_QUANT_TYPES" == *" $q "* ]] || die "The model is a GGUF file already; the target stage quantizes it to a type of llama-quantize, not '$q' (supported:${GGUF_QUANT_TYPES% })."
+    elif [[ "$GGUF_CONVERT_TYPES" == *" $q_lower "* ]]; then
+        convert_to_gguf "$q_lower" "${CONVERT_OUTPUT:-$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf}"
         return
     fi
     [[ "$GGUF_QUANT_TYPES" == *" $q "* ]] || die "Unsupported GGUF quantization '$q'. Supported: F16 BF16 F32 Q8_0 and$GGUF_QUANT_TYPES"
@@ -81,10 +87,18 @@ build_gguf() {
         echo "WARNING: $q without an importance matrix loses quality; enable IMatrix calibration for better results." >&2
     fi
 
-    f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
     out_file="$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf"
-    convert_to_gguf f16 "$f16_file"
-    printf 'quantize_gguf %q %q %q' "$q" "$f16_file" "$out_file" >> "$QUANTIZE_JOBS"
+    if [ "${INPUT_FORMAT:-model}" = "gguf" ]; then
+        f16_file="$MODEL_SOURCE"
+        job="quantize_kept_gguf"
+    else
+        f16_file="${CONVERT_OUTPUT:-$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf}"
+        if [ -n "${CONVERT_OUTPUT:-}" ]; then
+            job="quantize_kept_gguf"
+        fi
+        convert_to_gguf f16 "$f16_file"
+    fi
+    printf '%s %q %q %q' "$job" "$q" "$f16_file" "$out_file" >> "$QUANTIZE_JOBS"
     if [ ${#imatrix_args[@]} -gt 0 ]; then
         printf ' %q' "${imatrix_args[@]}" >> "$QUANTIZE_JOBS"
     fi
@@ -96,12 +110,18 @@ build_imatrix() {
     [ -f "$dataset" ] || die "Calibration dataset not found at '$dataset'."
     [ -x "$IMATRIX_BIN" ] || die "llama-imatrix not found at $IMATRIX_BIN (the image must build llama.cpp)."
     mkdir -p "$IMATRIX_DIR"
-    f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
-    convert_to_gguf f16 "$f16_file"
+    if [ "${INPUT_FORMAT:-model}" = "gguf" ]; then
+        f16_file="$MODEL_SOURCE"  # measured as it is, and kept
+    else
+        f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
+        convert_to_gguf f16 "$f16_file"
+    fi
     echo ">> Computing importance matrix..."
     # -o *.dat keeps the legacy format, which llama-quantize --imatrix accepts.
     "$IMATRIX_BIN" -m "$f16_file" -f "$dataset" -o "$IMATRIX_DIR/imatrix.dat" --chunks 100
-    rm -f "$f16_file"
+    if [ "${INPUT_FORMAT:-model}" != "gguf" ]; then
+        rm -f "$f16_file"
+    fi
     stage_output "$IMATRIX_DIR/imatrix.dat"
 }
 

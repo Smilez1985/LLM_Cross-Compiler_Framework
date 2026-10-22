@@ -157,6 +157,50 @@ def test_a_branch_that_writes_nothing_fails(tmp_path):
 # --- a generated module under the stage runner (DECISIONS U9) ------------------------------------------------------
 
 @needs_bash
+def test_the_quantization_logic_and_the_packaging_may_use_quant_as_before(tmp_path):
+    """The dispatcher of the template set QUANT="$QUANT_TYPE" next to QUANT_TYPE, and Ditto's field described the
+    block as `case "$QUANT" in`: a module definition that uses $QUANT keeps working in the stages (set -u)."""
+    target = generate(tmp_path, quantization_logic='    Q8_0) build_gguf "$QUANT" ;;',
+                      packaging_commands='echo "packaged $QUANT" > "$OUTPUT_DIR/notes.txt"')
+
+    result, work = run_build(target / "modules" / "build.sh", tmp_path, stub_llama(tmp_path), "q8")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (work / "output" / "notes.txt").read_text() == "packaged Q8_0\n"
+    assert (work / "output" / "model-Q8_0.gguf").is_file()
+
+
+@needs_bash
+def test_a_generated_module_takes_the_options_of_the_1x_convert_and_target_modules(tmp_path):
+    """convert_module.sh --input --output --model-name writes the F16 GGUF there; target_module.sh --input <that
+    GGUF> --quantization quantizes it without converting again and keeps it (HOW2_ORIGINAL, U9 addendum)."""
+    target = generate(tmp_path)
+    llama = stub_llama(tmp_path)
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "config.json").write_text("{}")
+    work = tmp_path / "work"
+    env = {"PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "HOME": str(tmp_path), "BUILD_CACHE_DIR": str(work),
+           "LLAMA_CPP_PATH": str(llama), "TARGET_FORMAT": "gguf", "JOB_TYPE": "build"}
+    modules = target / "modules"
+    f16 = tmp_path / "granite.fp16.gguf"
+
+    convert = subprocess.run(["bash", str(modules / "convert_module.sh"), "--input", str(model), "--output", str(f16),
+                              "--model-name", "granite"], env=env, capture_output=True, text=True, timeout=60)
+    assert convert.returncode == 0, convert.stdout + convert.stderr
+    assert f16.read_text() == "gguf"
+
+    quantize = subprocess.run(["bash", str(modules / "target_module.sh"), "--input", str(f16), "--quantization",
+                               "Q4_K_M", "--model-name", "granite"], env=env, capture_output=True, text=True,
+                              timeout=60)
+    assert quantize.returncode == 0, quantize.stdout + quantize.stderr
+    calls = (tmp_path / "calls.log").read_text().splitlines()
+    assert [c.split()[0] for c in calls] == ["convert", "quantize"], "the GGUF input is not converted again"
+    assert (work / "output" / "granite-Q4_K_M.gguf").read_text() == "quantized Q4_K_M"
+    assert f16.is_file(), "the input is the person's file"
+
+
+@needs_bash
 def test_the_setup_commands_run_once_and_what_they_export_reaches_the_later_stages(tmp_path):
     target = generate(tmp_path,
                       setup_commands='echo setup >> "$BUILD_CACHE_DIR/setup.log"\nexport SDK_TAG=vendor-7',

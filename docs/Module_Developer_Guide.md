@@ -546,7 +546,8 @@ or **Boards > Boards and Devices... > Verify...**).
 **Resume.** When a stage has finished (exit code 0), the runner writes a marker into `$BUILD_SCRATCH_DIR/stages/<job>/`
 with a digest of the stage's inputs and the size of every file the stage named with `stage_output FILE`. The inputs
 are the request (format, board, quantization, model folder with its file sizes and times, model revision and name,
-context length, importance matrix, calibration dataset, hardware profile), the toolchain (the llama.cpp pin of the
+context length, importance matrix, calibration dataset, hardware profile, also the one the config stage reads when
+none is named, output folder), the toolchain (the llama.cpp pin of the
 image, the SDK paths) and the SHA-256 of every file in `modules/` and `scripts/`. Started again on the same work
 folder, the runner skips every stage whose marker has the same digest and whose files are still there; a stage that
 runs again makes every later stage run again. A stage that fails writes no marker. `build.sh --fresh` ignores the
@@ -836,8 +837,13 @@ are the build again, with the dispatcher's work moved into the stage it belongs 
 - **Cloning llama.cpp.** `source_module.sh --clone-llama-cpp`, started by hand in a container with network, clones
   llama.cpp at `LLAMA_CPP_COMMIT` (a full commit id) and links it as `LLAMA_CPP_PATH`, for an image without
   llama.cpp. A build never does this: its image carries the pinned llama.cpp.
-- **The module options.** `--input`, `--model-name`, `--quantization` and `--hardware-config` work on `build.sh`
-  and on every entrypoint stage mode.
+- **The module options.** `--input`, `--output`, `--model-name`, `--quantization` and `--hardware-config` work on
+  `build.sh`, on every stage module started by hand and on every entrypoint stage mode, as in the maintainer's 1.x
+  design: `convert_module.sh --input DIR --output FILE --model-name NAME` writes the F16 GGUF to FILE (kept);
+  `target_module.sh --input FILE.gguf --quantization TYPE --model-name NAME` quantizes a GGUF without converting it
+  again and keeps it (without `--quantization` Q4_K_M, without `--model-name` the file name without `.gguf` and
+  `.fp16`); `config_module.sh --hardware-config FILE` needs no model and writes the toolchain and the plan into
+  the stage folder. A path given as an option is made absolute from the current folder.
 
 A target generated before this change keeps its own `build.sh`, which still runs as before.
 

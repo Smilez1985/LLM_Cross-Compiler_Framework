@@ -6,7 +6,8 @@
 #         the image's own (build/bin of the pinned llama.cpp, built for the build host).
 # Target: Rockchip boards, aarch64 Linux (RK3566, RK3568: CPU; RK3576, RK3588: CPU and NPU).
 # Stage:  quantizes what the convert stage left for it (quantize_jobs.sh: the F16 intermediate to the requested GGUF
-#         type, with the importance matrix when the build has one) and removes the intermediate; writes
+#         type, with the importance matrix when the build has one) and removes the intermediate (a GGUF input, the
+#         --input FILE.gguf of target_module.sh of version 1.x, and a file named with --output stay); writes
 #         build_info.json (model, format, board, quantization, llama.cpp tag), which the BuildEngine completes with
 #         the file list, the hashes and the build data; and lists the results.
 #         With a hardware profile in the build plan (config_module.sh) a GGUF build is also packaged for the board, as
@@ -40,15 +41,21 @@ log_success() { echo "✅ [$(date '+%H:%M:%S')] [TARGET] $1"; }
 # QUANTISIERUNG
 # ============================================================================
 
-# One job of quantize_jobs.sh: TYPE F16_FILE OUTPUT_FILE [llama-quantize options, e.g. --imatrix FILE]
-quantize_gguf() {
+# One job of quantize_jobs.sh: TYPE F16_FILE OUTPUT_FILE [llama-quantize options, e.g. --imatrix FILE].
+# quantize_kept_gguf keeps the F16 file (a GGUF input, or the file named with --output); quantize_gguf removes it
+# afterwards (the intermediate of the convert stage).
+quantize_kept_gguf() {
     local q="$1" f16_file="$2" out_file="$3"
     shift 3
     echo ">> Quantizing -> $q"
     "$QUANTIZE_BIN" "$@" "$f16_file" "$out_file" "$q"
-    QUANTIZED_FROM+=("$f16_file")
     TARGET_CONFIG[QUANTIZED_GGUF]="$out_file"
     TARGET_CONFIG[QUANT_METHOD]="$q"
+}
+
+quantize_gguf() {
+    quantize_kept_gguf "$@"
+    QUANTIZED_FROM+=("$2")
 }
 
 quantize_model() {
@@ -304,7 +311,7 @@ print_final_summary() {
 package_for_board() {
     local f
     if [ -z "${TARGET_CONFIG[QUANTIZED_GGUF]:-}" ]; then
-        for f in "$OUTPUT_DIR"/*.gguf; do
+        for f in "$OUTPUT_DIR"/*.gguf "${CONVERT_OUTPUT:-}"; do
             if [ -f "$f" ]; then
                 TARGET_CONFIG[QUANTIZED_GGUF]="$f"
                 TARGET_CONFIG[QUANT_METHOD]="$(normalize_gguf_type "$QUANT")"

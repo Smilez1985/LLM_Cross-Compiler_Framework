@@ -15,7 +15,8 @@
 # SECURITY: the flags are written with quoted heredocs and single quotes, never expanded by the shell.
 #
 # Inputs (environment, set by BuildEngine):
-#   MODEL_SOURCE   local HF model directory inside the container (staged by the host)
+#   MODEL_SOURCE   local HF model directory inside the container (staged by the host), or a GGUF file (quantized by
+#                  the target stage, nothing converted)
 #   TARGET_FORMAT  gguf                                       (default: gguf)
 #   TARGET_BOARD   board id from target.yml                   (optional)
 #   QUANTIZATION   e.g. Q4_K_M, IQ4_XS, Q8_0, F16
@@ -84,8 +85,23 @@ plan_request() {
     BOARD="$(echo "${TARGET_BOARD:-}" | tr '[:upper:]' '[:lower:]')"
     JOB="${JOB_TYPE:-build}"
     MODEL_SOURCE="${MODEL_SOURCE:-}"
-    MODEL_NAME="${MODEL_NAME:-$(basename "${MODEL_SOURCE%/}")}"
-    QUANT_TYPE="$(normalize_gguf_type "${QUANTIZATION:-}")"
+    local requested="${QUANTIZATION:-}" name
+    # The input: a model folder for the converter, or a GGUF file, the F16 GGUF that target_module.sh of version 1.x
+    # took (the convert stage then converts nothing; the defaults of 1.x: the file name without .gguf and .fp16, and
+    # Q4_K_M).
+    INPUT_FORMAT="model"
+    if [ -f "$MODEL_SOURCE" ] && [[ "$MODEL_SOURCE" == *.[gG][gG][uU][fF] ]]; then
+        INPUT_FORMAT="gguf"
+        name="$(basename "$MODEL_SOURCE")"
+        name="${name%.*}"
+        MODEL_NAME="${MODEL_NAME:-${name%.fp16}}"
+        if [ -z "$requested" ]; then
+            requested="Q4_K_M"
+        fi
+    else
+        MODEL_NAME="${MODEL_NAME:-$(basename "${MODEL_SOURCE%/}")}"
+    fi
+    QUANT_TYPE="$(normalize_gguf_type "$requested")"
 
     echo "Model:        $MODEL_SOURCE"
     echo "Task:         ${MODEL_TASK:-LLM}"
@@ -94,7 +110,12 @@ plan_request() {
     echo "Quantization: $QUANT_TYPE"
     echo "Job:          $JOB"
 
-    [ -n "$MODEL_SOURCE" ] && [ -e "$MODEL_SOURCE" ] || die "MODEL_SOURCE '$MODEL_SOURCE' does not exist in the container."
+    if [ -z "$MODEL_SOURCE" ] && [ "${STAGE_LAST:-}" = "config" ]; then
+        # config_module.sh --hardware-config FILE (version 1.x): the toolchain and the plan of the board only
+        echo "No model (--input): the build plan holds the hardware profile only."
+    else
+        [ -n "$MODEL_SOURCE" ] && [ -e "$MODEL_SOURCE" ] || die "MODEL_SOURCE '$MODEL_SOURCE' does not exist in the container."
+    fi
 
     # The importance-matrix job converts and measures only; its container has no output folder.
     [ "$JOB" = "imatrix" ] && return 0
@@ -161,8 +182,11 @@ generate_build_config() {
         plan_line FORMAT "$FORMAT"
         plan_line BOARD "$BOARD"
         plan_line QUANT_TYPE "$QUANT_TYPE"
+        # The name the dispatcher of the template gave it too (QUANT="$QUANT_TYPE"): module definitions use both.
+        plan_line QUANT "$QUANT_TYPE"
         plan_line JOB "$JOB"
         plan_line MODEL_SOURCE "$MODEL_SOURCE"
+        plan_line INPUT_FORMAT "$INPUT_FORMAT"
         plan_line MODEL_NAME "$MODEL_NAME"
         plan_line OUTPUT_DIR "$OUTPUT_DIR"
         plan_line IMATRIX_DIR "$IMATRIX_DIR"
