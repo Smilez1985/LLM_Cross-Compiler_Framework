@@ -621,7 +621,7 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   per-user folder, and `refusal`/`require` say what does not fit and what to do; a window shows the person's words
   with `person_reason`. Never compare `shutil.disk_usage` with a margin of your own. A download takes the rule
   as `PinnedDownloader(space=download_rule(ledger=...))`; a long call that writes later holds its space with
-  `hf_hub.reserve_space`. Tests read a roomy disk (the `roomy_disk` fixture); a test of a check gives its own.
+  `hf_hub.reserve_space`. Tests read a roomy disk (the `roomy_disk_usage` fixture); a test of a check gives its own.
 - **Every CLI action has a mouse path.** Many people never use a terminal, so a person can start every command and
   option of `llm-cli` in the GUI as well, without typing a command (typing a value into a field is fine). A new
   command or option needs its mouse path, a menu entry, a button or a field that calls the same core function as the

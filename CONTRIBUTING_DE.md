@@ -654,7 +654,7 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   tun ist; ein Fenster zeigt die Worte für die Person mit `person_reason`. Vergleiche `shutil.disk_usage` nie mit
   einem eigenen Spielraum. Ein Download bekommt die Regel als `PinnedDownloader(space=download_rule(ledger=...))`;
   ein langer Aufruf, der später schreibt, hält seinen Platz mit `hf_hub.reserve_space`. Tests lesen eine geräumige
-  Festplatte (die Fixture `roomy_disk`); ein Test einer Prüfung gibt seine eigene vor.
+  Festplatte (die Fixture `roomy_disk_usage`); ein Test einer Prüfung gibt seine eigene vor.
 - **Jede CLI-Aktion hat einen Weg mit der Maus.** Viele Menschen nutzen nie ein Terminal, deshalb kann eine Person
   jeden Befehl und jede Option von `llm-cli` auch in der GUI starten, ohne einen Befehl zu tippen (einen Wert in ein
   Feld zu tippen ist in Ordnung). Ein neuer Befehl oder eine neue Option braucht ihren Weg mit der Maus, einen
