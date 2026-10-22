@@ -451,6 +451,8 @@ def test_changes_of_the_person_in_the_clone_are_never_thrown_away(world):
         world.m.publish(review, key_name=KEY)
     assert refused.value.code == "clone_dirty" and (world.m.clone / "notes.txt").read_text() == "mine"
     assert world.github.merges == []
+    assert str(world.m.clone) in str(refused.value), "the person is told where"
+    assert str(world.m.clone) not in audit_rows(world)[-1]["detail"], "the audit row names no folder of the computer"
 
 
 @needs_git
@@ -757,6 +759,31 @@ def test_the_contribution_check_runs_on_every_pull_request_and_passes_one_withou
     (tmp_path / "changed.txt").write_text("")
     done = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, capture_output=True, text=True)
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+@needs_git
+def test_the_publication_pull_request_lists_no_contribution_file(tmp_path, monkeypatch):
+    """The workflow's "Changed files" step on the maintainer's pull request (the pack moved from contributions/ to
+    packs/, the index and its signature changed) lists nothing under contributions/, so the check passes it."""
+    if shutil.which("bash") is None or __import__("sys").platform == "win32":
+        pytest.skip("runs the workflow step in bash")
+    workflow = yaml.safe_load((REPO_ROOT / "scripts" / "community_repo" / "validate-contribution.yml")
+                              .read_text(encoding="utf-8"))
+    step = next(s for s in workflow["jobs"]["validate"]["steps"] if s.get("name") == "Changed files")
+    github = FakeGitHub(tmp_path, monkeypatch)
+    github.commit({f"contributions/target/{PACK}": b"PK pack"}, "refs/heads/main")
+    work = tmp_path / "work"
+    git("clone", "-q", str(github.origin), str(work))
+    git("-C", str(work), "switch", "-q", "-c", "lcf-publish-x")
+    (work / "packs" / "target").mkdir(parents=True)
+    git("-C", str(work), "mv", f"contributions/target/{PACK}", f"packs/target/{PACK}")
+    (work / "index.json").write_text("{}")
+    git("-C", str(work), "add", "index.json")
+    git("-C", str(work), "commit", "-q", "-m", "publish")
+    listed = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=work, capture_output=True, text=True,
+                            env={**__import__("os").environ, "BASE_REF": "main"})
+    assert listed.returncode == 0, listed.stderr
+    assert (work / "changed.txt").read_text() == ""
 
 
 # --- GUI -------------------------------------------------------------------------------------------------------------
