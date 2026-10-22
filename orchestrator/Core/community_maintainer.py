@@ -89,13 +89,13 @@ class MaintainerError(PackError):
     """A refusal with a plain reason (zoo.maint.err.<code>), what happened so far (a zoo.maint.state.* key) and the
     next step (zoo.maint.next.<code>). str() is English; text(lang) is the GUI's language."""
 
-    def __init__(self, code: str, **values: Any):
+    def __init__(self, code: str, /, **values: Any):
         self.code, self.values, self.state = code, dict(values), ""
         super().__init__(self.text("en"))
 
-    def with_state(self, state: str, **values: Any) -> "MaintainerError":
-        if state and not self.state:
-            self.state = state
+    def with_state(self, state_key: str, /, **values: Any) -> "MaintainerError":
+        if state_key and not self.state:
+            self.state = state_key
             self.values = {**values, **self.values}
             self.args = (self.text("en"),)
         return self
@@ -446,13 +446,18 @@ class _Run:
         if not self.final and self.cancelled is not None and self.cancelled():
             raise Cancelled()
 
-    def happened(self, state: str, **values: Any) -> None:
-        self.state, self.state_values = state, values
+    def happened(self, state_key: str, /, **values: Any) -> None:
+        self.state, self.state_values = state_key, values
 
     def end(self, error: MaintainerError) -> MaintainerError:
         error.with_state(self.state or "zoo.maint.state.nothing", **self.state_values)
+        # the row names what happened, never a folder of this computer (the clone's place in the per-user folder)
+        shown = MaintainerError(error.code, **{**error.values, **({"folder": "the local clone"}
+                                                                  if "folder" in error.values else {})})
+        shown.with_state(error.state, **error.values)
         try:
-            self._audit("cancelled" if isinstance(error, Cancelled) else "error", "end", error.text("en"))
+            self._audit("cancelled" if isinstance(error, Cancelled) else "error", "end", shown.text("en"),
+                        code=error.code)
         except MaintainerError:
             pass
         return error
@@ -842,7 +847,9 @@ class Maintainer:
         own = key_id(key.public_key())
         if own not in {t.key_id for t in self.trusted_keys()}:
             self.report("note_untrusted_key", key_id=own)
-        branch = re.sub(r"[^A-Za-z0-9._-]+", "-", f"lcf-{slug}-v{new.version}")[:100].rstrip("-.")
+        # The time makes each try a new branch: a branch left from a try that opened no pull request never blocks one.
+        suffix = "-v{}-{}".format(new.version, re.sub(r"[^0-9]", "", new.generated)[:14])
+        branch = re.sub(r"[^A-Za-z0-9._-]+", "-", f"lcf-{slug}")[:100 - len(suffix)].rstrip("-.") + suffix
         if not BRANCH.fullmatch(branch) or branch == "main":
             raise ValueError(f"not a branch of the maintainer actions: {branch!r}")
         run.checkpoint()
