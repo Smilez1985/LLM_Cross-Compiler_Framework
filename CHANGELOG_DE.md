@@ -1425,6 +1425,23 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   importiert, deshalb laden `orchestrator/utils/ssh_trust.py` und alles, was es importiert, keine SSH-Bibliothek, und
   das Deployment und der Builder-Tab fragen mit einem echten Import, ob SSH geht (eine kaputte Installation galt dort
   als vorhanden und bei der Anmeldung als fehlend).
+- **Eine Board-Sitzung für jeden Kontakt mit einem Board, `orchestrator/remote/session.py`** (Konsolidierungskette
+  c2-remote-session, Befund 2 des Architektur-Audits). Was nur die Board-Sitzung des Deployments konnte (sich erneut
+  anmelden und dabei den Host-Schlüssel wie bei der ersten Anmeldung prüfen, auf ein Board warten, dessen Netz
+  abgebrochen ist, einen Upload bei dem fortsetzen, was angekommen ist, eine Installation verfolgen, die auf dem Board
+  selbständig läuft), ist jetzt `RemoteSession`, über eine `Transport`-Schnittstelle
+  (`orchestrator/remote/transport.py` `ParamikoTransport`), sodass das Laufzeit-Deployment, die Board-Prüfung und der
+  Benchmark auf dem Board als Nächstes dieselben Schritte nutzen können (Kette c2-remote-callers). Das Deployment
+  behält sein Paket und den Job von deploy.sh und ist ein dünner Adapter: seine Ergebnisse, Gründe und
+  Gerätezustände sind dieselben, festgehalten von `tests/test_remote_session.py` an der Sitzung vor dem Umzug. Seine
+  Zugangsdaten haben einen Typ: `KeyOnly()` (jeder KI-Weg) erreicht die Schlüssel-Installation nie, nur das
+  `OneTimePassword` der Person kann koppeln. `RemoteShell` und die Board-Prüfung lesen die Antwort eines Boards mit
+  dem einen begrenzten Leser des Transports, `ssh_trust.connect` und `paramiko_quiet` delegieren an den Transport,
+  und die Grundcodes lesen die Fehlertypen von paramiko über ihn (paramiko hat in der Remote-Schicht jetzt nur noch
+  den Transport als Zuhause). Jeder Befehl des Deployments hat jetzt das Zeitlimit und die Ausgabegrenze, die die
+  Befehle der Geräte-Laufzeit hatten (120 s Stille, 1 MiB; eine sha256-Prüfung auf dem Board wartet mindestens 900 s
+  und bei einem großen Paket länger), und die Sitzung hält die Verbindung alle 15 s am Leben: Ein Board, das mitten in
+  einem Befehl nicht mehr antwortet, hält das Deployment nicht mehr fest.
 - **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
   zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9 Schleifen; die
   Schleife von `utils/network.py` ist mit diesem Modul gegangen, siehe unten) laufen über das Modul der ältesten,

@@ -1251,6 +1251,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the board steps' errors share `RemoteFailure`. paramiko is imported on first use only, so `orchestrator/utils/
   ssh_trust.py` and everything that imports it load no SSH library, and the deploy and the Builder tab ask with a
   real import whether SSH works (a broken installation counted as present there and as missing at the login).
+- **One board session for every contact with a board, `orchestrator/remote/session.py`** (consolidation chain
+  c2-remote-session, finding 2 of the architecture audit). What only the deploy's board session could do (log in again
+  with the host key checked as at the first login, wait for a board whose network dropped, resume an upload at what
+  arrived, follow an installation that runs on the board on its own) is now `RemoteSession`, over one `Transport`
+  interface (`orchestrator/remote/transport.py` `ParamikoTransport`), so the runtime deploy, the probe and the on-board
+  benchmark can use the same steps next (chain c2-remote-callers). The deploy keeps its package and deploy.sh's job and
+  is a thin adapter: its results, reasons and device states are the same, pinned by `tests/test_remote_session.py`
+  against the session before the move. Its credentials are typed: `KeyOnly()` (every AI path) can never reach the key
+  installation, only the person's `OneTimePassword` can pair. `RemoteShell` and the probe read a board's answer with
+  the transport's one bounded reader, `ssh_trust.connect` and `paramiko_quiet` delegate to the transport, and the
+  reason codes read paramiko's error types through it (paramiko now has the transport as its only home in the remote
+  layer). Every command of the deploy now has the time limit and the output cap the device runtime's commands had
+  (120 s of silence, 1 MiB; a sha256 check on the board waits at least 900 s and longer for a large package), and the
+  session keeps the connection alive every 15 s: a board that stops answering in the middle of a command no longer
+  holds the deploy.
 - **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
   existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
   `utils/network.py` left with that module, see below) run through the oldest one's module,

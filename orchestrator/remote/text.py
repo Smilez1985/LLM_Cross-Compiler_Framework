@@ -7,10 +7,10 @@ A board's words and the state of a running deploy as text.
 - keep_tail(lines, line): keeps a board's output line, plain and cut, in a list that holds only the last lines
   (moved from DeploymentManager._keep). The board's words are untrusted: they go into output lines, never into a
   reason.
-- event_text(event, place, lang, audience): a running deploy's event (DeployEvent: uploading, waiting, back,
-  installing) as one line. For the person ("person") in their language with the board's address, the words of the
-  GUI's Deployment tab and `llmcf deploy run`; for an AI ("ai") in English with the board's label only, never its
-  address or account (D0). The CLI adds " (Ctrl+C)" to a wait and escapes for its console itself.
+- event_text(event, place, lang, audience): a running deploy's event (session.RemoteEvent, which the deploy calls
+  DeployEvent: uploading, waiting, back, installing) as one line. For the person ("person") in their language with
+  the board's address, the words of the GUI's Deployment tab and `llmcf deploy run`; for an AI ("ai") in English
+  with the board's label only, never its address or account (D0). The CLI adds " (Ctrl+C)" to a wait and escapes for its console itself.
 - ai_size(n): a size in an AI's English text ("1.23 GB", "45.6 MB", "size unknown").
 """
 

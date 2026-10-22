@@ -25,7 +25,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional, List, Dict
 
 from orchestrator.remote.transport import PARAMIKO_AVAILABLE   # true while paramiko imports (tested on first use)
-from orchestrator.remote.transport import sh_command
+from orchestrator.remote import session as remote_session
+from orchestrator.remote.transport import ParamikoTransport
 from orchestrator.utils.logging import get_logger
 
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
@@ -49,18 +50,18 @@ DIGEST_REFERENCE = re.compile(r"^[a-z0-9][a-z0-9._/:-]{0,254}@sha256:[0-9a-f]{64
 REMOTE_OUTPUT_LINES = OUTPUT_LINES
 REMOTE_LINE_CHARS = LINE_CHARS
 # A deploy whose network drops (a Wi-Fi board) waits this long for the board to answer again (N5), trying every
-# WAIT_INTERVAL seconds, and continues at most MAX_RESUMES times.
-DEPLOY_WAIT_SECONDS = 300
-WAIT_INTERVAL = 5.0
-MAX_RESUMES = 20
-UPLOAD_CHUNK = 1 << 20
-INSTALL_TIMEOUT = 1800        # seconds deploy.sh may run on the board
-INSTALL_POLL = 2.0
+# WAIT_INTERVAL seconds, and continues at most MAX_RESUMES times: the numbers of the one board session
+# (orchestrator/remote/session.py), under the names the deploy has always had.
+DEPLOY_WAIT_SECONDS = remote_session.WAIT_SECONDS
+WAIT_INTERVAL = remote_session.WAIT_INTERVAL
+MAX_RESUMES = remote_session.MAX_RESUMES
+UPLOAD_CHUNK = remote_session.UPLOAD_CHUNK
+INSTALL_TIMEOUT = remote_session.JOB_TIMEOUT   # seconds deploy.sh may run on the board
+INSTALL_POLL = remote_session.JOB_POLL
 # Files of an installation that runs on the board on its own, in the deploy's private folder there.
-INSTALL_STARTED = ".lcf-install.started"
-INSTALL_STATUS = ".lcf-install.status"
-INSTALL_LOG = ".lcf-install.log"
-_REMOTE_DIR = re.compile(r"^/tmp/llm_deploy\.[A-Za-z0-9]{8}$", re.ASCII)
+INSTALL_STARTED = remote_session.JOB_STARTED
+INSTALL_STATUS = remote_session.JOB_STATUS
+INSTALL_LOG = remote_session.JOB_LOG
 # Packages with Docker images from earlier versions started a Qdrant sidecar on the board (`docker run --name
 # qdrant-sidecar --restart unless-stopped`). Nothing uses it any more; after a deploy the framework looks whether it is
 # still there and tells the person, and never removes it (round 5 f: the person removes what they can see).
@@ -119,18 +120,11 @@ class DeployResult:
     old_sidecar: str = ""           # "running" | "stopped": the old Qdrant sidecar is still on the board
 
 
-@dataclass(frozen=True)
-class DeployEvent:
-    """What a running deploy reports (deploy_package's on_event): "uploading" (bytes on the board of the package's
-    total), "waiting" (the network dropped: seconds waited of the limit, and whether the upload or the installation
-    waits), "back" (the board answers again: the upload continues at `done`, or with step "install" the installation
-    is followed again), "installing"."""
-    kind: str
-    done: int = 0
-    total: int = 0
-    elapsed: float = 0.0
-    limit: float = 0.0
-    step: str = ""
+# What a running deploy reports (deploy_package's on_event): "uploading" (bytes on the board of the package's total),
+# "waiting" (the network dropped: seconds waited of the limit, and whether the upload or the installation waits),
+# "back" (the board answers again: the upload continues at `done`, or with step "install" the installation is followed
+# again), "installing". It is the board session's event (orchestrator/remote/session.py RemoteEvent).
+DeployEvent = remote_session.RemoteEvent
 
 
 def image_problem(image: str, client: Any) -> Optional[str]:
@@ -648,15 +642,19 @@ class DeploymentManager:
         return f"cd {d} && unzip -o {pkg} && sh deploy.sh"
 
     @staticmethod
+    def _install_job(package_name: str) -> str:
+        """The installation as a job on the board: unzip and deploy.sh (read by sh, as in _remote_install_cmd) write
+        into INSTALL_LOG."""
+        pkg = shlex.quote(package_name)
+        return f"unzip -o {pkg} > {INSTALL_LOG} 2>&1 && sh deploy.sh >> {INSTALL_LOG} 2>&1"
+
+    @staticmethod
     def _remote_start_cmd(target_dir: str, package_name: str) -> str:
         """Starts the installation on the board on its own (nohup, nothing attached to the SSH session), so a network
-        drop never stops deploy.sh halfway: unzip and deploy.sh (read by sh, as in _remote_install_cmd) write into
-        INSTALL_LOG, their exit status goes into INSTALL_STATUS. The marker INSTALL_STARTED is made first, and a folder
-        that has it is never started again, also when this command reaches the board twice."""
-        d, pkg = shlex.quote(target_dir), shlex.quote(package_name)
-        job = f"unzip -o {pkg} > {INSTALL_LOG} 2>&1 && sh deploy.sh >> {INSTALL_LOG} 2>&1; echo $? > {INSTALL_STATUS}"
-        return (f"cd {d} && if [ -e {INSTALL_STARTED} ]; then echo started=already; else : > {INSTALL_STARTED} && "
-                f"(nohup sh -c {shlex.quote(job)} </dev/null >/dev/null 2>&1 &) && echo started=now; fi")
+        drop never stops deploy.sh halfway: its exit status goes into INSTALL_STATUS. The marker INSTALL_STARTED is
+        made first, and a folder that has it is never started again, also when this command reaches the board twice
+        (RemoteSession.detached_command)."""
+        return remote_session.RemoteSession.detached_command(target_dir, DeploymentManager._install_job(package_name))
 
     # A private, unpredictable folder on the device (a fixed /tmp path could be pre-created by another user).
     REMOTE_MKTEMP = "mktemp -d /tmp/llm_deploy.XXXXXXXX"
@@ -667,12 +665,10 @@ class DeploymentManager:
 
     @staticmethod
     def _run(ssh, command: str) -> tuple:
-        """(exit status, stdout, stderr) of a command on the board, sent as one `sh -c '...'` (transport.sh_command):
-        sh reads its redirections, && and $?, whatever the account's login shell is."""
-        _, out, err = ssh.exec_command(sh_command(command))
-        stdout = out.read().decode(errors="replace")
-        stderr = err.read().decode(errors="replace")
-        return out.channel.recv_exit_status(), stdout, stderr
+        """(exit status, stdout, stderr) of a command on the board: one `sh -c '...'` with a time limit and an output
+        cap (remote/transport.py ParamikoTransport.run)."""
+        result = ParamikoTransport(ssh).run(command)
+        return result.status, result.out, result.err
 
     def _old_sidecar(self, answer: str, fingerprint: str = "") -> Dict[str, Any]:
         """What a successful deploy reports about the old Qdrant sidecar on the board (OLD_SIDECAR_CHECK's answer):
@@ -693,11 +689,7 @@ class DeploymentManager:
     @staticmethod
     def _connection_lost(ssh) -> bool:
         """Whether the SSH session itself broke (the network dropped), not a command or a file on the board."""
-        try:
-            transport = ssh.get_transport()
-        except Exception:  # noqa: BLE001 - a session that cannot say: treated as broken
-            return True
-        return transport is None or not transport.is_active()
+        return not ParamikoTransport(ssh).alive()
 
     def _deploy_paramiko(self, artifact: Path, ip: str, user: str, pw: Optional[str], port: int, pair: bool,
                          expect_fingerprint: Optional[str] = None, expect_sha256: Optional[str] = None,
@@ -786,145 +778,46 @@ class DeploymentManager:
                                 reason=f"System Deployment Error: {e}")
 
 
-class _Stopped(Exception):
-    """The person (or the calling AI's cancel) stopped the deploy."""
-
-
-def _failed_because(code: str, error: BaseException) -> str:
-    """The end of a failed contact's reason: its SSH reason code, a problem on this computer in plain words (the
-    file's name, never its folder), or the error itself when it is none of them."""
-    from orchestrator.remote import reasons
-    if code == reasons.LOCAL_PROBLEM:
-        return f": a problem on this computer, not on the board ({reasons.local_detail(error)}; {code})."
-    return f" ({code})." if code else f": {error}"
-
-
 class _BoardSession:
-    """One deploy over paramiko (DeploymentManager.deploy_package): the first login, the private folder on the board,
-    the upload that resumes after a network drop, the installation that runs on the board on its own, and the waiting
-    for the board in between (N5). Every login checks the host key as the first one did."""
+    """One deploy over paramiko (DeploymentManager.deploy_package): the package and deploy.sh's job on a board session
+    (orchestrator/remote/session.py RemoteSession), which logs in (every login checks the host key as the first one
+    did), makes the private folder, uploads with resume, waits for the board (N5) and follows the installation that
+    runs on the board on its own. This adapter keeps the deploy's results as they were: the reasons, the device state
+    and the device's output lines (its words, never in a reason)."""
 
     def __init__(self, manager: DeploymentManager, host: str, user: str, password: Optional[str], port: int,
                  expect_fingerprint: Optional[str], on_client: Optional[Callable[[Any], None]],
                  stop: Callable[[], bool], wait_seconds: float, on_event: Optional[Callable[[DeployEvent], None]]):
         self.manager, self.logger = manager, manager.logger
         self.host, self.user, self.password, self.port = host, user, password, port
-        self.expect_fingerprint, self.on_client, self.stop = expect_fingerprint, on_client, stop
-        self.wait_seconds = max(0.0, float(wait_seconds))
-        self.on_event = on_event or (lambda _e: None)
-        self.ssh: Any = None
+        self.expect_fingerprint, self.on_client, self.wait_seconds = expect_fingerprint, on_client, wait_seconds
         self.lines: List[str] = []
-        self.resumed = 0
-        self.waited = 0.0
-        self.fingerprint = ""          # the host key the board presented at the last login
-        self.state_after_stop = "ok"   # "unknown" once deploy.sh was started on the board
+        self.on_event = on_event or (lambda _e: None)
+        self.cancel = remote_session.CancelToken(stop)
+        self.session: Optional[remote_session.RemoteSession] = None
+
+    def _session(self, pair: bool) -> remote_session.RemoteSession:
+        """The board session of this deploy: the person's one-time password when one was given (pairing installs the
+        framework key with it), else the framework key only. manager._clock, manager._sleep and manager._check_conn
+        are read at each use (tests set and patch them)."""
+        from orchestrator.remote.address import Endpoint
+        manager = self.manager
+        credentials = (remote_session.OneTimePassword(self.password, install_key=pair) if self.password else
+                       remote_session.KeyOnly())
+        return remote_session.RemoteSession(
+            Endpoint(self.host, self.port), self.user, manager._state_dir(), credentials=credentials,
+            expect_fingerprint=self.expect_fingerprint, cancel=self.cancel, clock=lambda: manager._clock(),
+            sleep=lambda seconds: manager._sleep(seconds), reachable=lambda h, p: manager._check_conn(h, p),
+            on_event=self.on_event, on_client=self.on_client, wait_seconds=self.wait_seconds, logger=manager.logger)
+
+    @property
+    def state_after_stop(self) -> str:
+        """"unknown" once deploy.sh's start command is on its way to the board, else "ok"."""
+        return "unknown" if self.session.detached_sent else "ok"
 
     def result(self, success: bool, **values: Any) -> DeployResult:
         values.setdefault("output", self.lines)
-        return DeployResult(success, resumed=self.resumed, waited_s=round(self.waited, 1), **values)
-
-    # --- logging in ---
-
-    def login(self, waiting: bool = False) -> Optional[DeployResult]:
-        """Reads and checks the board's host key, then logs in. None when logged in, else why not. `waiting`: the board
-        dropped off the network before (wait_for_board), so a connection that drops again means it is not back yet."""
-        from orchestrator.remote import reasons
-        state_dir = self.manager._state_dir()
-        try:
-            key = ssh_trust.fetch_host_key(self.host, self.port)
-            status = ssh_trust.check_host_key(state_dir, self.host, self.port, key)
-        except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko, a damaged known_hosts
-            code = reasons.reach_code(e, while_waiting=waiting)
-            return self.result(False, code=code, reason=f"Could not read the host key of {self.host}"
-                                                        + _failed_because(code, e))
-        if status == "unknown":
-            return self.result(False, reason=f"The device {self.host} is not trusted yet: confirm its host key "
-                                             "fingerprint first.")
-        if status == "changed":
-            return self.result(False, code=reasons.HOST_KEY_CHANGED,
-                               reason=str(ssh_trust.HostKeyChanged(self.host, self.port)))
-        if self.expect_fingerprint and ssh_trust.fingerprint(key) != self.expect_fingerprint:
-            return self.result(False, code=reasons.HOST_KEY_CHANGED,
-                               reason=f"The device {self.host} now presents another host key than the one shown "
-                                      f"({ssh_trust.fingerprint(key)}, not {self.expect_fingerprint}); nothing was "
-                                      "deployed.")
-        self.fingerprint = ssh_trust.fingerprint(key)
-        if self.stop():
-            raise _Stopped()
-        try:
-            self.ssh = ssh_trust.connect(self.host, self.user, state_dir, port=self.port, password=self.password)
-        except Exception as e:  # noqa: BLE001 - authentication, network, a host key that changed meanwhile
-            code = reasons.reach_code(e, while_waiting=waiting)
-            return self.result(False, code=code, reason=f"SSH login to {self.user}@{self.host} failed"
-                                                        + _failed_because(code, e))
-        if self.on_client is not None:
-            self.on_client(self.ssh)
-        return None
-
-    def close(self) -> None:
-        if self.ssh is not None:
-            try:
-                self.ssh.close()
-            except Exception:  # noqa: BLE001
-                pass
-            self.ssh = None
-
-    def pause(self, seconds: float) -> None:
-        """Sleeps, but ends at once on a cancel."""
-        end = self.manager._clock() + seconds
-        while not self.stop():
-            left = end - self.manager._clock()
-            if left <= 0:
-                return
-            self.manager._sleep(min(0.25, left))
-
-    def wait_for_board(self, step: str) -> Optional[DeployResult]:
-        """After a network drop: waits until the board answers on its SSH port again and logs in again (None), or
-        until wait_seconds have passed (the result with the reason code). A cancel ends the wait at once."""
-        from orchestrator.runtime.device import reasons
-        self.close()
-        manager = self.manager
-        started = manager._clock()
-        code: Optional[str] = None
-        while True:
-            if self.stop():
-                raise _Stopped()
-            elapsed = manager._clock() - started
-            self.on_event(DeployEvent("waiting", elapsed=elapsed, limit=self.wait_seconds, step=step))
-            if manager._check_conn(self.host, self.port):
-                failed = self.login(waiting=True)
-                if failed is None:
-                    self.waited += manager._clock() - started
-                    return None
-                if failed.code not in (reasons.HOST_DOWN, reasons.PORT_CLOSED):
-                    return failed  # a changed key or a refused login: waiting does not help
-                code = failed.code  # the SSH server is not up yet: keep waiting
-            elapsed = manager._clock() - started
-            if elapsed >= self.wait_seconds:
-                self.waited += elapsed
-                code = code or reasons.check_port(self.host, self.port) or reasons.HOST_DOWN
-                return self.result(False, code=code, device_state="unknown" if step == "install" else "ok",
-                                   reason=f"The board did not answer again within {int(self.wait_seconds)} s "
-                                          f"({code}); " + ("the installation on the board may still have finished."
-                                                           if step == "install" else "deploy.sh did not run."))
-            self.pause(min(WAIT_INTERVAL, max(0.1, self.wait_seconds - elapsed)))
-
-    # --- the steps ---
-
-    def deploy(self, fh, name: str, size: int, sha256: str, pair: bool) -> DeployResult:
-        try:
-            failed = self.login()
-            if failed is not None:
-                return failed
-            return self._deploy(fh, name, size, sha256, pair)
-        except _Stopped:
-            return self.stopped()
-        except Exception as e:  # noqa: BLE001 - a step that failed in a way no step expected
-            if self.stop():
-                return self.stopped()
-            return self.result(False, device_state=self.state_after_stop, reason=f"SSH Deployment Error: {e}")
-        finally:
-            self.close()
+        return DeployResult(success, resumed=self.session.resumed, waited_s=round(self.session.waited, 1), **values)
 
     def stopped(self) -> DeployResult:
         return self.result(False, device_state=self.state_after_stop,
@@ -933,190 +826,96 @@ class _BoardSession:
                                    if self.state_after_stop == "unknown" else
                                    "The deploy was cancelled before deploy.sh ran; nothing was installed."))
 
-    def _deploy(self, fh, name: str, size: int, sha256: str, pair: bool) -> DeployResult:
-        if self.password and pair:
-            ssh_trust.install_public_key(self.ssh, ssh_trust.client_key(self.manager._state_dir())[1])
-            self.logger.info("Framework SSH key installed; later deployments need no password.")
-        status, out, err = DeploymentManager._run(self.ssh, DeploymentManager.REMOTE_MKTEMP)
-        target_dir = out.strip()
-        # Checks mktemp's answer on the device; no local temp file is involved.
-        if status != 0 or not target_dir.startswith("/tmp/llm_deploy.") or not _REMOTE_DIR.fullmatch(target_dir):  # nosec B108
-            # What the device answered is device text: it goes into the output lines, never into the reason.
-            for line in err.splitlines()[-REMOTE_OUTPUT_LINES:]:
+    def failed(self, failure: remote_session.SessionFailure) -> DeployResult:
+        """The deploy's result of a session step that could not be done, in the words the deploy has always used."""
+        kind = failure.kind
+        for line in failure.output:
+            if kind == "private_dir":
                 self.logger.error(f"[REMOTE] {line.strip()}")
-                DeploymentManager._keep(self.lines, line)
-            return self.result(False, reason="Could not create a folder on the device (its answer is in the device "
-                                             "output).", device_state="ok")
-        if self.stop():
-            raise _Stopped()
-        failed = self._upload(fh, name, size, sha256, target_dir)
-        if failed is not None:
-            return failed
-        if self.stop():
+            DeploymentManager._keep(self.lines, line)
+        if kind in ("key_read", "not_trusted", "key_changed", "login"):
+            return self.result(False, code=failure.reason, reason=str(failure))
+        if kind == "other_key":
+            return self.result(False, code=failure.reason, reason=f"{failure}; nothing was deployed.")
+        if kind == "wait":
+            return self.result(False, code=failure.reason, device_state=failure.state,
+                               reason=f"{failure}; " + ("the installation on the board may still have finished."
+                                                        if failure.step == "install" else "deploy.sh did not run."))
+        texts = {
+            "private_dir": ("ok", "Could not create a folder on the device (its answer is in the device output)."),
+            "rename": ("ok", "The package arrived, but could not be renamed on the device."),
+            "upload_damaged": ("ok", "The package arrived damaged twice (its sha256 on the device differs); "
+                                     "deploy.sh did not run."),
+            "upload_failed": ("ok", str(failure)),
+            "folder_gone": ("ok", "The board answers again, but the upload folder is gone (the board restarted); "
+                                  "deploy.sh did not run. Deploy again."),
+            "not_started": ("ok", "The installation could not be started on the device (its answer is in the device "
+                                  "output)."),
+            "cannot_follow": ("unknown", "The board answers again, but the installation cannot be followed (its answer "
+                                         "is in the device output). It may have started before the connection "
+                                         "dropped, so the device state is unknown."),
+            "job_gone": ("unknown", "The board restarted during the installation (its upload folder is gone), so the "
+                                    "device state is unknown. Deploy again."),
+            "job_timeout": ("unknown", f"deploy.sh did not finish on the device within {INSTALL_TIMEOUT} s."),
+            "job_lost": (failure.state, f"The installation on {self.host} could not be followed: {failure.error}"),
+        }
+        state, reason = texts[kind]
+        return self.result(False, device_state=state, reason=reason)
+
+    # --- the steps ---
+
+    def deploy(self, fh, name: str, size: int, sha256: str, pair: bool) -> DeployResult:
+        self.session = self._session(pair)
+        try:
+            return self._deploy(fh, name, size, sha256)
+        except remote_session.Stopped:
+            return self.stopped()
+        except remote_session.SessionFailure as failure:
+            return self.failed(failure)
+        except Exception as e:  # noqa: BLE001 - a step that failed in a way no step expected
+            if self.cancel.cancelled:
+                return self.stopped()
+            return self.result(False, device_state=self.state_after_stop, reason=f"SSH Deployment Error: {e}")
+        finally:
+            self.session.close()
+
+    def _deploy(self, fh, name: str, size: int, sha256: str) -> DeployResult:
+        session = self.session
+        session.open()
+        if session.pair():
+            self.logger.info("Framework SSH key installed; later deployments need no password.")
+        target_dir = session.private_dir()
+        if self.cancel.cancelled:
+            raise remote_session.Stopped()
+        session.upload(fh, f"{target_dir}/{name}", size, sha256)
+        if self.cancel.cancelled:
             return self.result(False, reason="The deploy was cancelled after the upload; deploy.sh did not run.",
                                device_state="ok")
         self.logger.info("Installing on target...")
         self.on_event(DeployEvent("installing", done=size, total=size))
         return self._install(name, target_dir)
 
-    def _upload(self, fh, name: str, size: int, sha256: str, target_dir: str) -> Optional[DeployResult]:
-        """Uploads the package as <name>.part and renames it when its sha256 on the board is the package's. After a
-        network drop it waits for the board and continues at the bytes that arrived, once the sha256 of those bytes
-        on the board matches the same bytes here (else it starts again from the beginning)."""
-        part = f"{target_dir}/{name}.part"
-        restarted = False
-        while True:
-            try:
-                offset = self._resume_offset(fh, part, size)
-                self.logger.info("Uploading package..." if not offset else f"Resuming the upload at {offset} bytes...")
-                self._send(fh, part, offset, size)
-                status, out, _err = DeploymentManager._run(self.ssh, f"sha256sum {shlex.quote(part)}")
-                if status == 0 and out.split()[:1] == [sha256]:
-                    status, _out, _err = DeploymentManager._run(
-                        self.ssh, f"mv -f {shlex.quote(part)} {shlex.quote(target_dir + '/' + name)}")
-                    if status == 0:
-                        return None
-                    return self.result(False, reason="The package arrived, but could not be renamed on the device.",
-                                       device_state="ok")
-                if restarted:
-                    return self.result(False, reason="The package arrived damaged twice (its sha256 on the device "
-                                                     "differs); deploy.sh did not run.", device_state="ok")
-                restarted = True
-                DeploymentManager._run(self.ssh, f"rm -f {shlex.quote(part)}")
-            except _Stopped:
-                raise
-            except Exception as e:  # noqa: BLE001 - a network drop, or a failure on the board (disk full, ...)
-                if self.stop():
-                    raise _Stopped() from None
-                if self.ssh is None or not DeploymentManager._connection_lost(self.ssh) or \
-                        self.resumed >= MAX_RESUMES:
-                    return self.result(False, device_state="ok", reason=f"The upload to {self.host} failed: {e}")
-                self.logger.warning(f"The connection to {self.host} dropped during the upload; waiting for the board.")
-                failed = self.wait_for_board("upload")
-                if failed is not None:
-                    return failed
-                self.resumed += 1
-                status, _out, _err = DeploymentManager._run(self.ssh, f"[ -d {shlex.quote(target_dir)} ]")
-                if status != 0:
-                    # the board restarted and its /tmp is empty: nothing of the package is left there
-                    return self.result(False, device_state="ok",
-                                       reason="The board answers again, but the upload folder is gone (the board "
-                                              "restarted); deploy.sh did not run. Deploy again.")
-
-    def _resume_offset(self, fh, part: str, size: int) -> int:
-        """How many bytes of the package are on the board and match it (0: start from the beginning)."""
-        sftp = self.ssh.open_sftp()
-        try:
-            try:
-                offset = int(sftp.stat(part).st_size or 0)
-            except FileNotFoundError:  # nothing arrived yet
-                return 0
-        finally:
-            sftp.close()
-        if offset <= 0 or offset > size:
-            return 0
-        status, out, _err = DeploymentManager._run(self.ssh, f"head -c {offset} {shlex.quote(part)} | sha256sum")
-        fh.seek(0)
-        prefix = sha256_fileobj(fh, limit=offset, chunk=UPLOAD_CHUNK)  # the first `offset` bytes of the package
-        if status != 0 or out.split()[:1] != [prefix]:
-            self.logger.warning("What arrived on the board does not match the package; the upload starts again.")
-            return 0
-        self.on_event(DeployEvent("back", done=offset, total=size))
-        return offset
-
-    def _send(self, fh, part: str, offset: int, size: int) -> None:
-        sftp = self.ssh.open_sftp()
-        try:
-            fh.seek(offset)
-            with sftp.open(part, "r+b" if offset else "wb") as remote:
-                remote.set_pipelined(True)
-                if offset:
-                    remote.seek(offset)
-                done = offset
-                self.on_event(DeployEvent("uploading", done=done, total=size))
-                for chunk in iter(lambda: fh.read(UPLOAD_CHUNK), b""):
-                    if self.stop():
-                        raise _Stopped()
-                    remote.write(chunk)
-                    done += len(chunk)
-                    self.on_event(DeployEvent("uploading", done=done, total=size))
-        finally:
-            sftp.close()
-
     def _install(self, name: str, target_dir: str) -> DeployResult:
         """Starts the installation once (DeploymentManager._remote_start_cmd) and waits for its exit status; after a
-        network drop it waits for the board, logs in again and keeps waiting for the same installation. Once the start
-        command is on its way, the installation may run on the board even when its answer is lost: from then on the
-        device state is unknown until the board says how deploy.sh ended."""
+        network drop the session waits for the board, logs in again and keeps waiting for the same installation. Once
+        the start command is on its way, the installation may run on the board even when its answer is lost: from then
+        on the device state is unknown until the board says how deploy.sh ended."""
+        session = self.session
         d = shlex.quote(target_dir)
-        start = DeploymentManager._remote_start_cmd(target_dir, name)
-        started_at = self.manager._clock()
-        sent = False
-        first = True
-        while True:
-            try:
-                if not sent:
-                    self.state_after_stop = "unknown"
-                    status, out, err = DeploymentManager._run(self.ssh, start)
-                    if status != 0 or "started=" not in out:
-                        for line in err.splitlines()[-REMOTE_OUTPUT_LINES:]:
-                            DeploymentManager._keep(self.lines, line)
-                        if first:
-                            return self.result(False, device_state="ok", reason="The installation could not be "
-                                                                                "started on the device (its answer is "
-                                                                                "in the device output).")
-                        return self.result(False, device_state="unknown",
-                                           reason="The board answers again, but the installation cannot be followed "
-                                                  "(its answer is in the device output). It may have started before "
-                                                  "the connection dropped, so the device state is unknown.")
-                    sent = True
-                status, out, _err = DeploymentManager._run(
-                    self.ssh, f"cat {d}/{INSTALL_STATUS} 2>/dev/null || {{ [ -d {d} ] && echo running || echo gone; }}")
-                exit_status = out.strip()
-                if status == 0 and exit_status.isdigit():
-                    break
-                if exit_status == "gone":
-                    return self.result(False, device_state="unknown",
-                                       reason="The board restarted during the installation (its upload folder is "
-                                              "gone), so the device state is unknown. Deploy again.")
-                if self.manager._clock() - started_at > INSTALL_TIMEOUT:
-                    return self.result(False, device_state="unknown",
-                                       reason=f"deploy.sh did not finish on the device within {INSTALL_TIMEOUT} s.")
-                if self.stop():
-                    raise _Stopped()
-                self.pause(INSTALL_POLL)
-            except _Stopped:
-                raise
-            except Exception as e:  # noqa: BLE001 - a network drop while the board installs on its own
-                if self.stop():
-                    raise _Stopped() from None
-                if self.ssh is None or not DeploymentManager._connection_lost(self.ssh) or \
-                        self.resumed >= MAX_RESUMES:
-                    return self.result(False, device_state=self.state_after_stop,
-                                       reason=f"The installation on {self.host} could not be followed: {e}")
-                self.logger.warning(f"The connection to {self.host} dropped during the installation; waiting for "
-                                    "the board.")
-                failed = self.wait_for_board("install")
-                if failed is not None:
-                    return failed
-                self.resumed += 1
-                first = False
-                # the start command is sent again only when its answer never came: the marker on the board makes it
-                # answer started=already instead of starting deploy.sh a second time
-                self.on_event(DeployEvent("back", step="install"))
-        _status, log, _err = DeploymentManager._run(self.ssh, f"tail -n {REMOTE_OUTPUT_LINES} {d}/{INSTALL_LOG}")
+        code = session.run_detached(target_dir, DeploymentManager._install_job(name), timeout=INSTALL_TIMEOUT,
+                                    poll=INSTALL_POLL)
+        log = session.run(f"tail -n {REMOTE_OUTPUT_LINES} {d}/{INSTALL_LOG}").out
         for line in log.splitlines():
             self.logger.info(f"[REMOTE] {line.strip()}")
             DeploymentManager._keep(self.lines, line)
-        DeploymentManager._run(self.ssh, f"rm -rf {d}")
-        code = int(exit_status)
+        session.run(f"rm -rf {d}")
         if code == 0:
             self.logger.info("Remote deployment successful.")
             try:
-                _status, answer, _err = DeploymentManager._run(self.ssh, OLD_SIDECAR_CHECK)
+                answer = session.run(OLD_SIDECAR_CHECK).out
             except Exception:  # noqa: BLE001 - only a look; the deploy itself succeeded
                 answer = ""
             return self.result(True, exit_status=0, device_state="ok",
-                               **self.manager._old_sidecar(answer, self.fingerprint))
+                               **self.manager._old_sidecar(answer, session.fingerprint))
         return self.result(False, exit_status=code, device_state="failed",
                            reason=f"deploy.sh failed on the device (exit {code}).")
