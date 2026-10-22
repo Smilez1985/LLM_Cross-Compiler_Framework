@@ -405,12 +405,18 @@ def export_snapshots(folder: Path, names: Iterable[str], destination: Path) -> L
     if same:
         raise ValueError("Choose a folder other than the snapshots' own folder.")
     needed = sum(snapshots[n].size_bytes for n in wanted if not os.path.lexists(destination / snapshots[n].file_name))
+    # the one disk rule (A4): the reserve stays free there beside what running builds and downloads reserved
+    from orchestrator.Core.disk_plan import ReservationLedger, room
+    ledger = ReservationLedger(folder.parent) if folder.name == FOLDER else None   # the per-user folder's ledger
     try:
-        free = shutil.disk_usage(destination).free
+        check = room(destination, needed, ledger=ledger) if needed else None
     except OSError:
-        free = None
-    if free is not None and needed > free:
-        raise ValueError(f"{destination} has {size_text(free)} free; the export needs {size_text(needed)}.")
+        check = None
+    if check is not None and not check.fits:
+        others = (f", {size_text(check.reserved_by_others)} of it reserved by running builds or downloads"
+                  if check.reserved_by_others else "")
+        raise ValueError(f"{destination} has {size_text(check.free)} free{others}; the export needs "
+                         f"{size_text(needed)} and {size_text(check.reserve)} must stay free there.")
     results = []
     for name in wanted:
         snap = snapshots[name]

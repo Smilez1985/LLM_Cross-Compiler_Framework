@@ -2675,7 +2675,7 @@ deterministic checks; nothing asks a model what is wrong. The whole guide: [Mojo
 |---|---|
 | Python | supported version (3.11 to 3.14) |
 | Docker | daemon reachable, buildx available; where Docker keeps its images (`DockerRootDir`, with the free space of that disk) and how much the framework's build images use (information) |
-| Disk | free space for the cache, output and build folders (warning below 20 GB, error below 5 GB) |
+| Disk | free space for the cache, output and build folders by the one disk rule: an error when less than the reserve (2 GiB or 2 % of the disk) stays free after what running builds and downloads reserved, a warning below twice the reserve |
 | Targets | targets found, capabilities readable |
 | Security | personal folder private, secrets store usable, keyring protects secrets |
 | AI | tool permissions set up and readable, MCP tokens readable, audit log intact (changed, removed, wrong key, missing anchor, no key); the chat feed can be written and its newest entries verify (changed or foreign entries, no key; unreleased) |

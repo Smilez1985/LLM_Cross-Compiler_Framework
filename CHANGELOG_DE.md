@@ -1490,6 +1490,25 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `free_space`, `nearest_existing` und `DiskWatchdog`, das der Container-Watchdog und der Staging-Wächter jetzt sind);
   die Build-Engine behält ihre alten Methodennamen als Delegates, die Texte bleiben gleich und behalten "No space left
   on device", worauf das Self-Healing-Muster (jetzt aus denselben Phrasen gebaut) passt. Die Spielräume bleiben gleich.
+- **Eine Speicherplatz-Regel für jede Prüfung des freien Platzes** (Architektur-Konsolidierung c3-disk-callers,
+  Entscheidung A4 des Maintainers). Jede Prüfung misst über `orchestrator/Core/disk_plan.py` (`room`, die eine Prüfung
+  einer Festplatte, auf der `check_disk` und `require` aufbauen) und lässt die Reserve frei, die Builds frei lassen,
+  2 GiB oder 2 % der Festplatte (20 GiB oder 10 % unter einer Dauerfreigabe), neben dem, was angenommene Aufrufe
+  irgendeines Prozesses im Ledger des Benutzerordners reserviert haben: die Archiv- und Modell-Downloads der lokalen
+  Laufzeit und die Paket-Downloads des Community-Zoos (vorher 256 MiB), die Modellkopie der Benchmark-Sandbox und die
+  Umstellung der Wissensbasis (vorher 512 MiB), der Export von Wissens-Snapshots (vorher ohne Spielraum), Mojos
+  Speicherplatz-Prüfung (vorher feste 5 und 20 GB; jetzt ein Fehler unter der Reserve und eine Warnung unter der
+  doppelten Reserve, in dezimalen GB wie jede andere Größe), die Speicherplatz-Angabe für eine KI und die Prüfungen
+  des Deployment-Pakets und der Werkzeuge für den Laufzeit-Build. Ein Download, für den ein laufender Build keinen
+  Platz lässt, wird mit den Zahlen und dem nächsten Schritt abgelehnt (noch einmal versuchen, sobald dieser Build oder
+  Download fertig ist, oder Speicherplatz freigeben); die Fenster Lokale Laufzeit, Lokale Modelle und Community Hub
+  sagen es auf Englisch oder Deutsch, und die Reservierung eines beendeten Programms blockiert nie (das Ledger lässt
+  sie fallen). Ein Deployment-Paket hält seinen Platz im Ledger, solange es entsteht, wie es der Hugging-Face-Download
+  einer KI tut; hat ein anderer Aufruf den Platz genommen, während die Person gefragt wurde, werden beide auf dieselbe
+  Weise abgelehnt und nennen den Download oder das Paket (der Text sagte „this build“). Die Self-Healing-Diagnose nach einer vollen Festplatte nennt weiter die Festplatten unter der Reserve,
+  ohne Reservierungen zu zählen, weil sie die Festplatte sucht, die vollgelaufen ist. Der Downloader in
+  `orchestrator/utils/download.py` nimmt die Speicherplatz-Regel seines Aufrufers (`space`), so importiert die unterste
+  Schicht nichts über ihr.
 - **Die GUI ist ein optionales Extra; Kommandozeile, MCP-Server und Kern laufen ohne Qt.** PySide6 ist das Extra
   `gui` in `pyproject.toml` (die per Hash festgelegte `requirements-gui.txt`, ein Export von `uv.lock` wie
   `requirements.txt`). Die Installer für Linux und Windows installieren es wie bisher; `sudo ./install.sh --headless`
@@ -2507,13 +2526,26 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Kein Home-Ordner und kein Name eines anderen Kontos erreicht eine KI über eine Datei-URL oder ein Leerzeichen**
+  (D0; Vorgabe vom 2026-10-17). Die Pfad-Bezeichnungen für KIs (`security.paths.label_paths`, auch in `device_text`)
+  ließen den Pfad einer `file:///`-URL stehen, wenn er den Home-Ordner eines anderen Kontos nannte
+  (`file:///home/<Name>/...`, `file:///C:/Users/<Name>/...`, `file://localhost/...`, `file://server/Users/<Name>`); ihr
+  Pfad wird jetzt wie jeder andere bezeichnet (der Dateiname, das Label eines bekannten Ordners, "a home folder"), und
+  die URL behält ihr `file://`; ebenso eine Datei-URL einer Versionsverwaltung, wie pip und uv sie schreiben
+  (`git+file:///home/<Name>/pkg`, auch `svn+`, `hg+`, `bzr+`), die ihr Schema behält. Ein Kontoname mit Leerzeichen
+  wurde am Leerzeichen abgeschnitten ("a home folder Doe"):
+  der eigene Kontoname dieses Computers wird jetzt nach jeder Wurzel ganz genommen, und nach dem Windows-Home-Ordner
+  eines anderen Kontos gehören die folgenden Wörter, die mit einem Großbuchstaben oder einer Ziffer beginnen, zum
+  Namen (ein POSIX-Kontoname hat kein Leerzeichen, so behält `/home/pi Failed` sein nächstes Wort).
 - **Das GUI-Werkzeug verbirgt den Home-Ordner dieses Computers in jeder Schreibweise**: Ein Formularwert, den eine KI
   über das Tool `gui` liest (Ditto oder eine KI-App), zeigte den Home-Ordner nur dann als `~`, wenn er genau so
   geschrieben war, wie `Path.home()` ihn liefert. Über HOME oder USERPROFILE benannt (die MSYS-Form
   `/c/Users/<Name>`), mit dem anderen Trennzeichen, in anderer Groß- und Kleinschreibung (`c:/users/<Name>`) oder mit
   doppelten Backslashes, wie Python einen Pfad zitiert, erreichte er die KI mit dem Kontonamen. `tools_gui._no_home`
   nutzt jetzt das gemeinsame `security.paths.shorten_home` (dasselbe wie die Laufzeit- und Deploy-Tools) vor dem
-  Muster für die Home-Ordner anderer Konten.
+  Muster für die Home-Ordner anderer Konten. Der Fehlerbericht (`utils/telemetry.py`, der Link zum GitHub-Issue)
+  ersetzte nur `os.path.expanduser("~")` Buchstabe für Buchstabe; er ersetzt jetzt jede Schreibweise über dieselben
+  Funktionen aus `security.paths` und behält seine Markierung `~USER`.
 - **Jede Stelle nimmt dieselben SSH-Benutzernamen an**: Das Deployment (`llm-cli deploy run`, **Deploy to Target**
   im Deployment-Tab) und `llm-cli deploy devices add` prüften den Benutzernamen ohne `re.ASCII`, deshalb ließ Pythons
   Groß-/Kleinschreibungs-Faltung ein langes s (`ſ`) oder das Kelvin-Zeichen als `s` und `k` durch, und das `match()`

@@ -212,6 +212,14 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         resolve = getattr(framework, "resolve_path", None)
         return Path(resolve(value)) if callable(resolve) else Path(value)
 
+    def ledger():
+        """The disk reservation ledger every process of this user shares (builds, downloads, packages); None without
+        a per-user folder (a stand-in framework)."""
+        from orchestrator.Core.build_plan import state_dir
+        from orchestrator.Core.disk_plan import ReservationLedger
+        folder = state_dir(framework)
+        return ReservationLedger(folder) if folder is not None else None
+
     def artifact(aid: str):
         """(label, manifest with its folder) of a built model by its id."""
         try:
@@ -337,11 +345,15 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         profile = resolve_profile(inp, info)
         size = model_size(info)
         needed = 2 * size  # the copy in a temporary folder and the zip (design 2.7)
-        disk = disk_check(output_dir(), needed)
+        disk = disk_check(output_dir(), needed, ledger())   # the one disk rule (A4): with every process's reservations
         if not disk["fits"]:
             raise blocked("disk_full", f"Not enough disk space for the package: {_size(needed)} needed (twice the "
-                          f"model), {_size(disk['free'])} free, {_size(disk['reserve'])} kept free as a reserve.",
-                          "Tell the person how much space is needed; they can free disk space in the output folder.")
+                          f"model), {_size(disk['free'])} free, {_size(disk['reserve'])} kept free as a reserve"
+                          + (f", {_size(disk['reserved'])} reserved by other calls (running builds or downloads)"
+                             if disk["reserved"] else "") + ".",
+                          "Tell the person how much space is needed; they can free disk space in the output folder"
+                          + (" or wait until the running build or download has finished" if disk["reserved"] else "")
+                          + ".")
         facts = [Fact("Built model", label), Fact("Device profile", profile),
                  Fact("Disk", f"{_size(disk['free'])} free on the output folder's disk, about {_size(needed)} needed",
                       volatile=True)]
@@ -375,7 +387,8 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
 
     def create_deploy_package(inp: CreatePackageIn, ctx: ToolContext) -> JobStartedOut:
         from orchestrator.Core.deployment_manager import DeployError
-        from orchestrator.Core.hf_hub import Reservation
+        from orchestrator.Core.disk_plan import InsufficientSpace
+        from orchestrator.Core.hf_hub import reserve_space
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
         if bound.get("artifact_id") != inp.artifact_id or not bound.get("profile"):
             raise ToolError("The package is not bound to what the person was shown; nothing was packaged.",
@@ -383,7 +396,16 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         label, info = artifact(inp.artifact_id)
         folder, out = Path(info["path"]), output_dir()
         stop = threading.Event()
-        reservation = Reservation(f"package/{inp.artifact_id}/{id(stop)}", 2 * int(bound.get("size") or 0))
+        # the one disk rule (A4): the package's space is held in the ledger every process shares until it ends
+        try:
+            reservation = reserve_space(ledger(), out, 2 * int(bound.get("size") or 0), ctx.owner, f"package {label}",
+                                        need_label="output", what="deployment package",
+                                        key=f"package/{inp.artifact_id}/{id(stop)}", call="the deployment package",
+                                        estimate=True,   # twice the model: the copy and the zip
+                                        disk_usage=getattr(service, "disk_usage", None))   # the build disk seam
+        except InsufficientSpace as e:
+            raise ToolError(f"Not enough disk space for the package any more; nothing was packaged. {e}",
+                            code="insufficient_resources", next=e.next) from None
 
         def work(handle) -> Dict[str, Any]:
             from orchestrator.Core.job_service import JobCancelled

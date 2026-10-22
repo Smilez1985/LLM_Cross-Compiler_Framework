@@ -470,11 +470,10 @@ def _free_name(parent: Path, name: str) -> str:
     return candidate
 
 
-def _device(path: Path) -> int:
-    probe = path
-    while not probe.exists() and probe.parent != probe:
-        probe = probe.parent
-    return os.stat(probe).st_dev
+def _device(path: Path) -> str:
+    """The disk `path` is on (its nearest existing folder): disk_plan.device_of."""
+    from orchestrator.Core.disk_plan import device_of
+    return device_of(path)
 
 
 def _copy_file(source: Path, target: Path) -> str:

@@ -54,7 +54,6 @@ BENCH_ARGS = ("-p", "512", "-n", "128", "-r", "3", "-o", "json")
 CONTAINER_TMP = "/tmp"  # nosec B108
 PIN_PREFIX = ".llm-bench-"              # the private folder of a sandbox run's model file
 PIN_STALE_SECONDS = 3 * RUN_TIMEOUT     # older private folders are leftovers of a crash
-COPY_RESERVE = 512 * 1024 ** 2          # free space a copy of the model leaves on its disk
 
 
 class BenchError(RuntimeError):
@@ -460,10 +459,14 @@ class BenchRunner:
             # folder last, as before: a system without descriptor links, e.g. macOS)
             no_room = False
             if source is None:
+                # the one disk rule (A4): the reserve stays free beside what running builds and downloads reserved
+                from orchestrator.Core.disk_plan import ReservationLedger, room
+                ledger, short = ReservationLedger(self.state_dir), None
                 for parent in [*scratch, model.parent]:
                     try:
-                        if shutil.disk_usage(parent).free < open_st.st_size + COPY_RESERVE:
-                            no_room = True
+                        check = room(parent, open_st.st_size, ledger=ledger)
+                        if not check.fits:
+                            no_room, short = True, short or check
                             continue
                     except OSError:
                         continue
@@ -482,9 +485,16 @@ class BenchRunner:
                         made = None
             if source is None:
                 if no_room:
+                    from orchestrator.Core.disk_plan import gb
+                    numbers = f"about {open_st.st_size / 1000 ** 3:.1f} GB needed for the copy"
+                    if short is not None:
+                        held = short.reserve + short.reserved_by_others
+                        numbers = (f"about {(open_st.st_size + held) / 1000 ** 3:.1f} GB needed: the copy and the "
+                                   f"{gb(short.reserve)} that must stay free"
+                                   + (f", and {gb(short.reserved_by_others)} are reserved by running builds or "
+                                      "downloads" if short.reserved_by_others else "") + f"; {gb(short.free)} free")
                     raise BenchError(f"The Docker sandbox needs a private copy of {label} (its folder cannot hold a "
-                                     "link of it), and the framework's folders lack the room for one (about "
-                                     f"{(open_st.st_size + COPY_RESERVE) / 1000 ** 3:.1f} GB needed).",
+                                     f"link of it), and the framework's folders lack the room for one ({numbers}).",
                                      code="insufficient_resources",
                                      next="Tell the person how much space the copy needs, or benchmark natively.")
                 raise BenchError(f"The Docker sandbox needs a private link or copy of {label}, and neither its own "

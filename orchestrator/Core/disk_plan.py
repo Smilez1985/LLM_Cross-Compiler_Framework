@@ -270,9 +270,44 @@ class DiskWatchdog:
         return self
 
 
+def _disk(device: str, free: int, total: int, ledger: Optional["ReservationLedger"], exclude: str, standing: bool,
+          margin: Optional[int]) -> DiskCheck:
+    """The DiskCheck of one file system before anything is counted on it: its free space, the reserve (reserve_for,
+    or a check's own fixed `margin`), what other calls reserved there (the ledger, without `exclude`) and its trash."""
+    others = ledger.outstanding(device, exclude=exclude) if ledger is not None else 0
+    reserve = int(margin) if margin is not None else reserve_for(total, standing)
+    check = DiskCheck([], 0, int(free), int(total), reserve, others, device)
+    if ledger is not None:
+        from orchestrator.Core.trash import trash_bytes_by_device
+        check.trash_bytes = trash_bytes_by_device(ledger.state_dir).get(device, 0)
+    return check
+
+
+def room(path: Path, needed: int = 0, *, label: str = "", what: str = "",
+         ledger: Optional["ReservationLedger"] = None, exclude: str = "", standing: bool = False,
+         margin: Optional[int] = None, disk_usage: Optional[DiskUsage] = None) -> DiskCheck:
+    """The DiskCheck of the file system `path` is on (its nearest existing folder) for `needed` more bytes: the one
+    rule every free-space check uses. The reserve is reserve_for (2 GiB or 2 %; 20 GiB or 10 % with `standing`);
+    `margin` is a check's own fixed reserve instead. With `ledger`, what other calls of any process reserved there
+    counts as used, and the trash there is known. OSError when the disk cannot be measured (check_disk, which checks
+    many folders at once, counts such a disk as full instead). A measurement without the disk's size keeps the
+    smallest reserve (2 GiB, or 20 GiB with `standing`)."""
+    du = free_space(path, disk_usage)
+    total = int(getattr(du, "total", 0) or 0)
+    check = _disk(device_of(path), int(du.free), total, ledger, exclude, standing, margin)
+    check.needed = max(0, int(needed))
+    if label:
+        check.labels.append(label)
+    if what:
+        check.what.append(what)
+    return check
+
+
 def check_disk(needs: Iterable[DiskNeed], ledger: Optional["ReservationLedger"] = None, exclude: str = "",
-               standing: bool = False, disk_usage: Optional[DiskUsage] = None) -> List[DiskCheck]:
-    """Per file system: needed, free, reserve, reserved by other calls. Never raises for a full disk (see require)."""
+               standing: bool = False, disk_usage: Optional[DiskUsage] = None,
+               margin: Optional[int] = None) -> List[DiskCheck]:
+    """Per file system: needed, free, reserve, reserved by other calls. Never raises for a full disk (see require);
+    a disk that cannot be measured counts as full. `margin`: a fixed reserve instead of reserve_for (see room)."""
     usage = disk_usage or shutil.disk_usage
     groups: Dict[str, DiskCheck] = {}
     for need in needs:
@@ -286,11 +321,7 @@ def check_disk(needs: Iterable[DiskNeed], ledger: Optional["ReservationLedger"] 
                 free, total = int(du.free), int(du.total)
             except OSError:
                 free, total = 0, 0
-            others = ledger.outstanding(device, exclude=exclude) if ledger is not None else 0
-            check = groups[device] = DiskCheck([], 0, free, total, reserve_for(total, standing), others, device)
-            if ledger is not None:
-                from orchestrator.Core.trash import trash_bytes_by_device
-                check.trash_bytes = trash_bytes_by_device(ledger.state_dir).get(device, 0)
+            check = groups[device] = _disk(device, free, total, ledger, exclude, standing, margin)
         if need.label not in check.labels:
             check.labels.append(need.label)
         check.needed += need.bytes
@@ -298,11 +329,84 @@ def check_disk(needs: Iterable[DiskNeed], ledger: Optional["ReservationLedger"] 
     return list(groups.values())
 
 
-def require(checks: List[DiskCheck]) -> None:
-    """InsufficientSpace with the numbers when a file system cannot hold its part plus the reserve."""
+RESERVED_NEXT_AI = ("Tell the person that a running build or download has reserved {reserved} on that disk: the call "
+                    "fits once it has finished, or after they free space. Do not retry unchanged while it runs.")
+
+
+def held_by_others(check: DiskCheck) -> bool:
+    """The call would fit without what other calls (a running build or download) reserved on that disk."""
+    return not check.fits and check.reserved_by_others > 0 and check.after + check.reserved_by_others >= check.reserve
+
+
+def refusal(checks: List[DiskCheck], what: str, estimate: bool = False) -> Optional[InsufficientSpace]:
+    """None when every disk holds its part; else the refusal of `what` ("the download"): the numbers (require's), the
+    plain next step at the end of the message (wait for the running build or download that holds the space, or free
+    space: the person's English text, l10n_facts disk.no_room.reserved and action.free_disk) and as `next` for an
+    AI, and the person's next steps (`steps`: the builds list, the trash)."""
+    try:
+        require(checks, what=what, estimate=estimate)
+    except InsufficientSpace as e:
+        from orchestrator.utils.localization import ui_text
+        short = [c for c in checks if not c.fits]
+        others = [c for c in short if held_by_others(c)]
+        if others:
+            reserved = gb(sum(c.reserved_by_others for c in others))
+            e.args = (f"{e} {ui_text('disk.no_room.reserved', 'en', reserved=reserved)}",)
+            e.next = RESERVED_NEXT_AI.format(reserved=reserved)
+        else:
+            e.args = (f"{e} {ui_text('action.free_disk', 'en')}",)
+        from orchestrator.utils.next_steps import as_next_steps
+        e.steps = as_next_steps((["build.history"] if others else [])
+                                + (["trash.show"] if any(c.trash_bytes for c in short) else []))
+        return e
+    return None
+
+
+def download_rule(margin: Optional[int] = None, ledger: Optional["ReservationLedger"] = None,
+                  disk_usage: Optional[DiskUsage] = None) -> Callable[[Path, int, str], Optional[InsufficientSpace]]:
+    """The disk rule of a download (PinnedDownloader's `space`): None when `needed` more bytes fit in the folder, else
+    the refusal (InsufficientSpace with its check, see `refusal`). The one rule: the reserve (reserve_for, or a fixed
+    `margin`) stays free beside what other calls of any process reserved there (`ledger`); a reservation of a process
+    that has ended is never counted (the ledger drops it)."""
+    def space(folder: Path, needed: int, what: str) -> Optional[InsufficientSpace]:
+        check = room(folder, needed, label="download", what=what, ledger=ledger, margin=margin, disk_usage=disk_usage)
+        return refusal([check], what)
+    return space
+
+
+def person_text(checks: List[DiskCheck], lang: Optional[str] = None) -> str:
+    """Why a call does not fit, for the person in `lang` (English or German): the numbers of each disk that is short,
+    and what to do (wait for the running build or download that holds the space, empty the trash, free space). It
+    names no folder (the window says what was asked)."""
+    from orchestrator.utils.localization import ui_text
+    from orchestrator.utils.sizes import format_size
+    lines = []
+    for c in (c for c in checks if not c.fits):
+        lines.append(ui_text("disk.no_room", lang, needed=format_size(c.needed, lang), free=format_size(c.free, lang),
+                             reserve=format_size(c.reserve, lang)))
+        if held_by_others(c):
+            lines.append(ui_text("disk.no_room.reserved", lang, reserved=format_size(c.reserved_by_others, lang)))
+        else:
+            lines.append(ui_text("action.free_disk", lang))
+        if c.trash_bytes:
+            lines.append(ui_text("disk.no_room.trash", lang, trash=format_size(c.trash_bytes, lang)))
+    return " ".join(lines)
+
+
+def person_reason(error: BaseException, lang: Optional[str] = None) -> str:
+    """The text a window shows for a failed call: a disk that cannot hold it in the person's language (person_text of
+    the checks the error carries), any other error as its own text."""
+    checks = [c for c in (getattr(error, "checks", None) or []) if isinstance(c, DiskCheck) and not c.fits]
+    return person_text(checks, lang) if checks else str(error)
+
+
+def require(checks: List[DiskCheck], what: str = "this build", estimate: bool = True) -> None:
+    """InsufficientSpace with the numbers when a file system cannot hold its part plus the reserve; `what` names the
+    call in the message ("this build", "the download"); `estimate` marks the sizes as estimates (a build's are)."""
     short = [c for c in checks if not c.fits]
     if short:
-        detail = "; ".join(f"{' and '.join(c.labels)} disk: {gb(c.needed)} needed (estimate), {gb(c.free)} free"
+        detail = "; ".join(f"{' and '.join(c.labels)} disk: {gb(c.needed)} needed"
+                           + (" (estimate)" if estimate else "") + f", {gb(c.free)} free"
                            + (f", {gb(c.reserved_by_others)} reserved by other calls" if c.reserved_by_others else "")
                            + f", {gb(c.reserve)} must stay free" for c in short)
         trash = [c for c in short if c.trash_bytes]
@@ -311,7 +415,7 @@ def require(checks: List[DiskCheck]) -> None:
             detail += (f". The trash holds {gb(sum(c.trash_bytes for c in trash))} there"
                        + (": emptying it would make room" if fits else "")
                        + " (only the person empties it: File > Trash... or 'llm-cli trash empty')")
-        raise InsufficientSpace(f"Not enough disk space for this build: {detail}.", checks)
+        raise InsufficientSpace(f"Not enough disk space for {what}: {detail}.", checks)
 
 
 # --- the reservation ledger ----------------------------------------------------------------------------------------

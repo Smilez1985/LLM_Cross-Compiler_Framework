@@ -614,7 +614,7 @@ class TestDownloads:
 
     def test_not_enough_disk_space(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ls.shutil, "disk_usage", lambda p: type("U", (), {"free": 100 * MIB})())
-        with pytest.raises(LocalRuntimeError, match="Not enough free disk space"):
+        with pytest.raises(LocalRuntimeError, match="Not enough disk space for the download: "):
             self.fetch(tmp_path, FakeSession(), b"x", size=GIB)
 
 
