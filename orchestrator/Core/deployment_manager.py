@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, List, Dict
 
 from orchestrator.remote.transport import PARAMIKO_AVAILABLE   # true while paramiko imports (tested on first use)
+from orchestrator.remote.transport import sh_command
 from orchestrator.utils.logging import get_logger
 
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
@@ -666,8 +667,9 @@ class DeploymentManager:
 
     @staticmethod
     def _run(ssh, command: str) -> tuple:
-        """(exit status, stdout, stderr) of a command on the board."""
-        _, out, err = ssh.exec_command(command)
+        """(exit status, stdout, stderr) of a command on the board, sent as one `sh -c '...'` (transport.sh_command):
+        sh reads its redirections, && and $?, whatever the account's login shell is."""
+        _, out, err = ssh.exec_command(sh_command(command))
         stdout = out.read().decode(errors="replace")
         stderr = err.read().decode(errors="replace")
         return out.channel.recv_exit_status(), stdout, stderr

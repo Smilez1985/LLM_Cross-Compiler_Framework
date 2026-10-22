@@ -147,7 +147,13 @@ class Client:
     def exec_command(self, command):
         if not self.board.online or self.closed:
             raise Gone("Socket is closed")
-        status, out = self.board.run(command)
+        self.board.wire.append(command)
+        # sshd hands the command to the account's login shell: every command is one `sh -c '...'`, so that shell's
+        # syntax (fish, csh) never matters; the board's sh then runs the script inside
+        words = shlex.split(command)
+        assert len(words) == 3 and words[:2] == ["sh", "-c"] and command == "sh -c " + shlex.quote(words[2]), \
+            f"a command reached the board's login shell unwrapped: {command}"
+        status, out = self.board.run(words[2])
         return None, Stream(out.encode(), status), Stream(b"")
 
 
@@ -170,6 +176,7 @@ class Board:
         self.install_polls_needed = 2
         self.docker_ps = ""            # what `docker ps -a` answers on the board (the old Qdrant sidecar's look)
         self.docker_commands = []
+        self.wire = []                 # every command as it reached the board's login shell
 
     def go_offline(self):
         self.online = False

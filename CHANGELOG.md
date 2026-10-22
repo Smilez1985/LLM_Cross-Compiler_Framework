@@ -1785,6 +1785,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **A deploy works on a board whose account uses another login shell**: sshd hands every command to the board
+  account's login shell. The deploy's commands (the private folder, the hash checks, the start of the installation
+  that runs on its own and the polls of its end) and the installation of the framework key went there as they were,
+  so on an account whose login shell is fish, csh or another shell that is not POSIX, their `&&`, `||`, `2>/dev/null`
+  and `$?` meant something else or nothing. Every one of them now reaches the board as one `sh -c '...'`
+  (`orchestrator/remote/transport.py` `sh_command`, the form the device runtime and the board probe already used),
+  so the board's sh reads the script whatever the login shell is.
 - **A deploy keeps waiting while the board's SSH server starts again**: after the network dropped, the deploy waits
   for the board (N5). When the board answered again but its SSH server was still starting, the connection opened and
   dropped (a reset, an abort, a broken pipe or EOF in the key exchange); none of these had a reason code, so the deploy

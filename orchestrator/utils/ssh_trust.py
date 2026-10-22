@@ -250,8 +250,9 @@ def install_public_key(client, public_line: str) -> None:
     q = shlex.quote(public_line)
     command = (f"umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && "
                f"(grep -qxF {q} ~/.ssh/authorized_keys || printf '%s\\n' {q} >> ~/.ssh/authorized_keys)")
-    # B601: a fixed command whose one value is the checked and quoted public key line, never outside input.
-    _, stdout, stderr = client.exec_command(command)  # nosec B601
+    # B601: a fixed command whose one value is the checked and quoted public key line, never outside input. It goes
+    # to the board as one `sh -c '...'`, so the account's login shell (fish, csh) does not read its && and ||.
+    _, stdout, stderr = client.exec_command(transport.sh_command(command))  # nosec B601
     if stdout.channel.recv_exit_status() != 0:
         raise HostKeyError(f"Could not install the framework key: {stderr.read().decode(errors='replace').strip()}")
 

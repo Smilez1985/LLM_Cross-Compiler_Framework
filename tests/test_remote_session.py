@@ -16,8 +16,14 @@ orchestrator/remote/session.py (RemoteSession over a Transport):
 """
 
 import hashlib
+import os
+import re
 import shlex
 import socket
+import subprocess
+import sys
+import time
+import zipfile
 
 import pytest
 
@@ -542,3 +548,140 @@ def test_remote_shell_says_what_went_wrong_with_the_connection(error, message):
 def test_remote_shell_reads_undecodable_bytes_as_replacement_characters():
     from orchestrator.runtime.device.remote import RemoteShell
     assert RemoteShell(ShellClient(out=b"ok \xff\n")).run("true").out == "ok �\n"
+
+
+# --- regression (Fixed): every command reaches the board's login shell as one `sh -c '...'` --------------------------
+# sshd hands each command to the account's login shell. The deploy and the key installation sent theirs as they
+# were (`cd ... && if [ ... ]`, `cat ... 2>/dev/null || { ...; }`, `umask 077 && ...`), so on a board whose account
+# uses fish, csh or another shell that is not POSIX, the redirections, && and $? meant something else or nothing.
+
+# A login shell that is not POSIX (like fish or csh): it reads quoted words the way fish does ('...' with \\ and \'
+# as its only escapes, "..." with \", \\ and \$, adjacent parts joined) and knows only the form `sh -c <one word>`;
+# anything else (&&, ||, ;, redirections, $?) it refuses, as such a shell would misread it.
+NOT_POSIX_LOGIN_SHELL = r'''
+import subprocess, sys
+
+def word(text):
+    out, i = [], 0
+    while i < len(text):
+        c = text[i]
+        if c in "'\"":
+            escapes = "\\'" if c == "'" else "\\\"$"
+            j = i + 1
+            while text[j] != c:
+                if text[j] == "\\" and text[j + 1] in escapes:
+                    out.append(text[j + 1])
+                    j += 2
+                    continue
+                if c == '"' and text[j] in "$`":
+                    sys.exit("not-posix: no expansion inside double quotes here")
+                out.append(text[j])
+                j += 1
+            i = j + 1
+        elif c.isalnum() or c in "@%+=:,./-_":
+            out.append(c)
+            i += 1
+        else:
+            sys.exit(f"not-posix: cannot read {c!r} the way sh does")
+    return "".join(out)
+
+flag, command = sys.argv[1], sys.argv[2]
+if flag != "-c" or not command.startswith("sh -c "):
+    sys.exit(f"not-posix: unsupported command: {command[:60]}")
+sys.exit(subprocess.run([sys.argv[3], "-c", word(command[len("sh -c "):])]).returncode)
+'''
+
+
+def deploy_wire(manager, board, package):
+    """Every command a deploy with pairing and one network drop sent, as it reached the board's login shell."""
+    real_run = board.run
+
+    def on_board(script):
+        if "authorized_keys" in script:
+            return 0, ""
+        return real_run(script)
+    board.run = on_board
+    board.drop_after = 1_300_000
+    board.back_at = 20.0
+    assert manager.deploy_package(package, HOST, "radxa", password="one-time", pair=True).success
+    return list(board.wire)
+
+
+def test_every_command_reaches_the_login_shell_as_one_sh_c(manager, board, package):
+    wire = deploy_wire(manager, board, package)
+    for command in wire:
+        words = shlex.split(command)
+        assert len(words) == 3 and words[:2] == ["sh", "-c"] and command == "sh -c " + shlex.quote(words[2]), command
+    scripts = [shlex.split(c)[2] for c in wire]
+    assert scripts[0].startswith("umask 077 && mkdir -p ~/.ssh"), "the key installation too"
+    assert {s.split()[0] for s in scripts} >= {"umask", "mktemp", "head", "sha256sum", "mv", "[", "cd", "cat", "tail",
+                                               "rm", "if"}
+
+
+def _login_shell(name, tmp_path):
+    """argv that runs a command the way sshd does, through the account's login shell `name`."""
+    from conftest import posix_shell
+    sh = posix_shell("sh")
+    if sh is None:
+        pytest.skip("needs a POSIX sh to stand in for the board's sh (on Windows: Git for Windows)")
+    if name == "sh":
+        return lambda command: [sh, "-c", command]
+    stub = tmp_path / "not_posix_login_shell.py"
+    stub.write_text(NOT_POSIX_LOGIN_SHELL, encoding="utf-8")
+    return lambda command: [sys.executable, str(stub), "-c", command, sh]
+
+
+@pytest.mark.parametrize("login_shell", ["sh", "not-posix"])
+def test_the_commands_do_their_job_under_any_login_shell(login_shell, manager, board, package, tmp_path):
+    """The deploy's own commands, as sent, run in a folder of this computer that stands in for the board's upload
+    folder: once with sh as the account's login shell, once with a login shell that is not POSIX."""
+    shell = _login_shell(login_shell, tmp_path)
+    wire = deploy_wire(manager, board, package)
+    folder = tmp_path / "board" / "llm_deploy.Ab12Cd34"
+    folder.mkdir(parents=True)
+    local = folder.as_posix()
+    if not re.fullmatch(r"[\w@%+=:,./-]+", local):
+        pytest.skip("the test folder's path needs quoting of its own")
+    home = tmp_path / "board_home"   # the board account's home folder (never this computer's)
+    home.mkdir()
+    data = package.read_bytes()
+    (folder / "deploy_model_1.zip.part").write_bytes(data)
+    env = {**os.environ, "HOME": str(home)}
+
+    def on_board(command):
+        return subprocess.run(shell(command.replace(TARGET, local)), capture_output=True, text=True, timeout=60,
+                              env=env, stdin=subprocess.DEVNULL)
+    by_tool = {}
+    for command in wire:
+        by_tool.setdefault(shlex.split(command)[2].split()[0], []).append(command)
+    # the key installation: the line is added once, also when it runs twice
+    for _ in range(2):
+        assert on_board(by_tool["umask"][0]).returncode == 0
+    keys = (home / ".ssh" / "authorized_keys").read_text().splitlines()
+    assert keys == [ssh_trust.client_key(manager._state_dir())[1]]
+    # the resume's check of what arrived, and the check of the whole upload
+    (prefix,) = by_tool["head"]
+    assert on_board(prefix).stdout.split()[0] == hashlib.sha256(data[:1_300_000]).hexdigest()
+    assert on_board(by_tool["sha256sum"][-1]).stdout.split()[0] == hashlib.sha256(data).hexdigest()
+    assert on_board(by_tool["["][0]).returncode == 0
+    assert on_board(by_tool["mv"][0]).returncode == 0 and (folder / "deploy_model_1.zip").read_bytes() == data
+    # the installation that runs on its own: started once, followed to its end
+    with zipfile.ZipFile(folder / "deploy_model_1.zip", "w") as z:
+        z.writestr("deploy.sh", "echo run >> ../runs\necho installed-on-the-board\n")
+    (start,) = by_tool["cd"]
+    if login_shell == "not-posix":
+        refused = subprocess.run(shell(shlex.split(start)[2].replace(TARGET, local)), capture_output=True, text=True,
+                                 timeout=60, env=env, stdin=subprocess.DEVNULL)
+        assert refused.returncode != 0 and "not-posix" in refused.stderr, \
+            "the script itself, sent as it was before, is what such a login shell cannot read"
+    assert "started=now" in on_board(start).stdout and "started=already" in on_board(start).stdout
+    poll = by_tool["cat"][0]
+    for _ in range(200):
+        if on_board(poll).stdout.strip().isdigit():
+            break
+        time.sleep(0.05)
+    assert on_board(poll).stdout.strip() == "0"
+    assert "installed-on-the-board" in on_board(by_tool["tail"][0]).stdout
+    assert (folder.parent / "runs").read_text().splitlines() == ["run"], "deploy.sh ran exactly once"
+    assert on_board(by_tool["rm"][-1]).returncode == 0 and not folder.exists()
+    assert on_board(poll).stdout.strip() == "gone"
