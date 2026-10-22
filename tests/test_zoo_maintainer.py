@@ -66,8 +66,11 @@ class FakeGitHub:
     Maintainer's runner (gh answered here, git run for real on the local folders only)."""
 
     def __init__(self, tmp_path: Path, monkeypatch):
+        # Not an empty e-mail: Windows drops an environment variable set to "", and git without an identity refuses
+        # to commit (exit 128).
         for name, value in (("GIT_AUTHOR_NAME", "Maintainer"), ("GIT_COMMITTER_NAME", "Maintainer"),
-                            ("GIT_AUTHOR_EMAIL", ""), ("GIT_COMMITTER_EMAIL", ""), ("GIT_CONFIG_NOSYSTEM", "1"),
+                            ("GIT_AUTHOR_EMAIL", "maintainer@example.invalid"),
+                            ("GIT_COMMITTER_EMAIL", "maintainer@example.invalid"), ("GIT_CONFIG_NOSYSTEM", "1"),
                             ("GIT_TERMINAL_PROMPT", "0")):
             monkeypatch.setenv(name, value)
         self.tmp = tmp_path
