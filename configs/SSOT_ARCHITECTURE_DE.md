@@ -164,7 +164,7 @@ sowohl `b<build_number>` als auch `build` entspricht. Alles andere folgt aus die
 | Die Einstellung `llama_cpp_version` | ihre Vorgabe wird aus `tag` abgeleitet; sie verschiebt nicht mehr, was Target-Images bauen (ein anderer Wert ergibt nur eine Warnung im Build-Log) |
 | `ARG LLAMA_CPP_TAG` und `ARG LLAMA_CPP_COMMIT` in `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` und `Dockerfile.gpu` (geprüft wird jedes `Dockerfile*` eines Targets, das sie setzt oder llama.cpp klont), `docker.build_args.LLAMA_CPP_TAG` und `LLAMA_CPP_COMMIT` in `targets/*/target.yml` | Rückfallwerte für Image-Builds außerhalb des Frameworks; müssen `tag` und `commit` entsprechen |
 | `inference_backends.llama_cpp.commit` in `project_sources.yml` und `detailed_project_sources.yml` | Nachschlagekatalog; muss `tag` entsprechen |
-| Vorgaben für `LLAMA_CPP_COMMIT` in `targets/*/modules/source_module.sh` | alte Vier-Modul-Kette, unverändert gelassen (Entscheidung D20); gemeldet, nicht geprüft |
+| Vorgaben für `LLAMA_CPP_COMMIT` in `targets/*/modules/source_module.sh` | die mitgelieferten Stufenmodule haben keine: Ihre Stufe source meldet den Pin des Images, und `--clone-llama-cpp` (von Hand gestartet) braucht eine vollständige Commit-ID. Ein `source_module.sh` aus Version 1.x eines älteren Targets, das noch eine Vorgabe hat (Entscheidung D20), wird gemeldet, nicht geprüft |
 
 `tests/test_build_recipe.py` schlägt fehl, wenn eine Stelle abweicht. `python scripts/llama_cpp_pin.py check` gibt
 dieselbe Tabelle aus und prüft mit `git ls-remote`, dass der Tag bei Upstream auf den festgelegten Commit zeigt. Wie
@@ -308,9 +308,10 @@ stimmen die gemeinsamen Werte überein, und es nennt elf Einträge, die nur `pro
 Der Befehl bearbeitet die Einstellung `source_repositories` in `config.yml`: `--add <Name> <URL>` speichert einen
 Eintrag, `--remove <Name>` entfernt ihn, und ohne Optionen listet er die Einträge auf. Die Build-Engine macht aus
 Einträgen der Form `{name: {url: ...}}`, wie `--add` sie speichert, und aus reinen URLs früherer Versionen
-Variablen `<NAME>_REPO_OVERRIDE` für die Stufen-Container. Nur das alte `source_module.sh` liest
-`LLAMA_CPP_REPO_OVERRIDE`, und das aktuelle Rockchip-`build.sh` ruft es nicht auf. Praktisch hat die Einstellung
-derzeit keine Wirkung auf Builds.
+Variablen `<NAME>_REPO_OVERRIDE` für die Stufen-Container. Die Stufe source (`source_module.sh`) warnt nur, wenn
+`LLAMA_CPP_REPO_OVERRIDE` gesetzt ist, weil ein Build das llama.cpp seines Images nutzt; nur
+`source_module.sh --clone-llama-cpp`, von Hand in einem Container mit Netzwerk gestartet, klont daraus. Praktisch
+hat die Einstellung derzeit keine Wirkung auf Builds.
 
 ## Weitere einzige Quellen des Projekts
 
@@ -336,5 +337,5 @@ derzeit keine Wirkung auf Builds.
 | ein lokales Modell oder einen neueren llama.cpp-Build ergänzen | `llama_runtime.yml`, mit Größe, SHA256 und Commit | die Prüfung oben und `tests/test_runtime.py` ausführen; Changelog-Eintrag |
 | auf einen anderen llama.cpp-Commit wechseln | `llama_cpp.source` in `llama_runtime.yml` und die Stellen, die dazu passen müssen | das Vorgehen in [CONTRIBUTING_DE.md](../CONTRIBUTING_DE.md#den-llamacpp-pin-anheben) |
 | einen Schlüssel der Datei der Hardware-Probe ergänzen oder ändern | `hardware_probe_schema.yml` und die Probes, die ihn schreiben | die Prüfung oben, `tests/test_hardware_profile.py` und `tests/test_hardware_probe.py` ausführen; Changelog-Eintrag |
-| ein Target ein neues Board, Format oder einen neuen Typ bauen lassen | `target.yml` und `build.sh` des Targets | Tests; siehe [Leitfaden für Modulentwickler](../docs/Module_Developer_Guide_DE.md) |
+| ein Target ein neues Board, Format oder einen neuen Typ bauen lassen | `target.yml` des Targets und seine Stufenmodule (`modules/config_module.sh` für die Namen, die es annimmt, `convert_module.sh` und `target_module.sh` für die Arbeit) | Tests; siehe [Leitfaden für Modulentwickler](../docs/Module_Developer_Guide_DE.md) |
 | ein vorgelagertes Projekt oder einen Dokumentationslink festhalten | `project_sources.yml` (neue Einträge in der ausführlichen Datei von Hand) | `python ../scripts/validate_ssot.py` in `configs/`, danach `python ../scripts/sync_ssot.py --write` für geänderte Versionen |

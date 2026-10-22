@@ -115,7 +115,7 @@ flowchart TB
     BE["BuildEngine<br/>orchestrator/Core/builder.py"]
     subgraph Docker["Docker mit BuildKit"]
         IMG["Target-Image<br/>targets/Rockchip/dockerfile"]
-        SBX["Abgeschottete Stufen-Container<br/>imatrix + build über modules/build.sh"]
+        SBX["Abgeschottete Stufen-Container<br/>imatrix + build: modules/build.sh<br/>führt source, config, convert, target aus"]
     end
     TGT["targets/<br/>target.yml + Module"]
     CAL["data/calibration"]
@@ -203,7 +203,7 @@ der SSRF-sichere HTTP-Adapter in `security/http.py`, der Audit-Schlüssel in `Co
 | LLMOrchestrator | `orchestrator/Core/orchestrator.py` | Warteschlange und Pipeline: bereitet Kalibriertext vor, zerlegt einen Auftrag in Jobs (Modell x Target x Format x Quantisierung), führt sie auf der Build-Engine aus, behandelt Abbrüche und die Freigabeschleife des Self-Healing. |
 | BuildEngine | `orchestrator/Core/builder.py`, `orchestrator/utils/build_context.py` | Stellt den Docker-Build-Kontext zusammen, baut das Image (mit BuildKit, wenn vorhanden), lädt oder bindet das Modell ein, führt den optionalen Trivy-Scan, die Importance-Matrix-Stufe und die Build-Stufe in abgeschotteten Containern aus, schreibt Manifest, Model Card und ZIP in einen versteckten Zwischenordner, verschiebt sie in den Ausgabeordner, sobald der Build nicht mehr abgebrochen werden kann, und räumt auf. |
 | DockerManager | `orchestrator/Core/docker_manager.py` | Erzeugt die eine Build-Engine des Frameworks (mit ihrem Docker-Client) und prüft, ob der Docker-Daemon antwortet; ohne Qt. `container_resources()` macht aus einer `docker stats`-Messung eines laufenden Build-Containers CPU- und Speicherwerte (Dockers eigene Formeln, Speicher ohne den inaktiven Seiten-Cache); die Build-Engine misst sie in den Fortschritt des Builds, `BuildService.live_resources` gibt sie an den Builder (unter dem Fortschrittsbalken), und das Build-Protokoll warnt einmal nahe der Speichergrenze. |
-| Rockchip-Referenz-Target | `targets/Rockchip/` | `dockerfile` (Debian bookworm-slim; llama.cpp-Werkzeuge v0.6.0; drei Python-venvs), `modules/build.sh` (Verteiler für `gguf`, `rkllm`, `rknn` und den Job `imatrix`), `modules/rkllm_module.sh`, `modules/rknn_module.sh`, `scripts/export_rkllm.py`, `scripts/rknn_converter.py`, `target.yml`. `targets/_template/` ist der Ausgangspunkt für neue Targets ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md)). |
+| Rockchip-Referenz-Target | `targets/Rockchip/` | `dockerfile` (Debian bookworm-slim; llama.cpp-Werkzeuge v0.6.0; drei Python-venvs), `modules/build.sh` (der Stage-Runner) mit den vier Stufenmodulen `source_module.sh`, `config_module.sh`, `convert_module.sh` und `target_module.sh` (`gguf`, `rkllm`, `rknn` und der Job `imatrix`), `modules/rkllm_module.sh` und `modules/rknn_module.sh` (Format-Helfer der Stufe convert), `scripts/export_rkllm.py`, `scripts/rknn_converter.py`, `target.yml`. `targets/_template/` ist der Ausgangspunkt für neue Targets ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md)). |
 | DeploymentManager und SSH-Vertrauen | `orchestrator/Core/deployment_manager.py`, `orchestrator/utils/ssh_trust.py` | Baut das Deployment-Paket, prüft den Host-Schlüssel des Geräts, hinterlegt den SSH-Schlüssel des Frameworks, lädt hoch und startet die Installation. |
 | Remote-Schicht (unveröffentlicht) | `orchestrator/remote/` | Alles, was mit einem Board spricht, ohne Qt und nur mit Importen aus `orchestrator/utils` und `orchestrator/security`: die Adresse des Boards (`address.py`: `Endpoint` mit seiner known_hosts-, Speicher- und Anzeigeform, die eine Prüfung von Host, Port und SSH-Benutzer, nur ASCII), warum ein Board nicht erreichbar ist (`reasons.py`: die vier Grundcodes, `check_port`, `classify`, `reach_code`; eine abgebrochene Verbindung, während ein Deployment auf das Board wartet, zählt als „noch nicht zurück“), `RemoteFailure`, die Basis jedes Fehlers eines Board-Schritts (`errors.py`), die Worte eines Boards und der Stand eines laufenden Deployments als eine Zeile für die Person oder eine KI (`text.py`) und ob SSH hier geht (`transport.py`; paramiko wird erst bei der ersten Nutzung importiert). Die alten Pfade `orchestrator/runtime/device/reasons.py` und `orchestrator/utils/ssh_trust.py` funktionieren weiter. Was ein Kontakt ergab, hält `record_reach` in `orchestrator/runtime/device/trusted.py` für Mojo fest. |
 | Tool-Registry, Berechtigungen, Audit | `orchestrator/tools/` (`registry.py`, `policy.py`, `audit.py`, `confirmation.py`, `framework_tools.py`) | Elf typisierte Tools mit Risikostufen, die gespeicherten Berechtigungen des Benutzers, der Bestätigungstext (gemeinsam für MCP und Ditto) und ein per Hash verkettetes Audit-Log. |
@@ -225,9 +225,15 @@ der SSRF-sichere HTTP-Adapter in `security/http.py`, der Audit-Schlüssel in `Co
 | Kalibrierdaten | `data/calibration/`, `orchestrator/utils/calibration.py` | Kuratierter deutscher, englischer und Tool-Nutzungs-Text (MIT-Lizenz) mit SHA256-Prüfung, für Importance-Matrizen. |
 | Umgang mit nicht vertrauenswürdigem Text | `orchestrator/utils/untrusted.py` | Bereinigt und verpackt externen Text, bevor er ein Sprachmodell erreicht. |
 
-Der Rockchip-Ordner enthält außerdem noch `source_module.sh`, `config_module.sh`, `convert_module.sh` und
-`target_module.sh` aus der Vier-Module-Kette der Version 1.x. Der aktuelle Verteiler `build.sh` ruft sie nicht auf;
-ihre Entfernung ist für 3.4.0 geplant.
+Ein Build sind die vier Stufenmodule eines Targets (`source_module.sh`, `config_module.sh`, `convert_module.sh`,
+`target_module.sh`, die Kette der Version 1.x, die die Entscheidung U9 des Maintainers wieder zum Build gemacht hat).
+`build.sh` ist nur der Stage-Runner: Er führt sie der Reihe nach aus, schreibt nach jeder fertigen Stufe eine Marke
+zum Fortsetzen (eine Prüfsumme der Eingaben und die Dateien, die die Stufe genannt hat), überspringt eine fertige
+Stufe, wenn er auf demselben Arbeitsordner mit denselben Eingaben erneut läuft, und schreibt je Stufe eine
+Fortschrittszeile, die die BuildEngine aus dem Container-Log liest. Ein optionales `rotate_module.sh` zwischen
+convert und target ist der Platz für eine Rotation wie SpinQuant (mitgeliefert wird keine). Benchmarks bleiben auf
+dem Board: Keine Stufe führt einen aus, und das `benchmark_module.sh` der Vorlage ist keine Stufe. Siehe den
+[Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#6-die-stufen-des-builds).
 
 `configs/project_sources.yml` ist ein Katalog vorgelagerter Projekte und Dokumentationslinks. Zur Laufzeit liest
 das Framework nur seine Dokumentationslinks für Hardware (sie füllen das Deep-Ingest-Fenster für Hersteller und SDK
@@ -298,11 +304,15 @@ Container um, hält Hashes fest und lässt dich das Ergebnis auf deinem Gerät i
    der Build läuft weiter. Ein Scan, der nicht innerhalb von `build_timeout` fertig wird, wird mit einer Warnung
    gestoppt.
 7. **Importance-Matrix-Stufe** (nur GGUF mit IMatrix). Ein abgeschotteter Container führt `modules/build.sh` mit
-   `JOB_TYPE=imatrix` aus: Er wandelt das Modell in F16-GGUF um und lässt `llama-imatrix` über die ersten 100
-   Abschnitte des Kalibriertexts laufen. Scheitert diese Stufe, stoppt der Build.
-8. **Build-Stufe.** Ein zweiter abgeschotteter Container führt `modules/build.sh` mit `JOB_TYPE=build` aus. Der
-   Verteiler wählt die Werkzeugkette: `llama-quantize` für GGUF (mit Importance-Matrix, falls vorhanden),
-   `rkllm_module.sh` für RKLLM (nur RK3588 und RK3576), `rknn_module.sh` für RKNN.
+   `JOB_TYPE=imatrix` aus: Der Stage-Runner führt source, config und convert aus, und die Stufe convert wandelt das
+   Modell in F16-GGUF um und lässt `llama-imatrix` über die ersten 100 Abschnitte des Kalibriertexts laufen.
+   Scheitert diese Stufe, stoppt der Build.
+8. **Build-Stufe.** Ein zweiter abgeschotteter Container führt `modules/build.sh` mit `JOB_TYPE=build` aus, und der
+   Stage-Runner führt alle vier Stufen aus: source nennt die Werkzeuge des Images, config vereinheitlicht den
+   Auftrag und lehnt ab, was das Target nicht bauen kann, convert wählt die Werkzeugkette (den GGUF-Konverter,
+   `rkllm_module.sh` für RKLLM nur auf RK3588 und RK3576, `rknn_module.sh` für RKNN), und target quantisiert mit
+   `llama-quantize` (mit Importance-Matrix, falls vorhanden) und schreibt `build_info.json`. Die Fortschrittszeilen
+   des Runners zeigen die Stufe im Build-Status („Running modules: convert (3/4)“).
 9. **Manifest und „Golden Artifact“.** Die Engine kopiert die Ergebnisse in einen versteckten Zwischenordner neben
    dem Ausgabeordner (Links in der Ausgabe des Builds werden nicht verfolgt), ergänzt `build_info.json` um Größe
    und SHA256-Hash jeder Modelldatei und um die Hauptdatei, schreibt `Model_Card.md` und erstellt ein ZIP dieser
@@ -1072,7 +1082,8 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
   Angabe in freiem Text, etwa einen Namen in einem Satz. Für heikles Material nutzt du besser einen lokalen Anbieter.
 - **Erzeugte Targets sind Gerüste.** Der Modulgenerator schreibt einen Block `capabilities:` (Unterstützungsstufe
   community: die Boards und GGUF mit den Typen, die das Build-Skript behandelt) und einen Block `runtime:`, das
-  Vorlagen-`build.sh` folgt dem Rockchip-Dispatcher, und das Vorlagen-Dockerfile baut die Konvertierungswerkzeuge von
+  Vorlagen-`build.sh` ist derselbe Stage-Runner wie der von Rockchip (seine vier Stufenmodule enthalten die
+  Einrichtungs-, Quantisierungs- und Packbefehle des Wizards), und das Vorlagen-Dockerfile baut die Konvertierungswerkzeuge von
   llama.cpp nach demselben Rezept wie `targets/Rockchip/dockerfile`. Boards, Formate und Quantisierungen bleiben ein
   Ausgangspunkt, und ein erzeugtes GPU-Target ist auf echter Hardware nicht getestet. Siehe
   [Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md).
@@ -1112,7 +1123,7 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
 | **Ein venv je Werkzeugkette** im Target-Image | Die Werkzeugketten legen sich gegenseitig widersprechende Versionen fest: Der llama.cpp-Konverter nutzt ein aktuelles torch (2.11, CPU), RKLLM-Toolkit 1.3.1 braucht torch 2.6 und ein eigenes transformers, RKNN-Toolkit2 2.3.2 braucht torch 2.4, setuptools unter 81 und onnx 1.16.2. Getrennte venvs (`/opt/venv`, `/opt/venv-rkllm`, `/opt/venv-rknn`) halten jede bei ihren getesteten Versionen; die Modulskripte rufen den passenden Interpreter auf. |
 | **Debian bookworm und Python 3.11 in den Images** | Rockchip veröffentlicht seine Toolkit-Wheels nur für CPython 3.10 bis 3.12 (das Image nutzt das RKLLM-Wheel für cp311); bookworm bringt Python 3.11 mit. Die Host-Seite ist davon unabhängig und unterstützt Python 3.11 bis 3.14. |
 | **BuildKit für Image-Builds** | Besseres Zwischenspeichern der Schichten als der alte Builder hinter `api.build` von docker-py, den Docker abgekündigt hat, und derselbe Builder wie in der CI. Fehlt `docker buildx`, weicht die Engine auf die Docker-API aus. |
-| **Capabilities als Daten** | Eine Angabe in `target.yml` speist GUI, CLI, Build-Service, Ditto und die MCP-Tools; sie können sich also nicht widersprechen. Das pydantic-Schema lehnt widersprüchliche Angaben ab (etwa eine Vorgabe, die nicht in der Liste steht); Tests in `tests/test_foundation.py` und `tests/test_review_capabilities_paths.py` halten sie im Einklang mit `build.sh`, `rkllm_module.sh`, `rknn_module.sh` und `export_rkllm.py`. |
+| **Capabilities als Daten** | Eine Angabe in `target.yml` speist GUI, CLI, Build-Service, Ditto und die MCP-Tools; sie können sich also nicht widersprechen. Das pydantic-Schema lehnt widersprüchliche Angaben ab (etwa eine Vorgabe, die nicht in der Liste steht); Tests in `tests/test_foundation.py` und `tests/test_review_capabilities_paths.py` halten sie im Einklang mit `config_module.sh`, `convert_module.sh`, `rkllm_module.sh`, `rknn_module.sh` und `export_rkllm.py`. |
 | **Modelle auf dem Host bereitstellen, die Sandbox ohne Netzwerk betreiben** | Downloads brauchen Netzwerk und manchmal ein Token. Erledigt der Host sie, kann jeder Umwandlungscode offline laufen: Hersteller-Toolkits und KI-erzeugte Target-Skripte erreichen weder das Internet noch dein lokales Netz, und das Token gelangt nie in einen Container. |
 | **MCP zuerst, eine Tool-Registry** | Viele Benutzer haben schon einen fähigen KI-Client (Claude Code, Claude Desktop, VS Code). Typisierte Tools mit Berechtigungen und Audit-Log machten das Framework aus diesen Clients nutzbar, und die Zugangsdaten des Clients bleiben im Client. Dittos Tool-Schleife nutzt dieselbe Registry, dieselben Berechtigungen und denselben Bestätigungstext; beide Wege folgen also denselben Regeln. |
 | **Offizielle SDKs statt LiteLLM** | LiteLLM brachte einen großen Abhängigkeitsbaum mit; mit ihm und tiktoken fielen 19 indirekte Pakete weg (unter anderem aiohttp, boto3 und jinja2). Jeder API-Schlüssel läuft durch diese Schicht, und KI-Werkzeuge sind ein häufiges Ziel von Angriffen auf die Lieferkette; weniger Schichten heißen weniger Risiko. Die offiziellen SDKs `anthropic` und `openai` decken alle Vorlagen direkt oder über OpenAI-kompatible APIs ab und sind exakt festgelegt. |
@@ -1256,7 +1267,7 @@ ARM64-Target folgen direkt danach.
 | Punkt | Status |
 |---|---|
 | **Rezepte als Target-Vorlagen.** Eine Target-Vorlage enthält den Build-Code; Modell, Quantisierung, Format und Deployment sind Variablen, die du im Build-Menü wählst, und der Builder nutzt alles, was ein Rezept enthält. Warum: Du bist nie an die Wahl der Person gebunden, die die Vorlage gemacht hat. | geplant |
-| **Rotationsstufe vor der Quantisierung** (SpinQuant, QuaRot), direkt nach den Rezepten: Rotationen werden vor Konvertierung und Quantisierung in die Gewichte eingerechnet, nur wo das Zielformat sie unterstützt (eine Fähigkeit des Formats, kein fester Schritt). Warum: 4-Bit-Modelle der Llama-Familie behalten auf kleinen Boards ihre Qualität. | geplant |
+| **Rotationsstufe vor der Quantisierung** (SpinQuant, QuaRot), direkt nach den Rezepten: Rotationen werden vor Konvertierung und Quantisierung in die Gewichte eingerechnet, nur wo das Zielformat sie unterstützt (eine Fähigkeit des Formats, kein fester Schritt). Warum: 4-Bit-Modelle der Llama-Familie behalten auf kleinen Boards ihre Qualität. Der Platz ist da: Der Stage-Runner führt das `modules/rotate_module.sh` eines Targets zwischen den Stufen convert und target aus; der Algorithmus kommt noch. | geplant |
 | **Allgemeines ARM64-CPU-Target (GGUF)** mit Board-Vorgaben für den Raspberry Pi 4 und 5, direkt nach den Rezepten. Warum: Rockchip war nur der Anfang, und diese Boards brauchen kein Hersteller-SDK. | geplant |
 | **Targets aus der Hardware-Probe, auf dem Board bewiesen.** Ein neues Target beginnt mit der Probe, die du auf dem Board ausführst (auch ohne Netz, die Datei zurückgetragen), oder, wenn du willst, mit Ditto, der es über SSH prüft; ein bestandener Benchmark auf dem Board ist der Beweis, gezeigt als „getestet auf <Board>“ im Community-Hub und in Paketen mitgegeben. Warum: Der Maintainer besitzt die meisten Boards nicht, und nur ein Lauf auf dem echten Board zeigt, dass ein Target funktioniert. | geplant |
 | **Laufzeit auf dem Gerät, der Rest.** Der erste Lauf der selbst gebauten Board-Laufzeit auf einem echten Radxa ZERO 3W; die Geräte-Laufzeit in Deployment-Paketen; das Laufzeit-Image für Docker-Deployments, lokal aus einem Geräte-Build gebaut (statt des geholten Laufzeit-Images); Benchmarks auf dem Gerät und eine gemessene Quantisierungsempfehlung je Board; ein Build auf dem Board, wenn keine Builder-Basis alt genug für seine C-Bibliothek ist; Vulkan auf Mali erst, wenn llama-bench zeigt, dass es den CPU-Build schlägt; MCP-Tools zum Proben, Deployen und Messen von Geräten. | geplant |
@@ -1289,7 +1300,7 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **Dependabot-Wartezeit** für LLM-SDKs. | geplant |
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
 | **Signierte Updates** des Frameworks selbst (`orchestrator/utils/updater.py`, in Entwicklung: Update-Prüfung, Update und Neustart; noch nicht eingebunden), fertig gebaut als geprüfte Updates einer signierten Veröffentlichung statt eines einfachen `git pull`. Werkzeugketten-Images gehören nicht dazu: Das Framework teilt Rezepte, nie kompilierte Images, daher werden sie weiter auf deinem Rechner aus dem Dockerfile des Targets gebaut; die Einstellungen `docker_registry` (standardmäßig leer) und `docker_namespace`, die nichts liest, bleiben erhalten. Keine Vorgabe nennt ein Image aus einer Registry: Die Image-Einstellungen nennen lokale Images (`llm-framework/...`) oder Images Dritter wie Trivy und Qdrant, und der Block `docker` in der `target.yml` eines Targets nennt ein lokales Image ohne Registry. | geplant |
-| **Aufräumen**: Entfernung der alten Vier-Module-Skripte (Vorlagen-`build.sh` und Vorlagen-Dockerfile folgen bereits der aktuellen Pipeline: GGUF über llama.cpp, nach dem Rezept gebaut, Zwischendateien im Arbeitsordner). | geplant |
+| **Aufräumen der Vier-Module-Skripte**, anders erledigt als geplant: Statt sie zu entfernen, hat die Entscheidung U9 des Maintainers sie zum Build gemacht. `build.sh` von Rockchip und der Vorlage ist ein Stage-Runner über `source_module.sh`, `config_module.sh`, `convert_module.sh` und `target_module.sh`, mit Marken zum Fortsetzen je Stufe, Fortschritt je Stufe und dem Platz für die Rotation; die Arbeit des Verteilers liegt in der Stufe, zu der sie gehört, und der Modulgenerator schreibt funktionierende Stufenmodule statt Platzhaltern. | fertig |
 | **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
 
 ### Rust-Teile (geplant)

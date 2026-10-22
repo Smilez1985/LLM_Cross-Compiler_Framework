@@ -463,8 +463,8 @@ def _yaml_text(text: str) -> str:
 
 
 def capabilities_block(board_names: List[str], quantization_logic: str = "") -> Dict[str, Any]:
-    """The capabilities of a generated target: its boards and GGUF with the types its build.sh handles (the
-    labels of its case branches) or common defaults. Support level community: works for its makers."""
+    """The capabilities of a generated target: its boards and GGUF with the types its convert stage handles (the
+    labels of the case branches of the quantization logic in modules/convert_module.sh) or common defaults. Support level community: works for its makers."""
     from orchestrator.schemas.targets import TargetCapabilities
     labels = re.findall(r"^\s*([A-Za-z0-9_|\"' ]+)\)", quantization_logic or "", re.MULTILINE)
     quants = [q.strip(" \"'") for label in labels for q in label.split("|")]
