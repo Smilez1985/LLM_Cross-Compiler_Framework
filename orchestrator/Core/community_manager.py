@@ -66,7 +66,7 @@ from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_P
                                               write_pack)
 from orchestrator.rag import licence_texts, licences, pack_licences
 from orchestrator.rag.licences import FULL_TEXT, LINK_AND_FACTS, SharePlan
-from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file
+from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file, with_reason
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import ensure_directory, redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -678,8 +678,8 @@ class CommunityManager:
                                  expected=(kind, entry.id, entry.version))
         except BaseException as e:
             shutil.rmtree(quarantine, ignore_errors=True)
-            if isinstance(e, DownloadError):
-                raise PackError(str(e)) from None
+            if isinstance(e, DownloadError):   # a disk refusal keeps its numbers for the Community Hub (A4)
+                raise with_reason(PackError(str(e)), e) from None
             raise
 
     def prepare_install_file(self, path: Path, *, identity=None, passphrase: Optional[str] = None,
