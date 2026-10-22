@@ -18,15 +18,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   publish** lists the open pull requests of `community_repo` that add packs (and packs merged under `contributions/`
   but not published yet), fetches a pack from the pull request's head, checks it with `zoo verify` and shows every
   file (GUI: a file list with a read-only text view; CLI: printed, or written to a folder you name with
-  `--review-dir`), then asks "Publish?" ("No" is the default). Yes merges the contribution (only when its required
+  `--review-dir`; every member of the pack file), then asks "Publish?" ("No" is the default); a pull request that
+  changes anything besides new packs under `contributions/<kind>/`, or goes into another branch than `main`, is not
+  published, and the review names that change. Yes merges the contribution (only when its required
   check `validate` passed and its head is the reviewed commit), updates a local clone in the per-user folder, moves
   the pack to `packs/<kind>/`, adds its index entry with the raw address, raises the index version and time, signs
   the index with the keyring key, commits on a new branch, pushes it, opens a pull request, waits for the required
   check and merges it; nothing is ever pushed to `main`. **Revoke a published pack** adds a revocation (one file, one
   version or every version, with the reason) the same way. Every step is reported and written to the audit log,
-  Cancel (Ctrl+C at a terminal) stops before the next step up to the last merge, and a refusal says what happened so
-  far and the next step (no `gh`, not logged in, offline, a check that has not passed, a rejected pack, a clone with
-  changes of its own). The index on `main` must verify with your key or a trusted key before anything is signed on
+  Cancel (Ctrl+C at a terminal) stops before the next step up to the last merge (after the push it closes the
+  publication's own pull request and deletes its branch, so nothing half-published stays), and a refusal says what
+  happened so far and the next step (no `gh`, not logged in, offline, a check that has not passed, a rejected pack, a
+  clone with changes of its own). The index on `main` must verify with your key or a trusted key before anything is signed on
   top of it. gh and git use your own login; the framework never reads, stores or shows a token. The person only: no
   MCP tool, Ditto or other AI path reaches it (guard test). The check workflow template
   `scripts/community_repo/validate-contribution.yml` now runs on every pull request (no paths filter; a pull request

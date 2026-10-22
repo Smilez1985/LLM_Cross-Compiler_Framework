@@ -19,16 +19,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   **Prüfen und veröffentlichen** listet die offenen Pull Requests von `community_repo`, die Pakete hinzufügen (und
   unter `contributions/` gemergte, noch nicht veröffentlichte Pakete), holt ein Paket vom Stand des Pull Requests,
   prüft es mit `zoo verify` und zeigt jede Datei (GUI: eine Dateiliste mit schreibgeschützter Textansicht; CLI:
-  ausgegeben oder mit `--review-dir` in einen Ordner geschrieben, den du nennst), dann fragt es „Veröffentlichen?“
-  („Nein“ ist die Vorgabe). Ja mergt den Beitrag (nur wenn seine Pflichtprüfung `validate` bestanden ist und sein
+  ausgegeben oder mit `--review-dir` in einen Ordner geschrieben, den du nennst; jedes Element der Paket-Datei), dann
+  fragt es „Veröffentlichen?“ („Nein“ ist die Vorgabe); ein Pull Request, der außer neuen Paketen unter
+  `contributions/<kind>/` noch etwas ändert oder in einen anderen Branch als `main` geht, wird nicht veröffentlicht,
+  und die Prüfung nennt diese Änderung. Ja mergt den Beitrag (nur wenn seine Pflichtprüfung `validate` bestanden
+  ist und sein
   Stand der geprüfte Commit ist), aktualisiert einen lokalen Klon im benutzereigenen Ordner, verschiebt das Paket nach
   `packs/<kind>/`, trägt es mit der Raw-Adresse in den Index ein, erhöht Version und Zeit des Index, signiert ihn mit
   dem Schlüssel aus dem Schlüsselbund, committet auf einem neuen Branch, pusht ihn, öffnet einen Pull Request, wartet
   auf die Pflichtprüfung und mergt ihn; nach `main` wird nie gepusht. **Veröffentlichtes Paket zurückziehen** trägt
   einen Rückzug (eine Datei, eine Version oder jede Version, mit dem Grund) auf demselben Weg ein. Jeder Schritt wird
   gemeldet und ins Audit-Log geschrieben, Abbrechen (Strg+C im Terminal) hält bis zum letzten Merge vor dem nächsten
-  Schritt an, und eine Ablehnung sagt, was bis dahin geschehen ist, und nennt den nächsten Schritt (kein `gh`, nicht
-  angemeldet, offline, eine nicht bestandene Prüfung, ein abgelehntes Paket, ein Klon mit eigenen Änderungen). Der
+  Schritt an (nach dem Push schließt es den eigenen Pull Request der Veröffentlichung und löscht seinen Branch, damit
+  nichts halb Veröffentlichtes bleibt), und eine Ablehnung sagt, was bis dahin geschehen ist, und nennt den nächsten
+  Schritt (kein `gh`, nicht angemeldet, offline, eine nicht bestandene Prüfung, ein abgelehntes Paket, ein Klon mit eigenen Änderungen). Der
   Index auf `main` muss sich mit deinem Schlüssel oder einem vertrauenswürdigen Schlüssel prüfen lassen, bevor etwas
   darauf signiert wird. gh und git nutzen dein eigenes Login; das Framework liest, speichert und zeigt nie einen
   Token. Nur die Person: kein MCP-Tool, Ditto oder anderer Weg einer KI erreicht es (Test als Absicherung). Die

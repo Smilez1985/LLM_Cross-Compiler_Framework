@@ -2424,8 +2424,9 @@ llm-cli zoo maintainer revoke KIND ID --reason TEXT [--version V | --sha256 S] [
 Unreleased. For the maintainer of the community repository (`community_repo`), not for users. GitHub is reached with
 your own GitHub CLI login (`gh`) and git, both installed and logged in (`gh auth login`); the framework never reads,
 stores or shows a token. No AI client and no Ditto path reaches these commands. Every step is printed and written to
-the audit log; Ctrl+C cancels before the next step, up to the last merge. A refusal says what happened on GitHub so far
-and the next step.
+the audit log; Ctrl+C cancels before the next step, up to the last merge (after the push it also closes the
+publication's own pull request and deletes its branch). A refusal says what happened on GitHub so far and the next
+step.
 
 - **`key NAME`** (once): a new Ed25519 index signing key in the OS keyring (service `lcf-community-index`). A name that
   exists is refused; a key is never replaced. It prints the entry for `configs/community_keys.yml` (valid for two
@@ -2435,7 +2436,9 @@ and the next step.
   the required check `validate`, and the packs merged there but not published yet (`main:contributions/...`).
 - **`review ITEM`** (a pull request number such as `7` or `#7`, or `main:contributions/KIND/FILE.zip`): fetches the
   packs of that commit into the local clone in the per-user folder, checks each one with `zoo verify` and prints every
-  file of the pack (`pack.json`, `pack.sig` and each file; hidden characters are shown as escapes). With
+  file of the pack (`pack.json`, `pack.sig`, each file and any other member of the pack file; hidden characters are
+  shown as escapes). A pull request that also changes anything besides new packs under `contributions/<kind>/`, or
+  that goes into another branch than `main`, is not published; the review names that change. With
   `--review-dir DIR` the files are written to that new or empty folder instead, for you to read there. Then it asks
   "Publish?" ("No" is the default; without a terminal nothing is published). Yes merges the contribution (only when
   its check passed and its head is the reviewed commit), moves the pack to `packs/<kind>/`, adds its index entry with
