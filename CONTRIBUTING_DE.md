@@ -58,7 +58,7 @@ Installiert genau die festgelegten Versionen mit Hashes aus den Requirements-Dat
 ```bash
 uv venv --python 3.13
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
-uv pip install -r requirements.txt -r requirements-dev.txt
+uv pip sync requirements.txt requirements-dev.txt   # exactly the hash-pinned exports of uv.lock
 
 python -m orchestrator.cli --help      # Kommandozeile
 python -m orchestrator.main            # GUI

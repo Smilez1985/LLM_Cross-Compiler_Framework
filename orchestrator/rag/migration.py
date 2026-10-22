@@ -123,7 +123,7 @@ ENGINE_MISSING = ("Qdrant Edge is not available on this computer (the package qd
 EDGE_UNAVAILABLE = ("The knowledge base is stored in Qdrant Edge, but Qdrant Edge cannot be loaded on this computer "
                     "(the package qdrant-edge-py is missing or broken). Nothing was changed. The storage of earlier "
                     "versions is not used in its place: it lacks what was added since the conversion. Install the "
-                    "framework's requirements again (the installer, or pip install -r requirements.txt)")
+                    "framework's requirements again (the installer, or pip install --require-hashes --no-deps -r requirements.txt)")
 
 
 # Why the old storage is still in use before its conversion was tried (migration.current).

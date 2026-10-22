@@ -26,7 +26,7 @@ TEXTS = {
                                            "computer (the package qdrant-edge-py is missing or broken). Nothing was "
                                            "changed, and the storage of earlier versions is not used in its place: "
                                            "it lacks what was added since the conversion. Install the framework's "
-                                           "requirements again (the installer, or pip install -r requirements.txt).",
+                                           "requirements again (the installer, or pip install --require-hashes --no-deps -r requirements.txt).",
         "storage.convert.offer": "[Convert now] converts it now: the texts and vectors are copied and checked, nothing "
                                  "is embedded again, and the old folder is kept.",
         "storage.converted": "It was converted from the storage of earlier versions on {when} ({points} excerpts; "

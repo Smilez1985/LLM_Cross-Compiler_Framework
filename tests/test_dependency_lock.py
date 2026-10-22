@@ -126,4 +126,35 @@ def test_installers_install_only_the_hash_pinned_requirements_of_this_checkout()
     for name in ("install.sh", "install.bat"):
         text = (REPO_ROOT / name).read_text(encoding="utf-8")
         installs = re.findall(r"pip(?:\.exe)?\"?\)? install (?!--upgrade pip)[^\r\n|>]*", text.replace("$Pip", "pip"))
-        assert installs and all("--require-hashes -r requirements.txt" in i for i in installs), (name, installs)
+        assert installs and all("--require-hashes --no-deps -r requirements.txt" in i for i in installs), \
+            (name, installs)
+
+
+def test_the_pillow_override_lasts_only_while_fastembed_caps_pillow():
+    """pyproject.toml overrides fastembed's Pillow < 13 cap so the advisories fixed in Pillow 13 are gone. That is
+    safe only while the framework decodes no image with Pillow; and once fastembed allows the locked Pillow itself,
+    the override must go (this test then says so)."""
+    import importlib.metadata as metadata
+
+    overrides = pyproject()["tool"]["uv"]["override-dependencies"]
+    assert overrides == ["pillow>=13.0.0"], "a new override needs its own reason and check here"
+    locked = {norm(p["name"]): p["version"] for p in lock()["package"] if p.get("source", {}).get("registry")}
+    assert int(locked["pillow"].split(".")[0]) >= 13
+    offenders = [str(path.relative_to(REPO_ROOT)) for path in (REPO_ROOT / "orchestrator").rglob("*.py")
+                 if re.search(r"^\s*(from|import)\s+PIL\b", path.read_text(encoding="utf-8"), re.M)]
+    assert offenders == [], "framework code decodes images with Pillow: check it against fastembed's cap first"
+    try:
+        requires = metadata.requires("fastembed") or []
+    except metadata.PackageNotFoundError:
+        return
+    caps = [Requirement(r) for r in requires if norm(Requirement(r).name) == "pillow"]
+    assert caps and any(locked["pillow"] not in c.specifier for c in caps), \
+        "fastembed allows the locked Pillow now: remove [tool.uv] override-dependencies from pyproject.toml"
+
+
+def test_the_installers_and_workflows_install_the_export_without_resolving_again():
+    """The override only holds when pip installs the complete export as it is (--no-deps), not resolving again."""
+    for name in (".github/workflows/ci.yml", ".github/workflows/retrieval-eval.yml"):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        for line in re.findall(r"pip install [^\n]*-r requirements\.txt[^\n]*", text):
+            assert "--no-deps" in line, (name, line)

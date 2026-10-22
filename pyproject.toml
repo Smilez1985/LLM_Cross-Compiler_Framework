@@ -80,6 +80,13 @@ dev = [
 requires = ["uv_build>=0.11.32,<0.12"]
 build-backend = "uv_build"
 
+[tool.uv]
+# fastembed (every release up to 0.9.0) declares Pillow < 13, but Pillow 13.0.0 fixes 35 advisories of 12.3.0. The
+# framework uses only fastembed's text models and never decodes an image with Pillow (pypdf extracts text only), so
+# the newest Pillow is used; the installers install the complete hash-pinned export with --no-deps. A test fails once
+# fastembed allows Pillow 13 itself (then this override goes).
+override-dependencies = ["pillow>=13.0.0"]
+
 [tool.uv.build-backend]
 # The package lives at the top of the repository (orchestrator/), not below src/.
 module-name = "orchestrator"

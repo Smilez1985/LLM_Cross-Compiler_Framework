@@ -127,7 +127,8 @@ Write-Host "Installiere Requirements..."
 # Exactly the versions in requirements.txt of this checkout (uv export from uv.lock); pip checks every file against
 # its hash. Without the file nothing is installed unchecked.
 if (-not (Test-Path "requirements.txt")) { Write-Error "requirements.txt fehlt; ohne die festgelegten Versionen wird nichts installiert." }
-& $Pip install --require-hashes -r requirements.txt | Out-Null
+# --no-deps: the file is the complete export (every package, every hash); pip installs exactly that set.
+& $Pip install --require-hashes --no-deps -r requirements.txt | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Error "Die Pakete aus requirements.txt liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)." }
 
 # 5. LAUNCHER
