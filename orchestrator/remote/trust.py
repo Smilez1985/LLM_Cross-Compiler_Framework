@@ -38,9 +38,15 @@ from orchestrator.remote.address import Endpoint
 FINGERPRINT = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$", re.ASCII)
 # The host key types a board's SSH server offers (paramiko reads each of them).
 KEY_TYPES = ("ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa")
-# One pasted key line: an optional host field (known_hosts, ssh-keyscan), the key type, the base64 key, a comment.
-_KEY_LINE = re.compile(r"(?:(?P<hosts>[^\s@#][^\s]{0,1023})\s+)?(?P<type>ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)"
-                       r"|ssh-rsa)\s+(?P<blob>[A-Za-z0-9+/]{16,16384}={0,3})(?:\s+[^\r\n]{0,256})?", re.ASCII)
+# One pasted key line: an optional host field (known_hosts, ssh-keyscan), the key type, the base64 key, a comment. The
+# host field takes what known_hosts writes there (names, addresses, [host]:port, patterns with * ? !, a %zone, a hashed
+# |1|salt|hash entry, comma-separated), never the options or quoted commands of an authorized_keys line or shell words.
+_KEY_LINE = re.compile(r"(?:(?P<hosts>[A-Za-z0-9.:\[\]*?!,_%|=+/-]{1,1024})\s+)?"
+                       r"(?P<type>ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)|ssh-rsa)\s+"
+                       r"(?P<blob>[A-Za-z0-9+/]{16,16384}={0,3})(?:\s+(?P<comment>[^\r\n]{0,256}))?", re.ASCII)
+# A second key where the comment would be: one key per paste.
+_SECOND_KEY = re.compile(r"(?:^|\s)(?:ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)|ssh-rsa|ssh-dss)\s+[A-Za-z0-9+/]{16,}",
+                         re.ASCII)
 MAX_KEY_TEXT = 32 * 1024
 
 
@@ -224,7 +230,8 @@ class TrustStore:
 
 def parse_public_key(text: str) -> Any:
     """The host key in a text the person pasted: exactly one key line (blank lines and # comments aside) of a public key
-    file, known_hosts or ssh-keyscan, of one of KEY_TYPES, whose key data says the same type. KeyTextError otherwise."""
+    file, known_hosts or ssh-keyscan, of one of KEY_TYPES, whose key data says the same type; one key only, and no
+    authorized_keys options or commands in front of it. KeyTextError otherwise."""
     text = text if isinstance(text, str) else ""
     if len(text) > MAX_KEY_TEXT:
         raise KeyTextError("The pasted text is too long for a host key.", "not_a_key")
@@ -238,6 +245,8 @@ def parse_public_key(text: str) -> Any:
     if found is None:
         raise KeyTextError("The pasted text is not an SSH host key line (for example the line of the board's "
                            "/etc/ssh/ssh_host_ed25519_key.pub).", "not_a_key")
+    if found["comment"] and _SECOND_KEY.search(found["comment"]):
+        raise KeyTextError("The pasted line holds more than one key; paste the one key line.", "several")
     from orchestrator.remote import transport
     paramiko = transport.paramiko_module()
     if paramiko is None:
