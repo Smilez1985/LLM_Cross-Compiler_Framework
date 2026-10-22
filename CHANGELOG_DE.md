@@ -1643,6 +1643,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `_with_message`, `BoardOut`, `is_probe_id`, `SOURCE_KINDS`, `snapshot_listing`, `_write_profile_file`,
   `TokenStore.policy_of`, `deploy_artifact` (Aufrufer nutzen `deploy_package`), `WIDTH_LABELS` und `REQUEST_TTL`.
   CONTRIBUTING (EN/DE) nennt die Regel: erst nutzen, was es gibt.
+- **Community-Pakete gehen an das Community-Repository
+  [Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base)**: Der Maintainer hat es
+  gewählt (2026-10-22), und es ist jetzt der Standardwert der Einstellung `community_repo`; „Open pull request“ im
+  Export-Fenster und `llm-cli zoo export --pr` übergeben ein Paket also dorthin, statt mit „No community repository is
+  configured“ abzubrechen. Sein Beitrags-Workflow, sein signierter Index und der Schlüssel des Maintainers sind noch
+  nicht veröffentlicht: `community_index_url` bleibt leer, bis in diesem Repository der erste signierte Index liegt;
+  der Zoo installiert deshalb weiterhin nur Paketdateien. Leerst du die Einstellung selbst, wird wie bisher nichts
+  übergeben. Ein Test hält den Standardwert fest und prüft ihn gegen die Regel der Einstellung und die der Übergabe.
 - **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:
@@ -2177,6 +2185,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Die beim ersten Start gewählte Sprache gilt sofort**: Der Dialog beim ersten Start lief mit englischen Texten des
   Fensters, und die Wahl Deutsch ließ sie bis zum nächsten Start englisch (auch Qts eigene Schaltflächen). Das Fenster
   wechselt jetzt in die gewählte Sprache, bevor es sich öffnet (`orchestrator/gui/app.py`).
+- **Dependabot schlägt für die GPU-Vorlage kein anderes Ubuntu-Release mehr vor**:
+  `targets/_template/Dockerfile.gpu` baut auf dem Ubuntu-Release auf, auf das die CUDA-Redist-Archive und der
+  Katalog der Build-Basen festgelegt sind (Entscheidung D6), deshalb brach ein Sprung auf 25.10 die Tests.
+  `.github/dependabot.yml` ignoriert Wechsel des Ubuntu-Releases (major und minor); ein Test hält die Regel fest.
+- **Die nächtliche Retrieval-Evaluation läuft wieder**: Der Workflow `.github/workflows/retrieval-eval.yml` startete
+  das Framework auf einem GitHub-Runner, der keinen System-Keyring hat, ohne anzugeben, wie der Schlüsseltresor
+  gehalten wird; deshalb verweigerte das Framework jede Nacht den Start (Exit-Code 5). Der Job setzt jetzt
+  `LLM_SECRET_STORAGE=ephemeral` (nur im Arbeitsspeicher; die Evaluation braucht keine Zugangsdaten), und ein Test
+  schlägt fehl, wenn ein Workflow-Schritt das Framework ohne diese Angabe startet.
 - **Auf ein Board, dessen Home-Ordner einen langen Pfad hat, lässt sich deployen**: Die Geräte-Laufzeit lehnte einen
   Home-Ordner des Board-Benutzers mit mehr als 200 Zeichen ab (und dessen Staging-Ordner sowie Modelle darunter ab
   400), deshalb brach ein Home auf einem tief liegenden Einhängepunkt das Deployment mit „not a plain absolute path“
@@ -2652,6 +2669,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   die scheitert, wenn eine Nutzlast in die gespeicherten Auszüge gelangt; die Evaluation liest ihr Korpus jetzt
   ebenfalls als Text von außen ein. Früher gespeicherte Seiten behalten ihre Auszüge, bis sie erneut eingelesen
   werden.
+- **Abhängigkeiten auf den neuesten passenden Versionen, die Advisories vom Oktober 2026 behoben**: `uv lock
+  --upgrade` hob jede Abhängigkeit auf die neueste Version, die ihr Bereich erlaubt (darunter pypdf 6.21.2, certifi
+  2026.10.19, paramiko 5.1.0, qdrant-client 1.20.0, filelock 4.2.4), und Pillow geht auf 13.0.0, das 35 Advisories
+  von 12.3.0 behebt. fastembed (bis 0.9.0) verlangt noch Pillow < 13; das Framework nutzt nur dessen Textmodelle und
+  dekodiert nie ein Bild mit Pillow, deshalb hebt `pyproject.toml` diese Grenze auf (`[tool.uv]
+  override-dependencies`), und Installer und CI installieren den vollständigen Export mit Hashes per `--no-deps`, damit
+  pip ihn nicht neu auflöst: `requirements-gui.txt` (mit dem optionalen Extra `gui`), `requirements.txt` (ohne
+  Bildschirm) und `requirements-dev.txt`, in den Installern, den Jobs für Tests, ohne GUI, Lint und Sicherheit, der
+  nächtlichen Retrieval-Evaluation und der Workflow-Vorlage des Community-Repositorys. Ein Test meldet, sobald fastembed Pillow 13 selbst erlaubt und die Ausnahme entfallen
+  kann. `astral-sh/setup-uv` in der CI geht auf v10.3.0 (Dependabot-PR #8). Geprüft mit der vollen Testsuite und einer
+  echten Retrieval-Evaluation (88 % der Fälle bestanden).
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI

@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 import zipfile
 from datetime import date
@@ -804,6 +805,21 @@ class TestHandoff:
         with pytest.raises(PackError, match="community_repo"):
             submit_contribution(tmp_path / "p.zip", "", "target", opener=lambda u: pytest.fail("opened"))
 
+    def test_the_default_repository_is_the_community_repository(self, tmp_path):
+        """The community repository is decided (maintainer, 2026-10-22): the default of community_repo names it and
+        passes the setting's own rule and the handoff's; the index URL stays empty until a signed index exists."""
+        from orchestrator.Core.config_manager import ConfigManager
+        cfg = ConfigManager(tmp_path / "configs")
+        schema = cfg.config_schemas["community_repo"]
+        assert schema.default_value == cfg.get("community_repo") == "Smilez1985/Edge-LLM-Knowledge-Base"
+        assert schema.validate_value(schema.default_value) == (True, [])
+        assert zoo_mod.REPO_RE.fullmatch(schema.default_value)
+        assert cfg.get("community_index_url") == ""
+        opened = []
+        submit_contribution(tmp_path / "p.zip", cfg.get("community_repo"), "target", which=lambda name: None,
+                            opener=opened.append)
+        assert opened == ["https://github.com/Smilez1985/Edge-LLM-Knowledge-Base/upload/main/contributions/target"]
+
     def test_handoff_code_reads_no_credentials(self):
         source = inspect.getsource(zoo_mod.submit_contribution) + inspect.getsource(zoo_mod._submit_with_gh)
         for forbidden in ("environ", "getenv", "get_secret", "keyring", "getpass", "env="):
@@ -1355,3 +1371,36 @@ def test_hub_tooltips_show_the_description_as_plain_text(qapp):
         assert "&lt;b&gt;Fast&lt;/b&gt;" in tip and "<a " not in tip and "<img" not in tip and "&amp;" in tip
     finally:
         hub.close()
+
+
+@pytest.mark.skipif(shutil.which("bash") is None or sys.platform == "win32", reason="runs the workflow step in bash")
+def test_the_contribution_check_passes_the_folder_readmes_and_nothing_else_but_packs(tmp_path):
+    """The community repository keeps a README.md in each contributions/<kind>/ folder; the check lets those pass as
+    a notice, checks every pack with zoo verify and rejects any other file."""
+    import yaml
+    from conftest import REPO_ROOT
+    workflow = yaml.safe_load((REPO_ROOT / "scripts" / "community_repo" / "validate-contribution.yml")
+                              .read_text(encoding="utf-8"))
+    step = next(s for s in workflow["jobs"]["validate"]["steps"] if s.get("name") == "Check every added pack")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "llm-cli").write_text("#!/bin/sh\nexit 0\n")
+    (bin_dir / "llm-cli").chmod(0o755)
+    for kind in ("target", "recipe", "knowledge"):
+        (tmp_path / "contributions" / kind).mkdir(parents=True)
+        (tmp_path / "contributions" / kind / "README.md").write_text("folder\n")
+    (tmp_path / "contributions" / "target" / "board.zip").write_bytes(b"PK")
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+
+    def check(*files):
+        (tmp_path / "changed.txt").write_text("".join(f + "\n" for f in files))
+        return subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True,
+                              text=True)
+
+    ok = check("contributions/target/README.md", "contributions/recipe/README.md",
+               "contributions/knowledge/README.md", "contributions/target/board.zip")
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    assert ok.stdout.count("::notice") == 3
+    (tmp_path / "contributions" / "target" / "notes.txt").write_text("x")
+    bad = check("contributions/target/notes.txt")
+    assert bad.returncode != 0 and "only pack files" in bad.stdout

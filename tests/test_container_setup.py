@@ -130,6 +130,49 @@ def test_every_workflow_build_has_push_false():
                     assert (step.get("with") or {}).get("push") is False, f"{workflow.name}: push must be false"
 
 
+# A step that starts the framework (not pytest, which fakes the vault) on a runner without a system keyring stops
+# with exit code 5 unless the workflow says how the vault is kept (the nightly retrieval evaluation failed so).
+FRAMEWORK_RUN = re.compile(r"orchestrator\.cli\b|\bllm-cli\b|\bllmcf\b|\bllm-gui\b")
+
+
+def framework_steps_without_secret_storage(data: dict) -> list:
+    """The steps that start the framework without LLM_SECRET_STORAGE in the workflow's, the job's or the step's env
+    (or a docker run -e)."""
+    missing = []
+    workflow_env = data.get("env") or {}
+    for job_name, job in (data.get("jobs") or {}).items():
+        job_env = {**workflow_env, **(job.get("env") or {})}
+        for step in job.get("steps") or []:
+            run = str(step.get("run") or "")
+            if not FRAMEWORK_RUN.search(run):
+                continue
+            env = {**job_env, **(step.get("env") or {})}
+            if "LLM_SECRET_STORAGE" not in env and "LLM_SECRET_STORAGE=" not in run:
+                missing.append(f"{job_name}: {step.get('name') or run.strip()[:60]}")
+    return missing
+
+
+def test_every_workflow_that_starts_the_framework_says_how_the_vault_is_kept():
+    found = []
+    for workflow in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        found += [f"{workflow.name}: {step}" for step in framework_steps_without_secret_storage(data)]
+    assert not found, ("set LLM_SECRET_STORAGE (e.g. ephemeral) for these steps, a runner has no keyring:\n  "
+                       + "\n  ".join(found))
+
+
+def test_the_vault_guard_finds_a_framework_step_without_secret_storage():
+    step = {"name": "eval", "run": "python -m orchestrator.cli -q ditto eval --kind retrieval"}
+    assert framework_steps_without_secret_storage({"jobs": {"j": {"steps": [step]}}}) == ["j: eval"]
+    assert framework_steps_without_secret_storage(
+        {"jobs": {"j": {"env": {"LLM_SECRET_STORAGE": "ephemeral"}, "steps": [step]}}}) == []
+    assert framework_steps_without_secret_storage(
+        {"env": {"LLM_SECRET_STORAGE": "ephemeral"}, "jobs": {"j": {"steps": [step]}}}) == []
+    assert framework_steps_without_secret_storage({"jobs": {"j": {"steps": [
+        {"run": "docker run --rm -e LLM_SECRET_STORAGE=ephemeral lcf-framework:local llm-cli targets list"},
+        {"run": "python -m pytest -q"}]}}}) == []
+
+
 def test_the_guard_finds_a_push_and_a_framework_pull():
     for line in ["docker push lcf-framework:local", "docker buildx build --push -t x .", "docker image push x",
                  "docker compose push", "uses: docker/login-action@v3", "docker pull ghcr.io/smilez1985/llm-runtime",
@@ -822,7 +865,8 @@ class TestInstallShInAContainer:
         if failing is None:
             assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, run.stdout + run.stderr
             installs = [line for line in (install_dir / "pip.log").read_text().splitlines() if "--upgrade" not in line]
-            assert installs == [f"install --require-hashes -r {wanted}"]
+            # --no-deps: the complete export as it is, never resolved again (pyproject.toml's Pillow override)
+            assert installs == [f"install --require-hashes --no-deps -r {wanted}"]
             return
         assert run.returncode != 0, run.stdout + run.stderr
         assert "AFTER setup_venv" not in run.stdout, "the installer went on as if the environment existed"

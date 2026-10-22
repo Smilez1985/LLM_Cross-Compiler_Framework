@@ -54,7 +54,7 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install bandit
-        run: python -m pip install -r requirements-dev.txt
+        run: python -m pip install --no-deps -r requirements-dev.txt
 
       - name: Bandit (fails on high severity, high confidence)
         run: bandit -r orchestrator scripts targets --severity-level high --confidence-level high
@@ -79,7 +79,7 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install pip-audit
-        run: python -m pip install -r requirements-dev.txt
+        run: python -m pip install --no-deps -r requirements-dev.txt
 
       - name: Audit pinned runtime dependencies
         # requirements-gui.txt is a fully pinned export (requirements.txt plus the optional extra 'gui', so every

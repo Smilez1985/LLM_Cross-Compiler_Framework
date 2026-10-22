@@ -23,8 +23,8 @@ if str(_ROOT) not in sys.path:   # started as a script: python orchestrator/main
 GUI_EXTRA_MISSING = (
     "The graphical interface needs PySide6, the optional 'gui' extra, and this installation does not have it. "
     "Run the installer again without --headless, or install the hash-pinned list from the framework's folder with "
-    "the pip of this environment: pip install --require-hashes -r requirements-gui.txt. The command line (llmcf) "
-    "and its MCP server work without it.")
+    "the pip of this environment: pip install --require-hashes --no-deps -r requirements-gui.txt. The command line "
+    "(llmcf) and its MCP server work without it.")
 
 
 def qt_installed() -> bool:

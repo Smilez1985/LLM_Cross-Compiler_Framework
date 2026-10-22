@@ -57,7 +57,7 @@ Installs exactly the pinned, hashed versions from the requirements files:
 ```bash
 uv venv --python 3.13
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
-uv pip install -r requirements-gui.txt -r requirements-dev.txt   # without the GUI: requirements.txt
+uv pip sync requirements-gui.txt requirements-dev.txt   # exactly the hash-pinned exports of uv.lock; without the GUI: requirements.txt
 
 python -m orchestrator.cli --help      # command line
 python -m orchestrator.main            # GUI (orchestrator/gui/app.py; without PySide6 it says how to install it)
@@ -163,7 +163,7 @@ The CI runs the tests on Ubuntu with Python 3.11, 3.12, 3.13 and 3.14, and on Wi
 ```bash
 for v in 3.11 3.12 3.13 3.14; do
   uv venv --python "$v" ".venv-$v"
-  uv pip install --python ".venv-$v" -r requirements.txt -r requirements-dev.txt
+  uv pip sync --python ".venv-$v" requirements-gui.txt requirements-dev.txt
   QT_QPA_PLATFORM=offscreen ".venv-$v/bin/python" -m pytest -q || echo "FAILED on Python $v"
 done
 ```
@@ -324,7 +324,7 @@ Windows-only and version-specific ones; the exact script is in `security.yml`.
 the Qt-free checks (`tests/test_qt_free_core.py`: the core's texts, `llmcf --help`, `llmcf mcp serve` and the plain
 message of `llm-gui`) and the whole suite, whose GUI tests skip themselves (`pytest.importorskip("PySide6")` or the
 `qapp` fixture). A test module that imports `orchestrator.gui` at its top skips without Qt first. Locally:
-`python -m venv .venv-headless && .venv-headless/bin/pip install -r requirements.txt -r requirements-dev.txt`.
+`python -m venv .venv-headless && .venv-headless/bin/pip install --no-deps -r requirements.txt -r requirements-dev.txt`.
 
 **Secret scan** (`security.yml`): every commit of the whole history, see [section 6](#6-secret-scan-and-git-hooks).
 
@@ -515,10 +515,12 @@ and options are in the [CLI guide](docs/CLI_Usage.md#zoo-export); for targets, s
 The framework never asks for, reads or shows a token: `gh` and `git` use their own stored sign-in, and the upload
 page uses your browser's GitHub session.
 
-**Current state:** the community repository and its signed index are not published yet. `community_repo` and
-`community_index_url` are empty and `configs/community_keys.yml` lists no key, so `--pr` stops with "No community
-repository is configured" and leaves the pack in `community/contributions/`. Until the repository exists, a pack
-can be shared as a file (`llm-cli zoo install --file <pack>` installs it with trust `local`).
+**Current state:** the community repository is set: `community_repo` names
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), so `--pr` and "Open pull
+request" hand a pack to it. Its contribution workflow (the CI check of step 4), its signed index and the maintainer's
+key are not published yet: `community_index_url` stays empty until the first signed index exists in that repository, and
+`configs/community_keys.yml` lists no key. Until then a pack can also be shared as a file
+(`llm-cli zoo install --file <pack>` installs it with trust `local`).
 
 Knowledge packs keep the source address of every page and claim no licence for the pages (`NOASSERTION`); the pages
 stay under their owners' terms. Pages carried in full under a licence that asks for its text (MIT, BSD, ISC,

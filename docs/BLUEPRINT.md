@@ -926,9 +926,10 @@ address; a page's full text goes in only where its licence allows it, every othe
 every page with what it carries and why. Pages carried in full under a licence that asks for its text get that text in
 `LICENSES/` and a `NOTICE`, and the export names each licence text and why. A target you installed from someone else
 is not re-signed as yours, and pages imported from installed community knowledge packs are left out of a knowledge
-export. "Open pull request" (`--pr`) hands the pack to the community repository (`community_repo`): through the GitHub
-CLI when it is installed and logged in, otherwise the repository's upload page opens in the browser. Both keep their
-own credentials; the framework never asks for, reads or shows a token.
+export. "Open pull request" (`--pr`) hands the pack to the community repository (`community_repo`, by default
+`Smilez1985/Edge-LLM-Knowledge-Base`): through the GitHub CLI when it is installed and logged in, otherwise the
+repository's upload page opens in the browser. Both keep their own credentials; the framework never asks for, reads
+or shows a token.
 
 **Maintainer tools.** `scripts/zoo_sign_index.py` creates the index key in the OS keyring (`keygen`), checks a pack
 and prints its index entry (`entry`) and signs `index.json` (`sign`; with `--previous` the version must be higher
@@ -937,12 +938,13 @@ community repository: it accepts only pack zips of at most 5 MB and runs `llm-cl
 rejects packs that still contain keys or personal data (the repository's secret scan skips binary files, so it
 does not run on the zips). The signing key never reaches CI.
 
-**State.** The community repository, its index and the maintainer's key are not published yet:
-`configs/community_keys.yml` lists no key, and `community_index_url` and `community_repo` are empty. Listing the
-index and installing by id therefore stop with a message (`llm-cli zoo list` still shows installed packs), and
-`--pr` only says where the pack is. The framework release the workflow template checks packs with (`LCF_REF`) is a
-placeholder that the maintainer sets. Packs can already be exchanged as files (trust `local`) and encrypted between
-users.
+**State.** The community repository is chosen (maintainer, 2026-10-22): `community_repo` names
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base) by default, and `--pr` hands
+packs to it. Its contribution workflow, its signed index and the maintainer's key are not published yet:
+`configs/community_keys.yml` lists no key, and `community_index_url` stays empty until the first signed index exists in
+that repository. Listing the index and installing by id therefore stop with a message (`llm-cli zoo list` still shows
+installed packs). The framework release the workflow template checks packs with (`LCF_REF`) is a placeholder that the
+maintainer sets. Packs can already be exchanged as files (trust `local`) and encrypted between users.
 
 ### Recent inputs (unreleased)
 
@@ -1017,10 +1019,11 @@ These are real limitations of the current state. Most are scheduled in the [road
   same recipe as `targets/Rockchip/dockerfile`. The boards, formats and quantizations are still a starting point,
   and a generated GPU target is untested on real hardware. See the
   [Module Developer Guide](Module_Developer_Guide.md).
-- **The community zoo has no published index yet.** The community repository, its signed index and the
-  maintainer's key are not published: `configs/community_keys.yml` lists no key, and `community_index_url` and
-  `community_repo` are empty. Listing the index and installing by id stop with a message; packs can be exchanged
-  as files (trust `local`) and encrypted between users. Publishing is planned for 3.1.0.
+- **The community zoo has no published index yet.** The community repository is set (`community_repo`:
+  `Smilez1985/Edge-LLM-Knowledge-Base`), but its contribution workflow, its signed index and the maintainer's key
+  are not published: `configs/community_keys.yml` lists no key, and `community_index_url` is empty. Listing the
+  index and installing by id stop with a message; packs can be exchanged as files (trust `local`) and encrypted
+  between users. Publishing is planned for 3.1.0.
 - **Deep Ingest has no CLI command.** A person starts it in the GUI; MCP clients and Ditto ask for one with
   `crawl_docs_site` and the person confirms each crawl.
 - **Hidden text is found by what an element says itself.** Inline styles and attributes count; rules in style sheets
@@ -1124,6 +1127,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 | Version | Theme | Status |
 |---|---|---|
 | 3.1.0 | Ditto rebuild, sign-in and local AI | in progress |
+| next | Build service, queue and modes | planned |
 | 3.2.0 | Device runtime and the maintainer's hardware | planned |
 | 3.3.0 | LoRA and large models | planned |
 | 3.4.0 | Supply chain and community | planned |
@@ -1157,7 +1161,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 | **Better answers from the knowledge base**, taken from rag4ll and kept small: reranking with a cross-encoder on the CPU and a relevance floor that keeps unrelated excerpts out of Ditto's prompt (on for build recommendations; for the chat and MCP searches with `rag_rerank_default`), a size budget for the excerpts, splitting of oversized code and table blocks, keyword search that understands identifiers such as `-DGGML_CUDA=ON`, and unloading of idle models; measured with the retrieval evaluation (`llm-cli ditto eval --kind retrieval`). | done |
 | **Community packs with real cryptography**: packs with a manifest of every file, public packs signed with Ed25519, private packs encrypted in the age format (rage, through `pyrage`) to the recipients' keys or a passphrase, signed by the sender and readable with the standard age tools. The XOR "SwarmCipher" upload and its GitHub token prompt are removed; the framework never asks for a token. | done |
 | **Model zoo from the community**: recipes (model at a pinned commit, target fingerprint, format, quantization, toolchain image and verified hashes) generated from finished builds; a signed index with revocations, installation through a quarantine with trust levels, `llm-cli zoo`, the Community Hub, export for the community with a hand-over to a pull request, and the maintainer tools for the community repository. | done |
-| **Community repository and index published**: the community repository with the contribution workflow, the first signed index, the maintainer's key in `configs/community_keys.yml` and the settings `community_index_url` and `community_repo` filled in, shipped with a release. Until then the zoo works with pack files only. | planned |
+| **Community repository and index published**: the repository is chosen ([Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), the default of `community_repo` since 2026-10-22, so pull requests already go there). Still to do: its contribution workflow, the first signed index, the maintainer's key in `configs/community_keys.yml` and the setting `community_index_url` filled in, shipped with a release. Until then the zoo installs pack files only. | planned |
 
 Sign-in per access type, as designed. Built so far (listed in the changelog): the API key first for Anthropic,
 the credential store's second version, the one pattern table, the sign-in core (methods per provider, check,
@@ -1180,6 +1184,21 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 - **Credential store, second version**: encrypted vault with a lock across processes and key rotation; when no
   keyring is usable, you choose a fallback explicitly.
 - **One pattern table** for the repository's secret scan and the redaction in logs.
+
+### Next - build service, queue and modes (planned; starts right after the architecture consolidation)
+
+The steps come in this order. Decisions that are still open are written into their row; they are asked when that
+step starts.
+
+| Item | Status |
+|---|---|
+| **Step 1 - Build service**: one background program per account owns every build; the GUI, the command line and the MCP server become its clients. A crash of the GUI no longer ends a build. The service can be stopped and restarted without losing anything (the state is already kept in files: build records, build requests, the reservation ledger, job summaries), and a build resumes at its last finished stage of the four-module build (source, config, convert, target). Why: today a build runs inside the program that started it, and ends when that program ends. | planned |
+| **Step 2 - One queue across all programs**: builds wait in one queue in the build service and are admitted by RAM, CPU and disk. The disk part exists (the reservation ledger in `orchestrator/Core/disk_plan.py`); the queue extends what is there (the queue in `orchestrator/Core/orchestrator.py`, the build engine's slots, the request store) instead of a second structure. No Celery. Why: several programs (GUI, CLI, AI apps) start builds on one computer. | planned |
+| **Step 3 - Private and enterprise mode**: private mode is the default, enterprise mode is optional. The mode is chosen in the installer (`install.sh` and the Windows installer) and changed in File > Settings...; an AI can read it but never change it. It reuses the advanced/enterprise scaffolding that already exists in `orchestrator/Core/config_manager.py` (decision U7). Why: steps 4 and 5 bring company features that a private installation does not need by default. | planned |
+| **Step 4 - Secret backends**: HashiCorp Vault and CyberArk Conjur (enterprise mode; opt-in in private mode). Values are fetched when they are used, kept in memory only and never written to the local vault (`secrets.store`); every fetch is audited, and leases are renewed and revoked. Later: dynamic secrets and signed SSH certificates for boards. Why: companies keep secrets in a central store and must see every use. Open decisions, asked when this step starts: audit rows in CI mode; one fetch per operation; references only in enterprise mode; internet-hosted backends; where the backend's own sign-in credential is kept. | planned |
+| **Step 5 - Kubernetes and Nomad**: opt-in places to run builds, next to the local Docker builds that stay the default. They use images the company builds itself from the framework's Dockerfiles into its own registry, pinned by digest, never images from the community hub. Why: a company may want builds on its own cluster. Open decisions: both modes or enterprise mode only; through `kubectl`/`nomad` or their HTTP APIs. | planned |
+| **Step 6 - Own keyring service on Linux**: the framework ships its own keyring service on Linux (decided in round 7 on 2026-10-15, not built; Windows keeps the Windows Credential Manager); after step 4. Why: many Linux installations have no usable keyring, and the vault refuses one that hangs, keeps nothing or stores in plain text. Open decision: build it or keep the OS keyring. | planned |
+| **Step 7 - Newest fitting versions kept automatically**: every dependency (Python, CUDA, Docker base images, toolkits, GitHub Actions) stays on the highest version that fits, and each update is tested before it lands. A plan is being prepared. Why: old versions collect security advisories, and an update must not break anything. | planned |
 
 ### 3.2.0 - Device runtime and the maintainer's hardware (planned)
 
@@ -1223,7 +1242,7 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **Dependabot cooldown** for LLM SDKs. | planned |
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
 | **Signed updates** of the framework itself (`orchestrator/utils/updater.py`, in development: update check, update and restart; not wired yet), finished as verified updates of a signed release instead of a plain `git pull`. Toolchain images are not part of it: the framework shares recipes, never compiled images, so they stay built on your machine from the target's Dockerfile; the settings `docker_registry` (empty by default) and `docker_namespace`, which nothing reads, are kept. No default names a registry image: the image settings name local images (`llm-framework/...`) or third-party images such as Trivy and Qdrant, and the `docker` block of a target's `target.yml` names a local image without a registry. | planned |
-| **Clean-up of the four-module scripts**, done differently than planned: instead of removing them, the maintainer's decision U9 made them the build. `build.sh` of Rockchip and of the template is a stage runner over `source_module.sh`, `config_module.sh`, `convert_module.sh` and `target_module.sh`, with resume markers per stage, progress per stage and the rotation slot; the dispatcher's work moved into the stage it belongs to, and the module generator writes working stage modules instead of placeholders. | done |
+| **The four modules are the build structure** (the planned clean-up of the four-module scripts, done differently than planned): instead of removing them, the maintainer's decision U9 made them the build. `build.sh` of Rockchip and of the template is a stage runner over `source_module.sh`, `config_module.sh`, `convert_module.sh` and `target_module.sh`, with resume markers per stage, progress per stage and the rotation slot; the dispatcher's work moved into the stage it belongs to, and the module generator writes working stage modules instead of placeholders. | done |
 | **SSOT corrections** for the project-sources catalogue and its scripts. | done |
 
 ### Rust parts (planned)

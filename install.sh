@@ -310,7 +310,9 @@ setup_venv() {
         echo "$REQUIREMENTS fehlt in $INSTALL_DIR; ohne die festgelegten Versionen wird nichts installiert." >&2
         exit 1
     fi
-    ./.venv/bin/pip install --require-hashes -r "$REQUIREMENTS" > /dev/null
+    # --no-deps: $REQUIREMENTS is the complete export of uv.lock (every package, every hash), so pip installs exactly
+    # that set and does not resolve again (pyproject.toml [tool.uv] overrides one upstream cap: Pillow).
+    ./.venv/bin/pip install --require-hashes --no-deps -r "$REQUIREMENTS" > /dev/null
 EOF
     then
         log_error "Die Python-Umgebung in $INSTALL_DIR/.venv ließ sich nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Proxy oder eigener Spiegel: sudo -E ./install.sh bzw. PIP_INDEX_URL."

@@ -26,7 +26,7 @@ TEXTS = {
                                            "computer (the package qdrant-edge-py is missing or broken). Nothing was "
                                            "changed, and the storage of earlier versions is not used in its place: "
                                            "it lacks what was added since the conversion. Install the framework's "
-                                           "requirements again (the installer, or pip install -r requirements.txt).",
+                                           "requirements again (the installer, or pip install --require-hashes --no-deps -r requirements.txt).",
         "storage.convert.offer": "[Convert now] converts it now: the texts and vectors are copied and checked, nothing "
                                  "is embedded again, and the old folder is kept.",
         "storage.converted": "It was converted from the storage of earlier versions on {when} ({points} excerpts; "
@@ -257,8 +257,8 @@ TEXTS = {
                                            "geladen werden (das Paket qdrant-edge-py fehlt oder ist beschädigt). Es "
                                            "wurde nichts geändert, und der Speicher früherer Versionen springt nicht "
                                            "ein: ihm fehlt, was seit der Umwandlung dazukam. Installiere die "
-                                           "Abhängigkeiten des Frameworks erneut (der Installer, oder pip install -r "
-                                           "requirements.txt).",
+                                           "Abhängigkeiten des Frameworks erneut (der Installer, oder pip install "
+                                           "--require-hashes --no-deps -r requirements.txt).",
         "storage.convert.offer": "[Jetzt umwandeln] wandelt sie jetzt um: Texte und Vektoren werden kopiert und "
                                  "geprüft, nichts wird neu eingebettet, und der alte Ordner bleibt.",
         "storage.converted": "Sie wurde am {when} aus dem Speicher früherer Versionen umgewandelt ({points} Auszüge; "
