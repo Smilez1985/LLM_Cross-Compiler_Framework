@@ -117,3 +117,64 @@ class TestTheBrowsersDownloadWorker:
         worker.finished.connect(done.append)
         worker.run()
         assert errors == ["Hugging Face refused config.json (HTTP 401)."] and done == []
+
+
+class TestTheOldCacheIsUsableForABuild:
+    """Regression (A6, "stay usable"): a cache blob is named by its checksum, and the build tells a GGUF input by its
+    suffix (config_module.sh: INPUT_FORMAT=gguf only for *.gguf). A linked file therefore keeps its link's name in the
+    container, and a cached model folder chosen by path is bound file by file (its links lead to the cache's blobs,
+    outside the folder, and did not resolve inside the container)."""
+
+    @pytest.fixture
+    def engine(self, tmp_path, monkeypatch):
+        from orchestrator.Core.builder import BuildEngine
+        from orchestrator.Core.config_manager import ConfigManager
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("orchestrator.Core.builder.docker.from_env",
+                            lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
+        return BuildEngine(ConfigManager(tmp_path / "configs"))
+
+    @staticmethod
+    def stage(engine, source, pin=None):
+        from orchestrator.Core.builder import BuildConfiguration, BuildProgress, BuildStatus, ModelFormat
+        from orchestrator.tools.local_files import LocalInputs
+        config = BuildConfiguration(build_id="b1", timestamp="t", model_source=str(source), target_arch="Rockchip",
+                                    target_format=ModelFormat.GGUF, output_dir="out", quantization="Q4_K_M",
+                                    local_inputs=LocalInputs(model=pin) if pin is not None else None)
+        return engine._stage_model(config, BuildProgress("b1", BuildStatus.QUEUED, ""))
+
+    def test_an_ai_callers_reference_keeps_the_gguf_name(self, area):
+        folder = old_cache(area.models)
+        pin = area.files.resolve(f"models:models--acme--tiny-GGUF/snapshots/{OLD_COMMIT}/tiny-q4_k_m.gguf")
+        inner, volumes = mount_plan(pin, "/build-cache/input-model")
+        assert inner == "/build-cache/input-model/tiny-q4_k_m.gguf"
+        assert volumes == {str((folder / "blobs" / WEIGHTS_SHA).resolve()): {"bind": inner, "mode": "ro"}}
+
+    def test_a_plain_file_keeps_its_name_as_before(self, area):
+        (area.models / "m.gguf").write_bytes(WEIGHTS)
+        inner, _ = mount_plan(area.files.resolve("models:m.gguf"), "/build-cache/input-model")
+        assert inner == "/build-cache/input-model/m.gguf"
+
+    def test_the_builders_path_of_a_cached_gguf_keeps_its_name(self, area, engine):
+        folder = old_cache(area.models)
+        link = folder / "snapshots" / OLD_COMMIT / "tiny-q4_k_m.gguf"
+        inner, volumes = self.stage(engine, link)
+        assert inner == "/build-cache/input-model/tiny-q4_k_m.gguf"
+        assert volumes == {str((folder / "blobs" / WEIGHTS_SHA).resolve()): {"bind": inner, "mode": "ro"}}
+
+    def test_the_builders_path_of_a_cached_model_folder_binds_its_files(self, area, engine):
+        folder = old_cache(area.models, "acme/tiny", files={"config.json": (CONFIG, False),
+                                                            "model.safetensors": (WEIGHTS, True)})
+        inner, volumes = self.stage(engine, folder / "snapshots" / OLD_COMMIT)
+        assert inner == "/build-cache/input-model"
+        assert volumes == {
+            str((folder / "blobs" / git_blob_id(CONFIG)).resolve()): {"bind": f"{inner}/config.json", "mode": "ro"},
+            str((folder / "blobs" / WEIGHTS_SHA).resolve()): {"bind": f"{inner}/model.safetensors", "mode": "ro"}}
+
+    def test_a_folder_without_links_is_bound_whole_as_before(self, area, engine):
+        model = area.models / "own-model"
+        model.mkdir()
+        (model / "config.json").write_bytes(CONFIG)
+        assert self.stage(engine, model) == ("/build-cache/input-model",
+                                             {str(model.resolve()): {"bind": "/build-cache/input-model",
+                                                                     "mode": "ro"}})

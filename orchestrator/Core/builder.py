@@ -1167,12 +1167,16 @@ class BuildEngine:
         # 'Documents/private' would be a folder below the working directory (G8).
         local = Path(source).expanduser()
         if config.local_inputs is None and local.exists():
+            linked_name = local.name if local.is_symlink() else ""  # a cache blob is named by its checksum
             local = local.resolve()
             progress.add_log(f"Using local model {local}")
             if local.is_dir():
-                return "/build-cache/input-model", {str(local): {"bind": "/build-cache/input-model", "mode": "ro"}}
+                # A folder of links (a Hugging Face cache snapshot) file by file: its links lead out of it.
+                binds = local_files.linked_folder_binds(local, "/build-cache/input-model")
+                return "/build-cache/input-model", binds or {str(local): {"bind": "/build-cache/input-model",
+                                                                           "mode": "ro"}}
             # Only the file itself: the folder it lies in may hold anything else (G8).
-            inner = f"/build-cache/input-model/{local.name}"
+            inner = f"/build-cache/input-model/{linked_name or local.name}"
             return inner, {str(local): {"bind": inner, "mode": "ro"}}
 
         if not HF_REPO_ID.match(source) or ".." in source:
