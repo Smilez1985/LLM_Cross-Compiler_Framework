@@ -487,7 +487,8 @@ class _PipeWriter:
             self.process.stdin.close()
         except (OSError, ValueError):
             raise self.transport._write_failed(self.process, self.readers) from None
-        status = self.transport._wait(self.process, self.readers, COMMAND_TIMEOUT)
+        # what is still in OpenSSH's buffers goes out first (on a dead network keepalive ends it within ~45 s)
+        status = self.transport._wait(self.process, self.readers, HASH_TIMEOUT)
         failure = self.transport._failed(self.process, self.readers, status)
         if failure is not None:
             raise failure
@@ -537,9 +538,19 @@ class SystemSshTransport(Transport):
             self._kill(process)
         return process
 
-    def _forget(self, process: Any) -> None:
+    def _forget(self, process: Any, readers: Optional[_Readers] = None) -> None:
+        """The call is over: it is no longer one a close() ends, and the pipes of an ended process are closed once
+        its readers are done (a pipe a reader still reads stays open; it goes with the process object)."""
         with self._lock:
             self._running = [p for p in self._running if p is not process]
+        for thread in (readers.threads if readers is not None else []):
+            thread.join(2)
+        if process.poll() is None or (readers is not None and any(t.is_alive() for t in readers.threads)):
+            return
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                with contextlib.suppress(OSError, ValueError):
+                    stream.close()
 
     @staticmethod
     def _kill(process: Any) -> None:
@@ -605,6 +616,7 @@ class SystemSshTransport(Transport):
         up to `limit` bytes. The whole call ends after `timeout` seconds (TimeoutError); more output than `limit`
         raises TooMuchOutput; a failure of OpenSSH itself (exit status 255) raises SshFailed."""
         process = self._start(self.argv(script), stdin is not None)
+        readers = None
         try:
             readers = _Readers(process, limit)
             if stdin is not None:
@@ -622,7 +634,7 @@ class SystemSshTransport(Transport):
             self._kill(process)
             raise
         finally:
-            self._forget(process)
+            self._forget(process, readers)
         failure = self._failed(process, readers, status)
         if failure is not None:
             raise failure
@@ -644,6 +656,7 @@ class SystemSshTransport(Transport):
         first `offset` bytes, which RemoteSession has just found on the board and checked (`cat >>`)."""
         q = shlex.quote(path)
         process = self._start(self.argv(f"cat > {q}" if not offset else f"cat >> {q}"), True)
+        readers = None
         try:
             readers = _Readers(process, MAX_OUTPUT)
             writer = _PipeWriter(self, process, readers)
@@ -653,7 +666,7 @@ class SystemSshTransport(Transport):
             self._kill(process)
             raise
         finally:
-            self._forget(process)
+            self._forget(process, readers)
 
     def alive(self) -> bool:
         return self._alive and not self._closed

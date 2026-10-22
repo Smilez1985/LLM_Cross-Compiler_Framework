@@ -934,12 +934,15 @@ def real_sshd(tmp_path):
         except OSError:
             time.sleep(0.1)
     if process.poll() is not None:
-        pytest.skip(f"sshd does not start here: {process.stderr.read().decode(errors='replace')[-300:]}")
+        why = process.stderr.read().decode(errors="replace")[-300:]
+        process.stderr.close()
+        pytest.skip(f"sshd does not start here: {why}")
     line = host_key.with_suffix(".pub").read_text().split()
     ssh_trust.known_hosts_path(state).write_text(f"[127.0.0.1]:{port} {line[0]} {line[1]}\n")
     yield {"state": state, "port": port, "user": getpass.getuser()}
     process.kill()
     process.wait(10)
+    process.stderr.close()
 
 
 def test_a_real_deploy_over_openssh(real_sshd, config, monkeypatch, tmp_path):
