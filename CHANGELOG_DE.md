@@ -2454,7 +2454,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ließen den Pfad einer `file:///`-URL stehen, wenn er den Home-Ordner eines anderen Kontos nannte
   (`file:///home/<Name>/...`, `file:///C:/Users/<Name>/...`, `file://localhost/...`, `file://server/Users/<Name>`); ihr
   Pfad wird jetzt wie jeder andere bezeichnet (der Dateiname, das Label eines bekannten Ordners, "a home folder"), und
-  die URL behält ihr `file://`. Ein Kontoname mit Leerzeichen wurde am Leerzeichen abgeschnitten ("a home folder Doe"):
+  die URL behält ihr `file://`; ebenso eine Datei-URL einer Versionsverwaltung, wie pip und uv sie schreiben
+  (`git+file:///home/<Name>/pkg`, auch `svn+`, `hg+`, `bzr+`), die ihr Schema behält. Ein Kontoname mit Leerzeichen
+  wurde am Leerzeichen abgeschnitten ("a home folder Doe"):
   der eigene Kontoname dieses Computers wird jetzt nach jeder Wurzel ganz genommen, und nach dem Windows-Home-Ordner
   eines anderen Kontos gehören die folgenden Wörter, die mit einem Großbuchstaben oder einer Ziffer beginnen, zum
   Namen (ein POSIX-Kontoname hat kein Leerzeichen, so behält `/home/pi Failed` sein nächstes Wort).

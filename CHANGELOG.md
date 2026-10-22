@@ -2172,7 +2172,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   2026-10-17). The path labels for AIs (`security.paths.label_paths`, also inside `device_text`) left the path of a
   `file:///` URL as it was when it named another account's home folder (`file:///home/<name>/...`,
   `file:///C:/Users/<name>/...`, `file://localhost/...`, `file://server/Users/<name>`); its path is now labelled like
-  any other (the file name, a known folder's label, "a home folder"), and the URL keeps its `file://`. An account name
+  any other (the file name, a known folder's label, "a home folder"), and the URL keeps its `file://`; so does a
+  version-control file URL as pip and uv write it (`git+file:///home/<name>/pkg`, also `svn+`, `hg+`, `bzr+`), which
+  keeps its scheme. An account name
   with a space was cut at the space ("a home folder Doe"): this computer's own account name is now taken whole after
   any root, and after another account's Windows home folder the following words that start with a capital letter or
   a digit belong to the name (a POSIX account name has no space, so `/home/pi Failed` keeps its next word).

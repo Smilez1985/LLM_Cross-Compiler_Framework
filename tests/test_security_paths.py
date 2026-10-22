@@ -540,6 +540,10 @@ FILE_URLS = (
     ("share file://fs/Users/frank/m.gguf and file://fs/Users/frank", "share file://m.gguf and file://a home folder"),
     ("url 'file:///home/dave/x.bin'", "url 'file://x.bin'"),
     ("in file:///srv/my out/Rk/m.gguf", "in file://output:Rk/m.gguf"),
+    # a version-control file URL (pip's and uv's 'git+file:///...' in an install log) is a file URL too
+    ("pip install git+file:///home/bob/pkg failed", "pip install git+file://pkg failed"),
+    ("checkout svn+file:///home/bob/repo/trunk.", "checkout svn+file://trunk."),
+    ("hg+file:///C:/Users/Bob%20Smith/m and bzr+file://localhost/home/eve/x", "hg+file://m and bzr+file://x"),
     ("no path: file:// alone", "no path: file:// alone"),
     ("keep https://x.org/file:///a", "keep https://x.org/file:///a"),
 )
