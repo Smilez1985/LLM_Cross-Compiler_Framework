@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 The person's own board steps (MCP design 2.7, W1' of 2026-10-16): the one code path behind `llmcf deploy devices
-list|add|remove`, `llmcf device list|settings` and the board contacts of `llmcf device runtime prune|deploy|verify`,
+list|add|remove`, `llmcf deploy devices edit` (Q5), `llmcf device list|settings` and the board contacts of
+`llmcf device runtime prune|deploy|verify`,
 and behind the GUI's Boards > Boards and Devices... window. Both are the person's channels. No tool and no AI reaches
 this module (tests/test_board_steps.py keeps it out of the AI-reachable code): it trusts and removes boards, logs in
 with a password once, records the sudo consent and removes builds from a board.
@@ -41,8 +42,9 @@ UNTRUSTED_CONSENT = ("device_runtime_untrusted_model",
 class BoardStepError(WithSteps, RemoteFailure):
     """A board step that cannot be done. `kind` names the case (no_paramiko, unreachable, host_key_changed,
     not_trusted, other_device, login_failed, key_install, host_user, label, not_known, no_systemd, sudo_declined,
-    not_saved, damaged, no_user, no_address); `reason` is the SSH reason code when the board could not be reached or
-    logged in to; `error` the exception behind it."""
+    not_saved, damaged, no_user, no_address; for a change of a board's address or key: no_board, address, key_text
+    with facts["detail"] empty, several, not_a_key or no_paramiko, unchanged, no_key, stale, audit); `reason` is the
+    SSH reason code when the board could not be reached or logged in to; `error` the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None,
                  **facts: Any):
@@ -152,16 +154,130 @@ def add_trusted_board(state_dir: Path, host: str, port: int, user: str, key: Any
     key logs in (paired; no password is ever asked here), then stores the board's trusted record and audits the
     trust. Returns (TrustedDevice or None when the record could not be written, paired)."""
     from orchestrator.runtime.device.trusted import record_trusted_device
-    from orchestrator.utils import ssh_trust
-    try:  # paired: the framework's own key logs in
-        client = ssh_trust.connect(host, user, Path(state_dir), port=port, password=None)
-        client.close()
-        paired = True
-    except Exception:  # noqa: BLE001 - not paired yet: the record says so, and deploy_to_device refuses it
-        paired = False
+    paired = framework_key_logs_in(state_dir, host, port, user)
     device = record_trusted_device(Path(state_dir), host, port, user, key, via=via, paired=paired, label=label,
                                    audit=audit, actor=actor)
     return device, paired
+
+
+def framework_key_logs_in(state_dir: Path, host: str, port: int, user: str) -> bool:
+    """Whether the framework's own SSH key logs in to `user`@host:port (the board is paired; no password is ever
+    asked here). The board's host key must be the trusted one; a board that does not answer is not paired."""
+    from orchestrator.utils import ssh_trust
+    try:
+        client = ssh_trust.connect(host, user, Path(state_dir), port=port, password=None)
+        client.close()
+        return True
+    except Exception:  # noqa: BLE001 - not paired yet: the record says so, and deploy_to_device refuses it
+        return False
+
+
+# --- a trusted board's address and host key (Q5: deploy devices edit) -----------------------------------------------
+
+@dataclass
+class BoardChange:
+    """A change of a trusted board's address or host key, shown to the person before it is made: `device` the board's
+    record now, `plan` the change (remote/pairing.py KeyReplacement: the address, key type and fingerprint now and
+    after it, and a key of another board the new address held)."""
+    device: Any
+    plan: Any
+
+
+def plan_board_change(state_dir: Path, device_id: str, *, host: Optional[str] = None, port: Optional[int] = None,
+                      key_text: Optional[str] = None, read_key: bool = False) -> BoardChange:
+    """`llmcf deploy devices edit` and the Boards window's Edit address or key...: the change of the trusted board
+    `device_id` to a new host name or IP address (`host`), SSH port (`port`) and host key: pasted (`key_text`, one line
+    of the board's /etc/ssh/ssh_host_*_key.pub, of known_hosts or ssh-keyscan) or read from the board at its new
+    address (`read_key`: one connection to its SSH port, no login; off the GUI thread). None keeps a value. Nothing is
+    written; BoardStepError when the change cannot be made."""
+    from orchestrator.remote import pairing
+    from orchestrator.remote.address import Endpoint, valid_host, valid_port
+    from orchestrator.remote.trust import KeyTextError, TrustStore, parse_public_key
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    state_dir = Path(state_dir)
+    device = TrustedDevices(state_dir).get(str(device_id or "").strip())
+    if device is None:
+        raise BoardStepError(f"There is no trusted board {device_id}.", "no_board")
+    new_host = (host or "").strip() or device.host
+    new_port = device.port if port is None else port
+    if not valid_host(new_host) or not valid_port(new_port):
+        raise BoardStepError("The new address must be an address or a host name (e.g. 192.168.1.50, fe80::1 without "
+                             "brackets or myboard.local) and the port a number from 1 to 65535.", "address")
+    endpoint = Endpoint(new_host, int(new_port))
+    store = TrustStore(state_dir)
+    key = None
+    if key_text is not None and key_text.strip():
+        try:
+            key = parse_public_key(key_text)
+        except KeyTextError as e:
+            raise BoardStepError(str(e), "key_text", detail=e.kind) from None
+    elif read_key:
+        _need_paramiko()
+        try:
+            key = store.read_presented_key(endpoint)
+        except Exception as e:  # unreachable, no SSH server
+            raise unreachable_error(e, endpoint.host, endpoint.port) from None
+    try:
+        plan = pairing.plan_replacement(store, device, endpoint, key)
+    except pairing.KeyReplaceError as e:
+        raise BoardStepError(str(e), e.kind) from None
+    return BoardChange(device=device, plan=plan)
+
+
+def change_lines(change: BoardChange) -> List[str]:
+    """The change as the CLI shows it before asking (English; the GUI shows the same facts side by side)."""
+    plan, device = change.plan, change.device
+    lines = [f"Board: {device.label} ({device.device_id})",
+             f"Address now: {plan.old.display}",
+             f"Address after the change: {plan.new.display}",
+             f"Host key now: {plan.old_key_type} {plan.old_fingerprint}",
+             f"Host key after the change: {plan.new_key_type} {plan.new_fingerprint}"]
+    if plan.displaced:
+        lines.append(f"The framework's known_hosts holds another {plan.new_key_type} key for {plan.new.display} "
+                     f"({plan.displaced}); it is replaced too.")
+    if plan.key_changed:
+        lines.append(f"The board's device ID becomes {plan.new_device_id} (it derives from the host key). Its stored "
+                     f"probe and deploy settings stay under {plan.old_device_id}; probe the board again to store its "
+                     "system under the new key.")
+    return lines
+
+
+CHANGE_QUESTION = ("Change the board's address and host key in the framework's known_hosts? Compare the new "
+                   "fingerprint with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the board. Your answer is "
+                   "written to the audit log.")
+
+
+def change_board(state_dir: Path, change: BoardChange, *, via: str, audit: Any, actor: str):
+    """Makes the change the person confirmed (Q5): known_hosts first (remote/pairing.py replace_key, written to the
+    audit log before anything changes), then the board's trusted record follows: at its new address, and for a new key
+    under the board's new device ID with its label and user (whether the framework's key logs in there is tested once,
+    as `deploy devices add` does). For a new address the stored probe's address follows (its device ID stays).
+    Returns (TrustedDevice or None when the record could not be written, paired); BoardStepError when known_hosts
+    could not be changed (nothing was changed then)."""
+    from orchestrator.remote import pairing
+    from orchestrator.remote.trust import TrustStore
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    state_dir = Path(state_dir)
+    plan, device = change.plan, change.device
+    try:
+        pairing.replace_key(TrustStore(state_dir), plan, via=via, audit=audit, actor=actor)
+    except pairing.KeyReplaceError as e:
+        raise BoardStepError(str(e), e.kind) from None
+    paired = device.paired
+    if plan.key_changed:
+        paired = framework_key_logs_in(state_dir, plan.new.host, plan.new.port, device.user)
+    try:
+        moved = TrustedDevices(state_dir).replace(device.device_id, plan.new.host, plan.new.port, device.user,
+                                                  plan.new_key, via=via, paired=paired, label=device.label)
+    except Exception:  # noqa: BLE001 - known_hosts holds the change; the record is added again by the person
+        moved = None
+    if plan.address_changed and not plan.key_changed:
+        from orchestrator.runtime.profile import ProfileStore
+        try:
+            ProfileStore(state_dir).set_address(device.device_id, plan.new.store_form)
+        except (OSError, ValueError):
+            pass  # the probe's address is set again by the next probe
+    return moved, paired
 
 
 # --- stored boards (device list) -------------------------------------------------------------------------------------
@@ -387,4 +503,6 @@ __all__ = ["BoardPrune", "BoardStepError", "DAMAGED_QUESTION", "SUDO_QUESTION", 
            "UNTRUSTED_CONSENT", "UNTRUSTED_QUESTION", "add_trusted_board", "board_address", "boards_overview",
            "change_settings", "check_board_entry", "connect_stored", "device_rows", "list_board_builds",
            "load_settings", "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",
-           "remove_board_builds", "remove_trust", "settings_to_change", "trusted_rows", "unreachable_error"]
+           "remove_board_builds", "remove_trust", "settings_to_change", "trusted_rows", "unreachable_error",
+           "BoardChange", "CHANGE_QUESTION", "change_board", "change_lines", "framework_key_logs_in",
+           "plan_board_change"]

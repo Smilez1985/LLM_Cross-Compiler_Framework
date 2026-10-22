@@ -59,12 +59,14 @@ def keep_logger_levels():
 @pytest.fixture
 def terminal(monkeypatch):
     """Makes the CliRunner's standard input a terminal (sys.stdin.isatty() is True), so the CLI asks. The CLI's shared
-    console made meanwhile (it would keep a terminal's colours) is dropped again afterwards."""
+    console prints plain text to the runner's output meanwhile (a console made while it looks like a terminal would
+    keep its colours) and is the earlier one again afterwards."""
     import click.testing
+    from rich.console import Console
     from orchestrator import cli as cli_module
 
     def make(on=True):
-        monkeypatch.setattr(cli_module.console, "_console", None)
+        monkeypatch.setattr(cli_module.console, "_console", Console(color_system=None, width=500))
         monkeypatch.setattr(click.testing._NamedTextIOWrapper, "isatty", lambda self: on, raising=False)
     return make
 
@@ -752,3 +754,156 @@ class TestReplaceKey:
         with pytest.raises(pairing.KeyReplaceError) as e:
             pairing.replace_key(b.store, plan, via="gui", audit=audit)
         assert e.value.kind == "stale" and self.lines(b.state) == before and audit.rows == []
+
+
+# --- Q5: the person's change of a board's address and key (person_steps, CLI) --------------------------------------
+
+class TestBoardChange:
+
+    @pytest.fixture
+    def b(self, tmp_path, monkeypatch):
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        from orchestrator.runtime.profile import ProfileStore, parse_profile
+        from test_hardware_probe import FIXTURES
+        state = tmp_path / "state"
+        key = paramiko.ECDSAKey.generate()
+        device = record(state, key, label="Desk board", user="radxa")
+        profiles = ProfileStore(state)
+        profiles.save_device(device.device_id, parse_profile((FIXTURES / "schema2_rk3566_dietpi.txt").read_text()),
+                             label="Desk board", address=HOST)
+        logins = []
+        monkeypatch.setattr(ssh_trust, "connect", lambda host, user, state, port=22, password=None: logins.append(
+            (host, port, user, password)) or SimpleNamespace(close=lambda: None))
+        return SimpleNamespace(state=state, key=key, device=device, store=TrustedDevices(state), profiles=profiles,
+                               logins=logins, audit=Audit())
+
+    def test_a_new_address_moves_the_record_and_the_probe_s_address(self, b):
+        from orchestrator.runtime.device import person_steps
+        change = person_steps.plan_board_change(b.state, b.device.device_id, host="myboard.local", port=2222)
+        lines = person_steps.change_lines(change)
+        assert f"Address now: {HOST}:22" in lines and "Address after the change: myboard.local:2222" in lines
+        assert not any("device ID becomes" in line for line in lines)
+        moved, paired = person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli")
+        assert (moved.device_id, moved.host, moved.port, moved.user, moved.label) == (
+            b.device.device_id, "myboard.local", 2222, "radxa", "Desk board")
+        assert paired is True and moved.paired and moved.trusted_via == "cli" and b.logins == []
+        assert b.store.key_status(moved) == "known" and b.store.list() == [moved]
+        assert b.profiles.device_info(b.device.device_id)["address"] == "myboard.local:2222"
+        assert [r["tool"] for r in b.audit.rows] == ["host_key_replaced"]
+
+    @pytest.mark.parametrize("logs_in", [True, False])
+    def test_a_new_key_moves_the_record_to_the_new_device_id(self, b, monkeypatch, logs_in):
+        from orchestrator.runtime.device import person_steps
+        from orchestrator.runtime.profile import device_id_for_host_key
+        if not logs_in:
+            monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: (_ for _ in ()).throw(EOFError("closed")))
+        new = paramiko.ECDSAKey.generate()
+        change = person_steps.plan_board_change(b.state, b.device.device_id,
+                                                key_text=f"{HOST} {new.get_name()} {new.get_base64()}")
+        new_id = device_id_for_host_key(ssh_trust.fingerprint(new))
+        lines = person_steps.change_lines(change)
+        assert f"Host key now: ecdsa-sha2-nistp256 {b.device.fingerprint}" in lines
+        assert f"Host key after the change: ecdsa-sha2-nistp256 {ssh_trust.fingerprint(new)}" in lines
+        assert any(f"device ID becomes {new_id}" in line for line in lines)
+        moved, paired = person_steps.change_board(b.state, change, via="gui", audit=b.audit, actor="gui")
+        assert moved.device_id == new_id and (moved.label, moved.user, moved.host) == ("Desk board", "radxa", HOST)
+        assert paired is logs_in and moved.paired is logs_in
+        assert b.store.get(b.device.device_id) is None and b.store.list() == [moved]
+        assert b.store.key_status(moved) == "known"
+        assert b.profiles.list_devices() == [b.device.device_id], "the stored probe stays under its old ID"
+        assert b.logins in ([(HOST, 22, "radxa", None)], [])
+
+    def test_the_key_read_from_the_board_is_read_at_the_new_address(self, b, monkeypatch):
+        from orchestrator.runtime.device import person_steps
+        new = paramiko.ECDSAKey.generate()
+        reads = []
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: reads.append(
+            (host, port)) or new)
+        change = person_steps.plan_board_change(b.state, b.device.device_id, host="192.0.2.41", read_key=True)
+        assert reads == [("192.0.2.41", 22)] and change.plan.new_fingerprint == ssh_trust.fingerprint(new)
+        monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: (_ for _ in ()).throw(
+            ConnectionRefusedError(111, "refused")))
+        with pytest.raises(person_steps.BoardStepError) as e:
+            person_steps.plan_board_change(b.state, b.device.device_id, read_key=True)
+        assert e.value.kind == "unreachable" and e.value.reason == reasons.PORT_CLOSED
+
+    @pytest.mark.parametrize("kwargs, kind, detail", [
+        (dict(device_id="0" * 16), "no_board", None),
+        (dict(host="-oProxyCommand=x"), "address", None),
+        (dict(key_text="hello"), "key_text", "not_a_key"),
+        (dict(key_text="a b\nc d"), "key_text", "several"),
+        (dict(port=22), "unchanged", None),
+    ])
+    def test_what_is_refused_before_anything_changes(self, b, kwargs, kind, detail):
+        from orchestrator.runtime.device import person_steps
+        device_id = kwargs.pop("device_id", b.device.device_id)
+        before = (b.state / "known_hosts").read_bytes(), (b.state / "devices.json").read_bytes()
+        with pytest.raises(person_steps.BoardStepError) as e:
+            person_steps.plan_board_change(b.state, device_id, **kwargs)
+        assert e.value.kind == kind and e.value.facts.get("detail") == detail
+        assert ((b.state / "known_hosts").read_bytes(), (b.state / "devices.json").read_bytes()) == before
+
+    def test_without_an_audit_log_nothing_changes(self, b):
+        from orchestrator.runtime.device import person_steps
+        change = person_steps.plan_board_change(b.state, b.device.device_id, host="192.0.2.41")
+        before = (b.state / "known_hosts").read_bytes(), (b.state / "devices.json").read_bytes()
+        with pytest.raises(person_steps.BoardStepError) as e:
+            person_steps.change_board(b.state, change, via="cli", audit=None, actor="cli")
+        assert e.value.kind == "audit"
+        assert ((b.state / "known_hosts").read_bytes(), (b.state / "devices.json").read_bytes()) == before
+
+
+@pytest.mark.usefixtures("keep_logger_levels")
+class TestCliDevicesEdit:
+    """`llmcf deploy devices edit DEVICE --host/--port/--key/--read-key`: needs a terminal, shows the old and the new
+    address and fingerprint, asks with "No" as the default and writes the change to the audit log."""
+
+    @pytest.fixture
+    def b(self, tmp_path, monkeypatch):
+        from orchestrator import cli as cli_module
+        from orchestrator.runtime.profile import default_state_dir
+        state = default_state_dir()
+        key = paramiko.ECDSAKey.generate()
+        device = record(state, key, label="Desk board")
+        audit = Audit()
+        monkeypatch.setattr(cli_module, "_device_audit", lambda ctx, folder: audit)
+        monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: SimpleNamespace(close=lambda: None))
+        return SimpleNamespace(state=state, key=key, device=device, audit=audit)
+
+    def edit(self, *args, answer=None):
+        from test_cli_builds import invoke_plain
+        return invoke_plain("deploy", "devices", "edit", *args, input=answer)
+
+    def test_without_a_terminal_nothing_is_changed(self, b):
+        before = (b.state / "known_hosts").read_bytes()
+        result = self.edit(b.device.device_id, "--host", "192.0.2.41")
+        assert result.code == 1 and "needs a terminal" in result.out
+        assert (b.state / "known_hosts").read_bytes() == before and b.audit.rows == []
+
+    @pytest.mark.parametrize("args", [[], ["--key", "x", "--read-key"]])
+    def test_what_to_change_is_named_once(self, b, args):
+        assert self.edit(b.device.device_id, *args).code == 2
+
+    def test_no_is_the_default_and_yes_changes_and_audits(self, b, terminal):
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        terminal()
+        new = paramiko.ECDSAKey.generate()
+        line = f"{new.get_name()} {new.get_base64()} root@board"
+        before = (b.state / "known_hosts").read_bytes()
+        result = self.edit("Desk board", "--key", line, answer="\n")
+        assert result.code == 0 and "Nothing was changed." in result.out and "[y/N]" in result.out
+        assert f"Host key now: ecdsa-sha2-nistp256 {b.device.fingerprint}" in result.out
+        assert f"Host key after the change: ecdsa-sha2-nistp256 {ssh_trust.fingerprint(new)}" in result.out
+        assert (b.state / "known_hosts").read_bytes() == before and b.audit.rows == []
+        result = self.edit(b.device.device_id, "--key", line, "--host", "myboard.local", answer="y\n")
+        assert result.code == 0, result.out
+        (moved,) = TrustedDevices(b.state).list()
+        assert (moved.host, moved.fingerprint, moved.label) == ("myboard.local", ssh_trust.fingerprint(new),
+                                                                "Desk board")
+        assert f"Board {moved.device_id} (Desk board): myboard.local:22, host key" in result.out
+        assert [row["tool"] for row in b.audit.rows] == ["host_key_replaced"]
+
+    def test_an_unknown_board_is_named(self, b, terminal):
+        terminal()
+        result = self.edit("Garage", "--host", "192.0.2.41")
+        assert result.code == 1 and "No trusted board Garage" in result.out
