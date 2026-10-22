@@ -8,13 +8,16 @@
 #     pack (no home folders, addresses, host or user names, and no key of the framework's secret table: a pack
 #     with a key is rejected). The repository's secret scan is not run on the zips: it skips binary files, so it
 #     would check nothing inside a pack.
-# A maintainer then reviews the pack, merges it, adds its entry to index.json and signs the index offline with
-# scripts/zoo_sign_index.py (the signing key never reaches CI).
+# A maintainer then reviews the pack, merges it, adds its entry to index.json and signs the index on their own computer
+# (in the framework: Tools > Open Community Hub > Maintainer, or `llmcf zoo maintainer review`; by hand:
+# scripts/zoo_sign_index.py). The signing key never reaches CI.
 name: Validate contribution
 
+# Every pull request runs this check: main of the community repository is protected and requires it (its job name,
+# "validate"), also for the maintainer's own pull requests that move a pack to packs/ and change the signed index. A
+# pull request that adds no pack under contributions/ passes.
 on:
   pull_request:
-    paths: ["contributions/**"]
 
 permissions:
   contents: read

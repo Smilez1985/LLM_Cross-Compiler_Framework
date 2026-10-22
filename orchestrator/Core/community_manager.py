@@ -1273,6 +1273,17 @@ class CommunityManager:
 
 # --- Pull request handoff -------------------------------------------------------------------------------------
 
+def tool_error_detail(error: BaseException) -> str:
+    """What a failed gh or git call said, for the person: git and gh output can name a remote with credentials in it,
+    so a user name or token in an address is removed and known secret formats are redacted (the last 300
+    characters). The pull request handoff and the maintainer actions (community_maintainer.py) show it this way."""
+    raw = getattr(error, "stderr", "") or error
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    detail = redact_secrets(re.sub(r"(\w+://)[^/\s@'\"]+@", r"\1", str(raw)))
+    return detail.strip()[-300:]
+
+
 def submit_contribution(path: Path, repo: str, kind: str, *, runner: Callable = subprocess.run,
                         which: Callable = shutil.which, opener: Callable = webbrowser.open) -> str:
     """Hands an exported pack to a pull request on the community repository (owner/name). With an installed and
@@ -1295,9 +1306,7 @@ def submit_contribution(path: Path, repo: str, kind: str, *, runner: Callable = 
                 return _submit_with_gh(path, repo, kind, gh, git, runner)
             note = "The GitHub CLI is not logged in ('gh auth login'). "
         except (subprocess.SubprocessError, OSError) as e:
-            # git and gh output can name a remote with credentials in it: never shown
-            detail = redact_secrets(re.sub(r"(\w+://)[^/\s@'\"]+@", r"\1", str(getattr(e, "stderr", "") or e)))
-            note = f"The GitHub CLI could not open the pull request ({detail.strip()[-300:]}). "
+            note = f"The GitHub CLI could not open the pull request ({tool_error_detail(e)}). "
     opener(upload)
     return (f"{note}Opened {upload} in your browser: drop {path.name} (in {path.parent}) onto the page and "
             "propose the change; GitHub forks the repository for you.")
