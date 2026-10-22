@@ -697,6 +697,7 @@ llm-cli deploy run output/deploy_model_1791801300.zip --host 192.168.1.50 --user
 ```
 llm-cli deploy devices list [--json]
 llm-cli deploy devices add HOST --user BENUTZER [--port 22] [--label TEXT]
+llm-cli deploy devices edit GERÄT [--host HOST] [--port PORT] [--key "SCHLÜSSELZEILE" | --read-key]
 llm-cli deploy devices remove GERÄTE_ID
 ```
 
@@ -706,24 +707,28 @@ Namen für das Gerät, die Adresse, den Benutzer, den Host-Schlüssel, den du be
 SSH-Schlüssel des Frameworks sich dort anmeldet (gekoppelt); die Geräte-ID wird aus dem Host-Schlüssel abgeleitet,
 dieselbe ID, die `llm-cli device list` zeigt. Einträge schreibst nur du: `deploy run`, `scan --device` und
 `device runtime deploy` nach einer erfolgreichen Anmeldung, das Deployment-Fenster der GUI nach einem Deployment und
-`deploy devices add`. Kein Tool schreibt, ändert oder entfernt einen.
+`deploy devices add` und `deploy devices edit`. Kein Tool schreibt, ändert oder entfernt einen.
 
 | Befehl | Bedeutung |
 |---|---|
 | `list` | Jeder Eintrag mit seinem Host-Schlüssel und ob dieser noch der vertraute in der `known_hosts` des Frameworks ist (`trusted`, `CHANGED in known_hosts`, `not in known_hosts`), gekoppelt und dem letzten Deployment. |
 | `add HOST --user BENUTZER` | Nimmt ein Board auf, dem du vor dieser Version vertraut hast (sein Host-Schlüssel steht schon in der `known_hosts` des Frameworks). Braucht ein Terminal: Es zeigt den Fingerabdruck und fragt; es vertraut nie einem neuen Schlüssel, fragt nie nach einem Passwort und markiert das Board nur dann als gekoppelt, wenn der Schlüssel des Frameworks sich anmeldet. |
+| `edit GERÄT` | Ändert die Adresse eines vertrauten Boards (`--host`: Hostname oder IP-Adresse, `--port`) oder seinen SSH-Host-Schlüssel in der `known_hosts` des Frameworks, z. B. nachdem sich seine Adresse geändert hat oder es neu installiert wurde. `GERÄT` ist seine Geräte-ID, sein Name oder seine Adresse. Den neuen Schlüssel fügst du mit `--key` ein (die Zeile aus `/etc/ssh/ssh_host_ed25519_key.pub` auf dem Board, eine `known_hosts`-Zeile oder eine Zeile von `ssh-keyscan`, in Anführungszeichen; niemand tippt einen Schlüssel ab), oder `--read-key` liest ihn vom Board unter seiner (neuen) Adresse; eine Zeile mit Optionen aus `authorized_keys`, Befehlen oder einem zweiten Schlüssel und der Schlüssel eines anderen vertrauten Boards werden abgelehnt. Braucht ein Terminal: Es zeigt die Adresse und den Fingerabdruck jetzt und nach der Änderung und fragt ("Nein" ist die Vorgabe); die Änderung kommt zuerst ins Audit-Log. Ein neuer Schlüssel gibt dem Board eine neue Geräte-ID (sie leitet sich vom Schlüssel ab): Der Eintrag zieht mit Name und Benutzer dorthin, und ob sich der Schlüssel des Frameworks anmeldet, wird einmal getestet; Probe und Deploy-Einstellungen des Boards bleiben unter der alten ID, bis du es erneut prüfst. |
 | `remove GERÄTE_ID` | Entfernt den Eintrag (im Audit-Log vermerkt); KI-Tools können das Gerät dann nicht mehr nennen. Sein Eintrag in `known_hosts` bleibt. |
 
 Ein Eintrag ist nur nutzbar, solange die `known_hosts` des Frameworks genau den Schlüssel enthält, den er nennt:
-Hast du dort einen geänderten Schlüssel entfernt (um einem neu installierten Board wieder zu vertrauen), vertraue dem
-Board erneut mit `deploy run` oder `scan --device`.
+Gib dem Eintrag eines neu installierten Boards, dessen Schlüssel sich geändert hat, mit `deploy devices edit` den
+neuen Schlüssel (oder entferne den geänderten Schlüssel dort und vertraue dem Board erneut mit `deploy run` oder
+`scan --device`).
 
 In der GUI: **Boards > Boards und Geräte...**: Die Tabelle zeigt jedes vertraute Board (Name, Adresse, Benutzer, den Host-Schlüssel mit
 seinem vollen Fingerabdruck und seinem Stand in `known_hosts`, gekoppelt, seit wann und wie ihm vertraut wird,
 das letzte Deployment) neben den untersuchten Boards. **Vertrautes Board hinzufügen...** macht `add` (Adresse,
-Benutzer, Port, Name; der Fingerabdruck wird gezeigt und erfragt, "Nein" ist die Vorgabe), und
-**Vertrauen entfernen...** macht `remove` (es nennt genau, was wegfällt, "Nein" ist die Vorgabe, und es schreibt
-denselben Audit-Eintrag).
+Benutzer, Port, Name; der Fingerabdruck wird gezeigt und erfragt, "Nein" ist die Vorgabe), **Adresse oder
+Schlüssel ändern...** macht `edit` (Hostname oder IP-Adresse, Port und ein Feld, in das du den neuen Schlüssel
+einfügst, oder stattdessen **Schlüssel vom Board lesen**; Adresse, Host-Schlüssel und Geräte-ID jetzt und nach der
+Änderung nebeneinander, "Nein" ist die Vorgabe), und **Vertrauen entfernen...** macht `remove` (es nennt genau, was
+wegfällt, "Nein" ist die Vorgabe, und es schreibt denselben Audit-Eintrag).
 
 ---
 

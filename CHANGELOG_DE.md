@@ -10,6 +10,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Adresse und Host-Schlüssel eines vertrauten Boards kannst du ändern** (DECISIONS Runde 10 Q5): `llm-cli deploy
+  devices edit GERÄT [--host] [--port] [--key "SCHLÜSSELZEILE" | --read-key]` und **Adresse oder Schlüssel ändern...**
+  in **Boards > Boards und Geräte...** ändern Hostname oder IP-Adresse, SSH-Port oder Host-Schlüssel des Boards in der
+  `known_hosts` des Frameworks, zum Beispiel nachdem sich seine Adresse geändert hat oder es neu installiert wurde.
+  Niemand tippt einen Schlüssel ab: Er wird eingefügt (die Zeile aus `/etc/ssh/ssh_host_ed25519_key.pub` auf dem
+  Board, eine `known_hosts`-Zeile oder eine Zeile von `ssh-keyscan`) oder vom Board unter seiner neuen Adresse
+  gelesen; eine Zeile mit Optionen aus `authorized_keys`, Befehlen oder einem zweiten Schlüssel wird abgelehnt. Du
+  siehst Adresse, Host-Schlüssel und Geräte-ID jetzt und nach der Änderung nebeneinander (im Fenster) und
+  antwortest mit "Nein" als Vorgabe; die Änderung kommt ins Audit-Log, bevor sich etwas ändert, und wird abgelehnt,
+  wenn sich die `known_hosts` inzwischen geändert hat. Ein neuer Schlüssel gibt dem Board eine neue Geräte-ID: Sein
+  Eintrag zieht mit Name und Benutzer dorthin, und ob sich der Schlüssel des Frameworks anmeldet, wird einmal
+  getestet; der Schlüssel eines anderen vertrauten Boards wird abgelehnt und dieses Board genannt, sodass sein Eintrag
+  nie überschrieben wird. Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
+  Ditto oder die Laufzeit-Schritte für Geräte erreichen sie (`orchestrator/remote/pairing.py` `replace_key`, ein
+  Test über den Importgraphen).
 - **Nächste Schritte statt Befehlen, Befehle zum Zulassen und übersetzte, neu geordnete Menüs** (Welle 6, Kette
   a0; DECISIONS Runde 10 V1, V2, Q2, Q7): Der Qt-freie Katalog `orchestrator/utils/next_steps/` enthält jeden nächsten
   Schritt, den das Audit der Welle 6 nennt (104 Schritte in neun Bereichsmodulen, die von selbst gefunden werden,
@@ -1412,6 +1427,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `Core/knowledge_snapshots.py` und das Audit eines gespeicherten Moduls nach `Core/module_generator.py`. Für die
   Person ändert sich nichts; die Fachlogik importiert dafür keine Tool-Definitionen mehr, und der größte
   Import-Zyklus schrumpfte von 81 auf 9 Module.
+- **Ein nur lesender Host-Schlüssel-Speicher und die Vertrauens-Schreiber der Person**
+  (Konsolidierungskette c2-remote-trust): `orchestrator/remote/trust.py` (`TrustStore`: `status`, `status_of`,
+  `check` mit einem `KeyCheck`, `read_presented_key`; die Host-Schlüssel-Fehler sind dorthin umgezogen) nutzen die
+  neun Kopien von „Schlüssel lesen und prüfen“, jede behält nur ihre Regel (die Person darf vertrauen, eine KI wird
+  abgelehnt); `orchestrator/remote/pairing.py` enthält die Schreiber der Person, und die drei Abläufe für Vertrauen
+  bei der ersten Nutzung (`llm-cli deploy run`, `llm-cli scan --device`, die Host-Schlüssel-Frage der GUI) sind eine
+  Entscheidung mit einer Frage je Kanal, "Nein" als Vorgabe wie bisher. Ein Schlüssel, dem du jetzt vertraust, kommt
+  im selben Schritt ins Audit-Log (`host_key_trusted`), auch wenn die Anmeldung danach scheitert; vorher wurde nur
+  der Eintrag des Boards nach einer erfolgreichen Anmeldung festgehalten. Der Deployment-Tab bindet das Deployment
+  an den Schlüssel, den du in seiner Frage bestätigt hast, und trägt das Board damit ein, sodass ein Deployment aus
+  der GUI vier statt fünf Verbindungen zum SSH-Port des Boards öffnet. Die alten Namen in
+  `orchestrator/utils/ssh_trust.py` funktionieren weiter.
 - **Der Code, der mit einem Board spricht, bekommt sein eigenes Paket, `orchestrator/remote/`**
   (Konsolidierungskette c2-remote-base; für die Person und eine KI ändert sich nichts). Die vorhandenen
   Umsetzungen sind dorthin umgezogen, statt eine zweite Kopie zu bekommen: die Host-Prüfung der Remote-Probe, die
@@ -2062,6 +2089,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   als ein `sh -c '...'` auf dem Board an (`orchestrator/remote/transport.py` `sh_command`, die Form, die die
   Geräte-Laufzeit und die Board-Prüfung schon nutzten), sodass das sh des Boards das Skript liest, egal welche
   Login-Shell das Konto hat.
+- **Die `known_hosts` des Frameworks wird wie jede andere private Datei geschrieben**: Das Vertrauen in den
+  Host-Schlüssel eines Boards (und die Änderung von Adresse oder Schlüssel eines Boards) schrieb die Datei über eine
+  temporäre Datei, die liegen blieb, wenn das Schreiben scheiterte (zum Beispiel bei voller Platte), und unter Windows
+  scheiterte das Vertrauen, wenn ein anderes Programm die Datei gerade offen hatte. Die temporäre Datei verschwindet
+  jetzt wieder, und das Ersetzen ist das aus `orchestrator/utils/atomic.py`, das es unter Windows kurz erneut versucht
+  (`orchestrator/utils/ssh_trust.py` `save_host_keys`).
 - **Ein Deployment wartet weiter, während der SSH-Server des Boards neu startet**: Nach einem Netzabbruch wartet das
   Deployment auf das Board (N5). Antwortete das Board wieder, während sein SSH-Server noch startete, öffnete sich die
   Verbindung und brach wieder ab (ein Reset, ein Abbruch, eine unterbrochene Pipe oder EOF beim Schlüsselaustausch);
@@ -2487,6 +2520,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nur, wo es erlaubt ist): dem Deployment, dem Hinzufügen eines Boards, dem Deployment-Tab, den Einträgen
   vertrauenswürdiger Boards, den Deploy-Einstellungen, der systemd-Unit und den Kontonamen, die eine KI nie liest
   (`device_text`). Das Hinzufügen eines Boards lädt für diese Prüfung nicht mehr die Build-Engine und das Docker-SDK.
+  Der Board-Scan (`llm-cli scan --device`, **Remote Scan via SSH...** im Builder-Tab) prüft den Namen genauso, bevor
+  das Board kontaktiert wird, mit der Ablehnung in der Sprache der Person; vorher erreichte ein solcher Name die
+  Anmeldung des Boards.
 - **Der Dialog der KI-Einstellungen lehnt eine Serveradresse mit Benutzername oder Passwort darin ab**, wie es die
   Anmeldung und `llmcf ditto login` schon taten (dieselbe Adressregel aus `AISettingsChange`): Vorher wurde eine
   solche Adresse (oder eine mit Leerzeichen oder Backslash, die Parser als zwei verschiedene Hosts lesen können) so,

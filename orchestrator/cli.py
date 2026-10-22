@@ -4375,28 +4375,21 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         console.print("[red]Deployment Manager not loaded.[/red]")
         sys.exit(1)
 
-    # Trust on first use, never silently.
+    # Trust on first use, never silently (the one decision of remote/pairing.py first_use).
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import KeyCheck
     try:
         status, key = dep_mgr.host_key_status(host, port)
     except Exception as e:
         _unreachable(ctx, host, port, e, step="deploy")
-    if status == "changed":
+    store = _deploy_trust_store(ctx, dep_mgr) if status == "unknown" else None   # a store only to trust a key
+    outcome = _first_use(ctx, store, KeyCheck.of(Endpoint(host, port), key, status), trust_fingerprint,
+                         nothing="deployed")
+    if outcome.verdict == "changed":
         _note_reach(ctx, host, port, "deploy", reasons.HOST_KEY_CHANGED)
         _print_reason(ctx, reasons.HOST_KEY_CHANGED, host, port)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
-    if status == "unknown":
-        fp = ssh_trust.fingerprint(key)
-        console.print(f"New device {escape(host)}:{port} - {key.get_name()} {fp}")
-        if trust_fingerprint:
-            if trust_fingerprint != fp:
-                console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
-                sys.exit(1)
-        elif not (sys.stdin.isatty() and click.confirm(
-                "Compare with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the device. Trust it?", default=False)):
-            console.print("[red]Device not trusted; nothing was deployed.[/red]")
-            sys.exit(1)
-        dep_mgr.trust_host(host, key, port)
     if password is None and not password_stdin:
         password = _device_password(None, False, ask_when_omitted=True)
 
@@ -4425,6 +4418,38 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         for line in result.output[-20:]:
             console.print(f"  [dim]{escape(line)}[/dim]")
         sys.exit(1)
+
+
+def _deploy_trust_store(ctx: FrameworkContext, dep_mgr):
+    """The known_hosts the deploy logs in with (the deployment manager's folder; else the command's)."""
+    from orchestrator.remote.trust import TrustStore
+    make = getattr(dep_mgr, "trust_store", None)
+    return make() if callable(make) else TrustStore(_state_dir(ctx))
+
+
+def _first_use(ctx: Optional[FrameworkContext], store, check, trust_fingerprint: Optional[str], *, nothing: str):
+    """The CLI's prompt for trust on first use (remote/pairing.py first_use decides): an unknown key is shown with its
+    fingerprint and trusted when it has --trust-fingerprint or the person says yes at a terminal ("No" is the default);
+    the trust is written to the audit log. Exits when it is refused; returns the decision (known, trusted, changed)."""
+    from orchestrator.remote import pairing
+    if check.status == "unknown":
+        console.print(f"New device {escape(check.endpoint.host)}:{check.endpoint.port} - {escape(check.key_type)} "
+                      f"{check.fingerprint}")
+
+    def ask(_check) -> bool:
+        return _interactive() and click.confirm(
+            "Compare with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the device. Trust it?", default=False)
+
+    audit = (lambda: _device_audit(ctx, store.state_dir)) if ctx is not None else None
+    outcome = pairing.first_use(store, check, ask=ask, preset_fingerprint=trust_fingerprint, via="cli", audit=audit,
+                                actor="cli")
+    if outcome.verdict == "mismatch":
+        console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
+        sys.exit(1)
+    if outcome.verdict == "declined":
+        console.print(f"[red]Device not trusted; nothing was {nothing}.[/red]")
+        sys.exit(1)
+    return outcome
 
 
 class _ctrl_c_cancels:
@@ -4657,6 +4682,75 @@ def deploy_devices_add(ctx: FrameworkContext, host: str, user: str, port: int, l
     elif TrustedDevices(state_dir).key_status(device) != "known":
         console.print("[yellow]The trusted key is not in the framework's known_hosts.[/yellow]")
 
+
+@deploy_devices.command('edit')
+@click.argument('device')
+@click.option('--host', default=None,
+              help="The board's new address or host name, e.g. 192.168.1.51 or myboard.local (default: it stays)")
+@click.option('--port', default=None, type=click.IntRange(1, 65535),
+              help="The board's new SSH port (default: it stays)")
+@click.option('--key', 'key_text', default=None,
+              help="The board's new SSH host key: paste its line, e.g. of /etc/ssh/ssh_host_ed25519_key.pub on the "
+                   "board (in quotes; default: the key stays)")
+@click.option('--read-key', is_flag=True,
+              help="Read the board's new host key from the board at its (new) address instead of pasting it")
+@pass_context
+def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str], port: Optional[int],
+                        key_text: Optional[str], read_key: bool):
+    """Change a trusted board's address (host name or IP address, port) or its SSH host key in the framework's
+    known_hosts, e.g. after its address changed or it was reinstalled. Needs a terminal: you compare the old and the
+    new fingerprint ("No" is the default); the change is written to the audit log."""
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.runtime.device.trusted import TrustedDevices, find_boards
+    if key_text is not None and read_key:
+        raise click.UsageError("Give either --key or --read-key.")
+    if host is None and port is None and key_text is None and not read_key:
+        raise click.UsageError("Give the new --host, --port, --key or --read-key.")
+    if not _interactive():
+        console.print("[red]'deploy devices edit' needs a terminal: you compare the old and the new fingerprint "
+                      "yourself.[/red]")
+        sys.exit(1)
+    state_dir = _state_dir(ctx)
+    found = find_boards(TrustedDevices(state_dir), device, by_address=True)
+    if len(found) != 1:
+        console.print(f"[red]No trusted board {escape(device)} (llm-cli deploy devices list).[/red]" if not found else
+                      f"[red]{escape(device)} names several trusted boards "
+                      f"({', '.join(d.device_id for d in found)}); give its device ID.[/red]")
+        sys.exit(1)
+    try:
+        change = person_steps.plan_board_change(state_dir, found[0].device_id, host=host, port=port,
+                                                key_text=key_text, read_key=read_key)
+    except person_steps.BoardStepError as e:
+        if e.kind == "unreachable":
+            _unreachable(ctx, (host or found[0].host), port or found[0].port, e.error, doing="read the key of")
+        if e.kind == "address":
+            raise click.UsageError("--host takes an address or a host name, e.g. 192.168.1.50, fe80::1 (no brackets) "
+                                   "or myboard.local")
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    for line in person_steps.change_lines(change):
+        console.print(escape(line))
+    if not click.confirm(person_steps.CHANGE_QUESTION, default=False):
+        console.print("Nothing was changed.")
+        return
+    try:
+        moved, paired = person_steps.change_board(state_dir, change, via="cli",
+                                                  audit=lambda: _device_audit(ctx, state_dir), actor="cli")
+    except person_steps.BoardStepError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    plan = change.plan
+    if moved is None:
+        console.print("[red]The framework's known_hosts holds the change, but the board's record could not be "
+                      "written: add the board again with 'llm-cli deploy devices add'.[/red]")
+        sys.exit(1)
+    console.print(f"Board {moved.device_id} ({escape(moved.label)}): {escape(plan.new.display)}, host key "
+                  f"{escape(plan.new_key_type)} {plan.new_fingerprint}.")
+    if plan.key_changed and not paired:
+        console.print("[yellow]The framework's SSH key does not log in there yet: pair the board once with "
+                      "'llm-cli deploy run' (it asks for the password one time).[/yellow]")
+
+
 # ============================================================================
 # SCAN COMMAND
 # ============================================================================
@@ -4681,40 +4775,31 @@ def _profile_summary(profile) -> list:
 def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Optional[str],
                   ctx: Optional[FrameworkContext] = None):
     """The device's host key, trusted on first use but never silently (as for deploy run). Exits when refused."""
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import TrustStore
     from orchestrator.utils import ssh_trust
+    store = TrustStore(state_dir)
     try:
-        key = ssh_trust.fetch_host_key(host, port)
-        status = ssh_trust.check_host_key(state_dir, host, port, key)
+        check = store.check(Endpoint(host, port))
     except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
         _unreachable(ctx, host, port, e, step="probe", state_dir=state_dir)
-    if status == "changed":
+    if _first_use(ctx, store, check, trust_fingerprint, nothing="probed").verdict == "changed":
         _note_reach(ctx, host, port, "probe", "device_host_key_changed", state_dir=state_dir)
         console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
         sys.exit(1)
-    if status == "unknown":
-        fp = ssh_trust.fingerprint(key)
-        console.print(f"New device {escape(host)}:{port} - {escape(key.get_name())} {fp}")
-        if trust_fingerprint:
-            if trust_fingerprint != fp:
-                console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
-                sys.exit(1)
-        elif not (sys.stdin.isatty() and click.confirm(
-                "Compare with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the device. Trust it?",
-                default=False)):
-            console.print("[red]Device not trusted; nothing was probed.[/red]")
-            sys.exit(1)
-        ssh_trust.trust_host_key(state_dir, host, port, key)
-    return key
+    return check.key
 
 
 def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
                  password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str],
                  ctx: Optional[FrameworkContext] = None) -> None:
-    from orchestrator.remote.address import valid_host
-    from orchestrator.runtime.scan_steps import DeviceScanError, label_problem, scan_device
+    from orchestrator.remote.address import valid_host, valid_user
+    from orchestrator.runtime.scan_steps import USER_HINT, DeviceScanError, label_problem, scan_device
     from orchestrator.utils import ssh_trust
     if not user:
         raise click.UsageError("--device needs --user")
+    if not valid_user(user, allow_root=True):
+        raise click.UsageError(f"--user: {USER_HINT}")
     if not valid_host(host):
         raise click.UsageError("--device takes an address or a host name, e.g. 192.168.1.50, fe80::1 (no brackets) "
                                "or myboard.local")

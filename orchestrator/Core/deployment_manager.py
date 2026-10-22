@@ -552,13 +552,20 @@ class DeploymentManager:
         config = getattr(self.framework, "config", None)
         return Path(getattr(config, "user_state_dir", None) or Path.home() / ".llm-framework")
 
+    def trust_store(self):
+        """The framework's known_hosts this deploy logs in with (remote/trust.py TrustStore, read-only)."""
+        from orchestrator.remote.trust import TrustStore
+        return TrustStore(self._state_dir())
+
     def host_key_status(self, target_ip: str, port: int = 22):
         """('known'|'unknown'|'changed', key) for the device - shown to the user before trusting it."""
-        key = ssh_trust.fetch_host_key(target_ip, port)
-        return ssh_trust.check_host_key(self._state_dir(), target_ip, port, key), key
+        from orchestrator.remote.address import Endpoint
+        check = self.trust_store().check(Endpoint(target_ip, port))
+        return check.status, check.key
 
     def trust_host(self, target_ip: str, key, port: int = 22) -> None:
-        """Stores a host key the user confirmed by comparing its fingerprint."""
+        """Stores a host key the user confirmed by comparing its fingerprint (the old primitive without an audit row;
+        the person's channels trust through orchestrator/remote/pairing.py trust_presented_key)."""
         ssh_trust.trust_host_key(self._state_dir(), target_ip, port, key)
 
     def deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, **options: Any) -> DeployResult:

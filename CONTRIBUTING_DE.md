@@ -682,14 +682,22 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   einem Warten auf das Board), halte fest, was ein Kontakt ergab, mit `record_reach`
   (`orchestrator/runtime/device/trusted.py`), leite den Fehler eines Board-Schritts von
   `remote.errors.RemoteFailure` ab, zeig den Fortschritt eines Deployments mit `remote.text.event_text` und frag
-  `remote.transport.available()`, ob SSH geht; importiere paramiko nie auf Modulebene. Arbeite auf einem Board über
-  `remote.session.RemoteSession` (Anmeldung mit geprüftem Host-Schlüssel bei jeder Anmeldung, `run`, `private_dir`,
-  `upload` mit Fortsetzen, `wait_for_host`, `run_detached`, ein `CancelToken`): Ein KI-Weg übergibt `KeyOnly()`, nur
-  das `OneTimePassword` der Person kann koppeln, und jeder Befehl geht als ein `sh -c` mit Zeitlimit und
-  Ausgabegrenze über `remote.transport` (`sh_command`, `ParamikoTransport.run`). Schreib nie einen zweiten regulären
-  Ausdruck, eine zweite Grundtabelle, einen zweiten Recorder, eine zweite Warte- oder Upload-Schleife oder einen
-  zweiten Befehlsleser daneben. Das Paket importiert nur `orchestrator/utils` und `orchestrator/security`
-  (`tests/test_remote_layer.py`).
+  `remote.transport.available()`, ob SSH geht; importiere paramiko nie auf Modulebene. Lies und vergleiche den
+  Host-Schlüssel eines Boards mit `remote.trust.TrustStore` (`check` gibt einen `KeyCheck`: seinen Stand in der
+  `known_hosts` des Frameworks, den Fingerabdruck, ob es der erwartete oder der eines anderen Geräts ist) und behalte
+  darüber nur die Regel des Aufrufers: Die Person darf vertrauen, eine KI wird abgelehnt. Einem Schlüssel vertrauen,
+  koppeln, die Adresse oder den Schlüssel eines Boards ändern (Q5) und der Audit-Eintrag einer Zustimmung gehören der
+  Person: Sie laufen über `remote.pairing` (`trust_presented_key` und `first_use` mit dem Audit-Eintrag des
+  Vertrauens, `pair`, `plan_replacement`/`replace_key`, `record_consent`), das kein für eine KI erreichbares Modul
+  importiert (`tests/test_remote_trust.py` folgt den Importen der Tool-Module, des MCP-Servers, der LLM-Schicht, von
+  Ditto, des Gerätedienstes und des Benchmarks). Arbeite auf einem Board über `remote.session.RemoteSession`
+  (Anmeldung mit dem über `TrustStore` geprüften Host-Schlüssel bei jeder Anmeldung, `run`, `private_dir`, `upload`
+  mit Fortsetzen, `wait_for_host`, `run_detached`, ein `CancelToken`): Ein KI-Weg übergibt `KeyOnly()`, nur das
+  `OneTimePassword` der Person kann koppeln, und jeder Befehl geht als ein `sh -c` mit Zeitlimit und Ausgabegrenze
+  über `remote.transport` (`sh_command`, `ParamikoTransport.run`). Schreib nie einen zweiten regulären Ausdruck, eine
+  zweite Grundtabelle, einen zweiten Recorder, eine zweite Host-Schlüssel-Prüfung, eine zweite Warte- oder
+  Upload-Schleife oder einen zweiten Befehlsleser daneben. Das Paket importiert nur `orchestrator/utils` und
+  `orchestrator/security` (`tests/test_remote_layer.py`).
 - **Qt gibt es nur in `orchestrator/gui/`.** PySide6 ist das optionale Extra `gui`; Kommandozeile, MCP-Server und
   alles unterhalb der GUI importieren kein Qt, auch nicht in einer Funktion (`tests/test_qt_free_core.py` prüft jeden
   Import und führt sie in einem Prozess ohne PySide6 aus). Texte für jeden Prozess kommen aus

@@ -1070,30 +1070,38 @@ class TestScanDevice:
 
     def test_the_audit_log_is_opened_only_after_a_successful_probe(self, tmp_path, monkeypatch):
         """Review (w5-deploy-v): moving the flow into scan_steps.scan_device opened the audit log (and with it the
-        OS keyring's audit key) before the login; as before, a failed scan does not touch it."""
+        OS keyring's audit key) before the login; as before, a failed scan of a known board does not touch it.
+        Consolidation stage C (c2-remote-trust, on purpose): a key the person trusts now is audited in the same step
+        (remote/pairing.py trust_presented_key), so a scan whose login then fails opens the audit log once, for that
+        trust."""
         from orchestrator import cli as cli_module
         from orchestrator.runtime import remote_probe as rp
         from orchestrator.runtime.profile import parse_profile
         from orchestrator.utils import ssh_trust
         from test_cli_builds import invoke_plain
-        self.fake_ssh(monkeypatch)
         opened = []
         monkeypatch.setattr(cli_module, "_device_audit", lambda ctx, state: opened.append(state) or None)
 
         def refuse(host, user, state, port=22, password=None):
             raise ConnectionRefusedError(111, "refused")
 
-        monkeypatch.setattr(ssh_trust, "connect", refuse)
         fp = ssh_trust.fingerprint(FakeHostKey())
         monkeypatch.chdir(tmp_path)
-        failed = invoke_plain("scan", "--device", "192.0.2.10", "--user", "dietpi", "--trust-fingerprint", fp)
+        self.fake_ssh(monkeypatch, status="known")
+        monkeypatch.setattr(ssh_trust, "connect", refuse)
+        failed = invoke_plain("scan", "--device", "192.0.2.10", "--user", "dietpi")
         assert failed.code == 1 and opened == []
+        trusted, _connected = self.fake_ssh(monkeypatch)
+        monkeypatch.setattr(ssh_trust, "connect", refuse)
+        failed = invoke_plain("scan", "--device", "192.0.2.10", "--user", "dietpi", "--trust-fingerprint", fp)
+        assert failed.code == 1 and trusted == [("192.0.2.10", 22)] and len(opened) == 1, "the trust's own row"
+        opened.clear()
         self.fake_ssh(monkeypatch)
         board = parse_profile((FIXTURES / "schema2_rk3566_dietpi.txt").read_text())
         monkeypatch.setattr(rp, "probe_over_ssh", lambda client: rp.RemoteProbeResult(board, "sh", []))
         done = invoke_plain("scan", "--device", "192.0.2.10", "--user", "dietpi", "--trust-fingerprint", fp)
         assert done.code == 0, done.out
-        assert len(opened) == 1 and "Trusted device" in done.out
+        assert len(opened) == 2 and "Trusted device" in done.out, "the trust's row, then the record's"
 
     def test_a_changed_host_key_stops(self, tmp_path, monkeypatch):
         from test_cli_builds import invoke_plain

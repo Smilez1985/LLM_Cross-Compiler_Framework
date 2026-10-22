@@ -1093,3 +1093,134 @@ def test_older_builds_on_a_fake_board_go_with_the_real_core_steps(qapp, window, 
     rows = window.framework.tool_registry.audit.rows
     assert [r["outcome"] for r in rows] == ["started", "ok"] and rows[0]["actor"] == "gui"
     assert f"Deleted for good: runtime build {a}" in window.output.toPlainText()
+
+
+# --- Q5: Edit address or key... (deploy devices edit) -------------------------------------------------------------
+
+def _edit_dialogs(monkeypatch, *, host=None, port=None, key_text=None, read=False, answer=False):
+    """Fills the edit form and answers the side-by-side question; keeps what each dialog showed."""
+    from PySide6.QtWidgets import QCheckBox, QDialogButtonBox, QLabel, QLineEdit, QPlainTextEdit, QSpinBox
+    from orchestrator.gui import boards_window
+    seen = SimpleNamespace(forms=[], questions=[])
+
+    def fill(dialog):
+        if dialog.objectName() == "dlg_boards_edit_confirm":
+            buttons = dialog.findChild(QDialogButtonBox)
+            no = buttons.button(QDialogButtonBox.No)
+            seen.questions.append(SimpleNamespace(
+                default_is_no=no.isDefault() and not buttons.button(QDialogButtonBox.Yes).isDefault(),
+                cells={label.objectName(): label.text() for label in dialog.findChildren(QLabel)
+                       if label.objectName().startswith("lbl_boards_edit_")},
+                text="\n".join(label.text() for label in dialog.findChildren(QLabel)),
+                main_thread=threading.current_thread() is threading.main_thread()))
+            return answer
+        seen.forms.append({"host": dialog.findChild(QLineEdit, "txt_boards_edit_host").text(),
+                           "port": dialog.findChild(QSpinBox, "spn_boards_edit_port").value(),
+                           "key_placeholder": dialog.findChild(QPlainTextEdit, "txt_boards_edit_key")
+                           .placeholderText()})
+        if host is not None:
+            dialog.findChild(QLineEdit, "txt_boards_edit_host").setText(host)
+        if port is not None:
+            dialog.findChild(QSpinBox, "spn_boards_edit_port").setValue(port)
+        if key_text is not None:
+            dialog.findChild(QPlainTextEdit, "txt_boards_edit_key").setPlainText(key_text)   # pasted
+        dialog.findChild(QCheckBox, "cb_boards_edit_read").setChecked(read)
+        return True
+
+    monkeypatch.setattr(boards_window, "_exec", fill)
+    return seen
+
+
+def test_editing_a_board_s_key_shows_old_and_new_side_by_side_with_no_as_the_default(qapp, window, monkeypatch):
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    from orchestrator.utils import ssh_trust
+    state = state_of(window)
+    device = trusted_board(state)
+    monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: SimpleNamespace(close=lambda: None))
+    window.reload()
+    assert window.select(device.device_id) and window.buttons["btn_boards_edit"].isEnabled()
+    new = paramiko.ECDSAKey.generate()
+    pasted = f"{new.get_name()} {new.get_base64()} root@board\n"
+    before = (state / "known_hosts").read_bytes()
+    seen = _edit_dialogs(monkeypatch, key_text=pasted, answer=False)
+    Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    assert seen.forms == [{"host": "192.168.1.50", "port": 22, "key_placeholder": window._t("boards.edit.key_hint")}]
+    (question,) = seen.questions
+    assert question.default_is_no and question.main_thread
+    assert question.cells["lbl_boards_edit_key_now"].endswith(device.fingerprint)
+    assert question.cells["lbl_boards_edit_key_after"].endswith(ssh_trust.fingerprint(new))
+    assert question.cells["lbl_boards_edit_address_now"] == question.cells["lbl_boards_edit_address_after"]
+    assert "192.168.1.50" in question.cells["lbl_boards_edit_address_now"]
+    assert (state / "known_hosts").read_bytes() == before, "No changes nothing"
+    assert window.framework.tool_registry.audit.rows == []
+    seen = _edit_dialogs(monkeypatch, key_text=pasted, host="myboard.local", answer=True)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    (moved,) = TrustedDevices(state).list()
+    assert (moved.host, moved.fingerprint, moved.label) == ("myboard.local", ssh_trust.fingerprint(new), "Living room")
+    assert [row["tool"] for row in window.framework.tool_registry.audit.rows] == ["host_key_replaced"]
+    assert window.selected()["device_id"] == moved.device_id
+    (told,) = boxes.asked
+    assert ssh_trust.fingerprint(new) in told.text and "myboard.local" in told.text
+
+
+def test_the_key_read_from_the_board_is_read_off_the_gui_thread(qapp, window, monkeypatch):
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.utils import ssh_trust
+    state = state_of(window)
+    device = trusted_board(state)
+    window.reload()
+    window.select(device.device_id)
+    new, ran = paramiko.ECDSAKey.generate(), []
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: threads(ran)() or new)
+    seen = _edit_dialogs(monkeypatch, read=True, key_text="ignored while reading", answer=False)
+    Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    assert ran == [False], "read in a worker thread"
+    (question,) = seen.questions
+    assert question.cells["lbl_boards_edit_key_after"].endswith(ssh_trust.fingerprint(new))
+
+
+@pytest.mark.parametrize("pasted, key", [("not a key", "boards.edit.err.key_not_a_key"),
+                                         ("", "boards.edit.err.unchanged")])
+def test_a_refused_change_says_why_in_plain_words(qapp, window, monkeypatch, pasted, key):
+    state = state_of(window)
+    device = trusted_board(state)
+    window.reload()
+    window.select(device.device_id)
+    seen = _edit_dialogs(monkeypatch, key_text=pasted)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    assert seen.questions == [] and window._t(key) in [a.text for a in boxes.asked]
+
+
+def test_the_key_of_another_trusted_board_is_refused_with_its_name(qapp, window, monkeypatch):
+    """Review (remote-trust-v): pasting the key of another trusted board would overwrite that board's record; the
+    window refuses before asking and names that board in plain words."""
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    from orchestrator.utils import ssh_trust
+    state = state_of(window)
+    device = trusted_board(state)
+    garage_key = paramiko.ECDSAKey.generate()
+    ssh_trust.trust_host_key(state, "192.168.1.51", 22, garage_key)
+    garage = TrustedDevices(state).record("192.168.1.51", 22, "radxa", garage_key, via="cli", paired=True,
+                                          label="Garage")
+    before = (state / "devices.json").read_bytes()
+    window.reload()
+    window.select(device.device_id)
+    seen = _edit_dialogs(monkeypatch, key_text=f"{garage_key.get_name()} {garage_key.get_base64()}", answer=True)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    assert seen.questions == [], "refused before the question"
+    assert window._t("boards.edit.err.other_board", label="Garage", device_id=garage.device_id) in [
+        a.text for a in boxes.asked]
+    assert (state / "devices.json").read_bytes() == before
