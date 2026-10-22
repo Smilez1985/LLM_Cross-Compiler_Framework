@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-16
+Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-17
 
 [English](Features.md) · **Deutsch**
 
@@ -1753,9 +1753,9 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 
 | Signal | Wo es gelesen wird | Wirkung |
 |---|---|---|
-| robots.txt (RFC 9309) | `/robots.txt` jeder Site, einmal pro Schema, Host und Port | Gesperrte Pfade werden nicht abgerufen. Es gelten die Gruppen, deren `User-agent` `LLM-Conversion-Framework-Bot` lautet (gleich in welcher Schreibweise), sonst alle `*`-Gruppen (eine Gruppe für `bot` gehört einem anderen Crawler); Muster mit `*` und `$` wirken; die längste Regel gewinnt, bei Gleichstand `Allow`. Eine robots.txt, die nicht erreichbar ist oder mit einem Serverfehler, 401 oder 403 antwortet, gilt als „alles gesperrt“ (bei 401 und 403 strenger als RFC 9309, das dann Crawlen erlaubt: eine verschlossene robots.txt kann einen Vorbehalt enthalten). |
-| Header `X-Robots-Tag` | jede Antwort | `noindex`, `none`, `noai` und `noimageai` halten die Seite heraus; bei `nofollow` und `none` werden ihre Links nicht verfolgt. Direktiven für diesen Crawler (`LLM-Conversion-Framework-Bot: noai`) zählen, solche für andere Crawler nicht. |
-| `<meta name="robots">` und `<meta name="llm-conversion-framework-bot">` | HTML-Seiten | dieselben Direktiven wie beim Header |
+| robots.txt (RFC 9309) | `/robots.txt` jeder Site, einmal pro Schema, Host und Port | Gesperrte Pfade werden nicht abgerufen. Es gelten die Gruppen, deren `User-agent` `LLM-Cross-Compiler-Framework-Bot` oder, von vor der Umbenennung, `LLM-Conversion-Framework-Bot` lautet (gleich in welcher Schreibweise), sonst alle `*`-Gruppen (eine Gruppe für `bot` gehört einem anderen Crawler); Muster mit `*` und `$` wirken; die längste Regel gewinnt, bei Gleichstand `Allow`. Eine robots.txt, die nicht erreichbar ist oder mit einem Serverfehler, 401 oder 403 antwortet, gilt als „alles gesperrt“ (bei 401 und 403 strenger als RFC 9309, das dann Crawlen erlaubt: eine verschlossene robots.txt kann einen Vorbehalt enthalten). |
+| Header `X-Robots-Tag` | jede Antwort | `noindex`, `none`, `noai` und `noimageai` halten die Seite heraus; bei `nofollow` und `none` werden ihre Links nicht verfolgt. Direktiven für diesen Crawler (`LLM-Cross-Compiler-Framework-Bot: noai` oder sein früherer Name `LLM-Conversion-Framework-Bot`) zählen, solche für andere Crawler nicht. |
+| `<meta name="robots">`, `<meta name="llm-cross-compiler-framework-bot">` und das frühere `<meta name="llm-conversion-framework-bot">` | HTML-Seiten | dieselben Direktiven wie beim Header |
 | TDM Reservation Protocol (W3C TDMRep 1.0) | `/.well-known/tdmrep.json` pro Site (die erste passende Regel entscheidet), der Header `tdm-reservation`, `<meta name="tdm-reservation">`, `tdm:reservation` in den PDF-Metadaten | Ein Vorbehalt hält die Seite heraus; eine `tdm-policy` wird im Log genannt. |
 
 - Ein Vorbehalt aus irgendeiner dieser Quellen gewinnt. TDMRep erlaubt einer späteren Quelle, einen früheren
@@ -1764,9 +1764,11 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   Adresse geprüft: Sicherheitsprüfung, robots.txt und `tdmrep.json` ihres eigenen Hosts. Ein Link, der auf einen
   anderen Host weiterleitet, wird übersprungen; nur eine Weiterleitung der Start-URL (zum Beispiel von `example.com`
   auf `www.example.com`) verlegt den Crawl auf diesen Host. Höchstens 5 Weiterleitungen pro Adresse.
-- Der Crawler nennt sich `LLM-Conversion-Framework-Bot/<Version> (Open Source;
-  +https://github.com/Smilez1985/llm_conversion_framework)`, mit der echten Version des Frameworks. Betreiber von
-  Websites können ihn unter diesem Namen in der robots.txt und in einem Meta-Tag ansprechen.
+- Der Crawler nennt sich `LLM-Cross-Compiler-Framework-Bot/<Version> (Open Source;
+  +https://github.com/Smilez1985/LLM_Cross-Compiler_Framework)`, mit der echten Version des Frameworks. Betreiber von
+  Websites können ihn unter diesem Namen in der robots.txt und in einem Meta-Tag ansprechen. Regeln, die eine Website
+  für seinen Namen von vor der Umbenennung des Repositorys geschrieben hat, `LLM-Conversion-Framework-Bot`, gelten
+  weiter für ihn, ein früher erklärter Nutzungsvorbehalt bleibt also bestehen.
 
 ### Lizenzen und Urheberrecht
 

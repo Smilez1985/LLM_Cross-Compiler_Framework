@@ -41,8 +41,14 @@ except ImportError:  # SecretsManager reports the missing package (SecurityError
         pass
 
 from orchestrator.utils.helpers import redact_secrets
+from orchestrator.utils.logging import get_logger
 
-KEYRING_SERVICE = "llm-conversion-framework"
+KEYRING_SERVICE = "llm-cross-compiler-framework"
+# The service name before the repository was renamed to LLM_Cross-Compiler_Framework. Its entries (the vault keys of
+# every vault, the audit key, the revision anchors) are still read: when the new name holds nothing, the entry under
+# the old name is used and copied to the new name. The old entry is never removed (an installation that is still
+# on the old version reads it there).
+LEGACY_KEYRING_SERVICE = "llm-conversion-framework"
 KEY_ENTRY = "master-encryption-key"
 PREVIOUS_SUFFIX = ".prev"
 # The probe uses its own service, so it never touches the real entries (Windows Credential Manager moves
@@ -65,6 +71,9 @@ STORAGE_CHOICES = {
 # scrypt for helper output and passphrases (n=2**17, r=8, p=1: about 128 MiB and a fraction of a second).
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 17, 8, 1
 _SCRYPT_LIMITS = {"n": (2 ** 14, 2 ** 18), "r": (8, 16), "p": (1, 4)}
+# A stored format value, frozen: every vault protected by a passphrase or a credential helper holds this text encrypted
+# as its check token, so changing it (also with the product name) would make every existing vault look like a wrong
+# passphrase. It keeps the name from before the rename on purpose.
 CHECK_PLAINTEXT = b"llm-conversion-framework vault v2"
 
 
@@ -308,6 +317,35 @@ def new_vault_id() -> str:
     return secrets.token_hex(8)
 
 
+def legacy_service(service: str) -> Optional[str]:
+    """The name `service` had before the rename (llm-conversion-framework...): the plain service and every
+    "<service>-..." name (one per vault) were renamed. None for any other name."""
+    if service == KEYRING_SERVICE or service.startswith(KEYRING_SERVICE + "-"):
+        return LEGACY_KEYRING_SERVICE + service[len(KEYRING_SERVICE):]
+    return None
+
+
+def read_entry(backend: Any, service: str, name: str) -> Optional[str]:
+    """`backend.get_password(service, name)` (backend: a keyring backend or the keyring module). When nothing is
+    stored there, the entry under the service's name from before the rename: it is copied to the new name (so the
+    next read finds it there) and returned. The old entry stays where it is; a copy that fails is tried again on the
+    next read, the value is returned anyway."""
+    value = backend.get_password(service, name)
+    old_service = None if value else legacy_service(service)
+    if not old_service:
+        return value
+    old = backend.get_password(old_service, name)
+    if not old:
+        return value
+    try:
+        # The keyring module itself has a 'backends' subpackage, not a chain: the setting goes to its backend.
+        prefer_local_machine(backend.get_keyring() if callable(getattr(backend, "get_keyring", None)) else backend)
+        backend.set_password(service, name, old)
+    except Exception:  # still readable under the old name; copied on a later read
+        pass
+    return old
+
+
 def vault_service(vault_id: Optional[str]) -> str:
     """The keyring service holding a vault's key. Each vault has its own (a rotation or a change of storage
     must never remove the key of another vault, e.g. of another LLM_FRAMEWORK_HOME folder); stores of
@@ -316,7 +354,11 @@ def vault_service(vault_id: Optional[str]) -> str:
 
 
 class KeyringHolder:
-    """The vault key (and, during a rotation, the previous one) as entries of the OS keyring."""
+    """The vault key (and, during a rotation, the previous one) as entries of the OS keyring.
+
+    A vault whose key is still under the service name from before the rename (LEGACY_KEYRING_SERVICE) opens: the
+    first read copies its key, and the previous key of a rotation not yet finished, to the new name; from then on
+    only the new name is used. The entries under the old name are never removed by the framework."""
 
     def __init__(self, service: str = KEYRING_SERVICE):
         problem = keyring_problem()
@@ -325,13 +367,34 @@ class KeyringHolder:
         import keyring
         self._backend = keyring.get_keyring()
         self.service = service
+        self.legacy_service = legacy_service(service)
 
     @staticmethod
     def _entry(previous: bool) -> str:
         return KEY_ENTRY + (PREVIOUS_SUFFIX if previous else "")
 
     def get(self, previous: bool = False) -> Optional[str]:
-        return self._backend.get_password(self.service, self._entry(previous))
+        value = self._backend.get_password(self.service, self._entry(previous))
+        if value or not self.legacy_service:
+            return value
+        if previous and self._backend.get_password(self.service, self._entry(False)):
+            return None  # the new name is in use: its previous key was dropped, the old name is not asked again
+        old = self._backend.get_password(self.legacy_service, self._entry(previous))
+        if old and not previous:
+            self._copy_from_legacy(old)
+        return old
+
+    def _copy_from_legacy(self, current: str) -> None:
+        """The first use after the rename: the key (and a previous key still needed) under the new name too. The
+        previous key first, so a reader never sees the new current key without it. A copy that fails is tried
+        again on the next read; the old entries stay either way."""
+        try:
+            previous = self._backend.get_password(self.legacy_service, self._entry(True))
+            if previous:
+                self.set(previous, previous=True)
+            self.set(current)
+        except Exception:
+            pass
 
     def set(self, value: str, previous: bool = False) -> None:
         prefer_local_machine(self._backend)
@@ -342,6 +405,19 @@ class KeyringHolder:
             self._backend.delete_password(self.service, self._entry(previous))
         except Exception:  # not there (keyring raises PasswordDeleteError)
             pass
+        if previous or not self.legacy_service:
+            return
+        try:
+            left = self._backend.get_password(self.legacy_service, self._entry(False))
+        except Exception:
+            left = None
+        if left:
+            # Not removed by the framework: said in plain words, so the person decides.
+            get_logger("SecretsManager").warning(
+                f"A copy of this vault key is still kept under the keyring service name from before the rename, "
+                f"'{self.legacy_service}' (entry '{self._entry(False)}'). The framework does not remove it. If no "
+                f"older installation of the LLM Conversion Framework uses this vault any more, remove it in your "
+                f"keyring manager, e.g. python -m keyring del {self.legacy_service} {self._entry(False)}")
 
 
 class KeyFileHolder:

@@ -593,18 +593,19 @@ def _audit_key(framework, state_dir: Optional[Path] = None) -> Optional[bytes]:
     """The audit HMAC key: its own entry in the OS keyring, per user like the audit database itself, and
     never in a file an editor of the database could also read. None (an unkeyed chain, reported by
     `llm-cli doctor`) when no keyring is available. A key is created under a lock, so two first starts at
-    the same time (GUI and MCP server) end up with the same key."""
-    from orchestrator.Core.vault_key import keyring_usable
+    the same time (GUI and MCP server) end up with the same key. A key kept under the keyring service name from
+    before the rename is used and copied to the new name (read_entry), so the existing audit chain stays verifiable."""
+    from orchestrator.Core.vault_key import keyring_usable, read_entry
     if not keyring_usable():  # probed once per process; a hung keyring must not stop the boot
         return None
     try:
         import keyring
         from orchestrator.Core.secrets_manager import SecretsManager
         service = SecretsManager.SERVICE_ID
-        key = keyring.get_password(service, AUDIT_KEY_ID)
+        key = read_entry(keyring, service, AUDIT_KEY_ID)
         if not key:
             with _key_lock(Path(state_dir) if state_dir else _state_dir(framework)):
-                key = keyring.get_password(service, AUDIT_KEY_ID)  # another process may have been first
+                key = read_entry(keyring, service, AUDIT_KEY_ID)  # another process may have been first
                 if not key:
                     legacy = None
                     sm = getattr(framework, "secrets_manager", None)
@@ -622,11 +623,14 @@ def _audit_key(framework, state_dir: Optional[Path] = None) -> Optional[bytes]:
 
 def _revision_anchor(kind: str) -> RevisionAnchor:
     """Where the newest saved revision of a signed per-user file is kept: the OS keyring, next to the audit key, so
-    an older copy put back into the per-user folder (or a removed file) is noticed although its signature is genuine."""
+    an older copy put back into the per-user folder (or a removed file) is noticed although its signature is genuine.
+    A revision kept under the keyring service name from before the rename is read (and copied) when the new name has
+    none, so the protection carries over."""
     import keyring
     from orchestrator.Core.secrets_manager import SecretsManager
+    from orchestrator.Core.vault_key import read_entry
     service, name = SecretsManager.SERVICE_ID, f"{kind}-revision"
-    return RevisionAnchor(lambda: keyring.get_password(service, name),
+    return RevisionAnchor(lambda: read_entry(keyring, service, name),
                           lambda value: keyring.set_password(service, name, value))
 
 

@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: Smilez1985/llm_conversion_framework
+          repository: Smilez1985/LLM_Cross-Compiler_Framework
           ref: ${{ env.LCF_REF }}
           path: .lcf
           persist-credentials: false

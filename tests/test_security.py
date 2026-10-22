@@ -624,7 +624,9 @@ class TestCrawlerOptOuts:
                             lambda prepared, **kw: sent.append(prepared.headers["User-Agent"]) or response(404))
         crawler.crawl(f"{SITE}/")
 
-        assert sent and all(ua.startswith(f"LLM-Conversion-Framework-Bot/{__version__} (") for ua in sent)
+        assert sent and all(ua.startswith(f"LLM-Cross-Compiler-Framework-Bot/{__version__} (") for ua in sent)
+        # Site operators reach the project from the user agent: the repository's address since the rename.
+        assert all(ua.endswith("+https://github.com/Smilez1985/LLM_Cross-Compiler_Framework)") for ua in sent)
 
     @pytest.mark.parametrize("directive", ["noindex", "none", "noai", "noimageai", "NoAI"])
     def test_x_robots_tag_keeps_the_page_out(self, make_crawler, directive):
@@ -652,7 +654,9 @@ class TestCrawlerOptOuts:
 
     @pytest.mark.parametrize("header, kept, followed", [
         ("googlebot: noindex, nofollow", True, True),           # another crawler's rules
-        ("LLM-Conversion-Framework-Bot: noai", False, True),     # ours
+        ("LLM-Cross-Compiler-Framework-Bot: noai", False, True),     # ours
+        ("googlebot: noindex, llm-cross-compiler-framework-bot: nofollow", True, False),
+        ("LLM-Conversion-Framework-Bot: noai", False, True),     # ours before the rename: still honoured
         ("googlebot: noindex, llm-conversion-framework-bot: nofollow", True, False),
         ("unavailable_after: 25 Jun 2010 15:00:00 PST, noindex", False, True),
     ])
@@ -683,7 +687,9 @@ class TestCrawlerOptOuts:
     @pytest.mark.parametrize("meta, reason, followed", [
         ('<meta name="robots" content="noindex">', '<meta name="robots">: noindex', True),
         ('<meta name="ROBOTS" content="noimageai, noai">', '<meta name="robots">: noai, noimageai', True),
-        ('<meta name="LLM-Conversion-Framework-Bot" content="none">',
+        ('<meta name="LLM-Cross-Compiler-Framework-Bot" content="none">',
+         '<meta name="llm-cross-compiler-framework-bot">: none', False),
+        ('<meta name="LLM-Conversion-Framework-Bot" content="none">',   # the name before the rename still counts
          '<meta name="llm-conversion-framework-bot">: none', False),
         ('<meta name="tdm-reservation" content="1">', 'TDM reservation (<meta name="tdm-reservation">)', True),
         ('<meta name="robots" content="noindex nofollow">', '<meta name="robots">: noindex', False),   # spaces only
@@ -772,7 +778,13 @@ class TestCrawlerOptOuts:
         ("User-agent: *\nAllow: /\nDisallow: /private\n", "/private"),      # the longest rule wins, not the first
         ("User-agent: *\nDisallow: /x\n\nUser-agent: *\nDisallow: /private\n", "/private"),   # groups merged
         ("\ufeffUser-agent: *\nDisallow: /\n", "/docs"),                     # byte order mark
-        ("User-agent: LLM-Conversion-Framework-Bot/3.1\nDisallow: /\n", "/docs"),   # our token with a version
+        ("User-agent: LLM-Cross-Compiler-Framework-Bot/3.1\nDisallow: /\n", "/docs"),   # our token with a version
+        ("User-agent: LLM-Conversion-Framework-Bot/3.1\nDisallow: /\n", "/docs"),   # our token before the rename
+        # An opt-out written for the token before the rename still holds, although '*' allows everything.
+        ("User-agent: LLM-Conversion-Framework-Bot\nDisallow: /\n\nUser-agent: *\nAllow: /\n", "/docs"),
+        # Groups for the current and the earlier token are merged like any two groups of ours.
+        ("User-agent: LLM-Cross-Compiler-Framework-Bot\nAllow: /\n\n"
+         "User-agent: LLM-Conversion-Framework-Bot\nDisallow: /docs\n\nUser-agent: *\nAllow: /\n", "/docs"),
         ("User-agent: otherbot\nUser-agent: *\nDisallow: /docs # comment\n", "/docs"),
         ("User-agent: *\nAllow: https://example.org/\nDisallow: /private\n", "/private"),   # URL counts as "/"
     ])
@@ -790,7 +802,8 @@ class TestCrawlerOptOuts:
     @pytest.mark.parametrize("rules", [
         "User-agent: *\nDisallow: /private\nAllow: /private/public\n",          # the longer allow wins
         "User-agent: *\nAllow: /private/public\nDisallow: /private/public\n",   # a tie goes to allow
-        "User-agent: llm-conversion-framework-bot\nDisallow:\n\nUser-agent: *\nDisallow: /\n",   # our group
+        "User-agent: llm-cross-compiler-framework-bot\nDisallow:\n\nUser-agent: *\nDisallow: /\n",   # our group
+        "User-agent: llm-conversion-framework-bot\nDisallow:\n\nUser-agent: *\nDisallow: /\n",   # ours, earlier
         "User-agent: otherbot\nDisallow: /\n",
         "User-agent: *\nDisallow: /private/public/x\n",
     ])
@@ -802,7 +815,8 @@ class TestCrawlerOptOuts:
 
         assert self.sources(crawler.crawl(f"{SITE}/private/public")) == [f"{SITE}/private/public"]
 
-    @pytest.mark.parametrize("agent", ["bot", "llm", "framework", "Framework-Bot", "*bot"])
+    @pytest.mark.parametrize("agent", ["bot", "llm", "framework", "Framework-Bot", "*bot", "LLM-Cross-Compiler",
+                                       "Conversion-Framework-Bot"])
     def test_robots_txt_group_of_a_part_of_our_name_is_not_ours(self, make_crawler, agent):
         """RFC 9309 2.2.1: a group is ours when its user-agent equals our product token; 'bot' is another crawler,
         so the '*' group applies."""

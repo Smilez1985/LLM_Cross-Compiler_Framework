@@ -1,4 +1,4 @@
-Version 3.0.0 + unreleased changes · Last updated 2026-10-11
+Version 3.0.0 + unreleased changes · Last updated 2026-10-17
 
 **English** · [Deutsch](CONTRIBUTING_DE.md)
 
@@ -34,6 +34,17 @@ Ways to contribute:
 
 ## 1. Development setup
 
+Get the code:
+
+```bash
+git clone https://github.com/Smilez1985/LLM_Cross-Compiler_Framework.git
+cd LLM_Cross-Compiler_Framework
+```
+
+Up to release 3.0.0 the repository was called `llm_conversion_framework`. GitHub forwards the old address, so an
+existing clone keeps working; to point it at the new address:
+`git remote set-url origin https://github.com/Smilez1985/LLM_Cross-Compiler_Framework.git`.
+
 You need **Python 3.11 to 3.14**, Git, and Docker for real builds. On a Linux machine without a desktop, the Qt
 GUI tests need a few system libraries; the CI installs
 `libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0`.
@@ -45,7 +56,7 @@ Installs exactly the pinned, hashed versions from the requirements files:
 ```bash
 uv venv --python 3.13
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
-uv pip install -r requirements.txt -r requirements-dev.txt
+uv pip sync requirements.txt requirements-dev.txt   # exactly the hash-pinned exports of uv.lock
 
 python -m orchestrator.cli --help      # command line
 python -m orchestrator.main            # GUI
@@ -559,7 +570,10 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 
 ## 9. Commits and pull requests
 
-- Branch from `main`; one topic per pull request.
+- Branches: ongoing work happens on `development`; `main` holds the stable state and takes `development` in by a
+  pull request once that is stable (CI green on Linux and Windows, reviewed). Branch from `development` and aim
+  your pull request at it; one topic per pull request. CI runs on every push to `main` and `development` and on
+  every pull request.
 - Commit messages: a summary line in English, in the imperative, sentence case, no type prefix, ideally no longer
   than about 72 characters. Examples from the history: `Add a secret scan: pre-commit and pre-push hooks and a CI
   job` and `Pin the provider SDKs and local embeddings, drop LiteLLM and tiktoken`. The body explains why.
