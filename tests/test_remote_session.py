@@ -450,6 +450,42 @@ def test_the_board_s_answer_to_a_refused_start_stays_in_the_output(manager, boar
     assert BOARD_WORDS in result.output
 
 
+def _log(caplog):
+    return [r.getMessage() for r in caplog.records if r.name == "DeploymentManager"]
+
+
+def test_the_deploy_logs_its_steps_in_these_words(manager, board, package, caplog):
+    """The deploy's log lines reach the console of `llmcf deploy run` too (characterization, review): the words of a
+    clean deploy, a resume after a drop and an arrival that does not match."""
+    import logging
+    caplog.set_level(logging.INFO)
+    assert run(manager, package)[0].success
+    assert _log(caplog) == [
+        f"Deploying to {HOST}...", "Uploading package...", "Installing on target...",
+        "[REMOTE] [1/3] Checking Integrity...", "[REMOTE] Deployment Complete. System is ready.",
+        "Remote deployment successful."]
+    caplog.clear()
+    board.files.clear()
+    board.dirs.clear()
+    board.sent = 0
+    board.drop_after = 1_300_000
+    board.back_at = 42.0
+    assert run(manager, package)[0].success
+    assert _log(caplog)[:5] == [
+        f"Deploying to {HOST}...", "Uploading package...",
+        f"The connection to {HOST} dropped during the upload; waiting for the board.",
+        "Resuming the upload at 1300000 bytes...", "Installing on target..."]
+    caplog.clear()
+    board.files.clear()
+    board.dirs.clear()
+    board.sent = 0
+    board.drop_after = 1_300_000
+    answer(board, "head -c ", (0, "0" * 64 + "  -\n"))
+    assert run(manager, package)[0].success
+    assert "What arrived on the board does not match the package; the upload starts again." in _log(caplog)
+    assert _log(caplog).count("Uploading package...") == 2
+
+
 def test_the_bytes_hashed_are_the_bytes_uploaded(manager, board, package):
     """The bytes hashed are the bytes uploaded: the package is opened once."""
     shown = hashlib.sha256(package.read_bytes()).hexdigest()
