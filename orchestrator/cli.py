@@ -4680,6 +4680,7 @@ def deploy_devices_add(ctx: FrameworkContext, host: str, user: str, port: int, l
     elif TrustedDevices(state_dir).key_status(device) != "known":
         console.print("[yellow]The trusted key is not in the framework's known_hosts.[/yellow]")
 
+
 @deploy_devices.command('edit')
 @click.argument('device')
 @click.option('--host', default=None,

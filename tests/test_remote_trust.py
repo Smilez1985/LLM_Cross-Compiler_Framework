@@ -479,7 +479,8 @@ class TestParsePublicKey:
         ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBroken", "not_a_key"),
         ("@cert-authority *.lan ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGf0", "not_a_key"),
         ("ssh-ed25519 " + "A" * 40000, "not_a_key"),
-    ])
+    ], ids=["nothing", "comment only", "two lines", "words", "dss key", "broken data", "cert authority",
+            "too long"])
     def test_anything_else_is_refused_with_its_kind(self, text, kind):
         from orchestrator.remote.trust import KeyTextError, parse_public_key
         with pytest.raises(KeyTextError) as e:
