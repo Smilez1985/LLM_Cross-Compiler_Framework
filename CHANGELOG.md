@@ -1984,6 +1984,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **Dependencies on the newest versions that fit, with the advisories of 2026-10 fixed**: `uv lock --upgrade` moved
+  every dependency to the newest version its range allows (among them pypdf 6.21.2, certifi 2026.10.19, paramiko
+  5.1.0, qdrant-client 1.20.0, filelock 4.2.4), and Pillow goes to 13.0.0, which fixes 35 advisories of 12.3.0.
+  fastembed (up to 0.9.0) still declares Pillow < 13; the framework uses only its text models and never decodes an
+  image with Pillow, so `pyproject.toml` overrides that cap (`[tool.uv] override-dependencies`), and the installers
+  and CI install the complete hash-pinned export with `--no-deps` so pip does not resolve it again. A test removes the
+  override's reason as soon as fastembed allows Pillow 13 itself. The CI's `astral-sh/setup-uv` goes to v10.3.0
+  (Dependabot PR #8). Checked with the full test suite and a real retrieval evaluation (88 % of the cases pass).
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI

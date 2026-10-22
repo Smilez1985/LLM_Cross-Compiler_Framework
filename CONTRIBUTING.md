@@ -56,7 +56,7 @@ Installs exactly the pinned, hashed versions from the requirements files:
 ```bash
 uv venv --python 3.13
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
-uv pip install -r requirements.txt -r requirements-dev.txt
+uv pip sync requirements.txt requirements-dev.txt   # exactly the hash-pinned exports of uv.lock
 
 python -m orchestrator.cli --help      # command line
 python -m orchestrator.main            # GUI
