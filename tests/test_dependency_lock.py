@@ -154,7 +154,9 @@ def test_the_pillow_override_lasts_only_while_fastembed_caps_pillow():
 
 def test_the_installers_and_workflows_install_the_export_without_resolving_again():
     """The override only holds when pip installs the complete export as it is (--no-deps), not resolving again."""
-    for name in (".github/workflows/ci.yml", ".github/workflows/retrieval-eval.yml"):
+    for name in (".github/workflows/ci.yml", ".github/workflows/retrieval-eval.yml",
+                 "scripts/community_repo/validate-contribution.yml"):
         text = (REPO_ROOT / name).read_text(encoding="utf-8")
-        for line in re.findall(r"pip install [^\n]*-r requirements\.txt[^\n]*", text):
+        for line in re.findall(r"pip install [^\n]*-r \S*requirements\.txt[^\n]*", text):
             assert "--no-deps" in line, (name, line)
+        assert re.search(r"pip install [^\n]*requirements\.txt", text), name
