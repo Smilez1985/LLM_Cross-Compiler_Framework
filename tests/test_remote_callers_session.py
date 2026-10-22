@@ -262,6 +262,20 @@ class TestTheBenchmarkOnTheBoard:
         assert not list(board.root.glob(".bench.*")), "its folder goes afterwards"
         assert not any("/tmp" in c.replace(str(board.home), "") for c in board.commands)
 
+    def test_a_board_without_nohup_runs_it_attached_as_before(self, tmp_path, source, board_session):
+        board, session, _events, _clock = board_session
+        build, packaged = tdr.packaged_build(tmp_path, source)
+        assert deploy_over(session, build, packaged).activated
+        model = board.home / "m.gguf"
+        model.write_bytes(b"GGUF")
+        real_answer = board.answer
+        board.answer = lambda command, stdin: ((0, b"nohup=no\n", b"") if "command -v nohup" in command
+                                               else real_answer(command, stdin))
+        report = verify_on_device(RemoteShell(session), home=str(board.home), plan_verify=build.plan["verify"],
+                                  pin_build=tdr.PIN.build_number, pin_commit=tdr.PIN.commit, port=8080,
+                                  bench_model=str(model), bench_allowed=True)
+        assert report.check("smoke").ok and not any("nohup sh -c" in c for c in board.commands)
+
     def test_a_job_started_before_is_followed_without_starting_it_again(self, board_session):
         from orchestrator.remote.session import RemoteSession
         board, session, _events, _clock = board_session
