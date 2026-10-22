@@ -790,6 +790,15 @@ class _Stopped(Exception):
     """The person (or the calling AI's cancel) stopped the deploy."""
 
 
+def _failed_because(code: str, error: BaseException) -> str:
+    """The end of a failed contact's reason: its SSH reason code, a problem on this computer in plain words (the
+    file's name, never its folder), or the error itself when it is none of them."""
+    from orchestrator.remote import reasons
+    if code == reasons.LOCAL_PROBLEM:
+        return f": a problem on this computer, not on the board ({reasons.local_detail(error)}; {code})."
+    return f" ({code})." if code else f": {error}"
+
+
 class _BoardSession:
     """One deploy over paramiko (DeploymentManager.deploy_package): the first login, the private folder on the board,
     the upload that resumes after a network drop, the installation that runs on the board on its own, and the waiting
@@ -827,7 +836,7 @@ class _BoardSession:
         except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko, a damaged known_hosts
             code = reasons.reach_code(e, while_waiting=waiting)
             return self.result(False, code=code, reason=f"Could not read the host key of {self.host}"
-                                                        + (f" ({code})." if code else f": {e}"))
+                                                        + _failed_because(code, e))
         if status == "unknown":
             return self.result(False, reason=f"The device {self.host} is not trusted yet: confirm its host key "
                                              "fingerprint first.")
@@ -847,7 +856,7 @@ class _BoardSession:
         except Exception as e:  # noqa: BLE001 - authentication, network, a host key that changed meanwhile
             code = reasons.reach_code(e, while_waiting=waiting)
             return self.result(False, code=code, reason=f"SSH login to {self.user}@{self.host} failed"
-                                                        + (f" ({code})." if code else f": {e}"))
+                                                        + _failed_because(code, e))
         if self.on_client is not None:
             self.on_client(self.ssh)
         return None

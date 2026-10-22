@@ -1785,6 +1785,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **A problem on this computer is no longer "the board does not answer"**: every contact with a board counted an
+  error that was none of the four reason codes as `device_host_down`. A full or read-only disk, or no permission on
+  the framework's own files (its SSH key, known_hosts), therefore told the person to switch the board on, the deploy
+  stopped waiting for nothing, and the board was recorded as down for Mojo. Such an error now has its own reason,
+  `local_problem` ("Something on this computer stopped the contact, not the board"), with its next step in English
+  and German (free disk space, check the state folder and the security software of this computer), the AI's next step
+  and Mojo's check of the installation as the catalogue step (`orchestrator/remote/reasons.py` `is_local`,
+  `LOCAL_PROBLEM`, `CODES`). It is never recorded with the board. The deploy's reason names the file without its
+  folder; the CLI also prints the error itself. It is no blocker of the delegation rules, so no delegation is outdated.
 - **A deploy works on a board whose account uses another login shell**: sshd hands every command to the board
   account's login shell. The deploy's commands (the private folder, the hash checks, the start of the installation
   that runs on its own and the polls of its end) and the installation of the framework key went there as they were,

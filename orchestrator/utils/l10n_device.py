@@ -3,7 +3,8 @@
 The person's texts of the board deployment (eighth round N4-N7, seventh round 2'), in English and German.
 
 - `device.reason.<code>` and `device.next.<code>`: what happened and what the person can do, for the four reason
-  codes of orchestrator/runtime/device/reasons.py (a test keeps both languages complete, with the same placeholders).
+  codes of orchestrator/remote/reasons.py and its local_problem (a problem on this computer, not the board); a test
+  keeps both languages complete, with the same placeholders.
 - `device.wait.*`: the visible "waiting for the board" state of a deploy whose network dropped.
 - `device.kv.*`: the KV-cache choice of the deploy settings.
 - `device.bench.*`: the benchmark window, which measures on the board.
@@ -36,6 +37,13 @@ TEXTS = {
                                                "mean that another device answers in its place. Check the board. If "
                                                "it was installed again, remove its old line from the framework's "
                                                "known_hosts file and connect again to compare the new fingerprint.",
+        "device.reason.local_problem": "Something on this computer stopped the contact, not the board at {address}: "
+                                       "one of the framework's own files could not be read or written, or this "
+                                       "computer does not allow the connection.",
+        "device.next.local_problem": "Free disk space on this computer and check that you may write to the "
+                                     "framework's state folder (its SSH key and known_hosts are there) and that no "
+                                     "security program on this computer blocks the connection; the log names the "
+                                     "file and the error. Then try again.",
         # --- waiting for the board during a deploy (N5) ---
         "device.wait.status": "Waiting for the board at {address}: {elapsed} of at most {limit}. The upload "
                               "continues where it stopped as soon as the board answers again.",
@@ -129,6 +137,14 @@ TEXTS = {
                                                "Board. Wurde es neu installiert, entferne seine alte Zeile aus der "
                                                "known_hosts-Datei des Frameworks und verbinde dich erneut, um den "
                                                "neuen Fingerabdruck zu vergleichen.",
+        "device.reason.local_problem": "Etwas auf diesem Computer hat die Verbindung verhindert, nicht das Board "
+                                       "unter {address}: Eine der eigenen Dateien des Frameworks ließ sich nicht "
+                                       "lesen oder schreiben, oder dieser Computer erlaubt die Verbindung nicht.",
+        "device.next.local_problem": "Gib Speicherplatz auf diesem Computer frei und prüfe, ob du in den Statusordner "
+                                     "des Frameworks schreiben darfst (dort liegen sein SSH-Schlüssel und "
+                                     "known_hosts) und ob kein Sicherheitsprogramm auf diesem Computer die "
+                                     "Verbindung blockiert; das Log nennt die Datei und den Fehler. Versuche es dann "
+                                     "erneut.",
         # --- warten auf das Board während eines Deployments (N5) ---
         "device.wait.status": "Warte auf das Board unter {address}: {elapsed} von höchstens {limit}. Der Upload "
                               "geht dort weiter, wo er stehen blieb, sobald das Board wieder antwortet.",
