@@ -54,27 +54,49 @@ def run_build(script: Path, root: Path, llama: Path, quant: str):
     work = root / "work"
     model = root / "model"
     model.mkdir(exist_ok=True)
-    (model / "config.json").write_text("{}")
+    if not (model / "config.json").exists():  # written once: a second build of the same model resumes
+        (model / "config.json").write_text("{}")
     env = {"PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "HOME": str(root), "BUILD_CACHE_DIR": str(work),
            "LLAMA_CPP_PATH": str(llama), "MODEL_SOURCE": str(model), "MODEL_NAME": "model",
            "QUANTIZATION": quant, "TARGET_FORMAT": "gguf", "JOB_TYPE": "build"}
     return subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=60), work
 
 
+STAGES = ("build.sh", "source_module.sh", "config_module.sh", "convert_module.sh", "target_module.sh")
+
+
+def stage_code(target: Path) -> str:
+    """The build of a target: the stage runner and its four stage modules (DECISIONS U9)."""
+    return "\n".join((target / "modules" / name).read_text(encoding="utf-8").split("set -euo pipefail", 1)[1]
+                     for name in STAGES)
+
+
 def test_template_uses_the_current_llama_cpp_layout_and_no_tmp():
-    text = (TEMPLATE / "modules" / "build.sh").read_text(encoding="utf-8")
+    text = stage_code(TEMPLATE)
     assert "convert_hf_to_gguf.py" in text and "convert-hf-to-gguf.py" not in text
-    assert '"$LLAMA_BASE/build/bin/llama-quantize"' in text and '"$LLAMA_BASE/build/bin/llama-imatrix"' in text
-    assert "/tmp/" not in text.split("set -euo pipefail")[1], "intermediates belong in the work folder"
+    assert 'QUANTIZE_BIN="$LLAMA_BASE/build/bin/llama-quantize"' in text
+    assert 'IMATRIX_BIN="$LLAMA_BASE/build/bin/llama-imatrix"' in text
+    assert "/tmp/" not in text, "intermediates belong in the work folder"
     assert 'SCRATCH_DIR="${BUILD_SCRATCH_DIR:-$WORK_DIR}"' in text
     assert not re.search(r'\bcp\b[^\n]*\$MODEL_SOURCE', text), "no copy of the unconverted model"
-    for placeholder in ("[MODULE_NAME]", "# [SDK_SETUP_COMMANDS]", "[QUANTIZATION_LOGIC]", "# [PACKAGING_COMMANDS]"):
-        assert placeholder in text, placeholder
-    # The type lists are the Rockchip dispatcher's (same llama.cpp version).
-    rockchip = (REPO_ROOT / "targets" / "Rockchip" / "modules" / "build.sh").read_text(encoding="utf-8")
+    for placeholder, stage in (("[MODULE_NAME]", "build.sh"), ("# [SDK_SETUP_COMMANDS]", "source_module.sh"),
+                               ("[QUANTIZATION_LOGIC]", "convert_module.sh"),
+                               ("# [PACKAGING_COMMANDS]", "target_module.sh")):
+        assert placeholder in (TEMPLATE / "modules" / stage).read_text(encoding="utf-8"), placeholder
+    # The type lists are the Rockchip config stage's (same llama.cpp version).
+    rockchip = stage_code(REPO_ROOT / "targets" / "Rockchip")
     for name in ("GGUF_CONVERT_TYPES", "GGUF_QUANT_TYPES", "GGUF_NEEDS_IMATRIX", "GGUF_WANTS_IMATRIX"):
         pattern = re.compile(rf'^{name}=".*?"$', re.M | re.S)
         assert pattern.search(text).group(0) == pattern.search(rockchip).group(0), name
+
+
+def test_the_template_runs_the_rockchip_stage_runner():
+    """One stage runner for every target: the template's build.sh is the Rockchip one with its own name."""
+    def runner(target, label):
+        code = (target / "modules" / "build.sh").read_text(encoding="utf-8").split("set -euo pipefail", 1)[1]
+        assert f'TARGET_LABEL="{label}"' in code
+        return code.replace(f'TARGET_LABEL="{label}"', "")
+    assert runner(TEMPLATE, "[MODULE_NAME]") == runner(REPO_ROOT / "targets" / "Rockchip", "Rockchip")
 
 
 @needs_bash
@@ -85,7 +107,11 @@ def test_a_generated_module_passes_bash_n_and_the_placeholder_check(tmp_path):
     meta = yaml.safe_load((target / "target.yml").read_text())
     assert meta["capabilities"]["formats"]["gguf"]["quantizations"] == ["Q4_K_M", "Q8_0"]
     script = (target / "modules" / "build.sh").read_text()
-    assert "=== Build Started: My Board ===" in script and "cp -r build/*" not in script
+    # The stage runner's banner names the module ("=== Build Started: My Board (stages: ...) ===").
+    assert 'TARGET_LABEL="My Board"' in script and '=== Build Started: $TARGET_LABEL' in script
+    assert "cp -r build/*" not in script
+    assert all((target / "modules" / name).is_file() for name in STAGES)
+    assert "Placeholder" not in (target / "modules" / "convert_module.sh").read_text()
 
 
 @needs_bash
@@ -126,6 +152,59 @@ def test_a_branch_that_writes_nothing_fails(tmp_path):
     target = generate(tmp_path, quantization_logic='    Q4_K_M) echo "quantize" ;;')
     result, _ = run_build(target / "modules" / "build.sh", tmp_path, stub_llama(tmp_path), "Q4_K_M")
     assert result.returncode != 0 and "No artifact" in result.stderr
+
+
+# --- a generated module under the stage runner (DECISIONS U9) ------------------------------------------------------
+
+@needs_bash
+def test_the_setup_commands_run_once_and_what_they_export_reaches_the_later_stages(tmp_path):
+    target = generate(tmp_path,
+                      setup_commands='echo setup >> "$BUILD_CACHE_DIR/setup.log"\nexport SDK_TAG=vendor-7',
+                      quantization_logic='    Q8_0) convert_to_gguf q8_0 "$OUTPUT_DIR/${MODEL_NAME}-$SDK_TAG.gguf" ;;',
+                      packaging_commands='cp "$OUTPUT_DIR/${MODEL_NAME}-$SDK_TAG.gguf" "$OUTPUT_DIR/packaged-$SDK_TAG.gguf"')
+
+    result, work = run_build(target / "modules" / "build.sh", tmp_path, stub_llama(tmp_path), "Q8_0")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (work / "setup.log").read_text() == "setup\n", "the setup commands ran once"
+    names = sorted(p.name for p in (work / "output").iterdir())
+    assert names == ["build_info.json", "model-vendor-7.gguf", "packaged-vendor-7.gguf"], names
+    assert (work / "stages" / "build" / "sdk_environment.sh").read_text() == 'export SDK_TAG="vendor-7"\n'
+
+
+@needs_bash
+def test_a_generated_build_resumes_after_a_failed_quantization(tmp_path):
+    target = generate(tmp_path)
+    llama = stub_llama(tmp_path)
+    quantize = llama / "build" / "bin" / "llama-quantize"
+    working = quantize.read_text()
+    quantize.write_text(f"#!{sys.executable}\nimport sys\nsys.exit(9)\n")
+
+    first, work = run_build(target / "modules" / "build.sh", tmp_path, llama, "Q4_K_M")
+    assert first.returncode == 9 and "=== Stage 4/4: target failed (exit 9) ===" in first.stderr
+    quantize.write_text(working)
+    second, work = run_build(target / "modules" / "build.sh", tmp_path, llama, "Q4_K_M")
+
+    assert second.returncode == 0, second.stdout + second.stderr
+    for stage in ("1/4: source", "2/4: config", "3/4: convert"):
+        assert f"=== Stage {stage} resumed ===" in second.stdout
+    assert (tmp_path / "calls.log").read_text().count("convert ") == 1, "the model was converted once"
+    assert (work / "output" / "model-Q4_K_M.gguf").read_text() == "quantized Q4_K_M"
+
+
+def test_a_stage_without_a_template_stops_the_build_instead_of_doing_nothing(tmp_path):
+    """Only an incomplete installation lacks a stage template; the fallback was an 'exit 0' placeholder, which let a
+    build look finished without its stage."""
+    folder = tmp_path / "targets" / "board"
+    (folder / "modules").mkdir(parents=True)
+    (folder / "modules" / "convert_module.sh").write_text("#!/bin/bash\necho convert\n")
+    ModuleGenerator(tmp_path / "targets")._write_standard_modules(folder)
+    assert (folder / "modules" / "convert_module.sh").read_text() == "#!/bin/bash\necho convert\n", "kept"
+    text = (folder / "modules" / "target_module.sh").read_text()
+    assert "exit 1" in text and "Placeholder" not in text
+    if shutil.which("bash") and os.name != "nt":
+        result = subprocess.run(["bash", str(folder / "modules" / "target_module.sh")], capture_output=True, text=True)
+        assert result.returncode == 1 and "the target stage of this target has no script yet" in result.stderr
 
 
 # --- the recipe in generated modules (design 4.3, decisions D14, D20, D21, D6) ----------------------------------

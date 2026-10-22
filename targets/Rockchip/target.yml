@@ -99,43 +99,52 @@ docker:
     disk_gb: 20
     cpu_cores: 4
 
-# Module definitions  
+# The build (DECISIONS U9): modules/build.sh, the stage runner, runs the four stage modules in this order inside the
+# image, for every build; each module's header says which image it runs in, which system the result is for and what
+# its stage does. This block describes the folder; nothing reads it.
 modules:
+  runner: "modules/build.sh"
   source: "modules/source_module.sh"
   config: "modules/config_module.sh"
-  convert: "modules/convert_module.sh" 
+  convert: "modules/convert_module.sh"
   target: "modules/target_module.sh"
-  
+  # Optional hook between convert and target (roadmap: rotation such as SpinQuant or QuaRot): runs only when the
+  # target has this file; none is shipped.
+  rotate: "modules/rotate_module.sh"
+  # The convert stage's format helpers
+  helpers: ["modules/rkllm_module.sh", "modules/rknn_module.sh"]
+
   # Module metadata
   module_info:
     source:
-      description: "Environment & Tools Setup"
-      dependencies: ["python3", "git", "cmake", "make"]
-      runtime: "host"
-      
-    config:
-      description: "Hardware Detection & CMake Toolchain Generation"
-      dependencies: ["crossbuild-essential-arm64"]
+      description: "Toolchain sources of the image (llama.cpp pin, SDK venvs); no download"
+      dependencies: ["llama.cpp of the image (/usr/src/llama.cpp)", "/opt/venv-rkllm", "/opt/venv-rknn"]
       runtime: "container"
-      inputs: ["target_hardware_config.txt"]
-      outputs: ["cross_compile_toolchain.cmake", "build_config.sh"]
-      
-    convert:
-      description: "Model Format Conversion (HF/ONNX/PyTorch → GGUF)"
-      dependencies: ["torch", "transformers", "numpy"]
-      runtime: "container"
-      inputs: ["model_directory"]
-      outputs: ["model.fp16.gguf"]
-      
-    target:
-      description: "Quantization & Cross-Compilation"
-      dependencies: ["llama-quantize", "llama-cli"]
-      runtime: "container"
-      inputs: ["model.fp16.gguf", "cmake_toolchain"]
-      outputs: ["deployment_package.zip"]
 
-# Hardware optimization profiles. Legacy: read only by the legacy four-module chain (modules/*_module.sh); the
-# active build takes llama.cpp's options from the build recipe (orchestrator/runtime/build/recipe.py).
+    config:
+      description: "Request checks and the build plan; with a hardware profile also the CMake toolchain for the board"
+      dependencies: ["gcc-aarch64-linux-gnu (hardware profile only)"]
+      runtime: "container"
+      inputs: ["the request (environment)", "target_hardware_config.txt (optional)"]
+      outputs: ["build_config.sh", "cross_compile_toolchain.cmake (hardware profile only)"]
+
+    convert:
+      description: "Model conversion: HF -> GGUF (F16 intermediate or a direct type), RKLLM, RKNN; the imatrix job"
+      dependencies: ["convert_hf_to_gguf.py", "llama-imatrix", "RKLLM-Toolkit", "RKNN-Toolkit2"]
+      runtime: "container"
+      inputs: ["model_directory", "build_config.sh"]
+      outputs: ["<model>-<type>.gguf, .rkllm or .rknn", "tmp-<model>-F16.gguf and quantize_jobs.sh", "imatrix.dat"]
+
+    target:
+      description: "Quantization and the results (build_info.json); with a hardware profile the board package"
+      dependencies: ["llama-quantize"]
+      runtime: "container"
+      inputs: ["quantize_jobs.sh", "build_config.sh"]
+      outputs: ["<model>-<type>.gguf", "build_info.json", "packages/ (hardware profile only)"]
+
+# Hardware optimization profiles: descriptive, nothing reads them. The board's runtime takes llama.cpp's options from
+# the build recipe (orchestrator/runtime/build/recipe.py); a build with a hardware profile (config_module.sh) takes the
+# flags from that profile.
 optimization_profiles:
   rk3566_default:
     cpu_flags: "-mcpu=cortex-a55 -mfpu=neon-fp-armv8"
@@ -180,12 +189,12 @@ requirements:
     
 # Machine-readable capabilities (schema: orchestrator/schemas/targets.py). GUI, CLI, the build
 # service, Ditto and the MCP server offer and validate exactly what is listed here.
-# Keep in sync with modules/build.sh (GGUF types) and scripts/export_rkllm.py (RKLLM types);
+# Keep in sync with modules/config_module.sh (GGUF types) and scripts/export_rkllm.py (RKLLM types);
 # tests/test_foundation.py (TestCapabilities) and tests/test_review_capabilities_paths.py check that.
 capabilities:
   schema_version: 1
   support_level: official
-  default_board: rk3588   # what build.sh uses when no board is given (TARGET_BOARD empty)
+  default_board: rk3588   # what the config stage uses when no board is given (TARGET_BOARD empty)
   boards:
     rk3566:
       label: "RK3566 (4x Cortex-A55)"
@@ -230,7 +239,7 @@ capabilities:
       needs_imatrix: [IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S]
       dataset: optional
       dataset_kind: text
-      aliases: {FP16: F16, FP32: F32, INT8: Q8_0, Q8: Q8_0, INT4: Q4_K_M, Q4: Q4_K_M, Q5: Q5_K_M}   # build.sh normalize_gguf_type
+      aliases: {FP16: F16, FP32: F32, INT8: Q8_0, Q8: Q8_0, INT4: Q4_K_M, Q4: Q4_K_M, Q5: Q5_K_M}   # config_module.sh normalize_gguf_type
       notes: "Runs on the CPU of every board. Q4_0 and IQ4_NL are repacked for fast ARM kernels."
     rkllm:
       label: "RKLLM (Rockchip NPU, LLMs)"

@@ -288,9 +288,11 @@ class ModuleCreationWizard(QWizard):
         b.line("cpu_flags", "gui.field.wizard.cpu_flags", self.cpu_flags, page=3)
         b.line("cmake_flags", "gui.field.wizard.cmake_flags", self.cmake_flags, page=3)
         b.text("quantization_logic", "gui.field.wizard.quantization_logic", self.quant_logic, page=3,
-               hint="shell code (bash 'case' branches) for build.sh; the person reviews it on the last page")
+               hint="shell code (bash 'case' branches) for the convert stage (modules/convert_module.sh); the "
+                    "person reviews it on the last page")
         b.text("setup_commands", "gui.field.wizard.setup_commands", self.setup_commands, page=3,
-               hint="shell commands build.sh runs before converting (no network, unprivileged)")
+               hint="shell commands the source stage runs once before converting (no network, unprivileged); "
+                    "what they export reaches the later stages")
 
         def person_only():
             return "only the person decides what a module shares"
@@ -668,13 +670,15 @@ class ModuleCreationWizard(QWizard):
         mono = "font-family: Consolas, Monospace;"
         self.quant_logic = QTextEdit()
         self.quant_logic.setStyleSheet(mono)
-        self.quant_logic.setPlaceholderText("Optional: bash 'case' branches for build.sh (review AI output carefully)")
-        layout.addRow("Quantization logic (build.sh):", self.quant_logic)
+        self.quant_logic.setPlaceholderText("Optional: bash 'case' branches for the convert stage "
+                                            "(modules/convert_module.sh; review AI output carefully)")
+        layout.addRow("Quantization logic (convert stage):", self.quant_logic)
 
         self.setup_commands = QTextEdit()
         self.setup_commands.setStyleSheet(mono)
-        self.setup_commands.setPlaceholderText("Optional: commands build.sh runs before converting "
-                                               "(as the unprivileged build user, without network), e.g. exporting SDK variables")
+        self.setup_commands.setPlaceholderText("Optional: commands the source stage runs once before converting "
+                                               "(as the unprivileged build user, without network), e.g. exporting SDK "
+                                               "variables; what they export reaches the later stages")
         layout.addRow("Build-time setup:", self.setup_commands)
         
         page.setLayout(layout)
