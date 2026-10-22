@@ -117,8 +117,8 @@ class RemoteShell:
         from orchestrator.remote.session import SessionFailure, Stopped
         if self.lost is not None:
             raise RemoteError(str(self.lost), self.lost.kind, self.lost.reason)
-        if self.session.transport is None:
-            raise RemoteError("the connection to the device is closed")
+        if self.session.transport is None:   # closed by its owner (a Cancel) or never opened
+            raise RemoteError("the connection to the device is closed", "stopped" if self.session.ended else "")
         try:
             return action()
         except TooMuchOutput as e:
@@ -637,8 +637,12 @@ def _run_on_its_own(shell: RemoteShell, home: str, root: str, argv: Sequence[str
     connection goes): RemoteSession.run_detached starts it once in a private folder of the install folder
     (<root>/.bench.XXXXXXXX), its stdout and stderr go into files there, and the session follows it to its exit status,
     also after a network drop (the on-board benchmark, up to BENCH_TIMEOUT). Then both are read (within the output cap)
-    and the folder goes. Returns the program's exit status, stdout and stderr."""
+    and the folder goes. Returns the program's exit status, stdout and stderr. A board without nohup runs it attached
+    to the session as before (_run_program), so the run never waits for a job that could not start."""
     check_command(argv)   # the shared forbidden-option list (D22)
+    if shell.run("command -v nohup >/dev/null 2>&1 && echo nohup=yes || echo nohup=no", again=True).out.strip() \
+            != "nohup=yes":
+        return _run_program(shell, home, argv, timeout, merge=False)
     env = " ".join(f"{k}={_q(v)}" for k, v in posix_cleared_env(home).items())
     job = (f"(PATH={POSIX_CLEARED_PATH}; export PATH; cd {_q(home)} && exec env -i {env} "
            + " ".join(_q(a) for a in argv) + " </dev/null) >out 2>err")
