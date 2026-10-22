@@ -195,6 +195,54 @@ class TestPackage:
         assert seen and seen[0] and seen[0][0].startswith("package "), "held in the ledger while it is made"
         assert ledger.entries() == [], "released when it ends"
 
+    def test_space_taken_while_the_person_is_asked_refuses_the_package_by_its_own_name(self, make_framework, deploy):
+        """The ledger checks again under its lock when the package takes its reservation: the refusal names the
+        package (it said "this build") and its size as an estimate (twice the model)."""
+        from orchestrator.Core import disk_plan
+        from orchestrator.tools.policy import ToolPolicy
+        from orchestrator.tools.registry import ToolError
+        fw = make_framework()
+        fw.tool_registry.policy_store.replace(ToolPolicy(configured=True,
+                                                         reviewed=[s.name for s in fw.tool_registry.list()]))
+        aid = deploy.build(fw, size=10 ** 6)
+        ledger = disk_plan.ReservationLedger(deploy.state(fw))
+        out = Path(fw.resolve_path(fw.config.get("output_dir", "output")))
+        taken = []
+
+        def confirm(spec, inp, *rest):   # another call reserves the disk while the person is asked
+            taken.append(ledger.reserve([disk_plan.DiskNeed("cache", out, 980 * GB, "a build")], "gui", "a build",
+                                        disk_usage=fixed(1000 * GB))[0])
+            return True
+        try:
+            with pytest.raises(ToolError) as e:
+                deploy.call(fw, "create_deploy_package", {"artifact_id": aid}, confirm=confirm)
+        finally:
+            for rid in taken:
+                ledger.release(rid)
+        assert taken and e.value.code == "insufficient_resources"
+        assert "Not enough disk space for the deployment package: output disk: 2 MB needed (estimate), " in \
+            str(e.value)
+        assert "this build" not in str(e.value) and ledger.entries() == []
+        assert e.value.message.endswith("A running build or download has reserved 980.0 GB on that disk: try again "
+                                        "once it has finished (its reservation ends with it, also when its program "
+                                        "has ended), or free disk space.")
+        assert "running build or download has reserved 980.0 GB" in e.value.next, "the AI's next step: wait for it"
+
+    def test_a_download_whose_space_went_meanwhile_is_refused_as_the_disk_rule_says(self, tmp_path, held,
+                                                                                   monkeypatch):
+        """hf_hub.reserve_space (an AI's Hugging Face download): the ledger's second check under its lock refuses
+        with the one rule's refusal, not a build's text and the generic next step."""
+        from orchestrator.Core import disk_plan, hf_hub
+        monkeypatch.setattr(shutil, "disk_usage", fixed(60 * GB))
+        with pytest.raises(disk_plan.InsufficientSpace) as e:
+            hf_hub.reserve_space(held, tmp_path, 10 * GB + 1, "mcp", "o/r/x.gguf", need_label="models",
+                                 what="download x.gguf", key="o/r/c/x.gguf")
+        assert str(e.value).startswith("Not enough disk space for the download: models disk: 10.0 GB needed, "
+                                       "60.0 GB free, 30.0 GB reserved by other calls, 20.0 GB must stay free.")
+        assert e.value.next == disk_plan.RESERVED_NEXT_AI.format(reserved="30.0 GB")
+        assert [s.id for s in e.value.steps] == ["build.history"]
+        assert len(held.entries()) == 1, "nothing was reserved"
+
     def test_without_a_ledger_the_space_is_held_in_this_process(self, tmp_path):
         from orchestrator.Core import hf_hub
         held = hf_hub.reserve_space(None, tmp_path, 7, "mcp", "x", need_label="output", what="package", key="t/p")

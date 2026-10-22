@@ -396,7 +396,8 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         try:
             reservation = reserve_space(ledger(), out, 2 * int(bound.get("size") or 0), ctx.owner, f"package {label}",
                                         need_label="output", what="deployment package",
-                                        key=f"package/{inp.artifact_id}/{id(stop)}",
+                                        key=f"package/{inp.artifact_id}/{id(stop)}", call="the deployment package",
+                                        estimate=True,   # twice the model: the copy and the zip
                                         disk_usage=getattr(service, "disk_usage", None))   # the build disk seam
         except InsufficientSpace as e:
             raise ToolError(f"Not enough disk space for the package any more; nothing was packaged. {e}",
