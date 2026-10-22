@@ -8,8 +8,10 @@ scripts/hardware_probe.sh with `sh` (any POSIX shell: dash, busybox ash, bash). 
 stdin and its result comes back on stdout, so nothing is written on the device and nothing has to be cleaned up. The
 result is read with a size limit and parsed with the probe file parser: device output is untrusted.
 
-The caller brings an authenticated SSH client whose host key is trusted (orchestrator.utils.ssh_trust.connect);
-this module never trusts a host key or asks for a password itself.
+The caller brings the board session (orchestrator/remote/session.py RemoteSession, whose host key is checked at every
+login) or an authenticated SSH client whose host key is trusted (orchestrator.utils.ssh_trust.connect); this module
+never trusts a host key or asks for a password itself. The probe only reads, so with a session a network drop makes
+it wait for the board and send the command once more (N5).
 """
 
 import re
@@ -51,20 +53,35 @@ def store_address(host: str, port: int) -> str:
     return Endpoint(host, port).store_form
 
 
-def _exec(client, command: str, stdin_data: Optional[bytes], timeout: float, limit: int) -> Tuple[int, bytes]:
-    """(exit status, stdout) of one command; stdin_data is written and stdin closed. RemoteProbeError on a timeout,
-    a lost connection or more output than `limit` bytes."""
+def _session(target):
+    """The board session of `target`: a RemoteSession as it is (it waits for the board when the network drops, N5),
+    a client in one that cannot log in again (RemoteSession.attached: a drop ends the probe as before)."""
+    from orchestrator.remote.session import RemoteSession
+    return target if isinstance(target, RemoteSession) else RemoteSession.attached(target)
+
+
+def _exec_once(client, command: str, stdin_data: Optional[bytes], timeout: float, limit: int) -> Tuple[int, bytes]:
+    stdin, stdout, _stderr = client.exec_command(command, timeout=timeout)
+    if stdin_data is not None:
+        stdin.write(stdin_data)
+        stdin.flush()
+    stdin.channel.shutdown_write()
+    data = _read_limited(stdout, limit)
+    if len(data) > limit:
+        stdout.channel.close()
+        raise RemoteProbeError(f"the device sent more than {limit} bytes")
+    return stdout.channel.recv_exit_status(), data
+
+
+def _exec(target, command: str, stdin_data: Optional[bytes], timeout: float, limit: int) -> Tuple[int, bytes]:
+    """(exit status, stdout as the board sent it) of one command; stdin_data is written and stdin closed.
+    RemoteProbeError on a timeout, a lost connection or more output than `limit` bytes. The probe only reads and
+    writes nothing on the board, so after a network drop the session waits for the board and runs the command once
+    more (its SessionFailure says when the board does not answer again; Stopped on a cancel)."""
+    session = _session(target)
     try:
-        stdin, stdout, _stderr = client.exec_command(command, timeout=timeout)
-        if stdin_data is not None:
-            stdin.write(stdin_data)
-            stdin.flush()
-        stdin.channel.shutdown_write()
-        data = _read_limited(stdout, limit)
-        if len(data) > limit:
-            stdout.channel.close()
-            raise RemoteProbeError(f"the device sent more than {limit} bytes")
-        return stdout.channel.recv_exit_status(), data
+        # the client of the session's current login, looked up at each try
+        return session.resumable(lambda: _exec_once(session.client, command, stdin_data, timeout, limit))
     except (socket.timeout, TimeoutError):
         raise RemoteProbeError(f"no answer within {timeout:.0f} s") from None
     except (OSError, EOFError) as e:
@@ -95,8 +112,11 @@ def _run_probe(client, command: str, script: Path, timeout: float, limit: int) -
 
 
 def probe_over_ssh(client, scripts_dir: Optional[Path] = None, timeout: float = 180.0) -> RemoteProbeResult:
-    """Runs the hardware probe on the device behind `client` (an authenticated paramiko.SSHClient or a stand-in
-    with exec_command): the Python probe when python3 >= 3.8 is there, else (or when it fails) the shell probe."""
+    """Runs the hardware probe on the device behind `client` (a RemoteSession, or an authenticated
+    paramiko.SSHClient or a stand-in with exec_command): the Python probe when python3 >= 3.8 is there, else (or when
+    it fails) the shell probe. With a session, a network drop makes it wait for the board and run the command again
+    (orchestrator/remote/session.py SessionFailure when the board does not answer again)."""
+    client = _session(client)
     scripts = Path(scripts_dir) if scripts_dir is not None else SCRIPTS_DIR
     limit = load_schema().max_bytes
     notes: List[str] = []

@@ -52,6 +52,15 @@ TEXTS = {
         "device.wait.back": "The board answers again: the upload continues at {done} of {total}.",
         "device.wait.install": "The board answers again: checking whether the installation on the board has "
                                "finished (it is never started twice).",
+        # the runtime deploy's and the probe's other steps, and the benchmark on the board
+        "device.wait.status_step": "Waiting for the board at {address}: {elapsed} of at most {limit}. The step on "
+                                   "the board continues as soon as the board answers again.",
+        "device.wait.step": "The board answers again: the step continues.",
+        "device.wait.status_bench": "Waiting for the board at {address}: {elapsed} of at most {limit}. The "
+                                    "benchmark runs on the board on its own; it is followed again as soon as the "
+                                    "board answers.",
+        "device.wait.bench": "The board answers again: checking whether the benchmark on the board has finished (it "
+                             "is never started twice).",
         "device.wait.cancel": "Cancel",
         "device.wait.cancelled": "Cancelled while waiting for the board. The package on the board was not "
                                  "installed.",
@@ -152,6 +161,15 @@ TEXTS = {
         "device.wait.back": "Das Board antwortet wieder: der Upload geht bei {done} von {total} weiter.",
         "device.wait.install": "Das Board antwortet wieder: prüfe, ob die Installation auf dem Board fertig ist "
                                "(sie wird nie zweimal gestartet).",
+        # die anderen Schritte des Laufzeit-Deployments und der Board-Prüfung, und der Benchmark auf dem Board
+        "device.wait.status_step": "Warte auf das Board unter {address}: {elapsed} von höchstens {limit}. Der "
+                                   "Schritt auf dem Board geht weiter, sobald das Board wieder antwortet.",
+        "device.wait.step": "Das Board antwortet wieder: der Schritt geht weiter.",
+        "device.wait.status_bench": "Warte auf das Board unter {address}: {elapsed} von höchstens {limit}. Der "
+                                    "Benchmark läuft auf dem Board für sich; er wird wieder verfolgt, sobald das "
+                                    "Board antwortet.",
+        "device.wait.bench": "Das Board antwortet wieder: prüfe, ob der Benchmark auf dem Board fertig ist (er wird "
+                             "nie zweimal gestartet).",
         "device.wait.cancel": "Abbrechen",
         "device.wait.cancelled": "Beim Warten auf das Board abgebrochen. Das Paket wurde auf dem Board nicht "
                                  "installiert.",
