@@ -284,6 +284,8 @@ class MaintainerPanel(QWidget):
         if item is None:
             self._say(self._t("zoo.maint.choose_first"))
             return
+        if self._busy():   # the running action's review stays (a double click on the list while it runs)
+            return
         self._discard_review()
         self._say(self._t("zoo.maint.reviewing", item=one_line(item.label)))
         self._start(lambda: self._maintainer().review(item), self._reviewed)
@@ -305,7 +307,7 @@ class MaintainerPanel(QWidget):
             for file in pack.files:
                 self._files.append(file)
                 self.file_list.addItem(one_line(f"{pack.file_name}: {file.path}"))
-        problems = review.problems()
+        problems = review.problems(self.lang)
         if review.ok:
             self._say(self._t("zoo.maint.reviewed.ok", item=one_line(review.item.label)))
         else:

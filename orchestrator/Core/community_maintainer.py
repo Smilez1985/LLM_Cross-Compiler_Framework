@@ -57,19 +57,22 @@ from pydantic import ValidationError
 
 from orchestrator.Core.community_manager import (KINDS, REPO_RE, CommunityIndex, CommunityManager, IndexEntry,
                                                  Revocation, tool_error_detail)
-from orchestrator.Core.community_pack import (MANIFEST_NAME, SIGNATURE_NAME, PackError, key_id, list_files,
-                                              load_trusted_keys, read_pack, sign_index, utc_now, verify_index)
+from orchestrator.Core.community_pack import (MANIFEST_NAME, RESERVED_NAMES, SIGNATURE_NAME, PackError, key_id,
+                                              list_files, load_trusted_keys, read_pack, sign_index, utc_now,
+                                              verify_index)
 from orchestrator.utils import l10n_maintainer
 from orchestrator.utils.helpers import ensure_directory
 
 SERVICE = "lcf-community-index"   # the keyring service of the index signing key (the script's since its first version)
 REQUIRED_CHECK = "validate"       # the job of the community repository's check workflow; main requires it
 MAX_CONTRIBUTION_BYTES = 5_000_000   # the check workflow's limit for a pack
+MAX_SHOWN_BYTES = 16 * 1024 * 1024   # a zip member outside the file list (pack.json, pack.sig, ...) the review shows
 KEY_VALID_DAYS = 730
 KEY_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 PACK_PATH = re.compile(r"^contributions/(target|recipe|knowledge)/([A-Za-z0-9][A-Za-z0-9._+-]{0,150}\.zip)$")
 BRANCH = re.compile(r"^lcf-(publish|revoke)-[A-Za-z0-9._-]{1,90}$")
 PERSON_ACTORS = ("cli", "gui")
+CHANGE_KINDS = ("A", "M", "D", "T")   # git's added, modified, deleted, type changed (zoo.maint.change.*; X: other)
 WAIT_TIMEOUT = 30 * 60
 POLL_SECONDS = 10
 REPORT_EVERY = 30
@@ -86,27 +89,39 @@ def say(text_key: str, lang: str = "en", /, **values: Any) -> str:
 
 
 class MaintainerError(PackError):
-    """A refusal with a plain reason (zoo.maint.err.<code>), what happened so far (a zoo.maint.state.* key) and the
-    next step (zoo.maint.next.<code>). str() is English; text(lang) is the GUI's language."""
+    """A refusal with a plain reason (zoo.maint.err.<code>), what happened so far (zoo.maint.state.* keys: what
+    happened to the contribution, then what happened to the publication's own branch and pull request) and the next
+    step (zoo.maint.next.<code>). str() is English; text(lang) is the GUI's language."""
 
     def __init__(self, code: str, /, **values: Any):
-        self.code, self.values, self.state = code, dict(values), ""
+        self.code, self.values, self.states = code, dict(values), []
+        self.unanswered = False   # a tool that did not answer in time: what it was doing may have happened
         super().__init__(self.text("en"))
 
+    @property
+    def state(self) -> str:
+        """The last state key ("" when none is set)."""
+        return self.states[-1][0] if self.states else ""
+
     def with_state(self, state_key: str, /, **values: Any) -> "MaintainerError":
-        if state_key and not self.state:
-            self.state = state_key
-            self.values = {**values, **self.values}
+        return self.with_states([(state_key, values)] if state_key else [])
+
+    def with_states(self, states: Sequence[Tuple[str, Dict[str, Any]]]) -> "MaintainerError":
+        if states and not self.states:
+            self.states = [(key, dict(values)) for key, values in states if key]
             self.args = (self.text("en"),)
         return self
 
     def text(self, lang: str = "en") -> str:
         lines = [say(f"zoo.maint.err.{self.code}", lang, **self.values)]
-        if self.state:
-            lines.append(say(self.state, lang, **self.values))
+        merged: Dict[str, Any] = {}
+        for key, values in self.states:
+            lines.append(say(key, lang, **{**values, **self.values}))
+            merged.update(values)
+        merged.update(self.values)
         if f"zoo.maint.next.{self.code}" in l10n_maintainer.TEXTS["en"]:
             lines.append(say("zoo.maint.next_step", lang,
-                             step=say(f"zoo.maint.next.{self.code}", lang, **self.values)))
+                             step=say(f"zoo.maint.next.{self.code}", lang, **merged)))
         return "\n".join(lines)
 
 
@@ -257,11 +272,15 @@ def next_index(previous: Optional[CommunityIndex], *, add: Sequence[IndexEntry] 
             raise MaintainerError("entry_exists", what=f"{entry.kind} {entry.id} {entry.version}")
         entries.append(entry)
     for revocation in revoke:
-        if revocation in revoked:
+        if any(_scope(r) == _scope(revocation) for r in revoked):   # the same scope, whatever its reason
             raise MaintainerError("revoke_exists", what=describe_revocation(revocation))
         revoked.append(revocation)
     return CommunityIndex(version=previous.version + 1 if previous else 1, generated=utc_now(), entries=entries,
                           revoked=revoked)
+
+
+def _scope(r: Revocation) -> Tuple[str, str, Optional[str], Optional[str]]:
+    return r.kind, r.id.casefold(), r.version, r.sha256
 
 
 def revocation(kind: str, pack_id: str, *, reason: str, version: Optional[str] = None,
@@ -346,9 +365,11 @@ class ReviewedPack:
         return f"packs/{self.kind}/{self.file_name}"
 
     def line(self) -> str:
+        """One line for the question and the CLI: the manifest's author may hold a line separator or a direction
+        override, so every value is shown with hidden characters as escapes."""
         m = self.manifest
         what = f"{m.kind} {m.id} {m.version} by {m.author} ({m.license})" if m is not None else self.file_name
-        return f"{what}: {self.file_name}, {len(self.data)} bytes, sha256 {self.sha256}"
+        return one_line(f"{what}: {self.file_name}, {len(self.data)} bytes, sha256 {self.sha256}")
 
 
 @dataclass
@@ -358,13 +379,18 @@ class Review:
     packs: List[ReviewedPack]
     folder: Path
     temporary: bool
+    changes: List[Tuple[str, str]] = field(default_factory=list)   # (status, path): what else the PR changes
 
     @property
     def ok(self) -> bool:
-        return bool(self.packs) and all(p.manifest is not None and not p.problems for p in self.packs)
+        return (bool(self.packs) and not self.changes
+                and all(p.manifest is not None and not p.problems for p in self.packs))
 
-    def problems(self) -> List[str]:
-        return [f"{p.file_name}: {problem}" for p in self.packs for problem in p.problems]
+    def problems(self, lang: str = "en") -> List[str]:
+        changes = [say("zoo.maint.problem.other_change", lang, path=one_line(path),
+                       change=say(f"zoo.maint.change.{status if status in CHANGE_KINDS else 'X'}", lang))
+                   for status, path in self.changes]
+        return changes + [f"{p.file_name}: {problem}" for p in self.packs for problem in p.problems]
 
     def discard(self) -> None:
         """Removes the framework's own review folder (never a folder the person named)."""
@@ -405,6 +431,12 @@ def _review_file(path: str, raw: bytes) -> ReviewFile:
     return ReviewFile(path, len(raw), None if b"\x00" in raw else raw.decode("utf-8", errors="replace"))
 
 
+def one_line(text: Any) -> str:
+    """A value on one line with every line break and hidden character shown as an escape (a PR title, an author)."""
+    from orchestrator.tools.confirmation import visible
+    return visible(str(text))
+
+
 def shown_text(text: str) -> str:
     """Pack text for a terminal or a text view: lines and tabs kept, every other control or hidden character shown
     as an escape, so a pack can neither hide a line nor send terminal control sequences."""
@@ -420,7 +452,10 @@ class _Run:
 
     def __init__(self, owner: "Maintainer", op: str, values: Dict[str, Any], cancelled: Optional[Callable[[], bool]]):
         self.owner, self.op, self.values, self.cancelled = owner, op, values, cancelled
-        self.state, self.state_values, self.final = "", {}, False
+        # what happened so far, per slot: "contribution" (its merge) and "change" (the publication's own branch and
+        # pull request); the end text names both
+        self.states: Dict[str, Tuple[str, Dict[str, Any]]] = {}
+        self.final = False
 
     def _audit(self, outcome: str, step: str, detail: str, **values: Any) -> None:
         audit = self.owner.audit
@@ -446,18 +481,35 @@ class _Run:
         if not self.final and self.cancelled is not None and self.cancelled():
             raise Cancelled()
 
-    def happened(self, state_key: str, /, **values: Any) -> None:
-        self.state, self.state_values = state_key, values
+    def happened(self, state_key: str, /, *, slot: str = "change", **values: Any) -> None:
+        self.states[slot] = (state_key, values)
+
+    def forget(self, slot: str, before: Optional[Tuple[str, Dict[str, Any]]] = None) -> None:
+        """A step that GitHub answered with a refusal did not happen: the slot is what it was before it."""
+        if before is None:
+            self.states.pop(slot, None)
+        else:
+            self.states[slot] = before
 
     def end(self, error: MaintainerError) -> MaintainerError:
-        error.with_state(self.state or "zoo.maint.state.nothing", **self.state_values)
-        # the row names what happened, never a folder of this computer (the clone's place in the per-user folder)
+        error.with_states(list(self.states.values()) or [("zoo.maint.state.nothing", {})])
+        # the row names what happened, never a folder of this computer (the clone's place in the per-user folder; a
+        # git message can name it too)
         shown = MaintainerError(error.code, **{**error.values, **({"folder": "the local clone"}
                                                                   if "folder" in error.values else {})})
-        shown.with_state(error.state, **error.values)
+        shown.with_states(error.states)
+        detail = shown.text("en")
+        places = [(self.owner.clone, "<the local clone>"), (self.owner.work_dir, "<the maintainer folder>")]
         try:
-            self._audit("cancelled" if isinstance(error, Cancelled) else "error", "end", shown.text("en"),
-                        code=error.code)
+            places.append((Path.home(), "~"))
+        except (RuntimeError, KeyError, OSError):   # no home folder known: nothing to replace
+            pass
+        for place, name in places:
+            for spelling in sorted({str(place), Path(place).as_posix()}, key=len, reverse=True):
+                if len(spelling) > 3:
+                    detail = detail.replace(spelling, name)
+        try:
+            self._audit("cancelled" if isinstance(error, Cancelled) else "error", "end", detail, code=error.code)
         except MaintainerError:
             pass
         return error
@@ -489,14 +541,19 @@ class Maintainer:
     def _run(self, cmd: List[str], *, cwd: Optional[Path] = None, binary: bool = False, check: bool = True,
              timeout: int = 600) -> subprocess.CompletedProcess:
         # stdin=DEVNULL: gh and git never read the terminal or the MCP stream; no variables are passed or read.
+        # Text is UTF-8 (what gh and git write), never the code page of Windows: a title with a character that the
+        # code page lacks would stop the listing, or come out garbled.
         tool = Path(cmd[0]).stem   # gh or git, also gh.exe and git.exe
+        text = {} if binary else {"encoding": "utf-8", "errors": "replace"}
         try:
             return self._runner(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=not binary,
-                                timeout=timeout, check=check, stdin=subprocess.DEVNULL)
+                                timeout=timeout, check=check, stdin=subprocess.DEVNULL, **text)
         except subprocess.CalledProcessError as e:
             raise self._failure(tool, e) from None
         except subprocess.TimeoutExpired:
-            raise MaintainerError("offline", detail=f"{tool} did not answer within {timeout} s") from None
+            error = MaintainerError("offline", detail=f"{tool} did not answer within {timeout} s")
+            error.unanswered = True   # what it was doing may have reached GitHub
+            raise error from None
         except OSError as e:
             raise MaintainerError("tool_failed", tool=tool, detail=tool_error_detail(e)) from None
 
@@ -598,11 +655,12 @@ class Maintainer:
         self.check_tools()
         self.update_clone()
         self.report("list", repo=self.repo)
-        data = self._gh_json("pr", "list", "--repo", self.repo, "--state", "open", "--limit", "100", "--json",
-                             "number,title,author,url,headRefOid,files,statusCheckRollup", what="gh pr list")
+        data = self._gh_json("pr", "list", "--repo", self.repo, "--state", "open", "--base", "main", "--limit", "100",
+                             "--json", "number,title,author,url,headRefOid,baseRefName,files,statusCheckRollup",
+                             what="gh pr list")
         found = []
         for pr in data if isinstance(data, list) else []:
-            if not isinstance(pr, dict):
+            if not isinstance(pr, dict) or pr.get("baseRefName", "main") != "main":   # merged into main only
                 continue
             packs = sorted({f.get("path", "") for f in pr.get("files") or [] if isinstance(f, dict)
                             and PACK_PATH.fullmatch(str(f.get("path", "")))})
@@ -635,11 +693,15 @@ class Maintainer:
         merged."""
         self.check_tools()
         self.update_clone()
+        packs, changes = list(item.packs), []
         if item.number is not None:
             self._git("fetch", "--no-tags", "origin", f"+refs/pull/{item.number}/head:refs/lcf/pr/{item.number}")
             head = self._rev(f"refs/lcf/pr/{item.number}")
             if head != item.head:
                 raise MaintainerError("changed", item=item.label, head=head[:12])
+            packs, changes = self._pr_changes(head)
+            if not packs:
+                raise MaintainerError("no_packs", item=item.label)
         else:
             head = self._rev("origin/main")
         temporary = folder is None
@@ -651,14 +713,31 @@ class Maintainer:
             if folder.exists() and (not folder.is_dir() or any(folder.iterdir())):
                 raise MaintainerError("dir_not_empty", folder=str(folder))
             ensure_directory(folder)
-        review = Review(item, head, [], folder, temporary)
+        review = Review(item, head, [], folder, temporary, changes)
         try:
-            for path in item.packs:
+            for path in packs:
                 review.packs.append(self._review_pack(item, head, path, folder))
         except BaseException:
             review.discard()
             raise
         return review
+
+    def _pr_changes(self, head: str) -> Tuple[List[str], List[Tuple[str, str]]]:
+        """What the pull request changes, as GitHub merges it (from its merge base with main): the packs it adds under
+        contributions/<kind>/, and every other change (status, path). Only the first are reviewed, so a pull request
+        with anything else is never merged from here: the person would not have seen that change. Read from the
+        reviewed commit itself (gh lists at most 100 files of a pull request)."""
+        out = self._git("diff", "--name-status", "-z", "--no-renames", "--no-ext-diff", "--no-textconv",
+                        f"origin/main...{head}").stdout
+        parts = out.split("\0")
+        packs, other = [], []
+        for status, path in zip(parts[0::2], parts[1::2]):
+            status = status.strip()[:1]
+            if status == "A" and PACK_PATH.fullmatch(path):
+                packs.append(path)
+            elif path:
+                other.append((status, path))
+        return sorted(packs), other
 
     def _review_pack(self, item: Contribution, head: str, path: str, folder: Path) -> ReviewedPack:
         match = PACK_PATH.fullmatch(path)
@@ -686,14 +765,25 @@ class Maintainer:
             try:
                 read_pack(pack_file, unpacked)   # the listed files, each checked against the manifest
                 files = [_review_file(rel, file.read_bytes()) for rel, file in list_files(unpacked)]
-                with zipfile.ZipFile(pack_file) as zf:   # and the manifest and the author signature themselves
-                    meta = [i for name_ in (MANIFEST_NAME, SIGNATURE_NAME) for i in zf.infolist()
-                            if i.filename == name_ and i.file_size <= 1024 * 1024]
-                    for info in reversed(meta):
-                        raw = zf.read(info)
-                        if not (unpacked / info.filename).exists():
-                            (unpacked / info.filename).write_bytes(raw)
-                        files.insert(0, _review_file(info.filename, raw))
+                # and every other member of the file, which is published with it: the manifest, the author
+                # signature and any other name read_pack lets through (.lcf-provenance.json, which no client reads)
+                listed = {f.path for f in manifest.files}
+                order = {MANIFEST_NAME: 0, SIGNATURE_NAME: 1}
+                shown = []
+                with zipfile.ZipFile(pack_file) as zf:
+                    for info in sorted((i for i in zf.infolist() if i.filename not in listed),
+                                       key=lambda i: (order.get(i.filename, 2), i.filename)):
+                        if info.filename not in RESERVED_NAMES:   # read_pack refuses these already
+                            problems.append(f"{one_line(info.filename)}: not in the manifest")
+                        elif info.file_size > MAX_SHOWN_BYTES:
+                            problems.append(f"{info.filename}: {info.file_size} bytes, too large to be shown in "
+                                            "the review")
+                        else:
+                            raw = zf.read(info)
+                            if not (unpacked / info.filename).exists():
+                                (unpacked / info.filename).write_bytes(raw)
+                            shown.append(_review_file(info.filename, raw))
+                files = shown + files
             except (PackError, OSError, zipfile.BadZipFile) as e:
                 problems.append(str(e))
         return ReviewedPack(path, kind, name, data, hashlib.sha256(data).hexdigest(), manifest, problems, files)
@@ -752,12 +842,16 @@ class Maintainer:
             raise run.end(e) from None
         except PackError as e:
             raise run.end(MaintainerError("failed", detail=str(e))) from None
+        except Exception as e:  # noqa: BLE001 - an error nobody foresaw still ends the run: audit row, state, reason
+            raise run.end(MaintainerError("failed", detail=f"{type(e).__name__}: {e}"[:300])) from e
 
     def _merge_contribution(self, run: _Run, review: Review) -> None:
         item = review.item
         view = self._pr_view(item.number)
         if view.get("state") != "OPEN":
             raise MaintainerError("not_open", pr=item.number, state=view.get("state"))
+        if view.get("baseRefName") != "main":   # gh would merge it into that branch, not into main
+            raise MaintainerError("not_main", pr=item.number, base=one_line(view.get("baseRefName")))
         if view.get("headRefOid") != review.head:
             raise MaintainerError("changed", item=item.label, head=str(view.get("headRefOid"))[:12])
         state = check_state(view.get("statusCheckRollup"))
@@ -766,14 +860,27 @@ class Maintainer:
             raise MaintainerError("check_not_passed", check=REQUIRED_CHECK, pr=item.number, state=state)
         run.checkpoint()
         run.step("merge_contribution", item=item.label)
-        self._run([self.gh, "pr", "merge", str(item.number), "--repo", self.repo, "--squash",
-                   "--match-head-commit", review.head])
-        run.happened("zoo.maint.state.merged_waiting", item=item.label)
+        # Until gh answers, the merge may have happened (Ctrl+C, no answer in time): the state says to look.
+        run.happened("zoo.maint.state.merging_contribution", slot="contribution", item=item.label)
+        self._remote(run, "contribution", None, [self.gh, "pr", "merge", str(item.number), "--repo", self.repo,
+                                                 "--squash", "--match-head-commit", review.head])
+        run.happened("zoo.maint.state.merged_waiting", slot="contribution", item=item.label)
         run.step("merged_contribution", item=item.label)
+
+    def _remote(self, run: _Run, slot: str, before: Optional[Tuple[str, Dict[str, Any]]],
+                cmd: List[str]) -> subprocess.CompletedProcess:
+        """A step that changes GitHub; when gh or git answers with a refusal it did not happen, and the state of
+        `slot` is what it was before (an unanswered call keeps the "look whether it happened" state)."""
+        try:
+            return self._run(cmd)
+        except MaintainerError as e:
+            if not e.unanswered:
+                run.forget(slot, before)
+            raise
 
     def _pr_view(self, number: int) -> dict:
         view = self._gh_json("pr", "view", str(number), "--repo", self.repo, "--json",
-                             "number,state,headRefOid,statusCheckRollup,url", what="gh pr view")
+                             "number,state,headRefOid,baseRefName,statusCheckRollup,url", what="gh pr view")
         if not isinstance(view, dict):
             raise MaintainerError("bad_answer", what="gh pr view")
         return view
@@ -819,6 +926,8 @@ class Maintainer:
             raise run.end(e) from None
         except PackError as e:
             raise run.end(MaintainerError("failed", detail=str(e))) from None
+        except Exception as e:  # noqa: BLE001 - an error nobody foresaw still ends the run: audit row, state, reason
+            raise run.end(MaintainerError("failed", detail=f"{type(e).__name__}: {e}"[:300])) from e
 
     # -- the signed index on main and its change --------------------------------------------------------------------
     def _current_index(self, key: Optional[Ed25519PrivateKey]) -> Optional[CommunityIndex]:
@@ -881,30 +990,49 @@ class Maintainer:
                     raise MaintainerError("failed", detail=f"git changed {target} while committing")
             run.step("commit", branch=branch)
             run.checkpoint()
-            # The branch by its explicit name: never main (it is protected, and nothing here pushes to it).
-            self._git("push", "--quiet", "origin", f"{commit}:refs/heads/{branch}")
+            # The branch by its explicit name: never main (it is protected, and nothing here pushes to it). Until git
+            # answers, the push may have happened (the state says to look).
+            run.happened("zoo.maint.state.pushing", branch=branch)
+            try:
+                self._git("push", "--quiet", "origin", f"{commit}:refs/heads/{branch}")
+            except MaintainerError as e:
+                if not e.unanswered:
+                    run.forget("change")
+                raise
         except BaseException:
             self._restore(branch)
             raise
         run.happened("zoo.maint.state.branch_pushed", branch=branch)
         run.step("push", branch=branch)
         self._restore(branch)
-        run.checkpoint()
-        url = self._run([self.gh, "pr", "create", "--repo", self.repo, "--base", "main", "--head", branch,
-                         "--title", message, "--body", body]).stdout.strip().splitlines()
-        url = url[-1].strip() if url else ""
-        found = re.search(r"/pull/(\d+)\b", url)
-        if not found:
-            raise MaintainerError("bad_answer", what="gh pr create")
-        number = int(found.group(1))
-        run.happened("zoo.maint.state.pr_open", url=url)
-        run.step("pr", url=url)
-        self._wait_for_check(run, number, commit, url)
-        run.checkpoint()   # the last point to cancel: the merge below publishes
+        number, url = None, ""
+        try:
+            run.checkpoint()
+            lines = self._run([self.gh, "pr", "create", "--repo", self.repo, "--base", "main", "--head", branch,
+                               "--title", message, "--body", body]).stdout.strip().splitlines()
+            url = lines[-1].strip() if lines else ""
+            found = re.search(r"/pull/(\d+)\b", url)
+            if not found:
+                raise MaintainerError("bad_answer", what="gh pr create")
+            number = int(found.group(1))
+            run.happened("zoo.maint.state.pr_open", url=url)
+            run.step("pr", url=url)
+            self._wait_for_check(run, number, commit, url)
+            run.checkpoint()   # the last point to cancel: the merge below publishes
+        except (Cancelled, KeyboardInterrupt):
+            # A cancel never leaves the signed publication behind, one click on GitHub from being published.
+            self._withdraw(run, branch, number, url)
+            raise
+        except MaintainerError as e:
+            if e.code == "changed":   # someone else pushed to this branch: it is never left open to be merged
+                self._withdraw(run, branch, number, url)
+            raise
         run.final = True
         run.step("merge", pr=number)
-        self._run([self.gh, "pr", "merge", str(number), "--repo", self.repo, "--squash", "--match-head-commit",
-                   commit])
+        before = run.states.get("change")
+        run.happened("zoo.maint.state.merging_pr", url=url)
+        self._remote(run, "change", before, [self.gh, "pr", "merge", str(number), "--repo", self.repo, "--squash",
+                                             "--match-head-commit", commit])
         run.happened("zoo.maint.state.pr_merged", url=url)
         self._run([self.gh, "api", "--method", "DELETE", f"repos/{self.repo}/git/refs/heads/{branch}"], check=False)
         self.update_clone()
@@ -912,6 +1040,24 @@ class Maintainer:
             raise MaintainerError("failed", detail=f"main does not carry the new index yet; look at {url}")
         run.step("published", version=new.version, url=url)
         return ChangeResult(new.version, url, branch, new)
+
+    def _withdraw(self, run: _Run, branch: str, number: Optional[int], url: str) -> None:
+        """After a cancel before the last merge: the publication's own pull request is closed and its branch deleted,
+        so nothing half-published stays behind. Only what this run made is touched; the contribution's merge cannot
+        be undone (its pack waits under contributions/ and is listed again)."""
+        closed = False
+        try:
+            if number is not None:
+                self._run([self.gh, "pr", "close", str(number), "--repo", self.repo])
+                closed = True
+                run.happened("zoo.maint.state.pr_closed", url=url, branch=branch)
+                run.step("pr_closed", url=url)
+            self._run([self.gh, "api", "--method", "DELETE", f"repos/{self.repo}/git/refs/heads/{branch}"])
+            run.happened("zoo.maint.state.withdrawn" if closed else "zoo.maint.state.branch_deleted", url=url,
+                         branch=branch)
+            run.step("branch_deleted", branch=branch)
+        except MaintainerError:
+            pass   # the state names what is still on GitHub (the pull request or the branch)
 
     def _wait_for_check(self, run: _Run, number: int, commit: str, url: str) -> None:
         start, reported = self._clock(), 0.0
