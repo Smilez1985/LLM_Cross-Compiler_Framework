@@ -2215,10 +2215,12 @@ Der Community-Zoo: Hardware-Targets, Rezepte und Wissenspakete, die andere Nutze
 Quantisierung, mit den Prüfsummen dessen, was herauskam. Das Framework lädt nie von sich aus etwas hoch; Teilen ist
 immer ein Schritt, den du anstößt.
 
-**Aktueller Stand:** Das Community-Repository und sein signierter Index sind noch nicht veröffentlicht. Die
-Einstellungen `community_index_url` und `community_repo` sind leer, und `configs/community_keys.yml` enthält keinen
-Herausgeber-Schlüssel. Bis dahin zeigt `zoo list` nur installierte Pakete, Installieren per ID und
-`zoo export --pr` brechen mit einer Meldung ab, und Pakete werden als Dateien geteilt (`zoo install --file`).
+**Aktueller Stand:** Das Community-Repository ist festgelegt: Die Einstellung `community_repo` nennt
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), und `zoo export --pr`
+übergibt Pakete dorthin. Sein Beitrags-Workflow, sein signierter Index und der Schlüssel des Maintainers sind noch nicht
+veröffentlicht: `community_index_url` bleibt leer, bis in diesem Repository der erste signierte Index liegt, und
+`configs/community_keys.yml` enthält keinen Herausgeber-Schlüssel. Bis dahin zeigt `zoo list` nur installierte Pakete,
+Installieren per ID bricht mit einer Meldung ab, und Pakete werden auch als Dateien geteilt (`zoo install --file`).
 
 KI-Clients und Ditto nutzen denselben Zoo über die Tools `list_packs`, `add_pack_from_index` (nur signierter Index,
 immer gefragt), `start_recipe_build` (ein installiertes Rezept, genau wie festgelegt, mit der Frage von
@@ -2465,9 +2467,11 @@ repository?“. Antwortest du mit Nein oder gibt es kein Terminal und kein `--ye
 
 Das Framework fragt nie nach einem Token, liest keines und zeigt keines an: `gh` und `git` nutzen ihre eigene
 gespeicherte Anmeldung. Verschlüsselte Pakete sind zum privaten Teilen gedacht und werden nie eingereicht
-(Exit-Code 1). Solange `community_repo` leer ist, wie derzeit, bricht der Befehl mit „No community repository is
-configured“ und Exit-Code 1 ab; das Paket bleibt in seinem Ordner. Die CI des Community-Repositorys prüft jedes
-eingereichte Paket mit `llm-cli zoo verify` ([CONTRIBUTING](../CONTRIBUTING_DE.md#beiträge-zum-community-zoo)).
+(Exit-Code 1). `community_repo` nennt standardmäßig das Community-Repository,
+`Smilez1985/Edge-LLM-Knowledge-Base`; ist die Einstellung geleert, bricht der Befehl mit „No community repository is
+configured“ und Exit-Code 1 ab, und das Paket bleibt in seinem Ordner. Sobald sein Beitrags-Workflow veröffentlicht
+ist, prüft die CI des Community-Repositorys jedes eingereichte Paket mit `llm-cli zoo verify`
+([CONTRIBUTING](../CONTRIBUTING_DE.md#beiträge-zum-community-zoo)).
 
 ```bash
 # Ein Target, geprüft so, wie die CI des Community-Repositorys es prüfen wird
@@ -2567,10 +2571,10 @@ llm-cli trash empty --due
 - Einen CLI-Befehl, um Dittos Anbieter dauerhaft zu wählen, gibt es noch nicht; nutze die GUI, die `config.yml` oder
   `LLM_FRAMEWORK_AI_PROVIDER` (`ditto login` meldet an, wechselt den Anbieter aber nicht). Anmeldungen im Browser
   und bei Cloud-Plattformen (OAuth, AWS, Google Cloud, Azure) kommen später ([Roadmap](BLUEPRINT_DE.md#roadmap)).
-- Das Community-Repository und sein signierter Index sind noch nicht veröffentlicht (`community_index_url` und
-  `community_repo` sind leer, `configs/community_keys.yml` enthält keinen Schlüssel): `zoo list` zeigt nur
-  installierte Pakete, und `zoo install <ID>` und `zoo export --pr` brechen mit einer Meldung ab. Pakete lassen sich
-  als Dateien teilen.
+- Das Community-Repository ist festgelegt (`community_repo`: `Smilez1985/Edge-LLM-Knowledge-Base`), sein
+  Beitrags-Workflow, sein signierter Index und der Maintainer-Schlüssel sind aber noch nicht veröffentlicht
+  (`community_index_url` ist leer, `configs/community_keys.yml` enthält keinen Schlüssel): `zoo list` zeigt nur
+  installierte Pakete, und `zoo install <ID>` bricht mit einer Meldung ab. Pakete lassen sich als Dateien teilen.
 - `build start` hat keine Option für einen Modell-Commit: Der festgelegte Commit eines Rezepts wird genutzt, wenn der
   Builder aus dem Community Hub ausgefüllt wird oder wenn ein KI-Client dem MCP-Tool `start_build` eine `revision`
   übergibt.

@@ -128,7 +128,8 @@ Write-Host "Installiere Requirements..."
 # optional extra 'gui', PySide6: this installer sets up the desktop GUI); pip checks every file against its hash.
 # Without the file nothing is installed unchecked.
 if (-not (Test-Path "requirements-gui.txt")) { Write-Error "requirements-gui.txt fehlt; ohne die festgelegten Versionen wird nichts installiert." }
-& $Pip install --require-hashes -r requirements-gui.txt | Out-Null
+# --no-deps: the file is the complete export (every package, every hash); pip installs exactly that set.
+& $Pip install --require-hashes --no-deps -r requirements-gui.txt | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Error "Die Pakete aus requirements-gui.txt liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)." }
 
 # 5. LAUNCHER

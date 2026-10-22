@@ -990,9 +990,9 @@ jede Seite auf, mit dem, was sie enthält, und warum. Seiten mit vollem Text unt
 verlangt, bekommen diesen Text in `LICENSES/` und eine `NOTICE`, und der Export nennt jeden Lizenztext und warum. Ein
 Target, das du von jemand anderem installiert hast, wird nicht als deines neu signiert, und Seiten aus installierten
 Community-Wissenspaketen bleiben aus einem Wissens-Export draußen. „Open pull request“ (`--pr`) übergibt das Paket an
-das Community-Repository (`community_repo`): über die GitHub-CLI, wenn sie installiert und angemeldet ist, sonst
-öffnet sich die Upload-Seite des Repositorys im Browser. Beide behalten ihre eigenen Zugangsdaten; das Framework fragt
-nie nach einem Token, liest keines und zeigt keines an.
+das Community-Repository (`community_repo`, standardmäßig `Smilez1985/Edge-LLM-Knowledge-Base`): über die GitHub-CLI,
+wenn sie installiert und angemeldet ist, sonst öffnet sich die Upload-Seite des Repositorys im Browser. Beide behalten
+ihre eigenen Zugangsdaten; das Framework fragt nie nach einem Token, liest keines und zeigt keines an.
 
 **Werkzeuge für den Maintainer.** `scripts/zoo_sign_index.py` legt den Index-Schlüssel im Schlüsselbund des Systems
 an (`keygen`), prüft ein Paket und gibt seinen Indexeintrag aus (`entry`) und signiert `index.json` (`sign`; mit
@@ -1002,12 +1002,14 @@ nur Paket-ZIPs bis 5 MB an und lässt über jedes `llm-cli zoo verify` laufen, d
 Schlüssel oder persönliche Daten enthalten (der Secret-Scan des Repositorys überspringt Binärdateien und läuft
 deshalb nicht über die ZIP-Dateien). Der Signierschlüssel erreicht die CI nie.
 
-**Stand.** Das Community-Repository, sein Index und der Schlüssel des Maintainers sind noch nicht veröffentlicht:
-`configs/community_keys.yml` enthält keinen Schlüssel, und `community_index_url` und `community_repo` sind leer. Den
-Index auflisten und per ID installieren endet deshalb mit einer Meldung (`llm-cli zoo list` zeigt installierte
-Pakete trotzdem an), und `--pr` sagt nur, wo das Paket liegt. Das Framework-Release, mit dem die Workflow-Vorlage
-Pakete prüft (`LCF_REF`), ist ein Platzhalter, den der Maintainer einträgt. Pakete lassen sich schon als Dateien
-austauschen (Vertrauen `local`) und zwischen Benutzern verschlüsselt weitergeben.
+**Stand.** Das Community-Repository ist gewählt (Maintainer, 2026-10-22): `community_repo` nennt standardmäßig
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), und `--pr` übergibt Pakete
+dorthin. Sein Beitrags-Workflow, sein signierter Index und der Schlüssel des Maintainers sind noch nicht veröffentlicht:
+`configs/community_keys.yml` enthält keinen Schlüssel, und `community_index_url` bleibt leer, bis in diesem Repository
+der erste signierte Index liegt. Den Index auflisten und per ID installieren endet deshalb mit einer Meldung
+(`llm-cli zoo list` zeigt installierte Pakete trotzdem an). Das Framework-Release, mit dem die Workflow-Vorlage Pakete
+prüft (`LCF_REF`), ist ein Platzhalter, den der Maintainer einträgt. Pakete lassen sich schon als Dateien austauschen
+(Vertrauen `local`) und zwischen Benutzern verschlüsselt weitergeben.
 
 ### Zuletzt verwendete Eingaben (unveröffentlicht)
 
@@ -1087,11 +1089,12 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
   llama.cpp nach demselben Rezept wie `targets/Rockchip/dockerfile`. Boards, Formate und Quantisierungen bleiben ein
   Ausgangspunkt, und ein erzeugtes GPU-Target ist auf echter Hardware nicht getestet. Siehe
   [Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md).
-- **Der Community-Zoo hat noch keinen veröffentlichten Index.** Das Community-Repository, sein signierter Index und
-  der Schlüssel des Maintainers sind nicht veröffentlicht: `configs/community_keys.yml` enthält keinen Schlüssel,
-  und `community_index_url` und `community_repo` sind leer. Den Index auflisten und per ID installieren endet mit
-  einer Meldung; Pakete lassen sich als Dateien austauschen (Vertrauen `local`) und zwischen Benutzern
-  verschlüsselt weitergeben. Die Veröffentlichung ist für 3.1.0 geplant.
+- **Der Community-Zoo hat noch keinen veröffentlichten Index.** Das Community-Repository ist festgelegt
+  (`community_repo`: `Smilez1985/Edge-LLM-Knowledge-Base`), sein Beitrags-Workflow, sein signierter Index und der
+  Schlüssel des Maintainers sind aber nicht veröffentlicht: `configs/community_keys.yml` enthält keinen Schlüssel,
+  und `community_index_url` ist leer. Den Index auflisten und per ID installieren endet mit einer Meldung; Pakete
+  lassen sich als Dateien austauschen (Vertrauen `local`) und zwischen Benutzern verschlüsselt weitergeben. Die
+  Veröffentlichung ist für 3.1.0 geplant.
 - **Deep Ingest hat keinen CLI-Befehl.** Eine Person startet es in der GUI; MCP-Clients und Ditto bitten mit
   `crawl_docs_site` darum, und die Person bestätigt jeden Crawl.
 - **Versteckter Text wird an dem erkannt, was ein Element selbst sagt.** Inline-Styles und Attribute zählen; Regeln in
@@ -1200,6 +1203,7 @@ dieser Version.
 | Version | Thema | Status |
 |---|---|---|
 | 3.1.0 | Ditto-Neubau, Anmeldung und lokale KI | in Arbeit |
+| als Nächstes | Build-Dienst, Warteschlange und Modi | geplant |
 | 3.2.0 | Laufzeit auf dem Gerät und die Hardware des Maintainers | geplant |
 | 3.3.0 | LoRA und große Modelle | geplant |
 | 3.4.0 | Lieferkette und Community | geplant |
@@ -1233,7 +1237,7 @@ dieser Version.
 | **Bessere Antworten aus der Wissensbasis**, aus rag4ll übernommen und klein gehalten: Reranking mit einem Cross-Encoder auf der CPU und eine Relevanzschwelle, die unpassende Auszüge aus Dittos Prompt heraushält (eingeschaltet für Build-Empfehlungen; für Chat und MCP-Suchen mit `rag_rerank_default`), ein Größenbudget für die Auszüge, das Aufteilen übergroßer Code- und Tabellenblöcke, eine Stichwortsuche, die Bezeichner wie `-DGGML_CUDA=ON` versteht, und das Entladen unbenutzter Modelle; gemessen mit der Abruf-Evaluation (`llm-cli ditto eval --kind retrieval`). | fertig |
 | **Community-Pakete mit echter Kryptografie**: Pakete mit einem Manifest jeder Datei, öffentliche Pakete mit Ed25519 signiert, private Pakete im Format age (rage, über `pyrage`) an die Schlüssel der Empfänger oder eine Passphrase verschlüsselt, vom Absender signiert und mit den üblichen age-Werkzeugen lesbar. Der Upload mit der XOR-„SwarmCipher“ und seine Abfrage eines GitHub-Tokens entfallen; das Framework fragt nie nach einem Token. | fertig |
 | **Model-Zoo aus der Community**: Rezepte (Modell mit festgelegtem Commit, Target-Fingerabdruck, Format, Quantisierung, Toolchain-Image und geprüfte Hashes), aus fertigen Builds erzeugt; ein signierter Index mit Widerrufen, Installation über eine Quarantäne mit Vertrauensstufen, `llm-cli zoo`, der Community-Hub, der Export für die Community mit Übergabe an einen Pull-Request und die Werkzeuge des Maintainers für das Community-Repository. | fertig |
-| **Community-Repository und Index veröffentlicht**: das Community-Repository mit dem Beitrags-Workflow, der erste signierte Index, der Schlüssel des Maintainers in `configs/community_keys.yml` und die ausgefüllten Einstellungen `community_index_url` und `community_repo`, ausgeliefert mit einem Release. Bis dahin arbeitet der Zoo nur mit Paketdateien. | geplant |
+| **Community-Repository und Index veröffentlicht**: Das Repository ist gewählt ([Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), seit 2026-10-22 der Standardwert von `community_repo`, Pull Requests gehen also schon dorthin). Noch zu tun: sein Beitrags-Workflow, der erste signierte Index, der Schlüssel des Maintainers in `configs/community_keys.yml` und die ausgefüllte Einstellung `community_index_url`, ausgeliefert mit einem Release. Bis dahin installiert der Zoo nur Paketdateien. | geplant |
 
 Anmeldung je Zugangsart, wie entworfen. Schon gebaut (im Changelog aufgeführt): der API-Schlüssel zuerst bei
 Anthropic, die zweite Fassung des Secrets-Speichers, die eine Mustertabelle, der Kern der Anmeldung (Verfahren je
@@ -1257,6 +1261,21 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 - **Secrets-Speicher, zweite Fassung**: verschlüsselter Tresor mit einer Sperre über Prozessgrenzen und
   Schlüsselwechsel; ist kein Schlüsselbund nutzbar, wählst du einen Ausweichweg ausdrücklich.
 - **Eine Mustertabelle** für den Secret-Scan des Repositorys und die Schwärzung in Logs.
+
+### Als Nächstes - Build-Dienst, Warteschlange und Modi (geplant; beginnt direkt nach der Architektur-Konsolidierung)
+
+Die Schritte kommen in dieser Reihenfolge. Entscheidungen, die noch offen sind, stehen in ihrer Zeile; sie werden
+gefragt, wenn der Schritt beginnt.
+
+| Punkt | Status |
+|---|---|
+| **Schritt 1 - Build-Dienst**: Ein Hintergrundprogramm je Benutzerkonto führt jeden Build; die GUI, die Kommandozeile und der MCP-Server werden seine Clients. Ein Absturz der GUI beendet keinen Build mehr. Der Dienst lässt sich anhalten und neu starten, ohne dass etwas verloren geht (der Zustand liegt schon in Dateien: Build-Einträge, Build-Anfragen, das Reservierungsbuch, Job-Zusammenfassungen), und ein Build macht bei seiner letzten fertigen Stufe des Vier-Module-Builds weiter (source, config, convert, target). Warum: Heute läuft ein Build in dem Programm, das ihn gestartet hat, und endet, wenn dieses Programm endet. | geplant |
+| **Schritt 2 - Eine Warteschlange für alle Programme**: Builds warten in einer Warteschlange im Build-Dienst und werden nach RAM, CPU und Speicherplatz zugelassen. Der Teil für den Speicherplatz existiert (das Reservierungsbuch in `orchestrator/Core/disk_plan.py`); die Warteschlange erweitert, was da ist (die Warteschlange in `orchestrator/Core/orchestrator.py`, die Slots der Build-Engine, den Request Store), statt einer zweiten Struktur. Kein Celery. Warum: Mehrere Programme (GUI, CLI, KI-Apps) starten Builds auf einem Computer. | geplant |
+| **Schritt 3 - Privat- und Enterprise-Modus**: Der Privatmodus ist die Vorgabe, der Enterprise-Modus ist optional. Den Modus wählst du im Installer (`install.sh` und der Windows-Installer) und änderst ihn unter Datei > Einstellungen…; eine KI kann ihn lesen, aber nie ändern. Er nutzt das Gerüst für den erweiterten und den Enterprise-Modus, das es in `orchestrator/Core/config_manager.py` schon gibt (Entscheidung U7). Warum: Schritt 4 und 5 bringen Funktionen für Firmen, die eine private Installation standardmäßig nicht braucht. | geplant |
+| **Schritt 4 - Secret-Backends**: HashiCorp Vault und CyberArk Conjur (Enterprise-Modus; im Privatmodus als Opt-in). Werte werden abgerufen, wenn sie gebraucht werden, nur im Speicher gehalten und nie in den lokalen Tresor (`secrets.store`) geschrieben; jeder Abruf wird protokolliert, und Leases werden erneuert und widerrufen. Später: dynamische Secrets und signierte SSH-Zertifikate für Boards. Warum: Firmen halten Secrets in einem zentralen Speicher und müssen jede Nutzung sehen. Offene Entscheidungen, gefragt, wenn dieser Schritt beginnt: Audit-Zeilen im CI-Modus; ein Abruf je Vorgang; Referenzen nur im Enterprise-Modus; Backends im Internet; wo die eigene Anmeldung des Backends aufbewahrt wird. | geplant |
+| **Schritt 5 - Kubernetes und Nomad**: Orte für Builds als Opt-in, neben den lokalen Docker-Builds, die die Vorgabe bleiben. Sie nutzen Images, die die Firma selbst aus den Dockerfiles des Frameworks in ihre eigene Registry baut, per Digest festgelegt, nie Images aus dem Community Hub. Warum: Eine Firma will Builds vielleicht auf ihrem eigenen Cluster. Offene Entscheidungen: beide Modi oder nur der Enterprise-Modus; über `kubectl`/`nomad` oder ihre HTTP-APIs. | geplant |
+| **Schritt 6 - Eigener Schlüsselbund-Dienst unter Linux**: Das Framework bringt unter Linux einen eigenen Schlüsselbund-Dienst mit (beschlossen in Runde 7 am 2026-10-15, nicht gebaut; Windows behält die Windows-Anmeldeinformationsverwaltung); nach Schritt 4. Warum: Viele Linux-Installationen haben keinen nutzbaren Schlüsselbund, und der Tresor lehnt einen ab, der hängt, nichts behält oder im Klartext speichert. Offene Entscheidung: bauen oder beim Schlüsselbund des Systems bleiben. | geplant |
+| **Schritt 7 - Neueste passende Versionen, automatisch gehalten**: Jede Abhängigkeit (Python, CUDA, Docker-Basis-Images, Toolkits, GitHub Actions) bleibt auf der höchsten Version, die passt, und jedes Update wird getestet, bevor es übernommen wird. Ein Plan wird vorbereitet. Warum: Alte Versionen sammeln Sicherheitsmeldungen, und ein Update darf nichts kaputt machen. | geplant |
 
 ### 3.2.0 - Laufzeit auf dem Gerät und die Hardware des Maintainers (geplant)
 
@@ -1300,7 +1319,7 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **Dependabot-Wartezeit** für LLM-SDKs. | geplant |
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
 | **Signierte Updates** des Frameworks selbst (`orchestrator/utils/updater.py`, in Entwicklung: Update-Prüfung, Update und Neustart; noch nicht eingebunden), fertig gebaut als geprüfte Updates einer signierten Veröffentlichung statt eines einfachen `git pull`. Werkzeugketten-Images gehören nicht dazu: Das Framework teilt Rezepte, nie kompilierte Images, daher werden sie weiter auf deinem Rechner aus dem Dockerfile des Targets gebaut; die Einstellungen `docker_registry` (standardmäßig leer) und `docker_namespace`, die nichts liest, bleiben erhalten. Keine Vorgabe nennt ein Image aus einer Registry: Die Image-Einstellungen nennen lokale Images (`llm-framework/...`) oder Images Dritter wie Trivy und Qdrant, und der Block `docker` in der `target.yml` eines Targets nennt ein lokales Image ohne Registry. | geplant |
-| **Aufräumen der Vier-Module-Skripte**, anders erledigt als geplant: Statt sie zu entfernen, hat die Entscheidung U9 des Maintainers sie zum Build gemacht. `build.sh` von Rockchip und der Vorlage ist ein Stage-Runner über `source_module.sh`, `config_module.sh`, `convert_module.sh` und `target_module.sh`, mit Marken zum Fortsetzen je Stufe, Fortschritt je Stufe und dem Platz für die Rotation; die Arbeit des Verteilers liegt in der Stufe, zu der sie gehört, und der Modulgenerator schreibt funktionierende Stufenmodule statt Platzhaltern. | fertig |
+| **Die vier Module sind die Build-Struktur** (das geplante Aufräumen der Vier-Module-Skripte, anders erledigt als geplant): Statt sie zu entfernen, hat die Entscheidung U9 des Maintainers sie zum Build gemacht. `build.sh` von Rockchip und der Vorlage ist ein Stage-Runner über `source_module.sh`, `config_module.sh`, `convert_module.sh` und `target_module.sh`, mit Marken zum Fortsetzen je Stufe, Fortschritt je Stufe und dem Platz für die Rotation; die Arbeit des Verteilers liegt in der Stufe, zu der sie gehört, und der Modulgenerator schreibt funktionierende Stufenmodule statt Platzhaltern. | fertig |
 | **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
 
 ### Rust-Teile (geplant)

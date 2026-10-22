@@ -59,7 +59,7 @@ Installiert genau die festgelegten Versionen mit Hashes aus den Requirements-Dat
 ```bash
 uv venv --python 3.13
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
-uv pip install -r requirements-gui.txt -r requirements-dev.txt   # ohne GUI: requirements.txt
+uv pip sync requirements-gui.txt requirements-dev.txt   # genau die Exporte von uv.lock mit Hashes; ohne GUI: requirements.txt
 
 python -m orchestrator.cli --help      # Kommandozeile
 python -m orchestrator.main            # GUI (orchestrator/gui/app.py; ohne PySide6 sagt sie, wie du es installierst)
@@ -170,7 +170,7 @@ Die CI führt die Tests unter Ubuntu mit Python 3.11, 3.12, 3.13 und 3.14 aus un
 ```bash
 for v in 3.11 3.12 3.13 3.14; do
   uv venv --python "$v" ".venv-$v"
-  uv pip install --python ".venv-$v" -r requirements.txt -r requirements-dev.txt
+  uv pip sync --python ".venv-$v" requirements-gui.txt requirements-dev.txt
   QT_QPA_PLATFORM=offscreen ".venv-$v/bin/python" -m pytest -q || echo "FEHLER unter Python $v"
 done
 ```
@@ -340,7 +340,7 @@ die Qt-freien Prüfungen aus (`tests/test_qt_free_core.py`: die Texte des Kerns,
 die schlichte Meldung von `llm-gui`) und die ganze Testsuite, deren GUI-Tests sich selbst überspringen
 (`pytest.importorskip("PySide6")` oder die Fixture `qapp`). Ein Testmodul, das `orchestrator.gui` oben importiert,
 überspringt sich ohne Qt zuerst. Lokal:
-`python -m venv .venv-headless && .venv-headless/bin/pip install -r requirements.txt -r requirements-dev.txt`.
+`python -m venv .venv-headless && .venv-headless/bin/pip install --no-deps -r requirements.txt -r requirements-dev.txt`.
 
 **Secret-Scan** (`security.yml`): jeder Commit der ganzen Historie, siehe [Abschnitt 6](#6-secret-scan-und-git-hooks).
 
@@ -539,11 +539,13 @@ siehe auch den [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.m
 Das Framework fragt nie nach einem Token, liest keines und zeigt keines an: `gh` und `git` nutzen ihre eigene
 gespeicherte Anmeldung, und die Upload-Seite nutzt die GitHub-Sitzung deines Browsers.
 
-**Aktueller Stand:** Das Community-Repository und sein signierter Index sind noch nicht veröffentlicht.
-`community_repo` und `community_index_url` sind leer, und `configs/community_keys.yml` enthält keinen Schlüssel;
-`--pr` bricht deshalb mit „No community repository is configured“ ab und lässt das Paket in
-`community/contributions/`. Bis es das Repository gibt, lässt sich ein Paket als Datei teilen
-(`llm-cli zoo install --file <Paket>` installiert es mit der Vertrauensstufe `local`).
+**Aktueller Stand:** Das Community-Repository ist festgelegt: `community_repo` nennt
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), `--pr` und „Open pull
+request“ übergeben ein Paket also dorthin. Sein Beitrags-Workflow (die CI-Prüfung aus Schritt 4), sein signierter Index
+und der Schlüssel des Maintainers sind noch nicht veröffentlicht: `community_index_url` bleibt leer, bis in diesem
+Repository der erste signierte Index liegt, und `configs/community_keys.yml` enthält keinen Schlüssel. Bis dahin lässt
+sich ein Paket auch als Datei teilen (`llm-cli zoo install --file <Paket>` installiert es mit der Vertrauensstufe
+`local`).
 
 Wissenspakete behalten die Quelladresse jeder Seite und beanspruchen keine Lizenz für die Seiten (`NOASSERTION`); die
 Seiten bleiben unter den Bedingungen ihrer Eigentümer. Seiten mit vollem Text unter einer Lizenz, die ihren Text

@@ -140,8 +140,50 @@ def test_installers_install_only_the_hash_pinned_requirements_of_this_checkout()
     for name in ("install.sh", "install.bat"):
         text = (REPO_ROOT / name).read_text(encoding="utf-8")
         installs = re.findall(r"pip(?:\.exe)?\"?\)? install (?!--upgrade pip)[^\r\n|>]*", text.replace("$Pip", "pip"))
-        assert installs and all(re.search(r'--require-hashes -r "?(\$REQUIREMENTS|requirements(-gui)?\.txt)\b', i)
-                                for i in installs), (name, installs)
+        # --no-deps: the export is complete (every package, every hash), so pip installs exactly that set and does not
+        # resolve again (pyproject.toml [tool.uv] overrides one upstream cap: Pillow)
+        assert installs and all(
+            re.search(r'--require-hashes --no-deps -r "?(\$REQUIREMENTS|requirements(-gui)?\.txt)\b', i)
+            for i in installs), (name, installs)
         assert "requirements-gui.txt" in text, f"{name} installs the GUI"
     assert re.search(r'REQUIREMENTS="requirements\.txt"', (REPO_ROOT / "install.sh").read_text(encoding="utf-8")), \
         "install.sh --headless installs the base export"
+
+
+def test_the_pillow_override_lasts_only_while_fastembed_caps_pillow():
+    """pyproject.toml overrides fastembed's Pillow < 13 cap so the advisories fixed in Pillow 13 are gone. That is
+    safe only while the framework decodes no image with Pillow; and once fastembed allows the locked Pillow itself,
+    the override must go (this test then says so)."""
+    import importlib.metadata as metadata
+
+    overrides = pyproject()["tool"]["uv"]["override-dependencies"]
+    assert overrides == ["pillow>=13.0.0"], "a new override needs its own reason and check here"
+    locked = {norm(p["name"]): p["version"] for p in lock()["package"] if p.get("source", {}).get("registry")}
+    assert int(locked["pillow"].split(".")[0]) >= 13
+    offenders = [str(path.relative_to(REPO_ROOT)) for path in (REPO_ROOT / "orchestrator").rglob("*.py")
+                 if re.search(r"^\s*(from|import)\s+PIL\b", path.read_text(encoding="utf-8"), re.M)]
+    assert offenders == [], "framework code decodes images with Pillow: check it against fastembed's cap first"
+    try:
+        requires = metadata.requires("fastembed") or []
+    except metadata.PackageNotFoundError:
+        return
+    caps = [Requirement(r) for r in requires if norm(Requirement(r).name) == "pillow"]
+    assert caps and any(locked["pillow"] not in c.specifier for c in caps), \
+        "fastembed allows the locked Pillow now: remove [tool.uv] override-dependencies from pyproject.toml"
+
+
+def test_the_installers_and_workflows_install_the_export_without_resolving_again():
+    """The override only holds when pip installs the complete export as it is (--no-deps), not resolving again: every
+    pip install of requirements.txt, requirements-gui.txt (the base plus the extra 'gui') or requirements-dev.txt in
+    the workflows, also the lint, security and headless jobs."""
+    export = r"requirements(?:-gui|-dev)?\.txt"
+    for name in (".github/workflows/ci.yml", ".github/workflows/retrieval-eval.yml",
+                 ".github/workflows/security.yml", "scripts/community_repo/validate-contribution.yml"):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        lines = re.findall(rf"pip install [^\n]*-r \S*{export}[^\n]*", text)
+        assert lines, name
+        for line in lines:
+            assert "--no-deps" in line, (name, line)
+    ci = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert re.search(r"pip install --no-deps -r requirements-gui\.txt", ci), "the test jobs install the GUI extra"
+    assert re.search(r"pip install --no-deps -r requirements\.txt", ci), "the headless job installs the base export"

@@ -2123,10 +2123,12 @@ The community zoo: hardware targets, recipes and knowledge packs that other user
 template": a model at a pinned commit, built for a target, board, format and quantization, with the hashes of what
 came out. The framework never uploads anything by itself; sharing is always a step you start.
 
-**Current state:** the community repository and its signed index are not published yet. The settings
-`community_index_url` and `community_repo` are empty, and `configs/community_keys.yml` lists no publisher key. Until
-then `zoo list` shows only installed packs, installing by ID and `zoo export --pr` stop with a message, and packs
-are shared as files (`zoo install --file`).
+**Current state:** the community repository is set: the setting `community_repo` names
+[Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), and `zoo export --pr` hands
+packs to it. Its contribution workflow, its signed index and the maintainer's key are not published yet:
+`community_index_url` stays empty until the first signed index exists in that repository, and
+`configs/community_keys.yml` lists no publisher key. Until then `zoo list` shows only installed packs, installing by ID
+stops with a message, and packs are also shared as files (`zoo install --file`).
 
 AI clients and Ditto use the same zoo through the tools `list_packs`, `add_pack_from_index` (signed index only,
 always asked), `start_recipe_build` (an installed recipe, exactly as pinned, with the question of `start_build`)
@@ -2360,9 +2362,10 @@ repository?". If you answer no, or there is no terminal and no `--yes`, nothing 
   GitHub creates the fork for you.
 
 The framework never asks for, reads or shows a token: `gh` and `git` use their own stored sign-in. Encrypted packs
-are for private sharing and are never submitted (exit code 1). While `community_repo` is empty, as it is for now,
-the command stops with "No community repository is configured" and exit code 1; the pack stays in its folder. The
-community repository's CI checks every submitted pack with `llm-cli zoo verify`
+are for private sharing and are never submitted (exit code 1). `community_repo` names the community repository,
+`Smilez1985/Edge-LLM-Knowledge-Base`, by default; with the setting emptied the command stops with "No community
+repository is configured" and exit code 1, and the pack stays in its folder. Once its contribution workflow is
+published, the community repository's CI checks every submitted pack with `llm-cli zoo verify`
 ([CONTRIBUTING](../CONTRIBUTING.md#contributing-to-the-community-zoo)).
 
 ```bash
@@ -2459,9 +2462,10 @@ llm-cli trash empty --due
 - There is no CLI command yet to choose Ditto's provider permanently; use the GUI, `config.yml` or
   `LLM_FRAMEWORK_AI_PROVIDER` (`ditto login` signs in but does not switch the provider). Browser and cloud
   sign-ins (OAuth, AWS, Google Cloud, Azure) come later ([roadmap](BLUEPRINT.md#roadmap)).
-- The community repository and its signed index are not published yet (`community_index_url` and
-  `community_repo` are empty, `configs/community_keys.yml` lists no key): `zoo list` shows only installed packs,
-  and `zoo install <id>` and `zoo export --pr` stop with a message. Packs can be shared as files.
+- The community repository is set (`community_repo`: `Smilez1985/Edge-LLM-Knowledge-Base`), but its contribution
+  workflow, signed index and maintainer key are not published yet (`community_index_url` is empty,
+  `configs/community_keys.yml` lists no key): `zoo list` shows only installed packs, and `zoo install <id>` stops
+  with a message. Packs can be shared as files.
 - `build start` has no option for a model commit: the pinned commit of a recipe is used when the Builder is filled
   from the Community Hub, or when an AI client passes `revision` to the MCP tool `start_build`.
 - There is no CLI command for Deep Ingest (adding documentation pages to the knowledge base); it runs in the GUI's

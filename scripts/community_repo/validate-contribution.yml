@@ -1,5 +1,6 @@
 # Workflow template for the community repository (copy it to .github/workflows/ there; this repository does not
-# run it). It checks every file a pull request adds under contributions/ with the framework at a pinned tag:
+# run it). It checks every file a pull request adds under contributions/ (the README.md of each kind folder only
+# describes the folder and passes) with the framework at a pinned tag:
 #   - only pack files (.zip), each at most 5 MB;
 #   - `llm-cli zoo verify`: manifest and hashes, no links, no extra or binary files, the target validators
 #     (capabilities, every FROM pinned by digest, the shell deny-list, bash -n, no template placeholders), the
@@ -46,7 +47,7 @@ jobs:
 
       - name: Install the framework
         run: |
-          python -m pip install --require-hashes -r .lcf/requirements.txt
+          python -m pip install --require-hashes --no-deps -r .lcf/requirements.txt
           python -m pip install --no-deps ./.lcf
 
       - name: Changed files
@@ -67,6 +68,8 @@ jobs:
                   echo "::error file=$file::the pack was rejected (see the log above)"
                   status=1
                 fi ;;
+              contributions/target/README.md|contributions/recipe/README.md|contributions/knowledge/README.md)
+                echo "::notice file=$file::the folder's description, not a pack; not checked" ;;
               *)
                 echo "::error file=$file::only pack files (contributions/<kind>/*.zip) belong here"
                 status=1 ;;
