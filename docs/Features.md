@@ -2895,20 +2895,50 @@ and leave this computer only as a local file you publish yourself.
 
 ### Maintainer tools
 
-For the community repository, not for users:
+For the maintainer of the community repository (`community_repo`), not for users. **Tools > Open Community Hub >
+Maintainer** and `llm-cli zoo maintainer` ([CLI_Usage](CLI_Usage.md#zoo-maintainer)) do the work in three actions,
+one implementation for both (`orchestrator/Core/community_maintainer.py`). GitHub is reached with your own GitHub CLI
+login (`gh`) and git; the framework never reads, stores or shows a token. None of it is reachable by an AI: no MCP
+tool, no Ditto path and no other tool calls it (a test guards it).
 
-- `scripts/zoo_sign_index.py keygen <name>` creates an Ed25519 signing key in the OS keyring and prints its entry
-  for `configs/community_keys.yml` (valid for two years). `entry <pack.zip> --url <https address>` checks a pack and
-  prints its index entry. `sign index.json --key <name> [--previous <old index.json>]` checks the index (its version
-  must be higher than the previous one) and writes `index.json.sig`. To revoke a pack, add it to `revoked`, raise
-  the version and sign again.
-- `scripts/community_repo/validate-contribution.yml` is a CI workflow template for the community repository. On
-  every pull request under `contributions/` it accepts only `.zip` pack files of at most 5 MB and runs
-  `llm-cli zoo verify` on each, whose privacy scrub also rejects a pack with a key in any of its files (the
-  repository's secret scan skips binary files, so it does not run on the zips). A maintainer reviews and merges the
-  pack, adds its entry to `index.json` and signs the index offline; the signing key never reaches CI. The maintainer
-  sets the framework release the packs are checked with (`LCF_REF`); until then the template holds a placeholder,
-  so the job fails.
+1. **Create signing key...** (once; `zoo maintainer key NAME`): a new Ed25519 index signing key in the OS keyring
+   (service `lcf-community-index`). A name that exists is refused: a key is never replaced. Its public entry for
+   `configs/community_keys.yml` (valid for two years) is shown with **Copy** and **Save...** (`--save FILE`); it
+   reaches users with the next framework release.
+2. **Review and publish** (`zoo maintainer review [ITEM]`): **Load contributions** lists the open pull requests that
+   add packs under `contributions/<kind>/`, with the state of the required check `validate`, and packs merged there
+   but not published yet. **Review selected** fetches the packs from the pull request's head into a local clone of
+   the repository in the per-user folder, checks each one with `zoo verify` and shows every file (`pack.json`,
+   `pack.sig` and each file of the pack) in a list with a read-only text view (the CLI prints them, or writes them to
+   a new or empty folder you name with `--review-dir`). **Publish...** asks "Publish?" ("No" is the default). On yes
+   the contribution is merged (only when the check passed and its head is still the reviewed commit), the clone is
+   updated, the pack moves to `packs/<kind>/`, its index entry gets the raw address
+   (`https://raw.githubusercontent.com/<repo>/main/packs/<kind>/<file>`), the trust (`community`, or `verified` when
+   someone other than the author reproduced it) and the title, the index version is raised and its time set,
+   `index.json` is signed with the keyring key, and that change is committed on a new branch (`lcf-publish-...`),
+   pushed, opened as a pull request and merged once the required check passed. Nothing is ever pushed to `main` (it
+   is protected), and each merge pins the commit that was checked.
+3. **Revoke a published pack...** (`zoo maintainer revoke KIND ID --reason ... [--version V | --sha256 S]`): the
+   revocation (exactly one file, one version or every version of the id, with the reason every user sees) goes into
+   the signed index on the same route. The entry stays, so the hub shows the pack as revoked.
+
+Every step is shown as it happens and written to the audit log (tool `zoo_maintainer`; without the audit log nothing
+starts). **Cancel** (Ctrl+C at a terminal) stops before the next step, up to the last merge. Before anything is signed,
+the index on `main` must verify with your key or a trusted key of this framework. A refusal names the reason, what has
+happened on GitHub so far (for example a pull request that stays open) and the next step: no `gh` or `git`, not logged
+in (`gh auth login`), offline, a check that has not passed, a pack `zoo verify` rejects, a published file of the same
+name, a clone with changes of its own (they are never thrown away).
+
+- By hand: `scripts/zoo_sign_index.py`, a thin wrapper over the same code, creates the key (`keygen <name>`), prints
+  the index entry of a checked pack (`entry <pack.zip> --url <https address>`) and signs an index
+  (`sign index.json --key <name> [--previous <old index.json>]`; the version must be higher than the previous one).
+- `scripts/community_repo/validate-contribution.yml` is the CI workflow template for the community repository. It
+  runs on every pull request (it is the required check of the protected `main`; a pull request that adds no pack,
+  such as the maintainer's publication, passes) and accepts under `contributions/` only `.zip` pack files of at most
+  5 MB, each checked with `llm-cli zoo verify`, whose privacy scrub also rejects a pack with a key in any of its files
+  (the repository's secret scan skips binary files, so it does not run on the zips). The signing key never reaches
+  CI. The maintainer sets the framework release the packs are checked with (`LCF_REF`); until then the template holds
+  a placeholder, so the job fails.
 
 ### What was removed
 

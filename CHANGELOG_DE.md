@@ -10,6 +10,31 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Aktionen für den Maintainer des Community-Repositorys** (Entscheidung vom 2026-10-22: die Arbeit des Maintainers
+  als wenige Klicks statt einer Anleitung): **Tools > Community Hub öffnen > Maintainer** und
+  `llm-cli zoo maintainer key|review|revoke`, eine Implementierung in `orchestrator/Core/community_maintainer.py`
+  (`scripts/zoo_sign_index.py` ist jetzt eine dünne Hülle darüber). **Signaturschlüssel anlegen** (einmalig) legt den
+  Signaturschlüssel des Index im Schlüsselbund des Betriebssystems an (ein Name, den es schon gibt, wird abgelehnt)
+  und zeigt seinen öffentlichen Eintrag für `configs/community_keys.yml`, gespeichert als Textdatei, die du wählst.
+  **Prüfen und veröffentlichen** listet die offenen Pull Requests von `community_repo`, die Pakete hinzufügen (und
+  unter `contributions/` gemergte, noch nicht veröffentlichte Pakete), holt ein Paket vom Stand des Pull Requests,
+  prüft es mit `zoo verify` und zeigt jede Datei (GUI: eine Dateiliste mit schreibgeschützter Textansicht; CLI:
+  ausgegeben oder mit `--review-dir` in einen Ordner geschrieben, den du nennst), dann fragt es „Veröffentlichen?“
+  („Nein“ ist die Vorgabe). Ja mergt den Beitrag (nur wenn seine Pflichtprüfung `validate` bestanden ist und sein
+  Stand der geprüfte Commit ist), aktualisiert einen lokalen Klon im benutzereigenen Ordner, verschiebt das Paket nach
+  `packs/<kind>/`, trägt es mit der Raw-Adresse in den Index ein, erhöht Version und Zeit des Index, signiert ihn mit
+  dem Schlüssel aus dem Schlüsselbund, committet auf einem neuen Branch, pusht ihn, öffnet einen Pull Request, wartet
+  auf die Pflichtprüfung und mergt ihn; nach `main` wird nie gepusht. **Veröffentlichtes Paket zurückziehen** trägt
+  einen Rückzug (eine Datei, eine Version oder jede Version, mit dem Grund) auf demselben Weg ein. Jeder Schritt wird
+  gemeldet und ins Audit-Log geschrieben, Abbrechen (Strg+C im Terminal) hält bis zum letzten Merge vor dem nächsten
+  Schritt an, und eine Ablehnung sagt, was bis dahin geschehen ist, und nennt den nächsten Schritt (kein `gh`, nicht
+  angemeldet, offline, eine nicht bestandene Prüfung, ein abgelehntes Paket, ein Klon mit eigenen Änderungen). Der
+  Index auf `main` muss sich mit deinem Schlüssel oder einem vertrauenswürdigen Schlüssel prüfen lassen, bevor etwas
+  darauf signiert wird. gh und git nutzen dein eigenes Login; das Framework liest, speichert und zeigt nie einen
+  Token. Nur die Person: kein MCP-Tool, Ditto oder anderer Weg einer KI erreicht es (Test als Absicherung). Die
+  Vorlage des Prüf-Workflows `scripts/community_repo/validate-contribution.yml` läuft jetzt bei jedem Pull Request
+  (kein Pfadfilter; ein Pull Request ohne Paket besteht), wie die Kopie im Community-Repository, weil dessen
+  geschützter `main` sie verlangt.
 - **`tests/test_cli_gui_parity.py`: Jeder Befehl und jede Option der CLI für Personen hat einen Weg mit der Maus**
   (W1', Runde 9 U2): Der Test geht den ganzen Befehlsbaum von `llm-cli` durch (294 Pfade: Befehle, Unterbefehle und
   Optionen) und liest `CLI_PATHS`, `MACHINE_ONLY` und die Fenster- und Reitertabellen jedes Moduls in
