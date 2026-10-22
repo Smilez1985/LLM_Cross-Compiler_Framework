@@ -470,9 +470,11 @@ and options are in the [CLI guide](docs/CLI_Usage.md#zoo-export); for targets, s
    framework forks the repository named in the setting `community_repo`, commits the pack to `contributions/<kind>/`
    on a new branch and opens the pull request. Otherwise, or if that fails, the repository's upload page opens in
    your browser, and you drop the file there.
-4. **The CI check:** on every pull request that touches `contributions/`, the community repository's workflow
-   accepts only pack files (`contributions/target/*.zip`, `contributions/recipe/*.zip`,
-   `contributions/knowledge/*.zip`) of at most 5 MB, runs `llm-cli zoo verify` on each of them (manifest and hashes,
+4. **The CI check:** on every pull request into `main`, the community repository's workflow (always its own copy on
+   `main`, never one a pull request changes) accepts from contributors only new pack files
+   (`contributions/target/<name>.zip`, `contributions/recipe/<name>.zip`, `contributions/knowledge/<name>.zip`, regular
+   files): a pull request that also changes, adds or deletes anything else, a README included, fails and the error
+   names that file. It allows at most 5 MB per pack and runs `llm-cli zoo verify` on each of them (manifest and hashes,
    no links, extra or binary files, the target validators, the recipe and knowledge formats, an included author
    signature, the privacy scrub). The privacy scrub also covers the framework's table of secret formats, so a pack
    with a key in any of its files is rejected; the repository's secret scan is not run on the zips, because it skips
@@ -504,7 +506,13 @@ not use them.
 - `scripts/community_repo/validate-contribution.yml` is the CI workflow template of the community repository. Copy
   it to `.github/workflows/` there (this repository does not run it) and set `LCF_REF` to the framework release the
   packs are checked with: the template holds a placeholder, so the job fails until a published release tag is set.
-  It runs the checks of step 4 above with the framework at that tag. The signing key never reaches the CI.
+  It runs the checks of step 4 above with the framework at that tag. It runs on `pull_request_target`, so the copy on
+  `main` checks every pull request, read-only and without secrets, and the pull request's files are only read as
+  data. The repository's owner, members and collaborators may change other files too (the maintainer's publication
+  moves the pack to `packs/` and changes the signed index); those changes are shown as notices. Set the repository's
+  Actions option "Approval for running fork pull request workflows from contributors" to "Require approval for all
+  external contributors" and never approve a fork's run: a pull request can bring a workflow of its own with a job
+  named `validate`, and the check itself needs no approval. The signing key never reaches the CI.
 - `scripts/zoo_sign_index.py` signs the index. Its signing key lives only in the operating system's keyring
   (service `lcf-community-index`):
 

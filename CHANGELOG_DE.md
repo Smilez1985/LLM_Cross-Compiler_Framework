@@ -2275,6 +2275,39 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Ein Pull Request kann die Pflichtprüfung des Community-Repositorys nicht mehr umschreiben**: Die Vorlage des
+  Prüf-Workflows `scripts/community_repo/validate-contribution.yml` lief bei `pull_request`, also führte ein Pull
+  Request aus einem Fork seine eigene, geänderte Kopie aus: Er konnte die Prüfung bestehen lassen und ein schlechtes
+  Pack hinzufügen, oder `.github/`, `index.json`, `packs/` oder eine README ändern, die die Prüfung nie ansah (sie
+  listete nur `contributions/`). Die Maintainer-Aktionen lehnten einen solchen Pull Request ab, ein Merge auf der
+  GitHub-Webseite wurde aber nicht verhindert. Die Prüfung läuft jetzt bei `pull_request_target` (opened,
+  synchronize, reopened; Pull Requests in `main`), also prüft immer die Kopie in `main`, nur mit `contents: read`,
+  ohne Secret, ohne Cache und mit `persist-credentials: false` in seinem einzigen Checkout, dem des Frameworks. Der
+  Head-Commit des Pull Requests ist nur Daten und wird nie ausgecheckt (ein Checkout davon unter
+  `pull_request_target` ist das bekannte gefährliche Muster, und actions/checkout gibt seinen Betreff aus, in dem ein
+  Wagenrücklauf einen Workflow-Befehl beginnen würde): Nachdem das Framework installiert ist, werden `main` und der
+  Head-Commit über seine ID still und ohne Zugangsdaten in ein Repository ohne Arbeitsverzeichnis geholt, nichts davon
+  wird ausgeführt, eingelesen (`source`), installiert oder importiert, nur git liest es, und kein Wert des Pull
+  Requests (Titel, Branch, Text, Commit-Nachrichten, Dateinamen) wird in ein `run:`-Skript geschrieben; er kommt über
+  `env`. git berechnet die Änderungen zwischen `main` und dem Head (`--raw -z --no-renames`, ab ihrer einen
+  Merge-Basis, so wie GitHub sie zusammenführt; ein Pull Request ohne oder mit mehr als einer Merge-Basis fällt
+  durch, weil der Merge von GitHub dann Basen verbindet, die die Prüfung nicht sieht, und so eine Historie, die zwei
+  Linien von `main` noch einmal zusammenführt, eine Veröffentlichung unbemerkt rückgängig machen könnte). Ein
+  Dateiname mit einem Steuerzeichen, ein symbolischer Link (ein Link namens `x.zip` kann die
+  Prüfung keine andere Datei mehr lesen lassen), eine ausführbare Datei oder ein Submodul fällt für jeden durch. Wer
+  nicht Besitzer, Mitglied oder Collaborator ist (`author_association`), darf nur `contributions/<kind>/<name>.zip`
+  hinzufügen, die Pfade, die die Maintainer-Aktionen prüfen; jede andere hinzugefügte, geänderte oder gelöschte Datei
+  fällt mit ihrem Namen durch, die README eines Kind-Ordners eingeschlossen (sie bestand vorher als Hinweis). Die
+  übrigen Änderungen des Besitzers, eines Mitglieds oder eines Collaborators sind Hinweise, deshalb bestehen die
+  eigenen Pull Requests der Maintainer-Aktionen für Veröffentlichen und Zurückziehen weiter. Jedes hinzugefügte Pack
+  wird geprüft wie bisher (höchstens 5 MB, `llm-cli zoo verify`), jetzt aus dem Blob des Head-Commits, und was zoo
+  verify ausgibt, wird nie als Workflow-Befehl gelesen. Der Lint-Job der CI prüft die Vorlage auch mit actionlint.
+  Tests führen die echten Schritte in bash gegen lokale git-Repositorys mit einem Stub für `llm-cli` aus (auch die
+  Veröffentlichung der Maintainer-Aktionen über das nachgebildete GitHub, eine Commit-Nachricht mit Wagenrücklauf und
+  eine Historie mit zwei Merge-Basen) und sichern den Aufbau des Workflows ab. Die Kopie im Community-Repository
+  ändert dessen Maintainer (die Vorlage sagt, wie eine Kopie umgestellt wird, die noch bei `pull_request` läuft, und
+  nennt die Einstellung, die das Repository außerdem braucht: Fork-Pull-Request-Workflows nur mit Freigabe, weil ein
+  Pull Request immer noch einen eigenen Workflow mit einem Job namens `validate` mitbringen kann).
 - **Abhängigkeiten auf den neuesten passenden Versionen, die Advisories vom Oktober 2026 behoben**: `uv lock
   --upgrade` hob jede Abhängigkeit auf die neueste Version, die ihr Bereich erlaubt (darunter pypdf 6.21.2, certifi
   2026.10.19, paramiko 5.1.0, qdrant-client 1.20.0, filelock 4.2.4), und Pillow geht auf 13.0.0, das 35 Advisories

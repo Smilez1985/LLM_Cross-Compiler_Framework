@@ -1,23 +1,63 @@
 # Workflow template for the community repository (copy it to .github/workflows/ there; this repository does not
-# run it). It checks every file a pull request adds under contributions/ (the README.md of each kind folder only
-# describes the folder and passes) with the framework at a pinned tag:
-#   - only pack files (.zip), each at most 5 MB;
-#   - `llm-cli zoo verify`: manifest and hashes, no links, no extra or binary files, the target validators
-#     (capabilities, every FROM pinned by digest, the shell deny-list, bash -n, no template placeholders), the
-#     recipe and knowledge schemas, an included author signature, and the privacy scrub over every file in the
-#     pack (no home folders, addresses, host or user names, and no key of the framework's secret table: a pack
-#     with a key is rejected). The repository's secret scan is not run on the zips: it skips binary files, so it
-#     would check nothing inside a pack.
+# run it). It is the required check "validate" of the protected main there (its job name), and it checks every pull
+# request into main with the framework at a pinned tag.
+#
+# Why pull_request_target: a pull_request run takes this workflow from the pull request itself, so a pull request
+# from a fork could rewrite the check to pass. pull_request_target always runs the copy on main, which only the
+# maintainer changes. That event can reach the repository's token and secrets, so the job asks for contents: read only,
+# uses no secret and no cache, and keeps no credentials in its one checkout, the framework's (persist-credentials:
+# false).
+#
+# Why the pull request's commits are data only and never checked out: a checkout of an untrusted commit under
+# pull_request_target is the known dangerous pattern, and actions/checkout would also print the commit's subject,
+# where a carriage return starts a workflow command. After the framework is installed, the base branch and the head
+# commit (by its id) are fetched quietly and without credentials into a repository without a working tree (PR_DATA):
+# no file of the pull request is ever written out, so nothing of it can be run, sourced, installed or imported, and no
+# git hook or configuration comes from it. The steps read it with git only (rev-parse, merge-base, diff, cat-file),
+# each pack is copied out of git's objects into the runner's temporary folder before it is checked, and the framework
+# that checks it comes from LCF_REF. Nothing the pull request sets (title, branch, body, commit messages, file names)
+# is written into a run: script; what a step needs comes through env.
+#
+# What is checked, in the changes git computes between main and the head commit (from their one merge base, as GitHub
+# merges them: a pull request with no or more than one merge base fails, because GitHub's merge would then combine
+# bases this check does not see; -z, --no-renames, so a move is a deletion and an addition):
+#   - every changed path: no control character in its name (a newline could forge a workflow command), and only
+#     regular files (git mode 100644): a symbolic link, an executable file or a submodule fails, so a link named
+#     x.zip can never make the check read another file;
+#   - a pull request by anyone but the repository's owner, members and collaborators (author_association OWNER,
+#     MEMBER, COLLABORATOR) may only add pack files contributions/<kind>/<name>.zip (kinds target, recipe,
+#     knowledge; the paths the maintainer actions review). Anything else it adds, changes or deletes fails with its
+#     name: this workflow, index.json, packs/, a README, also the README.md of a kind folder;
+#   - the other changes of the owner, a member or a collaborator are listed as notices and pass (the publication's
+#     pull request moves a pack to packs/ and changes index.json and index.json.sig);
+#   - every added pack, whoever adds it: at most 5 MB, and `llm-cli zoo verify`: manifest and hashes, no links, no
+#     extra or binary files, the target validators (capabilities, every FROM pinned by digest, the shell deny-list,
+#     bash -n, no template placeholders), the recipe and knowledge schemas, an included author signature, and the
+#     privacy scrub over every file in the pack (no home folders, addresses, host or user names, and no key of the
+#     framework's secret table: a pack with a key is rejected). Its output is never read as workflow commands. The
+#     repository's secret scan is not run on the zips: it skips binary files, so it would check nothing inside a pack.
+# A pull request that changes nothing passes.
+#
 # A maintainer then reviews the pack, merges it, adds its entry to index.json and signs the index on their own computer
 # (in the framework: Tools > Open Community Hub > Maintainer, or `llmcf zoo maintainer review`; by hand:
 # scripts/zoo_sign_index.py). The signing key never reaches CI.
+#
+# What the repository must set as well: a pull request can still bring a workflow of its own that runs on
+# pull_request and names its job "validate" (GitHub runs a pull request's own workflows on pull_request). In the
+# repository's Settings > Actions > General, "Approval for running fork pull request workflows from contributors"
+# must be "Require approval for all external contributors": such a workflow then never runs without the
+# maintainer's approval, while this check (pull_request_target) needs none. Never approve a fork's workflow run.
+#
+# Bringing this copy to a repository whose copy still runs on pull_request: the pull request that changes it gets no
+# "validate" from either copy (main's copy is not triggered by pull_request_target, the new one not by pull_request).
+# Add `pull_request:` next to `pull_request_target:` in that pull request (its own copy then checks it), and remove it
+# again in the very next one (main's new copy checks that one).
 name: Validate contribution
 
-# Every pull request runs this check: main of the community repository is protected and requires it (its job name,
-# "validate"), also for the maintainer's own pull requests that move a pack to packs/ and change the signed index. A
-# pull request that adds no pack under contributions/ passes.
 on:
-  pull_request:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
 
 permissions:
   contents: read
@@ -31,12 +71,16 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The folder of the pull request's head commit: data only.
+      PR_DATA: pull-request
+      # The paths a contribution may add: the ones the maintainer actions review (community_maintainer.PACK_PATH).
+      PACK_PATH: '^contributions/(target|recipe|knowledge)/([A-Za-z0-9][A-Za-z0-9._+-]{0,150}\.zip)$'
+      MAX_PACK_BYTES: "5000000"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Smilez1985/LLM_Cross-Compiler_Framework
@@ -50,32 +94,141 @@ jobs:
 
       - name: Install the framework
         run: |
-          python -m pip install --require-hashes --no-deps -r .lcf/requirements.txt
-          python -m pip install --no-deps ./.lcf
+          python -I -m pip install --require-hashes --no-deps -r .lcf/requirements.txt
+          python -I -m pip install --no-deps ./.lcf
+
+      - name: The pull request's commits (data only, never checked out)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          object='^[0-9a-f]{40}([0-9a-f]{24})?$'
+          if ! [[ $HEAD_SHA =~ $object && $BASE_REF =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+            echo "::error::the pull request's head commit or base branch is not usable"
+            exit 1
+          fi
+          # A repository without a working tree: no file of the pull request is ever written out, and git prints none
+          # of its texts (a checkout prints the commit's subject, and a carriage return in it would start a workflow
+          # command). Anonymous (the repository is public), quiet, by the commit's id.
+          git init -q --bare "$PR_DATA"
+          if ! git --git-dir="$PR_DATA" fetch -q --no-tags --no-recurse-submodules --no-write-fetch-head \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" \
+              "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" "+$HEAD_SHA:refs/lcf/head" < /dev/null; then
+            echo "::error::the base branch $BASE_REF or the pull request's head commit $HEAD_SHA could not be fetched"
+            exit 1
+          fi
 
       - name: Changed files
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: git diff --name-only --diff-filter=AMR "origin/${BASE_REF}...HEAD" -- contributions > changed.txt
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          LC_ALL: C
+        run: |
+          # A workflow command whose file and text can never end its line or its property.
+          say() {
+            local file=$2 text=$3
+            file=${file//%/%25}; file=${file//$'\r'/%0D}; file=${file//$'\n'/%0A}; file=${file//:/%3A}; file=${file//,/%2C}
+            text=${text//%/%25}; text=${text//$'\r'/%0D}; text=${text//$'\n'/%0A}
+            if [ -n "$file" ]; then printf '::%s file=%s::%s\n' "$1" "$file" "$text"; else printf '::%s::%s\n' "$1" "$text"; fi
+          }
+          object='^[0-9a-f]{40}([0-9a-f]{24})?$'
+          if ! [[ $HEAD_SHA =~ $object && $BASE_REF =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+            say error "" "the pull request's head commit or base branch is not usable"
+            exit 1
+          fi
+          if [ "$(git --git-dir="$PR_DATA" rev-parse --verify --quiet "refs/lcf/head^{commit}")" != "$HEAD_SHA" ]; then
+            say error "" "the fetched commit is not the pull request's head commit"
+            exit 1
+          fi
+          main=$(git --git-dir="$PR_DATA" rev-parse --verify --quiet "refs/remotes/origin/$BASE_REF^{commit}") || {
+            say error "" "the base branch $BASE_REF was not fetched"
+            exit 1
+          }
+          # Exactly one merge base, as GitHub merges: with two or more (main holds a merge of lines that do not contain
+          # each other), git diff would count from one of them while GitHub's merge combines them all, so the merge
+          # could change files this check never sees.
+          base=$(git --git-dir="$PR_DATA" merge-base --all "$main" "$HEAD_SHA") || base=
+          if ! [[ $base =~ $object ]]; then
+            say error "" "the pull request has no or more than one merge base with main ($BASE_REF); rebase it onto $BASE_REF"
+            exit 1
+          fi
+          case "$AUTHOR_ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR) trusted=1 ;;
+            *) trusted=0 ;;
+          esac
+          echo "Author association: ${AUTHOR_ASSOCIATION//[^A-Z_]/?}; the changes from $base to $HEAD_SHA:"
+          git --git-dir="$PR_DATA" diff --raw -z --no-renames --no-abbrev --no-ext-diff --no-textconv \
+            "$base" "$HEAD_SHA" > "$RUNNER_TEMP/lcf-changes"
+          : > "$RUNNER_TEMP/lcf-packs"
+          status=0
+          count=0
+          while IFS= read -r -d '' -u 3 meta && IFS= read -r -d '' -u 3 path; do
+            count=$((count + 1))
+            read -r _ mode _ blob change <<< "${meta#:}"
+            change=${change:0:1}
+            if [[ $path == *[[:cntrl:]]* ]]; then
+              printf -v shown '%q' "$path"
+              say error "" "a file name with a control character is refused: $shown"
+              status=1
+              continue
+            fi
+            case "$change" in
+              A) what="adds" ;;
+              M) what="changes" ;;
+              D) what="deletes" ;;
+              T) what="changes the type of" ;;
+              *) what="changes (git status $change)" ;;
+            esac
+            if [ "$change" != D ] && [ "$mode" != 100644 ]; then
+              say error "$path" "not a regular file (git mode $mode): symbolic links, executable files and submodules are refused"
+              status=1
+            elif [ "$change" = A ] && [[ $path =~ $PACK_PATH ]] && [[ $blob =~ $object ]]; then
+              printf '%s\0%s\0' "$blob" "$path" >> "$RUNNER_TEMP/lcf-packs"
+              echo "pack: $path"
+            elif [ "$trusted" = 1 ]; then
+              say notice "$path" "this pull request $what $path (the repository's $AUTHOR_ASSOCIATION: passes without a check)"
+            else
+              say error "$path" "this pull request $what $path: a contribution may only add pack files contributions/<kind>/<name>.zip (kinds target, recipe, knowledge)"
+              status=1
+            fi
+          done 3< "$RUNNER_TEMP/lcf-changes"
+          if [ "$count" = 0 ]; then echo "No changes."; fi
+          exit "$status"
 
       - name: Check every added pack
         run: |
+          object='^[0-9a-f]{40}([0-9a-f]{24})?$'
           status=0
-          while IFS= read -r file; do
-            case "$file" in
-              contributions/target/*.zip|contributions/recipe/*.zip|contributions/knowledge/*.zip)
-                if [ "$(stat -c %s "$file")" -gt 5000000 ]; then
-                  echo "::error file=$file::larger than 5 MB; packs carry scripts, recipes and text only"
-                  status=1
-                elif ! llm-cli zoo verify "$file"; then
-                  echo "::error file=$file::the pack was rejected (see the log above)"
-                  status=1
-                fi ;;
-              contributions/target/README.md|contributions/recipe/README.md|contributions/knowledge/README.md)
-                echo "::notice file=$file::the folder's description, not a pack; not checked" ;;
-              *)
-                echo "::error file=$file::only pack files (contributions/<kind>/*.zip) belong here"
-                status=1 ;;
-            esac
-          done < changed.txt
+          n=0
+          while IFS= read -r -d '' -u 3 blob && IFS= read -r -d '' -u 3 path; do
+            n=$((n + 1))
+            if ! [[ $blob =~ $object && $path =~ $PACK_PATH ]]; then
+              echo "::error::the list of added packs is damaged"
+              exit 1
+            fi
+            # The blob itself, out of git's objects (there is no checkout).
+            size=$(git --git-dir="$PR_DATA" cat-file -s "$blob" < /dev/null)
+            if [ "$size" -gt "$MAX_PACK_BYTES" ]; then
+              echo "::error file=$path::larger than 5 MB; packs carry scripts, recipes and text only"
+              status=1
+              continue
+            fi
+            mkdir -p "$RUNNER_TEMP/lcf-pack-$n"
+            file="$RUNNER_TEMP/lcf-pack-$n/${path##*/}"
+            git --git-dir="$PR_DATA" cat-file blob "$blob" < /dev/null > "$file"
+            echo "::group::llm-cli zoo verify $path"
+            # What the pack makes zoo verify print (its file names) is never read as a workflow command.
+            token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+            echo "::stop-commands::$token"
+            if llm-cli zoo verify "$file" < /dev/null; then verdict=0; else verdict=1; fi
+            echo "::$token::"
+            echo "::endgroup::"
+            if [ "$verdict" != 0 ]; then
+              echo "::error file=$path::the pack was rejected (see the log above)"
+              status=1
+            fi
+          done 3< "$RUNNER_TEMP/lcf-packs"
+          if [ "$n" = 0 ]; then echo "No pack added: nothing to verify."; fi
           exit "$status"

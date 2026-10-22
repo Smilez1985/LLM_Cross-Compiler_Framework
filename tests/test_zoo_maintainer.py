@@ -10,8 +10,11 @@ import ast
 import inspect
 import io
 import json
+import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -27,7 +30,7 @@ from orchestrator.Core import community_pack as cp
 from orchestrator.Core.community_maintainer import Cancelled, Maintainer, MaintainerError
 from orchestrator.Core.community_manager import CommunityIndex, CommunityManager
 from orchestrator.tools.audit import AuditLog
-from test_zoo import make_target, pack_bytes
+from test_zoo import HEAD_SHA_EXPRESSION, check_workflow, make_target, pack_bytes, run_check
 
 REPO = "lcf-example/community"
 KEY = "lcf-test-2026"
@@ -779,47 +782,203 @@ def test_cli_refusal_is_the_plain_reason_with_the_next_step(monkeypatch):
 
 
 # --- the workflow template -------------------------------------------------------------------------------------------
+# Its rules run in bash in test_zoo.py (run_check); here the structure that keeps the pull request from changing or
+# feeding the check, and the maintainer actions' own pull requests through the real check.
 
-def test_the_contribution_check_runs_on_every_pull_request_and_passes_one_without_a_pack(tmp_path):
-    """main of the community repository requires the check, so it runs on every pull request (no paths filter, as
-    the community repository's copy) and a pull request that adds no pack (the publication's: a moved pack, the
-    index) passes."""
-    workflow = yaml.safe_load((REPO_ROOT / "scripts" / "community_repo" / "validate-contribution.yml")
-                              .read_text(encoding="utf-8"))
+EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
+
+
+def _expressions(node, where=()):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _expressions(value, (*where, str(key)))
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _expressions(value, (*where, str(i)))
+    else:
+        for found in EXPRESSION.findall(str(node)):
+            yield where, found.strip()
+
+
+def test_the_contribution_check_runs_from_main_on_every_pull_request_into_main():
+    """main of the community repository requires the check, so it runs on every pull request into main (no paths
+    filter) and comes from main itself (pull_request_target): a pull request cannot change the check that checks it.
+    That event can reach the repository's token, so the job reads only, uses no secret and no cache, and no checkout
+    keeps credentials (the only one is the framework's: test_the_pull_requests_commits_are_never_checked_out)."""
+    workflow = check_workflow()
     trigger = workflow.get("on", workflow.get(True))
-    assert "pull_request" in trigger and not (trigger["pull_request"] or {}).get("paths")
-    assert workflow["jobs"]["validate"], "the job name is the required check's name"
-    if shutil.which("bash") is None or not hasattr(subprocess, "run") or __import__("sys").platform == "win32":
-        return
-    step = next(s for s in workflow["jobs"]["validate"]["steps"] if s.get("name") == "Check every added pack")
-    (tmp_path / "changed.txt").write_text("")
-    done = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, capture_output=True, text=True)
+    assert list(trigger) == ["pull_request_target"], "pull_request would run the pull request's own copy"
+    assert trigger["pull_request_target"] == {"types": ["opened", "synchronize", "reopened"], "branches": ["main"]}
+    assert list(workflow["jobs"]) == [cmaint.REQUIRED_CHECK], "the job name is the required check's name"
+    job = workflow["jobs"][cmaint.REQUIRED_CHECK]
+    assert workflow["permissions"] == {"contents": "read"} and "permissions" not in job
+    assert job["defaults"] == {"run": {"shell": "bash"}}
+    used = yaml.safe_dump(workflow)   # without the comments
+    for name in ("secrets.", "github.token", "GITHUB_TOKEN"):
+        assert name not in used, name
+    checkouts = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/checkout@")]
+    assert checkouts and all(s["with"].get("persist-credentials") is False for s in checkouts)
+    setup = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-python@")]
+    assert len(setup) == 1 and set(setup[0]["with"]) == {"python-version"}, "no cache, nothing read from a file"
+    framework = next(s for s in checkouts if s["with"].get("path") == ".lcf")
+    assert framework["with"]["repository"] == "Smilez1985/LLM_Cross-Compiler_Framework"
+    assert framework["with"]["ref"] == "${{ env.LCF_REF }}"
+
+
+def test_the_check_takes_its_rules_from_the_maintainer_actions():
+    """The paths a contribution may add are the ones the maintainer actions review, and the size limit is theirs."""
+    job = check_workflow()["jobs"][cmaint.REQUIRED_CHECK]
+    assert job["env"]["PACK_PATH"] == cmaint.PACK_PATH.pattern
+    assert int(job["env"]["MAX_PACK_BYTES"]) == cmaint.MAX_CONTRIBUTION_BYTES
+
+
+def test_no_expression_of_the_pull_request_reaches_a_script():
+    """An expression is expanded before the shell reads the script, so one in a run: block would make the pull
+    request's title, branch, body or file names shell code. What a step needs comes through env; the pull request's
+    values appear only there (not even as the ref of a checkout: there is none of its commits)."""
+    workflow = check_workflow()
+    for step in workflow["jobs"][cmaint.REQUIRED_CHECK]["steps"]:
+        for key in ("run", "shell", "working-directory", "if"):
+            assert not EXPRESSION.search(str(step.get(key, ""))), (step.get("name"), key)
+    found = list(_expressions(workflow))
+    for where, expression in found:
+        if expression.startswith("github."):
+            assert where[-2] == "env", (where, expression)
+    assert {e for _, e in found} == {"env.LCF_REF", "github.base_ref", "github.event.pull_request.head.sha",
+                                     "github.event.pull_request.author_association"}
+
+
+# Every git command a step after the framework's installation may run: on the pull request's repository only, and
+# only these (none writes a working tree, runs a hook or reads a configuration of the pull request).
+DATA_GIT = re.compile(r'git (?:init -q --bare "\$PR_DATA"|--git-dir="\$PR_DATA" (?:fetch|rev-parse|merge-base|diff|cat-file)\b)')
+GIT_CALL = re.compile(r'(?:^|\$\(|[;&|!{]|\b(?:if|then|do|else))\s*(git\s)', re.MULTILINE)   # git as a command
+
+
+def _commands(script: str) -> str:
+    return "\n".join(line for line in script.splitlines() if not line.strip().startswith("#"))
+
+
+def _fetches(step) -> bool:
+    return bool(re.search(r'git --git-dir="\$PR_DATA" fetch\b', _commands(str(step.get("run", "")))))
+
+
+def test_the_pull_requests_commits_are_never_checked_out():
+    """actions/checkout of the pull request's commit under pull_request_target is the known dangerous pattern, and a
+    checkout prints the commit's subject, where a carriage return starts a workflow command (test_zoo runs that
+    attack). So the only checkout is the framework's, and the pull request's commits are fetched instead: quietly,
+    without credentials, by the id the event names, into a repository without a working tree."""
+    job = check_workflow()["jobs"][cmaint.REQUIRED_CHECK]
+    checkouts = [s for s in job["steps"] if "uses" in s and str(s["uses"]).startswith("actions/checkout@")]
+    assert [s["with"].get("repository") for s in checkouts] == ["Smilez1985/LLM_Cross-Compiler_Framework"]
+    assert [s for s in job["steps"] if "uses" in s and s not in checkouts
+            and not str(s["uses"]).startswith("actions/setup-python@")] == []
+    (data,) = [s for s in job["steps"] if _fetches(s)]
+    assert data["env"]["HEAD_SHA"] == HEAD_SHA_EXPRESSION
+    script = _commands(data["run"])
+    assert 'git init -q --bare "$PR_DATA"' in script
+    fetch = re.search(r'git --git-dir="\$PR_DATA" fetch ([^;]*?); then', script, re.DOTALL).group(1)
+    for option in ("-q", "--no-tags", "--no-recurse-submodules", '"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"',
+                   '"+$HEAD_SHA:refs/lcf/head"'):
+        assert option in fetch.split(), option
+    for step in job["steps"]:
+        commands = _commands(str(step.get("run", ""))).lower()
+        for word in ("checkout", "worktree", "github_token", "extraheader", "credential", "authorization"):
+            assert word not in commands, (step.get("name"), word)
+
+
+def test_the_pull_requests_commits_are_data_only():
+    """After the framework is installed (from its own checkout), the pull request's commits are fetched into their own
+    folder, and no step runs anything from them: no action, no working directory or shell of its own, and every git
+    command reads that repository only (rev-parse, merge-base, diff, cat-file); each pack is copied out of git's
+    objects."""
+    job = check_workflow()["jobs"][cmaint.REQUIRED_CHECK]
+    steps, folder = job["steps"], job["env"]["PR_DATA"]
+    (at,) = [i for i, s in enumerate(steps) if _fetches(s)]
+    assert folder and folder not in (".", ".lcf") and "/" not in folder
+    install = [i for i, s in enumerate(steps) if "pip install" in s.get("run", "")]
+    assert install and max(install) < at, "the framework is installed before any object of the pull request is there"
+    for i in install:
+        assert all(" .lcf/" in line or " ./.lcf" in line for line in steps[i]["run"].splitlines()
+                   if "pip install" in line), steps[i]["run"]
+    for step in steps[:at]:
+        assert "PR_DATA" not in str(step) and folder not in str(step)
+    after = steps[at:]
+    assert len(after) > 1, "the checks come after the fetch"
+    for step in after:
+        assert set(step) <= {"name", "run", "env"}, step.get("name")
+        script = _commands(step["run"])
+        calls = [m.start(1) for m in GIT_CALL.finditer(script)]
+        assert calls and len(calls) == len(DATA_GIT.findall(script)), step["name"]
+        for at_call in calls:
+            assert DATA_GIT.match(script, at_call), (step["name"], script[at_call:at_call + 80])
+        rest = DATA_GIT.sub("", script)
+        assert "PR_DATA" not in rest and folder not in rest, step["name"]
+    diff = next(s["run"] for s in after if " diff " in s["run"])
+    for option in ("--raw", "-z", "--no-renames", "--no-ext-diff", "--no-textconv"):
+        assert re.search(rf" {re.escape(option)}\b", diff), option
+    assert "merge-base --all" in diff, "exactly one merge base, as GitHub merges"
+    verify = next(s["run"] for s in after if "zoo verify" in s["run"])
+    assert 'cat-file blob "$blob"' in verify and '"$RUNNER_TEMP/' in verify
+
+
+def test_actionlint_accepts_the_template():
+    """The CI's lint job runs actionlint (with ShellCheck) over the template too; here when it is installed."""
+    bin_dir = Path(sys.executable).parent
+    actionlint = shutil.which("actionlint") or shutil.which("actionlint", path=str(bin_dir))
+    if actionlint is None:
+        pytest.skip("actionlint (actionlint-py, the dev group) is not installed")
+    ci = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    lint = next(s["run"] for s in ci["jobs"]["lint"]["steps"] if s.get("name") == "actionlint")
+    assert "scripts/community_repo/validate-contribution.yml" in lint
+    done = subprocess.run([actionlint, "scripts/community_repo/validate-contribution.yml"], cwd=REPO_ROOT,
+                          capture_output=True, text=True, stdin=subprocess.DEVNULL, check=False,
+                          env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
     assert done.returncode == 0, done.stdout + done.stderr
 
 
 @needs_git
-def test_the_publication_pull_request_lists_no_contribution_file(tmp_path, monkeypatch):
-    """The workflow's "Changed files" step on the maintainer's pull request (the pack moved from contributions/ to
-    packs/, the index and its signature changed) lists nothing under contributions/, so the check passes it."""
-    if shutil.which("bash") is None or __import__("sys").platform == "win32":
-        pytest.skip("runs the workflow step in bash")
-    workflow = yaml.safe_load((REPO_ROOT / "scripts" / "community_repo" / "validate-contribution.yml")
-                              .read_text(encoding="utf-8"))
-    step = next(s for s in workflow["jobs"]["validate"]["steps"] if s.get("name") == "Changed files")
-    github = FakeGitHub(tmp_path, monkeypatch)
-    github.commit({f"contributions/target/{PACK}": b"PK pack"}, "refs/heads/main")
-    work = tmp_path / "work"
-    git("clone", "-q", str(github.origin), str(work))
-    git("-C", str(work), "switch", "-q", "-c", "lcf-publish-x")
-    (work / "packs" / "target").mkdir(parents=True)
-    git("-C", str(work), "mv", f"contributions/target/{PACK}", f"packs/target/{PACK}")
-    (work / "index.json").write_text("{}")
-    git("-C", str(work), "add", "index.json")
-    git("-C", str(work), "commit", "-q", "-m", "publish")
-    listed = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=work, capture_output=True, text=True,
-                            env={**__import__("os").environ, "BASE_REF": "main"})
-    assert listed.returncode == 0, listed.stderr
-    assert (work / "changed.txt").read_text() == ""
+def test_the_maintainer_actions_pull_requests_pass_the_real_check(world, monkeypatch):
+    """The fake GitHub runs the check's real steps (test_zoo.run_check) for each pull request: the contribution as its
+    author (NONE) and the publication the maintainer actions open as the repository's OWNER, which passes (the pack
+    moved to packs/, index.json and index.json.sig changed: notices, nothing verified). The same publication from
+    anyone else fails, and so the contribution's check is the one that verifies the pack."""
+    if shutil.which("bash") is None or sys.platform == "win32":
+        pytest.skip("runs the workflow's steps in bash")
+    github, results = world.github, {}
+
+    def check(number, association):
+        head = github.prs[number]["headRefOid"]
+        results[(number, association)] = run_check(github.origin, head, association,
+                                                   world.tmp / f"check-{number}-{association}")
+        return "pass" if results[(number, association)][0] == 0 else "fail"
+
+    original = github.gh
+
+    def gh(args):
+        out, code, err = original(args)
+        if args[:2] == ["pr", "create"] and code == 0:
+            number = max(github.prs)
+            check(number, "NONE")
+            github.prs[number]["checks"] = ["pending", check(number, "OWNER")]
+        return out, code, err
+    monkeypatch.setattr(github, "gh", gh)
+
+    data = demo_pack(world.tmp)
+    github.contribution(data)
+    github.prs[7]["checks"] = [check(7, "NONE")]
+    code, output, verified = results[(7, "NONE")]
+    assert code == 0 and [Path(f).read_bytes() for f in verified] == [data], output
+    review = world.m.review(world.m.find("7"))
+    world.m.publish(review, key_name=KEY)
+    review.discard()
+    assert github.merges == [7, 8]
+    code, output, verified = results[(8, "OWNER")]
+    assert code == 0 and verified == [], output
+    changed = (f"contributions/target/{PACK}", f"packs/target/{PACK}", "index.json", "index.json.sig")
+    for path in changed:
+        assert f"::notice file={path}::" in output, output
+    code, output, _ = results[(8, "NONE")]
+    assert code != 0 and all(f"::error file={path}::" in output for path in changed), output
 
 
 # --- GUI -------------------------------------------------------------------------------------------------------------

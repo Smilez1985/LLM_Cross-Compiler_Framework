@@ -488,11 +488,14 @@ siehe auch den [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.m
    committet das Paket auf einem neuen Branch nach `contributions/<Art>/` und öffnet den Pull-Request. Sonst, oder
    wenn das scheitert, öffnet sich die Upload-Seite des Repositorys in deinem Browser, und du ziehst die Datei
    dorthin.
-4. **Die CI-Prüfung:** Bei jedem Pull-Request, der `contributions/` berührt, nimmt der Workflow des
-   Community-Repositorys nur Paketdateien an (`contributions/target/*.zip`, `contributions/recipe/*.zip`,
-   `contributions/knowledge/*.zip`), jeweils höchstens 5 MB, führt für jede `llm-cli zoo verify` aus (Manifest und
-   Prüfsummen, keine Links, zusätzlichen oder binären Dateien, die Target-Prüfungen, die Formate von Rezepten und
-   Wissen, eine enthaltene Autorensignatur, die Datenschutz-Bereinigung). Die Datenschutz-Bereinigung umfasst auch
+4. **Die CI-Prüfung:** Bei jedem Pull-Request in `main` nimmt der Workflow des Community-Repositorys (immer seine
+   eigene Kopie in `main`, nie eine, die ein Pull-Request ändert) von Beitragenden nur neue Paketdateien an
+   (`contributions/target/<Name>.zip`, `contributions/recipe/<Name>.zip`, `contributions/knowledge/<Name>.zip`,
+   normale Dateien): Ein Pull-Request, der auch etwas anderes ändert, hinzufügt oder löscht, eine README eingeschlossen,
+   fällt durch, und der Fehler nennt diese Datei. Er erlaubt höchstens 5 MB pro Paket und führt für jedes
+   `llm-cli zoo verify` aus (Manifest und Prüfsummen, keine Links, zusätzlichen oder binären Dateien, die
+   Target-Prüfungen, die Formate von Rezepten und Wissen, eine enthaltene Autorensignatur, die
+   Datenschutz-Bereinigung). Die Datenschutz-Bereinigung umfasst auch
    die Tabelle der Geheimnis-Formate des Frameworks; ein Paket mit einem Schlüssel in einer seiner Dateien wird also
    abgelehnt. Der Secret-Scan des Repositorys läuft nicht über die ZIP-Dateien, weil er Binärdateien überspringt und
    in einem Paket nichts prüfen würde.
@@ -526,7 +529,14 @@ nutzt sie nicht.
   Kopiere sie dort nach `.github/workflows/` (dieses Repository führt sie nicht aus) und setze `LCF_REF` auf die
   Framework-Version, mit der die Pakete geprüft werden: In der Vorlage steht ein Platzhalter, der Job schlägt also
   fehl, bis das Tag eines veröffentlichten Releases eingetragen ist. Sie führt die Prüfungen aus Schritt 4 oben mit
-  dem Framework in diesem Tag aus. Der Signaturschlüssel erreicht die CI nie.
+  dem Framework in diesem Tag aus. Sie läuft bei `pull_request_target`, also prüft die Kopie in `main` jeden Pull
+  Request, nur lesend und ohne Secrets, und die Dateien des Pull Requests werden nur als Daten gelesen. Besitzer,
+  Mitglieder und Collaborators des Repositorys dürfen auch andere Dateien ändern (die Veröffentlichung des Maintainers
+  verschiebt das Paket nach `packs/` und ändert den signierten Index); diese Änderungen erscheinen als Hinweise. Stell
+  die Actions-Option "Approval for running fork pull request workflows from contributors" des Repositorys auf
+  "Require approval for all external contributors" und gib den Lauf eines Forks nie frei: Ein Pull-Request kann einen
+  eigenen Workflow mit einem Job namens `validate` mitbringen, und die Prüfung selbst braucht keine Freigabe. Der
+  Signaturschlüssel erreicht die CI nie.
 - `scripts/zoo_sign_index.py` signiert den Index. Sein Signaturschlüssel liegt nur im Schlüsselbund des
   Betriebssystems (Dienst `lcf-community-index`):
 
