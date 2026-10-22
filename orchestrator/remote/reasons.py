@@ -148,13 +148,32 @@ def is_local(error: BaseException) -> bool:
         getattr(error, "errno", None) in _LOCAL_ERRNOS
 
 
+def _own_accounts() -> set:
+    """The names this computer's account goes by (its home folder's name, USER, USERNAME), never shown to an AI."""
+    import os
+    names = {os.environ.get("USER", ""), os.environ.get("USERNAME", "")}
+    try:
+        names.add(os.path.basename(os.path.expanduser("~").replace("\\", "/").rstrip("/")))
+    except Exception:  # noqa: BLE001 - no home folder known: the environment's names only
+        pass
+    return {n for n in names if n and n != "~"}
+
+
 def local_detail(error: BaseException) -> str:
     """A local problem in a few plain words for a reason text: what the system said and the file's name, never its
-    folder ("No space left on device: known_hosts"); the log has the whole path."""
+    folder ("No space left on device: known_hosts"); the log has the whole path. A home folder itself, or a folder
+    with this computer's account name, is named by its kind: its name is an account's name, and the reason reaches an
+    AI (D0)."""
     what = getattr(error, "strerror", None) or error.__class__.__name__
     name = getattr(error, "filename", None)
-    name = str(name).replace("\\", "/").rstrip("/").rpartition("/")[2] if name is not None else ""
-    return f"{what}: {name}" if name else str(what)
+    if name is None:
+        return str(what)
+    parent, _, base = str(name).replace("\\", "/").rstrip("/").rpartition("/")
+    if base and parent.rpartition("/")[2].lower() in ("home", "users"):   # /home/<account>, C:\Users\<account>
+        base = "a home folder"
+    elif base and base in _own_accounts():
+        base = "a folder named after the account"
+    return f"{what}: {base}" if base else str(what)
 
 
 def reach_code(error: BaseException, *, while_waiting: bool = False) -> str:
