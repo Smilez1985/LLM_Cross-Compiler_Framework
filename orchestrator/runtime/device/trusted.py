@@ -213,6 +213,27 @@ class TrustedDevices:
             self._write(self.path, rows)
         return device
 
+    def replace(self, old_id: str, host: str, port: int, user: str, key: Any, *, via: str, paired: bool,
+                label: str) -> TrustedDevice:
+        """Q5: the person changed the board's address or host key (orchestrator/remote/pairing.py replace_key): its
+        record moves to the new address and, for a new key, to the board's new device ID; the old record goes in the
+        same write. Called only by the person's board steps (person_steps.change_board)."""
+        from orchestrator.runtime.profile import device_id_for_host_key
+        from orchestrator.utils import ssh_trust
+        fp = ssh_trust.fingerprint(key)
+        device_id = device_id_for_host_key(fp)
+        with file_lock(self.state_dir / ".devices.lock"):
+            rows = self._read(self.path)
+            rows.pop(old_id, None)
+            device = TrustedDevice(device_id=device_id, label=clean_label(label), host=host, port=int(port),
+                                   user=user, key_type=key.get_name(), fingerprint=fp, paired=bool(paired),
+                                   trusted_at=_now(), trusted_via=via).check()
+            row = asdict(device)
+            row.pop("device_id")
+            rows[device_id] = row
+            self._write(self.path, rows)
+        return device
+
     def remove(self, device_id: str) -> bool:
         with file_lock(self.state_dir / ".devices.lock"):
             rows = self._read(self.path)

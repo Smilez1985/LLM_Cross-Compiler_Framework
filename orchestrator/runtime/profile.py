@@ -1076,6 +1076,17 @@ class ProfileStore:
         write_private(self._meta_path(device_id), json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
         return path
 
+    def set_address(self, device_id: str, address: str) -> bool:
+        """The stored board's SSH address (host[:port]) after the person changed it (Q5, deploy devices edit); its probe
+        and label stay. False when no probe of this device is stored."""
+        if not self.device_path(device_id).is_file():
+            return False
+        meta = self.device_info(device_id)
+        meta["address"] = _check_address(address)
+        meta["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        write_private(self._meta_path(device_id), json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
+        return True
+
     def load_device(self, device_id: str) -> Optional[HardwareProfile]:
         return self._read(self.device_path(device_id))
 
