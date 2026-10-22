@@ -102,6 +102,19 @@ SPACE_MARGIN = 256 * MIB   # what a download leaves free when its caller gives n
 # The caller's disk rule: space(folder, needed, what) returns None when `needed` more bytes fit in `folder`, else the
 # refusal (an exception; the domain passes Core/disk_plan's, this bottom layer imports nothing above it).
 SpaceRule = Callable[[Path, int, str], Optional[Exception]]
+# What a disk rule's refusal carries beside its message: the reason code, the AI's next step, the person's next steps
+# and the disk checks a window shows in the person's language (Core/disk_plan.person_reason).
+REASON_FIELDS = ("code", "next", "steps", "checks")
+
+
+def with_reason(error: Exception, source: Any) -> Exception:
+    """`error` (a download error, or the caller's own error class that wraps one) with the reason fields of `source`
+    (REASON_FIELDS, those it has); returns `error`, so ``raise with_reason(PackError(str(e)), e)`` keeps them."""
+    for name in REASON_FIELDS:
+        value = getattr(source, name, None)
+        if value:
+            setattr(error, name, value)
+    return error
 
 
 class PinnedDownloader:
@@ -132,11 +145,7 @@ class PinnedDownloader:
         if self.space is not None:
             refusal = self.space(folder, int(needed), what)
             if refusal is not None:
-                error = self.error(str(refusal))
-                for name in ("code", "next", "steps", "checks"):
-                    if getattr(refusal, name, None):
-                        setattr(error, name, getattr(refusal, name))
-                raise error
+                raise with_reason(self.error(str(refusal)), refusal)
             return
         free = shutil.disk_usage(folder).free
         if free < needed + SPACE_MARGIN:

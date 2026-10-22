@@ -121,6 +121,24 @@ class TestDownloads:
             zoo._downloads().ensure_space(tmp_path / "packs", 10 * GB + 1)
         assert "30.0 GB reserved by other calls" in str(e.value) and e.value.code == "insufficient_resources"
 
+    def test_the_zoo_install_keeps_the_refusal_for_the_community_hub(self, tmp_path, monkeypatch):
+        """The Community Hub shows person_reason of a failed install: the pack download's refusal must reach it with
+        its disk numbers, reason code and steps (prepare_install wraps the download error in a PackError)."""
+        from test_zoo import World
+
+        from orchestrator.Core.community_pack import PackError
+        from orchestrator.Core.disk_plan import person_reason
+        world = World(tmp_path)
+        world.add(world.target_pack())
+        world.publish()
+        monkeypatch.setattr(shutil, "disk_usage", fixed(1 * GB))   # 20 GB must stay free on 1000 GB
+        with pytest.raises(PackError) as e:
+            world.cm.prepare_install("target", "demo-board")
+        assert str(e.value).startswith("Not enough disk space for the download: download disk: ")
+        assert e.value.code == "insufficient_resources"
+        assert person_reason(e.value, "de").startswith("Nicht genug Speicherplatz: "), "the window's German text"
+        assert list((world.root / "targets" / ".quarantine").iterdir()) == [], "nothing is left in quarantine"
+
     def test_the_ai_disk_check_counts_the_ledger(self, tmp_path, held, monkeypatch):
         """download_hf_file counted the ledger already (design 6.5); the package and runtime build checks now too."""
         from orchestrator.Core import hf_hub
