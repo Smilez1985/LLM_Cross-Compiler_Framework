@@ -1,126 +1,72 @@
-config_module.sh:
+Die Stufenmodule eines Targets (targets/<Target>/modules/)
 
-Workflow:
+Ein Build sind vier Stufenmodule. modules/build.sh, der Stage-Runner, führt sie in dieser Reihenfolge aus und tut
+sonst nichts (Entscheidung U9 des Maintainers). Der Kopf jedes Moduls sagt, in welchem Image es läuft, für welches
+System sein Ergebnis ist und was seine Stufe tut. Die ganze Anleitung steht in docs/Module_Developer_Guide_DE.md,
+Abschnitt 6 (English: docs/Module_Developer_Guide.md, section 6).
 
-Stufe 1 (Auf Ziel-Hardware):
-bash# Auf RK3566/Target-PC ausführen
-./hardware_probe.sh  # → target_hardware_config.txt
+  1. source   source_module.sh   nennt die Quellen der Werkzeuge, aus denen das Image gebaut wurde (llama.cpp-Pin,
+                                 SDK-venvs); lädt nichts herunter
+  2. config   config_module.sh   liest den Auftrag aus der Umgebung, lehnt ab, was das Target nicht bauen kann, und
+                                 schreibt den Build-Plan build_config.sh in den Stufenordner; mit einem
+                                 Hardware-Profil erzeugt sie außerdem CMake-Toolchain und Compiler-Flags des Boards
+  3. convert  convert_module.sh  wandelt das Modell um (GGUF-F16-Zwischendatei oder, über rkllm_module.sh und
+                                 rknn_module.sh, das fertige RKLLM- oder RKNN-Modell); im Auftrag imatrix berechnet
+                                 sie die Importance-Matrix
+     rotate   rotate_module.sh   optionaler Haken zwischen convert und target für eine Rotation wie SpinQuant
+                                 (Roadmap); läuft nur, wenn das Target diese Datei hat, mitgeliefert wird keine
+  4. target   target_module.sh   quantisiert, schreibt build_info.json und listet die Ergebnisse auf
 
-Stufe 2 (Im Docker-Container):
-
-bash# Im Build-Container
-./config_module.sh --hardware-config target_hardware_config.txt
-# → Generiert: cross_compile_toolchain.cmake + build_config.sh
-
-Was das config_module.sh leistet:
-✅ Variable Substitution - Liest hardware_probe.sh Ausgabe ein
-✅ Multi-Arch Support - AArch64, x86_64, ARMv7
-✅ CPU-Specific Flags - Cortex-A55/A72/A76, Native x86
-✅ SIMD-Detection - NEON, AVX2, AVX512 → GGML-Flags
-✅ Cross-Compilation - Automatische Toolchain-Erkennung
-✅ CMake Integration - Vollständige Toolchain-Datei
-✅ Professional Validation - Compiler-Tests, Syntax-Checks
-
-
------------------------
-convert_module.sh - das Format-Conversion-Modul
-
-Verwendung im Container:
-
-bash# Im Docker-Container
-./convert_module.sh \
-  --input /build-cache/models/granite-h-350m \
-  --output /build-cache/output/granite-h-350m.fp16.gguf \
-  --model-name granite-h-350m
+benchmark_module.sh ist keine Stufe: Es würde die CPU des Build-Rechners messen. Ein Modell für ein Board wird auf
+dem Board gemessen: llm-cli device runtime verify GERÄT --bench-model PFAD, oder in der GUI
+Boards > Boards and Devices... > Verify...
 
 
-Was das convert_module.sh leistet:
+Verwendung im Build-Container
+-----------------------------
 
-✅ Multi-Format Support - HuggingFace, PyTorch, ONNX, SafeTensors → GGUF FP16
-✅ Intelligente Format-Detection - Automatische Erkennung des Input-Formats
-✅ Robust Validation - Input/Output Validation mit Integritäts-Checks
-✅ Container-Native - Direkt mit Docker-Python (kein VENV-Overhead)
-✅ Professional Error Handling - Cleanup, Backups, ausführliche Logs
-✅ Conversion Statistics - Compression-Ratio, Timing, File-Größen
-✅ llama.cpp Integration - Nutzt bewährte convert_hf_to_gguf.py
-✅ Functional Testing - Testet GGUF-Output mit llama-cli falls verfügbar
+Die Build-Engine startet /app/modules/build.sh selbst (JOB_TYPE=imatrix für die Importance-Matrix, sonst
+JOB_TYPE=build). Von Hand, im Container:
 
+  # Der ganze Build
+  /app/modules/build.sh --input /build-cache/input-model --model-name MODELL --quantization Q4_K_M
 
------------------------
+  # Mit Hardware-Profil des Boards (aus der Hardware-Probe, target_hardware_config.txt)
+  /app/modules/build.sh --input /build-cache/input-model --model-name MODELL --hardware-config PROFIL
 
-target_module.sh - das Quantization & Packaging-Modul! 
+  # Nur bis zu einer Stufe (die Stufen davor laufen mit)
+  /app/modules/build.sh --to convert --input /build-cache/input-model --model-name MODELL
 
+  # Ein Stufenmodul von Hand gestartet tut dasselbe wie build.sh --to STUFE
+  bash /app/modules/convert_module.sh --input /build-cache/input-model --model-name MODELL
 
-Was das target_module.sh leistet:
-✅ Multi-Quantization Support - Q4_0, Q4_K_M, Q8_0, alle llama.cpp Methoden
-✅ Cross-Compilation - Nutzt config_module.sh Toolchain für Target-Hardware
-✅ Professional Packaging - Deployment-ready mit Dokumentation
-✅ Automated Testing - Functional tests + validation
-✅ Helper Scripts - test_model.sh, deploy.sh für einfache Nutzung
-✅ Complete Manifest - JSON mit allen Build-Details
-✅ Container-Native - Kein VENV-Overhead, direkt mit Docker-Python
+  # Alle Stufen erneut, auch die schon fertigen
+  /app/modules/build.sh --fresh --input /build-cache/input-model --model-name MODELL
 
+Über den Entrypoint des Images (entrypoint.sh):
 
-Verwendung der kompletten Pipeline:
+  pipeline EINGABEPFAD MODELLNAME [QUANTISIERUNG] [HARDWARE_PROFIL]   der ganze Build über build.sh
+  source | config | convert | target [Optionen]                     der Build bis zu dieser Stufe
+  test                                                              prüft die Werkzeuge des Images
 
 
-bash# 1. Environment Setup
-./source_module.sh
+Fortsetzen
+----------
 
-# 2. Hardware Config (mit hardware_probe.sh Datei)
-./config_module.sh --hardware-config target_hardware_config.txt
-
-# 3. Model Conversion
-./convert_module.sh --input granite-h-350m --output granite.fp16.gguf
-
-# 4. Quantization & Packaging
-./target_module.sh --input granite.fp16.gguf --quantization Q4_K_M --model-name granite-h-350m
-
---------------------------------
+Wenn eine Stufe fertig ist, schreibt der Runner eine Marke nach $BUILD_SCRATCH_DIR/stages/<Auftrag>/: eine
+Prüfsumme der Eingaben (Format, Board, Quantisierung, Modellordner, Modell-Revision, Kontextlänge, Importance-Matrix,
+Kalibrierdatensatz, Hardware-Profil, llama.cpp-Pin des Images, SDK-Pfade, SHA-256 jeder Datei in modules/ und
+scripts/) und die Dateien, die die Stufe mit stage_output genannt hat. Erneut auf demselben Arbeitsordner gestartet,
+überspringt der Runner jede Stufe, deren Marke passt und deren Dateien noch da sind. Eine Stufe, die scheitert,
+schreibt keine Marke; der Build endet mit ihrem Exit-Code.
 
 
-Das Framework kann theoretisch:
-🎯 Community-Ready - Neue Targets einfach hinzufügen
-🎯 Production-Ready - Professional packaging & deployment
-🎯 Multi-Architecture - Rockchip, NVIDIA, Intel, Raspberry Pi
+Fortschritt
+-----------
 
+Je Stufe eine Zeile, die die Build-Engine aus dem Container-Log liest:
 
--------------------------------
-
-Container-System:
-✅ Erweitertes Dockerfile - Multi-stage, alle 4 Module, professionelle Sicherheit
-✅ Intelligent Entrypoint - Interactive Mode, Pipeline Mode, System Tests
-✅ Professional docker-compose - Volume Management, Health Checks, Orchestrierung
-✅ Production-Ready - Non-root user, Resource Limits, Restart Policies
-
-
-Einfache Nutzung:
-
-bash# 1. Framework starten
-docker-compose up -d
-
-# 2. Interaktiver Modus
-
-docker-compose exec rockchip-builder interactive
-
-# 3. Komplette Pipeline
-
-docker-compose exec rockchip-builder pipeline \
-  /build-cache/models/granite-h-350m \
-  granite-h-350m \
-  Q4_K_M
-
-# 4. Einzelne Module
-
-docker-compose exec rockchip-builder convert \
-  --input /build-cache/models/granite-h-350m \
-  --model-name granite
-
-
-Framework Status - Fast komplett! 🚀
-✅ 4 Module - source, config, convert, target
-✅ Container System - Dockerfile + docker-compose + entrypoint
-✅ Rockchip Target - Vollständig implementiert
-✅ GUI/Orchestrator - PySide6 Interface
-✅ Documentation - README, how2.txt
-
+  === Stage 3/4: convert ===
+  === Stage 3/4: convert done in 41 s ===
+  === Stage 1/4: source resumed ===
+  === Stage 3/4: convert failed (exit 1) ===

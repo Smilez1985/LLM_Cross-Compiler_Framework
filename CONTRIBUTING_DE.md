@@ -153,8 +153,14 @@ python -m pytest
 - `tests/test_versioning.py` prüft, dass `orchestrator/__init__.py`, `pyproject.toml` und der neueste
   veröffentlichte Changelog-Eintrag dieselbe Version tragen.
 - `tests/test_foundation.py` und `tests/test_review_capabilities_paths.py` prüfen, dass die Rockchip-Capabilities
-  in `target.yml` zu `modules/build.sh`, `modules/rkllm_module.sh`, `modules/rknn_module.sh` und
-  `scripts/export_rkllm.py` passen.
+  in `target.yml` zu den Stufenmodulen (`modules/config_module.sh`, `modules/convert_module.sh`),
+  `modules/rkllm_module.sh`, `modules/rknn_module.sh` und `scripts/export_rkllm.py` passen.
+- `tests/test_build_stages.py` hält mit nachgebauten Werkzeugketten fest, was ein Rockchip-Build erzeugt (Befehle
+  und ihre Reihenfolge, Ausgabedateien und Namen, `SHA256SUMS`, die Umgebungsvariablen, die die Skripte lesen,
+  Exit-Codes), und prüft den Stage-Runner `modules/build.sh`: Reihenfolge der Stufen, Marken zum Fortsetzen,
+  Fortschrittszeilen, den Platz für die Rotation und dass keine Stufe einen Benchmark ausführt.
+  `tests/test_target_template.py` prüft die Stufenmodule der Vorlage und dass ihr `build.sh` derselbe Runner ist wie
+  der von Rockchip.
 
 ### Die Matrix Python 3.11 bis 3.14
 
@@ -269,7 +275,8 @@ Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läu
    `git ls-remote https://github.com/ggml-org/llama.cpp.git refs/tags/b<N>` auf, das genau den neuen Commit ausgeben
    muss (GitHub liefert Commits, die in irgendeinen Fork gepusht wurden, auch über die Upstream-URL aus, der Commit
    allein beweist also nicht seine Herkunft), und listet jede Stelle auf, die die Version nennt: abgeleitete und
-   Referenz-Stellen müssen übereinstimmen, die Legacy-Vorgaben in `modules/source_module.sh` werden nur gemeldet.
+   Referenz-Stellen müssen übereinstimmen, und die `LLAMA_CPP_COMMIT`-Vorgabe eines `modules/source_module.sh` aus
+   Version 1.x in einem älteren Target wird nur gemeldet (die mitgelieferten Stufenmodule haben keine).
 5. Die Optionen, die etwas herunterladen können, gegen den neuen Baum prüfen. `DOWNLOAD_OPTIONS_OFF` und `NEVER_SET`
    in `orchestrator/runtime/build/recipe.py` nennen jede Option mit Datei und Zeilen; den neuen Baum nach
    `FetchContent_Declare`, `ExternalProject_Add` und `file(DOWNLOAD` durchsuchen und jede neue ergänzen. Ebenso die

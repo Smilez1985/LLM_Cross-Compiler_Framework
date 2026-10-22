@@ -1395,6 +1395,46 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Ein Build sind wieder die vier Stufenmodule, und `build.sh` führt sie nur aus** (Entscheidung U9 des
+  Maintainers; Konsolidierungskette build4). `targets/Rockchip/modules/build.sh` ist ein Stage-Runner über
+  `source_module.sh` (die Quellen der Werkzeuge, aus denen das Image gebaut wurde), `config_module.sh`
+  (vereinheitlicht den Auftrag, lehnt ab, was das Target nicht bauen kann, und schreibt den Build-Plan),
+  `convert_module.sh` (das Modell in voller Genauigkeit, die Importance-Matrix, RKLLM und RKNN über ihre Format-Helfer
+  `rkllm_module.sh` und `rknn_module.sh`) und `target_module.sh` (Quantisierung, `build_info.json`); die Arbeit des
+  Verteilers liegt in der Stufe, zu der sie gehört, und ein GGUF-, RKLLM- oder RKNN-Build erzeugt dieselben Dateien
+  mit denselben Namen wie bisher (`tests/test_build_stages.py` hält Befehle, Ausgaben, `SHA256SUMS`, die gelesenen
+  Umgebungsvariablen und die Exit-Codes fest, vorher und nachher). Neu: Nach jeder Stufe, die wirklich fertig ist,
+  eine Marke zum Fortsetzen im Arbeitsordner des Builds (`stages/<Auftrag>/`) mit einer Prüfsumme der Eingaben der
+  Stufe (Auftrag, Revision und Dateien des Modells, Quantisierung, Target, Format, Kalibrierdaten, der llama.cpp-Pin
+  des Images und der SHA-256 jedes Moduls und Skripts) und den Dateien, die sie geschrieben hat; erneut auf demselben
+  Arbeitsordner mit denselben Eingaben gestartet, werden fertige Stufen übersprungen, und eine geänderte Eingabe
+  oder eine fehlende Datei führt diese Stufe und jede spätere erneut aus (`build.sh --fresh` übergeht die Marken,
+  `--to STUFE` hält nach einer Stufe an). Jede Stufe schreibt eine Fortschrittszeile (`=== Stage 3/4: convert ===`,
+  `... done in 41 s`, `... resumed`, `... failed (exit 1)`), und Build-Status, Builder und `llm-cli build status`
+  zeigen die Stufe („Running modules: convert (3/4)“) mit ihrem Anteil am Fortschrittsbalken. Die Engine übergibt den
+  Hugging-Face-Commit des Modells als `MODEL_REVISION`. Ein optionales `modules/rotate_module.sh` läuft zwischen
+  convert und target, der Platz für eine Rotation wie SpinQuant (ein Algorithmus wird nicht mitgeliefert).
+  Benchmarks bleiben auf dem Board: Keine Stufe führt `benchmark_module.sh` aus, das das in seinem Kopf sagt und auf
+  `llm-cli device runtime verify --bench-model` verweist. Die Funktionen der Module aus 1.x sind wieder erreichbar
+  (mit nachgebauten Werkzeugketten getestet): Ein Hardware-Profil des Boards (`build.sh --hardware-config DATEI`) ergibt die CMake-Toolchain und
+  das Board-Paket mit cross-kompiliertem `llama-cli` und `llama-server`, und `source_module.sh --clone-llama-cpp`,
+  von Hand gestartet, klont llama.cpp bei einem angegebenen Commit; vier versteckte Fehler dieser 1.x-Wege sind dabei
+  behoben (eine nicht definierte Cross-Compile-Funktion, CMake-Flags als ein gequotetes Wort übergeben, eine
+  Profilprüfung, die das Skript unter `set -e` beendete, Schreibzugriffe in den schreibgeschützten Cache-Ordner). Was
+  sie taten und ein Build nicht mehr braucht (llama.cpp-Werkzeuge im Build bauen: Das Image hat sie; der alte
+  Rückfall auf `convert.py`: Das gepinnte llama.cpp hat diese Datei nicht), läuft nicht wieder.
+- **Neue Targets bekommen funktionierende Stufenmodule, und die Entrypoint-Modi führen den Stage-Runner aus.** Das
+  `build.sh` der Vorlage ist derselbe Runner wie der von Rockchip (ein Test hält sie gleich), und ihre vier
+  Stufenmodule nehmen die Werte des Wizards auf: Die Einrichtungsbefehle laufen einmal in der Stufe source (was sie
+  exportieren, erreicht die späteren Stufen, auch beim Fortsetzen), die Quantisierungslogik ist das `case` der Stufe
+  convert, die Packbefehle laufen in der Stufe target. Der Modulgenerator schreibt die convert- und target-Module der
+  Vorlage statt „Placeholder“-Skripten, die mit Exit-Code 0 endeten; eine Stufe ohne Vorlage beendet den Build mit
+  dem Grund. `entrypoint.sh pipeline EINGABE NAME [QUANTISIERUNG] [PROFIL]` und die Modi `source`, `config`,
+  `convert` und `target` führen `build.sh` aus (Letztere bis zu dieser Stufe, mit den Moduloptionen aus 1.x). Die
+  Blöcke `modules:` beider `target.yml`, der Wizard, das Tool `create_target_module`, Dittos Modul-Prompt,
+  `llm-cli module create` (dessen nächste Schritte die Module nicht mehr Altlasten nennen) und die Leitfäden nennen
+  die Stufe, zu der jeder Teil gehört; der Roadmap-Punkt, die Vier-Module-Skripte zu entfernen, ist anders erledigt
+  (sie sind der Build).
 - **Der Code ist in Schichten geordnet, und ein Test hält sie ein** (Konsolidierung; Entscheidung des Maintainers vom
   2026-10-17: ein Repository, Schichten per Test durchgesetzt). `tests/test_layering.py` ordnet jedes Modul von
   `orchestrator/` einer Schicht zu (unten, remote, Kern, Fachlogik, Tool-Definitionen, Adapter), liest jeden Import

@@ -2882,7 +2882,8 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   targets validate` und zeigt das Ergebnis.
 - **Neues Target aus einer Probe:** `llm-cli module generate-ai <Probe-Datei>` oder die KI-Analyse im Assistenten.
   Ditto schlägt Architektur, SDK, Basis-Image, Pakete, Hersteller-Paketquellen, pip-Pakete und Downloads, CPU- und
-  CMake-Flags, Setup-Befehle und den Quantisierungsblock von `build.sh` vor; du siehst zuerst den ganzen Vorschlag.
+  CMake-Flags, Setup-Befehle (einmal in der Stufe source ausgeführt) und den Quantisierungsblock der Stufe convert
+  (`convert_module.sh`) vor; du siehst zuerst den ganzen Vorschlag.
   Beide gehen denselben Weg: Das Basis-Image wird auf seinen Digest festgelegt, bevor du den Vorschlag siehst
   (`pin_base_image`; im Assistenten außerhalb des GUI-Threads), das Modul wird über `DittoManager.save_module`
   gespeichert, das ein vorgefertigtes `nvidia/cuda`-Image und ein Image, das kein Docker Official Image ist, ohne die
