@@ -226,10 +226,17 @@ def person_next(code: str, lang: Optional[str] = None, *, address: str = "", por
     return ui_text(f"device.next.{code}", lang, address=address or "?", port=int(port))
 
 
-def person_text(code: str, lang: Optional[str] = None, *, address: str = "", port: int = 22) -> str:
-    """Title and next steps in one text for a message box or the console."""
-    return f"{person_title(code, lang, address=address, port=port)} " \
+def person_text(code: str, lang: Optional[str] = None, *, address: str = "", port: int = 22,
+                error: Optional[BaseException] = None) -> str:
+    """Title and next steps in one text for a message box or the console. For a local problem with the `error`
+    behind it, the text also names what failed on this computer: the system's words and the file's name, never its
+    folder or an account (local_detail; the GUI's windows show it, as the CLI prints the error)."""
+    text = f"{person_title(code, lang, address=address, port=port)} " \
            f"{person_next(code, lang, address=address, port=port)}"
+    if code == LOCAL_PROBLEM and error is not None:
+        from orchestrator.utils.localization import ui_text
+        text += " " + ui_text("device.local.detail", lang, detail=local_detail(error))
+    return text
 
 
 __all__ = ["AI_NEXT", "AUTH_FAILED", "CODES", "CONNECT_TIMEOUT", "DROPPED", "HOST_DOWN", "HOST_KEY_CHANGED",

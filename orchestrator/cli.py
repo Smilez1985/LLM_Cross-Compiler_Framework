@@ -4794,9 +4794,9 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
 def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
                  password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str],
                  ctx: Optional[FrameworkContext] = None) -> None:
+    from orchestrator.remote import transport
     from orchestrator.remote.address import valid_host, valid_user
     from orchestrator.runtime.scan_steps import USER_HINT, DeviceScanError, label_problem, scan_device
-    from orchestrator.utils import ssh_trust
     if not user:
         raise click.UsageError("--device needs --user")
     if not valid_user(user, allow_root=True):
@@ -4808,7 +4808,7 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
         raise click.UsageError("--port must be between 1 and 65535")
     if label_problem(label):
         raise click.UsageError("--label takes 1 to 64 printable characters")
-    if ssh_trust.paramiko is None:
+    if not transport.available()[0]:   # a real import: a broken installation counts as missing
         console.print("[red]Probing a device needs the 'paramiko' package.[/red]")
         sys.exit(1)
     key = _trust_device(state_dir, host, port, trust_fingerprint, ctx)

@@ -52,8 +52,8 @@ def unreachable_text(host: str, port: int, error: BaseException, lang: Optional[
     """Why the board's key could not be read: its reason code's title and next step, else the error itself."""
     from orchestrator.remote import reasons
     code = reasons.reach_code(error)
-    if code in reasons.CODES:
-        return reasons.person_text(code, lang, address=host, port=port)
+    if code in reasons.CODES:   # a local problem also names what failed on this computer (the file's name)
+        return reasons.person_text(code, lang, address=host, port=port, error=error)
     return ui_text("deploy.hostkey.unreachable", lang, address=host, port=port, error=str(error))
 
 

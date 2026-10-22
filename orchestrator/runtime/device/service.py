@@ -26,11 +26,13 @@ class DeviceRuntimeError(WithSteps, RemoteFailure):
     """A device step that cannot be done; `code` is a tool reason code, `next` the step that helps, `reason` one of the
     SSH reason codes of orchestrator/runtime/device/reasons.py when the board could not be reached or logged in to.
     `external_text` holds what the device answered (its stderr, a check's output): never part of the message,
-    returned to AI callers marked as external text."""
+    returned to AI callers marked as external text. `error` is the exception behind a failed contact (the person's
+    windows name what failed on this computer from it; an AI never gets it)."""
 
     def __init__(self, message: str, code: str = "failed", next: str = "",
-                 external_text: Optional[List[str]] = None, reason: str = ""):
-        super().__init__(message, reason=reason)
+                 external_text: Optional[List[str]] = None, reason: str = "",
+                 error: Optional[BaseException] = None):
+        super().__init__(message, reason=reason, error=error)
         self.code, self.next = code, next
         self.external_text = list(external_text or [])
 
@@ -44,14 +46,15 @@ def note_reach(state_dir: Path, device: TrustedDevice, step: str, reason: str) -
 
 
 def unreachable(device: TrustedDevice, reason: str, state_dir: Optional[Path] = None,
-                step: str = "") -> DeviceRuntimeError:
+                step: str = "", error: Optional[BaseException] = None) -> DeviceRuntimeError:
     """The refusal for a board that could not be reached or logged in to, with its SSH reason code (N6); recorded for
     Mojo when the step is named."""
     from orchestrator.runtime.device import reasons
     if state_dir is not None:
         note_reach(state_dir, device, step, reason)
     return DeviceRuntimeError(f"The device {device.label} cannot be used now ({reason}).",
-                              code=reasons.TOOL_CODES[reason], next=reasons.AI_NEXT[reason], reason=reason)
+                              code=reasons.TOOL_CODES[reason], next=reasons.AI_NEXT[reason], reason=reason,
+                              error=error)
 
 
 def _device_said(what: str, device: TrustedDevice, error: Exception) -> DeviceRuntimeError:
@@ -89,7 +92,7 @@ def read_key(device: TrustedDevice, state_dir: Path, step: str = "") -> str:
     except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
         reason = reasons.reach_code(e)
         if reason:
-            raise unreachable(device, reason, state_dir, step) from None
+            raise unreachable(device, reason, state_dir, step, e) from None
         raise DeviceRuntimeError(f"The host key of {device.label} could not be read ({e.__class__.__name__}).",
                                  code="failed", next="Tell the person; the framework's log has the details.") from None
     fp = check.fingerprint
@@ -139,7 +142,7 @@ def connect(device: TrustedDevice, state_dir: Path, user: str, expect_fingerprin
         check, e = session.last_check, failed.error
         if failed.kind == "key_read":   # unreachable, no SSH server, no paramiko
             if failed.reason:
-                raise unreachable(device, failed.reason, state_dir, step) from None
+                raise unreachable(device, failed.reason, state_dir, step, e) from None
             raise DeviceRuntimeError(f"The host key of {device.label} could not be read ({e.__class__.__name__}).",
                                      code="failed", next="Tell the person; the framework's log has the details.") \
                 from None
@@ -149,7 +152,7 @@ def connect(device: TrustedDevice, state_dir: Path, user: str, expect_fingerprin
             raise _not_trusted(device, check.fingerprint if check is not None else "") from None
         reason = reasons.classify(e) if e is not None else None   # the login: authentication or network
         if reason is not None and reason != reasons.AUTH_FAILED:
-            raise unreachable(device, reason, state_dir, step) from None
+            raise unreachable(device, reason, state_dir, step, e) from None
         note_reach(state_dir, device, step, reasons.AUTH_FAILED)
         raise DeviceRuntimeError(f"The framework's SSH key does not log in to {device.label} as {user} "
                                  f"({(e or failed).__class__.__name__}).", code="needs_person",
@@ -170,7 +173,7 @@ def _session_failed(device: TrustedDevice, error: Exception, state_dir: Path, st
         return Stopped(what)
     reason = getattr(error, "reason", "")
     if reason:
-        return unreachable(device, reason, state_dir, step)
+        return unreachable(device, reason, state_dir, step, getattr(error, "error", None))
     return _device_said(what, device, error)
 
 

@@ -71,8 +71,9 @@ def unreachable_error(error: BaseException, host: str, port: int, *, state_dir: 
 
 
 def _need_paramiko() -> None:
-    from orchestrator.utils import ssh_trust
-    if ssh_trust.paramiko is None:
+    """BoardStepError no_paramiko when SSH does not work here (remote/transport.py available(): a real import)."""
+    from orchestrator.remote import transport
+    if not transport.available()[0]:
         raise BoardStepError("Reaching a device needs the 'paramiko' package.", "no_paramiko")
 
 
