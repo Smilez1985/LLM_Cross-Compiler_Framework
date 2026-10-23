@@ -1157,6 +1157,13 @@ class ProfileStore:
         write_private(path, text)
         return path
 
+    def device_files(self, device_id: str) -> Dict[str, Path]:
+        """Where the stored board's files are, whether they exist or not: its probe ("probe"), the probe's label and
+        address ("probe_info") and its deploy settings ("deploy_settings"). The person's change of a board's host key
+        moves them to the board's new device ID (runtime/device/board_move.py, P6)."""
+        return {"probe": self.device_path(device_id), "probe_info": self._meta_path(device_id),
+                "deploy_settings": self._deploy_path(device_id)}
+
     def remove_device(self, device_id: str) -> bool:
         removed = False
         for path in (self.device_path(device_id), self._meta_path(device_id), self._deploy_path(device_id)):

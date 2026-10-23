@@ -72,7 +72,7 @@ ROWS = (("btn_boards_add", "btn_boards_edit", "btn_boards_remove_trust", "btn_bo
 
 
 # The refusals of Edit address or key... with their own text (boards.edit.err.<kind>); a pasted key: key_<detail>.
-EDIT_ERRORS = ("no_board", "address", "unchanged", "no_key", "stale", "audit")
+EDIT_ERRORS = ("no_board", "address", "unchanged", "no_key", "stale", "audit", "not_moved")
 
 
 class Cancelled(Exception):
@@ -631,10 +631,18 @@ class BoardsWindow(QDialog):
             if not self._confirm_change(change):
                 self._say(self._t("boards.edit.nothing"))
                 return
-            audit = self.audit
+            audit, framework = self.audit, self.framework
 
             def apply():
-                return person_steps.change_board(state, change, via="gui", audit=audit, actor="gui")
+                output_dirs = []
+                if change.plan.key_changed:   # the board's "tested on" records move with its data (P6)
+                    from orchestrator.Core.artifact_output import artifact_folders
+                    try:
+                        output_dirs = artifact_folders(framework)
+                    except Exception:  # noqa: BLE001 - no output folder: there are no build records to move
+                        output_dirs = []
+                return person_steps.change_board(state, change, via="gui", audit=audit, actor="gui",
+                                                 output_dirs=output_dirs)
 
             self._start(self._t("boards.edit.changing"), apply, lambda out: self._changed(out, change))
 
@@ -695,12 +703,21 @@ class BoardsWindow(QDialog):
     def _changed(self, out: Any, change: Any) -> None:
         device, paired = out
         plan, t = change.plan, self._t
-        if device is None:
-            self._info(t("boards.edit.record_failed"), "warning")
+        moved_lines = []
+        data = getattr(change, "data", None)
+        if data is not None:   # where the board's data went (P6, the CLI's moved_lines)
+            def kinds(names):
+                return ", ".join(t(f"boards.edit.data.{name}") for name in names)
+            for key, names in (("boards.edit.moved", data.moved), ("boards.edit.kept", data.kept),
+                               ("boards.edit.left", data.left)):
+                if names:
+                    moved_lines.append(t(key, old_id=data.old_id, new_id=data.new_id, what=kinds(names)))
+        if device is None:   # the data moved all the same (the CLI prints moved_lines before it says so)
+            self._info("\n\n".join([t("boards.edit.record_failed")] + moved_lines), "warning")
             self.reload()
             return
         lines = [t("boards.edit.done", label=device.label, device_id=device.device_id, address=plan.new.display,
-                   key_type=plan.new_key_type, fingerprint=plan.new_fingerprint)]
+                   key_type=plan.new_key_type, fingerprint=plan.new_fingerprint)] + moved_lines
         if plan.key_changed:
             lines.append(t("boards.edit.probe_again", old_id=plan.old_device_id))
             if not paired:

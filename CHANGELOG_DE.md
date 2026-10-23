@@ -35,7 +35,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wenn sich die `known_hosts` inzwischen geändert hat. Ein neuer Schlüssel gibt dem Board eine neue Geräte-ID: Sein
   Eintrag zieht mit Name und Benutzer dorthin, und ob sich der Schlüssel des Frameworks anmeldet, wird einmal
   getestet; der Schlüssel eines anderen vertrauten Boards wird abgelehnt und dieses Board genannt, sodass sein Eintrag
-  nie überschrieben wird. Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
+  nie überschrieben wird. Die Daten des Boards ziehen mit seinem neuen Schlüssel um (DECISIONS Runde 22, P6;
+  `orchestrator/runtime/device/board_move.py`): seine gespeicherte Prüfung, die Deploy-Einstellungen, die deployte
+  Laufzeit (der Eintrag des letzten Deployments mit seinen Prüfungen und seinem Benchmark und seine Laufzeit-Pakete),
+  der Deploy-Eintrag und seine Benchmark-Ergebnisse bei den Builds ("getestet auf"). Jeder Teil wird zur neuen
+  Geräte-ID kopiert und geprüft (zurückgelesen, die Laufzeit-Pakete als harte Links oder als Kopien mit derselben
+  sha256), bevor sich die `known_hosts` ändert, und die Kopien der alten ID gehen erst nach der Änderung; scheitert
+  eine Kopie, wird die Änderung abgelehnt (kein Audit-Eintrag, `known_hosts` inzwischen geändert) oder endet sie auf
+  andere Weise, bevor sich die `known_hosts` ändert (ihre Sperre hält ein anderer Prozess, ein Strg+C), gehen die
+  Kopien wieder und nichts hat sich geändert. Sobald die `known_hosts` den neuen Schlüssel hält, gehen die alten Kopien
+  auch dann, wenn ein Strg+C den Anmeldetest danach beendet, sodass die Daten des Boards nie doppelt bleiben. Was die
+  neue ID schon mit anderem Inhalt hat, wird nie überschrieben (es bleibt unter der alten ID; die Prüfung und ihr Name
+  und ihre Adresse ziehen gemeinsam um oder bleiben gemeinsam), eine alte Kopie, die sich nicht entfernen lässt,
+  bleibt ebenfalls, und CLI und Fenster nennen beides, auch wenn der Eintrag des Boards nicht geschrieben werden
+  konnte; beide sagen auch, ein neu eingerichtetes Board erneut zu prüfen (seine umgezogene Prüfung kann alt sein).
+  Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
   Ditto oder die Laufzeit-Schritte für Geräte erreichen sie (`orchestrator/remote/pairing.py` `replace_key`, ein
   Test über den Importgraphen).
 - **Nächste Schritte statt Befehlen, Befehle zum Zulassen und übersetzte, neu geordnete Menüs** (Welle 6, Kette
@@ -1731,9 +1745,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `ServerAliveCountMax`), jeder Befehl als ein `sh -c` mit Zeitlimit (das auch gilt, während die Eingabe des Befehls
   geschrieben wird) und Ausgabegrenze, und `UserKnownHostsFile` in Anführungszeichen: Ein Zustandsordner mit einem
   Leerzeichen im Pfad (ein Windows-Kontoname wie „Jane Doe“) teilte die known_hosts des Frameworks in zwei Dateien,
-  die es nicht gibt, sodass der Schlüssel jedes Boards als unbekannt galt. Ein Passwort geht nicht mehr
-  stillschweigend verloren: OpenSSH fragt nie danach, also meldet sich das Deployment mit dem Schlüssel des Frameworks
-  an, und sein Ergebnis sagt, dass das Passwort nicht genutzt wurde. Ein Deployment, das an einen dir gezeigten
+  die es nicht gibt, sodass der Schlüssel jedes Boards als unbekannt galt. `GlobalKnownHostsFile` ist das Null-Gerät
+  (`/dev/null`, unter Windows `NUL`): OpenSSH liest nicht mehr zusätzlich die systemweite known_hosts dieses
+  Rechners, ein Schlüssel, den ein anderes Programm oder ein Administrator dort eingetragen hat, lässt also nie ein
+  Board herein, das du im Framework nicht bestätigt hast (`StrictHostKeyChecking=yes` bleibt). Ein Passwort geht nicht
+  mehr stillschweigend verloren: OpenSSH fragt nie danach, also meldet sich das Deployment mit dem Schlüssel des
+  Frameworks an, und sein Ergebnis sagt, dass das Passwort nicht genutzt wurde. Ein Deployment, das an einen dir gezeigten
   Fingerabdruck gebunden ist, wird ohne paramiko weiter abgelehnt, ebenso eine Board-Sitzung, die auch prüfen muss,
   welches Board antwortet (seine Geräte-ID). Der SSH-Schlüssel des Frameworks wird beim Anlegen
   und bevor OpenSSH ihn nutzt nur für dein Konto lesbar gemacht
@@ -1754,13 +1771,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   sofort mit seinem Grundcode. Der kurze llama-bench-Lauf startet auf dem Board für sich (`run_detached`) und wird nach
   einem Abbruch wieder verfolgt, nie zweimal gestartet (Runde 16 G4: Arbeit läuft weiter, während niemand zusieht; ein
   Board ohne nohup führt ihn wie bisher angehängt aus); `RemoteSession.follow` verfolgt einen schon gestarteten Job.
+  Sein privater Ordner (`<Installationsordner>/.bench.XXXXXXXX`) wird danach entfernt, auch nach einem Fehler oder
+  einem Strg+C im Terminal; einer, den ein Abbrechen im Fenster Boards oder ein `cancel_job` einer KI hinterließ (das
+  Abbrechen schließt die Verbindung, das Board ist dann nicht mehr erreichbar), geht mit dem nächsten Benchmark auf
+  dem Board, sobald kein Lauf seinen Job mehr verfolgen kann: In ihm hat sich länger als das Zeitlimit des Benchmarks
+  nichts geändert (`sweep_bench_folders`, so wie der lokale Benchmark die Sandbox-Ordner eines Absturzes entfernt).
   Die Board-Prüfung sendet ihre nur lesenden Befehle nach einem Abbruch erneut. Der KI-Weg
   (`runtime/device/service.py`) öffnet eine `KeyOnly`-Sitzung (Entscheidung 2), mit denselben Ablehnungen und Texten
   wie bisher; die Board-Schritte der Person (`person_steps.connect_stored`, `device runtime deploy|verify|prune
   --on-device` der CLI, das Fenster Boards) öffnen eine mit dem Einmal-Passwort der Person, wenn eines eingegeben ist,
   und `scan --device` übergibt seine Anmeldung an eine Sitzung. CLI und Fenster Boards sagen, wenn das Netz des Boards
   abbricht und wenn es wieder antwortet (EN/DE), jedes Warten neu (auch nach einem Upload, der von vorn begann),
-  der Job einer KI zeigt es mit dem Label des Boards. Ebenso **Board per SSH scannen...** im Tab Builder in seinem
+  der Job einer KI zeigt es mit dem Label des Boards (auch der Job von `probe_remote_device`, der gar kein Warten
+  zeigte: das Tool gibt die Ereignisse der Sitzung jetzt weiter wie die Deploy- und Benchmark-Tools). Ebenso
+  **Board per SSH scannen...** im Tab Builder in seinem
   Protokoll, mit dem Knopf **Scan abbrechen**, solange der Scan läuft, wie ihn das Fenster Boards hat: Er beendet ein
   Warten auf das Board sofort (nicht erst nach 300 s), und nichts wird gespeichert (`scan_steps.scan_device` nimmt den
   `CancelToken` und `on_event` des Aufrufers). Die Wartezeile der CLI bei `device runtime deploy|verify|prune
@@ -2363,6 +2387,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - `llm-cli build start --parallel`: Die Option hatte nie eine Wirkung (ein Aufruf startet einen Build). Sie ist in
   der Hilfe ausgeblendet und gibt eine Warnung aus. `--optimization` bleibt; seine Hilfe sagt jetzt, dass das
   Rockchip-Target die Option nicht auswertet.
+- `DeploymentManager.trust_host` (DECISIONS Runde 22, P5): der alte Schreiber eines bestätigten Host-Schlüssels, ohne
+  Audit-Zeile, den nichts im Framework aufruft. Er ist jetzt ein schlanker Delegate an `orchestrator/remote/pairing.py`
+  `trust_presented_key`, den einen Schreiber, der den Schlüssel unter seiner Sperre speichert und im selben Schritt die
+  Audit-Zeile des Vertrauens schreibt. Nur die Person kann ihn nutzen: Er nimmt den `pairing.PersonChannel` des Kanals
+  (`cli` oder `gui`, mit dem Audit-Log), den nur die Kanäle der Person bilden können, weil kein Modul, das eine KI
+  erreicht, `pairing` importiert. Ohne ihn vertraut er nichts und wirft `PermissionError`; jeder Aufruf warnt mit
+  `DeprecationWarning`. Die Prüfung in `tests/test_remote_trust.py` ist jetzt strenger: das Deploy-Modul nennt
+  überhaupt keinen Vertrauens-Schreiber mehr.
 
 ### Entfernt
 - Der ungenutzte `LocalProbeWorker` des Builder-Tabs, ein zweiter Starter des Fallback-Probe-Skripts (ein eigener

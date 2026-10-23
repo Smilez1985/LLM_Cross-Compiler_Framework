@@ -1171,6 +1171,94 @@ def test_editing_a_board_s_key_shows_old_and_new_side_by_side_with_no_as_the_def
     assert ssh_trust.fingerprint(new) in told.text and "myboard.local" in told.text
 
 
+def _board_with_data(window, monkeypatch):
+    """A trusted board with its probe, deploy settings and deploy record (P6), and the framework's key logging in."""
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    from orchestrator.utils import ssh_trust
+    state = state_of(window)
+    device = trusted_board(state)
+    stored(state, device.device_id, label="Living room", install="user", ssh_user="dietpi")
+    TrustedDevices(state).note_deploy(device.device_id, True, "deploy_model_1.zip")
+    monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: SimpleNamespace(close=lambda: None))
+    window.reload()
+    assert window.select(device.device_id)
+    return state, device
+
+
+def test_a_new_key_moves_the_board_s_data_as_the_cli_does(qapp, window, monkeypatch):
+    """P6: the Boards window's Edit address or key... runs the CLI's change_board, so the board's data moves to its new
+    device ID with it, the question says so before, and the answer names what moved."""
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    from orchestrator.runtime.profile import ProfileStore
+    state, device = _board_with_data(window, monkeypatch)
+    new = paramiko.ECDSAKey.generate()
+    seen = _edit_dialogs(monkeypatch, key_text=f"{new.get_name()} {new.get_base64()}", answer=True)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    (moved,) = TrustedDevices(state).list()
+    store = ProfileStore(state)
+    assert store.list_devices() == [moved.device_id] != [device.device_id]
+    assert store.load_deploy_settings(moved.device_id)["ssh_user"] == "dietpi"
+    assert store.load_deploy_settings(device.device_id) == {}
+    assert TrustedDevices(state).last_deploys()[moved.device_id]["package"] == "deploy_model_1.zip"
+    assert device.device_id not in TrustedDevices(state).last_deploys()
+    (question,) = seen.questions
+    assert window._t("boards.edit.new_id", new_id=moved.device_id, old_id=device.device_id) in question.text
+    (told,) = boxes.asked
+    what = ", ".join(window._t(f"boards.edit.data.{k}") for k in ("probe", "deploy_settings", "deploy_record"))
+    assert window._t("boards.edit.moved", new_id=moved.device_id, old_id=device.device_id, what=what) in told.text
+
+
+def test_a_record_that_cannot_be_written_still_names_where_the_board_s_data_went(qapp, window, monkeypatch):
+    """known_hosts holds the new key and the board's data moved, but its trusted record could not be written: the
+    window says both, as the CLI prints moved_lines before it says the record is missing."""
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.runtime.device.trusted import DeviceStoreError, TrustedDevices
+    from orchestrator.runtime.profile import device_id_for_host_key
+    from orchestrator.utils import ssh_trust
+    state, device = _board_with_data(window, monkeypatch)
+
+    def refuse(self, *a, **k):
+        raise DeviceStoreError("the device records are too large")
+    monkeypatch.setattr(TrustedDevices, "replace", refuse)
+    new = paramiko.ECDSAKey.generate()
+    new_id = device_id_for_host_key(ssh_trust.fingerprint(new))
+    _edit_dialogs(monkeypatch, key_text=f"{new.get_name()} {new.get_base64()}", answer=True)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    (told,) = boxes.asked
+    what = ", ".join(window._t(f"boards.edit.data.{k}") for k in ("probe", "deploy_settings", "deploy_record"))
+    assert window._t("boards.edit.record_failed") in told.text
+    assert window._t("boards.edit.moved", new_id=new_id, old_id=device.device_id, what=what) in told.text
+
+
+def test_a_failed_copy_of_the_board_s_data_changes_nothing_and_says_why(qapp, window, monkeypatch):
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.runtime.device import board_move
+    from orchestrator.runtime.profile import ProfileStore
+    state, device = _board_with_data(window, monkeypatch)
+
+    def full(self):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(board_move._File, "stage", full)
+    before = (state / "known_hosts").read_bytes(), (state / "devices.json").read_bytes()
+    new = paramiko.ECDSAKey.generate()
+    _edit_dialogs(monkeypatch, key_text=f"{new.get_name()} {new.get_base64()}", answer=True)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    assert window._t("boards.edit.err.not_moved") in [a.text for a in boxes.asked]
+    assert ((state / "known_hosts").read_bytes(), (state / "devices.json").read_bytes()) == before
+    assert ProfileStore(state).list_devices() == [device.device_id]
+    assert window.framework.tool_registry.audit.rows == []
+
+
 def test_the_key_read_from_the_board_is_read_off_the_gui_thread(qapp, window, monkeypatch):
     paramiko = pytest.importorskip("paramiko")
     from orchestrator.utils import ssh_trust

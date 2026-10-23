@@ -32,7 +32,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   side by side (in the window) and answer with "No" as the default; the change is written to the audit log before
   anything changes and refused when `known_hosts` changed meanwhile. A new key gives the board a new device ID: its
   record moves there with its name and user, and whether the framework's key logs in is tested once; the key of
-  another trusted board is refused, naming that board, so its record is never overwritten. The work runs
+  another trusted board is refused, naming that board, so its record is never overwritten. The board's data moves
+  with its new key (DECISIONS round 22, P6; `orchestrator/runtime/device/board_move.py`): its stored probe, deploy
+  settings, deployed runtime (the record of the last deployment with its checks and benchmark, and its runtime
+  packages), deploy record and its benchmark results with the builds ("tested on"). Every part is copied to the new
+  device ID and checked (read back, the runtime packages as hard links or as copies with the same sha256) before
+  `known_hosts` changes, and the old ID's copies go only after the change; when a copy fails or the change is refused
+  (no audit row, `known_hosts` changed meanwhile) or ends any other way before `known_hosts` changes (its lock held by
+  another process, a Ctrl+C), the copies go again and nothing has changed. Once `known_hosts` holds the new key, the
+  old copies go also when a Ctrl+C ends the login test after it, so the board's data is never left twice. What the new
+  ID already holds with other content is never overwritten (it stays under the old ID; the probe and its label and
+  address move or stay together), an old copy that cannot be removed stays too, and the CLI and the window name both,
+  also when the board's record could not be written; both also say to probe a board that was set up anew again (its
+  moved probe may be old). The work runs
   in the background; the texts are English and German. No tool, the MCP server, Ditto or the device runtime steps can
   reach it (`orchestrator/remote/pairing.py` `replace_key`, an import-graph test).
 - **Next steps instead of commands, allow-to-run proposals and translated, regrouped menus** (wave 6, chain a0;
@@ -1526,8 +1538,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   a login time limit (`ConnectTimeout`) and keepalive (`ServerAliveInterval`, `ServerAliveCountMax`), each command as
   one `sh -c` with a time limit (which also holds while the command's input is written) and an output cap, and
   `UserKnownHostsFile` in quotes: a state folder with a space in its path (a Windows account name such as "Jane Doe")
-  split the framework's known_hosts into two files that do not exist, so every board's key counted as unknown. A
-  password is no longer dropped silently: OpenSSH never asks for one, so the deploy logs in with the framework key and
+  split the framework's known_hosts into two files that do not exist, so every board's key counted as unknown.
+  `GlobalKnownHostsFile` is the null device (`/dev/null`, `NUL` on Windows): OpenSSH no longer also reads this
+  computer's system-wide known_hosts, so a key another program or an administrator put there never lets a board in
+  that you did not confirm in the framework (`StrictHostKeyChecking=yes` stays). A password is no longer dropped
+  silently: OpenSSH never asks for one, so the deploy logs in with the framework key and
   its result says the password was not used. A deploy bound to a fingerprint you were shown is still refused without
   paramiko, and so is a board session that must also check which board answers (its device ID). The framework's SSH key is made private to your account when it is created and before OpenSSH uses it
   (`orchestrator/utils/atomic.py` `owner_only`: group and other bits off on Linux and macOS, on Windows a protected ACL
@@ -1544,15 +1559,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   again, and the staging folder is still removed; a board that does not answer again ends every later step at once
   with its reason code. The short llama-bench run starts on the board on its own (`run_detached`) and is followed again
   after a drop, never started twice (round 16 G4: work keeps running while nobody watches; a board without nohup runs
-  it attached as before); `RemoteSession.follow` follows a job started before. The probe sends its read-only commands
-  again after a drop. The AI path (`runtime/device/service.py`) opens a `KeyOnly` session (decision 2), with the same
+  it attached as before); `RemoteSession.follow` follows a job started before. Its private folder
+  (`<install folder>/.bench.XXXXXXXX`) goes afterwards, also after a failure or a Ctrl+C at the terminal; one that a
+  Cancel in the Boards window or an AI's `cancel_job` left (the Cancel closes the connection, so the board cannot be
+  reached then) goes with the board's next benchmark once no run can follow its job any more: nothing in it changed
+  for longer than the benchmark's time limit (`sweep_bench_folders`, as the local benchmark removes the sandbox folders
+  a crash left). The probe sends its read-only commands again after a drop. The AI path (`runtime/device/service.py`) opens a `KeyOnly` session (decision 2), with the same
   refusals and texts as before; the person's board steps (`person_steps.connect_stored`, the CLI's
   `device runtime deploy|verify|prune --on-device`, the Boards window) open one with the person's one-time password
   when one is typed, and `scan --device` hands its login to a session. The CLI and the Boards window say when the
   board's network dropped and when it answers again (EN/DE), each wait anew (also after an upload that started
-  again from the beginning), an AI's job shows it by the board's label. So does the Builder tab's **Remote Scan via
-  SSH...** in its log, with a **Cancel scan** button while the scan runs, as the Boards window has one: it ends a wait
-  for the board at once (not after 300 s) and nothing is stored (`scan_steps.scan_device` takes the caller's
+  again from the beginning), an AI's job shows it by the board's label (`probe_remote_device`'s job too, which showed
+  no wait at all: the tool now passes the session's events as the deploy and benchmark tools do). So does the Builder
+  tab's **Remote Scan via SSH...** in its log, with a **Cancel scan** button while the scan runs, as the Boards window
+  has one: it ends a wait for the board at once (not after 300 s) and nothing is stored (`scan_steps.scan_device` takes the caller's
   `CancelToken` and `on_event`). The CLI's wait line of `device runtime deploy|verify|prune --on-device` and of
   `scan --device` (which waited silently under its spinner) names the key that ends it, " (Ctrl+C)", as
   `deploy run`'s does; a Ctrl+C during the runtime deploy's wait now ends the
@@ -2093,6 +2113,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   list. Use the hidden prompt or `--with-token`.
 - `llm-cli build start --parallel`: it never had an effect (one call runs one build). It is hidden from the help
   and prints a warning. `--optimization` stays; its help now says that the Rockchip target ignores it.
+- `DeploymentManager.trust_host` (DECISIONS round 22, P5): the old writer of a confirmed host key, without an audit
+  row, that nothing in the framework calls. It is now a thin delegate to `orchestrator/remote/pairing.py`
+  `trust_presented_key`, the one writer, which stores the key under its lock and writes the trust's audit row in the
+  same step. Only the person can use it: it takes the channel's `pairing.PersonChannel` (`cli` or `gui`, with the
+  audit log), which only the person's channels can make, because no module an AI can reach imports `pairing`. Without
+  one it trusts nothing and raises `PermissionError`; every call warns with `DeprecationWarning`. The guard in
+  `tests/test_remote_trust.py` is tighter now: the deploy module names no trust writer at all.
 
 ### Removed
 - The Builder tab's unused `LocalProbeWorker`, a second runner of the fallback probe script (its own subprocess call

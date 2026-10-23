@@ -412,6 +412,8 @@ class TestTheFallbacksGuarantees:
             assert call.option("IdentitiesOnly") == ["yes"]
             # the path as OpenSSH reads it back (the 1.x code passed it as it is; a Windows path now with /)
             assert call.option("UserKnownHostsFile") in ([str(known_hosts)], [known_hosts.as_posix()])
+            # this computer's system-wide known_hosts never decides either (/dev/null, NUL on Windows)
+            assert call.option("GlobalKnownHostsFile") == ["NUL" if os.name == "nt" else "/dev/null"]
             assert call.option("-i") == [str(state / ssh_trust.KEY_NAME)]
 
     def test_no_call_inherits_this_process_stdin_or_goes_through_a_shell(self, sys_manager, system_board, package):
@@ -685,6 +687,19 @@ class TestTheOpenSshTransport:
     def test_the_old_option_name_is_the_one_list(self, tmp_path):
         from orchestrator.remote import transport
         assert ssh_trust.system_ssh_options(tmp_path) == transport.openssh_options(tmp_path)
+
+    def test_only_the_framework_s_known_hosts_decides(self, tmp_path):
+        """OpenSSH also reads this computer's system-wide known_hosts unless GlobalKnownHostsFile says otherwise: a key
+        another program or an administrator put there would let a board in that the person never confirmed. The
+        option is the null device (NUL on Windows), next to the framework's own file and StrictHostKeyChecking=yes."""
+        from orchestrator.remote import transport
+        assert transport.NULL_DEVICE == ("NUL" if os.name == "nt" else "/dev/null")
+        options = transport.openssh_options(tmp_path)
+        pairs = [options[i + 1] for i, word in enumerate(options) if word == "-o"]
+        known = [p for p in pairs if p.split("=", 1)[0].lower().endswith("knownhostsfile")]
+        assert known == [f"UserKnownHostsFile={transport.config_value(ssh_trust.known_hosts_path(tmp_path))}",
+                         f"GlobalKnownHostsFile={transport.NULL_DEVICE}"]
+        assert "StrictHostKeyChecking=yes" in pairs and "BatchMode=yes" in pairs
 
     @pytest.mark.parametrize("text, reason, unknown, local", [
         (f"ssh: connect to host {HOST} port 22: Connection refused", reasons.PORT_CLOSED, False, False),
@@ -1143,6 +1158,28 @@ def test_a_real_deploy_over_openssh(real_sshd, config, monkeypatch, tmp_path):
     assert result.success and result.exit_status == 0 and result.device_state == "ok", (result.reason, result.output)
     assert result.output[-1] == "Deployment Complete."
     assert [e.kind for e in events][-1] == "installing" and len(sessions) == 1
+
+
+def test_a_real_openssh_takes_no_key_from_a_system_wide_known_hosts(real_sshd, tmp_path):
+    """A board whose key is only in a system-wide known_hosts (here one an ssh_config names, as /etc/ssh/ssh_config
+    may) is not trusted: the framework's GlobalKnownHostsFile on the command line wins, so its own file decides."""
+    from orchestrator.remote import transport
+    from orchestrator.remote.address import Endpoint
+    state = real_sshd["state"]
+    known_hosts = ssh_trust.known_hosts_path(state)
+    system_wide = tmp_path / "ssh_known_hosts"
+    system_wide.write_text(known_hosts.read_text())
+    known_hosts.write_text("")
+    config_file = tmp_path / "ssh_config"
+    config_file.write_text(f"GlobalKnownHostsFile {system_wide}\n")
+    argv = transport.openssh_argv("ssh", Endpoint("127.0.0.1", real_sshd["port"]), real_sshd["user"],
+                                  ["-F", str(config_file), *transport.openssh_options(state)], "true")
+    done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 255 and "Host key verification failed" in done.stderr, done.stderr
+    i = argv.index(f"GlobalKnownHostsFile={transport.NULL_DEVICE}")
+    trusting = argv[:i - 1] + argv[i + 1:]   # the same call without the option: the system-wide file lets it in
+    done = subprocess.run(trusting, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
 
 
 def test_a_real_openssh_refuses_an_unknown_host_key(real_sshd, config, monkeypatch, tmp_path):
