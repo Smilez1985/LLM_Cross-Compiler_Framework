@@ -95,6 +95,17 @@ GPU0:
 """
 
 
+VULKAN_SOFTWARE_ONLY = """\
+Devices:
+========
+GPU0:
+\tvendorID           = 0x10005
+\tdeviceID           = 0x0000
+\tdeviceType         = PHYSICAL_DEVICE_TYPE_CPU
+\tdeviceName         = llvmpipe (LLVM 19.1.7, 256 bits)
+"""
+
+
 class FakeRunner:
     """Answers probe commands by tool name (nvidia_smi, vulkaninfo, powershell); others are "not installed"."""
 
@@ -285,6 +296,30 @@ class TestProbes:
                                memory=(32 * GIB, 24 * GIB))
         assert [g.name for g in info.gpus] == ["AMD Radeon RX 7900 XTX"]
         assert info.gpus[0].vram_mib == 25753026560 // MIB and info.vulkan and info.arch == "x86_64"
+
+    def test_vulkaninfo_with_only_a_software_renderer_means_no_gpu_driver(self, tmp_path):
+        # The loader is installed (vulkaninfo runs), but no GPU has a Vulkan driver: the Vulkan build would only find
+        # llvmpipe, so the CPU build is the honest choice. Without vulkaninfo the loader still counts (next test).
+        root = amd_sysfs(tmp_path, card="card0", device="0x744c", vram=24 * GIB, gfx_version=110000)
+        info = detect_hardware(FakeRunner(vulkaninfo=(0, VULKAN_SOFTWARE_ONLY, "")), system="Linux",
+                               machine="x86_64", memory=(32 * GIB, 24 * GIB), sysfs_root=root, rocm_globs=(),
+                               find_library=lambda name: "libvulkan.so.1" if name == "vulkan" else None)
+        assert not info.vulkan and info.gpus[0].vram_mib == 24 * 1024
+        choice = select_backend(info, CATALOG)
+        assert choice.backend == "cpu" and "no Vulkan driver" in choice.reason
+        without = detect_hardware(FakeRunner(), system="Linux", machine="x86_64", memory=(32 * GIB, 24 * GIB),
+                                  sysfs_root=root, rocm_globs=(),
+                                  find_library=lambda name: "libvulkan.so.1" if name == "vulkan" else None)
+        assert without.vulkan
+
+    def test_windows_vulkaninfo_with_only_a_software_renderer(self):
+        # The display adapter is there, but vulkaninfo lists only a software renderer: neither the adapter nor the
+        # Vulkan loader (vulkan-1.dll) makes it a Vulkan GPU.
+        adapters = json.dumps({"Name": "AMD Radeon RX 7900 XTX", "AdapterCompatibility": "Advanced Micro Devices, Inc.",
+                               "DriverVersion": "32.0.12033.1030", "Memory": 25753026560})
+        info = detect_hardware(FakeRunner(vulkaninfo=(0, VULKAN_SOFTWARE_ONLY, ""), powershell=(0, adapters, "")),
+                               system="Windows", machine="AMD64", memory=(32 * GIB, 24 * GIB))
+        assert [g.name for g in info.gpus] == ["AMD Radeon RX 7900 XTX"] and not info.vulkan
 
     def test_probes_that_fail_contribute_nothing(self, tmp_path):
         info = detect_hardware(FakeRunner(nvidia_smi=(9, "", "NVIDIA-SMI has failed"), vulkaninfo=(1, "", "")),

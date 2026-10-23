@@ -2350,6 +2350,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Ein Rechner, dessen GPU keinen Vulkan-Treiber hat, bekommt den CPU-Build** (Kette port-runtime, aus der Prüfung des
+  verwalteten llama-server): Lief `vulkaninfo`, listete aber nur einen Software-Renderer (llvmpipe, lavapipe), setzte
+  die Hardware-Erkennung trotzdem `VULKAN=ON`, weil ein Vulkan-Loader, ein Grafikadapter (Windows) oder
+  `vulkan-1.dll` da war; die Wahl des offiziellen vorgebauten Archivs und der Plan des selbst gebauten Servers nahmen
+  daher den Vulkan-Build, der nur llvmpipe gefunden hätte. Ein solches `vulkaninfo` bedeutet jetzt `VULKAN=OFF`;
+  Loader, Adapter und DLL zählen nur, wenn `vulkaninfo` fehlt oder scheitert. Gleich in allen drei Erkennungen:
+  `orchestrator/runtime/hardware_probe.py` (mit seiner bytegleichen Kopie `scripts/hardware_probe.py`),
+  `scripts/hardware_probe.sh` und `scripts/hardware_probe.ps1`. Regressionstests: `tests/test_runtime.py`
+  `test_vulkaninfo_with_only_a_software_renderer_means_no_gpu_driver`,
+  `test_windows_vulkaninfo_with_only_a_software_renderer`, `tests/test_hardware_probe.py`
+  `test_a_software_renderer_only_means_no_vulkan` (das .sh und das .py auf demselben Rechner).
 - **`runtime start --model` und `--sleep-idle` zählen auch, während ein Server läuft** (Kette port-runtime, aus der
   Prüfung des verwalteten llama-server): Ein Start, der den laufenden Server schon mit dem gewählten Modell vorfand,
   kehrte zurück, bevor die Wahl gespeichert war; `runtime start --model X` (oder `--model auto`, und die Modellwahl
