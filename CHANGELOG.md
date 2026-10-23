@@ -1362,7 +1362,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `CancelToken` replaces the four "hold the client so Cancel can close it" copies, and closing a session ends its
   waits. The person's board steps, `scan --device` and Mojo ask `remote.transport.available()` whether SSH works, and
   the GUI's messages for a problem on this computer (local_problem) now also name what failed there (the system's
-  words and the file's name, never its folder or an account).
+  words and the file's name, never its folder or an account). Kept as before (review of the chain): a command that
+  stays silent while its connection still answers (`exit 0` on it) is busy on the board, not cut off, so its time
+  limit ends it at once with "no answer from the device within N s", without a second login, a second run on the
+  board or a line that the network dropped; the tarball is made under umask 077 before the SFTP upload writes into it,
+  so it is the user's only as with `umask 077 && cat >`; a drop just as the deploy asks whether the board has SFTP
+  waits for the board and uploads over SFTP instead of ending the deploy; and the board session's sentences an AI gets
+  as external text name the board by its label, never its address (D0).
 - **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
   existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
   `utils/network.py` left with that module, see below) run through the oldest one's module,
