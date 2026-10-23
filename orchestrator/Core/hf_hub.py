@@ -189,11 +189,13 @@ def offline_refusal() -> "HubError":
 
 def person_text(error: BaseException, lang: Optional[str] = None) -> str:
     """What a window or the command line shows a person for a failed Hugging Face call, in the person's language:
-    offline mode in plain words (what is refused and where to switch it off, hf.offline), a disk that cannot hold it
-    (disk_plan.person_reason), any other error as its own text."""
+    offline mode in plain words (what is refused, hf.offline, and what the person can do: the facts catalogue's
+    action for the blocker offline_mode, the words every other offline refusal shows the person), a disk that cannot
+    hold it (disk_plan.person_reason), any other error as its own text."""
     if getattr(error, "blocker", "") == "offline_mode":
+        from orchestrator.tools.facts_catalog import person_action_text
         from orchestrator.utils.localization import ui_text
-        return ui_text("hf.offline", lang)
+        return " ".join(t for t in (ui_text("hf.offline", lang), person_action_text("offline_mode", lang)) if t)
     from orchestrator.Core.disk_plan import person_reason
     return person_reason(error, lang)
 

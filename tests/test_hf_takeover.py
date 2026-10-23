@@ -466,7 +466,8 @@ class TestTheCommandLinesTakeOver:
 
         def invoke(answer=None, terminal=True):
             printed = io.StringIO()
-            monkeypatch.setattr(cli_module, "console", Console(file=printed, width=400, color_system=None))
+            # wide enough that the deletion table never folds a full path (Windows temp paths are long)
+            monkeypatch.setattr(cli_module, "console", Console(file=printed, width=2000, color_system=None))
             monkeypatch.setattr(cli_module, "_interactive", lambda: terminal)
             result = CliRunner().invoke(cli_module.cli, ["models", "take-over"], obj=Ctx(), input=answer)
             return result, printed.getvalue() + result.output

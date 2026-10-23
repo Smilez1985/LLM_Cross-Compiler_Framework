@@ -298,10 +298,12 @@ class TestOfflineMode:
         from orchestrator.utils.next_steps import mouse_path
         with pytest.raises(HubError) as refused:
             offline_manager(tmp_path).list_repo_files(REPO)
+        from orchestrator.tools.facts_catalog import person_action_text
         english, german = person_text(refused.value, "en"), person_text(refused.value, "de")
         assert english.startswith("Offline mode is on, so the framework does not contact Hugging Face")
         assert mouse_path("act_ditto_settings", "en") in english, "where to switch it off"
         assert german.startswith("Der Offline-Modus ist an") and mouse_path("act_ditto_settings", "de") in german
+        assert english.endswith(person_action_text("offline_mode", "en")), "the words of every offline refusal"
         assert "offline_mode" not in english + german, "no setting name, no reason code"
 
     def test_other_errors_keep_their_text(self):
@@ -344,11 +346,13 @@ class TestTheBrowserWindowOffline:
         return SimpleNamespace(win=win, boxes=boxes, hf=hf)
 
     def test_a_search_is_refused_in_a_plain_box(self, window, wire):
+        from orchestrator.Core.hf_hub import offline_refusal, person_text
         from orchestrator.utils.localization import ui_text
         window.win.search_edit.setText("tiny")
         window.win.start_search()
         assert window.win.worker is None, "no worker started"
-        assert window.boxes == [("information", ui_text("hf.offline.title", "en"), ui_text("hf.offline", "en"))]
+        assert window.boxes == [("information", ui_text("hf.offline.title", "en"),
+                                 person_text(offline_refusal(), "en"))]
         assert window.win.status_label.text() == ui_text("blocker.offline_mode", "en")
         assert wire.seen == []
 
@@ -364,5 +368,5 @@ class TestTheBrowserWindowOffline:
         seen = []
         worker.error.connect(seen.append)
         worker.run()
-        from orchestrator.utils.localization import ui_text
-        assert seen == [ui_text("hf.offline", "de")]
+        from orchestrator.Core.hf_hub import offline_refusal, person_text
+        assert seen == [person_text(offline_refusal(), "de")] and seen[0].startswith("Der Offline-Modus ist an")

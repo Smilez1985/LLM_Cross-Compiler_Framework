@@ -48,8 +48,7 @@ TEXTS = {
         "hf.takeover.why.offline": "offline mode is on, so Hugging Face was not asked for its checksum",
         "hf.offline.title": "Offline mode",
         "hf.offline": "Offline mode is on, so the framework does not contact Hugging Face: no search, licence check, "
-                      "file list or download. Switch offline mode off ({path:act_ditto_settings}) to use the browser; "
-                      "models already on this computer stay usable.",
+                      "file list or download.",
     },
     "de": {
         "hf.stop": "Anhalten",
@@ -91,18 +90,12 @@ TEXTS = {
                                    "gefragt",
         "hf.offline.title": "Offline-Modus",
         "hf.offline": "Der Offline-Modus ist an, deshalb nimmt das Framework keinen Kontakt zu Hugging Face auf: keine "
-                      "Suche, keine Lizenzprüfung, keine Dateiliste und kein Download. Schalte den Offline-Modus aus "
-                      "({path:act_ditto_settings}), um den Browser zu nutzen; Modelle, die schon auf diesem Computer "
-                      "sind, bleiben nutzbar.",
+                      "Suche, keine Lizenzprüfung, keine Dateiliste und kein Download.",
     },
 }
 
 FORMAL = {
     "de": {
-        "hf.offline": "Der Offline-Modus ist an, deshalb nimmt das Framework keinen Kontakt zu Hugging Face auf: keine "
-                      "Suche, keine Lizenzprüfung, keine Dateiliste und kein Download. Schalten Sie den Offline-Modus "
-                      "aus ({path:act_ditto_settings}), um den Browser zu nutzen; Modelle, die schon auf diesem "
-                      "Computer sind, bleiben nutzbar.",
         "hf.download.stopped": "Der Download von {name} wurde angehalten. Der bisher geladene Teil bleibt erhalten; "
                                "laden Sie die Datei noch einmal herunter, um ihn fortzusetzen.",
         "hf.takeover.tooltip": "Frühere Versionen haben die Downloads des Browsers im Hugging-Face-Cache im "
