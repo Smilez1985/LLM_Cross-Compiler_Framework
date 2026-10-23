@@ -790,7 +790,8 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 console.print(Panel(
                     f"[bold]Model:[/bold] {escape(model)}\n"
                     f"[bold]Target:[/bold] {escape(target)}\n"
-                    f"[bold]Format:[/bold] {format}\n"
+                    # the format the build runs with, as the target spells it (a target.yml format id is free text)
+                    f"[bold]Format:[/bold] {escape(str(request.format))}\n"
                     f"[bold]Quantization:[/bold] {escape(quantization or 'None')}\n"
                     f"[bold]Output:[/bold] {escape(output_dir)}\n"
                     f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"

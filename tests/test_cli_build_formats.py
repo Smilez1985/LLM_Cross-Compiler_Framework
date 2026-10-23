@@ -112,6 +112,36 @@ def test_the_targets_formats_are_accepted(mixed, tmp_path, monkeypatch):
     assert refused.code == 2 and "hf is no format a target builds" in refused.out
 
 
+def test_the_start_panel_names_the_format_the_build_runs_with(mixed, tmp_path, monkeypatch):
+    """The start panel of `build start` names the format as the target spells it (the one the build runs with),
+    not the person's spelling: `-f RKLLM` builds rkllm (stage C wave 3c, fix c)."""
+    cli = make_cli(mixed, tmp_path, monkeypatch)
+    result = cli.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "-f", "RKLLM", quiet=False)
+    assert result.code == 0, result.out
+    assert "Format: rkllm" in result.out and "Format: RKLLM" not in result.out
+    assert [str(r.target_formats[0].value) for r in cli.submitted] == ["rkllm"]
+
+
+def test_the_start_panel_never_reads_the_format_as_markup(mixed, tmp_path, monkeypatch):
+    """--format is no fixed choice any more: the format comes from a target.yml, whose format ids are free text, so
+    the panel prints it Rich-escaped, as every other value there."""
+    from orchestrator.Core.build_service import BuildService
+    cli = make_cli(mixed, tmp_path, monkeypatch)
+    real = BuildService.validate
+
+    def validate(self, request, **kwargs):
+        checked = real(self, request, **kwargs)
+        return checked.model_copy(update={"format": "[bold]rkllm[/bold]"})
+    monkeypatch.setattr(BuildService, "validate", validate)
+    monkeypatch.setattr(BuildService, "earlier_builds", lambda self, request, **kw: [])
+    monkeypatch.setattr(BuildService, "start_build", lambda self, request, **kw: SimpleNamespace(request_id="r1"))
+    monkeypatch.setattr(BuildService, "request_state", lambda self, request_id: None)
+    monkeypatch.setattr("orchestrator.cli._pause", lambda seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr("orchestrator.cli._cancel_interrupted_build", lambda ctx, request_id: None)
+    result = cli.invoke("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "-f", "rkllm", quiet=False)
+    assert "Format: [bold]rkllm[/bold]" in result.out, result.out
+
+
 def test_the_help_lists_what_the_installed_targets_build():
     from test_cli_builds import invoke_plain
     result = invoke_plain("build", "start", "--help")
