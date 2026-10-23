@@ -322,7 +322,11 @@ class TestOfflineMode:
             offline_manager(tmp_path).list_repo_files(REPO)
         from orchestrator.tools.facts_catalog import person_action_text
         english, german = person_text(refused.value, "en"), person_text(refused.value, "de")
-        assert english.startswith("Offline mode is on, so the framework does not contact Hugging Face")
+        # Review of chain hf-online: it said "the framework does not contact Hugging Face", while a build the person
+        # starts still downloads its model in offline mode (BuildEngine._stage_model does not read offline mode); the
+        # text names what refuses: the Hugging Face browser.
+        assert english.startswith("Offline mode is on, so the Hugging Face browser does not contact Hugging Face")
+        assert german.startswith("Der Offline-Modus ist an, deshalb nimmt der Hugging-Face-Browser keinen Kontakt")
         assert mouse_path("act_ditto_settings", "en") in english, "where to switch it off"
         assert german.startswith("Der Offline-Modus ist an") and mouse_path("act_ditto_settings", "de") in german
         assert english.endswith(person_action_text("offline_mode", "en")), "the words of every offline refusal"
