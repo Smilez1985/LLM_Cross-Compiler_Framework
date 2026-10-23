@@ -292,8 +292,9 @@ the packages dnf would have to remove for it (see [Installation](../README.md#in
 finds Podman by itself: when `DOCKER_HOST` is not set and no Docker daemon answers (neither the system's nor a
 rootless Docker's socket), it sets `DOCKER_HOST` to your Podman socket for its own process and the programs it starts
 (`orchestrator/utils/docker_engine.py`, one helper for the build engine, the builder image, Ditto's container, the
-Docker check and `scripts/build_container_image.sh`). A `DOCKER_HOST` you set always wins. `llm-cli mojo` names the
-engine in use.
+Docker check and `scripts/build_container_image.sh`). A `DOCKER_HOST` you set always wins. `podman-docker` links
+Docker's socket names (`/run/docker.sock`, `$XDG_RUNTIME_DIR/docker.sock`) to Podman's sockets; such a name, or a
+socket where Podman answers, counts as Podman, not as a Docker daemon. `llm-cli mojo` names the engine in use.
 
 Checked with Podman 5.8.2 and buildah 1.43.1 on Rocky Linux 9.8 and against Podman's sources:
 
