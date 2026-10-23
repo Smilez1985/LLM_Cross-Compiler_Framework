@@ -7,6 +7,7 @@ a fake HTTP session with Range support, archives built in tmp_path and a small P
 that speaks /health, /v1/models and /v1/chat/completions with API-key checks.
 """
 
+import contextlib
 import hashlib
 import io
 import json
@@ -1027,6 +1028,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):
         print(fmt % a, flush=True)
 
+time.sleep(behavior.get("bind_delay", 0))  # llama-server loads its GPU backends before it binds: seconds on some PCs
 try:
     httpd = ThreadingHTTPServer((opt("--host"), int(opt("--port"))), Handler)
 except OSError:  # the port is taken: llama-server says so and exits
@@ -1077,6 +1079,37 @@ class FakeConfig:
 
     def get(self, key, default=None):
         return self.values.get(key, default)
+
+
+@contextlib.contextmanager
+def impostor_on_the_first_port(monkeypatch):
+    """Another program that took the port the start chooses first: it answers /health, accepts any key and records
+    every Authorization header it gets. The start's next choice is a really free port. Yields (its port, headers)."""
+    seen = []
+
+    class Impostor(BaseHTTPRequestHandler):
+        def do_GET(self):
+            auth = self.headers.get("Authorization", "")
+            seen.append(auth)
+            body = b'{"data": [{"id": "tiny"}]}'
+            self.send_response(200 if self.path == "/health" or auth else 401)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    impostor = ThreadingHTTPServer(("127.0.0.1", 0), Impostor)
+    threading.Thread(target=impostor.serve_forever, daemon=True).start()
+    ports = [impostor.server_address[1]]
+    free_port = ls._free_port
+    monkeypatch.setattr(ls, "_free_port", lambda: ports.pop() if ports else free_port())
+    try:
+        yield impostor.server_address[1], seen
+    finally:
+        impostor.shutdown()
+        impostor.server_close()
 
 
 @POSIX_ONLY
@@ -1202,35 +1235,51 @@ class TestServerProcess:
     def test_a_program_answering_on_the_chosen_port_never_gets_the_key(self, fake_runtime, monkeypatch):
         # Port race: another program takes the free port first and answers /health (and accepts any key). It used to
         # be taken for our server, and _check_auth sent it the new key; the endpoint then pointed at it.
-        seen = []
-
-        class Impostor(BaseHTTPRequestHandler):
-            def do_GET(self):
-                auth = self.headers.get("Authorization", "")
-                seen.append(auth)
-                body = b'{"data": [{"id": "tiny"}]}'
-                self.send_response(200 if self.path == "/health" or auth else 401)
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, *a):
-                pass
-
-        impostor = ThreadingHTTPServer(("127.0.0.1", 0), Impostor)
-        threading.Thread(target=impostor.serve_forever, daemon=True).start()
-        ports = [impostor.server_address[1]]
-        free_port = ls._free_port
-        monkeypatch.setattr(ls, "_free_port", lambda: ports.pop() if ports else free_port())
-        try:
+        with impostor_on_the_first_port(monkeypatch) as (taken, seen):
             rt = fake_runtime()
             ep = rt.start()
-            assert ep.port != impostor.server_address[1] and ls.listens_on(ep.pid, ep.port)
+            assert ep.port != taken and ls.listens_on(ep.pid, ep.port)
             assert seen and not any(ep.api_key in s for s in seen) and all(not s for s in seen)
             assert (rt.root / "b1-cpu" / "starts").read_text() == "2", "the second port was tried"
-        finally:
-            impostor.shutdown()
-            impostor.server_close()
+
+    def test_other_processes_get_no_endpoint_before_the_port_is_confirmed(self, fake_runtime, monkeypatch):
+        # Review of port-runtime: server.json is written right after the launch, and LLMClient in every other process
+        # (the GUI, the MCP server) reads it. While the port check still ran it named the impostor's port with the new
+        # key, so a chat sent at that moment gave the impostor the key and the prompt. Here the stand-in binds after
+        # 1 s, as llama-server binds only after it loaded its GPU backends.
+        with impostor_on_the_first_port(monkeypatch) as (taken, seen):
+            rt = fake_runtime()
+            (rt.root / "b1-cpu" / "behavior.json").write_text(json.dumps({"mode": "ok", "bind_delay": 1.0}))
+            handed_out = []
+            rt._sleep = lambda s: (handed_out.append(ls.read_endpoint(rt.root)), time.sleep(s))
+            ep = rt.start()
+            assert ep.port != taken and (rt.root / "b1-cpu" / "starts").read_text() == "2"
+            assert handed_out and not [e for e in handed_out if e is not None and e.port == taken]
+            assert all(not s for s in seen)
+            again = ls.read_endpoint(rt.root)
+            assert (again.port, again.api_key, again.pid) == (ep.port, ep.api_key, ep.pid)
+            assert "port_unconfirmed" not in json.loads(rt.state_file.read_text()), "server.json as before"
+
+    def test_a_server_that_holds_its_port_is_handed_out_while_it_loads(self, fake_runtime):
+        # llama-server binds its port before it loads the model (/health answers 503 meanwhile). Once it is that port's
+        # listener, other processes get the endpoint as before (their calls wait for the model), not "not running".
+        rt = fake_runtime("slow")
+        handed_out = []
+        rt._sleep = lambda s: (handed_out.append(ls.read_endpoint(rt.root)), time.sleep(s))
+        with pytest.raises(LocalRuntimeError, match="did not become ready in time"):
+            rt.start(timeout=2)
+        assert [e for e in handed_out if e is not None]
+
+    def test_a_start_that_died_before_the_port_was_confirmed_leaves_no_server_behind(self, fake_runtime):
+        # A start killed before the port check finished leaves a running server whose record is not handed out; the
+        # next start stops it instead of starting a second one beside it.
+        rt = fake_runtime()
+        first = rt.start()
+        state = json.loads(rt.state_file.read_text())
+        rt.state_file.write_text(json.dumps({**state, "port_unconfirmed": True}))
+        assert rt.endpoint() is None and rt.status().running
+        second = rt.start()
+        assert second.pid != first.pid and gone(first.pid) and rt.endpoint().pid == second.pid
 
     def test_an_unreliable_connection_table_does_not_block_the_start(self, fake_runtime, monkeypatch):
         # Where psutil cannot list the server's sockets, a server that keeps running after the grace period has bound

@@ -12,7 +12,8 @@ its manifest (or the opted-in prebuilt archive), on 127.0.0.1 with a free port a
 reaches the server only through a 0600 key file, with a cleared environment and without any option of the shared
 forbidden list (orchestrator/runtime/server_policy.py, decision D22). An answer on the chosen port counts only while
 llama-server itself listens there (listens_on): a program that took the free port between the choice and the bind
-never receives the key, the auth check or a prompt, and another port is tried. It hands base_url, key and model to
+never receives the key, the auth check or a prompt, and another port is tried; until then server.json is marked
+("port_unconfirmed") and read_endpoint hands it to no other process. It hands base_url, key and model to
 the provider layer (read_endpoint; LLMClient uses it for the "local" provider). The server never gets its own tools,
 agent mode, MCP servers or web UI: Ditto's tools run inside the framework, where approval is enforced.
 
@@ -30,8 +31,9 @@ Files under <user state dir>/runtime/llama.cpp/:
                         the build Ditto's Docker image was made from (docker_build_id)
   mode.json             the runtime mode (bare-metal or docker) and Ditto's verified image (runtime_mode.py)
   server.json           pid, start time, port and model of the running server; trusted only while that
-                        exact process (pid + start time + executable) is alive; in Docker mode the container's ID,
-                        trusted only while that container runs with Ditto's label and the recorded port
+                        exact process (pid + start time + executable) is alive and, during a start, once it is
+                        known to listen on its port (until then "port_unconfirmed": true); in Docker mode the
+                        container's ID, trusted only while that container runs with Ditto's label and the recorded port
   server-<random>.key   API key of the running server (0600, deleted on stop)
   downloads/            archives while they are fetched (.part files resume)
 Models: <models_dir>/ditto/<file>.gguf plus a .<file>.verified.json marker. Log: <state dir>/logs/llama-server.log.
@@ -303,6 +305,8 @@ def read_endpoint(root: Path, docker: Any = None) -> Optional[LocalEndpoint]:
     state = _read_json(root / "server.json")
     if not _server_alive(state, docker):
         return None
+    if state.get("port_unconfirmed"):
+        return None  # llama-server is not yet known to be its port's listener: another program may answer there
     try:
         key_file = Path(state["key_file"])
         if key_file.parent.resolve() != root.resolve() or not key_file.name.startswith("server-"):
@@ -1286,6 +1290,8 @@ class LocalLLMRuntime:
                     self._remember_tier(tier, model, remember)
                     return running
                 self._stop_locked()
+            elif state.get("port_unconfirmed"):
+                self._stop_locked()  # a start that ended before its port check: its server is never handed out
             self._cleanup_stale_locked()
             model_path = self._ensure_model_verified(model)
             endpoint = self._launch(installed, model, model_path, ctx, idle, timeout, tie_to_process)
@@ -1351,20 +1357,31 @@ class LocalLLMRuntime:
                 created = psutil.Process(proc.pid).create_time()
             except psutil.Error:
                 created = 0.0  # already gone; the health wait reports it
-            _write_private(self.state_file, json.dumps({
+            state = {
                 "pid": proc.pid, "create_time": created, "port": port, "server": str(installed.server),
                 "variant": installed.variant, "origin": installed.origin, "build_id": installed.build_id,
                 "tier": model.tier, "alias": model.alias, "ctx": ctx, "sleep_idle_seconds": sleep_idle_seconds,
-                "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+                "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            # Written at once (a crash still leaves the server recorded), but marked: LLMClient in every other process
+            # reads server.json, and until llama-server is known to listen on the port, another program may answer
+            # there; read_endpoint hands out nothing for a marked record.
+            _write_private(self.state_file, json.dumps({**state, "port_unconfirmed": True}))
+            confirmed = []
+
+            def confirm() -> None:
+                if not confirmed:
+                    confirmed.append(True)
+                    _write_private(self.state_file, json.dumps(state))
             if tie_to_process:
                 self._tie_to_this_process(proc.pid, created)
-            outcome = self._wait_healthy(proc, port, timeout)
+            outcome = self._wait_healthy(proc, port, timeout, on_listening=confirm)
             if outcome == "ok":
                 try:
                     self._check_auth(port, key)
                 except (LocalRuntimeError, requests.RequestException) as e:
                     self._stop_locked()
                     raise LocalRuntimeError(str(e)) from e
+                confirm()  # where the connection table cannot be read: the checks above stand in for it
                 return LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key, model=model.alias,
                                      port=port, pid=proc.pid)
             tail = self._log_tail()
@@ -1543,15 +1560,22 @@ class LocalLLMRuntime:
                     self._terminate(proc, 5)
         atexit.register(stop_if_unchanged)
 
-    def _wait_healthy(self, proc, port: int, timeout: float) -> str:
+    def _wait_healthy(self, proc, port: int, timeout: float,
+                      on_listening: Optional[Callable[[], None]] = None) -> str:
         """ok | exited | timeout | foreign: another program answers /health on the port (it took the port between our
-        choice and llama-server's bind) and must never receive the key, the auth check or the prompts."""
+        choice and llama-server's bind) and must never receive the key, the auth check or the prompts. on_listening
+        runs once as soon as llama-server is listed as the port's listener (it binds before it loads the model), so
+        other processes get the endpoint while the model loads, as before, but never one another program answers."""
         deadline = time.monotonic() + timeout
+        listening = False
         while time.monotonic() < deadline:
             if proc.poll() is not None:
                 return "exited"
+            if not listening and on_listening is not None and listens_on(proc.pid, port):
+                listening = True
+                on_listening()
             if self._health(port) == 200:
-                return self._answered_by(proc, port)
+                return "ok" if listening else self._answered_by(proc, port)
             self._sleep(0.25)
         return "timeout"
 
