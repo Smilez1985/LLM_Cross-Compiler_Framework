@@ -240,7 +240,7 @@ capabilities:
         rk3566: Q4_0
         rk3568: Q4_0
       imatrix: true
-      needs_imatrix: [IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M, IQ3_XXS, Q2_K_S]
+      needs_imatrix: [IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M, IQ3_XXS, IQ3_XS, Q2_K_S]
       dataset: optional
       dataset_kind: text
       aliases: {FP16: F16, FP32: F32, INT8: Q8_0, Q8: Q8_0, INT4: Q4_K_M, Q4: Q4_K_M, Q5: Q5_K_M,

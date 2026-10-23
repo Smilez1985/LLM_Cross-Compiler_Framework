@@ -54,7 +54,8 @@ class PriorityLevel(Enum):
 
 # llama.cpp quantization types that cannot be produced without an importance matrix (llama-quantize refuses them;
 # the same list as GGUF_NEEDS_IMATRIX of targets/Rockchip/modules/config_module.sh and needs_imatrix of its target.yml)
-LLAMA_CPP_NEEDS_IMATRIX = frozenset({"IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ2_M", "IQ3_XXS", "Q2_K_S"})
+LLAMA_CPP_NEEDS_IMATRIX = frozenset({"IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ2_M", "IQ3_XXS", "IQ3_XS",
+                                     "Q2_K_S"})
 
 
 class OrchestrationStatus(Enum):
