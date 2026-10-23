@@ -10,9 +10,11 @@ are checked before anything is unpacked, and it is always shown as "prebuilt, no
 downloaded the same way. `start()` starts only a build that passed its verification on this machine and still matches
 its manifest (or the opted-in prebuilt archive), on 127.0.0.1 with a free port and a random per-start API key that
 reaches the server only through a 0600 key file, with a cleared environment and without any option of the shared
-forbidden list (orchestrator/runtime/server_policy.py, decision D22). It hands base_url, key and model to the provider
-layer (read_endpoint; LLMClient uses it for the "local" provider). The server never gets its own tools, agent mode,
-MCP servers or web UI: Ditto's tools run inside the framework, where approval is enforced.
+forbidden list (orchestrator/runtime/server_policy.py, decision D22). An answer on the chosen port counts only while
+llama-server itself listens there (listens_on): a program that took the free port between the choice and the bind
+never receives the key, the auth check or a prompt, and another port is tried. It hands base_url, key and model to
+the provider layer (read_endpoint; LLMClient uses it for the "local" provider). The server never gets its own tools,
+agent mode, MCP servers or web UI: Ditto's tools run inside the framework, where approval is enforced.
 
 Ditto's server runs bare metal (above) or in Docker (runtime mode "docker", DECISIONS round 7 D): then start() starts
 Ditto's image, built and verified on this computer (container_server.py, runtime_mode.py), with the same launch policy,
@@ -276,6 +278,16 @@ def owned_process(state: Optional[dict]) -> Optional[psutil.Process]:
         return None
 
 
+def listens_on(pid: int, port: int) -> Optional[bool]:
+    """Whether process `pid` has a listening TCP socket on `port` (the connection table of psutil); None when that
+    cannot be checked (no permission, a system psutil cannot read)."""
+    try:
+        connections = psutil.Process(pid).net_connections(kind="tcp")
+    except (psutil.Error, OSError):
+        return None
+    return any(c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port for c in connections)
+
+
 def _server_alive(state: Optional[dict], docker: Any = None) -> bool:
     """The recorded server still runs: that exact process, or in Docker mode that container of Ditto's."""
     if state and state.get("mode") == "docker":
@@ -369,6 +381,7 @@ class LocalLLMRuntime:
     """Install, start and stop the managed llama-server; choose Ditto's model for this machine."""
 
     EXIT_LOCK_TIMEOUT = 5.0  # seconds the exit handler of a tied server waits for the runtime lock
+    PORT_CHECK_GRACE = 10.0  # seconds a server not listed as its port's listener has to exit or to show up
 
     def __init__(self, data_dir: Optional[Path] = None, models_dir: Optional[Path] = None,
                  catalog: Optional[RuntimeCatalog] = None, hardware: Optional[HardwareInfo] = None,
@@ -1356,8 +1369,8 @@ class LocalLLMRuntime:
                                      port=port, pid=proc.pid)
             tail = self._log_tail()
             self._stop_locked()
-            if outcome == "exited" and "couldn't bind" in tail:
-                continue
+            if outcome == "foreign" or (outcome == "exited" and "couldn't bind" in tail):
+                continue  # another program took the port between our choice and the bind: try another one
             what = "did not become ready in time" if outcome == "timeout" else "exited during startup"
             raise LocalRuntimeError(f"llama-server {what} (log: {self.log_file}).", log_tail=tail)
         raise LocalRuntimeError("Could not find a free local port for llama-server.")
@@ -1531,14 +1544,31 @@ class LocalLLMRuntime:
         atexit.register(stop_if_unchanged)
 
     def _wait_healthy(self, proc, port: int, timeout: float) -> str:
+        """ok | exited | timeout | foreign: another program answers /health on the port (it took the port between our
+        choice and llama-server's bind) and must never receive the key, the auth check or the prompts."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if proc.poll() is not None:
                 return "exited"
             if self._health(port) == 200:
-                return "ok"
+                return self._answered_by(proc, port)
             self._sleep(0.25)
         return "timeout"
+
+    def _answered_by(self, proc, port: int) -> str:
+        """Who answered /health: llama-server binds its port right after it starts (before it loads the model) and
+        exits when the port is taken. So when it is not listed as the port's listener, it either exits shortly
+        (another program holds the port: "foreign") or shows up; when neither happens within PORT_CHECK_GRACE, the
+        connection table is what is unreliable, and a server that keeps running has bound its port."""
+        grace = time.monotonic() + self.PORT_CHECK_GRACE
+        while listens_on(proc.pid, port) is False:
+            if proc.poll() is not None:
+                return "foreign"
+            if time.monotonic() > grace:
+                self.logger.warning(f"Could not confirm that llama-server (pid {proc.pid}) listens on port {port}")
+                break
+            self._sleep(0.25)
+        return "ok"
 
     def stop(self, timeout: float = 15) -> int:
         """Stops the server this runtime started and leftover servers from its folder (after a crash). Returns

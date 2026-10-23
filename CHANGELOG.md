@@ -2534,6 +2534,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **Another program on the local model server's port never receives its key or a prompt** (chain port-runtime,
+  from the review of the managed llama-server): `runtime start` chose a free port, started llama-server on it and
+  took any answer of `/health` on that port for the server. A program that took the port between the choice and
+  llama-server's bind (another process of any user on this computer) was then sent the new key by the key check,
+  and the endpoint handed to Ditto pointed at it, so it would also have received the prompts. An answer now counts
+  only while llama-server itself listens on the port (its connection table through psutil); otherwise llama-server
+  exits at once (it found the port taken), the start stops it and tries another port, and nothing is sent to the
+  other program. Where the connection table cannot be read, a server that keeps running for 10 s has bound its
+  port and is used as before. Bare metal only: in Docker mode Docker binds the published port itself, and a taken
+  port fails the start. Regression tests: `tests/test_runtime.py`
+  `test_a_program_answering_on_the_chosen_port_never_gets_the_key`,
+  `test_an_unreliable_connection_table_does_not_block_the_start`.
 - **The Hugging Face token goes only to huggingface.co, also when `HF_ENDPOINT` names another host** (review of
   chain hf): huggingface_hub sends its API calls to the host in the `HF_ENDPOINT` environment variable (a mirror).
   The commit lookup of the GUI browser's download and the Hub list of **Take over old downloads...** sent the token
