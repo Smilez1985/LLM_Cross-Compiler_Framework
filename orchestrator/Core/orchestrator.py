@@ -52,8 +52,10 @@ class PriorityLevel(Enum):
     URGENT = 3
     CRITICAL = 4
 
-# llama.cpp quantization types that cannot be produced without an importance matrix
-LLAMA_CPP_NEEDS_IMATRIX = frozenset({"IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S"})
+# llama.cpp quantization types that cannot be produced without an importance matrix (llama-quantize refuses them;
+# the same list as GGUF_NEEDS_IMATRIX of targets/Rockchip/modules/config_module.sh and needs_imatrix of its target.yml)
+LLAMA_CPP_NEEDS_IMATRIX = frozenset({"IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ2_M", "IQ3_XXS", "IQ3_XS",
+                                     "Q2_K_S"})
 
 
 class OrchestrationStatus(Enum):
@@ -532,6 +534,8 @@ class LLMOrchestrator:
             dataset_sha256=None if req.dataset_generated else req.dataset_sha256,
             build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
             local_inputs=req.local_inputs,
+            # the engine records in it what has landed on disk (the request releases it when it ends)
+            disk_reservation=getattr(req, "disk_reservation", "") or "",
         )
 
     async def _submit_to_engine(self, build_config: BuildConfiguration, state: Optional[WorkflowState]) -> Optional[str]:

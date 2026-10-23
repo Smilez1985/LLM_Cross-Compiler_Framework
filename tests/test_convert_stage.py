@@ -21,7 +21,7 @@ import pytest
 
 from conftest import NO_POSIX_BASH, REPO_ROOT, posix_shell
 from model_files import GGUF_HEAD, gguf_bytes, gguf_text, safetensors_bytes, write_gguf, write_safetensors
-from test_build_stages import F16, OUT, Image, _script, by_hand, stage_lines
+from test_build_stages import F16, OUT, PAD, Image, _script, by_hand, stage_lines
 
 ROCKCHIP = REPO_ROOT / "targets" / "Rockchip"
 TEMPLATE = REPO_ROOT / "targets" / "_template"
@@ -887,8 +887,9 @@ def test_a_damaged_model_folder_is_refused_before_converting(image, damage, mess
 @needs_bash
 def test_a_gguf_input_is_checked_counted_and_not_converted(image):
     f16 = write_gguf(image.root / "granite.fp16.gguf", "gguf f16")
+    # target_module.sh by hand also packages for the board, whose 1.x input check wants a model of 1 MiB (PAD)
     result = by_hand(image, "target", "--input", f16, "--quantization", "Q5_K_M", "--model-name", "granite",
-                     MODEL_SOURCE=None, MODEL_NAME=None, QUANTIZATION=None)
+                     MODEL_SOURCE=None, MODEL_NAME=None, QUANTIZATION=None, **PAD)
     assert result.returncode == 0, result.stdout + result.stderr
     assert conversion(image) == {"input_format": "gguf", "input_bytes": f16.stat().st_size, "converted": False}
     assert "Input: a GGUF file" in result.stdout and "Nothing to convert" in result.stdout

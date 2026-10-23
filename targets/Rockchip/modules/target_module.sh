@@ -10,11 +10,19 @@
 #         --input FILE.gguf of target_module.sh of version 1.x, and a file named with --output stay); writes
 #         build_info.json (model, format, board, quantization, llama.cpp tag), which the BuildEngine completes with
 #         the file list, the hashes and the build data; and lists the results.
-#         With a hardware profile in the build plan (config_module.sh) a GGUF build is also packaged for the board, as
-#         in version 1.x: llama-cli and llama-server cross-compiled from the image's llama.cpp source with the
-#         profile's toolchain, a model card and helper scripts, in output/packages/. A build of the BuildEngine has no
-#         profile: the board's runtime comes from the runtime builder (llm-cli device runtime build) and the board
-#         package from llm-cli deploy package or llm-cli device runtime deploy.
+#         The package for the board (version 1.x's target module: deployment-ready, with documentation, helper
+#         scripts, a complete manifest and automated tests), in output/packages/<model>_<type>_<arch>_<time>/: the GGUF,
+#         llama-cli and llama-server cross-compiled from the image's llama.cpp source with the plan's toolchain, the
+#         toolchain file and the hardware profile, a model card (README.md), test_model.sh and deploy.sh (from
+#         scripts/package_*.sh), MANIFEST.json with every build detail and SHA256SUMS (scripts/board_package.py). It is
+#         checked before it is kept: the model is run once on this machine with the image's llama-completion (when the
+#         image has it), the programs must be ELF programs for the board, and every file must match SHA256SUMS.
+#         It is made for a GGUF build with a hardware profile in the build plan (config_module.sh), and on request
+#         (build.sh --package: target_module.sh started by hand, the entrypoint modes target and pipeline) also without
+#         one, with the plain defaults of this target (plan_package_defaults), which the manifest names. A build of the
+#         BuildEngine has no profile and asks for no package: the board's runtime comes from the runtime builder
+#         (llm-cli device runtime build) and the board package from llm-cli deploy package or llm-cli device runtime
+#         deploy.
 
 set -euo pipefail
 
@@ -38,6 +46,10 @@ QUANTIZED_FROM=()
 
 log_info() { echo "ℹ️  [$(date '+%H:%M:%S')] [TARGET] $1"; }
 log_success() { echo "✅ [$(date '+%H:%M:%S')] [TARGET] $1"; }
+log_warn() { echo "⚠️  [$(date '+%H:%M:%S')] [TARGET] $1"; }
+
+# The name of this target in the package (model card tag, manifest)
+PACKAGE_TARGET="Rockchip"
 
 # ============================================================================
 # QUANTISIERUNG
@@ -51,6 +63,7 @@ quantize_kept_gguf() {
     shift 3
     echo ">> Quantizing -> $q"
     "$QUANTIZE_BIN" "$@" "$f16_file" "$out_file" "$q"
+    [ -s "$out_file" ] || die "llama-quantize ended without writing the $q model."
     TARGET_CONFIG[QUANTIZED_GGUF]="$out_file"
     TARGET_CONFIG[QUANT_METHOD]="$q"
 }
@@ -81,8 +94,35 @@ EOF
 }
 
 # ============================================================================
-# PACKAGE FOR THE BOARD (version 1.x; only with a hardware profile)
+# PACKAGE FOR THE BOARD (version 1.x: "Professional Packaging - deployment-ready with documentation", "Helper
+# Scripts - test_model.sh, deploy.sh", "Complete Manifest - JSON with all build details", "Automated Testing -
+# functional tests + validation")
+# The same functions in targets/Rockchip and targets/_template (tests/test_target_stage.py compares them). They read
+# the board's part of the build plan (config_module.sh: board_plan_lines) and PACKAGE_TARGET, the target's name.
 # ============================================================================
+
+PACKAGE_SCRIPTS="$(dirname "$MODULES_DIR")/scripts"
+FUNCTIONAL_TEST_SECONDS=120
+FUNCTIONAL_TEST_TOKENS=8
+
+# Without a hardware profile in the build plan (a package on request: build.sh --package, target_module.sh started
+# by hand): the board's part of the plan from the plain defaults of this target, planned and checked by the config
+# stage's own functions (plan_board defaults), into the stage folder.
+plan_package_defaults() {
+    local plan="$PLAN_DIR/package_plan.sh"
+    # The toolchain file plan_board writes (the Rockchip config stage names it OUTPUT_TOOLCHAIN_FILE, the template's
+    # CMAKE_TOOLCHAIN)
+    # shellcheck disable=SC2034
+    OUTPUT_TOOLCHAIN_FILE="$PLAN_DIR/package_toolchain.cmake"
+    # shellcheck disable=SC2034
+    CMAKE_TOOLCHAIN="$PLAN_DIR/package_toolchain.cmake"
+    plan_board defaults
+    board_plan_lines > "$plan.tmp"
+    check_plan_file "$plan.tmp" "${BOARD_PLAN_NAMES[@]}"
+    mv -f "$plan.tmp" "$plan"
+    # shellcheck source=/dev/null
+    source "$plan"
+}
 
 validate_inputs() {
     local input_gguf="$1"
@@ -109,6 +149,37 @@ validate_inputs() {
     log_success "Input validation completed"
 }
 
+# A short run of the model on this build machine with the image's own llama.cpp tools (llama-completion; llama-cli
+# when the image has only that): FUNCTIONAL_TEST_TOKENS tokens, at most FUNCTIONAL_TEST_SECONDS, no network. A run that
+# ends with an error stops the package; a timeout is a note. Without the tools it is skipped, and the manifest says
+# so. The package's test_model.sh runs the same kind of test on the board.
+functional_test() {
+    local model="$1" log="$SCRATCH_DIR/functional-test.log" tool rc=0
+    local -a run
+    if [ -x "$LLAMA_BASE/build/bin/llama-completion" ]; then
+        tool="llama-completion"
+        run=("$LLAMA_BASE/build/bin/llama-completion" -m "$model" -p "Hello" -n "$FUNCTIONAL_TEST_TOKENS" -no-cnv)
+    elif [ -x "$LLAMA_BASE/build/bin/llama-cli" ]; then
+        tool="llama-cli"
+        run=("$LLAMA_BASE/build/bin/llama-cli" -m "$model" -p "Hello" -n "$FUNCTIONAL_TEST_TOKENS" -st)
+    else
+        TARGET_CONFIG[FUNCTIONAL_TEST]="skipped: the image has no llama-completion or llama-cli for this machine"
+        log_info "Functional test skipped: the image has no llama-completion or llama-cli for this machine"
+        return 0
+    fi
+    log_info "Functional test: $tool runs the model for $FUNCTIONAL_TEST_TOKENS tokens (at most ${FUNCTIONAL_TEST_SECONDS} s)"
+    timeout "$FUNCTIONAL_TEST_SECONDS" "${run[@]}" --no-warmup < /dev/null > "$log" 2>&1 || rc=$?
+    case "$rc" in
+        0) TARGET_CONFIG[FUNCTIONAL_TEST]="passed ($tool, $FUNCTIONAL_TEST_TOKENS tokens on the build machine)" ;;
+        124)
+            TARGET_CONFIG[FUNCTIONAL_TEST]="timed out after ${FUNCTIONAL_TEST_SECONDS} s ($tool on the build machine); not a failure"
+            log_warn "The functional test did not finish within ${FUNCTIONAL_TEST_SECONDS} s; the package is made anyway." ;;
+        *) die "The functional test failed: $tool could not run the quantized model (exit $rc): $(tail -n 8 "$log" | tr '\n' ' ')" ;;
+    esac
+    rm -f "$log"
+    log_success "Functional test: ${TARGET_CONFIG[FUNCTIONAL_TEST]}"
+}
+
 cross_compile_target() {
     log_info "Schritt 1B: Cross-Kompilierung für Target (${PROFILE_ARCH:-unknown})..."
 
@@ -121,8 +192,13 @@ cross_compile_target() {
     cmake_args+=("-DCMAKE_BUILD_TYPE=Release")
     cmake_args+=("-DBUILD_SHARED_LIBS=OFF")
     cmake_args+=("-DLLAMA_CURL=OFF")
-    # Nothing is downloaded at configure time (the build container has no network); only what the package needs.
+    # Nothing is downloaded at configure or build time (the build container has no network, a container started by
+    # hand may have); only what the package needs. Every option of llama.cpp that can download something is off, as
+    # in every llama.cpp build of the framework (DOWNLOAD_OPTIONS_OFF of orchestrator/runtime/build/recipe.py, the
+    # image's Dockerfile): LLAMA_USE_PREBUILT_UI, on by default, would fetch llama-server's web UI while it is built.
     cmake_args+=("-DFETCHCONTENT_FULLY_DISCONNECTED=ON" "-DLLAMA_OPENSSL=OFF" "-DLLAMA_BUILD_TESTS=OFF")
+    cmake_args+=("-DLLAMA_BUILD_EXAMPLES=OFF" "-DLLAMA_BUILD_APP=OFF" "-DLLAMA_USE_PREBUILT_UI=OFF" "-DLLAMA_BUILD_UI=OFF"
+                 "-DLLAMA_LLGUIDANCE=OFF" "-DGGML_CPU_KLEIDIAI=OFF" "-DGGML_OPENMP_FETCH=OFF")
     cmake_args+=("-DLLAMA_BUILD_SERVER=ON")
 
     # WICHTIG: Setze die Toolchain (mit den Optimierungs-Flags) aus config_module.sh
@@ -161,11 +237,36 @@ cross_compile_target() {
     log_success "Target-Kompilierung abgeschlossen in ${build_time}s."
 }
 
+# The programs of the package are programs for the board's processor: their ELF header names it (elf_machine and
+# elf_machine_of of config_module.sh).
+check_board_binaries() {
+    local key want got
+    want="$(elf_machine_of "${PROFILE_ARCH:-}")"
+    for key in LLAMA_CLI_BINARY LLAMA_SERVER_BINARY; do
+        got="$(elf_machine "${TARGET_CONFIG[$key]}")"
+        if [ -n "$want" ] && [ "$got" != "$want" ]; then
+            die "$(basename "${TARGET_CONFIG[$key]}") is no program for the ${PROFILE_ARCH} board (ELF machine ${got:-none}, expected $want); no package was made."
+        fi
+        TARGET_CONFIG[${key}_MACHINE]="${got:-unknown}"
+    done
+    log_success "llama-cli and llama-server are programs for ${PROFILE_ARCH} (ELF machine ${TARGET_CONFIG[LLAMA_CLI_BINARY_MACHINE]})"
+}
+
+profile_text() {  # how the package was planned, for the model card and the manifest
+    if [ "${PROFILE_SOURCE:-defaults}" = profile ]; then
+        echo "the board's hardware profile (target_hardware_config.txt in this package)"
+    else
+        echo "none: the plain defaults of the ${PACKAGE_TARGET} target (no hardware profile was given)"
+    fi
+}
+
 create_package_documentation() {
     local package_dir="$1"
     local readme_file="$package_dir/README.md"
-    local model_file
+    local model_file tag commit
     model_file="$(basename "${TARGET_CONFIG[INPUT_GGUF]}")"
+    tag="$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)"
+    commit="$(cat "$LLAMA_BASE/.llama_cpp_commit" 2>/dev/null || echo unknown)"
 
     log_info "Generiere Gold Standard Model Card..."
 
@@ -174,7 +275,7 @@ create_package_documentation() {
 library_name: gguf
 base_model: ${TARGET_CONFIG[MODEL_NAME]}
 tags:
-- rockchip
+- ${PACKAGE_TARGET,,}
 - ${PROFILE_ARCH:-unknown}
 - quantization:${TARGET_CONFIG[QUANT_METHOD]}
 - gguf
@@ -189,18 +290,24 @@ pipeline_tag: text-generation
 - **Quantization:** ${TARGET_CONFIG[QUANT_METHOD]}
 - **Target Architecture:** ${PROFILE_ARCH:-Generic}
 - **CPU:** ${TARGET_CPU:-unknown}
+- **Hardware profile:** $(profile_text)
 - **File Size:** ${QUANTIZATION_STATS[OUTPUT_SIZE_MB]:-0} MB
 - **Optimization Flags:** \`${CFLAGS:-none}\`
 
 ## 🚀 Quick Start (On ${PROFILE_ARCH:-the board})
+
+### Test first
+\`\`\`bash
+./test_model.sh                      # checks the files (SHA256SUMS), then a short answer from the model
+\`\`\`
 
 ### Option A: Direct CLI
 \`\`\`bash
 # Make binaries executable
 chmod +x llama-cli llama-server
 
-# Run inference
-./llama-cli -m ${model_file} -p "Hello, AI!" -n 128
+# Run inference (-st: one answer, then llama-cli ends)
+./llama-cli -m ${model_file} -p "Hello, AI!" -n 128 -st
 \`\`\`
 
 ### Option B: API Server
@@ -208,6 +315,22 @@ chmod +x llama-cli llama-server
 # Start server on port 8080
 ./llama-server -m ${model_file} --host 0.0.0.0 --port 8080
 \`\`\`
+
+## Deploy to the board
+- From your computer: \`./deploy.sh USER@HOST [DEST]\` copies this folder over scp (default DEST: llm/<this folder>
+  in the user's home on the board), checks the copy there against SHA256SUMS and makes the programs executable. The
+  board's host key must already be in your known_hosts; deploy.sh refuses an unknown or changed key
+  (StrictHostKeyChecking=yes). Compare \`ssh-keyscan -t ed25519 HOST | ssh-keygen -lf -\` with the fingerprint the
+  board shows at its own console (\`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\`) before you add it.
+- On the board itself: \`./deploy.sh [DEST]\` copies the package to DEST (default /opt/llm), as in version 1.x.
+- Through the framework: its own deployment (llm-cli deploy, or the Deployment window) logs in to a board it knows
+  and checks the board's key itself.
+
+## Files and checks
+- \`${model_file}\`: the model; \`llama-cli\`, \`llama-server\`: programs for ${PROFILE_ARCH:-the board}
+- \`MANIFEST.json\`: every build detail (model, quantization, llama.cpp, flags, tests, each file with its size and
+  sha256); \`SHA256SUMS\`: the checksums of every file (\`sha256sum -c SHA256SUMS\`)
+- \`cmake_toolchain.cmake\`: the toolchain the programs were built with
 
 ## ⚠️ Requirements
 - **Memory:** Approx. ${QUANTIZATION_STATS[OUTPUT_SIZE_MB]:-0} MB + 500MB Overhead
@@ -217,8 +340,69 @@ chmod +x llama-cli llama-server
 Generated by LLM Cross-Compiler Framework.
 - **Date:** $(date -Iseconds)
 - **Build Time:** ${BUILD_STATS[BUILD_TIME]:-0}s
+- **llama.cpp:** ${tag} (commit ${commit})
+- **Tests in the build:** functional ${TARGET_CONFIG[FUNCTIONAL_TEST]:-not run}; programs checked for
+  ${PROFILE_ARCH:-the board}; package checked against SHA256SUMS
 
 EOF
+}
+
+create_helper_scripts() {
+    local package_dir="$1" name source
+    for name in test_model.sh deploy.sh; do
+        source="$PACKAGE_SCRIPTS/package_$name"
+        [ -f "$source" ] || die "The helper script scripts/package_$name of this target is missing; no package was made."
+        cp "$source" "$package_dir/$name"
+        chmod 755 "$package_dir/$name"
+        bash -n "$package_dir/$name" || die "The helper script $name is not a valid shell script."
+    done
+}
+
+create_package_manifest() {
+    local package_dir="$1" model_file imatrix="no"
+    model_file="$(basename "${TARGET_CONFIG[INPUT_GGUF]}")"
+    if [ "${USE_IMATRIX:-0}" = "1" ]; then
+        imatrix="yes"
+    fi
+    python3 "$PACKAGE_SCRIPTS/board_package.py" write "$package_dir" \
+        --set "name=${TARGET_CONFIG[PACKAGE_NAME]}" \
+        --set "model=${TARGET_CONFIG[MODEL_NAME]}" \
+        --set "quantization=${TARGET_CONFIG[QUANT_METHOD]}" \
+        --set "format=gguf" \
+        --set "target=${PACKAGE_TARGET}" \
+        --set "board=${BOARD:-}" \
+        --set "build.source_model=$(basename "${MODEL_SOURCE%/}")" \
+        --set "build.input_format=${INPUT_FORMAT:-model}" \
+        --set "build.importance_matrix=$imatrix" \
+        --set "build.llama_cpp.tag=$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)" \
+        --set "build.llama_cpp.commit=$(cat "$LLAMA_BASE/.llama_cpp_commit" 2>/dev/null || echo unknown)" \
+        --int "build.cross_compile_seconds=${BUILD_STATS[BUILD_TIME]:-0}" \
+        --int "build.jobs=${BUILD_JOBS:-4}" \
+        --set "build.framework=LLM Cross-Compiler Framework" \
+        --set "hardware.profile=$(profile_text)" \
+        --set "hardware.source=${PROFILE_SOURCE:-defaults}" \
+        --set "hardware.arch=${PROFILE_ARCH:-}" \
+        --set "hardware.cpu=${TARGET_CPU:-generic}" \
+        --set "hardware.cflags=${CFLAGS:-}" \
+        --set "hardware.cxxflags=${CXXFLAGS:-}" \
+        --set "hardware.cmake_flags=${CMAKE_FLAGS:-}" \
+        --set "hardware.neon=${HW_SUPPORTS_NEON:-unknown}" \
+        --set "hardware.avx2=${HW_SUPPORTS_AVX2:-unknown}" \
+        --set "hardware.avx512=${HW_SUPPORTS_AVX512:-unknown}" \
+        --set "tests.inputs=passed: the model is a file of at least 1 MiB" \
+        --set "tests.functional=${TARGET_CONFIG[FUNCTIONAL_TEST]:-not run}" \
+        --set "tests.binaries=passed: ELF programs for ${PROFILE_ARCH:-the board} (machine ${TARGET_CONFIG[LLAMA_CLI_BINARY_MACHINE]:-unknown})" \
+        --set "tests.package=SHA256SUMS of every file, checked after packaging (board_package.py check)" \
+        --set "run.test=./test_model.sh [PROMPT] [TOKENS]" \
+        --set "run.cli=./llama-cli -m ${model_file} -p \"Hello, AI!\" -n 128 -st" \
+        --set "run.server=./llama-server -m ${model_file} --host 0.0.0.0 --port 8080" \
+        --set "deploy.by_hand=./deploy.sh USER@HOST [DEST]: scp to the board, the host key must be known (StrictHostKeyChecking=yes)" \
+        --set "deploy.on_the_board=./deploy.sh [DEST]: copies the package to DEST (default /opt/llm)" \
+        --set "deploy.framework=llm-cli deploy, or the Deployment window: the framework's own board session" \
+        --model "$model_file" \
+        --binary "llama-cli=${TARGET_CONFIG[LLAMA_CLI_BINARY_MACHINE]:-unknown}" \
+        --binary "llama-server=${TARGET_CONFIG[LLAMA_SERVER_BINARY_MACHINE]:-unknown}" \
+        || die "The manifest of the package could not be written."
 }
 
 create_deployment_package() {
@@ -249,10 +433,12 @@ create_deployment_package() {
     TARGET_CONFIG[PACKAGE_DIR]="$package_dir"
     TARGET_CONFIG[PACKAGE_NAME]="$package_name"
 
-    # Generiere Dokumentation & Helper
+    # Generiere Dokumentation & Helper; the manifest and SHA256SUMS last, over every file
     create_package_documentation "$package_dir"
     create_helper_scripts "$package_dir"
     create_package_manifest "$package_dir"
+    python3 "$PACKAGE_SCRIPTS/board_package.py" check "$package_dir" \
+        || die "The package does not match its SHA256SUMS or MANIFEST.json (above)."
 
     # Symlink
     local latest_link="$final_package_dir/${model_name}_${quant_method,,}_latest"
@@ -260,44 +446,6 @@ create_deployment_package() {
     ln -s "$package_name" "$latest_link"
 
     log_success "Deployment package created at: $package_dir"
-}
-
-create_package_manifest() {
-    local package_dir="$1"
-    cat > "$package_dir/MANIFEST.json" << EOF
-{
-  "name": "${TARGET_CONFIG[PACKAGE_NAME]}",
-  "created": "$(date -Iseconds)",
-  "model": "${TARGET_CONFIG[MODEL_NAME]}",
-  "quantization": "${TARGET_CONFIG[QUANT_METHOD]}"
-}
-EOF
-}
-
-create_helper_scripts() {
-    local package_dir="$1"
-    cat > "$package_dir/test_model.sh" << 'EOF'
-#!/bin/bash
-set -e
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-MODEL=$(find "$DIR" -name "*.gguf" | head -n 1)
-CLI="$DIR/llama-cli"
-if [ ! -x "$CLI" ]; then chmod +x "$CLI"; fi
-echo "Testing model: $(basename "$MODEL")"
-"$CLI" -m "$MODEL" -p "Hello, world!" -n 10
-EOF
-    chmod +x "$package_dir/test_model.sh"
-
-    cat > "$package_dir/deploy.sh" << 'EOF'
-#!/bin/bash
-set -e
-DEST="${1:-/opt/llm}"
-echo "Deploying to $DEST..."
-mkdir -p "$DEST"
-cp -r * "$DEST/"
-echo "Done."
-EOF
-    chmod +x "$package_dir/deploy.sh"
 }
 
 print_final_summary() {
@@ -308,14 +456,20 @@ print_final_summary() {
     echo " Model:         ${TARGET_CONFIG[MODEL_NAME]}"
     echo " Quantization:  ${TARGET_CONFIG[QUANT_METHOD]}"
     echo " Target Arch:   ${PROFILE_ARCH:-unknown}"
+    echo " Profile:       $(profile_text)"
     echo " Package:       ${TARGET_CONFIG[PACKAGE_DIR]}"
     echo " Model Card:    Generated (README.md)"
+    echo " Manifest:      MANIFEST.json, SHA256SUMS (checked)"
+    echo " Tests:         functional ${TARGET_CONFIG[FUNCTIONAL_TEST]:-not run}"
     echo "=================================================="
     echo ""
 }
 
 package_for_board() {
     local f
+    if [ "${BOARD_PACKAGE:-0}" != "1" ]; then
+        plan_package_defaults
+    fi
     if [ -z "${TARGET_CONFIG[QUANTIZED_GGUF]:-}" ]; then
         for f in "$OUTPUT_DIR"/*.gguf "${CONVERT_OUTPUT:-}"; do
             if [ -f "$f" ]; then
@@ -326,10 +480,16 @@ package_for_board() {
         done
     fi
     validate_inputs "${TARGET_CONFIG[QUANTIZED_GGUF]:-}" "${TARGET_CONFIG[QUANT_METHOD]:-}" "$MODEL_NAME"
+    functional_test "${TARGET_CONFIG[QUANTIZED_GGUF]}"
     cross_compile_target
+    check_board_binaries
     create_deployment_package
     print_final_summary
 }
+
+# ============================================================================
+# END OF PACKAGE
+# ============================================================================
 
 # ============================================================================
 # MAIN EXECUTION
@@ -341,8 +501,10 @@ main() {
 
     quantize_model
     write_build_info
-    if [ "$BOARD_PACKAGE" = "1" ] && [ "$FORMAT" = "gguf" ]; then
+    if [ "$FORMAT" = "gguf" ] && { [ "$BOARD_PACKAGE" = "1" ] || [ "${PACKAGE_REQUESTED:-0}" = "1" ]; }; then
         package_for_board
+    elif [ "${PACKAGE_REQUESTED:-0}" = "1" ]; then
+        log_info "No package for the board: a package holds a GGUF model with llama.cpp's programs; a $FORMAT model runs with the Rockchip runtime of the board."
     fi
 
     echo "=== Artifacts ==="
@@ -355,7 +517,8 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Started by hand: the build up to this stage, through the stage runner.
-    [ -n "${STAGE_RUNNER:-}" ] || exec bash "$(dirname "${BASH_SOURCE[0]}")/build.sh" --to target "$@"
+    # Started by hand: the build up to this stage, through the stage runner, with the package for the board (version
+    # 1.x: target_module.sh quantized and packaged).
+    [ -n "${STAGE_RUNNER:-}" ] || exec bash "$(dirname "${BASH_SOURCE[0]}")/build.sh" --to target --package "$@"
     main "$@"
 fi

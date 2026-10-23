@@ -531,15 +531,16 @@ system its result is for and what its stage does; keep these headers true when y
 | Stage | Module | What it does (Rockchip) |
 |---|---|---|
 | 1. source | `source_module.sh` | Names the toolchain sources the image was built from (the llama.cpp tag and commit its Dockerfile checked, the SDK venvs); in the template it also runs the setup commands of the module definition once. Nothing is downloaded. |
-| 2. config | `config_module.sh` | Reads the request from the environment, normalizes format, board and type names, refuses what the target cannot build, and writes the build plan `build_config.sh` into the stage folder. |
+| 2. config | `config_module.sh` | Reads the request from the environment, normalizes format, board and type names, refuses what the target cannot build, and writes the build plan `build_config.sh` into the stage folder. With a hardware profile it also plans the board (toolchain and flags) and checks that plan before it keeps it ([section 10](#10-what-the-stage-modules-kept-from-version-1x)). |
 | 3. convert | `convert_module.sh` | Converts the model: GGUF types the converter writes itself go straight into the output folder; every other type becomes an F16 intermediate in the work folder for the target stage. RKLLM and RKNN run their format helpers `rkllm_module.sh` and `rknn_module.sh`. In the `imatrix` job it computes the importance matrix. Around every conversion it detects the input's format, checks the input and what the converter wrote, runs a short functional test and records statistics ([section 6.5](#65-the-checks-of-the-convert-stage)). |
 | (rotate) | `rotate_module.sh` | Optional hook between convert and target for a rotation such as SpinQuant or QuaRot (roadmap): it runs only when the target has this file; none is shipped. It may change the full-precision intermediate before it is quantized. |
-| 4. target | `target_module.sh` | Quantizes what the convert stage left for it (`quantize_jobs.sh`) and removes the intermediate, writes `build_info.json` and lists the results. |
+| 4. target | `target_module.sh` | Quantizes what the convert stage left for it (`quantize_jobs.sh`) and removes the intermediate, writes `build_info.json` and lists the results. For a GGUF build with a hardware profile, and with `build.sh --package`, it also makes the package for the board ([section 10](#10-what-the-stage-modules-kept-from-version-1x)). |
 
 The `imatrix` job runs source, config and convert; the `build` job runs every stage. A stage module started by hand
 (`bash modules/convert_module.sh`) runs the build up to its stage through the runner; `build.sh --to STAGE` does the
-same. A later stage may use the functions of an earlier one by sourcing its module (`config_module.sh` and
-`source_module.sh` run their `main` only in their own stage). `benchmark_module.sh` is no stage: it would measure the
+same (`target_module.sh` started by hand also asks for the package: `build.sh --to target --package`). A later
+stage may use the functions of an earlier one by sourcing its module (`config_module.sh` and `source_module.sh` run
+their `main` only in their own stage). `benchmark_module.sh` is no stage: it would measure the
 build host's CPU, and a model for a board is measured on the board (`llm-cli device runtime verify --bench-model`,
 or **Boards > Boards and Devices... > Verify...**).
 
@@ -588,6 +589,7 @@ What the stage runner gives each stage:
 | `STAGE_DIR` | the stage folder `$BUILD_SCRATCH_DIR/stages/<job>/`: the markers, the build plan `build_config.sh` and what a stage hands to the next one (`quantize_jobs.sh`, `sdk_environment.sh`) |
 | `MODULES_DIR` | the folder of the stage modules (`/app/modules` in the image) |
 | `STAGE_RUNNER`, `STAGE_NAME` | set while the runner runs a stage; a module started without `STAGE_RUNNER` hands over to the runner |
+| `PACKAGE_REQUESTED` | `1` when `build.sh --package` asked the target stage for the package for the board (also without a hardware profile), else `0`; an input of the target stage only |
 | `stage_output FILE` | a shell function: names a file the stage wrote, which a resume checks |
 
 Mounts:
@@ -860,14 +862,37 @@ are the build again, with the dispatcher's work moved into the stage it belongs 
   model card and helper scripts in `output/packages/`. The profile is the file the hardware probe writes on the board
   ([section 11](#11-the-hardware-probe-file)): Rockchip's config stage takes the system from `ARCH` and the cores from
   `CPU_MODEL` (Cortex-A55, A72 and A76 get their CPU flags; `SUPPORTS_NEON`, `SUPPORTS_AVX2` and `SUPPORTS_AVX512`
-  their GGML flags) and refuses a system its image has no compiler for (only aarch64 and x86_64), for example
-  `ARCH=armv7` of a 32-bit OS on a board. A build of the framework has no profile: the board's runtime
-  is built from the board's own probe (`llm-cli device runtime build`), and the board package comes from
-  `llm-cli deploy package` or `llm-cli device runtime deploy`.
+  their GGML flags) and refuses a system its image has no compiler for (only aarch64 and x86_64). A 32-bit ARM
+  system (`ARCH=armv7` and the like) is refused with the plain reason: the Rockchip boards have 64-bit CPUs and the
+  image has only the aarch64 cross compilers, so install the board's 64-bit system and probe it again. The build jobs
+  are capped at the board's cores (`CPU_CORES`, or `CPU_CORES_LOGICAL` of the probe file). A build of the framework
+  has no profile: the board's runtime is built from the board's own probe (`llm-cli device runtime build`), and the
+  board package comes from `llm-cli deploy package` or `llm-cli device runtime deploy`.
+- **The plan is checked before it is kept.** The config stage finds the planned compilers in the image (it plans
+  nothing when one is missing), builds and links a small C and C++ program with the planned flags (and runs them when
+  they are for this machine), checks with the ELF header that they are for the board's system, lets `cmake -P` read
+  the generated toolchain file, and checks the plan `build_config.sh` in a clean shell: it must be a valid script that
+  sets every name the later stages read. A plan that fails a check is not written.
+- **The package for the board.** `output/packages/<model>_<type>_<arch>_<time>/` holds the GGUF, `llama-cli` and
+  `llama-server`, the toolchain file (`cmake_toolchain.cmake`) and the hardware profile, a model card (`README.md`),
+  `test_model.sh` (checks the files against `SHA256SUMS`, then asks the model for a short answer with `llama-cli`),
+  `deploy.sh` (`./deploy.sh USER@HOST [DEST]` copies the package over `ssh` and `scp` with
+  `StrictHostKeyChecking=yes`, so the board's host key must already be known, to DEST, default `llm/<package>` in the
+  user's home on the board, and checks the copy there; `./deploy.sh [DEST]` on the board itself copies it to DEST, default `/opt/llm`), `MANIFEST.json` with every build
+  detail (model, quantization, llama.cpp, board, profile, flags, tests, each file with its size and SHA-256) and
+  `SHA256SUMS`. The helpers come from the target's `scripts/package_test_model.sh`, `scripts/package_deploy.sh` and
+  `scripts/board_package.py`. Before the package is kept, the model is run once on this machine (`llama-completion`
+  of the image, when it has one), the programs must be ELF programs for the board, and every file must match
+  `SHA256SUMS`. `build.sh --package` (also `target_module.sh` started by hand and the entrypoint modes `target` and
+  `pipeline`) makes the package without a profile too, with the plain defaults of the target (aarch64 for Rockchip),
+  and the manifest says so (`hardware.source: defaults`). The framework's own deployment stays `llm-cli deploy` and
+  the **Deployment** tab, over its SSH session with the framework's key and known hosts.
 - **Cloning llama.cpp.** `source_module.sh --clone-llama-cpp` (or the entrypoint mode `source --clone-llama-cpp`),
-  started by hand in a container with network, clones llama.cpp at `LLAMA_CPP_COMMIT` (a full commit id) and links
-  it as `LLAMA_CPP_PATH`, for an image without llama.cpp. A build never does this: its image carries the pinned
-  llama.cpp.
+  started by hand in a container with network, clones llama.cpp at `LLAMA_CPP_COMMIT` (a full commit id; without it
+  the framework's pin, `LLAMA_CPP_PIN_COMMIT` in the module) from `LLAMA_CPP_REPO_OVERRIDE` (an https address without
+  a user name, password, token or query; without it upstream), checks that the checkout is that commit and links it
+  as `LLAMA_CPP_PATH`, for an image without llama.cpp. A build never does this: its image carries the pinned
+  llama.cpp, fetched from the repository override when the framework built the image.
 - **The module options.** `--input`, `--output`, `--model-name`, `--quantization` and `--hardware-config` work on
   `build.sh`, on every stage module started by hand and on every entrypoint stage mode, as in the maintainer's 1.x
   design: `convert_module.sh --input DIR --output FILE --model-name NAME` writes the F16 GGUF to FILE (kept);
