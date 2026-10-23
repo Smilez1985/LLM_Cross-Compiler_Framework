@@ -705,11 +705,17 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 - **Offline mode: one check, one locality rule.** Ask whether offline mode is on with
   `orchestrator.utils.locality.offline_mode(config)`, never with your own `config.get("offline_mode")`
   (`tests/test_offline_check.py` fails on one). Whether an address may be reached in offline mode is decided only by
-  the network-locality rule of `orchestrator/utils/locality.py` (`check_url`, `check_host`: every address a name
-  resolves to, Tailscale only with the person's own Headscale, the person's opt-outs), never by a name suffix or an
-  address check of your own; a connection that follows goes only to the checked addresses (`connect_addresses`, tried in turn;
-  `security/http.local_only_session` for requests, `llm/client.offline_http_client` for the SDKs,
-  `runtime/build/source.offline_reach` for git). A lookup never runs on the GUI thread: a window checks in a worker
+  the network-locality rule of `orchestrator/utils/locality.py`, never by a name suffix or an address check of your
+  own. Ask it the right question: `check_reach(url, config)` for "may offline mode reach this" (the person's
+  opt-outs count) and `check_location(url)` for "where does this server stand" (the privacy filter, a provider's
+  local/cloud label: the opt-outs never count; `ProviderPreset.is_local(base_url)` and `is_local_url(url)` take no
+  settings for that reason). A name with local and public addresses counts by its local ones, a Tailscale address
+  only with the person's own Headscale and for a device of the tailnet. A connection that follows goes only to the
+  checked local addresses (`connect_addresses`, tried in turn, and `locality.forget(host)` when every one failed;
+  `security/http.local_only_session` for requests, `security/http.pinned_transport` for an httpx client such as the
+  SDKs' (`llm/client.offline_http_client`) or qdrant-client's, `runtime/build/source.offline_reach` or
+  `offline_git_options` for git, `crawl_addresses` and `LocalOnlyAdapter(crawl=True)` for a crawl the person
+  starts). A lookup never runs on the GUI thread: a window checks in a worker
   first (`locality.needs_lookup`). The person's opt-outs are written only by `orchestrator/Core/local_network.py`;
   no module an AI can reach may import it or set its settings (`tests/test_local_network.py`). A tool whose handler
   or job reaches out after the person's answer checks offline mode again there (as `download_hf_file`). Tests never

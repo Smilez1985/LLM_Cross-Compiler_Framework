@@ -679,15 +679,19 @@ its support level is community.
   provider is unavailable, the next entry is tried. Entries that are not set up are skipped.
 - **Offline mode** (`offline_mode`): only local providers are used; a cloud provider is refused with a clear
   message. The knowledge base downloads nothing in offline mode either. "Local" follows one rule (unreleased): a
-  server name counts by every address it resolves to (a `.local` or `.lan` name only when it resolves to an address
-  in your own network; a public name such as a reverse proxy's is not local), and a Tailscale or Headscale address
-  only when its control server and every relay are in your own network. Ollama and a custom server are judged by
-  their address, and in offline mode the framework connects only to the address it checked. You decide what else
-  counts as local, a VPN, a host or an address range, in **File > Settings... > Local network** or with
-  `llm-cli config local-network`, each with a plain explanation of what can then leave your network; an AI can
-  neither read nor set these. A runtime download (a model, the pinned source) in offline mode comes only from your
-  own network (a local mirror), and an AI's runtime tools and pack installs look at offline mode again after your
-  answer.
+  server name counts by the addresses it resolves to (a `.local` or `.lan` name only when it resolves to an address
+  in your own network; a public name such as a reverse proxy's is not local; a name with addresses in your network
+  and on the internet counts as local, and the framework connects only to the ones in your network), and a Tailscale
+  or Headscale address only when its control server and every relay are in your own network and it belongs to a
+  device of your tailnet. Ollama and a custom server are judged by their address, and in offline mode the framework
+  connects only to the addresses it checked. You decide what else counts as local for offline mode, a VPN, a host or
+  an address range, in **File > Settings... > Local network** or with `llm-cli config local-network`, each with a
+  plain explanation of what can then leave your network; an AI can neither read nor set these. The privacy filter
+  stays on for what you add there: it follows where a server stands, never your opt-outs. A runtime download (a
+  model, the pinned source), a Qdrant server, the sign-in **Check** and the llama.cpp repository override of an
+  image build in offline mode reach only your own network, and an AI's runtime tools and pack installs look at
+  offline mode again after your answer. A Deep Ingest you start in offline mode reads only sites in your own
+  network (never a cloud metadata service); an AI's crawl reads nothing then.
 - Requests to servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment, so the proxy never sees
   prompts or the local server's key.
 - Errors are explained in plain words, for example that a Claude API key needs a workspace ID, that the key was

@@ -1491,6 +1491,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Offline-Modus: Deine Ausnahmen zählen nur dafür, was er erreichen darf, ein Name mit lokalen und öffentlichen
+  Adressen zählt nach seinen lokalen, und dein eigener Crawl liest dein eigenes Netz** (DECISIONS Runde 26 Q3, Q4,
+  Q5): Die Regel des eigenen Netzes beantwortet jetzt zwei Fragen mit einer API, `check_reach` (darf der Offline-Modus
+  das erreichen: deine Ausnahmen zählen) und `check_location` (wo steht dieser Server: sie zählen nie). Der
+  Datenschutzfilter und die Kennzeichnung lokal/Cloud eines Anbieters fragen die zweite; ein öffentlicher Host, den du
+  als lokal zählst, behält also den Datenschutzfilter, online wie offline, und seine Kennzeichnung
+  (`ProviderPreset.is_local` und `is_local_url` nehmen keine Einstellungen mehr); die Erklärungen in **Datei >
+  Einstellungen… > Lokales Netz** und bei `llm-cli config local-network` sagen das. Ein Name, der zu Adressen in
+  deinem Netz und im Internet auflöst (ein Heim-Router, der auch eine globale IPv6-Adresse einträgt), zählt jetzt als
+  lokal, und jede Verbindung geht nur an seine geprüften lokalen Adressen (der Anbieter-Client, der Download-Adapter
+  nur für das eigene Netz, die `http.curloptResolve`-Festlegung von git, der Crawler); vorher wurde er abgelehnt. Ein
+  Deep Ingest, den du im Offline-Modus startest, liest Seiten auf diesem Computer und in deinem eigenen Netz (vorher
+  lehnte er ab); `crawl_docs_site` einer KI bleibt im Offline-Modus abgelehnt. Mit deinem eigenen Headscale zählt
+  eine Adresse des VPN nur für diesen Computer oder ein Gerät des Tailnets als lokal (`tailscale status --json`), und
+  eine private Adresse hinter der Subnet-Route eines Geräts zählt wie eine VPN-Adresse. Eine Auflösung und die
+  VPN-Prüfung gelten 5 Minuten und werden nach einer gescheiterten Verbindung verworfen, statt für den ganzen Lauf.
 - **`install.sh` auf jeder Linux-Familie, über die Paketverwaltung der Familie** (DECISIONS Runde 24 PKG): Der Installer
   erkennt die Familie aus `ID` und `ID_LIKE` in `/etc/os-release` mit der Tabelle der Hardware-Untersuchung und
   installiert, was er braucht (Python 3.11 bis 3.14, `rsync`, Docker), mit `apt`, `dnf`, `zypper`, `pacman` oder `apk`,
@@ -1534,7 +1550,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   auflöst: Loopback, private (RFC 1918, `fc00::/7`) und Link-Local-Adressen sind lokal, ein `.local`-, `.lan`-,
   `.fritz.box`- oder einteiliger Name nur, wenn er zu einer solchen Adresse auflöst (früher zählte die Endung, auch
   mit einer öffentlichen Adresse; die Kennzeichnung „lokal“ des Datenschutzfilters folgt derselben Regel), und ein
-  Name mit lokalen und öffentlichen Adressen ist nicht lokal. Eine Tailscale-Adresse (`100.64.0.0/10`,
+  Name mit lokalen und öffentlichen Adressen zählt nach seinen lokalen (Runde 26, Eintrag unten). Eine
+  Tailscale-Adresse (`100.64.0.0/10`,
   `fd7a:115c:a1e0::/48`) zählt nur als lokal, wenn das VPN ein Headscale in deinem eigenen Netz mit nur eigenen
   DERP-Relays ist, gelesen mit dem Befehl `tailscale` (`debug prefs`, `debug derp-map`); ein öffentlicher Name wie
   der eines Reverse Proxys ist nicht lokal. Du kannst ein VPN, einen Host oder einen Adressbereich in **Datei >
@@ -1552,7 +1569,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Offline-Modus jetzt abgelehnt (seine Vorlage zählte unter jeder Adresse als lokal), und die Downloads der Laufzeit
   und die festgelegte Quelle kommen im Offline-Modus nur aus deinem eigenen Netz (ein lokaler Spiegel): `device
   runtime build`, `ditto runtime install` und `export-source`, das Boards-Fenster und Ditto > Lokale Laufzeit holten
-  vorher von GitHub oder Hugging Face. Deep Ingest der Person lehnt im Offline-Modus ab, wie der Crawl einer KI.
+  vorher von GitHub oder Hugging Face. Deep Ingest der Person liest im Offline-Modus nur das eigene Netz (Runde 26,
+  Eintrag unten), und der Crawl einer KI liest dann nichts.
   `build_local_runtime`, `deploy_device_runtime` und `add_pack_from_index` sehen nach der Antwort der Person noch
   einmal auf den Offline-Modus, wie `download_hf_file`. Ablehnungen nennen den Host, warum er nicht lokal ist, und
   die Ausnahme. Die Kennzeichnungen lokal/Cloud der mitgelieferten Anbieter ändern sich nicht. Jede Stelle, die die
@@ -3212,6 +3230,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Jede Verbindung des Offline-Modus nach außen geht jetzt über die Regel des eigenen Netzes** (DECISIONS Runde 24
+  L-NET, Runde 26 d-g): Ein Qdrant-Server (`qdrant_url`) wird nach ihr beurteilt, ein Qdrant in der Cloud wird in
+  einfachen Worten abgelehnt, und qdrant-client verbindet sich nur mit den geprüften Adressen, ohne Proxy und ohne
+  seine eigene Versionsanfrage; das **Prüfen** der Anmeldung, `ditto login --check` und der Anmeldebereich der
+  KI-Einstellungen lehnen einen Anbieter, den der Offline-Modus nicht erreichen darf, ab, bevor ein Socket aufgeht; die
+  llama.cpp-Überschreibung eines Image-Builds (`LLAMA_CPP_REPO_OVERRIDE`) und die Prüfung beim Anheben der Festlegung
+  (`scripts/llama_cpp_pin.py`) erreichen nur einen Spiegel in deinem eigenen Netz, festgelegt wie das Holen der Quelle
+  (der Image-Build bekommt `--add-host` für die geprüften Adressen und keinen Proxy); ein internationaler Hostname
+  eines Spiegels wird abgelehnt, bis er in seiner `xn--`-Form geschrieben ist (Python und das curl von git wandeln
+  einige Zeichen verschieden um). Ein Crawl liest nie eine IPv4-Link-Local-Adresse oder einen Metadatendienst einer
+  Cloud (AWS, Google, Azure, Oracle, OpenStack, Akamai/Linode, Alibaba, Scaleway, Tencent, nach ihrer Dokumentation;
+  auch in den Schreibweisen als IPv4-mapped, NAT64 und 6to4, und auch einen Namen mit einer solchen Adresse unter
+  anderen). Online wird ein eigener Server, der nach seiner Adresse als lokal gilt (seine Prompts gehen ohne
+  Datenschutzfilter), nur unter seinen geprüften lokalen Adressen erreicht, damit eine geänderte DNS-Antwort sie nicht
+  an einen öffentlichen Host schicken kann.
 - **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der Installer
   `get.docker.com` herunter und führte es ungeprüft als root aus. Jetzt kommt Docker nur aus Dockers offiziellem
   apt-Repository unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian, wie Dockers

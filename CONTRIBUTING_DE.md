@@ -746,11 +746,18 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 - **Offline-Modus: eine Prüfung, eine Regel des eigenen Netzes.** Ob der Offline-Modus an ist, fragst du mit
   `orchestrator.utils.locality.offline_mode(config)`, nie mit einem eigenen `config.get("offline_mode")`
   (`tests/test_offline_check.py` schlägt dann fehl). Ob eine Adresse im Offline-Modus erreicht werden darf,
-  entscheidet nur die Regel in `orchestrator/utils/locality.py` (`check_url`, `check_host`: jede Adresse, zu der ein
-  Name auflöst, Tailscale nur mit dem eigenen Headscale der Person, die Ausnahmen der Person), nie eine Namensendung
-  oder eine eigene Adressprüfung; eine Verbindung danach geht nur an die geprüften Adressen (`connect_addresses`, der Reihe nach;
-  `security/http.local_only_session` für requests, `llm/client.offline_http_client` für die SDKs,
-  `runtime/build/source.offline_reach` für git). Eine Auflösung läuft nie im GUI-Thread: Ein Fenster prüft vorher in
+  entscheidet nur die Regel in `orchestrator/utils/locality.py`, nie eine Namensendung oder eine eigene
+  Adressprüfung. Stell ihr die richtige Frage: `check_reach(url, config)` für „darf der Offline-Modus das
+  erreichen“ (die Ausnahmen der Person zählen) und `check_location(url)` für „wo steht dieser Server“ (der
+  Datenschutzfilter, die Kennzeichnung lokal/Cloud eines Anbieters: die Ausnahmen zählen nie; deshalb nehmen
+  `ProviderPreset.is_local(base_url)` und `is_local_url(url)` keine Einstellungen). Ein Name mit lokalen und
+  öffentlichen Adressen zählt nach seinen lokalen, eine Tailscale-Adresse nur mit dem eigenen Headscale der Person
+  und für ein Gerät des Tailnets. Eine Verbindung danach geht nur an die geprüften lokalen Adressen
+  (`connect_addresses`, der Reihe nach, und `locality.forget(host)`, wenn jede scheiterte;
+  `security/http.local_only_session` für requests, `security/http.pinned_transport` für einen httpx-Client wie den
+  der SDKs (`llm/client.offline_http_client`) oder den von qdrant-client, `runtime/build/source.offline_reach` oder
+  `offline_git_options` für git, `crawl_addresses` und `LocalOnlyAdapter(crawl=True)` für einen Crawl, den die
+  Person startet). Eine Auflösung läuft nie im GUI-Thread: Ein Fenster prüft vorher in
   einem Hintergrund-Thread (`locality.needs_lookup`). Die Ausnahmen der Person schreibt nur
   `orchestrator/Core/local_network.py`; kein Modul, das eine KI erreichen kann, darf es importieren oder seine
   Einstellungen setzen (`tests/test_local_network.py`). Ein Tool, dessen Handler oder Job nach der Antwort der Person
