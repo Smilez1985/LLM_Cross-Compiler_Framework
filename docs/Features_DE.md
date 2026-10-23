@@ -312,7 +312,9 @@ Framework findet Podman dann selbst: Ist `DOCKER_HOST` nicht gesetzt und antwort
 des Systems noch ein rootless Docker), setzt es `DOCKER_HOST` für den eigenen Prozess und die Programme, die es
 startet, auf deinen Podman-Socket (`orchestrator/utils/docker_engine.py`, ein Helfer für die Build-Engine, das
 Builder-Image, Dittos Container, die Docker-Prüfung und `scripts/build_container_image.sh`). Ein `DOCKER_HOST`, das
-du setzt, gilt immer. `llm-cli mojo` nennt die Engine, die gerade läuft.
+du setzt, gilt immer. `podman-docker` verlinkt Dockers Socket-Namen (`/run/docker.sock`,
+`$XDG_RUNTIME_DIR/docker.sock`) auf Podmans Sockets; ein solcher Name oder ein Socket, an dem Podman antwortet, zählt
+als Podman, nicht als Docker-Dienst. `llm-cli mojo` nennt die Engine, die gerade läuft.
 
 Geprüft mit Podman 5.8.2 und buildah 1.43.1 unter Rocky Linux 9.8 und an den Quellen von Podman:
 

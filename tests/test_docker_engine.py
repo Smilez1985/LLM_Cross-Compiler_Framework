@@ -125,6 +125,37 @@ class TestTheChoice:
         assert not ensure_docker_host(env, docker_sockets=[str(short_dir / "none.sock")]).set_here
         podman.close(), rootless.close()
 
+    def test_podman_dockers_socket_links_are_podman_not_docker(self, short_dir):
+        """podman-docker's systemd-tmpfiles entries link /run/docker.sock to the root Podman socket and
+        $XDG_RUNTIME_DIR/docker.sock to the person's (Rocky Linux 9.8, podman-docker 5.8.2): neither is a Docker
+        daemon, so the person's Podman socket is chosen."""
+        rootful = listening(short_dir / "rootful" / "podman" / "podman.sock")
+        rootless = listening(short_dir / "run" / "podman" / "podman.sock")
+        (short_dir / "docker.sock").symlink_to(short_dir / "rootful" / "podman" / "podman.sock")
+        (short_dir / "run" / "docker.sock").symlink_to(short_dir / "run" / "podman" / "podman.sock")
+        env = {"XDG_RUNTIME_DIR": str(short_dir / "run")}
+        choice = ensure_docker_host(env, docker_sockets=[str(short_dir / "docker.sock")])
+        assert choice.set_here and env["DOCKER_HOST"] == f"unix://{short_dir}/run/podman/podman.sock"
+        rootful.close(), rootless.close()
+
+    def test_a_docker_socket_where_podman_answers_is_no_docker(self, short_dir):
+        podman = listening(short_dir / "run" / "podman" / "podman.sock")
+        impostor = listening(short_dir / "docker.sock")
+
+        def answer():
+            conn, _ = impostor.accept()   # the connection check
+            conn.close()
+            conn, _ = impostor.accept()   # GET /version
+            with conn:
+                conn.recv(65536)
+                conn.sendall(("HTTP/1.0 200 OK\r\n\r\n" + json.dumps(PODMAN_VERSION)).encode())
+        worker = threading.Thread(target=answer, daemon=True)
+        worker.start()
+        env = {"XDG_RUNTIME_DIR": str(short_dir / "run")}
+        assert ensure_docker_host(env, docker_sockets=[str(short_dir / "docker.sock")]).set_here
+        worker.join(5)
+        podman.close(), impostor.close()
+
     def test_neither_engine_changes_nothing(self, short_dir):
         env = {"XDG_RUNTIME_DIR": str(short_dir / "run")}
         choice = ensure_docker_host(env, docker_sockets=[str(short_dir / "docker.sock")])

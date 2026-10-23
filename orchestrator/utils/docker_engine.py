@@ -69,23 +69,33 @@ def _is_socket(path: Path) -> bool:
         return False
 
 
+def _points_to_podman(path: Path) -> bool:
+    """podman-docker links Docker's socket names to Podman's own sockets (its systemd-tmpfiles entries:
+    /run/docker.sock -> /run/podman/podman.sock, $XDG_RUNTIME_DIR/docker.sock -> $XDG_RUNTIME_DIR/podman/podman.sock):
+    such a name is Podman, not Docker."""
+    try:
+        return "podman" in Path(os.path.realpath(path)).parts
+    except (OSError, ValueError):
+        return False
+
+
 def _docker_daemon_at(path: Path, timeout: float = 0.5) -> bool:
-    """Whether a Docker daemon listens on the socket `path`: it accepts the connection, or refuses this user (the
-    person is not in the group docker yet, which a new login fixes): either way Docker is there. A socket file nobody
-    listens on (a stopped daemon) does not count."""
-    if not _is_socket(path) or not hasattr(socket, "AF_UNIX"):
+    """Whether a Docker daemon listens on the socket `path`: it accepts the connection and does not answer as Podman,
+    or it refuses this user (the person is not in the group docker yet, which a new login fixes). A socket file nobody
+    listens on (a stopped daemon) and a name that leads to Podman's socket (podman-docker's links) do not count."""
+    if not _is_socket(path) or not hasattr(socket, "AF_UNIX") or _points_to_podman(path):
         return False
     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     conn.settimeout(timeout)
     try:
         conn.connect(str(path))
-        return True
     except PermissionError:
         return True
     except OSError:
         return False
     finally:
         conn.close()
+    return engine_at("unix://" + str(path), timeout=1.0) != "podman"
 
 
 def podman_socket(environ: Mapping[str, str], uid: Optional[int] = None) -> Optional[Path]:
