@@ -471,6 +471,42 @@ class TestAIConfigurationDialog:
         dlg._refresh_models()
         assert wait_for(qapp, lambda: any(s[:2] == ("custom", "http://192.168.1.30:8000/v1") for s in seen)), seen
 
+    def test_model_list_sends_a_typed_key_only_to_the_typed_address(self, qapp, tmp_path, monkeypatch):
+        """The provider's own address from `llm-cli ditto login --base-url` (ai_base_url_<provider>) wins over
+        ai_base_url in the LLM layer. The address field shows it; when the person types another address and a key for
+        it, the model list goes there, as the save would (AISettingsChange.apply writes the field into that setting),
+        never with the new key to the old address."""
+        from orchestrator.llm import ModelInfo
+        from orchestrator.llm.providers.base import ProviderAdapter
+        seen = []
+
+        class Recorder(ProviderAdapter):
+            def list_models(self):
+                seen.append((self.preset.id, self.base_url, self._api_key))
+                return [ModelInfo(id="served-model")]
+
+        monkeypatch.setattr("orchestrator.llm.client.adapter_class", lambda name: Recorder)
+        monkeypatch.setattr(AIConfigurationDialog, "model_lister", staticmethod(dialogs.list_provider_models))
+        config = ConfigManager(tmp_path)
+        config.set("ai_provider", "custom")
+        config.set("ai_base_url_custom", "http://192.168.1.30:8000/v1")
+        dlg = AIConfigurationDialog(FakeFramework(config, FakeSecrets()))
+        assert dlg.txt_base_url.text() == "http://192.168.1.30:8000/v1"
+        assert wait_for(qapp, lambda: any(s[:2] == ("custom", "http://192.168.1.30:8000/v1") for s in seen)), seen
+
+        dlg.txt_base_url.setText("http://192.168.1.40:8000/v1")
+        dlg.txt_api_key.setText("typed-key-for-the-new-server-0123")
+        seen.clear()
+        dlg._refresh_models()
+        assert wait_for(qapp, lambda: bool(seen)), seen
+        assert seen == [("custom", "http://192.168.1.40:8000/v1", "typed-key-for-the-new-server-0123")], seen
+
+        dlg.txt_base_url.setText("")   # empty: the provider's own endpoint (custom has none), never the old address
+        seen.clear()
+        dlg._refresh_models()
+        assert wait_for(qapp, lambda: bool(seen)), seen
+        assert [url for _, url, _ in seen] == [None], seen
+
     def test_removed_provider_is_explained_once(self, qapp, framework, monkeypatch):
         shown = []
 

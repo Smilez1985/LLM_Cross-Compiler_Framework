@@ -2872,7 +2872,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anbieters**: Wer einen anderen Anbieter wählte, bevor er dessen Adresse eintippte (ein gespeichertes Ollama im
   lokalen Netz, dann **custom**), ließ die Modelle beim Server des gespeicherten Anbieters mit dem Schlüssel des
   anderen auflisten. Das Adressfeld zählt für die Liste jetzt immer, ein leeres bedeutet den eigenen Endpunkt des
-  Anbieters. Regressionstest: `tests/test_dialogs.py` `test_model_list_never_sends_a_key_to_the_saved_providers_url`.
+  Anbieters, auch gegenüber der eigenen Adresse des Anbieters aus `llm-cli ditto login --base-url` (die das Feld zeigt
+  und die das Speichern ersetzt), sodass ein für eine neue Adresse eingetippter Schlüssel nie an die alte geht.
+  Regressionstests: `tests/test_dialogs.py` `test_model_list_never_sends_a_key_to_the_saved_providers_url`,
+  `test_model_list_sends_a_typed_key_only_to_the_typed_address`.
 - **Das Hugging-Face-Token geht nur an huggingface.co, auch wenn `HF_ENDPOINT` einen anderen Host nennt** (Review
   der Kette hf): huggingface_hub schickt seine API-Aufrufe an den Host in der Umgebungsvariable `HF_ENDPOINT` (einen
   Mirror). Die Commit-Abfrage des Downloads im GUI-Browser und die Hub-Liste von **Alte Downloads übernehmen…**

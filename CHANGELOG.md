@@ -2547,8 +2547,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **The AI settings dialog's model list never sends a key to the saved provider's address**: choosing another
   provider before typing its address (a saved Ollama on the local network, then **custom**) listed models at the
   saved provider's server with the other provider's key. The address field now always counts for the list, an empty
-  one meaning the provider's own endpoint. Regression test: `tests/test_dialogs.py`
-  `test_model_list_never_sends_a_key_to_the_saved_providers_url`.
+  one meaning the provider's own endpoint, also over the provider's own address from `llm-cli ditto login
+  --base-url` (which the field shows and the save replaces), so a key typed for a new address never goes to the old
+  one. Regression tests: `tests/test_dialogs.py` `test_model_list_never_sends_a_key_to_the_saved_providers_url`,
+  `test_model_list_sends_a_typed_key_only_to_the_typed_address`.
 - **The Hugging Face token goes only to huggingface.co, also when `HF_ENDPOINT` names another host** (review of
   chain hf): huggingface_hub sends its API calls to the host in the `HF_ENDPOINT` environment variable (a mirror).
   The commit lookup of the GUI browser's download and the Hub list of **Take over old downloads...** sent the token
