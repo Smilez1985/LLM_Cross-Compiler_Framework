@@ -274,7 +274,14 @@ content; a tag can be moved. A bump goes like this:
    `FetchContent_Declare`, `ExternalProject_Add` and `file(DOWNLOAD` and add any new one. Check the CUDA architecture
    rules (`ggml/src/ggml-cuda/CMakeLists.txt`) and which targets `tools/CMakeLists.txt` builds as well. The target
    Dockerfiles repeat both lists in their llama.cpp build step (the options set last, and the ones they refuse);
-   `tests/test_target_dockerfiles.py` fails until they match the recipe again. Re-check the quantization types too:
+   `tests/test_target_dockerfiles.py` fails until they match the recipe again. The board package's cross build in both
+   `target_module.sh` sets them after a module's CMake flags (`tests/test_target_stage.py` reads the recipe) and
+   refuses a module flag of `NEVER_SET` (its `NEVER_SET_OPTIONS`, which
+   `test_the_package_refuses_the_options_the_build_recipe_never_sets` compares), and the module generator refuses a
+   module's flags with `recipe.refused_option`, which reads the same lists. If the new tree
+   changes ggml's x86 options or the flags it adds for them (`ggml/src/ggml-cpu/CMakeLists.txt`), `X86_FEATURES` and
+   `_X86_FLAGS` of the recipe change, and with them the tables of Rockchip's `config_module.sh`
+   (`test_the_explicit_x86_features_are_the_build_recipe_s` fails until they agree). Re-check the quantization types too:
    copy `QUANT_OPTIONS` of the new `tools/quantize/quantize.cpp` into `PINNED_QUANT_OPTIONS` of
    `tests/test_target_stage.py`, and into `PINNED_NEEDS_IMATRIX` every method `llama-quantize` refuses without an
    importance matrix: one where `tensor_requires_imatrix` of `src/llama-quant.cpp` is true for a type that
@@ -497,7 +504,9 @@ The full guide is the [Module Developer Guide](docs/Module_Developer_Guide.md). 
    read-only image filesystem and only the build's own folders writable. The template's convert stage already
    detects the input's format, checks the input and the written GGUF, runs a short functional test and records
    statistics; keep its `scripts/model_check.py` in your target (the target stage's package runs the same
-   functional test on the quantized model, `model_check.py test`).
+   functional test on the quantized model, `model_check.py test`). Your module's CMake flags may not switch on a
+   llama.cpp option that downloads while it is built (the generator and the folder check refuse them, see the
+   [Module Developer Guide](docs/Module_Developer_Guide.md#91-what-the-validators-check)).
 5. **Test with a real build**, for example
    `llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t <name> -f gguf -b <board> -F`, and add the
    Dockerfile to the hadolint matrix in `.github/workflows/docker.yml` and to `.github/dependabot.yml`.
@@ -663,6 +672,10 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   with `person_reason`. Never compare `shutil.disk_usage` with a margin of your own. A download takes the rule
   as `PinnedDownloader(space=download_rule(ledger=...))`; a long call that writes later holds its space with
   `hf_hub.reserve_space`. Tests read a roomy disk (the `roomy_disk_usage` fixture); a test of a check gives its own.
+  The build container has no framework: the board package's check before its copy is `scripts/board_package.py room`
+  of the target, which carries the rule's numbers and words (`tests/test_target_stage.py` compares them with
+  `disk_plan`); the image's python3 of the stage tests measures a disk the test sets (`tests/board_toolchain.py
+  set_disk`).
 - **One Hugging Face downloader.** A file from the Hub comes through `orchestrator/Core/hf_hub.py` `HubFetcher`
   (pinned commit, resumable `.part`, the Hub's size and sha256 checked before the file gets its name, the token only
   to huggingface.co); never call huggingface_hub's `hf_hub_download` or `snapshot_download` for a model

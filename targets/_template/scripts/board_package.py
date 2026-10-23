@@ -12,6 +12,11 @@ build details"), and their check. Standard library only: it runs with the image'
     board_package.py check PACKAGE_DIR
         checks SHA256SUMS (every file of the package is listed and has its hash) and that MANIFEST.json is valid JSON
         whose "files" match the package; exit code 0 or 1 with the reason.
+    board_package.py room PACKAGE_DIR --what TEXT FILE...
+        whether the disk of PACKAGE_DIR (its nearest existing folder) holds FILE... (their sizes) and still keeps the
+        reserve free that the framework's disk rule keeps on every disk (2 GiB or 2 % of the disk, whichever is
+        larger: reserve_for of orchestrator/Core/disk_plan.py); exit code 0, or 1 with the refusal in the words of
+        that rule on stdout ("Not enough disk space for TEXT: output disk: ... needed, ... free, ... must stay free.").
 
 Paths in the manifest are file names inside the package, never paths of the machine that built it.
 """
@@ -20,6 +25,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +33,15 @@ from pathlib import Path
 MANIFEST = "MANIFEST.json"
 SUMS = "SHA256SUMS"
 CHUNK = 1024 * 1024
+
+# The framework's disk rule (orchestrator/Core/disk_plan.py: RESERVE_MIN, RESERVE_SHARE, gb, require and the person's
+# next step action.free_disk; tests/test_target_stage.py compares): the same numbers and the same words in the image,
+# which has no framework. The per-user reservation ledger is on the computer, not in the build container.
+GIB = 1024 ** 3
+GB = 1000 ** 3
+RESERVE_MIN = 2 * GIB
+RESERVE_SHARE = 0.02
+FREE_DISK = "Free disk space (old builds, the model cache, the trash), or choose a smaller model."
 
 
 def sha256(path: Path) -> str:
@@ -97,6 +112,30 @@ def write(folder: Path, sets, ints, model, binaries) -> dict:
     return manifest
 
 
+def gb(value: float) -> str:
+    """Bytes in decimal gigabytes, as people and Hugging Face show sizes (disk_plan.gb)."""
+    if value < GB:
+        return f"{value / 1000 ** 2:.0f} MB"
+    return f"{value / GB:.1f} GB"
+
+
+def room(folder: Path, files, what: str, disk_usage=None):
+    """None when the disk of `folder` (its nearest existing folder) holds `files` and keeps the reserve free (2 GiB or
+    2 % of the disk, whichever is larger); else the refusal, as disk_plan.refusal words it for the output disk.
+    OSError when the disk cannot be measured. `disk_usage`: the test seam, shutil.disk_usage by default."""
+    path = Path(folder)
+    while not path.exists() and path.parent != path:
+        path = path.parent
+    needed = sum(Path(f).stat().st_size for f in files)
+    usage = (disk_usage or shutil.disk_usage)(str(path))
+    total = int(getattr(usage, "total", 0) or 0)
+    reserve = max(RESERVE_MIN, int(total * RESERVE_SHARE))
+    if int(usage.free) - needed >= reserve:
+        return None
+    return (f"Not enough disk space for {what}: output disk: {gb(needed)} needed, {gb(int(usage.free))} free, "
+            f"{gb(reserve)} must stay free. {FREE_DISK}")
+
+
 def check(folder: Path) -> list:
     """The problems of a package; empty when SHA256SUMS and MANIFEST.json match its files."""
     problems = []
@@ -140,11 +179,23 @@ def main(argv=None) -> int:
     w.add_argument("--binary", dest="binaries", action="append", default=[])
     c = sub.add_parser("check")
     c.add_argument("folder")
+    r = sub.add_parser("room")
+    r.add_argument("folder")
+    r.add_argument("--what", required=True)
+    r.add_argument("files", nargs="+")
     args = parser.parse_args(argv)
     folder = Path(args.folder)
     if args.command == "write":
         write(folder, args.sets, args.ints, args.model, args.binaries)
         return 0
+    if args.command == "room":
+        try:
+            problem = room(folder, args.files, args.what)
+        except OSError as e:
+            problem = f"The free space of the output disk could not be measured for {args.what}: {e.strerror or e}."
+        if problem:
+            print(problem)
+        return 1 if problem else 0
     problems = check(folder)
     for problem in problems:
         print(f"package check: {problem}", file=sys.stderr)

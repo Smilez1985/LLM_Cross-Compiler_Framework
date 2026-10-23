@@ -12,6 +12,8 @@ import os
 import platform
 import shutil
 import subprocess
+from collections import namedtuple
+from pathlib import Path
 
 import pytest
 
@@ -81,14 +83,185 @@ def test_compilers_that_build_for_another_system_are_refused(image):
     assert not (image.root / STAGES / "build_config.sh").exists()
 
 
+def this_machine_profile(drop_flag=None):
+    """A hardware profile of this test host as the probe writes it (ARCH, CPU_MODEL, CPU_FLAGS_ALL, the x86 features),
+    read from /proc/cpuinfo; None where that is not readable. `drop_flag` leaves one CPU flag out."""
+    try:
+        text = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    model = next((line.split(":", 1)[1] for line in text.splitlines() if line.startswith("model name")), None)
+    flags = next((line.split(":", 1)[1].split() for line in text.splitlines() if line.startswith("flags")), None)
+    if not model or not flags:
+        return None
+    flags = [f for f in dict.fromkeys(flags) if f != drop_flag]
+    return (f"PROBE_SCHEMA=2\nARCH=x86_64\nCPU_MODEL={' '.join(model.split())}\nCPU_FLAGS_ALL={','.join(flags)}\n"
+            f"SUPPORTS_AVX2={'ON' if 'avx2' in flags else 'OFF'}\nSUPPORTS_AVX512={'ON' if 'avx512f' in flags else 'OFF'}\n")
+
+
+needs_x86_64_host = pytest.mark.skipif(platform.machine() != "x86_64" or this_machine_profile() is None,
+                                       reason="the native x86_64 plan runs its program on an x86_64 Linux host")
+
+
 @needs_bash
-@pytest.mark.skipif(platform.machine() != "x86_64", reason="the native x86_64 plan runs its program on an x86_64 host")
+@needs_x86_64_host
 def test_the_native_x86_64_plan_runs_its_test_programs(image):
-    result = config_with(image, (PROBE_FIXTURES / "schema2_linux_z1_extreme.txt").read_text(encoding="utf-8"))
+    """-march=native for a profile of this build machine itself (the same CPU model and CPU flags as /proc/cpuinfo):
+    the programs are for this machine, so the compiler test runs them. Before, every x86_64 profile was planned so."""
+    result = config_with(image, this_machine_profile())
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert any(c.startswith("gcc ") and "-march=native" in c for c in tools_log(image))
+    assert "The hardware profile is of this build machine: -march=native" in result.stdout
     assert "Compiler test passed: C and C++ programs for x86_64" in result.stdout
+    assert "-march=native" in plan_of(image)["CFLAGS"]
+
+
+# The x86 PCs of the tests: an AVX-512 PC (the Ryzen Z1 Extreme fixture) and an AVX2-only PC made from it.
+AVX512_PC = (PROBE_FIXTURES / "schema2_linux_z1_extreme.txt").read_text(encoding="utf-8")
+
+
+def _avx2_only(text):
+    lines = []
+    for line in text.splitlines():
+        if line.startswith("SUPPORTS_AVX512"):
+            line = line.split("=")[0] + "=OFF"
+        elif line.startswith("CPU_FLAGS_ALL="):
+            line = "CPU_FLAGS_ALL=" + ",".join(f for f in line.split("=", 1)[1].split(",") if not f.startswith("avx512"))
+        elif line.startswith("CPU_MODEL="):
+            line = "CPU_MODEL=AMD Ryzen 7 5700G"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+AVX2_PC = _avx2_only(AVX512_PC)
+
+
+def recipe_x86(profile_text):
+    """The build recipe's x86 CPU options and compiler flags for a build for the machine of a profile
+    (orchestrator/runtime/build/recipe.py, the explicit features of a build for another machine)."""
+    from orchestrator.runtime.build.recipe import X86_FEATURES, _x86_options
+    from orchestrator.runtime.profile import parse_profile
+    options, flags = _x86_options(parse_profile(profile_text), [])
+    return " ".join(f"-D{name}={options[name]}" for name in X86_FEATURES.values()), " ".join(flags)
+
+
+@needs_bash
+@pytest.mark.parametrize("profile, has, lacks", [
+    (AVX2_PC, "-mavx2", "-mavx512f"),
+    (AVX512_PC, "-mavx512f", "-mamx-tile"),
+], ids=["avx2-only", "avx512"])
+def test_an_x86_64_profile_of_another_pc_gets_its_cpu_features_not_march_native(image, profile, has, lacks):
+    """A package planned for another PC is built for that PC's CPU: the explicit features of its probe, as the build
+    recipe plans every build for another machine (recipe.py), on the x86-64 baseline. -march=native would have tuned
+    the programs to the build machine (an AVX-512 build host gives an AVX2-only PC programs it cannot run)."""
+    cmake, flags = recipe_x86(profile)
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = plan_of(image)
+    assert plan["CFLAGS"] == f"-O3 -pthread -fPIC -march=x86-64 {flags}"
+    assert plan["CMAKE_FLAGS"] == f"-DGGML_NATIVE=OFF {cmake}"
+    assert "-march=native" not in plan["CFLAGS"] and has in plan["CFLAGS"] and lacks not in plan["CFLAGS"]
+    assert "The hardware profile is of another machine: its CPU features (-march=x86-64 " in result.stdout
+    # the compiler test builds with these flags and checks the programs' processor; it never runs them here
+    assert any(c.startswith(f"gcc {plan['CFLAGS']} ") for c in tools_log(image)), tools_log(image)
+    assert "Compiler test passed: C and C++ programs for x86_64" in result.stdout
+
+
+def test_the_explicit_x86_features_are_the_build_recipe_s():
+    """The table of config_module.sh is the build recipe's (X86_FEATURES, _X86_NEEDS, _X86_FLAGS) with the probe's
+    /proc/cpuinfo flags (configs/hardware_probe_schema.yml); the plans of a real cross build agree with recipe_x86."""
+    import re
+    from conftest import REPO_ROOT
+
+    from orchestrator.runtime.build import recipe
+    from orchestrator.runtime.catalog import load_catalog
+    from orchestrator.runtime.profile import load_schema, parse_profile
+    text = (REPO_ROOT / "targets" / "Rockchip" / "modules" / "config_module.sh").read_text(encoding="utf-8")
+    table = re.search(r"X86_FEATURE_TABLE=\((.*?)\n\)", text, re.S).group(1)
+    rows = [row.split() for row in re.findall(r'"([^"]+)"', table)]
+    schema = load_schema()
+    assert [r[0] for r in rows] == list(recipe.X86_FEATURES)
+    assert {r[0]: r[1] for r in rows} == dict(recipe.X86_FEATURES)
+    assert {r[0]: r[2] for r in rows if r[2] != "-"} == dict(recipe._X86_NEEDS)
+    assert {r[0]: (r[3],) for r in rows} == {key: schema.keys[key].cpuinfo for key in recipe.X86_FEATURES}
+    flag_rows = re.search(r"X86_FLAG_TABLE=\((.*?)\n\)", text, re.S).group(1)
+    flags = [row.split() for row in re.findall(r'"([^"]+)"', flag_rows)]
+    assert [(r[0], tuple(r[1:])) for r in flags] == list(recipe._X86_FLAGS.items())
+    plan = recipe.plan_build(parse_profile(AVX512_PC), purpose="device-runtime", placement="cross", backend="cpu",
+                             catalog=load_catalog(), toolchain=recipe.ToolchainInfo(host_os="linux", host_arch="x86_64"))
+    assert " ".join(f"-D{n}={plan.options()[n]}" for n in recipe.X86_FEATURES.values()) == recipe_x86(AVX512_PC)[0]
+    assert " ".join(plan.verify["compile_check_flags"]) == recipe_x86(AVX512_PC)[1]
+
+
+@needs_bash
+@needs_x86_64_host
+def test_a_profile_with_this_cpu_model_but_other_cpu_flags_is_another_machine(image):
+    """Only the CPU of this very machine is -march=native: the same model name with one CPU flag less (another PC, a
+    feature switched off) gets the explicit features of its probe."""
+    profile = this_machine_profile(drop_flag="sse2")
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "-march=native" not in plan_of(image)["CFLAGS"] and "-march=x86-64" in plan_of(image)["CFLAGS"]
+
+
+@needs_bash
+def test_features_the_probe_does_not_confirm_are_left_out(image):
+    """A probe that could not tell a feature (UNKNOWN, Windows without a constant for it) gets no option for it: never
+    more than the probe confirmed, as in the build recipe's plan."""
+    profile = "\n".join(line for line in AVX2_PC.splitlines() if not line.startswith("CPU_FLAGS_ALL=")) + "\n"
+    profile = profile.replace("SUPPORTS_FMA=ON", "SUPPORTS_FMA=UNKNOWN").replace("SUPPORTS_F16C=ON", "SUPPORTS_F16C=UNKNOWN")
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = plan_of(image)
+    assert plan["CMAKE_FLAGS"] == f"-DGGML_NATIVE=OFF {recipe_x86(profile)[0]}"
+    assert "-DGGML_FMA=OFF" in plan["CMAKE_FLAGS"] and "-DGGML_F16C=OFF" in plan["CMAKE_FLAGS"]
+    assert "-mfma" not in plan["CFLAGS"] and "-mavx2" in plan["CFLAGS"]
+    assert "does not say whether the CPU has F16C FMA: left out" in result.stdout + result.stderr
+
+
+@needs_bash
+def test_a_probe_file_of_version_1x_gets_the_features_its_cpu_flags_name(image):
+    """The probe of version 1.x wrote SUPPORTS_AVX2 and SUPPORTS_AVX512 only, and the CPU flags separated by spaces:
+    the other features come from its CPU flags, as the framework reads such a file (orchestrator/runtime/profile.py)."""
+    profile = (PROBE_FIXTURES / "schema1_sh_laptop.txt").read_text(encoding="utf-8")
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    cmake, flags = recipe_x86(profile)
+    assert plan_of(image)["CMAKE_FLAGS"] == f"-DGGML_NATIVE=OFF {cmake}"
+    assert plan_of(image)["CFLAGS"] == f"-O3 -pthread -fPIC -march=x86-64 {flags}"
+    assert "-DGGML_FMA=ON" in cmake and "-DGGML_AVX512_VNNI=ON" in cmake and "-DGGML_AVX512_BF16=OFF" in cmake
+
+
+@needs_bash
+@pytest.mark.parametrize("fixture", ["schema2_linux_ivybridge.txt", "schema2_windows_apu.txt",
+                                     "schema2_linux_z1_extreme.txt", "schema1_sh_laptop.txt"])
+def test_every_x86_probe_fixture_is_planned_as_the_build_recipe_plans_it(image, fixture):
+    """Both ways for each PC of the probe fixtures: every feature the probe confirmed is an option ON with its compiler
+    flags, every other one is OFF without them (an Ivy Bridge PC gets -mavx and -mf16c, never -mavx2 or -mfma; a
+    Windows probe without an answer for FMA gets no -mfma)."""
+    from orchestrator.runtime.build.recipe import _X86_FLAGS
+    profile = (PROBE_FIXTURES / fixture).read_text(encoding="utf-8")
+    cmake, flags = recipe_x86(profile)
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = plan_of(image)
+    assert plan["CMAKE_FLAGS"] == f"-DGGML_NATIVE=OFF {cmake}"
+    assert plan["CFLAGS"] == f"-O3 -pthread -fPIC -march=x86-64 {flags}".rstrip()
+    words = plan["CFLAGS"].split()
+    for option, option_flags in _X86_FLAGS.items():
+        on = f"-D{option}=ON" in plan["CMAKE_FLAGS"].split()
+        assert all((f in words) == on for f in option_flags), (option, plan["CFLAGS"])
 
 
 @needs_bash
@@ -463,6 +636,128 @@ def test_programs_for_another_processor_get_no_package(image):
     assert not any((image.output / "packages").glob("granite_*_aarch64_*"))
 
 
+# --- the disk rule before the package's copies (scripts/board_package.py room) ------------------------------------
+
+GIB = 1024 ** 3
+
+
+def small_disk(image, *frees):
+    """The disk the image's python3 measures (tests/board_toolchain.py set_disk): 100 GB, free as given, one value per
+    measurement, the last one for every further measurement."""
+    from board_toolchain import set_disk
+    set_disk(image.toolchain, *frees)
+    return {}
+
+
+def sized_files(monkeypatch, board_package, folder, sizes):
+    """Files of these sizes for board_package.room, without their bytes: the files are empty and their stat reports
+    the size (a sparse file is no portable stand-in: Python extends a file on Windows by writing zeros)."""
+    paths = {}
+    for name, size in sizes:
+        path = folder / name
+        path.write_bytes(b"")
+        paths[str(path)] = size
+
+    class SizedPath(type(Path())):
+        def stat(self, *args, **kwargs):
+            result = super().stat(*args, **kwargs)
+            if str(self) not in paths:
+                return result
+            fields = list(result[:10])
+            fields[6] = paths[str(self)]  # st_size
+            return os.stat_result(fields)
+
+    monkeypatch.setattr(board_package, "Path", SizedPath)
+    return [folder / name for name, _size in sizes]
+
+
+def disk_rule_refusal(needed, free, total=100 * 10 ** 9):
+    """The refusal of the framework's disk rule (orchestrator/Core/disk_plan.py) for the package on the output disk."""
+    from orchestrator.Core import disk_plan
+    usage = namedtuple("usage", "total used free")(total, total - free, free)
+    check = disk_plan.room(Path("."), needed, label="output", disk_usage=lambda _path: usage)
+    problem = disk_plan.refusal([check], "the package for the board")
+    return None if problem is None else str(problem)
+
+
+@pytest.mark.parametrize("needed, free, total", [
+    (5 * 10 ** 9, 20 * 10 ** 9, 500 * 10 ** 9),      # fits: 15 GB left, 10 GB (2 %) must stay free
+    (5 * 10 ** 9, 14 * 10 ** 9, 500 * 10 ** 9),      # 9 GB left: less than the 2 %
+    (1 << 20, GIB, 100 * 10 ** 9),                   # a small disk keeps 2 GiB
+    (1 << 20, 2 * GIB + (1 << 20), 100 * 10 ** 9),   # exactly the reserve left: fits
+    (1 << 20, 2 * GIB + (1 << 20) - 1, 100 * 10 ** 9),
+    (900 * 10 ** 6, 3 * 10 ** 9, 0),                 # a measurement without the disk's size keeps 2 GiB
+])
+def test_the_package_s_room_is_the_framework_s_disk_rule(tmp_path, monkeypatch, needed, free, total):
+    """The image has no framework, so scripts/board_package.py carries the disk rule's numbers and words: the same
+    verdict and the same refusal as disk_plan.refusal for the output disk, without the reservation ledger (the per-user
+    folder of the computer, which a build container does not see)."""
+    from orchestrator.Core import disk_plan
+    from orchestrator.utils.localization import ui_text
+    board_package = _board_package()
+    [model] = sized_files(monkeypatch, board_package, tmp_path, [("model.gguf", needed)])
+    usage = namedtuple("usage", "total used free")(total, total - free, free)
+
+    problem = board_package.room(tmp_path / "packages", [model], "the package for the board",
+                                 disk_usage=lambda _path: usage)
+
+    assert problem == disk_rule_refusal(needed, free, total)
+    assert (board_package.RESERVE_MIN, board_package.RESERVE_SHARE) == (disk_plan.RESERVE_MIN, disk_plan.RESERVE_SHARE)
+    assert board_package.FREE_DISK == ui_text("action.free_disk", "en")
+    for value in (0, 999_999, 10 ** 9 - 1, 10 ** 9, 2 * GIB, 123_456_789_012):
+        assert board_package.gb(value) == disk_plan.gb(value)
+
+
+def test_the_package_s_room_counts_every_file_on_the_disk_of_the_nearest_folder(tmp_path, monkeypatch):
+    board_package = _board_package()
+    files = sized_files(monkeypatch, board_package, tmp_path,
+                        [("model.gguf", 3 * 10 ** 9), ("llama-cli", 10 ** 6), ("llama-server", 10 ** 6)])
+    asked = []
+
+    def usage(path):
+        asked.append(path)
+        return namedtuple("usage", "total used free")(100 * 10 ** 9, 0, 2 * GIB + 3 * 10 ** 9 + 10 ** 6)
+
+    assert board_package.room(tmp_path / "packages" / "new", files[:2], "x", disk_usage=usage) is None
+    assert asked == [str(tmp_path)], "measured on the folder that exists"
+    assert board_package.room(tmp_path / "packages", files, "the package for the board", disk_usage=usage) == (
+        "Not enough disk space for the package for the board: output disk: 3.0 GB needed, 5.1 GB free, 2.1 GB must "
+        "stay free. Free disk space (old builds, the model cache, the trash), or choose a smaller model.")
+
+
+@needs_bash
+def test_a_package_the_disk_cannot_hold_is_refused_before_anything_slow(image):
+    """Version 1.x copied the model into the package without a look at the disk. Now the framework's disk rule comes
+    first: the model alone does not fit, so neither the functional test nor the cross build runs."""
+    result = target_by_hand(image, "--model-name", "granite", STUB_TOOLS_LOG=image.root / "tools.log",
+                            **small_disk(image, GIB))
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    model = image.output / "granite-Q4_K_M.gguf"
+    expected = disk_rule_refusal(model.stat().st_size, GIB)
+    assert f"ERROR: {expected} No package was made." in result.stderr
+    assert expected.startswith("Not enough disk space for the package for the board: output disk: 1 MB needed, "
+                               "1.1 GB free, 2.1 GB must stay free. Free disk space")
+    assert not any(c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c for c in tools_log(image))
+    assert "Functional test" not in result.stdout
+    assert not (image.output / "packages").exists()
+
+
+@needs_bash
+def test_a_disk_that_fills_during_the_cross_build_stops_the_package_before_the_copy(image):
+    """The check before the copy counts every file the package copies (the model, the programs, the toolchain file);
+    here another job filled the disk while the programs were built."""
+    result = target_by_hand(image, "--model-name", "granite", STUB_TOOLS_LOG=image.root / "tools.log",
+                            **small_disk(image, 50 * 10 ** 9, GIB))
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert any(c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c for c in tools_log(image)), "cross build ran"
+    assert ("ERROR: Not enough disk space for the package for the board: output disk: 1 MB needed, 1.1 GB free, "
+            "2.1 GB must stay free.") in result.stderr
+    assert "No package was made." in result.stderr
+    assert not (image.output / "packages").exists()
+
+
 @needs_bash
 def test_the_package_s_cross_build_turns_off_every_option_that_downloads(image):
     """The programs for the board are built like every llama.cpp build of the framework: each option that can download
@@ -479,6 +774,83 @@ def test_the_package_s_cross_build_turns_off_every_option_that_downloads(image):
     words = configure.split()
     assert [option for option in DOWNLOAD_OPTIONS_OFF if f"-D{option}=OFF" not in words] == [], configure
     assert "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in words
+
+
+def last_values(configure):
+    """The value CMake keeps for each -DNAME=VALUE of a configure call (the last one)."""
+    values = {}
+    for word in configure.split():
+        if word.startswith("-D") and "=" in word:
+            name, _, value = word[2:].partition("=")
+            values[name.split(":")[0]] = value
+    return values
+
+
+@needs_bash
+def test_a_module_s_cmake_flags_cannot_switch_a_download_back_on_in_the_package_s_cross_build(image):
+    """The every-build options come after the module's CMake flags, as in the image's Dockerfile, so CMake keeps
+    them: a module edited by hand (the module generator refuses such flags) gets no download and no server with
+    subprocesses (decision D22: llama-server has none in any build of the framework)."""
+    from orchestrator.runtime.build.recipe import DEPRECATED_DOWNLOAD_OPTIONS, DOWNLOAD_OPTIONS_OFF
+    config = image.app / "modules" / "config_module.sh"
+    text = config.read_text(encoding="utf-8")
+    assert 'local cmake_flags="-DGGML_NATIVE=OFF"' in text
+    config.write_text(text.replace(
+        'local cmake_flags="-DGGML_NATIVE=OFF"',
+        'local cmake_flags="-DGGML_NATIVE=OFF -DLLAMA_USE_PREBUILT_UI=ON -DLLAMA_CURL=ON -DLLAMA_SUBPROCESS=ON '
+        '-DFETCHCONTENT_FULLY_DISCONNECTED=OFF -DLLAMA_BUILD_TESTS=ON"'), encoding="utf-8")
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_TOOLS_LOG=image.root / "tools.log")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    configure = next(c for c in tools_log(image) if c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c)
+    assert "-DLLAMA_USE_PREBUILT_UI=ON" in configure.split(), "the module's flags are on the command line"
+    kept = last_values(configure)
+    assert {name: kept.get(name) for name in [*DOWNLOAD_OPTIONS_OFF, *DEPRECATED_DOWNLOAD_OPTIONS, "LLAMA_SUBPROCESS"]} \
+        == {name: "OFF" for name in [*DOWNLOAD_OPTIONS_OFF, *DEPRECATED_DOWNLOAD_OPTIONS, "LLAMA_SUBPROCESS"]}
+    assert kept["FETCHCONTENT_FULLY_DISCONNECTED"] == "ON" and kept["GGML_NATIVE"] == "OFF"
+    assert kept["BUILD_SHARED_LIBS"] == "OFF" and kept["LLAMA_BUILD_SERVER"] == "ON"
+
+
+@needs_bash
+@pytest.mark.parametrize("flags, refused", [
+    ("-D LLAMA_BUILD_BORINGSSL=ON", "-DLLAMA_BUILD_BORINGSSL=ON (LLAMA_BUILD_BORINGSSL downloads at configure time "
+                                    "and is never set)"),
+    ("-DGGML_CUDA_CCCL_VERSION:STRING=v3.4.3", "-DGGML_CUDA_CCCL_VERSION:STRING=v3.4.3 (GGML_CUDA_CCCL_VERSION "
+                                               "downloads at configure time and is never set)"),
+    ("-C /tmp/initial-cache.cmake", "-C (CMake runs a script with -C or -P, and a script can set any option)"),
+    ("-P/tmp/settings.cmake", "-P/tmp/settings.cmake (CMake runs a script with -C or -P, and a script can set any "
+                              "option)"),
+], ids=["space", "typed", "initial-cache", "script"])
+def test_a_module_s_cmake_flags_that_no_later_option_turns_off_stop_the_package(image, flags, refused):
+    """An option that downloads whenever it is set (NEVER_SET of the build recipe) is not turned off by the every-build
+    options after it, and a CMake script (-C, -P) can set any option: the package refuses such module flags before
+    anything slow, in every spelling cmake reads, as the image's Dockerfile refuses such LLAMA_CMAKE_ARGS (a module
+    edited by hand, or generated before the module generator refused them)."""
+    config = image.app / "modules" / "config_module.sh"
+    text = config.read_text(encoding="utf-8")
+    config.write_text(text.replace('local cmake_flags="-DGGML_NATIVE=OFF"',
+                                   f'local cmake_flags="-DGGML_NATIVE=OFF {flags}"'), encoding="utf-8")
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_TOOLS_LOG=image.root / "tools.log")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (f"ERROR: The CMake flags of the build plan would let llama.cpp download while it is built: {refused}; "
+            "builds have no network: leave it out. No package was made.") in result.stderr
+    assert not any(c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c for c in tools_log(image))
+    assert "Functional test" not in result.stdout
+    assert not (image.output / "packages").exists()
+
+
+def test_the_package_refuses_the_options_the_build_recipe_never_sets():
+    """The image has no framework: target_module.sh carries the recipe's NEVER_SET (as the Dockerfiles do)."""
+    import re
+    from conftest import REPO_ROOT
+
+    from orchestrator.runtime.build.recipe import NEVER_SET
+    text = (REPO_ROOT / "targets" / "Rockchip" / "modules" / "target_module.sh").read_text(encoding="utf-8")
+    names = re.search(r"^NEVER_SET_OPTIONS=\(([^)]*)\)", text, re.M).group(1).split()
+    assert names == list(NEVER_SET)
 
 
 @needs_bash
