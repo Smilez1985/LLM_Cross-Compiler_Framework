@@ -748,3 +748,78 @@ def test_the_tarball_stays_the_owners_only_when_a_damaged_copy_is_sent_again(tmp
         os.umask(old)
     assert damaged and any(c.startswith("sh -c 'rm -f ") and ".part" in c for c in board.commands), "sent twice"
     assert modes == [0o600]
+
+
+# --- stage C wave 2: the CLI's wait lines and a failed wait (follow-up of remote-callers-v) -------------------------
+
+def test_the_first_line_of_a_wait_carries_the_key_that_ends_it():
+    from orchestrator.remote.session import RemoteEvent
+    from orchestrator.remote.text import wait_lines
+    lines = []
+    on_event = wait_lines(lines.append, "192.0.2.5", "en", hint=" (Ctrl+C)")
+    for event in (RemoteEvent("waiting", elapsed=0, limit=300), RemoteEvent("waiting", elapsed=5, limit=300),
+                  RemoteEvent("back", done=1, total=2)):
+        on_event(event)
+    assert len(lines) == 2 and lines[0].endswith(" (Ctrl+C)") and not lines[1].endswith("(Ctrl+C)")
+
+
+def test_the_cli_names_ctrl_c_in_its_wait_line_as_deploy_run_does(tmp_path, monkeypatch):
+    """`device runtime deploy|verify|prune --on-device` (cli._connect_device) say a wait for the board with the key
+    that ends it, as `deploy run` says it (cli._deploy_event_text)."""
+    from orchestrator import cli as cli_module
+    from orchestrator.remote.session import RemoteEvent
+    from orchestrator.runtime.device import person_steps
+    from test_cli_builds import quiet_console
+    printed = quiet_console(monkeypatch)
+
+    def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None, cancel=None,
+                on_event=None):
+        on_event(RemoteEvent("waiting", elapsed=0, limit=300, step="command"))
+        return object(), None
+    monkeypatch.setattr(person_steps, "connect_stored", connect)
+    cli_module._connect_device(tmp_path, "0123456789abcdef", "192.0.2.30", 22, "dietpi", None, step="verify")
+    (line,) = [ln for ln in printed.getvalue().splitlines() if ln.startswith("Waiting for the board at 192.0.2.30")]
+    assert line.endswith(" (Ctrl+C)"), line
+
+
+def test_a_failed_wait_prints_the_plain_reason_not_the_raw_code(monkeypatch):
+    """A board that did not answer again after its network dropped ends the command with what the reason code means
+    and the next step (cli._print_reason, as `deploy run` prints it), not with the session's sentence that only names
+    the code; any other failure keeps its own words."""
+    from orchestrator import cli as cli_module
+    from orchestrator.runtime.device import reasons
+    from orchestrator.runtime.device.remote import RemoteError
+    from test_cli_builds import quiet_console
+    printed = quiet_console(monkeypatch)
+    waited = RemoteError(f"The board did not answer again within 300 s ({reasons.HOST_DOWN})", "wait",
+                         reasons.HOST_DOWN)
+    with pytest.raises(SystemExit) as code:
+        cli_module._board_step_failed(None, waited, "192.0.2.30", 22)
+    out = printed.getvalue()
+    assert code.value.code == 1
+    assert reasons.person_title(reasons.HOST_DOWN, "en", address="192.0.2.30", port=22) in out
+    assert reasons.person_next(reasons.HOST_DOWN, "en", address="192.0.2.30", port=22)[:40] in out
+    assert "within 300 s" not in out, out
+    printed.truncate(0)
+    printed.seek(0)
+    with pytest.raises(SystemExit):
+        cli_module._board_step_failed(None, RemoteError("installing on the device failed (exit 2): no space"),
+                                      "192.0.2.30", 22)
+    assert "installing on the device failed (exit 2): no space" in printed.getvalue()
+
+
+@POSIX
+def test_a_ctrl_c_during_a_wait_is_not_hidden_by_the_staging_clean_up(tmp_path, source, board_session):
+    """Ctrl+C while the runtime deploy waits for the board (the wait line names it) ends the command as a Ctrl+C
+    (click's "Aborted!"): the staging folder's clean-up, which cannot reach the board then, no longer replaces it
+    with "the connection to the device is closed"."""
+    board, session, _events, _clock = board_session
+    build, packaged = tdr.packaged_build(tmp_path, source)
+    board.back = False
+    board.drop_before = "SHA256SUMS"
+
+    def ctrl_c(_seconds):
+        raise KeyboardInterrupt
+    session._sleep = ctrl_c
+    with pytest.raises(KeyboardInterrupt):
+        deploy_over(session, build, packaged)

@@ -5024,7 +5024,8 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
     rewrites the board's trust record (its --ssh-user may name another account than the one AI tools deploy as)."""
     from orchestrator.remote.text import wait_lines
     from orchestrator.runtime.device import person_steps, reasons
-    lines = wait_lines(lambda text: console.print(escape(text)), host, _config_language(ctx))
+    # the key that ends a wait, as `deploy run` names it (Ctrl+C ends the command; a wait never runs on to 300 s)
+    lines = wait_lines(lambda text: console.print(escape(text)), host, _config_language(ctx), hint=" (Ctrl+C)")
     try:   # the shared step records the board's contacts for Mojo in `state_dir`
         client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step,
                                                   on_event=lines)
@@ -5046,6 +5047,20 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
     if ctx is not None and step != "verify":  # trusted by the person when it was probed, logged in to with the
         _remember_device(ctx, host, port, user, key, paired=True)  # framework's key now (a verify only checks)
     return client
+
+
+def _board_step_failed(ctx: Optional[FrameworkContext], error, host: str, port: int) -> None:
+    """Exits after a step on the board failed (a RemoteError of `device runtime deploy|verify|prune --on-device`): a
+    board that did not answer again after its network dropped (N5), or that refused the login again, says why in the
+    plain words `deploy run` uses (_print_reason: what the reason code means and the next step), never only the raw
+    code; any other failure as its sentence."""
+    from orchestrator.runtime.device import reasons
+    if error.reason in reasons.CODES:
+        _print_reason(ctx, error.reason, host, port)
+        if error.kind == "wait":   # the wait line said it before; the session's own sentence only repeats the code
+            sys.exit(1)
+    console.print(f"[red]{escape(str(error))}[/red]")
+    sys.exit(1)
 
 
 def _bench_choice(ctx: FrameworkContext, shell, home: str, bench_model: Optional[str], allow_untrusted: bool,
@@ -5398,8 +5413,7 @@ def _prune_on_device(ctx: FrameworkContext, state_dir: Path, store, device_id: s
             console.print(f"[yellow]{escape(str(e))}[/yellow]")
             return
     except RemoteError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
+        _board_step_failed(ctx, e, host, port)
     finally:
         client.close()
     _print_deletion_result(result, accepted)
@@ -5475,8 +5489,7 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
                                         bench=steps.BenchChoice(model_path, allowed, digest),
                                         say=lambda msg: console.print(escape(msg)))
     except RemoteError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
+        _board_step_failed(ctx, e, host, port)
     finally:
         client.close()
     result, report = outcome.result, outcome.report
@@ -5557,8 +5570,7 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
                                      plan_verify=plan_verify, source=source, port=settings.port,
                                      bench=steps.BenchChoice(model_path, allowed, digest))
     except RemoteError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
+        _board_step_failed(ctx, e, host, port)
     finally:
         client.close()
     console.print(f"Device {device_id}, build {record['build_id'][:16]}:")
