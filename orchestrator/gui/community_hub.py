@@ -397,7 +397,8 @@ class CommunityHubWindow(QMainWindow):
     def confirm_install(self, prepared):
         from orchestrator.Core.community_manager import TrustLevel
         local = prepared.trust == TrustLevel.LOCAL
-        title = ui_text("zoo.sort.title", self.lang) if prepared.loose_file is not None else "Install community pack"
+        title = (ui_text("zoo.sort.title", self.lang) if getattr(prepared, "loose_file", None) is not None
+                 else "Install community pack")
         box = QMessageBox(QMessageBox.Warning if local else QMessageBox.Question, title,
                           prepared.summary(), QMessageBox.Yes | QMessageBox.No, self)
         # The summary quotes the pack (author, notes): as HTML it could hide the trust level and the warning.
@@ -423,11 +424,13 @@ class CommunityHubWindow(QMainWindow):
         if prepared.manifest.kind == "target" and tm is not None:
             tm.initialize()
         # a knowledge pack, a sorted loose file or a target pack's knowledge snapshot reached the knowledge base
-        problem = getattr(self.comm_manager, "last_sync_problem", "") if prepared.imports_knowledge else ""
-        lines = [ui_text("zoo.sort.done", self.lang, name=one_line(prepared.loose_label), folder=str(dest))
-                 if prepared.loose_file is not None else
+        imports = getattr(prepared, "imports_knowledge", prepared.manifest.kind == "knowledge")
+        problem = getattr(self.comm_manager, "last_sync_problem", "") if imports else ""
+        lines = [ui_text("zoo.sort.done", self.lang, name=one_line(getattr(prepared, "loose_label", "")),
+                         folder=str(dest))
+                 if getattr(prepared, "loose_file", None) is not None else
                  f"Installed {prepared.manifest.kind} {prepared.manifest.id} in {dest}."]
-        snapshot = getattr(self.comm_manager, "last_sync_snapshot", None) if prepared.imports_knowledge else None
+        snapshot = getattr(self.comm_manager, "last_sync_snapshot", None) if imports else None
         if snapshot and not problem:   # N13, as `llm-cli zoo install` says it: saved first, so it can be undone
             lines.append(ui_text("zoo.install.snapshot", self.lang, name=one_line(snapshot)))
         self._install_note = "\n".join(lines)

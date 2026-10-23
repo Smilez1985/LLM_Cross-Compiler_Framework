@@ -204,6 +204,15 @@ class TestLooseFiles:
         world.cm.finish_install(prepared)
         assert path.is_file(), "a file changed after it was checked stays where it is"
 
+    def test_the_loose_file_stays_when_its_installed_copy_is_not_the_checked_one(self, world):
+        path = loose(world, "copy.json")
+        prepared = world.cm.prepare_sort("copy.json", topic="t")
+        (prepared.quarantine / "pack" / "knowledge.json").write_text(json.dumps(PAGES[:1]))   # not the checked bytes
+        dest = world.cm.finish_install(prepared)
+        assert path.is_file(), "the person's file goes only when its copy arrived as it was checked"
+        assert world.rag.ingested == [] and "changed since it was installed" in world.cm.last_sync_problem
+        assert dest.is_dir()
+
     def test_a_sorted_name_is_unique_across_topics(self, world):
         loose(world, "docs.json")
         loose(world, "b/docs.json")

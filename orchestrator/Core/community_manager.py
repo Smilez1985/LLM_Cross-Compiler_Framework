@@ -1256,9 +1256,14 @@ class CommunityManager:
 
     def _remove_sorted(self, prepared: PreparedInstall) -> None:
         """The loose file a sort moved into its pack folder: removed when it is still the file that was checked (it is
-        the pack's knowledge.json now), and its folder when that is left empty. A file changed meanwhile stays."""
+        the pack's knowledge.json now), and its folder when that is left empty. A file changed meanwhile stays, and so
+        does the file when its copy in the pack folder is not the checked one."""
         loose = prepared.loose_file
         try:
+            if sha256_file(prepared.destination / KNOWLEDGE_FILE) != prepared.provenance.pack_sha256:
+                self.logger.warning(f"{prepared.loose_label} was not removed: its copy in the pack folder is not the "
+                                    "checked file.")
+                return
             if sha256_file(loose) != prepared.provenance.pack_sha256:
                 self.logger.warning(f"{prepared.loose_label} changed after it was checked; it stays where it is.")
                 return
