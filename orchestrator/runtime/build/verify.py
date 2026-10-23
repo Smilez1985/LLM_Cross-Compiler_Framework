@@ -92,6 +92,9 @@ class Check:
 class VerifyReport:
     checks: List[Check] = field(default_factory=list)
     ran_binaries: bool = False   # steps 2-5 ran on this machine (not for cross builds)
+    # the board's temperature during the checks on a board (runtime/device/thermal.py BoardHeat), None when the board
+    # shows none or the checks ran elsewhere; a hot board does not fail a check: it is a warning with what helps
+    heat: Any = None
 
     @property
     def ok(self) -> bool:
@@ -105,7 +108,10 @@ class VerifyReport:
         return next((c for c in self.checks if c.name == name), None)
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"ok": self.ok, "ran_binaries": self.ran_binaries, "checks": [c.as_dict() for c in self.checks]}
+        out = {"ok": self.ok, "ran_binaries": self.ran_binaries, "checks": [c.as_dict() for c in self.checks]}
+        if self.heat is not None:
+            out["temperature"] = self.heat.as_dict()
+        return out
 
     def summary(self) -> str:
         failed = self.failures

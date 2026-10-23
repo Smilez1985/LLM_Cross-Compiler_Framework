@@ -690,8 +690,12 @@ class FakeDevice:
         return FakeStdin(job), FakeStream(job, 1), FakeStream(job, 2)
 
     def answer(self, command, stdin):
+        # the board's thermal zones and device tree are the fake root's too (thermal.THERMAL_COMMAND): none unless a
+        # test gives the board some, so this computer's own temperature never shows in a test
         moved = command.replace("/run/systemd/system", f"{self.fakeroot}/run/systemd/system") \
-                       .replace("/etc/systemd/system/", f"{self.fakeroot}/etc/systemd/system/")
+                       .replace("/etc/systemd/system/", f"{self.fakeroot}/etc/systemd/system/") \
+                       .replace("/sys/class/thermal/", f"{self.fakeroot}/sys/class/thermal/") \
+                       .replace("/proc/device-tree/", f"{self.fakeroot}/proc/device-tree/")
         env = {"HOME": str(self.home), "PATH": f"{self.stubs}:/usr/bin:/bin", "LANG": "C",
                "FAKE_LOG": str(self.log), "LLAMA_ARG_TOOLS": "all", "LLAMA_ARG_HOST": "0.0.0.0"}
         res = subprocess.run([SHELL, "-c", moved], input=stdin, env=env, capture_output=True, timeout=120,

@@ -361,7 +361,7 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
     return {"activated": ok, "build_id": build.build_id, "install": settings.install, "previous": result.previous,
             "older_builds_kept": len(result.older),
             "checks": [c.as_dict() for c in (report.checks if report is not None else [])],
-            "notes": list(result.notes)}
+            "notes": list(result.notes), **steps.heat_facts(report)}
 
 
 def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, expect_fingerprint: str, *,
@@ -430,6 +430,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
     record.update({"verification": report.as_dict(), "verified_at": report_time()})
     record.pop("format", None)
     devices.save_record(record)
+    steps.record_heat(state_dir, device.device_id, report.heat)   # for Mojo, until the next reading
     recorded = record_board_test(output_dirs, device, profile, report, digest, record["build_id"], source,
                                  settings.kv_choice(profile).kind)
     smoke = report.check("smoke")
@@ -437,7 +438,8 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
     speeds = {("prompt_ts" if r.get("n_prompt") else "gen_ts"): r.get("avg_ts") for r in bench
               if isinstance(r.get("avg_ts"), (int, float))}
     return {"ok": report.ok, "trusted_model": trusted, "model_sha256": digest, "build_id": record["build_id"],
-            "checks": [c.as_dict() for c in report.checks], "recorded_builds": len(recorded), **speeds}
+            "checks": [c.as_dict() for c in report.checks], "recorded_builds": len(recorded), **speeds,
+            **steps.heat_facts(report)}
 
 
 def record_board_test(output_dirs: Sequence[Path], device: Any, profile: Any, report: Any, digest: Optional[str],

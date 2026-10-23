@@ -43,9 +43,10 @@ DEVICE_ID_RE = re.compile(r"^[0-9a-f]{16}$", re.ASCII)
 _FINGERPRINT = FINGERPRINT   # the one fingerprint pattern (orchestrator/remote/trust.py)
 _KEY_TYPE = re.compile(r"^[a-z0-9@.-]{3,64}$", re.ASCII)
 _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
-# What a deploy saw on the board, kept with its last deploy (note_board) until the next deploy looks again, and what the
-# last contact found (note_reach), kept until a contact reaches the board again.
-BOARD_FACTS = ("old_sidecar", "board_checked_at", "reach")
+# What a deploy saw on the board, kept with its last deploy (note_board) until the next deploy looks again, what the
+# last contact found (note_reach), kept until a contact reaches the board again, and the board's temperature at the last
+# checks on it (note_heat), kept until the next reading.
+BOARD_FACTS = ("old_sidecar", "board_checked_at", "reach", "heat")
 # The framework's contacts with a board whose failure is recorded for Mojo (note_reach), in plain words.
 REACH_STEPS = {"deploy": "deploy", "runtime_deploy": "runtime deploy", "verify": "verify", "benchmark": "benchmark",
                "probe": "probe"}
@@ -298,6 +299,35 @@ class TrustedDevices:
         except (OSError, TimeoutError, DeviceStoreError):
             pass  # bookkeeping never fails a deploy, a verify or a benchmark
 
+    def note_heat(self, device_id: str, heat: Any) -> None:
+        """The board's temperature at the last checks on it (runtime/device/thermal.py BoardHeat), for Mojo (it never
+        logs in to a board itself): kept until the next reading replaces it. Nothing when there is no reading (a board
+        that shows no temperature). Never fails the caller's work."""
+        if heat is None or not DEVICE_ID_RE.fullmatch(device_id or ""):
+            return
+        try:
+            row_heat = {**heat.as_dict(), "at": _now()}
+            with file_lock(self.state_dir / ".devices.lock"):
+                rows = self.last_deploys()
+                row = dict(rows.get(device_id) or {})
+                row["heat"] = row_heat
+                rows[device_id] = row
+                self._write(self.deploys_path, rows)
+        except (OSError, TimeoutError, DeviceStoreError, AttributeError, TypeError):
+            pass  # bookkeeping never fails a deploy, a verify or a benchmark
+
+    def last_heat(self, device: TrustedDevice) -> Optional[Dict[str, Any]]:
+        """The board's recorded temperature ({"at", "heat": BoardHeat}) or None; a record written before the person's
+        last trust of the board (they trusted or paired it again since) is no longer the board's. Reads only the
+        file."""
+        from orchestrator.runtime.device.thermal import from_dict
+        row = (self.last_deploys().get(device.device_id) or {}).get("heat")
+        heat = from_dict(row)
+        at = row.get("at") if isinstance(row, dict) else None
+        if heat is None or not isinstance(at, str) or not _STAMP.fullmatch(at) or at < device.trusted_at:
+            return None
+        return {"at": at, "heat": heat}
+
     def copy_deploys(self, old_id: str, new_id: str) -> str:
         """P6, the person's change of a board's host key (runtime/device/board_move.py): copies the board's deploy
         record (its last deploy, what a deploy saw there, the last contact's problem) from `old_id` to `new_id` and
@@ -359,6 +389,17 @@ def record_reach(state_dir: Path, step: str, code: str, *, device_id: str = "",
             store.note_reach(device_id, step, code)
         elif endpoint is not None:
             store.note_reach_at(endpoint.host, endpoint.port, step, code)
+    except Exception:  # noqa: BLE001 - bookkeeping never changes what the step does
+        pass
+
+
+def record_heat(state_dir: Path, device_id: str, heat: Any) -> None:
+    """The one recorder of the board's temperature at the checks on it, for Mojo (W1: Mojo reads it instead of
+    contacting the board); nothing without a reading, and it never fails the caller's work."""
+    if heat is None:
+        return
+    try:
+        TrustedDevices(Path(state_dir)).note_heat(device_id, heat)
     except Exception:  # noqa: BLE001 - bookkeeping never changes what the step does
         pass
 

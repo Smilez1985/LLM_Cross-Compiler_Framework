@@ -466,7 +466,9 @@ class BoardsWindow(QDialog):
         for check in (report.checks if report is not None else []):
             lines.append("  " + self._t("boards.check_line", name=check.name, result=self._t(result[check.ok]),
                                         detail=one_line(check.detail)))
-        return lines
+        # the board's temperature at these checks, as the CLI prints it (round 23 item 16)
+        from orchestrator.runtime.device.steps import heat_lines
+        return lines + heat_lines(report, self.lang)
 
     def _may_run_untrusted(self, user: str) -> Callable[[str], bool]:
         """The CLI's question before a model that is not a catalog model runs in the short benchmark, asked from the
