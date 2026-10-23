@@ -2304,6 +2304,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - `llm-cli build start --parallel`: Die Option hatte nie eine Wirkung (ein Aufruf startet einen Build). Sie ist in
   der Hilfe ausgeblendet und gibt eine Warnung aus. `--optimization` bleibt; seine Hilfe sagt jetzt, dass das
   Rockchip-Target die Option nicht auswertet.
+- `DeploymentManager.trust_host` (DECISIONS Runde 22, P5): der alte Schreiber eines bestätigten Host-Schlüssels, ohne
+  Audit-Zeile, den nichts im Framework aufruft. Er ist jetzt ein schlanker Delegate an `orchestrator/remote/pairing.py`
+  `trust_presented_key`, den einen Schreiber, der den Schlüssel unter seiner Sperre speichert und im selben Schritt die
+  Audit-Zeile des Vertrauens schreibt. Nur die Person kann ihn nutzen: Er nimmt den `pairing.PersonChannel` des Kanals
+  (`cli` oder `gui`, mit dem Audit-Log), den nur die Kanäle der Person bilden können, weil kein Modul, das eine KI
+  erreicht, `pairing` importiert. Ohne ihn vertraut er nichts und wirft `PermissionError`; jeder Aufruf warnt mit
+  `DeprecationWarning`. Die Prüfung in `tests/test_remote_trust.py` ist jetzt strenger: das Deploy-Modul nennt
+  überhaupt keinen Vertrauens-Schreiber mehr.
 
 ### Entfernt
 - Der ungenutzte `LocalProbeWorker` des Builder-Tabs, ein zweiter Starter des Fallback-Probe-Skripts (ein eigener
