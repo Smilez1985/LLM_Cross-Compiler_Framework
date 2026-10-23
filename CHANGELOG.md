@@ -1498,11 +1498,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   again from the beginning), an AI's job shows it by the board's label. So does the Builder tab's **Remote Scan via
   SSH...** in its log, with a **Cancel scan** button while the scan runs, as the Boards window has one: it ends a wait
   for the board at once (not after 300 s) and nothing is stored (`scan_steps.scan_device` takes the caller's
-  `CancelToken` and `on_event`). The CLI's wait line of `device runtime deploy|verify|prune --on-device` names the
-  key that ends it, " (Ctrl+C)", as `deploy run`'s does; a Ctrl+C during the runtime deploy's wait now ends the
+  `CancelToken` and `on_event`). The CLI's wait line of `device runtime deploy|verify|prune --on-device` and of
+  `scan --device` (which waited silently under its spinner) names the key that ends it, " (Ctrl+C)", as
+  `deploy run`'s does; a Ctrl+C during the runtime deploy's wait now ends the
   command as a Ctrl+C (the staging folder's clean-up, which cannot reach the board then, no longer replaces it with
-  "the connection to the device is closed"), and a board that does not answer again ends these commands with the
-  plain reason and its next step (`_print_reason`, as `deploy run` prints it), not with a sentence that only names
+  "the connection to the device is closed"), and a board that does not answer again ends these commands (also
+  `scan --device`) with the plain reason and its next step (`_print_reason`, as `deploy run` prints it), not with a sentence that only names
   the reason code. One
   `CancelToken` replaces the four "hold the client so Cancel can close it" copies, and closing a session ends its
   waits. The person's board steps, `scan --device` and Mojo ask `remote.transport.available()` whether SSH works, and

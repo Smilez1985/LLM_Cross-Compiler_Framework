@@ -1916,6 +1916,11 @@ scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
 | `--label TEXT` | Deine Bezeichnung für das Board im Profilspeicher (mit `--device` oder `--import`). |
 | `--import DATEI` | Die Probe-Datei eines Boards im Probe-Speicher ablegen und ihre Probe-ID zeigen (nicht zusammen mit `--device`). |
 
+Bricht das Netz des Boards während `--device` ab (zum Beispiel bei einem Board nur mit WLAN), wartet der Scan bis zu
+300 s auf das Board und sagt das einmal (`Warte auf das Board unter ... (Ctrl+C)`); Strg+C beendet den Befehl
+sofort, und kein Profil wird gespeichert. Ein Board, das nicht wieder antwortet, beendet den Scan mit dem, was das
+bedeutet, und dem nächsten Schritt, wie `deploy run` es sagt.
+
 Ein Rechner ohne Netzzugang führt eine Probe von Hand aus, und du importierst ihre Datei
 ([README](../README_DE.md#die-hardware-des-boards-untersuchen)).
 
