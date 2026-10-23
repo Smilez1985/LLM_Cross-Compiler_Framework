@@ -121,8 +121,8 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Konnte VENV nicht erstellen." }
 $Pip = ".venv\Scripts\pip.exe"
 $PythonVenv = ".venv\Scripts\python.exe"
 
-# Pip Upgrade & Dependencies
-& $Pip install --upgrade pip | Out-Null
+# Dependencies. The venv's pip is the one that comes with Python (ensurepip) and is not upgraded: that would fetch the
+# newest pip without a checksum, and the bundled one is enough for --require-hashes below.
 Write-Host "Installiere Requirements..."
 # Exactly the versions in requirements-gui.txt of this checkout (uv export from uv.lock, the base packages plus the
 # optional extra 'gui', PySide6: this installer sets up the desktop GUI); pip checks every file against its hash.

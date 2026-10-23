@@ -433,7 +433,8 @@ setup_venv() {
     set -e
     cd "$INSTALL_DIR"
     python3 -m venv .venv
-    ./.venv/bin/pip install --upgrade pip > /dev/null || echo "⚠️ pip ließ sich nicht aktualisieren; weiter mit der vorhandenen Version."
+    # Das pip der Umgebung ist das, was mit Python kommt (ensurepip). Es wird nicht aktualisiert: Das lüde die neueste
+    # Version von pip ohne Prüfsumme, und das mitgelieferte genügt für die Installation mit --require-hashes unten.
 
     # Genau die Versionen aus $REQUIREMENTS dieses Stands (uv export aus uv.lock); pip prüft jede Datei gegen
     # ihren Hash. Ohne die Datei wird nichts ungeprüft nachinstalliert.
