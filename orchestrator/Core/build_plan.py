@@ -615,7 +615,7 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     optimization = getattr(request, "optimization", "balanced") or "balanced"
     base = request.model_dump(exclude={"optimization", "include_download_size"})
     from orchestrator.schemas.build import BuildRequestIn
-    req, inputs = service._validated(BuildRequestIn(**base), False)
+    req, inputs = service._validated(BuildRequestIn(**base), False, check_here=False)
     pin = getattr(inputs, "model", None)
     shown = pin.ref if pin is not None else req.model
     plan = BuildPlan(request=req.model_copy(update={"model": shown, "dataset_path": (
@@ -678,9 +678,20 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         plan.mounts.append(f"model cache: {req.model}" + "@commit")
         from orchestrator.utils.locality import offline_mode
         if offline_mode(getattr(framework, "config", None)):
-            plan.problems.append(Problem("needs_person", "Offline mode is on, so the framework does not contact "
-                                         "huggingface.co.", "Use a local model (list_local_files), or ask the person "
-                                         "to switch offline mode off in the GUI or CLI.", "offline_mode"))
+            # DECISIONS round 25 Q1: never a download; the copy on this computer, or the models already here by label
+            copy = service.local_copy(req.model, req.revision)
+            if copy is not None:
+                plan.commit, plan.download, plan.download_known = copy.commit, 0, True
+                plan.local_bytes = plan.cached = _size_of(Path(copy.path))
+                plan.mounts[-1] = (f"model cache: {req.model}@{copy.commit[:12]} (its copy on this computer; offline "
+                                   "mode: nothing is downloaded)")
+            else:
+                from orchestrator.Core.local_models import not_here_text
+                plan.problems.append(Problem("needs_person", not_here_text(req.model, service.models_here(for_ai=True),
+                                                                           for_ai=True),
+                                             "Use one of the listed labels as the model (list_local_files lists the "
+                                             "files), or ask the person to add a model or to switch offline mode off "
+                                             "in the GUI or CLI.", "offline_mode"))
         elif look_up_hub:
             try:
                 plan.facts = service.hub_facts(req.model, req.revision)
@@ -713,8 +724,8 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     if getattr(inputs, "dataset", None) is not None:
         plan.mounts.append(inputs.dataset.ref)
 
-    # disk
-    size = plan.download if plan.source == "hf" else plan.local_bytes
+    # disk (a copy on this computer in offline mode: its size, nothing to download)
+    size = (plan.download or plan.local_bytes) if plan.source == "hf" else plan.local_bytes
     if size:
         plan.needs = disk_plan.build_needs(size, req.format, req.quantization, folder(framework, "cache_dir", "cache"),
                                            folder(framework, "output_dir", "output"),

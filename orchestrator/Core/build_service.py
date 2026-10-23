@@ -82,6 +82,28 @@ class BuildServiceError(WithSteps, ValueError):
         self.code, self.next, self.field = code, next, field
 
 
+class ModelNotHere(BuildServiceError):
+    """Offline mode is on and the model named by its Hugging Face id is not on this computer (DECISIONS round 25 Q1):
+    the build is not started, nothing is downloaded. `choices`: the models already here (local_models.models_here; for
+    an AI caller only those it may name, by label), which the CLI lists and the Builder tab offers next to a file or
+    folder of the person's own. The facts catalogue's blocker offline_mode goes with it."""
+
+    blocker = "offline_mode"
+
+    def __init__(self, repo: str, choices, for_ai: bool):
+        from orchestrator.Core.local_models import not_here_text
+        super().__init__(not_here_text(repo, choices, for_ai=for_ai), code="needs_person", field="model",
+                         next=("Use one of the listed labels as the model, or ask the person to add a model or to "
+                               "switch offline mode off." if for_ai else
+                               "Choose a model already on this computer or a model file or folder of your own."))
+        self.repo, self.choices, self.for_ai = repo, list(choices), for_ai
+
+    def text(self, lang: str = "en") -> str:
+        """The refusal in the person's language (the message itself stays English, as the framework's refusals)."""
+        from orchestrator.Core.local_models import not_here_text
+        return not_here_text(self.repo, self.choices, for_ai=self.for_ai, lang=lang)
+
+
 class BuildService:
     def __init__(self, framework, orchestrator=None):
         """`orchestrator`: the orchestrator to queue builds on and read them from when it is not the framework's own
@@ -994,7 +1016,10 @@ class BuildService:
         for a person's own caller (GUI, CLI, a script), which may name any path."""
         return self._validated(request, local_paths)[0]
 
-    def _validated(self, request: BuildRequestIn, local_paths: bool) -> Tuple[BuildRequestIn, Optional[LocalInputs]]:
+    def _validated(self, request: BuildRequestIn, local_paths: bool,
+                   check_here: bool = True) -> Tuple[BuildRequestIn, Optional[LocalInputs]]:
+        """The checked request and its pinned local inputs. `check_here`: in offline mode a model named by its Hugging
+        Face id must be on this computer (check_model_here); the build plan reports that as one of its problems."""
         target = self.resolve_target(request.target)
         caps = self._targets().get_capabilities(target) if local_paths else self.capabilities(target)
         if caps is not None:
@@ -1038,8 +1063,37 @@ class BuildService:
             raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.",
                                     code="invalid_value", next="Leave out the revision for a local model.",
                                     field="revision")
+        if check_here and getattr(inputs, "model", None) is None and HF_REPO_ID.match(model) \
+                and not Path(model).is_absolute():
+            self.check_model_here(model, request.revision, for_ai=not local_paths)
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model}), inputs
+
+    def model_folders(self) -> Tuple[Path, Path]:
+        """(cache folder, models folder) as the build engine reads them."""
+        from orchestrator.Core.build_plan import folder
+        return folder(self.framework, "cache_dir", "cache"), folder(self.framework, "models_dir", "models")
+
+    def local_copy(self, repo: str, revision: Optional[str] = None):
+        """The complete copy of Hugging Face model `repo` on this computer (local_models.local_copy), or None."""
+        from orchestrator.Core.local_models import local_copy
+        cache, models = self.model_folders()
+        return local_copy(cache, models, repo, revision)
+
+    def models_here(self, for_ai: bool = False):
+        """The models already on this computer (local_models.models_here): what an offline build can use."""
+        from orchestrator.Core.local_models import models_here
+        return models_here(self.framework, for_ai=for_ai)
+
+    def check_model_here(self, repo: str, revision: Optional[str] = None, *, for_ai: bool = False) -> None:
+        """In offline mode (the framework's one offline check) a model named by its Hugging Face id must have a copy
+        on this computer, else ModelNotHere with the models already here: nothing is ever downloaded then
+        (DECISIONS round 25 Q1). Nothing happens online."""
+        from orchestrator.utils.locality import offline_mode
+        if not offline_mode(getattr(self.framework, "config", None)):
+            return
+        if self.local_copy(repo, revision) is None:
+            raise ModelNotHere(repo, self.models_here(for_ai=for_ai), for_ai)
 
     @staticmethod
     def request_in(**values: Any) -> BuildRequestIn:
