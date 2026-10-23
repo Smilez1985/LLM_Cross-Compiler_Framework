@@ -151,6 +151,9 @@ class Box:
         self.calls = self.root / "calls.log"
         self.os_release = self.etc / "os-release"
         self.os_release.write_text(OS_RELEASE[system])
+        # pacman's package database, as on an installed Arch system (a fresh container has none)
+        (self.etc / "pacman-sync").mkdir()
+        (self.etc / "pacman-sync" / "core.db").write_text("")
         self.pinned = pinned
         for tool in REAL_TOOLS:
             if shutil.which(tool):
@@ -203,7 +206,8 @@ class Box:
         script = ('source "$1"; OS_RELEASE_FILE="$2/os-release"; DEBIAN_VERSION_FILE="$2/debian_version"; '
                   'DOCKER_KEYRING="$2/apt/keyrings/docker.asc"; DOCKER_SOURCES="$2/apt/sources.list.d/docker.sources"; '
                   'DOCKER_RPM_KEYRING="$2/pki/rpm-gpg/docker-ce.asc"; DOCKER_RPM_REPO="$2/yum.repos.d/docker-ce.repo"; '
-                  'APK_REPOSITORIES="$2/apk/repositories"; wait_for_internet() { :; }; ')
+                  'APK_REPOSITORIES="$2/apk/repositories"; PACMAN_SYNC_DIR="$2/pacman-sync"; '
+                  'wait_for_internet() { :; }; ')
         if self.pinned:
             script += 'DOCKER_KEY_FINGERPRINT="$3"; DOCKER_RPM_KEY_FINGERPRINT="$3"; '
         run = subprocess.run([str(self.bin / "bash"), "-c", script + body, "test", str(INSTALL_SH), str(self.etc),
@@ -517,6 +521,17 @@ class TestTheDistributionsOwnPackages:
         assert calls == ["pacman -S --needed --noconfirm python",
                          "pacman -S --needed --noconfirm docker docker-buildx", "systemctl enable --now docker",
                          "usermod -aG docker lcf"]
+
+    @pytest.mark.parametrize("body", ["main --dry-run", "setup_system"])
+    def test_without_a_package_database_pacman_is_not_run(self, tmp_path, body):
+        """A fresh Arch system or container has no sync database: pacman finds nothing ("target not found"). The
+        installer says to update the system first and never reads the database itself (-Sy) or upgrades (-Syu)."""
+        box = Box(tmp_path, "arch")
+        (box.etc / "pacman-sync" / "core.db").unlink()
+        run, calls = box.run(body)
+        assert run.returncode == 1, said(run)
+        assert "pacman hat noch keine Paketdatenbank" in said(run) and "sudo pacman -Syu" in said(run)
+        assert calls == []
 
     def test_a_failing_pacman_says_how_to_update_first(self, tmp_path):
         box = Box(tmp_path, "arch", present=("python3=3.13",), fails=("docker-buildx",))
