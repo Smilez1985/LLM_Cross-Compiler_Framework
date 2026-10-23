@@ -1452,6 +1452,33 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   statt Programme zu bekommen, die dort nicht laufen. Die Prüfsumme zum Fortsetzen umfasst auch den Ausgabeordner
   und das Hardware-Profil, das die Stufe config liest, wenn keins genannt ist, und eine verspätete Stufenzeile eines fertigen
   Containers nimmt dem Build seinen nächsten Schritt nicht mehr weg.
+- **Die Stufe convert erkennt, prüft, zählt und testet, was sie umwandelt, und hinterlässt nichts Halbfertiges**
+  (der Entwurf des Maintainers für das convert-Modul von 1.x, Nachtrag zur Entscheidung U9; Konsolidierungskette
+  how2-convert). `scripts/model_check.py` (das Rockchip-Target und die Vorlage bringen dieselbe Datei mit; sie braucht
+  nur das Python des Images und seine Standardbibliothek) erkennt die Eingabe: einen Hugging-Face-Ordner mit
+  SafeTensors- oder PyTorch-Gewichten, eine GGUF-Datei (nichts wird umgewandelt, die Stufe target quantisiert sie),
+  ein ONNX-Modell, eine einzelne Gewichtsdatei oder einen Ordner mit GGUF-Dateien. Was das Format des Builds nicht
+  verwenden kann, wird mit dem Grund abgelehnt, bevor etwas Langsames läuft: Ein ONNX-Modell für GGUF („llama.cpp has
+  no converter from ONNX to GGUF“) oder RKLLM nennt das Format rknn für die NPU (auf dem RK3566 führt die NPU Sprach-
+  und Bildmodelle aus, das LLM läuft als GGUF auf der CPU), und eine einzelne Gewichtsdatei fragt nach dem Ordner des
+  Modells. Vorher erreichte eine solche Eingabe den Konverter und scheiterte dort mit einem Traceback. Geprüft wird
+  die Integrität der Eingabe (ihre JSON-Dateien, jeder SafeTensors-Header gegen die Dateigröße, wie die
+  safetensors-Bibliothek ihn prüft, die Teildateien, die ein Index nennt, PyTorch-Archive, ein GGUF-Header) und die
+  jedes GGUF, das der Konverter geschrieben hat (die Daten jedes Tensors liegen in der Datei, wie der Lader von
+  llama.cpp es prüft); die Warnungen von 1.x zu fehlender Konfiguration, fehlendem Tokenizer oder fehlenden Gewichten
+  bleiben. Ein kurzer Funktionstest führt das geschriebene GGUF mit `llama-completion` aus, dem Einmal-Generator, der
+  in 1.x `llama-cli` war (`llama-cli` selbst, wenn ein Image nur das hat): 8 Tokens, höchstens 120 s, offline. Ein
+  Lauf, der mit einem Fehler endet, lässt die Stufe mit den letzten Zeilen des Werkzeugs scheitern; eine
+  Zeitüberschreitung oder ein angehaltener Lauf ist ein Hinweis; übersprungen wird er mit einem Hinweis, wenn das
+  Image keines der beiden Werkzeuge hat, bei einem Embedding-Modell, bei den NPU-Formaten und im Auftrag `imatrix`.
+  Die Statistik (Größe der Eingabe und der Ausgabe, Verhältnis, Dauer der Umwandlung, das Ergebnis des Tests) steht
+  im Log und als `conversion` in `build_info.json` (Zahlen und Wörter, keine Pfade), das die Build-Engine beim
+  Vervollständigen des Manifests behält. Eine Datei, die ein Konverter ersetzt (die `--output`-Datei von 1.x, ein
+  früheres Ergebnis), bleibt als `DATEI.convert-backup` erhalten, bis die neue ihre Prüfungen bestanden hat; eine
+  gescheiterte oder angehaltene Stufe entfernt, was sie geschrieben hat, und legt die Sicherungen zurück, nach einem
+  abgebrochenen Lauf tut es der nächste Start der Stufe. Die Module bleiben mit ihren Optionen von 1.x einzeln
+  aufrufbar. Die Charakterisierungstests vergleichen `build_info.json` ohne den neuen Schlüssel, und ihre
+  nachgebauten Werkzeugketten schreiben GGUF- und SafeTensors-Dateien mit gültigen Headern (`tests/model_files.py`).
 - **Neue Targets bekommen funktionierende Stufenmodule, und die Entrypoint-Modi führen den Stage-Runner aus.** Das
   `build.sh` der Vorlage ist derselbe Runner wie der von Rockchip (ein Test hält sie gleich), und ihre vier
   Stufenmodule nehmen die Werte des Wizards auf: Die Einrichtungsbefehle laufen einmal in der Stufe source (was sie

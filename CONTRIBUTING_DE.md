@@ -160,7 +160,11 @@ python -m pytest
   Exit-Codes), und prüft den Stage-Runner `modules/build.sh`: Reihenfolge der Stufen, Marken zum Fortsetzen,
   Fortschrittszeilen, den Platz für die Rotation und dass keine Stufe einen Benchmark ausführt.
   `tests/test_target_template.py` prüft die Stufenmodule der Vorlage und dass ihr `build.sh` derselbe Runner ist wie
-  der von Rockchip.
+  der von Rockchip. `tests/test_convert_stage.py` prüft, was die Stufe convert um jede Umwandlung herum tut
+  (`scripts/model_check.py`, dieselbe Datei in jedem Target): Erkennen des Formats und Ablehnungen, die
+  Integritätsprüfungen der Eingabe und des geschriebenen GGUF, die Statistik in `build_info.json`, den
+  Funktionstest sowie Sicherungen und Aufräumen bei einem Fehler; `tests/model_files.py` schreibt die kleinen
+  gültigen GGUF- und SafeTensors-Dateien, die die nachgebauten Werkzeugketten verwenden.
 
 ### Die Matrix Python 3.11 bis 3.14
 
@@ -496,7 +500,10 @@ Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module
    dort steht.
 4. **Dockerfile und Build-Skript:** Lege jede Version fest (Tags, Commits, Hashes, wie `RKLLM_WHEEL_SHA256` im
    Rockchip-Dockerfile). Die Umwandlung muss in der Sandbox funktionieren: als Benutzer ohne root-Rechte, ohne
-   Netzwerk, mit schreibgeschütztem Image-Dateisystem und nur den eigenen Ordnern des Builds beschreibbar.
+   Netzwerk, mit schreibgeschütztem Image-Dateisystem und nur den eigenen Ordnern des Builds beschreibbar. Die Stufe
+   convert der Vorlage erkennt bereits das Format der Eingabe, prüft die Eingabe und das geschriebene GGUF, führt
+   einen kurzen Funktionstest aus und hält eine Statistik fest; behalte ihr `scripts/model_check.py` in deinem
+   Target.
 5. **Mit einem echten Build testen**, zum Beispiel
    `llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t <Name> -f gguf -b <Board> -F`, und das Dockerfile
    in die hadolint-Matrix in `.github/workflows/docker.yml` und in `.github/dependabot.yml` aufnehmen.
