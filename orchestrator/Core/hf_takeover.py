@@ -18,8 +18,9 @@ Take over:
   against the sha256 its blob is named by (a file stored with LFS), its git blob id (a small file), or, where the
   cache kept no checksum (a cache without links), against what the Hub lists for that commit (`lookup`: the LFS
   sha256, a small file by its size, as the downloader pins it); without `lookup`, when the Hub cannot be asked or in
-  offline mode (the lookup refuses before any request), such a file is skipped with the reason and stays where it is. A copy is a hidden temporary file under the downloader's
-  per-file lock until its check passed, then it gets its name. The one disk rule comes first (room for the copies
+  offline mode (the lookup refuses before any request), such a file is skipped with the reason and stays where it
+  is. A copy is a hidden temporary file under the downloader's per-file lock until its check passed, then it gets its
+  name. The one disk rule comes first (room for the copies
   beside the reserve and what other calls reserved), and the copy holds its own reservation in the ledger while it
   runs. Nothing is removed from the old cache here, and a link that leads out of the models folder is never
   followed (a link may lead into huggingface_hub's shared store of the same cache, `<models_dir>/blobs/`).
