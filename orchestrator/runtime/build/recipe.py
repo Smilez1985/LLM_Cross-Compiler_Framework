@@ -79,6 +79,13 @@ NEVER_SET: Mapping[str, str] = {
     "LLAMA_USE_PREBUILT_WEBUI": "tools/ui/CMakeLists.txt:11-14, deprecated alias of LLAMA_USE_PREBUILT_UI",
 }
 
+# Ignored at the pin, but a download option in older versions: a target module's CMake flags may not switch it on
+# (refused_option), and the board package's cross build keeps it OFF (targets/*/modules/target_module.sh).
+DEPRECATED_DOWNLOAD_OPTIONS: Mapping[str, str] = {
+    "LLAMA_CURL": "CMakeLists.txt:195 deprecated and ignored (llama_option_depr); older versions link libcurl to "
+                  "download models",
+}
+
 # Options that do not change the binaries and stay out of the build ID.
 _NOT_IN_BUILD_ID = frozenset({"GGML_CCACHE"})
 
@@ -349,18 +356,35 @@ def build_id_of(inputs: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("ascii")).hexdigest()
 
 
+def refused_option(name: str, value: Optional[str]) -> Optional[str]:
+    """Why the CMake option NAME=VALUE has no place in a llama.cpp build of the framework, or None: it downloads at
+    configure time whenever it is set (NEVER_SET), or it switches on what every build keeps off (DOWNLOAD_OPTIONS_OFF
+    and DEPRECATED_DOWNLOAD_OPTIONS other than OFF, FETCHCONTENT_FULLY_DISCONNECTED other than ON) or a server with
+    subprocesses (LLAMA_SUBPROCESS other than OFF, decision D22). The one rule: check_download_options applies it to
+    a plan, the module generator to the CMake flags of a target module (module_generator.download_flag_problems)."""
+    if name in NEVER_SET:
+        return f"{name} must never be set: {NEVER_SET[name]}"
+    if name in DOWNLOAD_OPTIONS_OFF and value != "OFF":
+        return f"{name} must be OFF on every build: {DOWNLOAD_OPTIONS_OFF[name]}"
+    if name in DEPRECATED_DOWNLOAD_OPTIONS and value != "OFF":
+        return f"{name} must be OFF on every build: {DEPRECATED_DOWNLOAD_OPTIONS[name]}"
+    if name == "FETCHCONTENT_FULLY_DISCONNECTED" and value != "ON":
+        return "FETCHCONTENT_FULLY_DISCONNECTED must be ON on every build"
+    if name == "LLAMA_SUBPROCESS" and value != "OFF":
+        return "LLAMA_SUBPROCESS must be OFF on every build (decision D22)"
+    return None
+
+
 def check_download_options(options: Mapping[str, str]) -> None:
-    """Refuses options that would let configure or build download anything (and a server with subprocesses)."""
+    """Refuses options that would let configure or build download anything (and a server with subprocesses): every
+    option of NEVER_SET that is set, and every option a build must set to its value (refused_option)."""
     for name in NEVER_SET:
         if name in options:
-            raise PlanError(f"{name} must never be set: {NEVER_SET[name]}")
-    for name, why in DOWNLOAD_OPTIONS_OFF.items():
-        if options.get(name) != "OFF":
-            raise PlanError(f"{name} must be OFF on every build: {why}")
-    if options.get("FETCHCONTENT_FULLY_DISCONNECTED") != "ON":
-        raise PlanError("FETCHCONTENT_FULLY_DISCONNECTED must be ON on every build")
-    if options.get("LLAMA_SUBPROCESS") != "OFF":
-        raise PlanError("LLAMA_SUBPROCESS must be OFF on every build (decision D22)")
+            raise PlanError(refused_option(name, options[name]))
+    for name in (*DOWNLOAD_OPTIONS_OFF, "FETCHCONTENT_FULLY_DISCONNECTED", "LLAMA_SUBPROCESS"):
+        problem = refused_option(name, options.get(name))
+        if problem:
+            raise PlanError(problem)
 
 
 # --- profile facts ----------------------------------------------------------------------------------------------

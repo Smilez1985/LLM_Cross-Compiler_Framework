@@ -588,6 +588,42 @@ def test_the_package_s_cross_build_turns_off_every_option_that_downloads(image):
     assert "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in words
 
 
+def last_values(configure):
+    """The value CMake keeps for each -DNAME=VALUE of a configure call (the last one)."""
+    values = {}
+    for word in configure.split():
+        if word.startswith("-D") and "=" in word:
+            name, _, value = word[2:].partition("=")
+            values[name.split(":")[0]] = value
+    return values
+
+
+@needs_bash
+def test_a_module_s_cmake_flags_cannot_switch_a_download_back_on_in_the_package_s_cross_build(image):
+    """The every-build options come after the module's CMake flags, as in the image's Dockerfile, so CMake keeps
+    them: a module edited by hand (the module generator refuses such flags) gets no download and no server with
+    subprocesses (decision D22: llama-server has none in any build of the framework)."""
+    from orchestrator.runtime.build.recipe import DEPRECATED_DOWNLOAD_OPTIONS, DOWNLOAD_OPTIONS_OFF
+    config = image.app / "modules" / "config_module.sh"
+    text = config.read_text(encoding="utf-8")
+    assert 'local cmake_flags="-DGGML_NATIVE=OFF"' in text
+    config.write_text(text.replace(
+        'local cmake_flags="-DGGML_NATIVE=OFF"',
+        'local cmake_flags="-DGGML_NATIVE=OFF -DLLAMA_USE_PREBUILT_UI=ON -DLLAMA_CURL=ON -DLLAMA_SUBPROCESS=ON '
+        '-DFETCHCONTENT_FULLY_DISCONNECTED=OFF -DLLAMA_BUILD_TESTS=ON"'), encoding="utf-8")
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_TOOLS_LOG=image.root / "tools.log")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    configure = next(c for c in tools_log(image) if c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c)
+    assert "-DLLAMA_USE_PREBUILT_UI=ON" in configure.split(), "the module's flags are on the command line"
+    kept = last_values(configure)
+    assert {name: kept.get(name) for name in [*DOWNLOAD_OPTIONS_OFF, *DEPRECATED_DOWNLOAD_OPTIONS, "LLAMA_SUBPROCESS"]} \
+        == {name: "OFF" for name in [*DOWNLOAD_OPTIONS_OFF, *DEPRECATED_DOWNLOAD_OPTIONS, "LLAMA_SUBPROCESS"]}
+    assert kept["FETCHCONTENT_FULLY_DISCONNECTED"] == "ON" and kept["GGML_NATIVE"] == "OFF"
+    assert kept["BUILD_SHARED_LIBS"] == "OFF" and kept["LLAMA_BUILD_SERVER"] == "ON"
+
+
 @needs_bash
 def test_package_is_an_input_of_the_target_stage_only(image):
     """The convert stage first, then the target stage with --package: the stages before target resume (the request

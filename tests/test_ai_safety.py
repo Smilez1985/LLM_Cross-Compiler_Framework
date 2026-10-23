@@ -280,6 +280,51 @@ class TestModuleGenerator:
             generator.generate_module(self.data(**overrides))
         assert not (generator.targets_dir / "etc").exists()
 
+    @pytest.mark.parametrize("flag, rule", [
+        ("-DLLAMA_USE_PREBUILT_UI=ON", "LLAMA_USE_PREBUILT_UI must be OFF on every build: scripts/ui-assets.cmake"),
+        ("-DLLAMA_BUILD_TESTS:BOOL=ON", "LLAMA_BUILD_TESTS must be OFF on every build"),
+        ("-DGGML_OPENMP_FETCH=1", "GGML_OPENMP_FETCH must be OFF on every build"),
+        ("-DLLAMA_CURL=ON", "LLAMA_CURL must be OFF on every build: CMakeLists.txt:195 deprecated"),
+        ("-DGGML_CUDA_CCCL_VERSION=v3.4.3", "GGML_CUDA_CCCL_VERSION must never be set"),
+        ("-DLLAMA_BUILD_BORINGSSL=OFF", "LLAMA_BUILD_BORINGSSL must never be set"),
+        ("-DFETCHCONTENT_FULLY_DISCONNECTED=OFF", "FETCHCONTENT_FULLY_DISCONNECTED must be ON on every build"),
+        ("-DLLAMA_SUBPROCESS=ON", "LLAMA_SUBPROCESS must be OFF on every build (decision D22)"),
+    ])
+    def test_cmake_flags_that_would_download_are_refused(self, generator, flag, rule):
+        """The board package's cross build takes a module's CMake flags as they are. Builds have no network, so a
+        module may not switch on a llama.cpp option that downloads (the build recipe's rule, recipe.refused_option)."""
+        with pytest.raises(ValueError) as refused:
+            generator.generate_module(self.data(cmake_flags=f"-DGGML_NATIVE=OFF {flag} -DGGML_NEON=ON"))
+        assert f"- cmake_flags: {flag} would let llama.cpp download while it is built ({rule}" in str(refused.value)
+        assert "builds have no network: leave it out" in str(refused.value)
+        assert not (generator.targets_dir / "my_board").exists()
+
+    def test_cmake_flags_that_keep_every_download_off_are_kept(self, generator):
+        flags = "-DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DGGML_CUDA=ON"
+        target = generator.generate_module(self.data(cmake_flags=flags))
+        assert f"CMAKE_OPTIONS='{flags}'" in (target / "modules" / "config_module.sh").read_text()
+
+    def test_a_target_folder_whose_scripts_switch_a_download_on_is_refused(self, generator):
+        """A community pack, an export or a module edited by hand never passes the module data check; the folder
+        check (packs in quarantine, exports, every generated module) applies the same rule to each script line that is
+        not the template's."""
+        from orchestrator.Core.module_generator import validate_target_folder
+        target = generator.generate_module(self.data())
+        assert validate_target_folder(target, generator.template_dir) == []
+        config = target / "modules" / "config_module.sh"
+        text = config.read_text(encoding="utf-8")
+        assert "CMAKE_OPTIONS='-DGGML_NATIVE=OFF'" in text
+        config.write_text(text.replace("CMAKE_OPTIONS='-DGGML_NATIVE=OFF'",
+                                       "CMAKE_OPTIONS='-DGGML_NATIVE=OFF -DLLAMA_USE_PREBUILT_UI=ON'"), encoding="utf-8")
+        (target / "modules" / "extra.sh").write_text('cmake -S . -B b -DLLAMA_BUILD_WEBUI=OFF\n', encoding="utf-8")
+
+        problems = validate_target_folder(target, generator.template_dir)
+
+        assert [p.split(": not allowed, ")[0].split(":")[0] for p in problems] == ["modules/config_module.sh",
+                                                                                  "modules/extra.sh"], problems
+        assert "not allowed, -DLLAMA_USE_PREBUILT_UI=ON would let llama.cpp download" in problems[0]
+        assert "LLAMA_BUILD_WEBUI must never be set" in problems[1]
+
     def test_failed_generation_leaves_nothing_behind(self, generator):
         with pytest.raises(ValueError, match="syntax"):
             generator.generate_module(self.data(quantization_logic="    Q4) echo 'unterminated ;;"))
