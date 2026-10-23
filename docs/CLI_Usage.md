@@ -471,7 +471,7 @@ target's defaults. A target without a capabilities block is built unchecked.
 |---|---|
 | `-m, --model TEXT` | **Required.** Hugging Face ID (e.g. `HuggingFaceTB/SmolLM2-135M-Instruct`) or a local folder or file. |
 | `-t, --target TEXT` | **Required.** Target id as listed by `targets list`, e.g. `Rockchip`, or the target's folder name. Not case-sensitive. An unknown target stops with exit code 2 and the list of known targets. |
-| `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Output format (default `gguf`). The list is longer than what any target supports; Rockchip accepts `gguf`, `rkllm` and `rknn`. |
+| `-f, --format FORMAT` | Output format (default `gguf`): one the target builds, as its `target.yml` capabilities declare it (the formats the Builder tab offers for it). `--help` and the shell completion list what each installed target builds (Rockchip: `gguf`, `rkllm`, `rknn`). A target without capabilities takes any format but `hf`, unchecked. A format the target does not build stops with exit code 2 and names what each installed target builds. Not case-sensitive. |
 | `-b, --board TEXT` | Board of the target family, e.g. `rk3588`, `rk3576`, `rk3566`. Default: the target's default board (Rockchip: `rk3588`). Not case-sensitive. |
 | `-q, --quantization TEXT` | Quantization, e.g. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Default: the format's default for the board. Common spellings such as `INT8` are translated. |
 | `-o, --output TEXT` | Folder the finished model (golden artifact) is saved to, relative to the current folder; made when it does not exist. Default: the output folder ([`config output-folder`](#config-output-folder), `~/llmcf/output`). At a terminal without it you are asked, with the output folder as the default; `-` keeps the build in the framework's build folder ([`build save`](#build-save) saves it later). A system folder or the framework's program folder is refused (exit code 2). `--output-dir` is the old name and still works. |
@@ -485,6 +485,17 @@ target's defaults. A target without a capabilities block is built unchecked.
 
 Behaviour:
 
+- Before anything runs, the finished builds are compared with the request (the Builder tab's check): when one has
+  100 % the same options (model and its commit, target, board, format, quantization, calibration, optimization, ...),
+  you are asked, with its full path: **u** use it, **a** build it again, **c** cancel (`u` is the default). "Use"
+  starts nothing and copies the earlier build, with its golden ZIP, into the folder this build would have gone to
+  (`--output`, the answer to the prompt or the output folder; `-` copies nothing and names it): the free disk space
+  there is checked first (with every running build's and download's reservation), every copy is checked against its
+  original by sha256, and the earlier build stays where it is. When the identical build lies there already, nothing
+  is copied; when another build lies under that name, it is replaced only after you accepted the full list of what is
+  replaced ("No" is the default; into the trash or for good). For a Hugging Face model the current commit is looked
+  up once (never in offline mode) when an earlier build could be identical. Without a terminal nothing is asked: the
+  earlier build is named and the build starts as given (nothing is skipped by itself).
 - The command stays in the foreground until the build has finished. Ctrl+C cancels the build through the build
   service: its running container (image build, security scan or conversion) is stopped, the CLI waits until the
   build has stopped (at most 120 s), says so and exits with code 130. Nothing is written to the output folder. A
@@ -512,11 +523,14 @@ Behaviour:
   at all: they use `<label>:<relative path>` inside the [folders the AI may use](#tools-folders).
 - The first build of a target builds its Docker image first and takes much longer.
 
-In the GUI: the **Builder** tab: model, target (**Targets...** shows every target), format (a target without
-capabilities offers every format of `--format`, with the note that nothing is checked), board, quantization,
+In the GUI: the **Builder** tab: model, target (**Targets...** shows every target), format (exactly the formats the
+target declares, the list `--format` takes for it; a target without capabilities offers every format, with the note
+that nothing is checked), board, quantization,
 **Optimization** (all levels, also `FAST`), **Priority**, calibration and GPU, then **Start Build Pipeline**. The
 progress panel follows the build (`--follow`), **Cancel Build** stops it (Ctrl+C), and the finished model is offered
-in a save dialog at the output folder (`--output`; **File > Output Folder...** sets the default).
+in a save dialog at the output folder (`--output`; **File > Output Folder...** sets the default). The question about an
+identical earlier build is the same; **Use the existing build** opens the folder dialog at the output folder and
+copies it there, as above.
 
 ```bash
 # GGUF for the RK3566 CPU (default quantization Q4_0 on this board)

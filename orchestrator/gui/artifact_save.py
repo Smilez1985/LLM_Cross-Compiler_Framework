@@ -8,6 +8,11 @@ build (N11).
   nothing: the build stays in the framework's build folder, and "Save..." in the Deployment tab saves it later.
 - `ask_earlier`: before a build, an earlier build with 100 % the same options is named with its full path; the person
   uses it or builds again (Cancel builds nothing). Nothing is skipped by itself.
+- `ask_and_use`: "Use" (DECISIONS round 23, item 9): the folder dialog opens at the output folder, as for a finished
+  build, and the earlier build is copied there in a worker thread (artifact_output.plan_copy, copy_artifact: the one
+  disk rule first, every copy checked by sha256; the earlier build stays where it is), as `llm-cli build start`'s
+  "use" copies it to --output. The identical build there already is not copied again; anything else under its name
+  is replaced only after the person accepted the full list in the deletion dialog ("No" is the default).
 
 Every text is plain text; paths are the person's own and shown in full.
 """
@@ -93,6 +98,88 @@ def ask_and_save(parent, framework: Any, folder: Path, on_done: Callable[[bool, 
     return worker
 
 
+class CopyWorker(QThread):
+    """Copies an earlier build into the chosen folder (artifact_output.copy_artifact) off the GUI thread: a copy onto
+    another disk can take long. `accepted`: the person's yes to what the copy replaces (None: the name was free)."""
+    done = Signal(bool, str)
+
+    def __init__(self, framework: Any, plan: Any, accepted: Any = None, lang: Optional[str] = None):
+        super().__init__()
+        self.framework, self.plan, self.accepted = framework, plan, accepted
+        self.lang = lang or current_language()
+
+    def run(self):
+        from orchestrator.Core.artifact_output import DestinationRefused, copy_artifact
+        from orchestrator.Core.deletion import PlanChanged
+        from orchestrator.Core.knowledge_snapshots import size_text
+        try:
+            trash = None
+            if self.accepted is not None and self.accepted.mode == "trash":
+                from orchestrator.Core.trash import Trash
+                trash = Trash.for_framework(self.framework)
+            audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+            result = copy_artifact(self.framework, self.plan, replace=self.accepted, trash=trash, audit=audit)
+        except DestinationRefused as e:
+            self.done.emit(False, ui_text("earlier.copy_failed", self.lang, reason=str(e), next=e.next or ""))
+            return
+        except (PlanChanged, PermissionError) as e:
+            self.done.emit(False, ui_text("earlier.copy_failed", self.lang, reason=str(e), next=""))
+            return
+        except Exception as e:  # noqa: BLE001 - shown to the person; the earlier build stays where it was
+            self.done.emit(False, ui_text("earlier.copy_failed", self.lang, reason=str(e), next=""))
+            return
+        lines = [ui_text("earlier.copied", self.lang, path=str(result.folder), files=result.files,
+                         size=size_text(result.bytes), source=str(self.plan.source))]
+        if result.zip is not None:
+            lines.append(ui_text("save.done.zip", self.lang, path=str(result.zip)))
+        lines += list(result.notes)
+        self.done.emit(True, "\n".join(lines))
+
+
+def ask_and_use(parent, framework: Any, earlier: Any, on_done: Callable[[bool, str], None],
+                lang: Optional[str] = None) -> Optional[CopyWorker]:
+    """"Use" of the earlier build `earlier` (build_identity.EarlierBuild): the folder dialog at the output folder (made
+    first when it does not exist yet); the build is copied into the chosen folder at its relative path (its label's)
+    in a worker thread, returned (keep a reference). None when nothing is copied: the person cancelled the folder
+    dialog (nothing more is said: the caller named the earlier build already), cancelled the replacement, the folder
+    is refused, or the identical build lies there already; `on_done` then gets the text that says so."""
+    from orchestrator.Core.artifact_output import DestinationRefused, output_folder, plan_copy, refusal
+    lang = lang or current_language()
+    source = str(earlier.info.get("path") or "")
+    if not source:
+        return None
+    out = output_folder(framework)
+    try:
+        if not out.exists() and not refusal(framework, out):
+            out.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    chosen = choose_folder(parent, ui_text("earlier.use_title", lang, name=Path(source).name), str(out))
+    if not chosen:
+        return None
+    relative = earlier.label.split(":", 1)[1] if ":" in earlier.label else None
+    try:
+        plan = plan_copy(framework, source, chosen, relative=relative)
+    except DestinationRefused as e:
+        on_done(False, ui_text("earlier.copy_failed", lang, reason=str(e), next=e.next or ""))
+        return None
+    if plan.there:
+        on_done(True, ui_text("earlier.there", lang, path=str(plan.target)))
+        return None
+    accepted = None
+    if plan.replaces is not None:
+        from orchestrator.gui.deletion_dialog import ask_deletion
+        accepted = ask_deletion(parent, plan.replaces, lang=lang, title=ui_text("earlier.replace_title", lang),
+                                intro=ui_text("earlier.replace_intro", lang, path=str(plan.target)))
+        if accepted is None:
+            on_done(False, ui_text("earlier.not_replaced", lang, path=str(plan.target), source=source))
+            return None
+    worker = CopyWorker(framework, plan, accepted, lang)
+    worker.done.connect(on_done)
+    worker.start()
+    return worker
+
+
 def ask_earlier(parent, found: List[Any], lang: Optional[str] = None) -> str:
     """The person's choice about earlier builds with the same options (build_identity.EarlierBuild): "use" (nothing is
     built), "again" (build anyway) or "cancel". The full path of the earlier build is shown; "Use" is the default."""
@@ -115,4 +202,4 @@ def ask_earlier(parent, found: List[Any], lang: Optional[str] = None) -> str:
     return "use" if clicked is use else "again" if clicked is again else "cancel"
 
 
-__all__ = ["SaveWorker", "ask_and_save", "ask_earlier", "choose_folder", "result_text"]
+__all__ = ["CopyWorker", "SaveWorker", "ask_and_save", "ask_and_use", "ask_earlier", "choose_folder", "result_text"]

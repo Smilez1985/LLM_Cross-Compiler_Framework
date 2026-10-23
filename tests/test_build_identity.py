@@ -185,11 +185,14 @@ class TestBuilderForm:
     def test_the_person_uses_the_earlier_build_or_builds_again(self, tab, monkeypatch, choice, started):
         from orchestrator.gui import artifact_save
         from test_review_capabilities_paths import submit
-        asked = []
+        asked, folders = [], []
         monkeypatch.setattr(artifact_save, "ask_earlier", lambda parent, found, lang=None: asked.append(found) or
                             choice)
+        # Use opens the folder dialog for the copy (round 23 item 9); the person cancels it here: nothing is copied
+        monkeypatch.setattr(artifact_save, "choose_folder", lambda parent, title, start: folders.append(start) or "")
         req = submit(tab)
         assert asked and (req is not None) == started
+        assert bool(folders) == (choice == "use"), "only Use asks where the earlier build is copied to"
         if choice == "use":
             assert "/srv/builds/Rockchip/SmolLM2/Q4_K_M" in tab.log_area.toPlainText()
 

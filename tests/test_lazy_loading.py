@@ -271,10 +271,17 @@ def test_lazy_names_are_the_real_objects():
 
 
 def test_build_format_choices_still_come_from_the_engine():
-    from orchestrator.cli import cli
+    """Changed on purpose by DECISIONS round 23 item 7: --format offers what the installed targets build (read when
+    its help or completion is shown, never at import), no longer every format of the engine. What a target without
+    capabilities is offered is still the engine's own list: every ModelFormat but hf (build_formats.ModelFormat is
+    builder.ModelFormat)."""
+    from orchestrator.cli import _TargetFormat, cli
+    from orchestrator.Core.build_formats import unchecked_formats
     from orchestrator.Core.builder import ModelFormat
     option = next(p for p in cli.commands["build"].commands["start"].params if p.name == "format")
-    assert list(option.type.choices) == [f.value for f in ModelFormat if f is not ModelFormat.HUGGINGFACE]
+    assert isinstance(option.type, _TargetFormat)
+    assert sorted(v for _, v in unchecked_formats()) == sorted(f.value for f in ModelFormat
+                                                               if f is not ModelFormat.HUGGINGFACE)
 
 
 def test_package_exports_resolve():

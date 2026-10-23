@@ -1289,6 +1289,23 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **`llm-cli build start --format` offers what the installed targets build** (DECISIONS round 23 item 7): instead of
+  every format of the engine (`tensorrt`, `coreml`, ... that no target builds), `--format` takes a format the target
+  builds, as its `target.yml` capabilities declare it, the list the Builder tab's format box offers
+  (`build_formats.offered_formats`, one list for both; a target without capabilities takes every format but `hf`,
+  unchecked, as before). `--help` and the shell completion list what each installed target builds, read from the
+  targets when they are shown; a format the target does not build stops with exit code 2 in plain words naming what
+  each installed target builds (`build_formats.format_problem`). The format is no longer case-sensitive.
+- **"Use the existing build" copies it into the chosen folder, and `llm-cli build start` asks too** (DECISIONS round
+  23 item 9): `build start` checks for a finished build with 100 % the same options before anything runs, as the
+  Builder tab does (`BuildService.earlier_builds`, the commit looked up once when it could be identical), and asks the
+  same question at a terminal (use it, build it again, cancel; without a terminal it builds as given). "Use" now copies
+  the earlier build with its golden ZIP into the folder the build would have gone to (`--output`, the prompt's answer
+  or the output folder; in the GUI the folder dialog that opens at the output folder), where it was only named before:
+  `artifact_output.plan_copy` and `copy_artifact`, the one disk rule before the copy, every copy checked by sha256,
+  the earlier build left where it is. The identical build there already is not copied again; another build under that
+  name is replaced only after you accepted the full list of what is replaced ("No" is the default; to the trash or
+  for good; written to the audit log first).
 - **The Deployment tab's Docker table decides what the package carries** (DECISIONS round 23 item 6): the table in
   **Use Docker Containerization?** no longer shows mock-up choices that did nothing (Llama.cpp (CPU), RKLLM (NPU),
   TensorRT (GPU)); it lists the containers a package with Docker images carries for the chosen profile, from the one
@@ -2187,6 +2204,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **Removing old Hugging Face downloads works with the real audit log**: the audit log refuses outcomes it does not
+  know, and the deletion of old downloads (Take over, `hf_takeover.delete_old_copies`) recorded
+  `old_downloads_deleted`, which it did not know, so the deletion stopped with "The audit log cannot record the
+  deletion" (the tests used a stand-in log). It is a known outcome now, as is `earlier_build_replaced` of "Use".
 - **hadolint findings at build time are shown, not thrown away** (DECISIONS round 23, item 4): the build reported
   every outcome of its Dockerfile check as "Hadolint check skipped (tool not found or failed)" and dropped what
   hadolint found. `BuildEngine._validate_dockerfile_hadolint` now runs hadolint through the new
