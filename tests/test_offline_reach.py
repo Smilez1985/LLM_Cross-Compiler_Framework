@@ -185,12 +185,12 @@ def test_a_refused_connection_reads_as_the_plain_refusal():
 def test_a_mirror_in_the_own_network_is_pinned_to_its_checked_address(names, tmp_path):
     from orchestrator.runtime.build.source import SourceError, _git_config, offline_reach
     offline = Settings(offline_mode=True)
-    names.update({"mirror.lan": ["192.168.1.5"], "v6.lan": ["fd00::5"], "github.com": ["140.82.121.4"]})
+    names.update({"mirror.lan": ["192.168.1.5"], "v6.lan": ["fd00::5"], "github.com": ["198.51.100.4"]})
     assert offline_reach("https://mirror.lan/llama.cpp.git", offline) == "mirror.lan:443:192.168.1.5"
     assert offline_reach("https://v6.lan:8443/llama.cpp.git", offline) == "v6.lan:8443:[fd00::5]"
     assert offline_reach(str(tmp_path / "mirror"), offline) is None, "a local folder needs no network"
     assert offline_reach("https://github.com/ggml-org/llama.cpp", Settings()) is None, "online: as before"
-    with pytest.raises(SourceError, match="github.com resolves to 140.82.121.4 on the internet"):
+    with pytest.raises(SourceError, match="github.com resolves to 198.51.100.4 on the internet"):
         offline_reach("https://github.com/ggml-org/llama.cpp", offline)
     assert "http.curloptResolve=mirror.lan:443:192.168.1.5" in _git_config(False, "mirror.lan:443:192.168.1.5")
     assert not any("curloptResolve" in a for a in _git_config(False))
@@ -238,10 +238,10 @@ def test_the_local_only_session_connects_to_the_checked_address(names, server):
 
 def test_runtime_downloads_in_offline_mode_reach_only_the_own_network(names, tmp_path):
     from orchestrator.runtime.llama_server import LocalLLMRuntime, LocalRuntimeError
-    names.update({"models.lan": ["192.168.1.9"], "huggingface.co": ["18.239.50.1"]})
+    names.update({"models.lan": ["192.168.1.9"], "huggingface.co": ["192.0.2.18"]})
     rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models",
                          settings=Settings(offline_mode=True))
-    with pytest.raises(LocalRuntimeError, match="huggingface.co resolves to 18.239.50.1 on the internet"):
+    with pytest.raises(LocalRuntimeError, match="huggingface.co resolves to 192.0.2.18 on the internet"):
         rt._fetch("https://huggingface.co/x/y/resolve/c/m.gguf", tmp_path / "m.gguf", 1, "0" * 64)
     assert not (tmp_path / "m.gguf").exists() and not (tmp_path / "m.gguf.part").exists()
     session = rt._offline_session("https://models.lan/x/y/resolve/c/m.gguf")

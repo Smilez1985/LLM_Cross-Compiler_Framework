@@ -157,7 +157,7 @@ def derp_map(*nodes):
 
 HEADSCALE = {"ControlURL": "https://headscale.lan:8080", "WantRunning": True}
 NAMES = table(**{"headscale.lan": ["192.168.1.2"], "derp.lan": ["192.168.1.3"],
-                 "derp1.tailscale.com": ["199.38.181.104"], "derp.mixed": ["192.168.1.4", "203.0.113.1"]})
+                 "derp1.tailscale.com": ["203.0.113.104"], "derp.mixed": ["192.168.1.4", "203.0.113.1"]})
 
 
 def test_headscale_with_only_own_relays_is_the_own_vpn():
@@ -182,7 +182,7 @@ def test_relay_addresses_follow_the_derp_node_fields(node):
     ({"ControlURL": "https://headscale.example.com"}, {}, "control_outside"),            # does not resolve here
     ({"ControlURL": "https://203.0.113.5"}, {}, "control_outside"),
     (HEADSCALE, derp_map({"HostName": "derp.lan"}, {"HostName": "derp1.tailscale.com"}), "relay_outside"),
-    (HEADSCALE, derp_map({"HostName": "derp.lan", "IPv4": "199.38.181.104", "IPv6": "none"}), "relay_outside"),
+    (HEADSCALE, derp_map({"HostName": "derp.lan", "IPv4": "203.0.113.104", "IPv6": "none"}), "relay_outside"),
     (HEADSCALE, derp_map({"HostName": "derp.mixed"}), "relay_outside"),
     (HEADSCALE, {"omitDefaultRegions": True}, "unreadable"),                             # no Regions: not a DERP map
     (HEADSCALE, "not json", "unreadable"),
@@ -385,3 +385,34 @@ def test_the_tailscale_command_runs_as_every_helper_command(monkeypatch):
     monkeypatch.setattr(helpers, "execute_command", lambda *a, **k: (-1, "", "timed out"))
     with pytest.raises(subprocess.SubprocessError):
         REAL_RUN_CLI(["/no/such/tailscale", "debug", "prefs"])
+
+
+# --- the tests' own addresses (stage C wave 3c) ---------------------------------------------------------------------
+
+# Public addresses these tests may still name: the ones the tests before offline mode used (8.8.8.8, 93.184.215.14)
+# and deliberate edges of a range (just outside 172.16.0.0/12 and 198.51.100.0/24; multicast).
+PUBLIC_KEPT = {"8.8.8.8", "93.184.215.14", "172.32.0.1", "198.51.101.1", "224.0.0.1"}
+DOCUMENTATION = ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")
+OFFLINE_TESTS = ("test_locality.py", "test_offline_reach.py", "test_local_network.py", "test_offline_check.py")
+
+
+def test_a_public_stand_in_is_a_documentation_address():
+    """The rule judges an address by its range, so a documentation address (RFC 5737, RFC 3849) means "on the
+    internet" as well as a real service's address does, and it belongs to nobody: the offline-mode tests name no
+    address of a real service (github.com, huggingface.co, a Tailscale relay) where they only need a public one."""
+    import ipaddress
+    import re
+    from pathlib import Path
+    networks = [ipaddress.ip_network(n) for n in DOCUMENTATION]
+    assert all(address_kind(str(n[1])) == "public" for n in networks), "a documentation address is public here"
+    found = []
+    for name in OFFLINE_TESTS:
+        text = (Path(__file__).parent / name).read_text(encoding="utf-8")
+        for literal in sorted(set(re.findall(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])", text))):
+            try:
+                address = ipaddress.ip_address(literal)
+            except ValueError:
+                continue
+            if address.is_global and literal not in PUBLIC_KEPT and not any(address in n for n in networks):
+                found.append(f"{name}: {literal}")
+    assert found == []
