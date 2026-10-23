@@ -33,6 +33,7 @@ class Wire:
 
     def __init__(self, licence="apache-2.0", gated=False):
         self.seen, self.licence, self.gated = [], licence, gated
+        self.redirect = ""   # a host the Hub's API answers with a redirect to (a renamed repository, a mirror)
 
     def tokens_to(self, host: str):
         return [token for seen_host, _, token in self.seen if seen_host == host and token]
@@ -45,6 +46,8 @@ class Wire:
         auth = request.headers.get("authorization", "")
         self.seen.append((request.url.host, request.url.path, auth[len("Bearer "):] if auth else None))
         path = request.url.path
+        if self.redirect and request.url.host == "huggingface.co" and path.startswith("/api/"):
+            return httpx.Response(307, headers={"Location": f"{self.redirect}{path}"})
         if path == "/api/models":
             return httpx.Response(200, json=[
                 {"id": "acme/free", "modelId": "acme/free", "downloads": 10, "likes": 1, "gated": False,
@@ -234,6 +237,25 @@ class TestTheTokenGoesOnlyToHuggingFace:
         assert client.info(REPO).commit == COMMIT
         only_to_huggingface(foreign, STORED)
 
+    def test_a_redirect_to_another_host_carries_no_token(self, wire, tmp_path):
+        """An API answer that redirects to another host (a renamed repository, a mirror, a CDN): huggingface_hub's
+        client follows it, and the token stays with huggingface.co (httpx drops Authorization when the origin changes;
+        the fetcher's redirects are tests/test_hf_tools.py's)."""
+        from orchestrator.Core.build_service import BuildService
+        from orchestrator.Core.hf_hub import HubClient
+        from orchestrator.Core.model_manager import ModelManager
+        wire.redirect = FOREIGN
+        manager = ModelManager(framework(tmp_path, STORED))
+        assert "config.json" in manager.list_repo_files(REPO)
+        assert manager.check_license(REPO)["license"] == "apache-2.0"
+        assert [m["id"] for m in manager.search_huggingface_models("tiny")] == ["acme/free", "acme/locked"]
+        assert real_look_up(REPO, None, STORED).commit == COMMIT
+        assert BuildService(framework(tmp_path, STORED)).model_commit(REPO) == COMMIT
+        assert HubClient(framework(tmp_path, STORED)).info(REPO).commit == COMMIT
+        assert {host for host, _, _ in wire.seen} >= {"huggingface.co", "mirror.example"}, "the redirects were followed"
+        assert wire.tokens_to("mirror.example") == [], "a token went through a redirect to another host"
+        assert set(wire.tokens_to("huggingface.co")) == {STORED}
+
 
 def test_every_hub_api_object_comes_from_hub_api():
     """One Hub API (R0): no module but orchestrator/Core/hf_hub.py creates huggingface_hub's HfApi or imports its
@@ -370,3 +392,112 @@ class TestTheBrowserWindowOffline:
         worker.run()
         from orchestrator.Core.hf_hub import offline_refusal, person_text
         assert seen == [person_text(offline_refusal(), "de")] and seen[0].startswith("Der Offline-Modus ist an")
+
+
+# --- offline mode opens no connection at all (a socket guard, not only the stand-in transport) ----------------------
+
+def guard_sockets(monkeypatch):
+    """Every way to open a network connection refuses and is recorded: a name lookup, socket.create_connection
+    (httpx, huggingface_hub's client) and a socket's connect (urllib3, the fetcher's requests). huggingface_hub uses its
+    real client here, never the stand-in transport. A loopback connect is let through (Windows builds a socketpair
+    with one). Returns the list of what was tried."""
+    import socket
+    from huggingface_hub.utils import _http
+    tried = []
+
+    def refuse(what, *args):
+        tried.append((what,) + tuple(args[:1]))
+        raise OSError(f"socket guard: {what} in a test that must not reach the network")
+
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+
+    def loopback(address) -> bool:
+        return isinstance(address, tuple) and str(address[0]) in ("127.0.0.1", "::1")
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: refuse("getaddrinfo", *a))
+    monkeypatch.setattr(socket, "create_connection", lambda *a, **k: refuse("create_connection", *a))
+    monkeypatch.setattr(socket.socket, "connect",
+                        lambda self, address: real_connect(self, address) if loopback(address) else
+                        refuse("connect", address))
+    monkeypatch.setattr(socket.socket, "connect_ex",
+                        lambda self, address: real_connect_ex(self, address) if loopback(address) else
+                        refuse("connect_ex", address))
+    _http.set_client_factory(_http.default_client_factory)
+    return tried
+
+
+@pytest.fixture
+def no_network(monkeypatch):
+    tried = guard_sockets(monkeypatch)
+    yield tried
+    from huggingface_hub.utils import _http
+    _http.close_session()
+
+
+class TestOfflineModeOpensNoSocket:
+    """Offline mode is checked before any connection is opened, not only before a request reaches the stand-in
+    transport: with every socket refused and recorded, the browser's calls, the Take over, an AI caller's calls, the
+    GUI's commit check and the browser window in offline mode try none. The first test proves the guard sees a real
+    request of huggingface_hub's client and of the fetcher."""
+
+    def test_the_guard_sees_a_real_request(self, no_network, tmp_path):
+        from orchestrator.Core.hf_hub import HubFetcher, HubFile
+        from orchestrator.Core.model_manager import ModelManager
+        with pytest.raises(Exception):
+            ModelManager(framework(tmp_path)).list_repo_files(REPO)
+        assert no_network, "huggingface_hub's own client was not stopped by the guard"
+        before = len(no_network)
+        with pytest.raises(Exception):
+            HubFetcher(sleep=lambda s: None).fetch_file(REPO, COMMIT, HubFile("x.gguf", 1, None), tmp_path / "x.gguf",
+                                                        attempts=1)
+        assert len(no_network) > before, "the fetcher's requests were not stopped by the guard"
+
+    def test_the_browsers_calls_and_the_take_over(self, no_network, tmp_path):
+        from orchestrator.Core.hf_hub import HubError
+        from test_hf_gui_download import WEIGHTS, old_cache
+        manager = offline_manager(tmp_path, STORED)
+        for call in (lambda: manager.search_huggingface_models("tiny"), lambda: manager.check_license(REPO),
+                     lambda: manager.list_repo_files(REPO, "hf_" + "Typed" * 8),
+                     lambda: manager.download_file(REPO, "tiny-q4_k_m.gguf"),
+                     lambda: manager._hub_lookup()(REPO, COMMIT)):
+            with pytest.raises(HubError):
+                call()
+        old_cache(tmp_path / "models", "acme/plain", files={"b.gguf": (WEIGHTS, True)}, links=False)
+        result = manager.take_over(manager.old_downloads())
+        assert [(f.repo, code) for f, code in result.skipped] == [("acme/plain", "offline")]
+        assert no_network == []
+
+    def test_an_ai_callers_calls_and_the_gui_commit_check(self, no_network, tmp_path):
+        from orchestrator.Core.build_service import BuildService
+        from orchestrator.Core.hf_hub import HubClient, HubError
+        client = HubClient(framework(tmp_path, STORED, offline_mode=True))
+        for call in (lambda: client.search("tiny"), lambda: client.info(REPO)):
+            with pytest.raises(HubError):
+                call()
+        assert BuildService(framework(tmp_path, STORED, offline_mode=True)).model_commit(REPO) is None
+        assert no_network == []
+
+    def test_the_browser_window(self, qapp, no_network, tmp_path, monkeypatch):
+        pytest.importorskip("PySide6")
+        from orchestrator.gui import huggingface_window as hf, plain
+        from test_hf_gui_download import WEIGHTS, old_cache
+        boxes = []
+        monkeypatch.setattr(plain, "plain_box", lambda parent, kind, title, text, **kw: boxes.append(kind))
+        monkeypatch.setattr(hf, "AskTokenDialog", lambda *a, **k: pytest.fail("no token question offline"))
+        manager = offline_manager(tmp_path, STORED)
+        win = hf.HuggingFaceWindow(SimpleNamespace(model_manager=manager, secrets_manager=None))
+        win.search_edit.setText("tiny")
+        win.start_search()
+        win.populate_table([{"id": "meta/locked", "downloads": 1, "likes": 0, "gated": True}])
+        win.on_download_request(0, 0)
+        assert win.worker is None and win.list_worker is None and boxes == ["information", "information"]
+        for worker in (hf.SearchWorker(manager, "tiny", lang="en"), hf.FileListWorker(manager, REPO, lang="en"),
+                       hf.DownloadWorker(manager, REPO, "tiny-q4_k_m.gguf", lang="en")):
+            worker.run()   # what the window's threads would run, had they been started
+        old_cache(tmp_path / "models", "acme/plain", files={"b.gguf": (WEIGHTS, True)}, links=False)
+        taken = []
+        worker = hf.TakeOverWorker(manager, manager.old_downloads(), lang="en")
+        worker.finished.connect(lambda result, plan: taken.append(result))
+        worker.run()
+        assert [code for _, code in taken[0].skipped] == ["offline"]
+        assert no_network == []
