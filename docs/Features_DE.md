@@ -2872,7 +2872,9 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   Ergebnisses legt sie für den Target-Abgleich in `<cache_dir>/probes/` ab. Der SSH-Scan der GUI nutzt dieselbe
   entfernte Probe wie
   `llm-cli scan --device`: Das Skript kommt über den SSH-Kanal, also funktioniert er auch auf Boards, die `/tmp` mit
-  `noexec` einhängen, und das Profil wird unter der ID des Boards abgelegt. Rechner ohne
+  `noexec` einhängen, und das Profil wird unter der ID des Boards abgelegt. Bricht das Netz des Boards während des
+  Scans ab, sagt das Protokoll, dass auf das Board gewartet wird und wann es wieder antwortet, und **Scan abbrechen**
+  beendet den Scan, auch während dieses Wartens; dann wird nichts gespeichert. Rechner ohne
   Netzzugang führen eine Probe von Hand aus ([README](../README_DE.md#die-hardware-des-boards-untersuchen)).
 - **Dittos lokales Modell** nutzt dieselbe Probe: Die Hardware, auf der Build- und Modellwahl beruhen, kommt aus einem
   Probe-Profil, und freier RAM und freier VRAM werden bei jedem Start neu gelesen.

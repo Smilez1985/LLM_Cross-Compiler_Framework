@@ -196,10 +196,14 @@ class SSHProbeWorker(QThread):
     with python3 -I when the device has Python 3.8 or newer, else the shell probe), so nothing is written on the
     device, also where /tmp is mounted noexec. The profile is kept under the device's ID (from its host key) with the
     person's label, written to result_dir for the GUI, the SSH user becomes the board's deploy user and the board's
-    trusted, paired record is written (audited as the person's decision in the GUI)."""
+    trusted, paired record is written (audited as the person's decision in the GUI). While the board's network is gone
+    the scan waits for it (N5) and says so in `line` (remote/text.py wait_lines, as the Boards window says it);
+    `cancel` (one session.CancelToken, as every board step has) ends the wait and the probe at once."""
     finished = Signal(bool, str, str) # success, message, file_path
+    line = Signal(str)   # a line for the log while the scan runs: the wait for the board and its answer
 
     def __init__(self, ip, user, password, state_dir, result_dir, port=22, *, label=None, audit=None):
+        from orchestrator.remote.session import CancelToken
         super().__init__()
         self.ip = ip
         self.user = user
@@ -209,6 +213,7 @@ class SSHProbeWorker(QThread):
         self.audit = audit
         self.state_dir = Path(state_dir)
         self.result_dir = Path(result_dir)
+        self.cancel = CancelToken()
 
     def run(self):
         password, self.password = self.password, None   # used once for this scan, never kept
@@ -217,6 +222,7 @@ class SSHProbeWorker(QThread):
             return
         from orchestrator.runtime.device import reasons
         from orchestrator.remote.address import valid_host
+        from orchestrator.remote.text import wait_lines
         from orchestrator.runtime.scan_steps import DeviceScanError, scan_device
         if not valid_host(self.ip):
             self.finished.emit(False, "Enter a host name or an IP address (an IPv6 address without brackets, e.g. "
@@ -226,9 +232,12 @@ class SSHProbeWorker(QThread):
         local_output = self.result_dir / f"target_hardware_config_{self.ip.replace(':', '_')}.txt"
         try:
             scan = scan_device(self.state_dir, self.ip, int(self.port), self.user, None, password=password,
-                               label=self.label, output_file=local_output, via="gui", actor="gui", audit=self.audit)
+                               label=self.label, output_file=local_output, via="gui", actor="gui", audit=self.audit,
+                               cancel=self.cancel, on_event=wait_lines(self.line.emit, self.ip))
         except DeviceScanError as e:
-            if e.kind == "user":
+            if e.kind == "cancelled":
+                text = ui_text("deploy.remote.cancelled", address=self.ip)
+            elif e.kind == "user":
                 text = ui_text("deploy.bad_user")
             elif e.kind == "login":
                 text = (reasons.person_text(e.reason, address=self.ip, port=int(self.port), error=e.error)
@@ -447,6 +456,13 @@ class BuilderTab(QWidget):
         
         self.scan_btn.setMenu(self.scan_menu)
         h_layout.addWidget(self.scan_btn)
+        # The board scan's Cancel (as every board step has one): shown while a remote scan runs
+        self.scan_cancel_btn = QPushButton(button_text(ui_text("deploy.remote.cancel")))
+        self.scan_cancel_btn.setObjectName("btn_deploy_scan_cancel")
+        self.scan_cancel_btn.setToolTip(plain_tooltip(ui_text("deploy.remote.cancel.tip")))
+        self.scan_cancel_btn.clicked.connect(self._cancel_remote_scan)
+        self.scan_cancel_btn.setVisible(False)
+        h_layout.addWidget(self.scan_cancel_btn)
         
         tgt_layout.addLayout(h_layout)
         # A target without capabilities: every format is offered and nothing is checked; said, never silent
@@ -742,7 +758,10 @@ class BuilderTab(QWidget):
             audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
             self.probe_worker = SSHProbeWorker(ip, user, password or None, state_dir, result_dir, port=port,
                                                label=label, audit=audit)
+            self.probe_worker.line.connect(self._log)   # the wait for the board (N5) and its answer
             self.probe_worker.finished.connect(self._on_probe_finished)
+            self.scan_cancel_btn.setEnabled(True)
+            self.scan_cancel_btn.setVisible(True)
             self.probe_worker.start()
 
         self.host_keys.start(ip, port, trusted, step="probe")
@@ -778,8 +797,17 @@ class BuilderTab(QWidget):
             target = target.with_suffix(".json" if "json" in str(chosen).lower() else ".txt")
         self._run_local_scan(use_script=use_script, output=target, as_json=target.suffix.lower() == ".json")
 
+    def _cancel_remote_scan(self):
+        """Cancel of the running board scan: closes its board session, so the probe and a wait for the board end."""
+        worker = getattr(self, "probe_worker", None)
+        if isinstance(worker, SSHProbeWorker) and worker.isRunning():
+            worker.cancel.cancel()
+            self.scan_cancel_btn.setEnabled(False)
+            self._log(ui_text("deploy.remote.cancelling", address=worker.ip))
+
     def _on_probe_finished(self, success, msg, output_path):
         self.scan_btn.setEnabled(True)
+        self.scan_cancel_btn.setVisible(False)
         if success:
             self._log(f"Scan finished: {msg}")
             if output_path:

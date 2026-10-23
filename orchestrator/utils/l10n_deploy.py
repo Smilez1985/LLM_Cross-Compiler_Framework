@@ -95,6 +95,11 @@ TEXTS = {
         "deploy.scan.write_failed": "The profile could not be written to {path}: {reason}",
         "deploy.remote.title": "Remote Hardware Probe (SSH)",
         "deploy.remote.running": "Connecting to {user}@{address}:{port}...",
+        "deploy.remote.cancel": "Cancel scan",
+        "deploy.remote.cancel.tip": "Ends the board scan, also while it waits for the board after a network drop; "
+                                    "nothing is stored.",
+        "deploy.remote.cancelling": "Cancelling the scan of {address}...",
+        "deploy.remote.cancelled": "The scan of {address} was cancelled; nothing was stored.",
         "deploy.remote.tool.python": "Python probe",
         "deploy.remote.tool.sh": "shell probe",
         "deploy.remote.done": "Remote scan successful from {address} ({tool}; stored as device {device_id}).",
@@ -196,6 +201,11 @@ TEXTS = {
         "deploy.scan.write_failed": "Das Profil konnte nicht nach {path} geschrieben werden: {reason}",
         "deploy.remote.title": "Hardware-Probe auf dem Board (SSH)",
         "deploy.remote.running": "Verbinde mit {user}@{address}:{port}...",
+        "deploy.remote.cancel": "Scan abbrechen",
+        "deploy.remote.cancel.tip": "Beendet den Scan des Boards, auch während er nach einem Netzabbruch auf das "
+                                    "Board wartet; nichts wird gespeichert.",
+        "deploy.remote.cancelling": "Der Scan von {address} wird abgebrochen...",
+        "deploy.remote.cancelled": "Der Scan von {address} wurde abgebrochen; nichts wurde gespeichert.",
         "deploy.remote.tool.python": "Python-Probe",
         "deploy.remote.tool.sh": "Shell-Probe",
         "deploy.remote.done": "Scan von {address} erfolgreich ({tool}; als Gerät {device_id} gespeichert).",

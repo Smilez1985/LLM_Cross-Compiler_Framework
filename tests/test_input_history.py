@@ -360,7 +360,8 @@ class TestBuilderTab:
 
         monkeypatch.setattr(builder_tab, "SSHConnectDialog", Dialog)
         monkeypatch.setattr(builder_tab, "SSHProbeWorker", lambda *a, **k: SimpleNamespace(
-            finished=SimpleNamespace(connect=lambda slot: None), start=lambda: started.append(a[0])))
+            finished=SimpleNamespace(connect=lambda slot: None), line=SimpleNamespace(connect=lambda slot: None),
+            start=lambda: started.append(a[0])))
         tab = builder_tab.BuilderTab(framework)
 
         # The host key is read off the GUI thread (gui/host_key.HostKeyCheck); the person's answer comes back to then.

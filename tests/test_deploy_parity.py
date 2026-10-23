@@ -765,7 +765,8 @@ class TestScanMenu:
 
         monkeypatch.setattr(builder_tab, "SSHConnectDialog", Dialog)
         monkeypatch.setattr(builder_tab, "SSHProbeWorker", lambda *a, **k: workers.append((a, k)) or SimpleNamespace(
-            finished=SimpleNamespace(connect=lambda slot: None), start=lambda: None))
+            finished=SimpleNamespace(connect=lambda slot: None), line=SimpleNamespace(connect=lambda slot: None),
+            start=lambda: None))
         monkeypatch.setattr(tab.host_keys, "start", lambda host, port, then, step="": reads.append(
             (host, port, step)) or then(True))
         tab._open_ssh_dialog()
@@ -806,6 +807,71 @@ class TestScanMenu:
         assert audited and audited[0][:2] == ("gui", "device_trusted")
         assert ProfileStore(state).device_info(device.device_id)["label"] == "Shed board"
         assert Path(path).parent == tmp_path / "probes"
+
+    def test_the_board_scan_says_its_wait_and_has_a_cancel(self, tab, monkeypatch, tmp_path):
+        """Stage C wave 2 (remote-callers + N5): the scan's session waits up to 300 s for a board whose network
+        dropped. The Builder tab says so in its log (the Boards window's wait line) and shows Cancel while the scan
+        runs; Cancel ends the wait at once and nothing is stored."""
+        from PySide6.QtWidgets import QApplication
+        from orchestrator.gui import builder_tab
+        from orchestrator.remote import reasons as remote_reasons
+        from orchestrator.runtime import remote_probe as rp
+        from orchestrator.runtime.profile import ProfileStore
+        from orchestrator.utils import ssh_trust
+        from orchestrator.utils.localization import ui_text
+
+        class Client:
+            def close(self):
+                pass
+
+            def get_transport(self):
+                return SimpleNamespace(get_remote_server_key=lambda: FakeHostKey())
+
+        class Dialog:
+            def __init__(self, parent=None, recent=()):
+                pass
+
+            def exec(self):
+                return 1
+
+            def get_data(self):
+                return "192.0.2.95", "radxa", None
+
+            def get_options(self):
+                return 22, None
+
+        state = Path(tab.framework.config.user_state_dir)   # the test's own folder (window_framework)
+        monkeypatch.setattr(builder_tab, "PARAMIKO_AVAILABLE", True)
+        monkeypatch.setattr(builder_tab, "SSHConnectDialog", Dialog)
+        monkeypatch.setattr(builder_tab, "probe_result_dir", lambda framework: tmp_path / "probes")
+        monkeypatch.setattr(tab.host_keys, "start", lambda host, port, then, step="": then(True))
+        monkeypatch.setattr(ssh_trust, "connect", lambda host, user, st, port=22, password=None: Client())
+        monkeypatch.setattr(remote_reasons, "check_port", lambda host, port=22, timeout=3.0: remote_reasons.HOST_DOWN)
+        waiting = threading.Event()
+
+        def dropped(session):   # the board's network drops during the probe; the session waits for it
+            waiting.set()
+            session.wait_for_host("command")
+        monkeypatch.setattr(rp, "probe_over_ssh", dropped)
+        assert not tab.scan_cancel_btn.isVisibleTo(tab)
+        tab._open_ssh_dialog()
+        worker = tab.probe_worker
+        assert isinstance(worker, builder_tab.SSHProbeWorker) and tab.scan_cancel_btn.isVisibleTo(tab)
+        assert tab.scan_cancel_btn.objectName() == "btn_deploy_scan_cancel"
+        assert waiting.wait(10)
+        deadline = time.monotonic() + 10
+        while "Waiting for the board at 192.0.2.95" not in tab.log_area.toPlainText() and time.monotonic() < deadline:
+            QApplication.processEvents()
+            time.sleep(0.02)
+        tab.scan_cancel_btn.click()
+        assert worker.wait(10000), "Cancel ends the wait at once (not after 300 s)"
+        QApplication.processEvents()
+        log = tab.log_area.toPlainText()
+        assert "Waiting for the board at 192.0.2.95" in log, log
+        assert ui_text("deploy.remote.cancelling", address="192.0.2.95") in log
+        assert ui_text("deploy.remote.cancelled", address="192.0.2.95") in log
+        assert not tab.scan_cancel_btn.isVisibleTo(tab) and tab.scan_btn.isEnabled()
+        assert ProfileStore(state).list_devices() == []
 
     def test_a_failed_login_says_why(self, window_framework, monkeypatch, tmp_path):
         paramiko = pytest.importorskip("paramiko")

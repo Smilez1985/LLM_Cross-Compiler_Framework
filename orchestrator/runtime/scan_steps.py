@@ -115,8 +115,8 @@ def import_probe(probes: Any, path: Path, label: Optional[str] = None, target_ma
 class DeviceScanError(WithSteps, RemoteFailure):
     """A board scan that could not be done. `kind`: user (the SSH user is not an account name: refused before any
     contact, as on every other board path), login (the board could not be reached or logged in to; `reason` is its SSH
-    reason code when it has one), probe (the probe on the board failed) or save (the profile could not be stored or
-    written). `error` is the exception behind it."""
+    reason code when it has one), probe (the probe on the board failed), cancelled (the caller's Cancel ended it) or
+    save (the profile could not be stored or written). `error` is the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None):
         super().__init__(message, kind, reason, error)
@@ -147,7 +147,8 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
                 label: Optional[str] = None, output_file: Optional[Path] = None, as_json: bool = False,
                 store: Any = None, record: bool = True, via: str = "cli", actor: str = "", audit: Any = None,
                 audit_factory: Optional[Callable[[], Any]] = None,
-                on_client: Optional[Callable[[Any], None]] = None) -> DeviceScan:
+                on_client: Optional[Callable[[Any], None]] = None, cancel: Any = None,
+                on_event: Optional[Callable[[Any], None]] = None) -> DeviceScan:
     """Probes a board whose host key the person trusted (the caller asked; `key` is that key, or None to take the key
     of the session itself): logs in (a password only the first time, to install the framework's SSH key; never
     stored), runs the hardware probe there (the Python probe with python3 -I, else the shell probe; nothing is
@@ -156,7 +157,10 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     audits it as the person's decision through `via`). A failed login or a reached board is recorded for Mojo (W1).
     `audit_factory` (instead of `audit`) opens the audit log only when that record is written, so a scan that fails
     never touches it (the CLI's audit log may create the OS keyring's audit key on first use). `on_client` gets the
-    SSH session so a Cancel can close it."""
+    SSH session so a Cancel can close it. While the board's network is gone the probe's session waits for it (N5):
+    `on_event` gets its events (remote/text.py wait_lines makes the person's lines of them), and `cancel`, a
+    session.CancelToken, ends the wait and the probe at once (it holds the session); a scan it ended raises
+    DeviceScanError "cancelled"."""
     from orchestrator.remote.address import Endpoint, valid_user
     from orchestrator.remote.session import KeyOnly, OneTimePassword, RemoteSession, SessionFailure, Stopped
     from orchestrator.runtime.device.settings import remember_ssh_user
@@ -184,8 +188,13 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     # network drops, it waits for the board and logs in again with the host key checked as at the first login, the
     # one-time password for this session's logins only (N5)
     session = RemoteSession(Endpoint(host, port), user, state_dir,
-                            credentials=OneTimePassword(password) if password else KeyOnly())
+                            credentials=OneTimePassword(password) if password else KeyOnly(), cancel=cancel,
+                            on_event=on_event)
     try:
+        if cancel is not None:
+            cancel.hold(session)   # a Cancel closes the session: a running probe and a wait for the board end
+        if session.cancel.cancelled:
+            raise Stopped()
         if key is None:
             key = client.get_transport().get_remote_server_key()   # the key of the session itself
         session.adopt(client, key)
@@ -194,13 +203,19 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
             pairing.pair(client, state_dir)   # the framework's key, over the one-time password session
         result = probe_over_ssh(session)
     except (RemoteProbeError, ssh_trust.HostKeyError) as e:
+        if session.cancel.cancelled:   # the Cancel closed the session under the running probe
+            raise DeviceScanError(f"The scan of {host} was cancelled.", "cancelled", error=e) from None
         raise DeviceScanError(f"The probe on {host} failed: {e}", "probe", error=e) from None
     except (SessionFailure, Stopped) as e:   # the board did not answer again after a drop, or a cancel
+        if session.cancel.cancelled or isinstance(e, Stopped):
+            raise DeviceScanError(f"The scan of {host} was cancelled.", "cancelled", error=e) from None
         if getattr(e, "reason", ""):
             _note_reach(state_dir, host, port, e.reason)
         raise DeviceScanError(f"The probe on {host} failed: {e}", "probe", reason=getattr(e, "reason", ""),
                               error=e) from None
     finally:
+        if cancel is not None:
+            cancel.release(session)
         if session.client is not None:
             session.close()   # the client of its current login
         else:
