@@ -768,8 +768,10 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 from orchestrator.Core.job_service import JobCancelled
                 handle.progress(None, None, f"probing {device.label}")
                 try:
-                    # the cancel holds the probe's session: closing it ends the probe and any wait for the board
-                    out = dev.probe(device, state_dir(), bound["fingerprint"], on_client=on_client)
+                    # the cancel holds the probe's session: closing it ends the probe and any wait for the board; the
+                    # waits show in the job's progress as for the other board tools (the board by its label only, D0)
+                    out = dev.probe(device, state_dir(), bound["fingerprint"], on_client=on_client,
+                                    on_event=board_events(handle, device))
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set():
                         raise JobCancelled() from None

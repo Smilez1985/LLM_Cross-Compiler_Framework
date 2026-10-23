@@ -90,7 +90,7 @@ def test_a_board_job_error_never_names_the_account(fw, monkeypatch):  # noqa: F8
     device, key = trust(fw, host=ADDRESS, user=ACCOUNT)
     monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: key)
 
-    def refuse(d, s, fp, on_client=None):
+    def refuse(d, s, fp, on_client=None, on_event=None):
         raise service.DeviceRuntimeError(f"The framework's SSH key does not log in as {ACCOUNT}.",
                                          external_text=[f"/home/{ACCOUNT}/.ssh/authorized_keys: denied"])
     monkeypatch.setattr(service, "probe", refuse)

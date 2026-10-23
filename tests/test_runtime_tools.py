@@ -416,13 +416,44 @@ class TestBoard:
         from orchestrator.runtime.device import service
         dev, presented, _ = device
         probed = []
-        monkeypatch.setattr(service, "probe", lambda d, s, fp, on_client=None: probed.append(fp) or
+        monkeypatch.setattr(service, "probe", lambda d, s, fp, on_client=None, on_event=None: probed.append(fp) or
                             {"probe_id": d.device_id, "tool": "python", "warnings": 0})
         allow(fw, "probe_remote_device")
         confirm = asking(True)
         started = call(fw, "probe_remote_device", {"device_id": dev.device_id}, confirm=confirm)
         assert "Living room board" in confirm.asked[0] and dev.fingerprint in confirm.asked[0]
         assert wait_job(fw, started.job_id).state == "done" and probed == [dev.fingerprint]
+
+    def test_the_probe_job_shows_the_wait_for_the_board_by_its_label_only(self, fw, device, monkeypatch):
+        """The probe tool hands the board session's events to the job's progress, as the deploy and benchmark tools
+        do (remote/text.py progress_events): an AI following the job sees that the framework waits for the board and
+        that it answered again, with the board named by its label only (D0: no address, no account)."""
+        from orchestrator.Core import job_service
+        from orchestrator.remote.session import RemoteEvent
+        from orchestrator.runtime.device import service
+        dev, _presented, _ = device
+        messages, update = [], job_service.JobService.update
+
+        def recording(self, job_id, **kw):
+            if kw.get("progress") is not None:
+                messages.append(kw["progress"][2])
+            return update(self, job_id, **kw)
+        monkeypatch.setattr(job_service.JobService, "update", recording)
+
+        def probe(d, s, fp, on_client=None, on_event=None):
+            for event in (RemoteEvent("waiting", elapsed=5, limit=300, step="command"),
+                          RemoteEvent("waiting", elapsed=5, limit=300, step="command"),
+                          RemoteEvent("back", step="command")):
+                on_event(event)
+            return {"probe_id": d.device_id, "tool": "python", "warnings": 0}
+        monkeypatch.setattr(service, "probe", probe)
+        allow(fw, "probe_remote_device")
+        started = call(fw, "probe_remote_device", {"device_id": dev.device_id}, confirm=asking(True))
+        assert wait_job(fw, started.job_id).state == "done"
+        waits = [m for m in messages if m != "probing Living room board"]
+        assert len(waits) == 2, messages   # the same wait line once, then the board's answer
+        assert all("Living room board" in m for m in waits)
+        assert not any("192.168.1.50" in m or "dietpi" in m for m in messages)
 
     def test_a_changed_host_key_is_refused_before_the_question(self, fw, device):
         dev, presented, paramiko = device

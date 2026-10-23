@@ -1704,7 +1704,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   --on-device` der CLI, das Fenster Boards) öffnen eine mit dem Einmal-Passwort der Person, wenn eines eingegeben ist,
   und `scan --device` übergibt seine Anmeldung an eine Sitzung. CLI und Fenster Boards sagen, wenn das Netz des Boards
   abbricht und wenn es wieder antwortet (EN/DE), jedes Warten neu (auch nach einem Upload, der von vorn begann),
-  der Job einer KI zeigt es mit dem Label des Boards. Ebenso **Board per SSH scannen...** im Tab Builder in seinem
+  der Job einer KI zeigt es mit dem Label des Boards (auch der Job von `probe_remote_device`, der gar kein Warten
+  zeigte: das Tool gibt die Ereignisse der Sitzung jetzt weiter wie die Deploy- und Benchmark-Tools). Ebenso
+  **Board per SSH scannen...** im Tab Builder in seinem
   Protokoll, mit dem Knopf **Scan abbrechen**, solange der Scan läuft, wie ihn das Fenster Boards hat: Er beendet ein
   Warten auf das Board sofort (nicht erst nach 300 s), und nichts wird gespeichert (`scan_steps.scan_device` nimmt den
   `CancelToken` und `on_event` des Aufrufers). Die Wartezeile der CLI bei `device runtime deploy|verify|prune
