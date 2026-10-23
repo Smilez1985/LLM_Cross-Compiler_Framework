@@ -72,11 +72,12 @@ class ModelManager:
                                   gated: Optional[bool] = None) -> List[Dict[str, Any]]:
         """Models matching `query`, most downloaded first. gated: False only models that download without accepting
         conditions, True only gated ones, None all. Each result keeps the gating mode (`gating`: false, auto,
-        manual) next to the plain `gated` flag. Raises on any failure: an error is never an empty list."""
-        from huggingface_hub import HfApi
+        manual) next to the plain `gated` flag. Raises on any failure: an error is never an empty list. Asks
+        huggingface.co only (hf_hub.hub_api) with the token stored in the framework, or none: never an implicit one."""
         from orchestrator.Core.hf_hub import gating
-        models = HfApi().list_models(search=query, limit=limit, sort="downloads", gated=gated,
-                                     expand=["gated", "downloads", "likes", "tags"])
+        token = self._stored_token()
+        models = self._hub_api(token).list_models(search=query, limit=limit, sort="downloads", gated=gated,
+                                                  expand=["gated", "downloads", "likes", "tags"], token=token or False)
         results = []
         for m in models:
             mode = gating(getattr(m, "gated", False))
@@ -90,15 +91,16 @@ class ModelManager:
         return results
 
     # --- v2.3.0: ETHICS GATE (License Check) ---
-    def check_license(self, model_id: str) -> Dict[str, Any]:
+    def check_license(self, model_id: str, token: Optional[str] = None) -> Dict[str, Any]:
         """The licence of a model: `restrictive` is "false" only for a licence on the permissive allowlist, "true"
         for a known restrictive one and "unknown" otherwise (`other`, custom, a list, none); `is_restrictive` is
         True unless it is "false", so the GUI asks before such a download. Raises when the check fails: a failed
-        check never counts as "not restrictive"."""
-        from huggingface_hub import model_info
+        check never counts as "not restrictive". Asks huggingface.co only, with `token` or the stored one, else
+        none."""
         from orchestrator.Core.hf_hub import classify_license
         self.logger.info(f"Checking license for {model_id}...")
-        info = model_info(model_id)
+        token = token or self._stored_token()
+        info = self._hub_api(token).model_info(model_id, token=token or False)
         card = info.card_data
         raw = card.get("license") if card is not None and hasattr(card, "get") else None
         if raw is None:
@@ -116,9 +118,10 @@ class ModelManager:
         return result
 
     def list_repo_files(self, repo_id: str, token: Optional[str] = None) -> List[str]:
-        """The file list of a repository. Raises on any failure."""
-        from huggingface_hub import HfApi
-        return HfApi(token=token).list_repo_files(repo_id=repo_id)
+        """The file list of a repository. Raises on any failure. Asks huggingface.co only, with the token the person
+        typed, else the stored one, else none (never an implicit one)."""
+        token = token or self._stored_token()
+        return self._hub_api(token).list_repo_files(repo_id=repo_id, token=token or False)
 
     def download_file(self, repo_id: str, filename: str, token: Optional[str] = None,
                       progress: Optional[Callable[[str, int, int], None]] = None,
