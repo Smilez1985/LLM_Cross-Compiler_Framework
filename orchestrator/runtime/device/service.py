@@ -284,7 +284,7 @@ def plan_facts(state_dir: Path, profile: Any) -> DevicePlanFacts:
 
 def ensure_build(state_dir: Path, device: TrustedDevice, profile: Any, expect_build_id: str, *,
                  cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None,
-                 jobs: Optional[int] = None, mirror: Optional[str] = None):
+                 jobs: Optional[int] = None, mirror: Optional[str] = None, config: Any = None):
     """(BuildStore, StoredBuild, packaged tarball) of the device's runtime: built in the builder container when it is
     not built yet (the pinned source is fetched when it is not cached, from `mirror` when given; `jobs` parallel
     compile jobs), then packaged; the same step as `llmcf device runtime build` (steps.build_runtime). The plan must
@@ -306,7 +306,8 @@ def ensure_build(state_dir: Path, device: TrustedDevice, profile: Any, expect_bu
 
     try:
         built = steps.build_runtime(state_dir, device.device_id, profile, plan, pinned_source(), jobs=jobs,
-                                    mirror=mirror, on_step=on_step, log=say, cancelled=cancelled, reuse_package=True)
+                                    mirror=mirror, on_step=on_step, log=say, cancelled=cancelled, reuse_package=True,
+                                    settings=config)
     except SourceError as e:
         raise DeviceRuntimeError(f"The pinned llama.cpp source: {e}", code="failed") from None
     except (BuildFailed, StoreError) as e:
@@ -321,7 +322,7 @@ def ensure_build(state_dir: Path, device: TrustedDevice, profile: Any, expect_bu
 def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, expect_fingerprint: str,
            expect_build_id: str, *, on_client: Optional[Callable[[Any], None]] = None,
            cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None, cancel: Any = None,
-           on_event: Optional[Callable[[Any], None]] = None) -> Dict[str, Any]:
+           on_event: Optional[Callable[[Any], None]] = None, config: Any = None) -> Dict[str, Any]:
     """Builds (when needed) and installs the device runtime as the deploy settings say, checks the new build on the
     device and activates it only when it passes: the one flow of `llm-cli device runtime deploy` and the Boards window
     (steps.deploy_runtime_flow; steps.install_runtime saves the deployment's record), with this path's login only: the
@@ -332,7 +333,9 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
     from orchestrator.runtime.device import steps
     from orchestrator.runtime.device.remote import RemoteError
     cancel = cancel if cancel is not None else CancelToken(check=cancelled)
-    builds, build, packaged = ensure_build(state_dir, device, profile, expect_build_id, cancelled=cancelled, say=say)
+    # config: the framework's settings (offline mode: the source only from the own network, utils/locality.py)
+    builds, build, packaged = ensure_build(state_dir, device, profile, expect_build_id, cancelled=cancelled, say=say,
+                                           config=config)
     source = pinned_source()
 
     def open_board():

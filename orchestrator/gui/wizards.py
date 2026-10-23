@@ -765,6 +765,13 @@ Setup commands:
         show_crawl_notice_once(self, cfg, announcer=speak,
                                registry=getattr(self.framework_manager, "tool_registry", None))
 
+        # Offline mode reaches only the person's own network, and the crawler reads only public sites: no crawl then
+        # (the person's own setting; an AI's crawl_docs_site refuses the same way).
+        from orchestrator.utils.locality import offline_mode
+        if offline_mode(cfg):
+            QMessageBox.information(self, ui_text("net.crawl.title", lang), ui_text("net.crawl.offline", lang))
+            return
+
         rag = self.framework_manager.get_component("rag_manager")
         if not rag:
             QMessageBox.critical(self, "Error", "Local Knowledge Base (RAG) is not active.\nPlease enable it in 'Configure AI Agent' first.")

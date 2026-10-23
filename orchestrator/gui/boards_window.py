@@ -1005,7 +1005,8 @@ class BoardsWindow(QDialog):
             plan = steps.plan_runtime(profile)
             built = steps.build_runtime(state, device_id, profile, plan, source, jobs=jobs, mirror=mirror,
                                         may_fetch=lambda: may_fetch, on_step=on_step, log=self._progress,
-                                        cancelled=self._cancel.is_set)
+                                        cancelled=self._cancel.is_set,
+                                        settings=getattr(self.framework, "config", None))
             from orchestrator.runtime.device.package import DeviceRuntimeStore
             return built, steps.older_package_count(DeviceRuntimeStore(state, device_id), built.build)
 

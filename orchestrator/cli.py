@@ -1721,8 +1721,10 @@ def _local_runtime(ctx: FrameworkContext):
     # The effective models_dir (LLM_FRAMEWORK_MODELS_DIR, config.yml, or the per-user folder when the installation
     # is read-only), the same folder the GUI and the MCP server use.
     config, resolve = _settings(ctx)
+    # the settings: in offline mode its downloads reach only the own network (utils/locality.py)
     return LocalLLMRuntime(data_dir=config.user_state_dir,
-                           models_dir=resolve(config.get("models_dir", "models") or "models") / "ditto")
+                           models_dir=resolve(config.get("models_dir", "models") or "models") / "ditto",
+                           settings=config)
 
 
 def _download_progress():
@@ -2277,7 +2279,7 @@ def runtime_export_source(ctx: FrameworkContext, file: Path, mirror: Optional[st
             return
         with console.status("Preparing the llama.cpp source ..."):
             manifest = export_source(source, state_dir, file, url=mirror,
-                                     log=lambda msg: console.print(escape(msg)))
+                                     log=lambda msg: console.print(escape(msg)), settings=_settings(ctx)[0])
     except SourceError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
@@ -5552,7 +5554,7 @@ def device_runtime_build(ctx: FrameworkContext, device_name: str, jobs: Optional
     try:
         built = steps.build_runtime(state_dir, device_id, profile, plan, source, jobs=jobs, mirror=mirror,
                                     may_fetch=may_fetch, on_step=on_step,
-                                    log=lambda msg: console.print(escape(msg)))
+                                    log=lambda msg: console.print(escape(msg)), settings=_settings(ctx)[0])
     except steps.SourceDeclined:
         console.print("[red]The build needs the pinned source (or llm-cli ditto runtime import-source on a machine "
                       "without internet).[/red]")

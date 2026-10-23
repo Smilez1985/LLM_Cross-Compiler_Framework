@@ -217,3 +217,37 @@ def test_fetch_source_in_offline_mode_passes_the_pin_to_git(names, tmp_path, mon
         fetch(pin, tmp_path, url="https://public.example/llama.cpp.git", git=git,
               settings=Settings(offline_mode=True))
     assert len(calls) == 1, "nothing was fetched from the public mirror"
+
+
+# --- the runtime's downloads (a local model mirror) -----------------------------------------------------------------
+
+def test_the_local_only_session_connects_to_the_checked_address(names, server):
+    import requests
+    from orchestrator.security.http import local_only_session
+    port, seen = server
+    names["models.lan"] = ["127.0.0.1"]
+    session = local_only_session(Settings(offline_mode=True))
+    assert locality.check_host("models.lan").local
+    names["models.lan"] = ["203.0.113.66"]           # a rebinding answer after the check
+    assert session.get(f"http://models.lan:{port}/model.gguf", timeout=5).status_code == 200
+    assert seen == [f"models.lan:{port}"] and session.trust_env is False
+    with pytest.raises((LocalityRefused, requests.exceptions.ConnectionError)):
+        session.get(f"http://203.0.113.66:{port}/model.gguf", timeout=2)
+    assert len(seen) == 1
+
+
+def test_runtime_downloads_in_offline_mode_reach_only_the_own_network(names, tmp_path):
+    from orchestrator.runtime.llama_server import LocalLLMRuntime, LocalRuntimeError
+    names.update({"models.lan": ["192.168.1.9"], "huggingface.co": ["18.239.50.1"]})
+    rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models",
+                         settings=Settings(offline_mode=True))
+    with pytest.raises(LocalRuntimeError, match="huggingface.co resolves to 18.239.50.1 on the internet"):
+        rt._fetch("https://huggingface.co/x/y/resolve/c/m.gguf", tmp_path / "m.gguf", 1, "0" * 64)
+    assert not (tmp_path / "m.gguf").exists() and not (tmp_path / "m.gguf.part").exists()
+    session = rt._offline_session("https://models.lan/x/y/resolve/c/m.gguf")
+    assert type(session.get_adapter("https://models.lan/")).__name__ == "LocalOnlyAdapter"
+    online = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models", settings=Settings())
+    assert online._offline_session("https://huggingface.co/x") is None, "online: the downloads as before"
+    framework = SimpleNamespace(config=SimpleNamespace(user_state_dir=tmp_path / "s", get=lambda k, d=None: d),
+                                resolve_path=lambda p: tmp_path / p)
+    assert LocalLLMRuntime.from_framework(framework).settings is framework.config
