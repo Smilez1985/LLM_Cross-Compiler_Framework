@@ -52,6 +52,7 @@ from orchestrator.remote.transport import ParamikoTransport  # noqa: F401 - its 
 from orchestrator.remote.transport import Result, TooMuchOutput, sh_command
 from orchestrator.remote.transport import read_limited as _read_limited  # noqa: F401 - its old name here
 from orchestrator.runtime.build.verify import Check, VerifyReport, parse_bench_json, parse_devices, parse_version
+from orchestrator.runtime.device import thermal   # the board's temperature during the checks (round 23 item 16)
 from orchestrator.runtime.device.launcher import (DEVICE_FOLDER_MAX, DEVICE_PATH_MAX, KEY_REL, START_SCRIPT,
                                                   UNIT_NAME, UNIT_PATH, install_root,
                                                   render_systemd_unit)
@@ -836,6 +837,10 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
         report.checks.append(Check("server-tools", False, f"llama-server did not refuse --tools (exit {r.status}): "
                                    f"{_tail(r.out)}"))
 
+    # The board's temperature (round 23 item 16): read-only, before the short benchmark and again after it ran; the
+    # reading closer to its limit stays with the report (a hot board warns, it fails no check)
+    report.heat = thermal.read_heat(shell)
+
     # Short benchmark
     if bench_model is None:
         report.checks.append(Check("smoke", None, "no model on the device was given for the short llama-bench run "
@@ -850,6 +855,7 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
         if threads:
             argv += ["-t", str(int(threads))]
         r = _run_on_its_own(shell, home, root, argv, BENCH_TIMEOUT)
+        report.heat = thermal.hotter(report.heat, thermal.read_heat(shell))
         if r.status != 0:
             sigill = r.status in (132, -4) or "Illegal instruction" in r.err
             report.checks.append(Check("smoke", False, f"llama-bench failed on the device (exit {r.status})"

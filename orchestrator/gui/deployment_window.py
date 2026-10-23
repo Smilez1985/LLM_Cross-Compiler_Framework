@@ -355,6 +355,9 @@ class BoardBenchWorker(QThread):
                  f"{ui_text('device.bench.gen')}: {out.get('gen_ts') or '-'} t/s",
                  f"{ui_text('device.bench.checks')}: " + ", ".join(f"{c['name']} {c['result']}"
                                                                    for c in out.get("checks", []))]
+        # the board's temperature during the run, as the CLI and the Boards window show it (round 23 item 16)
+        from orchestrator.runtime.device.thermal import from_dict, person_lines
+        lines += person_lines(from_dict(out.get("temperature")))
         board = profile.get("BOARD_MODEL") or device.label
         lines.append(ui_text("device.bench.recorded", board=board, count=out["recorded_builds"])
                      if out.get("recorded_builds") else ui_text("device.bench.not_recorded"))

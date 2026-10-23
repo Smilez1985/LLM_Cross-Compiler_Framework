@@ -5679,10 +5679,15 @@ def _say_board_test(ctx: FrameworkContext, store, device_id: str, profile, build
                          ui_text("device.bench.not_recorded", lang)))
 
 
-def _print_report(report) -> None:
+def _print_report(report, lang: Optional[str] = None) -> None:
+    from orchestrator.runtime.device.steps import heat_lines
     for check in report.checks:
         mark = {True: "[green]passed[/green]", False: "[red]failed[/red]", None: "[yellow]skipped[/yellow]"}[check.ok]
         console.print(f"  {check.name}: {mark} - {escape(check.detail)}")
+    # the board's temperature at these checks (round 23 item 16): a hot board is a warning with what helps
+    hot = bool(getattr(getattr(report, "heat", None), "hot", False))
+    for line in heat_lines(report, lang):
+        console.print(f"[yellow]{escape(line)}[/yellow]" if hot else escape(line))
 
 
 @cli.group()
@@ -6089,13 +6094,13 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         console.print(f"[red]Build {build.build_id[:16]} did not pass its checks on the device; it was not "
                       "activated.[/red]")
         if report is not None:
-            _print_report(report)
+            _print_report(report, _config_language(ctx))
         for note in result.notes:
             console.print(f"[yellow]{escape(note)}[/yellow]")
         sys.exit(1)
     console.print(f"[bold green]Deployed[/bold green] build {build.build_id[:16]} to {escape(result.root)}"
                   + (f" (previous {result.previous} kept)" if result.previous else ""))
-    _print_report(report)
+    _print_report(report, _config_language(ctx))
     _say_board_test(ctx, store, device_id, profile, flow.tested)
     for note in result.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
@@ -6165,7 +6170,7 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     finally:
         client.close()
     console.print(f"Device {device_id}, build {record['build_id'][:16]}:")
-    _print_report(report)
+    _print_report(report, _config_language(ctx))
     _record_board_test(ctx, store, device_id, profile, report, digest if allowed else None, record["build_id"],
                        source, settings.kv_choice(profile).kind)
     if not report.ok:
