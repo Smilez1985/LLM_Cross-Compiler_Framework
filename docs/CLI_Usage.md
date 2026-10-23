@@ -148,6 +148,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `device list` / `device settings` | The probed boards / how the runtime is installed on a board (start script or systemd), decided before a deployment |
 | `device runtime plan/build/deploy/verify/status` | The self-built llama.cpp runtime of a board: plan it from the board's profile, cross-build it, install it over SSH and check it there |
 | `config show` / `config repos` | Show the effective settings and where each comes from / manage source repository overrides |
+| `config local-network` | What offline mode counts as local, and what you count as local yourself (a VPN, a host, an address range) (unreleased) |
 | `config output-folder` | Show or set the output folder finished models are saved to (unreleased) |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
@@ -2170,6 +2171,39 @@ no network.
 
 In the GUI: **File > Settings...**, tab **Source repositories**: the list, **Add** (name and URL) and **Remove
 selected...** (asks first; "No" is the default).
+
+### config local-network
+
+```
+llm-cli config local-network [--add KIND VALUE | --remove KIND VALUE | --check ADDRESS] [--yes]
+```
+
+What offline mode counts as local (unreleased): this computer, your own network, and what you count as local
+yourself. A name counts by every address it resolves to (loopback, private and link-local addresses are local; a
+`.local` or `.lan` name only when it resolves to such an address; a name with a public address is never local), and
+an address of a Tailscale or Headscale VPN only when its control server and every relay are in your own network
+(read with the `tailscale` command when it is installed). Without options the command lists what you count as
+local, with what can then leave your network, and the check of this computer's VPN.
+
+`--add` counts one more as local: `vpn tailscale` (every Tailscale or Headscale address, also with Tailscale's
+servers or outside relays), `host NAME` (for example your reverse proxy's public name, whatever it resolves to) or
+`range CIDR` (an address range such as `203.0.113.0/24`, or one address). It prints the plain explanation of what
+can then leave your network and asks first ("No" is the default; `--yes` skips the question, the explanation is
+printed all the same), then saves `config.yml`. `--remove` stops counting one as local. `--check` shows whether an
+address, host name or URL counts as local and why, with the addresses it resolves to. Only you set these: the AI
+settings change and MCP `update_settings` refuse them, and an AI can neither read nor set them. Exit code 2 for a
+value that is not a VPN, host name or range (an address goes under `range`), 1 when `config.yml` could not be saved.
+
+| Option | Meaning |
+|---|---|
+| `--add KIND VALUE` | Count a VPN, host or address range as local (asks first). |
+| `--remove KIND VALUE` | No longer count it as local. |
+| `--check ADDRESS` | Whether an address, host name or URL counts as local, and why. |
+| `-y`, `--yes` | Do not ask before `--add`; for scripts. |
+
+In the GUI: **File > Settings...**, tab **Local network**: the list with what can then leave your network, **Count as
+local...** (kind and value; asks with the explanation, "No" is the default), **Remove** (asks first), the check of
+this computer's VPN and **Check** for an address (both in the background).
 
 ---
 

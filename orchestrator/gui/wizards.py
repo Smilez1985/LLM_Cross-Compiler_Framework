@@ -765,6 +765,13 @@ Setup commands:
         show_crawl_notice_once(self, cfg, announcer=speak,
                                registry=getattr(self.framework_manager, "tool_registry", None))
 
+        # Offline mode reaches only the person's own network, and the crawler reads only public sites: no crawl then
+        # (the person's own setting; an AI's crawl_docs_site refuses the same way).
+        from orchestrator.utils.locality import offline_mode
+        if offline_mode(cfg):
+            QMessageBox.information(self, ui_text("net.crawl.title", lang), ui_text("net.crawl.offline", lang))
+            return
+
         rag = self.framework_manager.get_component("rag_manager")
         if not rag:
             QMessageBox.critical(self, "Error", "Local Knowledge Base (RAG) is not active.\nPlease enable it in 'Configure AI Agent' first.")
@@ -1230,8 +1237,8 @@ Setup commands:
         if ditto is not None:
             return bool(getattr(ditto, "offline_mode", False))
         try:
-            config = getattr(self.framework_manager, "config", None)
-            return bool(config.get("offline_mode", False)) if config is not None else False
+            from orchestrator.utils.locality import offline_mode   # the one offline check
+            return offline_mode(getattr(self.framework_manager, "config", None))
         except Exception:  # noqa: BLE001 - no settings: the registry is asked
             return False
 

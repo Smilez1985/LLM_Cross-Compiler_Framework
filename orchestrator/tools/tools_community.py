@@ -323,7 +323,15 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                          next=next or "Tell the person what failed; nothing was installed.")
 
     def offline() -> bool:
-        return bool(_cfg(framework, "offline_mode", False))
+        from orchestrator.utils.locality import offline_mode   # the one offline check
+        return offline_mode(getattr(framework, "config", None))
+
+    def refuse_offline() -> None:
+        """The pack's refusal in offline mode: before the question, and again after the person's answer."""
+        if offline():
+            raise blocked("offline_mode", "Offline mode is on: no pack can be downloaded.",
+                          "Only the person can switch offline mode off (in the GUI or with llm-cli).",
+                          reason="not_supported")
 
     def label(cm, path: Path) -> str:
         """A folder of the installation as a label (targets/<name>, community/recipes/<name>, ...), never a path."""
@@ -483,10 +491,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
 
     def prepare_add(inp: AddPackIn, ctx: ToolContext) -> CallFacts:
         cm = community()
-        if offline():
-            raise blocked("offline_mode", "Offline mode is on: no pack can be downloaded.",
-                          "Only the person can switch offline mode off (in the GUI or with llm-cli).",
-                          reason="not_supported")
+        refuse_offline()
         try:
             state = cm.load_index(refresh=True)
         except PackError as e:
@@ -606,6 +611,10 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         if not bound.get("sha256") or bound.get("kind") != inp.kind:
             raise ToolError("The installation is not bound to what the person was shown; nothing was installed.",
                             code="failed", next="Call add_pack_from_index again through the framework's tool registry.")
+        # The look-up refused in offline mode; the person may have switched it on while the question was open (the
+        # import can reach out: the knowledge base's models): the same refusal again, before anything is reserved,
+        # taken from the quarantine or installed (as download_hf_file).
+        refuse_offline()
         from orchestrator.Core.confirmed_builds import unattended
         cm = community()
         channel = ctx.confirm_channel or ""

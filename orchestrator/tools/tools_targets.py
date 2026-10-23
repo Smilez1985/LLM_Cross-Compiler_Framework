@@ -286,11 +286,8 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         return HardwareProbes.for_framework(framework)
 
     def offline() -> bool:
-        get = getattr(getattr(framework, "config", None), "get", None)
-        try:
-            return bool(get("offline_mode", False)) if callable(get) else False
-        except Exception:  # noqa: BLE001
-            return False
+        from orchestrator.utils.locality import offline_mode   # the one offline check
+        return offline_mode(getattr(framework, "config", None))
 
     def cache_index():
         try:

@@ -108,6 +108,9 @@ STEPS = (
     Step("settings.knowledge_on", person_only="permission", window="ai_settings", target="act_ditto_settings"),
     Step("settings.sandbox_on", person_only="permission", window="settings", target="act_file_settings"),
     Step("settings.pin_image", person_only="permission", window="settings", target="act_file_settings"),
+    # the person's opt-out of offline mode's locality rule (DECISIONS round 24, "L-NET final"): never an AI
+    Step("settings.local_network", cli="config local-network", person_only="permission", window="settings",
+         target="act_file_settings"),
     Step("settings.show", cli="config show", person_only="permission", window="settings", target="act_file_settings",
          runnable=True),
     Step("output.folder", cli="config output-folder", cli_args=("{folder}",), params={"folder": Param("path")},
@@ -141,6 +144,10 @@ TEXTS = {
         "step.settings.pin_image": "Set the program image to an exact version in the settings",
         "step.settings.show": "Look at the settings",
         "step.settings.show.what": "Shows the effective settings and where each one comes from.",
+        "step.settings.local_network": "Count it as part of your own network in the settings (only you can)",
+        "step.settings.local_network.what": "Lists what counts as local in offline mode; a VPN, a host or an address "
+                                            "range can be counted as local, each with what can then leave your "
+                                            "network.",
         "step.output.folder": "Choose the folder for finished models",
         "step.docker.start": "Start Docker (Docker Desktop on Windows and macOS)",
         "step.docker.group": "Allow your user account to use Docker, then log in again",
@@ -170,6 +177,11 @@ TEXTS = {
         "step.settings.pin_image": "Das Programm-Image in den Einstellungen auf eine genaue Version festlegen",
         "step.settings.show": "Die Einstellungen ansehen",
         "step.settings.show.what": "Zeigt die wirksamen Einstellungen und woher jede kommt.",
+        "step.settings.local_network": "Es in den Einstellungen als Teil deines eigenen Netzes zählen (nur du kannst "
+                                       "das)",
+        "step.settings.local_network.what": "Listet, was im Offline-Modus als lokal gilt; ein VPN, ein Host oder ein "
+                                            "Adressbereich kann als lokal gezählt werden, jeweils mit dem, was dann "
+                                            "dein Netz verlassen kann.",
         "step.output.folder": "Den Ordner für fertige Modelle wählen",
         "step.docker.start": "Docker starten (Docker Desktop unter Windows und macOS)",
         "step.docker.group": "Deinem Benutzerkonto Docker erlauben, dann neu anmelden",
@@ -189,5 +201,10 @@ FORMAL = {
         "step.images.free.what": "Listet die Docker-Build-Images des Frameworks mit ihrer Größe; Sie haken an, was "
                                  "gelöscht wird.",
         "step.trash.empty": "Den Papierkorb leeren (Sie haken an, was gelöscht wird)",
+        "step.settings.local_network": "Es in den Einstellungen als Teil Ihres eigenen Netzes zählen (nur Sie können "
+                                       "das)",
+        "step.settings.local_network.what": "Listet, was im Offline-Modus als lokal gilt; ein VPN, ein Host oder ein "
+                                            "Adressbereich kann als lokal gezählt werden, jeweils mit dem, was dann "
+                                            "Ihr Netz verlassen kann.",
     },
 }

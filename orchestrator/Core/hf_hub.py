@@ -172,12 +172,10 @@ def hub_api(token: Any = False):
 
 def offline(config: Any) -> bool:
     """Offline mode (the setting offline_mode) of `config` (a ConfigManager, a dict or a stand-in with get); False
-    when it cannot be read. The one check of every Hugging Face caller (HubClient, ModelManager)."""
-    try:
-        get = getattr(config, "get", None)
-        return bool(get("offline_mode", False)) if callable(get) else False
-    except Exception:  # noqa: BLE001 - an unreadable setting is "not offline", as before
-        return False
+    when it cannot be read. The check of every Hugging Face caller (HubClient, ModelManager). Deprecated name: it
+    delegates to the framework's one offline check, utils/locality.offline_mode."""
+    from orchestrator.utils.locality import offline_mode
+    return offline_mode(config)
 
 
 def offline_refusal() -> "HubError":

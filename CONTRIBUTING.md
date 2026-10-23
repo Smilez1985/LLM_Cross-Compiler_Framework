@@ -702,6 +702,19 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   (`tests/test_hf_online.py` fails on anything else). In offline mode a Hugging Face call refuses
   before any request with `hf_hub.offline_refusal()` (checked with `hf_hub.offline(config)`), and a window or the
   command line shows the person `hf_hub.person_text(error, lang)`.
+- **Offline mode: one check, one locality rule.** Ask whether offline mode is on with
+  `orchestrator.utils.locality.offline_mode(config)`, never with your own `config.get("offline_mode")`
+  (`tests/test_offline_check.py` fails on one). Whether an address may be reached in offline mode is decided only by
+  the network-locality rule of `orchestrator/utils/locality.py` (`check_url`, `check_host`: every address a name
+  resolves to, Tailscale only with the person's own Headscale, the person's opt-outs), never by a name suffix or an
+  address check of your own; a connection that follows goes only to the checked addresses (`connect_addresses`, tried in turn;
+  `security/http.local_only_session` for requests, `llm/client.offline_http_client` for the SDKs,
+  `runtime/build/source.offline_reach` for git). A lookup never runs on the GUI thread: a window checks in a worker
+  first (`locality.needs_lookup`). The person's opt-outs are written only by `orchestrator/Core/local_network.py`;
+  no module an AI can reach may import it or set its settings (`tests/test_local_network.py`). A tool whose handler
+  or job reaches out after the person's answer checks offline mode again there (as `download_hf_file`). Tests never
+  resolve a real name or run the real `tailscale` command (the `hermetic_locality` fixture in `tests/conftest.py`;
+  give your own answers by replacing `locality._system_lookup`).
 - **Every CLI action has a mouse path.** Many people never use a terminal, so a person can start every command and
   option of `llm-cli` in the GUI as well, without typing a command (typing a value into a field is fine). A new
   command or option needs its mouse path, a menu entry, a button or a field that calls the same core function as the

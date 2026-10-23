@@ -284,13 +284,24 @@ class TestRules:
         assert codes(cloud.problems(config, FakeSecrets())) == ["offline_cloud"]
         assert change(catalog, "ollama", model="m", offline_mode=True).problems(config, FakeSecrets()) == []
 
-    def test_offline_mode_accepts_a_custom_server_only_on_the_local_network(self, catalog, config):
-        """The rule of the LLM layer at request time (preset.is_local of the address): a custom server outside this
-        computer and the local network is refused at save already, not only when Ditto is asked."""
+    def test_offline_mode_accepts_a_custom_server_only_on_the_local_network(self, catalog, config, monkeypatch):
+        """The rule of the LLM layer at request time (preset.offline_refusal of the address): a custom server outside
+        this computer and the local network is refused at save already, not only when Ditto is asked. Since
+        offline-lan (DECISIONS round 24 L-NET) a name counts by every address it resolves to (utils/locality.py):
+        llm-box.local is local because it resolves to a private address, not because of its suffix."""
+        from orchestrator.utils import locality
+        monkeypatch.setattr(locality, "_system_lookup", lambda host: {
+            "api.example.com": ["93.184.215.14"], "llm-box.local": ["192.168.1.31"],
+            "proxy.local": ["203.0.113.9"]}[host])
         public = change(catalog, "custom", model="m", base_url="https://api.example.com/v1", offline_mode=True)
         found = public.problems(config, FakeSecrets())
         assert codes(found) == ["offline_cloud"] and found[0].title == "Offline Mode"
         assert "not on this computer or your local network" in found[0].message
+        assert "(api.example.com)" in found[0].message and "on the internet" in found[0].message
+        assert "count the address as local in the settings" in found[0].message
+        assert codes(change(catalog, "custom", model="m", base_url="http://proxy.local:8000/v1",
+                            offline_mode=True).problems(config, FakeSecrets())) == ["offline_cloud"], \
+            "a .local name with a public address is not local"
         for address in ("http://192.168.1.30:8000/v1", "http://localhost:8000/v1", "http://llm-box.local:8000/v1"):
             assert change(catalog, "custom", model="m", base_url=address, offline_mode=True).problems(
                 config, FakeSecrets()) == [], address
