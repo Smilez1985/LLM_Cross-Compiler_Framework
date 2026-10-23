@@ -65,6 +65,10 @@ DELETION_SITES = {
     ("orchestrator/rag/migration.py", "delete_old_store"): PERSON,
     # the old Hugging Face download cache after its Take over (A6): the person's list only (tests/test_hf_takeover.py)
     ("orchestrator/Core/hf_takeover.py", "delete_old_copies"): PERSON,
+    # what lay under the name an identical earlier build is copied to ("Use", round 23 item 9): only the person's
+    # accepted list, built again first, audited first (tests/test_use_earlier_build.py covers no plan, another actor,
+    # a changed list and the audit entry)
+    ("orchestrator/Core/artifact_output.py", "_replace_with_copy"): PERSON,
     ("orchestrator/rag/edge_store.py", "EdgeStorage.delete"): KNOWLEDGE_REPLACED,
     # (the chat: FeedStore.clear_conversation and ChatHistory.clear delete rows and messages, not files; see below)
     ("orchestrator/Core/builder.py", "BuildEngine._keep_as_last_build"): NAME_ONLY,
