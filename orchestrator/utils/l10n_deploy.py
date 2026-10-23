@@ -70,6 +70,19 @@ TEXTS = {
         "deploy.existing.title": "Choose the deployment package",
         "deploy.existing.filter": "Deployment packages (*.zip)",
 
+        # the containers of a package with Docker images (the "Use Docker Containerization?" group)
+        "deploy.containers.component": "Container",
+        "deploy.containers.image": "Image",
+        "deploy.containers.access": "Hardware access on the board",
+        "deploy.containers.inference": "Inference engine",
+        "deploy.containers.access_none": "none (it runs on the CPU)",
+        "deploy.containers.tip": "The containers a package with Docker images carries for the chosen profile: the "
+                                 "image comes from the setting image_inference_runtime, the hardware access (an NPU "
+                                 "or a GPU passed into the container) from the profile's target. Ticked containers "
+                                 "go into the package; untick one to leave it out.",
+        "deploy.containers.none": "No container is ticked: tick at least one in the Docker table, or switch Docker "
+                                  "off for this package. Nothing was packaged.",
+
         # the host-key question (trust on first use)
         "deploy.hostkey.title": "New device",
         "deploy.hostkey.question": "First connection to {address}:{port}.\n\nKey type: {key_type}\nFingerprint: "
@@ -174,6 +187,17 @@ TEXTS = {
                                "das oben genannte Board und startet dort sein deploy.sh.",
         "deploy.existing.title": "Deployment-Paket wählen",
         "deploy.existing.filter": "Deployment-Pakete (*.zip)",
+        "deploy.containers.component": "Container",
+        "deploy.containers.image": "Image",
+        "deploy.containers.access": "Hardware-Zugriff auf dem Board",
+        "deploy.containers.inference": "Inference-Engine",
+        "deploy.containers.access_none": "keiner (läuft auf der CPU)",
+        "deploy.containers.tip": "Die Container, die ein Paket mit Docker-Images für das gewählte Profil enthält: das "
+                                 "Image kommt aus der Einstellung image_inference_runtime, der Hardware-Zugriff (eine "
+                                 "NPU oder GPU, die in den Container durchgereicht wird) aus dem Target des Profils. "
+                                 "Angehakte Container kommen ins Paket; nimm den Haken weg, um einen wegzulassen.",
+        "deploy.containers.none": "Kein Container ist angehakt: hake in der Docker-Tabelle mindestens einen an oder "
+                                  "schalte Docker für dieses Paket aus. Es wurde nichts verpackt.",
 
         "deploy.hostkey.title": "Neues Gerät",
         "deploy.hostkey.question": "Erste Verbindung zu {address}:{port}.\n\nSchlüsseltyp: {key_type}\n"

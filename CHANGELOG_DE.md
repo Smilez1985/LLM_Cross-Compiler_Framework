@@ -1469,6 +1469,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Die Docker-Tabelle im Deployment-Tab entscheidet, was das Paket enthält** (DECISIONS Runde 23 Punkt 6): Die
+  Tabelle in **Use Docker Containerization?** zeigt keine Attrappen-Auswahl mehr, die nichts bewirkte (Llama.cpp
+  (CPU), RKLLM (NPU), TensorRT (GPU)); sie listet die Container, die ein Paket mit Docker-Images für das gewählte Profil
+  enthält, aus der einen Liste, die `llm-cli deploy package --docker` verpackt
+  (`deployment_manager.package_containers`): die Inference-Engine mit ihrem Image (Einstellung
+  `image_inference_runtime`) und dem Hardware-Zugriff, den das Target des Profils ihr auf dem Board gibt. Jeder
+  Container ist angehakt, das verpackt genau das, was `--docker` verpackt; ein Container ohne Haken bleibt aus dem
+  Paket (`package_docker_config(docker, containers)`, über `make_package` und den einen Deploy-Schritt
+  `person_steps.deploy_build`), und ohne Haken sagen **Deploy to Target** und **Create package only...**, warum, und
+  tun nichts.
 - **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
   Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
   sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target

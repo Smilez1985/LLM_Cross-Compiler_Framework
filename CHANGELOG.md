@@ -1289,6 +1289,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **The Deployment tab's Docker table decides what the package carries** (DECISIONS round 23 item 6): the table in
+  **Use Docker Containerization?** no longer shows mock-up choices that did nothing (Llama.cpp (CPU), RKLLM (NPU),
+  TensorRT (GPU)); it lists the containers a package with Docker images carries for the chosen profile, from the one
+  list `llm-cli deploy package --docker` packs (`deployment_manager.package_containers`): the inference engine with its
+  image (setting `image_inference_runtime`) and the hardware access the profile's target gives it on the board. Every
+  container is ticked, which packs exactly what `--docker` packs; an unticked container stays out of the package
+  (`package_docker_config(docker, containers)`, through `make_package` and the one deploy step
+  `person_steps.deploy_build`), and with none ticked **Deploy to Target** and **Create package only...** say why and
+  do nothing.
 - **Knowledge always belongs to a topic or a target** (DECISIONS round 23 items 1 and 8): an installed knowledge pack
   lives in `community/knowledge/<topic or target>/<pack>/` (packs installed earlier stay where they are), and every
   excerpt it brings carries its topic or target. A knowledge pack names its topic or target in its manifest:

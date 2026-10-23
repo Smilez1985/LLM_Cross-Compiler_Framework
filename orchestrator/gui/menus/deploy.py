@@ -30,8 +30,10 @@ CLI_PATHS: Dict[str, str] = {
     "deploy list-artifacts": "list_deploy_artifacts",      # the build list with "not saved yet" and tested-on boards
     "deploy package": "btn_deploy_package",                # Create package only... (no board; air-gapped boards)
     "deploy package --profile": "btn_deploy_package",      # the Profile combo of the tab
-    "deploy package --docker": "btn_deploy_package",       # the "Use Docker Containerization?" group of the tab
-    "deploy package --no-docker": "btn_deploy_package",
+    "deploy package --docker": "table_deploy_containers",  # the containers table of the "Use Docker
+                                                           # Containerization?" group: the containers --docker packs
+                                                           # (package_containers), each ticked one goes in
+    "deploy package --no-docker": "grp_deploy_docker",     # the group's own tick, off
     "deploy run": "btn_deploy_existing",                   # Deploy existing package... (PACKAGE_PATH); Deploy to
                                                            # Target (btn_deploy_run) packages and deploys in one step
     "deploy run --host": "btn_deploy_existing",            # the "Address or host name" field
