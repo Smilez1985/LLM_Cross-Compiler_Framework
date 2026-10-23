@@ -667,10 +667,12 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 - **Gemeinsame Helfer haben ein Zuhause unterhalb der Tools.** Pfade in Text, den eine KI liest:
   `orchestrator/security/paths.py` (`label_paths`, `shorten_home`, `device_text`, `scrub_for_ai` und die
   Home-Ordner-Muster `HOME_ROOT` und `ACCOUNT_NAME`, auf denen andere Bereiniger aufbauen). Private atomare Dateien:
-  `orchestrator/utils/atomic.py` (`replace_file` mit dem Windows-Wiederholen, `write_private`,
-  `write_private_exclusive` und `owner_only`, das eine vorhandene Datei nur für dieses Konto lesbar macht: Gruppen- und
-  andere Bits weg unter POSIX, unter Windows eine geschützte ACL nur für dieses Konto; jede „nur du“-Datei nutzt es,
-  nie ein zweiter chmod- oder ACL-Helfer). Einmalige Hinweise: `orchestrator/utils/notice_store.py` (`OneTimeNotice`).
+  `orchestrator/utils/atomic.py` (`replace_file` mit dem Windows-Wiederholen, `remove_file`, das mit demselben
+  Wiederholen löscht (eine Datei, die ein anderer Prozess offen hat, etwa `server.json`, die Schlüsseldateien und die
+  Sperrdateien der lokalen Laufzeit), `write_private`, `write_private_exclusive` und `owner_only`, das eine
+  vorhandene Datei nur für dieses Konto lesbar macht: Gruppen- und andere Bits weg unter POSIX, unter Windows eine
+  geschützte ACL nur für dieses Konto; jede „nur du“-Datei nutzt es, nie ein zweiter chmod- oder ACL-Helfer).
+  Einmalige Hinweise: `orchestrator/utils/notice_store.py` (`OneTimeNotice`).
   Docker-Image-Referenzen: `orchestrator/utils/image_ref.py`. HTTP, das nur öffentliche Adressen erreicht:
   `orchestrator/security/http.py` (`PublicOnlyAdapter`). Der Audit-Schlüssel: `Core/vault_key.audit_key`; die
   Basis-Images eines Pakets: `Core/community_pack.py`; die Snapshot-Prüfung vor einem Index:

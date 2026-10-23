@@ -54,6 +54,7 @@ class FakeRuntime:
         self.catalog = SimpleNamespace(models=models, model=self._model)
         self.models_dir = tmp_path / "models" / "ditto"
         self.recommended = recommended
+        self.preferred = None       # the tier chosen with `runtime start --model`
         self.states = dict(states or {})
         self.calls = []
         self.block = False          # a download that waits until it is stopped
@@ -70,7 +71,7 @@ class FakeRuntime:
         return self._model(self.recommended), "8 GiB RAM: the small model fits"
 
     def preferred_tier(self):
-        return None
+        return self.preferred
 
     def model_state(self, m):
         return self.states.get(m.tier, "missing")
@@ -306,6 +307,22 @@ class TestModelsDownload:
         assert win.btn_cancel.isHidden() and win.btn_download.isEnabled()
         wait_until(models_ui.qapp, lambda: win._load_token is None)
         assert cells(win.table, 0)[4] == "downloaded", "the list is read again afterwards"
+
+    def test_without_a_selection_the_download_is_the_model_the_server_loads(self, models_ui):
+        """A tier chosen earlier for the local server is what a plain start loads: the window's own download takes it
+        (with its name in the question), as `ditto models download` without a tier does."""
+        win, rt = models_ui.win, models_ui.rt
+        assert win.btn_recommended.text() == "Download the recommended model..."
+        rt.preferred = "default"
+        win.refresh()
+        wait_until(models_ui.qapp, lambda: win._load_token is None)
+        assert win.btn_recommended.text() == "Download the chosen model..."
+        models_ui.answers.append(True)
+        assert win.download_recommended() is True
+        (question, _), = models_ui.asked
+        assert question.startswith("Chosen earlier for the local server: default\n\nexample/Model-GGUF / default.gguf")
+        wait_until(models_ui.qapp, lambda: not win.busy)
+        assert rt.called("download_model") == [("default", False)]
 
     def test_download_selected_takes_the_chosen_tier(self, models_ui):
         win = models_ui.win

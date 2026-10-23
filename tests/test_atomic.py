@@ -6,8 +6,9 @@ Characterization first: the two writers the framework shares keep their own rule
   0700, a mkstemp file ".<name>.<random>.tmp" next to the target, fsync, 0600 (not on Windows), then replace_file.
 - runtime/llama_server._write_private (the runtime's own state files): a ".<name>.<8 hex>.tmp" file created with
   O_EXCL and 0600, LF line ends on every system, no fsync, no link resolution (a link is replaced by the file),
-  plain os.replace.
-Both leave no temporary file behind, also when the replace fails.
+  replace_file (port-runtime: it used a plain os.replace, which Windows refuses while LLMClient reads server.json).
+Both leave no temporary file behind, also when the replace fails. remove_file deletes the runtime's state, key and
+lock files and tries again on Windows while another process has the file open.
 """
 
 import os
@@ -144,6 +145,58 @@ def test_replace_file_tries_again_while_a_reader_holds_the_target(tmp_path, monk
     (tmp_path / "a").write_text("y", encoding="utf-8")
     with pytest.raises(PermissionError):
         vault_key.replace_file(tmp_path / "a", tmp_path / "b")
+
+
+def test_the_runtime_writer_tries_again_while_a_reader_holds_the_target(tmp_path, monkeypatch):
+    """Windows refuses os.replace while another process (LLMClient in the GUI, a lock waiter) has server.json or
+    active.json open; the runtime's writer (also the build store's and the runtime mode's) tries again like
+    replace_file, and elsewhere a PermissionError is a real error that leaves no temporary file."""
+    from orchestrator.utils import atomic
+    monkeypatch.setattr(atomic, "REPLACE_RETRIES", 10)  # what a Windows host uses
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    real_replace, refused = os.replace, []
+
+    def busy_twice(src, dst):
+        if len(refused) < 2:
+            refused.append(dst)
+            raise PermissionError(13, "The process cannot access the file")
+        return real_replace(src, dst)
+    monkeypatch.setattr(os, "replace", busy_twice)
+    target = tmp_path / "runtime" / "server.json"
+    llama_server._write_private(target, "{}")
+    assert target.read_text(encoding="utf-8") == "{}" and len(refused) == 2
+    refused.clear()
+    monkeypatch.setattr(atomic, "REPLACE_RETRIES", 0)  # Linux and macOS: no retry
+    with pytest.raises(PermissionError):
+        llama_server._write_private(target, '{"a": 1}')
+    assert target.read_text(encoding="utf-8") == "{}" and list(target.parent.iterdir()) == [target]
+
+
+def test_remove_file_tries_again_while_a_reader_holds_the_file(tmp_path, monkeypatch):
+    """remove_file: a missing file is fine (missing_ok); a PermissionError (Windows: another process has the file
+    open) is tried again REPLACE_RETRIES times, never elsewhere."""
+    from orchestrator.utils import atomic
+    assert atomic.REPLACE_RETRIES == (10 if os.name == "nt" else 0)
+    monkeypatch.setattr(atomic, "REPLACE_RETRIES", 3)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    real_unlink, busy = os.unlink, {"left": 2}
+
+    def busy_twice(path, *args, **kwargs):
+        if busy["left"]:
+            busy["left"] -= 1
+            raise PermissionError(13, "The process cannot access the file")
+        return real_unlink(path, *args, **kwargs)
+    monkeypatch.setattr(os, "unlink", busy_twice)
+    target = tmp_path / "server-1.key"
+    target.write_text("k", encoding="utf-8")
+    atomic.remove_file(target)
+    assert not target.exists() and busy["left"] == 0
+    atomic.remove_file(target)  # already gone
+    target.write_text("k", encoding="utf-8")
+    busy["left"] = 9
+    with pytest.raises(PermissionError):
+        atomic.remove_file(target)
+    assert target.exists()
 
 
 def test_the_old_names_are_the_one_implementation():

@@ -1184,7 +1184,9 @@ and its note (recommended for this computer, chosen, on request, not pinned), wi
 recommendation and the full models folder. **Download the recommended model...** and **Download selected...** do
 `ditto models download` with the same question (repo, file, licence, size, folder; "No" is the default); the list and
 the download run in the background, with progress and **Cancel** (the part is kept for a resume). The recommended
-download takes the recommendation the window shows, so no hardware probe runs while you wait for the question. A
+download takes the recommendation the window shows, so no hardware probe runs while you wait for the question; when a
+tier was chosen earlier for the local server, the button reads **Download the chosen model...** and takes that tier,
+the model a plain start loads (as `ditto models download` without a tier does). A
 download is a task of Ditto's local runtime: it waits while a build, a server start or another download runs in
 **Ditto > Local Runtime...** or the AI settings, and they wait for it.
 
@@ -1206,7 +1208,9 @@ download is a task of Ditto's local runtime: it waits while a build, a server st
   Silicon and integrated GPUs), rounded to 256 tokens, at least 4096 and at most 32768 (`--ctx` sets it).
 - **Isolation:** `llama-server` listens on 127.0.0.1 only, on a free port. A new random API key per start reaches it
   only through a key file readable by you, and the framework checks that the server refuses requests without the
-  key. The web UI and the slots endpoint are off, and the server runs with `--offline`. Options that would give the
+  key. An answer on the port counts only while `llama-server` itself listens there: a program that took the free port
+  in the meantime never gets the key or a prompt (another port is tried), and a call prepared for a server that has
+  restarted since is refused instead of sending the new key to the old port. The web UI and the slots endpoint are off, and the server runs with `--offline`. Options that would give the
   model its own tools, agent mode, MCP servers or remote computing, that download (Hugging Face, URLs, Docker Hub), write the
   prompts to disk, run programs from a folder, or put a key or token on the command line are refused, in every
   spelling llama.cpp accepts (its aliases, and `--a_b` for `--a-b`). The

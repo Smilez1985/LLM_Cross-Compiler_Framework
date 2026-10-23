@@ -5,13 +5,17 @@ runtime/llama_server.py, which keep the old names, so the utils and the kernel n
 
 - replace_file(src, dst): os.replace, tried again for a moment on Windows while another process has the target open
   (REPLACE_RETRIES times there, never elsewhere).
+- remove_file(path): deletes a file if it is there, tried again the same way (chain port-runtime: the local runtime's
+  server.json and key files, which LLMClient reads in every process, and the lock files of utils/download.FileLock,
+  which waiting processes read).
 - write_private(path, text): the shared writer (the secrets store, profiles, trusted boards, the notices, the input
   history, the GUI bridge): the link is resolved first (a link onto an encrypted volume keeps pointing there), the
   folder is made 0700, a temporary ".<name>.<random>.tmp" file next to the target is written, flushed and synced,
   made 0600 (not on Windows) and moved over the target with replace_file.
 - write_private_exclusive(path, text): the local runtime's state files (llama_server, the build store, the runtime
   mode): a ".<name>.<8 hex>.tmp" file created with O_EXCL and 0600, LF line ends on every system, no fsync, no link
-  resolution (a link is replaced by the file), plain os.replace.
+  resolution (a link is replaced by the file), replace_file (a plain os.replace until chain port-runtime: Windows
+  refused it while the GUI's LLMClient read server.json).
 Neither leaves its temporary file behind. The other writers (JSON and signed stores) are unified later (chain
 c5-io-stores).
 - owner_only(path): an existing file private to this account (the framework's SSH key before OpenSSH uses it, chain
@@ -39,6 +43,21 @@ def replace_file(src, dst) -> None:
     for attempt in range(REPLACE_RETRIES + 1):
         try:
             os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt >= REPLACE_RETRIES:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
+def remove_file(path) -> None:
+    """Deletes the file at `path` if it is there (a missing file is fine); tried again for a moment on Windows while
+    another process has it open (REPLACE_RETRIES times there, never elsewhere)."""
+    for attempt in range(REPLACE_RETRIES + 1):
+        try:
+            os.unlink(path)
+            return
+        except FileNotFoundError:
             return
         except PermissionError:
             if attempt >= REPLACE_RETRIES:
@@ -75,7 +94,7 @@ def write_private_exclusive(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-        os.replace(tmp, path)
+        replace_file(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -171,4 +190,4 @@ def _windows_owner_only(path: str) -> None:
         raise failed("SetNamedSecurityInfoW", error)
 
 
-__all__ = ["REPLACE_RETRIES", "owner_only", "replace_file", "write_private", "write_private_exclusive"]
+__all__ = ["REPLACE_RETRIES", "owner_only", "remove_file", "replace_file", "write_private", "write_private_exclusive"]

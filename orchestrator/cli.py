@@ -2296,7 +2296,7 @@ def models_list(ctx: FrameworkContext):
 @click.option('--yes', '-y', is_flag=True, help='Do not ask before downloading')
 @pass_context
 def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
-    """Download a model at its pinned revision and check size and sha256 (default: the recommended tier)"""
+    """Download a model at its pinned revision and check size and sha256 (default: the one `runtime start` loads)"""
     from orchestrator.runtime.ditto_models import model_to_download
     from orchestrator.runtime.llama_server import LocalRuntimeError
     rt = _local_runtime(ctx)
@@ -2307,6 +2307,8 @@ def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
         sys.exit(2)
     if why is not None:
         console.print(f"Recommended: {escape(why)}")
+    elif tier is None:   # the tier chosen earlier: the model a plain `runtime start` loads
+        console.print(f"Chosen earlier with 'runtime start --model': {escape(model.tier)}")
     if rt.model_ready(model):
         console.print(f"[green]{escape(model.file)} is already downloaded.[/green]")
         return

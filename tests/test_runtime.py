@@ -7,6 +7,7 @@ a fake HTTP session with Range support, archives built in tmp_path and a small P
 that speaks /health, /v1/models and /v1/chat/completions with API-key checks.
 """
 
+import contextlib
 import hashlib
 import io
 import json
@@ -15,9 +16,12 @@ import signal
 import stat
 import sys
 import tarfile
+import threading
 import time
 import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import psutil
 import pytest
@@ -90,6 +94,17 @@ GPU0:
 \tdeviceType         = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
 \tdeviceName         = AMD Radeon RX 7900 XTX (RADV NAVI31)
 \tdriverInfo         = Mesa 25.0.7
+"""
+
+
+VULKAN_SOFTWARE_ONLY = """\
+Devices:
+========
+GPU0:
+\tvendorID           = 0x10005
+\tdeviceID           = 0x0000
+\tdeviceType         = PHYSICAL_DEVICE_TYPE_CPU
+\tdeviceName         = llvmpipe (LLVM 19.1.7, 256 bits)
 """
 
 
@@ -283,6 +298,30 @@ class TestProbes:
                                memory=(32 * GIB, 24 * GIB))
         assert [g.name for g in info.gpus] == ["AMD Radeon RX 7900 XTX"]
         assert info.gpus[0].vram_mib == 25753026560 // MIB and info.vulkan and info.arch == "x86_64"
+
+    def test_vulkaninfo_with_only_a_software_renderer_means_no_gpu_driver(self, tmp_path):
+        # The loader is installed (vulkaninfo runs), but no GPU has a Vulkan driver: the Vulkan build would only find
+        # llvmpipe, so the CPU build is the honest choice. Without vulkaninfo the loader still counts (next test).
+        root = amd_sysfs(tmp_path, card="card0", device="0x744c", vram=24 * GIB, gfx_version=110000)
+        info = detect_hardware(FakeRunner(vulkaninfo=(0, VULKAN_SOFTWARE_ONLY, "")), system="Linux",
+                               machine="x86_64", memory=(32 * GIB, 24 * GIB), sysfs_root=root, rocm_globs=(),
+                               find_library=lambda name: "libvulkan.so.1" if name == "vulkan" else None)
+        assert not info.vulkan and info.gpus[0].vram_mib == 24 * 1024
+        choice = select_backend(info, CATALOG)
+        assert choice.backend == "cpu" and "no Vulkan driver" in choice.reason
+        without = detect_hardware(FakeRunner(), system="Linux", machine="x86_64", memory=(32 * GIB, 24 * GIB),
+                                  sysfs_root=root, rocm_globs=(),
+                                  find_library=lambda name: "libvulkan.so.1" if name == "vulkan" else None)
+        assert without.vulkan
+
+    def test_windows_vulkaninfo_with_only_a_software_renderer(self):
+        # The display adapter is there, but vulkaninfo lists only a software renderer: neither the adapter nor the
+        # Vulkan loader (vulkan-1.dll) makes it a Vulkan GPU.
+        adapters = json.dumps({"Name": "AMD Radeon RX 7900 XTX", "AdapterCompatibility": "Advanced Micro Devices, Inc.",
+                               "DriverVersion": "32.0.12033.1030", "Memory": 25753026560})
+        info = detect_hardware(FakeRunner(vulkaninfo=(0, VULKAN_SOFTWARE_ONLY, ""), powershell=(0, adapters, "")),
+                               system="Windows", machine="AMD64", memory=(32 * GIB, 24 * GIB))
+        assert [g.name for g in info.gpus] == ["AMD Radeon RX 7900 XTX"] and not info.vulkan
 
     def test_probes_that_fail_contribute_nothing(self, tmp_path):
         info = detect_hardware(FakeRunner(nvidia_smi=(9, "", "NVIDIA-SMI has failed"), vulkaninfo=(1, "", "")),
@@ -612,6 +651,48 @@ class TestDownloads:
         self.fetch(tmp_path, session, data)
         assert session.calls == []
 
+    def test_tls_failures_are_not_retried_and_name_only_the_host(self, tmp_path):
+        # A certificate problem does not go away on its own (a TLS-inspecting proxy needs its CA): it used to be
+        # retried five times with backoff and to end in "did not complete after 5 attempts".
+        session = FakeSession()
+
+        def get(url, **kw):
+            session.calls.append(url)
+            raise requests.exceptions.SSLError(f"certificate verify failed for {url}?X-Amz-Signature=secret")
+        session.get = get
+        with pytest.raises(LocalRuntimeError, match="TLS certificate of example.invalid") as err:
+            self.fetch(tmp_path, session, b"abc")
+        assert len(session.calls) == 1 and "Signature" not in str(err.value) and "REQUESTS_CA_BUNDLE" in str(err.value)
+
+    def test_a_tls_failure_after_a_redirect_names_the_host_that_failed(self, tmp_path):
+        # Review of port-runtime: release archives and models are redirected to a CDN host. A proxy that inspects only
+        # some hosts fails the CDN's certificate; the message named the first host, whose certificate was fine.
+        session = FakeSession()
+        cdn = "https://objects.cdn.invalid/blob.bin?X-Amz-Signature=secret"
+
+        def get(url, **kw):
+            session.calls.append(url)
+            raise requests.exceptions.SSLError("certificate verify failed",
+                                               request=requests.Request("GET", cdn).prepare())
+        session.get = get
+        with pytest.raises(LocalRuntimeError, match="TLS certificate of objects.cdn.invalid could not") as err:
+            self.fetch(tmp_path, session, b"abc")
+        assert "Signature" not in str(err.value) and "example.invalid" not in str(err.value)
+
+    @pytest.mark.parametrize("error", [requests.exceptions.TooManyRedirects("30 redirects"),
+                                       requests.exceptions.InvalidURL("bad")])
+    def test_other_request_errors_end_with_a_clear_message(self, tmp_path, error):
+        session = FakeSession()
+        session.get = lambda url, **kw: (_ for _ in ()).throw(error)
+        with pytest.raises(LocalRuntimeError, match=f"failed \\({type(error).__name__}\\)"):
+            self.fetch(tmp_path, session, b"abc")
+
+    def test_a_part_file_that_cannot_be_written(self, tmp_path):
+        data = os.urandom(100000)
+        (tmp_path / "dl" / "blob.bin.part").mkdir(parents=True)  # stands in for a full or read-only disk
+        with pytest.raises(LocalRuntimeError, match="Could not write .*resumes on the next run"):
+            self.fetch(tmp_path, FakeSession({self.URL: data}), data)
+
     def test_not_enough_disk_space(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ls.shutil, "disk_usage", lambda p: type("U", (), {"free": 100 * MIB})())
         with pytest.raises(LocalRuntimeError, match="Not enough disk space for the download: "):
@@ -750,7 +831,7 @@ class TestInstall:
         assert [i.full_path for i in rt.cleanup_plan().items] == [str(rt.root / "b0-cpu")]
 
     def test_refuses_to_replace_the_installation_the_server_runs_from(self, tmp_path, monkeypatch):
-        rt, _ = self.setup_runtime(tmp_path)
+        rt, session = self.setup_runtime(tmp_path)
         inst = rt.install_prebuilt()
 
         class Running:
@@ -760,8 +841,61 @@ class TestInstall:
             def exe(self):
                 return str(inst.server)
         monkeypatch.setattr(ls, "owned_process", lambda state: Running())
+        calls = len(session.calls)
         with pytest.raises(LocalRuntimeError, match="stop it first"):
             rt.install_prebuilt(force=True)
+        assert len(session.calls) == calls  # refused before downloading, not after
+
+    def test_downloads_do_not_hold_the_runtime_lock(self, tmp_path):
+        # A CUDA archive is hundreds of MB; holding the lock meanwhile made `runtime stop`, `runtime start` and the exit
+        # handler of a GUI with a tied server wait for the whole download (up to the lock's 15 minutes).
+        rt, session = self.setup_runtime(tmp_path)
+        free = []
+        get = session.get
+
+        def checking_get(url, **kw):
+            with ls._FileLock(rt.lock_file, timeout=0.3, sleep=lambda s: time.sleep(0.05)):
+                free.append(url)
+            return get(url, **kw)
+        session.get = checking_get
+        rt.install_prebuilt()
+        assert len(free) == 2 and rt.installed()
+
+    def test_the_leftovers_of_an_interrupted_install_are_removed_before_the_space_check(self, tmp_path, monkeypatch):
+        # Review of port-runtime: the unpack space check moved before the downloads, out of the lock, and so before
+        # the leftovers of an interrupted install (.staging-*, .old-*) were removed; on a disk they filled, the install
+        # was refused although removing them (as it did before) made room.
+        rt, session = self.setup_runtime(tmp_path)
+        leftover = rt.root / ".staging-cuda-13.4-dead"
+        leftover.mkdir(parents=True)
+        (leftover / "llama-server").write_bytes(b"partial")
+
+        def usage(path):
+            full = any(rt.root.glob(".staging-*"))
+            return SimpleNamespace(total=2 * 1024 * GIB, used=GIB, free=0 if full else 1024 * GIB)
+        monkeypatch.setattr(ls.shutil, "disk_usage", usage)
+        inst = rt.install_prebuilt()
+        assert inst == rt.installed() and not leftover.exists()
+
+    @pytest.mark.parametrize("force", [False, True])
+    def test_an_install_finished_meanwhile_by_another_process(self, tmp_path, force):
+        rt, session = self.setup_runtime(tmp_path)
+        other = LocalLLMRuntime(data_dir=rt.data_dir, models_dir=rt.models_dir, catalog=rt.catalog,
+                                hardware=rt.hardware(), session=session, sleep=lambda s: None)
+        lock = rt._lock
+
+        def other_installs_first():
+            other.install_prebuilt(force=force)  # it reuses our verified archives and deletes them when done
+            return lock()
+        rt._lock = other_installs_first
+        calls_before = len(session.calls)
+        inst = rt.install_prebuilt(force=force)
+        assert inst == rt.installed() and inst.server.is_file()
+        downloads = len(session.calls) - calls_before
+        # Without force the other installation is taken as it is; with force the removed archives are fetched again
+        # instead of failing as a "broken archive".
+        assert downloads == (4 if force else 2)
+        assert not list((rt.root / "downloads").glob("*.tar.gz"))
 
     def test_no_build_for_this_machine(self, tmp_path):
         rt = LocalLLMRuntime(data_dir=tmp_path / "s", models_dir=tmp_path / "m", catalog=runtime_catalog(),
@@ -836,7 +970,9 @@ class TestServerCommand:
         cpu = build_server_command(Path("s"), Path("m"), 1, Path("k"), 4096, "x", gpu=False, cache_ram_mib=256)
         assert "-ngl" not in cpu and "--sleep-idle-seconds" not in cpu
 
-    @pytest.mark.parametrize("alias", ["--tools", "--api-key", "--agent", "--rpc", "--webui"])
+    # --reuse-port (SO_REUSEPORT) would let another process of this user bind the server's port beside it.
+    @pytest.mark.parametrize("alias", ["--tools", "--api-key", "--agent", "--rpc", "--webui", "-hfr", "--hf-token",
+                                       "-mmu", "--log-prompts-dir", "--reuse-port", "--reuse_port"])
     def test_forbidden_options_never_reach_the_server(self, alias):
         with pytest.raises(LocalRuntimeError, match="Refusing"):
             build_server_command(Path("s"), Path("m"), 1, Path("k"), 4096, alias, gpu=False, cache_ram_mib=256)
@@ -924,7 +1060,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):
         print(fmt % a, flush=True)
 
-ThreadingHTTPServer((opt("--host"), int(opt("--port"))), Handler).serve_forever()
+time.sleep(behavior.get("bind_delay", 0))  # llama-server loads its GPU backends before it binds: seconds on some PCs
+try:
+    httpd = ThreadingHTTPServer((opt("--host"), int(opt("--port"))), Handler)
+except OSError:  # the port is taken: llama-server says so and exits
+    print(f"couldn't bind HTTP server socket, hostname: {opt('--host')}, port: {opt('--port')}", flush=True)
+    sys.exit(1)
+httpd.serve_forever()
 '''
 
 
@@ -969,6 +1111,37 @@ class FakeConfig:
 
     def get(self, key, default=None):
         return self.values.get(key, default)
+
+
+@contextlib.contextmanager
+def impostor_on_the_first_port(monkeypatch):
+    """Another program that took the port the start chooses first: it answers /health, accepts any key and records
+    every Authorization header it gets. The start's next choice is a really free port. Yields (its port, headers)."""
+    seen = []
+
+    class Impostor(BaseHTTPRequestHandler):
+        def do_GET(self):
+            auth = self.headers.get("Authorization", "")
+            seen.append(auth)
+            body = b'{"data": [{"id": "tiny"}]}'
+            self.send_response(200 if self.path == "/health" or auth else 401)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    impostor = ThreadingHTTPServer(("127.0.0.1", 0), Impostor)
+    threading.Thread(target=impostor.serve_forever, daemon=True).start()
+    ports = [impostor.server_address[1]]
+    free_port = ls._free_port
+    monkeypatch.setattr(ls, "_free_port", lambda: ports.pop() if ports else free_port())
+    try:
+        yield impostor.server_address[1], seen
+    finally:
+        impostor.shutdown()
+        impostor.server_close()
 
 
 @POSIX_ONLY
@@ -1091,6 +1264,118 @@ class TestServerProcess:
         handlers[-1]()
         assert gone(third.pid) and rt.endpoint() is None and gone(first.pid)
 
+    def test_a_program_answering_on_the_chosen_port_never_gets_the_key(self, fake_runtime, monkeypatch):
+        # Port race: another program takes the free port first and answers /health (and accepts any key). It used to
+        # be taken for our server, and _check_auth sent it the new key; the endpoint then pointed at it.
+        with impostor_on_the_first_port(monkeypatch) as (taken, seen):
+            rt = fake_runtime()
+            ep = rt.start()
+            assert ep.port != taken and ls.listens_on(ep.pid, ep.port)
+            assert seen and not any(ep.api_key in s for s in seen) and all(not s for s in seen)
+            assert (rt.root / "b1-cpu" / "starts").read_text() == "2", "the second port was tried"
+
+    def test_other_processes_get_no_endpoint_before_the_port_is_confirmed(self, fake_runtime, monkeypatch):
+        # Review of port-runtime: server.json is written right after the launch, and LLMClient in every other process
+        # (the GUI, the MCP server) reads it. While the port check still ran it named the impostor's port with the new
+        # key, so a chat sent at that moment gave the impostor the key and the prompt. Here the stand-in binds after
+        # 1 s, as llama-server binds only after it loaded its GPU backends.
+        with impostor_on_the_first_port(monkeypatch) as (taken, seen):
+            rt = fake_runtime()
+            (rt.root / "b1-cpu" / "behavior.json").write_text(json.dumps({"mode": "ok", "bind_delay": 1.0}))
+            handed_out = []
+            rt._sleep = lambda s: (handed_out.append(ls.read_endpoint(rt.root)), time.sleep(s))
+            ep = rt.start()
+            assert ep.port != taken and (rt.root / "b1-cpu" / "starts").read_text() == "2"
+            assert handed_out and not [e for e in handed_out if e is not None and e.port == taken]
+            assert all(not s for s in seen)
+            again = ls.read_endpoint(rt.root)
+            assert (again.port, again.api_key, again.pid) == (ep.port, ep.api_key, ep.pid)
+            assert "port_unconfirmed" not in json.loads(rt.state_file.read_text()), "server.json as before"
+
+    def test_a_server_that_holds_its_port_is_handed_out_while_it_loads(self, fake_runtime):
+        # llama-server binds its port before it loads the model (/health answers 503 meanwhile). Once it is that port's
+        # listener, other processes get the endpoint as before (their calls wait for the model), not "not running".
+        rt = fake_runtime("slow")
+        handed_out = []
+        rt._sleep = lambda s: (handed_out.append(ls.read_endpoint(rt.root)), time.sleep(s))
+        with pytest.raises(LocalRuntimeError, match="did not become ready in time"):
+            rt.start(timeout=2)
+        assert [e for e in handed_out if e is not None]
+
+    def test_a_start_that_died_before_the_port_was_confirmed_leaves_no_server_behind(self, fake_runtime):
+        # A start killed before the port check finished leaves a running server whose record is not handed out; the
+        # next start stops it instead of starting a second one beside it.
+        rt = fake_runtime()
+        first = rt.start()
+        state = json.loads(rt.state_file.read_text())
+        rt.state_file.write_text(json.dumps({**state, "port_unconfirmed": True}))
+        assert rt.endpoint() is None and rt.status().running
+        second = rt.start()
+        assert second.pid != first.pid and gone(first.pid) and rt.endpoint().pid == second.pid
+
+    def test_an_unreliable_connection_table_does_not_block_the_start(self, fake_runtime, monkeypatch):
+        # Where psutil cannot list the server's sockets, a server that keeps running after the grace period has bound
+        # its port (llama-server exits when the port is taken).
+        monkeypatch.setattr(ls, "listens_on", lambda pid, port: False)
+        rt = fake_runtime()
+        rt.PORT_CHECK_GRACE = 0.5
+        ep = rt.start()
+        assert rt.status().healthy and (rt.root / "b1-cpu" / "starts").read_text() == "1" and ep.pid
+        monkeypatch.setattr(ls, "listens_on", lambda pid, port: None)  # cannot be checked at all: no wait
+        assert rt.start(ctx=4096).pid != ep.pid
+
+    def test_choosing_a_tier_is_remembered_when_the_running_server_is_reused(self, fake_runtime):
+        # `runtime start --model X` (or `--model auto`) on a server that already serves X returned before the choice
+        # was recorded, so the next plain start loaded the recommendation instead.
+        rt = fake_runtime()
+        first = rt.start()
+        assert rt.preferred_tier() is None
+        assert rt.start(tier="tiny", remember=False).pid == first.pid and rt.preferred_tier() is None
+        assert rt.start(tier="tiny").pid == first.pid and rt.preferred_tier() == "tiny"
+        assert rt.start(tier="auto").pid == first.pid and rt.preferred_tier() is None
+
+    def test_an_explicit_idle_time_restarts_a_server_started_with_another(self, fake_runtime):
+        # `runtime start --sleep-idle 0` was ignored while a server with the catalog's 600 s ran.
+        rt = fake_runtime()
+        first = rt.start()
+        argv = json.loads((rt.root / "b1-cpu" / "argv-1.json").read_text())
+        assert argv[argv.index("--sleep-idle-seconds") + 1] == "600"
+        second = rt.start(sleep_idle_seconds=0)
+        assert second.pid != first.pid and "--sleep-idle-seconds" not in json.loads(
+            (rt.root / "b1-cpu" / "argv-2.json").read_text())
+        assert rt.start(sleep_idle_seconds=0).pid == second.pid and rt.start().pid == second.pid
+        assert rt.start(sleep_idle_seconds=600).pid != second.pid
+
+    def test_an_idle_time_the_build_cannot_use_restarts_nothing(self, fake_runtime):
+        # A build without --sleep-idle-seconds always runs with 0: asking for another value compares as 0, so it
+        # neither restarts the server on every start nor passes the option.
+        rt = fake_runtime()
+        rt.catalog.llama_cpp.features["sleep_idle_seconds"] = False
+        first = rt.start()
+        assert rt.start(sleep_idle_seconds=300).pid == first.pid
+        assert "--sleep-idle-seconds" not in json.loads((rt.root / "b1-cpu" / "argv-1.json").read_text())
+
+    def test_exit_handler_does_not_wait_for_a_busy_lock(self, fake_runtime, monkeypatch):
+        # Another process holding the runtime lock (its start waits up to minutes for health) must not keep this
+        # process from exiting for the lock's 15 minutes; the tied server, verified by pid and start time, is ended
+        # anyway.
+        handlers = []
+        monkeypatch.setattr(ls.atexit, "register", handlers.append)
+        rt = fake_runtime()
+        ep = rt.start(tie_to_process=True)
+        holder = psutil.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            rt.lock_file.write_text(f"{holder.pid} {holder.create_time()}")
+            rt.EXIT_LOCK_TIMEOUT = 0.3
+            began = time.monotonic()
+            handlers[0]()
+            assert time.monotonic() - began < 5 and gone(ep.pid)
+        finally:
+            holder.kill()
+            holder.wait(5)
+            rt.lock_file.unlink(missing_ok=True)
+        assert rt.endpoint() is None
+
     def test_crashed_server_leaves_nothing_that_is_trusted(self, fake_runtime):
         rt = fake_runtime()
         ep = rt.start()
@@ -1198,6 +1483,29 @@ class TestHousekeeping:
         with ls._FileLock(lock_path, timeout=0.3):
             assert lock_path.read_text().startswith(str(os.getpid()))
 
+    def test_windows_sharing_violations_are_retried(self, tmp_path, monkeypatch):
+        """Windows refuses to delete a file that another process has open at that moment (LLMClient reading
+        server.json or the key in the GUI, a lock waiter reading the lock file): stop() and the runtime lock try
+        again for a moment (utils/atomic.remove_file) instead of failing with a sharing violation."""
+        from orchestrator.utils import atomic
+        monkeypatch.setattr(atomic, "REPLACE_RETRIES", 10)  # what a Windows host uses
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        rt = self.runtime(tmp_path)
+        rt.root.mkdir(parents=True)
+        rt.state_file.write_text(json.dumps({"pid": 999999, "create_time": 1.0, "server": "x"}))
+        (rt.root / "server-a.key").write_text("k")
+        real_unlink, refused = os.unlink, []
+
+        def busy_once(path, *args, **kwargs):
+            if Path(path).name not in refused:
+                refused.append(Path(path).name)
+                raise PermissionError(13, "The process cannot access the file")
+            return real_unlink(path, *args, **kwargs)
+        monkeypatch.setattr(os, "unlink", busy_once)
+        assert rt.stop() == 0
+        assert not rt.state_file.exists() and not (rt.root / "server-a.key").exists() and not rt.lock_file.exists()
+        assert {"server.json", "server-a.key", ".lock"} <= set(refused)
+
     def test_preferred_tier_and_auto(self, tmp_path):
         rt = self.runtime(tmp_path)
         assert rt.resolve_model()[0].tier == "tiny" and rt.preferred_tier() is None
@@ -1276,6 +1584,25 @@ class TestCli:
         declined = self.invoke(monkeypatch, rt, "models", "download", "small", input="n\n")
         assert declined.exit_code == 0 and not list(rt.models_dir.glob("*.gguf"))
 
+    def test_model_download_defaults_to_the_model_runtime_start_loads(self, tmp_path, monkeypatch):
+        # `runtime start` loads the tier chosen earlier with --model; `models download` without a tier fetched the
+        # recommendation instead, so the next start still failed with "not downloaded".
+        small, other = b"GGUF" + os.urandom(800), b"GGUF" + os.urandom(900)
+        models = [{"tier": "tiny", "repo": "example/Tiny-GGUF", "revision": "c" * 40, "file": "tiny.gguf",
+                   "size": len(small), "sha256": sha(small)},
+                  {"tier": "other", "repo": "example/Other-GGUF", "revision": "d" * 40, "file": "other.gguf",
+                   "size": len(other), "sha256": sha(other)}]
+        session = FakeSession({f"https://models.invalid/example/Other-GGUF/resolve/{'d' * 40}/other.gguf": other})
+        rt = LocalLLMRuntime(data_dir=tmp_path / "s", models_dir=tmp_path / "m", hardware=CPU_HW, session=session,
+                             catalog=runtime_catalog(models=models), sleep=lambda s: None)
+        rt._update_active(tier="other")
+        assert rt.resolve_model()[0].tier == "other", "what a plain start loads"
+        result = self.invoke(monkeypatch, rt, "models", "download", "--yes")
+        assert result.exit_code == 0 and "Chosen earlier with 'runtime start --model': other" in result.output, \
+            result.output
+        assert "Recommended:" not in result.output
+        assert rt.model_ready(rt.catalog.model("other")) and not rt.model_path(rt.catalog.model("tiny")).exists()
+
     def test_install_failure_exits_with_1(self, tmp_path, monkeypatch):
         rt, session = TestInstall().setup_runtime(tmp_path)
         for url in session.files:
@@ -1311,6 +1638,26 @@ class TestClientIntegration:
         assert json.loads(seen[0].content)["model"] == "Qwen3.5-4B-Q4_K_M"
         client.set_runtime_endpoint("local", "http://127.0.0.1:9999/v1", "explicit", "other")  # explicit wins
         assert client.resolve().base_url == "http://127.0.0.1:9999/v1" and client.resolve().model == "other"
+
+    def test_a_new_key_never_goes_to_the_port_of_the_previous_server(self, tmp_path):
+        # A restart between resolve() and adapter() gives a new port and a new key. The adapter used to pair the old
+        # URL with the new key (the credential read the endpoint again); another program may hold the old port now.
+        from orchestrator.llm import ProviderUnavailable
+        answers = [("http://127.0.0.1:9123/v1", "old-key", "m"), ("http://127.0.0.1:9124/v1", "new-key", "m")]
+        client = self.make(tmp_path, lambda pid: answers[0])
+        target = client.resolve()
+        answers.pop(0)
+        with pytest.raises(ProviderUnavailable, match="stopped or restarted"):
+            client.adapter(target)
+        assert not client._adapters, "nothing was built for the old port"
+        answers[0] = None   # stopped meanwhile
+        with pytest.raises(ProviderUnavailable, match="stopped or restarted"):
+            client.adapter(target)
+        answers[0] = ("http://127.0.0.1:9124/v1", "new-key", "m")
+        fresh = client.resolve()
+        adapter = client.adapter(fresh)
+        assert adapter.base_url == "http://127.0.0.1:9124/v1"
+        assert client.credential(fresh).api_key.get_secret_value() == "new-key"
 
     def test_broken_resolver_means_not_running(self, tmp_path):
         from orchestrator.llm import NotConfigured

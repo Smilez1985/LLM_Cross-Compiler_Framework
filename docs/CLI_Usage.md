@@ -1361,8 +1361,9 @@ In the GUI: **Ditto > Local Models...** (the same list, with the recommendation 
 llm-cli ditto models download [TIER] [-y]
 ```
 
-Downloads a model at its pinned Hugging Face revision and checks size and sha256. Without `TIER` the recommended
-tier for this machine. Interrupted downloads resume.
+Downloads a model at its pinned Hugging Face revision and checks size and sha256. Without `TIER` the model a plain
+`ditto runtime start` loads: the tier chosen earlier with `runtime start --model` ("Chosen earlier with 'runtime start
+--model': ..."), else the recommended tier for this machine ("Recommended: ..."). Interrupted downloads resume.
 
 | Argument / option | Meaning |
 |---|---|
@@ -1375,7 +1376,8 @@ llm-cli ditto models download small-q2
 ```
 
 In the GUI: **Ditto > Local Models...** > **Download the recommended model...** (the recommendation the window
-shows; the button is on once the list is read), or select a tier and **Download selected...**; the question shows repo, file, licence, size and folder ("No" is the default), the download runs in the
+shows; the button is on once the list is read; **Download the chosen model...** when a tier was chosen earlier for the
+local server), or select a tier and **Download selected...**; the question shows repo, file, licence, size and folder ("No" is the default), the download runs in the
 background with progress and **Cancel** (the part downloaded so far is kept for a resume).
 
 ---

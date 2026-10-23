@@ -285,7 +285,18 @@ class LLMClient:
         return self.resolver.resolve(target.preset, target.auth, target.base_url)
 
     def adapter(self, target: Target):
-        credential = self.credential(target)  # raises before any request: no key, admin key, bad workspace ID
+        """The adapter for a resolved target. For a running local server (runtime_endpoint presets) URL and key are
+        read again, together: a server restarted since resolve() has a new port and a new key, and the new key must
+        never go to the old port (another program may hold it now), so a changed URL is refused (ProviderUnavailable,
+        which chat() treats like an outage)."""
+        if target.preset.runtime_endpoint:
+            endpoint = self._runtime_endpoint(target.preset)
+            if not endpoint or endpoint[0] != target.base_url:
+                raise ProviderUnavailable(f"{target.preset.label}: the local model server was stopped or restarted; "
+                                          "try again.", provider=target.provider)
+            credential = self.resolver.resolve(target.preset, target.auth, target.base_url, runtime_key=endpoint[1])
+        else:
+            credential = self.credential(target)  # raises before any request: no key, admin key, bad workspace ID
         return self.adapter_for(target.preset, target.base_url, credential)
 
     def adapter_for(self, preset: ProviderPreset, base_url: Optional[str], credential: ResolvedCredential):

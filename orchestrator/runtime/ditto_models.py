@@ -6,7 +6,9 @@ Ditto's model catalogue as `llm-cli ditto models list` shows it, and the model `
 models_overview() reads the pinned catalogue once: every tier with its file, size, licence, whether it is downloaded
 (ready, unverified, missing), and which tier is recommended for this computer (and why), chosen with
 `ditto runtime start --model`, only on request, or not pinned. model_to_download() picks the model a download is for:
-the named tier, or the recommendation. The download itself is LocalLLMRuntime.download_model (pinned revision, size
+the named tier, else the model a plain `runtime start` loads (the tier chosen earlier with --model, else the
+recommendation; chain port-runtime: it used to be the recommendation even when another tier was chosen). The download
+itself is LocalLLMRuntime.download_model (pinned revision, size
 and sha256 checked; a set stop event ends it and keeps the `.part` file for a resume).
 
 It reads only: nothing is downloaded, started or stopped here. The recommendation probes the hardware (seconds);
@@ -79,8 +81,13 @@ def models_overview(rt: Any) -> ModelsOverview:
 
 def model_to_download(rt: Any, tier: Optional[str] = None) -> Tuple[Any, Optional[str]]:
     """The model `ditto models download [TIER]` is about: the named tier (why None; KeyError with the known tiers when
-    the catalogue has no such tier), or the recommendation for this computer with its reason."""
+    the catalogue has no such tier); without a tier the model a plain `runtime start` loads (LocalLLMRuntime.
+    resolve_model): the tier chosen earlier with `runtime start --model` (why None), else the recommendation for this
+    computer with its reason."""
     if tier is None:
+        preferred = rt.preferred_tier()
+        if preferred:
+            return rt.catalog.model(preferred), None
         return rt.choose_tier()
     return rt.catalog.model(tier), None
 
