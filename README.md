@@ -152,7 +152,8 @@ The installer:
    - **Alpine:** `docker` from Alpine's community repository (switched on in `/etc/apk/repositories` if needed). The
      framework itself cannot run on Alpine (musl): its pinned Python packages include onnxruntime, which has no musl
      build. The installer stops after Docker and points you to the framework image you build on this computer
-     ([The framework in a container](docs/Container_Setup.md)).
+     ([The framework in a container](docs/Container_Setup.md)); its build script also needs `git` and GNU `tar`,
+     which Alpine does not bring (busybox's `tar` is not enough): `sudo apk add git tar`.
    - On ARMv6 (Raspberry Pi 1, Zero), when a key does not match, or on any other system (such as Gentoo, Void or
      NixOS) it stops, says why and points you to [Docker's install guide](https://docs.docker.com/engine/install/);
      install Docker yourself and start `install.sh` again. On such a system it installs nothing else either: what it

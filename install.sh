@@ -843,9 +843,10 @@ docker_group() {
 # Alpine und postmarketOS (musl): Die festgelegten Python-Pakete des Frameworks gibt es nicht für musl (onnxruntime,
 # das die lokale Wissensbasis über fastembed braucht, veröffentlicht nur Builds für glibc, ohne Quellpaket), also kann
 # das Framework hier nicht direkt laufen. Der Installer hat Docker eingerichtet und hält mit dem Weg an, der geht: das
-# Framework-Image (Debian), auf diesem Rechner gebaut.
+# Framework-Image (Debian), auf diesem Rechner gebaut. Das Skript dafür braucht git und GNU tar (es stellt die Dateien
+# mit 'tar --null --files-from' zusammen; busybox' tar kennt --null nicht), die Alpine nicht mitbringt.
 alpine_stop() {
-    log_error "Das Framework selbst wurde auf $(system_label) nicht installiert: Seine festgelegten Python-Pakete gibt es nicht für musl (onnxruntime, das die lokale Wissensbasis braucht, nur für glibc). Docker ist eingerichtet; baue auf diesem Rechner das Framework-Image (Debian) und nutze das Framework darin: scripts/build_container_image.sh (Anleitung: docs/Container_Setup_DE.md; dafür auch git, bash und docker buildx). Für die Gruppe docker einmal ab- und wieder anmelden."
+    log_error "Das Framework selbst wurde auf $(system_label) nicht installiert: Seine festgelegten Python-Pakete gibt es nicht für musl (onnxruntime, das die lokale Wissensbasis braucht, nur für glibc). Docker ist eingerichtet; baue auf diesem Rechner das Framework-Image (Debian) und nutze das Framework darin: scripts/build_container_image.sh (Anleitung: docs/Container_Setup_DE.md). Das Skript braucht dafür auch git und GNU tar (busybox' tar genügt nicht): sudo apk add git tar. Für die Gruppe docker einmal ab- und wieder anmelden."
 }
 
 # --- SCHRITT 2: DATEIEN KOPIEREN ---
