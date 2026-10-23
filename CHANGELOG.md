@@ -1399,7 +1399,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`package_docker_config(docker, containers)`, through `make_package` and the one deploy step
   `person_steps.deploy_build`), and with none ticked **Deploy to Target** and **Create package only...** say why and
   do nothing. An empty `hardware:` block in a `target.yml` (or an empty `npu:` or `gpu:` block, e.g. with its lines
-  commented out) gives no device access, as no block does, instead of keeping the tab from opening.
+  commented out) gives no device access, as no block does, instead of keeping the tab from opening; the Builder tab's
+  probe import reads such a block (and an empty `cpu:` block) the same way when it suggests a target, instead of
+  stopping there.
 - **Knowledge always belongs to a topic or a target** (DECISIONS round 23 items 1 and 8): an installed knowledge pack
   lives in `community/knowledge/<topic or target>/<pack>/` (packs installed earlier stay where they are), and every
   excerpt it brings carries its topic or target. A knowledge pack names its topic or target in its manifest:
