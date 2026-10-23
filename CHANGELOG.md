@@ -2080,6 +2080,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **A pinned download that cannot work says why at once** (chain port-runtime, from the review of the managed
+  llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, shared by the local runtime's builds and models
+  and the community zoo): a TLS certificate that could not be verified was retried five times with backoff like a
+  dropped connection and ended in "did not complete after 5 attempts"; it now ends at once with "the TLS certificate
+  of <host> could not be verified" (only the host, never the possibly signed download URL; behind a proxy that
+  inspects TLS its CA certificate belongs in `REQUESTS_CA_BUNDLE`). Any other request error (too many redirects, an
+  invalid URL) and a `.part` file that cannot be written (a full disk, no permission) used to escape as a raw
+  exception; they now end with a clear message, and the part is kept for a resume. Regression tests:
+  `tests/test_runtime.py` `TestDownloads`.
 - **The local runtime no longer fails on Windows while another window reads its files** (chain port-runtime, from
   the review of the managed llama-server): Windows refuses to replace or delete a file that another process has open
   at that moment. The GUI's LLMClient reads `server.json` and the server's key file, and a process waiting for the

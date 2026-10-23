@@ -2350,6 +2350,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Ein gepinnter Download, der nicht gelingen kann, sagt sofort, warum** (Kette port-runtime, aus der Prüfung des
+  verwalteten llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, den die Builds und Modelle der
+  lokalen Laufzeit und der Community-Zoo teilen): Ein TLS-Zertifikat, das sich nicht prüfen ließ, wurde wie eine
+  abgebrochene Verbindung fünfmal mit Wartezeit erneut versucht und endete mit „did not complete after 5 attempts“;
+  jetzt endet es sofort mit „the TLS certificate of <host> could not be verified“ (nur der Host, nie die
+  möglicherweise signierte Download-URL; hinter einem Proxy, der TLS prüft, gehört sein CA-Zertifikat in
+  `REQUESTS_CA_BUNDLE`). Jeder andere Anfragefehler (zu viele Weiterleitungen, eine ungültige URL) und eine
+  `.part`-Datei, die sich nicht schreiben lässt (volle Platte, keine Berechtigung), kamen als rohe Ausnahme heraus;
+  jetzt enden sie mit einer klaren Meldung, und der Teil bleibt für die Fortsetzung erhalten. Regressionstests:
+  `tests/test_runtime.py` `TestDownloads`.
 - **Die lokale Laufzeit scheitert unter Windows nicht mehr, während ein anderes Fenster ihre Dateien liest** (Kette
   port-runtime, aus der Prüfung des verwalteten llama-server): Windows verweigert das Ersetzen oder Löschen einer
   Datei, die ein anderer Prozess gerade offen hat. Der LLMClient der GUI liest `server.json` und die Schlüsseldatei

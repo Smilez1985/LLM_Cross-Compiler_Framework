@@ -612,6 +612,33 @@ class TestDownloads:
         self.fetch(tmp_path, session, data)
         assert session.calls == []
 
+    def test_tls_failures_are_not_retried_and_name_only_the_host(self, tmp_path):
+        # A certificate problem does not go away on its own (a TLS-inspecting proxy needs its CA): it used to be
+        # retried five times with backoff and to end in "did not complete after 5 attempts".
+        session = FakeSession()
+
+        def get(url, **kw):
+            session.calls.append(url)
+            raise requests.exceptions.SSLError(f"certificate verify failed for {url}?X-Amz-Signature=secret")
+        session.get = get
+        with pytest.raises(LocalRuntimeError, match="TLS certificate of example.invalid") as err:
+            self.fetch(tmp_path, session, b"abc")
+        assert len(session.calls) == 1 and "Signature" not in str(err.value) and "REQUESTS_CA_BUNDLE" in str(err.value)
+
+    @pytest.mark.parametrize("error", [requests.exceptions.TooManyRedirects("30 redirects"),
+                                       requests.exceptions.InvalidURL("bad")])
+    def test_other_request_errors_end_with_a_clear_message(self, tmp_path, error):
+        session = FakeSession()
+        session.get = lambda url, **kw: (_ for _ in ()).throw(error)
+        with pytest.raises(LocalRuntimeError, match=f"failed \\({type(error).__name__}\\)"):
+            self.fetch(tmp_path, session, b"abc")
+
+    def test_a_part_file_that_cannot_be_written(self, tmp_path):
+        data = os.urandom(100000)
+        (tmp_path / "dl" / "blob.bin.part").mkdir(parents=True)  # stands in for a full or read-only disk
+        with pytest.raises(LocalRuntimeError, match="Could not write .*resumes on the next run"):
+            self.fetch(tmp_path, FakeSession({self.URL: data}), data)
+
     def test_not_enough_disk_space(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ls.shutil, "disk_usage", lambda p: type("U", (), {"free": 100 * MIB})())
         with pytest.raises(LocalRuntimeError, match="Not enough disk space for the download: "):
