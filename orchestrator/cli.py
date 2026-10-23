@@ -4985,6 +4985,17 @@ def _profile_summary(profile) -> list:
     lines.append("GPU: " + ("; ".join(gpus) if gpus else "none found"))
     if profile.get("NPU_VENDOR"):
         lines.append(f"NPU: {value('NPU_VENDOR')} {value('NPU_MODEL', '')}".rstrip())
+    hailo = profile.hailo()   # also next to another NPU (a Rockchip board with a Hailo M.2 card)
+    if hailo.present:
+        facts = [hailo.model or "architecture not determined"]
+        if hailo.family:
+            facts.append(f"family {hailo.family} (HailoRT {hailo.hailort_line}.x)")
+        if hailo.devices is not None:
+            facts.append(f"{hailo.devices} device{'' if hailo.devices == 1 else 's'}" +
+                         (f" on {hailo.interface}" if hailo.interface else ""))
+        if hailo.hailort_version:
+            facts.append(f"HailoRT {hailo.hailort_version} installed")
+        lines.append("Hailo: " + escape(", ".join(facts)))
     if profile.warnings:
         lines.append("Notes: " + escape(", ".join(profile.warnings)))
     return lines
