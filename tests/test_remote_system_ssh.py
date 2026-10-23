@@ -762,6 +762,45 @@ class TestTheOpenSshTransport:
         call = system_board.fake.calls[-1]
         assert call.kwargs["stdin"] is subprocess.PIPE and call.kwargs["stdout"] is subprocess.PIPE
 
+    def test_the_time_limit_holds_while_stdin_is_written(self, system_board, tmp_path):
+        """A board that does not read the command's input (its pipe stays full) ends the call at the time limit, as
+        paramiko's channel time limit does: the limit covers the whole call, the writing included."""
+        import time
+
+        from orchestrator.remote.transport import timed_out
+
+        class NotRead:
+            """The stdin pipe of a command that never reads it: once it is full, write() waits until ssh ends."""
+
+            def __init__(self, process):
+                self.process, self.closed = process, False
+
+            def write(self, data):
+                self.process.ended.wait(8)
+                raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+            def flush(self):
+                pass
+
+            def close(self):
+                self.closed = True
+
+        transport = self.make(tmp_path)
+        real_start = system_board.fake.start
+
+        def start(process):
+            if process.call.script == "sleep 1000":
+                process.stdin = NotRead(process)
+                return
+            real_start(process)
+        system_board.fake.start = start
+        started = time.monotonic()
+        with pytest.raises(TimeoutError) as e:
+            transport.run("sleep 1000", stdin=[b"x" * 65536] * 4, timeout=0.5)
+        assert time.monotonic() - started < 4, "the call ended at its time limit, not when the board gave up"
+        assert timed_out(e.value), "RemoteSession waits through it like a drop"
+        assert {c.script for c in system_board.fake.killed} == {"sleep 1000"}
+
 
 # --- the framework key: private to this account before OpenSSH uses it --------------------------------------------
 

@@ -1354,7 +1354,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   call comes from one builder (`openssh_argv`, `openssh_options`; `ssh_trust.system_ssh_options` is its old name): the
   framework key and known_hosts only, never a question and never a new key, as before, now also a login time limit
   (`ConnectTimeout`) and keepalive (`ServerAliveInterval`, `ServerAliveCountMax`), each command as one `sh -c` with a
-  time limit and an output cap, and `UserKnownHostsFile` in quotes: a state folder with a space in its path (a
+  time limit (which also holds while the command's input is written) and an output cap, and `UserKnownHostsFile` in
+  quotes: a state folder with a space in its path (a
   Windows account name such as "Jane Doe") split the framework's known_hosts into two files that do not exist, so
   every board's key counted as unknown. A password is no longer dropped silently: OpenSSH never asks for one, so the
   deploy logs in with the framework key and its result says the password was not used. A deploy bound to a
