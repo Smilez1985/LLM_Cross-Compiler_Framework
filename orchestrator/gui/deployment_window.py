@@ -104,6 +104,7 @@ class DeploymentWorker(QThread):
         self.kv_setting = KV_KEEP       # what the board's deploy settings get: None (automatic), a type, or KV_KEEP
         self.device_id = None           # the board's record after a successful deploy
         self.model_name = None          # the GGUF model the package installed (for the benchmark on the board)
+        self.package_error = None       # why _make_package made no package (a DeployError with its next step)
         # the one cancel of a board step (remote/session.py CancelToken): it holds the deploy's SSH session
         from orchestrator.remote.session import CancelToken
         self._stop = CancelToken()
@@ -170,6 +171,22 @@ class DeploymentWorker(QThread):
             self.progress.emit("📦 Generating Deployment Package...")
         elif kind == "deploy":
             self.progress.emit(f"🚀 Deploying to {self.target_ip}...")
+
+    def _make_package(self, dep_mgr):
+        """Step 1 of a deploy on its own, kept for older callers (run() packages through person_steps.deploy_build):
+        the package of the selected build in the configured output folder, made as run() makes it (make_package: the
+        image name of a Docker package; Cancel stops it). None when it cannot be made; the reason is then in
+        `package_error`, never in the manager's shared state."""
+        from orchestrator.Core.deployment_manager import DeployError, make_package, package_folder
+        self.package_error = None
+        self._on_step("package")
+        try:
+            return make_package(dep_mgr, self.framework, self.artifact_path, self.profile_name,
+                                bool((self.docker_config or {}).get("use_docker")), package_folder(self.framework),
+                                kv_cache=self.kv_cache, cancelled=self._stop.is_set)
+        except DeployError as e:
+            self.package_error = e
+            return None
 
     def _model_name(self):
         """The GGUF model deploy.sh copied to models/ in the home folder (for the benchmark on the board); with Docker
