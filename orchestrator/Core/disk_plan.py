@@ -11,7 +11,9 @@ yet. A call under a standing approval must leave a larger reserve (20 GiB or 10 
 
 Reservations, not snapshots: three builds of a 145 GB model prepared together would each see the same free space, so
 an accepted build takes a reservation in a ledger in the per-user folder; it is released when the request ends, and a
-reservation of a process that has ended is dropped. The check runs again when a build leaves the queue.
+reservation of a process that has ended is dropped. The check runs again when a build leaves the queue. While the
+build runs, the build engine records what of its reservation has landed on disk (LandedMeter), so those bytes are not
+counted twice (once in the free space, once in the reservation).
 
 The hardware estimate (can this computer convert it, can the board run it) is shown in the question and in
 check_build_request; it is never a refusal by itself. Every number here is an estimate and labelled as one.
@@ -553,6 +555,50 @@ class ReservationLedger:
                                     self.outstanding(device, exclude=rid), device))
         require(checks)
         return checks
+
+
+class LandedMeter:
+    """What of one reservation is on disk now: the growth of the folders the call writes since each was first
+    watched, per file system, recorded with ReservationLedger.landed() as the bytes land. Those bytes show in the free
+    space already, so without this a running build would be counted twice (in the free space and in its reservation)
+    by every other check. Growth, not size: a folder that held files before (the staged download of the same commit)
+    counts only what was added; files removed again (the F16 intermediate) count no longer. Thread-safe (the build
+    thread and its disk watchdogs report); the ledger is written only when a number changed."""
+
+    def __init__(self, ledger: ReservationLedger, rid: str):
+        self.ledger, self.rid = ledger, rid
+        self._base: Dict[str, int] = {}      # folder -> its size when it was first watched
+        self._sent: Dict[str, int] = {}      # device -> the bytes last recorded
+        self._lock = threading.Lock()
+
+    def watch(self, *folders: Path) -> None:
+        from orchestrator.Core.trash import tree_size
+        with self._lock:
+            for folder in folders:
+                self._base.setdefault(str(folder), tree_size(Path(folder)) if Path(folder).exists() else 0)
+
+    def written(self) -> Dict[str, int]:
+        """Bytes added below the watched folders, per file system (device_of)."""
+        from orchestrator.Core.trash import tree_size
+        with self._lock:
+            base = dict(self._base)
+        per_device: Dict[str, int] = {}
+        for folder, before in base.items():
+            path = Path(folder)
+            grown = max(0, tree_size(path) - before) if path.exists() else 0
+            device = device_of(path)
+            per_device[device] = per_device.get(device, 0) + grown
+        return per_device
+
+    def report(self) -> Dict[str, int]:
+        """Records what changed since the last report; returns the bytes per file system."""
+        written = self.written()
+        with self._lock:
+            for device, count in written.items():
+                if self._sent.get(device) != count:
+                    self.ledger.landed(self.rid, device, count)
+                    self._sent[device] = count
+        return written
 
 
 # --- the hardware estimate -----------------------------------------------------------------------------------------

@@ -533,6 +533,8 @@ class LLMOrchestrator:
             dataset_sha256=None if req.dataset_generated else req.dataset_sha256,
             build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
             local_inputs=req.local_inputs,
+            # the engine records in it what has landed on disk (the request releases it when it ends)
+            disk_reservation=getattr(req, "disk_reservation", "") or "",
         )
 
     async def _submit_to_engine(self, build_config: BuildConfiguration, state: Optional[WorkflowState]) -> Optional[str]:

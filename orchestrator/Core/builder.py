@@ -23,7 +23,7 @@ import shutil
 import re
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Callable, Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
@@ -212,6 +212,9 @@ class BuildConfiguration:
     # again right before each container starts; without a pinned model the source is a Hugging Face repo id and is
     # never looked up on disk. None only for a person's own builds (GUI, CLI), whose paths are used as given.
     local_inputs: Optional[Any] = None
+    # The disk reservation of the request (BuildRequest.disk_reservation; an AI caller's accepted build): the engine
+    # records in it what has landed on disk (_report_landed), so a running build is not counted twice
+    disk_reservation: str = ""
 
 @dataclass
 class BuildProgress:
@@ -523,7 +526,7 @@ class BuildEngine:
             # half the reserve, so the per-user folder always keeps room to record what happened.
             from orchestrator.Core.disk_plan import DiskWatchdog
             DiskWatchdog(Path(self.cache_dir), prefix.strip(": ") or "The build", CONTAINER_WATCH_EVERY, low, watched,
-                         check=self._low_disk_text, name=f"disk-watch-{config.build_id}").start()
+                         check=self._disk_check(config), name=f"disk-watch-{config.build_id}").start()
             threading.Thread(target=self._sample_resources, args=(container, progress, prefix, watched),
                              name=f"resources-{config.build_id}", daemon=True).start()
             timeout = config.build_timeout or self.default_timeout
@@ -694,6 +697,7 @@ class BuildEngine:
                 self._save_record(bid)
                 self._running.discard(bid)
                 self._settled.discard(bid)
+                self.__dict__.get("_meters", {}).pop(bid, None)
 
     def _execute_build_stages(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
         """Runs the stages and returns the outcome; _execute_build publishes it."""
@@ -713,6 +717,8 @@ class BuildEngine:
 
             # 2. Prepare Environment
             self._prepare_build_environment(config, prog, target_path)
+            # what lands here counts against the build's disk reservation (ReservationLedger.landed)
+            self._report_landed(config, self.cache_dir / "builds" / bid, self._staging_root(config))
             self._stage_dataset(config, prog)
             
             # 3. Generate Dockerfile
@@ -726,6 +732,7 @@ class BuildEngine:
 
             # 4a. Make the model available inside the containers
             staged = self._stage_model(config, prog)
+            self._report_landed(config)
             self._check_cancelled(prog)
             
             # 5. Security Scan
@@ -749,7 +756,9 @@ class BuildEngine:
             # (and the deployment listings) only once the build can no longer be cancelled.
             self._enter_stage(prog, BuildStatus.PACKAGING)
             self._extract_artifacts(config, prog)
+            self._report_landed(config)
             self._create_golden_artifact(config, prog)
+            self._report_landed(config)  # the last count: publishing moves files, cleanup only frees space
 
             # 9. Cleanup, before the outcome is settled: a cancel meanwhile still discards the staged files.
             if config.cleanup_after_build:
@@ -1241,7 +1250,8 @@ class BuildEngine:
             stop.set()
         from orchestrator.Core.disk_plan import DiskWatchdog
         watcher = DiskWatchdog(dest, "Staging", STAGING_WATCH_EVERY, low, stop, also_stop_when=cancelled,
-                               check=self._low_disk_text, name=f"staging-watch-{config.build_id}")
+                               check=self._disk_check(config), name=f"staging-watch-{config.build_id}")
+        self._report_landed(config, dest)  # the download counts as landed while it arrives
         fetcher = self._hub_fetcher(auth or None, stop)
         try:
             with StagingLock(dest.parent / f".{dest.name}.lock"):
@@ -1305,6 +1315,40 @@ class BuildEngine:
         None while it has room (disk_plan.low_disk_text)."""
         from orchestrator.Core.disk_plan import low_disk_text
         return low_disk_text(folder, what)
+
+    def _report_landed(self, config: BuildConfiguration, *folders: Path) -> None:
+        """Records in the build's disk reservation (config.disk_reservation, an AI caller's accepted build) what of it
+        is on disk now, so the free space and the reservation do not count those bytes twice for every other check
+        (disk_plan.LandedMeter, ReservationLedger.landed); `folders` are watched from now on. Nothing without a
+        reservation or a per-user folder; a ledger that cannot be written never stops a build."""
+        rid = getattr(config, "disk_reservation", "")
+        if not rid:
+            return
+        meters = self.__dict__.setdefault("_meters", {})
+        try:
+            meter = meters.get(config.build_id)
+            if meter is None:
+                # the ledger of the per-user folder, as the build service took the reservation in it
+                # (build_plan.state_dir; ConfigManager raises AttributeError for a name it does not know)
+                try:
+                    folder = getattr(self.config, "user_state_dir", None)
+                except Exception:  # noqa: BLE001
+                    folder = None
+                if not isinstance(folder, (str, Path)) or not str(folder):
+                    return
+                from orchestrator.Core.disk_plan import LandedMeter, ReservationLedger
+                meter = meters.setdefault(config.build_id, LandedMeter(ReservationLedger(Path(folder)), rid))
+            meter.watch(*folders)
+            meter.report()
+        except Exception as e:  # noqa: BLE001 - the reservation is released when the request ends anyway
+            self.logger.debug(f"Disk reservation of {config.build_id} not updated: {e}")
+
+    def _disk_check(self, config: BuildConfiguration) -> Callable[[Path, str], Optional[str]]:
+        """The check of a build's disk watchdogs: records what has landed (_report_landed), then _low_disk_text."""
+        def check(folder: Path, what: str) -> Optional[str]:
+            self._report_landed(config)
+            return self._low_disk_text(folder, what)
+        return check
 
     @staticmethod
     def _model_commit(api, source: str, revision: Optional[str], token: Any = False) -> Optional[str]:
