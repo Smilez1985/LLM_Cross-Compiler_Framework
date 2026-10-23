@@ -239,6 +239,19 @@ def map_anthropic_error(err: BaseException, label: str = "Claude API", provider:
     return LLMError(f"{label} request failed: {redact_secrets(without_secret(str(err), secret))[:300]}", **kw)
 
 
+def _locality_refusal(err: BaseException):
+    """The LocalityRefused behind an SDK connection error (offline mode refused the address when the connection was
+    opened), None otherwise."""
+    from orchestrator.utils.locality import LocalityRefused
+    seen = 0
+    while err is not None and seen < 8:
+        if isinstance(err, LocalityRefused):
+            return err
+        err = err.__cause__ or err.__context__
+        seen += 1
+    return None
+
+
 class _ClaudeAPI:
     """Stands in for the preset when a caller passes none: the Claude API's own causes still apply."""
     adapter = "anthropic"
@@ -247,7 +260,7 @@ class _ClaudeAPI:
     base_url = "https://api.anthropic.com"
 
     @staticmethod
-    def is_local(url=None) -> bool:
+    def is_local(url=None, config=None) -> bool:
         return False
 
 
@@ -268,6 +281,9 @@ def map_openai_error(err: BaseException, label: str = "OpenAI-compatible server"
     if isinstance(err, openai.APITimeoutError):
         return ProviderTimeout(f"{label} did not answer in time.", **kw)
     if isinstance(err, openai.APIConnectionError):
+        refused = _locality_refusal(err)
+        if refused is not None:   # offline mode: the connection was not to a checked local address
+            return NotConfigured(str(refused), **kw).with_steps(*refused.steps)
         if preset is not None and preset.is_local(base_url):
             from orchestrator.llm.auth.errors import auth_error, engine_name
             from orchestrator.llm.auth.store import display_origin

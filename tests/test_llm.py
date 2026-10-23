@@ -194,8 +194,15 @@ class TestCatalog:
     @pytest.mark.parametrize("url, local", [("http://localhost:8080/v1", True), ("http://127.0.0.1:1/v1", True),
                                             ("http://192.168.1.5:8000/v1", True), ("http://[::1]:8000", True),
                                             ("http://box.local:8000", True), ("https://api.example.com/v1", False),
-                                            (None, False), ("http://8.8.8.8/v1", False)])
-    def test_custom_location_follows_the_host(self, url, local):
+                                            (None, False), ("http://8.8.8.8/v1", False),
+                                            ("http://proxy.local:8000", False), ("http://100.64.0.5:8000", False)])
+    def test_custom_location_follows_the_host(self, url, local, monkeypatch):
+        """Since offline-lan (DECISIONS round 24 L-NET) a name counts by the addresses it resolves to: box.local is
+        local because it resolves to a private address, a .local name with a public address is not (it was by its
+        suffix before), and a Tailscale address only with the person's own Headscale (utils/locality.py)."""
+        from orchestrator.utils import locality
+        answers = {"box.local": ["192.168.1.40"], "proxy.local": ["203.0.113.9"], "api.example.com": ["93.184.215.14"]}
+        monkeypatch.setattr(locality, "_system_lookup", lambda host: answers[host])
         assert is_local_url(url) is local
 
     def test_unknown_model_ids_work_without_code_changes(self, make_client):

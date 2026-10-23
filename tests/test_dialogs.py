@@ -236,20 +236,39 @@ class TestAIConfigurationDialog:
         assert dlg.result() == 0
 
     def test_offline_mode_accepts_a_custom_server_only_on_the_local_network(self, qapp, framework,
-                                                                              message_boxes):
+                                                                              message_boxes, monkeypatch):
+        """Since offline-lan (DECISIONS round 24 L-NET) a server name counts by the addresses it resolves to; the
+        dialog looks it up in a worker thread first (never on the GUI thread) and saves or refuses when it is in."""
+        import threading
+        from orchestrator.utils import locality
+        threads = []
+
+        def lookup(host):
+            threads.append(threading.current_thread() is threading.main_thread())
+            return {"api.example.com": ["93.184.215.14"], "llm-box.local": ["192.168.1.31"]}[host]
+        monkeypatch.setattr(locality, "_system_lookup", lookup)
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "custom")
         dlg.cb_model.setCurrentText("my-model")
         dlg.chk_offline.setChecked(True)
         dlg.txt_base_url.setText("https://api.example.com/v1")
         dlg._save_config()
-        assert message_boxes == [("warning", "Offline Mode")] and dlg.result() == 0
+        assert wait_for(qapp, lambda: message_boxes == [("warning", "Offline Mode")]) and dlg.result() == 0
         assert framework.config.get("offline_mode") is not True, "nothing is saved"
+        assert threads == [False], "looked up in a worker thread"
 
         dlg.txt_base_url.setText("http://192.168.1.30:8000/v1")
         dlg._save_config()
         assert dlg.result() == dialogs.QDialog.Accepted
         assert framework.config.get("ai_provider") == "custom" and framework.config.get("offline_mode") is True
+
+        named = AIConfigurationDialog(framework)
+        select_provider(named, "custom")
+        named.cb_model.setCurrentText("my-model")
+        named.chk_offline.setChecked(True)
+        named.txt_base_url.setText("http://llm-box.local:8000/v1")
+        named._save_config()
+        assert wait_for(qapp, lambda: named.result() == dialogs.QDialog.Accepted), message_boxes
 
     def test_offline_mode_accepts_only_local_providers(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)

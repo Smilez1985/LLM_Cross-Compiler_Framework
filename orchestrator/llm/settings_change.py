@@ -282,19 +282,26 @@ class AISettingsChange:
                 "fallback_unknown", "Invalid Fallback Chain",
                 f"Unknown provider in the fallback chain: {', '.join(unknown)}.\n"
                 f"Known providers: {', '.join(self.catalog.ids())}." + (f"\n\n{removed}" if removed else "")))
-        # The LLM layer's own rule (client.resolve): a provider whose location depends on its address (a custom
-        # server) counts as local only on this computer or the local network (no address at all: base_url_missing).
+        # The LLM layer's own rule (client.resolve, ProviderPreset.offline_refusal): a cloud provider never; Ollama and
+        # a custom server only at an address on this computer or in the person's own network by the network-locality
+        # rule (utils/locality.py: every address a name resolves to, the own Headscale, the person's opt-outs; no
+        # address at all: base_url_missing). The rule looks names up: a window checks the address in a worker thread
+        # first (locality.needs_lookup), so here it is read from the run's cache.
         if self.offline_mode and preset.location == "cloud":
             found.append(SettingsProblem(
                 "offline_cloud", "Offline Mode",
                 f"{preset.label} is a cloud provider. In offline mode choose a local provider (Ollama, the managed "
                 "local model, or a custom server on your network)."))
-        elif self.offline_mode and (self.address or preset.base_url) and not preset.is_local(self.address or None):
-            found.append(SettingsProblem(
-                "offline_cloud", "Offline Mode",
-                f"The server address of {preset.label} is not on this computer or your local network. In offline "
-                "mode choose a local provider (Ollama, the managed local model, or a custom server on your "
-                "network)."))
+        elif self.offline_mode and (self.address or preset.base_url):
+            refusal = preset.offline_refusal(self.address or None, config)
+            verdict = refusal.locality if refusal is not None else None
+            if verdict is not None:
+                text = (f"The server address of {preset.label} ({verdict.host or '-'}) is not on this computer or "
+                        f"your local network: {verdict.why()}. In offline mode choose a local provider (Ollama, the "
+                        "managed local model, or a custom server on your network)")
+                if verdict.steps:
+                    text += ", or count the address as local in the settings (only you can)"
+                found.append(SettingsProblem("offline_cloud", "Offline Mode", text + "."))
         if self.key_required(config) and not self.key and not self.stored_key(secrets):
             found.append(SettingsProblem("key_missing", "Missing API Key",
                                          "Please provide an API key for this provider."))
