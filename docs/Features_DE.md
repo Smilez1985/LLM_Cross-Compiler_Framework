@@ -639,7 +639,7 @@ die Annahmen; seine Unterstützungsstufe ist community.
 | `openrouter` | OpenRouter | Cloud | API-Schlüssel (`openrouter_api_key` oder `OPENROUTER_API_KEY`) |
 | `ollama` | Ollama | lokal (Basis-URL einstellbar) | keine |
 | `local` | verwalteter llama-server | lokal | Schlüssel pro Start, wird automatisch verwaltet |
-| `custom` | jeder OpenAI-kompatible Server | ergibt sich aus der Adresse: Loopback-, private und Link-Local-Adressen sowie Namen auf `.local`, `.lan`, `.localhost` oder `.home.arpa` gelten als lokal | API-Schlüssel der Serveradresse (`custom_api_key`) oder keine |
+| `custom` | jeder OpenAI-kompatible Server | ergibt sich aus der Adresse: Loopback-, private und Link-Local-Adressen gelten als lokal, ein Name nach jeder Adresse, zu der er auflöst (ein `.local`- oder `.lan`-Name nur, wenn diese lokal sind; `localhost`-Namen sind dieser Computer) | API-Schlüssel der Serveradresse (`custom_api_key`) oder keine |
 
 - Cloud-Anbieter haben feste Adressen; eine von Ollama oder einem eigenen Server übrig gebliebene Basis-URL bekommt
   nie ihren Schlüssel.

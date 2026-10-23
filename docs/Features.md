@@ -586,7 +586,7 @@ its support level is community.
 | `openrouter` | OpenRouter | cloud | API key (`openrouter_api_key`, or `OPENROUTER_API_KEY`) |
 | `ollama` | Ollama | local (base URL configurable) | none |
 | `local` | managed llama-server | local | per-start key, handled for you |
-| `custom` | any OpenAI-compatible server | decided from the address: loopback, private and link-local addresses and names ending in `.local`, `.lan`, `.localhost` or `.home.arpa` count as local | API key of the server address (`custom_api_key`) or none |
+| `custom` | any OpenAI-compatible server | decided from the address: loopback, private and link-local addresses count as local, and a name by every address it resolves to (a `.local` or `.lan` name only when those are local; `localhost` names are this computer) | API key of the server address (`custom_api_key`) or none |
 
 - Cloud providers have fixed addresses; a base URL left over from Ollama or a custom server never receives their key.
 - A key of a custom server belongs to the address it was saved for (scheme, host and port): after the base URL

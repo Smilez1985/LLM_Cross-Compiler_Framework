@@ -92,6 +92,27 @@ def test_offline_mode_keeps_the_cloud_refusal_and_judges_a_custom_server_by_its_
     assert target.local, "the privacy label follows the same rule"
 
 
+def test_the_provider_table_judges_a_custom_server_by_its_addresses(names):
+    """docs/Features(_DE).md's provider table said a custom server's name ending in .local, .lan, .localhost or
+    .home.arpa counts as local; since the one locality rule a name counts by every address it resolves to (a .local
+    name with a public address is not local), and only localhost names count as this computer without a lookup. The
+    table says what the code does (stage C wave 3c review)."""
+    import re
+    from conftest import REPO_ROOT
+    custom = load_catalog().get("custom")
+    names.update({"box.local": ["203.0.113.4"], "gpu.lan": ["192.168.1.40"]})
+    assert custom.is_local("http://box.local:8000/v1") is False, "a home suffix never makes a public address local"
+    assert custom.is_local("http://gpu.lan:8000/v1") is True
+    assert custom.is_local("http://llm.localhost:8000/v1") is True, "this computer, without a lookup"
+    assert custom.is_local("http://10.0.0.5:8000/v1") is True and custom.is_local("http://198.51.100.5/v1") is False
+    for doc, wrong, right in (("docs/Features.md", r"names ending in", "resolves to"),
+                              ("docs/Features_DE.md", r"Namen auf", "auflöst")):
+        rows = [line for line in (REPO_ROOT / doc).read_text(encoding="utf-8").splitlines()
+                if line.startswith("| `custom` |")]
+        assert len(rows) == 1, (doc, rows)
+        assert not re.search(wrong, rows[0]) and right in rows[0], (doc, rows[0])
+
+
 def test_the_persons_opt_outs_count_for_the_provider(tmp_path, names):
     from orchestrator.llm import NotConfigured
     names["myhome.duckdns.org"] = ["198.51.100.7"]
