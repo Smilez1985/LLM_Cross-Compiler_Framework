@@ -291,10 +291,11 @@ Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läu
    Die Target-Dockerfiles wiederholen beide Listen in ihrem llama.cpp-Bauschritt (die zuletzt gesetzten Optionen und
    die, die sie ablehnen); `tests/test_target_dockerfiles.py` schlägt fehl, bis sie wieder zum Rezept passen. Der
    Cross-Build des Board-Pakets in beiden `target_module.sh` setzt sie nach den CMake-Flags eines Moduls
-   (`tests/test_target_stage.py` liest das Rezept), und der Modul-Generator lehnt Flags eines Moduls mit
-   `recipe.refused_option` ab, das dieselben Listen liest. Ändert der neue Baum die x86-Optionen von ggml oder die
-   Flags, die es für sie setzt (`ggml/src/ggml-cpu/CMakeLists.txt`), ändern sich `X86_FEATURES` und `_X86_FLAGS` des
-   Rezepts und mit ihnen die Tabellen in Rockchips `config_module.sh`
+   (`tests/test_target_stage.py` liest das Rezept) und lehnt ein Flag eines Moduls aus `NEVER_SET` ab (sein
+   `NEVER_SET_OPTIONS`, das `test_the_package_refuses_the_options_the_build_recipe_never_sets` vergleicht), und der
+   Modul-Generator lehnt Flags eines Moduls mit `recipe.refused_option` ab, das dieselben Listen liest. Ändert der
+   neue Baum die x86-Optionen von ggml oder die Flags, die es für sie setzt (`ggml/src/ggml-cpu/CMakeLists.txt`),
+   ändern sich `X86_FEATURES` und `_X86_FLAGS` des Rezepts und mit ihnen die Tabellen in Rockchips `config_module.sh`
    (`test_the_explicit_x86_features_are_the_build_recipe_s` schlägt fehl, bis sie übereinstimmen). Prüfe
    auch die Quantisierungstypen: `QUANT_OPTIONS` aus dem neuen `tools/quantize/quantize.cpp` nach
    `PINNED_QUANT_OPTIONS` in `tests/test_target_stage.py` übernehmen und nach `PINNED_NEEDS_IMATRIX` jede Methode,

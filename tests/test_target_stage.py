@@ -242,6 +242,29 @@ def test_a_probe_file_of_version_1x_gets_the_features_its_cpu_flags_name(image):
 
 
 @needs_bash
+@pytest.mark.parametrize("fixture", ["schema2_linux_ivybridge.txt", "schema2_windows_apu.txt",
+                                     "schema2_linux_z1_extreme.txt", "schema1_sh_laptop.txt"])
+def test_every_x86_probe_fixture_is_planned_as_the_build_recipe_plans_it(image, fixture):
+    """Both ways for each PC of the probe fixtures: every feature the probe confirmed is an option ON with its compiler
+    flags, every other one is OFF without them (an Ivy Bridge PC gets -mavx and -mf16c, never -mavx2 or -mfma; a
+    Windows probe without an answer for FMA gets no -mfma)."""
+    from orchestrator.runtime.build.recipe import _X86_FLAGS
+    profile = (PROBE_FIXTURES / fixture).read_text(encoding="utf-8")
+    cmake, flags = recipe_x86(profile)
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = plan_of(image)
+    assert plan["CMAKE_FLAGS"] == f"-DGGML_NATIVE=OFF {cmake}"
+    assert plan["CFLAGS"] == f"-O3 -pthread -fPIC -march=x86-64 {flags}".rstrip()
+    words = plan["CFLAGS"].split()
+    for option, option_flags in _X86_FLAGS.items():
+        on = f"-D{option}=ON" in plan["CMAKE_FLAGS"].split()
+        assert all((f in words) == on for f in option_flags), (option, plan["CFLAGS"])
+
+
+@needs_bash
 def test_an_image_without_the_cross_compiler_plans_nothing(image):
     if shutil.which("aarch64-linux-gnu-gcc", path=f"/usr/bin{os.pathsep}/bin"):
         pytest.skip("this host has an aarch64 cross compiler of its own")
