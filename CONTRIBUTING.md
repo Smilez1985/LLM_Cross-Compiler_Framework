@@ -522,7 +522,8 @@ and options are in the [CLI guide](docs/CLI_Usage.md#zoo-export); for targets, s
 
 1. **Export a pack:** `llm-cli zoo export target <id> --author "<name>"` for a target,
    `llm-cli zoo export recipe <build folder> --author "<name>"` for a finished build, or
-   `llm-cli zoo export knowledge --author "<name>"` for your knowledge base. In the GUI: "Export for community after
+   `llm-cli zoo export knowledge --author "<name>" --topic <topic>` (or `--target <target>`) for your knowledge
+   base: knowledge always belongs to a topic or a target, and the recipient finds its pages under it. In the GUI: "Export for community after
    creating" on the last page of the module wizard, or "Export a finished build for the community..." in the
    Builder log's context menu. The pack is privacy-scrubbed, checked and signed with your key, and written to
    `community/contributions/`. Nothing is sent yet.

@@ -273,6 +273,12 @@ in `knowledge/LICENSES/<SPDX-ID>.txt` und eine `knowledge/NOTICE`, die jede Seit
 und Lizenz aufführt; die Platzhalterprüfung lässt auch diese aus, und ein Export erstellt sie neu aus dem
 Schnappschuss.
 
+Auf deinem Computer wird der Schnappschuss nicht importiert: seine Seiten sind schon in deiner Wissensbasis.
+Exportierst du das Target als Paket, reist der Schnappschuss mit, und das Framework des Empfängers prüft ihn bei der
+Installation wie ein Wissenspaket (eine Liste von Seiten, jede mit ihrer Quelle, und seine Lizenzdateien) und
+importiert ihn unter diesem Target in dessen Wissensbasis, mit einem Snapshot dieser Wissensbasis vorher; eine neuere
+Version deines Target-Pakets ersetzt dort die Auszüge der älteren (unveröffentlicht, DECISIONS Runde 23 Punkt 8).
+
 Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
 
 - **Der Capabilities-Block ist ein Ausgangspunkt.** Ergänze deine echten Boards, weitere Formate, Quantisierungen je

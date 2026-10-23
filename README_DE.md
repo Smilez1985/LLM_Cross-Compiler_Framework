@@ -746,7 +746,11 @@ beachtet diese maschinenlesbaren Opt-outs einer Website: robots.txt, den Header 
 Fehlschlag; das Ergebnis spricht auch die Sprachausgabe des Betriebssystems, wenn es eine gibt, außer du schaltest
 das aus. Suchergebnisse gelten als externer Text, nie als Anweisungen. Jede Seite hält auch ihre Lizenz und ihren
 Urheberrechtshinweis fest: Ein Wissenspaket enthält den vollen Text einer Seite nur, wo ihre Lizenz die Weitergabe
-erlaubt, jede andere Seite als ihre Adresse mit kurzen Fakten (`llm-cli knowledge sources` zeigt jede Seite). Mehr
+erlaubt, jede andere Seite als ihre Adresse mit kurzen Fakten (`llm-cli knowledge sources` zeigt jede Seite).
+Wissen gehört immer zu einem Thema oder einem Target: Installierte Wissenspakete liegen im Ordner ihres Themas oder
+Targets, eine lose Wissensdatei wird nie importiert, bis du sie in einen davon einsortierst (vorher wird sie wie ein
+Paket geprüft), eine neuere Paketversion ersetzt die Auszüge der alten, und der Wissens-Snapshot eines Target-Pakets
+kommt unter diesem Target in die Wissensbasis des Empfängers. Mehr
 dazu: [Wissensbasis](docs/Features_DE.md#wissensbasis-rag), [Deep Ingest](docs/Features_DE.md#deep-ingest) und
 [Lizenzen und Urheberrecht](docs/Features_DE.md#lizenzen-und-urheberrecht).
 

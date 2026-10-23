@@ -11,7 +11,9 @@ Every `llm-cli zoo` action has its mouse path here (DECISIONS W1'), each calling
 Details... (zoo show: CommunityManager.details), Import file... with a passphrase or the key files of the only senders
 to accept (zoo install --file --passphrase / --from: prepare_install_file), Check installed packs (zoo verify:
 verify_installed), Check a pack file... (zoo verify FILE: verify_file), Export... (zoo export target|recipe|knowledge
-with --id, --to, --passphrase, --out: export_pack) and My public keys... (zoo keys: UserKeys.export_public). Downloads,
+with --id, --topic/--target, --to, --passphrase, --out: export_pack), Sort loose knowledge... (knowledge loose and
+knowledge sort: loose_knowledge, prepare_sort; a loose knowledge file is never imported until it is sorted into a topic
+or target folder, DECISIONS round 23 item 1) and My public keys... (zoo keys: UserKeys.export_public). Downloads,
 checks, exports and the keys run off the GUI thread; passphrases are never stored or shown.
 
 The second tab, Maintainer (gui/community_maintainer.py), holds the maintainer's actions on the community repository
@@ -127,8 +129,9 @@ class CommunityHubWindow(QMainWindow):
                                               "btn_zoo_verify_installed")
         self.verify_file_btn = self._action_button("zoo.verify_file", self.verify_file, "btn_zoo_verify_file")
         self.export_btn = self._action_button("zoo.export", self.export_pack, "btn_zoo_export")
+        self.sort_btn = self._action_button("zoo.sort", self.sort_loose, "btn_zoo_sort")
         self.keys_btn = self._action_button("zoo.keys", self.show_keys, "btn_zoo_keys")
-        for button in (self.details_btn, self.verify_btn, self.verify_file_btn, self.export_btn):
+        for button in (self.details_btn, self.verify_btn, self.verify_file_btn, self.export_btn, self.sort_btn):
             actions.addWidget(button)
         actions.addStretch()
         actions.addWidget(self.keys_btn)
@@ -353,6 +356,22 @@ class CommunityHubWindow(QMainWindow):
         kind, source = dialog.values()
         CommunityExportDialog(self.framework_manager, kind, source, self).exec()
 
+    def sort_loose(self):
+        """Sort loose knowledge...: the loose knowledge files and the topic or target for one (SortKnowledgeDialog),
+        then CommunityManager.prepare_sort in a worker thread and the summary with "No" as the default; "Yes" moves it
+        into its folder and imports it (`llm-cli knowledge loose`, `llm-cli knowledge sort NAME --topic|--target`)."""
+        from orchestrator.gui.community_dialogs import SortKnowledgeDialog
+        if not self.comm_manager:
+            self.on_error("Community Manager missing.")
+            return
+        dialog = SortKnowledgeDialog(self.comm_manager.loose_knowledge(), self.comm_manager.knowledge_topics(),
+                                     self.comm_manager.exportable_targets(), self, self.lang)
+        if not dialog.exec():
+            return
+        name, topic, target = dialog.values()
+        self.status_label.setText(ui_text("zoo.sort.checking", self.lang, name=one_line(name)))
+        self._run(self.comm_manager.prepare_sort, self.confirm_install, name, topic=topic, target=target)
+
     def _build_start(self) -> str:
         """Where the build_info.json chooser opens: the output folder, as the Builder's export does."""
         config = getattr(self.framework_manager, "config", None)
@@ -378,7 +397,9 @@ class CommunityHubWindow(QMainWindow):
     def confirm_install(self, prepared):
         from orchestrator.Core.community_manager import TrustLevel
         local = prepared.trust == TrustLevel.LOCAL
-        box = QMessageBox(QMessageBox.Warning if local else QMessageBox.Question, "Install community pack",
+        title = (ui_text("zoo.sort.title", self.lang) if getattr(prepared, "loose_file", None) is not None
+                 else "Install community pack")
+        box = QMessageBox(QMessageBox.Warning if local else QMessageBox.Question, title,
                           prepared.summary(), QMessageBox.Yes | QMessageBox.No, self)
         # The summary quotes the pack (author, notes): as HTML it could hide the trust level and the warning.
         box.setTextFormat(Qt.PlainText)
@@ -402,19 +423,28 @@ class CommunityHubWindow(QMainWindow):
         tm = getattr(self.framework_manager, "target_manager", None)
         if prepared.manifest.kind == "target" and tm is not None:
             tm.initialize()
-        problem = getattr(self.comm_manager, "last_sync_problem", "") if prepared.manifest.kind == "knowledge" else ""
-        lines = [f"Installed {prepared.manifest.kind} {prepared.manifest.id} in {dest}."]
-        snapshot = getattr(self.comm_manager, "last_sync_snapshot", None) if prepared.manifest.kind == "knowledge" \
-            else None
+        # a knowledge pack, a sorted loose file or a target pack's knowledge snapshot reached the knowledge base
+        imports = getattr(prepared, "imports_knowledge", prepared.manifest.kind == "knowledge")
+        problem = getattr(self.comm_manager, "last_sync_problem", "") if imports else ""
+        lines = [ui_text("zoo.sort.done", self.lang, name=one_line(getattr(prepared, "loose_label", "")),
+                         folder=str(dest))
+                 if getattr(prepared, "loose_file", None) is not None else
+                 f"Installed {prepared.manifest.kind} {prepared.manifest.id} in {dest}."]
+        snapshot = getattr(self.comm_manager, "last_sync_snapshot", None) if imports else None
         if snapshot and not problem:   # N13, as `llm-cli zoo install` says it: saved first, so it can be undone
             lines.append(ui_text("zoo.install.snapshot", self.lang, name=one_line(snapshot)))
+        # Only the snapshot that did not fit is a question of disk space (below); any other reason the pack waits is
+        # said here, as `llm-cli zoo install` says it
+        no_room = bool(problem) and getattr(self.comm_manager, "last_sync_no_room", True)
+        if problem and not no_room:
+            lines.append(ui_text("zoo.install.waiting", self.lang, why=one_line(problem)))
         self._install_note = "\n".join(lines)
         self.status_label.setText(self._install_note)
         if prepared.manifest.kind == "target" and tm is not None:   # `llm-cli targets validate` on it, shown
             from orchestrator.gui.targets_window import show_target_check
             show_target_check(self, self.framework_manager, Path(dest).name, lang=self.lang,
                               intro=ui_text("bld.check.after_install", self.lang))
-        if problem:  # installed, but not imported: the snapshot taken first did not fit (N13)
+        if no_room:  # installed, but not imported: the snapshot taken first did not fit (N13)
             from orchestrator.gui.knowledge_snapshots_window import offer_snapshot_list
             offer_snapshot_list(self, self.framework_manager, problem)
         self.installed.emit(prepared.manifest.kind)
@@ -487,8 +517,15 @@ class CommunityExportDialog(QDialog):
         self.id_edit = QLineEdit()
         self.id_edit.setObjectName("edt_zoo_export_id")
         self.id_edit.setPlaceholderText(self._t("zoo.export.id.hint"))
+        self.scope = None   # a knowledge pack's topic or target (DECISIONS round 23 item 1: --topic / --target)
         if kind == "knowledge":
             form.addRow(plain_label(self._t("zoo.export.id"), wrap=False), self.id_edit)
+            from orchestrator.gui.community_dialogs import ScopeChooser
+            cm = self.comm_manager
+            self.scope = ScopeChooser(self, self.lang, cm.knowledge_topics() if cm else [],
+                                      cm.exportable_targets() if cm else [], "zoo_export")
+            form.addRow(plain_label(self._t("knowledge.scope"), wrap=False), self.scope.scope)
+            form.addRow(plain_label(self._t("knowledge.scope.name"), wrap=False), self.scope.name)
         self.encrypt_combo = QComboBox()
         self.encrypt_combo.setObjectName("cmb_zoo_export_encrypt")
         for mode in self.ENCRYPT:
@@ -583,6 +620,10 @@ class CommunityExportDialog(QDialog):
         if self.comm_manager is None:
             self.output.setPlainText("Error: Community Manager missing.")
             return
+        topic, target = self.scope.values() if self.scope is not None else (None, None)
+        if self.scope is not None and not (topic or target):
+            self._warn(self._t("knowledge.scope.missing"))
+            return
         mode = self.encrypt_combo.currentData()
         recipients, secret = [], []
         if mode == "keys":   # the CLI's --to: the age recipients in the key files (read_public_key_files)
@@ -616,6 +657,8 @@ class CommunityExportDialog(QDialog):
                          pack_id=(self.id_edit.text().strip() or None) if self.kind == "knowledge" else None,
                          model_license=self.model_license_edit.text().strip() or "unknown", recipients=recipients,
                          out_dir=self.out_dir)
+        if self.kind == "knowledge":
+            arguments.update(topic=topic, target=target)
         self.create_btn.setEnabled(False)
         self.pr_btn.setEnabled(False)
         self.output.setPlainText(self._t("zoo.export.creating"))

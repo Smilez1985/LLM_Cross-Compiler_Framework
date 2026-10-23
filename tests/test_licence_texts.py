@@ -135,7 +135,7 @@ def test_an_export_without_the_canonical_text_says_why(world, without):
     without("MIT")
     world.rag.records = [record(f"{DOCS}/mit", "Text under MIT.", title="MIT page", licence="MIT"),
                          record(f"{DOCS}/apache", "Text under Apache.", title="Apache page", licence="Apache-2.0")]
-    result = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+    result = world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs")
     files = pack_files(result.path)
     entries = {e["source"]: e for e in json.loads(files["knowledge.json"])}
     assert entries[f"{DOCS}/mit"]["metadata"]["licence_state"] == "no_licence_text"
@@ -178,7 +178,7 @@ def full_world_records():
 
 def test_a_knowledge_pack_ships_each_licence_text_and_a_notice_of_every_page(world):
     world.rag.records = full_world_records()
-    result = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+    result = world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs")
     files = pack_files(result.path)
     shipped = sorted(n for n in files if n.startswith("LICENSES/"))
     assert shipped == [f"LICENSES/{x}.txt" for x in ("Apache-2.0", "BSD-3-Clause", "CC-BY-4.0", "ISC", "MIT",
@@ -237,7 +237,7 @@ def test_a_knowledge_pack_from_the_qdrant_edge_knowledge_base_ships_the_licence_
         assert rag.ingest_document(source, text, meta, replace=True), rag.last_error
     assert rag.get_status()["store_format"] == "qdrant-edge"
     world.rag = rag
-    result = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+    result = world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs")
     files = pack_files(result.path)
     shipped = sorted(n for n in files if n.startswith("LICENSES/"))
     assert shipped == [f"LICENSES/{x}.txt" for x in ("Apache-2.0", "BSD-3-Clause", "CC-BY-4.0", "ISC", "MIT",
@@ -271,7 +271,7 @@ def test_every_copyright_line_of_a_repositorys_licence_file_goes_into_the_notice
                licence="MIT", root_url=TOOL),
         record(f"{TOOL}/blob/main/src/main.c", "int main(void) { return 0; }", code_repo="github.com/acme/tool",
                root_url=TOOL)]
-    notice = pack_files(world.cm.export_pack("knowledge", author="a", pack_id="docs").path)["NOTICE"].decode()
+    notice = pack_files(world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs").path)["NOTICE"].decode()
     assert (f"Source: {TOOL}/blob/main/LICENSE\nCopyright: Copyright (c) 2023 First Holder\n"
             "Copyright: Copyright (c) 2024 Second Holder\nSPDX id: MIT") in notice
     assert (f"Source: {TOOL}/blob/main/src/main.c\n"
@@ -283,7 +283,7 @@ def test_every_copyright_line_of_a_repositorys_licence_file_goes_into_the_notice
 def test_without_a_page_that_asks_for_a_text_the_pack_ships_no_licence_file(world):
     world.rag.records = [record(f"{DOCS}/free", "Free text.", title="Free", licence="CC0-1.0"),
                          record(f"{DOCS}/sdk", "Vendor words.", copyright="© 2023 Vendor")]
-    result = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+    result = world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs")
     assert sorted(pack_files(result.path)) == ["knowledge.json", "pack.json", "pack.sig"]
     assert "Licence texts in the pack: none; no page carried in full is under a licence that asks for its text." \
         in result.summary() and result.licence_texts == []
@@ -293,7 +293,7 @@ def test_an_apache_page_without_a_crawled_notice_file_says_so(world):
     world.rag.records = [record(f"{LIB}/blob/main/LICENSE", "Apache License", code_repo="github.com/acme/lib",
                                 licence_file=True, licence="Apache-2.0", root_url=LIB),
                          record(f"{LIB}/blob/main/a.py", "a = 1", code_repo="github.com/acme/lib", root_url=LIB)]
-    notice = pack_files(world.cm.export_pack("knowledge", author="a", pack_id="docs").path)["NOTICE"].decode()
+    notice = pack_files(world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs").path)["NOTICE"].decode()
     assert "The crawl read no NOTICE file of github.com/acme/lib; if the work has one, its notices apply too" in notice
 
 
@@ -304,7 +304,7 @@ def test_the_privacy_scrub_never_changes_a_licence_text(world, monkeypatch):
         return text.replace("SOFTWARE", "<host>").replace("Software", "<host>")
     monkeypatch.setattr(community_manager, "scrub", scrub)
     world.rag.records = [record(f"{DOCS}/mit", "Text.", title="MIT page", licence="MIT")]
-    result = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+    result = world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs")
     files = pack_files(result.path)
     assert files["LICENSES/MIT.txt"] == (DATA / "MIT.txt").read_bytes()
     assert not any(name == "LICENSES/MIT.txt" for name, _ in result.changes)
@@ -316,7 +316,7 @@ def test_the_privacy_scrub_never_changes_a_licence_text(world, monkeypatch):
 
 def test_the_install_keeps_the_licence_texts_and_verify_checks_them(world):
     world.rag.records = full_world_records()
-    exported = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+    exported = world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs")
     imported = []
     world.rag.ingest_document = lambda s, c, m: imported.append((s, m)) or True
     prepared = world.cm.prepare_install_file(exported.path)
@@ -492,7 +492,7 @@ def test_an_ai_gets_the_licence_texts_in_fixed_words(env):  # noqa: F811
     UserKeys(env.world.secrets).signing_key()
     env.world.rag.records = full_world_records()
     asked = []
-    out = call(env, "export_pack", {"kind": "knowledge", "author": "pat", "pack_id": "docs"},
+    out = call(env, "export_pack", {"kind": "knowledge", "author": "pat", "pack_id": "docs", "topic": "docs"},
                confirm=recording(asked))
     assert "Licence texts" in asked[0] and "LICENSES/" in asked[0]
     job = wait_job(env, out.pack_notes[0].split()[2].rstrip(":"))

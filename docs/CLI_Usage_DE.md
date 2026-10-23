@@ -124,6 +124,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten; die ausgewählten löschen oder exportieren (unveröffentlicht) |
 | `knowledge index-docs` | Die eigene Dokumentation des Frameworks (und mit `--with-code` seinen Code) in die Wissensbasis aufnehmen (unveröffentlicht) |
 | `knowledge storage` | Wo die Wissensbasis liegt (Qdrant Edge), die Umwandlung einer älteren und ihr alter Ordner: `convert`, `delete-old` (unveröffentlicht) |
+| `knowledge loose` / `knowledge sort` | Die losen Wissensdateien auflisten / eine nach den Paketprüfungen und deiner Bestätigung in einen Themen- oder Target-Ordner einsortieren und importieren (unveröffentlicht) |
 | `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen (unveröffentlicht) |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
@@ -334,7 +335,7 @@ llm-cli knowledge index-docs --with-code
 ### knowledge sources
 
 ```
-llm-cli knowledge sources [--kind web|pack|docs|other|any]
+llm-cli knowledge sources [--kind web|pack|docs|other|any] [--topic NAME]
 ```
 
 Unveröffentlicht. Listet, was die Wissensbasis enthält: jede Quelle mit ihrer Art, der Lizenz, die sie nennt (eine
@@ -343,13 +344,47 @@ Urheberrechtshinweis und dem, was ein Wissenspaket von ihr enthielte, und warum:
 die Weitergabe des Textes), **link and short facts** (ein Urheberrechtshinweis ohne eine solche Lizenz, Code ohne
 Lizenz, eine unbekannte Lizenz) oder **not exported** (eine Seite eines installierten Wissenspakets, die eigenen
 Dokumente des Frameworks). Adressen, Titel und Hinweise sind Text der Website und werden als reiner Text gezeigt. Die
-Wissensbasis muss eingeschaltet sein.
+Wissensbasis muss eingeschaltet sein. Die Spalte **Thema oder Target** nennt das Thema oder Target, zu dem die Auszüge
+eines Wissenspakets oder eines Target-Pakets gehören (`-` für deine eigenen Seiten, die beim Export eins bekommen);
+`--topic NAME` listet nur die Quellen dieses Themas oder Targets (Groß- und Kleinschreibung egal).
 
-In der GUI: **Tools > Wissensquellen...** (dieselben Spalten; der Filter **Art** ist `--kind`).
+In der GUI: **Tools > Wissensquellen...** (dieselben Spalten; der Filter **Art** ist `--kind`, das Feld **Thema oder
+Target** ist `--topic`).
 
 ```bash
 llm-cli knowledge sources
 llm-cli knowledge sources --kind web
+llm-cli knowledge sources --topic Rockchip
+```
+
+### knowledge loose und knowledge sort
+
+```
+llm-cli knowledge loose
+llm-cli knowledge sort NAME --topic NAME | --target NAME
+```
+
+Unveröffentlicht. Wissen gehört immer zu einem Thema oder einem Target. Ein installiertes Wissenspaket liegt im Ordner
+seines Themas oder Targets, `community/knowledge/<Thema oder Target>/<Paket>/`, und eine lose Wissensdatei wird nie
+importiert: eine `.json`-Datei direkt in `community/knowledge/` oder in einem Themenordner, oder eine `knowledge.json`
+in einem Ordner ohne die `.lcf-provenance.json` des Pakets. `knowledge loose` listet sie (Mojo nennt sie auch).
+`knowledge sort` sortiert eine davon (`NAME`, wie `knowledge loose` ihn ausgibt) in ein Thema (einen vorhandenen
+Themenordner oder einen neuen Namen) oder in ein Target dieses Computers: Die Datei wird in der Quarantäne wie ein
+installiertes Wissenspaket geprüft (eine Liste von Seiten, jede mit ihrer Quelle; die Lizenztexte und die `NOTICE`,
+die ihre Volltext-Seiten brauchen, werden daneben geschrieben), die Zusammenfassung wird gezeigt, und erst nach
+deinem **y** an einem Terminal („Nein“ ist die Vorgabe) wird sie in den Ordner verschoben (Vertrauensstufe `local`)
+und in die Wissensbasis importiert, nach einem Snapshot von ihr. Ohne Terminal wird nichts einsortiert. Das Paket
+heißt wie die Datei (eine `knowledge.json` wie ihr Ordner), mit einer angehängten Zahl, wenn ein installiertes Paket
+oder etwas im gewählten Ordner schon so heißt; die Zusammenfassung nennt den Ordner, bevor du antwortest. Eine Datei
+im alten „Swarm“-Format, oder eine, die die Prüfung nicht besteht, bleibt mit dem Grund liegen.
+
+In der GUI: **Lose Wissensdateien einsortieren...** im Community Hub (die Liste der losen Dateien, **Gehört zu:** ein
+Thema oder ein Target, dann die Zusammenfassung mit „Nein“ als Vorgabe).
+
+```bash
+llm-cli knowledge loose
+llm-cli knowledge sort notes.json --topic llama.cpp
+llm-cli knowledge sort board/knowledge.json --target Rockchip
 ```
 
 ### knowledge storage
@@ -2275,9 +2310,15 @@ Vertrauensstufen:
 Targets, die mit dem Framework ausgeliefert werden, etwa Rockchip, haben keine Herkunftsdatei und erscheinen nicht im
 Zoo.
 
-Installierte Targets landen im Targets-Ordner, Rezepte in `community/recipes/<ID>/` und Wissenspakete in
-`community/knowledge/<ID>/` der Installation. Ein Wissenspaket wird direkt nach der Installation in deine
-Wissensbasis importiert oder, wenn die Wissensbasis ausgeschaltet ist, sobald sie eingeschaltet wird.
+Installierte Targets landen im Targets-Ordner, Rezepte in `community/recipes/<ID>/` und Wissenspakete im Ordner
+ihres Themas oder Targets, `community/knowledge/<Thema oder Target>/<ID>/` der Installation (ein Paket, das eine
+frühere Version installiert hat, bleibt in `community/knowledge/<ID>/`). Ein Wissenspaket wird direkt nach der
+Installation in deine Wissensbasis importiert oder, wenn die Wissensbasis ausgeschaltet ist, sobald sie eingeschaltet
+wird; jeder Auszug trägt sein Thema oder Target. Ein Paket, das erstellt wurde, bevor Pakete ihr Thema nannten,
+bekommt seine ID als Thema, was die Zusammenfassung sagt und die Installation bestätigt. Eine neuere Version eines
+Pakets (installiert, nachdem du den Ordner der älteren entfernt hast) ersetzt die Auszüge der älteren Version. Ein
+Target-Paket mit einem Wissens-Snapshot (`knowledge/initial_knowledge.json`) lässt ihn wie ein Wissenspaket prüfen und
+unter seinem Target importieren, ebenfalls mit einem Snapshot der Wissensbasis vorher.
 
 In der GUI: **Tools > Community Hub öffnen** (Liste, Filter nach Art und Vertrauensstufe, „Import file...“, „Build“
 bei einem installierten Rezept, **Details...**, **Installierte Pakete prüfen**, **Paketdatei prüfen...**,
@@ -2428,6 +2469,7 @@ Datei), und Hinweise.
 | `--license TEXT` | Lizenz des Pakets als SPDX-ID. Standard `MIT`; für Wissen `NOASSERTION`, weil die Seiten unter den Bedingungen ihrer Eigentümer bleiben. |
 | `--model-license TEXT` | Rezepte: Lizenz-ID des Modells (Standard `unknown`). |
 | `--id TEXT` | Wissen: ID des Pakets (Standard `knowledge-` und das heutige Datum, z. B. `knowledge-20261011`). |
+| `--topic TEXT` / `--target TEXT` | Wissen: **eins davon ist Pflicht**: das Thema, zu dem seine Seiten gehören (z. B. `llama.cpp`), oder ein Target dieses Computers. Der Empfänger findet die Seiten darunter. Nicht für `target` und `recipe` (Exit-Code 2). |
 | `--to FILE` | Das Paket zum privaten Teilen an die age-Empfänger (`age1...`) in dieser Datei verschlüsseln: was `llm-cli zoo keys` auf dem Rechner des Empfängers ausgegeben hat, oder ein öffentlicher Schlüssel aus `age-keygen`/`rage-keygen`; wiederholbar. |
 | `--passphrase` | Das Paket zum privaten Teilen mit einer Passphrase verschlüsseln (zweimal abgefragt, mindestens 12 Zeichen). Nicht zusammen mit `--to` (Exit-Code 2): age verschlüsselt an Schlüssel oder an eine Passphrase. |
 | `--out DIRECTORY` | Ordner für das Paket. Standard: `community/contributions/` in der Installation. |
@@ -2498,7 +2540,7 @@ llm-cli zoo export recipe output/build_20261011_141500/Rockchip/SmolLM2-135M-Ins
   --author "<dein Name>" --model-license Apache-2.0
 
 # Deine Wissensbasis unter einer ID deiner Wahl
-llm-cli zoo export knowledge --author "<dein Name>" --id rk3588-notes
+llm-cli zoo export knowledge --author "<dein Name>" --id rk3588-notes --target Rockchip
 
 # Verschlüsselt für eine Kollegin, oder mit einer Passphrase
 llm-cli zoo export target my-board --author "<dein Name>" --to kollegin.keys

@@ -1442,6 +1442,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
+  Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
+  sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target
+  im Manifest: `llm-cli zoo export knowledge` braucht `--topic` oder `--target` (ein Target dieses Computers), ebenso
+  das Export-Fenster (**Gehört zu:**) und das Werkzeug `export_pack`; ein Paket von vorher wird weiter geprüft und
+  installiert, mit seiner ID als Thema, was die Zusammenfassung sagt und nur deine Bestätigung annimmt (keine
+  dauerhafte Freigabe deckt das ab). `search_knowledge` und `list_knowledge_sources` nehmen `topic`,
+  `llm-cli knowledge sources --topic` und das neue Feld und die Spalte **Thema oder Target** in **Tools >
+  Wissensquellen...** grenzen die Liste ein. Eine lose Wissensdatei wird gelistet (`llm-cli knowledge loose`, Mojo,
+  **Lose Wissensdateien einsortieren...** im Community Hub) und über die Prüfungen eines installierten Pakets in einen
+  Themen- oder Target-Ordner einsortiert (`llm-cli knowledge sort NAME --topic|--target`), dann importiert. Der
+  Wissens-Snapshot eines Target-Pakets (`knowledge/initial_knowledge.json`) wird wie ein Wissenspaket geprüft und unter
+  diesem Target in die Wissensbasis des Empfängers importiert, mit einem Snapshot vorher; die README, die der
+  Modul-Assistent daneben schreibt, sagt das. Der vorläufige Wissens-Export des Modul-Assistenten landet in einem
+  privaten Arbeitsordner statt in `community/knowledge/`.
 - **Der Hugging-Face-Browser der GUI lädt in den Ordner `hf/` des Modellordners, geprüft, wie ein Download einer KI**
   (Entscheidung A6 des Maintainers; Konsolidierungskette hf). Neuer Ort: `<Modellordner>/hf/<Owner>--<Name>/<die
   ersten 12 Zeichen des Commits>/<Datei>`, derselbe Ordner wie bei `download_hf_file` einer KI (der Builder legt
@@ -2391,6 +2406,25 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Hinweis: Der Build läuft immer weiter. Der lokale hadolint-Befehl in CONTRIBUTING legt das Image per Digest fest
   (`hadolint/hadolint:v2.15.1@sha256:32dac941...`, FRESHNESS_PLAN F-5) und nennt alle fünf Dockerfiles, die die CI
   prüft.
+- **Eine neuere Version eines Wissenspakets ließ die Auszüge der alten Version zurück** (DECISIONS Runde 23 Punkt 2):
+  Paketseiten werden Stück für Stück ohne Ersetzen gespeichert, also behielt eine geänderte oder weggefallene Seite
+  ihre alten Auszüge. Jeder Auszug trägt jetzt den Inhalts-Digest des installierten Pakets; sobald jede Seite der neuen
+  Version drin ist, werden die Auszüge der älteren entfernt (`RAGManager.remove_pack_leftovers`), je Paket und
+  Seitenquelle, nie die anderer Pakete oder deine eigenen Seiten; eine einsortierte lose Datei ersetzt auch die
+  Auszüge, die eine frühere Version unsortiert aus ihr importiert hat. Der Snapshot vor dem Import bleibt. Eine Paketseite,
+  die sich nicht importieren ließ, landete früher nur im Log; warum ein Paket wartet, wird jetzt nach der Installation
+  gesagt (`last_sync_problem`): nur, warum das installierte Paket wartet (ein anderes wartendes Paket wird beim Start
+  der Wissensbasis genannt), und der Community Hub bietet die Liste der Snapshots zum Löschen nur an, wenn der vorher
+  genommene Snapshot nicht passte. Eine einsortierte lose Datei bekommt einen Namen, der in ihrem Ordner frei ist,
+  bevor du gefragt wirst (auch wenn die Datei in einem Ordner dieses Themas lag), nie einen Windows-Gerätenamen, und
+  ihr Einsortieren entfernt nie die Auszüge eines installierten Pakets gleichen Namens oder eines Target-Pakets. Ein
+  Wissenspaket, dessen Ordner es schon gibt, wird vor der Frage abgelehnt, wie andere Pakete. Windows speichert kein
+  Ausführungsrecht, also passte ein installiertes Paket mit Skripten von Linux oder macOS (jedes Target, das der
+  Modul-Assistent macht) dort nie zu seinem Digest: Sein Wissens-Snapshot wäre nie importiert worden, und **Installierte
+  Pakete prüfen** nannte es verändert. Die Herkunftsdatei hält jetzt auch den Digest des Pakets mit den Rechten, wie
+  das Dateisystem sie behält (nur wo er abweicht; die Inhalte bleiben die des Manifests, also fällt eine später
+  geänderte Datei weiter auf), und beide Prüfungen nehmen ihn an. Gecrawlte Seiten ersetzten ihre früheren Auszüge
+  schon und werden direkt nach dem Download gespeichert (unverändert).
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie
@@ -2873,6 +2907,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Windows als Administrator). Die virtuelle Umgebung behält jetzt das pip, das mit Python kommt; es genügt für
   `--require-hashes --no-deps`, und der Installer-Test hält jeden pip-Aufruf am Export mit Hashes fest.
   `install.bat` lädt sonst nichts ungeprüft (winget prüft den Python-Installer gegen den SHA256 seines Manifests).
+- **Lose Wissensdateien werden nicht mehr ohne die Paketprüfungen importiert** (DECISIONS Runde 23 Punkt 1): Jede
+  `.json`-Datei in `community/knowledge/` und jede `knowledge.json` in einem Ordner ohne die Herkunftsdatei des Pakets
+  wurde bei jedem Start in die Wissensbasis importiert, ohne Manifest, Signatur, Quarantäne oder Prüfung. Jetzt werden
+  nur installierte Pakete importiert, und nur solange ihre Dateien dem Installierten entsprechen; eine lose Datei
+  wartet, bis die Person sie über die Prüfungen eines installierten Pakets einsortiert. Eine Paketseite kann die Felder
+  nicht mehr setzen, die der Import selbst setzt (`origin_pack`, `origin_sha256`, `topic`, `target`), und ein Thema
+  oder Target erreicht einen KI-Client nur als schlichter Name.
 - **Das Hugging-Face-Token geht nur an huggingface.co, auch wenn `HF_ENDPOINT` einen anderen Host nennt** (Review
   der Kette hf): huggingface_hub schickt seine API-Aufrufe an den Host in der Umgebungsvariable `HF_ENDPOINT` (einen
   Mirror). Die Commit-Abfrage des Downloads im GUI-Browser und die Hub-Liste von **Alte Downloads übernehmen…**

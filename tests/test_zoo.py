@@ -99,8 +99,10 @@ def make_target(root: Path, script: str = "echo build\n", yml: str = TARGET_YML,
     return root
 
 
-def pack_bytes(root: Path, kind="target", pack_id="demo-board", version="1.2.0", author="alice", key=None) -> bytes:
-    manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license="MIT")
+def pack_bytes(root: Path, kind="target", pack_id="demo-board", version="1.2.0", author="alice", key=None,
+               topic=None, target=None) -> bytes:
+    manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license="MIT",
+                              topic=topic, target=target)
     return write_pack(root, manifest, sign_manifest(manifest, key) if key else None)
 
 
@@ -677,7 +679,7 @@ class TestExport:
                               "metadata": {"root_url": "https://docs.invalid", "licence": "CC0-1.0"}},
                              {"source": "b", "content": "private",
                               "metadata": {"root_url": "https://mine.invalid", "licence": "CC0-1.0"}}]
-        result = world.cm.export_pack("knowledge", author="a", pack_id="board-docs", root_urls=["https://docs.invalid"])
+        result = world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="board-docs", root_urls=["https://docs.invalid"])
         with zipfile.ZipFile(result.path) as zf:
             assert [e["content"] for e in json.loads(zf.read("knowledge.json"))] == ["from docs"]
 
@@ -686,27 +688,27 @@ class TestExport:
                               "metadata": {"licence": "CC0-1.0"}},
                              {"source": "https://docs.invalid/b", "content": "alice's",
                               "metadata": {"origin_pack": "alice-notes", "licence": "CC0-1.0"}}]
-        result = world.cm.export_pack("knowledge", author="mallory", pack_id="docs")
+        result = world.cm.export_pack("knowledge", topic="docs", author="mallory", pack_id="docs")
         with zipfile.ZipFile(result.path) as zf:
             assert [e["content"] for e in json.loads(zf.read("knowledge.json"))] == ["mine"]
         assert any(n.startswith("1 page(s) imported from installed community knowledge packs were left out")
                    for n in result.notes), result.notes
         world.rag.records = world.rag.records[1:]
         with pytest.raises(PackError, match="nothing to export"):
-            world.cm.export_pack("knowledge", author="mallory", pack_id="docs")
+            world.cm.export_pack("knowledge", topic="docs", author="mallory", pack_id="docs")
 
     def test_the_note_counts_left_out_pages_not_their_chunks(self, world):
         world.rag.records = [{"source": "https://docs.invalid/a", "content": "mine", "metadata": {}}] + [
             {"source": f"https://docs.invalid/{page}", "content": f"alice's part {i}",
              "metadata": {"origin_pack": "alice-notes"}} for page in ("b", "c") for i in range(3)]
-        result = world.cm.export_pack("knowledge", author="mallory", pack_id="docs")
+        result = world.cm.export_pack("knowledge", topic="docs", author="mallory", pack_id="docs")
         assert any(n.startswith("2 page(s) imported from installed community knowledge packs were left out")
                    for n in result.notes), result.notes
 
     def test_knowledge_keeps_its_sources_and_claims_no_licence(self, world):
         world.rag.records = [{"source": "https://docs.invalid/a", "content": "page", "metadata": {}},
                              {"source": "", "content": "nobody knows where from", "metadata": {}}]
-        result = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+        result = world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs")
         assert result.manifest.license == "NOASSERTION", "web pages are not the exporter's to license"
         with zipfile.ZipFile(result.path) as zf:
             assert [e["source"] for e in json.loads(zf.read("knowledge.json"))] == ["https://docs.invalid/a"]
@@ -993,10 +995,11 @@ class TestGenerator:
         world.rag.records = [{"source": "a", "content": "board doc", "metadata": {"root_url": "https://b.invalid"}}]
         target = generator.generate_module(self.data(), world.framework, knowledge_roots=["https://b.invalid"])
         readme = (target / "knowledge" / "README.md").read_text(encoding="utf-8")
-        for claim in ("vectorized", "Qdrant", "automatically"):   # nothing reads initial_knowledge.json
+        for claim in ("vectorized", "Qdrant", "automatically"):   # this computer never imports initial_knowledge.json
             assert claim not in readme
-        for fact in ("initial_knowledge.json", "privacy scrub", "source", "does not read this file",
-                     "llm-cli zoo export knowledge"):
+        # DECISIONS round 23 item 8: a target pack's snapshot is imported at the recipient, under its target
+        for fact in ("initial_knowledge.json", "privacy scrub", "source", "does not import this file",
+                     "recipient's framework imports it", "under this target", "llm-cli zoo export knowledge"):
             assert fact in readme
 
 

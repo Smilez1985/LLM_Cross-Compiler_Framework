@@ -23,6 +23,18 @@ not packs.
 The framework never uploads anything and never asks for or reads a repository token: a contribution is handed to
 the browser or to an installed GitHub CLI, which keeps its own credentials.
 
+Knowledge always belongs to a topic or a target (DECISIONS round 23 items 1, 2 and 8). An installed knowledge pack
+lives in the folder of its topic or target, community/knowledge/<topic or target>/<pack>/ (a pack installed before
+topic folders stays in community/knowledge/<pack>/), and its pages reach the knowledge base with that topic or target
+on every excerpt. A loose knowledge file (a .json file in community/knowledge/ or in a topic folder, or a
+knowledge.json without the pack's provenance) is never imported: it is listed (loose_knowledge; Mojo, `llmcf knowledge
+loose`, the Community Hub's Sort loose knowledge...) and the person sorts it into a topic or target folder through the
+checks of an installed pack (prepare_sort: quarantine, the knowledge validator, the licence files, the person's
+"Yes"); only then is it imported, as a pack of trust local. A newer version of a pack replaces the excerpts of the
+older one (every excerpt carries the installed pack's content digest; what this import did not write is removed once
+every page is in). The knowledge snapshot a target pack carries (knowledge/initial_knowledge.json) is imported into the
+recipient's knowledge base under that target, with the same checks, the same snapshot first and the same replacement.
+
 Knowledge leaves this computer only as the licences allow (eighth round, Q-1 and Q-1'; share_pages): a page goes into
 a knowledge pack, or into a target's knowledge snapshot, with its full text only when its licence allows passing the
 text on, and keeps the attribution its licence requires. A page with a copyright notice and no such licence, code
@@ -55,15 +67,15 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Mapping, Option
 
 import yaml
 from packaging.version import InvalidVersion, Version
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 
 from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_PACK_BYTES, PACK_KINDS,
                                               PROVENANCE_NAME, SHA256_PATTERN, UTC_TIME_PATTERN, VERSION_PATTERN,
                                               Kind, PackError, PackManifest, PackSignature, Strict, UserKeys,
-                                              build_manifest, decrypt_pack, encrypt_pack, is_encrypted_pack,
-                                              list_files, load_trusted_keys, read_manifest, read_pack, scrub,
-                                              sign_manifest, tree_sha256, utc_now, verify_index, verify_manifest,
-                                              write_pack)
+                                              build_manifest, check_topic, decrypt_pack, encrypt_pack,
+                                              is_encrypted_pack, list_files, load_trusted_keys, local_sha256,
+                                              read_manifest, read_pack, scrub, sign_manifest, tree_sha256, utc_now,
+                                              verify_index, verify_manifest, write_pack)
 from orchestrator.rag import licence_texts, licences, pack_licences
 from orchestrator.rag.licences import FULL_TEXT, LINK_AND_FACTS, SharePlan
 from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file, with_reason
@@ -78,6 +90,16 @@ INDEX_MAX_BYTES = 8 * 1024 * 1024
 INDEX_MAX_AGE = 24 * 3600
 KNOWLEDGE_FILE = "knowledge.json"
 RECIPE_FILE = "recipe.yml"
+# The excerpts of a target pack's knowledge snapshot name it as their origin_pack with this prefix ("target:Rockchip"):
+# a knowledge pack's id cannot hold ':' (ID_PATTERN), so the two never meet.
+TARGET_ORIGIN = "target:"
+# Where the import markers of the target packs' knowledge snapshots live (inside community/knowledge/, hidden)
+TARGET_MARKERS = ".targets"
+# Excerpt fields the import sets itself: a page of a pack never sets them (it could claim another pack, topic or
+# target, or keep an older version's excerpts from being replaced).
+ORIGIN_FIELDS = ("origin_pack", "origin_sha256", "topic", "target")
+LOOSE_AUTHOR = "a file on this computer"   # the author a sorted loose knowledge file is installed under
+LOOSE_SOURCE = "loose file "   # the provenance source of a sorted loose file, before its label
 
 
 class TrustLevel(str, Enum):
@@ -166,6 +188,30 @@ class Provenance(Strict):
     # (MCP add_pack_from_index under a standing approval or a delegation): builds of it stay outside every build
     # standing approval until the person confirmed one build of it.
     installed_via: Optional[str] = Field(default=None, pattern=r"^(grant:g_|delegation:d_)[0-9a-f]{16}$")
+    # A knowledge pack: the topic or the target it belongs to (the pack's own, or the one taken from the id of a pack
+    # made before topics and confirmed by the person). Absent for other kinds and for packs installed before it.
+    topic: Optional[str] = None
+    target: Optional[str] = None
+    # The pack's digest with the modes as this computer's file system keeps them (community_pack.local_sha256), only
+    # where that differs from content_sha256: Windows keeps no execute bit, so a pack's 0o755 scripts read as 0o644
+    # there (installed_unchanged)
+    local_sha256: Optional[str] = Field(default=None, pattern=SHA256_PATTERN)
+
+    @field_validator("topic", "target")
+    @classmethod
+    def _topic_name(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else check_topic(value)
+
+    def to_json(self) -> str:
+        """The provenance file's text; the fields added later only when set, so the file of a target or recipe pack
+        stays what earlier versions write and read."""
+        return self.model_dump_json(indent=2, exclude={name for name in ("topic", "target", "local_sha256")
+                                                       if getattr(self, name) is None})
+
+    def installed_unchanged(self, digest: str) -> bool:
+        """Whether `digest` (tree_sha256 of the installed folder) is the installed content: the pack's own digest, or
+        that digest with the modes this computer's file system kept at the install."""
+        return digest in {self.content_sha256, self.local_sha256}
 
 
 @dataclass
@@ -224,17 +270,97 @@ class PreparedInstall:
     provenance: Provenance
     notes: List[str] = field(default_factory=list)
     author_key: Optional[str] = None  # the checked author signature's public key (base64), pinned on first use
+    # A knowledge pack: the topic or target it is sorted under; topic_from_id: the pack names neither (made before
+    # topics), so its topic is its id, which installing confirms.
+    topic: Optional[str] = None
+    target: Optional[str] = None
+    topic_from_id: bool = False
+    # A loose knowledge file being sorted (prepare_sort): moved into the pack folder by finish_install.
+    loose_file: Optional[Path] = None
+    loose_label: str = ""
+    # Pages that reach the knowledge base with it: a knowledge pack's, or those of a target pack's knowledge snapshot.
+    knowledge_pages: int = 0
+
+    @property
+    def imports_knowledge(self) -> bool:
+        """Whether finish_install imports pages into the knowledge base (a snapshot of it first): a knowledge pack, or
+        a target pack with a knowledge snapshot."""
+        return self.manifest.kind == "knowledge" or self.knowledge_pages > 0
 
     def summary(self) -> str:
         m = self.manifest
-        warning = ("\nWARNING: this pack is not in the signed community index. Nobody reviewed it; install it "
-                   "only if you trust where it came from. Every build of it shows a warning."
-                   if self.trust == TrustLevel.LOCAL else "")
+        if self.loose_file is not None:
+            warning = ("\nWARNING: a loose file of the knowledge folder; nobody reviewed it. Sort it only if you trust "
+                       "where it came from.")
+        else:
+            warning = ("\nWARNING: this pack is not in the signed community index. Nobody reviewed it; install it "
+                       "only if you trust where it came from. Every build of it shows a warning."
+                       if self.trust == TrustLevel.LOCAL else "")
         lines = [f"{m.kind} {m.id} {m.version} by {m.author} (licence {m.license})",
                  f"Trust: {self.trust.value}{warning}", f"Source: {self.provenance.source}",
-                 f"Files: {len(m.files)} ({sum(f.size for f in m.files)} bytes)",
-                 f"Installs to: {self.destination}"]
+                 f"Files: {len(m.files)} ({sum(f.size for f in m.files)} bytes)"]
+        if self.target:
+            lines.append(f"Target: {self.target} (its pages are found under this target)")
+        elif self.topic:
+            lines.append(f"Topic: {self.topic}" + (" (taken from the pack id: this pack was made before packs named "
+                                                   "their topic; installing confirms it)" if self.topic_from_id
+                                                   else ""))
+        if self.loose_file is not None:
+            lines.append(f"Moves the file {self.loose_label} to: {self.destination}")
+        else:
+            lines.append(f"Installs to: {self.destination}")
         return "\n".join(lines + [f"Note: {n}" for n in self.notes])
+
+
+@dataclass(frozen=True)
+class LooseKnowledge:
+    """A loose knowledge file (DECISIONS round 23 item 1), never imported until the person sorts it into a topic or
+    target folder (CommunityManager.prepare_sort). label: its place below community/knowledge/ ('/'-separated), the
+    name `llmcf knowledge sort` takes."""
+    path: Path
+    label: str
+    size: int
+
+
+def derived_topic(pack_id: str) -> str:
+    """The topic of a knowledge pack that names none (made before topics): its id, as a topic name."""
+    name = re.sub(r"[^A-Za-z0-9._-]", "-", str(pack_id or "")).strip(".")[:64].rstrip(".")
+    try:
+        return check_topic(name)
+    except ValueError:
+        return "knowledge"
+
+
+def knowledge_scope(prov: "Provenance") -> Tuple[str, str]:
+    """("target", name) or ("topic", name) of an installed knowledge pack; for a pack installed before topics, its
+    topic is its id."""
+    if prov.target:
+        return "target", prov.target
+    return "topic", prov.topic or derived_topic(prov.id)
+
+
+def _count_pages(path: Path) -> int:
+    """The pages (entries) of a knowledge file that is a list; 0 when it cannot be read."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return 0
+    return len(data) if isinstance(data, list) else 0
+
+
+@dataclass
+class _KnowledgeImport:
+    """One installed pack whose pages sync_knowledge_base imports: a knowledge pack, or a target pack's knowledge
+    snapshot."""
+    label: str              # what the person reads ("knowledge pack X", "the knowledge of target pack Y")
+    file: Path              # its pages
+    folder: Path            # the installed pack folder, checked against its provenance before the import
+    expected: str           # the provenance's content digest (also on every excerpt: origin_sha256)
+    marker: Path            # written once every page is in
+    origin: str             # origin_pack of its excerpts
+    tags: Dict[str, str]    # {"topic": ...} or {"target": ...}
+    legacy_origins: Tuple[str, ...] = ()   # the origin_pack an earlier, unsorted import of the same file used
+    provenance: Optional["Provenance"] = None   # the installed pack's (installed_unchanged)
 
 
 @dataclass(frozen=True)
@@ -439,6 +565,12 @@ def ai_generated_target(target_path: Path) -> bool:
         meta["metadata"].get("provenance") == "ai-generated"
 
 
+def _folder_key(path: Path) -> str:
+    """An installed pack's folder as a key (sync_knowledge_base's waiting packs): the same folder gives the same key,
+    also in another spelling of its case where the file system ignores case (Windows)."""
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
 def _file_stamp(path: Path) -> str:
     """Size and modification time of a knowledge pack's file: another file (a pack installed again) is another
     stamp."""
@@ -483,8 +615,13 @@ class CommunityManager:
         self.targets_dir = resolve(targets) if callable(resolve) else self.app_root / str(targets)
         self._session = session
         self._keys = keys  # tests pass their own; otherwise configs/community_keys.yml
-        # The last knowledge pack import (sync_knowledge_base): the snapshot taken first, or why nothing was imported
+        # The last knowledge pack import (sync_knowledge_base): the snapshot taken first, or why nothing was imported;
+        # last_sync_waiting: why each installed pack that stays pending waits (by its folder); last_sync_no_room: the
+        # snapshot taken first did not fit, so no pack was imported (finish_install narrows last_sync_problem to the
+        # pack it installed)
         self.last_sync_problem, self.last_sync_snapshot = "", None
+        self.last_sync_waiting: Dict[str, str] = {}
+        self.last_sync_no_room = False
         # Directories are created when something is written, not at every CLI/GUI start.
 
     def _cfg(self, key: str, default: Any = None) -> Any:
@@ -587,6 +724,9 @@ class CommunityManager:
     def installed(self) -> List[Tuple[Path, Provenance]]:
         found = []
         for kind in KINDS:
+            if kind == "knowledge":   # in topic and target folders (_knowledge_layout)
+                found += self._knowledge_layout()[0]
+                continue
             root = self._install_root(kind)
             if not root.is_dir():
                 continue
@@ -595,6 +735,190 @@ class CommunityManager:
                 if prov is not None and prov.kind == kind:
                     found.append((folder, prov))
         return found
+
+    # --- the knowledge folder: topic and target folders, loose files ------------------------------------------------
+    def _knowledge_layout(self) -> Tuple[List[Tuple[Path, Provenance]], List[Path]]:
+        """The knowledge folder as it is laid out: every installed knowledge pack (a folder with its provenance, in
+        community/knowledge/<topic or target>/<pack>/, or community/knowledge/<pack>/ for a pack installed before topic
+        folders) and every loose knowledge file (a .json file in community/knowledge/ or in a topic or target folder,
+        and a knowledge.json in a folder without a provenance). Hidden entries (the quarantine, the markers of the
+        target packs' knowledge) and links are left out; nothing below the second level is read."""
+        root = self.knowledge_dir
+        packs: List[Tuple[Path, Provenance]] = []
+        loose: List[Path] = []
+        if not root.is_dir() or root.is_symlink():
+            return packs, loose
+
+        def entries(folder: Path) -> List[Path]:
+            try:
+                return sorted((p for p in folder.iterdir() if not p.name.startswith(".") and not p.is_symlink()),
+                              key=lambda p: p.name.casefold())
+            except OSError:
+                return []
+
+        def provenance(folder: Path) -> Optional[Provenance]:
+            prov = read_provenance(folder)
+            return prov if prov is not None and prov.kind == "knowledge" else None
+
+        for first in entries(root):
+            if first.is_file():
+                if first.suffix.lower() == ".json":
+                    loose.append(first)
+                continue
+            if not first.is_dir():
+                continue
+            prov = provenance(first)
+            if prov is not None:   # installed before topic folders
+                packs.append((first, prov))
+                continue
+            for second in entries(first):   # a topic or target folder
+                if second.is_file():
+                    if second.suffix.lower() == ".json":
+                        loose.append(second)
+                    continue
+                if not second.is_dir():
+                    continue
+                prov = provenance(second)
+                if prov is not None:
+                    packs.append((second, prov))
+                elif (second / KNOWLEDGE_FILE).is_file() and not (second / KNOWLEDGE_FILE).is_symlink():
+                    loose.append(second / KNOWLEDGE_FILE)
+        return packs, loose
+
+    def loose_knowledge(self) -> List[LooseKnowledge]:
+        """Every loose knowledge file (DECISIONS round 23 item 1): not imported until the person sorts it into a topic
+        or target folder (prepare_sort). Reads the folder only."""
+        found = []
+        for path in self._knowledge_layout()[1]:
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            found.append(LooseKnowledge(path, path.relative_to(self.knowledge_dir).as_posix(), size))
+        return found
+
+    def knowledge_topics(self) -> List[str]:
+        """The topic and target folders of community/knowledge/ (for the person's choice when sorting), sorted."""
+        return sorted({folder.parent.name for folder, _ in self._knowledge_layout()[0]
+                       if folder.parent != self.knowledge_dir}, key=str.casefold)
+
+    def _knowledge_group(self, group: str) -> Path:
+        """The folder of a topic or target below community/knowledge/: the one there already (ignoring case, as
+        Windows and macOS do), or the new one. PackError when that name is a pack installed before topic folders."""
+        root = self.knowledge_dir
+        existing = next((p for p in (root.iterdir() if root.is_dir() else ())
+                         if p.name.casefold() == group.casefold() and p.is_dir() and not p.is_symlink()), None)
+        if existing is not None and read_provenance(existing) is not None:
+            raise PackError(f"{existing} is the knowledge pack {existing.name}, installed before knowledge was sorted "
+                            f"into topic folders; it cannot also be the folder of the topic {group}. Choose another "
+                            "topic name.")
+        return existing or root / group
+
+    def _knowledge_destination(self, pack_id: str, topic: Optional[str], target: Optional[str]) -> Path:
+        """community/knowledge/<topic or target>/<pack id>; PackError when a knowledge pack of that name is installed
+        already (pack names are unique across all topics: the knowledge base names a pack's excerpts by it), when
+        something of that name is in the topic's folder already (refused before the person is asked, as for every
+        other kind), or when the topic's folder is a pack installed before topic folders."""
+        group = target or topic or derived_topic(pack_id)
+        installed = self._knowledge_layout()[0]
+        taken = next((folder for folder, _ in installed if folder.name.casefold() == pack_id.casefold()), None)
+        if taken is not None:
+            raise PackError(f"{taken} already exists (the knowledge pack {taken.name}); remove it first to install "
+                            f"{pack_id} again.")
+        folder = self._knowledge_group(group)
+        if folder.is_dir() and any(p.name.casefold() == pack_id.casefold() for p in folder.iterdir()):
+            raise PackError(f"{folder / pack_id} already exists; remove it first to install {pack_id}.")
+        return folder / pack_id
+
+    def _knowledge_choice(self, topic: Optional[str], target: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """A topic or a target the person chose for knowledge (an export, a sorted file): exactly one, a valid name,
+        and a target that exists here (its folder's name). Raises PackError with what to give."""
+        topic = (topic or "").strip() or None
+        target = (target or "").strip() or None
+        if bool(topic) == bool(target):
+            raise PackError("Knowledge always belongs to a topic or a target: name one of them (a topic such as "
+                            "llama.cpp, or a target such as Rockchip), not both.")
+        try:
+            check_topic(topic or target)
+        except ValueError as e:
+            raise PackError(str(e)) from None
+        if target:
+            folder = self._target_folder(target) if re.fullmatch(ID_PATTERN, target) else None
+            if folder is None:
+                raise PackError(f"There is no target '{target}' on this computer; give a topic instead, or install "
+                                "the target first.").with_steps("hub.open")
+            target = folder.name
+        return topic, target
+
+    def prepare_sort(self, name: str, *, topic: Optional[str] = None,
+                     target: Optional[str] = None) -> PreparedInstall:
+        """A loose knowledge file (its label from loose_knowledge) sorted into a topic or target folder, checked like
+        an installed knowledge pack: copied into the quarantine as the pack's knowledge.json, the licence texts and the
+        NOTICE its pages need written next to it (rag/pack_licences.py, as an export writes them), then the knowledge
+        validator and the licence check (_validate). finish_install moves it into place (trust local), removes the
+        loose file and imports its pages; discard keeps the loose file as it is. Raises PackError."""
+        loose = next((item for item in self.loose_knowledge() if item.label == str(name or "").replace("\\", "/")),
+                     None)
+        if loose is None:
+            raise PackError(f"There is no loose knowledge file '{name}'.").with_steps("knowledge.loose")
+        topic, target = self._knowledge_choice(topic, target)
+        if loose.size > MAX_PACK_BYTES:
+            raise PackError(f"{loose.label} is larger than a knowledge pack may be.")
+        data = loose.path.read_bytes()
+        try:
+            parsed = json.loads(data.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            parsed = None
+        if isinstance(parsed, dict) and parsed.get("swarm_encrypted"):
+            raise PackError(f"{loose.label} is in the old 'swarm' format, which is no longer read (no real encryption, "
+                            "no authenticity); ask for a signed knowledge pack instead.")
+        stem = loose.path.parent.name if loose.path.name == KNOWLEDGE_FILE else loose.path.stem
+        base = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("._-")[:56] or "knowledge"
+        try:   # the pack's folder name: never one Windows reserves for a device (aux, con, nul, ...)
+            check_topic(base)
+        except ValueError:
+            base = f"{base}-knowledge"
+        # a free name: no installed pack has it, nor anything in the folder it goes to (the file's own folder may be
+        # there), so the move after the person's Yes is never refused
+        taken = {folder.name.casefold() for folder, _ in self._knowledge_layout()[0]}
+        group = self._knowledge_group(target or topic)
+        if group.is_dir():
+            taken |= {p.name.casefold() for p in group.iterdir()}
+        pack_id, count = base, 1
+        while pack_id.casefold() in taken:
+            count += 1
+            pack_id = f"{base}-{count}"
+        destination = self._knowledge_destination(pack_id, topic, target)
+        quarantine = self._new_quarantine("knowledge", pack_id)
+        try:
+            root = quarantine / "pack"
+            root.mkdir()
+            (root / KNOWLEDGE_FILE).write_bytes(data)
+            notes: List[str] = []
+            problems = self._check_knowledge(root)
+            if not problems:   # the licence texts its full-text pages need, as an export writes them
+                files = pack_licences.write(root, [e for e in parsed if isinstance(e, dict)])
+                notes += files.notes()
+            manifest = build_manifest(root, kind="knowledge", id=pack_id, version="1.0.0", author=LOOSE_AUTHOR,
+                                      license="NOASSERTION", topic=topic, target=target)
+            problems = problems or self._validate(manifest, root, notes)
+            if problems:
+                raise PackError(f"{loose.label} cannot be sorted: it is not a knowledge file the framework imports:\n- "
+                                + "\n- ".join(problems[:20]))
+            prov = Provenance(kind="knowledge", id=pack_id, version="1.0.0", trust=TrustLevel.LOCAL.value,
+                              source=f"{LOOSE_SOURCE}{loose.label}"[:1000],
+                              pack_sha256=hashlib.sha256(data).hexdigest(),
+                              content_sha256=manifest.content_sha256(), author=LOOSE_AUTHOR, installed_at=utc_now(),
+                              topic=topic, target=target)
+            pages = len(parsed) if isinstance(parsed, list) else 0
+            notes.insert(0, f"{pages} page(s); the knowledge base is saved as a snapshot first, then they are imported "
+                            f"under the {'target' if target else 'topic'} {target or topic}")
+            return PreparedInstall(manifest, TrustLevel.LOCAL, quarantine, destination, prov, notes, None,
+                                   topic=topic, target=target, loose_file=loose.path, loose_label=loose.label,
+                                   knowledge_pages=pages)
+        except BaseException:
+            shutil.rmtree(quarantine, ignore_errors=True)
+            raise
 
     def listing(self, refresh: bool = False) -> Tuple[List[ZooItem], str]:
         """list_items() of the current index, and a note on which index was used (or why there is none)."""
@@ -736,9 +1060,26 @@ class CommunityManager:
         if problems:
             raise PackError(f"The {m.kind} pack {m.id} was rejected and removed:\n- " + "\n- ".join(problems[:20]))
         root = self._install_root(m.kind)
-        if any(p.name.casefold() == m.id.casefold() for p in root.iterdir() if p.name != ".quarantine"):
-            raise PackError(f"{root / m.id} already exists; remove it first to install {m.id} {m.version}.")
+        topic, target, from_id, pages = None, None, False, 0
+        if m.kind == "knowledge":
+            # Its topic or target folder; a pack made before topics names neither: its id, which installing confirms
+            topic, target = m.topic, m.target
+            if not (topic or target):
+                topic, from_id = derived_topic(m.id), True
+            destination = self._knowledge_destination(m.id, topic, target)
+            if target and self._target_folder(target) is None:
+                notes.append(f"target {target} is not installed here; its pages are found under that target anyway")
+            pages = _count_pages(quarantine / "pack" / KNOWLEDGE_FILE)
+        else:
+            if any(p.name.casefold() == m.id.casefold() for p in root.iterdir() if p.name != ".quarantine"):
+                raise PackError(f"{root / m.id} already exists; remove it first to install {m.id} {m.version}.")
+            destination = root / m.id
         if m.kind == "target":
+            from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
+            pages = _count_pages(quarantine / "pack" / KNOWLEDGE_SNAPSHOT)
+            if pages:
+                notes.append(f"its knowledge snapshot ({pages} page(s)) is imported into your knowledge base under the "
+                             f"target {m.id}; the knowledge base is saved as a snapshot first")
             # Target names resolve to the first match ignoring case (G43): a pack never captures another target's
             # name, also not with other separators (my_board next to My-Board).
             from orchestrator.Core.module_generator import target_name_collision
@@ -760,9 +1101,10 @@ class CommunityManager:
                           pack_sha256=sha256_file(archive),  # in pieces: an archive may have 512 MB
                           content_sha256=m.content_sha256(), index_version=index.version if index else None,
                           author=m.author, signer=signature.key_id if checked else None, sender=sender,
-                          installed_at=utc_now())
-        return PreparedInstall(m, trust, quarantine, root / m.id, prov, notes,
-                               signature.pubkey if checked else None)
+                          installed_at=utc_now(), topic=topic, target=target)
+        return PreparedInstall(m, trust, quarantine, destination, prov, notes,
+                               signature.pubkey if checked else None, topic=topic, target=target,
+                               topic_from_id=from_id, knowledge_pages=pages)
 
     def _author_note(self, manifest: PackManifest, signature: Optional[PackSignature]) -> Optional[str]:
         """Author signatures are provenance: checked when the public key is included, the public key pinned per
@@ -833,7 +1175,11 @@ class CommunityManager:
         names = {f.path for f in manifest.files}
         licence_notes = [] if exporting else notes
         if manifest.kind == "target":
-            return validate_target_folder(root) + self._check_licence_files(root, "target", licence_notes)
+            # Its knowledge snapshot reaches the recipient's knowledge base: the knowledge pack's validator too
+            from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
+            snapshot = self._check_knowledge(root, KNOWLEDGE_SNAPSHOT) if (root / KNOWLEDGE_SNAPSHOT).exists() else []
+            return (validate_target_folder(root) + snapshot
+                    + self._check_licence_files(root, "target", licence_notes))
         allowed = {RECIPE_FILE if manifest.kind == "recipe" else KNOWLEDGE_FILE, "README.md"}
         if manifest.kind == "knowledge":   # the licence texts and the NOTICE its pages need (_check_licence_files)
             allowed |= {licence_texts.NOTICE_NAME} | {n for n in names if n.startswith(licence_texts.LICENSES_DIR + "/")}
@@ -899,26 +1245,44 @@ class CommunityManager:
         return problems
 
     @staticmethod
-    def _check_knowledge(root: Path) -> List[str]:
+    def _check_knowledge(root: Path, rel: str = KNOWLEDGE_FILE) -> List[str]:
+        """The knowledge validator: `rel` below root (a knowledge pack's knowledge.json, a target pack's knowledge
+        snapshot, a loose file being sorted) is a list of {source, content, metadata} pages, each with its source."""
+        path = Path(root).joinpath(*rel.split("/"))
         try:
-            data = json.loads((root / KNOWLEDGE_FILE).read_text(encoding="utf-8"))
+            if path.is_symlink():
+                return [f"{rel}: a link, not a file"]
+            data = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return [f"{KNOWLEDGE_FILE}: missing"]
-        except (ValueError, UnicodeDecodeError):
-            return [f"{KNOWLEDGE_FILE}: not valid JSON"]
+            return [f"{rel}: missing"]
+        except (OSError, ValueError, UnicodeDecodeError):
+            return [f"{rel}: not valid JSON"]
         # Every page keeps where it came from: shared knowledge is never without its source.
         good = isinstance(data, list) and all(
             isinstance(e, dict) and isinstance(e.get("source"), str) and e["source"].strip()
             and isinstance(e.get("content"), str) and isinstance(e.get("metadata", {}), dict) for e in data)
-        return [] if good else [f"{KNOWLEDGE_FILE}: expected a list of {{source, content, metadata}} entries, "
+        return [] if good else [f"{rel}: expected a list of {{source, content, metadata}} entries, "
                                 "each with its source"]
 
     def finish_install(self, prepared: PreparedInstall) -> Path:
         """Moves the checked pack into place (atomic rename) with its provenance; the quarantine is removed."""
         try:
             pack = prepared.quarantine / "pack"
-            (pack / PROVENANCE_NAME).write_text(prepared.provenance.model_dump_json(indent=2), encoding="utf-8")
+            # The pack's digest with the modes as this file system keeps them (the same file system as the
+            # destination), kept where it is not the pack's own (Windows: no execute bit); the files' contents stay
+            # the manifest's, so a file changed later still makes the installed pack "changed"
+            try:
+                local = local_sha256(pack, prepared.manifest)
+            except PackError:   # never a reason to refuse an install that was checked (read_pack wrote no link)
+                local = None
+            if local and local != prepared.provenance.content_sha256:
+                prepared.provenance = prepared.provenance.model_copy(update={"local_sha256": local})
+            (pack / PROVENANCE_NAME).write_text(prepared.provenance.to_json(), encoding="utf-8")
             dest = prepared.destination
+            if prepared.manifest.kind == "knowledge":
+                # its topic or target folder; a pack name is unique across all of them
+                self._knowledge_destination(dest.name, prepared.topic, prepared.target)
+                ensure_directory(dest.parent)
             if any(p.name.casefold() == dest.name.casefold() for p in dest.parent.iterdir()):
                 raise PackError(f"{dest} already exists.")
             os.rename(pack, dest)  # never merges into an existing folder
@@ -926,11 +1290,47 @@ class CommunityManager:
             shutil.rmtree(prepared.quarantine, ignore_errors=True)
         if prepared.author_key:
             self._pin_author(prepared.manifest.author, prepared.author_key)
+        if prepared.loose_file is not None:
+            self._remove_sorted(prepared)
         if prepared.manifest.kind == "knowledge":
             # The marker of an earlier version (its folder was deleted to remove it) would skip this one.
             (self.knowledge_dir / f"{dest.name}.imported").unlink(missing_ok=True)
             self.sync_knowledge_base()
+            self.last_sync_problem = self._waits(dest)
+        elif prepared.manifest.kind == "target":
+            (self.knowledge_dir / TARGET_MARKERS / f"{dest.name}.imported").unlink(missing_ok=True)
+            if prepared.knowledge_pages:   # its knowledge snapshot, under its target
+                self.sync_knowledge_base()
+                self.last_sync_problem = self._waits(dest)
         return dest
+
+    def _waits(self, folder: Path) -> str:
+        """After an import: why the pack installed in `folder` is not (completely) in the knowledge base: the snapshot
+        taken first did not fit (then no pack was imported), or that pack's own reason; "" when it is in. Another pack
+        that waits is not this pack's problem (sync_knowledge_base names every one when the knowledge base starts)."""
+        if self.last_sync_no_room:
+            return self.last_sync_problem
+        return self.last_sync_waiting.get(_folder_key(folder), "")
+
+    def _remove_sorted(self, prepared: PreparedInstall) -> None:
+        """The loose file a sort moved into its pack folder: removed when it is still the file that was checked (it is
+        the pack's knowledge.json now), and its folder when that is left empty. A file changed meanwhile stays, and so
+        does the file when its copy in the pack folder is not the checked one."""
+        loose = prepared.loose_file
+        try:
+            if sha256_file(prepared.destination / KNOWLEDGE_FILE) != prepared.provenance.pack_sha256:
+                self.logger.warning(f"{prepared.loose_label} was not removed: its copy in the pack folder is not the "
+                                    "checked file.")
+                return
+            if sha256_file(loose) != prepared.provenance.pack_sha256:
+                self.logger.warning(f"{prepared.loose_label} changed after it was checked; it stays where it is.")
+                return
+            loose.unlink()
+            parent = loose.parent
+            if parent != self.knowledge_dir and parent.is_dir() and not any(parent.iterdir()):
+                parent.rmdir()
+        except OSError as e:
+            self.logger.warning(f"{prepared.loose_label} was sorted but could not be removed: {e}")
 
     def _pin_author(self, author: str, pubkey: str) -> None:
         """Pins an author's public key on first use. The GUI, the CLI and another CLI call may install at the same
@@ -966,7 +1366,7 @@ class CommunityManager:
             trust, reason = trust_of_folder(folder, index)
             problems = [f"revoked: {reason}"] if trust == TrustLevel.REVOKED else []
             try:
-                if tree_sha256(folder) != prov.content_sha256:
+                if not prov.installed_unchanged(tree_sha256(folder)):
                     problems.append("changed since it was installed")
             except PackError as e:
                 problems.append(str(e))
@@ -1005,14 +1405,20 @@ class CommunityManager:
     def export_pack(self, kind: str, source: Optional[str] = None, *, author: str, license: Optional[str] = None,
                     pack_id: Optional[str] = None, model_license: str = "unknown",
                     root_urls: Optional[Iterable[str]] = None, recipients: Sequence = (),
-                    passphrase: Optional[str] = None, out_dir: Optional[Path] = None) -> ExportResult:
+                    passphrase: Optional[str] = None, out_dir: Optional[Path] = None,
+                    topic: Optional[str] = None, target: Optional[str] = None) -> ExportResult:
         """A scrubbed pack signed with your key: kind target (source: target id), recipe (source: a build's
         build_info.json) or knowledge (optionally only the pages of root_urls). With recipients or a passphrase
         it is encrypted for private sharing. Nothing is uploaded. The licence defaults to MIT for your own work;
         knowledge holds other people's pages, so it is NOASSERTION there, every page keeps its source, and a page goes
-        in with its full text only where its licence allows it (share_pages; the result lists every page)."""
+        in with its full text only where its licence allows it (share_pages; the result lists every page). A knowledge
+        pack names the topic or the target its pages belong to (exactly one; a target must exist here)."""
         if kind not in KINDS:
             raise PackError(f"Unknown pack kind {kind!r}.")
+        if kind == "knowledge":
+            topic, target = self._knowledge_choice(topic, target)
+        elif topic or target:
+            raise PackError(f"Only a knowledge pack names a topic or target, not a {kind} pack.")
         license = license or ("NOASSERTION" if kind == "knowledge" else "MIT")
         out_dir = ensure_directory(Path(out_dir) if out_dir else self.contributions_dir)
         staging = Path(tempfile.mkdtemp(prefix=".export-", dir=out_dir))
@@ -1038,8 +1444,11 @@ class CommunityManager:
                 notes.append("every page keeps its source address; the pages stay under their owners' terms")
                 notes.append(share_counts(shares))
                 notes += files.notes()
+                notes.append(f"its pages belong to the {'target' if target else 'topic'} {target or topic}: a "
+                             "recipient finds them under it")
             changes = self._scrub_tree(root)
-            manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license=license)
+            manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license=license,
+                                      topic=topic, target=target)
             problems = self._validate(manifest, root, notes, exporting=True)
             if problems:
                 raise PackError("The pack would be rejected:\n- " + "\n- ".join(problems[:20]))
@@ -1169,8 +1578,12 @@ class CommunityManager:
 
     # --- knowledge base ---------------------------------------------------------------------------------------
     def sync_knowledge_base(self, rag_manager=None) -> int:
-        """Imports the knowledge packs not imported yet (also those installed while the knowledge base was off;
-        the framework calls this when the knowledge base starts). Returns the number of pages imported.
+        """Imports the knowledge packs not imported yet, and the knowledge snapshots of installed target packs (also
+        those installed while the knowledge base was off; the framework calls this when the knowledge base starts).
+        Returns the number of pages imported. Loose knowledge files are never imported (loose_knowledge, prepare_sort),
+        nor a pack whose files changed since it was installed; each excerpt carries its pack's topic or target, and a
+        newer version of a pack replaces the excerpts of the older one (_import_pages). Why a pack stays pending is in
+        `last_sync_problem`, never only in the log.
 
         Before the first page is imported, the knowledge base is saved as a snapshot (pre_pack_<time>), so the import
         can be undone (eighth round, N13). When that snapshot does not fit on the disk, nothing is imported (the packs
@@ -1178,71 +1591,135 @@ class CommunityManager:
         the snapshot taken. A pack that cannot be imported yet is tried again at the next start without another
         snapshot; a pack installed again gets one."""
         self.last_sync_problem, self.last_sync_snapshot = "", None
+        self.last_sync_waiting, self.last_sync_no_room = {}, False
         if rag_manager is None and hasattr(self.framework, "get_component"):
             rag_manager = self.framework.get_component("rag_manager")
         if not rag_manager:
             return 0
 
         imported_count = 0
-        files = sorted(self.knowledge_dir.glob("*.json")) + sorted(self.knowledge_dir.glob(f"*/{KNOWLEDGE_FILE}"))
-        # An installed pack folder stays unchanged (its content is verified); its marker lives next to it.
-        pending = [(f, f.with_suffix(".imported") if f.parent == self.knowledge_dir else
-                    self.knowledge_dir / f"{f.parent.name}.imported") for f in files]
-        pending = [(f, marker) for f, marker in pending if not marker.exists()]
+        waiting = self.last_sync_waiting   # installed folder -> why its pack waits
+        # Only installed packs, never a loose file (DECISIONS round 23 item 1: loose_knowledge lists them, the person
+        # sorts them, prepare_sort); a pack whose files changed since it was installed is not imported either.
+        pending = []
+        for item in self._knowledge_imports():
+            if item.marker.exists():
+                continue
+            try:
+                digest = tree_sha256(item.folder)
+                unchanged = (item.provenance.installed_unchanged(digest) if item.provenance is not None
+                             else digest == item.expected)
+            except PackError:
+                unchanged = False
+            if not unchanged:
+                waiting[_folder_key(item.folder)] = (f"{item.label}: its files changed since it was installed, so it "
+                                                     "is not imported (the check of the installed packs shows it; "
+                                                     "install it again)")
+                continue
+            pending.append(item)
         # A pack that cannot be imported yet stays pending and is tried again at every start: its snapshot is taken
         # once (<pack>.snapshotted names the file it was taken for), never one per start (none is deleted by itself)
-        fresh = [(f, marker.with_suffix(".snapshotted"), _file_stamp(f)) for f, marker in pending]
-        fresh = [(f, mark, stamp) for f, mark, stamp in fresh if _read_text(mark) != stamp]
+        fresh = [(item.marker.with_suffix(".snapshotted"), _file_stamp(item.file)) for item in pending]
+        fresh = [(mark, stamp) for mark, stamp in fresh if _read_text(mark) != stamp]
         if fresh and callable(getattr(rag_manager, "create_snapshot", None)):
             from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom
             try:
                 self.last_sync_snapshot = rag_manager.create_snapshot(f"pre_pack_{int(time.time())}",
                                                                       "a knowledge pack is imported")
             except SnapshotNoRoom as e:  # no snapshot, no import: there is no "continue anyway"
-                self.last_sync_problem = str(e)
+                self.last_sync_problem, self.last_sync_no_room = str(e), True
                 self.logger.warning(f"Knowledge packs not imported: {e}")
                 return 0
-            for _f, mark, stamp in fresh:
+            for mark, stamp in fresh:
                 try:
+                    ensure_directory(mark.parent)
                     mark.write_text(stamp, encoding="utf-8")
                 except OSError as e:
                     self.logger.warning(f"Could not note the snapshot taken before {mark.stem}: {e}")
-        for json_file, marker in pending:
+        for item in pending:
             try:
-                if marker.exists():
+                count, problem = self._import_pages(item, rag_manager)
+                imported_count += count
+                if problem:
+                    waiting[_folder_key(item.folder)] = problem
                     continue
-                self.logger.info(f"Syncing {json_file.name}...")
-                with open(json_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-
-                if isinstance(data, dict) and data.get("swarm_encrypted", False):
-                    # The old obfuscated format (no real encryption, no authenticity) is no longer read.
-                    self.logger.warning(f"Skipped {json_file.name}: the old 'swarm' format is no longer "
-                                        f"supported; ask for a signed community pack instead.")
-                    continue
-
-                if isinstance(data, list):
-                    failed = 0
-                    for entry in data:
-                        meta = entry.get("metadata", {})
-                        meta["origin_pack"] = json_file.name if json_file.parent == self.knowledge_dir else \
-                            json_file.parent.name
-                        # A page with origin_pack is outside text: the knowledge base stores it cleaned (hidden HTML,
-                        # invisible characters and HTML comments left out; RAGManager.ingest_document)
-                        if rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""), meta):
-                            imported_count += 1
-                        elif str(entry.get("content") or "").strip():
-                            failed += 1  # refused, e.g. offline without the embedding model
-                    if failed:  # importing again updates the pages already stored in place
-                        self.logger.warning(f"{json_file.name}: {failed} page(s) not imported; trying again when "
-                                            "the knowledge base starts next time.")
-                        continue
-
-                with open(marker, 'w') as f:
-                    f.write(datetime.now().isoformat())
-            except Exception as e:
-                self.logger.error(f"Sync failed {json_file.name}: {e}")
+                ensure_directory(item.marker.parent)
+                item.marker.write_text(datetime.now().isoformat(), encoding="utf-8")
+            except Exception as e:  # noqa: BLE001 - one pack never stops the others; the person reads why
+                waiting[_folder_key(item.folder)] = f"{item.label}: not imported ({redact_secrets(str(e))[:300]})"
+                self.logger.error(f"Knowledge import failed for {item.label}: {e}")
+        if waiting:
+            self.last_sync_problem = "; ".join(waiting.values())
+            self.logger.warning(f"Knowledge packs not imported: {self.last_sync_problem}")
         return imported_count
+
+    def _knowledge_imports(self) -> List[_KnowledgeImport]:
+        """Every installed pack whose pages belong in the knowledge base: the knowledge packs (each under its topic or
+        target) and the target packs with a knowledge snapshot (under their target). A loose knowledge file is never
+        one of them."""
+        from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
+        items = []
+        installed = self._knowledge_layout()[0]
+        names = {folder.name.casefold() for folder, _ in installed}
+        for folder, prov in installed:
+            scope, name = knowledge_scope(prov)
+            # A sorted loose file that earlier versions imported unsorted: its excerpts named the file (a .json in
+            # community/knowledge/) or its folder (<folder>/knowledge.json); the sorted pack replaces them. A name an
+            # installed pack has (or the origin of a target pack's knowledge) names that pack's excerpts, never these.
+            legacy: Tuple[str, ...] = ()
+            if prov.trust == TrustLevel.LOCAL.value and prov.source.startswith(LOOSE_SOURCE):
+                parts = prov.source[len(LOOSE_SOURCE):].split("/")
+                old = parts[0] if len(parts) == 1 or (len(parts) == 2 and parts[1] == KNOWLEDGE_FILE) else ""
+                legacy = (old,) if old and old.casefold() not in names and not old.startswith(TARGET_ORIGIN) else ()
+            items.append(_KnowledgeImport(f"knowledge pack {folder.name}", folder / KNOWLEDGE_FILE, folder,
+                                          prov.content_sha256, self.knowledge_dir / f"{folder.name}.imported",
+                                          folder.name, {scope: name}, legacy, prov))
+        root = self.targets_dir
+        for folder in sorted(root.iterdir()) if root.is_dir() else []:
+            prov = None if folder.is_symlink() or not folder.is_dir() else read_provenance(folder)
+            snapshot = folder / KNOWLEDGE_SNAPSHOT
+            if prov is None or prov.kind != "target" or not snapshot.is_file() or snapshot.is_symlink():
+                continue
+            items.append(_KnowledgeImport(f"the knowledge of target pack {folder.name}", snapshot, folder,
+                                          prov.content_sha256,
+                                          self.knowledge_dir / TARGET_MARKERS / f"{folder.name}.imported",
+                                          f"{TARGET_ORIGIN}{folder.name}", {"target": folder.name}, (), prov))
+        return items
+
+    def _import_pages(self, item: _KnowledgeImport, rag_manager) -> Tuple[int, str]:
+        """Imports one pack's pages: (pages imported, why it stays pending, "" when it is done). Every excerpt carries
+        the pack (origin_pack), its content digest (origin_sha256) and its topic or target; a page's own metadata
+        never sets them. Once every page is in, the excerpts of an older version of the pack (another digest) are
+        removed: a newer version replaces the old one, per pack and page source, never per piece (a pack may store a
+        page in pieces, each ingested without replace)."""
+        self.logger.info(f"Importing {item.label}...")
+        data = json.loads(item.file.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            return 0, f"{item.label}: not a list of pages"
+        imported = failed = 0
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            meta = entry.get("metadata")
+            meta = {k: v for k, v in (meta.items() if isinstance(meta, dict) else ()) if k not in ORIGIN_FIELDS}
+            meta.update(origin_pack=item.origin, origin_sha256=item.expected, **item.tags)
+            # A page with origin_pack is outside text: the knowledge base stores it cleaned (hidden HTML, invisible
+            # characters and HTML comments left out; RAGManager.ingest_document)
+            if rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""), meta):
+                imported += 1
+            elif str(entry.get("content") or "").strip():
+                failed += 1  # refused, e.g. offline without the embedding model
+        if failed:  # importing again updates the pages already stored in place
+            self.logger.warning(f"{item.label}: {failed} page(s) not imported; trying again when the knowledge base "
+                                "starts next time.")
+            return imported, (f"{item.label}: {failed} page(s) not imported yet; tried again when the knowledge base "
+                              "starts next time")
+        remove = getattr(rag_manager, "remove_pack_leftovers", None)
+        if callable(remove) and any(remove(origin, item.expected) is False
+                                    for origin in (item.origin, *item.legacy_origins)):
+            return imported, (f"{item.label}: the excerpts of its older version could not be removed yet; tried "
+                              "again when the knowledge base starts next time")
+        return imported, ""
 
     def _knowledge_pages(self, root_urls: Optional[Iterable[str]] = None) -> Tuple[List[dict], int]:
         """knowledge_share without the list of pages."""
@@ -1277,13 +1754,17 @@ class CommunityManager:
         return pages, len(left_out), shares
 
     def export_knowledge_base(self, output_name_prefix: str = "knowledge_export",
-                              root_urls: Optional[Iterable[str]] = None) -> Optional[str]:
-        """Writes your pages of the knowledge base (_knowledge_pages) as JSON into the knowledge folder and returns
-        its path, or None when there is nothing. It stays on this computer; sharing it is a separate step."""
+                              root_urls: Optional[Iterable[str]] = None,
+                              out_dir: Optional[Path] = None) -> Optional[str]:
+        """Writes your pages of the knowledge base (_knowledge_pages) as JSON into out_dir, or into a new private
+        scratch folder (only your account can read it; the caller moves the file and removes the folder), and returns
+        its path, or None when there is nothing. Never into community/knowledge/: a file there would be a loose
+        knowledge file. It stays on this computer; sharing it is a separate step."""
         pages, _ = self._knowledge_pages(root_urls)
         if not pages:
             return None
-        export_path = ensure_directory(self.knowledge_dir) / f"{output_name_prefix}_{datetime.now():%Y%m%d_%H%M%S}.json"
+        folder = Path(out_dir) if out_dir is not None else Path(tempfile.mkdtemp(prefix="lcf-knowledge-"))
+        export_path = ensure_directory(folder) / f"{output_name_prefix}_{datetime.now():%Y%m%d_%H%M%S}.json"
         export_path.write_text(json.dumps(pages, indent=2), encoding="utf-8")
         return str(export_path)
 

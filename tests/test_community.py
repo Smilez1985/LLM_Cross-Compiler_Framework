@@ -9,6 +9,7 @@ import pytest
 
 from conftest import REPO_ROOT
 from orchestrator.Core.community_manager import CommunityManager
+from orchestrator.Core.community_pack import PackError
 from orchestrator.utils.build_context import stage_build_context
 
 POSIX = os.name == "posix"
@@ -53,8 +54,13 @@ class TestSwarmRemoval:
         cm.knowledge_dir.mkdir(parents=True)
         (cm.knowledge_dir / "swarm_old.json").write_text('{"swarm_encrypted": true, "payload": "x", "hash": "y"}')
         (cm.knowledge_dir / "plain.json").write_text('[{"source": "s", "content": "c", "metadata": {}}]')
-        assert cm.sync_knowledge_base() == 1
+        # DECISIONS round 23 item 1: a loose file is never imported unsorted; it is sorted first, through the checks
+        assert cm.sync_knowledge_base() == 0 and ingested == []
+        with pytest.raises(PackError, match="old 'swarm' format"):
+            cm.prepare_sort("swarm_old.json", topic="old")
+        cm.finish_install(cm.prepare_sort("plain.json", topic="notes"))
         assert ingested[0][:2] == ("s", "c")
+        assert [item.label for item in cm.loose_knowledge()] == ["swarm_old.json"]
 
     def test_knowledge_export_is_scrubbed(self, tmp_path, monkeypatch):
         monkeypatch.setattr("getpass.getuser", lambda: "jenny")
@@ -64,7 +70,8 @@ class TestSwarmRemoval:
         rag = SimpleNamespace(export_records=lambda: iter(records))
         framework = SimpleNamespace(info=SimpleNamespace(installation_path=tmp_path),
                                     get_component=lambda name: rag if name == "rag_manager" else None)
-        exported = Path(CommunityManager(framework).export_knowledge_base("t")).read_text(encoding="utf-8")
+        path = Path(CommunityManager(framework).export_knowledge_base("t", out_dir=tmp_path / "export"))
+        exported = path.read_text(encoding="utf-8")
         for leaked in ("10.1.2.3", "hf_aBcDeF", "jenny"):
             assert leaked not in exported
 

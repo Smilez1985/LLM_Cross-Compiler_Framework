@@ -312,7 +312,7 @@ def test_a_knowledge_pack_carries_full_text_only_where_the_licence_allows_it(wor
         record("https://github.com/other/code/blob/main/a.c", "int other;", code_repo="github.com/other/code",
                root_url="https://github.com/other/code"),
     ]
-    result = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+    result = world.cm.export_pack("knowledge", topic="docs", author="a", pack_id="docs")
     by_source = {}
     for entry in exported(result):
         by_source.setdefault(entry["source"], []).append(entry)
