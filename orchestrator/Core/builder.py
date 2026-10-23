@@ -1255,16 +1255,23 @@ class BuildEngine:
         from orchestrator.Core.hf_lookup import staged_files
         # The token stored in the framework, or none at all: never an implicit token (HF_TOKEN, the Hugging Face home
         # folder's token file) the person did not give the framework (G37), and only to huggingface.co, never to the
-        # host in HF_ENDPOINT (hf_hub.hub_api, the one Hub API of the framework).
-        auth = self._hf_token() or False
-        api = hub_api(auth)
+        # host in HF_ENDPOINT (hf_hub.hub_api, the one Hub API of the framework); and only where Hugging Face needs
+        # it (DECISIONS round 25 Q2): a gated or private repository, never a public one's files.
+        auth = self._hf_token() or None
+        # one API without a token, made first; one with the token only when the Hub refuses a request without it
+        apis: Dict[Any, Any] = {False: hub_api(False)}
+
+        def api_for(token: Any):
+            if token not in apis:
+                apis[token] = hub_api(token)
+            return apis[token]
         revision = config.model_branch or None
-        commit = self._model_commit(api, source, revision, auth)
+        commit = self._model_commit(api_for, source, revision, auth)
         if not commit:
             raise ValueError(f"The commit of {source} could not be found out on Hugging Face (not reachable, or no "
                              f"such revision '{revision or 'main'}'); nothing was downloaded.")
         revision = config.model_revision = commit  # listing and download see the same commit
-        files = self._hub_files(api, source, commit, auth)
+        files, needed = self._hub_files(api_for, source, commit, auth)
         keep = staged_files(list(files))
         dest = self.staging_folder(source, commit, revision)
         progress.add_log(f"Downloading {source} ({len(keep)} files, commit {commit}) from Hugging Face ...")
@@ -1289,7 +1296,7 @@ class BuildEngine:
         watcher = DiskWatchdog(dest, "Staging", STAGING_WATCH_EVERY, low, stop, also_stop_when=cancelled,
                                check=self._disk_check(config), name=f"staging-watch-{config.build_id}")
         self._report_landed(config, dest)  # the download counts as landed while it arrives
-        fetcher = self._hub_fetcher(auth or None, stop)
+        fetcher = self._hub_fetcher(auth if needed else None, stop)
         try:
             with StagingLock(dest.parent / f".{dest.name}.lock"):
                 watcher.start()
@@ -1311,12 +1318,20 @@ class BuildEngine:
         return inner, {str(dest): {"bind": inner, "mode": "ro"}}
 
     @staticmethod
-    def _hub_files(api, source: str, commit: str, auth: Any) -> Dict[str, Any]:
+    def _hub_files(api_for, source: str, commit: str, token: Optional[str]) -> Tuple[Dict[str, Any], bool]:
         """The commit's files with the sizes and LFS sha256 the Hub lists (what the fetcher checks each file against),
-        read by hf_hub.hub_file, the one parser of the Hub's file list."""
-        from orchestrator.Core.hf_hub import hub_file
-        info = api.model_info(source, revision=commit, files_metadata=True, token=auth)
-        return {f.name: f for f in (hub_file(s) for s in getattr(info, "siblings", None) or [])}
+        read by hf_hub.hub_file, the one parser of the Hub's file list, and whether the files need the token (a gated
+        or private repository). Asked without the token; with it only when the Hub refuses that
+        (hf_hub.tokenless_first). `api_for(token)`: the Hub's API (hf_hub.hub_api)."""
+        from orchestrator.Core.hf_hub import hub_file, needs_token, tokenless_first
+        sent: List[Any] = []
+
+        def model_info(t: Any):
+            sent.append(t)
+            return api_for(t).model_info(source, revision=commit, files_metadata=True, token=t)
+        info = tokenless_first(model_info, token)
+        files = {f.name: f for f in (hub_file(s) for s in getattr(info, "siblings", None) or [])}
+        return files, needs_token(info) or bool(sent and sent[-1])
 
     @staticmethod
     def _hub_fetcher(token: Optional[str], stop: threading.Event):
@@ -1381,12 +1396,15 @@ class BuildEngine:
         return check
 
     @staticmethod
-    def _model_commit(api, source: str, revision: Optional[str], token: Any = False) -> Optional[str]:
-        """The commit a branch or tag points to (None when it cannot be found out)."""
+    def _model_commit(api_for, source: str, revision: Optional[str], token: Optional[str] = None) -> Optional[str]:
+        """The commit a branch or tag points to (None when it cannot be found out). Asked without the token; with it
+        only when the Hub refuses that (a private repository). `api_for(token)`: the Hub's API (hf_hub.hub_api)."""
+        from orchestrator.Core.hf_hub import tokenless_first
         if revision and COMMIT_ID.fullmatch(revision):
             return revision
         try:
-            sha = getattr(api.model_info(source, revision=revision, token=token), "sha", None)
+            sha = getattr(tokenless_first(lambda t: api_for(t).model_info(source, revision=revision, token=t),
+                                          token), "sha", None)
         except Exception:
             return None
         return sha if isinstance(sha, str) and COMMIT_ID.fullmatch(sha) else None

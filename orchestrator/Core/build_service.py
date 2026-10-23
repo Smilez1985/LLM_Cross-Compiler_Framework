@@ -750,10 +750,12 @@ class BuildService:
         from orchestrator.utils.locality import offline_mode
         if offline_mode(self.framework.config) or not HF_REPO_ID.match(str(repo or "")):
             return None
-        from orchestrator.Core.hf_hub import hub_api
+        from orchestrator.Core.hf_hub import hub_api, tokenless_first
         token = self.hf_token()
-        try:  # the stored token or none, only to huggingface.co (hf_hub.hub_api, never the host in HF_ENDPOINT)
-            sha = getattr(hub_api(token).model_info(repo, token=token or False, timeout=10), "sha", None)
+        try:  # without a token; the stored one only when the Hub refuses that (a private repository), and only to
+            # huggingface.co (hf_hub.hub_api, never the host in HF_ENDPOINT)
+            sha = getattr(tokenless_first(lambda t: hub_api(t).model_info(repo, token=t, timeout=10), token),
+                          "sha", None)
         except Exception:  # noqa: BLE001 - not known: the earlier build is reported as "commit not checked"
             return None
         return sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) else None

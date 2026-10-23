@@ -18,7 +18,8 @@ from typing import Callable, List, Literal, Optional, Sequence, Tuple
 from pydantic import BaseModel, ConfigDict
 
 from orchestrator.rag.chunking import _FENCE_OPEN
-from orchestrator.rag.embeddings import _FastEmbedBase, approx_tokens, machine_resources, register_model
+from orchestrator.rag.embeddings import (FASTEMBED_EXTRA_FILES, Fetch, _FastEmbedBase, approx_tokens,
+                                         fastembed_source, machine_resources, register_model)
 from orchestrator.rag.errors import EmbeddingError
 from orchestrator.utils.helpers import redact_secrets
 
@@ -103,21 +104,29 @@ class FastEmbedReranker(_FastEmbedBase):
     BATCH_SIZE = 8
     CACHE_SIZE = 2048
 
-    def __init__(self, spec: RerankerSpec, cache_dir: Path, offline: Callable[[], bool] = lambda: False):
-        super().__init__(cache_dir, offline, spec.size_gb)
+    def __init__(self, spec: RerankerSpec, cache_dir: Path, offline: Callable[[], bool] = lambda: False,
+                 fetch: Optional[Fetch] = None):
+        super().__init__(cache_dir, offline, spec.size_gb, fetch)
         self.spec = spec
         self.model_id = spec.model_id
         self._cache_lock = threading.Lock()
         self._scores: "OrderedDict[str, float]" = OrderedDict()
 
-    def _create(self, offline: bool):
+    def _register(self):
         from fastembed.common.model_description import ModelSource
         from fastembed.rerank.cross_encoder import TextCrossEncoder
 
         register_model(TextCrossEncoder, self.model_id, sources=ModelSource(hf=self.model_id),
                        model_file=self.spec.model_file, license=self.spec.license, size_in_gb=self.spec.size_gb,
                        description="Registered by the LLM Cross-Compiler Framework.")
-        return TextCrossEncoder(self.model_id, cache_dir=str(self.cache_dir), local_files_only=offline)
+        return TextCrossEncoder
+
+    def _create(self, offline: bool):
+        return self._register()(self.model_id, cache_dir=str(self.cache_dir), **self._local_kwargs(offline))
+
+    def _hub_files(self):
+        source = fastembed_source(self._register(), self.model_id)
+        return (source[0], source[1], FASTEMBED_EXTRA_FILES) if source else None
 
     def _key(self, query: str, document: str) -> str:
         # By text, never by position in a candidate list: the same document keeps its score in any order. JSON keeps
