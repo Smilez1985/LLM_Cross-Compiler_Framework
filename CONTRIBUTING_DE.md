@@ -734,6 +734,20 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   Ausnahmeklassen (`tests/test_hf_online.py` schlägt bei allem anderen fehl). Im Offline-Modus lehnt ein
   Hugging-Face-Aufruf vor jeder Anfrage mit `hf_hub.offline_refusal()` ab (geprüft mit `hf_hub.offline(config)`),
   und ein Fenster oder die Kommandozeile zeigt der Person `hf_hub.person_text(error, lang)`.
+- **Offline-Modus: eine Prüfung, eine Regel des eigenen Netzes.** Ob der Offline-Modus an ist, fragst du mit
+  `orchestrator.utils.locality.offline_mode(config)`, nie mit einem eigenen `config.get("offline_mode")`
+  (`tests/test_offline_check.py` schlägt dann fehl). Ob eine Adresse im Offline-Modus erreicht werden darf,
+  entscheidet nur die Regel in `orchestrator/utils/locality.py` (`check_url`, `check_host`: jede Adresse, zu der ein
+  Name auflöst, Tailscale nur mit dem eigenen Headscale der Person, die Ausnahmen der Person), nie eine Namensendung
+  oder eine eigene Adressprüfung; eine Verbindung danach geht an die geprüfte Adresse (`connect_address`;
+  `security/http.local_only_session` für requests, `llm/client.offline_http_client` für die SDKs,
+  `runtime/build/source.offline_reach` für git). Eine Auflösung läuft nie im GUI-Thread: Ein Fenster prüft vorher in
+  einem Hintergrund-Thread (`locality.needs_lookup`). Die Ausnahmen der Person schreibt nur
+  `orchestrator/Core/local_network.py`; kein Modul, das eine KI erreichen kann, darf es importieren oder seine
+  Einstellungen setzen (`tests/test_local_network.py`). Ein Tool, dessen Handler oder Job nach der Antwort der Person
+  nach außen geht, prüft den Offline-Modus dort noch einmal (wie `download_hf_file`). Tests lösen nie einen echten
+  Namen auf und starten nie den echten Befehl `tailscale` (die Fixture `hermetic_locality` in `tests/conftest.py`;
+  eigene Antworten gibst du, indem du `locality._system_lookup` ersetzt).
 - **Jede CLI-Aktion hat einen Weg mit der Maus.** Viele Menschen nutzen nie ein Terminal, deshalb kann eine Person
   jeden Befehl und jede Option von `llm-cli` auch in der GUI starten, ohne einen Befehl zu tippen (einen Wert in ein
   Feld zu tippen ist in Ordnung). Ein neuer Befehl oder eine neue Option braucht ihren Weg mit der Maus, einen

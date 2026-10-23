@@ -1289,6 +1289,29 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **Offline mode reaches only this computer and your own network, and you decide what that includes** (DECISIONS
+  round 24, L-NET and "L-NET final"): one network-locality rule (`orchestrator/utils/locality.py`) decides every
+  reach-out of offline mode. A server name counts by every address it resolves to: loopback, private (RFC 1918,
+  `fc00::/7`) and link-local addresses are local, a `.local`, `.lan`, `.fritz.box` or single-label name only when it
+  resolves to such an address (it counted by its ending before, also with a public address; the privacy filter's
+  local label follows the same rule), and a name with local and public addresses is not local. A Tailscale address
+  (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) counts as local only when the VPN is Headscale in your own network with
+  only own DERP relays, read with the `tailscale` command (`debug prefs`, `debug derp-map`); a public name such as a
+  reverse proxy's is not local. You can count a VPN, a host or an address range as local in **File > Settings... >
+  Local network** or with `llm-cli config local-network` (new), each with a plain explanation of what can then leave
+  your network (settings `offline_local_vpns`, `offline_local_hosts`, `offline_local_ranges`); only you can: the AI
+  settings change and MCP `update_settings` refuse them, and an AI can neither read nor set them. The lookup uses
+  the system resolver only, with a 2 s timeout, once per run and never on the GUI thread, and the connection that
+  follows goes to the checked address (the provider client of offline mode uses no proxy from the environment;
+  runtime downloads through a local-only adapter; git with `http.curloptResolve`). Ollama at an address outside your
+  network is now refused in offline mode (its preset counted as local whatever its address), and the runtime's
+  downloads and the pinned source come in offline mode only from your own network (a local mirror): `device runtime
+  build`, `ditto runtime install` and `export-source`, the Boards window and Ditto > Local Runtime fetched from
+  GitHub or Hugging Face before. The person's Deep Ingest refuses in offline mode as an AI's crawl does.
+  `build_local_runtime`, `deploy_device_runtime` and `add_pack_from_index` look at offline mode again after the
+  person's answer, as `download_hf_file` does. Refusals name the host, why it is not local and the opt-out. The
+  local/cloud labels of the bundled providers do not change. Every reader of the setting now asks the one offline
+  check, `locality.offline_mode` (`hf_hub.offline` and the other getters delegate; behaviour and texts unchanged).
 - **Knowledge always belongs to a topic or a target** (DECISIONS round 23 items 1 and 8): an installed knowledge pack
   lives in `community/knowledge/<topic or target>/<pack>/` (packs installed earlier stay where they are), and every
   excerpt it brings carries its topic or target. A knowledge pack names its topic or target in its manifest:

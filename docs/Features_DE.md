@@ -732,7 +732,17 @@ die Annahmen; seine Unterstützungsstufe ist community.
 - **Ersatzkette** (`ai_fallback_chain`, z. B. `local, ollama:qwen3.5:4b`): Lehnt das Modell ab oder ist der Anbieter
   nicht erreichbar, wird der nächste Eintrag versucht. Nicht eingerichtete Einträge werden übersprungen.
 - **Offline-Modus** (`offline_mode`): Es werden nur lokale Anbieter genutzt; ein Cloud-Anbieter wird mit einer
-  klaren Meldung abgelehnt. Auch die Wissensbasis lädt im Offline-Modus nichts herunter.
+  klaren Meldung abgelehnt. Auch die Wissensbasis lädt im Offline-Modus nichts herunter. „Lokal“ folgt einer Regel
+  (unveröffentlicht): Ein Servername zählt nach jeder Adresse, zu der er auflöst (ein `.local`- oder `.lan`-Name nur,
+  wenn er zu einer Adresse in deinem eigenen Netz auflöst; ein öffentlicher Name wie der eines Reverse Proxys ist
+  nicht lokal), und eine Tailscale- oder Headscale-Adresse nur, wenn ihr Steuerserver und jedes Relay in deinem
+  eigenen Netz sind. Ollama und ein eigener Server werden nach ihrer Adresse beurteilt, und im Offline-Modus
+  verbindet sich das Framework nur mit der geprüften Adresse. Was sonst als lokal zählt, ein VPN, ein Host oder ein
+  Adressbereich, entscheidest du in **Datei > Einstellungen… > Lokales Netz** oder mit `llm-cli config
+  local-network`, jeweils mit einer einfachen Erklärung, was dann dein Netz verlassen kann; eine KI kann das weder
+  lesen noch setzen. Ein Download der Laufzeit (ein Modell, die festgelegte Quelle) kommt im Offline-Modus nur aus
+  deinem eigenen Netz (ein lokaler Spiegel), und die Laufzeit-Tools und Paketinstallationen einer KI sehen nach
+  deiner Antwort noch einmal auf den Offline-Modus.
 - Anfragen an Server auf 127.0.0.1 gehen nie über einen HTTP(S)-Proxy aus der Umgebung; der Proxy sieht also weder
   Prompts noch den Schlüssel des lokalen Servers.
 - Fehler werden verständlich erklärt, zum Beispiel dass ein Claude-API-Schlüssel eine Workspace-ID braucht, dass
