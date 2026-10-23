@@ -14,6 +14,7 @@ MOUSE_LABELS = {
     "btn_tokens_permissions": (_MCP, "tmcp.tokens.permissions"),
     "btn_tokens_add": (_MCP, "tmcp.tokens.add"),
     "btn_audit_archive": ("act_tools_mcp_audit", "tmcp.audit.archive"),
+    "btn_audit_check": ("act_tools_mcp_audit", "tmcp.audit.check"),
     "btn_ai_folders_add": ("act_tools_folders", "main.folders.add"),
 }
 
@@ -29,6 +30,8 @@ STEPS = (
     Step("audit.archive", cli="tools audit --archive", cli_args=("--archive",), person_only="audit",
          target="btn_audit_archive"),
     Step("audit.show", cli="tools audit", person_only="audit", target="act_tools_mcp_audit", runnable=True),
+    Step("audit.verify", cli="tools audit --verify", cli_args=("--verify",), person_only="audit",
+         target="btn_audit_check"),
     # not runnable: `tools approvals` needs a terminal (an approval is the person's own, never a piped answer)
     Step("approvals.list", cli="tools approvals list", person_only="permission", window="approvals",
          target="act_tools_approvals"),
@@ -52,6 +55,7 @@ TEXTS = {
         "step.tokens.reset_store": "Reset the access codes (it lists what goes)",
         "step.audit.archive": "Archive the activity record and start a new one",
         "step.audit.show": "Look at the activity record",
+        "step.audit.verify": "Check that the activity record is intact",
         "step.audit.show.what": "Lists the latest entries of the activity record: who called which tool, when and "
                                 "with which result.",
         "step.approvals.list": "Look at the calls that wait for your approval",
@@ -71,6 +75,7 @@ TEXTS = {
         "step.tokens.reset_store": "Die Zugangscodes zurücksetzen (es listet, was gelöscht wird)",
         "step.audit.archive": "Das Aktivitätsprotokoll archivieren und ein neues beginnen",
         "step.audit.show": "Das Aktivitätsprotokoll ansehen",
+        "step.audit.verify": "Prüfen, ob das Aktivitätsprotokoll unversehrt ist",
         "step.audit.show.what": "Listet die neuesten Einträge des Aktivitätsprotokolls: wer welches Tool wann mit "
                                 "welchem Ergebnis aufgerufen hat.",
         "step.approvals.list": "Die Aufrufe ansehen, die auf deine Freigabe warten",

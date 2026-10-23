@@ -32,7 +32,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [scan](#scan): hardware probe
 - [device](#device): `list`, `settings`, `runtime`
 - [config](#config): `show`, `output-folder`, `repos`
-- [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
+- [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`, `maintainer`
 - [trash](#trash): `list`, `restore`, `empty`
 - [Known limitations](#known-limitations)
 
@@ -149,6 +149,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
 | `zoo export` / `zoo keys` | Make a signed pack of your own target, build or knowledge base (and open a pull request) / show your public keys |
+| `zoo maintainer key` / `review` / `revoke` | For the maintainer of the community repository: create the index signing key / review and publish contributions / revoke a published pack |
 
 ---
 
@@ -2423,6 +2424,54 @@ llm-cli zoo keys > my.keys
 # encrypted packs (llm-cli zoo export --to) or check your signed packs.
 age1<58 characters>
 ed25519:<base64>
+```
+
+### zoo maintainer
+
+```
+llm-cli zoo maintainer key NAME [--save FILE]
+llm-cli zoo maintainer review [ITEM] [--review-dir DIR] [--key NAME] [--trust community|verified] [--title T]
+llm-cli zoo maintainer revoke KIND ID --reason TEXT [--version V | --sha256 S] [--key NAME]
+```
+
+Unreleased. For the maintainer of the community repository (`community_repo`), not for users. GitHub is reached with
+your own GitHub CLI login (`gh`) and git, both installed and logged in (`gh auth login`); the framework never reads,
+stores or shows a token. No AI client and no Ditto path reaches these commands. Every step is printed and written to
+the audit log; Ctrl+C cancels before the next step, up to the last merge (after the push it also closes the
+publication's own pull request and deletes its branch). A refusal says what happened on GitHub so far and the next
+step.
+
+- **`key NAME`** (once): a new Ed25519 index signing key in the OS keyring (service `lcf-community-index`). A name that
+  exists is refused; a key is never replaced. It prints the entry for `configs/community_keys.yml` (valid for two
+  years); `--save FILE` also writes it to a text file (an existing file is refused before any key is made). Choose a
+  name that is not your personal name, for example `lcf-community-2026`: it appears in the public entry.
+- **`review`** without ITEM lists the open pull requests that add packs under `contributions/<kind>/`, with the state of
+  the required check `validate`, and the packs merged there but not published yet (`main:contributions/...`).
+- **`review ITEM`** (a pull request number such as `7` or `#7`, or `main:contributions/KIND/FILE.zip`): fetches the
+  packs of that commit into the local clone in the per-user folder, checks each one with `zoo verify` and prints every
+  file of the pack (`pack.json`, `pack.sig`, each file and any other member of the pack file; hidden characters are
+  shown as escapes). A pull request that also changes anything besides new packs under `contributions/<kind>/`, or
+  that goes into another branch than `main`, is not published; the review names that change. With
+  `--review-dir DIR` the files are written to that new or empty folder instead, for you to read there. Then it asks
+  "Publish?" ("No" is the default; without a terminal nothing is published). Yes merges the contribution (only when
+  its check passed and its head is the reviewed commit), moves the pack to `packs/<kind>/`, adds its index entry with
+  the raw address, the trust (`--trust`, default `community`; `verified` only when someone other than the author
+  reproduced the pack) and the title (`--title`, a contribution with one pack; default the pack id), raises the index
+  version and time, signs `index.json` with the key (`--key`, default the one used last), commits on a new branch,
+  pushes it, opens a pull request, waits for the required check and merges it. Nothing is pushed to `main`.
+- **`revoke KIND ID --reason TEXT`**: revokes every version of the id, one version (`--version`) or exactly one file
+  (`--sha256`, from the index), with the reason every user sees, after the question "Revoke ...?" ("No" is the
+  default); the revocation goes into the signed index the same way. The entry stays, so the hub shows it as revoked.
+
+In the GUI: **Tools > Open Community Hub > Maintainer**: **1. Create signing key...** (with **Copy** and **Save...**),
+**2. Review and publish: load contributions**, **Review selected** (file list and a read-only text view), **Trust**,
+**Title** and **Publish...**, **3. Revoke a published pack...**, the **Signing key name** and **Cancel**.
+
+```bash
+llm-cli zoo maintainer key lcf-community-2026 --save lcf-community-2026.public-key.txt
+llm-cli zoo maintainer review
+llm-cli zoo maintainer review 7 --review-dir ../review-7
+llm-cli zoo maintainer revoke target Rockchip --version 1.0.0 --reason "breaks the RK3588 build"
 ```
 
 ---

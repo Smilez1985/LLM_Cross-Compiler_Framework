@@ -118,6 +118,7 @@ TEXTS = {
         "zoo.verify_file.tip": "Checks a pack file before you install or share it: format, hashes, validators and the "
                                "privacy scrub. Nothing is installed.",
         "zoo.export": "Export...",
+        "zoo.refresh": "Refresh",
         "zoo.export.tip": "Export a target, a finished build (recipe) or your knowledge base as a scrubbed pack signed "
                           "with your key, plain for the community or encrypted for private sharing",
         "zoo.keys": "My public keys...",
@@ -354,6 +355,7 @@ TEXTS = {
         "zoo.verify_file.tip": "Prüft eine Paketdatei, bevor du sie installierst oder weitergibst: Format, Prüfsummen, "
                                "Validatoren und die Datenschutz-Bereinigung. Es wird nichts installiert.",
         "zoo.export": "Exportieren...",
+        "zoo.refresh": "Aktualisieren",
         "zoo.export.tip": "Ein Target, einen fertigen Build (Rezept) oder deine Wissensdatenbank als bereinigtes, mit "
                           "deinem Schlüssel signiertes Paket exportieren, offen für die Community oder verschlüsselt "
                           "zum privaten Teilen",

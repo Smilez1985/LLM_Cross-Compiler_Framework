@@ -557,6 +557,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_ditto_models",)   # Ditto > Local Mode
 TEXT_MODULES += ("orchestrator.utils.l10n_main", "orchestrator.utils.l10n_shell", "orchestrator.utils.l10n_activity",
                  "orchestrator.utils.l10n_hf", "orchestrator.utils.l10n_ditto_setup",
                  "orchestrator.utils.l10n_glossary")
+TEXT_MODULES += ("orchestrator.utils.l10n_maintainer",)   # Community Hub > Maintainer, llmcf zoo maintainer
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

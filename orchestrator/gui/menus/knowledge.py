@@ -8,8 +8,9 @@ source of the knowledge base with its kind, licence, copyright notice and what a
 filtered by kind (orchestrator/gui/knowledge_sources_window.py). The entries that exist already get their object names
 here: Knowledge Snapshots... (act_knowledge_snapshots: the snapshots with the disk line, the storage and its buttons),
 Index the Framework's Documentation... (act_knowledge_index_docs) and Community Hub (act_knowledge_hub: the zoo with
-Details..., Import file..., Check installed packs, Check a pack file..., Export... and My public keys...). The windows
-load when their entry is first used (lazy loading, RG1).
+Details..., Import file..., Check installed packs, Check a pack file..., Export... and My public keys...; its Maintainer
+tab holds `llmcf zoo maintainer key|review|revoke`). The windows load when their entry is first used (lazy loading,
+RG1).
 
 CLI_PATHS names, for each `llmcf` command path of this area (and each of its options), the object that does it by
 mouse; WINDOW_OBJECTS names, for an object that lives in a window, the menu action that opens that window;
@@ -69,10 +70,25 @@ CLI_PATHS: Dict[str, str] = {
     "zoo export --out": "btn_zoo_export",            # Folder: Choose folder...
     "zoo export --pr": "btn_zoo_export",             # the export window's Open pull request, after the summary
     "zoo keys": "btn_zoo_keys",                      # with Copy and Save...
+    # the hub's Maintainer tab: the maintainer of the community repository (gui/community_maintainer.py)
+    "zoo maintainer": "pnl_zoo_maintainer",          # the group lists its commands; the tab holds all three
+    "zoo maintainer key": "btn_zoo_maint_key",       # the name, then the public entry with Copy and Save...
+    "zoo maintainer key --save": "btn_zoo_maint_key",
+    "zoo maintainer review": "btn_zoo_maint_load",   # without ITEM: the contributions; with ITEM: Review selected
+    "zoo maintainer review --review-dir": "lst_zoo_maint_files",   # every file in the list and its text view
+    "zoo maintainer review --key": "edt_zoo_maint_key_name",
+    "zoo maintainer review --trust": "cmb_zoo_maint_trust",
+    "zoo maintainer review --title": "edt_zoo_maint_title",
+    "zoo maintainer revoke": "btn_zoo_maint_revoke",   # the pack, the scope and the reason
+    "zoo maintainer revoke --reason": "btn_zoo_maint_revoke",
+    "zoo maintainer revoke --version": "btn_zoo_maint_revoke",
+    "zoo maintainer revoke --sha256": "btn_zoo_maint_revoke",
+    "zoo maintainer revoke --key": "edt_zoo_maint_key_name",
 }
 # Commands whose argument makes them another action, and the object that does that one.
 ARGUMENT_PATHS: Dict[str, str] = {
     "zoo verify PACK_FILE": "btn_zoo_verify_file",
+    "zoo maintainer review ITEM": "btn_zoo_maint_review",   # fetch, check, every file; Publish... after the question
 }
 # Objects that live in a window, and the menu action that opens it.
 WINDOW_OBJECTS: Dict[str, str] = {
@@ -95,6 +111,18 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "btn_zoo_verify_file": ACT_HUB,
     "btn_zoo_export": ACT_HUB,
     "btn_zoo_keys": ACT_HUB,
+    "pnl_zoo_maintainer": ACT_HUB,
+    "btn_zoo_maint_key": ACT_HUB,
+    "btn_zoo_maint_load": ACT_HUB,
+    "btn_zoo_maint_review": ACT_HUB,
+    "btn_zoo_maint_publish": ACT_HUB,
+    "btn_zoo_maint_revoke": ACT_HUB,
+    "btn_zoo_maint_cancel": ACT_HUB,
+    "lst_zoo_maint_files": ACT_HUB,
+    "txt_zoo_maint_file": ACT_HUB,
+    "edt_zoo_maint_key_name": ACT_HUB,
+    "cmb_zoo_maint_trust": ACT_HUB,
+    "edt_zoo_maint_title": ACT_HUB,
 }
 MACHINE_ONLY: Dict[str, str] = {
     "zoo list --json": "machine-readable output; the Community Hub shows the same rows",

@@ -40,7 +40,10 @@ jobs:
         run: git ls-files -z '*.sh' ':!:targets/_template/*' | xargs -0 shellcheck --severity=error
 
       - name: actionlint
-        run: actionlint
+        # The workflows of this repository, and the community repository's check template (not run here).
+        run: |
+          actionlint
+          actionlint scripts/community_repo/validate-contribution.yml
 
   lock:
     name: Lock files (uv.lock and the requirements exports)
