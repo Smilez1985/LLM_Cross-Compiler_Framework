@@ -1969,6 +1969,11 @@ comes from the deploy settings or `--user`.
 The result is kept in `device/<ID>/deployed.json` (a failed deployment does not change it). Exit code 1 when a step
 or a check fails.
 
+When the board's network drops during a step (a board with Wi-Fi only, for example), this command, `device runtime
+verify` and `device runtime prune --on-device` wait up to 300 s for the board and say so once (`Waiting for the
+board at ... (Ctrl+C)`); Ctrl+C ends the command at once. A board that does not answer again ends the command with
+what that means and the next step, as `deploy run` says it.
+
 In the GUI: **Boards > Boards and Devices...** **> Deploy runtime...** (the SSH user, the password asked each time and never stored, a model
 for the short benchmark; a model that is not a catalog model runs only after an explicit warning with "No" as
 the default, and the consent is written to the audit log before it is loaded).

@@ -384,8 +384,13 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         active = next((ln.split("=", 1)[1].strip() for ln in res.out.splitlines() if ln.startswith("current=")), "")
         active = active if _RE_ID16.fullmatch(active) else ""
         existed = "existed=1" in res.out.splitlines()
-    finally:
-        shell.run(f"rm -rf {_q(staging)}", again=True)
+    except BaseException:
+        try:
+            shell.run(f"rm -rf {_q(staging)}", again=True)
+        except RemoteError:
+            pass   # the step's own failure (or a Ctrl+C during a wait for the board) is what the person reads
+        raise
+    shell.run(f"rm -rf {_q(staging)}", again=True)
     folder = f"{root}/{id16}"
 
     say("creating the API key on the device (umask 077) ...")

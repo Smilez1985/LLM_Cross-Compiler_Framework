@@ -2050,6 +2050,11 @@ aus `--user`.
 Das Ergebnis liegt in `device/<ID>/deployed.json` (ein gescheitertes Deployment ändert es nicht). Exit-Code 1, wenn
 ein Schritt oder eine Prüfung scheitert.
 
+Bricht das Netz des Boards während eines Schritts ab (zum Beispiel bei einem Board nur mit WLAN), warten dieser
+Befehl, `device runtime verify` und `device runtime prune --on-device` bis zu 300 s auf das Board und sagen das einmal
+(`Warte auf das Board unter ... (Ctrl+C)`); Strg+C beendet den Befehl sofort. Ein Board, das nicht wieder antwortet,
+beendet den Befehl mit dem, was das bedeutet, und dem nächsten Schritt, wie `deploy run` es sagt.
+
 In der GUI: **Boards > Boards und Geräte...** **> Laufzeit installieren...** (der SSH-Benutzer, das Passwort jedes Mal abgefragt und nie
 gespeichert, ein Modell für den kurzen Benchmark; ein Modell, das kein Katalogmodell ist, läuft nur nach einer
 ausdrücklichen Warnung mit "Nein" als Vorgabe, und die Zustimmung steht im Audit-Log, bevor es geladen wird).
