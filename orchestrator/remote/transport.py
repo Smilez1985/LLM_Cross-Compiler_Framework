@@ -338,6 +338,7 @@ _PORT_FLAG = {"ssh": "-p", "scp": "-P", "sftp": "-P"}
 # the framework's own key file (its permissions, a damaged file): a problem on this computer, not the board.
 _UNKNOWN_KEY_OUTPUT = ("Host key verification failed", "host key is known for")
 _KEY_FILE_OUTPUT = ("UNPROTECTED PRIVATE KEY FILE", "Load key", "Bad owner or permissions")
+_KEY_TOO_OPEN = ("are too open",)   # "Permissions 0644 for '<key>' are too open." (the line that names the key)
 
 
 def config_value(path: Any) -> str:
@@ -413,10 +414,18 @@ class SshFailed(OSError):
 
     @classmethod
     def of(cls, text: str, key_file: str = "") -> "SshFailed":
-        """The failure OpenSSH's words `text` describe."""
+        """The failure OpenSSH's words `text` describe. OpenSSH ignores a key file it refuses ("This private key will
+        be ignored") and goes on without it, so the board then refuses the login and OpenSSH's last words are
+        "Permission denied": when the framework's key file (`key_file`, named by its file name) is the one refused,
+        the cause is still this computer, not the board."""
         from orchestrator.remote import reasons
         output = [line for line in (text or "").splitlines() if line.strip()]
         reason = reasons.classify_ssh_output(text) or ""
+        name = str(key_file).replace("\\", "/").rpartition("/")[2]
+        if reason == reasons.AUTH_FAILED and name and any(
+                name in line and any(needle in line for needle in _KEY_FILE_OUTPUT + _KEY_TOO_OPEN)
+                for line in output):
+            reason = ""   # the board refused the login because OpenSSH did not offer the framework's key
         if not reason and any(needle in (text or "") for needle in _KEY_FILE_OUTPUT):
             return cls("OpenSSH refuses the framework's SSH key file (other accounts may read it, or it is damaged)",
                        key_file=key_file or "the framework's SSH key", output=output)

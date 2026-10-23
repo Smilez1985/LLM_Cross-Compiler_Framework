@@ -43,6 +43,18 @@ ATTACHED_INSTALL = "sh deploy.sh; status=$?"   # the 1.x fallback ran deploy.sh 
 DEPLOY_LINES = "[1/3] Checking Integrity...\nDeployment Complete. System is ready.\n"
 
 
+def openssh_refuses_key(key, why="bad permissions"):
+    """What OpenSSH (9.6, as run against a real sshd) prints when it refuses the key file `key`: it ignores the key,
+    goes on without it, and the board then refuses the login, so the last line is the board's "Permission denied"."""
+    head = ("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n"
+            "@         WARNING: UNPROTECTED PRIVATE KEY FILE!          @\r\n"
+            "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n"
+            f"Permissions 0644 for '{key}' are too open.\r\n"
+            "It is required that your private key files are NOT accessible by others.\r\n"
+            "This private key will be ignored.\r\n") if why == "bad permissions" else ""
+    return head + f'Load key "{key}": {why}\r\n{USER}@{HOST}: Permission denied (publickey).\r\n'
+
+
 # --- the board behind OpenSSH ---------------------------------------------------------------------------------------
 
 class OpenSshBoard(tbd.Board):
@@ -591,6 +603,21 @@ class TestTheSecondTransport:
         assert not result.success and result.code == reasons.LOCAL_PROBLEM
         assert ssh_trust.KEY_NAME in result.reason and str(sys_manager._state_dir()) not in result.reason
 
+    @pytest.mark.parametrize("why", ["bad permissions", "error in libcrypto"])
+    def test_a_refused_key_file_stays_a_problem_on_this_computer_when_the_board_then_refuses(
+            self, sys_manager, system_board, package, monkeypatch, why):
+        """A real OpenSSH ignores a key file it refuses and goes on without it, so its last line is the board's
+        "Permission denied": the cause is still this computer's key file, never the board (nor recorded with it)."""
+        from orchestrator.runtime.device import trusted
+        recorded = []
+        monkeypatch.setattr(trusted, "record_reach", lambda *a, **k: recorded.append((a, k)))
+        key = sys_manager._state_dir() / ssh_trust.KEY_NAME
+        system_board.fake.fail = (255, openssh_refuses_key(key, why))
+        result, _events = deploy(sys_manager, package)
+        assert not result.success and result.code == reasons.LOCAL_PROBLEM, result.reason
+        assert ssh_trust.KEY_NAME in result.reason and str(sys_manager._state_dir()) not in result.reason
+        assert recorded == [], "a problem on this computer is never kept with the board"
+
     def test_a_board_that_restarts_its_ssh_server_while_waited_for_is_not_back_yet(self, sys_manager,
                                                                                    system_board, package):
         """While the deploy waits, a connection that opens and drops again (sshd starting) keeps it waiting."""
@@ -667,11 +694,19 @@ class TestTheOpenSshTransport:
         (f"No ED25519 host key is known for {HOST} and you have requested strict checking.\n"
          "Host key verification failed.", "", True, False),
         ("Load key \"/x/id\": bad permissions", "", False, True),
+        # what OpenSSH 9.6 really prints: it ignores the refused key, goes on, and the board refuses the login
+        (None, "", False, True),
+        (f'Load key "/state/{ssh_trust.KEY_NAME}": error in libcrypto\n{USER}@{HOST}: Permission denied (publickey).',
+         "", False, True),
+        # another key of this account's own ssh_config refused: the board refused the framework's key
+        (f'Load key "/keys/id_rsa": bad permissions\n{USER}@{HOST}: Permission denied (publickey).',
+         reasons.AUTH_FAILED, False, False),
         ("client_loop: send disconnect: Broken pipe", "", False, False),
         ("", "", False, False),
     ])
     def test_what_openssh_said(self, text, reason, unknown, local):
         from orchestrator.remote.transport import SshFailed
+        text = openssh_refuses_key(f"/state/{ssh_trust.KEY_NAME}", "bad permissions") if text is None else text
         failure = SshFailed.of(text, key_file="/state/id_ed25519_llm_framework")
         assert isinstance(failure, OSError) and failure.reason == reason and failure.unknown_key is unknown
         assert bool(failure.filename) is local
@@ -996,3 +1031,22 @@ def test_a_real_openssh_refuses_an_unknown_host_key(real_sshd, config, monkeypat
                                                                      port=real_sshd["port"])
     assert not result.success and result.code == ""
     assert result.reason == "The device 127.0.0.1 is not trusted yet: confirm its host key fingerprint first."
+
+
+def test_a_real_openssh_that_refuses_the_key_file_is_a_problem_on_this_computer(real_sshd, config, monkeypatch,
+                                                                                 tmp_path):
+    """A key file OpenSSH refuses (others may read it: the narrowing failed) is ignored by OpenSSH, which goes on and
+    ends with the board's "Permission denied": the deploy still names this computer's key file, not the board."""
+    from orchestrator.utils import atomic
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(real_sshd["state"]))
+    monkeypatch.setattr(dmod, "PARAMIKO_AVAILABLE", False)
+    monkeypatch.setattr(atomic, "owner_only", lambda path: None)   # the narrowing could not be done
+    private = real_sshd["state"] / ssh_trust.KEY_NAME
+    os.chmod(private, 0o644)
+    package = tmp_path / "deploy_model_1.zip"
+    package.write_bytes(b"PK")
+    result = DeploymentManager(FakeFramework(config)).deploy_package(package, "127.0.0.1", real_sshd["user"],
+                                                                     port=real_sshd["port"])
+    assert not result.success and result.code == reasons.LOCAL_PROBLEM, (result.reason, result.output)
+    assert any("Permission denied" in line for line in result.output), "OpenSSH's last words: the board refused"
+    assert ssh_trust.KEY_NAME in result.reason and str(real_sshd["state"]) not in result.reason

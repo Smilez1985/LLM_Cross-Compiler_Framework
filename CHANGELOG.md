@@ -1361,7 +1361,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   fingerprint you were shown is still refused without paramiko. The framework's SSH key is made private to your
   account when it is created and before OpenSSH uses it (`orchestrator/utils/atomic.py` `owner_only`: group and other
   bits off on Linux and macOS, on Windows a protected ACL for your account alone, which OpenSSH for Windows requires of
-  a private key). Tested against a real `sshd` as well (`tests/test_remote_system_ssh.py`).
+  a private key). A key file OpenSSH still refuses (others may read it, or it is damaged) is reported as a problem on
+  this computer (`local_problem`, never kept with the board), not as the board refusing the login, although OpenSSH
+  then goes on without the key and ends with the board's "Permission denied". Tested against a real `sshd` as well
+  (`tests/test_remote_system_ssh.py`).
 - **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
   existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
   `utils/network.py` left with that module, see below) run through the oldest one's module,
