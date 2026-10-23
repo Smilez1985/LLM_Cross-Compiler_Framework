@@ -26,9 +26,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   packages), deploy record and its benchmark results with the builds ("tested on"). Every part is copied to the new
   device ID and checked (read back, the runtime packages as hard links or as copies with the same sha256) before
   `known_hosts` changes, and the old ID's copies go only after the change; when a copy fails or the change is refused
-  (no audit row, `known_hosts` changed meanwhile), the copies go again and nothing has changed. What the new ID
-  already holds with other content is never overwritten (it stays under the old ID), an old copy that cannot be
-  removed stays too, and the CLI and the window name both. The work runs
+  (no audit row, `known_hosts` changed meanwhile) or ends any other way before `known_hosts` changes (its lock held by
+  another process, a Ctrl+C), the copies go again and nothing has changed. Once `known_hosts` holds the new key, the
+  old copies go also when a Ctrl+C ends the login test after it, so the board's data is never left twice. What the new
+  ID already holds with other content is never overwritten (it stays under the old ID; the probe and its label and
+  address move or stay together), an old copy that cannot be removed stays too, and the CLI and the window name both,
+  also when the board's record could not be written. The work runs
   in the background; the texts are English and German. No tool, the MCP server, Ditto or the device runtime steps can
   reach it (`orchestrator/remote/pairing.py` `replace_key`, an import-graph test).
 - **Next steps instead of commands, allow-to-run proposals and translated, regrouped menus** (wave 6, chain a0;

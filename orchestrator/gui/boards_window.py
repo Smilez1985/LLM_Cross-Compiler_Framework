@@ -703,12 +703,7 @@ class BoardsWindow(QDialog):
     def _changed(self, out: Any, change: Any) -> None:
         device, paired = out
         plan, t = change.plan, self._t
-        if device is None:
-            self._info(t("boards.edit.record_failed"), "warning")
-            self.reload()
-            return
-        lines = [t("boards.edit.done", label=device.label, device_id=device.device_id, address=plan.new.display,
-                   key_type=plan.new_key_type, fingerprint=plan.new_fingerprint)]
+        moved_lines = []
         data = getattr(change, "data", None)
         if data is not None:   # where the board's data went (P6, the CLI's moved_lines)
             def kinds(names):
@@ -716,7 +711,13 @@ class BoardsWindow(QDialog):
             for key, names in (("boards.edit.moved", data.moved), ("boards.edit.kept", data.kept),
                                ("boards.edit.left", data.left)):
                 if names:
-                    lines.append(t(key, old_id=data.old_id, new_id=data.new_id, what=kinds(names)))
+                    moved_lines.append(t(key, old_id=data.old_id, new_id=data.new_id, what=kinds(names)))
+        if device is None:   # the data moved all the same (the CLI prints moved_lines before it says so)
+            self._info("\n\n".join([t("boards.edit.record_failed")] + moved_lines), "warning")
+            self.reload()
+            return
+        lines = [t("boards.edit.done", label=device.label, device_id=device.device_id, address=plan.new.display,
+                   key_type=plan.new_key_type, fingerprint=plan.new_fingerprint)] + moved_lines
         if plan.key_changed:
             lines.append(t("boards.edit.probe_again", old_id=plan.old_device_id))
             if not paired:
