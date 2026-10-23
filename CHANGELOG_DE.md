@@ -1442,6 +1442,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Ein Deploy-Schritt für einen Build und ein Ablauf für die Runtime eines Boards, für CLI, GUI und KI**
+  (Konsolidierungskette c3-deploy-flow). `llmcf deploy run` und Deploy sowie Vorhandenes Paket deployen... im
+  Deployment-Tab laufen jetzt über einen Kernschritt, `person_steps.deploy_build`: das Paket, das Deployment, dann
+  der vertraute Eintrag des Boards. Der Tab baut sein Paket jetzt so wie `llmcf deploy package` und Nur Paket
+  erstellen... (`make_package`): Ein Docker-Paket trägt den Namen des Inferenz-Images, und Abbrechen stoppt auch das
+  Packen zwischen seinen Schritten (es bleibt kein Paket liegen). Der Grund, warum ein Paket nicht gebaut werden kann,
+  kommt mit dem Ergebnis zurück statt über das geteilte `DeploymentManager.last_package_error`, das kein Code des
+  Frameworks mehr liest (`create_deployment_package` behält es für ältere Aufrufer). Der vertraute Eintrag des Tabs
+  wird so protokolliert wie in der CLI: Ohne das Audit-Log der Registry schreibt er seine Zeile jetzt ins Audit-Log
+  im Benutzerordner, vorher schrieb er keine. `llmcf device runtime deploy`, Laufzeit installieren... im Boards-Fenster
+  und `deploy_device_runtime` der KI laufen über einen Ablauf, `steps.deploy_runtime_flow`. Er meldet sich an,
+  schreibt den vertrauten Eintrag des Boards (nur für die Person), liest das Board und lehnt root vor jeder Frage ab,
+  fragt zum Benchmark-Modell mit der Zustimmung (nur für die Person), installiert, schließt die Sitzung und
+  vermerkt „getestet auf“. Jeder Aufrufer übergibt seine Anmeldung und seine Worte als Hooks. Die Hooks der KI
+  enthalten keinen vertrauten Eintrag, keine Frage und keine frühe Ablehnung von root, ihre Ergebnisse bleiben also
+  gleich; ein Test prüft das. Was die CLI ausgibt und die Fenster zeigen, bleibt sonst gleich.
 - **Der Hugging-Face-Browser der GUI lädt in den Ordner `hf/` des Modellordners, geprüft, wie ein Download einer KI**
   (Entscheidung A6 des Maintainers; Konsolidierungskette hf). Neuer Ort: `<Modellordner>/hf/<Owner>--<Name>/<die
   ersten 12 Zeichen des Commits>/<Datei>`, derselbe Ordner wie bei `download_hf_file` einer KI (der Builder legt
