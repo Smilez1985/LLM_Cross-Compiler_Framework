@@ -419,7 +419,8 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   above too (waiting for the board, resuming the upload, `deploy.sh` on its own), with the framework's key and
   known_hosts only, a login time limit and keepalive; `ssh` never gets the framework's standard input (over MCP stdio
   that is the protocol stream). A password needs paramiko there (OpenSSH never asks for one): the result says it was
-  not used. A deploy bound to a fingerprint you were shown is refused.
+  not used. A deploy bound to a fingerprint you were shown is refused. `deploy run` and the Deployment tab read the
+  board's host key with paramiko before they deploy, so they still need it.
 
 ### Runtime on the board (self-built llama.cpp)
 

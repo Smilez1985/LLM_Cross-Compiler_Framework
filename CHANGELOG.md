@@ -1345,27 +1345,27 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   up): the deploy waits for the board as after any drop, logs in again with the host key checked again and continues
   the upload or follows the installation again, at most 20 times, instead of ending with "could not be followed".
 - **The OpenSSH fallback of the deploy is a second transport, not a second deploy** (decision A5, consolidation
-  chain c2-remote-system, finding 3 of the architecture audit). Where paramiko cannot be imported, `deploy run`, the
-  Deployment tab and every caller of `deploy_package` now run the same board session as with paramiko, over this
-  computer's OpenSSH client (`orchestrator/remote/transport.py` `SystemSshTransport`): the deploy waits for a board whose
-  network dropped (`--wait`, the waiting events, Cancel), resumes the upload at the bytes whose sha256 on the board
-  matches, starts `deploy.sh` once on the board on its own (detached, behind a marker) and follows it again after a
-  drop, instead of an upload with `scp` and an installation tied to the SSH session that a drop killed. Every OpenSSH
-  call comes from one builder (`openssh_argv`, `openssh_options`; `ssh_trust.system_ssh_options` is its old name): the
-  framework key and known_hosts only, never a question and never a new key, as before, now also a login time limit
-  (`ConnectTimeout`) and keepalive (`ServerAliveInterval`, `ServerAliveCountMax`), each command as one `sh -c` with a
-  time limit (which also holds while the command's input is written) and an output cap, and `UserKnownHostsFile` in
-  quotes: a state folder with a space in its path (a
-  Windows account name such as "Jane Doe") split the framework's known_hosts into two files that do not exist, so
-  every board's key counted as unknown. A password is no longer dropped silently: OpenSSH never asks for one, so the
-  deploy logs in with the framework key and its result says the password was not used. A deploy bound to a
-  fingerprint you were shown is still refused without paramiko. The framework's SSH key is made private to your
-  account when it is created and before OpenSSH uses it (`orchestrator/utils/atomic.py` `owner_only`: group and other
-  bits off on Linux and macOS, on Windows a protected ACL for your account alone, which OpenSSH for Windows requires of
-  a private key). A key file OpenSSH still refuses (others may read it, or it is damaged) is reported as a problem on
-  this computer (`local_problem`, never kept with the board), not as the board refusing the login, although OpenSSH
-  then goes on without the key and ends with the board's "Permission denied". Tested against a real `sshd` as well
-  (`tests/test_remote_system_ssh.py`).
+  chain c2-remote-system, finding 3 of the architecture audit). Where paramiko cannot be imported, `deploy_package`
+  now runs the same board session as with paramiko, over this computer's OpenSSH client
+  (`orchestrator/remote/transport.py` `SystemSshTransport`): the deploy waits for a board whose network dropped (its
+  wait time, the waiting events, Cancel), resumes the upload at the bytes whose sha256 on the board matches, starts
+  `deploy.sh` once on the board on its own (detached, behind a marker) and follows it again after a drop, instead of
+  an upload with `scp` and an installation tied to the SSH session that a drop killed. `deploy run` and the Deployment
+  tab still read the board's host key with paramiko before they deploy, so without paramiko they stop there, as
+  before. Every OpenSSH call comes from one builder (`openssh_argv`, `openssh_options`; `ssh_trust.system_ssh_options`
+  is its old name): the framework key and known_hosts only, never a question and never a new key, as before, now also
+  a login time limit (`ConnectTimeout`) and keepalive (`ServerAliveInterval`, `ServerAliveCountMax`), each command as
+  one `sh -c` with a time limit (which also holds while the command's input is written) and an output cap, and
+  `UserKnownHostsFile` in quotes: a state folder with a space in its path (a Windows account name such as "Jane Doe")
+  split the framework's known_hosts into two files that do not exist, so every board's key counted as unknown. A
+  password is no longer dropped silently: OpenSSH never asks for one, so the deploy logs in with the framework key and
+  its result says the password was not used. A deploy bound to a fingerprint you were shown is still refused without
+  paramiko. The framework's SSH key is made private to your account when it is created and before OpenSSH uses it
+  (`orchestrator/utils/atomic.py` `owner_only`: group and other bits off on Linux and macOS, on Windows a protected ACL
+  for your account alone, which OpenSSH for Windows requires of a private key). A key file OpenSSH still refuses
+  (others may read it, or it is damaged) is reported as a problem on this computer (`local_problem`, never kept with
+  the board), not as the board refusing the login, although OpenSSH then goes on without the key and ends with the
+  board's "Permission denied". Tested against a real `sshd` as well (`tests/test_remote_system_ssh.py`).
 - **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
   existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
   `utils/network.py` left with that module, see below) run through the oldest one's module,

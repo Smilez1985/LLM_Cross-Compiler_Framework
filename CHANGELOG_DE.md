@@ -1532,23 +1532,24 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Installation weiter, höchstens 20-mal, statt mit „could not be followed“ zu enden.
 - **Der OpenSSH-Rückfallweg des Deployments ist ein zweiter Transport, kein zweites Deployment** (Entscheidung A5,
   Konsolidierungskette c2-remote-system, Befund 3 des Architektur-Audits). Wo paramiko nicht importiert werden kann,
-  laufen `deploy run`, der Deployment-Tab und jeder Aufrufer von `deploy_package` jetzt über dieselbe Board-Sitzung wie
-  mit paramiko, über den OpenSSH-Client dieses Computers (`orchestrator/remote/transport.py` `SystemSshTransport`):
-  Das Deployment wartet auf ein Board, dessen Netzwerk weggebrochen ist (`--wait`, die Warte-Ereignisse, Abbrechen),
-  setzt den Upload bei den Bytes fort, deren sha256 auf dem Board passt, startet `deploy.sh` einmal selbständig auf
-  dem Board (abgekoppelt, hinter einer Markierung) und verfolgt es nach einem Abbruch weiter, statt eines Uploads mit
-  `scp` und einer an die SSH-Sitzung gebundenen Installation, die ein Abbruch beendete. Jeder OpenSSH-Aufruf kommt aus
-  einem Bauer (`openssh_argv`, `openssh_options`; `ssh_trust.system_ssh_options` ist sein alter Name): nur der
-  Schlüssel und die known_hosts des Frameworks, nie eine Frage und nie ein neuer Schlüssel, wie bisher, jetzt auch ein
-  Zeitlimit für die Anmeldung (`ConnectTimeout`) und Keepalive (`ServerAliveInterval`, `ServerAliveCountMax`), jeder
-  Befehl als ein `sh -c` mit Zeitlimit (das auch gilt, während die Eingabe des Befehls geschrieben wird) und
-  Ausgabegrenze, und `UserKnownHostsFile` in Anführungszeichen: Ein
-  Zustandsordner mit einem Leerzeichen im Pfad (ein Windows-Kontoname wie „Jane Doe“) teilte die known_hosts des
-  Frameworks in zwei Dateien, die es nicht gibt, sodass der Schlüssel jedes Boards als unbekannt galt. Ein Passwort
-  geht nicht mehr stillschweigend verloren: OpenSSH fragt nie danach, also meldet sich das Deployment mit dem
-  Schlüssel des Frameworks an, und sein Ergebnis sagt, dass das Passwort nicht genutzt wurde. Ein Deployment, das an
-  einen dir gezeigten Fingerabdruck gebunden ist, wird ohne paramiko weiter abgelehnt. Der SSH-Schlüssel des
-  Frameworks wird beim Anlegen und bevor OpenSSH ihn nutzt nur für dein Konto lesbar gemacht
+  läuft `deploy_package` jetzt über dieselbe Board-Sitzung wie mit paramiko, über den OpenSSH-Client dieses Computers
+  (`orchestrator/remote/transport.py` `SystemSshTransport`): Das Deployment wartet auf ein Board, dessen Netzwerk
+  weggebrochen ist (seine Wartezeit, die Warte-Ereignisse, Abbrechen), setzt den Upload bei den Bytes fort, deren
+  sha256 auf dem Board passt, startet `deploy.sh` einmal selbständig auf dem Board (abgekoppelt, hinter einer
+  Markierung) und verfolgt es nach einem Abbruch weiter, statt eines Uploads mit `scp` und einer an die SSH-Sitzung
+  gebundenen Installation, die ein Abbruch beendete. `deploy run` und der Deployment-Tab lesen den Host-Schlüssel des
+  Boards vor dem Deployment weiter mit paramiko, ohne paramiko halten sie also wie bisher dort an. Jeder
+  OpenSSH-Aufruf kommt aus einem Bauer (`openssh_argv`, `openssh_options`; `ssh_trust.system_ssh_options` ist sein
+  alter Name): nur der Schlüssel und die known_hosts des Frameworks, nie eine Frage und nie ein neuer Schlüssel, wie
+  bisher, jetzt auch ein Zeitlimit für die Anmeldung (`ConnectTimeout`) und Keepalive (`ServerAliveInterval`,
+  `ServerAliveCountMax`), jeder Befehl als ein `sh -c` mit Zeitlimit (das auch gilt, während die Eingabe des Befehls
+  geschrieben wird) und Ausgabegrenze, und `UserKnownHostsFile` in Anführungszeichen: Ein Zustandsordner mit einem
+  Leerzeichen im Pfad (ein Windows-Kontoname wie „Jane Doe“) teilte die known_hosts des Frameworks in zwei Dateien,
+  die es nicht gibt, sodass der Schlüssel jedes Boards als unbekannt galt. Ein Passwort geht nicht mehr
+  stillschweigend verloren: OpenSSH fragt nie danach, also meldet sich das Deployment mit dem Schlüssel des Frameworks
+  an, und sein Ergebnis sagt, dass das Passwort nicht genutzt wurde. Ein Deployment, das an einen dir gezeigten
+  Fingerabdruck gebunden ist, wird ohne paramiko weiter abgelehnt. Der SSH-Schlüssel des Frameworks wird beim Anlegen
+  und bevor OpenSSH ihn nutzt nur für dein Konto lesbar gemacht
   (`orchestrator/utils/atomic.py` `owner_only`: Gruppen- und andere Bits weg unter Linux und macOS, unter Windows eine
   geschützte ACL nur für dein Konto, die OpenSSH für Windows bei einem privaten Schlüssel verlangt). Eine
   Schlüsseldatei, die OpenSSH trotzdem ablehnt (andere können sie lesen, oder sie ist beschädigt), wird als Problem auf
