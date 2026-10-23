@@ -1207,6 +1207,20 @@ def test_stored_rows_of_the_removed_remote_mode_still_render(make_panel, feed):
         assert TEXTS["en"].get(key) and TEXTS["de"].get(key), f"legacy key {key} kept in both languages"
 
 
+@pytest.mark.parametrize("reason, shown, other", [
+    ("long", "The conversation got long", "without tools"),
+    ("no_tools", "Answered without tools", "got long")])
+def test_the_new_conversation_notice_says_why(make_panel, feed, reason, shown, other):
+    from orchestrator.Core.ditto_manager import ChatReply
+    from orchestrator.utils.l10n_chat import TEXTS
+    panel = make_panel(feed)
+    panel._on_ai_response(ChatReply(question="q", text="Hello.", new_messages=[], new_conversation=True,
+                                    new_conversation_reason=reason))
+    text = panel.feed_view.plain_text()
+    assert shown in text and other not in text
+    assert TEXTS["en"]["chat.notice.new_conversation_no_tools"] and TEXTS["de"]["chat.notice.new_conversation_no_tools"]
+
+
 def test_a_conversation_of_the_removed_remote_mode_starts_anew_with_its_own_tools(make_panel, feed):
     """A saved conversation of the removed remote mode (tool source "mcp:...") starts anew once; the notice says that
     Ditto now uses its own tools, never that another computer joins."""

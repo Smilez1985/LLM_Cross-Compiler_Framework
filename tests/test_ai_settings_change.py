@@ -284,6 +284,21 @@ class TestRules:
         assert codes(cloud.problems(config, FakeSecrets())) == ["offline_cloud"]
         assert change(catalog, "ollama", model="m", offline_mode=True).problems(config, FakeSecrets()) == []
 
+    def test_offline_mode_accepts_a_custom_server_only_on_the_local_network(self, catalog, config):
+        """The rule of the LLM layer at request time (preset.is_local of the address): a custom server outside this
+        computer and the local network is refused at save already, not only when Ditto is asked."""
+        public = change(catalog, "custom", model="m", base_url="https://api.example.com/v1", offline_mode=True)
+        found = public.problems(config, FakeSecrets())
+        assert codes(found) == ["offline_cloud"] and found[0].title == "Offline Mode"
+        assert "not on this computer or your local network" in found[0].message
+        for address in ("http://192.168.1.30:8000/v1", "http://localhost:8000/v1", "http://llm-box.local:8000/v1"):
+            assert change(catalog, "custom", model="m", base_url=address, offline_mode=True).problems(
+                config, FakeSecrets()) == [], address
+        assert change(catalog, "custom", model="m", base_url="https://api.example.com/v1").problems(
+            config, FakeSecrets()) == [], "without offline mode a public server is fine"
+        assert codes(change(catalog, "custom", model="m", offline_mode=True).problems(config, FakeSecrets())) == [
+            "base_url_missing"], "no address at all: the missing address is the problem to name"
+
     def test_a_key_is_required_unless_one_is_stored_or_another_method_was_chosen(self, catalog, config):
         assert codes(change(catalog, "openai", model="m").problems(config, FakeSecrets())) == ["key_missing"]
         stored = FakeSecrets({"openai_api_key": "sk-stored-0123456789abcdefghij"})

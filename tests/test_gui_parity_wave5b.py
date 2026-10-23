@@ -36,7 +36,10 @@ def test_one_provider_check_and_one_overlay_for_every_choice_for_one_run(tmp_pat
     monkeypatch.setattr(ai_override, "ditto_with", lambda base, values: used.append((base, values))
                         or real(base, values))
     run = ditto.for_run("ollama", "small-model")
-    assert used == [(ditto, {"ai_provider": "ollama", "ai_model": "small-model"})], "for_run goes through ditto_with"
+    # Changed on purpose (port of ditto-rewire-verified): the core's values, here a switch away from the saved provider.
+    assert used == [(ditto, ai_override.override_values("ollama", "small-model", ditto=ditto))], \
+        "for_run goes through ditto_with"
+    assert used[0][1]["ai_base_url"] == "" and used[0][1]["ai_model_json"] == "small-model"
     assert isinstance(run.config, ai_override.SettingsOverlay)
     assert run.client.primary_provider().id == "ollama" and config.get("ai_provider") == "anthropic"
     assert ditto.for_run(None, None) is ditto and len(used) == 1
