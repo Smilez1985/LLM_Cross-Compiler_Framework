@@ -452,6 +452,23 @@ class TestDownload:
         pin = LocalFiles.for_framework(env.framework).resolve(job.result["file_id"])
         assert Path(pin.path) == dest(env).resolve()
 
+    def test_offline_mode_switched_on_while_the_person_is_asked_refuses_before_any_request(self, env):
+        """Review of stage C wave 3 (hf-online's open item): the look-up refuses in offline mode, but the download
+        did not look again after the question. Offline mode switched on while the person's question was open, then
+        a Yes, and the file still came from Hugging Face. The download refuses before any request now, with the one
+        offline refusal (hf_hub.offline_refusal), and nothing is reserved or started."""
+        def yes_after_going_offline(spec, inp):
+            env.settings["offline_mode"] = True
+            return True
+        env.registry.policy_store.replace(ToolPolicy(configured=True, reviewed=[]))
+        session = env.session()
+        with pytest.raises(ToolError) as info:
+            call(env, "download_hf_file", {"model": REPO, "filename": "tiny-q4_k_m.gguf"},
+                 confirm=yes_after_going_offline)
+        assert info.value.code == "not_supported" and "offline" in str(info.value)
+        assert session.seen == [] and env.jobs.list() == [], "no request, no job"
+        assert not dest(env).exists() and not dest(env).with_name(dest(env).name + ".part").exists()
+
     def test_the_question_shows_size_disk_licence_and_gating(self, env):
         asked = []
 

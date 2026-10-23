@@ -2613,7 +2613,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Fenster oder der Kommandozeile die Worte für die Person). **Alte Downloads übernehmen…** funktioniert offline: Eine
   Datei, deren Prüfsumme nur Hugging Face liefern könnte (ein Cache ohne Links), bleibt mit dem Grund „der
   Offline-Modus ist an“ im alten Cache, und Hugging Face wird nicht gefragt; `llm-cli models take-over` verhält sich
-  genauso. Regressionstests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`.
+  genauso. `download_hf_file` einer KI prüft nach deiner Antwort erneut (Review von Stufe C, Welle 3): Wurde der
+  Offline-Modus eingeschaltet, während die Frage offen war, lehnt der Download mit derselben Ablehnung ab, bevor etwas
+  reserviert oder angefragt wird. Regressionstests: `tests/test_hf_online.py` `TestOfflineMode`,
+  `TestTheBrowserWindowOffline`, `tests/test_hf_tools.py`
+  `test_offline_mode_switched_on_while_the_person_is_asked_refuses_before_any_request`.
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie

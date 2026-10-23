@@ -2315,7 +2315,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   AI; `hf_hub.person_text` gives a window or the command line the person's words). **Take over old downloads...**
   works offline: a file whose checksum only Hugging Face could give (a cache without links) stays in the old cache
   with the reason "offline mode is on", and Hugging Face is not asked; `llm-cli models take-over` behaves the same.
-  Regression tests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`.
+  An AI's `download_hf_file` looks again after your answer (review of stage C wave 3): offline mode switched on while
+  its question was open refuses the download with the same refusal, before anything is reserved or requested.
+  Regression tests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`, `tests/test_hf_tools.py`
+  `test_offline_mode_switched_on_while_the_person_is_asked_refuses_before_any_request`.
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer
