@@ -32,6 +32,9 @@ OWN_BRIDGE = ("bookkeeping: the endpoint and key file of the framework's own GUI
 NAME_ONLY = "never deletes an image: drops the per-build name once the image carries its last-build name"
 MOVED = ("a move the person chose (save dialog, Save..., llm-cli build save): the build folder's copy goes only after "
          "every file arrived and matched its original by sha256; the artifact itself is kept (eighth round, answer 3)")
+BOARD_MOVED = ("a move the person confirmed (Q5/P6, a board's new host key): the old device ID's data goes only after "
+               "its copy under the new ID was checked and the change was made; the undo takes back only the copies "
+               "the move itself made")
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
 KNOWLEDGE_REPLACED = ("the knowledge base's own storage: a collection replaced by a restore, which saves the current "
                       "content as a snapshot first (round 5 b); clear_knowledge_base, its other caller, has no caller "
@@ -98,6 +101,12 @@ DELETION_SITES = {
     ("orchestrator/runtime/bench.py", "BenchRunner._pinned_link"): TEMP,
     ("orchestrator/runtime/bench.py", "BenchRunner._pinned_model"): TEMP,
     ("orchestrator/runtime/bench.py", "BenchRunner._sweep"): TEMP,
+    ("orchestrator/runtime/device/board_move.py", "_File.finish"): BOARD_MOVED,
+    ("orchestrator/runtime/device/board_move.py", "_File.undo"): BOARD_MOVED,
+    ("orchestrator/runtime/device/board_move.py", "_Folder.finish"): BOARD_MOVED,
+    ("orchestrator/runtime/device/board_move.py", "_Folder.undo"): BOARD_MOVED,
+    ("orchestrator/runtime/device/board_move.py", "_Folder.stage"): STAGING,   # its temporary folder (a failed copy,
+                                                                               # what an interrupted move left)
     ("orchestrator/tools/approvals.py", "ApprovalStore._write"): TEMP,
     ("orchestrator/tools/audit.py", "AuditLog._write_anchor"): TEMP,
     ("orchestrator/tools/audit.py", "AuditLog.record"): TEMP,             # an anchor of an entry never committed
