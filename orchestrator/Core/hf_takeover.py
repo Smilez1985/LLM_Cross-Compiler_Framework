@@ -223,12 +223,12 @@ def _copy_one(models_dir: Path, file: OldFile, sha256: Optional[str], git_id: Op
                 return problem
             os.replace(tmp, dest)
             return ""
-        except HashStopped:
-            tmp.unlink(missing_ok=True)
-            raise
         except OSError:
             tmp.unlink(missing_ok=True)
             return "copy_failed"
+        except BaseException:  # stopped (HashStopped), or a second Ctrl+C at a terminal: no half copy stays
+            tmp.unlink(missing_ok=True)
+            raise
 
 
 def take_over(models_dir: Path, files: List[OldFile], *, ledger: Any = None, stop: Optional[threading.Event] = None,
