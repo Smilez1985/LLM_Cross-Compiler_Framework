@@ -196,6 +196,21 @@ class TestTakeOver:
         assert not (area.models / "hf" / "acme--tiny-GGUF" / OLD_COMMIT[:12] / "config.json").exists()
         assert no_temporary_files(area.models)
 
+    def test_an_interrupt_during_a_copy_leaves_no_half_file(self, area, monkeypatch):
+        # A second Ctrl+C at a terminal (llm-cli models take-over) interrupts the copy itself: its temporary file
+        # goes, and nothing gets the file's name.
+        from orchestrator.utils import helpers
+        two_files(area)
+
+        def interrupted(src, dst, **kwargs):
+            Path(dst).write_bytes(b"half")
+            raise KeyboardInterrupt
+        monkeypatch.setattr(helpers, "copy_hashed", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            hf_takeover.take_over(area.models, hf_takeover.old_cache(area.models))
+        assert no_temporary_files(area.models) and not (area.models / "hf" / "acme--tiny-GGUF" /
+                                                         OLD_COMMIT[:12] / "config.json").exists()
+
     def test_only_what_the_cache_listed_for_this_folder_is_copied(self, area, tmp_path):
         two_files(area)
         (file, _) = hf_takeover.old_cache(area.models)
