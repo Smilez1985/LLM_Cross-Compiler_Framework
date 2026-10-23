@@ -605,3 +605,139 @@ def test_the_ai_s_deploy_hands_the_flow_no_person_only_hook():
     imported_names = {a.name for n in ast.walk(steps_tree) if isinstance(n, ast.ImportFrom) for a in n.names}
     assert not [m for m in imported if m and ("person_steps" in m or "pairing" in m)], imported
     assert not imported_names & {"person_steps", "pairing"}, imported_names
+
+
+# --- review of c3-deploy-flow ----------------------------------------------------------------------------------------
+
+def test_the_ai_s_deploy_reaches_no_person_hook_from_any_ai_reachable_module():
+    """The guard above, over every module an AI can reach (tests/test_deploy_tools.py AI_REACHABLE): none builds the
+    flow's hooks with the person's trusted record, question or 'tested on' record, none hands them over by position
+    or sets them later, and none names the person's deploy of a build (person_steps.deploy_build and its helpers)."""
+    import ast
+    from conftest import REPO_ROOT
+    from test_deploy_tools import AI_REACHABLE
+    person_hooks = {"remember", "choose_bench", "tested_on"}
+    files = []
+    for entry in AI_REACHABLE:
+        path = REPO_ROOT / entry
+        files.extend([path] if path.is_file() else sorted(path.rglob("*.py")))
+    built = 0
+    for file in files:
+        tree = ast.parse(file.read_text(encoding="utf-8"))
+        where = file.relative_to(REPO_ROOT).as_posix()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+                if name == "DeployHooks":
+                    built += 1
+                    names = {k.arg for k in node.keywords}
+                    assert not node.args and None not in names, f"{where}:{node.lineno} hands hooks over unnamed"
+                    assert not names & person_hooks, f"{where}:{node.lineno} passes {names & person_hooks}"
+                if name == "replace":   # dataclasses.replace(hooks, remember=...)
+                    assert not {k.arg for k in node.keywords} & person_hooks, f"{where}:{node.lineno}"
+                assert name not in ("deploy_build", "remember_deployed", "device_audit"), f"{where}:{node.lineno}"
+            if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    assert not (isinstance(target, ast.Attribute) and target.attr in person_hooks), \
+                        f"{where}:{node.lineno} sets a person hook"
+    assert built, "service.deploy builds the AI's hooks"
+
+
+def test_the_tabs_deploy_says_its_steps_as_before(qapp, tmp_path, monkeypatch):
+    """The button text of the Deployment tab's deploy: packaging the build, then the deploy; an existing package is
+    only deployed (characterization, the same before and after deploy_build)."""
+    from orchestrator.Core.deployment_manager import DeployResult
+    tab = TestDeploymentTabDeploy()
+    framework = Framework(tmp_path)
+    tab.deploys(framework, monkeypatch, DeployResult(True, exit_status=0, device_state="ok"))
+    worker, _done = tab.worker(framework, a_build(tmp_path / "b"))
+    said = []
+    worker.progress.connect(said.append)
+    worker.run()
+    assert said == ["📦 Generating Deployment Package...", "🚀 Deploying to myboard.local..."]
+    package = next((tmp_path / "output").glob("*.zip"))
+    worker, _done = tab.worker(framework, None, package=package, key=None, password=None)
+    monkeypatch.setattr(worker, "_remember_device", lambda *a, **k: None)
+    said.clear()
+    worker.progress.connect(said.append)
+    worker.run()
+    assert said == ["🚀 Deploying to myboard.local..."]
+
+
+def test_a_refused_login_reaches_the_ai_as_it_is(ai_board, monkeypatch):
+    """A refusal of the AI's login (service.connect: a key the person did not trust, a login the framework's key
+    cannot make) reaches the AI as connect words it, with its code and next step; it is never relabelled as the
+    device's words, and nothing is installed (characterization, the same before and after deploy_runtime_flow)."""
+    from orchestrator.runtime.device import service
+    refusal = service.DeviceRuntimeError("The framework's SSH key does not log in to Shelf board as dietpi.",
+                                         code="needs_person", next="Ask the person to pair the device once.")
+
+    def refused(*a, **k):
+        ai_board.order.append("connect")
+        raise refusal
+
+    monkeypatch.setattr(service, "connect", refused)
+    with pytest.raises(service.DeviceRuntimeError) as e:
+        service.deploy(ai_board.state, ai_board.device, RK3566, ai_board.settings, ai_board.device.fingerprint,
+                       "b" * 64)
+    assert e.value is refusal and e.value.code == "needs_person" and e.value.external_text == []
+    assert ai_board.order == ["ensure_build", "connect"], "nothing else ran"
+
+
+class TestReplacedHelpersDelegate:
+    """The helpers the one deploy step and the one flow replaced stay, as delegates onto them (nothing is removed
+    without the maintainer's word: round 11 D-del, round 22 P5)."""
+
+    def test_the_tabs_package_step_makes_the_package_as_its_deploy_makes_it(self, qapp, tmp_path, monkeypatch):
+        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE
+        framework = Framework(tmp_path)
+        real_create = framework.manager.create_package
+        seen = []
+
+        def create_package(artifact_path, profile_name, docker_config, output_dir, **extra):
+            seen.append((dict(docker_config), sorted(extra), Path(output_dir)))
+            return real_create(artifact_path, profile_name, {"use_docker": False}, output_dir, **extra)
+
+        monkeypatch.setattr(framework.manager, "create_package", create_package)
+        tab = TestDeploymentTabDeploy()
+        worker, _done = tab.worker(framework, a_build(tmp_path / "b"))
+        worker.docker_config, worker.kv_cache = {"use_docker": True}, "q8_0"
+        said = []
+        worker.progress.connect(said.append)
+        package = worker._make_package(framework.manager)
+        assert package is not None and package.parent == tmp_path / "output" and package.is_file()
+        assert seen == [({"use_docker": True, "image_name": DEFAULT_INFERENCE_IMAGE}, ["cancelled", "kv_cache"],
+                         tmp_path / "output")]
+        assert said == ["📦 Generating Deployment Package..."] and worker.package_error is None
+        worker, _done = tab.worker(framework, a_build(tmp_path / "c"))
+        worker.cancel()
+        assert worker._make_package(framework.manager) is None
+        assert "Packaging was cancelled" in str(worker.package_error)
+        assert framework.manager.last_package_error is None, "no shared state of the manager is written"
+
+    def test_the_clis_package_check_of_a_stored_build(self, tmp_path, monkeypatch):
+        from orchestrator import cli as cli_module
+        from orchestrator.runtime.device import steps
+        from orchestrator.runtime.device.package import PackageError
+        from test_cli_builds import quiet_console
+        printed = quiet_console(monkeypatch)
+        monkeypatch.setattr(cli_module, "_pinned_llama_source", lambda: PIN)
+        asked = []
+
+        def ensure(state, device_id, builds, build, source):
+            asked.append((state, device_id, builds, build, source()))
+            return "devices", "packaged"
+
+        monkeypatch.setattr(steps, "ensure_package", ensure)
+        assert cli_module._ensure_package(tmp_path, "0123456789abcdef", "builds", "build") == ("devices", "packaged")
+        assert asked == [(tmp_path, "0123456789abcdef", "builds", "build", PIN)]
+        for error, text in ((steps.PackageNeedsSource("no source"), "needs the pinned source"),
+                            (PackageError("the tarball is damaged"), "the tarball is damaged")):
+            def refuse(*a, error=error, **k):
+                raise error
+
+            monkeypatch.setattr(steps, "ensure_package", refuse)
+            with pytest.raises(SystemExit) as e:
+                cli_module._ensure_package(tmp_path, "0123456789abcdef", "builds", "build")
+            assert e.value.code == 1 and text in " ".join(printed.getvalue().split())

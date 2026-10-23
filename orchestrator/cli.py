@@ -5383,13 +5383,32 @@ def _stored_runtime(state_dir: Path, device_id: str, profile):
         console.print(f"[red]The runtime for this device is not built yet (or the device's profile changed): "
                       f"llm-cli device runtime build {device_id}[/red]")
         sys.exit(1)
-    except steps.PackageNeedsSource:
+    except (steps.PackageNeedsSource, PackageError) as e:
+        _package_refused(e, device_id)
+
+
+def _ensure_package(state_dir: Path, device_id: str, builds, build):
+    """(the device's runtime store, its checked tarball) of a stored build (steps.ensure_package); exits with the
+    reason and the next step when it cannot be packaged. Kept for older callers: `device runtime deploy` finds its
+    build and tarball through _stored_runtime (steps.stored_runtime), with the same words."""
+    from orchestrator.runtime.device.package import PackageError
+    from orchestrator.runtime.device import steps
+    try:
+        return steps.ensure_package(state_dir, device_id, builds, build, _pinned_llama_source)
+    except (steps.PackageNeedsSource, PackageError) as e:
+        _package_refused(e, device_id)
+
+
+def _package_refused(error, device_id: str) -> None:
+    """The words for a stored build whose tarball cannot be used: it needs the pinned source to be packaged again,
+    or the package's own reason; exits with 1."""
+    from orchestrator.runtime.device import steps
+    if isinstance(error, steps.PackageNeedsSource):
         console.print("[red]The tarball must be packaged again, which needs the pinned source (its licence text): "
                       f"run llm-cli device runtime build {device_id}.[/red]")
-        sys.exit(1)
-    except PackageError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
+    else:
+        console.print(f"[red]{escape(str(error))}[/red]")
+    sys.exit(1)
 
 
 @device_runtime.command('prune')
