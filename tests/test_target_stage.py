@@ -649,6 +649,28 @@ def small_disk(image, *frees):
     return {}
 
 
+def sized_files(monkeypatch, board_package, folder, sizes):
+    """Files of these sizes for board_package.room, without their bytes: the files are empty and their stat reports
+    the size (a sparse file is no portable stand-in: Python extends a file on Windows by writing zeros)."""
+    paths = {}
+    for name, size in sizes:
+        path = folder / name
+        path.write_bytes(b"")
+        paths[str(path)] = size
+
+    class SizedPath(type(Path())):
+        def stat(self, *args, **kwargs):
+            result = super().stat(*args, **kwargs)
+            if str(self) not in paths:
+                return result
+            fields = list(result[:10])
+            fields[6] = paths[str(self)]  # st_size
+            return os.stat_result(fields)
+
+    monkeypatch.setattr(board_package, "Path", SizedPath)
+    return [folder / name for name, _size in sizes]
+
+
 def disk_rule_refusal(needed, free, total=100 * 10 ** 9):
     """The refusal of the framework's disk rule (orchestrator/Core/disk_plan.py) for the package on the output disk."""
     from orchestrator.Core import disk_plan
@@ -666,16 +688,14 @@ def disk_rule_refusal(needed, free, total=100 * 10 ** 9):
     (1 << 20, 2 * GIB + (1 << 20) - 1, 100 * 10 ** 9),
     (900 * 10 ** 6, 3 * 10 ** 9, 0),                 # a measurement without the disk's size keeps 2 GiB
 ])
-def test_the_package_s_room_is_the_framework_s_disk_rule(tmp_path, needed, free, total):
+def test_the_package_s_room_is_the_framework_s_disk_rule(tmp_path, monkeypatch, needed, free, total):
     """The image has no framework, so scripts/board_package.py carries the disk rule's numbers and words: the same
     verdict and the same refusal as disk_plan.refusal for the output disk, without the reservation ledger (the per-user
     folder of the computer, which a build container does not see)."""
     from orchestrator.Core import disk_plan
     from orchestrator.utils.localization import ui_text
     board_package = _board_package()
-    model = tmp_path / "model.gguf"
-    with open(model, "wb") as f:
-        f.truncate(needed)  # sparse: the size counts, not the blocks
+    [model] = sized_files(monkeypatch, board_package, tmp_path, [("model.gguf", needed)])
     usage = namedtuple("usage", "total used free")(total, total - free, free)
 
     problem = board_package.room(tmp_path / "packages", [model], "the package for the board",
@@ -688,13 +708,10 @@ def test_the_package_s_room_is_the_framework_s_disk_rule(tmp_path, needed, free,
         assert board_package.gb(value) == disk_plan.gb(value)
 
 
-def test_the_package_s_room_counts_every_file_on_the_disk_of_the_nearest_folder(tmp_path):
+def test_the_package_s_room_counts_every_file_on_the_disk_of_the_nearest_folder(tmp_path, monkeypatch):
     board_package = _board_package()
-    files = []
-    for name, size in (("model.gguf", 3 * 10 ** 9), ("llama-cli", 10 ** 6), ("llama-server", 10 ** 6)):
-        files.append(tmp_path / name)
-        with open(files[-1], "wb") as f:
-            f.truncate(size)
+    files = sized_files(monkeypatch, board_package, tmp_path,
+                        [("model.gguf", 3 * 10 ** 9), ("llama-cli", 10 ** 6), ("llama-server", 10 ** 6)])
     asked = []
 
     def usage(path):
