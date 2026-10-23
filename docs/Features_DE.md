@@ -225,7 +225,8 @@ die Bezeichnungen `output:`, `builds:` und `saved:`.
 
 ### Gleiche Builds
 
-Vor einem Build suchen `check_build_request` und das Build-Formular der GUI einen fertigen Build mit zu 100 %
+Vor einem Build suchen `check_build_request`, `llm-cli build start` und das Build-Formular der GUI einen fertigen
+Build mit zu 100 %
 denselben gewählten Optionen (unveröffentlicht; achte Runde, N11): das Modell und sein genauer Commit (ein lokales
 Modell: jede Gewichtsdatei mit Name, Größe und Änderungszeit), das Target und der sha256 seines Ordners, Board,
 Format, Quantisierung, Importance-Matrix und der sha256 der Kalibrierdaten, Optimierung, Kontextlänge,
@@ -234,9 +235,17 @@ Optionen in seinem Manifest fest (`build_options`, mit ihrem sha256); frühere B
 gemeldet.
 
 - **GUI:** das Build-Formular nennt den früheren Build mit vollem Pfad. **Den vorhandenen Build nehmen** startet
-  nichts, **Noch einmal bauen** baut trotzdem, **Abbrechen** tut keins von beiden. Ist der neueste Commit des Modells
-  noch nicht bekannt, fragt das Formular einmal bei Hugging Face nach dem Commit, nur wenn ein früherer Build gleich
-  sein könnte und nie im Offline-Modus; ohne den Commit sagt das Formular, dass er sich nicht prüfen ließ.
+  nichts: Der Ordnerdialog öffnet am Ausgabeordner, und der frühere Build wird samt Golden-ZIP in den Ordner kopiert,
+  den du wählst (zuerst wird der freie Platz dort geprüft, jede Kopie per sha256 geprüft, der frühere Build bleibt,
+  wo er ist; liegt der gleiche Build dort schon, wird er nicht noch einmal kopiert, und ein anderer Build unter
+  diesem Namen wird erst ersetzt, wenn du die vollständige Liste angenommen hast). **Noch einmal bauen** baut
+  trotzdem, **Abbrechen** tut keins von beiden. Ist der neueste Commit des Modells noch nicht bekannt, fragt das
+  Formular einmal bei Hugging Face nach dem Commit, nur wenn ein früherer Build gleich sein könnte und nie im
+  Offline-Modus; ohne den Commit sagt das Formular, dass er sich nicht prüfen ließ.
+- **CLI:** `llm-cli build start` stellt an einem Terminal dieselbe Frage (`u` nehmen, `a` noch einmal bauen, `c`
+  abbrechen); „nehmen“ kopiert den früheren Build in den Ordner, in den der Build gegangen wäre (`--output`, die
+  Antwort auf die Frage oder der Ausgabeordner), mit denselben Prüfungen. Ohne Terminal nennt sie den früheren Build
+  und baut wie angegeben.
 - **KI-Clients:** `check_build_request` listet solche Builds in `earlier_builds` (`identical`, oder
   `commit_unchecked`, wenn der Commit nicht nachgeschlagen wurde) mit einem Hinweis; die Frage von `start_build`
   sagt, dass sie einen gleichen Build noch einmal baut.
@@ -358,7 +367,10 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   `.bin`); ein Build mit mehreren Gewichtsdateien wird abgelehnt.
 - **Ein Paket ohne Board** (`llm-cli deploy package`; GUI: Tab Deployment > **Nur Paket erstellen…**): das Paket des
   ausgewählten Builds für das gewählte Profil, mit Docker-Images für ein Board ohne Netz, wenn du **Use Docker
-  Containerization?** ankreuzt. Wie die CLI nimmt die GUI jeden Pfad: **Anderer Build oder Modelldatei…** fügt der
+  Containerization?** ankreuzt: Die Tabelle darin listet die Container, die ein solches Paket für das Profil enthält
+  (die Inference-Engine mit ihrem Image, Einstellung `image_inference_runtime`, und dem Hardware-Zugriff, den das
+  Target des Profils ihr gibt), jeder angehakt, also das, was `--docker` verpackt; nimm einen Haken weg, um ihn
+  wegzulassen. Wie die CLI nimmt die GUI jeden Pfad: **Anderer Build oder Modelldatei…** fügt der
   Build-Liste einen Build-Ordner oder eine Modelldatei hinzu. Kein Board wird kontaktiert. Die GUI öffnet den
   Ordnerdialog beim Ausgabeordner, wie für jedes Golden Artifact, und nennt den vollen Pfad des Pakets oder, wenn es
   nicht erstellt werden kann, den Grund und den nächsten Schritt. Kopiere es auf das Board und starte dort

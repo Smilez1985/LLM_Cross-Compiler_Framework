@@ -50,6 +50,16 @@ TEXTS = {
         "earlier.use": "Use the existing build",
         "earlier.again": "Build again",
         "earlier.used": "Nothing was started: the existing build is used ({path}).",
+        "earlier.use_title": "Copy the existing build {name} to",
+        "earlier.copied": "The existing build is copied to {path} ({files} files, {size}; every copy was checked "
+                          "against its original). It stays in {source} too.",
+        "earlier.there": "The identical build is in {path} already; nothing was copied.",
+        "earlier.copy_failed": "Not copied: {reason} {next}",
+        "earlier.replace_title": "Replace with the existing build?",
+        "earlier.replace_intro": "{path} exists already. The copy of the existing build replaces what lies there now; "
+                                 "it is copied and checked first. Nothing is replaced without your yes.",
+        "earlier.not_replaced": "Nothing was copied or replaced: {path} stays as it is, and the existing build stays "
+                                "in {source}.",
     },
     "de": {
         "snapshots.disk": "Die Snapshots belegen {size}; auf dieser Festplatte sind {free} frei.",
@@ -91,5 +101,15 @@ TEXTS = {
         "earlier.use": "Den vorhandenen Build nehmen",
         "earlier.again": "Noch einmal bauen",
         "earlier.used": "Nichts wurde gestartet: der vorhandene Build wird genommen ({path}).",
+        "earlier.use_title": "Den vorhandenen Build {name} kopieren nach",
+        "earlier.copied": "Der vorhandene Build ist nach {path} kopiert ({files} Dateien, {size}; jede Kopie wurde "
+                          "mit ihrem Original verglichen). Er bleibt auch in {source}.",
+        "earlier.there": "Der gleiche Build liegt schon in {path}; es wurde nichts kopiert.",
+        "earlier.copy_failed": "Nicht kopiert: {reason} {next}",
+        "earlier.replace_title": "Durch den vorhandenen Build ersetzen?",
+        "earlier.replace_intro": "{path} gibt es schon. Die Kopie des vorhandenen Builds ersetzt, was dort jetzt "
+                                 "liegt; sie wird vorher kopiert und geprüft. Ohne dein Ja wird nichts ersetzt.",
+        "earlier.not_replaced": "Nichts wurde kopiert oder ersetzt: {path} bleibt, wie es ist, und der vorhandene "
+                                "Build bleibt in {source}.",
     },
 }

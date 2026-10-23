@@ -1558,6 +1558,38 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   die Ausnahme. Die Kennzeichnungen lokal/Cloud der mitgelieferten Anbieter ändern sich nicht. Jede Stelle, die die
   Einstellung liest, fragt jetzt die eine Prüfung `locality.offline_mode` (`hf_hub.offline` und die übrigen Abfragen
   geben weiter; Verhalten und Texte unverändert).
+- **`llm-cli build start --format` bietet, was die installierten Targets bauen** (DECISIONS Runde 23 Punkt 7): statt
+  jedes Formats der Engine (`tensorrt`, `coreml`, ..., die kein Target baut) nimmt `--format` ein Format, das das
+  Target baut, wie seine Capabilities in `target.yml` es angeben, die Liste, die die Formatauswahl des Builder-Tabs
+  anbietet (`build_formats.offered_formats`, eine Liste für beide; ein Target ohne Capabilities nimmt wie bisher jedes
+  Format außer `hf`, ungeprüft). `--help` und die Shell-Vervollständigung nennen, was jedes installierte Target baut,
+  gelesen aus den Targets, wenn sie gezeigt werden; ein Format, das das Target nicht baut, stoppt mit Exit-Code 2 in
+  klaren Worten, die nennen, was jedes installierte Target baut (`build_formats.format_problem`). Groß- und
+  Kleinschreibung des Formats spielt keine Rolle mehr.
+- **„Den vorhandenen Build nehmen“ kopiert ihn in den gewählten Ordner, und `llm-cli build start` fragt auch**
+  (DECISIONS Runde 23 Punkt 9): `build start` prüft vor allem anderen auf einen fertigen Build mit zu 100 % denselben
+  Optionen, wie der Builder-Tab (`BuildService.earlier_builds`, der Commit einmal nachgeschlagen, wenn er gleich sein
+  könnte), und stellt am Terminal dieselbe Frage (nehmen, noch einmal bauen, abbrechen; ohne Terminal baut er wie
+  angegeben). „Nehmen“ kopiert den früheren Build jetzt samt Golden-ZIP in den Ordner, in den der Build gegangen wäre
+  (`--output`, die Antwort auf die Frage oder der Ausgabeordner; in der GUI der Ordnerdialog, der am Ausgabeordner
+  öffnet), wo er vorher nur genannt wurde: `artifact_output.plan_copy` und `copy_artifact`, die eine Plattenregel vor
+  der Kopie, jede Kopie per sha256 geprüft, der frühere Build bleibt, wo er ist. Der gleiche Build, der dort schon
+  liegt (dasselbe Manifest, und jede seiner Modelldateien dort mit ihrer Größe), wird nicht noch einmal kopiert;
+  alles andere unter diesem Namen, auch ein Ordner, dessen Modelldatei gelöscht oder geändert wurde, wird erst
+  ersetzt, wenn du die vollständige Liste dessen angenommen hast, was ersetzt wird („Nein“ ist die Vorgabe; in den
+  Papierkorb oder endgültig; vorher ins Audit-Log geschrieben), und nur durch eine vollständige Kopie (eine, die einen
+  Link ausgelassen hat, behält einen eigenen Namen).
+- **Die Docker-Tabelle im Deployment-Tab entscheidet, was das Paket enthält** (DECISIONS Runde 23 Punkt 6): Die
+  Tabelle in **Use Docker Containerization?** zeigt keine Attrappen-Auswahl mehr, die nichts bewirkte (Llama.cpp
+  (CPU), RKLLM (NPU), TensorRT (GPU)); sie listet die Container, die ein Paket mit Docker-Images für das gewählte Profil
+  enthält, aus der einen Liste, die `llm-cli deploy package --docker` verpackt
+  (`deployment_manager.package_containers`): die Inference-Engine mit ihrem Image (Einstellung
+  `image_inference_runtime`) und dem Hardware-Zugriff, den das Target des Profils ihr auf dem Board gibt. Jeder
+  Container ist angehakt, das verpackt genau das, was `--docker` verpackt; ein Container ohne Haken bleibt aus dem
+  Paket (`package_docker_config(docker, containers)`, über `make_package` und den einen Deploy-Schritt
+  `person_steps.deploy_build`), und ohne Haken sagen **Deploy to Target** und **Create package only...**, warum, und
+  tun nichts. Ein leerer `hardware:`-Block in einer `target.yml` (oder ein leerer `npu:`- oder `gpu:`-Block, etwa mit
+  auskommentierten Zeilen) gibt keinen Gerätezugriff, wie gar kein Block, statt den Tab nicht mehr öffnen zu lassen.
 - **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
   Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
   sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target
@@ -2548,6 +2580,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **`llm-cli deploy devices edit` nennt den Grund statt eines Tracebacks**: Der Befehl fing nur die eigenen Fehler
+  der Board-Schritte ab; eine von einem anderen Prozess belegte `known_hosts` des Frameworks (ein `LockTimeout` von
+  `pairing.replace_key`), Einstellungen, die sich nach deinem Ja nicht lesen ließen, oder eine Datei, die sich vor
+  der Frage nicht lesen ließ, endeten in einem Traceback. Jetzt zeigt er jeweils den Grund `local_problem` mit seinem
+  nächsten Schritt (`_print_reason`) und was nicht ging, endet mit Exit-Code 1 und ändert nichts.
+- **Alte Hugging-Face-Downloads entfernen geht mit dem echten Audit-Log**: Das Audit-Log lehnt Ergebnisse ab, die es
+  nicht kennt, und das Löschen alter Downloads (Übernehmen, `hf_takeover.delete_old_copies`) schrieb
+  `old_downloads_deleted`, das es nicht kannte; das Löschen stoppte also mit „The audit log cannot record the
+  deletion“ (die Tests nutzten ein Ersatz-Log). Es ist jetzt ein bekanntes Ergebnis, ebenso `earlier_build_replaced`
+  von „Nehmen“.
 - **hadolint-Funde beim Build werden gezeigt statt weggeworfen** (DECISIONS Runde 23, Punkt 4): Der Build meldete
   jedes Ergebnis seiner Dockerfile-Prüfung als „Hadolint check skipped (tool not found or failed)“ und verwarf, was
   hadolint fand. `BuildEngine._validate_dockerfile_hadolint` führt hadolint jetzt über das neue

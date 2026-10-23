@@ -214,11 +214,50 @@ def resolve_model_artifact(artifact_path: Path) -> Path:
 
 # --- a package without a board (`llmcf deploy package`, the Deployment tab's "Create package only...") -------------
 
-def package_docker_config(docker: bool) -> Dict[str, Any]:
-    """The Docker part of a package: whether the inference container image goes into it (air-gap use) and, then, the
-    image the package names (the package itself takes image_inference_runtime from the settings)."""
+# The containers a package with Docker images can carry, by their component key (package_containers lists them).
+INFERENCE = "inference"
+CONTAINER_KEYS = (INFERENCE,)
+
+
+@dataclass(frozen=True)
+class PackageContainer:
+    """One container a package with Docker images carries (the Deployment tab's container table, `llmcf deploy
+    package --docker`): its component key, the image the package packs (from the settings) and the hardware access
+    the target profile gives it on the board (the `docker run` options deploy.sh starts it with)."""
+    key: str
+    image: str
+    flags: tuple = ()
+
+
+def package_containers(framework: Any, profile: str) -> List[PackageContainer]:
+    """The containers a package for the target `profile` carries with Docker images, as create_package packs them:
+    today the inference engine, the image image_inference_runtime of the settings, started with the device access of
+    the profile's target (TargetManager.get_docker_flags_for_profile: an NPU or GPU passed into the container; none
+    for a CPU-only target). The one list the CLI's --docker and the Deployment tab's container table both use."""
+    config = getattr(framework, "config", None)
+    get = getattr(config, "get", None)
+    image = get("image_inference_runtime", DEFAULT_INFERENCE_IMAGE) if callable(get) else DEFAULT_INFERENCE_IMAGE
+    get_component = getattr(framework, "get_component", None)
+    target_mgr = get_component("target_manager") if callable(get_component) else None
+    flags = target_mgr.get_docker_flags_for_profile(profile) if target_mgr and profile else []
+    return [PackageContainer(INFERENCE, str(image or DEFAULT_INFERENCE_IMAGE), tuple(flags or ()))]
+
+
+def package_docker_config(docker: bool, containers: Optional[Any] = None) -> Dict[str, Any]:
+    """The Docker part of a package: whether the container images go into it (air-gap use) and, then, the image the
+    package names (the package itself takes image_inference_runtime from the settings). `containers`: the component
+    keys the person chose in the Deployment tab's container table (None: every container, as `llmcf deploy package
+    --docker` packs them); a choice of none is a package without Docker images, and a choice of only some is named
+    under "containers" (create_package packs exactly those)."""
     config: Dict[str, Any] = {"use_docker": bool(docker)}
-    if docker:
+    if docker and containers is not None:
+        wanted = {str(c) for c in containers}
+        chosen = [key for key in CONTAINER_KEYS if key in wanted]
+        if not chosen:
+            return {"use_docker": False}
+        if chosen != list(CONTAINER_KEYS):
+            config["containers"] = chosen
+    if config["use_docker"]:
         config["image_name"] = DEFAULT_INFERENCE_IMAGE
     return config
 
@@ -245,17 +284,19 @@ def resolve_package_source(framework: Any, artifact: Any, output_dir: Path) -> P
 
 
 def make_package(manager: Any, framework: Any, artifact: Any, profile: str, docker: bool, output_dir: Path, *,
-                 kv_cache: Optional[str] = None, cancelled: Optional[Callable[[], bool]] = None) -> Path:
+                 kv_cache: Optional[str] = None, cancelled: Optional[Callable[[], bool]] = None,
+                 containers: Optional[Any] = None) -> Path:
     """The deployment ZIP for a board this computer need not reach (`llmcf deploy package` and the GUI's "Create
-    package only..."): the model, its provenance, deploy.sh and checksums, with `docker` also the inference image
-    (air-gap). Written to `output_dir`; raises DeployError with the reason and the next step."""
+    package only..."): the model, its provenance, deploy.sh and checksums, with `docker` also the container images
+    (air-gap; `containers`: the ones the person chose in the Deployment tab, None: every one, package_docker_config).
+    Written to `output_dir`; raises DeployError with the reason and the next step."""
     extra: Dict[str, Any] = {}
     if cancelled is not None:
         extra["cancelled"] = cancelled
     if kv_cache:
         extra["kv_cache"] = kv_cache
     return manager.create_package(resolve_package_source(framework, artifact, output_dir), profile,
-                                  package_docker_config(docker), Path(output_dir), **extra)
+                                  package_docker_config(docker, containers), Path(output_dir), **extra)
 
 
 def package_model_name(package: Path) -> Optional[str]:
@@ -315,18 +356,17 @@ class DeploymentManager:
         except (OSError, ValueError) as e:
             raise DeployError(str(e), code="invalid_value") from None
 
-        # Hardware Flags vom TargetManager holen
-        target_mgr = self.framework.get_component("target_manager")
-        docker_flags = []
-        if target_mgr and profile_name:
-            docker_flags = target_mgr.get_docker_flags_for_profile(profile_name)
-        flags_str = " ".join(docker_flags)
-
-        # Images (names come from the central config), checked before anything is copied
-        use_docker = docker_config.get("use_docker", False)
-        cfg = self.framework.config
-        inference_image = cfg.get("image_inference_runtime", DEFAULT_INFERENCE_IMAGE)
-        images = [inference_image] if use_docker else []
+        # The containers of the profile (package_containers: the image from the central config, the hardware flags
+        # of the target profile) and the ones chosen (docker_config["containers"]; none named: every one), checked
+        # before anything is copied
+        containers = package_containers(self.framework, profile_name)
+        inference = next(c for c in containers if c.key == INFERENCE)
+        flags_str = " ".join(inference.flags)
+        inference_image = inference.image
+        chosen = docker_config.get("containers")
+        packed = [c for c in containers if chosen is None or c.key in chosen]
+        use_docker = bool(docker_config.get("use_docker", False)) and bool(packed)
+        images = [c.image for c in packed] if use_docker else []
         client = self.framework.get_component("docker_client") if images else None
         for image in images:
             problem = image_problem(image, client)

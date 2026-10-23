@@ -586,8 +586,8 @@ class BuildDeploy:
 
 
 def deploy_build(framework: Any, manager: Any, endpoint: Any, user: str, *, source: Any = None,
-                 package: Optional[Path] = None, profile: str = "", docker: bool = False, credentials: Any = None,
-                 label: Optional[str] = None, kv_cache: Optional[str] = None, wait: Optional[float] = None,
+                 package: Optional[Path] = None, profile: str = "", docker: bool = False,
+                 containers: Optional[Sequence[str]] = None, credentials: Any = None, label: Optional[str] = None, kv_cache: Optional[str] = None, wait: Optional[float] = None,
                  on_event: Optional[Callable[[Any], None]] = None, cancel: Any = None, key: Any = None,
                  bind_key: bool = True, via: str, actor: str, state_dir: Any = None,
                  output_dir: Optional[Path] = None, audit: Any = None,
@@ -598,8 +598,9 @@ def deploy_build(framework: Any, manager: Any, endpoint: Any, user: str, *, sour
     each). The person's step only: no AI-reachable module imports this one (the AI deploys with deploy_to_device).
 
     1. The package (`on_step("package")`): `package` as it is, else made from `source` (a build folder or a model file)
-       for the target `profile` by make_package: `docker` packs the inference image (air-gap) under the image name of
-       package_docker_config, `kv_cache` names the KV cache in the start command, and `cancel` stops it between its
+       for the target `profile` by make_package: `docker` packs the container images (air-gap) under the image name
+       of package_docker_config (`containers`: the ones the person chose in the Deployment tab's container table; None:
+       every one, as `llmcf deploy package --docker`), `kv_cache` names the KV cache in the start command, and `cancel` stops it between its
        steps; written to `output_dir` (None: the configured output folder, package_folder). A package that cannot be
        made comes back as `package_error`; nothing is deployed then.
     2. The deploy (`on_step("deploy")`): DeploymentManager.deploy_package to `endpoint` as `user` with `credentials`
@@ -618,9 +619,10 @@ def deploy_build(framework: Any, manager: Any, endpoint: Any, user: str, *, sour
     if done.package is None:
         on_step("package")
         try:
+            extra = {"containers": containers} if containers is not None else {}
             done.package = make_package(manager, framework, source, profile, docker,
                                         Path(output_dir) if output_dir is not None else package_folder(framework),
-                                        kv_cache=kv_cache, cancelled=stop)
+                                        kv_cache=kv_cache, cancelled=stop, **extra)
         except DeployError as e:
             done.package_error = e
             return done
