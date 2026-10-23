@@ -429,6 +429,10 @@ class SignIn:
         result = ValidationResult(ok=False, provider=preset.id, method=spec.id)
         try:
             url = self.endpoint(preset, base_url)
+            refused = self._offline_refusal(preset, url)
+            if refused is not None:   # before any socket opens (round 24 L-NET: every reach-out on the rule)
+                result.error = refused
+                return result
             stored = False
             if spec.type in KEY_TYPES and not preset.runtime_endpoint and (key is not None or fields):
                 credential = self._typed_credential(preset, spec, url, key, fields or {})
@@ -444,14 +448,39 @@ class SignIn:
         except LLMError as e:
             result.error = e
             return result
-        result = validate_credential(preset, spec, credential, url, http_client=self.client.http_client,
-                                     timeout=self.timeout,
-                                     list_models=lambda: self.client.adapter_for(preset, url, credential).list_models())
+        pinned = None
+        if self.client.http_client is None and url and self._offline():
+            from orchestrator.llm.client import offline_http_client
+            pinned = offline_http_client(self.config)   # offline mode: only the checked local addresses, no proxy
+        try:
+            result = validate_credential(preset, spec, credential, url, http_client=self.client.http_client or pinned,
+                                         timeout=self.timeout,
+                                         list_models=lambda: self.client.adapter_for(preset, url,
+                                                                                     credential).list_models())
+        finally:
+            if pinned is not None:
+                pinned.close()
         if result.ok and stored and spec.type in KEY_TYPES:
             self.store.update_metadata(preset.id, spec.id, {"validated_at": self.store.now(),
                                                             "account_label": result.account_label},
                                        self._origin(preset, spec, url))
         return result
+
+    def _offline(self) -> bool:
+        from orchestrator.utils.locality import offline_mode   # the one offline check
+        return offline_mode(self.config)
+
+    def _offline_refusal(self, preset: Any, url: Optional[str]) -> Optional[LLMError]:
+        """In offline mode, why the check may not reach `preset` at `url` (a cloud provider, a server address that is
+        not on this computer or in the person's own network: ProviderPreset.offline_refusal, the rule the AI calls
+        use, with the person's opt-outs); None when it may or offline mode is off. The check, `ditto login --check`
+        and the AI settings' sign-in panel all come here."""
+        if not self._offline():
+            return None
+        refusal = preset.offline_refusal(url, self.config)
+        if refusal is None:
+            return None
+        return NotConfigured(refusal.text, provider=preset.id).with_steps(*refusal.steps)
 
     def _merged_fields(self, preset: Any, spec: AuthMethodSpec, origin: Optional[str],
                        typed: Mapping[str, Optional[str]]) -> Dict[str, str]:

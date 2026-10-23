@@ -580,3 +580,149 @@ def test_the_rag_manager_hands_the_persons_actor_to_the_crawler(monkeypatch):
     rag.ingest_url("http://docs.lan/", actor="gui")
     rag.ingest_url("http://docs.lan/")
     assert made == [{"actor": "gui"}, {}], "an AI's crawl (crawl_jobs) passes no actor"
+
+
+# --- (d) a Qdrant server in offline mode ------------------------------------------------------------------------------
+
+def rag_for(settings):
+    from orchestrator.Core import rag_manager as rag_module
+    rag = rag_module.RAGManager.__new__(rag_module.RAGManager)
+    rag.framework = SimpleNamespace(config=settings, secrets_manager=None)
+    rag.config = settings
+    return rag
+
+
+def test_a_cloud_qdrant_is_refused_in_offline_mode(names):
+    from orchestrator.Core.rag_manager import KnowledgeBaseError
+    names["qdrant.example.com"] = ["203.0.113.30"]
+    rag = rag_for(Settings(offline_mode=True))
+    with pytest.raises(KnowledgeBaseError) as info:
+        rag._offline_server_options("https://qdrant.example.com:6333")
+    text = str(info.value)
+    assert "the Qdrant server (setting qdrant_url)" in text and "203.0.113.30 on the internet" in text
+    assert rag_for(Settings())._offline_server_options("https://qdrant.example.com:6333") == {}, "online: as before"
+
+
+def test_a_qdrant_server_in_the_own_network_is_reached_only_at_its_checked_address(names, monkeypatch):
+    """End to end with qdrant-client: its REST client gets the pinned transport (no proxy, only the local address of a
+    name with a public and a local one) and no version request of its own."""
+    from qdrant_client import QdrantClient
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b'{"result": {"collections": []}, "status": "ok", "time": 0.0}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    port = httpd.server_address[1]
+    try:
+        names["qdrant.lan"] = ["203.0.113.66", "127.0.0.1"]
+        monkeypatch.setenv("HTTP_PROXY", "http://203.0.113.1:9")
+        options = rag_for(Settings(offline_mode=True))._offline_server_options(f"http://qdrant.lan:{port}")
+        assert options["check_compatibility"] is False and options["trust_env"] is False
+        backend = options["transport"]._pool._network_backend
+        assert type(backend).__name__ == "PinnedBackend"
+        inner, asked = backend._inner, []
+
+        class Spy:
+            def connect_tcp(self, host, port, **kwargs):
+                asked.append(host)
+                return inner.connect_tcp(host, port, **kwargs)
+
+            def sleep(self, seconds):
+                inner.sleep(seconds)
+        backend._inner = Spy()
+        client = QdrantClient(url=f"http://qdrant.lan:{port}", timeout=10, **options)
+        assert client.get_collections().collections == []
+        assert asked == ["127.0.0.1"]
+        client.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+# --- (e) the sign-in check in offline mode ----------------------------------------------------------------------------
+
+def test_the_sign_in_check_refuses_a_cloud_provider_before_any_socket_opens(tmp_path, names, monkeypatch):
+    import httpx2
+
+    from orchestrator.llm.auth.signin import SignIn
+    opened = []
+    monkeypatch.setattr(httpx2.Client, "send", lambda *a, **k: opened.append(a) or pytest.fail("a request was sent"))
+    monkeypatch.setattr(socket, "create_connection", lambda *a, **k: pytest.fail("a socket was opened"))
+    service = SignIn(Settings(offline_mode=True, ai_provider="openai"), None)
+    preset = service.catalog.get("openai")
+    result = service.check(preset, preset.method("api_key"), key="sk-proj-0123456789abcdefghijkl")
+    assert not result.ok and "is a cloud provider" in str(result.error) and opened == []
+    names["llm.example.com"] = ["203.0.113.70"]
+    custom = service.catalog.get("custom")
+    result = service.check(custom, custom.method(custom.auth[0]), "https://llm.example.com/v1")
+    assert not result.ok and "on the internet" in str(result.error)
+    assert [s.id for s in result.error.steps] == ["settings.local_network"]
+
+
+def test_the_sign_in_check_of_a_local_server_goes_only_to_its_checked_address(tmp_path, names, server):
+    from orchestrator.llm.auth.signin import SignIn
+    port, seen = server
+    names["box.lan"] = ["203.0.113.66", "127.0.0.1"]
+    service = SignIn(Settings(offline_mode=True, ai_provider="ollama"), None)
+    preset = service.catalog.get("ollama")
+    spec = preset.method(preset.auth[0])
+    result = service.check(preset, spec, f"http://box.lan:{port}/v1")
+    assert seen and set(seen) == {f"box.lan:{port}"}, "the request reached the local server"
+    assert result.status == 200, result
+
+
+# --- (f) LLAMA_CPP_REPO_OVERRIDE in offline mode ---------------------------------------------------------------------
+
+def image_build(tmp_path, monkeypatch, repos, offline=True):
+    from orchestrator.Core import builder as builder_module
+    from orchestrator.Core.builder import BuildEngine, BuildProgress, BuildStatus
+    from orchestrator.Core.config_manager import ConfigManager
+    monkeypatch.setattr(builder_module.docker, "from_env", lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
+    config = ConfigManager(tmp_path / "configs")
+    config.set("offline_mode", offline)
+    engine = BuildEngine(config)
+    monkeypatch.setattr(engine, "_get_conf", lambda key, default=None: repos if key == "source_repositories" else default)
+    seen = {}
+
+    def buildkit(tag, path, args, progress, labels=None, **kwargs):
+        seen.update(args=dict(args), **kwargs)
+    monkeypatch.setattr(engine, "_build_with_buildkit", buildkit)
+    monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
+    monkeypatch.setattr(engine, "docker_client", SimpleNamespace(images=SimpleNamespace(get=lambda tag: tag)))
+    dockerfile = tmp_path / "ctx" / "Dockerfile"
+    dockerfile.parent.mkdir(exist_ok=True)
+    dockerfile.write_text("FROM scratch\nARG LLAMA_CPP_REPO=x\n")
+    progress = BuildProgress("b1", BuildStatus.QUEUED, "")
+    build = SimpleNamespace(target_arch="rockchip", build_id="b1", build_args={})
+    engine._build_docker_image(build, progress, dockerfile)
+    return seen, progress
+
+
+def test_the_repository_override_is_a_pinned_mirror_in_offline_mode(tmp_path, names, monkeypatch):
+    names["mirror.lan"] = ["192.168.1.5", "2001:db8::5", "fd00::5"]
+    seen, progress = image_build(tmp_path, monkeypatch, {"llama.cpp": {"url": "https://mirror.lan/llama.cpp.git"}})
+    assert seen["args"]["LLAMA_CPP_REPO"] == "https://mirror.lan/llama.cpp.git"
+    assert seen["hosts"] == ["mirror.lan:192.168.1.5", "mirror.lan=[fd00::5]"], "only the checked local addresses"
+    assert seen["args"]["HTTPS_PROXY"] == "" and seen["args"]["NO_PROXY"] == "*", "no proxy in the image build"
+    online, _ = image_build(tmp_path, monkeypatch, {"llama.cpp": {"url": "https://mirror.lan/llama.cpp.git"}},
+                            offline=False)
+    assert "hosts" not in online and "HTTPS_PROXY" not in online["args"], "online: as before"
+
+
+def test_a_public_repository_override_stops_the_build_in_offline_mode(tmp_path, names, monkeypatch):
+    names["mirror.example.com"] = ["203.0.113.40"]
+    with pytest.raises(RuntimeError) as info:
+        image_build(tmp_path, monkeypatch, {"llama.cpp": {"url": "https://mirror.example.com/llama.cpp.git"}})
+    assert "LLAMA_CPP_REPO_OVERRIDE" in str(info.value) and "on the internet" in str(info.value)
+    with pytest.raises(RuntimeError, match="xn--"):
+        image_build(tmp_path, monkeypatch, {"llama.cpp": {"url": "https://bücher.example/llama.cpp.git"}})

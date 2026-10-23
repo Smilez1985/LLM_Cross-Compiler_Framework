@@ -463,6 +463,25 @@ class RAGManager:
                                          "sent in clear text.")
         return key or None
 
+    def _offline_server_options(self, url: str) -> Dict[str, Any]:
+        """In offline mode (round 24 L-NET: every reach-out on the rule) the Qdrant server must be on this computer or in
+        the person's own network by the network-locality rule with the person's opt-outs (a cloud Qdrant is refused
+        with the plain text, KnowledgeBaseError); qdrant-client then connects only to the checked local addresses,
+        through no proxy (security/http.pinned_transport), and skips its own version request (an unpinned request in
+        a thread of its own). {} when offline mode is off."""
+        from orchestrator.utils.locality import check_reach, offline_mode
+        if not offline_mode(self.config):
+            return {}
+        verdict = check_reach(url, self.config)
+        if not verdict.local:
+            raise KnowledgeBaseError(verdict.refusal("the Qdrant server (setting qdrant_url)"))
+        import httpcore
+        import httpx
+
+        from orchestrator.security.http import pinned_transport
+        return {"check_compatibility": False, "trust_env": False,
+                "transport": pinned_transport(self.config, "the Qdrant server", httpx=httpx, httpcore=httpcore)}
+
     # --- storage lifecycle ---
 
     def _open_client(self) -> Tuple[Any, bool, type]:
@@ -472,7 +491,8 @@ class RAGManager:
             from qdrant_client import QdrantClient
 
             from orchestrator.rag.client_store import ClientKnowledgeStore
-            client = QdrantClient(url=url, api_key=self._server_api_key(url), timeout=10)
+            pinned = self._offline_server_options(url)   # offline mode: only a Qdrant server in the own network
+            client = QdrantClient(url=url, api_key=self._server_api_key(url), timeout=10, **pinned)
             client.get_collections()  # fail now, not on the first search
             return client, True, ClientKnowledgeStore
         return self._open_local()

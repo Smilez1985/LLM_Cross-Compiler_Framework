@@ -134,6 +134,41 @@ class LocalOnlyAdapter(HTTPAdapter):
         self.poolmanager.pool_classes_by_scheme = _pools(vet, forget)
 
 
+def pinned_transport(settings: Any, what: str, *, httpx: Any, httpcore: Any, offline: bool = True):
+    """An httpx transport without the proxy from the environment whose every connection goes only to the checked
+    local addresses of its host (locality.connect_addresses with the person's opt-outs in `settings`, tried in turn;
+    locality.forget when every one failed), for the httpx/httpcore pair a client library uses: httpx2/httpcore2 of
+    the AI SDKs (llm/client.offline_http_client) or httpx/httpcore of qdrant-client (a Qdrant server in offline
+    mode). A host that is not local is refused when the connection is opened (LocalityRefused). `offline` False: the
+    location of a server labelled local by its address (no opt-outs; the refusal says so)."""
+    from orchestrator.utils.locality import connect_addresses, forget
+
+    class PinnedBackend(httpcore.NetworkBackend):
+        def __init__(self, inner):
+            self._inner = inner
+
+        def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+            failed = None
+            for address in connect_addresses(host, settings, what, offline=offline):
+                try:
+                    return self._inner.connect_tcp(address, port, timeout=timeout, local_address=local_address,
+                                                   socket_options=socket_options)
+                except (httpcore.ConnectError, httpcore.ConnectTimeout) as e:   # the next checked address
+                    failed = e
+            forget(host)   # every checked address failed: the next connection asks the resolver again
+            raise failed
+
+        def connect_unix_socket(self, path, timeout=None, socket_options=None):  # pragma: no cover - never used
+            raise PermissionError("offline mode connects to checked network addresses only")
+
+        def sleep(self, seconds):
+            self._inner.sleep(seconds)
+
+    transport = httpx.HTTPTransport(trust_env=False)
+    transport._pool._network_backend = PinnedBackend(transport._pool._network_backend)
+    return transport
+
+
 def local_only_session(settings: Any = None, what: str = "the download", *, crawl: bool = False):
     """A requests session for offline mode: LocalOnlyAdapter for http and https, no proxy from the environment."""
     import requests
@@ -145,4 +180,4 @@ def local_only_session(settings: Any = None, what: str = "the download", *, craw
     return session
 
 
-__all__ = ["LocalOnlyAdapter", "PublicOnlyAdapter", "local_only_session"]
+__all__ = ["LocalOnlyAdapter", "PublicOnlyAdapter", "local_only_session", "pinned_transport"]

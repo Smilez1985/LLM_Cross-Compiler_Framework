@@ -86,31 +86,8 @@ def offline_http_client(config: Any, *, offline: bool = True):
     import httpcore2
     import httpx2
     import openai
-    from orchestrator.utils.locality import connect_addresses, forget
-
-    class PinnedBackend(httpcore2.NetworkBackend):
-        def __init__(self, inner):
-            self._inner = inner
-
-        def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
-            failed = None
-            for address in connect_addresses(host, config, "the AI provider's server", offline=offline):
-                try:
-                    return self._inner.connect_tcp(address, port, timeout=timeout, local_address=local_address,
-                                                   socket_options=socket_options)
-                except (httpcore2.ConnectError, httpcore2.ConnectTimeout) as e:   # the next checked address
-                    failed = e
-            forget(host)   # every checked address failed: the next connection asks the resolver again
-            raise failed
-
-        def connect_unix_socket(self, path, timeout=None, socket_options=None):  # pragma: no cover - never used
-            raise PermissionError("offline mode connects to checked network addresses only")
-
-        def sleep(self, seconds):
-            self._inner.sleep(seconds)
-
-    transport = httpx2.HTTPTransport(trust_env=False)
-    transport._pool._network_backend = PinnedBackend(transport._pool._network_backend)
+    from orchestrator.security.http import pinned_transport
+    transport = pinned_transport(config, "the AI provider's server", httpx=httpx2, httpcore=httpcore2, offline=offline)
     return openai.DefaultHttpxClient(trust_env=False, transport=transport)
 
 
