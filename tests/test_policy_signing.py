@@ -333,6 +333,52 @@ class TestOlderCopiesAndRemovedFiles:
         fresh = TokenStore(tmp_path, key=KEY, anchor=memory_anchor(slots)[1])
         assert fresh.find(token) is None
 
+    def test_an_older_copy_whose_bytes_this_process_cached_is_refused(self, tmp_path):
+        """The HTTP server caches the parsed tokens by the SHA-256 of the file's bytes. A person revokes a token in
+        another process; then the older file is put back. Its bytes are those the server cached, so only the revision
+        anchor can tell: it must refuse them like any other older copy, and the revoked token stays revoked."""
+        slots, anchor = memory_anchor()
+        server = TokenStore(tmp_path, key=KEY, anchor=anchor)
+        token = server.add("laptop")
+        older = server.path.read_bytes()
+        assert server.find(token).name == "laptop"  # cached by the bytes of revision 1
+        person = TokenStore(tmp_path, key=KEY, anchor=memory_anchor(slots)[1])  # the keyring entry both share
+        person.revoke("laptop")  # revision 2, in the keyring too
+        server.path.write_bytes(older)  # put back: genuinely signed, and the very bytes the server cached
+        assert server.find(token) is None, "the revoked token stays revoked"
+        with pytest.raises(TokenStoreError, match="older copy"):
+            server.list()
+
+    def test_an_older_copy_whose_bytes_a_change_of_this_process_cached_is_refused(self, tmp_path):
+        """The same in one process: a revoke reads (and caches) revision 1 before it writes revision 2, so revision
+        1's bytes put back afterwards are the cached ones."""
+        tokens = TokenStore(tmp_path, key=KEY, anchor=memory_anchor()[1])
+        token = tokens.add("laptop")
+        older = tokens.path.read_bytes()
+        tokens.revoke("laptop")
+        tokens.path.write_bytes(older)
+        assert tokens.find(token) is None, "the revoked token stays revoked"
+        with pytest.raises(TokenStoreError, match="older copy"):
+            tokens.list()
+
+    def test_a_change_saved_by_another_process_during_a_read_is_no_older_copy(self, tmp_path):
+        """The framework saves the file before it moves the anchor, so the anchor is read before the file: a person
+        adding a token while the server checks a request gives the server the new file or the old one, never a
+        current file that looks older than the anchor (which would refuse every token and close every session)."""
+        slots, anchor = memory_anchor()
+        server = TokenStore(tmp_path, key=KEY, anchor=anchor)
+        token = server.add("laptop")
+        assert server.find(token).name == "laptop"  # revision 1 cached
+        person = TokenStore(tmp_path, key=KEY, anchor=memory_anchor(slots)[1])
+        anchor_current = anchor.current
+
+        def a_person_saves_meanwhile(path):
+            person.add("phone")  # revision 2: the file first, then the keyring
+            return anchor_current(path)
+        with mock.patch.object(anchor, "current", side_effect=a_person_saves_meanwhile):
+            assert server.find(token).name == "laptop"
+        assert [t.name for t in server.list()] == ["laptop", "phone"] and slots["rev"] == "2"
+
     def test_the_framework_keeps_the_revisions_in_the_keyring(self, make_framework, memory_keyring):
         fm = make_framework()
         registry = fm.tool_registry
