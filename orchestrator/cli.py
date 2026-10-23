@@ -5977,6 +5977,62 @@ def config_repos(ctx: FrameworkContext, add, remove):
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(2 if e.code in ("invalid_name", CREDENTIAL_IN_URL) else 1)
 
+
+@config.command('local-network')
+@click.option('--add', nargs=2, metavar='KIND VALUE',
+              help='Count as local in offline mode: vpn tailscale, host NAME or range CIDR (you see what can then '
+                   'leave your network, and are asked)')
+@click.option('--remove', nargs=2, metavar='KIND VALUE', help='No longer count it as local: vpn, host or range VALUE')
+@click.option('--check', 'target', metavar='ADDRESS', help='Show whether an address, host name or URL counts as local')
+@click.option('--yes', '-y', is_flag=True, help='Do not ask before --add (the explanation is printed all the same)')
+@pass_context
+def config_local_network(ctx: FrameworkContext, add, remove, target: Optional[str], yes: bool):
+    """What offline mode counts as local: this computer, your own network, and what you count as local yourself (a
+    VPN, a host such as your reverse proxy, an address range). Only you set these, never an AI"""
+    from orchestrator.Core.local_network import (LocalNetworkError, add_opt_out, check, check_text, explain,
+                                                 normalize, opt_outs, remove_opt_out, vpn_status, vpn_text)
+    from orchestrator.utils.localization import ui_text
+    if sum(1 for chosen in (add, remove, target) if chosen) > 1:
+        _usage("Use one of --add, --remove and --check at a time.")
+    ctx.require_framework()
+    cm = ctx.framework_manager.config
+    try:
+        if add:
+            kind, value = add[0].lower(), add[1]
+            stored = normalize(kind, value)
+            console.print(escape(explain(kind, stored)))
+            if not yes and not click.confirm(ui_text("net.ask.title") + "?", default=False):
+                console.print("[yellow]Nothing changed.[/yellow]")
+                return
+            added = add_opt_out(cm, kind, stored)
+            console.print(f"[green]{escape(ui_text('net.added', value=added.label()))}[/green]")
+        elif remove:
+            kind, value = remove[0].lower(), remove[1]
+            if remove_opt_out(cm, kind, value):
+                console.print(f"[green]{escape(ui_text('net.removed', value=value))}[/green]")
+            else:
+                console.print(f"[yellow]{escape(ui_text('net.not_found', value=value))}[/yellow]")
+        elif target:
+            verdict = check(cm, target)
+            console.print(escape(check_text(verdict)), style="green" if verdict.local else "yellow")
+        else:
+            console.print(escape(ui_text("net.intro")))
+            rows = opt_outs(cm)
+            if not rows:
+                console.print(escape(ui_text("net.empty")))
+            else:
+                table = Table(title=ui_text("net.tab"))
+                table.add_column(ui_text("net.col.kind"), style="cyan")
+                table.add_column(ui_text("net.col.value"), style="green")
+                table.add_column(ui_text("net.col.means"))
+                for row in rows:
+                    table.add_row(escape(row.kind_label()), escape(row.label()), escape(row.explanation()))
+                console.print(table)
+            console.print(escape(vpn_text(vpn_status())))
+    except LocalNetworkError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1 if e.code == "not_saved" else 2)
+
 # ============================================================================
 # COMMUNITY ZOO (signed community packs: targets, recipes, knowledge)
 # ============================================================================
