@@ -2856,6 +2856,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Der neue Schlüssel eines neu gestarteten lokalen Modellservers geht nie an seinen alten Port** (Kette
+  port-runtime, aus der Prüfung des verwalteten llama-server): Jeder Start gibt dem Server einen neuen Port und einen
+  neuen Schlüssel. `LLMClient` bestimmte das Ziel (mit der URL) und baute danach den Adapter mit einem
+  Anmeldenachweis, der den Zustand des Servers erneut las; ein Neustart dazwischen paarte daher die alte URL mit dem
+  neuen Schlüssel und schickte ihn an das, was inzwischen auf dem alten Port lauschte. Der Adapter liest URL und
+  Schlüssel des lokalen Servers jetzt einmal, zusammen, und lehnt ab, wenn sich die URL seit dem Bestimmen des Ziels
+  geändert hat („the local model server was stopped or restarted; try again“, ein Ausfall für die Ersatzkette), sodass
+  für den alten Port nichts gebaut oder geschickt wird (`orchestrator/llm/client.py` `adapter`; der
+  Anmelde-Resolver nimmt diesen Schlüssel, `CredentialResolver.resolve(..., runtime_key=...)`). Regressionstest:
+  `tests/test_runtime.py` `test_a_new_key_never_goes_to_the_port_of_the_previous_server`.
 - **Ein anderes Programm auf dem Port des lokalen Modellservers bekommt nie dessen Schlüssel oder einen Prompt**
   (Kette port-runtime, aus der Prüfung des verwalteten llama-server): `runtime start` wählte einen freien Port,
   startete llama-server darauf und nahm jede Antwort von `/health` auf diesem Port für den Server. Ein Programm, das

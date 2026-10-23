@@ -1325,7 +1325,11 @@ warten auf ihn.
   legt sie fest).
 - **Abschottung:** `llama-server` lauscht nur auf 127.0.0.1, auf einem freien Port. Ein neuer, zufälliger
   API-Schlüssel pro Start erreicht ihn nur über eine Schlüsseldatei, die nur du lesen kannst, und das Framework
-  prüft, dass der Server Anfragen ohne Schlüssel ablehnt. Weboberfläche und Slots-Endpunkt sind aus, und der Server
+  prüft, dass der Server Anfragen ohne Schlüssel ablehnt. Eine Antwort auf dem Port zählt nur, solange `llama-server`
+  selbst dort lauscht: Ein Programm, das den freien Port inzwischen belegt hat, bekommt nie den Schlüssel oder einen
+  Prompt (ein anderer Port wird versucht), und ein Aufruf, der für einen inzwischen neu gestarteten Server vorbereitet
+  war, wird abgelehnt, statt den neuen Schlüssel an den alten Port zu schicken. Weboberfläche und Slots-Endpunkt sind
+  aus, und der Server
   läuft mit `--offline`. Optionen, die dem Modell eigene Tools, einen Agentenmodus, MCP-Server oder entferntes
   Rechnen geben würden, die etwas herunterladen (Hugging Face, URLs, Docker Hub), die Prompts auf die Platte schreiben, Programme
   aus einem Ordner starten oder einen Schlüssel oder Token auf die Befehlszeile bringen, werden abgelehnt, in jeder

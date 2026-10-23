@@ -2534,6 +2534,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **A restarted local model server's new key never goes to its old port** (chain port-runtime, from the review of the
+  managed llama-server): every start gives the server a new port and a new key. `LLMClient` resolved the target
+  (with the URL) and then built the adapter with a credential that read the server's state again, so a restart in
+  between paired the old URL with the new key and sent it to whatever listened on the old port by then. The adapter
+  now reads URL and key of the local server once, together, and refuses when the URL changed since the target was
+  resolved ("the local model server was stopped or restarted; try again", an outage for the fallback chain), so
+  nothing is built or sent for the old port (`orchestrator/llm/client.py` `adapter`; the credential resolver takes
+  that key, `CredentialResolver.resolve(..., runtime_key=...)`). Regression test: `tests/test_runtime.py`
+  `test_a_new_key_never_goes_to_the_port_of_the_previous_server`.
 - **Another program on the local model server's port never receives its key or a prompt** (chain port-runtime,
   from the review of the managed llama-server): `runtime start` chose a free port, started llama-server on it and
   took any answer of `/health` on that port for the server. A program that took the port between the choice and
