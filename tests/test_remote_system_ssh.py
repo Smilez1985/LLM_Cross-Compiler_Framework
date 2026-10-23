@@ -416,6 +416,28 @@ class TestTheFallbacksGuarantees:
             assert call.option("GlobalKnownHostsFile") == ["NUL" if os.name == "nt" else "/dev/null"]
             assert call.option("-i") == [str(state / ssh_trust.KEY_NAME)]
 
+    def test_the_one_deploy_step_keeps_every_call_to_the_framework_s_key_and_known_hosts(self, sys_manager,
+                                                                                          system_board, package):
+        """Seam of stage C wave 3 (chains deploy-flow and trust-followups): `llmcf deploy run` and the Deployment
+        tab deploy through person_steps.deploy_build now. Over OpenSSH every call of that step still carries the one
+        argv builder's options, trust-followups' GlobalKnownHostsFile included."""
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.runtime.device.person_steps import deploy_build
+        remembered = []
+        done = deploy_build(None, sys_manager, Endpoint(HOST), USER, package=package, via="cli",
+                            actor="framework-cli", remember=remembered.append)
+        assert done.result.success and done.package_error is None and remembered == [None]
+        state = sys_manager._state_dir()
+        calls = system_board.fake.calls
+        assert calls and {c.program for c in calls} <= {"ssh", "scp"}
+        for call in calls:
+            assert call.option("BatchMode") == ["yes"] and call.option("StrictHostKeyChecking") == ["yes"]
+            assert call.option("IdentitiesOnly") == ["yes"]
+            assert call.option("UserKnownHostsFile") in ([str(ssh_trust.known_hosts_path(state))],
+                                                         [ssh_trust.known_hosts_path(state).as_posix()])
+            assert call.option("GlobalKnownHostsFile") == ["NUL" if os.name == "nt" else "/dev/null"]
+            assert call.option("-i") == [str(state / ssh_trust.KEY_NAME)]
+
     def test_no_call_inherits_this_process_stdin_or_goes_through_a_shell(self, sys_manager, system_board, package):
         assert deploy(sys_manager, package)[0].success
         for call in system_board.fake.calls:
