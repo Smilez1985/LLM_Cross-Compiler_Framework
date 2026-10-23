@@ -30,6 +30,7 @@ TEXTS = {
                            "checked against its checksum? The old copies stay until you remove them.\n\n{files}",
         "hf.takeover.more": "… and {n} more",
         "hf.takeover.running": "Taking over {name} ({done} of {total} files)…",
+        "hf.takeover.stopping": "Stopping; the files copied so far stay in the models folder.",
         "hf.takeover.result": "Copied {copied} of {total} files ({size}) into the models folder, each checked.",
         "hf.takeover.kept": "Kept in the old cache: {name} ({reason})",
         "hf.takeover.stopped": "The take-over was stopped. The files copied so far are in the models folder; the "
@@ -66,6 +67,7 @@ TEXTS = {
                            "entfernst.\n\n{files}",
         "hf.takeover.more": "… und {n} weitere",
         "hf.takeover.running": "Übernehme {name} ({done} von {total} Dateien)…",
+        "hf.takeover.stopping": "Wird angehalten; die bisher kopierten Dateien bleiben im Modellordner.",
         "hf.takeover.result": "{copied} von {total} Dateien ({size}) in den Modellordner kopiert, jede geprüft.",
         "hf.takeover.kept": "Bleibt im alten Cache: {name} ({reason})",
         "hf.takeover.stopped": "Die Übernahme wurde angehalten. Die bis dahin kopierten Dateien liegen im "
