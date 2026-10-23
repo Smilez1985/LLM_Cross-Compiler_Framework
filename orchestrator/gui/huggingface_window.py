@@ -67,8 +67,9 @@ class SearchWorker(QThread):
             self.error.emit(person_text(e, self.lang))
 
 class FileListWorker(QThread):
-    """Checks the licence and lists the files of a repository: both are network calls, never on the GUI thread. A
-    refusal (offline mode) arrives in plain words in the person's language (hf_hub.person_text)."""
+    """Checks the licence and lists the files of a repository: both are network calls, never on the GUI thread, and
+    both with the token the person typed (else the stored one, else none: ModelManager). A refusal (offline mode)
+    arrives in plain words in the person's language (hf_hub.person_text)."""
     finished = Signal(dict, list)
     error = Signal(str)
 
@@ -81,7 +82,7 @@ class FileListWorker(QThread):
 
     def run(self):
         try:
-            licence = self.manager.check_license(self.repo_id)
+            licence = self.manager.check_license(self.repo_id, token=self.token)
             files = self.manager.list_repo_files(self.repo_id, self.token)
             self.finished.emit(licence, files)
         except Exception as e:

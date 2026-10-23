@@ -28,7 +28,7 @@ class FakeModels:
         self.downloads.append((repo_id, filename, token))
         return f"/models/{filename}"
 
-    def check_license(self, model_id):
+    def check_license(self, model_id, token=None):   # the browser hands over the token the person typed
         return {"license": "apache-2.0", "is_restrictive": False, "message": "ok"}
 
 
@@ -99,7 +99,7 @@ class BlockingSearch(FakeModels):
         self.release.wait(10)
         return super().search_huggingface_models(query, limit)
 
-    def check_license(self, model_id):
+    def check_license(self, model_id, token=None):
         self.licence_threads.append(threading.current_thread() is threading.main_thread())
         return self.licence
 
