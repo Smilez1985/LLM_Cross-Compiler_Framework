@@ -149,6 +149,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `device list` / `device settings` | Die untersuchten Boards / wie die Laufzeit auf einem Board installiert wird (Startskript oder systemd), vor einem Deployment entschieden |
 | `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
+| `config local-network` | Was der Offline-Modus als lokal zählt, und was du selbst als lokal zählst (ein VPN, ein Host, ein Adressbereich) (unveröffentlicht) |
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden (unveröffentlicht) |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
@@ -2264,6 +2265,42 @@ daraus. Die übrigen Überschreibungen ändern in einem Build nichts: Seine Stuf
 
 In der GUI: **Datei > Einstellungen…**, Tab **Quell-Repositorys**: die Liste, **Hinzufügen** (Name und URL) und
 **Ausgewählte entfernen…** (fragt zuerst; „Nein“ ist die Vorgabe).
+
+### config local-network
+
+```
+llm-cli config local-network [--add ART WERT | --remove ART WERT | --check ADRESSE] [--yes]
+```
+
+Was der Offline-Modus als lokal zählt (unveröffentlicht): diesen Computer, dein eigenes Netz und was du selbst als
+lokal zählst. Ein Name zählt nach jeder Adresse, zu der er auflöst (Loopback, private und Link-Local-Adressen sind
+lokal; ein `.local`- oder `.lan`-Name nur, wenn er zu einer solchen Adresse auflöst; ein Name mit einer öffentlichen
+Adresse ist nie lokal), und eine Adresse eines Tailscale- oder Headscale-VPN nur, wenn sein Steuerserver und jedes
+Relay in deinem eigenen Netz sind (gelesen mit dem Befehl `tailscale`, wenn er installiert ist). Ohne Optionen
+listet der Befehl, was du als lokal zählst, mit dem, was dann dein Netz verlassen kann, und die Prüfung des VPN
+dieses Computers.
+
+`--add` zählt einen weiteren Eintrag als lokal: `vpn tailscale` (jede Tailscale- oder Headscale-Adresse, auch mit
+Tailscales Servern oder Relays außerhalb), `host NAME` (zum Beispiel den öffentlichen Namen deines Reverse Proxys,
+egal wohin er auflöst) oder `range CIDR` (einen Adressbereich wie `203.0.113.0/24` oder eine einzelne Adresse). Es
+zeigt die einfache Erklärung, was dann dein Netz verlassen kann, und fragt zuerst („Nein“ ist die Vorgabe; `--yes`
+überspringt die Frage, die Erklärung steht trotzdem da), dann speichert es `config.yml`. `--remove` zählt einen
+Eintrag nicht mehr als lokal. `--check` zeigt, ob eine Adresse, ein Hostname oder eine URL als lokal zählt und
+warum, mit den Adressen, zu denen er auflöst. Nur du legst das fest: die Änderung der KI-Einstellungen und MCP
+`update_settings` lehnen es ab, und eine KI kann es weder lesen noch setzen. Exit-Code 2 für einen Wert, der kein
+VPN, Hostname oder Bereich ist (eine Adresse gehört unter `range`), 1, wenn `config.yml` nicht gespeichert werden
+konnte.
+
+| Option | Bedeutung |
+|---|---|
+| `--add KIND VALUE` | Ein VPN, einen Host oder einen Adressbereich als lokal zählen (fragt zuerst). |
+| `--remove KIND VALUE` | Nicht mehr als lokal zählen. |
+| `--check ADDRESS` | Ob eine Adresse, ein Hostname oder eine URL als lokal zählt, und warum. |
+| `-y`, `--yes` | Vor `--add` nicht fragen; für Skripte. |
+
+In der GUI: **Datei > Einstellungen…**, Tab **Lokales Netz**: die Liste mit dem, was dann dein Netz verlassen kann,
+**Als lokal zählen…** (Art und Wert; fragt mit der Erklärung, „Nein“ ist die Vorgabe), **Entfernen** (fragt zuerst),
+die Prüfung des VPN dieses Computers und **Prüfen** für eine Adresse (beides im Hintergrund).
 
 ---
 

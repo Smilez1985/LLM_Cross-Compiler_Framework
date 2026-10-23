@@ -1469,6 +1469,32 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Der Offline-Modus erreicht nur diesen Computer und dein eigenes Netz, und was dazugehört, entscheidest du**
+  (DECISIONS Runde 24, L-NET und „L-NET final“): Eine Regel des eigenen Netzes (`orchestrator/utils/locality.py`)
+  entscheidet jede Verbindung des Offline-Modus nach außen. Ein Servername zählt nach jeder Adresse, zu der er
+  auflöst: Loopback, private (RFC 1918, `fc00::/7`) und Link-Local-Adressen sind lokal, ein `.local`-, `.lan`-,
+  `.fritz.box`- oder einteiliger Name nur, wenn er zu einer solchen Adresse auflöst (früher zählte die Endung, auch
+  mit einer öffentlichen Adresse; die Kennzeichnung „lokal“ des Datenschutzfilters folgt derselben Regel), und ein
+  Name mit lokalen und öffentlichen Adressen ist nicht lokal. Eine Tailscale-Adresse (`100.64.0.0/10`,
+  `fd7a:115c:a1e0::/48`) zählt nur als lokal, wenn das VPN ein Headscale in deinem eigenen Netz mit nur eigenen
+  DERP-Relays ist, gelesen mit dem Befehl `tailscale` (`debug prefs`, `debug derp-map`); ein öffentlicher Name wie
+  der eines Reverse Proxys ist nicht lokal. Du kannst ein VPN, einen Host oder einen Adressbereich in **Datei >
+  Einstellungen… > Lokales Netz** oder mit `llm-cli config local-network` (neu) als lokal zählen, jeweils mit einer
+  einfachen Erklärung, was dann dein Netz verlassen kann (Einstellungen `offline_local_vpns`, `offline_local_hosts`,
+  `offline_local_ranges`); nur du kannst das: die Änderung der KI-Einstellungen und MCP `update_settings` lehnen sie
+  ab, und eine KI kann sie weder lesen noch setzen. Die Auflösung nutzt nur den Resolver des Systems, mit 2 s
+  Zeitlimit, einmal je Lauf und nie im GUI-Thread, und die Verbindung danach geht an die geprüfte Adresse (der
+  Anbieter-Client des Offline-Modus nutzt keinen Proxy aus der Umgebung; Downloads der Laufzeit über einen Adapter
+  nur für das eigene Netz; git mit `http.curloptResolve`). Ollama unter einer Adresse außerhalb deines Netzes wird im
+  Offline-Modus jetzt abgelehnt (seine Vorlage zählte unter jeder Adresse als lokal), und die Downloads der Laufzeit
+  und die festgelegte Quelle kommen im Offline-Modus nur aus deinem eigenen Netz (ein lokaler Spiegel): `device
+  runtime build`, `ditto runtime install` und `export-source`, das Boards-Fenster und Ditto > Lokale Laufzeit holten
+  vorher von GitHub oder Hugging Face. Deep Ingest der Person lehnt im Offline-Modus ab, wie der Crawl einer KI.
+  `build_local_runtime`, `deploy_device_runtime` und `add_pack_from_index` sehen nach der Antwort der Person noch
+  einmal auf den Offline-Modus, wie `download_hf_file`. Ablehnungen nennen den Host, warum er nicht lokal ist, und
+  die Ausnahme. Die Kennzeichnungen lokal/Cloud der mitgelieferten Anbieter ändern sich nicht. Jede Stelle, die die
+  Einstellung liest, fragt jetzt die eine Prüfung `locality.offline_mode` (`hf_hub.offline` und die übrigen Abfragen
+  geben weiter; Verhalten und Texte unverändert).
 - **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
   Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
   sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target
