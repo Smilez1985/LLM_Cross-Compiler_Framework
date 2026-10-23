@@ -130,7 +130,10 @@ The installer:
    `/etc/os-release` (`ID`, then `ID_LIKE`, with the same table as the hardware probe) and its package manager, and
    checks Python: if no Python 3.11 to 3.14 is there, it installs the distribution's own package (`python3`; on
    RHEL 8/9 and their rebuilds and on openSUSE Leap 15, whose `python3` is older, a numbered one such as
-   `python3.12` or `python312`),
+   `python3.12` or `python312`). On SLES these come from SUSE's Python 3 Module, which is off by default: when none
+   is there, the installer asks whether to switch it on (`SUSEConnect -p sle-module-python3/<version>/<arch>`, e.g.
+   `sle-module-python3/15.6/x86_64`) and tries again; a system that is not registered stops with the registration
+   step (`sudo SUSEConnect -r <code>`),
 2. installs Docker if it is missing, through the package manager of the system and never with a downloaded script.
    Every package manager checks signatures its own way, and a third-party repository is trusted only after its key
    matches a fingerprint pinned in `install.sh`:
@@ -142,18 +145,31 @@ The installer:
      lists.
    - **Fedora, RHEL and CentOS Stream:** Docker's rpm repository, its key trusted only with the fingerprint Docker's
      guide publishes (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`); dnf checks the signature of every package.
+   - **Rocky Linux, AlmaLinux, Oracle Linux** and the other RHEL rebuilds: Docker CE as well, from Docker's RHEL
+     repository (`download.docker.com/linux/rhel/<RHEL version>`, the same key check), because the framework needs
+     BuildKit (for example for Hailo). Podman is only the fallback: when Docker publishes nothing for this
+     architecture or release, the repository cannot be reached or the key does not match, `podman-docker` (Podman
+     with the `docker` command) comes from the distribution's own sources. There is no `docker` group then; the
+     installer switches on Podman's Docker-compatible socket for your user (`systemctl --user enable --now
+     podman.socket`), and the framework finds it by itself (it sets `DOCKER_HOST` when no Docker daemon is there).
+     What Podman cannot do is listed in [Features](docs/Features.md#podman-instead-of-docker); to switch later:
+     `sudo dnf remove podman-docker`, then `sudo ./install.sh` again.
+   - **Packages dnf would remove:** before it installs Docker CE on Fedora, RHEL, CentOS Stream or a rebuild, dnf
+     works out what it would have to remove or replace for it (`podman-docker`, and on RHEL 8 rebuilds also `runc`,
+     `podman`, `buildah`, ...) without changing anything. The installer names exactly these packages and asks you;
+     only a yes removes them (`dnf --allowerasing`, never without asking). A no, or no terminal to answer on, removes
+     nothing: on a rebuild Podman comes as the fallback, elsewhere the installer stops.
    - Where Docker publishes no repository, the distribution's own package: `moby-engine` on other systems built on
      Fedora; `docker` on Amazon Linux, on openSUSE and SLES (on SLES from the Containers Module, which the installer
      switches on with `SUSEConnect`) and on Arch, Manjaro and EndeavourOS (with `docker-buildx`; the installer never
      runs `pacman -Sy`, a partial upgrade: if pacman cannot find a package, update the system with `sudo pacman -Syu`
-     first). Rocky Linux, AlmaLinux and Oracle Linux get `podman-docker` (Podman with the `docker` command): there is
-     no `docker` group then; the installer switches on Podman's Docker-compatible socket for your user and tells you
-     the `DOCKER_HOST` the framework needs.
+     first).
    - **Alpine:** `docker` from Alpine's community repository (switched on in `/etc/apk/repositories` if needed). The
      framework itself cannot run on Alpine (musl): its pinned Python packages include onnxruntime, which has no musl
      build. The installer stops after Docker and points you to the framework image you build on this computer
      ([The framework in a container](docs/Container_Setup.md)); its build script also needs `git` and GNU `tar`,
-     which Alpine does not bring (busybox's `tar` is not enough): `sudo apk add git tar`.
+     which Alpine does not bring (busybox's `tar` is not enough), so the installer adds them first (`apk add git
+     tar`).
    - On ARMv6 (Raspberry Pi 1, Zero), when a key does not match, or on any other system (such as Gentoo, Void or
      NixOS) it stops, says why and points you to [Docker's install guide](https://docs.docker.com/engine/install/);
      install Docker yourself and start `install.sh` again. On such a system it installs nothing else either: what it

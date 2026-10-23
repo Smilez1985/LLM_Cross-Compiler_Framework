@@ -133,7 +133,11 @@ Der Installer:
    Linux-Familie aus `/etc/os-release` (`ID`, dann `ID_LIKE`, mit derselben Tabelle wie die Hardware-Untersuchung)
    und ihre Paketverwaltung und prüft Python: Gibt es kein Python 3.11 bis 3.14, installiert er das Paket der
    Distribution (`python3`; unter RHEL 8/9 und ihren Nachbauten und unter openSUSE Leap 15, deren `python3` älter
-   ist, eines mit Nummer im Namen wie `python3.12` oder `python312`),
+   ist, eines mit Nummer im Namen wie `python3.12` oder `python312`). Unter SLES kommen diese aus SUSEs Python 3
+   Module, das zunächst ausgeschaltet ist: Gibt es keins davon, fragt der Installer, ob er es einschaltet
+   (`SUSEConnect -p sle-module-python3/<Version>/<Architektur>`, etwa `sle-module-python3/15.6/x86_64`), und
+   versucht es noch einmal; ein nicht registriertes System hält mit dem Schritt der Registrierung an
+   (`sudo SUSEConnect -r <Code>`),
 2. installiert Docker, falls es fehlt, über die Paketverwaltung des Systems und nie mit einem heruntergeladenen
    Skript. Jede Paketverwaltung prüft die Signaturen auf ihre Weise, und einem fremden Repository wird erst
    vertraut, wenn sein Schlüssel zu einem in `install.sh` festgelegten Fingerabdruck passt:
@@ -146,19 +150,33 @@ Der Installer:
    - **Fedora, RHEL und CentOS Stream:** Dockers rpm-Repository, dessen Schlüssel nur mit dem Fingerabdruck aus
      Dockers Anleitung vertraut wird (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`); dnf prüft die Signatur
      jedes Pakets.
+   - **Rocky Linux, AlmaLinux, Oracle Linux** und die übrigen RHEL-Nachbauten: ebenfalls Docker CE, aus Dockers
+     RHEL-Repository (`download.docker.com/linux/rhel/<RHEL-Version>`, dieselbe Schlüsselprüfung), denn das
+     Framework braucht BuildKit (etwa für Hailo). Podman ist nur der Ersatzweg: Veröffentlicht Docker für diese
+     Architektur oder Version nichts, ist das Repository nicht erreichbar oder passt der Schlüssel nicht, kommt
+     `podman-docker` (Podman mit dem Befehl `docker`) aus den Paketquellen der Distribution. Dann gibt es keine
+     Gruppe `docker`; der Installer schaltet Podmans Docker-kompatible Schnittstelle für deinen Benutzer ein
+     (`systemctl --user enable --now podman.socket`), und das Framework findet sie selbst (es setzt `DOCKER_HOST`,
+     wenn kein Docker-Dienst da ist). Was unter Podman nicht geht, steht in
+     [Funktionen](docs/Features_DE.md#podman-statt-docker); später wechseln: `sudo dnf remove podman-docker`, dann
+     `sudo ./install.sh` erneut.
+   - **Pakete, die dnf entfernen würde:** Bevor er Docker CE unter Fedora, RHEL, CentOS Stream oder einem Nachbau
+     installiert, lässt der Installer dnf ausrechnen, was es dafür entfernen oder ersetzen müsste (`podman-docker`,
+     unter Nachbauten von RHEL 8 auch `runc`, `podman`, `buildah`, ...), ohne etwas zu verändern. Er nennt genau
+     diese Pakete und fragt dich; nur ein Ja entfernt sie (`dnf --allowerasing`, nie ungefragt). Ein Nein, oder kein
+     Terminal für die Antwort, entfernt nichts: Unter einem Nachbau kommt Podman als Ersatzweg, sonst hält der
+     Installer an.
    - Wo Docker kein Repository veröffentlicht, das Paket der Distribution: `moby-engine` auf anderen Systemen, die
      auf Fedora aufbauen; `docker` unter Amazon Linux, unter openSUSE und SLES (unter SLES aus dem Containers Module,
      das der Installer mit `SUSEConnect` einschaltet) und unter Arch, Manjaro und EndeavourOS (mit `docker-buildx`;
      der Installer ruft nie `pacman -Sy` auf, ein Teil-Upgrade: Findet pacman ein Paket nicht, aktualisiere zuerst
-     das System mit `sudo pacman -Syu`). Rocky Linux, AlmaLinux und Oracle Linux bekommen `podman-docker` (Podman
-     mit dem Befehl `docker`): Dann gibt es keine Gruppe `docker`; der Installer schaltet Podmans Docker-kompatible
-     Schnittstelle für deinen Benutzer ein und sagt dir, welches `DOCKER_HOST` das Framework braucht.
+     das System mit `sudo pacman -Syu`).
    - **Alpine:** `docker` aus Alpines Repository community (falls nötig in `/etc/apk/repositories` eingeschaltet).
      Das Framework selbst läuft unter Alpine (musl) nicht: Zu seinen festgelegten Python-Paketen gehört onnxruntime,
      das es nicht für musl gibt. Der Installer hält nach Docker an und verweist auf das Framework-Image, das du auf
      diesem Rechner baust ([Das Framework in einem Container](docs/Container_Setup_DE.md)); sein Build-Skript braucht
-     dafür auch `git` und GNU `tar`, die Alpine nicht mitbringt (das `tar` von busybox genügt nicht):
-     `sudo apk add git tar`.
+     dafür auch `git` und GNU `tar`, die Alpine nicht mitbringt (das `tar` von busybox genügt nicht), also richtet
+     der Installer sie vorher ein (`apk add git tar`).
    - Auf ARMv6 (Raspberry Pi 1, Zero), wenn ein Schlüssel nicht passt, oder auf jedem anderen System (etwa Gentoo,
      Void oder NixOS) hält er an, sagt warum und verweist auf
      [Dockers Installationsanleitung](https://docs.docker.com/engine/install/); installiere Docker dann selbst und
