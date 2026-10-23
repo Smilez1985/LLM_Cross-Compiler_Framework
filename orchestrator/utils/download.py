@@ -242,8 +242,10 @@ class PinnedDownloader:
                         if progress:
                             progress(name, have, size)
         except requests.exceptions.SSLError as e:  # a ConnectionError, but trying again only wastes time
-            raise self.error(f"Download of {name} failed: the TLS certificate of {urlparse(url).hostname} could not "
-                             "be verified (behind a proxy that inspects TLS, its CA certificate belongs in "
+            # The host whose certificate failed: after a redirect (a release CDN) that is the request requests sent.
+            failed = getattr(getattr(e, "request", None), "url", None) or url
+            raise self.error(f"Download of {name} failed: the TLS certificate of {urlparse(failed).hostname} could "
+                             "not be verified (behind a proxy that inspects TLS, its CA certificate belongs in "
                              "REQUESTS_CA_BUNDLE).") from e
         except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as e:
             raise _Retry(e.__class__.__name__) from e

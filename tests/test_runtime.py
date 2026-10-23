@@ -663,6 +663,21 @@ class TestDownloads:
             self.fetch(tmp_path, session, b"abc")
         assert len(session.calls) == 1 and "Signature" not in str(err.value) and "REQUESTS_CA_BUNDLE" in str(err.value)
 
+    def test_a_tls_failure_after_a_redirect_names_the_host_that_failed(self, tmp_path):
+        # Review of port-runtime: release archives and models are redirected to a CDN host. A proxy that inspects only
+        # some hosts fails the CDN's certificate; the message named the first host, whose certificate was fine.
+        session = FakeSession()
+        cdn = "https://objects.cdn.invalid/blob.bin?X-Amz-Signature=secret"
+
+        def get(url, **kw):
+            session.calls.append(url)
+            raise requests.exceptions.SSLError("certificate verify failed",
+                                               request=requests.Request("GET", cdn).prepare())
+        session.get = get
+        with pytest.raises(LocalRuntimeError, match="TLS certificate of objects.cdn.invalid could not") as err:
+            self.fetch(tmp_path, session, b"abc")
+        assert "Signature" not in str(err.value) and "example.invalid" not in str(err.value)
+
     @pytest.mark.parametrize("error", [requests.exceptions.TooManyRedirects("30 redirects"),
                                        requests.exceptions.InvalidURL("bad")])
     def test_other_request_errors_end_with_a_clear_message(self, tmp_path, error):
