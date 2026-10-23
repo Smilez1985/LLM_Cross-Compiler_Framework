@@ -905,9 +905,10 @@ llm-cli ditto ask QUESTION [--no-tools] [--provider TEXT] [--model TEXT]
 Asks Ditto one question. Ditto may use the framework tools within your permissions; tools set to "ask" show the
 tool and every argument and need your confirmation in the terminal (without a terminal they are denied). The
 tools are the framework's own on this computer. The answer goes to stdout, tool notes and errors to stderr, without
-control characters (escape sequences, carriage returns, bidi and zero-width characters). Ctrl+C or the end of input
-at a confirmation is a no. Nothing is saved to the chat history, and `--provider`/`--model` hold for this command
-only: they are never saved, also not when a tool saves the settings during the question.
+control characters (escape sequences, carriage returns, bidi and zero-width characters; the joiner inside an emoji
+stays). Ctrl+C or the end of input at a confirmation is a no. Nothing is saved to the chat history, and
+`--provider`/`--model` hold for this command only: they are never saved, also not when a tool saves the settings
+during the question.
 
 | Option | Meaning |
 |---|---|

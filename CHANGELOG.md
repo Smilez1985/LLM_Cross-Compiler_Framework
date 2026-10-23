@@ -2536,10 +2536,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Model output cannot steer the terminal**: `llm-cli ditto ask` printed the answer, error texts quoting a provider
   or a tool, and tool lines (a made-up tool name, a handler's error) as they came, so escape sequences steered by a
   build log or a web page could rewrite the screen, the window title or the clipboard. Control characters (C0 with
-  carriage return, DEL, C1) and format characters (bidi controls, zero-width characters) are removed there; the
-  `module generate-ai` proposal and its facts show hidden characters as escapes (`tools.confirmation.visible`).
-  Regression tests: `tests/test_ditto.py` `test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal`
-  and the tests next to it.
+  carriage return, DEL, C1) and format characters (bidi controls, zero-width characters) are removed there and from
+  the line of `module generate-ai` that says the AI's base image cannot be pinned; the zero-width joiner inside an
+  emoji sequence stays, as in the cleaning of outside text (`utils/untrusted`), and umlauts, CJK and other scripts are
+  shown as they are. The `module generate-ai` proposal and its facts show hidden characters as escapes
+  (`tools.confirmation.visible`). Regression tests: `tests/test_ditto.py`
+  `test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal`,
+  `test_the_terminal_text_keeps_every_script_and_emoji_as_they_are`,
+  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` and the tests next to them.
 - **The AI settings dialog's model list never sends a key to the saved provider's address**: choosing another
   provider before typing its address (a saved Ollama on the local network, then **custom**) listed models at the
   saved provider's server with the other provider's key. The address field now always counts for the list, an empty

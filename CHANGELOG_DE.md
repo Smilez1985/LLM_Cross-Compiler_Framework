@@ -2860,10 +2860,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einen Anbieter oder ein Tool zitieren, und Tool-Zeilen (ein erfundener Tool-Name, der Fehler eines Handlers) so aus,
   wie sie kamen, also konnten von einem Build-Log oder einer Webseite gesteuerte Escape-Sequenzen den Bildschirm, den
   Fenstertitel oder die Zwischenablage überschreiben. Steuerzeichen (C0 mit Wagenrücklauf, DEL, C1) und
-  Formatzeichen (Bidi-Steuerzeichen, Nullbreitenzeichen) werden dort entfernt; der Vorschlag von `module generate-ai`
-  und seine Fakten zeigen versteckte Zeichen als Escapes (`tools.confirmation.visible`). Regressionstests:
-  `tests/test_ditto.py` `test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal` und die Tests
-  daneben.
+  Formatzeichen (Bidi-Steuerzeichen, Nullbreitenzeichen) werden dort entfernt, ebenso aus der Zeile von
+  `module generate-ai`, die sagt, dass das Basis-Image der KI nicht gepinnt werden kann; der Nullbreiten-Verbinder
+  (Zero Width Joiner) in einer Emoji-Folge bleibt, wie bei der Bereinigung von Text von außen (`utils/untrusted`), und
+  Umlaute, CJK und andere Schriften erscheinen, wie sie sind. Der Vorschlag von `module generate-ai` und seine Fakten
+  zeigen versteckte Zeichen als Escapes (`tools.confirmation.visible`). Regressionstests: `tests/test_ditto.py`
+  `test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal`,
+  `test_the_terminal_text_keeps_every_script_and_emoji_as_they_are`,
+  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` und die Tests daneben.
 - **Die Modellliste des KI-Einstellungsdialogs schickt nie einen Schlüssel an die Adresse des gespeicherten
   Anbieters**: Wer einen anderen Anbieter wählte, bevor er dessen Adresse eintippte (ein gespeichertes Ollama im
   lokalen Netz, dann **custom**), ließ die Modelle beim Server des gespeicherten Anbieters mit dem Schlüssel des
