@@ -1479,7 +1479,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (`USER@HOST [ZIEL]` über `ssh` und `scp` mit `StrictHostKeyChecking=yes`, oder auf dem Board selbst nach
   `/opt/llm`), `MANIFEST.json` mit jedem Detail des Builds und `SHA256SUMS`; das Modell läuft einmal auf diesem
   Rechner, die Programme müssen für das Board sein, und jede Datei muss zu ihrer Prüfsumme passen, bevor das Paket
-  bleibt. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die Entrypoint-Modi `target` und
+  bleibt. Ihr Cross-Build schaltet jede Option von llama.cpp ab, die etwas herunterladen kann, wie jeder
+  llama.cpp-Build des Frameworks (`DOWNLOAD_OPTIONS_OFF` von `orchestrator/runtime/build/recipe.py`): Am Pin ist
+  `LLAMA_USE_PREBUILT_UI` standardmäßig an und holte in einem Container mit Netz die Web-Oberfläche von
+  `llama-server` aus einem Hugging-Face-Bucket. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die Entrypoint-Modi `target` und
   `pipeline`) macht es auch ohne Profil, mit den schlichten Vorgaben des Targets, die das Manifest nennt; das eigene
   Deployment des Frameworks bleibt `llm-cli deploy` über seine SSH-Sitzung. Jede Quantisierungsmethode des gepinnten
   `llama-quantize` ist aufgeführt und wird angenommen (neu: `Q1_0`, `Q2_0` und die Kurznamen `Q3_K`, `Q4_K`,

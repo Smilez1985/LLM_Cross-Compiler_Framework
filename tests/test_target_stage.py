@@ -395,6 +395,24 @@ def test_programs_for_another_processor_get_no_package(image):
 
 
 @needs_bash
+def test_the_package_s_cross_build_turns_off_every_option_that_downloads(image):
+    """The programs for the board are built like every llama.cpp build of the framework: each option that can download
+    something is off (DOWNLOAD_OPTIONS_OFF of orchestrator/runtime/build/recipe.py, which the image's Dockerfile turns
+    off as well). At the pin LLAMA_USE_PREBUILT_UI is on by default and fetches llama-server's web UI from a Hugging
+    Face bucket while llama-server is built, whenever the container has network (target_module.sh started by hand,
+    the entrypoint's pipeline mode)."""
+    from orchestrator.runtime.build.recipe import DOWNLOAD_OPTIONS_OFF
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_TOOLS_LOG=image.root / "tools.log")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    configure = next(c for c in tools_log(image) if c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c)
+    words = configure.split()
+    assert [option for option in DOWNLOAD_OPTIONS_OFF if f"-D{option}=OFF" not in words] == [], configure
+    assert "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in words
+
+
+@needs_bash
 def test_package_is_an_input_of_the_target_stage_only(image):
     """The convert stage first, then the target stage with --package: the stages before target resume (the request
     is the same), and only the target stage's marker names the package."""

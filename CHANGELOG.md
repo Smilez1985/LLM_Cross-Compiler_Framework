@@ -1302,7 +1302,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   answer from the model), `deploy.sh` (`USER@HOST [DEST]` over `ssh` and `scp` with `StrictHostKeyChecking=yes`, or
   on the board itself to `/opt/llm`), `MANIFEST.json` with every build detail and `SHA256SUMS`; the model is run once
   on this machine, the programs must be for the board, and every file must match its checksum before the package is
-  kept. `build.sh --package` (also `target_module.sh` started by hand and the entrypoint modes `target` and
+  kept. Their cross build turns off every llama.cpp option that can download something, as every llama.cpp build of
+  the framework does (`DOWNLOAD_OPTIONS_OFF` of `orchestrator/runtime/build/recipe.py`): at the pin
+  `LLAMA_USE_PREBUILT_UI` is on by default and fetched `llama-server`'s web UI from a Hugging Face bucket in a
+  container with network. `build.sh --package` (also `target_module.sh` started by hand and the entrypoint modes `target` and
   `pipeline`) makes it without a profile too, with the target's plain defaults, which the manifest names; the
   framework's own deployment stays `llm-cli deploy` over its SSH session. Every quantization method of the pinned
   `llama-quantize` is listed and accepted (new: `Q1_0`, `Q2_0` and the short names `Q3_K`, `Q4_K`, `Q5_K`), and
