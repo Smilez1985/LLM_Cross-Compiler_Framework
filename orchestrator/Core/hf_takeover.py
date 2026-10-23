@@ -117,21 +117,31 @@ def _real_inside(path: Path, folder: Path) -> Optional[Path]:
 def old_cache(models_dir: Path) -> List[OldFile]:
     """Every file of every model in huggingface_hub's cache inside `models_dir`, sorted by model, commit and name. An
     empty list when there is none or the cache cannot be read (it stays as it is)."""
+    return _scan(models_dir)[0]
+
+
+def _scan(models_dir: Path) -> Tuple[List[OldFile], set]:
+    """old_cache's files, and the cache folders that hold a file old_cache leaves out (a revision folder that is no
+    commit, a name the downloader refuses): such a folder is never taken over completely, so it is never offered
+    for removal."""
     models_dir = Path(models_dir)
     if not models_dir.is_dir():
-        return []
+        return [], set()
     try:
         from huggingface_hub import scan_cache_dir
         info = scan_cache_dir(models_dir)
     except Exception:  # noqa: BLE001 - no cache there, or an unreadable folder: nothing to take over
-        return []
+        return [], set()
     found: List[OldFile] = []
+    partial: set = set()
     for repo in sorted(info.repos, key=lambda r: r.repo_id):
         if getattr(repo, "repo_type", "") != "model" or not REPO_ID.match(repo.repo_id or ""):
             continue
         folder = Path(repo.repo_path)
         for revision in sorted(repo.revisions, key=lambda r: r.commit_hash):
             if not COMMIT.match(revision.commit_hash or ""):
+                if revision.files:
+                    partial.add(folder)
                 continue
             snapshot = Path(revision.snapshot_path)
             for cached in sorted(revision.files, key=lambda f: str(f.file_path)):
@@ -139,8 +149,10 @@ def old_cache(models_dir: Path) -> List[OldFile]:
                 try:
                     name = path.relative_to(snapshot).as_posix()
                 except ValueError:
+                    partial.add(folder)
                     continue
                 if not safe_filename(name):
+                    partial.add(folder)
                     continue
                 etag = Path(cached.blob_path).name.lower() if path.is_symlink() else ""
                 size = int(cached.size_on_disk)
@@ -148,7 +160,7 @@ def old_cache(models_dir: Path) -> List[OldFile]:
                 found.append(OldFile(repo.repo_id, revision.commit_hash, name, path, size,
                                      etag if _SHA256.match(etag) else None, etag if _GIT_ID.match(etag) else None,
                                      dest, _state(dest, size), folder))
-    return found
+    return found, partial
 
 
 def _expected(file: OldFile, lookup: Optional[Callable[[str, str], Dict[str, Any]]],
@@ -309,12 +321,14 @@ def old_copies_plan(models_dir: Path):
     from orchestrator.tools.spec import DeletionItem
     models_dir = Path(models_dir)
     by_folder: Dict[Path, List[OldFile]] = {}
-    for file in old_cache(models_dir):
+    listed, partial = _scan(models_dir)
+    for file in listed:
         by_folder.setdefault(file.folder, []).append(file)
     done: Dict[Path, str] = {}
     items = []
     for folder, files in sorted(by_folder.items(), key=lambda kv: str(kv[0])):
-        if any(f.state != "taken" for f in files) or folder.is_symlink() or not folder.is_dir():
+        if (folder in partial or any(f.state != "taken" for f in files) or folder.is_symlink()
+                or not folder.is_dir()):
             continue
         repo = done[folder] = files[0].repo
         items.append(DeletionItem(

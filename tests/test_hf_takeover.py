@@ -235,6 +235,20 @@ class TestTheOldCopiesGoOnlyWithTheYes:
         assert plan.items[0].speaking_name == f"{REPO} (old download cache)" and other.is_dir()
         assert plan.mode_offered == ("trash", "permanent")
 
+    @pytest.mark.parametrize("stray", ["not-a-commit/kept.gguf", f"{OLD_COMMIT}/{'x' * 200}/{'y' * 120}.gguf"])
+    def test_a_folder_with_a_file_the_take_over_skips_is_not_offered(self, area, stray):
+        # Regression (review of chain hf): old_cache leaves out what it cannot place in the new folder (a revision
+        # folder that is no commit, a name the downloader would refuse); the folder that holds it was offered for
+        # removal as "taken over completely", and that file would have gone with it, never copied.
+        folder = two_files(area)
+        kept = folder / "snapshots" / stray
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        kept.write_bytes(b"GGUF-mine")
+        hf_takeover.take_over(area.models, hf_takeover.old_cache(area.models))
+        assert {f.state for f in hf_takeover.old_cache(area.models)} == {"taken"}
+        assert hf_takeover.old_copies_plan(area.models) is None
+        assert kept.read_bytes() == b"GGUF-mine"
+
     def test_a_shared_store_file_only_the_old_copies_use_is_listed_too(self, area):
         store = shared_store(area)
         result = hf_takeover.take_over(area.models, hf_takeover.old_cache(area.models))

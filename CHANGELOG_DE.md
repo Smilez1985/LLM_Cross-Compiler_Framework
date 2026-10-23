@@ -1429,8 +1429,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   die Git-Blob-ID; bei einem Cache ohne Links, was der Hub für diesen Commit führt), unter der Speicherplatz-Regel mit
   eigener Reservierung; eine Datei, die nicht passt, oder eine andere Datei gleichen Namens im neuen Ordner bleibt, wo
   sie ist, mit ihrem Grund. Danach bietet er das Entfernen der alten Kopien nur im Löschdialog mit der genauen Liste
-  an (der Cache-Ordner jedes Modells und die Dateien des gemeinsamen Speichers des Caches, die nur sie nutzen, mit
-  vollem Pfad und Größe; Papierkorb oder endgültig; „Nein“ ist die Vorgabe), zuerst im Audit-Log vermerkt; ohne dieses
+  an (der Cache-Ordner jedes Modells, dessen Dateien alle übernommen sind, und die Dateien des gemeinsamen Speichers
+  des Caches, die nur sie nutzen, mit vollem Pfad und Größe; ein Ordner mit einer Datei, die die Übernahme nicht
+  aufführen kann, wird nie angeboten; Papierkorb oder endgültig; „Nein“ ist die Vorgabe), zuerst im Audit-Log
+  vermerkt; ohne dieses
   Ja wird nichts gelöscht. Jeder Schritt läuft in einem Worker-Thread. Die Texte stehen in
   `orchestrator/utils/l10n_hf.py` (Englisch und Deutsch). Der Browser liest den Offline-Modus wie bisher nicht.
 - **Ein Build sind wieder die vier Stufenmodule, und `build.sh` führt sie nur aus** (Entscheidung U9 des
