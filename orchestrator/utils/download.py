@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 import psutil
 import requests
 
+from orchestrator.utils.atomic import remove_file
 from orchestrator.utils.helpers import digest_matches
 from orchestrator.utils.helpers import sha256_file  # download.sha256_file: community zoo, Hugging Face
 
@@ -47,7 +48,8 @@ def _gib(size: float) -> str:
 
 class FileLock:
     """Cross-process lock: an O_EXCL lock file holding the owner's pid and start time. A lock left behind by a
-    process that no longer exists is taken over."""
+    process that no longer exists is taken over. The lock file is deleted with atomic.remove_file: on Windows a waiting
+    process reading it at that moment makes the delete fail for a moment."""
 
     error = DownloadError
     busy = "{path} is in use by another llm-cli or GUI; try again when it has finished."
@@ -84,7 +86,7 @@ class FileLock:
                 fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             except FileExistsError:
                 if not self._owner_alive():
-                    self.path.unlink(missing_ok=True)
+                    remove_file(self.path)
                     continue
                 if time.monotonic() > deadline:
                     raise self.error(self.busy.format(path=self.path)) from None
@@ -95,7 +97,7 @@ class FileLock:
             return self
 
     def __exit__(self, *exc) -> None:
-        self.path.unlink(missing_ok=True)
+        remove_file(self.path)
 
 
 SPACE_MARGIN = 256 * MIB   # what a download leaves free when its caller gives no disk rule (`space`)

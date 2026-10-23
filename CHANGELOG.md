@@ -2080,6 +2080,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **The local runtime no longer fails on Windows while another window reads its files** (chain port-runtime, from
+  the review of the managed llama-server): Windows refuses to replace or delete a file that another process has open
+  at that moment. The GUI's LLMClient reads `server.json` and the server's key file, and a process waiting for the
+  runtime lock reads the lock file, so a start, stop or install in another window could end with "The process cannot
+  access the file". The runtime's state files (also those of the build store and the runtime mode) are now replaced
+  with `utils/atomic.replace_file`, and `server.json`, the key files and the lock files of `utils/download.FileLock`
+  (the runtime lock, the build store's lock and the per-download locks) are deleted with the new
+  `utils/atomic.remove_file`; both try again for a moment on Windows, never elsewhere. Regression tests:
+  `tests/test_atomic.py`, `tests/test_runtime.py` `test_windows_sharing_violations_are_retried`.
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer

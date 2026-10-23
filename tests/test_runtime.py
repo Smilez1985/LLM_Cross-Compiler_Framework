@@ -1200,6 +1200,29 @@ class TestHousekeeping:
         with ls._FileLock(lock_path, timeout=0.3):
             assert lock_path.read_text().startswith(str(os.getpid()))
 
+    def test_windows_sharing_violations_are_retried(self, tmp_path, monkeypatch):
+        """Windows refuses to delete a file that another process has open at that moment (LLMClient reading
+        server.json or the key in the GUI, a lock waiter reading the lock file): stop() and the runtime lock try
+        again for a moment (utils/atomic.remove_file) instead of failing with a sharing violation."""
+        from orchestrator.utils import atomic
+        monkeypatch.setattr(atomic, "REPLACE_RETRIES", 10)  # what a Windows host uses
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        rt = self.runtime(tmp_path)
+        rt.root.mkdir(parents=True)
+        rt.state_file.write_text(json.dumps({"pid": 999999, "create_time": 1.0, "server": "x"}))
+        (rt.root / "server-a.key").write_text("k")
+        real_unlink, refused = os.unlink, []
+
+        def busy_once(path, *args, **kwargs):
+            if Path(path).name not in refused:
+                refused.append(Path(path).name)
+                raise PermissionError(13, "The process cannot access the file")
+            return real_unlink(path, *args, **kwargs)
+        monkeypatch.setattr(os, "unlink", busy_once)
+        assert rt.stop() == 0
+        assert not rt.state_file.exists() and not (rt.root / "server-a.key").exists() and not rt.lock_file.exists()
+        assert {"server.json", "server-a.key", ".lock"} <= set(refused)
+
     def test_preferred_tier_and_auto(self, tmp_path):
         rt = self.runtime(tmp_path)
         assert rt.resolve_model()[0].tier == "tiny" and rt.preferred_tier() is None

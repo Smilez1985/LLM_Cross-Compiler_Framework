@@ -77,6 +77,9 @@ DELETION_SITES = {
     ("orchestrator/Core/trash.py", "Trash.restore"): TEMP,   # the empty entry folder after a restore
     ("orchestrator/Core/vault_key.py", "KeyFileHolder._write"): TEMP,
     ("orchestrator/utils/atomic.py", "write_private"): TEMP,
+    # the helper that deletes the local runtime's state and key files and the lock files (with the Windows retry);
+    # its callers are listed (FileLock, LocalLLMRuntime._stop_locked and _cleanup_stale_locked)
+    ("orchestrator/utils/atomic.py", "remove_file"): TEMP,
     ("orchestrator/utils/ssh_trust.py", "save_host_keys"): TEMP,   # known_hosts' temporary file when writing fails
     ("orchestrator/Core/deployment_manager.py", "DeploymentManager.create_package"): TEMP,
     ("orchestrator/Core/knowledge_snapshots.py", "_copy_checked"): TEMP,   # an export's unfinished copy
@@ -181,9 +184,9 @@ DELETION_SITES = {
 
 _DELETING = {"rmtree", "unlink", "rmdir", "removedirs", "prune", "prune_builds", "prune_containers", "prune_volumes",
              "prune_networks", "prune_images"}
-# Helpers that delete a folder, called by name (runtime/build/source.py remove_tree; shutil.rmtree imported by name):
-# their callers delete as much as the helper does.
-_DELETING_HELPERS = {"remove_tree", "rmtree"}
+# Helpers that delete a folder or a file, called by name (runtime/build/source.py remove_tree; shutil.rmtree imported
+# by name; utils/atomic.remove_file): their callers delete as much as the helper does.
+_DELETING_HELPERS = {"remove_tree", "rmtree", "remove_file"}
 
 
 def _deletes(call: ast.Call) -> bool:
