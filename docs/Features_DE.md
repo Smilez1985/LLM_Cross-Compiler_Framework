@@ -2345,7 +2345,12 @@ wurde.
   das Entfernen der alten Kopien im Löschdialog mit der genauen Liste an (der Cache-Ordner jedes Modells, dessen
   Dateien alle übernommen sind, und die Dateien des gemeinsamen Speichers des Caches, die nur sie nutzen, mit vollem
   Pfad und Größe; Papierkorb oder endgültig; „Nein“ ist die Vorgabe); ohne dein Ja wird nichts entfernt, und eine KI
-  entfernt sie nie.
+  entfernt sie nie. Im Terminal macht `llm-cli models take-over` dasselbe, mit denselben Listen und Fragen. Im
+  Offline-Modus nimmt der Browser zu niemandem Kontakt auf: Eine Suche, eine Lizenzprüfung, eine
+  Dateiliste oder ein Download wird sofort abgelehnt, in klaren Worten, mit dem Ort, an dem du den Offline-Modus
+  ausschaltest; die Übernahme funktioniert offline (eine Datei, die nur Hugging Face prüfen könnte, bleibt mit diesem
+  Grund im alten Cache). Jeder Hub-Aufruf (Suche, Abfrage, Dateiliste) geht nur an huggingface.co, nie an den Host in
+  `HF_ENDPOINT`, mit deinem eingegebenen oder gespeicherten Token, nie mit einem impliziten.
 - **Geräte und Deployment (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` zeigt die
   [vertrauten Geräte](#übertragen-auf-das-board-deployment) mit deinem Namen dafür, Adresse, Fingerabdruck des
   Host-Schlüssels, ob das Gerät nutzbar ist (gekoppelt und sein Schlüssel noch der vertraute) und dem letzten

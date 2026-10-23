@@ -16,6 +16,7 @@ program itself, which only change how the CLI starts or prints, with the reason.
 from typing import Dict
 
 ACT_TRASH = "act_file_trash"   # File > Trash...
+ACT_HF_BROWSER = "act_tools_hf_browser"   # Tools > Hugging Face Model Browser...
 
 CLI_PATHS: Dict[str, str] = {
     "trash": ACT_TRASH,                             # `trash` alone lists, as `trash list`
@@ -25,11 +26,13 @@ CLI_PATHS: Dict[str, str] = {
     "trash empty --all": "btn_trash_delete",        # the window lists every entry; the person ticks
     "trash empty --due": "btn_trash_delete",        # the Reminder column shows which ones are due; the person ticks
     "ditto setup": "act_tools_permissions",         # Tools > Tool Permissions (Ditto / MCP)... (also at first start)
+    "models take-over": "btn_hf_take_over",         # the browser's Take over old downloads... (the same list and yes)
     "--version": "act_help_about",                  # Help > About shows the version
 }
 WINDOW_OBJECTS: Dict[str, str] = {
     "btn_trash_restore": ACT_TRASH,
     "btn_trash_delete": ACT_TRASH,
+    "btn_hf_take_over": ACT_HF_BROWSER,
 }
 MACHINE_ONLY: Dict[str, str] = {
     "--config": "start switch of the command line program; the GUI uses its own settings (File > Settings...)",
@@ -39,4 +42,4 @@ MACHINE_ONLY: Dict[str, str] = {
     "--debug-http": "a developer switch that logs the HTTP traffic of the command line to the console",
 }
 
-__all__ = ["ACT_TRASH", "CLI_PATHS", "MACHINE_ONLY", "WINDOW_OBJECTS"]
+__all__ = ["ACT_HF_BROWSER", "ACT_TRASH", "CLI_PATHS", "MACHINE_ONLY", "WINDOW_OBJECTS"]

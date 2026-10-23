@@ -20,7 +20,9 @@ download_hf_file (ModelManager.download_file -> Core/hf_hub.py download_for_pers
 window shows its progress and can stop it (the part downloaded so far is kept). "Take over old downloads..." copies
 what earlier versions saved in huggingface_hub's cache, each file checked (Core/hf_takeover.py), and then offers to
 remove the old copies only through the deletion dialog with the exact list. Every network and file step runs in a
-worker thread, never on the GUI thread.
+worker thread, never on the GUI thread. In offline mode the search, the licence check, the file list and the download
+are refused before any request, in plain words in the person's language (hf_hub.person_text); the Take over works
+offline (a file only Hugging Face could check stays in the old cache with its reason).
 """
 
 import threading
@@ -45,39 +47,47 @@ def tr(key, default=None):
 # --- WORKERS ---
 
 class SearchWorker(QThread):
+    """The search, a network call: never on the GUI thread. A refusal (offline mode) arrives in plain words in the
+    person's language (hf_hub.person_text)."""
     finished = Signal(list)
     error = Signal(str)
 
-    def __init__(self, manager, query):
+    def __init__(self, manager, query, lang=None):
         super().__init__()
         self.manager = manager
         self.query = query
+        self.lang = lang or current_language()
 
     def run(self):
         try:
             results = self.manager.search_huggingface_models(self.query)
             self.finished.emit(results)
         except Exception as e:
-            self.error.emit(str(e))
+            from orchestrator.Core.hf_hub import person_text
+            self.error.emit(person_text(e, self.lang))
 
 class FileListWorker(QThread):
-    """Checks the licence and lists the files of a repository: both are network calls, never on the GUI thread."""
+    """Checks the licence and lists the files of a repository: both are network calls, never on the GUI thread, and
+    both with the token the person typed (else the stored one, else none: ModelManager). A refusal (offline mode)
+    arrives in plain words in the person's language (hf_hub.person_text)."""
     finished = Signal(dict, list)
     error = Signal(str)
 
-    def __init__(self, manager, repo_id, token=None):
+    def __init__(self, manager, repo_id, token=None, lang=None):
         super().__init__()
         self.manager = manager
         self.repo_id = repo_id
         self.token = token
+        self.lang = lang or current_language()
 
     def run(self):
         try:
-            licence = self.manager.check_license(self.repo_id)
+            licence = self.manager.check_license(self.repo_id, token=self.token)
             files = self.manager.list_repo_files(self.repo_id, self.token)
             self.finished.emit(licence, files)
         except Exception as e:
-            self.error.emit(str(e))
+            from orchestrator.Core.hf_hub import person_text
+            self.error.emit(person_text(e, self.lang))
 
 class DownloadWorker(QThread):
     """One download through ModelManager.download_file (the verified fetcher). `stop` ends it between two chunks and
@@ -114,8 +124,8 @@ class DownloadWorker(QThread):
             if isinstance(e, DownloadStopped):
                 self.stopped.emit(ui_text("hf.download.stopped", self.lang, name=self.filename))
                 return
-            from orchestrator.Core.disk_plan import person_reason
-            self.error.emit(person_reason(e, self.lang))
+            from orchestrator.Core.hf_hub import person_text
+            self.error.emit(person_text(e, self.lang))
 
 
 class TakeOverScanWorker(QThread):
@@ -153,8 +163,8 @@ class TakeOverWorker(QThread):
                                             progress=lambda done, total, name: self.progress.emit(done, total, name))
             self.finished.emit(result, self.manager.old_copies_plan())
         except Exception as e:
-            from orchestrator.Core.disk_plan import person_reason
-            self.error.emit(person_reason(e, self.lang))
+            from orchestrator.Core.hf_hub import person_text
+            self.error.emit(person_text(e, self.lang))
 
 
 class RemoveOldCopiesWorker(QThread):
@@ -342,15 +352,32 @@ class HuggingFaceWindow(QMainWindow):
     def _busy(self) -> bool:
         return _running(self.list_worker, self.dl_worker, self.scan_worker, self.takeover_worker, self.remove_worker)
 
+    def _refused_offline(self) -> bool:
+        """Offline mode is on: the browser does not contact Hugging Face, and the person reads why and where to switch
+        it off before any worker starts or a token is asked for (the core refuses as well: ModelManager)."""
+        offline = getattr(self.model_manager, "offline", None)
+        try:
+            refused = bool(offline()) if callable(offline) else False
+        except Exception:  # noqa: BLE001 - an unreadable setting: the core decides
+            refused = False
+        if refused:
+            from orchestrator.Core.hf_hub import offline_refusal, person_text
+            from orchestrator.gui.plain import plain_box
+            self.status_label.setText(self._t("blocker.offline_mode"))
+            plain_box(self, "information", self._t("hf.offline.title"), person_text(offline_refusal(), self.lang))
+        return refused
+
     def start_search(self):
         query = self.search_edit.text()
         if not query or _running(self.worker): return  # Enter while a search runs (only the button is disabled)
-        
+        if self._refused_offline():
+            return
+
         self.status_label.setText("Searching Hugging Face...")
         self.search_btn.setEnabled(False)
         self.table.setRowCount(0)
-        
-        self.worker = SearchWorker(self.model_manager, query)
+
+        self.worker = SearchWorker(self.model_manager, query, lang=self.lang)
         self.worker.finished.connect(self.on_search_finished)
         self.worker.error.connect(self.on_search_error)
         self.worker.start()
@@ -403,6 +430,8 @@ class HuggingFaceWindow(QMainWindow):
         if self._busy():
             self.status_label.setText(self._t("hf.busy"))
             return
+        if self._refused_offline():
+            return
         model_id = self.table.item(row, 0).text()
         access_item = self.table.item(row, 3)
         is_gated = "🔒" in access_item.text()
@@ -418,7 +447,7 @@ class HuggingFaceWindow(QMainWindow):
         
         # Licence check (Ethics Gate) and file list in a worker thread; the warning follows in show_file_selection
         self.status_label.setText(f"Checking the licence and listing files for {model_id}...")
-        self.list_worker = FileListWorker(self.model_manager, model_id, token)
+        self.list_worker = FileListWorker(self.model_manager, model_id, token, lang=self.lang)
         self.list_worker.finished.connect(
             lambda licence, files: self.show_file_selection(model_id, files, token, licence))
         self.list_worker.error.connect(lambda e: QMessageBox.critical(self, "Error", str(e)))

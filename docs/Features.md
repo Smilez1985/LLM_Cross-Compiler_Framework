@@ -2118,7 +2118,11 @@ with the token's standing approvals, Back to read only). A token is shown once, 
   with its reason. Then it offers to remove the old copies in the deletion dialog with the exact list (each model's
   cache folder whose every file was taken over, and the files of the cache's shared store only they use, with full
   path and size; trash or for good; "No" is the default); nothing is removed without your yes, and an AI never
-  removes them.
+  removes them. At a terminal, `llm-cli models take-over` does the same with the same lists and questions. In offline
+  mode the browser contacts nobody: a search, a licence check, a file list or a download is
+  refused at once, in plain words, with where to switch offline mode off; the Take over works offline (a file only
+  Hugging Face could check stays in the old cache, with that reason). Every Hub call (search, look-up, file list) goes
+  to huggingface.co only, never to the host in `HF_ENDPOINT`, with your typed or stored token, never an implicit one.
 - **Devices and deploy (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` shows the
   [trusted devices](#deployment) with the label you gave, address, host key fingerprint, whether the device is
   usable (paired, and its key still the trusted one) and the last deploy; the account the framework logs in with is

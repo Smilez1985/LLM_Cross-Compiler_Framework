@@ -327,13 +327,16 @@ class FakeHub:
     FILES = ["config.json", "model-1.safetensors", "model-2.safetensors", "pytorch_model.bin"]
 
     def __init__(self, commit=COMMIT_A, on_file=None):
-        self.commit, self.on_file, self.calls, self.stops = commit, on_file, [], []
+        self.commit, self.on_file, self.calls, self.stops, self.endpoints = commit, on_file, [], [], []
 
     def install(self, monkeypatch, engine=None):
         import huggingface_hub
         hub = self
 
         class Api:
+            def __init__(self, endpoint=None, token=None):   # made by hf_hub.hub_api: pinned to huggingface.co
+                hub.endpoints.append(endpoint)
+
             def model_info(self, repo, revision=None, token=None, files_metadata=False):
                 hub.calls.append(("model_info", token))
                 siblings = [SimpleNamespace(rfilename=n, size=1, lfs=None) for n in hub.FILES]
@@ -368,6 +371,7 @@ class TestStaging:
             ["config.json", "model-1.safetensors", "model-2.safetensors"]
         assert all(c[-1] is False for c in hub.calls if c[0] == "model_info"), "G37: token=False without a stored token"
         assert all(c[-1] is None for c in hub.calls if c[0] == "download"), "the fetcher sends no token at all"
+        assert hub.endpoints == ["https://huggingface.co"], "the API is pinned to huggingface.co (hf_hub.hub_api)"
 
     def test_two_commits_never_share_a_folder_and_the_encoding_cannot_collide(self, engine):
         a = engine.staging_folder("a/b__c", COMMIT_A, None)
@@ -389,6 +393,9 @@ class TestStaging:
         monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda **kw: got.append(kw))
 
         class Api:
+            def __init__(self, endpoint=None, token=None):   # made by hf_hub.hub_api
+                pass
+
             def model_info(self, repo, revision=None, token=None, files_metadata=False):
                 assert files_metadata and revision == COMMIT_A
                 return SimpleNamespace(sha=COMMIT_A, siblings=[

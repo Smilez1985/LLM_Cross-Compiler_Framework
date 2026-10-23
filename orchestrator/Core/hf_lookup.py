@@ -7,7 +7,9 @@ exactly that commit, G30), the files the build stages with their sizes (the same
 weights type (safetensors, pickle, gguf), the gating, the licence and whether the token stored in the framework can
 read the repository. The token is read inside the framework only and passed to huggingface_hub explicitly; without
 a stored token the calls pass token=False, so a token the person never gave the framework (HF_TOKEN, the Hugging Face
-home folder's token file) is never sent (G37). Nothing here returns or logs the token.
+home folder's token file) is never sent (G37). The calls go to huggingface.co only, never to the host in HF_ENDPOINT
+(orchestrator/Core/hf_hub.py hub_api), and the file list is read by hf_hub.hub_file. Nothing here returns or logs the
+token.
 """
 
 import fnmatch
@@ -16,7 +18,7 @@ from typing import Any, List, Optional, Tuple
 
 # One licence allowlist and keyword list, one gating map and one file record for every Hugging Face path
 # (builds here, get_hf_model_info and download_hf_file in hf_hub), so a model is classified the same everywhere.
-from orchestrator.Core.hf_hub import HubFile, classify_license, gating
+from orchestrator.Core.hf_hub import HubFile, classify_license, gating, hub_api, hub_file
 from orchestrator.utils.helpers import redact_secrets
 
 # What the build engine leaves out when it stages a repository (one list for staging and for the size look-up).
@@ -97,9 +99,8 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
     token=False goes to every call: never an implicit token). HubLookupError with a reason code when the repository
     cannot be read; a gated repository the stored token cannot read is refused here, before any question:
     needs_person without a stored token, permission_denied with one that has no access."""
-    from huggingface_hub import HfApi
     from huggingface_hub.utils import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
-    api = api or HfApi()
+    api = api or hub_api(token)  # huggingface.co only, never the host in HF_ENDPOINT
     auth = token or False
     try:
         info = api.model_info(repo, revision=revision, files_metadata=True, token=auth)
@@ -132,9 +133,7 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
     base = get("base_model", None)
     bases = [b for b in (base if isinstance(base, (list, tuple)) else [base]) if b is not None]
     base = bases[0] if bases else None
-    files = [HubFile(s.rfilename, getattr(s, "size", None),
-                     getattr(getattr(s, "lfs", None), "sha256", None) if getattr(s, "lfs", None) else None)
-             for s in (getattr(info, "siblings", None) or [])]
+    files = [hub_file(s) for s in (getattr(info, "siblings", None) or [])]
     names = [f.name for f in files]
     keep = set(staged_files(names))
     safetensors = getattr(info, "safetensors", None)

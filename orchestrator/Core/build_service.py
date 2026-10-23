@@ -749,9 +749,10 @@ class BuildService:
         cannot be asked."""
         if bool(self._config_get("offline_mode", False)) or not HF_REPO_ID.match(str(repo or "")):
             return None
-        from huggingface_hub import HfApi
-        try:
-            sha = getattr(HfApi().model_info(repo, token=self.hf_token() or False, timeout=10), "sha", None)
+        from orchestrator.Core.hf_hub import hub_api
+        token = self.hf_token()
+        try:  # the stored token or none, only to huggingface.co (hf_hub.hub_api, never the host in HF_ENDPOINT)
+            sha = getattr(hub_api(token).model_info(repo, token=token or False, timeout=10), "sha", None)
         except Exception:  # noqa: BLE001 - not known: the earlier build is reported as "commit not checked"
             return None
         return sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) else None

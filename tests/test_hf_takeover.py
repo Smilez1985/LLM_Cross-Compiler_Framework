@@ -196,6 +196,21 @@ class TestTakeOver:
         assert not (area.models / "hf" / "acme--tiny-GGUF" / OLD_COMMIT[:12] / "config.json").exists()
         assert no_temporary_files(area.models)
 
+    def test_an_interrupt_during_a_copy_leaves_no_half_file(self, area, monkeypatch):
+        # A second Ctrl+C at a terminal (llm-cli models take-over) interrupts the copy itself: its temporary file
+        # goes, and nothing gets the file's name.
+        from orchestrator.utils import helpers
+        two_files(area)
+
+        def interrupted(src, dst, **kwargs):
+            Path(dst).write_bytes(b"half")
+            raise KeyboardInterrupt
+        monkeypatch.setattr(helpers, "copy_hashed", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            hf_takeover.take_over(area.models, hf_takeover.old_cache(area.models))
+        assert no_temporary_files(area.models) and not (area.models / "hf" / "acme--tiny-GGUF" /
+                                                         OLD_COMMIT[:12] / "config.json").exists()
+
     def test_only_what_the_cache_listed_for_this_folder_is_copied(self, area, tmp_path):
         two_files(area)
         (file, _) = hf_takeover.old_cache(area.models)
@@ -434,3 +449,141 @@ class TestTheBrowsersTakeOver:
         window.win.take_over()
         self.settle(qapp, window.win)
         assert [kind for kind, _, _ in window.boxes] == ["information"] and window.asked == []
+
+
+class TestTheCommandLinesTakeOver:
+    """`llm-cli models take-over` (headless installations): the same core calls as the browser's Take over old
+    downloads... (ModelManager.old_downloads, take_over, old_copies_plan, delete_old_copies), the full list and the yes
+    question with "No" as the default, then the full deletion list (confirm_deletion: trash or for good, "No" as the
+    default); only at a terminal."""
+
+    @pytest.fixture
+    def cli(self, area, monkeypatch):
+        import io
+        from click.testing import CliRunner
+        from rich.console import Console
+        from orchestrator import cli as cli_module
+        from orchestrator.Core.model_manager import ModelManager
+        settings = {"models_dir": str(area.models)}
+        config = SimpleNamespace(get=lambda key, default=None: settings.get(key, default),
+                                 user_state_dir=str(area.state))
+        audit = Audit()
+        framework = SimpleNamespace(config=config, resolve_path=lambda p: Path(p), secrets_manager=None,
+                                    tool_registry=SimpleNamespace(audit=audit))
+        framework.model_manager = ModelManager(framework)
+        trash = Trash(area.state, audit=Audit())
+        monkeypatch.setattr(cli_module, "_cli_trash", lambda ctx: trash)
+
+        class Ctx(cli_module.FrameworkContext):
+            def require_framework(self):
+                self.framework_manager = framework
+                return self
+
+        def invoke(answer=None, terminal=True):
+            printed = io.StringIO()
+            # wide enough that the deletion table never folds a full path (Windows temp paths are long)
+            monkeypatch.setattr(cli_module, "console", Console(file=printed, width=2000, color_system=None))
+            monkeypatch.setattr(cli_module, "_interactive", lambda: terminal)
+            result = CliRunner().invoke(cli_module.cli, ["models", "take-over"], obj=Ctx(), input=answer)
+            return result, printed.getvalue() + result.output
+
+        return SimpleNamespace(invoke=invoke, audit=audit, trash=trash, settings=settings)
+
+    def test_without_a_terminal_nothing_is_copied(self, area, cli):
+        folder = two_files(area)
+        result, out = cli.invoke(terminal=False)
+        assert result.exit_code == 0 and "Nothing was copied: the take-over needs your answer at a terminal" in out
+        assert f"{REPO} / tiny-q4_k_m.gguf" in out and not (area.models / "hf").exists() and folder.is_dir()
+
+    def test_the_full_list_and_no_by_default(self, area, cli):
+        from orchestrator.utils.localization import ui_text
+        names = {f"part-{i:02d}.gguf": (WEIGHTS + bytes([i]), True) for i in range(20)}   # more than the GUI shows
+        old_cache(area.models, REPO, files=names)
+        result, out = cli.invoke(answer="\n")
+        assert all(f"{REPO} / {name}" in out for name in names), "every file is listed"
+        assert ui_text("hf.takeover.ask", "en").split("{n}")[0] in out and "[y/N]" in out
+        assert "Nothing was copied." in out and not (area.models / "hf").exists()
+
+    def test_a_yes_copies_then_the_old_copies_stay_without_a_second_yes(self, area, cli):
+        folder = two_files(area)
+        result, out = cli.invoke(answer="y\n\n\n")   # copy; then the trash (default) and No (default)
+        assert result.exit_code == 0, out
+        assert new_place(area, "tiny-q4_k_m.gguf").read_bytes() == WEIGHTS
+        assert new_place(area, "config.json").read_bytes() == CONFIG
+        assert "Copied 2 of 2 files" in out and str(folder) in out, "the deletion list names the full path"
+        assert "Nothing was deleted." in out and folder.is_dir() and cli.audit.entries == []
+
+    def test_a_yes_to_the_list_removes_exactly_the_old_copies(self, area, cli):
+        folder = two_files(area)
+        result, out = cli.invoke(answer="y\npermanent\ny\n")
+        assert result.exit_code == 0, out
+        assert f"Deleted for good: {REPO} (old download cache)" in out and not folder.exists()
+        (entry,) = cli.audit.entries
+        assert entry["actor"] == "cli" and entry["outcome"] == "old_downloads_deleted"
+        assert new_place(area, "config.json").read_bytes() == CONFIG
+
+    def test_into_the_trash(self, area, cli):
+        folder = two_files(area)
+        result, out = cli.invoke(answer="y\ntrash\ny\n")
+        assert f"Moved to the trash: {REPO} (old download cache)" in out and not folder.exists()
+        assert len(cli.trash.entries()) == 1
+
+    def test_after_a_take_over_only_the_removal_is_offered(self, area, cli):
+        folder = two_files(area)
+        hf_takeover.take_over(area.models, hf_takeover.old_cache(area.models))
+        result, out = cli.invoke(answer="\n\n")
+        assert "Copy exactly" not in out and str(folder) in out and "Nothing was deleted." in out
+        assert folder.is_dir()
+
+    def test_nothing_to_take_over_says_so(self, cli):
+        from orchestrator.utils.localization import ui_text
+        result, out = cli.invoke()
+        assert result.exit_code == 0 and ui_text("hf.takeover.none", "en") in out
+
+    def test_offline_it_behaves_as_the_browser(self, area, cli):
+        """Offline mode: the take-over copies what the old cache can check itself; a file only Hugging Face could
+        check stays, with the reason the GUI shows (hf.takeover.why.offline), and Hugging Face is not asked."""
+        from orchestrator.utils.localization import ui_text
+        cli.settings["offline_mode"] = True
+        old_cache(area.models, REPO, files={"plain.gguf": (WEIGHTS, True)}, links=False)
+        result, out = cli.invoke(answer="y\n")
+        assert ui_text("hf.takeover.why.offline", "en") in out and "Copied 0 of 1 files" in out
+        assert not new_place(area, "plain.gguf").exists()
+
+    def test_offline_it_opens_no_socket(self, area, cli, monkeypatch):
+        from test_hf_online import guard_sockets
+        tried = guard_sockets(monkeypatch)
+        cli.settings["offline_mode"] = True
+        old_cache(area.models, REPO, files={"plain.gguf": (WEIGHTS, True)}, links=False)
+        result, out = cli.invoke(answer="y\n")
+        assert result.exit_code == 0 and "Copied 0 of 1 files" in out
+        assert tried == [], "a connection was tried in offline mode"
+
+    def test_a_failed_take_over_is_one_plain_line(self, area, cli, monkeypatch):
+        # Regression (review of chain hf-online): only a disk that cannot hold the copies was caught, so a file in use
+        # by another llm-cli or the GUI (its per-file lock) ended the command with a Python traceback; the window
+        # shows "Nothing was taken over: <reason>" for every failure, and so does the command line now.
+        from orchestrator.utils import download
+        from orchestrator.utils.localization import ui_text
+        two_files(area)
+        busy = "The file is in use by another llm-cli or GUI; try again when it has finished."
+
+        class Busy:
+            def __init__(self, path, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                raise download.DownloadError(busy)
+
+            def __exit__(self, *exc):
+                return False
+        monkeypatch.setattr(download, "FileLock", Busy)
+        result, out = cli.invoke(answer="y\n")
+        assert result.exit_code == 1 and isinstance(result.exception, SystemExit), result.exception
+        assert ui_text("hf.takeover.failed", "en", reason=busy) in out
+        assert not (area.models / "hf" / "acme--tiny-GGUF" / OLD_COMMIT[:12] / "config.json").exists()
+
+    def test_the_command_is_in_the_parity_table(self):
+        from orchestrator.gui.menus import existing
+        assert existing.CLI_PATHS["models take-over"] == "btn_hf_take_over"
+        assert existing.WINDOW_OBJECTS["btn_hf_take_over"] == "act_tools_hf_browser"
