@@ -245,6 +245,11 @@ def make_input(tmp_path: Path, kind: str) -> Path:
         (tmp_path / "ggufs").mkdir()
         write_gguf(tmp_path / "ggufs" / "model-Q4_K_M.gguf")
         return tmp_path / "ggufs"
+    if kind == "gguf repository":  # a GGUF repository with the config.json of its model, no weights to convert
+        (tmp_path / "repo").mkdir()
+        (tmp_path / "repo" / "config.json").write_text("{}")
+        write_gguf(tmp_path / "repo" / "model-Q4_K_M.gguf")
+        return tmp_path / "repo"
     if kind == "tflite":
         (tmp_path / "model.tflite").write_bytes(b"TFL3")
         return tmp_path / "model.tflite"
@@ -268,6 +273,7 @@ def make_input(tmp_path: Path, kind: str) -> Path:
     ("safetensors file", "weights-file", "'model.safetensors' is a SafeTensors file, the weights only"),
     ("pytorch file", "weights-file", "'pytorch_model.bin' is a PyTorch weights file, the weights only"),
     ("gguf folder", "gguf-folder", "The folder holds GGUF files but no Hugging Face model"),
+    ("gguf repository", "gguf-folder", "The folder holds GGUF files but no Hugging Face model"),
     ("tflite", "tflite", "'model.tflite' is a TensorFlow Lite model"),
     ("text file", "file", "'notes.txt' is no model this stage converts"),
     ("bare folder", "folder", None),  # the converter has the last word (the warnings of 1.x say what is missing)
@@ -861,14 +867,14 @@ def test_a_generated_target_converts_with_the_same_checks(tmp_path):
 
 
 def test_the_stats_reach_build_info_through_the_one_file_the_target_stage_reads():
-    """The convert stage writes convert_stats.json in the stage folder; the target stage of every shipped target puts
-    it into build_info.json as "conversion" (one name on both sides)."""
+    """The convert stage writes convert_stats.json in the stage folder; the target stage of every shipped target reads
+    the same file (one name on both sides). That it lands in build_info.json as "conversion" is pinned by the builds
+    above (Rockchip) and test_a_generated_target_converts_with_the_same_checks (template)."""
     for target in (ROCKCHIP, TEMPLATE):
         convert = (target / "modules" / "convert_module.sh").read_text(encoding="utf-8")
         stage = (target / "modules" / "target_module.sh").read_text(encoding="utf-8")
         assert 'CONVERT_STATS="$PLAN_DIR/convert_stats.json"' in convert
-        assert 'CONVERT_STATS="$PLAN_DIR/convert_stats.json"' in stage
-        assert '\\"conversion\\": $(cat "$CONVERT_STATS")' in stage
+        assert "convert_stats.json" in stage
 
 
 def test_the_functional_test_is_bounded():

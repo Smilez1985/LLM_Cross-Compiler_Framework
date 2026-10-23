@@ -154,7 +154,7 @@ def detect(path: Path) -> Dict[str, Any]:
         info["kind"] = "huggingface"
     elif onnx:
         info["kind"] = "onnx"
-    elif gguf and not has_config:
+    elif gguf:  # GGUF files and no weights to convert (a GGUF repository may have a config.json as well)
         info["kind"] = "gguf-folder"
     elif has_config:
         info["kind"] = "huggingface"   # without weights: the warning of the convert stage says so
@@ -533,7 +533,7 @@ def cmd_input(args) -> None:
         stats["weights"] = info["weights"]
     write_stats(Path(args.stats), stats, fresh=True)
     if kind == "gguf" and args.format == "gguf":
-        log("Nothing to convert: the input is a GGUF file already, which the target stage quantizes.")
+        log("Nothing to convert: the input is a GGUF file already (quantized or measured as it is).")
 
 
 def cmd_begin(args) -> None:
