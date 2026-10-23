@@ -47,6 +47,23 @@ def _block(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def hardware_id(value: Any) -> str:
+    """A vendor or device id of target.yml or of a probe as one spelling: '0x' and four or more lower-case hex
+    digits. YAML reads an unquoted `vendor_id: 0x1e60` as the integer 7776, a quoted one as the text '0x1E60'; both
+    give '0x1e60'. Other text is compared lower-cased as before; nothing (None, a boolean, 0, an empty value) is ''."""
+    if isinstance(value, bool) or value is None:
+        return ""
+    if isinstance(value, int):
+        return f"0x{value:04x}" if value > 0 else ""
+    text = str(value).strip().lower()
+    if text.startswith("0x") and len(text) > 2:
+        try:
+            return f"0x{int(text, 16):04x}"
+        except ValueError:
+            return text
+    return text
+
+
 def resolve_target_name(name: Optional[str], folders: Dict[str, Path]) -> Optional[str]:
     """The registered id for a name the user typed: the id itself, else its folder name, each first exactly and
     then ignoring the letter case. None for an unknown name."""
@@ -271,13 +288,15 @@ class TargetManager:
         """
         if not self._initialized: self.initialize()
 
-        # Extrahiere IDs aus der Probe
-        p_gpu_vid = probe_data.get("GPU_VENDOR_ID", "").lower()
-        p_npu_vid = probe_data.get("NPU_VENDOR_ID", "").lower()
-        p_cpu_arch = probe_data.get("ARCH", "").lower()
+        # Extrahiere IDs aus der Probe (the same spelling as the target's ids: hardware_id)
+        p_gpu_vid = hardware_id(probe_data.get("GPU_VENDOR_ID", ""))
+        p_npu_vid = hardware_id(probe_data.get("NPU_VENDOR_ID", ""))
+        p_cpu_arch = str(probe_data.get("ARCH", "") or "").lower()
 
         def value(hw: Dict[str, Any], part: str, key: str) -> str:
-            return str(_block(hw.get(part)).get(key) or '').lower()
+            raw = _block(hw.get(part)).get(key)
+            # a vendor or device id may be an integer (unquoted 0x1e60 in YAML) or text: one spelling either way
+            return hardware_id(raw) if key.endswith("_id") else str(raw or '').lower()
 
         for tid, tdata in self._targets.items():
             # An empty block (`hardware:`, `cpu:`, `npu:` or `gpu:` with nothing under it: YAML reads null) or one that
