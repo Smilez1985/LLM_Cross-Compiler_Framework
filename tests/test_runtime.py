@@ -836,7 +836,9 @@ class TestServerCommand:
         cpu = build_server_command(Path("s"), Path("m"), 1, Path("k"), 4096, "x", gpu=False, cache_ram_mib=256)
         assert "-ngl" not in cpu and "--sleep-idle-seconds" not in cpu
 
-    @pytest.mark.parametrize("alias", ["--tools", "--api-key", "--agent", "--rpc", "--webui"])
+    # --reuse-port (SO_REUSEPORT) would let another process of this user bind the server's port beside it.
+    @pytest.mark.parametrize("alias", ["--tools", "--api-key", "--agent", "--rpc", "--webui", "-hfr", "--hf-token",
+                                       "-mmu", "--log-prompts-dir", "--reuse-port", "--reuse_port"])
     def test_forbidden_options_never_reach_the_server(self, alias):
         with pytest.raises(LocalRuntimeError, match="Refusing"):
             build_server_command(Path("s"), Path("m"), 1, Path("k"), 4096, alias, gpu=False, cache_ram_mib=256)

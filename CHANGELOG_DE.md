@@ -3102,8 +3102,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Eine Startregel für jedes llama.cpp-Programm, das das Framework startet (`orchestrator/runtime/server_policy.py`):
   Dittos Server, die Prüfungen nach dem Build, die Perplexity-Prüfung, das Startskript und die systemd-Unit auf einem
   Board und die Prüfungen dort teilen eine Liste verbotener Optionen (Tools, Agentenmodus, MCP, Weboberfläche,
-  entferntes Rechnen, Downloads, ein Prompt-Protokoll auf der Platte, ein Schlüssel oder Token auf der Befehlszeile,
-  in jeder Schreibweise, die llama.cpp annimmt, auch `--a_b` für `--a-b`) und eine geleerte Umgebung, und jeder
+  entferntes Rechnen, Downloads, ein Prompt-Protokoll auf der Platte, ein Port, den ein anderer Prozess mitbenutzen
+  dürfte (`--reuse-port`), ein Schlüssel oder Token auf der Befehlszeile, in jeder Schreibweise, die llama.cpp annimmt,
+  auch `--a_b` für `--a-b`) und eine geleerte Umgebung, und jeder
   Server lauscht nur auf 127.0.0.1 und liest seinen Schlüssel aus einer privaten Datei, gebunden an dieselben
   Server-Optionen (Dittos Befehlszeile wird unmittelbar vor dem Start noch einmal geprüft, die des Startskripts, wenn
   es erzeugt wird). `runtime start` startet nur einen Build, der seine Prüfung auf diesem

@@ -2748,8 +2748,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - One launch policy for every llama.cpp program the framework starts (`orchestrator/runtime/server_policy.py`):
   Ditto's server, the build checks, the perplexity check, the start script and systemd unit on a board and the
   checks there share one list of forbidden options (tools, agent mode, MCP, web UI, remote compute, downloads, a
-  prompt log on disk, a key or token on the command line, in every spelling llama.cpp accepts, also `--a_b` for
-  `--a-b`) and a cleared environment, and every server listens on 127.0.0.1 only and reads its key from a private
+  prompt log on disk, a port another process may bind as well (`--reuse-port`), a key or token on the command line,
+  in every spelling llama.cpp accepts, also `--a_b` for `--a-b`) and a cleared environment, and every server listens on 127.0.0.1 only and reads its key from a private
   file, held to the same server options (Ditto's command line is checked again right before the start, the start
   script's when it is generated). `runtime start` starts only a build that
   passed its verification on this machine, still matches its manifest and is of the pinned commit (else its CPU
