@@ -9,7 +9,8 @@ tests/test_board_steps.py check the calls and the module name in that code.
 
 - trust_presented_key(store, endpoint, key, *, via, audit, actor=""): stores a key the person confirmed in the
   framework's known_hosts (atomically, readable only by this user) and writes its audit row in the same step, so a key
-  trusted before a login that then fails is audited too.
+  trusted before a login that then fails is audited too. PersonChannel(via, audit, actor) carries it for the
+  deprecated DeploymentManager.trust_host, a thin delegate that trusts only with the person's channel (P5).
 - first_use(store, check, *, ask, preset_fingerprint=None, via, audit, actor=""): the one decision of trust on first
   use behind `llmcf deploy run`, `llmcf scan --device` and the GUI's host-key question. A known key goes on, a changed
   key is refused, an unknown key is trusted only when it matches --trust-fingerprint or the person said yes (each
@@ -78,6 +79,28 @@ def trust_presented_key(store: TrustStore, endpoint: Endpoint, key: Any, *, via:
                    approved=True, extra={"confirm_channel": f"framework-{via}", "answer": "accepted"})
     except Exception:  # noqa: BLE001 - logged by the audit log itself
         pass
+
+
+# The person's own channels: the only `via` a PersonChannel takes.
+PERSON_CHANNELS = ("cli", "gui")
+
+
+@dataclass(frozen=True)
+class PersonChannel:
+    """The person's channel as the deprecated DeploymentManager.trust_host takes it (DECISIONS round 22, P5): `via`
+    (cli or gui), the audit log or a function that opens it, and the actor of its rows. Only the person's channels
+    make one: no module an AI can reach imports this module (tests/test_remote_trust.py). trust_presented_key() is the
+    one implementation above, with its audit row."""
+    via: str
+    audit: Any = None
+    actor: str = ""
+
+    def __post_init__(self) -> None:
+        if self.via not in PERSON_CHANNELS:
+            raise ValueError(f"a person's channel is one of {', '.join(PERSON_CHANNELS)}")
+
+    def trust_presented_key(self, store: TrustStore, endpoint: Endpoint, key: Any) -> None:
+        trust_presented_key(store, endpoint, key, via=self.via, audit=self.audit, actor=self.actor)
 
 
 @dataclass(frozen=True)
@@ -272,5 +295,5 @@ def record_consent(audit: Any, tool: str, arguments: Dict[str, Any], detail: str
                  extra={"answer": "accepted", "confirm_channel": channel})
 
 
-__all__ = ["FirstUse", "KeyReplaceError", "KeyReplacement", "first_use", "pair", "plan_replacement",
-           "record_consent", "replace_key", "trust_presented_key"]
+__all__ = ["FirstUse", "KeyReplaceError", "KeyReplacement", "PERSON_CHANNELS", "PersonChannel", "first_use", "pair",
+           "plan_replacement", "record_consent", "replace_key", "trust_presented_key"]

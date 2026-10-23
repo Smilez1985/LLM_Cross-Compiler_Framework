@@ -566,10 +566,24 @@ class DeploymentManager:
         check = self.trust_store().check(Endpoint(target_ip, port))
         return check.status, check.key
 
-    def trust_host(self, target_ip: str, key, port: int = 22) -> None:
-        """Stores a host key the user confirmed by comparing its fingerprint (the old primitive without an audit row;
-        the person's channels trust through orchestrator/remote/pairing.py trust_presented_key)."""
-        ssh_trust.trust_host_key(self._state_dir(), target_ip, port, key)
+    def trust_host(self, target_ip: str, key, port: int = 22, *, person: Any = None) -> None:
+        """Deprecated (DECISIONS round 22, P5): a thin delegate to orchestrator/remote/pairing.py trust_presented_key,
+        the one writer of a confirmed host key, which stores it in this deploy's known_hosts under its lock and writes
+        the trust's audit row in the same step. Only the person's: `person` is the pairing.PersonChannel of the
+        calling channel (the CLI or the GUI, with its audit log). No module an AI can reach imports pairing
+        (tests/test_remote_trust.py), so nothing an AI runs holds one, and no code of the framework calls this method.
+        Without it nothing is trusted (PermissionError): the old primitive without an audit row is gone."""
+        import warnings
+        from orchestrator.remote.address import Endpoint, valid_port
+        warnings.warn("DeploymentManager.trust_host is deprecated: the person's channels trust a host key with "
+                      "orchestrator.remote.pairing.trust_presented_key", DeprecationWarning, stacklevel=2)
+        trust = getattr(person, "trust_presented_key", None)
+        if not callable(trust):
+            raise PermissionError("Only the person trusts a board's host key, in the GUI or the CLI: pass the "
+                                  "channel's orchestrator.remote.pairing.PersonChannel; nothing was trusted.")
+        if not valid_host(target_ip) or not valid_port(port):
+            raise ValueError("the board's address must be a host name or an IP address with a port from 1 to 65535")
+        trust(self.trust_store(), Endpoint(target_ip, port), key)
 
     def deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, **options: Any) -> DeployResult:
         """Uploads the package and runs its deploy.sh on the device (_deploy_package says how), and records for Mojo

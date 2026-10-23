@@ -14,7 +14,8 @@ pair and replace keys with their audit rows live in orchestrator/remote/pairing.
 install_public_key through this module (tests replace them here). Of the modules an AI can reach, only
 orchestrator/remote/session.py RemoteSession.pair calls install_public_key, and only with the person's
 OneTimePassword credentials (every AI path logs in with KeyOnly); none calls trust_host_key on an AI's behalf
-(DeploymentManager.trust_host, the old primitive without an audit row, has no caller).
+(DeploymentManager.trust_host, deprecated, names no writer: it delegates to pairing.trust_presented_key through the
+person's PersonChannel, and nothing in the framework calls it).
 
 paramiko is imported on first use (orchestrator/remote/transport.py, decision RG1): importing this module, the deploy or
 the probe code loads no SSH library. The login (connect) and paramiko_quiet live in orchestrator/remote/transport.py;

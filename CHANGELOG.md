@@ -2039,6 +2039,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   list. Use the hidden prompt or `--with-token`.
 - `llm-cli build start --parallel`: it never had an effect (one call runs one build). It is hidden from the help
   and prints a warning. `--optimization` stays; its help now says that the Rockchip target ignores it.
+- `DeploymentManager.trust_host` (DECISIONS round 22, P5): the old writer of a confirmed host key, without an audit
+  row, that nothing in the framework calls. It is now a thin delegate to `orchestrator/remote/pairing.py`
+  `trust_presented_key`, the one writer, which stores the key under its lock and writes the trust's audit row in the
+  same step. Only the person can use it: it takes the channel's `pairing.PersonChannel` (`cli` or `gui`, with the
+  audit log), which only the person's channels can make, because no module an AI can reach imports `pairing`. Without
+  one it trusts nothing and raises `PermissionError`; every call warns with `DeprecationWarning`. The guard in
+  `tests/test_remote_trust.py` is tighter now: the deploy module names no trust writer at all.
 
 ### Removed
 - The Builder tab's unused `LocalProbeWorker`, a second runner of the fallback probe script (its own subprocess call

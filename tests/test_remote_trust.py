@@ -563,11 +563,11 @@ def test_the_import_guard_bites():
 
 # The primitives that write the framework's known_hosts or a board's authorized_keys (orchestrator/utils/ssh_trust.py).
 TRUST_WRITERS = ("trust_host_key", "save_host_keys", "install_public_key")
-# The only places a module an AI can reach names one of them: ssh_trust itself (their definitions), the session's pair(),
-# which only the person's OneTimePassword credentials reach (every AI path logs in with KeyOnly), and the old
-# DeploymentManager.trust_host, which nothing calls.
-WRITER_PLACES = {("orchestrator.remote.session", "RemoteSession.pair"),
-                 ("orchestrator.Core.deployment_manager", "DeploymentManager.trust_host")}
+# The only places a module an AI can reach names one of them: ssh_trust itself (their definitions) and the session's
+# pair(), which only the person's OneTimePassword credentials reach (every AI path logs in with KeyOnly). The deprecated
+# DeploymentManager.trust_host names none since P5 (DECISIONS round 22): it delegates to pairing.trust_presented_key
+# through the person's PersonChannel, and nothing calls it.
+WRITER_PLACES = {("orchestrator.remote.session", "RemoteSession.pair")}
 
 
 def writer_uses(module: str, source: str):
@@ -591,8 +591,8 @@ def writer_uses(module: str, source: str):
 
 def test_no_module_an_ai_can_reach_writes_trust_except_the_person_s_one_time_password_session():
     """ssh_trust's promise (stage C seam): of the modules an AI can reach, only RemoteSession.pair names a trust writer
-    (install_public_key, gated by OneTimePassword), and DeploymentManager.trust_host, the old primitive without an audit
-    row, has no caller anywhere in the framework."""
+    (install_public_key, gated by OneTimePassword), and DeploymentManager.trust_host, the deprecated delegate that
+    trusts only with the person's PersonChannel (P5), names none and has no caller anywhere in the framework."""
     import test_layering
     via = ai_reachable_closure(test_layering.build_graph().edges())
     uses = set()
@@ -607,6 +607,72 @@ def test_no_module_an_ai_can_reach_writes_trust_except_the_person_s_one_time_pas
     assert ("orchestrator.remote.session", "RemoteSession.pair") in uses, "the guard reads the session"
     callers = [p for p in test_layering.PACKAGE.rglob("*.py") if ".trust_host(" in p.read_text(encoding="utf-8")]
     assert callers == [], callers
+
+
+class TestTrustHostDelegate:
+    """P5 (DECISIONS round 22): DeploymentManager.trust_host is deprecated and a thin delegate to
+    pairing.trust_presented_key, for the person only: with the channel's PersonChannel it stores the key in the deploy's
+    known_hosts and writes the same audit row; without one nothing is trusted."""
+
+    def manager(self, state):
+        from orchestrator.Core.deployment_manager import DeploymentManager
+        return DeploymentManager(SimpleNamespace(config=SimpleNamespace(user_state_dir=str(state))))
+
+    def test_with_the_person_s_channel_it_is_trust_presented_key(self, tmp_path):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore, device_id_for
+        state, key, audit = tmp_path / "state", paramiko.ECDSAKey.generate(), Audit()
+        with pytest.warns(DeprecationWarning, match="trust_presented_key"):
+            self.manager(state).trust_host(HOST, key, 2222,
+                                           person=pairing.PersonChannel("gui", audit=lambda: audit, actor="gui"))
+        assert TrustStore(state).status(Endpoint(HOST, 2222), key) == "known"
+        if sys.platform != "win32":
+            assert TrustStore(state).path.stat().st_mode & 0o077 == 0
+        (row,) = audit.rows
+        fp = ssh_trust.fingerprint(key)
+        assert (row["actor"], row["tool"], row["outcome"], row["approved"]) == ("gui", "host_key_trusted", "ok", True)
+        assert row["arguments"] == {"device_id": device_id_for(fp), "fingerprint": fp,
+                                    "key_type": "ecdsa-sha2-nistp256"}
+        assert row["extra"] == {"confirm_channel": "framework-gui", "answer": "accepted"}
+
+    def test_it_goes_through_the_one_writer(self, tmp_path, monkeypatch):
+        from orchestrator.remote import pairing
+        seen = []
+        monkeypatch.setattr(pairing, "trust_presented_key", lambda store, endpoint, key, **kw: seen.append(
+            (store.state_dir, endpoint, key, kw)))
+        key = paramiko.ECDSAKey.generate()
+        with pytest.warns(DeprecationWarning):
+            self.manager(tmp_path / "state").trust_host(HOST, key, person=pairing.PersonChannel("cli", actor="cli"))
+        ((state_dir, endpoint, used, kw),) = seen
+        assert (state_dir, endpoint.host, endpoint.port, used) == (tmp_path / "state", HOST, 22, key)
+        assert kw == {"via": "cli", "audit": None, "actor": "cli"}
+
+    @pytest.mark.parametrize("person", [None, "cli", SimpleNamespace(via="cli")], ids=["none", "a word", "no writer"])
+    def test_without_the_person_s_channel_nothing_is_trusted(self, tmp_path, person):
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore
+        state, key = tmp_path / "state", paramiko.ECDSAKey.generate()
+        with pytest.warns(DeprecationWarning), pytest.raises(PermissionError, match="PersonChannel"):
+            self.manager(state).trust_host(HOST, key, person=person)
+        with pytest.warns(DeprecationWarning), pytest.raises(PermissionError):
+            self.manager(state).trust_host(HOST, key)   # the old call: the primitive without an audit row is gone
+        assert TrustStore(state).status(Endpoint(HOST), key) == "unknown" and not (state / "known_hosts").exists()
+
+    @pytest.mark.parametrize("host, port", [("-oProxyCommand=x", 22), ("host;reboot", 22), (HOST, 0), (HOST, True)])
+    def test_an_address_that_is_none_is_refused(self, tmp_path, host, port):
+        from orchestrator.remote import pairing
+        with pytest.warns(DeprecationWarning), pytest.raises(ValueError):
+            self.manager(tmp_path / "state").trust_host(host, paramiko.ECDSAKey.generate(), port,
+                                                        person=pairing.PersonChannel("cli"))
+        assert not (tmp_path / "state" / "known_hosts").exists()
+
+    def test_only_the_person_s_channels_make_a_person_channel(self):
+        from orchestrator.remote import pairing
+        for via in ("mcp", "ditto", "", "framework-gui"):
+            with pytest.raises(ValueError):
+                pairing.PersonChannel(via)
+        assert {pairing.PersonChannel(v).via for v in pairing.PERSON_CHANNELS} == {"cli", "gui"}
 
 
 def test_the_trust_writer_guard_bites():
