@@ -746,6 +746,31 @@ esac
 BOARD=$(dt_prop model ' ')
 [ -n "$BOARD" ] && put_text BOARD_MODEL "$BOARD" quiet
 
+# NVIDIA Jetson (decision O-PREP; read only when NVIDIA's files are there): the L4T release of /etc/nv_tegra_release
+# ("# R35 (release), REVISION: 4.1, ..." -> 35.4.1) and the JetPack version of the installed package nvidia-jetpack.
+if [ "$OS" = linux ] && [ "$ARCH" = arm64 ]; then
+    if [ -f "$(f /etc/nv_tegra_release)" ]; then
+        v=$(sed '/^[[:space:]]*$/d' "$(f /etc/nv_tegra_release)" 2>/dev/null | head -n1 |
+            sed -n 's/^#[[:space:]]*R\([0-9][0-9]*\)[[:space:]]*(release),[[:space:]]*REVISION:[[:space:]]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1.\2/p')
+        if [ -n "$v" ]; then put JETSON_L4T_VERSION "$v" '^[0-9]{2}\.[0-9]{1,2}\.[0-9]{1,2}$'
+        else warn "not_determined:JETSON_L4T_VERSION"
+        fi
+    fi
+    if [ -f "$(f /var/lib/dpkg/status)" ]; then
+        v=$(awk '
+            function check() {
+                if (pkg == "nvidia-jetpack" && st == "install ok installed" && !done) { print ver; done = 1 }
+                pkg = ""; st = ""; ver = ""; hp = 0; hs = 0; hv = 0
+            }
+            /^$/ { check(); next }
+            /^Package: / && !hp { pkg = substr($0, 10); hp = 1 }
+            /^Status: / && !hs { st = substr($0, 9); hs = 1 }
+            /^Version: / && !hv { ver = substr($0, 10); hv = 1 }
+            END { check() }' "$(f /var/lib/dpkg/status)" 2>/dev/null | sed -n 's/^\([0-9][0-9.]*\).*/\1/p' | head -n1)
+        put JETSON_JETPACK_VERSION "$v" '^[0-9]{1,2}\.[0-9]{1,2}(\.[0-9]{1,2})?$' quiet
+    fi
+fi
+
 # --- NPU and USB-attached boards -------------------------------------------------------------------------------
 
 PCI_IDS=""
@@ -807,6 +832,7 @@ for n in "$(f /dev)"/apex_[0-9]*; do [ -e "$n" ] && { APEX_NODE=/dev/${n##*/}; b
 for n in "$(f /sys/class/accel)"/accel[0-9]*; do
     if [ "$(link_name "$n/device/driver")" = intel_vpu ]; then INTEL_NODE=/dev/accel/${n##*/}; break; fi
 done
+[ "$OS" = linux ] && put INTEL_NPU_DEVICE "$INTEL_NODE" '^/dev/accel/accel[0-9]{1,3}$' quiet
 # --- Hailo (HAILO_PLAN.md section 2; the same read order and rules as hardware_probe.py) -------------------------
 # Files first (no tool): /sys/module/<driver> (never lsmod), the sysfs classes, /dev nodes, PCI and USB ids. Then
 # hailortcli with fixed arguments and an empty stdin: -v, scan, fw-control identify -s <id> for up to 16 devices (never
@@ -1451,6 +1477,52 @@ if [ "$OS" = linux ]; then
     fi
     emit HIP_RUNTIME "$HIP"
     put ROCM_VERSION "$(first_number "$(rd /opt/rocm/.info/version)")" "$P_VERSION" quiet
+    # Decision O-PREP, each read only when it is there: the gfx targets of every KFD node (also compute devices that
+    # are no display controller), the CUDA toolkit release, the TensorRT and OpenVINO runtime libraries, the Intel GPU
+    # render node and its driver.
+    ROCM_GFX=""
+    for props in "$(f /sys/class/kfd/kfd/topology/nodes)"/*/properties; do
+        [ -f "$props" ] || continue
+        ver=$(awk '$1 == "gfx_target_version" { print $2; exit }' "$props")
+        case "$ver" in ''|*[!0-9]*) continue ;; esac
+        [ ${#ver} -le 9 ] || continue
+        [ "$ver" -gt 0 ] || continue
+        t=$(printf 'gfx%d%x%x' $((ver / 10000)) $((ver / 100 % 100)) $((ver % 100)))
+        valid '^gfx[0-9a-f]{3,5}$' "$t" || continue
+        case ",$ROCM_GFX," in *",$t,"*) ;; *) ROCM_GFX="${ROCM_GFX:+$ROCM_GFX,}$t" ;; esac
+    done
+    put ROCM_GFX_TARGETS "$(printf '%s' "$ROCM_GFX" | tr ',' '\n' | head -n16 | tr '\n' ',' | sed 's/,$//')" \
+        '^gfx[0-9a-f]{3,5}(,gfx[0-9a-f]{3,5})*$' quiet
+    if [ -f "$(f /usr/local/cuda/version.json)" ]; then
+        v=$(tr -d '\r\n' < "$(f /usr/local/cuda/version.json)" |
+            sed -n 's/.*"cuda"[[:space:]]*:[[:space:]]*{[^}]*"version"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p')
+        if [ -n "$v" ]; then put CUDA_TOOLKIT_VERSION "$v" "$P_DOTTED"; else warn "not_determined:CUDA_TOOLKIT_VERSION"; fi
+    elif [ -f "$(f /usr/local/cuda/version.txt)" ]; then
+        v=$(sed -n 's/^CUDA Version \([0-9][0-9.]*\).*/\1/p' "$(f /usr/local/cuda/version.txt)" | head -n1)
+        if [ -n "$v" ]; then put CUDA_TOOLKIT_VERSION "$v" "$P_DOTTED"; else warn "not_determined:CUDA_TOOLKIT_VERSION"; fi
+    fi
+    v=""
+    for m in "$(f /usr/lib)"/*/libnvinfer.so.* "$(f /usr/lib64)"/libnvinfer.so.* "$(f /usr/lib)"/libnvinfer.so.*; do
+        [ -e "$m" ] || [ -L "$m" ] || continue
+        if valid '^[0-9]+\.[0-9]+\.[0-9]+$' "${m##*/libnvinfer.so.}"; then v=${m##*/libnvinfer.so.}; break; fi
+    done
+    put TENSORRT_VERSION "$v" '^[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}$' quiet
+    v=""
+    for m in "$(f /usr/lib)"/libopenvino.so.* "$(f /usr/lib)"/*/libopenvino.so.* "$(f /usr/lib64)"/libopenvino.so.*; do
+        [ -e "$m" ] || [ -L "$m" ] || continue
+        if valid '^[0-9]+\.[0-9]+\.[0-9]+$' "${m##*/libopenvino.so.}"; then v=${m##*/libopenvino.so.}; break; fi
+    done
+    put OPENVINO_VERSION "$v" '^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$' quiet
+    for n in "$(f /sys/class/drm)"/renderD[0-9]*; do
+        [ -e "$n" ] || [ -L "$n" ] || continue
+        vendor=$(hexid "$(rdp "$n/device/vendor")" 4) || continue
+        drv=$(link_name "$n/device/driver") || drv=""
+        if [ "$vendor" = 0x8086 ] && { [ "$drv" = i915 ] || [ "$drv" = xe ]; }; then
+            put INTEL_GPU_DEVICE "/dev/dri/${n##*/}" '^/dev/dri/renderD[0-9]{1,3}$' quiet
+            put INTEL_GPU_DRIVER "$drv"
+            break
+        fi
+    done
 else
     emit HIP_RUNTIME OFF
 fi

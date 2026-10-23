@@ -680,3 +680,136 @@ class TestHailoAccess:
     def test_the_accessor_of_a_3_0_0_profile(self):
         facts = parse_profile((FIXTURES / "schema2_rk3566_dietpi.txt").read_text(encoding="utf-8")).hailo()
         assert facts.present is False and facts.family is None and facts.model is None and facts.hailort_line is None
+
+
+# --- O-PREP: vendor runtimes of targets the maintainer cannot test (read only when present) --------------------------
+
+DPKG_STATUS = """Package: nvidia-l4t-core
+Status: install ok installed
+Priority: standard
+Version: 36.4.0-20240912212859
+Description: NVIDIA Core Package
+ a continuation line: Version: 9.9.9
+
+Package: nvidia-jetpack
+Status: deinstall ok config-files
+Version: 5.1.2-b104
+
+Package: nvidia-jetpack
+Status: install ok installed
+Architecture: arm64
+Version: 6.1+b123
+"""
+CUDA_VERSION_JSON = """{
+   "cuda" : {
+      "name" : "CUDA SDK",
+      "version" : "12.6.3"
+   },
+   "cuda_cccl" : {
+      "name" : "CUDA C++ Core Compute Libraries",
+      "version" : "12.6.77"
+   }
+}
+"""
+
+
+def jetson(tmp_path):
+    root = make_sysroot(tmp_path, "rk3588")   # an arm64 board; the RK3588 parts do not matter here
+    write(root, "/etc/nv_tegra_release", "# R36 (release), REVISION: 4.0, GCID: 37537400, BOARD: generic, EABI: "
+                                         "aarch64, DATE: Fri Sep 13 04:36:44 UTC 2024\n# KERNEL_VARIANT: oot\n")
+    write(root, "/var/lib/dpkg/status", DPKG_STATUS)
+    write(root, "/usr/local/cuda/version.json", CUDA_VERSION_JSON)
+    write(root, "/usr/lib/aarch64-linux-gnu/libnvinfer.so.10.3.0", b"")
+    os.symlink("libnvinfer.so.10.3.0", root / "usr/lib/aarch64-linux-gnu/libnvinfer.so.10")
+    return root
+
+
+def intel_pc(tmp_path):
+    root = make_sysroot(tmp_path, "intel")
+    write(root, "/usr/lib/libopenvino.so.2025.3.0", b"")
+    os.symlink("libopenvino.so.2025.3.0", root / "usr/lib/libopenvino.so.2530")
+    for node, driver in (("renderD128", "i915"), ("renderD129", "xe")):
+        write(root, f"/sys/class/drm/{node}/device/vendor", "0x8086\n")
+        (root / f"sys/bus/pci/drivers/{driver}").mkdir(parents=True, exist_ok=True)
+        os.symlink(f"../../../../bus/pci/drivers/{driver}", root / f"sys/class/drm/{node}/device/driver")
+    (root / "sys/bus/pci/drivers/intel_vpu").mkdir(parents=True)
+    (root / "sys/class/accel/accel0/device").mkdir(parents=True)
+    os.symlink("../../../../bus/pci/drivers/intel_vpu", root / "sys/class/accel/accel0/device/driver")
+    return root
+
+
+class TestVendorRuntimes:
+
+    def test_parsers(self):
+        assert probe.parse_nv_tegra_release("# R35 (release), REVISION: 4.1, GCID: 33958178, BOARD: t186ref, "
+                                            "EABI: aarch64, DATE: Tue Aug 1 19:57:35 UTC 2023\n") == "35.4.1"
+        assert probe.parse_nv_tegra_release("# R32 (release), REVISION: 7.4\n") == "32.7.4"
+        assert probe.parse_nv_tegra_release("garbage\n") is None
+        assert probe.dpkg_installed_version(DPKG_STATUS.splitlines(True), "nvidia-jetpack") == "6.1+b123"
+        assert probe.dpkg_installed_version(DPKG_STATUS.splitlines(True), "nvidia-l4t-core") == "36.4.0-20240912212859"
+        assert probe.dpkg_installed_version(["Package: x\n"], "nvidia-jetpack") is None
+        assert probe.parse_cuda_version_file(CUDA_VERSION_JSON, True) == "12.6.3"
+        assert probe.parse_cuda_version_file("CUDA Version 10.2.300\n", False) == "10.2.300"
+
+    @POSIX_ONLY
+    @NEEDS_SHELL
+    def test_jetson(self, tmp_path):
+        profile = run_both(tmp_path, jetson(tmp_path), tool_dir(tmp_path))
+        assert (profile.get("JETSON_L4T_VERSION"), profile.get("JETSON_JETPACK_VERSION"),
+                profile.get("CUDA_TOOLKIT_VERSION"), profile.get("TENSORRT_VERSION")) == ("36.4.0", "6.1", "12.6.3",
+                                                                                         "10.3.0")
+        assert not [w for w in profile.warnings if "JETSON" in w or "CUDA" in w]
+
+    @POSIX_ONLY
+    @NEEDS_SHELL
+    def test_jetson_files_that_say_nothing(self, tmp_path):
+        root = jetson(tmp_path)
+        write(root, "/etc/nv_tegra_release", "# a damaged file\n")
+        write(root, "/usr/local/cuda/version.json", "{}\n")
+        write(root, "/var/lib/dpkg/status", "Package: nvidia-jetpack\nStatus: deinstall ok config-files\nVersion: 6.1\n")
+        profile = run_both(tmp_path, root, tool_dir(tmp_path))
+        assert not any(k in profile for k in ("JETSON_L4T_VERSION", "JETSON_JETPACK_VERSION", "CUDA_TOOLKIT_VERSION"))
+        assert {"not_determined:JETSON_L4T_VERSION", "not_determined:CUDA_TOOLKIT_VERSION"} <= set(profile.warnings)
+
+    @POSIX_ONLY
+    @NEEDS_SHELL
+    def test_cuda_version_txt_of_older_toolkits(self, tmp_path):
+        root = jetson(tmp_path)
+        (root / "usr/local/cuda/version.json").unlink()
+        write(root, "/usr/local/cuda/version.txt", "CUDA Version 10.2.300\n")
+        assert run_both(tmp_path, root, tool_dir(tmp_path)).get("CUDA_TOOLKIT_VERSION") == "10.2.300"
+
+    @POSIX_ONLY
+    @NEEDS_SHELL
+    def test_intel_openvino_gpu_and_npu(self, tmp_path):
+        profile = run_both(tmp_path, intel_pc(tmp_path), tool_dir(tmp_path))
+        assert (profile.get("OPENVINO_VERSION"), profile.get("INTEL_GPU_DEVICE"), profile.get("INTEL_GPU_DRIVER"),
+                profile.get("INTEL_NPU_DEVICE")) == ("2025.3.0", "/dev/dri/renderD128", "i915", "/dev/accel/accel0")
+        assert profile.get("NPU_DEVICE") == "/dev/accel/accel0" and profile.get("NPU_MODEL") == "intel-npu"
+        assert "JETSON_L4T_VERSION" not in profile   # x86: never looked for
+
+    @POSIX_ONLY
+    @NEEDS_SHELL
+    def test_rocm_gfx_targets_also_of_compute_devices(self, tmp_path):
+        root = make_sysroot(tmp_path, "amd")
+        # An Instinct card (PCI class 0x12, no display controller, so no GPU<n>) next to the APU's node of the fixture.
+        write(root, "/sys/class/kfd/kfd/topology/nodes/2/properties", "simd_count 304\ngfx_target_version 90402\n")
+        write(root, "/sys/class/kfd/kfd/topology/nodes/3/properties", "gfx_target_version 90402\n")
+        write(root, "/sys/class/kfd/kfd/topology/nodes/0/properties", "cpu_cores_count 16\ngfx_target_version 0\n")
+        profile = run_both(tmp_path, root, tool_dir(tmp_path))
+        assert profile.items_of("ROCM_GFX_TARGETS") == ["gfx1103", "gfx942"]
+        assert [g.get("GFX_TARGET") for g in profile.gpus()] == ["gfx1103"]
+
+    def test_nothing_is_written_without_the_files(self, tmp_path):
+        values = py_probe(make_sysroot(tmp_path, "intel"))
+        for key in ("JETSON_L4T_VERSION", "JETSON_JETPACK_VERSION", "CUDA_TOOLKIT_VERSION", "TENSORRT_VERSION",
+                    "OPENVINO_VERSION", "INTEL_GPU_DEVICE", "INTEL_GPU_DRIVER", "INTEL_NPU_DEVICE", "ROCM_GFX_TARGETS"):
+            assert key not in values, key
+        assert not any(k in values.get("PROBE_WARNINGS", "") for k in ("JETSON", "CUDA", "TENSORRT", "OPENVINO"))
+
+    @pytest.mark.parametrize("node", ["/dev/sda", "/dev/dri/card0", "/dev/accel/../mem"])
+    def test_device_keys_name_accelerator_nodes_only(self, node):
+        text = (FIXTURES / "schema2_linux_ivybridge.txt").read_text(encoding="utf-8")
+        for key in ("INTEL_GPU_DEVICE", "INTEL_NPU_DEVICE"):
+            with pytest.raises(Exception, match=key):
+                parse_profile(text + f"{key}={node}\n")

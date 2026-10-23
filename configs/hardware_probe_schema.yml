@@ -1153,6 +1153,42 @@ keys:
     normalise: "trailing NUL removed, whitespace trimmed and collapsed"
     consumers: [gui, proposal]
 
+  JETSON_L4T_VERSION:
+    group: soc
+    type: pattern
+    pattern: '^\d{2}\.\d{1,2}\.\d{1,2}$'
+    only_os: [linux]
+    only_arch: [arm64]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: >-
+        the first line of /etc/nv_tegra_release (NVIDIA Jetson Linux: "# R35 (release), REVISION: 4.1, GCID: ...,
+        BOARD: ..., EABI: aarch64, DATE: ..."; NVIDIA's Jetson Linux guide points to this file for the installed
+        release); read only when the file exists
+    normalise: >-
+      <R number>.<REVISION>: R35 with REVISION 4.1 -> 35.4.1 (the BSP version NVIDIA names r35.4.1 for JetPack 5.1.2);
+      a file without that line: left out with not_determined:JETSON_L4T_VERSION
+    consumers: [preflight, deploy, generator, gui]
+  JETSON_JETPACK_VERSION:
+    group: soc
+    type: pattern
+    pattern: '^\d{1,2}\.\d{1,2}(\.\d{1,2})?$'
+    only_os: [linux]
+    only_arch: [arm64]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: >-
+        /var/lib/dpkg/status: the Version of the package nvidia-jetpack when its Status is "install ok installed"
+        (what apt-cache show nvidia-jetpack reports; "5.1.2-b104" is JetPack 5.1.2); left out without the package
+        (a Jetson flashed with the BSP only), no warning
+    normalise: "the leading dotted number of the package version (6.1+b123 -> 6.1)"
+    consumers: [preflight, deploy, generator, gui]
   # --- NPU and USB-attached boards ---------------------------------------------------------------------------
   NPU_VENDOR:
     group: npu
@@ -1340,6 +1376,22 @@ keys:
     normalise: "ON/OFF"
     consumers: [preflight]
 
+  INTEL_NPU_DEVICE:
+    group: npu
+    type: pattern
+    # An accelerator node only (a deploy step may pass it to `docker run --device`), as NPU_DEVICE.
+    pattern: '^/dev/accel/accel[0-9]{1,3}$'
+    only_os: [linux]
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources:
+      linux: >-
+        the first /sys/class/accel/accel<N> whose device driver is intel_vpu (the Intel NPU of Core Ultra
+        processors), also when NPU_DEVICE describes another NPU
+    normalise: "/dev/accel/accel<N>"
+    consumers: [deploy, preflight, recipe]
   # --- Hailo accelerators (HAILO_PLAN.md section 2; written whatever NPU NPU_VENDOR describes) ------------------
   # Linux, files first (no tool): /sys/module/<driver> (never lsmod), the sysfs classes, /dev nodes, PCI and USB ids.
   # Then hailortcli with fixed arguments, an empty stdin and the time limit, never with sudo, at most 60 s in all:
@@ -1640,6 +1692,100 @@ keys:
     sources: {linux: "/opt/rocm/.info/version, else hipconfig --version"}
     normalise: "leading dotted number"
     consumers: [recipe]
+  ROCM_GFX_TARGETS:
+    group: gpu
+    type: list
+    item_pattern: '^gfx[0-9a-f]{3,5}$'
+    max_items: 16
+    only_os: [linux]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: >-
+        gfx_target_version of every KFD topology node (/sys/class/kfd/kfd/topology/nodes/*/properties, what
+        rocminfo reads), also of compute devices that are not display controllers (an AMD Instinct card has PCI
+        class 0x12, so it has no GPU<n> entry and no GPU<n>_GFX_TARGET)
+    normalise: "LLVM target names (110003 -> gfx1103), each once, in the order of the nodes; no KFD: left out"
+    consumers: [recipe, generator, preflight]
+  CUDA_TOOLKIT_VERSION:
+    group: gpu
+    type: pattern
+    pattern: '^\d{1,3}(\.\d{1,4}){1,3}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: >-
+        /usr/local/cuda/version.json, the "version" of its "cuda" object (installed by NVIDIA's package
+        cuda-toolkit-<X>-<Y>: {"cuda": {"name": "CUDA SDK", "version": "12.6.3"}, ...}); else the "CUDA Version X.Y.Z"
+        line of /usr/local/cuda/version.txt (toolkits before version.json); also on a Jetson, where nvcc is not on
+        PATH; read only when the file exists
+    normalise: >-
+      the toolkit release (12.6.3), not the driver's CUDA level (NVIDIA_DRIVER_CUDA_MAX) and not nvcc's own version
+      (TOOL_NVCC); a file without it: left out with not_determined:CUDA_TOOLKIT_VERSION
+    consumers: [recipe, preflight, generator, gui]
+  TENSORRT_VERSION:
+    group: gpu
+    type: pattern
+    pattern: '^\d{1,2}\.\d{1,2}\.\d{1,2}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: >-
+        the file name of the TensorRT runtime library libnvinfer.so.X.Y.Z (NVIDIA's packages install
+        /usr/lib/<triplet>/libnvinfer*.so.X.Y.Z with the soname link .so.X): the first in /usr/lib/*, /usr/lib64 and
+        /usr/lib; a tar install in the person's folder is not looked for
+    normalise: "X.Y.Z; no library: left out without a warning"
+    consumers: [recipe, preflight, generator, gui]
+  OPENVINO_VERSION:
+    group: gpu
+    type: pattern
+    pattern: '^\d{4}\.\d{1,2}\.\d{1,2}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: >-
+        the file name of the OpenVINO runtime library libopenvino.so.YYYY.M.P (Intel's APT packages
+        libopenvino-<version> install /usr/lib/libopenvino.so.2025.3.0 with the soname link libopenvino.so.2530): the
+        first in /usr/lib, /usr/lib/* and /usr/lib64; an archive install under /opt/intel is not looked for
+    normalise: "YYYY.M.P; no library: left out without a warning"
+    consumers: [recipe, preflight, generator, gui]
+  INTEL_GPU_DEVICE:
+    group: gpu
+    type: pattern
+    # A render node only (a deploy step may pass it to `docker run --device`).
+    pattern: '^/dev/dri/renderD[0-9]{1,3}$'
+    only_os: [linux]
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources:
+      linux: >-
+        the first /sys/class/drm/renderD<N> whose device has PCI vendor 0x8086 and the kernel driver i915 or xe (the
+        node the OpenVINO GPU plugin and the oneAPI/SYCL runtimes open)
+    normalise: "/dev/dri/renderD<N>"
+    consumers: [deploy, preflight, recipe]
+  INTEL_GPU_DRIVER:
+    group: gpu
+    type: enum
+    values: [i915, xe]
+    only_os: [linux]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: "the driver of INTEL_GPU_DEVICE (the name its /sys/class/drm/renderD<N>/device/driver link points to)"
+    normalise: "the module name"
+    consumers: [recipe, preflight, gui]
   METAL:
     group: gpu
     type: bool
