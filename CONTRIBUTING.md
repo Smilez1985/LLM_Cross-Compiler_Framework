@@ -780,8 +780,11 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   cap through `remote.transport` (`sh_command`, `ParamikoTransport.run`). Without paramiko the same session runs over
   this computer's OpenSSH client (`RemoteSession(..., openssh=SystemSshTransport)`: `KeyOnly` only, no shown
   fingerprint, no `expect_device_id`); an ssh, scp or sftp command line comes only from
-  `remote.transport.openssh_argv` with `openssh_options`, and a path in an `-o` option is quoted with `config_value`.
-  The runtime deploy, the checks on the board and the probe use it through `runtime/device/remote.py` `RemoteShell`
+  `remote.transport.openssh_argv` with `openssh_options`, and a path in an `-o` option is quoted with `config_value`
+  (a path of the framework's own goes through `openssh_file`, which writes `%` as `%%`). `openssh_options` passes the
+  framework's own settings file with `-F` (`remote/ssh_config.py`), so OpenSSH reads no `~/.ssh/config`; that file is
+  written only by `person_steps.save_ssh_block` (the CLI and the GUI), and a trust option is never moved into it: it
+  stays first on the command line. The runtime deploy, the checks on the board and the probe use it through `runtime/device/remote.py` `RemoteShell`
   (mark a command `again=True` only when it may run twice: it only reads, or does the same again; any other ends with
   "dropped" after a network drop; a command that stays silent while its connection still answers is no drop and ends
   with its time limit), a job that runs long on the board goes through `run_detached` (the on-board benchmark), and a
