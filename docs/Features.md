@@ -213,17 +213,24 @@ per-user folder). `llm-cli deploy list-artifacts`, the Deployment tab and
 
 ### Identical builds
 
-Before a build, `check_build_request` and the GUI's builder form look for a finished build with 100 % the same
+Before a build, `check_build_request`, `llm-cli build start` and the GUI's builder form look for a finished build
+with 100 % the same
 chosen options (unreleased; eighth round, N11): the model and its exact commit (a local model: every weights file by
 name, size and modification time), the target and the sha256 of its folder, board, format, quantization, importance
 matrix and the sha256 of the calibration data, optimization, context length, GPU use and task. Other weights or
 another quantization is never identical. Every build records these options in its manifest (`build_options`, with
 their sha256); builds made before do not have them and are never reported.
 
-- **GUI:** the builder form names the earlier build with its full path. **Use the existing build** starts nothing,
-  **Build again** builds anyway, **Cancel** does neither. When the model's newest commit is not known yet, the form
-  asks Hugging Face once for the commit, only when an earlier build could be identical and never in offline mode;
-  without the commit the form says that it could not be checked.
+- **GUI:** the builder form names the earlier build with its full path. **Use the existing build** starts nothing:
+  the folder dialog opens at the output folder and the earlier build, with its golden ZIP, is copied to the folder
+  you pick (the free space there is checked first, every copy is checked by sha256, the earlier build stays where it
+  is; the identical build there already is not copied again, and another build under that name is replaced only
+  after you accepted the full list). **Build again** builds anyway, **Cancel** does neither. When the model's newest
+  commit is not known yet, the form asks Hugging Face once for the commit, only when an earlier build could be
+  identical and never in offline mode; without the commit the form says that it could not be checked.
+- **CLI:** `llm-cli build start` asks the same question at a terminal (`u` use it, `a` build again, `c` cancel);
+  "use" copies the earlier build into the folder the build would have gone to (`--output`, the prompt's answer or the
+  output folder), with the same checks. Without a terminal it names the earlier build and builds as given.
 - **AI clients:** `check_build_request` lists such builds in `earlier_builds` (`identical`, or `commit_unchecked`
   when the commit was not looked up) with a note; `start_build`'s question says that it builds an identical build
   again.
@@ -338,7 +345,9 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   build with several weight files is refused.
 - **A package without a board** (`llm-cli deploy package`; GUI: Deployment tab > **Create package only…**): the
   package of the selected build for the chosen profile, with Docker images for a board without network if you tick
-  **Use Docker Containerization?**. Like the CLI, the GUI takes any path: **Other build or model file…** adds a build
+  **Use Docker Containerization?**: its table lists the containers such a package carries for the profile (the
+  inference engine with its image, setting `image_inference_runtime`, and the hardware access the profile's target
+  gives it), every one ticked, which is what `--docker` packs; untick one to leave it out. Like the CLI, the GUI takes any path: **Other build or model file…** adds a build
   folder or a model file to the build list. No board is contacted. The GUI opens the folder
   dialog at the output folder, as for every golden artifact, and names the package's full path, or the reason and
   the next step when it cannot be made. Copy it to the board and run `deploy.sh` there, or deploy it later.
