@@ -163,10 +163,10 @@ load_hardware_config() {
     done < <(grep '=' "$HARDWARE_CONFIG_FILE")
     # The build jobs are capped at the board's cores (CPU_CORES of version 1.x; the probe writes CPU_CORES_LOGICAL).
     HW_CONFIG[CPU_CORES]="${HW_CONFIG[CPU_CORES]:-${HW_CONFIG[CPU_CORES_LOGICAL]:-}}"
-    # The profile must be of the system this module builds for (the probe writes ARCH: arm64, x86_64, armv7, ...).
+    # The profile must be of the system this module builds for (the probe writes ARCH: arm64, x86_64, armv7, ...); a
+    # system whose programs are not the module's (elf_machine_of), or one it does not know, is refused.
     local system="${HW_CONFIG[ARCHITECTURE_FULL]:-${HW_CONFIG[ARCH]:-}}"
-    if [ -n "$system" ] && [ -n "$(elf_machine_of "$system")" ] \
-            && [ "$(elf_machine_of "$system")" != "$(elf_machine_of '[IHRE_ARCHITEKTUR]')" ]; then
+    if [ -n "$system" ] && [ "$(elf_machine_of "$system")" != "$(elf_machine_of '[IHRE_ARCHITEKTUR]')" ]; then
         die "The hardware profile is of a $system system; this module builds for [IHRE_ARCHITEKTUR], so nothing was planned for it."
     fi
     HW_CONFIG[ARCHITECTURE_FULL]='[IHRE_ARCHITEKTUR]'
@@ -240,8 +240,8 @@ EOF
 # HW_CONFIG[ARCHITECTURE_FULL].
 # ============================================================================
 
-# The ELF machine number of a program file (62 x86_64, 183 aarch64, 40 32-bit Arm, 243 RISC-V), empty for a file that
-# is no ELF program.
+# The ELF machine number of a program file (62 x86_64, 183 aarch64, 40 32-bit Arm, 3 32-bit x86, 243 RISC-V), empty for a
+# file that is no ELF program.
 elf_machine() {
     local -a head
     read -r -a head <<< "$(od -An -tu1 -N20 "$1" 2>/dev/null | tr '\n' ' ')"
@@ -258,7 +258,8 @@ elf_machine_of() {  # SYSTEM: the ELF machine number of its programs, empty when
     case "$1" in
         aarch64|arm64) echo 183 ;;
         x86_64|amd64) echo 62 ;;
-        armv7*|armv6*|armhf|armel|arm) echo 40 ;;
+        armv7*|armv6*|armv8l|armhf|armel|arm) echo 40 ;;
+        x86|i386|i486|i586|i686) echo 3 ;;
         riscv64) echo 243 ;;
         *) echo "" ;;
     esac

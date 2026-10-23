@@ -195,6 +195,18 @@ def test_another_system_gets_no_32_bit_advice(image):
     assert result.returncode == 1 and "32-bit" not in result.stderr
 
 
+@needs_bash
+@pytest.mark.parametrize("arch", ["armv7l", "armv8l", "armhf"])
+def test_a_32_bit_arm_profile_of_version_1x_gets_the_plain_reason_as_well(image, arch):
+    """The probe of version 1.x wrote `ARCH=$(uname -m)`: armv7l, or armv8l for a 32-bit system on a 64-bit CPU (the
+    probe of today writes armv7 for both, scripts/hardware_probe.sh arch_alias)."""
+    result = config_with(image, f"ARCH={arch}\nCPU_MODEL=Cortex-A55\nCPU_CORES_LOGICAL=4\n")
+
+    assert result.returncode == 1
+    assert "The board runs a 32-bit system:" in result.stderr
+    assert tools_log(image) == [], "nothing was compiled for it"
+
+
 # --- every quantization method of llama.cpp (target_module.sh of version 1.x: "Q4_0, Q4_K_M, Q8_0, all llama.cpp
 # methods") ---------------------------------------------------------------------------------------------------------
 
@@ -851,3 +863,16 @@ def test_a_generated_module_refuses_a_profile_of_another_system(tmp_path):
     assert result.returncode == 1
     assert ("ERROR: The hardware profile is of a x86_64 system; this module builds for aarch64, so nothing was planned "
             "for it.") in result.stderr
+
+
+@needs_bash
+@pytest.mark.parametrize("arch", ["armv8l", "x86", "ppc64le"])
+def test_a_generated_module_refuses_every_profile_that_is_not_of_its_system(tmp_path, arch):
+    """A 32-bit ARM system on a 64-bit CPU (armv8l of a 1.x probe file), a 32-bit x86 system (the probe's x86) and a
+    system the module does not know are no aarch64 board either: before, the module planned its own system for them."""
+    result, stages, _ = generated_config(tmp_path, f"ARCH={arch}\nCPU_MODEL=Cortex-A55\n", STUB_CC_MACHINE="183")
+
+    assert result.returncode == 1
+    assert (f"ERROR: The hardware profile is of a {arch} system; this module builds for aarch64, so nothing was "
+            "planned for it.") in result.stderr
+    assert not (stages / "build_config.sh").exists()

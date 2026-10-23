@@ -1296,7 +1296,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   they are for the board's system, lets `cmake -P` read the generated toolchain file and checks the plan
   `build_config.sh` in a clean shell before it keeps it. The build jobs are capped at the board's cores (`CPU_CORES`,
   or `CPU_CORES_LOGICAL` of the probe file), and a 32-bit ARM system is refused with the plain reason (the boards
-  have 64-bit CPUs, the image only the aarch64 cross compilers; install the 64-bit system and probe again). With a
+  have 64-bit CPUs, the image only the aarch64 cross compilers; install the 64-bit system and probe again), also
+  `ARCH=armv8l` of a 1.x probe file (a 32-bit system on a 64-bit CPU); the template refuses every profile that is not
+  of the module's system, also one of a system it does not know. With a
   profile, the target stage of a GGUF build makes the package in `output/packages/`: the model, `llama-cli` and `llama-server`
   for the board, the toolchain file and the profile, a model card, `test_model.sh` (checks the files, then a short
   answer from the model), `deploy.sh` (`USER@HOST [DEST]` over `ssh` and `scp` with `StrictHostKeyChecking=yes`, or

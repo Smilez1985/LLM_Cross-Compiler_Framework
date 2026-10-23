@@ -1473,7 +1473,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `build_config.sh` in einer sauberen Shell, bevor sie ihn behält. Die Build-Jobs werden auf die Kerne des Boards
   begrenzt (`CPU_CORES` oder `CPU_CORES_LOGICAL` der Probe-Datei), und ein 32-Bit-ARM-System wird mit dem schlichten
   Grund abgelehnt (die Boards haben 64-Bit-CPUs, das Image nur die aarch64-Cross-Compiler; installiere das
-  64-Bit-System und lass die Probe erneut laufen). Mit Profil macht die Stufe target eines GGUF-Builds das Paket in
+  64-Bit-System und lass die Probe erneut laufen), auch `ARCH=armv8l` einer Probe-Datei der Version 1.x (ein
+  32-Bit-System auf einer 64-Bit-CPU); die Vorlage lehnt jedes Profil ab, das nicht vom System des Moduls ist, auch
+  eines von einem System, das sie nicht kennt. Mit Profil macht die Stufe target eines GGUF-Builds das Paket in
   `output/packages/`: das Modell, `llama-cli` und `llama-server` für das Board, die Toolchain-Datei und das Profil,
   eine Model Card, `test_model.sh` (prüft die Dateien, dann eine kurze Antwort des Modells), `deploy.sh`
   (`USER@HOST [ZIEL]` über `ssh` und `scp` mit `StrictHostKeyChecking=yes`, oder auf dem Board selbst nach
