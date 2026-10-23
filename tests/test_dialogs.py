@@ -422,6 +422,39 @@ class TestAIConfigurationDialog:
                                                                                      True)
         assert framework.config.get("ai_base_url") == "", "nothing is saved before Save"
 
+    def test_model_list_never_sends_a_key_to_the_saved_providers_url(self, qapp, tmp_path, monkeypatch):
+        """Saved: Ollama on a LAN host. Choosing "custom" (with a stored custom key) before typing its address must
+        not list models at the saved Ollama address with the custom key: the address field always counts for the
+        list, an empty one meaning the provider's own endpoint (none for custom)."""
+        from orchestrator.llm import ModelInfo
+        from orchestrator.llm.providers.base import ProviderAdapter
+        seen = []
+
+        class Recorder(ProviderAdapter):
+            def list_models(self):
+                seen.append((self.preset.id, self.base_url, self._api_key))
+                return [ModelInfo(id="served-model")]
+
+        monkeypatch.setattr("orchestrator.llm.client.adapter_class", lambda name: Recorder)
+        monkeypatch.setattr(AIConfigurationDialog, "model_lister", staticmethod(dialogs.list_provider_models))
+        config = ConfigManager(tmp_path)
+        config.set("ai_provider", "ollama")
+        config.set("ai_base_url", "http://192.168.1.20:11434/v1")
+        fw = FakeFramework(config, FakeSecrets({"custom_api_key": "custom-secret-0123456789"}))
+        dlg = AIConfigurationDialog(fw)
+        assert wait_for(qapp, lambda: any(s[:2] == ("ollama", "http://192.168.1.20:11434/v1") for s in seen)), seen
+
+        select_provider(dlg, "custom")
+        assert wait_for(qapp, lambda: any(provider == "custom" for provider, _, _ in seen)), seen
+        # No address for custom: the request has none (the real adapter refuses it: "no server URL is set"), never
+        # the saved Ollama address.
+        assert [(url, key) for provider, url, key in seen if provider == "custom"] == [(None, None)], seen
+        assert not any(key == "custom-secret-0123456789" for _, url, key in seen if "192.168.1.20" in str(url))
+
+        dlg.txt_base_url.setText("http://192.168.1.30:8000/v1")
+        dlg._refresh_models()
+        assert wait_for(qapp, lambda: any(s[:2] == ("custom", "http://192.168.1.30:8000/v1") for s in seen)), seen
+
     def test_removed_provider_is_explained_once(self, qapp, framework, monkeypatch):
         shown = []
 
