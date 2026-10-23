@@ -1036,8 +1036,22 @@ class BuildService:
             raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.",
                                     code="invalid_value", next="Leave out the revision for a local model.",
                                     field="revision")
+        self._refuse_what_the_engine_cannot(request)
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model}), inputs
+
+    def _refuse_what_the_engine_cannot(self, request: BuildRequestIn) -> None:
+        """Before anything is queued, a build the container engine cannot run as asked (DECISIONS round 26 Q1): a GPU
+        build that passes an NVIDIA GPU (nvidia-smi) into the container needs Docker's GPU request, which Podman's
+        Docker-compatible interface drops without a word; the build would run on the CPU instead."""
+        if not request.use_gpu or not shutil.which("nvidia-smi"):
+            return
+        from orchestrator.utils.docker_engine import engine_name, podman_refusal
+        get = getattr(self.framework, "get_component", None)
+        refusal = podman_refusal("gpu", engine_name(get("docker_client") if callable(get) else None))
+        if refusal:
+            raise BuildServiceError(refusal, code="not_supported", field="use_gpu",
+                                    next="Build without the GPU option, or switch to Docker CE as described.")
 
     @staticmethod
     def request_in(**values: Any) -> BuildRequestIn:

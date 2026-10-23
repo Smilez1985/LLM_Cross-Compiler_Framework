@@ -40,6 +40,7 @@ from orchestrator.Core import build_identity, build_records
 from orchestrator.tools import local_files
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
+from orchestrator.utils.docker_engine import engine_name, ensure_docker_host, podman_refusal
 from orchestrator.utils.download import FileLock as DownloadLock
 from orchestrator.utils.helpers import copy_hashed, digest_matches, sha256_file
 from orchestrator.utils.llama_pin import pinned_source
@@ -297,7 +298,12 @@ class BuildEngine:
         # The framework's target registry (set by FrameworkManager): its id -> folder map resolves targets.
         self.target_manager = None
 
-        # Docker Client Fallback
+        # Docker Client Fallback. Without a Docker daemon the person's Podman socket (DOCKER_HOST, set for this process
+        # and the processes it starts; utils/docker_engine.py, DECISIONS round 26 Q1).
+        engine = ensure_docker_host()
+        if engine.set_here:
+            self.logger.info("No Docker daemon here: the framework uses Podman's Docker-compatible interface "
+                             "(DOCKER_HOST is set to the person's Podman socket).")
         if not self.docker_client:
             try:
                 self.docker_client = docker.from_env()
@@ -349,6 +355,9 @@ class BuildEngine:
         docker = check_docker_environment(self.docker_client)
         if not docker.reachable:
             self.logger.warning(f"Docker environment check failed: {docker.error}")
+        elif docker.engine == "podman":
+            self.logger.info("Container engine: Podman (its Docker-compatible interface); images are built by "
+                             "Podman's builder, without BuildKit.")
         elif not docker.docker_cli:
             self.logger.warning("Docker executable not found in PATH.")
         elif not docker.buildx:
@@ -927,6 +936,9 @@ class BuildEngine:
 
             labels = {IMAGE_LABEL: config.target_arch}
             self._build_images[config.build_id] = tag
+            if engine_name(self.docker_client) == "podman":
+                progress.add_log("Podman builds the image (its builder buildah, through its Docker-compatible "
+                                 "interface); BuildKit is not used.")
             if self._buildkit_available():
                 self._build_with_buildkit(tag, path, buildargs, progress, labels)
             else:
@@ -1045,9 +1057,21 @@ class BuildEngine:
         return bool(base) and not base.startswith(("http+docker://localhost", "http+docker://localnpipe",
                                                    "http+unix://"))
 
+    def _refuse_gpu_under_podman(self) -> None:
+        """Docker's GPU request (DeviceRequests) passes the NVIDIA GPU into a build container; Podman's Docker-compatible
+        interface drops it without a word. BuildService.start_build refuses such a build before it is queued; this
+        stops one that got past it rather than letting it run on the CPU."""
+        refusal = podman_refusal("gpu", engine_name(self.docker_client))
+        if refusal:
+            raise RuntimeError(refusal)
+
     def _buildkit_available(self) -> bool:
         """BuildKit (docker buildx) caches better than the legacy builder behind docker-py's api.build,
-        which Docker deprecated; it is also what CI uses."""
+        which Docker deprecated; it is also what CI uses. Not under Podman: there 'docker buildx' is Podman's own
+        builder (buildah) or Docker's CLI that expects BuildKit behind the API; images are built through Podman's API
+        (buildah), which docker-py's api.build reaches."""
+        if engine_name(self.docker_client) == "podman":
+            return False
         if not shutil.which("docker"):
             return False
         try:
@@ -1632,6 +1656,7 @@ class BuildEngine:
         # GPU Handling for Calculation
         device_requests = []
         if config.use_gpu and shutil.which("nvidia-smi"):
+             self._refuse_gpu_under_podman()
              device_requests = [DeviceRequest(count=-1, capabilities=[['gpu']])]
              
         container = self.docker_client.containers.create(
@@ -1700,6 +1725,7 @@ class BuildEngine:
         devices = []
         if config.use_gpu:
             if shutil.which("nvidia-smi"):
+                self._refuse_gpu_under_podman()
                 device_requests = [DeviceRequest(count=-1, capabilities=[['gpu']])]
             elif os.path.exists("/dev/dri"):
                 devices = ["/dev/dri:/dev/dri"]

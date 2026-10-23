@@ -170,8 +170,18 @@ class DockerEngine(ContainerEngine):
     def client(self) -> Any:
         if self._client is None:
             import docker
+            from orchestrator.utils.docker_engine import ensure_docker_host
+            ensure_docker_host()   # no Docker daemon: the person's Podman socket (DECISIONS round 26 Q1)
             self._client = docker.from_env(timeout=120)
         return self._client
+
+    def engine(self) -> str:
+        """'docker' or 'podman' (Podman's Docker-compatible interface), '' when the engine does not answer."""
+        from orchestrator.utils.docker_engine import engine_name
+        try:
+            return engine_name(self.client())
+        except Exception:  # noqa: BLE001 - no client: unknown
+            return ""
 
     def unavailable(self) -> Optional[str]:
         try:

@@ -166,6 +166,8 @@ class DittoDocker(DockerEngine):
     def client(self) -> Any:
         if self._client is None:
             import docker
+            from orchestrator.utils.docker_engine import ensure_docker_host
+            ensure_docker_host()   # no Docker daemon: the person's Podman socket (DECISIONS round 26 Q1)
             self._client = docker.from_env(timeout=self._timeout)
         return self._client
 
@@ -307,7 +309,12 @@ def gpu_passthrough(docker: Any, hardware: Any, backend: str, dri: Optional[Path
         return GpuPassthrough("none", {}, {}, "CPU build: the container needs no GPU")
     vendors = {getattr(g, "vendor", "") for g in getattr(hardware, "gpus", []) or []}
     notes = []
-    if "nvidia" in vendors:
+    engine = docker.engine() if "nvidia" in vendors and callable(getattr(docker, "engine", None)) else ""
+    if "nvidia" in vendors and engine == "podman":
+        # Podman's Docker-compatible interface drops Docker's GPU request without a word (DECISIONS round 26 Q1).
+        notes.append("the NVIDIA GPU is not passed through: under Podman, Docker's GPU request does not reach the "
+                     "container (with Docker CE it does)")
+    elif "nvidia" in vendors:
         try:
             runtimes = docker.info().get("Runtimes") or {}
         except Exception:  # noqa: BLE001
