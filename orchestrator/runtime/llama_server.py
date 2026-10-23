@@ -392,10 +392,13 @@ class LocalLLMRuntime:
                  session: Optional[requests.Session] = None, runner: Optional[Runner] = None,
                  sleep: Callable[[float], None] = time.sleep, *, profile: Any = None, toolchain: Any = None,
                  engine: Any = None, executor: Any = None, verifier: Any = None,
-                 platform: Optional[Tuple[str, str]] = None, docker: Any = None):
+                 platform: Optional[Tuple[str, str]] = None, docker: Any = None, settings: Any = None):
         """profile (HardwareProfile), toolchain (DetectedToolchain), engine (ContainerEngine), executor and verifier
         replace the probe, the toolchain detection, Docker and the build steps (tests); platform is (os, arch) of this
-        machine; docker (container_server.DittoDocker) replaces Docker for Ditto's container."""
+        machine; docker (container_server.DittoDocker) replaces Docker for Ditto's container. `settings`: the
+        framework's settings; in offline mode every download (a model, the opted-in prebuilt archive, the pinned
+        source) reaches only the person's own network, at the address the network-locality rule checked
+        (utils/locality.py)."""
         self.logger = get_logger("LocalLLMRuntime")
         self.catalog = catalog or load_catalog()
         self.data_dir = Path(data_dir) if data_dir else user_data_dir()
@@ -418,6 +421,7 @@ class LocalLLMRuntime:
         self._hardware_given = hardware is not None  # a caller's HardwareInfo is used as given, never re-probed
         self._runner = runner
         self._session = session
+        self.settings = settings
         self._sleep = sleep
         self._popen = subprocess.Popen          # replaced by tests
         self._process_iter = psutil.process_iter
@@ -429,7 +433,8 @@ class LocalLLMRuntime:
 
     @classmethod
     def from_framework(cls, framework, **kwargs) -> "LocalLLMRuntime":
-        """Uses the framework's per-user directory and models directory."""
+        """Uses the framework's per-user directory and models directory, and its settings (offline mode)."""
+        kwargs.setdefault("settings", framework.config)
         return cls(data_dir=framework.config.user_state_dir,
                    models_dir=framework.resolve_path(framework.config.get("models_dir", "models")) / "ditto",
                    **kwargs)
@@ -784,7 +789,8 @@ class LocalLLMRuntime:
                                             "fetched. On a machine without network: Ditto > Local Runtime... > "
                                             "Import the source... in the GUI, or llm-cli ditto runtime "
                                             "import-source FILE (made with export-source elsewhere).")
-                source = llama_source.fetch_source(pin, self.data_dir, log=log)
+                source = llama_source.fetch_source(pin, self.data_dir, log=log,
+                                                   **({"settings": self.settings} if self.settings is not None else {}))
         except llama_source.SourceError as e:
             raise LocalRuntimeError(f"The pinned llama.cpp source: {e}") from None
         return source
@@ -1106,12 +1112,25 @@ class LocalLLMRuntime:
                 p.chmod(p.stat().st_mode | 0o755)
 
     # --- downloads (orchestrator/utils/download.py) ---------------------------------------------------------
-    def _downloads(self) -> _Downloads:
+    def _downloads(self, session: Optional[requests.Session] = None) -> _Downloads:
         """The pinned downloader on the one disk rule (A4): the reserve stays free beside what running builds and
         downloads of any process reserved (the ledger in this user's folder)."""
         from orchestrator.Core.disk_plan import ReservationLedger, download_rule
-        return _Downloads(self._session, self._sleep, self.logger,
+        return _Downloads(session or self._session, self._sleep, self.logger,
                           space=download_rule(ledger=ReservationLedger(Path(self.data_dir))))
+
+    def _offline_session(self, url: str) -> Optional[requests.Session]:
+        """In offline mode: the session a download from `url` uses (only the person's own network, at the address the
+        network-locality rule checked; security/http.LocalOnlyAdapter), LocalRuntimeError when `url` is not local
+        (the host, why, and that the person can count it as local). None when offline mode is off."""
+        from orchestrator.utils.locality import check_url, offline_mode
+        if not offline_mode(self.settings):
+            return None
+        verdict = check_url(url, self.settings)
+        if not verdict.local:
+            raise LocalRuntimeError(verdict.refusal("the download address"))
+        from orchestrator.security.http import local_only_session
+        return local_only_session(self.settings, "the download")
 
     def _ensure_space(self, folder: Path, needed: int, what: str = "the download") -> None:
         self._downloads().ensure_space(folder, needed, what)
@@ -1120,11 +1139,13 @@ class LocalLLMRuntime:
                progress: Optional[ProgressFn] = None, attempts: int = 5, stop: Any = None) -> Path:
         """Resumable download into <dest>.part; the file only gets its final name after size and hash matched. A set
         `stop` event ends it with DownloadStopped, keeping the part."""
-        downloads = self._downloads()
+        offline = self._offline_session(url)   # offline mode: only the own network (a local model mirror)
+        downloads = self._downloads(offline)
         try:
             return downloads.fetch(url, dest, size, sha256, progress, attempts, stop=stop)
         finally:
-            self._session = downloads._session  # keep the connection pool for the next file
+            if offline is None:
+                self._session = downloads._session  # keep the connection pool for the next file
 
     def _verify(self, path: Path, size: int, sha256: str, name: str) -> None:
         self._downloads().verify(path, size, sha256, name)

@@ -676,7 +676,8 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         plan.mounts.append(pin.ref)
     else:
         plan.mounts.append(f"model cache: {req.model}" + "@commit")
-        if bool(_config(framework, "offline_mode", False)):
+        from orchestrator.utils.locality import offline_mode
+        if offline_mode(getattr(framework, "config", None)):
             plan.problems.append(Problem("needs_person", "Offline mode is on, so the framework does not contact "
                                          "huggingface.co.", "Use a local model (list_local_files), or ask the person "
                                          "to switch offline mode off in the GUI or CLI.", "offline_mode"))

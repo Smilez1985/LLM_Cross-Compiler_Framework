@@ -383,8 +383,9 @@ class RAGManager:
     def _offline(self) -> bool:
         # Ditto's own switch counts too: offline mode must never download a model.
         # So does a tool call of an AI (local_models_only): it never downloads a model either.
+        from orchestrator.utils.locality import offline_mode
         ditto = getattr(self.framework, "ditto_manager", None)
-        return (bool(self._cfg("offline_mode", False)) or getattr(ditto, "offline_mode", False) is True
+        return (offline_mode(self.config) or getattr(ditto, "offline_mode", False) is True
                 or models_local_only())
 
     def _state_dir(self) -> Path:

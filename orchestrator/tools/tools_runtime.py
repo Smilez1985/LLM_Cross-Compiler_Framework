@@ -176,10 +176,51 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         return Path(framework.config.user_state_dir)
 
     def offline() -> bool:
-        try:
-            return bool(framework.config.get("offline_mode", False))
-        except Exception:  # noqa: BLE001
-            return False
+        from orchestrator.utils.locality import offline_mode   # the one offline check
+        return offline_mode(getattr(framework, "config", None))
+
+    def outside(needs) -> str:
+        """Offline mode: why one of `needs` ((what, url) the call would fetch) is not on this computer or in the
+        person's own network by the network-locality rule (utils/locality.py: a local mirror of the pinned source or
+        of the model may be used; the person's opt-outs count); "" when none is outside or offline mode is off."""
+        if not offline():
+            return ""
+        from orchestrator.utils.locality import check_url
+        for what, url in needs:
+            verdict = check_url(url, getattr(framework, "config", None))
+            if not verdict.local:
+                return verdict.refusal(what)
+        return ""
+
+    def runtime_downloads(rt, plan, model) -> list:
+        """(what, url) of every download build_local_runtime's plan needs: the pinned source when it is not cached,
+        the catalog model when it is not downloaded."""
+        from orchestrator.runtime.build.source import cached_source
+        pin = rt.catalog.llama_cpp.source
+        needs = []
+        if plan.needs_source and not (pin is not None and cached_source(pin, rt.data_dir) is not None):
+            needs.append(("the pinned llama.cpp source", pin.repo if pin is not None else ""))
+        if model is not None and not rt.model_ready(model):
+            needs.append((f"the catalog model {model.tier}", model.url(rt.catalog.model_base_url)))
+        return needs
+
+    def refuse_runtime_downloads(rt, plan, model) -> None:
+        why = outside(runtime_downloads(rt, plan, model))
+        if why:
+            raise blocked("offline_mode", "Offline mode is on, and this needs a download (the pinned source or "
+                          "the model). " + why, "Ask the person to switch offline mode off, or to import the source "
+                          "with 'llm-cli ditto runtime import-source'.")
+
+    def refuse_device_source(plan) -> None:
+        """deploy_device_runtime in offline mode: the board's build needs the pinned source when it is neither built
+        nor cached, and it may come only from the person's own network."""
+        from orchestrator.runtime.device import service as dev
+        if plan.built or plan.source_cached:
+            return
+        why = outside([("the pinned llama.cpp source", dev.pinned_source().repo)])
+        if why:
+            raise blocked("offline_mode", "Offline mode is on, and the build needs the pinned source. " + why,
+                          "Ask the person to switch offline mode off or import the source.")
 
     def sandbox_allowed() -> bool:
         """Whether the person allowed the Docker sandbox for an AI's benchmark of an untrusted model (an oversight
@@ -304,10 +345,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 raise blocked("model_unpinned", f"The catalog model {model.tier} has no pinned size and sha256.",
                               "Choose another tier.", field="model_tier")
             fetch_model = model is not None and not rt.model_ready(model)
-            if offline() and (fetch_model or (plan.needs_source and not cached)):
-                raise blocked("offline_mode", "Offline mode is on, and this needs a download (the pinned source or "
-                              "the model).", "Ask the person to switch offline mode off, or to import the source with "
-                              "'llm-cli ditto runtime import-source'.")
+            # offline mode: only from the person's own network (a local mirror), by the network-locality rule
+            refuse_runtime_downloads(rt, plan, model)
             to_build = [b for b in plan.builds if b.to_build]
             needed = (SOURCE_SIZE if plan.needs_source and not cached else 0) + BUILD_SIZE * len(to_build) + \
                 (int(model.size or 0) if fetch_model else 0)
@@ -359,6 +398,18 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             if bound.get("backend") != inp.backend or "builds" not in bound:
                 raise ToolError("The build is not bound to what the person was shown; nothing was built.",
                                 code="failed", next="Call build_local_runtime again through the framework's registry.")
+            if offline():
+                # The question refused in offline mode; the person may have switched it on while the question was
+                # open: the same refusal again, before a job starts or anything is fetched (as download_hf_file).
+                from orchestrator.runtime.llama_server import LocalRuntimeError
+                rt = runtime()
+                try:
+                    plan = rt.plan_install(backend=inp.backend, placement=bound["placement"])
+                except LocalRuntimeError:
+                    plan = None   # the job reports why the build cannot be planned
+                if plan is not None:
+                    refuse_runtime_downloads(rt, plan, model_of(bound["model_tier"]) if bound.get("model_tier")
+                                             else None)
             stop = threading.Event()
 
             def work(handle) -> Dict[str, Any]:
@@ -797,9 +848,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 users = device_users(device, settings)
                 plan = dev.plan_facts(state_dir(), profile)
                 kv = settings.kv_choice(profile)
-                if offline() and not plan.built and not plan.source_cached:
-                    raise blocked("offline_mode", "Offline mode is on, and the build needs the pinned source.",
-                                  "Ask the person to switch offline mode off or import the source.")
+                if offline():   # the source only from the person's own network (the network-locality rule)
+                    refuse_device_source(plan)
                 fp = dev.read_key(device, state_dir(), step="runtime_deploy")
             except dev.DeviceRuntimeError as e:
                 raise svc_error(e, users) from None
@@ -842,6 +892,13 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                 code="failed", next="Call deploy_device_runtime again through the framework's "
                                                     "registry.")
             device = trusted(inp.device_id)
+            if offline():
+                # switched on while the person was asked: the same refusal again, before a job starts (as
+                # download_hf_file); a board's build that needs the pinned source fetches it only from the own network
+                try:
+                    refuse_device_source(dev.plan_facts(state_dir(), dev.device_profile(state_dir(), device)))
+                except dev.DeviceRuntimeError as e:
+                    raise svc_error(e, device_users(device)) from None
             on_client, cancel, stop = session_hooks()
 
             def work(handle) -> Dict[str, Any]:
@@ -859,7 +916,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                      on_client=on_client, cancelled=lambda: stop.is_set() or handle.cancelled,
                                      say=lambda msg: handle.progress(None, None, device_text(msg, users,
                                                                                              folder_labels())[:200]),
-                                     on_event=board_events(handle, device))
+                                     on_event=board_events(handle, device), config=getattr(framework, "config", None))
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set() or handle.cancelled:
                         raise JobCancelled() from None

@@ -17,6 +17,13 @@ git bundle.
 
 Git runs with an argument list (never a shell), a cleared environment, no user or system git configuration, no hooks,
 no credential helpers or prompts, and only the https transport (plus local files for bundles and local mirrors).
+
+Offline mode (fetch_source and export_source with `settings`; DECISIONS round 24 L-NET): a network repository is
+fetched only from the person's own network (a local mirror), judged by the one network-locality rule
+(utils/locality.py, with the person's opt-outs), and git connects only to the addresses that were checked
+(http.curloptResolve, git 2.37 or newer), so a DNS answer that changes in between cannot reach a public host; it uses
+no proxy (an empty http.proxy and no proxy variables: a proxy would resolve the name itself) and follows no redirect
+(http.followRedirects=false: a redirect could lead to a host nobody checked). A local file or path needs no network.
 Bundle files and remote output are untrusted: sizes are capped and every value is checked before it is used.
 """
 
@@ -30,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 
 from orchestrator import __version__
 from orchestrator.runtime.catalog import LlamaCppSource
@@ -88,8 +95,10 @@ def _is_local(url: str) -> bool:
     return url.startswith("file://") or "://" not in url
 
 
-def _git_env() -> Dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k in _PASS_ENV}
+def _git_env(offline: bool = False) -> Dict[str, str]:
+    """The cleared environment git runs with; in offline mode without the proxy variables (git connects to the
+    checked address of the mirror itself, never through a proxy that would resolve the name on its own)."""
+    env = {k: v for k, v in os.environ.items() if k in _PASS_ENV and not (offline and k.lower().endswith("_proxy"))}
     env.update({
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
@@ -103,7 +112,37 @@ def _git_env() -> Dict[str, str]:
     return env
 
 
-def _git_config(allow_file: bool) -> List[str]:
+def offline_reach(url: str, settings: Any) -> Optional[str]:
+    """In offline mode (the settings `settings`), the git option value that pins the repository at `url` to the
+    addresses the network-locality rule checked ("HOST:PORT:ADDRESS[,ADDRESS...]" for http.curloptResolve, every
+    checked address in the resolver's order, which curl tries in turn; HOST spelled as git and curl look it up, a
+    trailing dot kept, an international name in its IDNA form); SourceError when the repository is not on this
+    computer or in the person's own network. None for a local file or path, when offline mode is off, or for an
+    address (nothing to resolve: git connects to the address that was checked). fetch_source passes git the other
+    options of offline mode in every case (no proxy, no redirect)."""
+    from urllib.parse import urlsplit
+
+    from orchestrator.utils.locality import check_url, offline_mode, parse_address
+    if _is_local(url) or not offline_mode(settings):
+        return None
+    verdict = check_url(url, settings)
+    if not verdict.local or not verdict.addresses:
+        raise SourceError(verdict.refusal("the llama.cpp source repository"))
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    if parse_address(host) is not None:
+        return None
+    try:
+        host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        pass   # git refuses such a URL itself
+    # curl takes no zone in the address list: a link-local address with one is left out (unless it is the only one)
+    addresses = [a for a in verdict.addresses if "%" not in a] or [verdict.addresses[0].split("%", 1)[0]]
+    port = parts.port or (443 if parts.scheme.lower() == "https" else 80)
+    return f"{host}:{port}:" + ",".join(f"[{a}]" if ":" in a else a for a in addresses)
+
+
+def _git_config(allow_file: bool, resolve: Optional[str] = None, offline: bool = False) -> List[str]:
     config = {
         "core.hooksPath": os.devnull,
         "core.fsmonitor": "false",
@@ -118,6 +157,13 @@ def _git_config(allow_file: bool) -> List[str]:
         "init.defaultBranch": "main",
         "transfer.fsckObjects": "true",
     }
+    if offline or resolve:
+        # offline mode: no proxy (an empty http.proxy switches off the one from the environment as well) and no
+        # redirect, so git reaches only the checked mirror itself
+        config["http.proxy"] = ""
+        config["http.followRedirects"] = "false"
+    if resolve:   # offline mode: the checked addresses of the repository's host (offline_reach)
+        config["http.curloptResolve"] = resolve
     args: List[str] = []
     for key, value in config.items():
         args += ["-c", f"{key}={value}"]
@@ -132,12 +178,16 @@ class Git:
         self.git = git or shutil.which("git")
 
     def __call__(self, args: Sequence[str], *, cwd: Optional[Path] = None, allow_file: bool = False,
-                 timeout: int = LOCAL_TIMEOUT, check: bool = True) -> "subprocess.CompletedProcess[str]":
+                 timeout: int = LOCAL_TIMEOUT, check: bool = True, resolve: Optional[str] = None,
+                 offline: bool = False) -> "subprocess.CompletedProcess[str]":
+        """`resolve` (offline_reach) pins the mirror's host to its checked addresses; with it, or with `offline`,
+        git also uses no proxy and follows no redirect (offline mode)."""
         if not self.git:
             raise SourceError("git was not found; install git (the pinned source is fetched and verified with it)")
-        argv = [self.git, *_git_config(allow_file), *args]
+        offline = offline or bool(resolve)
+        argv = [self.git, *_git_config(allow_file, resolve, offline), *args]
         try:
-            result = self.runner(argv, cwd=str(cwd) if cwd else None, env=_git_env(), capture_output=True,
+            result = self.runner(argv, cwd=str(cwd) if cwd else None, env=_git_env(offline), capture_output=True,
                                  text=True, timeout=timeout, stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             raise SourceError(f"git {args[0]} did not finish within {timeout} s") from None
@@ -262,9 +312,11 @@ def _checkout(staging: Path, git: Git, commit: str) -> None:
 # --- fetch -------------------------------------------------------------------------------------------------------
 
 def fetch_source(source: LlamaCppSource, state_dir: Union[str, Path], *, url: Optional[str] = None,
-                 git: Optional[Git] = None, log: Optional[Callable[[str], None]] = None) -> Path:
+                 git: Optional[Git] = None, log: Optional[Callable[[str], None]] = None,
+                 settings: Any = None) -> Path:
     """The verified, read-only tree of the pinned commit: from the cache (no network) or fetched once by commit.
-    `url` overrides the catalog's repository (a mirror; tests use a local repository)."""
+    `url` overrides the catalog's repository (a mirror; tests use a local repository). With `settings` in offline mode
+    the repository must be in the person's own network and git connects to its checked address (offline_reach)."""
     git = git or Git()
     say = log or (lambda _msg: None)
     url = url or source.repo
@@ -280,17 +332,21 @@ def fetch_source(source: LlamaCppSource, state_dir: Union[str, Path], *, url: Op
         say(f"The cached source in {target} is damaged; it is fetched again.")
         remove_tree(target)
     local = _is_local(url)
+    pin = offline_reach(url, settings)        # offline mode: only the own network, at the checked addresses
+    from orchestrator.utils.locality import offline_mode
+    # offline mode: git also uses no proxy and follows no redirect (also for a mirror given by its address)
+    pinned = ({"resolve": pin} if pin else {"offline": True}) if not local and offline_mode(settings) else {}
     staging = _staging(state_dir)
     try:
         _init(staging, git)
         say(f"Fetching llama.cpp {source.tag} (commit {source.commit[:12]}) ...")
         fetched = git(["fetch", "--quiet", "--depth", "1", "--no-tags", url, source.commit], cwd=staging,
-                      allow_file=local, timeout=GIT_TIMEOUT, check=False)
+                      allow_file=local, timeout=GIT_TIMEOUT, check=False, **pinned)
         if fetched.returncode != 0:
             # Some mirrors refuse a fetch by commit; the tag is fetched instead and must give the same commit.
             say("The server refused a fetch by commit; fetching the tag and checking its commit.")
             git(["fetch", "--quiet", "--depth", "1", "--no-tags", url, f"refs/tags/{source.tag}"], cwd=staging,
-                allow_file=local, timeout=GIT_TIMEOUT)
+                allow_file=local, timeout=GIT_TIMEOUT, **pinned)
         _checkout(staging, git, source.commit)
         return _install(staging, source, state_dir, git)
     finally:
@@ -305,11 +361,13 @@ def manifest_path(bundle: Path) -> Path:
 
 
 def export_source(source: LlamaCppSource, state_dir: Union[str, Path], out: Path, *, url: Optional[str] = None,
-                  git: Optional[Git] = None, log: Optional[Callable[[str], None]] = None) -> Dict[str, object]:
+                  git: Optional[Git] = None, log: Optional[Callable[[str], None]] = None,
+                  settings: Any = None) -> Dict[str, object]:
     """Writes `out` (a git bundle of the pinned commit) and `out`.json; fetches the source first if it is not
-    cached. Returns the manifest."""
+    cached (in offline mode only from the person's own network, as fetch_source with `settings`). Returns the
+    manifest."""
     git = git or Git()
-    path = fetch_source(source, state_dir, url=url, git=git, log=log)
+    path = fetch_source(source, state_dir, url=url, git=git, log=log, settings=settings)
     out = Path(out).absolute()  # git runs inside the source cache: a relative path would land there
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f".{out.name}.{secrets.token_hex(4)}.tmp")

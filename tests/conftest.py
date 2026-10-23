@@ -250,6 +250,26 @@ def isolated_environment(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def hermetic_locality(monkeypatch):
+    """Offline mode's locality rule (utils/locality.py) never asks the real resolver or the real tailscale command in
+    a test: a name does not resolve (a test gives its own answers), and the VPN cannot be read. The run's cache starts
+    empty in every test."""
+    from orchestrator.utils import locality
+
+    def no_dns(host):
+        raise OSError(f"{host}: no name resolution in tests")
+
+    def no_cli(argv):
+        raise OSError("no tailscale command in tests")
+    locality.clear_cache()
+    monkeypatch.setattr(locality, "_system_lookup", no_dns)
+    monkeypatch.setattr(locality, "_run_cli", no_cli)
+    monkeypatch.setattr(locality, "_ui_thread", [None])
+    yield
+    locality.clear_cache()
+
+
+@pytest.fixture(autouse=True)
 def no_network_llama_source(monkeypatch):
     """Tests never fetch the llama.cpp source from the network: a real fetch is about 215 MB, and a test that reaches
     it would go on to a real build. Local mirrors and bundles (the source tests) still work."""

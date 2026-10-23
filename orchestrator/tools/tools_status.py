@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from orchestrator.llm.settings_change import (MIN_MEMORY_LIMIT, TIGHTEN_ONLY, direction_problem,  # noqa: F401
                                               memory_bytes)
 from orchestrator.tools.output import ToolOutput, untrusted_text
+from orchestrator.utils.locality import offline_mode
 from orchestrator.utils.any_path import last_part
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.untrusted import sanitize_untrusted
@@ -335,9 +336,13 @@ def setting_value(framework, key: str) -> SettingValue:
 
 
 def oversight_problems(writable: Any = None) -> List[str]:
-    """Settings that keep the person informed but would be writable by an AI (the registration refuses that)."""
+    """Settings that keep the person informed, or that only the person sets (the opt-outs of offline mode's locality
+    rule, llm/settings_change.PERSON_ONLY_SETTINGS), but would be writable or readable by an AI (the registration
+    refuses that)."""
+    from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS
     keys = set(WRITABLE if writable is None else writable)
-    return sorted(k for k in OVERSIGHT if k in keys)
+    readable = set(READABLE) if writable is None else keys
+    return sorted({k for k in OVERSIGHT if k in keys} | {k for k in PERSON_ONLY_SETTINGS if k in keys | readable})
 
 
 def allowed_text(key: str) -> str:
@@ -417,7 +422,7 @@ def framework_section(framework, registry) -> FrameworkSection:
     policy = registry.policy_store.load()
     return FrameworkSection(version=str(getattr(getattr(framework, "info", None), "version", "") or "unknown"),
                             docker_reachable=docker, targets=targets,
-                            offline_mode=bool(_cfg(framework, "offline_mode", False)),
+                            offline_mode=offline_mode(getattr(framework, "config", None)),
                             knowledge_base=bool(_cfg(framework, "enable_rag_knowledge", False)), active_builds=active,
                             policy_configured=bool(policy.configured),
                             policy_problem=bool(getattr(registry.policy_store, "problem", None)))
@@ -727,9 +732,9 @@ def ai_settings_problem(framework, values: Dict[str, Any]) -> Optional[str]:
     errors name the person's config folder)."""
     import yaml
     from orchestrator.Core.mojo.views import ai_folder_labels
-    from orchestrator.llm.settings_change import AI_SETTINGS, AISettingsChange
+    from orchestrator.llm.settings_change import AI_SETTINGS, PERSON_ONLY_SETTINGS, AISettingsChange
     from orchestrator.security.paths import scrub_for_ai
-    ai = {key: value for key, value in values.items() if key in AI_SETTINGS}
+    ai = {key: value for key, value in values.items() if key in AI_SETTINGS or key in PERSON_ONLY_SETTINGS}
     if not ai:
         return None
     try:
@@ -828,7 +833,7 @@ def status_tool_specs(registry, framework, no_tool_actions: List[Tuple[str, str]
                        model=str(_cfg(framework, "ai_model", "") or "") or None,
                        effort=str(_cfg(framework, "ai_effort", "") or "") or None,
                        privacy_level=str(_cfg(framework, "ai_security_level", "") or "") or None,
-                       offline_mode=bool(_cfg(framework, "offline_mode", False)))
+                       offline_mode=offline_mode(getattr(framework, "config", None)))
         return SettingsOut(settings=rows, ai=ai)
 
     def update_settings(inp: UpdateSettingsIn, ctx) -> UpdateSettingsOut:
@@ -844,9 +849,12 @@ def status_tool_specs(registry, framework, no_tool_actions: List[Tuple[str, str]
             ai_problem = ai_settings_problem(framework, {c["key"]: c["new"] for c in bound})
         except ValueError as e:
             ai_problem = str(e)
-        from orchestrator.llm.settings_change import AI_SETTINGS
+        from orchestrator.llm.settings_change import AI_SETTINGS, PERSON_ONLY_SETTINGS
         for change in bound:
             key, new = change["key"], change["new"]
+            if key in PERSON_ONLY_SETTINGS:   # never an AI's (the input model has no such key; checked all the same)
+                out.rejected.append(RejectedOut(key=key, reason="only the person sets it"))
+                continue
             # Checked again right before it is set: the person may have changed it while the question was open.
             loosens = direction_problem(key, _cfg(framework, key), new)
             if loosens:

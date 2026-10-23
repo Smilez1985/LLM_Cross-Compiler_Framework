@@ -208,6 +208,23 @@ def test_refusals_before_the_question(env, case):
     assert asked == [] and quarantined(env) == []
 
 
+def test_offline_mode_switched_on_while_the_person_is_asked_installs_nothing(env):
+    """Chain offline-lan (as download_hf_file, 56b962c): the look-up refuses in offline mode, and the install after
+    the person's answer looks again. Offline mode switched on while the question was open, then a Yes: the same
+    refusal, nothing reserved, nothing installed, no job."""
+    env.world.add(env.world.target_pack())
+    env.world.publish()
+
+    def yes_after_going_offline(spec, inp):
+        env.world.values["offline_mode"] = True
+        return True
+    with pytest.raises(ToolError) as e:
+        call(env, "add_pack_from_index", {"kind": "target", "pack_id": "demo-board"},
+             confirm=yes_after_going_offline)
+    assert e.value.code == "not_supported" and e.value.blocker == "offline_mode" and "Offline mode" in str(e.value)
+    assert not (env.cm.targets_dir / "demo-board").exists() and env.jobs.list() == []
+
+
 def test_a_pack_the_disk_cannot_hold_is_refused_before_the_download(env):
     url = env.world.add(env.world.target_pack())
     env.world.publish()

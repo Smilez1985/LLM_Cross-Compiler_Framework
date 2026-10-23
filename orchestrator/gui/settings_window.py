@@ -11,17 +11,25 @@ Source repositories: the repository overrides builds receive as <NAME>_REPO_OVER
 add_repo_override / remove_repo_override, the functions of `config repos`). A URL is shown with any credential in it
 redacted. Removing one asks first with exactly what goes and where it is saved ("No" is the default); nothing else is
 removed. Every text is plain text.
+
+Local network (`config local-network`, Core/local_network.py; DECISIONS round 24, "L-NET final"): what offline mode
+counts as local besides this computer and the own network, the person's opt-outs (a VPN, a host, an address range),
+each added only after the person read what can then leave the network ("No" is the default), the VPN check of this
+computer and a check of any address. Both checks look names up and may run the tailscale command: in a worker thread,
+never on the GUI thread. No field here is one Ditto's GUI tools may fill (no form binding): only the person decides.
 """
 
 import json
+import threading
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView,
-                               QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
-                               QWidget)
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
+                               QHeaderView, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget,
+                               QVBoxLayout, QWidget)
 
-from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label
+from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
 from orchestrator.utils.localization import current_language, ui_text
 
 
@@ -68,6 +76,9 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._general_tab(), self._t("words.settings.tab.general"))
         self.tabs.addTab(self._effective_tab(), self._t("bld.settings.tab.effective"))
         self.tabs.addTab(self._repos_tab(), self._t("bld.settings.tab.repos"))
+        self.page_net = self._network_tab()
+        self.tabs.addTab(self.page_net, self._t("net.tab"))
+        self.tabs.currentChanged.connect(self._tab_changed)
         layout.addWidget(self.tabs)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, self)
         buttons.rejected.connect(self.reject)
@@ -257,9 +268,203 @@ class SettingsDialog(QDialog):
                                              else "bld.settings.repos.not_found", name=one_line(name)))
         self.refresh()
 
+    # --- local network (config local-network) -----------------------------------------------------------------
+
+    def _network_tab(self) -> QWidget:
+        from orchestrator.gui.worker_relay import worker_relay
+        page = QWidget(self)
+        page.setObjectName("tab_settings_local_network")
+        layout = QVBoxLayout(page)
+        layout.addWidget(plain_label(self._t("net.intro"), page))
+        self.lbl_net_vpn = plain_label(self._t("net.vpn.checking"), page)
+        self.lbl_net_vpn.setObjectName("lbl_net_vpn")
+        layout.addWidget(self.lbl_net_vpn)
+        self.lbl_net_empty = plain_label(self._t("net.empty"), page)
+        layout.addWidget(self.lbl_net_empty)
+        self.table_net = QTableWidget(0, 3, page)
+        self.table_net.setObjectName("table_settings_local_network")
+        self.table_net.setHorizontalHeaderLabels([self._t("net.col.kind"), self._t("net.col.value"),
+                                                  self._t("net.col.means")])
+        self.table_net.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_net.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_net.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table_net.setWordWrap(True)
+        self.table_net.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table_net.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.table_net)
+        form = QFormLayout()
+        self.combo_net_kind = QComboBox(page)
+        self.combo_net_kind.setObjectName("combo_net_kind")
+        for kind in ("host", "range", "vpn"):
+            self.combo_net_kind.addItem(self._t(f"net.kind.{kind}"), kind)
+        self.combo_net_kind.currentIndexChanged.connect(self._net_kind_changed)
+        self.edit_net_value = QLineEdit(page)
+        self.edit_net_value.setObjectName("edit_net_value")
+        self.edit_net_value.setPlaceholderText(self._t("net.value.hint"))
+        form.addRow(self._t("net.kind.label"), self.combo_net_kind)
+        form.addRow(self._t("net.value.label"), self.edit_net_value)
+        layout.addLayout(form)
+        row = QHBoxLayout()
+        self.btn_net_add = QPushButton(button_text(self._t("net.add")), page)
+        self.btn_net_add.setObjectName("btn_net_add")
+        self.btn_net_remove = QPushButton(button_text(self._t("net.remove")), page)
+        self.btn_net_remove.setObjectName("btn_net_remove")
+        for button, slot in ((self.btn_net_add, self.add_opt_out), (self.btn_net_remove, self.remove_opt_out)):
+            button.setAutoDefault(False)
+            button.clicked.connect(slot)
+            row.addWidget(button)
+        row.addStretch(1)
+        layout.addLayout(row)
+        check_row = QHBoxLayout()
+        check_row.addWidget(plain_label(self._t("net.check.label"), page))
+        self.edit_net_check = QLineEdit(page)
+        self.edit_net_check.setObjectName("edit_net_check")
+        self.edit_net_check.setPlaceholderText(self._t("net.check.hint"))
+        check_row.addWidget(self.edit_net_check, 1)
+        self.btn_net_check = QPushButton(button_text(self._t("net.check")), page)
+        self.btn_net_check.setObjectName("btn_net_check")
+        self.btn_net_check.setAutoDefault(False)
+        self.btn_net_check.clicked.connect(self.check_address)
+        check_row.addWidget(self.btn_net_check)
+        layout.addLayout(check_row)
+        self.lbl_net_result = plain_label("", page)
+        self.lbl_net_result.setObjectName("lbl_net_result")
+        layout.addWidget(self.lbl_net_result)
+        layout.addStretch(1)
+        self._net_requests = {}
+        self._relay = worker_relay()
+        self._relay.done.connect(self._on_net_result, Qt.QueuedConnection)
+        self._vpn_checked = False   # checked when the tab is first shown (it may run the tailscale command)
+        return page
+
+    def _tab_changed(self, index: int) -> None:
+        if self.tabs.widget(index) is getattr(self, "page_net", None) and not self._vpn_checked:
+            self._start_vpn_check()
+
+    def _net_kind_changed(self) -> None:
+        vpn = self.combo_net_kind.currentData() == "vpn"
+        self.edit_net_value.setEnabled(not vpn)
+        if vpn:
+            self.edit_net_value.setText("tailscale")
+        elif self.edit_net_value.text() == "tailscale":
+            self.edit_net_value.clear()
+
+    def _in_worker(self, kind: str, work: Callable[[], str]) -> None:
+        """Runs `work()` in a worker thread (a lookup or the tailscale command never runs on the GUI thread); its
+        result comes back through the relay to _on_net_result."""
+        token = object()
+        self._net_requests[kind] = token
+        relay = self._relay
+
+        def run():
+            try:
+                result = ("ok", work())
+            except Exception as e:  # noqa: BLE001 - shown as plain text
+                result = ("error", str(e))
+            relay.done.emit(token, result)
+
+        threading.Thread(target=run, name=f"local-network-{kind}", daemon=True).start()
+
+    def _start_vpn_check(self) -> None:
+        from orchestrator.Core.local_network import vpn_status, vpn_text
+        lang = self.lang
+        self._vpn_checked = True
+        self.lbl_net_vpn.setText(self._t("net.vpn.checking"))
+        self._in_worker("vpn", lambda: vpn_text(vpn_status(), lang))
+
+    def check_address(self) -> None:
+        """Checks the typed address, host or URL by the rule with the person's opt-outs (in a worker thread)."""
+        from orchestrator.Core.local_network import check, check_text
+        target = self.edit_net_check.text().strip()
+        if not target:
+            return
+        config, lang = self.config, self.lang
+        self.lbl_net_result.setText(self._t("net.check.running", host=one_line(target)))
+        self._in_worker("check", lambda: check_text(check(config, target), lang))
+
+    def _on_net_result(self, token: object, result) -> None:
+        kind = next((k for k, t in self._net_requests.items() if t is token), None)
+        if kind is None or not isinstance(result, tuple) or len(result) != 2:
+            return   # another window's result, or an older check
+        self._net_requests.pop(kind, None)
+        label = self.lbl_net_vpn if kind == "vpn" else self.lbl_net_result
+        try:
+            label.setText(one_line(result[1]) if result[0] == "error" else str(result[1]))
+        except RuntimeError:   # the window was closed meanwhile
+            pass
+
+    def refresh_network(self) -> None:
+        from orchestrator.Core.local_network import opt_outs
+        self.net_rows = opt_outs(self.config)
+        self.lbl_net_empty.setVisible(not self.net_rows)
+        self.table_net.setRowCount(len(self.net_rows))
+        for row, entry in enumerate(self.net_rows):
+            for column, text in enumerate((entry.kind_label(self.lang), entry.label(self.lang),
+                                           entry.explanation(self.lang))):
+                item = QTableWidgetItem(one_line(text))
+                item.setToolTip(plain_tooltip(text))
+                self.table_net.setItem(row, column, item)
+        self.table_net.resizeRowsToContents()
+        self.btn_net_remove.setEnabled(bool(self.net_rows))
+
+    def add_opt_out(self) -> None:
+        """Counts a VPN, host or range as local: only after the person read what can then leave the network."""
+        from orchestrator.Core.local_network import LocalNetworkError, add_opt_out, explain, normalize
+        kind = self.combo_net_kind.currentData() or "host"
+        value = self.edit_net_value.text().strip()
+        if not value:
+            plain_box(self, "information", self._t("net.tab"), self._t("net.value.hint"))
+            return
+        try:
+            stored = normalize(kind, value, self.lang)
+        except LocalNetworkError as e:
+            plain_box(self, "warning", self._t("net.tab"), one_line(str(e)))
+            return
+        question = self._t("net.ask", explanation=explain(kind, stored, self.lang))
+        if not ask(self, self._t("net.ask.title"), question):   # "No" is the default
+            return
+        try:
+            added = add_opt_out(self.config, kind, stored, self.lang)
+        except LocalNetworkError as e:
+            plain_box(self, "warning", self._t("net.tab"), one_line(str(e)))
+            return
+        self.lbl_net_result.setText(self._t("net.added", value=one_line(added.label(self.lang))))
+        if kind != "vpn":
+            self.edit_net_value.clear()
+        self.refresh()
+        self._start_vpn_check()
+
+    def selected_opt_out(self):
+        rows = self.table_net.selectionModel().selectedRows() if self.table_net.selectionModel() else []
+        if not rows or rows[0].row() >= len(getattr(self, "net_rows", [])):
+            return None
+        return self.net_rows[rows[0].row()]
+
+    def remove_opt_out(self) -> None:
+        """Stops counting the chosen row as local, after a question with what changes and where ("No" default)."""
+        from orchestrator.Core.local_network import LocalNetworkError, remove_opt_out
+        entry = self.selected_opt_out()
+        if entry is None:
+            plain_box(self, "information", self._t("net.tab"), self._t("net.pick"))
+            return
+        question = self._t("net.remove_question", value=one_line(entry.label(self.lang)),
+                           path=one_line(self._config_file()))
+        if not ask(self, self._t("net.tab"), question):   # "No" is the default
+            return
+        try:
+            removed = remove_opt_out(self.config, entry.kind, entry.value, self.lang)
+        except LocalNetworkError as e:
+            plain_box(self, "warning", self._t("net.tab"), one_line(str(e)))
+            return
+        self.lbl_net_result.setText(self._t("net.removed" if removed else "net.not_found",
+                                            value=one_line(entry.label(self.lang))))
+        self.refresh()
+        self._start_vpn_check()
+
     def refresh(self) -> None:
         self.refresh_effective()
         self.refresh_repos()
+        self.refresh_network()
 
 
 __all__ = ["SettingsDialog", "source_text", "value_text"]

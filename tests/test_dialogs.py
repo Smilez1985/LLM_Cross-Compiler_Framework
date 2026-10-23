@@ -236,20 +236,94 @@ class TestAIConfigurationDialog:
         assert dlg.result() == 0
 
     def test_offline_mode_accepts_a_custom_server_only_on_the_local_network(self, qapp, framework,
-                                                                              message_boxes):
+                                                                              message_boxes, monkeypatch):
+        """Since offline-lan (DECISIONS round 24 L-NET) a server name counts by the addresses it resolves to; the
+        dialog looks it up in a worker thread first (never on the GUI thread) and saves or refuses when it is in."""
+        import threading
+        from orchestrator.utils import locality
+        threads = []
+
+        def lookup(host):
+            threads.append(threading.current_thread() is threading.main_thread())
+            return {"api.example.com": ["93.184.215.14"], "llm-box.local": ["192.168.1.31"]}[host]
+        monkeypatch.setattr(locality, "_system_lookup", lookup)
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "custom")
         dlg.cb_model.setCurrentText("my-model")
         dlg.chk_offline.setChecked(True)
         dlg.txt_base_url.setText("https://api.example.com/v1")
         dlg._save_config()
-        assert message_boxes == [("warning", "Offline Mode")] and dlg.result() == 0
+        assert wait_for(qapp, lambda: message_boxes == [("warning", "Offline Mode")]) and dlg.result() == 0
         assert framework.config.get("offline_mode") is not True, "nothing is saved"
+        assert threads == [False], "looked up in a worker thread"
 
         dlg.txt_base_url.setText("http://192.168.1.30:8000/v1")
         dlg._save_config()
         assert dlg.result() == dialogs.QDialog.Accepted
         assert framework.config.get("ai_provider") == "custom" and framework.config.get("offline_mode") is True
+
+        named = AIConfigurationDialog(framework)
+        select_provider(named, "custom")
+        named.cb_model.setCurrentText("my-model")
+        named.chk_offline.setChecked(True)
+        named.txt_base_url.setText("http://llm-box.local:8000/v1")
+        named._save_config()
+        assert wait_for(qapp, lambda: named.result() == dialogs.QDialog.Accepted), message_boxes
+
+    def test_a_dialog_cancelled_during_the_address_check_saves_nothing(self, qapp, framework, message_boxes,
+                                                                        monkeypatch):
+        """Review offline-lan-v: Save in offline mode looks the server name up in a worker first; the person pressed
+        Cancel while it ran, and when the answer came the dialog saved the settings all the same."""
+        import time
+        from orchestrator.utils import locality
+        release = threading.Event()
+
+        def slow_lookup(host):
+            release.wait(5)
+            return ["192.168.1.31"]
+        monkeypatch.setattr(locality, "_system_lookup", slow_lookup)
+        saved = {key: framework.config.get(key) for key in ("ai_provider", "offline_mode", "ai_base_url")}
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "custom")
+        dlg.cb_model.setCurrentText("my-model")
+        dlg.chk_offline.setChecked(True)
+        dlg.txt_base_url.setText("http://llm-box.local:8000/v1")
+        dlg._save_config()
+        dlg.reject()
+        release.set()
+        assert wait_for(qapp, lambda: locality.cached("llm-box.local") is not None)
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline:   # the relay delivers the worker's answer to the GUI thread
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert {key: framework.config.get(key) for key in saved} == saved, "nothing is saved"
+        assert dlg.result() == dialogs.QDialog.Rejected and message_boxes == []
+
+    def test_offline_mode_checks_a_vpn_address_in_a_worker_first(self, qapp, framework, message_boxes, monkeypatch):
+        """Review offline-lan-v: a literal Headscale address needs the VPN check (the tailscale command), which never
+        runs on the GUI thread; the dialog checked only names first, so the save was refused as "not checked yet"
+        even with the person's own Headscale."""
+        from orchestrator.utils import locality
+        answers = {"prefs": {"ControlURL": "https://headscale.lan:8080"},
+                   "derp-map": {"Regions": {"900": {"Nodes": [{"HostName": "derp.lan", "IPv4": "192.168.1.3",
+                                                                "IPv6": "none"}]}}}}
+        on_gui_thread = []
+
+        def run(argv):
+            on_gui_thread.append(threading.current_thread() is threading.main_thread())
+            return json.dumps(answers[argv[2]])
+        monkeypatch.setattr(locality.shutil, "which", lambda name: "/usr/bin/tailscale" if name == "tailscale" else None)
+        monkeypatch.setattr(locality, "_run_cli", run)
+        monkeypatch.setattr(locality, "_system_lookup", lambda host: {"headscale.lan": ["192.168.1.2"]}[host])
+        locality.mark_ui_thread()   # as gui/app.py does
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "custom")
+        dlg.cb_model.setCurrentText("my-model")
+        dlg.chk_offline.setChecked(True)
+        dlg.txt_base_url.setText("http://100.64.0.5:8000/v1")
+        dlg._save_config()
+        assert wait_for(qapp, lambda: dlg.result() == dialogs.QDialog.Accepted), message_boxes
+        assert on_gui_thread == [False, False], "the tailscale command ran in a worker thread"
 
     def test_offline_mode_accepts_only_local_providers(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
@@ -1112,6 +1186,22 @@ class TestDeepIngestControls:
         assert wizard.ai_progress.maximum() == 50   # the "page 1 of 50" progress reached the GUI
         assert wizard.status_label.text() == "Deep Ingest finished: 1 pages (2 chunks) are now searchable."
         assert offered == [[], ["https://docs.example/"]]   # crawled URLs are offered the next time
+
+    def test_offline_mode_reads_no_web_site_for_the_person_either(self, qapp, wizard, tmp_path, monkeypatch,
+                                                                 wizard_boxes):
+        """Chain offline-lan: in offline mode the framework reaches only the person's own network, and the crawler
+        reads only public sites, so the person's Deep Ingest refuses as an AI's crawl_docs_site does (it used to
+        crawl the web in offline mode)."""
+        from orchestrator.gui import wizards
+        cfg = ConfigManager(tmp_path / "configs")
+        cfg.set("offline_mode", True)
+        crawled = []
+        wizard.framework_manager = SimpleNamespace(config=cfg, get_component=lambda name: crawled.append(name))
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
+        monkeypatch.setattr(wizards, "URLInputDialog", lambda *a, **k: pytest.fail("no address is asked for"))
+        wizard.run_deep_ingest()
+        assert [kind for kind, _title, _text in wizard_boxes] == ["information"]
+        assert "Offline mode is on" in wizard_boxes[0][2] and crawled == [] and wizard.crawl_worker is None
 
     def test_finish_waits_for_a_running_crawl(self, qapp, wizard, tmp_path, monkeypatch, wizard_boxes):
         """Finish used to create the module, and its knowledge snapshot of the crawled pages, while Deep Ingest

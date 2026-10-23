@@ -93,14 +93,15 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
                   may_fetch: Callable[[], bool] = lambda: True,
                   on_step: Callable[[str, Any], None] = lambda _kind, _build: None,
                   log: Say = lambda _m: None, cancelled: Callable[[], bool] = lambda: False,
-                  reuse_package: bool = False) -> RuntimeBuild:
+                  reuse_package: bool = False, settings: Any = None) -> RuntimeBuild:
     """Builds the board's runtime as `llmcf device runtime build`: the pinned llama.cpp source from the cache, or
     fetched (from `mirror` when given) only after `may_fetch()` said yes; the cross build in the builder container
     without network (`jobs` parallel compile jobs; None: the CPUs, limited by the memory); then the tarball for the
     board. `on_step(kind, build)` tells the caller where it is: "fetch" and "fetched" around the download, "build"
     before the build, "stored" when the plan's build was stored already. `cancelled()` is asked between the steps
     (the build in the container itself runs to its end). With `reuse_package` a checked tarball of the build that is
-    there already is used again."""
+    there already is used again. `settings`: the framework's settings; in offline mode the source comes only from the
+    person's own network (a local mirror), at its checked address (runtime/build/source.offline_reach)."""
     from orchestrator.runtime.build.executor import BuildExecutor, DockerEngine
     from orchestrator.runtime.build.source import cached_source, fetch_source
     from orchestrator.runtime.build.store import BuildStore
@@ -113,7 +114,8 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
         if not may_fetch():
             raise SourceDeclined("the pinned llama.cpp source is not cached and fetching it was not allowed")
         on_step("fetch", None)
-        src = fetch_source(source, state_dir, url=mirror, log=log)
+        src = fetch_source(source, state_dir, url=mirror, log=log,
+                           **({"settings": settings} if settings is not None else {}))
         on_step("fetched", None)
     if cancelled():
         raise BuildCancelled("the build was cancelled")

@@ -2,11 +2,9 @@
 """Provider presets (configs/llm_providers.yml, schema v2; v1 files still load) as typed data. The sign-in methods
 of a preset are AuthMethodSpecs (orchestrator/llm/auth/spec.py)."""
 
-import ipaddress
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Literal, NamedTuple, Optional, Tuple
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -19,7 +17,8 @@ DEFAULT_CATALOG = Path(__file__).resolve().parents[2] / "configs" / "llm_provide
 CATALOG_FILENAME = "llm_providers.yml"
 
 SCHEMA_VERSIONS = (1, 2)
-__all__ = ["ALWAYS_OPT_IN", "LEGACY_AUTH", "Catalog", "ProviderPreset", "is_local_url", "load_catalog"]
+__all__ = ["ALWAYS_OPT_IN", "LEGACY_AUTH", "Catalog", "OfflineRefusal", "ProviderPreset", "is_local_url",
+           "load_catalog"]
 
 # Providers that no longer exist. Selecting one, also by an old alias or spelling ("Claude Code"), raises
 # NotConfigured with this text. Keys are normalized (see _removed_key).
@@ -31,6 +30,14 @@ CLAUDE_CODE_REMOVED = (
 REMOVED_PROVIDERS = {"claudecode": CLAUDE_CODE_REMOVED}
 # Adapters that no longer exist: a user catalog preset that still uses one is skipped, not fatal.
 REMOVED_ADAPTERS = {"claude_code": CLAUDE_CODE_REMOVED}
+
+
+class OfflineRefusal(NamedTuple):
+    """Why a provider cannot be used in offline mode: the plain text, the next steps (the person's opt-out of the
+    locality rule when it would help) and the locality verdict behind it (None for a cloud provider)."""
+    text: str
+    steps: Tuple[str, ...] = ()
+    locality: Any = None
 
 
 def _removed_key(name: Optional[str]) -> str:
@@ -130,10 +137,29 @@ class ProviderPreset(BaseModel):
     def model_for(self, task: str) -> Optional[str]:
         return self.models.get(task) or self.models.get("default")
 
-    def is_local(self, base_url: Optional[str] = None) -> bool:
+    def is_local(self, base_url: Optional[str] = None, config: Any = None) -> bool:
+        """The preset's location label: its `location`, or for "auto" (a server whose address the person sets) the
+        network-locality rule for the address (utils/locality.py, with the person's opt-outs in `config`)."""
         if self.location != "auto":
             return self.location == "local"
-        return is_local_url(base_url or self.base_url)
+        return is_local_url(base_url or self.base_url, config)
+
+    def offline_refusal(self, base_url: Optional[str] = None, config: Any = None) -> Optional[OfflineRefusal]:
+        """Why this preset cannot be used in offline mode with `base_url` (None when it can): a cloud provider, or a
+        server address that is not on this computer or in the person's own network by the locality rule (every
+        address the name resolves to; a Tailscale address only with the own Headscale; the person's opt-outs in
+        `config`). Ollama and a custom server are judged by their address, the managed local model by its loopback
+        address; a server without an address is reached nowhere."""
+        url = base_url or self.base_url
+        if self.location == "cloud" or (self.location == "auto" and not url):
+            return OfflineRefusal(f"Offline mode is on: {self.label} is a cloud provider. Choose a local model.")
+        if not url:
+            return None
+        from orchestrator.utils.locality import check_url
+        verdict = check_url(url, config)
+        if verdict.local:
+            return None
+        return OfflineRefusal(verdict.refusal(f"the server address of {self.label}"), verdict.steps, verdict)
 
     def map_effort(self, effort: Optional[str]) -> Optional[str]:
         if effort is None:
@@ -194,20 +220,15 @@ class Catalog(BaseModel):
         return list(self.providers)
 
 
-def is_local_url(url: Optional[str]) -> bool:
-    """Loopback, private network or *.local hosts count as local; anything else (or nothing) as cloud."""
+def is_local_url(url: Optional[str], config: Any = None) -> bool:
+    """Whether a server address counts as local: the one network-locality rule (utils/locality.py, DECISIONS round 24
+    L-NET): a name by every address it resolves to (a .local or .lan name only when those addresses are local),
+    loopback, private and link-local addresses, a Tailscale address only with the person's own Headscale, and the
+    person's opt-outs in `config`; anything else (or nothing) counts as cloud."""
     if not url:
         return False
-    host = (urlparse(url if "//" in url else f"http://{url}").hostname or "").lower()
-    if host in ("localhost",) or host.endswith((".localhost", ".local", ".lan", ".home.arpa")):
-        return True
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    if ip.version == 6 and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
-    return ip.is_loopback or ip.is_private or ip.is_link_local
+    from orchestrator.utils.locality import check_url
+    return check_url(url, config).local
 
 
 def _read(path: Path) -> dict:
