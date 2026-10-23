@@ -353,9 +353,10 @@ def test_the_deployment_package_goes_to_the_configured_output_folder(qapp, tmp_p
     install, seen = tmp_path / "install", {}
 
     class Deployment:
-        def create_deployment_package(self, artifact_path, profile_name, docker_config, output_dir):
+        def create_package(self, artifact_path, profile_name, docker_config, output_dir, **extra):  # make_package's
+            from orchestrator.Core.deployment_manager import DeployError
             seen["output_dir"] = output_dir
-            return None  # stops after packaging
+            raise DeployError("stopped after packaging")
 
     framework = SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None: default),
                                 resolve_path=lambda value: install / value,

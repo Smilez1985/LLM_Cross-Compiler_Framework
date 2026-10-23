@@ -225,6 +225,57 @@ class TestDeploymentTabDeploy:
         assert not ok and "Package generation failed" in msg and "No model file found" in msg
         assert calls == [] and worker.device_id is None
 
+    def test_without_the_registry_the_board_is_audited_in_the_clis_audit_log(self, qapp, tmp_path, monkeypatch,
+                                                                             memory_keyring):
+        """The wave-5 minor (w6-deploy-hf, done by c3-deploy-flow): without the registry's audit log the Deployment
+        tab used to write the board's trusted record with no audit row; it now audits it in the per-user audit log, as
+        `llmcf deploy run` does (person_steps.device_audit, the CLI's opener)."""
+        from orchestrator.Core.deployment_manager import DeployResult
+        from orchestrator.Core.vault_key import audit_key
+        from orchestrator.tools.audit import AuditLog
+        framework = Framework(tmp_path, registry=False)
+        self.deploys(framework, monkeypatch, DeployResult(True, exit_status=0, device_state="ok"))
+        worker, done = self.worker(framework, a_build(tmp_path / "b"))
+        worker.run()
+        assert done[0][0] and worker.device_id
+        state = tmp_path / "state"
+        rows = [r for r in AuditLog(state / "audit.db", key=audit_key(None, state)).entries(10)
+                if r["tool"] == "device_trusted"]
+        assert len(rows) == 1 and rows[0]["actor"] == "gui"
+        extra = rows[0]["extra"] if isinstance(rows[0]["extra"], dict) else json.loads(rows[0]["extra"])
+        assert extra["confirm_channel"] == "framework-gui" and extra["answer"] == "accepted"
+
+    def test_the_package_is_made_as_deploy_package_makes_it_with_its_image_and_cancel(self, qapp, tmp_path,
+                                                                                    monkeypatch):
+        """The Deployment tab packages through make_package, the step of `llmcf deploy package` and Create package
+        only...: a Docker package gets package_docker_config's image name, and the deploy's Cancel also stops the
+        packaging between its steps (no package stays, nothing is deployed)."""
+        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE, DeployResult
+        framework = Framework(tmp_path)
+        calls = self.deploys(framework, monkeypatch, DeployResult(True, exit_status=0, device_state="ok"))
+        real_create = framework.manager.create_package
+        seen = []
+
+        def create_package(artifact_path, profile_name, docker_config, output_dir, **extra):
+            seen.append((dict(docker_config), sorted(extra)))
+            return real_create(artifact_path, profile_name, {"use_docker": False}, output_dir, **extra)
+
+        monkeypatch.setattr(framework.manager, "create_package", create_package)
+        worker, done = self.worker(framework, a_build(tmp_path / "b"))
+        worker.docker_config = {"use_docker": True}
+        worker.kv_cache = "q8_0"
+        worker.run()
+        assert seen == [({"use_docker": True, "image_name": DEFAULT_INFERENCE_IMAGE}, ["cancelled", "kv_cache"])]
+        assert done[0][0] and len(calls) == 1
+        seen.clear()
+        worker, done = self.worker(framework, a_build(tmp_path / "c"))
+        worker.cancel()
+        worker.run()
+        ((ok, msg),) = done
+        assert not ok and "Packaging was cancelled; no package was written." in msg
+        assert len(calls) == 1, "nothing more was deployed"
+        assert len(list((tmp_path / "output").glob("*.zip"))) == 1 and not list((tmp_path / "output").glob(".*"))
+
     def test_a_failed_deploy_remembers_nothing(self, qapp, tmp_path, monkeypatch):
         from orchestrator.Core.deployment_manager import DeployResult
         from orchestrator.runtime.device.trusted import TrustedDevices
@@ -520,6 +571,16 @@ def test_the_threads_of_a_test_never_outlive_it():
     while time.monotonic() < deadline and [t for t in threading.enumerate() if t.name == "boards-step"]:
         time.sleep(0.05)
     assert not [t for t in threading.enumerate() if t.name == "boards-step"]
+
+
+def test_no_framework_code_reads_the_shared_package_error():
+    """The reason a package could not be made comes back with the call (make_package raises it, deploy_build returns
+    it as package_error): no framework module reads DeploymentManager.last_package_error, which every caller of one
+    manager shares (it stays for older callers of create_deployment_package only)."""
+    from conftest import REPO_ROOT
+    readers = [p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / "orchestrator").rglob("*.py")
+               if "last_package_error" in p.read_text(encoding="utf-8")]
+    assert readers == ["orchestrator/Core/deployment_manager.py"], readers
 
 
 def test_the_ai_s_deploy_hands_the_flow_no_person_only_hook():

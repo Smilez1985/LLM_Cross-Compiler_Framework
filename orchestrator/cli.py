@@ -4395,11 +4395,19 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         password = _device_password(None, False, ask_when_omitted=True)
 
     import threading
+    from orchestrator.remote.session import CancelToken, KeyOnly, OneTimePassword
+    from orchestrator.runtime.device.person_steps import deploy_build
     stop = threading.Event()
+    # The one deploy of a build (person_steps.deploy_build, also the Deployment tab's): the package as it is, the
+    # deploy (Ctrl+C is its cancel, _ctrl_c_cancels), then, trusted by you and logged in to with the framework's key,
+    # the board's record, so AI tools may name it (deploy_to_device).
     with _ctrl_c_cancels(stop), console.status(f"Deploying to {user}@{host}...", spinner="earth") as shown:
-        result = dep_mgr.deploy_package(Path(package_path), host, user, port=port, password=password,
-                                        wait_seconds=wait_seconds, cancelled=stop.is_set,
-                                        on_event=lambda event: shown.update(_deploy_event_text(ctx, event, host)))
+        done = deploy_build(ctx.framework_manager, dep_mgr, Endpoint(host, port), user, package=Path(package_path),
+                            credentials=OneTimePassword(password) if password else KeyOnly(), label=label,
+                            wait=wait_seconds, on_event=lambda event: shown.update(_deploy_event_text(ctx, event, host)),
+                            cancel=CancelToken(check=stop.is_set), key=key, bind_key=False, via="cli", actor="cli",
+                            state_dir=lambda: _state_dir(ctx), audit=lambda: _device_audit(ctx, _state_dir(ctx)))
+    result = done.result
 
     if result.success:
         console.print("[bold green]✅ Deployment Execution Successful![/bold green]")
@@ -4408,8 +4416,7 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
                           "for the board and continued where it stopped.")
         for note in result.notes:  # e.g. an old container on the board that only you remove
             console.print(f"[yellow]{escape(note)}[/yellow]")
-        # Trusted by you and logged in to with the framework's key: AI tools may now name it (deploy_to_device).
-        _remember_device(ctx, host, port, user, key, paired=True, label=label)
+        _say_trusted(done.device)
     else:
         console.print("[bold red]❌ Deployment Failed.[/bold red]")
         if result.code:
@@ -4555,17 +4562,11 @@ def _deploy_event_text(ctx: FrameworkContext, event, host: str) -> str:
 
 
 def _device_audit(ctx: FrameworkContext, state_dir: Path):
-    """The tool audit log for a person's device decisions, also when the framework is not booted (scan --device)."""
+    """The tool audit log for a person's device decisions, also when the framework is not booted (scan --device): the
+    one opener the GUI uses too (person_steps.device_audit)."""
+    from orchestrator.runtime.device.person_steps import device_audit
     fm = ctx.framework_manager if getattr(ctx, "_initialized", False) else None
-    audit = getattr(getattr(fm, "tool_registry", None), "audit", None)
-    if audit is not None:
-        return audit
-    try:
-        from orchestrator.tools.audit import AuditLog
-        from orchestrator.Core.vault_key import audit_key
-        return AuditLog(state_dir / "audit.db", key=audit_key(None, state_dir))
-    except Exception:  # noqa: BLE001 - the record is still written; the trust itself was the person's
-        return None
+    return device_audit(fm, state_dir)
 
 
 def _remember_device(ctx: FrameworkContext, host: str, port: int, user: str, key, *, paired: bool,
