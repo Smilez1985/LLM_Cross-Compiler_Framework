@@ -42,6 +42,11 @@ def read_target_folders(targets_dir: Path, logger=None) -> Dict[str, Tuple[Path,
     return found
 
 
+def _block(value: Any) -> Dict[str, Any]:
+    """A block of target.yml as a mapping: an empty block (YAML null) or anything that is no mapping counts as none."""
+    return value if isinstance(value, dict) else {}
+
+
 def resolve_target_name(name: Optional[str], folders: Dict[str, Path]) -> Optional[str]:
     """The registered id for a name the user typed: the id itself, else its folder name, each first exactly and
     then ignoring the letter case. None for an unknown name."""
@@ -203,19 +208,24 @@ class TargetManager:
         """
         target = self.get_target(target_id)
         if not target: return []
-        
+
         flags = []
-        hw = target.get('hardware', {})
-        
+        # An empty block (`hardware:` or `npu:` with nothing under it, e.g. its lines commented out: YAML reads null)
+        # gives no device access, as no block does; the Deployment tab's container table reads this when it opens.
+        hw = _block(target.get('hardware'))
+
+        def vendor(part: str) -> str:
+            return str(_block(hw.get(part)).get('vendor') or '').lower()
+
         # 1. GPU Support
-        gpu = hw.get('gpu', {}).get('vendor', '').lower()
+        gpu = vendor('gpu')
         if gpu == 'nvidia':
             flags.append("--gpus all")
         elif gpu == 'intel':
             flags.append("--device /dev/dri") # iGPU / Arc
             
         # 2. NPU Support (Manual mappings based on vendor)
-        npu = hw.get('npu', {}).get('vendor', '').lower()
+        npu = vendor('npu')
         if 'rockchip' in npu:
             flags.append("--device /dev/rknpu")
             flags.append("--device /dev/rga")

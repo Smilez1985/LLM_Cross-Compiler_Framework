@@ -266,3 +266,71 @@ def cli_and_tab(tab, window_framework, monkeypatch, tmp_path, told):
         return calls[-1]
 
     return cli, gui
+
+
+# --- a target.yml whose hardware block is empty (review cs-cli-gui-v) ---------------------------------------------
+
+EMPTY_HARDWARE_TARGET = """\
+metadata:
+  id: Mine
+  name: My board
+  architecture: aarch64
+hardware:
+  # npu:
+  #   vendor: rockchip
+"""
+
+
+@pytest.fixture
+def empty_hardware(make_framework, tmp_path):
+    """A target whose `hardware:` block has nothing in it (its lines commented out: YAML reads null), next to one
+    whose npu and gpu blocks are empty."""
+    targets = tmp_path / "targets_empty_hw"
+    (targets / "Mine").mkdir(parents=True)
+    (targets / "Mine" / "target.yml").write_text(EMPTY_HARDWARE_TARGET, encoding="utf-8")
+    (targets / "Other").mkdir()
+    (targets / "Other" / "target.yml").write_text("metadata:\n  id: Other\nhardware:\n  npu:\n  gpu:\n    vendor:\n",
+                                                  encoding="utf-8")
+    fm = make_framework(initialize=False)
+    fm.config.set("targets_dir", str(targets))
+    assert fm.initialize()
+    return fm
+
+
+@pytest.mark.parametrize("hardware, flags", [
+    ({"gpu": {"vendor": "NVIDIA"}}, ["--gpus all"]),
+    ({"gpu": {"vendor": "intel"}, "npu": {"vendor": "Rockchip"}},
+     ["--device /dev/dri", "--device /dev/rknpu", "--device /dev/rga"]),
+    ({"npu": {"vendor": "hailo"}}, ["--device /dev/hailo0"]),
+    ({"npu": {"vendor": "axelera"}}, ["--privileged"]),
+    ({"cpu": {"architecture": "aarch64"}}, []),
+    ({}, []),
+])
+def test_the_device_access_of_a_hardware_block_stays(hardware, flags):
+    """Characterization (the flags a filled hardware block gives, as before the empty-block fix)."""
+    from types import SimpleNamespace
+
+    from orchestrator.Core.target_manager import TargetManager
+    tm = TargetManager(SimpleNamespace(config=SimpleNamespace(targets_dir="targets"), resolve_path=Path))
+    tm._targets, tm._initialized = {"T": {"metadata": {"id": "T"}, "hardware": hardware}}, True
+    assert tm.get_docker_flags_for_profile("T") == flags
+    assert tm.get_docker_flags_for_profile("unknown") == []
+
+
+def test_an_empty_hardware_block_gives_no_device_access(empty_hardware):
+    """A target.yml whose hardware block (or its npu/gpu block) is empty gives the container no device access, as no
+    block at all does: the container table, `deploy package --docker` and the AI's package facts all read it."""
+    from orchestrator.Core.deployment_manager import package_containers
+    assert empty_hardware.target_manager.get_docker_flags_for_profile("Mine") == []
+    assert empty_hardware.target_manager.get_docker_flags_for_profile("Other") == []
+    (container,) = package_containers(empty_hardware, "Mine")
+    assert container.flags == ()
+
+
+def test_the_deployment_tab_opens_with_an_empty_hardware_block(qapp, empty_hardware, monkeypatch):
+    """The container table is filled when the tab is built: a person's target.yml with an empty hardware block must
+    not stop the Deployment tab from opening."""
+    from test_deploy_parity import TestDeploymentTab
+    win = TestDeploymentTab().window(empty_hardware, monkeypatch)
+    win.cb_profiles.setCurrentIndex(win.cb_profiles.findText("Mine"))
+    assert rows(win)[0][1:] == (True, rows(win)[0][2], "none (it runs on the CPU)")
