@@ -1391,7 +1391,8 @@ class BuildEngine:
             raise ValueError(f"Offline mode is on, so {source} is not downloaded from Hugging Face, and no copy of it "
                              "is on this computer. Choose a model already here or a model file or folder of your own, "
                              "or switch offline mode off.")
-        config.model_revision = copy.commit
+        if COMMIT_ID.fullmatch(copy.commit or ""):   # a browser download's folder names only the commit's first 12
+            config.model_revision = copy.commit
         progress.add_log(f"Offline mode: using the copy of {source} on this computer (commit {copy.commit[:12]}); "
                          "nothing is downloaded.")
         inner = "/build-cache/input-model"
