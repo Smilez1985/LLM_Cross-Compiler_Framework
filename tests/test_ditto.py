@@ -830,6 +830,147 @@ class TestConfirmations:
         assert calls == [("Which targets?", cli._ditto_confirm, True)]
         assert config.values["ai_provider"] == "ollama"
 
+    @pytest.mark.parametrize("abort_at", ["confirm", "grant"])
+    def test_ctrl_c_or_end_of_input_at_the_prompt_is_a_no(self, monkeypatch, capsys, abort_at):
+        from orchestrator import cli
+        monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: True))
+        monkeypatch.setattr("sys.stdout", SimpleNamespace(isatty=lambda: False, write=lambda s: None,
+                                                          flush=lambda: None))
+
+        def abort(*args, **kwargs):
+            raise cli.click.Abort()
+
+        monkeypatch.setattr(cli.click, "confirm", abort)
+        monkeypatch.setattr(cli.click, "prompt", abort)
+        if abort_at == "grant":
+            monkeypatch.setattr("orchestrator.tools.registry.current_grant_offer", lambda: object())
+        assert cli._ditto_confirm(SPEC, BuildIn(model="m", target="t")) is False
+        assert "Denied." in capsys.readouterr().err
+
+    def test_no_stdin_at_all_is_a_no(self, monkeypatch, capsys):
+        from orchestrator import cli
+        monkeypatch.setattr("sys.stdin", None)
+        assert cli._ditto_confirm(SPEC, BuildIn(model="m", target="t")) is False
+        assert "No terminal to confirm in: denied" in capsys.readouterr().err
+
+    def test_an_aborted_prompt_is_an_audited_no_and_the_tool_never_runs(self, tmp_path, llm, registry, monkeypatch):
+        from orchestrator import cli
+        monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: True))
+
+        def abort(*args, **kwargs):
+            raise cli.click.Abort()
+
+        monkeypatch.setattr(cli.click, "confirm", abort)
+        llm.script += [answer(calls=[call("start_build", {"model": "m", "target": "Rockchip"})]),
+                       answer("It was not started.")]
+        reply = make_ditto(tmp_path, registry).chat("Build it", confirm=cli._ditto_confirm)
+        assert registry.started == [] and reply.text == "It was not started."
+        result = tool_messages(llm.requests[1])[0]
+        assert result.is_error and "needs your confirmation, which was not given" in result.text()
+        outcomes = [e["outcome"] for e in registry.audit.entries(10) if e["tool"] == "start_build"]
+        assert "not_confirmed" in outcomes and "confirmation_requested" in outcomes
+
+    def test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal(self, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli
+        hostile = "\x1b]0;owned\x07Rock\x1b[2Jchip‮​\x9b31m\x7f\r\nnext line\tend"
+
+        class FakeDitto:
+            client = SimpleNamespace(catalog=SimpleNamespace(get=lambda p: object(), ids=lambda: ["ollama"]))
+
+            def chat(self, question, confirm=None, use_tools=True, on_tool=None):
+                on_tool(ToolUse("list_targets", "List targets", True))
+                on_tool(ToolUse("x\x1b[31m", "Made‮ up\x1b[2J", False, "handler said \x1b]52;c;evil\x07"))
+                return ChatReply(question=question, text=hostile, new_messages=[])
+
+        framework = SimpleNamespace(config=FakeConfig(), get_component=lambda name: FakeDitto())
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "Targets?"])
+        assert result.exit_code == 0, result.output
+        for bad in ("\x1b", "\x07", "‮", "​", "\x9b", "\x7f", "\r"):
+            assert bad not in result.output, repr(bad)
+        assert "Rock[2Jchip" in result.stdout and "next line\tend" in result.stdout
+        assert "Made up[2J" in result.output and "handler said ]52;c;evil" in result.output
+
+    def test_ditto_ask_errors_reach_the_terminal_without_control_characters(self, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli
+
+        class FakeDitto:
+            client = SimpleNamespace(catalog=SimpleNamespace(get=lambda p: object(), ids=lambda: ["ollama"]))
+
+            def chat(self, question, **kwargs):
+                raise DittoError("The AI provider rejected the request.\nDetails: \x1b[2J\x9b2Jgone⁦")
+
+        framework = SimpleNamespace(config=FakeConfig(), get_component=lambda name: FakeDitto())
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "Hi"])
+        assert result.exit_code == 1
+        assert "rejected the request" in result.output and "gone" in result.output
+        assert not any(bad in result.output for bad in ("\x1b", "\x9b", "⁦"))
+
+    @pytest.fixture
+    def generate_ai(self, monkeypatch, tmp_path):
+        """`module generate-ai` with a fake Ditto: run(definition=..., generate=..., save=..., answer=...)."""
+        from click.testing import CliRunner
+        from orchestrator import cli
+        probe = tmp_path / "target_hardware_config.txt"
+        probe.write_text("cpu: rk3588\n", encoding="utf-8")
+        config = FakeConfig(targets_dir=str(tmp_path / "targets"))
+        framework = SimpleNamespace(config=config, resolve_path=lambda p: Path(p))
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        monkeypatch.setattr(cli, "_ditto_notice_once", lambda: None)
+        monkeypatch.setattr("orchestrator.Core.ditto_manager.pin_base_image", lambda definition, offline=False:
+                            definition)
+
+        def run(generate, save=None, answer="n"):
+            ditto = SimpleNamespace(describe=lambda task: {"label": "Ollama", "model": "m"},
+                                    generate_module=generate, save_module=save)
+            monkeypatch.setattr(cli, "_run_ditto", lambda ctx, provider, model: ditto)
+            return CliRunner().invoke(cli.cli, ["-q", "module", "generate-ai", str(probe)], input=answer + "\n")
+        return SimpleNamespace(run=run, probe=probe)
+
+    def test_generate_ai_shows_hidden_characters_of_the_proposal_escaped(self, generate_ai):
+        definition = ModuleDefinition(**{**MODULE, "cpu_flags": "-mcpu=cortex-a76‮\x9b2J\x7f",
+                                         "assumptions": ["the NPU driver\x1b]0;x\x07 is 0.9.8"]})
+        result = generate_ai.run(lambda path: definition)
+        assert result.exit_code == 0, result.output
+        assert not any(bad in result.output for bad in ("‮", "\x9b", "\x7f", "\x1b", "\x07"))
+        # visible(): shown escaped (a hex digit right after an escape is escaped too, so it cannot extend it)
+        assert "-mcpu=cortex-a76\\u202e\\u009b\\u0032J\\u007f" in result.output
+
+    @pytest.mark.parametrize("error", [IsADirectoryError(21, "Is a directory"),
+                                       FileNotFoundError("Probe file not found: the folder"),
+                                       PermissionError(13, "Permission denied")])
+    def test_generate_ai_reports_a_probe_that_cannot_be_read(self, generate_ai, error):
+        def generate(path):
+            raise error
+        result = generate_ai.run(generate)
+        assert result.exit_code == 1 and "AI generation failed" in result.output
+        assert "Traceback" not in result.output
+
+    def test_generate_ai_reports_a_module_that_cannot_be_saved(self, generate_ai):
+        def save(definition, targets_dir, **kwargs):
+            raise PermissionError(13, "Permission denied")
+        result = generate_ai.run(lambda path: ModuleDefinition(**MODULE), save=save, answer="y")
+        assert result.exit_code == 1 and "The proposal was rejected" in result.output
+        assert "Permission denied" in result.output
+
     def test_one_command_provider_and_model_are_never_saved(self, monkeypatch, tmp_path):
         """`ditto ask --provider/--model` holds for this command only: a save of the settings during it (the
         update_settings tool the person confirms) writes the saved provider and model, never the command's."""
