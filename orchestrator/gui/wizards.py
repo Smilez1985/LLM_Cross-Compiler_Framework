@@ -142,7 +142,9 @@ class CrawlWorker(QThread):
                     stopped = True
                     break
                 self.progress.emit(f"Crawling root: {url}...")
-                result = self.rag_manager.ingest_url(url, self.options, stop=self._stop, progress=self.page.emit)
+                # the person's crawl (actor "gui"): in offline mode it may read the own network (round 26 Q5)
+                result = self.rag_manager.ingest_url(url, self.options, stop=self._stop, progress=self.page.emit,
+                                                     actor="gui")
                 if result.get("blocker") == "snapshot_no_room":  # no snapshot, no crawl: nothing more is read
                     self.no_room = str(result.get("message") or "")
                     outcomes.append("failure")
@@ -765,12 +767,12 @@ Setup commands:
         show_crawl_notice_once(self, cfg, announcer=speak,
                                registry=getattr(self.framework_manager, "tool_registry", None))
 
-        # Offline mode reaches only the person's own network, and the crawler reads only public sites: no crawl then
-        # (the person's own setting; an AI's crawl_docs_site refuses the same way).
+        # Offline mode reaches only the person's own network: the person's crawl reads only sites there (round 26
+        # Q5; every redirect and link checked again, never a cloud metadata service). Said once before the address
+        # question; an AI's crawl_docs_site stays refused in offline mode.
         from orchestrator.utils.locality import offline_mode
         if offline_mode(cfg):
             QMessageBox.information(self, ui_text("net.crawl.title", lang), ui_text("net.crawl.offline", lang))
-            return
 
         rag = self.framework_manager.get_component("rag_manager")
         if not rag:

@@ -37,6 +37,7 @@ TEXTS = {
         "net.refusal": "Offline mode is on, and {subject} is not on this computer or in your own network: {why}.",
         "net.refusal.opt_out": " If it is part of your own network (a reverse proxy, a VPN), the person can count it "
                                "as local in the framework's settings (only the person can; an AI cannot).",
+        "net.refusal.metadata": "{subject} is not read: {why}.",
         "net.refusal.location": "{subject} no longer counts as local: {why}. The framework sends it nothing without the "
                                 "privacy filter; check the server address in the AI settings.",
         "net.subject": "the address",
@@ -149,6 +150,7 @@ TEXTS = {
                        "Netz: {why}.",
         "net.refusal.opt_out": " Gehört es zu deinem eigenen Netz (ein Reverse Proxy, ein VPN), kann die Person es in "
                                "den Einstellungen des Frameworks als lokal zählen (nur die Person kann das, keine KI).",
+        "net.refusal.metadata": "{subject} wird nicht gelesen: {why}.",
         "net.refusal.location": "{subject} zählt nicht mehr als lokal: {why}. Das Framework schickt dorthin nichts ohne "
                                 "den Datenschutzfilter; prüfe die Serveradresse in den KI-Einstellungen.",
         "net.subject": "die Adresse",
