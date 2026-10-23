@@ -2080,6 +2080,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **The local runtime's lock is not held for minutes any more** (chain port-runtime, from the review of the managed
+  llama-server): `ditto runtime install --prebuilt` (and the GUI's **Install the official prebuilt archive…**)
+  downloaded the archives while it held the runtime lock, so a `runtime start` or `runtime stop` elsewhere waited for
+  the whole download (a CUDA build is hundreds of MB), up to the lock's 15 minutes. The archives are now downloaded
+  outside the lock (each file has its own); under the lock the install checks again whether another process
+  installed the same build meanwhile (then it is used as it is), whether a server runs from it, and fetches the
+  archives again if a concurrent install removed them; a running server is still refused before anything is
+  downloaded. The exit handler of a server tied to its process (`start(tie_to_process=True)`) waits at most 5 s for
+  the lock and then still ends the exact process it started (pid, start time and program checked), instead of
+  keeping the exiting process alive behind another start. Regression tests: `tests/test_runtime.py`
+  `test_downloads_do_not_hold_the_runtime_lock`, `test_an_install_finished_meanwhile_by_another_process`,
+  `test_exit_handler_does_not_wait_for_a_busy_lock`.
 - **A pinned download that cannot work says why at once** (chain port-runtime, from the review of the managed
   llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, shared by the local runtime's builds and models
   and the community zoo): a TLS certificate that could not be verified was retried five times with backoff like a

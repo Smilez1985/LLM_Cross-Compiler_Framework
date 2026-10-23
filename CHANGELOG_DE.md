@@ -2350,6 +2350,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Die Sperre der lokalen Laufzeit wird nicht mehr minutenlang gehalten** (Kette port-runtime, aus der Prüfung des
+  verwalteten llama-server): `ditto runtime install --prebuilt` (und **Offizielles fertiges Archiv
+  installieren…** in der GUI) lud die Archive herunter, während es die Laufzeit-Sperre hielt; ein
+  `runtime start` oder `runtime stop` anderswo wartete daher den ganzen Download ab (ein CUDA-Build hat Hunderte MB),
+  bis zu den 15 Minuten der Sperre. Die Archive werden jetzt außerhalb der Sperre geladen (jede Datei hat ihre eigene);
+  unter der Sperre prüft die Installation erneut, ob ein anderer Prozess denselben Build inzwischen installiert hat
+  (dann wird er so genommen), ob ein Server daraus läuft, und lädt die Archive erneut, wenn eine gleichzeitige
+  Installation sie entfernt hat; ein laufender Server wird weiterhin abgelehnt, bevor etwas heruntergeladen wird. Der
+  Exit-Handler eines an seinen Prozess gebundenen Servers (`start(tie_to_process=True)`) wartet höchstens 5 s auf die
+  Sperre und beendet danach trotzdem genau den Prozess, den er gestartet hat (PID, Startzeit und Programm geprüft),
+  statt den endenden Prozess hinter einem anderen Start am Leben zu halten. Regressionstests:
+  `tests/test_runtime.py` `test_downloads_do_not_hold_the_runtime_lock`,
+  `test_an_install_finished_meanwhile_by_another_process`, `test_exit_handler_does_not_wait_for_a_busy_lock`.
 - **Ein gepinnter Download, der nicht gelingen kann, sagt sofort, warum** (Kette port-runtime, aus der Prüfung des
   verwalteten llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, den die Builds und Modelle der
   lokalen Laufzeit und der Community-Zoo teilen): Ein TLS-Zertifikat, das sich nicht prüfen ließ, wurde wie eine
