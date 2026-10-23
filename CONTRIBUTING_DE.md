@@ -514,7 +514,8 @@ Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module
    Netzwerk, mit schreibgeschütztem Image-Dateisystem und nur den eigenen Ordnern des Builds beschreibbar. Die Stufe
    convert der Vorlage erkennt bereits das Format der Eingabe, prüft die Eingabe und das geschriebene GGUF, führt
    einen kurzen Funktionstest aus und hält eine Statistik fest; behalte ihr `scripts/model_check.py` in deinem
-   Target.
+   Target (das Paket der Stufe target führt denselben Funktionstest mit dem quantisierten Modell aus,
+   `model_check.py test`).
 5. **Mit einem echten Build testen**, zum Beispiel
    `llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t <Name> -f gguf -b <Board> -F`, und das Dockerfile
    in die hadolint-Matrix in `.github/workflows/docker.yml` und in `.github/dependabot.yml` aufnehmen.
