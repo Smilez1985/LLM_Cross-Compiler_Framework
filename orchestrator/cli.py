@@ -476,9 +476,29 @@ def _run_ditto(ctx: FrameworkContext, provider: Optional[str], model: Optional[s
 PAGED_QUESTION_LINES = 30  # a longer question (up to 16,000 characters) is shown through the pager first
 
 
+def _printable(text: Any) -> str:
+    """Model output (an answer, an error that quotes a provider or a tool, a tool line) for the terminal: line breaks
+    and tabs stay; control characters (C0 including carriage return, DEL, C1), format characters (bidi controls and
+    isolates, zero-width characters) are removed, so text a build log or a web page steered cannot rewrite the screen,
+    the window title or the clipboard, nor reorder what the person reads. Line and paragraph separators become line
+    breaks. (A value the person confirms is shown escaped instead: tools.confirmation.visible.)"""
+    import unicodedata
+    out = []
+    for ch in str(text):
+        category = unicodedata.category(ch)
+        if ch in "\n\t":
+            out.append(ch)
+        elif category in ("Zl", "Zp"):
+            out.append("\n")
+        elif category not in ("Cc", "Cf"):
+            out.append(ch)
+    return "".join(out)
+
+
 def _ditto_confirm(spec, inp) -> bool:
     """Asks before a tool call that needs confirmation; without a terminal the answer is no. A long question (a
-    module definition) is shown whole, through the pager when it does not fit the screen."""
+    module definition) is shown whole, through the pager when it does not fit the screen. Ctrl+C or the end of input at
+    a prompt is a no as well (the registry records it like any other), never a failed tool call."""
     from orchestrator.tools.confirmation import MAX_ELICITATION, MAX_FRAMEWORK, CallTooLong, describe_call
     from orchestrator.tools.registry import current_question
     try:
@@ -487,7 +507,7 @@ def _ditto_confirm(spec, inp) -> bool:
     except CallTooLong as e:
         click.echo(str(e), err=True)
         return False
-    if not sys.stdin.isatty():
+    if sys.stdin is None or not sys.stdin.isatty():
         # Nobody may sit here and another program (an AI app running this command) may read it: the call and its
         # arguments only, never the facts the framework's question shows the person alone (full paths, logins).
         try:
@@ -501,6 +521,16 @@ def _ditto_confirm(spec, inp) -> bool:
         click.echo_via_pager(text + "\n")
     else:
         click.echo(text, err=True)
+    try:
+        return _ditto_answer()
+    except click.Abort:   # Ctrl+C or the end of input at one of the prompts
+        click.echo("\nDenied.", err=True)
+        return False
+
+
+def _ditto_answer():
+    """The person's answer at the terminal to the question _ditto_confirm showed: yes, no, or a standing approval
+    (GrantChoice) when the tool offers one. click.Abort when the prompt is cancelled."""
     from orchestrator.tools.registry import current_grant_offer, current_registry
     offer = current_grant_offer()
     if offer is None:
@@ -547,15 +577,15 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     try:
         info = ditto.describe("json")
     except DittoError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
+        console.print(f"[red]{escape(_printable(e))}[/red]")
         sys.exit(1)
     console.print(Panel(f"[bold cyan]🤖 Ditto AI Hardware Agent[/bold cyan]\nAnalyzing: {escape(str(probe_file))}\n"
                         f"Provider: {escape(info['label'])} / {escape(info['model'])}", title="AI Setup"))
     try:
         with console.status("🤖 Analyzing the hardware probe...", spinner="dots"):
             definition = ditto.generate_module(Path(probe_file))
-    except DittoError as e:
-        console.print(f"[bold red]AI generation failed:[/bold red] {escape(str(e))}")
+    except (DittoError, OSError) as e:   # OSError: the probe cannot be read (a folder, no permission)
+        console.print(f"[bold red]AI generation failed:[/bold red] {escape(_printable(e))}")
         sys.exit(1)
 
     # The base image is pinned to the digest its tag points at now, before the question (DECISIONS round 3): the
@@ -568,10 +598,13 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
         console.print(f"[red]The base image {escape(definition.base_os)} cannot be pinned: {escape(str(e))}[/red]")
         console.print(escape(e.next))
         sys.exit(1)
-    # The definition is shown in full before anything is written; the module generator checks it again.
+    # The definition is shown in full before anything is written; the module generator checks it again. Hidden and
+    # control characters of the AI's values are shown escaped (tools.confirmation.visible), never sent as they are.
+    from orchestrator.tools.confirmation import visible
     console.print("\n[bold green]AI analysis finished. Review the proposal:[/bold green]")
-    click.echo(json.dumps(definition.model_dump(exclude={"cannot"}), indent=2, ensure_ascii=False))
-    click.echo(proposal_facts(definition))
+    proposal = json.dumps(definition.model_dump(exclude={"cannot"}), indent=2, ensure_ascii=False)
+    click.echo("\n".join(visible(line) for line in proposal.split("\n")))
+    click.echo("\n".join(visible(line) for line in proposal_facts(definition).split("\n")))
     from rich.prompt import Confirm
     if not Confirm.ask("Generate module with these settings?"):
         return
@@ -583,8 +616,8 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     profile = _target_profile(probe_file, strict=False)
     try:
         path = ditto.save_module(definition, targets_dir, module_name=module_name, profile=profile)
-    except ValueError as e:
-        console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(str(e))}")
+    except (ValueError, OSError) as e:   # OSError: the targets folder cannot be written
+        console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(_printable(e))}")
         sys.exit(1)
     from orchestrator.Core.module_generator import generator_input
     from orchestrator.Core.module_generator import record_module_saved
@@ -2355,15 +2388,16 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
 
     from orchestrator.Core.ditto_manager import tool_note
 
-    def tool_used(use):
-        err.print(f"[dim]{escape(tool_note(use))}[/dim]" if use.ok else f"[yellow]{escape(tool_note(use))}[/yellow]")
+    def tool_used(use):   # a made-up tool's name and a handler's error are outside text
+        line = escape(_printable(tool_note(use)))
+        err.print(f"[dim]{line}[/dim]" if use.ok else f"[yellow]{line}[/yellow]")
 
     try:
         reply = ditto.chat(question, confirm=_ditto_confirm, use_tools=not no_tools, on_tool=tool_used)
-    except DittoError as e:
-        err.print(f"[red]{escape(str(e))}[/red]")
+    except DittoError as e:   # may quote the provider's or a tool's text
+        err.print(f"[red]{escape(_printable(e))}[/red]")
         sys.exit(1)
-    click.echo(reply.text)
+    click.echo(_printable(reply.text))
 
 
 @ditto.command('eval')
