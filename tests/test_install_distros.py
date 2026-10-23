@@ -446,6 +446,29 @@ class TestDockersRpmRepository:
         assert "wieder entfernt" in said(run) and "podman, buildah oder runc" in said(run)
         assert not box.repo.exists() and "systemctl enable --now docker" not in calls
 
+    @pytest.mark.parametrize("body", ["install_docker", "main --dry-run"])
+    @pytest.mark.parametrize("text", [
+        "[docker-ce-stable]\nname=Docker CE Stable - $basearch\nbaseurl=https://download.docker.com/linux/fedora/"
+        "$releasever/$basearch/stable\nenabled=0\ngpgcheck=1\n[docker-ce-test]\nbaseurl=https://download.docker.com/"
+        "linux/fedora/$releasever/$basearch/test\nenabled=0\ngpgcheck=1\n",
+        "#[docker-ce-stable]\n#baseurl=https://download.docker.com/linux/fedora/$releasever/$basearch/stable\n"],
+        ids=["enabled-0", "commented"])
+    def test_a_switched_off_repository_file_of_the_same_name_is_never_replaced_or_removed(self, tmp_path, keys,
+                                                                                         text, body):
+        """The person's own docker-ce.repo (Docker's guide writes that name) with Docker's repository switched off:
+        the installer neither overwrites it nor, when the install fails, deletes it. It stops before it changes
+        anything (no key import, no dnf call) and says what to do; the dry run stops the same way."""
+        box = Box(tmp_path, "fedora", keys["docker.asc"], present=("python3=3.13", "rsync"),
+                  fails=("install -y docker-ce",), pinned=keys["pinned"])
+        box.repo.parent.mkdir(parents=True)
+        box.repo.write_text(text)
+        run, calls = box.run(body)
+        assert run.returncode == 1, said(run)
+        assert box.repo.read_text() == text
+        assert "Docker wurde nicht installiert" in said(run) and str(box.repo) in said(run)
+        assert "enabled=1" in said(run) and "wieder entfernt" not in said(run)
+        assert calls == [] and not box.keyring.exists()
+
     def test_without_dnf_it_stops(self, tmp_path, keys):
         """CentOS 7 has yum only."""
         box = Box(tmp_path, "centos", keys["docker.asc"], present=("python3=3.13",), tools=("apt-get",),
@@ -483,6 +506,27 @@ class TestTheDistributionsOwnPackages:
                          "systemctl --user --machine=lcf@ enable --now podman.socket"]
         assert "Podman ist installiert" in run.stdout and "/podman/podman.sock" in run.stdout
         assert "DOCKER_HOST=unix:///run/user/" in run.stdout and "Gruppe docker" in run.stdout
+
+    @pytest.mark.parametrize("system", ["rocky", "fedora"])
+    def test_a_docker_command_that_is_podman_gets_the_podman_way_on_a_second_run(self, tmp_path, system):
+        """install.sh run again after podman-docker came in (or with podman-docker the person installed): there is
+        no group docker to join and no re-login to ask for; Podman's socket and DOCKER_HOST are named again."""
+        box = Box(tmp_path, system, present=("python3=3.12", "rsync"))
+        box.write(box.bin / "docker", '#!/bin/sh\n[ "$1" = --version ] && echo "podman version 5.4.0"\n'
+                                      'echo "Emulate Docker CLI using podman." >&2\nexit 0\n')
+        run, calls = box.run("setup_system; finish")
+        assert run.returncode == 0, said(run)
+        assert calls == ["systemctl --user --machine=lcf@ enable --now podman.socket"]
+        assert "DOCKER_HOST=unix:///run/user/" in run.stdout
+        assert "zur Gruppe docker" not in said(run) and "Docker-Gruppe hinzugefügt" not in said(run)
+
+    def test_a_real_docker_still_gets_the_group(self, tmp_path):
+        box = Box(tmp_path, "rocky", present=("python3=3.12", "rsync"))
+        box.write(box.bin / "docker", '#!/bin/sh\n[ "$1" = --version ] && echo "Docker version 28.5.1, build e180ab8"\n'
+                                      'exit 0\n')
+        run, calls = box.run("setup_system")
+        assert run.returncode == 0, said(run)
+        assert calls == ["usermod -aG docker lcf"]
 
     def test_opensuse_gets_docker_and_buildx_from_its_repositories(self, tmp_path):
         box = Box(tmp_path, "opensuse-tumbleweed")
@@ -569,6 +613,31 @@ class TestPython:
         run, calls = box.run("setup_system")
         assert run.returncode == 1 and "Python 3.11 bis 3.14 wird benötigt" in said(run), said(run)
         assert len(calls) == 4
+
+    # Characterization of the apt path as it was before the families came in (these pass against install.sh of
+    # cs-c3-v as well): the Python step on Debian and Ubuntu is unchanged.
+    @pytest.mark.parametrize("system", ["debian", "ubuntu", "linuxmint"])
+    def test_apt_installs_a_missing_python3_as_before(self, tmp_path, system):
+        box = Box(tmp_path, system, present=("docker", "rsync"))
+        run, calls = box.run("setup_system")
+        assert run.returncode == 0, said(run)
+        assert calls == ["apt-get update", "apt-get install -y python3 python3-venv python3-pip",
+                         "usermod -aG docker lcf"]
+        assert "Python3 fehlt. Installiere..." in run.stdout
+
+    def test_apt_with_a_too_old_python3_stops_as_before(self, tmp_path):
+        box = Box(tmp_path, "ubuntu", present=("python3=3.10", "docker", "rsync"))
+        run, calls = box.run("setup_system")
+        assert run.returncode == 1, said(run)
+        assert ("Python 3.11 bis 3.14 wird benötigt, gefunden: Python 3.10.0. Bitte eine passende Version "
+                "installieren (z. B. Debian 12, Ubuntu 24.04 oder 'uv python install 3.13')." in said(run))
+        assert calls == []
+
+    def test_apt_that_cannot_install_python_stops_as_before(self, tmp_path):
+        box = Box(tmp_path, "debian", present=("docker", "rsync"), fails=("install -y python3 ",))
+        run, calls = box.run("setup_system")
+        assert run.returncode == 1 and "Konnte Python nicht installieren." in said(run), said(run)
+        assert calls == ["apt-get update", "apt-get install -y python3 python3-venv python3-pip"]
 
 
 @needs_bash_and_gpg
