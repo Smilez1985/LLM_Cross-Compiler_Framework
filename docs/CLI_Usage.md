@@ -364,8 +364,10 @@ pack's `.lcf-provenance.json`. `knowledge loose` lists them (Mojo names them too
 computer: the file is checked like an installed knowledge pack in the quarantine (a list of pages, each with its
 source; the licence texts and the `NOTICE` its full-text pages need are written next to it), the summary is shown,
 and only after your **y** at a terminal ("No" is the default) is it moved into the folder (trust `local`) and
-imported into the knowledge base, after a snapshot of it. Without a terminal nothing is sorted. A file in the old
-"swarm" format, or one that fails the check, stays where it is with the reason.
+imported into the knowledge base, after a snapshot of it. Without a terminal nothing is sorted. The pack is named
+after the file (a `knowledge.json` after its folder), with a number added when an installed pack or something in the
+chosen folder has that name already; the summary names the folder before you answer. A file in the old "swarm"
+format, or one that fails the check, stays where it is with the reason.
 
 In the GUI: **Sort loose knowledge...** in the Community Hub (the list of loose files, **Belongs to:** a topic or a
 target, then the summary with "No" as the default).

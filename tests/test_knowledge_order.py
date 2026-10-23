@@ -12,6 +12,7 @@
 
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 
@@ -220,6 +221,43 @@ class TestLooseFiles:
         second = world.cm.finish_install(world.cm.prepare_sort("b/docs.json", topic="two"))
         assert (first.name, second.name) == ("docs", "docs-2")
 
+    def test_sorting_never_removes_the_excerpts_of_an_installed_pack_of_that_name(self, world):
+        """Earlier versions imported a loose <folder>/knowledge.json under the folder's name. When an installed pack
+        has that name (here a pack made before topics, installed in community/knowledge/foo/foo/), those excerpts are
+        the pack's own: sorting the loose file must not remove them (only its own upsert replaces them)."""
+        world.add(knowledge_pack(world, name="foo"), kind="knowledge", pack_id="foo", version="1.0.0")
+        world.publish()
+        world.cm.finish_install(world.cm.prepare_install("knowledge", "foo"))
+        loose(world, "foo/knowledge.json", PAGES[:1])
+        world.rag.removed.clear()
+        dest = world.cm.finish_install(world.cm.prepare_sort("foo/knowledge.json", topic="other"))
+        assert dest.name == "foo-2"
+        assert [origin for origin, _ in world.rag.removed] == ["foo-2"], "pack foo's excerpts stay"
+
+    @pytest.mark.skipif(os.name == "nt", reason="Windows does not store ':' in a folder name")
+    def test_sorting_never_removes_the_knowledge_of_a_target_pack(self, world):
+        """A folder named like the origin of a target pack's knowledge ("target:<folder>") is not an older import of
+        the loose file: the target's excerpts stay."""
+        loose(world, f"{TARGET_ORIGIN}demo-board/knowledge.json", PAGES[:1])
+        dest = world.cm.finish_install(world.cm.prepare_sort(f"{TARGET_ORIGIN}demo-board/knowledge.json", topic="t"))
+        assert [origin for origin, _ in world.rag.removed] == [dest.name]
+
+    def test_a_file_in_a_folder_of_its_own_topic_is_sorted_under_a_free_name(self, world):
+        """A knowledge.json in community/knowledge/<topic>/<folder>/ sorted into that topic: its folder name is
+        taken there, so the pack gets a free one, decided before the person's Yes (never refused after it)."""
+        path = loose(world, "rk-npu/notes/knowledge.json")
+        prepared = world.cm.prepare_sort("rk-npu/notes/knowledge.json", topic="rk-npu")
+        assert prepared.destination == world.cm.knowledge_dir / "rk-npu" / "notes-2"
+        dest = world.cm.finish_install(prepared)
+        assert dest == prepared.destination and not path.exists() and world.cm.loose_knowledge() == []
+        assert [s for s, _, _ in world.rag.ingested] == [p["source"] for p in PAGES]
+
+    def test_a_sorted_file_never_gets_a_windows_device_name(self, world):
+        loose(world, "aux.json")
+        prepared = world.cm.prepare_sort("aux.json", topic="t")
+        assert prepared.manifest.id == "aux-knowledge" and prepared.destination.name == "aux-knowledge"
+        world.cm.discard(prepared)
+
 
 # --- installed packs: in their topic folder, never imported once changed -------------------------------------------
 
@@ -264,6 +302,42 @@ class TestInstalledPacks:
         rag = RecordingRag()
         assert world.cm.sync_knowledge_base(rag) == 0 and rag.ingested == [] and rag.snapshots == []
         assert "changed since it was installed" in world.cm.last_sync_problem
+
+    def test_a_pack_whose_folder_is_taken_is_refused_before_the_question(self, world):
+        """As for every other kind, a pack whose folder exists already is refused while it is prepared, not after the
+        person said Yes; the folder there stays as it is."""
+        planted = loose(world, "llama.cpp/rk-docs/knowledge.json")
+        world.add(knowledge_pack(world, topic="llama.cpp"), kind="knowledge", pack_id="rk-docs", version="1.0.0")
+        world.publish()
+        with pytest.raises(PackError, match="already exists"):
+            world.cm.prepare_install("knowledge", "rk-docs")
+        assert planted.is_file() and world.rag.ingested == []
+
+    def test_an_install_says_only_why_that_pack_waits(self, world):
+        """After an install, last_sync_problem names why that pack is not (completely) in the knowledge base. Another
+        pack that waits (here one whose files changed after its install) is not reported as this pack not being
+        imported; the knowledge base's start still names every pack that waits."""
+        world.add(knowledge_pack(world, name="a", topic="t"), kind="knowledge", pack_id="a", version="1.0.0")
+        world.add(knowledge_pack(world, name="b", topic="t"), kind="knowledge", pack_id="b", version="1.0.0")
+        world.publish()
+        rag = world.rag
+        world.framework.get_component = lambda name: None   # installed while the knowledge base is off
+        first = world.cm.finish_install(world.cm.prepare_install("knowledge", "a"))
+        (first / "knowledge.json").write_text(json.dumps(PAGES[:1]))   # changed after its install: it waits
+        world.framework.get_component = lambda name: rag if name == "rag_manager" else None
+        world.cm.finish_install(world.cm.prepare_install("knowledge", "b"))
+        assert world.cm.last_sync_problem == "" and world.cm.last_sync_snapshot and not world.cm.last_sync_no_room
+        assert [s for s, _, m in rag.ingested if m["origin_pack"] == "b"] == [p["source"] for p in PAGES]
+        assert world.cm.sync_knowledge_base() == 0
+        assert "knowledge pack a: its files changed" in world.cm.last_sync_problem
+
+    def test_an_install_says_why_its_own_pages_wait(self, world):
+        world.add(knowledge_pack(world, topic="t"), kind="knowledge", pack_id="rk-docs", version="1.0.0")
+        world.publish()
+        world.rag.ingest_document = lambda source, content, meta: False   # e.g. offline without the embedding model
+        world.cm.finish_install(world.cm.prepare_install("knowledge", "rk-docs"))
+        assert "knowledge pack rk-docs: 2 page(s) not imported yet" in world.cm.last_sync_problem
+        assert not world.cm.last_sync_no_room, "not a question of disk space"
 
     def test_a_folder_dropped_in_without_provenance_is_loose_not_installed(self, world):
         loose(world, "planted/knowledge.json")

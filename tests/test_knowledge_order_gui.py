@@ -77,6 +77,32 @@ def test_sort_loose_knowledge_checks_off_the_gui_thread_and_moves_only_after_yes
         hub.close()
 
 
+@pytest.mark.parametrize("no_room", [True, False])
+def test_only_a_snapshot_that_did_not_fit_offers_the_snapshot_list(qapp, tmp_path, monkeypatch, no_room):
+    """After an install the hub says why the pack is not in the knowledge base yet. Only the snapshot that did not fit
+    opens "Not enough disk space" with the list of snapshots to delete; another reason (pages refused, e.g. offline
+    without the embedding model) is said in the hub's status, never as a question of disk space."""
+    from PySide6.QtWidgets import QLabel
+
+    from orchestrator.gui import community_hub, knowledge_snapshots_window
+    from orchestrator.utils.localization import ui_text
+    offered = []
+    monkeypatch.setattr(knowledge_snapshots_window, "offer_snapshot_list",
+                        lambda parent, framework, text, lang=None: offered.append(text) or False)
+    why = ("Not enough disk space for the snapshot" if no_room
+           else "knowledge pack rk-docs: 2 page(s) not imported yet; tried again when the knowledge base starts")
+    cm = SimpleNamespace(last_sync_problem=why, last_sync_no_room=no_room, last_sync_snapshot=None)
+    hub = SimpleNamespace(comm_manager=cm, framework_manager=SimpleNamespace(target_manager=None),
+                          status_label=QLabel(), installed=SimpleNamespace(emit=lambda kind: None),
+                          refresh_list=lambda: None, lang="en")
+    prepared = SimpleNamespace(manifest=SimpleNamespace(kind="knowledge", id="rk-docs"), imports_knowledge=True,
+                               loose_file=None)
+    community_hub.CommunityHubWindow._installed(hub, (prepared, tmp_path / "rk-docs"))
+    assert offered == ([why] if no_room else [])
+    if not no_room:
+        assert ui_text("zoo.install.waiting", "en", why=why) in hub.status_label.text()
+
+
 @pytest.mark.parametrize("lang", ["en", "de"])
 def test_the_sort_dialog_refuses_without_a_topic_and_says_when_nothing_is_loose(qapp, lang):
     from orchestrator.gui.community_dialogs import SortKnowledgeDialog
@@ -166,7 +192,9 @@ def test_cli_lists_loose_knowledge_and_sorts_only_with_a_confirmation(world):
     loose(world, "notes.json")
     listed = invoke(world, "knowledge", "loose")
     assert listed.exit_code == 0, listed.output
-    assert "notes.json" in listed.output and "not imported" in listed.output
+    # the table's title holds the folder, whose length depends on where the tests run: compared without the wrapping
+    words = " ".join(listed.output.split())
+    assert "notes.json" in words and "(not imported)" in words
     refused = invoke(world, "knowledge", "sort", "notes.json")
     assert refused.exit_code == 2 and "--topic or --target" in refused.output
     missing = invoke(world, "knowledge", "sort", "other.json", "--topic", "t")

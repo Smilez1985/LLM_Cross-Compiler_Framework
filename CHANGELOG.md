@@ -2100,8 +2100,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   older one are removed (`RAGManager.remove_pack_leftovers`), per pack and page source, never those of other packs or
   your own pages; a sorted loose file also replaces the excerpts an earlier version imported from it unsorted. The
   snapshot before the import stays. A pack page that failed to import used to be written only to
-  the log; why a pack waits is now said after the install (`last_sync_problem`). Crawled pages already replaced their
-  earlier excerpts and are stored right after their download (unchanged).
+  the log; why a pack waits is now said after the install (`last_sync_problem`): only why the installed pack waits
+  (another pack that waits is named when the knowledge base starts), and the Community Hub offers the list of
+  snapshots to delete only when the snapshot taken first did not fit. A sorted loose file gets a name that is free in
+  its folder before you are asked (also when the file lay in a folder of that topic), never a Windows device name,
+  and its sort never removes the excerpts of an installed pack of the same name or of a target pack. A knowledge pack
+  whose folder exists already is refused before the question, as other packs are. Crawled pages already replaced
+  their earlier excerpts and are stored right after their download (unchanged).
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer
