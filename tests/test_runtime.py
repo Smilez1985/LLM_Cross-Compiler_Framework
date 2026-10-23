@@ -15,8 +15,10 @@ import signal
 import stat
 import sys
 import tarfile
+import threading
 import time
 import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import psutil
@@ -990,7 +992,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):
         print(fmt % a, flush=True)
 
-ThreadingHTTPServer((opt("--host"), int(opt("--port"))), Handler).serve_forever()
+try:
+    httpd = ThreadingHTTPServer((opt("--host"), int(opt("--port"))), Handler)
+except OSError:  # the port is taken: llama-server says so and exits
+    print(f"couldn't bind HTTP server socket, hostname: {opt('--host')}, port: {opt('--port')}", flush=True)
+    sys.exit(1)
+httpd.serve_forever()
 '''
 
 
@@ -1156,6 +1163,50 @@ class TestServerProcess:
         third = rt.start(tie_to_process=True)
         handlers[-1]()
         assert gone(third.pid) and rt.endpoint() is None and gone(first.pid)
+
+    def test_a_program_answering_on_the_chosen_port_never_gets_the_key(self, fake_runtime, monkeypatch):
+        # Port race: another program takes the free port first and answers /health (and accepts any key). It used to
+        # be taken for our server, and _check_auth sent it the new key; the endpoint then pointed at it.
+        seen = []
+
+        class Impostor(BaseHTTPRequestHandler):
+            def do_GET(self):
+                auth = self.headers.get("Authorization", "")
+                seen.append(auth)
+                body = b'{"data": [{"id": "tiny"}]}'
+                self.send_response(200 if self.path == "/health" or auth else 401)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        impostor = ThreadingHTTPServer(("127.0.0.1", 0), Impostor)
+        threading.Thread(target=impostor.serve_forever, daemon=True).start()
+        ports = [impostor.server_address[1]]
+        free_port = ls._free_port
+        monkeypatch.setattr(ls, "_free_port", lambda: ports.pop() if ports else free_port())
+        try:
+            rt = fake_runtime()
+            ep = rt.start()
+            assert ep.port != impostor.server_address[1] and ls.listens_on(ep.pid, ep.port)
+            assert seen and not any(ep.api_key in s for s in seen) and all(not s for s in seen)
+            assert (rt.root / "b1-cpu" / "starts").read_text() == "2", "the second port was tried"
+        finally:
+            impostor.shutdown()
+            impostor.server_close()
+
+    def test_an_unreliable_connection_table_does_not_block_the_start(self, fake_runtime, monkeypatch):
+        # Where psutil cannot list the server's sockets, a server that keeps running after the grace period has bound
+        # its port (llama-server exits when the port is taken).
+        monkeypatch.setattr(ls, "listens_on", lambda pid, port: False)
+        rt = fake_runtime()
+        rt.PORT_CHECK_GRACE = 0.5
+        ep = rt.start()
+        assert rt.status().healthy and (rt.root / "b1-cpu" / "starts").read_text() == "1" and ep.pid
+        monkeypatch.setattr(ls, "listens_on", lambda pid, port: None)  # cannot be checked at all: no wait
+        assert rt.start(ctx=4096).pid != ep.pid
 
     def test_choosing_a_tier_is_remembered_when_the_running_server_is_reused(self, fake_runtime):
         # `runtime start --model X` (or `--model auto`) on a server that already serves X returned before the choice
