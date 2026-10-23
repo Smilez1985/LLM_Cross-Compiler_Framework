@@ -10,6 +10,28 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Hardware-Probe 3.1.0: L2-Cache, Version der Vulkan-Instanz, OpenCL-Plattformen, die Hailo-Schlüssel und die
+  Hersteller-Laufzeiten** (Konsolidierungskette probe-keys; Entscheidungen Runde 23 Punkt 11, O-PREP und O-HAILO,
+  HAILO_PLAN.md Abschnitt 2): `scripts/hardware_probe.py` (und seine Kopie im Paket), `hardware_probe.sh` und
+  `hardware_probe.ps1` schreiben, geprüft durch `configs/hardware_probe_schema.yml`, `CPU_L2_CACHE_KB` (der größte
+  Level-2-Cache), `VULKAN_INSTANCE_VERSION` (vulkaninfo, sonst der Dateiname des Loaders oder `vulkan-1.dll`) und
+  `OPENCL_PLATFORMS` (`<Name>:<OpenCL-Version>` aus clinfo); die neun Hailo-Schlüssel `HAILO_FAMILY`, `HAILO_ARCH`,
+  `HAILO_DEVICES`, `HAILO_INTERFACE`, `HAILO_DRIVER`, `HAILO_DRIVER_VERSION`, `HAILO_FW_VERSION`, `HAILORT_VERSION`
+  und `HAILO_PYHAILORT_VERSION` (zuerst Dateien: `/sys/module`, die sysfs-Klassen, Knoten, PCI- und USB-IDs; dann
+  `hailortcli -v`, `scan` und `fw-control identify`, nie `--extended`, gelesen werden nur seine Zeilen zu Architektur
+  und Firmware, Geräte-IDs werden nie geschrieben) mit dem neuen Warnungscode `version_mismatch`; und für die Targets,
+  die für andere vorbereitet werden (O-PREP), `JETSON_L4T_VERSION`, `JETSON_JETPACK_VERSION`, `CUDA_TOOLKIT_VERSION`,
+  `TENSORRT_VERSION`, `OPENVINO_VERSION`, `INTEL_GPU_DEVICE`, `INTEL_GPU_DRIVER`, `INTEL_NPU_DEVICE` und
+  `ROCM_GFX_TARGETS`, jeder nur gelesen, wenn er da ist; nichts wird installiert oder mit sudo ausgeführt. Die
+  schnelle Probe von freiem RAM und GPUs bei jedem Start der lokalen Laufzeit und für die Schätzung eines Builds
+  startet kein neues Werkzeug (clinfo und die Dateien der Hersteller-Laufzeiten liest nur die volle Probe), und
+  NUL-Bytes und CRLF-Zeilenenden ergeben in allen drei Probes dieselben Werte. `HardwareProfile.hailo()` liefert die Hailo-Fakten als einen typisierten Wert (`HailoFacts`); `llm-cli scan` (auch
+  `--device` und `--import`) zeigt sie in einer Zeile „Hailo:“, auch neben einer Rockchip-NPU; Target-Matching,
+  Board-Empfehlung, Doku-Links und Deploy lesen denselben Wert, sobald die Hailo-Targets aus HAILO_PLAN Abschnitt 3
+  da sind. Die `.py` und die `.sh` laufen auf den Testrechnern aus
+  HAILO_PLAN 6.1 (Ausgaben von identify und scan aus Hailos Dokumentation und aus den heutigen Formatstrings, die
+  abweichende Version auf stderr, Sysroot-Bäume) mit einem nachgebildeten `hailortcli` und stimmen überein; der
+  Leitfaden für Modulentwickler (Abschnitt 11.6) sagt, wie ein Stage-Modul und das Framework die Schlüssel nutzen.
 - **`llm-cli models take-over`: die Übernahme alter Hugging-Face-Downloads im Terminal** (Konsolidierungskette
   hf-online): Installationen ohne GUI konnten nicht übernehmen, was frühere Versionen des Hugging-Face-Browsers der
   GUI im Cache von huggingface_hub im Modellordner gespeichert haben. Der Befehl ruft im Kern dasselbe auf wie **Alte
@@ -1496,6 +1518,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Fingerabdrücke der Schlüssel), ohne etwas zu verändern, zu laden oder aufzurufen und ohne Root-Rechte, mit Exit-Code
   0 oder 1, wie die Installation enden würde. Tests führen den Installer gegen die `/etc/os-release`-Dateien echter
   Distributionen mit nachgebauten Paketverwaltungen aus (`tests/test_install_distros.py`).
+- **Hardware-Probe: Version 3.1.0, breitere Hailo-Erkennung** (Konsolidierungskette probe-keys):
+  `PROBE_TOOL_VERSION` ist in allen drei Probes 3.1.0 (neue Schlüssel sind eine Änderung des Schemas; HAILO_PLAN
+  Frage 5, Vorgabe in Runde 23 festgehalten). Die neuen Schlüssel sind nie Pflicht und nie `ON`/`OFF`-Schlüssel, darum
+  wird ein Profil der Probe 3.0.0 gelesen und gespeichert wie bisher (getestet mit jedem Testprofil in Schema 2).
+  `NPU_DEVICE` nimmt auch die Knoten `/dev/h1x-<N>` und `/dev/h1x` des Hailo-master-Treibers an, `NPU_MODEL` wird für
+  einen Hailo gefüllt (`hailo-8l`, `hailo-10h`), und `SUPPORTS_HAILO` ist auch `ON` für den USB-Hailo-10H, einen
+  Eintrag einer Hailo-sysfs-Klasse und ein Gerät, das `hailortcli scan` auflistet; `HAILO_FAMILY` und `HAILO_ARCH`
+  gehen in den Leistungsschlüssel ein. Ein Board, dessen Probe einen Hailo ohne `hailortcli` sieht, bekommt jetzt
+  `HAILO_FAMILY`, `HAILO_INTERFACE`, `HAILO_DEVICES` und die Warnung `not_determined:HAILO_ARCH`. `hardware_probe.sh`
+  nutzt für die DRM-Knoten kein `ls | grep` mehr (ShellCheck auf Warnungsstufe sauber).
 - **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
   Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
   sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target

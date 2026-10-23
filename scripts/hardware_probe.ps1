@@ -30,7 +30,7 @@ param(
     [switch]$NoToolchain
 )
 
-$ProbeVersion = '3.0.0'
+$ProbeVersion = '3.1.0'
 if ($OutputFile -eq '') { [Console]::Error.WriteLine('Usage: hardware_probe.ps1 [-OutputFile FILE|-] [-Elevate] [-NoToolchain]'); Exit 2 }
 if ($OutputFile -ne '-') {
     # Absolute, because an elevated restart starts in another folder.
@@ -183,6 +183,7 @@ $Features = [ordered]@{
 }
 
 $P_Version = '^[0-9]{1,5}(\.[0-9]{1,6}){0,3}$'
+$P_Dotted = '^[0-9]{1,3}(\.[0-9]{1,4}){1,3}$'
 
 # --- native calls ------------------------------------------------------------------------------------------------
 $NativeCode = @"
@@ -226,6 +227,49 @@ public static class LlmProbeNative {
 $HaveNative = $true
 try { if (-not ('LlmProbeNative' -as [type])) { Add-Type -TypeDefinition $NativeCode -Language CSharp } }
 catch { $HaveNative = $false }
+
+# The caches of GetLogicalProcessorInformation (its own type: a failure here costs only CPU_L2_CACHE_KB). An entry is
+# SYSTEM_LOGICAL_PROCESSOR_INFORMATION: ProcessorMask, Relationship (RelationCache = 2) and a 16-byte union whose
+# CACHE_DESCRIPTOR has Level (byte 0), Size (bytes 4-7) and Type (bytes 8-11; CacheUnified = 0, CacheData = 2).
+$CacheCode = @"
+using System;
+using System.Runtime.InteropServices;
+public static class LlmProbeCache {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ProcessorInformation { public UIntPtr Mask; public int Relationship; public ulong Data0; public ulong Data1; }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool GetLogicalProcessorInformation(IntPtr buffer, ref uint length);
+
+    // KiB of the largest level-2 unified or data cache; 0 when none is listed, -1 when Windows cannot tell.
+    public static long LargestL2Kb() {
+        uint length = 0;
+        GetLogicalProcessorInformation(IntPtr.Zero, ref length);
+        int size = Marshal.SizeOf(typeof(ProcessorInformation));
+        if (length < size) { return -1; }
+        IntPtr buffer = Marshal.AllocHGlobal((int)length);
+        try {
+            if (!GetLogicalProcessorInformation(buffer, ref length)) { return -1; }
+            long best = 0;
+            for (long offset = 0; offset + size <= length; offset += size) {
+                ProcessorInformation info = (ProcessorInformation)Marshal.PtrToStructure(
+                    new IntPtr(buffer.ToInt64() + offset), typeof(ProcessorInformation));
+                if (info.Relationship != 2) { continue; }
+                long level = (long)(info.Data0 & 0xFF);
+                long kb = (long)((info.Data0 >> 32) & 0xFFFFFFFF) / 1024;
+                long type = (long)(info.Data1 & 0xFFFFFFFF);
+                if (level == 2 && (type == 0 || type == 2) && kb > best) { best = kb; }
+            }
+            return best;
+        } finally { Marshal.FreeHGlobal(buffer); }
+    }
+}
+"@
+$L2Kb = -1
+try {
+    if (-not ('LlmProbeCache' -as [type])) { Add-Type -TypeDefinition $CacheCode -Language CSharp }
+    $L2Kb = [LlmProbeCache]::LargestL2Kb()
+} catch { $L2Kb = -1 }
 
 Write-Log "Hardware probe $ProbeVersion (schema 2)..."
 
@@ -314,6 +358,9 @@ foreach ($key in $Features.Keys) {
     elseif ($answer -eq $false -and $build -ge $minBuild) { Set-Flag $key 'OFF' }
     else { Set-Flag $key 'UNKNOWN' }
 }
+if ($L2Kb -lt 0) { Add-Warning 'not_determined:CPU_L2_CACHE_KB' }
+elseif ($L2Kb -gt 1048576) { Add-Warning 'not_determined:CPU_L2_CACHE_KB' }
+elseif ($L2Kb -gt 0) { Put 'CPU_L2_CACHE_KB' ([string]$L2Kb) }
 
 # --- memory ------------------------------------------------------------------------------------------------------
 $memory = $null
@@ -346,14 +393,141 @@ if ($diskPath) {
     } catch { }
 }
 
+# --- Hailo (HAILO_PLAN.md 2.4: the PnP ids and hailortcli on PATH, with the rules of hardware_probe.py) ----------
+# Tables: copies of configs/hardware_probe_schema.yml (tests compare them). hailortcli runs with fixed arguments and an
+# empty stdin: -v, scan, fw-control identify -s <id> for up to 16 devices (never --extended); of identify only the
+# architecture and firmware lines are read. The Linux-only driver keys and the pip version are not written here.
+$HailoArchNames = @{ 'HAILO8' = 'hailo8'; 'HAILO8_B0' = 'hailo8'; 'HAILO8L' = 'hailo8l'; 'HAILO10H' = 'hailo10h'; 'HAILO15H' = 'hailo15h'; 'HAILO15M' = 'hailo15m'; 'HAILO15L' = 'hailo15l'; 'HAILO12L' = 'hailo12l'; 'MARS' = 'hailo12l' }
+$HailoArchFamily = @{ 'hailo8' = 'hailo8'; 'hailo8l' = 'hailo8'; 'hailo10h' = 'hailo1x'; 'hailo15h' = 'hailo1x'; 'hailo15m' = 'hailo1x'; 'hailo15l' = 'hailo1x'; 'hailo12l' = 'hailo1x' }
+$HailoPciDevices = @{ '0x1e60:0x2864' = 'hailo8'; '0x1e60:0x45c4' = 'hailo1x'; '0x1e60:0x43a2' = 'hailo1x'; '0x1e60:0x26a2' = 'hailo1x' }
+$HailoUsbDevices = @{ '0x0b05:0x1d6f' = 'hailo10h' }
+$HailoIdPattern = '^(\[integrated\]|usb/[0-9]{3}:[0-9]{3}|(pci/)?([0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7])$'
+
+function Hailo-Interface([string]$Id) {
+    if ($Id -ceq '[integrated]') { return 'integrated' }
+    if ($Id.StartsWith('usb/')) { return 'usb' }
+    return 'pcie'
+}
+
+function Distinct-List($Items) {
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($item in $Items) { if ($null -ne $item -and -not $out.Contains([string]$item)) { $out.Add([string]$item) } }
+    return ,$out
+}
+
+$hailoFamilies = New-Object System.Collections.Generic.List[string]
+$hailoPci = 0; $hailoUsb = 0; $hailoUsbArch = $null
+foreach ($id in @($ids | Sort-Object)) {
+    $parts = ([string]$id).Split(':')
+    if ($parts.Count -ne 3) { continue }
+    $pair = '0x' + $parts[1] + ':0x' + $parts[2]
+    if ($parts[0] -eq 'pci' -and $parts[1] -eq '1e60') {
+        $hailoPci++
+        if ($HailoPciDevices.ContainsKey($pair)) { $hailoFamilies.Add($HailoPciDevices[$pair]) }
+    }
+    if ($parts[0] -eq 'usb' -and $HailoUsbDevices.ContainsKey($pair)) {
+        $hailoUsb++
+        $hailoUsbArch = $HailoUsbDevices[$pair]
+        $hailoFamilies.Add($HailoArchFamily[$hailoUsbArch])
+    }
+}
+$hailoInstalled = $false; $hailoWarn = $null; $hailoVersion = $null; $hailoIds = $null
+$hailoRecords = New-Object System.Collections.ArrayList
+$hailoClock = [Diagnostics.Stopwatch]::StartNew()
+$result = Invoke-Tool 'hailortcli' @('-v')
+if ($null -ne $result) {
+    $hailoInstalled = $true
+    # NUL bytes removed from every hailortcli output, as a shell drops them (hardware_probe.sh, .py)
+    $text = ([string]$result.Out + "`n" + [string]$result.Err).Replace([string][char]0, '')
+    $versionText = $null
+    if ($text -cmatch 'HailoRT-CLI version ([0-9]+\.[0-9]+\.[0-9]+)') { $versionText = $Matches[1] }
+    if ($text -cmatch 'libhailort version \(([0-9.]+)\) does not match HailoRT-CLI version \(([0-9.]+)\)') { $hailoWarn = 'version_mismatch' }
+    elseif ($result.Code -ne 0) { if ($versionText) { $hailoWarn = 'not_determined' } else { $hailoWarn = 'version_mismatch' } }
+    elseif ($versionText -and $versionText -cmatch $P_Dotted) { $hailoVersion = $versionText }
+    else { $hailoWarn = 'not_determined' }
+    if ($hailoWarn -ne 'version_mismatch') {
+        $result = Invoke-Tool 'hailortcli' @('scan')
+        if ($null -ne $result -and $result.Code -eq 0) {
+            $scanOut = ([string]$result.Out).Replace([string][char]0, '')
+            $found = @([regex]::Matches($scanOut, '(?m)^\s*\[-\]\s*Device:\s*(\S+)\s*$') | ForEach-Object { $_.Groups[1].Value })
+            if ($found.Count -gt 0 -or $scanOut.Contains('Hailo devices not found')) {
+                $hailoIds = New-Object System.Collections.Generic.List[string]
+                foreach ($d in $found) { if ($d -cmatch $HailoIdPattern -and -not $hailoIds.Contains($d)) { $hailoIds.Add($d) } }
+            }
+        }
+        if ($null -ne $hailoIds) {
+            foreach ($d in @($hailoIds | Select-Object -First 16)) {
+                if ($hailoClock.Elapsed.TotalSeconds -ge 60) { break }
+                $result = Invoke-Tool 'hailortcli' @('fw-control', 'identify', '-s', $d)
+                if ($null -eq $result) { break }   # it did not answer: no further device is asked
+                if ($result.Code -ne 0) { continue }
+                $clean = ([string]$result.Out).Replace([string][char]0, '')
+                $word = $null; $fw = $null
+                if ($clean -cmatch '(?m)^\s*Device Architecture\s*:\s*([A-Za-z0-9_]+)\s*$') { $word = $Matches[1].ToUpperInvariant() }
+                if ($clean -cmatch '(?m)^\s*Firmware Version\s*:\s*([0-9][0-9.]*)') { $fw = $Matches[1]; if ($fw -cnotmatch $P_Dotted) { $fw = $null } }
+                if ($word) { [void]$hailoRecords.Add(@($d, $word, $fw)) }
+            }
+        }
+    }
+}
+$hailoPresent = ($hailoPci -gt 0) -or ($hailoUsb -gt 0) -or ($null -ne $hailoIds -and $hailoIds.Count -gt 0)
+if ($hailoVersion) { Put 'HAILORT_VERSION' $hailoVersion $P_Dotted }
+elseif ($hailoWarn -eq 'version_mismatch') { Add-Warning 'version_mismatch:HAILORT_VERSION' }
+elseif ($hailoWarn) { Add-Warning 'not_determined:HAILORT_VERSION' }
+$hailoArchs = New-Object System.Collections.Generic.List[string]
+$hailoFws = New-Object System.Collections.Generic.List[string]
+$hailoUnknown = $false
+foreach ($record in $hailoRecords) {
+    if (-not $HailoArchNames.ContainsKey($record[1])) { $hailoUnknown = $true; continue }
+    $arch = $HailoArchNames[$record[1]]
+    if ($arch -eq 'hailo15h' -and (Hailo-Interface $record[0]) -ne 'integrated') { $arch = 'hailo10h' }
+    $hailoArchs.Add($arch)
+    if ($record[2]) { $hailoFws.Add($record[2]) }
+}
+$hailoArchs = Distinct-List $hailoArchs
+$hailoFws = Distinct-List $hailoFws
+$hailoArch = $null
+if ($hailoArchs.Count -gt 1 -or $hailoUnknown) { Add-Warning 'not_determined:HAILO_ARCH' }
+elseif ($hailoArchs.Count -eq 1) { $hailoArch = $hailoArchs[0] }
+elseif ($hailoUsbArch -and $hailoPci -eq 0 -and $hailoRecords.Count -eq 0) { $hailoArch = $hailoUsbArch }
+$families = @()
+if ($hailoArch) { $families += $HailoArchFamily[$hailoArch] }
+$families = Distinct-List ($families + @($hailoFamilies))
+$hailoFamily = $null
+if ($families.Count -eq 1) { $hailoFamily = $families[0] }
+$hailoConflict = $families.Count -gt 1
+if ($hailoConflict) { $hailoArch = $null; Add-Warning 'not_determined:HAILO_FAMILY' }
+if ($hailoPresent -and -not $hailoArch -and -not $hailoConflict -and $hailoWarn -ne 'version_mismatch') { Add-Warning 'not_determined:HAILO_ARCH' }
+if ($hailoFws.Count -eq 1) { Put 'HAILO_FW_VERSION' $hailoFws[0] $P_Dotted }
+elseif ($hailoFws.Count -gt 1) { Add-Warning 'not_determined:HAILO_FW_VERSION' }
+if ($null -ne $hailoIds -and $hailoIds.Count -gt 0) { $interfaces = Distinct-List @($hailoIds | ForEach-Object { Hailo-Interface $_ }) }
+else {
+    $interfaces = @()
+    if ($hailoPci -gt 0) { $interfaces += 'pcie' }
+    if ($hailoUsb -gt 0) { $interfaces += 'usb' }
+}
+if (@($interfaces).Count -eq 1) { Put 'HAILO_INTERFACE' @($interfaces)[0] }
+elseif (@($interfaces).Count -gt 1) { Add-Warning 'not_determined:HAILO_INTERFACE' }
+$hailoCount = $null
+if ($null -ne $hailoIds -and $hailoIds.Count -gt 0) { $hailoCount = $hailoIds.Count }
+elseif ($hailoPresent) { $hailoCount = $hailoPci + $hailoUsb }
+elseif ($null -ne $hailoIds) { $hailoCount = 0 }
+if ($null -ne $hailoCount) {
+    if ($hailoCount -le 64) { Put 'HAILO_DEVICES' ([string]$hailoCount) } else { Add-Warning 'not_determined:HAILO_DEVICES' }
+} elseif ($hailoInstalled -and $hailoWarn -ne 'version_mismatch') { Add-Warning 'not_determined:HAILO_DEVICES' }
+if ($hailoFamily) { Put 'HAILO_FAMILY' $hailoFamily }
+if ($hailoArch) { Put 'HAILO_ARCH' $hailoArch }
+$hailoModel = $null
+if ($hailoArch) { $hailoModel = 'hailo-' + $hailoArch.Substring(5) }
+
 # --- NPU and USB-attached boards (a board attached over USB is not this machine's NPU) -------------------------
 $pciVendors = @($ids | Where-Object { $_ -like 'pci:*' } | ForEach-Object { $_.Split(':')[1] })
-$hailo = $pciVendors -contains '1e60'
+$hailo = $hailoPresent
 $metis = $pciVendors -contains '1f4b'
 $mx3 = $pciVendors -contains '1d6b'
 $coral = ($ids -contains 'pci:1ac1:089a') -or ($ids -contains 'usb:1a6e:089a') -or ($ids -contains 'usb:18d1:9302')
 $npuVendor = $null; $npuModel = $null
-if ($hailo) { $npuVendor = 'hailo' }
+if ($hailo) { $npuVendor = 'hailo'; $npuModel = $hailoModel }
 elseif ($metis) { $npuVendor = 'axelera' }
 elseif ($mx3) { $npuVendor = 'memryx' }
 elseif ($coral) { $npuVendor = 'google' }
@@ -460,7 +634,11 @@ if ($nvidia.Count -gt 0 -and $smi) {
 # Vulkan devices (software renderers such as llvmpipe are skipped).
 $vk = New-Object System.Collections.ArrayList
 $vkRan = $false
+$vkInstance = $null
 $result = Invoke-Tool 'vulkaninfo' @('--summary') 20000
+if ($null -ne $result -and $result.Code -eq 0 -and ([string]$result.Out) -match '(?m)^\s*Vulkan Instance Version:\s*([0-9][0-9.]*)') {
+    $vkInstance = $Matches[1]
+}
 if ($null -ne $result -and $result.Code -eq 0 -and ([string]$result.Out).Contains('Devices')) {
     $vkRan = $true
     $devicesFound = New-Object System.Collections.ArrayList
@@ -549,6 +727,44 @@ if ($vk.Count -eq 0) {
 }
 if (-not $vulkan -and -not $vkRan -and $env:SystemRoot) { $vulkan = Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\vulkan-1.dll') -PathType Leaf }
 if ($vkRan) { Put 'VULKAN_DEVICES' $vk.Count '^[0-9]{1,2}$' -Quiet }
+# The instance version: vulkaninfo's line, else the file version of the loader vulkan-1.dll (X.Y.Z of X.Y.Z.W).
+if (-not $vkInstance -and $env:SystemRoot) {
+    try {
+        $loader = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
+        if (Test-Path -LiteralPath $loader -PathType Leaf) {
+            $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($loader)
+            $vkInstance = "$($info.FileMajorPart).$($info.FileMinorPart).$($info.FileBuildPart)"
+        }
+    } catch { }
+}
+Put 'VULKAN_INSTANCE_VERSION' $vkInstance '^[0-9]{1,2}\.[0-9]{1,3}\.[0-9]{1,5}$' -Quiet
+
+# OpenCL platforms of clinfo: each "Platform Version" line with the "Platform Name" line before it, as
+# <name>:<OpenCL version> (the name lower case, (r)/(tm) removed, other characters one "-", at most 48 characters).
+function OpenCL-Name([string]$Name) {
+    $t = (Clean-Text $Name 4096).ToLowerInvariant().Replace('(r)', '').Replace('(tm)', '')
+    $t = ($t -creplace '[^a-z0-9]+', '-').Trim('-')
+    if ($t.Length -gt 48) { $t = $t.Substring(0, 48) }
+    return $t.TrimEnd('-')
+}
+$openCl = New-Object System.Collections.Generic.List[string]
+$result = Invoke-Tool 'clinfo'
+if ($null -ne $result -and $result.Code -eq 0) {
+    $platformName = $null
+    foreach ($raw in (([string]$result.Out) -split "`n")) {
+        $line = $raw.Trim(" `t`r".ToCharArray())
+        if ($line -ceq 'Platform Name' -or $line -cmatch '^Platform Name[ \t]') {
+            $platformName = $line.Substring(13).Trim(" `t`r".ToCharArray()); continue
+        }
+        if ($platformName -and $line -cmatch '^Platform Version[ \t]+OpenCL ([0-9]+\.[0-9]+)') {
+            $item = (OpenCL-Name $platformName) + ':' + $Matches[1]
+            if ($item -cmatch '^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?:[0-9]{1,2}\.[0-9]{1,2}$' -and -not $openCl.Contains($item) -and $openCl.Count -lt 16) {
+                $openCl.Add($item)
+            }
+        }
+    }
+}
+if ($openCl.Count -gt 0) { Put 'OPENCL_PLATFORMS' ($openCl -join ',') }
 
 $gpus = @(@($nvidia) + @($others) | Select-Object -First 16)
 Put 'GPU_COUNT' $gpus.Count
