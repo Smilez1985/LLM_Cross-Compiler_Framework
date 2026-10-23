@@ -322,6 +322,20 @@ class TestTheBrowsersDownload:
         person.mm.download_file(REPO, "tiny-q4_k_m.gguf", typed)
         assert person.hub.tokens[-1] == typed
 
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_a_refusal_of_the_file_is_a_hub_error_with_the_token_step(self, person, status):
+        # Characterization (ARCH_PLAN c5-io-misc: 401/403 -> HubError), on the browser's path: no file, no part, no
+        # space held.
+        from orchestrator.Core.hf_hub import TOKEN_NEXT, HubError
+        from test_hf_tools import REPO, Response
+        person.use(gate=lambda body, start: Response(b"", status=status, url="https://huggingface.co/x"))
+        with pytest.raises(HubError) as refused:
+            person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert refused.value.code == "permission_denied" and refused.value.next == TOKEN_NEXT
+        assert f"HTTP {status}" in str(refused.value)
+        assert not new_place(person).exists() and not new_place(person).with_name("tiny-q4_k_m.gguf.part").exists()
+        assert person.ledger.entries() == []
+
     def test_progress_is_reported_and_a_stop_keeps_the_part(self, person):
         import threading
         from orchestrator.Core.hf_hub import DownloadStopped
