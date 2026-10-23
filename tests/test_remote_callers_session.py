@@ -711,3 +711,40 @@ def test_the_person_is_told_of_every_wait_also_after_an_upload_that_started_agai
     assert len(waits) == 2, lines
     assert "upload" in waits[0] and "step on the board" in waits[1]
     assert lines[-1] == "The board answers again: the step continues."
+
+
+@POSIX
+def test_the_tarball_stays_the_owners_only_when_a_damaged_copy_is_sent_again(tmp_path, source, board_session,
+                                                                            monkeypatch):
+    """The first copy arrives damaged (its sha256 on the board differs), so the upload removes it and sends the file
+    once more: that second copy is the user's only too, as `umask 077 && cat >` made every copy (an SFTP server
+    creates a new file with its own umask)."""
+    board, session, _events, _clock = board_session
+    build, packaged = tdr.packaged_build(tmp_path, source)
+    real_write = LocalFile.write
+    damaged = []
+
+    def write(self, data):
+        if not damaged:
+            damaged.append(True)
+            data = bytes([data[0] ^ 0xFF]) + data[1:]   # one flipped byte on the way
+        return real_write(self, data)
+
+    monkeypatch.setattr(LocalFile, "write", write)
+    modes = []
+    real = board.answer
+
+    def answer(command, stdin):
+        if "sha256sum -c SHA256SUMS" in command:
+            (staging,) = list(board.root.glob(".staging-*"))
+            modes.append((staging / "runtime.tar.gz").stat().st_mode & 0o777)
+        return real(command, stdin)
+
+    board.answer = answer
+    old = os.umask(0o022)   # what an SFTP server usually runs with
+    try:
+        assert deploy_over(session, build, packaged).activated
+    finally:
+        os.umask(old)
+    assert damaged and any(c.startswith("sh -c 'rm -f ") and ".part" in c for c in board.commands), "sent twice"
+    assert modes == [0o600]

@@ -17,7 +17,9 @@ the probe and the on-board benchmark can use the same steps (chain c2-remote-cal
 - upload(fh, remote_path, size, sha256): sends an open file as <remote_path>.part in pipelined chunks of
   UPLOAD_CHUNK, checks its sha256 on the board and only then renames it. A damaged arrival is sent once more. After
   a network drop it waits for the board and continues at what arrived, once the board's hash of those bytes matches
-  the same bytes here (utils/helpers.sha256_fileobj on the same open file); else it starts again.
+  the same bytes here (utils/helpers.sha256_fileobj on the same open file); else it starts again. With `private`
+  every copy it starts on the board is made empty under umask 077 first and then written into (an SFTP server makes a
+  new file with its own umask), so it is the user's only from the start (the runtime deploy's tarball).
 - wait_for_host(step): after a drop, waits up to `wait_seconds` until the board's SSH port answers and the login
   works again (N5), with a "waiting" event about every WAIT_INTERVAL seconds; a connection that opens and drops
   again while the SSH server starts counts as not back yet (reasons.reach_code(..., while_waiting=True)).
@@ -520,9 +522,11 @@ class RemoteSession:
 
     # --- the upload ---
 
-    def upload(self, fh: Any, remote_path: str, size: int, sha256: str) -> None:
+    def upload(self, fh: Any, remote_path: str, size: int, sha256: str, *, private: bool = False) -> None:
         """Uploads the open file `fh` (`size` bytes, sha256 `sha256`) as <remote_path>.part and renames it when its
-        sha256 on the board is the same; resumes after a network drop (see the module docstring)."""
+        sha256 on the board is the same; resumes after a network drop (see the module docstring). `private`: every
+        new copy on the board is made under umask 077 (`umask 077 && : >`) before it is written into, also the one
+        sent again after a damaged arrival, so the file is the user's only as `umask 077 && cat >` made it."""
         part = f"{remote_path}.part"
         folder = posixpath.dirname(remote_path)
         restarted = False
@@ -531,7 +535,7 @@ class RemoteSession:
                 offset = self._resume_offset(fh, part, size)
                 # the deploy's words since N5 (they reach the console of `llmcf deploy run`)
                 self.logger.info("Uploading package..." if not offset else f"Resuming the upload at {offset} bytes...")
-                self._send(fh, part, offset, size)
+                self._send(fh, part, offset, size, private)
                 result = self.run(f"sha256sum {shlex.quote(part)}", timeout=hash_timeout(size))
                 if result.status == 0 and result.out.split()[:1] == [sha256]:
                     result = self.run(f"mv -f {shlex.quote(part)} {shlex.quote(remote_path)}")
@@ -572,7 +576,11 @@ class RemoteSession:
         self.on_event(RemoteEvent("back", done=offset, total=size))
         return offset
 
-    def _send(self, fh: Any, part: str, offset: int, size: int) -> None:
+    def _send(self, fh: Any, part: str, offset: int, size: int, private: bool = False) -> None:
+        if private and not offset:
+            # a new copy: made empty by the user's shell under umask 077 first (writing into it keeps its mode); when
+            # that fails, the SFTP open below says why
+            self.run(f"umask 077 && : > {shlex.quote(part)}")
         fh.seek(offset)
         with self.transport.open_write(part, offset) as remote:
             done = offset
