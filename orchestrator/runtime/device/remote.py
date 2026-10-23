@@ -151,7 +151,9 @@ class RemoteShell:
     def upload(self, path: Path, remote_path: str, sha256: str) -> None:
         """Puts the file at `path` (its sha256 `sha256`) on the device as `remote_path`, in a folder that exists
         there: over SFTP as <remote_path>.part, checked with sha256sum on the device and only then renamed; after a
-        network drop it waits for the board and continues at what arrived (RemoteSession.upload). A board without
+        network drop it waits for the board and continues at what arrived (RemoteSession.upload). The file is made
+        empty under umask 077 first, so it is the user's only from the start, as the old `umask 077 && cat >` made it
+        (an SFTP server creates a file with its own umask; writing into the empty file keeps its mode). A board without
         SFTP (or a stand-in without it) gets the file on a command's stdin under umask 077 as before (no resume)."""
         if not self._has_sftp(posixpath.dirname(remote_path)):
             res = self.run(f"umask 077 && cat > {_q(remote_path)}", stdin=_chunks(Path(path)),
@@ -159,21 +161,28 @@ class RemoteShell:
             if res.status != 0:
                 raise RemoteError(f"the upload failed (exit {res.status}): {_tail(res.err or res.out)}")
             return
+        part = remote_path + ".part"   # RemoteSession.upload's file until its sha256 on the board matches
+        res = self.run(f"umask 077 && : > {_q(part)}", again=True)   # empties a file that is not written yet
+        if res.status != 0:
+            raise RemoteError(f"the upload failed (exit {res.status}): {_tail(res.err or res.out)}")
         with open(path, "rb") as fh:
             size = os.fstat(fh.fileno()).st_size
             self._call(lambda: self.session.upload(fh, remote_path, size, sha256), UPLOAD_TIMEOUT)
 
     def _has_sftp(self, folder: str) -> bool:
         """Whether the device answers over SFTP: one stat of `folder`, tried once. A board without an SFTP server
-        (Dropbear without sftp-server) or a stand-in without SFTP gets the file on stdin; a network drop at this very
-        moment shows in that upload's own command, which then ends with "dropped" once the board answers again."""
+        (Dropbear without sftp-server) or a stand-in without SFTP gets the file on stdin. A network drop at this very
+        moment (the connection stood before the stat and then dropped) is no answer about SFTP: the upload goes over
+        SFTP, whose steps wait for the board and resume (RemoteSession.dropped). An attached session never waits, and
+        a stand-in that cannot tell whether its connection stands gets stdin as before."""
         if self.lost is not None or self.session.transport is None:
             return True   # the upload's own step says why it cannot be done
+        stood = self.session.alive()
         try:
             self.session.transport.stat_size(folder)
             return True
-        except Exception:  # noqa: BLE001 - no SFTP subsystem on the device, a stand-in without SFTP, a drop
-            return False
+        except Exception as e:  # noqa: BLE001 - no SFTP subsystem on the device, a stand-in without SFTP, a drop
+            return stood and self.session.dropped(e)
 
     def run_detached(self, folder: str, job: str, *, timeout: float, poll: float, step: str) -> int:
         """Starts `job` once in the private `folder` on the device on its own and follows it to its exit status, also
