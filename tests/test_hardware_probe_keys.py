@@ -9,6 +9,7 @@ keys, stays readable.
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -288,7 +289,10 @@ def hailo10_files(root):
 
 def fake_hailortcli(bindir, version="version_4.24.0.txt", version_err=None, version_rc=0, scan=None, identify=None,
                     scan_rc=0):
-    """A hailortcli on PATH that answers -v, scan and fw-control identify -s <id> from the fixture files."""
+    """A hailortcli on PATH that answers -v, scan and fw-control identify -s <id> from the fixture files. `true` goes
+    on PATH too, so the .sh finds a working `timeout` and runs every tool with its time limit, as on a board."""
+    if shutil.which("true") and not (bindir / "true").exists():
+        os.symlink(shutil.which("true"), bindir / "true")
     data = bindir.parent / "hailo-data"
     data.mkdir(exist_ok=True)
     (data / "v.out").write_bytes((HAILO / version).read_bytes() if version else b"")

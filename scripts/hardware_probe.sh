@@ -984,6 +984,7 @@ if [ "$H_INSTALLED" = 1 ]; then
     set -f
     asked=0
     for id in $H_IDS; do
+        IFS=$OLDIFS   # the ids are split on line breaks; the commands below need the usual IFS ($TIMEOUT)
         [ "$asked" -lt 16 ] || break
         now=$(hailo_seconds)
         if [ -n "$H_START" ] && [ -n "$now" ] && [ $((now - H_START)) -ge 60 ]; then break; fi
