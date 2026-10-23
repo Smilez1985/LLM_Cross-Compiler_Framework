@@ -57,11 +57,26 @@ def unreachable(device: TrustedDevice, reason: str, state_dir: Optional[Path] = 
                               error=error)
 
 
+def by_label(text: str, device: TrustedDevice) -> str:
+    """`text` with the board's address (its host, also with its port) named by the board's label: the address, like
+    the login, is the person's to see, never an AI's (D0). The board session's own sentences name the host (the
+    person's windows show them as they are); this is their copy for an AI."""
+    import re
+    out, host = str(text), str(device.host or "")
+    if not host:
+        return out
+    port = int(device.port)
+    forms = {host, device.address, f"{host}:{port}", f"[{host}]:{port}"}
+    for form in sorted(forms, key=len, reverse=True):   # the longest form first, so a port never stays behind
+        out = re.sub(r"(?<![\w.-])" + re.escape(form) + r"(?![\w-])", lambda _m: device.label, out)
+    return out
+
+
 def _device_said(what: str, device: TrustedDevice, error: Exception) -> DeviceRuntimeError:
     """A failed remote step: the framework's sentence as the message, the device's words (inside the remote error's
-    text) as external text."""
+    text) as external text, the board named there by its label only (by_label)."""
     return DeviceRuntimeError(f"{what} on {device.label} failed; the details from the device are kept apart as "
-                              "external text.", code="failed", external_text=[str(error)[:2000]])
+                              "external text.", code="failed", external_text=[by_label(str(error), device)[:2000]])
 
 
 class Stopped(DeviceRuntimeError):

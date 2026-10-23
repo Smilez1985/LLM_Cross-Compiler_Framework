@@ -28,9 +28,11 @@ the probe and the on-board benchmark can use the same steps (chain c2-remote-cal
 - run_resumable(script, again=...) and resumable(action): one command (or any action on the board) through a network
   drop: the session waits for the board, logs in again and, for a command that may run twice (it only reads, or does
   the same again), runs it once more; for one that may not, it raises SessionFailure "dropped" once the board answers
-  again (so the caller can still clean up). A command that stays silent while its connection stands is tried once
-  more, then its timeout is the end. The runtime deploy, the probe and the checks on the board run their commands
-  this way (runtime/device/remote.py RemoteShell is their facade).
+  again (so the caller can still clean up). A command that stays silent while its connection still answers (an
+  `exit 0` on it, answers()) is busy on the board, no drop: its timeout is the end at once, as before; one whose
+  connection is silent too waits for the board and is tried once more, then its timeout is the end. The runtime
+  deploy, the probe and the checks on the board run their commands this way (runtime/device/remote.py RemoteShell is
+  their facade).
 - attached(client): a session over a client someone else logged in (a stand-in in tests): it runs, uploads and follows
   jobs like any session, but cannot log in again, so a network drop ends it as it always did.
 - CancelToken: one cancel for the whole session; every wait ends at once on it. close() ends the session the same
@@ -88,6 +90,10 @@ PRIVATE_PREFIX = "llm_deploy"
 # How often a command that stays silent while its connection stands is tried again (resumable): once, then the board
 # is taken to be busy, not gone, and the time limit is the end.
 SILENT_TRIES = 1
+# How long a standing connection may take to answer ANSWER_COMMAND when a command on it stayed silent (resumable): an
+# answer means the board is busy with that command and the network did not drop (N5 waits for a network loss only).
+ANSWER_TIMEOUT = 10.0
+ANSWER_COMMAND = "exit 0"
 # The steps whose work runs on the board on its own (a job): a wait that fails leaves the board's state unknown.
 JOB_STEPS = ("install", "bench")
 # What a step is called in the log line of a drop.
@@ -464,8 +470,11 @@ class RemoteSession:
         the session waits for the board (wait_for_host(step)), logs in again and, with `again`, does it once more (a
         "back" event with `step` first). Without `again` (a step that must not run twice) it raises SessionFailure
         "dropped" (state unknown) once the board answers again, so the caller can still clean up. A command that stays
-        silent while its connection stands is tried SILENT_TRIES more times, then its timeout is raised. Anything else
-        (the board's own error, too much output) is raised as it is; a cancel raises Stopped."""
+        silent while its connection stands is no drop when that connection still answers (answers()): the board is
+        busy with it, so its timeout is raised at once, as before the board session; when the connection is silent
+        too (the network is gone, while paramiko's connection stands until TCP gives up), the session waits, and such
+        a command is tried SILENT_TRIES more times, then its timeout is raised. Anything else (the board's own error,
+        too much output) is raised as it is; a cancel raises Stopped."""
         silent = 0
         while True:
             try:
@@ -479,7 +488,7 @@ class RemoteSession:
                     raise
                 if timed_out(e) and self.transport.alive():
                     silent += 1
-                    if silent > SILENT_TRIES:
+                    if silent > SILENT_TRIES or self.answers():
                         raise   # the board keeps the connection but does not answer this command: no drop
                 self._say_dropped(step)
                 self.wait_for_host(step)
@@ -489,6 +498,18 @@ class RemoteSession:
                                          "again, but whether the step ran there is unknown, so it is not repeated.",
                                          "dropped", error=e, state="unknown", step=step) from None
                 self.on_event(RemoteEvent("back", step=step))
+
+    def answers(self) -> bool:
+        """Whether the standing connection still answers `exit 0` within ANSWER_TIMEOUT seconds: then a command on it
+        that stayed silent is busy on the board, not cut off by a network drop (it is neither waited for nor run
+        again)."""
+        if self.transport is None:
+            return False
+        try:
+            self.transport.run(ANSWER_COMMAND, timeout=ANSWER_TIMEOUT, limit=64)
+        except Exception:  # noqa: BLE001 - no answer either: the network is gone
+            return False
+        return True
 
     def run_resumable(self, script: str, *, again: bool = True, step: str = "command",
                       timeout: float = COMMAND_TIMEOUT, limit: int = MAX_OUTPUT, stdin: Any = None) -> Result:
@@ -643,7 +664,7 @@ class RemoteSession:
                 self.on_event(RemoteEvent("back", step=step))
 
 
-__all__ = ["CancelToken", "HASH_RATE", "JOB_LOG", "JOB_POLL", "JOB_STARTED", "JOB_STATUS", "JOB_STEPS", "JOB_TIMEOUT",
-           "KeyOnly", "MAX_RESUMES", "OneTimePassword", "PRIVATE_PARENT", "PRIVATE_PREFIX", "RemoteEvent",
-           "RemoteSession", "SILENT_TRIES", "SessionFailure", "Stopped", "UPLOAD_CHUNK", "WAIT_INTERVAL",
-           "WAIT_SECONDS", "failed_because", "hash_timeout"]
+__all__ = ["ANSWER_COMMAND", "ANSWER_TIMEOUT", "CancelToken", "HASH_RATE", "JOB_LOG", "JOB_POLL", "JOB_STARTED",
+           "JOB_STATUS", "JOB_STEPS", "JOB_TIMEOUT", "KeyOnly", "MAX_RESUMES", "OneTimePassword", "PRIVATE_PARENT",
+           "PRIVATE_PREFIX", "RemoteEvent", "RemoteSession", "SILENT_TRIES", "SessionFailure", "Stopped",
+           "UPLOAD_CHUNK", "WAIT_INTERVAL", "WAIT_SECONDS", "failed_because", "hash_timeout"]

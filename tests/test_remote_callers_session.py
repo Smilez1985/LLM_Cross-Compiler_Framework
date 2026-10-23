@@ -348,7 +348,10 @@ class TestResumable:
         session.open()
         with pytest.raises(socket.timeout):
             session.run_resumable("cat big", again=True)
-        assert runs == ["cat big", "cat big"]
+        # the connection is silent too (its `exit 0` gets no answer either): the session waits for the board, tries
+        # the command once more, then its timeout is the end (the review added the `exit 0` that tells a busy board
+        # from a dropped network, TestASilentCommandIsNoNetworkDrop below)
+        assert runs == ["cat big", "exit 0", "cat big"]
 
     def test_an_attached_session_never_waits(self):
         from orchestrator.remote.session import RemoteSession
@@ -554,3 +557,134 @@ class TestTheEventLines:
             on_event(event)
         assert len(lines) == 3 and lines[0].startswith("Waiting for the board at 192.0.2.5")
         assert lines[1].startswith("The board answers again") and "benchmark" in lines[2]
+
+
+# --- review of the chain (remote-callers-v): regression tests ------------------------------------------------------
+
+def _silent_on(board, marker):
+    """Commands with `marker` stay silent on the board (their read times out) while the connection itself stands."""
+    real = board.exec_command
+
+    def exec_command(command, timeout=None):
+        if marker in command:
+            board.commands.append(command)
+            raise socket.timeout("timed out")
+        return real(command, timeout)
+
+    board.exec_command = exec_command
+
+
+class TestASilentCommandIsNoNetworkDrop:
+    """N5 waits for a network loss. A command that stays silent while its connection still answers is busy on the
+    board, not cut off: its time limit ends it at once with the sentence RemoteShell always gave, without logging in
+    again, running it a second time on the board or telling the person that the network dropped."""
+
+    @pytest.mark.parametrize("again", [True, False])
+    def test_its_time_limit_ends_it_with_the_old_sentence(self, board_session, again):
+        board, session, events, _clock = board_session
+        _silent_on(board, "hung-program")
+        with pytest.raises(RemoteError, match=r"^no answer from the device within 7 s$"):
+            RemoteShell(session).run("hung-program --list-devices", timeout=7, again=again)
+        assert len([c for c in board.commands if "hung-program" in c]) == 1, "never started a second time"
+        assert len(board.logins) == 1, "no second login"
+        assert not [e for e in events if e.kind in ("waiting", "back")], "no network drop is reported"
+
+    def test_a_command_whose_connection_is_silent_too_waits_for_the_board(self, board_session, monkeypatch):
+        """The network is gone while paramiko's connection still stands (it does until TCP gives up): the session
+        waits for the board, logs in again and runs a command that may run twice once more, as before."""
+        from orchestrator.utils import ssh_trust
+        board, session, events, _clock = board_session
+        board.stalled = True
+        real = board.exec_command
+
+        def exec_command(command, timeout=None):
+            if board.stalled:
+                board.commands.append(command)
+                raise socket.timeout("timed out")
+            return real(command, timeout)
+
+        board.exec_command = exec_command
+        login = ssh_trust.connect
+
+        def back(*a, **k):
+            board.stalled = False   # the network is back
+            return login(*a, **k)
+
+        monkeypatch.setattr(ssh_trust, "connect", back)
+        result = RemoteShell(session).run("echo read-only", again=True)
+        assert result.status == 0 and result.out.strip() == "read-only"
+        assert len(board.logins) == 2
+        steps = [(e.kind, e.step) for e in events]
+        assert ("waiting", "command") in steps and ("back", "command") in steps
+
+
+@POSIX
+def test_a_failed_step_names_the_board_only_by_its_label_for_an_ai(tmp_path, source, board_session, monkeypatch):
+    """D0 and the chain's plan: the AI path's texts name the board by its label, never its address (the address, like
+    the login, is the person's to see). The board session's own sentences name the host; the AI's copy of them, the
+    external text, names the label instead."""
+    from orchestrator.runtime.device import service
+    from orchestrator.runtime.device.trusted import TrustedDevice
+    board, session, _events, _clock = board_session
+    build, packaged = tdr.packaged_build(tmp_path, source)
+
+    def full(self, data):
+        raise OSError("Failure")   # the board's disk is full; the connection stands
+
+    monkeypatch.setattr(LocalFile, "write", full)
+    with pytest.raises(RemoteError) as e:
+        deploy_over(session, build, packaged)
+    assert "192.0.2.30" in str(e.value), "the person's own text names the address"
+    device = TrustedDevice("0123456789abcdef", "Shelf board", "192.0.2.30", 22, "dietpi", "ssh-ed25519",
+                           "SHA256:" + "E" * 43, True, "2026-10-12T00:00:00Z", "cli")
+    failed = service._session_failed(device, e.value, tmp_path / "state", "runtime_deploy", "The deploy")
+    seen = " ".join([str(failed), *failed.external_text])
+    assert "192.0.2.30" not in seen and "Shelf board" in " ".join(failed.external_text)
+    assert "Failure" in " ".join(failed.external_text), "the board's words stay"
+
+
+@POSIX
+def test_the_tarball_on_the_board_is_the_owners_only_as_before(tmp_path, source, board_session):
+    """Before the board session the tarball was written under umask 077 (`umask 077 && cat >`). An SFTP server creates
+    a file with its own umask (often 022), so the upload makes the file under umask 077 first."""
+    board, session, _events, _clock = board_session
+    build, packaged = tdr.packaged_build(tmp_path, source)
+    modes = []
+    real = board.answer
+
+    def answer(command, stdin):
+        if "sha256sum -c SHA256SUMS" in command:
+            (staging,) = list(board.root.glob(".staging-*"))
+            modes.append((staging / "runtime.tar.gz").stat().st_mode & 0o777)
+        return real(command, stdin)
+
+    board.answer = answer
+    old = os.umask(0o022)   # what an SFTP server usually runs with
+    try:
+        assert deploy_over(session, build, packaged).activated
+    finally:
+        os.umask(old)
+    assert modes == [0o600]
+
+
+@POSIX
+def test_a_drop_at_the_sftp_check_still_uploads_over_sftp_after_the_wait(tmp_path, source, board_session,
+                                                                         monkeypatch):
+    """The network drops just as RemoteShell asks whether the board has SFTP: that is a drop, not a board without
+    SFTP, so the upload waits for the board and goes over SFTP (with resume) instead of starting a stdin upload into
+    the dropped network, which ended the deploy."""
+    board, session, events, _clock = board_session
+    build, packaged = tdr.packaged_build(tmp_path, source)
+    real_stat = LocalSFTP.stat
+    first = {"done": False}
+
+    def stat(self, path):
+        if not first["done"]:
+            first["done"] = True
+            self.board.go_offline()
+        return real_stat(self, path)
+
+    monkeypatch.setattr(LocalSFTP, "stat", stat)
+    assert deploy_over(session, build, packaged).activated
+    assert not any("cat >" in c for c in board.commands), "over SFTP after the wait"
+    assert any(e.kind == "waiting" for e in events), "it waited for the board"
