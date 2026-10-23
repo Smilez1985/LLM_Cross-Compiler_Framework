@@ -699,7 +699,9 @@ class LocalRuntimeWindow(QDialog):
             if llama_source.cached_source(pin, rt.data_dir) is None and not ask_from_worker(
                     ui_text("ditto_runtime.source.fetch_question", lang, tag=pin.tag, commit=pin.commit[:12])):
                 return None
-            manifest = llama_source.export_source(pin, rt.data_dir, path, url=mirror, log=say, settings=rt.settings)
+            settings = getattr(rt, "settings", None)   # offline mode: only from the own network (locality rule)
+            manifest = llama_source.export_source(pin, rt.data_dir, path, url=mirror, log=say,
+                                                  **({"settings": settings} if settings is not None else {}))
             return pin, manifest
 
         def done(ok: bool, value: Any) -> None:

@@ -66,10 +66,10 @@ READERS = {"get", "_cfg", "_config", "_config_get", "_flag", "_setting", "user_v
 ALLOWED = {"orchestrator/utils/locality.py"}
 
 
-def offline_reads():
+def offline_reads(root: Path = PACKAGE):
     found = []
-    for path in sorted(PACKAGE.rglob("*.py")):
-        rel = path.relative_to(REPO_ROOT).as_posix()
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root.parent).as_posix()
         if rel in ALLOWED:
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -88,10 +88,8 @@ def test_no_module_reads_offline_mode_on_its_own():
     assert offline_reads() == []
 
 
-def test_the_guard_bites(tmp_path, monkeypatch):
-    sample = PACKAGE / "Core" / "_offline_guard_sample.py"
+def test_the_guard_bites(tmp_path):
+    sample = tmp_path / "orchestrator" / "Core" / "sample.py"
+    sample.parent.mkdir(parents=True)
     sample.write_text("def f(cfg):\n    return bool(cfg.get('offline_mode', False))\n", encoding="utf-8")
-    try:
-        assert offline_reads() == ["orchestrator/Core/_offline_guard_sample.py:2"]
-    finally:
-        sample.unlink()
+    assert offline_reads(tmp_path / "orchestrator") == ["orchestrator/Core/sample.py:2"]
