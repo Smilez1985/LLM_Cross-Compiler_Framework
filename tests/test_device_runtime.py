@@ -1599,7 +1599,9 @@ def test_a_cli_consent_is_written_to_the_real_audit_log(tmp_path, monkeypatch):
     from orchestrator import cli as cli_module
     from orchestrator.tools.audit import AuditLog
     audit = AuditLog(tmp_path / "audit.db")
-    monkeypatch.setattr(cli_module, "_tool_registry", lambda ctx: SimpleNamespace(audit=audit))
+    # the CLI's one opener of the person's device rows (round 25 Q3: _device_audit, the registry's log or audit.db)
+    monkeypatch.setattr(cli_module, "_state_dir", lambda ctx: tmp_path)
+    monkeypatch.setattr(cli_module, "_device_audit", lambda ctx, state: audit)
     cli_module._record_consent(None, "device_runtime_deploy", {"device": "dev-1"}, "systemd unit allowed")
     entry = audit.entries(1)[0]
     assert (entry["tool"], entry["outcome"], entry["approved"]) == ("device_runtime_deploy", "ok", 1)
