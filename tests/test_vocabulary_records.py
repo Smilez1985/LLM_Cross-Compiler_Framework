@@ -314,6 +314,8 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
                                              "orchestrator.utils.l10n_deploy",
                                              "orchestrator.utils.l10n_build", "orchestrator.utils.l10n_ditto_runtime",
                                              "orchestrator.utils.l10n_ditto_models",
+                                             # offline-lan: offline mode's locality rule and the Local network tab
+                                             "orchestrator.utils.l10n_network",
                                              # wave 6: chain a0 pre-registers every planned module (a missing one is
                                              # skipped): the menu bar, the shell, the activity, Hugging Face, the
                                              # Ditto setup guide and the glossary
