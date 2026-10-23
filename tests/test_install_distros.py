@@ -340,7 +340,18 @@ class TestTheDryRun:
         assert ("apk add docker docker-cli-buildx; rc-update add docker default; rc-service docker start" in text
                 and "Repository community" in text)
         assert "musl" in text and "onnxruntime" in text and "scripts/build_container_image.sh" in text
+        assert "apk add git tar" in text
         assert "Python:" not in text
+
+    def test_the_way_alpine_is_pointed_to_takes_busybox_tar_into_account(self):
+        """scripts/build_container_image.sh stages the build context with GNU tar's --null --files-from (busybox' tar
+        on Alpine has no --null): the Alpine stop names what to add, and the script still uses those options."""
+        script = (REPO_ROOT / "scripts" / "build_container_image.sh").read_text(encoding="utf-8")
+        assert "--null --files-from=" in script
+        text = INSTALL_SH.read_text(encoding="utf-8")
+        stop = text[text.index("alpine_stop() {"):]
+        stop = stop[:stop.index("\n}")]
+        assert "apk add git tar" in stop and "GNU tar" in stop
 
     @pytest.mark.parametrize("system, family", [("gentoo", "gentoo"), ("void", "void"), ("nixos", "nixos")])
     def test_another_family_stops_naming_the_family_and_the_manual(self, tmp_path, system, family):
@@ -668,6 +679,9 @@ class TestAlpine:
         text = said(run)
         assert "musl" in text and "onnxruntime" in text and "scripts/build_container_image.sh" in text
         assert "Docker ist eingerichtet" in text
+        # The way it points to needs git and GNU tar, which Alpine does not bring: build_container_image.sh stages the
+        # context with 'tar --null --files-from', and busybox' tar stops at once ("unrecognized option: null").
+        assert "apk add git tar" in text and "GNU tar" in text
 
     def test_without_a_main_line_it_stops(self, tmp_path):
         box = self.box(tmp_path, "#nothing here\n")

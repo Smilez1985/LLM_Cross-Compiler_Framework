@@ -156,7 +156,9 @@ Der Installer:
    - **Alpine:** `docker` aus Alpines Repository community (falls nötig in `/etc/apk/repositories` eingeschaltet).
      Das Framework selbst läuft unter Alpine (musl) nicht: Zu seinen festgelegten Python-Paketen gehört onnxruntime,
      das es nicht für musl gibt. Der Installer hält nach Docker an und verweist auf das Framework-Image, das du auf
-     diesem Rechner baust ([Das Framework in einem Container](docs/Container_Setup_DE.md)).
+     diesem Rechner baust ([Das Framework in einem Container](docs/Container_Setup_DE.md)); sein Build-Skript braucht
+     dafür auch `git` und GNU `tar`, die Alpine nicht mitbringt (das `tar` von busybox genügt nicht):
+     `sudo apk add git tar`.
    - Auf ARMv6 (Raspberry Pi 1, Zero), wenn ein Schlüssel nicht passt, oder auf jedem anderen System (etwa Gentoo,
      Void oder NixOS) hält er an, sagt warum und verweist auf
      [Dockers Installationsanleitung](https://docs.docker.com/engine/install/); installiere Docker dann selbst und
