@@ -165,6 +165,15 @@ python -m pytest
   Integritätsprüfungen der Eingabe und des geschriebenen GGUF, die Statistik in `build_info.json`, den
   Funktionstest sowie Sicherungen und Aufräumen bei einem Fehler; `tests/model_files.py` schreibt die kleinen
   gültigen GGUF- und SafeTensors-Dateien, die die nachgebauten Werkzeugketten verwenden.
+- `tests/test_install_docker.py` und `tests/test_install_distros.py` führen `install.sh` in einer Sandbox aus: die
+  `/etc/os-release`-Dateien der echten Distributionen, nachgebaute Paketverwaltungen (`apt-get`, `dnf`, `zypper`,
+  `pacman`, `apk`) und Werkzeuge, die ihre Aufrufe aufschreiben, und das echte gpg mit Schlüsseln, die der Test
+  anlegt. Sie halten je Familie fest, welche Pakete woher kommen, die Schlüsselprüfungen der Docker-Repositorys,
+  das Anhalten in klaren Worten und den Plan von `install.sh --dry-run`. `install.sh` erkennt die Familie mit der
+  Tabelle der Hardware-Untersuchung (`os_family_of`, dieselbe wie in `scripts/hardware_probe.sh` und
+  `tables.os_families` in `configs/hardware_probe_schema.yml`; ein Test prüft, dass sie gleich sind): Eine neue
+  Distributions-ID kommt in alle drei zugleich. Auf einem echten Rechner zeigt `./install.sh --dry-run` den Plan,
+  ohne etwas zu verändern.
 
 ### Die Matrix Python 3.11 bis 3.14
 

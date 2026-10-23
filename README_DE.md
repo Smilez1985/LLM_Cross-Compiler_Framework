@@ -92,7 +92,10 @@ quantisiert); die Kurznamen `Q3_K`, `Q4_K` und `Q5_K` werden für `Q3_K_M`, `Q4_
 
 - Ein **x86-64-Rechner** (Intel oder AMD). Das Rockchip-Build-Image installiert die Toolkits von Rockchip als
   Pakete für x86-64-Linux.
-- **Linux** (der Installer nutzt `apt`, also Debian, Ubuntu und Verwandte) oder **Windows** mit Docker Desktop.
+- **Linux** mit einer der Paketverwaltungen, die der Installer nutzt: `apt` (Debian, Ubuntu, Raspberry Pi OS und
+  die Systeme, die darauf aufbauen), `dnf` (Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux,
+  Amazon Linux), `zypper` (openSUSE, SLES) oder `pacman` (Arch, Manjaro, EndeavourOS); unter Alpine richtet er
+  nur Docker ein (siehe [Installation](#installation)). Oder **Windows** mit Docker Desktop.
 - **Python 3.11 bis 3.14.**
 - **Docker:** unter Linux Docker Engine (der Installer richtet es ein, falls es fehlt); unter Windows **Docker
   Desktop** mit **WSL-2-Backend**, installiert und gestartet, bevor du das Framework installierst.
@@ -126,27 +129,50 @@ sudo ./install.sh
 Der Installer:
 
 1. prüft die Internetverbindung (HTTPS zum Paketindex `pypi.org` oder zu `PIP_INDEX_URL`, wenn du einen Spiegel
-   setzt; hinter einem Proxy startest du ihn mit `sudo -E`, damit `https_proxy` erhalten bleibt) und Python
-   (installiert es mit `apt`, falls es fehlt, und verlangt dann 3.11 bis 3.14),
-2. installiert Docker, falls es fehlt, nur aus Dockers offiziellem apt-Repository und nur mit geprüftem Schlüssel: Unter
-   Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian, wie Dockers Anleitung es sagt) und
-   auf Systemen, die auf Ubuntu oder Debian aufbauen, etwa Linux Mint, Pop!_OS oder LMDE (wie bisher die Pakete der
-   Ubuntu- oder Debian-Version, auf der sie aufbauen), lädt er Dockers Signaturschlüssel und vertraut ihm nur, wenn die
-   Datei genau diesen einen Schlüssel mit dem Fingerabdruck aus Dockers Installationsanleitung enthält
-   (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, fest in `install.sh`); apt prüft danach jedes Paket gegen die
-   signierten Paketlisten. Kein heruntergeladenes Skript läuft. Auf jedem anderen System, auf ARMv6 (Raspberry Pi 1, Zero) oder
-   wenn der Schlüssel nicht passt, hält er an, sagt warum und verweist auf
-   [Dockers Installationsanleitung](https://docs.docker.com/engine/install/); installiere Docker dann selbst und starte
-   `install.sh` erneut. Danach nimmt er deinen Benutzer in die Gruppe `docker` auf und sagt, was das heißt: Wer in der
-   Gruppe ist, steuert den Docker-Dienst, und der läuft als root; jedes Programm, das als dein Benutzer läuft, kann
-   damit Root-Rechte auf diesem Rechner bekommen (`sudo gpasswd -d BENUTZER docker` macht es rückgängig; danach kann
-   das Framework ohne sudo nicht bauen),
+   setzt; hinter einem Proxy startest du ihn mit `sudo -E`, damit `https_proxy` erhalten bleibt), erkennt die
+   Linux-Familie aus `/etc/os-release` (`ID`, dann `ID_LIKE`, mit derselben Tabelle wie die Hardware-Untersuchung)
+   und ihre Paketverwaltung und prüft Python: Gibt es kein Python 3.11 bis 3.14, installiert er das Paket der
+   Distribution (`python3`; unter RHEL 8/9 und ihren Nachbauten und unter openSUSE Leap 15, deren `python3` älter
+   ist, eines mit Nummer im Namen wie `python3.12` oder `python312`),
+2. installiert Docker, falls es fehlt, über die Paketverwaltung des Systems und nie mit einem heruntergeladenen
+   Skript. Jede Paketverwaltung prüft die Signaturen auf ihre Weise, und einem fremden Repository wird erst
+   vertraut, wenn sein Schlüssel zu einem in `install.sh` festgelegten Fingerabdruck passt:
+   - **Debian, Ubuntu, Raspberry Pi OS** und Systeme, die auf Ubuntu oder Debian aufbauen, etwa Linux Mint, Pop!_OS
+     oder LMDE: Dockers offizielles apt-Repository (32-Bit-Raspberry-Pi-OS bekommt die armhf-Pakete von Debian, wie
+     Dockers Anleitung es sagt; ein System, das auf Ubuntu oder Debian aufbaut, die Pakete der Version, auf der es
+     aufbaut). Die geladene Schlüsseldatei muss genau diesen einen Schlüssel mit dem Fingerabdruck aus Dockers
+     Installationsanleitung enthalten (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`); apt prüft danach jedes
+     Paket gegen die signierten Paketlisten.
+   - **Fedora, RHEL und CentOS Stream:** Dockers rpm-Repository, dessen Schlüssel nur mit dem Fingerabdruck aus
+     Dockers Anleitung vertraut wird (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`); dnf prüft die Signatur
+     jedes Pakets.
+   - Wo Docker kein Repository veröffentlicht, das Paket der Distribution: `moby-engine` auf anderen Systemen, die
+     auf Fedora aufbauen; `docker` unter Amazon Linux, unter openSUSE und SLES (unter SLES aus dem Containers Module,
+     das der Installer mit `SUSEConnect` einschaltet) und unter Arch, Manjaro und EndeavourOS (mit `docker-buildx`;
+     der Installer ruft nie `pacman -Sy` auf, ein Teil-Upgrade: Findet pacman ein Paket nicht, aktualisiere zuerst
+     das System mit `sudo pacman -Syu`). Rocky Linux, AlmaLinux und Oracle Linux bekommen `podman-docker` (Podman
+     mit dem Befehl `docker`): Dann gibt es keine Gruppe `docker`; der Installer schaltet Podmans Docker-kompatible
+     Schnittstelle für deinen Benutzer ein und sagt dir, welches `DOCKER_HOST` das Framework braucht.
+   - **Alpine:** `docker` aus Alpines Repository community (falls nötig in `/etc/apk/repositories` eingeschaltet).
+     Das Framework selbst läuft unter Alpine (musl) nicht: Zu seinen festgelegten Python-Paketen gehört onnxruntime,
+     das es nicht für musl gibt. Der Installer hält nach Docker an und verweist auf das Framework-Image, das du auf
+     diesem Rechner baust ([Das Framework in einem Container](docs/Container_Setup_DE.md)).
+   - Auf ARMv6 (Raspberry Pi 1, Zero), wenn ein Schlüssel nicht passt, oder auf jedem anderen System (etwa Gentoo,
+     Void oder NixOS) hält er an, sagt warum und verweist auf
+     [Dockers Installationsanleitung](https://docs.docker.com/engine/install/); installiere Docker dann selbst und
+     starte `install.sh` erneut. Auf einem solchen System installiert er auch sonst nichts: Was es braucht (siehe
+     [Voraussetzungen](#voraussetzungen)), liegt bei dir.
+
+   Danach nimmt er deinen Benutzer in die Gruppe `docker` auf und sagt, was das heißt: Wer in der Gruppe ist,
+   steuert den Docker-Dienst, und der läuft als root; jedes Programm, das als dein Benutzer läuft, kann damit
+   Root-Rechte auf diesem Rechner bekommen (`sudo gpasswd -d BENUTZER docker` macht es rückgängig; danach kann das
+   Framework ohne sudo nicht bauen),
 3. kopiert die Dateien, die das Repository ausliefert, nach `/opt/llm-cross-compiler-framework` (Eigentümer ist dein
-   Benutzer) und führt sie in `.lcf-installed-files` auf. Ein erneuter Aufruf aktualisiert diese Dateien und
-   entfernt nur Dateien, die ein früherer Aufruf kopiert hat und die das Repository nicht mehr ausliefert; alles
-   andere dort bleibt: deine eigenen Targets (Modul-Assistent, `llm-cli module create`), installierte
-   Community-Packs, `configs/config.yml`, Builds, Cache und Modelle. Starte Updates im Repository-Ordner: Die
-   Kopie von `install.sh` in `/opt` kopiert und entfernt nichts,
+   Benutzer; fehlt `rsync`, kommt es aus der Paketverwaltung) und führt sie in `.lcf-installed-files` auf. Ein erneuter
+   Aufruf aktualisiert diese Dateien und entfernt nur Dateien, die ein früherer Aufruf kopiert hat und die das
+   Repository nicht mehr ausliefert; alles andere dort bleibt: deine eigenen Targets (Modul-Assistent,
+   `llm-cli module create`), installierte Community-Packs, `configs/config.yml`, Builds, Cache und Modelle. Starte
+   Updates im Repository-Ordner: Die Kopie von `install.sh` in `/opt` kopiert und entfernt nichts,
 4. legt dort eine virtuelle Umgebung (`.venv`) an und installiert die festgelegten Pakete aus
    `requirements-gui.txt` (alles aus `requirements.txt` plus PySide6 für die GUI; mit `--headless` nur
    `requirements.txt`), jede Datei gegen ihren Hash geprüft, mit dem pip, das mit Python kommt (pip selbst wird
@@ -161,6 +187,11 @@ Den Ditto-Schritt wählst du mit `sudo ./install.sh --ditto=auto|bare-metal|dock
 unbeaufsichtigten Lauf setzt du stattdessen `LCF_DITTO` (zum Beispiel `sudo LCF_DITTO=auto ./install.sh`): Dann wird
 nichts gefragt, und ein Modell unter einer freien Lizenz (etwa Apache 2.0) wird heruntergeladen, nachdem Größe und
 Lizenz angezeigt wurden.
+
+Was der Installer auf diesem Rechner täte, ohne etwas zu verändern, zeigt `./install.sh --dry-run` (ohne `sudo`):
+die Familie, die Paketverwaltung, die Pakete, die Repositorys und die Fingerabdrücke der Schlüssel; er ruft
+keine Paketverwaltung auf und lädt nichts. Er endet mit Exit-Code 0, wenn die Installation durchliefe, und mit 1
+samt Grund, wenn sie anhielte.
 
 Auf einem Server ohne Bildschirm lässt `sudo ./install.sh --headless` (unbeaufsichtigt: `LCF_HEADLESS=1`) die GUI
 weg: Kommandozeile und MCP-Server brauchen kein Qt. `llm-framework` sagt dann, wie du die GUI später ergänzt.
