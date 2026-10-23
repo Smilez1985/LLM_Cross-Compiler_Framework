@@ -6,15 +6,17 @@ the community zoo).
 PinnedDownloader.fetch resumes into <dest>.part; the file gets its final name only after its size and sha256
 matched the pin. get_bytes reads a small file that is verified another way (the signed community index) with a
 size cap. Redirects away from HTTPS are refused. A dropped connection, a timeout or a server error is retried (the
-download resumes); a TLS certificate that cannot be verified is not (it does not go away on its own) and is named by
-its host only, never by the (possibly signed) URL; any other request error and a `.part` file that cannot be written
-end the download with a clear error (the part is kept for a resume). This range download is the only one: the
+download resumes; a connection that ends during its TLS handshake or whose TLS record breaks on the way is dropped
+too); a TLS certificate that cannot be verified is not (it does not go away on its own) and is named by its host only,
+never by the (possibly signed) URL; any other request error and a `.part` file that cannot be written end the
+download with a clear error (the part is kept for a resume). This range download is the only one: the
 Hugging Face fetcher (orchestrator/Core/hf_hub.py HubFetcher) runs it too and adds only its own headers and checks.
 """
 
 import os
 import re
 import shutil
+import ssl
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
@@ -112,6 +114,23 @@ SpaceRule = Callable[[Path, int, str], Optional[Exception]]
 # What a disk rule's refusal carries beside its message: the reason code, the AI's next step, the person's next steps
 # and the disk checks a window shows in the person's language (Core/disk_plan.person_reason).
 REASON_FIELDS = ("code", "next", "steps", "checks")
+
+
+def certificate_failed(error: BaseException) -> bool:
+    """Whether a TLS error of a request is a certificate that could not be verified (an unknown CA, such as that of a
+    proxy that inspects TLS, an expired certificate, another host's name): ssl.SSLCertVerificationError anywhere in
+    what requests and urllib3 wrapped. Every other TLS error (the connection ended during its handshake, a TLS record
+    that broke on the way) is a dropped connection and is retried like one."""
+    seen, todo = set(), [error]
+    while todo:
+        e = todo.pop()
+        if not isinstance(e, BaseException) or id(e) in seen:
+            continue
+        seen.add(id(e))
+        if isinstance(e, ssl.SSLCertVerificationError):
+            return True
+        todo += [e.__cause__, e.__context__, getattr(e, "reason", None), *e.args]
+    return "certificate verify failed" in str(error).lower()
 
 
 def with_reason(error: Exception, source: Any) -> Exception:
@@ -261,8 +280,12 @@ class PinnedDownloader:
                             break  # more than pinned: the hash check refuses it
                         if progress:
                             progress(name, have, size)
-        except requests.exceptions.SSLError as e:  # a ConnectionError, but trying again only wastes time
-            # The host whose certificate failed: after a redirect (a release CDN) that is the request requests sent.
+        except requests.exceptions.SSLError as e:  # a ConnectionError
+            if not certificate_failed(e):
+                # the connection ended during its TLS handshake, a TLS record broke on the way: a dropped connection
+                raise _Retry(e.__class__.__name__) from e
+            # A certificate that cannot be verified does not go away on its own: trying again only wastes time. The
+            # host whose certificate failed: after a redirect (a release CDN) that is the request requests sent.
             failed = getattr(getattr(e, "request", None), "url", None) or url
             raise self.error(f"Download of {name} failed: the TLS certificate of {urlparse(failed).hostname} could "
                              "not be verified (behind a proxy that inspects TLS, its CA certificate belongs in "

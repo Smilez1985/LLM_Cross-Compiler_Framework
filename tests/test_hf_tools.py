@@ -100,6 +100,19 @@ class Response:
             yield self.data[i:i + 1024]
 
 
+def urllib3_ssl_error(cause):
+    """A TLS error inside a response as urllib3 wraps it (requests turns it into requests.exceptions.SSLError)."""
+    import urllib3
+    return urllib3.exceptions.SSLError(cause)
+
+
+def as_requests_raises(cause, url="https://huggingface.co/x"):
+    """A TLS error of a request exactly as requests raises it: SSLError(MaxRetryError(reason=urllib3 SSLError(...)))."""
+    import urllib3
+    return requests.exceptions.SSLError(urllib3.exceptions.MaxRetryError(None, url, urllib3_ssl_error(cause)),
+                                        request=requests.Request("GET", url).prepare())
+
+
 class FakeSession:
     """Serves DATA (or `body`), honouring Range; records every request's url and headers."""
 
@@ -305,6 +318,45 @@ class TestTheFetcherSaysWhyAtOnce:
         assert len(calls) == 1, "a certificate problem does not go away on its own: no retry"
         assert "Signature" not in str(err.value) and TOKEN not in str(err.value)
         assert "REQUESTS_CA_BUNDLE" in str(err.value)
+
+    def test_a_tls_connection_that_ends_early_is_a_dropped_connection(self, tmp_path):
+        """Review of stage C wave 3: the one range download took every TLS error for a certificate that cannot be
+        verified. Before 9e71d3c the Hub's fetcher retried them all; since, a connection that ended during its TLS
+        handshake (a flapping link, a proxy) ended a multi-gigabyte download at once with the certificate text and its
+        REQUESTS_CA_BUNDLE advice. It is a dropped connection: retried, and a broken record mid-way resumes the part."""
+        import ssl
+        handshake = ssl.SSLEOFError(8, "[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol")
+        record = ssl.SSLError(1, "[SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed or bad record mac")
+        session = FakeSession()
+        dropped = [as_requests_raises(handshake)]
+
+        class Broken(Response):
+            def iter_content(self, chunk_size=1):
+                yield self.data[:2048]
+                raise requests.exceptions.SSLError(urllib3_ssl_error(record))
+
+        def gate(body, start):
+            if dropped:
+                raise dropped.pop()
+            return (Broken if not start else Response)(body[start:], start, total=len(body))
+        session.gate = gate
+        path, digest = self.fetch(tmp_path, session)
+        assert digest == SHA and path.read_bytes() == DATA
+        assert [headers.get("Range") for _url, headers in session.seen] == [None, None, "bytes=2048-"]
+
+    def test_a_certificate_that_cannot_be_verified_is_still_not_retried(self, tmp_path):
+        import ssl
+        calls = []
+
+        class Session:
+            def get(self, url, **kwargs):
+                calls.append(url)
+                raise as_requests_raises(ssl.SSLCertVerificationError(
+                    1, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer "
+                       "certificate"))
+        with pytest.raises(hf_hub.DownloadError, match="TLS certificate of huggingface.co could not"):
+            self.fetch(tmp_path, Session())
+        assert len(calls) == 1
 
     @pytest.mark.parametrize("error", [requests.exceptions.TooManyRedirects("30 redirects"),
                                        requests.exceptions.InvalidURL("bad")])
