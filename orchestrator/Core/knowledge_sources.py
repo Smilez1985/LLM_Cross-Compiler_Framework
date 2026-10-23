@@ -11,7 +11,7 @@ This module imports nothing heavy: the knowledge base is opened by the framework
 RAGManager.list_sources reads payload fields only, never the chunk text.
 """
 
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # The kinds of a source (rag_manager.source_kind), and the filter's choices.
 KINDS = ("web", "pack", "docs", "other")
@@ -46,13 +46,33 @@ def knowledge_base(framework: Any) -> Any:
     return rag
 
 
-def sources(rag: Any, kind: str = "any") -> List[Dict[str, Any]]:
+def sources(rag: Any, kind: str = "any", topic: Optional[str] = None) -> List[Dict[str, Any]]:
     """Every source of the knowledge base `rag` (RAGManager.list_sources: source, title, kind, licence, copyright,
-    pack_share, share_reason, ...), only those of `kind` unless it is "any". Raises KnowledgeBaseError when the
+    pack_share, share_reason, topic, target, ...), only those of `kind` unless it is "any", and with `topic` only those
+    that belong to that topic or target (DECISIONS round 23 item 1; ignoring case). Raises KnowledgeBaseError when the
     knowledge base cannot be read, ValueError for an unknown kind."""
     if kind not in KIND_CHOICES:
         raise ValueError(f"Unknown kind {kind!r}; one of {', '.join(KIND_CHOICES)}.")
-    return [e for e in rag.list_sources() if kind in ("any", e.get("kind"))]
+    return [e for e in rag.list_sources() if kind in ("any", e.get("kind")) and belongs_to(e, topic)]
+
+
+def topic_of(entry: Dict[str, Any]) -> str:
+    """The topic or target a source belongs to ("target X" / "topic X"; "-" for your own pages, which belong to the
+    topic or target you name when you export them)."""
+    if entry.get("target"):
+        return f"target {entry['target']}"
+    if entry.get("topic"):
+        return f"topic {entry['topic']}"
+    return "-"
+
+
+def belongs_to(entry: Dict[str, Any], topic: Optional[str]) -> bool:
+    """Whether a source or an excerpt's metadata belongs to `topic` (a topic or a target, ignoring case); True for
+    no topic."""
+    if not topic:
+        return True
+    wanted = str(topic).strip().casefold()
+    return any(str(entry.get(key) or "").casefold() == wanted for key in ("topic", "target"))
 
 
 def carried(entry: Dict[str, Any]) -> str:
@@ -84,8 +104,9 @@ def totals(entries: List[Dict[str, Any]]) -> Tuple[int, int]:
     return full, facts
 
 
-def empty_sentence(kind: str = "any") -> str:
-    return "The knowledge base holds no source" + ("." if kind == "any" else f" of kind {kind}.")
+def empty_sentence(kind: str = "any", topic: Optional[str] = None) -> str:
+    return ("The knowledge base holds no source" + ("" if kind == "any" else f" of kind {kind}")
+            + (f" on the topic or target {topic}" if topic else "") + ".")
 
 
 def totals_sentence(entries: List[Dict[str, Any]]) -> str:
@@ -94,5 +115,6 @@ def totals_sentence(entries: List[Dict[str, Any]]) -> str:
             "their address and short facts (llm-cli zoo export knowledge lists them again).")
 
 
-__all__ = ["CARRIED", "KINDS", "KIND_CHOICES", "KnowledgeOff", "OFF", "REMOVED", "REMOVED_NONE", "carried",
-           "empty_sentence", "knowledge_base", "removed_text", "sources", "totals", "totals_sentence"]
+__all__ = ["CARRIED", "KINDS", "KIND_CHOICES", "KnowledgeOff", "OFF", "REMOVED", "REMOVED_NONE", "belongs_to",
+           "carried", "empty_sentence", "knowledge_base", "removed_text", "sources", "topic_of", "totals",
+           "totals_sentence"]

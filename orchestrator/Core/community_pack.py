@@ -4,7 +4,9 @@ Community packs: manifest, Ed25519 signatures, privacy scrub, and encryption for
 
 A pack is a zip file:
   pack.json   manifest: schema_version, kind, id, version, author, license, lcf_min_version, created (UTC)
-              and files [{path, sha256, size, mode}]
+              and files [{path, sha256, size, mode}]; a knowledge pack also names the topic or the target its pages
+              belong to (topic or target; DECISIONS round 23 item 1). A pack made before that names neither: the
+              field is absent from its manifest and from the bytes its signature covers, so it still verifies
   pack.sig    optional author signature: {"v": 1, "alg": "Ed25519", "key_id": "...", "sig": "<base64url>",
               "pubkey": "<base64>"} (the public key is optional; it lets anyone check the signature, and the
               author's public key is pinned on first use when the pack is installed)
@@ -64,6 +66,13 @@ ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 VERSION_PATTERN = r"^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,32})?$"
 LICENSE_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$"
 UTC_TIME_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+# The topic or target a knowledge pack belongs to: also the name of its folder below community/knowledge/, so a plain
+# name that every file system stores as written (no trailing '.', which Windows drops, and no device name Windows
+# reserves).
+TOPIC_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9_-])?$"
+_WINDOWS_DEVICE = re.compile(r"^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?$", re.IGNORECASE)
+# The manifest fields a pack made before topics did not have: left out of the manifest when unset (see as_json)
+_OPTIONAL_FIELDS = ("topic", "target")
 _KEY_ID = r"^[0-9a-f]{16}$"
 # Characters Windows cannot store or treats specially, control characters and the backslash.
 _BAD_PATH_CHARS = re.compile(r'[\x00-\x1f\x7f\\:*?"<>|]')
@@ -102,6 +111,14 @@ def check_relpath(path: str) -> str:
     return path
 
 
+def check_topic(value: str) -> str:
+    """A knowledge topic or target name (TOPIC_PATTERN, no Windows device name); raises ValueError otherwise."""
+    if not isinstance(value, str) or not re.fullmatch(TOPIC_PATTERN, value) or _WINDOWS_DEVICE.match(value):
+        raise ValueError(f"not a topic or target name: {value!r} (letters, digits, '.', '_' and '-', up to 64 "
+                         "characters, starting with a letter or digit and not ending in '.')")
+    return value
+
+
 class PackFile(Strict):
     path: str
     sha256: str = Field(pattern=SHA256_PATTERN)
@@ -125,9 +142,22 @@ class PackManifest(Strict):
     lcf_min_version: str = Field(default=__version__, pattern=VERSION_PATTERN)
     created: str = Field(pattern=UTC_TIME_PATTERN)
     files: List[PackFile] = Field(default_factory=list, max_length=MAX_FILES)
+    # A knowledge pack: the topic or the target its pages belong to (one of them; an export sets it, a pack made
+    # before topics names neither and installs with the topic taken from its id, after the person confirmed it).
+    topic: Optional[str] = None
+    target: Optional[str] = None
+
+    @field_validator("topic", "target")
+    @classmethod
+    def _topic_name(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else check_topic(value)
 
     @model_validator(mode="after")
     def _unique_sorted(self):
+        if self.topic is not None and self.target is not None:
+            raise ValueError("a knowledge pack names its topic or its target, not both")
+        if (self.topic is not None or self.target is not None) and self.kind != "knowledge":
+            raise ValueError(f"only a knowledge pack names a topic or target, not a {self.kind} pack")
         seen, folders = set(), set()
         for f in self.files:
             # Case-insensitive: on Windows and macOS 'A.sh' and 'a.sh' are one file.
@@ -146,9 +176,18 @@ class PackManifest(Strict):
         self.files = sorted(self.files, key=lambda f: f.path)
         return self
 
+    def as_json(self) -> dict:
+        """The manifest as pack.json holds it: a field packs made before it did not have (topic, target) only when
+        it is set, so the manifest and the signature of such a pack stay what they were."""
+        data = self.model_dump(mode="json")
+        for name in _OPTIONAL_FIELDS:
+            if data.get(name) is None:
+                data.pop(name, None)
+        return data
+
     def canonical_bytes(self) -> bytes:
-        """The bytes a signature covers: sorted keys, no whitespace, UTF-8."""
-        return _canonical(self.model_dump(mode="json"))
+        """The bytes a signature covers: sorted keys, no whitespace, UTF-8 (of as_json)."""
+        return _canonical(self.as_json())
 
     def content_sha256(self) -> str:
         """Digest of the file list only (path, sha256, size, mode): the same content always gives the same value,
@@ -227,13 +266,14 @@ def tree_sha256(root: Path) -> str:
 
 
 def build_manifest(root: Path, *, kind: str, id: str, version: str, author: str, license: str,
-                   created: Optional[str] = None, lcf_min_version: Optional[str] = None) -> PackManifest:
-    """The manifest of every file below root (see _scan)."""
+                   created: Optional[str] = None, lcf_min_version: Optional[str] = None,
+                   topic: Optional[str] = None, target: Optional[str] = None) -> PackManifest:
+    """The manifest of every file below root (see _scan); a knowledge pack's topic or target."""
     files = _pack_files(root)
     try:
         return PackManifest(kind=kind, id=id, version=version, author=author, license=license,
                             created=created or utc_now(), lcf_min_version=lcf_min_version or __version__,
-                            files=files)
+                            files=files, topic=topic, target=target)
     except ValidationError as e:
         raise PackError(f"Invalid pack: {e}") from None
 
@@ -441,7 +481,7 @@ def write_pack(root: Path, manifest: PackManifest, signature: Optional[PackSigna
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
         zf.writestr(_zip_info(MANIFEST_NAME, 0o644),
-                    json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True, ensure_ascii=False))
+                    json.dumps(manifest.as_json(), indent=2, sort_keys=True, ensure_ascii=False))
         if signature is not None:
             zf.writestr(_zip_info(SIGNATURE_NAME, 0o644), signature.model_dump_json())
         for f in manifest.files:

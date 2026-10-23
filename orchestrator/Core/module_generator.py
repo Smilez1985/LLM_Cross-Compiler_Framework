@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Dict, Iterable, List, Any, Optional
@@ -106,10 +107,12 @@ List, and `NOTICE` lists every page with its source address, its copyright line 
 Apache-2.0 also the notices of the work's NOTICE file, when the crawl read it). An export of the target makes both
 anew from the snapshot.
 
-The framework does not read this file: nothing imports it into a knowledge base, and there is no command for
-that. To share knowledge so that it reaches other users' knowledge bases, export your knowledge base as a
-knowledge pack (`llm-cli zoo export knowledge --author <name>`); an installed knowledge pack is added to the
-knowledge base.
+On this computer the framework does not import this file: its pages are in your knowledge base already (Deep Ingest
+stored them there). When you export this target as a target pack (`llm-cli zoo export target <name>`), the snapshot
+travels with it, and the recipient's framework imports it into their knowledge base under this target, after the
+pack's checks and with a snapshot of their knowledge base taken first; a newer version of the pack replaces the pages
+of the older one. To share knowledge on a topic of its own, export a knowledge pack (`llm-cli zoo export knowledge
+--author <name> --topic <topic>`).
 """
 
 
@@ -745,21 +748,22 @@ class ModuleGenerator:
             # CommunityManager owns the export and its privacy scrub
             cm = CommunityManager(framework_manager)
             self.logger.info("Creating Knowledge Snapshot for module...")
-            snapshot_path_str = cm.export_knowledge_base(output_name_prefix=f"knowledge_{module_slug}",
-                                                         root_urls=roots)
+            # A private scratch folder, never community/knowledge/ (a file there would be a loose knowledge file)
+            with tempfile.TemporaryDirectory(prefix="lcf-knowledge-") as scratch:
+                snapshot_path_str = cm.export_knowledge_base(output_name_prefix=f"knowledge_{module_slug}",
+                                                             root_urls=roots, out_dir=Path(scratch))
+                if snapshot_path_str and os.path.exists(snapshot_path_str):
+                    src = Path(snapshot_path_str)
+                    dst = target_dir / KNOWLEDGE_SNAPSHOT
+                    ensure_directory(dst.parent)
+                    shutil.move(src, dst)
+                    (dst.parent / "README.md").write_text(KNOWLEDGE_README.format(slug=module_slug), encoding="utf-8")
+                    self._write_licence_files(dst)
+                    self.logger.info(f"Attached the knowledge snapshot: {dst}")
+                else:
+                    self.logger.warning("No knowledge snapshot attached: no stored page comes from the crawled URLs, "
+                                        "or the knowledge base could not be read.")
 
-            if snapshot_path_str and os.path.exists(snapshot_path_str):
-                src = Path(snapshot_path_str)
-                dst = target_dir / KNOWLEDGE_SNAPSHOT
-                ensure_directory(dst.parent)
-                shutil.move(src, dst)
-                (dst.parent / "README.md").write_text(KNOWLEDGE_README.format(slug=module_slug), encoding="utf-8")
-                self._write_licence_files(dst)
-                self.logger.info(f"Attached the knowledge snapshot: {dst}")
-            else:
-                self.logger.warning("No knowledge snapshot attached: no stored page comes from the crawled URLs, "
-                                    "or the knowledge base could not be read.")
-                
         except Exception as e:
             self.logger.warning(f"Failed to create knowledge snapshot: {e}")
             # Non-fatal error, module creation should still succeed

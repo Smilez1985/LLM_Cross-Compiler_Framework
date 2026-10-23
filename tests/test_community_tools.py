@@ -25,12 +25,13 @@ L4T = "nvcr.io/nvidia/l4t-base@sha256:" + "c" * 64   # a vendor image, pinned
 OFFICIAL = "debian:bookworm-slim"
 
 
-def knowledge_pack(world, name="rk-docs", text="RK3588 NPU notes"):
+def knowledge_pack(world, name="rk-docs", text="RK3588 NPU notes", topic="rk3588"):
+    """A knowledge pack on a topic (topic=None: a pack made before packs named their topic)."""
     root = world.tmp / "src" / name
     root.mkdir(parents=True)
     (root / "knowledge.json").write_text(json.dumps([{"source": "https://docs.example/rk", "content": text,
                                                       "metadata": {}}]))
-    return pack_bytes(root, kind="knowledge", pack_id=name, version="1.0.0")
+    return pack_bytes(root, kind="knowledge", pack_id=name, version="1.0.0", topic=topic)
 
 
 @pytest.fixture
@@ -261,10 +262,25 @@ def test_a_knowledge_standing_approval_installs_the_next_such_pack_without_a_que
     assert asked == []
     job = wait_job(env, out.job_id)
     assert job.state == "done" and job.result["installed_via"] == f"grant:{made.id}"
-    prov = read_provenance(env.cm.knowledge_dir / "more-docs")
-    assert prov.installed_via == f"grant:{made.id}"
+    prov = read_provenance(env.cm.knowledge_dir / "rk3588" / "more-docs")   # in its topic's folder
+    assert prov.installed_via == f"grant:{made.id}" and prov.topic == "rk3588"
     entries = [e for e in env.registry.audit.entries(200) if e.get("tool") == "add_pack_from_index"]
     assert any(e.get("confirm_channel") == f"grant:{made.id}" for e in entries)
+
+
+def test_a_pack_made_before_topics_is_always_asked_and_named_after_its_id(env):
+    """DECISIONS round 23 item 1: an older knowledge pack names no topic; its topic comes from its id, and only with
+    the person's confirmation, so no standing approval covers it."""
+    env.world.add(knowledge_pack(env.world, "rk-docs"), kind="knowledge", pack_id="rk-docs", version="1.0.0")
+    env.world.add(knowledge_pack(env.world, "old-docs", topic=None), kind="knowledge", pack_id="old-docs",
+                  version="1.0.0")
+    env.world.publish()
+    assert grant(env, "knowledge", "rk-docs") is not None
+    asked = []
+    out = call(env, "add_pack_from_index", {"kind": "knowledge", "pack_id": "old-docs"}, confirm=recording(asked))
+    assert len(asked) == 1 and "taken from the pack id" in asked[0]
+    assert wait_job(env, out.job_id).state == "done"
+    assert read_provenance(env.cm.knowledge_dir / "old-docs" / "old-docs").topic == "old-docs"
 
 
 def test_it_does_not_cover_a_recipe_pack_or_a_community_target_pack(env):
@@ -385,7 +401,7 @@ def test_a_standing_approval_asks_when_the_larger_reserve_would_not_stay_free(en
     asked = []
     with pytest.raises(ToolError):
         call(env, "add_pack_from_index", {"kind": "knowledge", "pack_id": "more-docs"}, confirm=recording(asked, False))
-    assert len(asked) == 1 and not (env.cm.knowledge_dir / "more-docs").exists()
+    assert len(asked) == 1 and not (env.cm.knowledge_dir / "rk3588" / "more-docs").exists()
 
 
 def test_an_mcp_question_without_an_answer_removes_the_quarantined_copy(env, monkeypatch):

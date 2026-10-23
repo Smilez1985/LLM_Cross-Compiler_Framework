@@ -3818,8 +3818,9 @@ def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
 @knowledge.command('sources')
 @click.option('--kind', type=click.Choice(["web", "pack", "docs", "other", "any"]), default="any", show_default=True,
               help='Only sources of this kind')
+@click.option('--topic', help='Only sources that belong to this topic or target (e.g. llama.cpp or Rockchip)')
 @pass_context
-def knowledge_sources(ctx: FrameworkContext, kind: str):
+def knowledge_sources(ctx: FrameworkContext, kind: str, topic: Optional[str]):
     """What the knowledge base holds: every source with the licence and copyright notice it shows, what a
     knowledge pack would carry of it (full text, or only its address and short facts) and why, and how much hidden
     text was left out of it before it was stored"""
@@ -3832,21 +3833,81 @@ def knowledge_sources(ctx: FrameworkContext, kind: str):
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     try:
-        entries = ks.sources(rag, kind)
+        entries = ks.sources(rag, kind, topic)
     except KnowledgeBaseError as e:
         console.print(f"[red]The knowledge base cannot be read: {escape(str(e))}[/red]")
         sys.exit(1)
     if not entries:
-        console.print(ks.empty_sentence(kind))
+        console.print(escape(ks.empty_sentence(kind, topic)))
         return
     table = Table(title="Knowledge sources, their licence and what a knowledge pack carries of them")
-    for column in ("Source", "Kind", "Hidden text left out", "Licence", "Copyright notice", "In a pack", "Why"):
+    for column in ("Source", "Kind", "Topic or target", "Hidden text left out", "Licence", "Copyright notice",
+                   "In a pack", "Why"):
         table.add_column(column, overflow="fold")
     for e in entries:   # addresses, titles and notices are site text: escaped, never markup
-        table.add_row(escape(e["source"]), e["kind"], ks.removed_text(e), escape(e.get("licence") or "-"),
-                      escape(e.get("copyright") or "-"), ks.carried(e), escape(e.get("share_reason") or ""))
+        table.add_row(escape(e["source"]), e["kind"], escape(ks.topic_of(e)), ks.removed_text(e),
+                      escape(e.get("licence") or "-"), escape(e.get("copyright") or "-"), ks.carried(e),
+                      escape(e.get("share_reason") or ""))
     console.print(table)
     console.print(escape(ks.totals_sentence(entries)))
+
+
+@knowledge.command('loose')
+@pass_context
+def knowledge_loose(ctx: FrameworkContext):
+    """The loose knowledge files: knowledge always belongs to a topic or a target, so a loose file is never imported
+    until you sort it into a topic or target folder ('llm-cli knowledge sort')"""
+    ctx.require_framework()
+    cm = _zoo(ctx)
+    found = cm.loose_knowledge()   # the Community Hub's Sort loose knowledge... lists the same
+    if not found:
+        console.print("No loose knowledge file: every knowledge file belongs to a topic or a target.")
+        return
+    table = Table(title=f"Loose knowledge files in {escape(str(cm.knowledge_dir))} (not imported)")
+    for column in ("File", "Size"):
+        table.add_column(column, overflow="fold")
+    for item in found:
+        table.add_row(escape(item.label), f"{item.size} bytes")
+    console.print(table)
+    topics = cm.knowledge_topics()
+    if topics:
+        console.print("Topics and targets in use: " + escape(", ".join(topics)))
+    console.print("Sort each with 'llm-cli knowledge sort FILE --topic NAME' (or --target NAME): it is checked like a "
+                  "knowledge pack, moved into that folder and imported.")
+
+
+@knowledge.command('sort')
+@click.argument('name')
+@click.option('--topic', help='The topic its pages belong to (a new or an existing topic folder)')
+@click.option('--target', help='The target its pages belong to (a target on this computer)')
+@pass_context
+def knowledge_sort(ctx: FrameworkContext, name: str, topic: Optional[str], target: Optional[str]):
+    """Sort a loose knowledge file (NAME as 'llm-cli knowledge loose' lists it) into a topic or target folder: it is
+    checked like a knowledge pack (quarantine, the knowledge validator, the licence files), shown, and after your Yes
+    moved there and imported into the knowledge base (a snapshot first)"""
+    from orchestrator.Core.community_pack import PackError
+    ctx.require_framework()
+    if bool(topic) == bool(target):
+        _zoo_fail(click.UsageError("Knowledge always belongs to a topic or a target: give --topic or --target (not "
+                                   "both)."), 2)
+    cm = _zoo(ctx)
+    try:
+        prepared = cm.prepare_sort(name, topic=topic, target=target)
+    except (PackError, OSError) as e:
+        _zoo_fail(e)
+    click.echo(prepared.summary(), err=True)
+    if not sys.stdin.isatty():   # a loose file nobody reviewed: always confirmed, like a pack of trust local
+        cm.discard(prepared)
+        _zoo_fail(ValueError("No terminal to confirm in: not sorted (a loose file is always confirmed)."))
+    if not click.confirm("Sort and import this file?", default=False, err=True):
+        cm.discard(prepared)
+        sys.exit(1)
+    try:
+        dest = cm.finish_install(prepared)
+    except (PackError, OSError) as e:
+        _zoo_fail(e)
+    console.print(f"[green]Sorted {escape(prepared.loose_label)} into {escape(str(dest))}[/green]")
+    _say_knowledge_import(cm)
 
 
 # ============================================================================
@@ -5826,13 +5887,18 @@ def zoo_install(ctx: FrameworkContext, pack_id: Optional[str], kind: str, file_p
         ctx.framework_manager.target_manager.initialize()
     console.print(f"[green]Installed {prepared.manifest.kind} {escape(prepared.manifest.id)} in "
                   f"{escape(str(dest))}[/green]")
-    if prepared.manifest.kind == "knowledge":  # N13: a snapshot first, and nothing imported without it
-        if getattr(cm, "last_sync_problem", ""):
-            console.print(f"[yellow]Not imported into the knowledge base yet: {escape(cm.last_sync_problem)}"
-                          "[/yellow]")
-        elif getattr(cm, "last_sync_snapshot", None):
-            console.print(f"The knowledge base was saved first as the snapshot {escape(cm.last_sync_snapshot)} "
-                          "('llm-cli knowledge snapshots' lists it).")
+    if prepared.imports_knowledge:   # a knowledge pack, or a target pack's knowledge snapshot
+        _say_knowledge_import(cm)
+
+
+def _say_knowledge_import(cm) -> None:
+    """What the import into the knowledge base did after an install or a sort (N13: a snapshot first, and nothing
+    imported without it; why a pack waits is said, never only logged)."""
+    if getattr(cm, "last_sync_problem", ""):
+        console.print(f"[yellow]Not imported into the knowledge base yet: {escape(cm.last_sync_problem)}[/yellow]")
+    elif getattr(cm, "last_sync_snapshot", None):
+        console.print(f"The knowledge base was saved first as the snapshot {escape(cm.last_sync_snapshot)} "
+                      "('llm-cli knowledge snapshots' lists it).")
 
 
 @zoo.command('verify')
@@ -5872,6 +5938,8 @@ def zoo_verify(ctx: FrameworkContext, pack_file: Optional[Path]):
               'knowledge (the pages keep their owners\' terms)')
 @click.option('--model-license', default='unknown', show_default=True, help='Recipes: licence id of the model')
 @click.option('--id', 'pack_id', help='Knowledge: id of the pack')
+@click.option('--topic', help='Knowledge (this or --target is required): the topic its pages belong to, e.g. llama.cpp')
+@click.option('--target', 'target', help='Knowledge (this or --topic is required): the target its pages belong to')
 @click.option('--to', 'recipients', multiple=True, type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help='Encrypt for private sharing to the age recipients (age1...) in this file (repeatable)')
 @click.option('--passphrase', 'use_passphrase', is_flag=True, help='Encrypt for private sharing with a passphrase')
@@ -5881,10 +5949,11 @@ def zoo_verify(ctx: FrameworkContext, pack_file: Optional[Path]):
 @click.option('--yes', is_flag=True, help='With --pr: submit without asking after the summary')
 @pass_context
 def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: str, license_: Optional[str],
-               model_license: str, pack_id: Optional[str], recipients: Tuple[Path, ...], use_passphrase: bool,
-               out: Optional[Path], open_pr: bool, yes: bool):
+               model_license: str, pack_id: Optional[str], topic: Optional[str], target: Optional[str],
+               recipients: Tuple[Path, ...], use_passphrase: bool, out: Optional[Path], open_pr: bool, yes: bool):
     """Export a target (SOURCE: target id), a recipe (SOURCE: a build folder or its build_info.json) or your
-    knowledge base as a scrubbed pack signed with your key. Shows what the privacy scrub changed."""
+    knowledge base (on a --topic or a --target) as a scrubbed pack signed with your key. Shows what the privacy scrub
+    changed."""
     from pyrage.x25519 import Recipient
     from orchestrator.Core.community_manager import submit_contribution
     from orchestrator.Core.community_pack import PackError
@@ -5892,6 +5961,11 @@ def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: 
         _zoo_fail(click.UsageError(f"Name the {'target id' if kind == 'target' else 'build folder'} to export."), 2)
     if recipients and use_passphrase:
         _zoo_fail(click.UsageError("Use --to or --passphrase, not both: age encrypts to keys or to one passphrase."), 2)
+    if kind == "knowledge" and bool(topic) == bool(target):
+        _zoo_fail(click.UsageError("Knowledge always belongs to a topic or a target: give --topic or --target (not "
+                                   "both)."), 2)
+    if kind != "knowledge" and (topic or target):
+        _zoo_fail(click.UsageError("--topic and --target apply only to a knowledge pack."), 2)
     if kind == "recipe" and Path(source).is_dir():
         source = str(Path(source) / "build_info.json")
     cm = _zoo(ctx)
@@ -5900,7 +5974,7 @@ def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: 
     try:
         result = cm.export_pack(kind, source, author=author, license=license_, pack_id=pack_id,
                                 model_license=model_license, recipients=_public_keys(recipients, Recipient),
-                                passphrase=passphrase, out_dir=out)
+                                passphrase=passphrase, out_dir=out, topic=topic, target=target)
     except (PackError, OSError, ValueError) as e:
         _zoo_fail(e)
     click.echo(result.summary())
