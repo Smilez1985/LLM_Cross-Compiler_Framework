@@ -55,6 +55,7 @@ BUTTONS = (
     ("btn_boards_edit", "boards.btn.edit", "_on_edit", "trusted"),
     ("btn_boards_remove_trust", "boards.btn.remove_trust", "_on_remove_trust", "trusted"),
     ("btn_boards_settings", "boards.btn.settings", "_on_settings", "stored"),
+    ("btn_boards_ssh", "boards.btn.ssh", "_on_ssh", ""),
     ("btn_boards_check", "boards.btn.check", "_on_check", "trusted"),
     ("btn_boards_refresh", "boards.btn.refresh", "reload", ""),
     ("btn_boards_plan", "boards.btn.plan", "_on_plan", "stored"),
@@ -65,8 +66,8 @@ BUTTONS = (
     ("btn_boards_prune", "boards.btn.prune", "_on_prune", "stored"),
     ("btn_boards_prune_board", "boards.btn.prune_board", "_on_prune_board", "stored"),
 )
-ROWS = (("btn_boards_add", "btn_boards_edit", "btn_boards_remove_trust", "btn_boards_settings", "btn_boards_check",
-         "btn_boards_refresh"),
+ROWS = (("btn_boards_add", "btn_boards_edit", "btn_boards_remove_trust", "btn_boards_settings", "btn_boards_ssh",
+         "btn_boards_check", "btn_boards_refresh"),
         ("btn_boards_plan", "btn_boards_status", "btn_boards_build", "btn_boards_deploy", "btn_boards_verify"),
         ("btn_boards_prune", "btn_boards_prune_board"))
 
@@ -648,10 +649,41 @@ class BoardsWindow(QDialog):
                 return person_steps.change_board(state, change, via="gui", audit=audit, actor="gui",
                                                  output_dirs=output_dirs)
 
-            self._start(self._t("boards.edit.changing"), apply, lambda out: self._changed(out, change))
+            self._start(self._t("boards.edit.changing"), apply, lambda out: self._changed(out, change),
+                        failed=lambda e: self._change_failed(e, change.plan.new.host, change.plan.new.port))
 
         self._start(self._t("boards.edit.reading" if read_key else "boards.edit.checking"), plan, planned,
-                    failed=lambda e: self._show_error(e, address=host, port=port) or True)
+                    failed=lambda e: self._change_failed(e, host, port) or self._show_error(e, address=host,
+                                                                                           port=port) or True)
+
+    def _change_text(self, error: BaseException, address: str, port: int) -> Optional[str]:
+        """The person's words for a key or address change that something on this computer stopped, as `deploy devices
+        edit` prints them (cli._board_change_failed): the plain local_problem reason, then known_hosts held by another
+        part of the framework (LockTimeout: the data move was undone, nothing changed), what failed on this computer
+        (an OSError, its file's name) or the error itself. None for a BoardStepError, which keeps the shared step
+        text (_error_text), as every other step's error does."""
+        from orchestrator.runtime.device import reasons
+        from orchestrator.runtime.device.person_steps import BoardStepError
+        from orchestrator.utils.file_lock import LockTimeout
+        if isinstance(error, BoardStepError):
+            return None
+        t = self._t
+        if isinstance(error, LockTimeout):
+            detail = t("boards.edit.err.lock")
+        elif isinstance(error, OSError):
+            detail = t("boards.edit.err.local", detail=reasons.local_detail(error))
+        else:
+            detail = t("boards.edit.err.stopped", reason=str(error) or error.__class__.__name__)
+        return reasons.person_text(reasons.LOCAL_PROBLEM, self.lang, address=address, port=port) + "\n\n" + detail
+
+    def _change_failed(self, error: BaseException, address: str, port: int) -> bool:
+        text = self._change_text(error, address, port)
+        if text is None:
+            return False
+        self._say(text)
+        self._info(text, "warning")
+        self.reload()
+        return True
 
     def _confirm_change(self, change: Any) -> bool:
         """The question before the change: the address, the host key and the device ID now and after the change side
@@ -752,6 +784,128 @@ class BoardsWindow(QDialog):
         self.reload()
 
     # --- deploy settings ---------------------------------------------------------------------------------------
+
+    # --- the framework's own SSH settings (round 25 Q4: llmcf deploy ssh-config show|edit|import) -----------------
+
+    def _on_ssh(self) -> None:
+        """deploy ssh-config: the framework's own OpenSSH settings file (every OpenSSH call reads it instead of
+        ~/.ssh/config), shown whole; one board's block set (its lines checked: refused ones with the reason), or copied
+        from the person's ~/.ssh/config after showing it. A ProxyJump or ProxyCommand needs its own yes after reading
+        what it does; the change needs a yes too ("No" is the default each time). Local files only, on the GUI
+        thread."""
+        from orchestrator.runtime.device import person_steps
+        state = self.state_dir
+        try:
+            path, text = person_steps.ssh_settings(state)
+        except OSError as e:
+            self._ssh_file_failed(e)
+            return
+        from orchestrator.remote import ssh_config
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        entry = self.selected()
+        device = TrustedDevices(state).get(entry["device_id"]) if entry and entry.get("trusted") else None
+        host_now = device.host if device is not None else ""   # the selected board's address as OpenSSH gets it
+        dialog, form = _form_dialog(self, self._t("boards.ssh.title"), self._t("boards.ssh.intro", file=str(path)))
+        dialog.setObjectName("dlg_boards_ssh")
+        shown = QPlainTextEdit(dialog)   # plain text by nature: the file is never read as rich text
+        shown.setObjectName("txt_boards_ssh_file")
+        shown.setReadOnly(True)
+        shown.setPlainText(text)
+        shown.setFixedHeight(120)
+        host = QLineEdit(host_now, dialog)
+        host.setObjectName("txt_boards_ssh_host")
+        lines = QPlainTextEdit(dialog)
+        lines.setObjectName("txt_boards_ssh_lines")
+        lines.setTabChangesFocus(True)
+        lines.setFixedHeight(100)
+
+        def fill() -> None:
+            lines.setPlainText("\n".join(ssh_config.block_lines(text, host.text().strip()) or []))
+
+        fill()
+        host.editingFinished.connect(fill)
+        imported = QPushButton(button_text(self._t("boards.ssh.import")), dialog)
+        imported.setObjectName("btn_boards_ssh_import")
+        imported.setAutoDefault(False)
+        imported.clicked.connect(lambda: self._import_ssh(host.text().strip(), lines))
+        form.addRow(self._t("boards.ssh.file"), shown)
+        form.addRow(self._t("boards.ssh.host"), host)
+        form.addRow(self._t("boards.ssh.lines"), lines)
+        form.addRow("", imported)
+        if not _exec(dialog):
+            dialog.deleteLater()
+            return
+        values = (host.text().strip(), lines.toPlainText().splitlines())
+        dialog.deleteLater()
+        self.set_ssh_block(*values)
+
+    def _import_ssh(self, host: str, lines: Any) -> None:
+        """The person-only import: `host`'s block of ~/.ssh/config, shown, then put into the lines field (nothing is
+        written before the person confirms the change)."""
+        from orchestrator.runtime.device import person_steps
+        try:
+            found = person_steps.import_ssh_block(host)
+        except person_steps.BoardStepError as e:
+            reason = str(getattr(e.error, "strerror", "") or e.error or e)
+            self._info(self._t(f"boards.ssh.err.{e.kind}", host=host, reason=reason), "warning")
+            return
+        lines.setPlainText("\n".join(found))
+        self._info(self._t("boards.ssh.imported", host=host, lines="\n".join(found)))
+
+    def _ssh_file_failed(self, error: BaseException) -> None:
+        from orchestrator.runtime.device import reasons
+        self._info(self._t("boards.ssh.err.file", reason=reasons.local_detail(error)), "warning")
+
+    def set_ssh_block(self, host: str, lines: List[str]) -> bool:
+        """The change of `host`'s block (person_steps.plan_ssh_block and save_ssh_block, the CLI's steps): refused
+        lines are named with their reason and nothing is written; a ProxyJump or ProxyCommand is asked about on its own
+        with what it does; then the change itself is asked with the block now and after. True when it was written."""
+        from orchestrator.runtime.device import person_steps
+        t, state = self._t, self.state_dir
+        try:
+            plan = person_steps.plan_ssh_block(state, host, lines)
+        except person_steps.BoardStepError as e:
+            self._info(t(f"boards.ssh.err.{e.kind}"), "warning")
+            return False
+        except OSError as e:
+            self._ssh_file_failed(e)
+            return False
+        if plan.refused:
+            problems = "\n".join(t(f"boards.ssh.why.{p.kind}", line=self._ssh_line(plan.new, p.number))
+                                 for p in plan.refused)
+            self._info(t("boards.ssh.refused", problems=problems), "warning")
+            return False
+        if plan.unchanged:
+            self._info(t("boards.ssh.unchanged"))
+            return False
+        if plan.knowingly:
+            what = "\n\n".join(t(f"boards.ssh.what.{k.keyword.lower()}", line=k.line) for k in plan.knowingly)
+            if not ask(self, t("boards.ssh.title"), t("boards.ssh.knowingly", lines=what)):
+                self._say(t("boards.ssh.nothing"))
+                return False
+        none = t("boards.ssh.none")
+        if not ask(self, t("boards.ssh.title"), t("boards.ssh.question", host=plan.host,
+                                                   old="; ".join(plan.old) or none, new="; ".join(plan.new) or none)):
+            self._say(t("boards.ssh.nothing"))
+            return False
+        try:
+            person_steps.save_ssh_block(state, plan, via="gui", knowingly=bool(plan.knowingly), audit=self.audit,
+                                        actor="gui")
+        except person_steps.BoardStepError as e:
+            self._info(t(f"boards.ssh.err.{e.kind}") if e.kind == "ssh_stale" else str(e), "warning")
+            return False
+        except OSError as e:
+            self._ssh_file_failed(e)
+            return False
+        self._say(t("boards.ssh.done", host=plan.host))
+        return True
+
+    @staticmethod
+    def _ssh_line(lines: Any, number: int) -> str:
+        try:
+            return str(lines[number - 1])
+        except (IndexError, TypeError):
+            return ""
 
     def _on_settings(self) -> None:
         """device settings: the full current settings, and install, user, port, model and KV cache to change."""

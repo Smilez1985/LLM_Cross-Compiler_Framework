@@ -424,7 +424,9 @@ AI_REACHABLE = ["orchestrator/mcp_server.py", "orchestrator/tools", "orchestrato
 WRITERS = {"record_trusted_device", "trust_host_key", "trust_host", "install_public_key", "save_host_keys",
            "trust_presented_key", "first_use", "pair", "replace_key", "plan_replacement",
            # P6: the move of a board's data to its new device ID after the person's key change (board_move.py)
-           "BoardDataMove", "copy_deploys", "drop_deploys", "copy_board_rows", "drop_board_rows"}
+           "BoardDataMove", "copy_deploys", "drop_deploys", "copy_board_rows", "drop_board_rows",
+           # round 25 Q4: the person's writer of the framework's own SSH settings file (person_steps)
+           "save_ssh_block", "import_ssh_block"}
 
 
 def _python_files():

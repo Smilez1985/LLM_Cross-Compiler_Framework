@@ -181,6 +181,61 @@ TEXTS = {
         "boards.edit.err.key_not_a_key": "The pasted text is not an SSH host key line (for example the line of "
                                          "/etc/ssh/ssh_host_ed25519_key.pub on the board).",
         "boards.edit.err.key_no_paramiko": "Reading a host key needs the 'paramiko' package.",
+        # a change that something on this computer stopped (the CLI prints the same local_problem reason)
+        "boards.edit.err.lock": "The framework's known_hosts is being changed by another part of the framework (another "
+                                "window, the command line or an MCP server); nothing was changed. Try again when it has "
+                                "finished.",
+        "boards.edit.err.local": "What failed on this computer: {detail}. The table shows the board's record now.",
+        "boards.edit.err.stopped": "The change stopped: {reason}. The table shows the board's record now.",
+        # the framework's own SSH settings (round 25 Q4)
+        "boards.btn.ssh": "SSH settings...",
+        "boards.ssh.title": "The framework's SSH settings",
+        "boards.ssh.intro": "Every SSH connection of the framework reads only this file ({file}), never your "
+                            "~/.ssh/config or /etc/ssh/ssh_config. Add what a board needs, for example a ProxyJump "
+                            "for a board behind a jump host. The framework's own trust settings (its known_hosts, its "
+                            "key) always win over this file.",
+        "boards.ssh.file": "The file now:",
+        "boards.ssh.host": "Board (address or host name):",
+        "boards.ssh.lines": "Its settings, one per line (e.g. ProxyJump jump.example):",
+        "boards.ssh.import": "Import from ~/.ssh/config",
+        "boards.ssh.imported": "~/.ssh/config holds for {host}:\n{lines}\n\nThe lines are in the field now; nothing "
+                               "is written before you confirm.",
+        "boards.ssh.refused": "Nothing was written: the framework never uses these lines (its own trust settings stay "
+                              "on OpenSSH's command line).\n\n{problems}",
+        "boards.ssh.why.trust": "{line}: it would change how a board's host key is checked or which machine is "
+                                "reached; the framework's own known_hosts decides that.",
+        "boards.ssh.why.command": "{line}: it would run a command or load code on this computer or the board.",
+        "boards.ssh.why.files": "{line}: it would read another configuration file (such as ~/.ssh/config), which "
+                                "this file keeps out.",
+        "boards.ssh.why.reuse": "{line}: it would reuse or forward the connection; the framework opens its own "
+                                "connection each time.",
+        "boards.ssh.why.session": "{line}: it would change how the framework's commands run on the board.",
+        "boards.ssh.why.syntax": "{line}: this is no 'Option value' line of a board's settings.",
+        "boards.ssh.why.jump_path": "{line}: OpenSSH hands the path of this file to the jump host's ssh without "
+                                    "quotes, and the framework's folder has a space, a '%' or another sign a shell "
+                                    "reads in its path, so a ProxyJump cannot work from there. Write the jump as a "
+                                    "ProxyCommand instead, for example: ProxyCommand ssh -W [%h]:%p jump.example.",
+        "boards.ssh.what.proxyjump": "{line}: connects to the board through another computer (the jump host). "
+                                     "OpenSSH first logs in there with this file's settings for the jump host and its "
+                                     "defaults: the jump host's key is checked against your own ~/.ssh/known_hosts and "
+                                     "your own SSH keys log in there. The board's own host key is still checked "
+                                     "against the framework's known_hosts.",
+        "boards.ssh.what.proxycommand": "{line}: runs this command on this computer for every connection to the "
+                                        "board, and the connection goes through it. The board's own host key is still "
+                                        "checked against the framework's known_hosts.",
+        "boards.ssh.knowingly": "These lines connect through another computer or run a command:\n\n{lines}\n\nAdd "
+                                "them anyway?",
+        "boards.ssh.question": "Write these settings for {host}?\n\nNow: {old}\nAfter the change: {new}",
+        "boards.ssh.none": "no settings",
+        "boards.ssh.done": "Written to the framework's SSH settings: {host}.",
+        "boards.ssh.unchanged": "These are the settings already; nothing was changed.",
+        "boards.ssh.nothing": "Nothing was changed.",
+        "boards.ssh.err.ssh_host": "Enter a host name, an address or a pattern OpenSSH reads (letters, digits, '.', "
+                                   "'-', ':', '_' and the patterns '*', '?', '!').",
+        "boards.ssh.err.ssh_stale": "The file changed meanwhile; nothing was changed. Open SSH settings... again.",
+        "boards.ssh.err.ssh_import_none": "~/.ssh/config has no Host block for {host}.",
+        "boards.ssh.err.ssh_import_unreadable": "~/.ssh/config cannot be read: {reason}",
+        "boards.ssh.err.file": "The framework's SSH settings cannot be read or written: {reason}",
         # deploy settings (device settings)
         "boards.settings.title": "Deploy settings of {label}",
         "boards.settings.current": "Current settings\nInstall: {install}\nSSH user: {user}\nPort: {port}\nModel for "
@@ -512,6 +567,67 @@ TEXTS = {
         "boards.edit.err.key_not_a_key": "Der eingefügte Text ist keine SSH-Host-Schlüsselzeile (zum Beispiel die "
                                          "Zeile aus /etc/ssh/ssh_host_ed25519_key.pub auf dem Board).",
         "boards.edit.err.key_no_paramiko": "Um einen Host-Schlüssel zu lesen, wird das Paket 'paramiko' gebraucht.",
+        "boards.edit.err.lock": "Die known_hosts des Frameworks wird gerade von einem anderen Teil des Frameworks "
+                                "geändert (einem anderen Fenster, der Kommandozeile oder einem MCP-Server); es wurde "
+                                "nichts geändert. Versuche es erneut, wenn das fertig ist.",
+        "boards.edit.err.local": "Was auf diesem Computer fehlschlug: {detail}. Die Tabelle zeigt jetzt den Eintrag "
+                                 "des Boards.",
+        "boards.edit.err.stopped": "Die Änderung wurde abgebrochen: {reason}. Die Tabelle zeigt jetzt den Eintrag des "
+                                   "Boards.",
+        "boards.btn.ssh": "SSH-Einstellungen...",
+        "boards.ssh.title": "SSH-Einstellungen des Frameworks",
+        "boards.ssh.intro": "Jede SSH-Verbindung des Frameworks liest nur diese Datei ({file}), nie deine "
+                            "~/.ssh/config oder /etc/ssh/ssh_config. Trage ein, was ein Board braucht, zum Beispiel "
+                            "einen ProxyJump für ein Board hinter einem Jump-Host. Die eigenen Vertrauens-"
+                            "Einstellungen des Frameworks (seine known_hosts, sein Schlüssel) gelten immer vor dieser "
+                            "Datei.",
+        "boards.ssh.file": "Die Datei jetzt:",
+        "boards.ssh.host": "Board (Adresse oder Hostname):",
+        "boards.ssh.lines": "Seine Einstellungen, eine pro Zeile (z. B. ProxyJump jump.example):",
+        "boards.ssh.import": "Aus ~/.ssh/config übernehmen",
+        "boards.ssh.imported": "~/.ssh/config enthält für {host}:\n{lines}\n\nDie Zeilen stehen jetzt im Feld; "
+                               "geschrieben wird erst, wenn du bestätigst.",
+        "boards.ssh.refused": "Es wurde nichts geschrieben: das Framework verwendet diese Zeilen nie (seine eigenen "
+                              "Vertrauens-Einstellungen bleiben auf der Kommandozeile von OpenSSH).\n\n{problems}",
+        "boards.ssh.why.trust": "{line}: würde ändern, wie der Host-Schlüssel eines Boards geprüft oder welcher "
+                                "Rechner erreicht wird; das entscheidet die eigene known_hosts des Frameworks.",
+        "boards.ssh.why.command": "{line}: würde einen Befehl ausführen oder Code laden, auf diesem Computer oder dem "
+                                  "Board.",
+        "boards.ssh.why.files": "{line}: würde eine andere Konfigurationsdatei lesen (etwa ~/.ssh/config), die diese "
+                                "Datei gerade fernhält.",
+        "boards.ssh.why.reuse": "{line}: würde die Verbindung wiederverwenden oder weiterleiten; das Framework öffnet "
+                                "jedes Mal seine eigene Verbindung.",
+        "boards.ssh.why.session": "{line}: würde ändern, wie die Befehle des Frameworks auf dem Board laufen.",
+        "boards.ssh.why.syntax": "{line}: das ist keine Zeile 'Option Wert' für die Einstellungen eines Boards.",
+        "boards.ssh.why.jump_path": "{line}: OpenSSH gibt den Pfad dieser Datei ohne Anführungszeichen an das ssh des "
+                                    "Jump-Hosts weiter, und der Ordner des Frameworks hat ein Leerzeichen, ein '%' "
+                                    "oder ein anderes Zeichen in seinem Pfad, das eine Shell liest; ein ProxyJump kann "
+                                    "von dort nicht funktionieren. Schreibe den Sprung stattdessen als ProxyCommand, "
+                                    "zum Beispiel: ProxyCommand ssh -W [%h]:%p jump.example.",
+        "boards.ssh.what.proxyjump": "{line}: verbindet über einen anderen Rechner (den Jump-Host) mit dem Board. "
+                                     "OpenSSH meldet sich zuerst dort an, mit den Einstellungen dieser Datei für den "
+                                     "Jump-Host und seinen Standardwerten: der Schlüssel des Jump-Hosts wird gegen "
+                                     "deine eigene ~/.ssh/known_hosts geprüft, und deine eigenen SSH-Schlüssel melden "
+                                     "sich dort an. Der Host-Schlüssel des Boards selbst wird weiter gegen die "
+                                     "known_hosts des Frameworks geprüft.",
+        "boards.ssh.what.proxycommand": "{line}: führt diesen Befehl bei jeder Verbindung zum Board auf diesem "
+                                        "Computer aus, und die Verbindung läuft durch ihn. Der Host-Schlüssel des "
+                                        "Boards selbst wird weiter gegen die known_hosts des Frameworks geprüft.",
+        "boards.ssh.knowingly": "Diese Zeilen verbinden über einen anderen Rechner oder führen einen Befehl "
+                                "aus:\n\n{lines}\n\nTrotzdem hinzufügen?",
+        "boards.ssh.question": "Diese Einstellungen für {host} schreiben?\n\nJetzt: {old}\nNach der Änderung: {new}",
+        "boards.ssh.none": "keine Einstellungen",
+        "boards.ssh.done": "In die SSH-Einstellungen des Frameworks geschrieben: {host}.",
+        "boards.ssh.unchanged": "Das sind schon die Einstellungen; es wurde nichts geändert.",
+        "boards.ssh.nothing": "Es wurde nichts geändert.",
+        "boards.ssh.err.ssh_host": "Gib einen Hostnamen, eine Adresse oder ein Muster ein, das OpenSSH liest "
+                                   "(Buchstaben, Ziffern, '.', '-', ':', '_' und die Muster '*', '?', '!').",
+        "boards.ssh.err.ssh_stale": "Die Datei hat sich inzwischen geändert; es wurde nichts geändert. Öffne "
+                                    "SSH-Einstellungen... erneut.",
+        "boards.ssh.err.ssh_import_none": "~/.ssh/config hat keinen Host-Block für {host}.",
+        "boards.ssh.err.ssh_import_unreadable": "~/.ssh/config kann nicht gelesen werden: {reason}",
+        "boards.ssh.err.file": "Die SSH-Einstellungen des Frameworks können nicht gelesen oder geschrieben werden: "
+                               "{reason}",
         "boards.settings.title": "Deploy-Einstellungen von {label}",
         "boards.settings.current": "Aktuelle Einstellungen\nInstallation: {install}\nSSH-Benutzer: {user}\nPort: "
                                    "{port}\nModell für die systemd-Unit: {model}\nKV-Cache: {kv}",

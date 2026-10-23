@@ -5164,6 +5164,108 @@ def _board_change_failed(ctx: FrameworkContext, host: str, port: int, error: Bas
     sys.exit(1)
 
 
+# --- the framework's own OpenSSH settings (DECISIONS round 25 Q4) ---------------------------------------------------
+
+@deploy.group('ssh-config', invoke_without_command=True)
+@click.pass_context
+def deploy_ssh_config(click_ctx):
+    """The framework's own OpenSSH settings: every OpenSSH call reads this file instead of ~/.ssh/config (show, edit or
+    import a board's settings, such as a ProxyJump)"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(deploy_ssh_config_show)
+
+
+@deploy_ssh_config.command('show')
+@pass_context
+def deploy_ssh_config_show(ctx: FrameworkContext):
+    """Show the framework's own OpenSSH settings file and what it holds"""
+    from orchestrator.runtime.device import person_steps
+    try:
+        path, text = person_steps.ssh_settings(_state_dir(ctx))
+    except OSError as e:
+        from orchestrator.runtime.device import reasons
+        console.print(f"[red]The framework's SSH settings cannot be read: {escape(reasons.local_detail(e))}.[/red]")
+        sys.exit(1)
+    console.print(f"The framework's own SSH settings ({escape(str(path))}); OpenSSH reads neither ~/.ssh/config nor "
+                  "/etc/ssh/ssh_config:")
+    console.print(escape(text.rstrip("\n")) if text.strip() else "(empty)")
+
+
+def _ssh_block_change(ctx: FrameworkContext, host: str, lines) -> None:
+    """The person's change of `host`'s block (deploy ssh-config edit and import): the block now and after, every
+    refused line with its reason (nothing written), what a ProxyJump or ProxyCommand does and its own question, then
+    the question to write it ("No" is the default each time)."""
+    from orchestrator.runtime.device import person_steps
+    state_dir = _state_dir(ctx)
+    try:
+        plan = person_steps.plan_ssh_block(state_dir, host, lines)
+    except person_steps.BoardStepError as e:
+        raise click.UsageError(str(e))
+    except OSError as e:
+        from orchestrator.runtime.device import reasons
+        console.print(f"[red]The framework's SSH settings cannot be read: {escape(reasons.local_detail(e))}.[/red]")
+        sys.exit(1)
+    for line in person_steps.ssh_block_lines(plan):
+        console.print(escape(line))
+    if plan.refused:
+        console.print("[red]Nothing was changed: the framework never uses these lines (its own trust settings stay "
+                      "on OpenSSH's command line).[/red]")
+        sys.exit(1)
+    if plan.unchanged:
+        console.print("These are the settings already; nothing was changed.")
+        return
+    if not _interactive():
+        console.print("[red]'deploy ssh-config' needs a terminal: you read and confirm the settings yourself.[/red]")
+        sys.exit(1)
+    if plan.knowingly and not click.confirm(person_steps.SSH_KNOWINGLY_QUESTION, default=False):
+        console.print("Nothing was changed.")
+        return
+    if not click.confirm(person_steps.SSH_BLOCK_QUESTION, default=False):
+        console.print("Nothing was changed.")
+        return
+    try:
+        path = person_steps.save_ssh_block(state_dir, plan, via="cli", knowingly=bool(plan.knowingly),
+                                           audit=lambda: _device_audit(ctx, state_dir), actor="cli")
+    except person_steps.BoardStepError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    except OSError as e:
+        from orchestrator.runtime.device import reasons
+        console.print(f"[red]The framework's SSH settings could not be written: "
+                      f"{escape(reasons.local_detail(e))}; nothing was changed.[/red]")
+        sys.exit(1)
+    console.print(f"Written to the framework's SSH settings ({escape(str(path))}).")
+
+
+@deploy_ssh_config.command('edit')
+@click.argument('host')
+@click.option('--line', 'lines', multiple=True,
+              help="An option line of HOST's block, e.g. 'ProxyJump jump.example' (repeat it for each line; without "
+                   "any the block goes)")
+@pass_context
+def deploy_ssh_config_edit(ctx: FrameworkContext, host: str, lines):
+    """Set the settings of one board (HOST: its address or host name as the framework names it) in the framework's own
+    SSH settings file. Lines that would change how a host key is trusted or run a command are refused with the
+    reason; a ProxyJump or ProxyCommand is added only after you read what it does and say yes ("No" is the default)."""
+    _ssh_block_change(ctx, host, lines)
+
+
+@deploy_ssh_config.command('import')
+@click.argument('host')
+@pass_context
+def deploy_ssh_config_import(ctx: FrameworkContext, host: str):
+    """Copy HOST's block from your own ~/.ssh/config into the framework's SSH settings, after showing it (the same
+    checks and questions as edit; ~/.ssh/config itself is only read)"""
+    from orchestrator.runtime.device import person_steps
+    try:
+        lines = person_steps.import_ssh_block(host)
+    except person_steps.BoardStepError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"~/.ssh/config holds for {escape(host)}: " + escape("; ".join(lines)))
+    _ssh_block_change(ctx, host, lines)
+
+
 # ============================================================================
 # SCAN COMMAND
 # ============================================================================
