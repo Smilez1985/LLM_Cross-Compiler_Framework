@@ -305,7 +305,8 @@ class TestDeploymentTab:
         package = tmp_path / "deploy_smol.zip"
         package.write_bytes(b"PK")
         calls = []
-        manager = SimpleNamespace(create_deployment_package=lambda **kw: package,
+        # the worker packages through make_package (manager.create_package), as `llmcf deploy package` does
+        manager = SimpleNamespace(create_package=lambda *a, **kw: package,
                                   deploy_package=lambda *a, **kw: calls.append((a, kw)) or DeployResult(
                                       True, exit_status=0, device_state="ok", resumed=2, waited_s=41.0))
         monkeypatch.setattr(window_framework, "get_component",
@@ -361,9 +362,10 @@ class TestDeploymentTab:
     def test_a_failed_package_names_its_reason_and_the_next_step(self, window_framework, monkeypatch, tmp_path):
         from orchestrator.Core.deployment_manager import DeployError
         from orchestrator.gui.deployment_window import DeploymentWorker
-        manager = SimpleNamespace(create_deployment_package=lambda **kw: None,
-                                  last_package_error=DeployError("The image is not pinned.",
-                                                                 next="Package without Docker images."))
+        def refuse(*a, **kw):   # the reason comes back with the call (person_steps.deploy_build), no shared state
+            raise DeployError("The image is not pinned.", next="Package without Docker images.")
+
+        manager = SimpleNamespace(create_package=refuse)
         monkeypatch.setattr(window_framework, "get_component", lambda name: manager)
         worker = DeploymentWorker(window_framework, tmp_path, "Rockchip", {}, "myboard.local", "radxa", None)
         done = []

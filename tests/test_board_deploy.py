@@ -672,7 +672,7 @@ class TestOldSidecar:
         package.write_bytes(b"zip")
 
         class Deployment:
-            def create_deployment_package(self, **kw):
+            def create_package(self, *a, **kw):   # make_package's call
                 return package
 
             def deploy_package(self, *a, **kw):
