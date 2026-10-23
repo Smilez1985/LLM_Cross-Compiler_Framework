@@ -53,7 +53,11 @@ MAX_GPUS = 16
 BOOLS = ("ON", "OFF", "UNKNOWN")
 MIB = 1024 * 1024
 GIB = 1024 * MIB
-SECTIONS = ("cpu", "memory", "soc", "npu", "gpu", "toolchain")
+# "runtimes" (with "gpu"): the vendor runtime keys of probe 3.1.0 (OpenCL platforms through clinfo, the Vulkan loader's
+# version, CUDA, TensorRT, OpenVINO, the ROCm gfx targets, the Intel GPU node). The full probe reads them; the quick
+# probe of orchestrator/runtime/hardware.py detect_hardware() (sections memory and gpu: free RAM and the GPUs at every
+# start of the local runtime) leaves them out, so it runs no tool it did not run before.
+SECTIONS = ("cpu", "memory", "soc", "npu", "gpu", "runtimes", "toolchain")
 
 # --- key table: type, rule, required, only_arch, only_os (a copy of the schema's validation) -----------------------
 
@@ -808,8 +812,8 @@ HAILO_MAX_IDENTIFY = 16
 def parse_hailo_version(output, returncode):
     """(HAILORT_VERSION or None, warning code or None) from `hailortcli -v` (stdout and stderr together). The CLI
     refuses to run when libhailort differs and says so on stderr; a non-zero exit without the version line counts as
-    that mismatch as well."""
-    text = output or ""
+    that mismatch as well. NUL bytes are removed first, as a shell drops them (hardware_probe.sh)."""
+    text = (output or "").replace("\0", "")
     match = re.search(r"HailoRT-CLI version ([0-9]+\.[0-9]+\.[0-9]+)", text)
     if HAILO_MISMATCH.search(text):
         return None, "version_mismatch"
@@ -822,9 +826,10 @@ def parse_hailo_version(output, returncode):
 
 def parse_hailo_scan(text):
     """The device ids of `hailortcli scan` ("[-] Device: <id>"; "Hailo devices not found": []), each once, only of
-    the known forms; None when the output is neither."""
-    found = re.findall(r"^\s*\[-\]\s*Device:\s*(\S+)\s*$", text or "", re.MULTILINE)
-    if not found and "Hailo devices not found" not in (text or ""):
+    the known forms; None when the output is neither. NUL bytes are removed first, as a shell drops them."""
+    text = (text or "").replace("\0", "")
+    found = re.findall(r"^\s*\[-\]\s*Device:\s*(\S+)\s*$", text, re.MULTILINE)
+    if not found and "Hailo devices not found" not in text:
         return None
     ids = []
     for device in found:
@@ -1968,8 +1973,9 @@ class Probe:
             if nvidia and smi:
                 self.put("NVIDIA_DRIVER_CUDA_MAX", nvidia_cuda_max(run, smi), warn_invalid=False)
             vk_ran, vk, vk_version = run_vulkaninfo(run)
-            self.put("VULKAN_INSTANCE_VERSION", vk_version or self._vulkan_loader_version(), warn_invalid=False)
-            self.put("OPENCL_PLATFORMS", ",".join(probe_opencl(run)) or None, warn_invalid=False)
+            if "runtimes" in self.sections:
+                self.put("VULKAN_INSTANCE_VERSION", vk_version or self._vulkan_loader_version(), warn_invalid=False)
+                self.put("OPENCL_PLATFORMS", ",".join(probe_opencl(run)) or None, warn_invalid=False)
             others = [g for g in vk if g["VENDOR"] != "nvidia" or not nvidia]
             if os_name == "windows":
                 adapters = [g for g in probe_windows_adapters(run) if g["VENDOR"] != "nvidia" or not nvidia]
@@ -2009,7 +2015,8 @@ class Probe:
             self.values["HIP_RUNTIME"] = "ON" if hip else "OFF"
             rocm = first_number(self.read("/opt/rocm/.info/version", 4096) or "", 4)
             self.put("ROCM_VERSION", rocm, warn_invalid=False)
-            self._vendor_runtimes()
+            if "runtimes" in self.sections:
+                self._vendor_runtimes()
         self.values["METAL"] = "ON" if os_name == "macos" and self._metal else "OFF"
 
     def _vendor_runtimes(self):

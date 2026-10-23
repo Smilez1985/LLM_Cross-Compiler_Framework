@@ -437,7 +437,8 @@ $hailoClock = [Diagnostics.Stopwatch]::StartNew()
 $result = Invoke-Tool 'hailortcli' @('-v')
 if ($null -ne $result) {
     $hailoInstalled = $true
-    $text = [string]$result.Out + "`n" + [string]$result.Err
+    # NUL bytes removed from every hailortcli output, as a shell drops them (hardware_probe.sh, .py)
+    $text = ([string]$result.Out + "`n" + [string]$result.Err).Replace([string][char]0, '')
     $versionText = $null
     if ($text -cmatch 'HailoRT-CLI version ([0-9]+\.[0-9]+\.[0-9]+)') { $versionText = $Matches[1] }
     if ($text -cmatch 'libhailort version \(([0-9.]+)\) does not match HailoRT-CLI version \(([0-9.]+)\)') { $hailoWarn = 'version_mismatch' }
@@ -447,8 +448,9 @@ if ($null -ne $result) {
     if ($hailoWarn -ne 'version_mismatch') {
         $result = Invoke-Tool 'hailortcli' @('scan')
         if ($null -ne $result -and $result.Code -eq 0) {
-            $found = @([regex]::Matches([string]$result.Out, '(?m)^\s*\[-\]\s*Device:\s*(\S+)\s*$') | ForEach-Object { $_.Groups[1].Value })
-            if ($found.Count -gt 0 -or ([string]$result.Out).Contains('Hailo devices not found')) {
+            $scanOut = ([string]$result.Out).Replace([string][char]0, '')
+            $found = @([regex]::Matches($scanOut, '(?m)^\s*\[-\]\s*Device:\s*(\S+)\s*$') | ForEach-Object { $_.Groups[1].Value })
+            if ($found.Count -gt 0 -or $scanOut.Contains('Hailo devices not found')) {
                 $hailoIds = New-Object System.Collections.Generic.List[string]
                 foreach ($d in $found) { if ($d -cmatch $HailoIdPattern -and -not $hailoIds.Contains($d)) { $hailoIds.Add($d) } }
             }

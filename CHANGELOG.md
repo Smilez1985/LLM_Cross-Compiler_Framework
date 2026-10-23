@@ -22,7 +22,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   code `version_mismatch`; and for the targets prepared for others (O-PREP) `JETSON_L4T_VERSION`,
   `JETSON_JETPACK_VERSION`, `CUDA_TOOLKIT_VERSION`, `TENSORRT_VERSION`, `OPENVINO_VERSION`, `INTEL_GPU_DEVICE`,
   `INTEL_GPU_DRIVER`, `INTEL_NPU_DEVICE` and `ROCM_GFX_TARGETS`, each read only when it is there; nothing is installed
-  or run with sudo. `HardwareProfile.hailo()` returns the Hailo facts as one typed value (`HailoFacts`); `llm-cli
+  or run with sudo. The quick probe of free RAM and the GPUs at every start of the local runtime and for a build's
+  estimate runs no new tool (clinfo and the vendor runtime files are read by the full probe only), and NUL bytes and
+  CRLF line ends give the same values in all three probes. `HardwareProfile.hailo()` returns the Hailo facts as one typed value (`HailoFacts`); `llm-cli
   scan` (also `--device` and `--import`) prints them in a "Hailo:" line, also next to a Rockchip NPU; target matching,
   the board recommendation, the documentation links and deploy read the same value once the Hailo targets of
   HAILO_PLAN section 3 exist. The `.py` and the `.sh` run on the fixture
