@@ -703,5 +703,9 @@ def test_the_cli_shows_the_reason_and_this_computer_s_words(tmp_path, monkeypatc
 def test_the_gui_shows_the_reason_of_this_computer():
     pytest.importorskip("PySide6")
     from orchestrator.gui import host_key
-    assert host_key.unreachable_text(HOST, PORT, LOCAL_ERRORS[0], "de") == \
-        reasons.person_text(reasons.LOCAL_PROBLEM, "de", address=HOST, port=PORT)
+    # the person's text of the local problem, and since c2-remote-callers (on purpose: the GUI names the failing
+    # file, as the CLI prints the error) what failed on this computer, by the file's name only
+    text = host_key.unreachable_text(HOST, PORT, LOCAL_ERRORS[0], "de")
+    assert text.startswith(reasons.person_text(reasons.LOCAL_PROBLEM, "de", address=HOST, port=PORT))
+    assert text == reasons.person_text(reasons.LOCAL_PROBLEM, "de", address=HOST, port=PORT, error=LOCAL_ERRORS[0])
+    assert reasons.local_detail(LOCAL_ERRORS[0]) in text

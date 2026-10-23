@@ -6,9 +6,9 @@ Everything runs as the device user the deploy settings name, over an authenticat
 caller has checked (orchestrator.utils.ssh_trust.connect; this module never trusts a key or asks for a password).
 Every command is one fixed `sh -c '...'` (so the device user's login shell does not matter) built only from values
 checked here: the device's home folder, user ID and architecture are read from the device and validated before they
-are used, and paths are quoted. Nothing is written to /tmp (which may be mounted noexec): the tarball travels on the
-command's stdin into a private staging folder inside the install folder, is checked there against its sha256, then
-every file against SHA256SUMS, and only then moved into place:
+are used, and paths are quoted. Nothing is written to /tmp (which may be mounted noexec): the tarball goes over SFTP
+into a private staging folder inside the install folder (on a board without SFTP on a command's stdin), is checked
+there against its sha256, then every file against SHA256SUMS, and only then moved into place:
 
     ~/.local/share/llm-framework/llama.cpp/<build id[:16]>/   bin/, lib/, llama-server.sh, build.json, ...
     ~/.local/share/llm-framework/llama.cpp/current            -> <build id[:16]>
@@ -17,17 +17,25 @@ every file against SHA256SUMS, and only then moved into place:
 The new build's programs are checked in their own folder before anything starts them (design 3.8 and P6: a failed
 build is never activated): as the unprivileged user with a cleared environment, --version (the pinned build and
 commit), --list-devices, the server's refusal of --tools, and a short llama-bench run when a model on the device is
-given. A model that is not a catalog model is only benchmarked after the user's consent, which the caller writes to
-the audit log (decision D23). Only a build that passes becomes `current`; a build that fails (a SIGILL from a wrong
-CPU baseline, a C library its programs do not run with) is removed again, and the previous build stays active.
+given (it runs on the board on its own and is followed to its end). A model that is not a catalog model is only
+benchmarked after the user's consent, which the caller writes to the audit log (decision D23). Only a build that
+passes becomes `current`; a build that fails (a SIGILL from a wrong CPU baseline, a C library its programs do not run
+with) is removed again, and the previous build stays active.
 After the switch every older build stays on the device: the framework removes none by itself (round 5 f). The
 result lists them (older_builds: name, size, whether a running program uses one), and only the person removes them,
 at a terminal with `llm-cli device runtime prune DEVICE --on-device`: the full list first (full path, name, size and
 what each is), nothing ticked, "No" by default (board_cleanup_plan, remove_older_builds). With the deploy setting
 "systemd" the unit is then written and enabled with `sudo -n`, which fails instead of asking; whether sudo may be
 used was decided in the deploy settings, before the deployment.
+
+Every step goes through the one board session (RemoteShell over orchestrator/remote/session.py RemoteSession): when
+the network of a Wi-Fi board drops, the session waits for the board (N5), the upload continues at what arrived, the
+checks (they only read) run once more, the benchmark on the board is followed again, and a step that must not run
+twice ends with a RemoteError once the board answers again, after which the staging folder is still removed.
 """
 
+import os
+import posixpath
 import re
 import secrets
 import shlex
@@ -36,9 +44,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from orchestrator.remote.errors import RemoteFailure
 from orchestrator.remote.text import one_line as _tail   # a board's answer as one plain line
 from orchestrator.remote.transport import COMMAND_TIMEOUT, HASH_TIMEOUT, MAX_OUTPUT  # the one board session's limits
-from orchestrator.remote.transport import ParamikoTransport, Result, TooMuchOutput, sh_command
+from orchestrator.remote.transport import ParamikoTransport  # noqa: F401 - its old import path here
+from orchestrator.remote.transport import Result, TooMuchOutput, sh_command
 from orchestrator.remote.transport import read_limited as _read_limited  # noqa: F401 - its old name here
 from orchestrator.runtime.build.verify import Check, VerifyReport, parse_bench_json, parse_devices, parse_version
 from orchestrator.runtime.device.launcher import (DEVICE_FOLDER_MAX, DEVICE_PATH_MAX, KEY_REL, START_SCRIPT,
@@ -52,6 +62,8 @@ UPLOAD_TIMEOUT = 1800
 VERSION_TIMEOUT = 60
 DEVICES_TIMEOUT = 180
 BENCH_TIMEOUT = 900
+BENCH_POLL = 2.0           # seconds between two looks whether the benchmark on the board has finished
+BENCH_PREFIX = ".bench"    # its private folder in the install folder: <root>/.bench.XXXXXXXX (no build folder name)
 REQUIRED_TOOLS = ("tar", "gzip", "sha256sum", "od", "dd", "tr", "readlink", "awk", "mktemp")
 MACHINES = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
 
@@ -66,33 +78,119 @@ _RE_BUILD_LINE = re.compile(r"^build=([0-9a-f]{16}) (\d{1,15}) ([01])$", re.ASCI
 _PROGRAMS = ("llama-server", "llama-bench")
 
 
-class RemoteError(RuntimeError):
-    """A deployment step on the device failed; the message says which and what to do."""
+class RemoteError(RemoteFailure):
+    """A deployment step on the device failed; the message says which and what to do. `kind` is the board session's
+    case when the session ended the step (dropped: the network dropped during a step that is not repeated; wait: the
+    board did not answer again; stopped: cancelled), `reason` the SSH reason code when the board could not be reached
+    or logged in to again."""
 
 
 class RemoteShell:
-    """Runs fixed shell scripts on a device: `client` is an authenticated paramiko.SSHClient (or a stand-in with
-    exec_command). Every script is wrapped into one `sh -c '...'` argument; the command, its time limit and its output
-    cap are the one board session's (orchestrator/remote/transport.py ParamikoTransport.run), and this shell says in
-    a RemoteError what went wrong."""
+    """Runs fixed shell scripts on a device through the one board session (orchestrator/remote/session.py): `target`
+    is a RemoteSession, or an authenticated paramiko.SSHClient (or a stand-in with exec_command), which runs in a
+    session that cannot log in again (RemoteSession.attached: a network drop ends the step as before). Every script
+    is wrapped into one `sh -c '...'` argument; the command, its time limit and its output cap are the session's
+    (orchestrator/remote/transport.py ParamikoTransport.run), and this shell says in a RemoteError what went wrong.
 
-    def __init__(self, client: Any):
-        self.client = client
+    With a session that can log in again, a network drop (a Wi-Fi board, N5) makes the session wait for the board: a
+    command that may run twice (`again`: it only reads, or does the same again) runs once more; any other ends with a
+    RemoteError once the board answers again (whether it ran there is unknown), so the caller can still clean up. When
+    the board does not answer again, every later command of this shell raises that same RemoteError at once (no second
+    wait). upload() sends a file over SFTP and resumes after a drop (the session's upload); run_detached() starts a
+    program on the board on its own and follows it (a drop does not stop it)."""
+
+    def __init__(self, target: Any):
+        from orchestrator.remote.session import RemoteSession
+        self.session = target if isinstance(target, RemoteSession) else RemoteSession.attached(target)
+        self.lost: Optional[RemoteError] = None   # the board did not answer again: every later step ends with it
+
+    @property
+    def client(self) -> Any:
+        return self.session.client
 
     @staticmethod
     def command(script: str) -> str:
         return sh_command(script)
 
-    def run(self, script: str, *, stdin: Optional[Iterable[bytes]] = None, timeout: float = COMMAND_TIMEOUT,
-            limit: int = MAX_OUTPUT) -> Result:
+    def _call(self, action: Callable[[], Any], timeout: float) -> Any:
+        """`action()` on the session, its failures as RemoteError (the framework's sentences)."""
+        from orchestrator.remote.session import SessionFailure, Stopped
+        if self.lost is not None:
+            raise RemoteError(str(self.lost), self.lost.kind, self.lost.reason)
+        if self.session.transport is None:   # closed by its owner (a Cancel) or never opened
+            raise RemoteError("the connection to the device is closed", "stopped" if self.session.ended else "")
         try:
-            return ParamikoTransport(self.client).run(script, stdin=stdin, timeout=timeout, limit=limit)
+            return action()
         except TooMuchOutput as e:
             raise RemoteError(str(e)) from None
+        except Stopped:
+            raise RemoteError("the step was cancelled", "stopped") from None
+        except SessionFailure as e:
+            error = RemoteError(str(e), e.kind, e.reason, e.error)
+            if e.kind == "wait" or self.session.transport is None:
+                self.lost = error
+            raise error from None
         except (socket.timeout, TimeoutError):
             raise RemoteError(f"no answer from the device within {timeout:.0f} s") from None
         except (OSError, EOFError) as e:
             raise RemoteError(f"the SSH connection failed: {e}") from None
+
+    def run(self, script: str, *, stdin: Optional[Iterable[bytes]] = None, timeout: float = COMMAND_TIMEOUT,
+            limit: int = MAX_OUTPUT, again: bool = False, step: str = "command") -> Result:
+        """One `sh -c` on the device. `again`: the command may run twice, so after a network drop it runs once more
+        (its `stdin` must then be a list, sent again); without it the step ends with a RemoteError once the board
+        answers again."""
+        return self._call(lambda: self.session.run_resumable(script, again=again, step=step, timeout=timeout,
+                                                             limit=limit, stdin=stdin), timeout)
+
+    def private_dir(self, parent: str, prefix: str) -> str:
+        """A private folder on the device (RemoteSession.private_dir: mktemp, its answer checked strictly)."""
+        return self._call(lambda: self.session.resumable(lambda: self.session.private_dir(parent, prefix),
+                                                         again=False), COMMAND_TIMEOUT)
+
+    def upload(self, path: Path, remote_path: str, sha256: str) -> None:
+        """Puts the file at `path` (its sha256 `sha256`) on the device as `remote_path`, in a folder that exists
+        there: over SFTP as <remote_path>.part, checked with sha256sum on the device and only then renamed; after a
+        network drop it waits for the board and continues at what arrived (RemoteSession.upload). Every copy it starts
+        on the board is made empty under umask 077 first (`private`), so it is the user's only from the start, as the
+        old `umask 077 && cat >` made it (an SFTP server creates a file with its own umask; writing into the empty file
+        keeps its mode), also the copy sent again after a damaged arrival. A board without SFTP (or a stand-in without
+        it) gets the file on a command's stdin under umask 077 as before (no resume)."""
+        if not self._has_sftp(posixpath.dirname(remote_path)):
+            res = self.run(f"umask 077 && cat > {_q(remote_path)}", stdin=_chunks(Path(path)),
+                           timeout=UPLOAD_TIMEOUT)
+            if res.status != 0:
+                raise RemoteError(f"the upload failed (exit {res.status}): {_tail(res.err or res.out)}")
+            return
+        with open(path, "rb") as fh:
+            size = os.fstat(fh.fileno()).st_size
+            self._call(lambda: self.session.upload(fh, remote_path, size, sha256, private=True), UPLOAD_TIMEOUT)
+
+    def _has_sftp(self, folder: str) -> bool:
+        """Whether the device answers over SFTP: one stat of `folder`, tried once. A board without an SFTP server
+        (Dropbear without sftp-server) or a stand-in without SFTP gets the file on stdin. A network drop at this very
+        moment (the connection stood before the stat and then dropped) is no answer about SFTP: the upload goes over
+        SFTP, whose steps wait for the board and resume (RemoteSession.dropped). An attached session never waits, and
+        a stand-in that cannot tell whether its connection stands gets stdin as before."""
+        if self.lost is not None or self.session.transport is None:
+            return True   # the upload's own step says why it cannot be done
+        stood = self.session.alive()
+        try:
+            self.session.transport.stat_size(folder)
+            return True
+        except Exception as e:  # noqa: BLE001 - no SFTP subsystem on the device, a stand-in without SFTP, a drop
+            return stood and self.session.dropped(e)
+
+    def run_detached(self, folder: str, job: str, *, timeout: float, poll: float, step: str) -> int:
+        """Starts `job` once in the private `folder` on the device on its own and follows it to its exit status, also
+        after a network drop (RemoteSession.run_detached): a drop never stops it, and it is never started twice."""
+        try:
+            return self._call(lambda: self.session.run_detached(folder, job, timeout=timeout, poll=poll, step=step),
+                              timeout)
+        except RemoteError as e:
+            if e.kind == "job_timeout":   # the sentence of a command that stayed silent this long, as before
+                raise RemoteError(f"no answer from the device within {timeout:.0f} s", e.kind) from None
+            raise
 
 
 def _q(value: str) -> str:
@@ -134,7 +232,7 @@ SUDO_SCRIPT = "sudo -n true >/dev/null 2>&1 && echo sudo=yes || echo sudo=no"
 
 def read_facts(shell: RemoteShell, *, want_sudo: bool = False) -> DeviceFacts:
     """User ID, home folder, architecture, init system and missing tools of the device, each value validated."""
-    res = shell.run(FACTS_SCRIPT + ("\n" + SUDO_SCRIPT if want_sudo else ""))
+    res = shell.run(FACTS_SCRIPT + ("\n" + SUDO_SCRIPT if want_sudo else ""), again=True)
     if res.status != 0:
         raise RemoteError(f"the device could not be inspected (exit {res.status}): {_tail(res.err or res.out)}")
     values: Dict[str, List[str]] = {}
@@ -246,10 +344,9 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
                           f"{_tail(res.err or res.out)}")
     try:
         say(f"uploading {Path(tarball).name} ...")
-        res = shell.run(f"umask 077 && cat > {_q(staging + '/runtime.tar.gz')}", stdin=_chunks(Path(tarball)),
-                        timeout=UPLOAD_TIMEOUT)
-        if res.status != 0:
-            raise RemoteError(f"the upload failed (exit {res.status}): {_tail(res.err or res.out)}")
+        # over SFTP, checked on the board and resumed after a network drop (the session's upload); on a board
+        # without SFTP on the command's stdin as before
+        shell.upload(Path(tarball), staging + "/runtime.tar.gz", tarball_sha256)
         say("checking the tarball and every file on the device ...")
         sums_check = "\n".join([
             "set -eu",
@@ -288,7 +385,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         active = active if _RE_ID16.fullmatch(active) else ""
         existed = "existed=1" in res.out.splitlines()
     finally:
-        shell.run(f"rm -rf {_q(staging)}")
+        shell.run(f"rm -rf {_q(staging)}", again=True)
     folder = f"{root}/{id16}"
 
     say("creating the API key on the device (umask 077) ...")
@@ -298,7 +395,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         f'mode=$(ls -ln {_q(facts.key)} | cut -c1-10)',
         '[ "$mode" = "-rw-------" ] || { echo "the key file is readable by others ($mode)" >&2; exit 3; }',
     ])
-    res = shell.run(key_check)
+    res = shell.run(key_check, again=True)   # keygen makes the key only when it is missing
     if res.status != 0:
         _discard(shell, root, id16, active, existed)
         raise RemoteError(f"the key could not be created on the device (exit {res.status}): "
@@ -324,7 +421,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
                                 + "; the new build failed its checks and was removed from the device")
         return result
 
-    res = shell.run("\n".join(["set -eu", f"cd {_q(root)}", f"ln -sfn {_q(id16)} current"]))
+    res = shell.run("\n".join(["set -eu", f"cd {_q(root)}", f"ln -sfn {_q(id16)} current"]), again=True)
     if res.status != 0:
         _discard(shell, root, id16, active, existed)
         raise RemoteError(f"switching to the new build failed (exit {res.status}): {_tail(res.err or res.out)}")
@@ -354,7 +451,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         result.notes.append(f"a systemd unit of an earlier deployment is still installed ({UNIT_PATH}); it starts "
                             "the new build after its next restart. To remove it: sudo systemctl disable --now "
                             f"{UNIT_NAME} && sudo rm {UNIT_PATH}")
-    res = shell.run(f"sh {_q(root + '/current/' + START_SCRIPT)} status")
+    res = shell.run(f"sh {_q(root + '/current/' + START_SCRIPT)} status", again=True)
     if res.status == 0 and "running" in res.out:
         result.notes.append("a server started with the start script is still running the previous build; restart "
                             f"it to use the new one ({root}/current/{START_SCRIPT} stop, then start)")
@@ -389,7 +486,7 @@ def older_builds(shell: RemoteShell, root: str) -> List[BoardBuild]:
         '  echo "build=$d ${k:-0} $u"',
         "done",
     ])
-    res = shell.run(script)
+    res = shell.run(script, again=True)
     if res.status != 0:
         raise RemoteError(f"the runtime builds on the device could not be listed (exit {res.status}): "
                           f"{_tail(res.err or res.out)}")
@@ -491,7 +588,7 @@ def _discard(shell: RemoteShell, root: str, id16: str, active: str, existed: boo
     only the person removes it (llm-cli device runtime prune DEVICE --on-device)."""
     if id16 != active and not existed:
         try:
-            shell.run(f"rm -rf {_q(root + '/' + id16)}")
+            shell.run(f"rm -rf {_q(root + '/' + id16)}", again=True)
         except RemoteError:
             pass
 
@@ -504,15 +601,15 @@ def _install_unit(shell: RemoteShell, facts: DeviceFacts, settings: DeploySettin
         raise RemoteError("the systemd unit needs the SSH user and the model path in the deploy settings")
     unit = render_systemd_unit(user=user, home=facts.home, model=model, port=settings.port, kv_cache=kv_cache)
     say(f"installing the systemd unit {UNIT_NAME} (sudo -n) ...")
-    res = shell.run(f"sudo -n tee {UNIT_PATH} >/dev/null", stdin=[unit.encode("utf-8")])
+    res = shell.run(f"sudo -n tee {UNIT_PATH} >/dev/null", stdin=[unit.encode("utf-8")], again=True)
     if res.status != 0:
         raise RemoteError(f"sudo could not write {UNIT_PATH} (exit {res.status}); the runtime is installed for the "
                           f"start script: {_tail(res.err or res.out)}")
-    res = shell.run(f"sudo -n systemctl daemon-reload && sudo -n systemctl enable {UNIT_NAME}")
+    res = shell.run(f"sudo -n systemctl daemon-reload && sudo -n systemctl enable {UNIT_NAME}", again=True)
     if res.status != 0:
         raise RemoteError(f"systemctl could not enable {UNIT_NAME} (exit {res.status}): {_tail(res.err or res.out)}")
     res = shell.run(f"if [ -f {_q(model)} ]; then sudo -n systemctl restart {UNIT_NAME} && echo started=yes; "
-                    "else echo started=no; fi")
+                    "else echo started=no; fi", again=True)
     if res.status != 0:
         raise RemoteError(f"systemctl could not start {UNIT_NAME} (exit {res.status}): {_tail(res.err or res.out)}")
     result.unit_started = "started=yes" in res.out
@@ -530,20 +627,50 @@ def _program(folder: str, name: str) -> str:
 def _run_program(shell: RemoteShell, home: str, argv: Sequence[str], timeout: float, *,
                  merge: bool = True, checked: bool = True) -> Result:
     """Runs a program of the runtime on the device as the SSH user, from the home folder, with a cleared
-    environment (the shared policy: HOME, a fixed PATH, the C locale), an empty stdin and a time limit."""
+    environment (the shared policy: HOME, a fixed PATH, the C locale), an empty stdin and a time limit. The checks it
+    runs only read, so after a network drop they run once more."""
     if checked:
         check_command(argv)  # the shared forbidden-option list (D22); only the --tools check passes checked=False
     env = " ".join(f"{k}={_q(v)}" for k, v in posix_cleared_env(home).items())
     script = (f"cd {_q(home)} && exec env -i {env} " + " ".join(_q(a) for a in argv) + " </dev/null"
               + (" 2>&1" if merge else ""))
-    return shell.run(f"PATH={POSIX_CLEARED_PATH}; export PATH; {script}", timeout=timeout)
+    return shell.run(f"PATH={POSIX_CLEARED_PATH}; export PATH; {script}", timeout=timeout, again=True)
+
+
+def _run_on_its_own(shell: RemoteShell, home: str, root: str, argv: Sequence[str], timeout: float) -> Result:
+    """Runs a program of the runtime on the device on its own, as _run_program does (the user, the home folder, the
+    cleared environment, an empty stdin), but detached from the SSH session (round 16 G4: work keeps running when the
+    connection goes): RemoteSession.run_detached starts it once in a private folder of the install folder
+    (<root>/.bench.XXXXXXXX), its stdout and stderr go into files there, and the session follows it to its exit status,
+    also after a network drop (the on-board benchmark, up to BENCH_TIMEOUT). Then both are read (within the output cap)
+    and the folder goes. Returns the program's exit status, stdout and stderr. A board without nohup runs it attached
+    to the session as before (_run_program), so the run never waits for a job that could not start."""
+    check_command(argv)   # the shared forbidden-option list (D22)
+    if shell.run("command -v nohup >/dev/null 2>&1 && echo nohup=yes || echo nohup=no", again=True).out.strip() \
+            != "nohup=yes":
+        return _run_program(shell, home, argv, timeout, merge=False)
+    env = " ".join(f"{k}={_q(v)}" for k, v in posix_cleared_env(home).items())
+    job = (f"(PATH={POSIX_CLEARED_PATH}; export PATH; cd {_q(home)} && exec env -i {env} "
+           + " ".join(_q(a) for a in argv) + " </dev/null) >out 2>err")
+    folder = shell.private_dir(root, BENCH_PREFIX)
+    try:
+        status = shell.run_detached(folder, job, timeout=timeout, poll=BENCH_POLL, step="bench")
+        out = shell.run(f"cat {_q(folder + '/out')}", again=True).out
+        err = shell.run(f"cat {_q(folder + '/err')}", again=True).out
+    finally:
+        try:
+            shell.run(f"rm -rf {_q(folder)}", again=True)
+        except RemoteError:
+            pass   # a folder that stays is no build folder: older_builds and the prune never list it
+    return Result(status, out, err)
 
 
 def model_sha256(shell: RemoteShell, path: str) -> Optional[str]:
     """sha256 of a file on the device (None when it is missing or unreadable)."""
     if not _RE_MODEL.fullmatch(path or "") or ".." in path.split("/"):
         raise RemoteError("the model path on the device is not a plain absolute path")
-    res = shell.run(f"[ -f {_q(path)} ] && sha256sum {_q(path)} | cut -d ' ' -f 1", timeout=HASH_TIMEOUT)
+    res = shell.run(f"[ -f {_q(path)} ] && sha256sum {_q(path)} | cut -d ' ' -f 1", timeout=HASH_TIMEOUT,
+                    again=True)
     digest = res.out.strip()
     return digest if res.status == 0 and _RE_SHA.fullmatch(digest) else None
 
@@ -563,7 +690,7 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
         raise RemoteError("the folder to check is not a build folder of the install folder")
     names = list(dict.fromkeys(list(plan_verify.get("binaries") or []) + list(_PROGRAMS)))
     res = shell.run("; ".join(f"[ -f {_q(_program(folder, n))} ] && [ -x {_q(_program(folder, n))} ] "
-                              f"|| echo missing={n}" for n in names))
+                              f"|| echo missing={n}" for n in names), again=True)
     missing = [ln.split("=", 1)[1] for ln in res.out.splitlines() if ln.startswith("missing=")]
     if res.status != 0 or missing:
         report.checks.append(Check("binaries", False, "missing on the device: " + (", ".join(missing) or "?")))
@@ -631,7 +758,7 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
         argv = [_program(folder, "llama-bench"), "-m", bench_model, "-p", "64", "-n", "16", "-r", "1", "-o", "json"]
         if threads:
             argv += ["-t", str(int(threads))]
-        r = _run_program(shell, home, argv, BENCH_TIMEOUT, merge=False)
+        r = _run_on_its_own(shell, home, root, argv, BENCH_TIMEOUT)
         if r.status != 0:
             sigill = r.status in (132, -4) or "Illegal instruction" in r.err
             report.checks.append(Check("smoke", False, f"llama-bench failed on the device (exit {r.status})"
