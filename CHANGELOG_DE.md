@@ -2843,9 +2843,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   während der Fetcher es nur an huggingface.co schickt. Jeder Hub-API-Aufruf von `orchestrator/Core/hf_hub.py`
   (`HubClient`) und von Download und Übernahme des Browsers (`ModelManager`) läuft jetzt über `hf_hub.hub_api`, fest
   auf huggingface.co. Regressionstests: `tests/test_hf_gui_download.py` `TestTheTokenGoesOnlyToHuggingFace`.
-- **Kein Hugging-Face-Aufruf des Frameworks schickt mehr ein Token an den Host in `HF_ENDPOINT` oder ein
-  implizites `HF_TOKEN`** (Konsolidierungskette hf-online). Außerhalb von `hf_hub` legten vier Aufrufer noch ihr
-  eigenes `HfApi()` an: Das Bereitstellen eines Hugging-Face-Modells im Builder, die Abfrage des Build-Plans
+- **Kein Hugging-Face-Aufruf im eigenen Code des Frameworks schickt mehr ein Token an den Host in `HF_ENDPOINT`
+  oder ein implizites `HF_TOKEN`** (Konsolidierungskette hf-online). Außerhalb von `hf_hub` legten vier Aufrufer
+  noch ihr eigenes `HfApi()` an: Das Bereitstellen eines Hugging-Face-Modells im Builder, die Abfrage des Build-Plans
   (`hf_lookup.look_up`) und die Commit-Prüfung der GUI für einen gleichen Build (`BuildService.model_commit`)
   schickten das im Framework gespeicherte Token an den Host in `HF_ENDPOINT`, und Suche, Lizenzprüfung und
   Dateiliste des Hugging-Face-Browsers (`ModelManager.search_huggingface_models`, `check_license`,
@@ -2853,10 +2853,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   dorthin. Jeder von ihnen läuft jetzt über `hf_hub.hub_api` (nur huggingface.co; das Token, das die Person im
   Browser eingegeben hat, sonst das im Framework gespeicherte, sonst keines), und jede Dateiliste liest
   `hf_hub.hub_file` (`_hub_files` des Builders delegiert dorthin). Suche und Lizenzprüfung des Browsers nutzen das
-  gespeicherte Token, wo sie das implizite nutzten. Regressionstests: `tests/test_hf_online.py` führt jeden
-  Aufrufer durch den HTTP-Client von huggingface_hub selbst, mit `HF_ENDPOINT` auf einem anderen Host und gesetztem
-  `HF_TOKEN`, und schlägt bei einem Token an diesen Host, beim impliziten Token und bei einem `HfApi` außerhalb von
-  `hf_hub` fehl.
+  gespeicherte Token, wo sie das implizite nutzten. Einen Mirror in `HF_ENDPOINT` benutzt auch keiner dieser Aufrufe
+  mehr, wie seit A6 die Downloads des Browsers; nur fastembed, die Embedding-Bibliothek der Wissensbasis, lädt ihre
+  Modelle noch mit den eigenen Vorgaben von huggingface_hub (`HF_ENDPOINT`, ein implizites Token). Eine Umleitung
+  einer API-Antwort auf einen anderen Host wird ohne das Token verfolgt. Regressionstests: `tests/test_hf_online.py`
+  führt jeden Aufrufer durch den HTTP-Client von huggingface_hub selbst, mit `HF_ENDPOINT` auf einem anderen Host und
+  gesetztem `HF_TOKEN`, und schlägt bei einem Token an diesen Host, beim impliziten Token, bei einem Token, das einer
+  Umleitung auf einen anderen Host folgt, und bei einem `HfApi` außerhalb von `hf_hub` fehl.
 - **Kein Home-Ordner und kein Name eines anderen Kontos erreicht eine KI über eine Datei-URL oder ein Leerzeichen**
   (D0; Vorgabe vom 2026-10-17). Die Pfad-Bezeichnungen für KIs (`security.paths.label_paths`, auch in `device_text`)
   ließen den Pfad einer `file:///`-URL stehen, wenn er den Home-Ordner eines anderen Kontos nannte
