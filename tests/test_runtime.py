@@ -531,34 +531,50 @@ class FakeSession:
 
 
 def self_signed_certificate(folder: Path):
-    """A throwaway certificate for 127.0.0.1 (its own CA) and its key, as PEM files in `folder`."""
+    """A throwaway CA and a server certificate for 127.0.0.1 signed by it, as PEM files in `folder`: (the CA's
+    certificate, which a client trusts; the server's certificate chain; the server's key). Both carry the extensions a
+    strict verification (VERIFY_X509_STRICT) asks for."""
     import datetime
     import ipaddress
     x509 = pytest.importorskip("cryptography.x509")
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.x509.oid import NameOID
-    key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
     now = datetime.datetime.now(datetime.timezone.utc)
-    public = key.public_key()
-    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(public)
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(now - datetime.timedelta(minutes=5)).not_valid_after(now + datetime.timedelta(days=1))
-            .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
-                           critical=False)
-            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-            .add_extension(x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True,
-                                         content_commitment=False, key_encipherment=False, data_encipherment=False,
-                                         key_agreement=False, encipher_only=False, decipher_only=False), critical=True)
-            .add_extension(x509.SubjectKeyIdentifier.from_public_key(public), critical=False)
-            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(public), critical=False)
-            .sign(key, hashes.SHA256()))
-    cert_file, key_file = folder / "tls-cert.pem", folder / "tls-key.pem"
-    cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
-    key_file.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                           serialization.NoEncryption()))
-    return cert_file, key_file
+
+    def usage(**on):
+        names = ("digital_signature", "content_commitment", "key_encipherment", "data_encipherment",
+                 "key_agreement", "key_cert_sign", "crl_sign", "encipher_only", "decipher_only")
+        return x509.KeyUsage(**{n: on.get(n, False) for n in names})
+
+    def build(subject, issuer, public, signer, issuer_public, ca):
+        builder = (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer).public_key(public)
+                   .serial_number(x509.random_serial_number())
+                   .not_valid_before(now - datetime.timedelta(minutes=5))
+                   .not_valid_after(now + datetime.timedelta(days=1))
+                   .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+                   .add_extension(x509.SubjectKeyIdentifier.from_public_key(public), critical=False)
+                   .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_public), critical=False))
+        if ca:
+            builder = builder.add_extension(usage(key_cert_sign=True, crl_sign=True), critical=True)
+        else:
+            builder = (builder.add_extension(usage(digital_signature=True), critical=True)
+                       .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+                       .add_extension(x509.SubjectAlternativeName(
+                           [x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False))
+        return builder.sign(signer, hashes.SHA256())
+
+    ca_key, key = ec.generate_private_key(ec.SECP256R1()), ec.generate_private_key(ec.SECP256R1())
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "llmcf test CA")])
+    ca = build(ca_name, ca_name, ca_key.public_key(), ca_key, ca_key.public_key(), True)
+    server = build(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")]), ca_name, key.public_key(),
+                   ca_key, ca_key.public_key(), False)
+    pem = serialization.Encoding.PEM
+    ca_file, chain_file, key_file = folder / "tls-ca.pem", folder / "tls-chain.pem", folder / "tls-key.pem"
+    ca_file.write_bytes(ca.public_bytes(pem))
+    chain_file.write_bytes(server.public_bytes(pem) + ca.public_bytes(pem))
+    key_file.write_bytes(key.private_bytes(pem, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    return ca_file, chain_file, key_file
 
 
 @contextlib.contextmanager
@@ -573,7 +589,8 @@ def tls_server(cert: Path, key: Path, body: bytes, drops: int = 0):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(5)
-    listener.settimeout(20)
+    listener.settimeout(0.1)   # a closed listener does not wake a waiting accept on every system: look again often
+    stop = threading.Event()
     state = SimpleNamespace(url=f"https://127.0.0.1:{listener.getsockname()[1]}/blob", connections=0)
 
     class Handler(BaseHTTPRequestHandler):
@@ -588,9 +605,11 @@ def tls_server(cert: Path, key: Path, body: bytes, drops: int = 0):
 
     def serve():
         left = drops
-        while True:
+        while not stop.is_set():
             try:
                 raw, address = listener.accept()
+            except socket.timeout:
+                continue
             except OSError:
                 return
             state.connections += 1
@@ -616,8 +635,9 @@ def tls_server(cert: Path, key: Path, body: bytes, drops: int = 0):
     try:
         yield state
     finally:
-        listener.close()
+        stop.set()
         thread.join(5)
+        listener.close()
 
 
 def runtime_catalog(model_bytes: bytes = b"", assets=None, models=None, **server) -> RuntimeCatalog:
@@ -776,10 +796,10 @@ class TestDownloads:
         certificate is fine. It is a dropped connection and is retried; a certificate the client does not trust is
         still refused at once, by the host's name only."""
         data = os.urandom(300000)
-        cert, key = self_signed_certificate(tmp_path)
+        ca, cert, key = self_signed_certificate(tmp_path)
         with tls_server(cert, key, data, drops=1) as server:
             session = requests.Session()
-            session.trust_env, session.verify = False, str(cert)
+            session.trust_env, session.verify = False, str(ca)
             rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models",
                                  catalog=runtime_catalog(), hardware=CPU_HW, session=session, sleep=lambda s: None)
             path = rt._fetch(server.url, tmp_path / "dl" / "blob.bin", len(data), sha(data))
