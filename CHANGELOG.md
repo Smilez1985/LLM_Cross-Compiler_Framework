@@ -1295,7 +1295,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   generator that was `llama-cli` in 1.x (`llama-cli` itself when an image has only that): 8 tokens, at most 120 s,
   offline. A run that ends with an error fails the stage with the tool's last lines; a timeout or a stopped run is a
   note; it is skipped with a note when the image has neither tool, for an embedding model, for the NPU formats and
-  in the `imatrix` job. The statistics (input and output size, ratio, duration of the conversion, the test's result)
+  in the `imatrix` job. The statistics (input and output size, ratio, duration of the conversion, the test's result;
+  the input counts the weights the converter reads, not a second copy such as Mistral's `consolidated.safetensors`)
   go into the log and into `build_info.json` as `conversion` (numbers and words, no paths), which the build engine
   keeps when it completes the manifest. A file a converter replaces (the `--output` file of 1.x, an earlier result)
   is kept as `FILE.convert-backup` until the new one passed its checks; a failed or stopped stage removes what it

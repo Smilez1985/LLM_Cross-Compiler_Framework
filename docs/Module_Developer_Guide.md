@@ -702,7 +702,9 @@ it there). What it does is what the convert module of version 1.x promised in th
 | `restore --state FILE --failed` or `--stopped` | when the stage fails; at its next start | Removes what the run wrote and puts the backups back (`--stopped`: what a killed run left). A file whose backup is no longer there stays as it is: the earlier file was put back by hand. |
 
 The statistics (`convert_stats.json` in the stage folder) go into `build_info.json` as `conversion`: `input_format`,
-`weights`, `input_bytes`, `converted`, `output_format`, `output_type`, `output_bytes`, `ratio` (input / output),
+`weights`, `input_bytes` (what the converter reads: a weights file it leaves aside, such as Mistral's
+`consolidated.safetensors` beside the `model*.safetensors` shards, is not counted), `converted`, `output_format`,
+`output_type`, `output_bytes`, `ratio` (input / output),
 `seconds`, `functional_test` (`passed`, `skipped`, `timed out` or `stopped`) and `functional_test_tool`; numbers and
 words only, no paths. A functional test that ends with an error fails the stage with the tool's last lines: the GGUF
 does not work. It is skipped with a note when the image has neither tool or the tool does not start there, for an embedding model, for the NPU formats

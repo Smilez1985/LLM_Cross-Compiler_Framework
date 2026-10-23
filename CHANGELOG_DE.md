@@ -1473,7 +1473,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Lauf, der mit einem Fehler endet, lässt die Stufe mit den letzten Zeilen des Werkzeugs scheitern; eine
   Zeitüberschreitung oder ein angehaltener Lauf ist ein Hinweis; übersprungen wird er mit einem Hinweis, wenn das
   Image keines der beiden Werkzeuge hat, bei einem Embedding-Modell, bei den NPU-Formaten und im Auftrag `imatrix`.
-  Die Statistik (Größe der Eingabe und der Ausgabe, Verhältnis, Dauer der Umwandlung, das Ergebnis des Tests) steht
+  Die Statistik (Größe der Eingabe und der Ausgabe, Verhältnis, Dauer der Umwandlung, das Ergebnis des Tests; die
+  Eingabe zählt die Gewichte, die der Konverter liest, keine zweite Kopie wie Mistrals `consolidated.safetensors`) steht
   im Log und als `conversion` in `build_info.json` (Zahlen und Wörter, keine Pfade), das die Build-Engine beim
   Vervollständigen des Manifests behält. Eine Datei, die ein Konverter ersetzt (die `--output`-Datei von 1.x, ein
   früheres Ergebnis), bleibt als `DATEI.convert-backup` erhalten, bis die neue ihre Prüfungen bestanden hat; eine
