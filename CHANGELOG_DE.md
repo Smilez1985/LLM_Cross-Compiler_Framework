@@ -1497,7 +1497,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Container ist angehakt, das verpackt genau das, was `--docker` verpackt; ein Container ohne Haken bleibt aus dem
   Paket (`package_docker_config(docker, containers)`, über `make_package` und den einen Deploy-Schritt
   `person_steps.deploy_build`), und ohne Haken sagen **Deploy to Target** und **Create package only...**, warum, und
-  tun nichts.
+  tun nichts. Ein leerer `hardware:`-Block in einer `target.yml` (oder ein leerer `npu:`- oder `gpu:`-Block, etwa mit
+  auskommentierten Zeilen) gibt keinen Gerätezugriff, wie gar kein Block, statt den Tab nicht mehr öffnen zu lassen.
 - **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
   Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
   sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target
