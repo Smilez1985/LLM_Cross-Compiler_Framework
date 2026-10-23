@@ -736,13 +736,24 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   hält) teilen ihn. Dateien des alten Caches von huggingface_hub werden über `orchestrator/Core/hf_takeover.py`
   gelesen; seine alten Kopien gehen nur als angenommener Löschplan (`delete_old_copies`). Jeder Hub-API-Aufruf
   (Suche, Modellinfo, Dateiliste, Zugriffsprüfung) nutzt das `HfApi`, das `hf_hub.hub_api(token)` anlegt (nur
-  huggingface.co, nie der Host in `HF_ENDPOINT`; das Token des Frameworks oder `False`, nie ein implizites), und eine
-  Dateiliste liest `hf_hub.hub_file`; lege nirgends sonst ein `HfApi` an und rufe nirgends sonst die API-Funktionen
+  huggingface.co, nie der Host in `HF_ENDPOINT`; nie ein implizites Token), und eine Dateiliste liest
+  `hf_hub.hub_file`. Das Token geht nur dorthin, wo Hugging Face eines braucht (Entscheidung Runde 25 Q2): frag
+  zuerst ohne und leg den Aufruf in `hf_hub.tokenless_first(call, token)` (das Token folgt einmal, nur nach einem
+  401/403); eine Suche oder Liste trägt es nie; gib `HubFetcher` `token_needed=hf_hub.needs_token(info)` (ein
+  gated oder privates Repository). Eine Bibliothek, die selbst vom Hub lädt (fastembed), bekommt ihre Dateien über
+  `hf_hub.fetch_snapshot` (die Embedder der Wissensbasis nehmen es als `fetch`, `rag_manager.fetch_model_files`);
+  der Prozess läuft mit `HF_HUB_DISABLE_IMPLICIT_TOKEN` und `HF_HUB_DISABLE_TELEMETRY`
+  (`orchestrator/utils/hf_env.py`, gesetzt beim Import des Pakets `orchestrator`; `tests/test_hf_tokens.py`); lege nirgends sonst ein `HfApi` an und rufe nirgends sonst die API-Funktionen
   von huggingface_hub auf Modulebene auf: Außerhalb von `hf_hub.py` nimmt der Code in `orchestrator/` und `scripts/`
   aus huggingface_hub nur die Leser des lokalen Caches (`try_to_load_from_cache`, `scan_cache_dir`) und
   Ausnahmeklassen (`tests/test_hf_online.py` schlägt bei allem anderen fehl). Im Offline-Modus lehnt ein
   Hugging-Face-Aufruf vor jeder Anfrage mit `hf_hub.offline_refusal()` ab (geprüft mit `hf_hub.offline(config)`),
-  und ein Fenster oder die Kommandozeile zeigt der Person `hf_hub.person_text(error, lang)`.
+  und ein Fenster oder die Kommandozeile zeigt der Person `hf_hub.person_text(error, lang)`. Ein Build im
+  Offline-Modus lädt sein Modell nie: Er nutzt `orchestrator/Core/local_models.local_copy`, und
+  `BuildService.check_model_here` lehnt mit `ModelNotHere` ab (die Modelle, die schon hier sind, nach Label; für
+  eine KI nie ein Pfad). Ein Docker-Image wird im Offline-Modus nur aus einer Registry gezogen, die die Regel des
+  eigenen Netzes als lokal zählt (`utils/image_ref.offline_pull_refusal`), und ein Target-Image wird dann nicht
+  gebaut (`BuildEngine._offline_image`).
 - **Offline-Modus: eine Prüfung, eine Regel des eigenen Netzes.** Ob der Offline-Modus an ist, fragst du mit
   `orchestrator.utils.locality.offline_mode(config)`, nie mit einem eigenen `config.get("offline_mode")`
   (`tests/test_offline_check.py` schlägt dann fehl). Ob eine Adresse im Offline-Modus erreicht werden darf,
