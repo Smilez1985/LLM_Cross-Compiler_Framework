@@ -439,6 +439,30 @@ class TestTheBrowsersDiskRule:
             person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
         assert person.ledger.entries() == []
 
+    def test_a_file_that_is_there_complete_is_not_refused_by_a_full_disk(self, person, monkeypatch):
+        # Regression (review of chain hf): nothing is written for a complete file (the fetcher checks it and returns
+        # it), so the disk rule has nothing to refuse; before A6 the browser returned such a file too.
+        import shutil
+        from test_hf_tools import DATA, REPO
+        new_place(person).parent.mkdir(parents=True)
+        new_place(person).write_bytes(DATA)
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: SimpleNamespace(total=100 * 10 ** 9, used=0, free=10))
+        assert Path(person.mm.download_file(REPO, "tiny-q4_k_m.gguf")) == new_place(person)
+        assert person.sessions[-1].seen == [] and person.ledger.entries() == []
+
+    def test_a_part_larger_than_the_file_reserves_the_whole_file(self, person):
+        # Regression (review of chain hf): the fetcher starts such a part again from its first byte, so the whole
+        # file is written; the reservation held nothing for it.
+        from test_hf_tools import DATA, REPO, Response
+        part = new_place(person).with_name("tiny-q4_k_m.gguf.part")
+        part.parent.mkdir(parents=True)
+        part.write_bytes(DATA + b"x" * 100)
+        held = []
+        person.use(gate=lambda body, start: held.append(person.ledger.entries()) or
+                   Response(body[start:], start, total=len(body)))
+        assert Path(person.mm.download_file(REPO, "tiny-q4_k_m.gguf")).read_bytes() == DATA
+        assert list(held[0][0]["bytes"].values()) == [len(DATA)]
+
     def test_a_resumed_download_reserves_only_what_is_missing(self, person):
         from test_hf_tools import DATA, REPO, Response
         part = new_place(person).with_name("tiny-q4_k_m.gguf.part")
