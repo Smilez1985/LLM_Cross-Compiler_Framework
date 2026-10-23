@@ -939,9 +939,9 @@ Stellt Ditto eine Frage. Ditto darf die Tools des Frameworks im Rahmen deiner Be
 „ask“ stehen, zeigen das Tool und jedes Argument und brauchen deine Bestätigung im Terminal (ohne Terminal werden sie
 abgelehnt). Die Tools sind die eigenen des Frameworks auf diesem Computer. Die Antwort geht nach stdout,
 Tool-Hinweise und Fehler nach stderr, ohne Steuerzeichen (Escape-Sequenzen, Wagenrückläufe, Bidi- und
-Nullbreitenzeichen). Strg+C oder das Ende der Eingabe an einer Bestätigung ist ein Nein. Nichts wird im Chatverlauf
-gespeichert, und `--provider`/`--model` gelten nur für diesen Befehl: Sie werden nie gespeichert, auch nicht, wenn ein
-Tool während der Frage die Einstellungen speichert.
+Nullbreitenzeichen; der Verbinder in einem Emoji bleibt). Strg+C oder das Ende der Eingabe an einer Bestätigung ist
+ein Nein. Nichts wird im Chatverlauf gespeichert, und `--provider`/`--model` gelten nur für diesen Befehl: Sie werden
+nie gespeichert, auch nicht, wenn ein Tool während der Frage die Einstellungen speichert.
 
 | Option | Bedeutung |
 |---|---|

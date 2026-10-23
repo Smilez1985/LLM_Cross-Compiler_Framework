@@ -480,9 +480,11 @@ def _printable(text: Any) -> str:
     """Model output (an answer, an error that quotes a provider or a tool, a tool line) for the terminal: line breaks
     and tabs stay; control characters (C0 including carriage return, DEL, C1), format characters (bidi controls and
     isolates, zero-width characters) are removed, so text a build log or a web page steered cannot rewrite the screen,
-    the window title or the clipboard, nor reorder what the person reads. Line and paragraph separators become line
-    breaks. (A value the person confirms is shown escaped instead: tools.confirmation.visible.)"""
+    the window title or the clipboard, nor reorder what the person reads. The zero-width joiner stays, as in
+    utils/untrusted (the one rule for it: needed inside emoji sequences, harmless on its own). Line and paragraph
+    separators become line breaks. (A value the person confirms is shown escaped instead: tools.confirmation.visible.)"""
     import unicodedata
+    from orchestrator.utils.untrusted import _KEEP_FORMAT
     out = []
     for ch in str(text):
         category = unicodedata.category(ch)
@@ -490,7 +492,7 @@ def _printable(text: Any) -> str:
             out.append(ch)
         elif category in ("Zl", "Zp"):
             out.append("\n")
-        elif category not in ("Cc", "Cf"):
+        elif category not in ("Cc", "Cf") or ch in _KEEP_FORMAT:
             out.append(ch)
     return "".join(out)
 
@@ -594,8 +596,9 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     from orchestrator.utils.image_registry import ImageLookupError
     try:
         definition = pin_base_image(definition, offline=bool(ctx.framework_manager.config.get("offline_mode", False)))
-    except ImageLookupError as e:
-        console.print(f"[red]The base image {escape(definition.base_os)} cannot be pinned: {escape(str(e))}[/red]")
+    except ImageLookupError as e:   # the base image is the AI's value, and the message may quote it
+        console.print(f"[red]The base image {escape(_printable(definition.base_os))} cannot be pinned: "
+                      f"{escape(_printable(e))}[/red]")
         console.print(escape(e.next))
         sys.exit(1)
     # The definition is shown in full before anything is written; the module generator checks it again. Hidden and

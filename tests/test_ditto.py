@@ -897,6 +897,14 @@ class TestConfirmations:
         assert "Rock[2Jchip" in result.stdout and "next line\tend" in result.stdout
         assert "Made up[2J" in result.output and "handler said ]52;c;evil" in result.output
 
+    def test_the_terminal_text_keeps_every_script_and_emoji_as_they_are(self):
+        """Only what can steer the terminal or hide text goes: umlauts, CJK, combining marks, variation selectors and
+        the zero-width joiner inside an emoji sequence (kept as in utils/untrusted, harmless on its own) stay."""
+        from orchestrator import cli
+        text = "Grüße aus Köln, 中文テキスト한국어, ä, 👩‍💻 ❤️ 🇩🇪 👍🏽"
+        assert cli._printable(text) == text
+        assert cli._printable("a​b‮c⁦d﻿e") == "abcde", "other zero-width and bidi characters go"
+
     def test_ditto_ask_errors_reach_the_terminal_without_control_characters(self, monkeypatch):
         from click.testing import CliRunner
         from orchestrator import cli
@@ -953,6 +961,21 @@ class TestConfirmations:
         assert not any(bad in result.output for bad in ("‮", "\x9b", "\x7f", "\x1b", "\x07"))
         # visible(): shown escaped (a hex digit right after an escape is escaped too, so it cannot extend it)
         assert "-mcpu=cortex-a76\\u202e\\u009b\\u0032J\\u007f" in result.output
+
+    def test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error(self, generate_ai,
+                                                                                         monkeypatch):
+        """The base image is the AI's value too: when it cannot be pinned (here in offline mode, whose message quotes
+        it), the error line reaches the terminal without its control characters."""
+        from orchestrator.Core import ditto_manager
+        monkeypatch.setattr("orchestrator.Core.ditto_manager.pin_base_image", lambda definition, offline=False:
+                            definition.model_copy(update={"base_os": ditto_manager.pin_reference(definition.base_os,
+                                                                                                 offline=True)}))
+        definition = ModuleDefinition(**{**MODULE,
+                                         "base_os": "debian\x1b]0;owned\x07\x1b[2J\x9b2J‮:bookworm-slim"})
+        result = generate_ai.run(lambda path: definition)
+        assert result.exit_code == 1 and "cannot be pinned" in result.output, result.output
+        assert "offline mode" in result.output and "bookworm-slim" in result.output
+        assert not any(bad in result.output for bad in ("\x1b", "\x07", "\x9b", "‮")), repr(result.output)
 
     @pytest.mark.parametrize("error", [IsADirectoryError(21, "Is a directory"),
                                        FileNotFoundError("Probe file not found: the folder"),
