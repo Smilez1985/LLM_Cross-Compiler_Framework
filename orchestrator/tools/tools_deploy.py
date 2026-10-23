@@ -339,7 +339,7 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                             field="artifact_id", next="Choose another built model (list_artifacts).") from None
 
     def package_facts(inp: CreatePackageIn, ctx: ToolContext) -> CallFacts:
-        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE, image_problem
+        from orchestrator.Core.deployment_manager import image_problem, package_containers
         from orchestrator.Core.hf_hub import disk_check
         label, info = artifact(inp.artifact_id)
         profile = resolve_profile(inp, info)
@@ -358,9 +358,8 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                  Fact("Disk", f"{_size(disk['free'])} free on the output folder's disk, about {_size(needed)} needed",
                       volatile=True)]
         if inp.include_docker_images:
-            config = getattr(framework, "config", None)
-            get = config.get if config is not None else (lambda k, d=None: d)
-            images = [get("image_inference_runtime", DEFAULT_INFERENCE_IMAGE)]
+            # the containers the package carries, as `deploy package --docker` packs them (package_containers)
+            images = [c.image for c in package_containers(framework, profile)]
             get_component = getattr(framework, "get_component", None)
             client = get_component("docker_client") if callable(get_component) else None
             for image in images:
