@@ -25,6 +25,7 @@ uses the network. Every target ships the same copy (targets/Rockchip/scripts and
   model_check.py watch DIR --state FILE
   model_check.py output (FILE | --watched) --stats FILE --state FILE --format FORMAT [--type TYPE] [--seconds N]
                  [--tools DIR --test-seconds N | --test-skip REASON]
+  model_check.py test FILE --tools DIR --result FILE [--test-seconds N] [--what TEXT] [--stage NAME]
   model_check.py restore --state FILE (--failed | --stopped)
   model_check.py keep --state FILE
 
@@ -96,8 +97,12 @@ class Problem(Exception):
     """A refusal or a failed check: the reason, for the person, without a path."""
 
 
+# The stage whose log lines these are (the target stage runs the functional test of its package through `test`)
+STAGE = "CONVERT"
+
+
 def log(text: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] [CONVERT] {text}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] [{STAGE}] {text}", flush=True)
 
 
 def warn(text: str) -> None:
@@ -495,25 +500,39 @@ def plural(count: int, word: str) -> str:
 
 # --- Functional test ---------------------------------------------------------------------------------------------
 
-def functional_test(gguf: Path, tools: Path, seconds: int) -> Tuple[str, Optional[str]]:
+def find_test_tool(tools: Path) -> Optional[Path]:
+    """The image's program for the functional test in `tools` (TEST_TOOLS, the first that is there), or None."""
+    return next((tools / n for n in TEST_TOOLS if (tools / n).is_file() and os.access(tools / n, os.X_OK)), None)
+
+
+def functional_test(gguf: Path, tools: Path, seconds: int,
+                    what: str = "the GGUF the converter wrote") -> Tuple[str, Optional[str]]:
     """A short run of the GGUF: (passed | timed out | stopped | skipped, the tool). A run that ends with an error is a
-    Problem: the GGUF the converter wrote does not work."""
-    tool = next((tools / n for n in TEST_TOOLS if (tools / n).is_file() and os.access(tools / n, os.X_OK)), None)
+    Problem: `what` does not work."""
+    result, tool, _note = run_test(gguf, tools, seconds, what)
+    return result, tool
+
+
+def run_test(gguf: Path, tools: Path, seconds: int, what: str) -> Tuple[str, Optional[str], str]:
+    """functional_test with its note: (result, the tool, what the result rests on in a few words, for the package's
+    manifest). The one functional test of the framework's stages: the convert stage's of what the converter wrote,
+    and the target stage's of the quantized model before it is packaged (cmd_test)."""
+    tool = find_test_tool(tools)
     if tool is None:
         log("Functional test skipped: this image has neither llama-completion nor llama-cli to run the model.")
-        return "skipped", None
+        return "skipped", None, "the image has no llama-completion or llama-cli for this machine"
     try:
         shown = subprocess.run([str(tool), "--help"], check=False, stdin=subprocess.DEVNULL, capture_output=True,
                                text=True, errors="replace", timeout=60)
         options = shown.stdout + shown.stderr
     except (OSError, subprocess.TimeoutExpired):
         log(f"Functional test skipped: {tool.name} --help did not answer.")
-        return "skipped", tool.name
+        return "skipped", tool.name, f"{tool.name} --help did not answer"
     # One prompt, no conversation: plain completion (-no-cnv), or a single turn of the chat program
     mode = next((option for option in ("-no-cnv", "--single-turn") if option in options), None)
     if mode is None:
         log(f"Functional test skipped: this {tool.name} has no option for a run without a conversation.")
-        return "skipped", tool.name
+        return "skipped", tool.name, f"this {tool.name} has no option for a run without a conversation"
     args = [str(tool), "-m", str(gguf), "-p", "Hello", "-n", str(TEST_TOKENS), "-c", "256", mode]
     for option, value in (("--offline", None), ("--no-warmup", None), ("--temp", "0"), ("--simple-io", None)):
         if option in options:
@@ -525,33 +544,45 @@ def functional_test(gguf: Path, tools: Path, seconds: int) -> Tuple[str, Optiona
     except subprocess.TimeoutExpired:
         log(f"Functional test: {tool.name} did not finish within {seconds} s on this build host (a large model?); "
             "not counted as a failure.")
-        return "timed out", tool.name
+        return "timed out", tool.name, f"after {seconds} s ({tool.name} on the build machine)"
     except OSError as e:
         log(f"Functional test skipped: {tool.name} could not be started ({e.strerror or e}).")
-        return "skipped", tool.name
+        return "skipped", tool.name, f"{tool.name} could not be started"
     took = int(time.monotonic() - started)
     if run.returncode == 0:
         log(f"Functional test passed: {tool.name} loaded {gguf.name} and generated {TEST_TOKENS} tokens ({took} s).")
-        return "passed", tool.name
+        return "passed", tool.name, f"{tool.name}, {TEST_TOKENS} tokens on the build machine"
     if -run.returncode in STOP_SIGNALS:
         # Stopped from outside: the kernel's out-of-memory killer sends SIGKILL, a stop SIGTERM
         log(f"Functional test: {tool.name} was stopped by signal {-run.returncode} (not enough memory?); not counted "
             "as a failure.")
-        return "stopped", tool.name
+        return "stopped", tool.name, (f"by signal {-run.returncode} ({tool.name} on the build machine, not enough "
+                                      "memory?)")
     if -run.returncode == SIGILL:
         log(f"Functional test skipped: {tool.name} uses instructions this build host's CPU does not have "
             f"(signal {SIGILL}).")
-        return "skipped", tool.name
+        return "skipped", tool.name, f"{tool.name} uses instructions this build machine's CPU does not have " \
+                                     f"(signal {SIGILL})"
     if run.returncode in (126, 127):
         # The tool itself did not start (a library of the image missing, no permission): nothing said about the GGUF
         log(f"Functional test skipped: {tool.name} does not start in this image (exit {run.returncode}).")
-        return "skipped", tool.name
+        return "skipped", tool.name, f"{tool.name} does not start in this image (exit {run.returncode})"
     tail = [line for line in (run.stderr or "").splitlines() if line.strip()][-6:]
     # Any other signal is a crash on this GGUF (GGML_ASSERT aborts, a segmentation fault): it does not work either
     how = (f"crashed running {gguf.name} (signal {-run.returncode})" if run.returncode < 0
            else f"could not run {gguf.name} (exit {run.returncode})")
-    raise Problem(f"The functional test failed: {tool.name} {how}, so the GGUF the converter wrote does not work."
+    raise Problem(f"The functional test failed: {tool.name} {how}, so {what} does not work."
                   + ("" if not tail else " Its last lines:\n  " + "\n  ".join(tail)))
+
+
+def summary_line(result: str, note: str) -> str:
+    """The functional test in one line for the package's manifest and model card ("passed (llama-completion, 8 tokens
+    on the build machine)"); a timeout and a stop from outside say they are no failure."""
+    if result == "passed":
+        return f"passed ({note})"
+    if result in ("timed out", "stopped"):
+        return f"{result} {note}; not a failure"
+    return f"{result}: {note}"
 
 
 # --- Commands ----------------------------------------------------------------------------------------------------
@@ -678,6 +709,24 @@ def cmd_output(args) -> None:
         f"conversion {args.seconds} s, functional test {result}.")
 
 
+def cmd_test(args) -> None:
+    """The functional test of a GGUF a later stage made: the target stage's quantized model before it is packaged
+    (target_module.sh functional_test), the same test as after the converter (an embedding model is not run). Writes
+    three lines to --result: the result, the tool (empty when none ran) and the manifest's line (summary_line)."""
+    global STAGE
+    STAGE = args.stage
+    path = Path(args.file)
+    if not path.is_file() or path.stat().st_size == 0:
+        raise Problem(f"{path.name} is missing or empty.")
+    # Without a program to run it the model is not read (as before the target stage used this test)
+    if find_test_tool(Path(args.tools)) is not None and read_gguf(path)["embedding"]:
+        log("Functional test skipped: an embedding model does not generate text; its header was checked.")
+        result, tool, note = "skipped", None, "an embedding model does not generate text"
+    else:
+        result, tool, note = run_test(path, Path(args.tools), args.test_seconds, args.what)
+    Path(args.result).write_text(f"{result}\n{tool or ''}\n{summary_line(result, note)}\n", encoding="utf-8")
+
+
 def cmd_restore(args) -> None:
     state_file = Path(args.state)
     if not state_file.is_file():
@@ -747,6 +796,13 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--tools", default="")
     s.add_argument("--test-seconds", type=int, default=120)
     s.add_argument("--test-skip", default="")
+    s = sub.add_parser("test")
+    s.add_argument("file")
+    s.add_argument("--tools", required=True)
+    s.add_argument("--test-seconds", type=int, default=120)
+    s.add_argument("--result", required=True)
+    s.add_argument("--what", default="the GGUF the converter wrote")
+    s.add_argument("--stage", default="CONVERT")
     s = sub.add_parser("restore")
     s.add_argument("--state", required=True)
     group = s.add_mutually_exclusive_group(required=True)
@@ -757,7 +813,7 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-COMMANDS = {"input": cmd_input, "begin": cmd_begin, "watch": cmd_watch, "output": cmd_output,
+COMMANDS = {"input": cmd_input, "begin": cmd_begin, "watch": cmd_watch, "output": cmd_output, "test": cmd_test,
             "restore": cmd_restore, "keep": cmd_keep}
 
 

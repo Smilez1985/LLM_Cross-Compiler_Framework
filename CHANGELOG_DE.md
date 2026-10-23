@@ -1572,7 +1572,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (`USER@HOST [ZIEL]` über `ssh` und `scp` mit `StrictHostKeyChecking=yes`, oder auf dem Board selbst nach
   `/opt/llm`), `MANIFEST.json` mit jedem Detail des Builds und `SHA256SUMS`; das Modell läuft einmal auf diesem
   Rechner, die Programme müssen für das Board sein, und jede Datei muss zu ihrer Prüfsumme passen, bevor das Paket
-  bleibt. Ihr Cross-Build schaltet jede Option von llama.cpp ab, die etwas herunterladen kann, wie jeder
+  bleibt. Dieser Lauf ist der Funktionstest der Stufe convert (`scripts/model_check.py test`, eine Implementierung
+  seit dem Merge beider Ketten): Ein Lauf, der mit einem Fehler endet oder am Modell abstürzt, stoppt das Paket; eine
+  Zeitüberschreitung, ein Stopp von außen (der Out-of-Memory-Killer), ein Werkzeug, das die CPU dieses Rechners nicht
+  ausführen kann oder das im Image nicht startet, und ein Embedding-Modell sind Hinweise, die das Manifest nennt, wie
+  in der Stufe convert (vorher hatte das Paket einen eigenen Test, der sie ablehnte, sodass ein Build seine Stufe
+  convert bestehen und dann sein Paket aus demselben Grund nicht bekommen konnte, und ein Embedding-Modell bekam kein
+  Paket). Ihr Cross-Build schaltet jede Option von llama.cpp ab, die etwas herunterladen kann, wie jeder
   llama.cpp-Build des Frameworks (`DOWNLOAD_OPTIONS_OFF` von `orchestrator/runtime/build/recipe.py`): Am Pin ist
   `LLAMA_USE_PREBUILT_UI` standardmäßig an und holte in einem Container mit Netz die Web-Oberfläche von
   `llama-server` aus einem Hugging-Face-Bucket. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die Entrypoint-Modi `target` und

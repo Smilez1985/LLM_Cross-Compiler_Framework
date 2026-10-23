@@ -284,15 +284,12 @@ import sys  # noqa: E402
 
 from model_files import write_gguf  # noqa: E402
 from test_build_stages import _script, ran, resumed  # noqa: E402
+# The package's functional test is the convert stage's (scripts/model_check.py test): the same llama-completion stub,
+# which answers --help and fails as STUB_FAIL says (completion, -hang, -signal, -nostart, -abort, -sigill)
+from test_convert_stage import COMPLETION_STUB  # noqa: E402
 
 PAD = {"STUB_PAD": 1 << 20}  # the package's input check of 1.x wants a model of at least 1 MiB
 OUT_DIR = "<root>/build-cache/output"
-COMPLETION_STUB = """\
-import os, sys
-with open(os.environ["STUB_LOG"], 'a') as f:
-    f.write('completion ' + ' '.join(sys.argv[1:]) + '\\n')
-sys.exit(int(os.environ.get('STUB_COMPLETION_EXIT', '0')))
-"""
 
 
 def f16_input(image):
@@ -370,31 +367,90 @@ def test_the_manifest_holds_every_build_detail_and_the_checksums_cover_every_fil
     assert "MANIFEST.json: OK" in sums.stdout
 
 
-@needs_bash
-@pytest.mark.parametrize("exit_code, outcome", [(0, "passed (llama-completion, 8 tokens on the build machine)"),
-                                                (124, "timed out after 120 s (llama-completion on the build "
-                                                      "machine); not a failure")])
-def test_the_functional_test_runs_the_model_on_the_build_machine(image, exit_code, outcome):
-    _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
+def short_functional_test(image, seconds=1):
+    """The image's target_module.sh with a functional test of `seconds` (120 in the module)."""
+    module = image.app / "modules" / "target_module.sh"
+    text = module.read_text(encoding="utf-8")
+    assert "FUNCTIONAL_TEST_SECONDS=120\n" in text
+    module.write_text(text.replace("FUNCTIONAL_TEST_SECONDS=120\n", f"FUNCTIONAL_TEST_SECONDS={seconds}\n"),
+                      encoding="utf-8")
 
-    result = target_by_hand(image, "--model-name", "granite", STUB_COMPLETION_EXIT=exit_code)
+
+@needs_bash
+@pytest.mark.parametrize("fail, outcome", [(None, "passed (llama-completion, 8 tokens on the build machine)"),
+                                           ("completion-hang", "timed out after 1 s (llama-completion on the build "
+                                                               "machine); not a failure")])
+def test_the_functional_test_runs_the_model_on_the_build_machine(image, fail, outcome):
+    """The package's functional test is the convert stage's (scripts/model_check.py test, one implementation): 8
+    tokens of the quantized model, bounded, offline, with the options this llama-completion has."""
+    _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
+    short_functional_test(image)
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_FAIL=fail)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    run = [c for c in image.calls() if c.startswith("completion ")]
-    assert run == [f"completion -m {OUT_DIR}/granite-Q4_K_M.gguf -p Hello -n 8 -no-cnv --no-warmup"]
+    run = [c for c in image.calls() if c.startswith("llama-completion ")]
+    assert run == [f"llama-completion -m {OUT_DIR}/granite-Q4_K_M.gguf -p Hello -n 8 -c 256 -no-cnv --offline "
+                   "--no-warmup --temp 0 --simple-io"]
+    assert manifest_of(package_of(image))["tests"]["functional"] == outcome
+    assert "[TARGET] Functional test" in result.stdout, "the target stage's log line"
+
+
+@needs_bash
+@pytest.mark.parametrize("fail, how", [("completion", "could not run granite-Q4_K_M.gguf (exit 1)"),
+                                       ("completion-abort", "crashed running granite-Q4_K_M.gguf (signal 6)")])
+def test_a_model_the_functional_test_cannot_run_gets_no_package(image, fail, how):
+    _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_FAIL=fail)
+
+    assert result.returncode == 1
+    assert f"ERROR: The functional test failed: llama-completion {how}, so the quantized model does not work." \
+        in result.stderr
+    assert not (image.output / "packages").exists()
+
+
+@needs_bash
+@pytest.mark.parametrize("fail, outcome", [
+    ("completion-sigill", "skipped: llama-completion uses instructions this build machine's CPU does not have "
+                          "(signal 4)"),
+    ("completion-nostart", "skipped: llama-completion does not start in this image (exit 127)"),
+    ("completion-signal", "stopped by signal 9 (llama-completion on the build machine, not enough memory?); not a "
+                          "failure"),
+])
+def test_what_says_nothing_about_the_model_is_a_note_as_in_the_convert_stage(image, fail, outcome):
+    """Stage C wave 2 seam (how2-convert and how2-target built a functional test each): the package's test reads a
+    run the way the convert stage does. A tool this machine's CPU cannot run, one that does not start in the image
+    and a run the out-of-memory killer stopped say nothing about the model, so the package is made with the note (the
+    convert stage's test of the same machine and tool notes them too, so a build no longer passed its convert stage
+    and then failed its package for the same reason)."""
+    _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_FAIL=fail)
+
+    assert result.returncode == 0, result.stdout + result.stderr
     assert manifest_of(package_of(image))["tests"]["functional"] == outcome
 
 
 @needs_bash
-def test_a_model_the_functional_test_cannot_run_gets_no_package(image):
+def test_an_embedding_model_is_packaged_without_a_text_run(image):
+    """An embedding GGUF generates no text: the convert stage skips its run, and so does the package's test now (a
+    text run of it fails in llama-completion, so the package was refused)."""
+    from model_files import gguf_bytes
     _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
+    # a quantizer that keeps the model's header (the stub of tests/test_build_stages.py writes a llama header)
+    _script(image.llama / "build" / "bin" / "llama-quantize", "import shutil, sys\nshutil.copyfile(sys.argv[-3], "
+            "sys.argv[-2])\n")
+    model = image.root / "embed.f16.gguf"
+    model.write_bytes(gguf_bytes(arch="bert") + b"." * (1 << 20))
 
-    result = target_by_hand(image, "--model-name", "granite", STUB_COMPLETION_EXIT=3)
+    result = by_hand(image, "target", "--input", model, "--model-name", "embed", MODEL_SOURCE=None, MODEL_NAME=None,
+                     QUANTIZATION=None)
 
-    assert result.returncode == 1
-    assert "ERROR: The functional test failed: llama-completion could not run the quantized model (exit 3)" \
-        in result.stderr
-    assert not (image.output / "packages").exists()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not [c for c in image.calls() if c.startswith("llama-completion ")], "no text run of an embedding model"
+    package = package_of(image, "embed_q4_k_m_latest")
+    assert manifest_of(package)["tests"]["functional"] == "skipped: an embedding model does not generate text"
 
 
 @needs_bash

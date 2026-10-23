@@ -1384,7 +1384,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   model), `deploy.sh` (`USER@HOST [DEST]` over `ssh` and `scp` with `StrictHostKeyChecking=yes`, or
   on the board itself to `/opt/llm`), `MANIFEST.json` with every build detail and `SHA256SUMS`; the model is run once
   on this machine, the programs must be for the board, and every file must match its checksum before the package is
-  kept. Their cross build turns off every llama.cpp option that can download something, as every llama.cpp build of
+  kept. That run is the convert stage's functional test (`scripts/model_check.py test`, one implementation since the
+  merge of both chains): a run that ends with an error or crashes on the model stops the package; a timeout, a stop
+  from outside (the out-of-memory killer), a tool this machine's CPU cannot run or that does not start in the image,
+  and an embedding model are notes the manifest names, as in the convert stage (before, the package had a test of its
+  own that refused these, so a build could pass its convert stage and then fail its package for the same reason, and
+  an embedding model got no package). Their cross build turns off every llama.cpp option that can download something, as every llama.cpp build of
   the framework does (`DOWNLOAD_OPTIONS_OFF` of `orchestrator/runtime/build/recipe.py`): at the pin
   `LLAMA_USE_PREBUILT_UI` is on by default and fetched `llama-server`'s web UI from a Hugging Face bucket in a
   container with network. `build.sh --package` (also `target_module.sh` started by hand and the entrypoint modes `target` and

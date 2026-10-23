@@ -722,6 +722,7 @@ versprochen hat:
 | `begin DATEI --state DATEI [--scratch ORDNER]` | bevor ein Konverter DATEI schreibt | Behält eine vorhandene DATEI als `DATEI.convert-backup`, bis die neue ihre Prüfungen bestanden hat (eine Zwischendatei `tmp-*` des Arbeitsordners wird einfach ersetzt). |
 | `watch ORDNER --state DATEI` | bevor ein Format-Helfer läuft | Merkt sich die Dateien von ORDNER mit Größe und Zeit, damit `output --watched` das Modell findet, das der Helfer geschrieben hat (eine neue Datei oder eine, die er überschrieben hat), und ein Fehler es entfernt. |
 | `output DATEI --format gguf --type TYP --seconds N --stats DATEI --tools ORDNER` | nach dem Konverter | Prüft das GGUF (die Daten jedes Tensors liegen in der Datei), führt den Funktionstest mit `llama-completion` (oder `llama-cli`) aus ORDNER aus: 8 Tokens, höchstens `--test-seconds` (120), offline. `--test-skip GRUND` überspringt den Test mit einem Hinweis. Vervollständigt die Statistik. |
+| `test DATEI --tools ORDNER --result DATEI` | in der Stufe target, bevor das Paket bleibt | Derselbe Funktionstest eines anderen GGUF (des quantisierten Modells; ein Embedding-Modell läuft nicht): `--what TEXT` nennt es bei einem Fehler, `--stage NAME` seine Logzeilen. Schreibt das Ergebnis, das Werkzeug und die Zeile des Manifests nach `--result`. |
 | `keep --state DATEI` | wenn die Stufe gelungen ist | Entfernt die Sicherungen. |
 | `restore --state DATEI --failed` oder `--stopped` | wenn die Stufe scheitert; bei ihrem nächsten Start | Entfernt, was der Lauf geschrieben hat, und legt die Sicherungen zurück (`--stopped`: was ein abgebrochener Lauf hinterlassen hat). Eine Datei, deren Sicherung nicht mehr da ist, bleibt, wie sie ist: Die frühere Datei wurde von Hand zurückgelegt. |
 
@@ -914,8 +915,12 @@ Funktionen aus 1.x sind geblieben:
   jedem Detail des Builds (Modell, Quantisierung, llama.cpp, Board, Profil, Flags, Tests, jede Datei mit Größe und
   SHA-256) und `SHA256SUMS`. Die Helfer kommen aus `scripts/package_test_model.sh`, `scripts/package_deploy.sh` und
   `scripts/board_package.py` des Targets. Bevor das Paket bleibt, läuft das Modell einmal auf diesem Rechner
-  (`llama-completion` des Images, wenn es eins hat), die Programme müssen ELF-Programme für das Board sein, und jede
-  Datei muss zu `SHA256SUMS` passen. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die
+  (`llama-completion` des Images, wenn es eins hat), mit dem Funktionstest der Stufe convert
+  (`scripts/model_check.py test`, [Abschnitt 6.5](#65-die-prüfungen-der-stufe-convert)): Ein Lauf, der mit einem
+  Fehler endet oder abstürzt, stoppt das Paket, und was nichts über das Modell sagt (eine Zeitüberschreitung, ein
+  Stopp von außen, ein Werkzeug, das dieser Rechner nicht ausführen oder starten kann, ein Embedding-Modell), ist ein
+  Hinweis im Manifest. Die Programme müssen ELF-Programme für das Board sein, und jede Datei muss zu `SHA256SUMS`
+  passen. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die
   Entrypoint-Modi `target` und `pipeline`) macht das Paket auch ohne Profil, mit den schlichten Vorgaben des Targets
   (aarch64 bei Rockchip), und das Manifest sagt es (`hardware.source: defaults`). Das eigene Deployment des
   Frameworks bleibt `llm-cli deploy` und der Tab **Deployment**, über seine SSH-Sitzung mit dem Schlüssel und den Known

@@ -700,6 +700,7 @@ it there). What it does is what the convert module of version 1.x promised in th
 | `begin FILE --state FILE [--scratch DIR]` | before a converter writes FILE | Keeps an existing FILE as `FILE.convert-backup` until the new one passed its checks (an intermediate `tmp-*` of the work folder is simply replaced). |
 | `watch DIR --state FILE` | before a format helper runs | Notes the files of DIR with their sizes and times, so that `output --watched` finds the model the helper wrote (a new file, or one it wrote over) and a failure removes it. |
 | `output FILE --format gguf --type TYPE --seconds N --stats FILE --tools DIR` | after the converter | Checks the GGUF (every tensor's data inside the file), runs the functional test with `llama-completion` (or `llama-cli`) from DIR: 8 tokens, at most `--test-seconds` (120), offline. `--test-skip REASON` skips the test with a note. Completes the statistics. |
+| `test FILE --tools DIR --result FILE` | in the target stage, before the package is kept | The same functional test of another GGUF (the quantized model; an embedding model is not run): `--what TEXT` names it in a failure, `--stage NAME` its log lines. Writes the result, the tool and the manifest's line to `--result`. |
 | `keep --state FILE` | when the stage succeeded | Removes the backups. |
 | `restore --state FILE --failed` or `--stopped` | when the stage fails; at its next start | Removes what the run wrote and puts the backups back (`--stopped`: what a killed run left). A file whose backup is no longer there stays as it is: the earlier file was put back by hand. |
 
@@ -882,8 +883,11 @@ are the build again, with the dispatcher's work moved into the stage it belongs 
   detail (model, quantization, llama.cpp, board, profile, flags, tests, each file with its size and SHA-256) and
   `SHA256SUMS`. The helpers come from the target's `scripts/package_test_model.sh`, `scripts/package_deploy.sh` and
   `scripts/board_package.py`. Before the package is kept, the model is run once on this machine (`llama-completion`
-  of the image, when it has one), the programs must be ELF programs for the board, and every file must match
-  `SHA256SUMS`. `build.sh --package` (also `target_module.sh` started by hand and the entrypoint modes `target` and
+  of the image, when it has one) with the convert stage's functional test (`scripts/model_check.py test`,
+  [section 6.5](#65-the-checks-of-the-convert-stage)): a run that ends with an error or crashes stops the package,
+  and what says nothing about the model (a timeout, a stop from outside, a tool this machine cannot run or start, an
+  embedding model) is a note in the manifest. The programs must be ELF programs for the board, and every file must
+  match `SHA256SUMS`. `build.sh --package` (also `target_module.sh` started by hand and the entrypoint modes `target` and
   `pipeline`) makes the package without a profile too, with the plain defaults of the target (aarch64 for Rockchip),
   and the manifest says so (`hardware.source: defaults`). The framework's own deployment stays `llm-cli deploy` and
   the **Deployment** tab, over its SSH session with the framework's key and known hosts.
