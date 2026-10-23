@@ -2369,7 +2369,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Paketseiten werden Stück für Stück ohne Ersetzen gespeichert, also behielt eine geänderte oder weggefallene Seite
   ihre alten Auszüge. Jeder Auszug trägt jetzt den Inhalts-Digest des installierten Pakets; sobald jede Seite der neuen
   Version drin ist, werden die Auszüge der älteren entfernt (`RAGManager.remove_pack_leftovers`), je Paket und
-  Seitenquelle, nie die anderer Pakete oder deine eigenen Seiten. Der Snapshot vor dem Import bleibt. Eine Paketseite,
+  Seitenquelle, nie die anderer Pakete oder deine eigenen Seiten; eine einsortierte lose Datei ersetzt auch die
+  Auszüge, die eine frühere Version unsortiert aus ihr importiert hat. Der Snapshot vor dem Import bleibt. Eine Paketseite,
   die sich nicht importieren ließ, landete früher nur im Log; warum ein Paket wartet, wird jetzt nach der Installation
   gesagt (`last_sync_problem`). Gecrawlte Seiten ersetzten ihre früheren Auszüge schon und werden direkt nach dem
   Download gespeichert (unverändert).

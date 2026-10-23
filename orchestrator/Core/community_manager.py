@@ -99,6 +99,7 @@ TARGET_MARKERS = ".targets"
 # target, or keep an older version's excerpts from being replaced).
 ORIGIN_FIELDS = ("origin_pack", "origin_sha256", "topic", "target")
 LOOSE_AUTHOR = "a file on this computer"   # the author a sorted loose knowledge file is installed under
+LOOSE_SOURCE = "loose file "   # the provenance source of a sorted loose file, before its label
 
 
 class TrustLevel(str, Enum):
@@ -349,6 +350,7 @@ class _KnowledgeImport:
     marker: Path            # written once every page is in
     origin: str             # origin_pack of its excerpts
     tags: Dict[str, str]    # {"topic": ...} or {"target": ...}
+    legacy_origins: Tuple[str, ...] = ()   # the origin_pack an earlier, unsorted import of the same file used
 
 
 @dataclass(frozen=True)
@@ -865,7 +867,8 @@ class CommunityManager:
                 raise PackError(f"{loose.label} cannot be sorted: it is not a knowledge file the framework imports:\n- "
                                 + "\n- ".join(problems[:20]))
             prov = Provenance(kind="knowledge", id=pack_id, version="1.0.0", trust=TrustLevel.LOCAL.value,
-                              source=f"loose file {loose.label}"[:1000], pack_sha256=hashlib.sha256(data).hexdigest(),
+                              source=f"{LOOSE_SOURCE}{loose.label}"[:1000],
+                              pack_sha256=hashlib.sha256(data).hexdigest(),
                               content_sha256=manifest.content_sha256(), author=LOOSE_AUTHOR, installed_at=utc_now(),
                               topic=topic, target=target)
             pages = len(parsed) if isinstance(parsed, list) else 0
@@ -1591,9 +1594,16 @@ class CommunityManager:
         items = []
         for folder, prov in self._knowledge_layout()[0]:
             scope, name = knowledge_scope(prov)
+            # A sorted loose file that earlier versions imported unsorted: its excerpts named the file (a .json in
+            # community/knowledge/) or its folder (<folder>/knowledge.json); the sorted pack replaces them.
+            legacy: Tuple[str, ...] = ()
+            if prov.trust == TrustLevel.LOCAL.value and prov.source.startswith(LOOSE_SOURCE):
+                parts = prov.source[len(LOOSE_SOURCE):].split("/")
+                old = parts[0] if len(parts) == 1 or (len(parts) == 2 and parts[1] == KNOWLEDGE_FILE) else ""
+                legacy = (old,) if old and old != folder.name else ()
             items.append(_KnowledgeImport(f"knowledge pack {folder.name}", folder / KNOWLEDGE_FILE, folder,
                                           prov.content_sha256, self.knowledge_dir / f"{folder.name}.imported",
-                                          folder.name, {scope: name}))
+                                          folder.name, {scope: name}, legacy))
         root = self.targets_dir
         for folder in sorted(root.iterdir()) if root.is_dir() else []:
             prov = None if folder.is_symlink() or not folder.is_dir() else read_provenance(folder)
@@ -1635,7 +1645,8 @@ class CommunityManager:
             return imported, (f"{item.label}: {failed} page(s) not imported yet; tried again when the knowledge base "
                               "starts next time")
         remove = getattr(rag_manager, "remove_pack_leftovers", None)
-        if callable(remove) and remove(item.origin, item.expected) is False:
+        if callable(remove) and any(remove(origin, item.expected) is False
+                                    for origin in (item.origin, *item.legacy_origins)):
             return imported, (f"{item.label}: the excerpts of its older version could not be removed yet; tried "
                               "again when the knowledge base starts next time")
         return imported, ""

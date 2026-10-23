@@ -2098,7 +2098,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   pages are stored piece by piece without replacing, so a changed or dropped page kept its old excerpts. Every excerpt
   now carries the installed pack's content digest; once every page of the new version is in, the excerpts of the
   older one are removed (`RAGManager.remove_pack_leftovers`), per pack and page source, never those of other packs or
-  your own pages. The snapshot before the import stays. A pack page that failed to import used to be written only to
+  your own pages; a sorted loose file also replaces the excerpts an earlier version imported from it unsorted. The
+  snapshot before the import stays. A pack page that failed to import used to be written only to
   the log; why a pack waits is now said after the install (`last_sync_problem`). Crawled pages already replaced their
   earlier excerpts and are stored right after their download (unchanged).
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
