@@ -1242,9 +1242,10 @@ class LocalLLMRuntime:
     def start(self, tier: Optional[str] = None, ctx: Optional[int] = None,
               sleep_idle_seconds: Optional[int] = None, timeout: Optional[float] = None,
               tie_to_process: bool = False, remember: bool = True) -> LocalEndpoint:
-        """Starts llama-server (or returns the running one if it already serves this model and context).
-        tier "auto" forgets a tier chosen earlier; tie_to_process ends the server together with this process;
-        remember=False keeps the tier chosen earlier (e.g. for an evaluation run). Only a build that passed its
+        """Starts llama-server (or returns the running one if it already serves this model and context, and the idle
+        time when one is given). tier "auto" forgets a tier chosen earlier; the choice is recorded also when the running
+        server is reused; tie_to_process ends the server together with this process; remember=False keeps the tier
+        chosen earlier (e.g. for an evaluation run). Only a build that passed its
         verification on this machine and still matches its manifest is started (or the opted-in prebuilt archive).
         In Docker mode, Ditto's verified image is started instead (_start_container)."""
         if self.mode() == "docker":
@@ -1260,21 +1261,36 @@ class LocalLLMRuntime:
         for note in installed.notes:
             self.logger.warning(f"Local runtime: {note}")
         model, _ = self.resolve_model(tier)
+        idle = self._idle_seconds(sleep_idle_seconds)
         with self._lock():
             state = self._load_state() or {}
             running = self.endpoint()
             if running:
                 same = (state.get("alias") == model.alias and state.get("server") == str(installed.server)
-                        and (ctx is None or state.get("ctx") == ctx))
+                        and (ctx is None or state.get("ctx") == ctx)
+                        and (sleep_idle_seconds is None or state.get("sleep_idle_seconds") == idle))
                 if same and self._health(running.port) == 200:
+                    self._remember_tier(tier, model, remember)
                     return running
                 self._stop_locked()
             self._cleanup_stale_locked()
             model_path = self._ensure_model_verified(model)
-            endpoint = self._launch(installed, model, model_path, ctx, sleep_idle_seconds, timeout, tie_to_process)
+            endpoint = self._launch(installed, model, model_path, ctx, idle, timeout, tie_to_process)
+            self._remember_tier(tier, model, remember)
+        return endpoint
+
+    def _idle_seconds(self, requested: Optional[int]) -> int:
+        """The idle time a server gets (--sleep-idle-seconds, 0 = never): the request, else the catalog's; 0 when the
+        pinned build has no such option. Recorded in server.json and compared the same way, so a build without the
+        option is not restarted on every start that asks for one."""
+        idle = self.catalog.server.sleep_idle_seconds if requested is None else int(requested)
+        return idle if self.catalog.llama_cpp.supports("sleep_idle_seconds") else 0
+
+    def _remember_tier(self, tier: Optional[str], model: ModelEntry, remember: bool) -> None:
+        """Records the tier chosen with `start --model` (under the runtime lock, which install() also takes to write
+        active.json): "auto" forgets it; remember=False (an evaluation run) keeps the earlier choice."""
         if tier and remember:
             self._update_active(tier=None if tier == "auto" else model.tier)
-        return endpoint
 
     def _launch(self, installed: InstalledRuntime, model: ModelEntry, model_path: Path, ctx: Optional[int],
                 sleep_idle_seconds: Optional[int], timeout: Optional[float], tie_to_process: bool) -> LocalEndpoint:
@@ -1288,10 +1304,7 @@ class LocalLLMRuntime:
             ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)
         else:
             ctx, why = max(256, min(int(ctx), model.native_context)), "set explicitly"
-        if sleep_idle_seconds is None:
-            sleep_idle_seconds = self.catalog.server.sleep_idle_seconds
-        if not self.catalog.llama_cpp.supports("sleep_idle_seconds"):
-            sleep_idle_seconds = 0
+        sleep_idle_seconds = self._idle_seconds(sleep_idle_seconds)
         cache_ram = max(256, min(8192, hw.ram_total // (8 * MIB)))
         timeout = timeout or self.catalog.server.health_timeout_seconds
 
@@ -1328,7 +1341,7 @@ class LocalLLMRuntime:
             _write_private(self.state_file, json.dumps({
                 "pid": proc.pid, "create_time": created, "port": port, "server": str(installed.server),
                 "variant": installed.variant, "origin": installed.origin, "build_id": installed.build_id,
-                "tier": model.tier, "alias": model.alias, "ctx": ctx,
+                "tier": model.tier, "alias": model.alias, "ctx": ctx, "sleep_idle_seconds": sleep_idle_seconds,
                 "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
             if tie_to_process:
                 self._tie_to_this_process(proc.pid, created)
@@ -1374,20 +1387,22 @@ class LocalLLMRuntime:
         read-only, verified here first), on 127.0.0.1 only."""
         image = self.docker_image()
         model, _ = self.resolve_model(tier)
+        idle = self._idle_seconds(sleep_idle_seconds)
         with self._lock():
             state = self._load_state() or {}
             running = self.endpoint()
             if running:
                 same = (state.get("mode") == "docker" and state.get("alias") == model.alias
-                        and state.get("image_id") == image.image_id and (ctx is None or state.get("ctx") == ctx))
+                        and state.get("image_id") == image.image_id and (ctx is None or state.get("ctx") == ctx)
+                        and (sleep_idle_seconds is None or state.get("sleep_idle_seconds") == idle))
                 if same and self._health(running.port) == 200:
+                    self._remember_tier(tier, model, remember)
                     return running
                 self._stop_locked()
             self._cleanup_stale_locked()
             model_path = self._ensure_model_verified(model)
-            endpoint = self._launch_container(image, model, model_path, ctx, sleep_idle_seconds, timeout)
-        if tier and remember:
-            self._update_active(tier=None if tier == "auto" else model.tier)
+            endpoint = self._launch_container(image, model, model_path, ctx, idle, timeout)
+            self._remember_tier(tier, model, remember)
         return endpoint
 
     def _launch_container(self, image, model: ModelEntry, model_path: Path, ctx: Optional[int],
@@ -1404,10 +1419,7 @@ class LocalLLMRuntime:
             ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)
         else:
             ctx, why = max(256, min(int(ctx), model.native_context)), "set explicitly"
-        if sleep_idle_seconds is None:
-            sleep_idle_seconds = self.catalog.server.sleep_idle_seconds
-        if not self.catalog.llama_cpp.supports("sleep_idle_seconds"):
-            sleep_idle_seconds = 0
+        sleep_idle_seconds = self._idle_seconds(sleep_idle_seconds)
         extra = ["-c", str(ctx), "--cache-ram", str(max(256, min(8192, hw.ram_total // (8 * MIB))))]
         if gpu.used:
             extra += ["-ngl", "auto"]
@@ -1449,8 +1461,8 @@ class LocalLLMRuntime:
         _write_private(self.state_file, json.dumps({
             "mode": "docker", "container_id": container_id, "container_name": name, "image_id": image.image_id,
             "build_id": image.labels.get(cs.LABEL_BUILD), "port": port, "variant": backend, "origin": "docker",
-            "tier": model.tier, "alias": model.alias, "ctx": ctx, "key_file": str(key_file),
-            "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+            "tier": model.tier, "alias": model.alias, "ctx": ctx, "sleep_idle_seconds": sleep_idle_seconds,
+            "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
         outcome = self._wait_container_healthy(container_id, port, timeout)
         if outcome == "ok":
             try:

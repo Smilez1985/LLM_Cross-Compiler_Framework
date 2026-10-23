@@ -530,6 +530,29 @@ class TestServerInDocker:
         server.status = "exited"
         assert rt.endpoint() is None, "a key is never handed to whatever listens on the port now"
 
+    def test_a_reused_container_remembers_the_tier_and_another_idle_time_restarts_it(self, tmp_path, dri):
+        # The same two gaps as bare metal: `runtime start --model X` on a container that already serves X recorded no
+        # choice, and an explicit idle time other than the running container's was ignored.
+        client = FakeClient()
+        rt = runtime(tmp_path, client)
+        _docker_mode(rt, client)
+        _model(rt)
+        rt._health = lambda port: 200
+        rt._check_auth = lambda port, key: None
+
+        def servers():
+            return [c for c in client.created if c.labels.get(cs.LABEL) == "server"]
+        rt.start(tier="small", remember=False)
+        assert len(servers()) == 1 and rt.preferred_tier() is None
+        assert "--sleep-idle-seconds" in servers()[-1].command
+        rt.start(tier="small")
+        assert len(servers()) == 1 and rt.preferred_tier() == "small"
+        rt.start(sleep_idle_seconds=0)
+        assert len(servers()) == 2 and "--sleep-idle-seconds" not in servers()[-1].command
+        rt.start(sleep_idle_seconds=0)
+        rt.start()
+        assert len(servers()) == 2
+
     def test_a_missing_or_other_image_is_not_started(self, tmp_path):
         client = FakeClient()
         rt = runtime(tmp_path, client)
