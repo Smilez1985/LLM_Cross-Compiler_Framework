@@ -1929,10 +1929,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer
   saw a `.gguf` file (`config_module.sh` tells a GGUF input by its suffix) and tried to convert it; a cached model
   folder chosen by its path in the Builder was mounted whole, and its links to the blobs outside it did not resolve
-  inside the container. A linked file now keeps its link's name in the build (`tools/local_files.py` `mount_plan`
-  and the Builder's local path), and a folder that holds links is bound file by file, as an AI caller's reference
-  already was (`file_binds`, `linked_folder_binds`); files and folders without links are mounted as before.
-  Regression tests: `tests/test_hf_gui_download.py` `TestTheOldCacheIsUsableForABuild`.
+  inside the container. A link to a cache blob (a file named by its checksum) now keeps its link's name in the build
+  (`tools/local_files.py` `mount_plan` and the Builder's local path), and a person's folder whose links lead to cache
+  blobs is bound file by file, as an AI caller's reference already was (`file_binds`, `linked_folder_binds`). Every
+  other link, and a folder with any other link (or one the binder refuses: broken, to a folder, a second name for
+  one file), is mounted exactly as before: a link's own name would change the build's model name, and a link out of
+  a person's folder is never followed into the container. Regression tests: `tests/test_hf_gui_download.py`
+  `TestTheOldCacheIsUsableForABuild`.
 - **A problem on this computer is no longer "the board does not answer"**: every contact with a board counted an
   error that was none of the four reason codes as `device_host_down`. A full or read-only disk, or no permission on
   the framework's own files (its SSH key, known_hosts), therefore told the person to switch the board on, the deploy

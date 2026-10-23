@@ -2182,10 +2182,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   unter diesem Prüfsummen-Namen ein, sodass der Build keine `.gguf`-Datei mehr sah (`config_module.sh` erkennt eine
   GGUF-Eingabe an ihrer Endung) und sie umzuwandeln versuchte; ein Modellordner aus dem Cache, im Builder über seinen
   Pfad gewählt, wurde als Ganzes eingebunden, und seine Links auf die Blobs außerhalb lösten sich im Container nicht
-  auf. Eine verlinkte Datei behält jetzt im Build den Namen ihres Links (`tools/local_files.py` `mount_plan` und der
-  lokale Pfad des Builders), und ein Ordner mit Links wird Datei für Datei eingebunden, wie es die Referenz eines
-  KI-Aufrufers schon wurde (`file_binds`, `linked_folder_binds`); Dateien und Ordner ohne Links werden wie bisher
-  eingebunden. Regressionstests: `tests/test_hf_gui_download.py` `TestTheOldCacheIsUsableForABuild`.
+  auf. Ein Link auf einen Cache-Blob (eine Datei, die nach ihrer Prüfsumme heißt) behält jetzt im Build den Namen
+  seines Links (`tools/local_files.py` `mount_plan` und der lokale Pfad des Builders), und ein eigener Ordner, dessen
+  Links auf Cache-Blobs führen, wird Datei für Datei eingebunden, wie es die Referenz eines KI-Aufrufers schon wurde
+  (`file_binds`, `linked_folder_binds`). Jeder andere Link und ein Ordner mit einem anderen Link (oder einem, den
+  das Einbinden ablehnt: kaputt, auf einen Ordner, ein zweiter Name für eine Datei) werden genau wie bisher
+  eingebunden: Der eigene Name eines Links würde den Modellnamen des Builds ändern, und ein Link aus einem eigenen
+  Ordner hinaus wird nie in den Container verfolgt. Regressionstests: `tests/test_hf_gui_download.py`
+  `TestTheOldCacheIsUsableForABuild`.
 - **Ein Problem auf diesem Computer heißt nicht mehr „das Board antwortet nicht“**: Jeder Kontakt mit einem Board
   zählte einen Fehler, der keiner der vier Grundcodes war, als `device_host_down`. Eine volle oder schreibgeschützte
   Festplatte oder fehlende Rechte an den eigenen Dateien des Frameworks (sein SSH-Schlüssel, known_hosts) sagten der

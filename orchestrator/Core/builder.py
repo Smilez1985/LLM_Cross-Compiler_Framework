@@ -1167,8 +1167,10 @@ class BuildEngine:
         # 'Documents/private' would be a folder below the working directory (G8).
         local = Path(source).expanduser()
         if config.local_inputs is None and local.exists():
-            linked_name = local.name if local.is_symlink() else ""  # a cache blob is named by its checksum
+            # A cache blob is named by its checksum: a link to it keeps the link's name, any other file its own.
+            link_name = local.name if local.is_symlink() else ""
             local = local.resolve()
+            linked_name = link_name if link_name and local_files.cache_blob(local) else ""
             progress.add_log(f"Using local model {local}")
             if local.is_dir():
                 # A folder of links (a Hugging Face cache snapshot) file by file: its links lead out of it.
