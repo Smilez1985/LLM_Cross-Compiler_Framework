@@ -12,8 +12,9 @@ Updates v2.3.0:
 - License check improvements.
 """
 
+import threading
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass
 
 from orchestrator.utils.logging import get_logger
@@ -37,10 +38,12 @@ class ModelManager:
         
         # --- Logic for handling Framework vs Config object ---
         framework = None
+        self.framework = None  # the FrameworkManager when there is one (its vault token, its per-user folder)
         if hasattr(config_or_framework, 'config') and not isinstance(config_or_framework, dict):
             # It is FrameworkManager: relative paths resolve against the installation, never the working
             # directory (the CLI and the MCP server are started inside arbitrary projects).
             framework = config_or_framework
+            self.framework = framework
             self.config = framework.config
             self.root_path = Path(getattr(getattr(framework, 'info', None), 'installation_path', None) or Path("."))
         else:
@@ -117,17 +120,87 @@ class ModelManager:
         from huggingface_hub import HfApi
         return HfApi(token=token).list_repo_files(repo_id=repo_id)
 
-    def download_file(self, repo_id: str, filename: str, token: Optional[str] = None) -> str:
-        """Downloads one file for the GUI's Hugging Face browser (the person's own action). Raises on any failure.
-        AI callers use download_hf_file instead (orchestrator/Core/hf_hub.py: pinned commit, sha256, stop)."""
-        from huggingface_hub import HfApi, hf_hub_download
-        # The commit is resolved first and the file downloaded from exactly that commit (not a moving branch).
-        commit = HfApi(token=token).model_info(repo_id).sha
-        self.logger.info(f"Downloading {filename} from {repo_id} (commit {commit})...")
-        path = hf_hub_download(repo_id=repo_id, filename=filename, revision=commit, cache_dir=str(self.models_dir),
-                               token=token)
-        self.logger.info(f"Download successful: {path}")
-        return path
+    def download_file(self, repo_id: str, filename: str, token: Optional[str] = None,
+                      progress: Optional[Callable[[str, int, int], None]] = None,
+                      stop: Optional[threading.Event] = None) -> str:
+        """Downloads one file for the GUI's Hugging Face browser (the person's own action) through the framework's
+        verified fetcher, the same as an AI's download_hf_file (DECISIONS round 11 A6, hf_hub.download_for_person):
+        the commit is resolved first and exactly that commit's file is fetched, resumable, checked against the Hub's
+        size and sha256, into <models_dir>/hf/<owner>--<name>/<commit[:12]>/, under the one disk rule with its own
+        reservation in the per-user ledger while it runs. `token`: the one the person typed, else the one stored in
+        the framework; never an implicit one. `progress(name, done, total)` is called between chunks; `stop` ends it
+        between two chunks and keeps the part already downloaded. Raises on any failure (HubError, a DownloadError,
+        disk_plan.InsufficientSpace)."""
+        from orchestrator.Core.hf_hub import download_for_person
+        token = token or self._stored_token()
+        self.logger.info(f"Downloading {filename} from {repo_id}...")
+        path = download_for_person(self.models_dir, repo_id, filename, api=self._hub_api(token), token=token,
+                                   ledger=self._ledger(), stop=stop, progress=progress)
+        self.logger.info(f"Download successful: {path.name}")
+        return str(path)
+
+    # --- the old huggingface_hub cache (A6: listed and usable, an optional one-time Take over) ---
+
+    def old_downloads(self):
+        """The files the browser downloaded before A6 into huggingface_hub's cache inside the models folder
+        (hf_takeover.old_cache), each with its state (new, taken, conflict)."""
+        from orchestrator.Core.hf_takeover import old_cache
+        return old_cache(self.models_dir)
+
+    def take_over(self, files, stop: Optional[threading.Event] = None,
+                  progress: Optional[Callable[[int, int, str], None]] = None):
+        """Copies `files` of the old cache into the new folder, each checked (hf_takeover.take_over), under the one
+        disk rule with its own reservation while it runs; the old copies stay."""
+        from orchestrator.Core.hf_takeover import take_over
+        return take_over(self.models_dir, files, ledger=self._ledger(), stop=stop, progress=progress,
+                         lookup=self._hub_lookup())
+
+    def old_copies_plan(self):
+        """The deletion plan of the old cache's models that were taken over completely (hf_takeover), or None."""
+        from orchestrator.Core.hf_takeover import old_copies_plan
+        return old_copies_plan(self.models_dir)
+
+    def delete_old_copies(self, accepted, trash=None, audit=None):
+        """Removes exactly the old copies the person accepted in the deletion dialog (hf_takeover.delete_old_copies)."""
+        from orchestrator.Core.hf_takeover import delete_old_copies
+        return delete_old_copies(self.models_dir, accepted, trash=trash, audit=audit)
+
+    # --- what the downloads use ---
+
+    def _stored_token(self) -> Optional[str]:
+        """The Hugging Face token stored in the framework's vault (hf_token), or None."""
+        from orchestrator.Core.hf_hub import HubClient
+        return HubClient(self.framework).token() if self.framework is not None else None
+
+    def _hub_api(self, token: Optional[str]):
+        """The Hub's API with `token` or no token at all (False: never HF_TOKEN or the Hugging Face home folder's
+        token file), pinned to huggingface.co (hf_hub.hub_api: never the host in HF_ENDPOINT). A stand-in
+        framework's `hf_api_factory` replaces it (tests)."""
+        factory = getattr(self.framework, "hf_api_factory", None)
+        if callable(factory):
+            return factory(token or False)
+        from orchestrator.Core.hf_hub import hub_api
+        return hub_api(token)
+
+    def _hub_lookup(self):
+        """For the Take over: the files the Hub lists for one commit of a repository ({name: HubFile}), with the
+        stored token; used only for a cached file whose checksum the old cache did not keep."""
+        def lookup(repo: str, commit: str):
+            from orchestrator.Core.hf_hub import hub_file
+            token = self._stored_token()
+            info = self._hub_api(token).model_info(repo, revision=commit, files_metadata=True, token=token or False)
+            return {f.name: f for f in (hub_file(s) for s in getattr(info, "siblings", None) or [])}
+        return lookup
+
+    def _ledger(self):
+        """The disk reservation ledger every process of this user shares (builds and downloads), or None without a
+        per-user folder (a ConfigManager on its own)."""
+        if self.framework is None:
+            return None
+        from orchestrator.Core.build_plan import state_dir
+        from orchestrator.Core.disk_plan import ReservationLedger
+        folder = state_dir(self.framework)
+        return ReservationLedger(folder) if folder is not None else None
 
     def _detect_model_format(self, model_path: Path) -> str:
         if not model_path.exists(): return "unknown"

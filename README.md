@@ -294,7 +294,9 @@ tab:** copy a finished build to a board. The **Auto-Tuning** and **Models** tabs
 Menus: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (wizard for a new target, including "Deep Ingest" to add documentation to the knowledge base),
 **Tools > Hugging Face Model Browser...** (search models, see whether they are gated and their licence, download
-single files such as a GGUF into the models folder; a gated model asks for your Hugging Face token),
+single files such as a GGUF into the models folder's `hf/` folder, checked like an AI's download, with a Stop button;
+a gated model asks for your Hugging Face token; **Take over old downloads...** copies what earlier versions saved in
+the Hugging Face cache, see [Features](docs/Features.md#mcp-server)),
 **Tools > Open Community Hub** (see [Community zoo](#community-zoo)), **Tools > Tool Permissions (Ditto / MCP)...**,
 **Tools > Spoken Announcements** (on or off) and **Tools > Clear Input History...**
 
