@@ -265,6 +265,17 @@ def tree_sha256(root: Path) -> str:
     return _files_digest(_pack_files(root))
 
 
+def local_sha256(root: Path, manifest: PackManifest) -> Optional[str]:
+    """The manifest's content digest with each file's mode as the file system below root reports it, or None when
+    root does not hold exactly the manifest's files. Windows keeps no execute bit, so a pack's 0o755 scripts read as
+    0o644 there and tree_sha256 of the installed pack never gives the manifest's digest; this one it gives as long as
+    every file keeps the manifest's sha256 (contents are not read here: tree_sha256 reads them)."""
+    modes = {rel: 0o755 if st.st_mode & 0o111 else 0o644 for rel, _path, st in _scan(root)}
+    if set(modes) != {f.path for f in manifest.files}:
+        return None
+    return _files_digest(f.model_copy(update={"mode": modes[f.path]}) for f in manifest.files)
+
+
 def build_manifest(root: Path, *, kind: str, id: str, version: str, author: str, license: str,
                    created: Optional[str] = None, lcf_min_version: Optional[str] = None,
                    topic: Optional[str] = None, target: Optional[str] = None) -> PackManifest:

@@ -73,9 +73,9 @@ from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_P
                                               PROVENANCE_NAME, SHA256_PATTERN, UTC_TIME_PATTERN, VERSION_PATTERN,
                                               Kind, PackError, PackManifest, PackSignature, Strict, UserKeys,
                                               build_manifest, check_topic, decrypt_pack, encrypt_pack,
-                                              is_encrypted_pack, list_files, load_trusted_keys, read_manifest,
-                                              read_pack, scrub, sign_manifest, tree_sha256, utc_now, verify_index,
-                                              verify_manifest, verify_tree, write_pack)
+                                              is_encrypted_pack, list_files, load_trusted_keys, local_sha256,
+                                              read_manifest, read_pack, scrub, sign_manifest, tree_sha256, utc_now,
+                                              verify_index, verify_manifest, write_pack)
 from orchestrator.rag import licence_texts, licences, pack_licences
 from orchestrator.rag.licences import FULL_TEXT, LINK_AND_FACTS, SharePlan
 from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file, with_reason
@@ -1267,19 +1267,12 @@ class CommunityManager:
         """Moves the checked pack into place (atomic rename) with its provenance; the quarantine is removed."""
         try:
             pack = prepared.quarantine / "pack"
-            if prepared.imports_knowledge:
-                # Its pages are imported only while the installed files are these ones: their digest as this file
-                # system reports it (the same file system as the destination), kept where it is not the pack's own
-                # and only when every file is still the checked one (verify_tree compares paths, sizes and sha256;
-                # what differs is then only what the file system keeps of the modes)
-                local = tree_sha256(pack)
-                if local != prepared.provenance.content_sha256:
-                    try:
-                        verify_tree(pack, prepared.manifest)
-                    except PackError as e:
-                        self.logger.warning(f"{prepared.manifest.id}: not the checked files any more ({e})")
-                    else:
-                        prepared.provenance = prepared.provenance.model_copy(update={"local_sha256": local})
+            # The pack's digest with the modes as this file system keeps them (the same file system as the
+            # destination), kept where it is not the pack's own (Windows: no execute bit); the files' contents stay
+            # the manifest's, so a file changed later still makes the installed pack "changed"
+            local = local_sha256(pack, prepared.manifest)
+            if local and local != prepared.provenance.content_sha256:
+                prepared.provenance = prepared.provenance.model_copy(update={"local_sha256": local})
             (pack / PROVENANCE_NAME).write_text(prepared.provenance.to_json(), encoding="utf-8")
             dest = prepared.destination
             if prepared.manifest.kind == "knowledge":

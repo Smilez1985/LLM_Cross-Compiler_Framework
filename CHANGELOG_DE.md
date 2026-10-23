@@ -2380,10 +2380,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Wissenspaket, dessen Ordner es schon gibt, wird vor der Frage abgelehnt, wie andere Pakete. Windows speichert kein
   Ausführungsrecht, also passte ein installiertes Paket mit Skripten von Linux oder macOS (jedes Target, das der
   Modul-Assistent macht) dort nie zu seinem Digest: Sein Wissens-Snapshot wäre nie importiert worden, und **Installierte
-  Pakete prüfen** nannte es verändert. Die Herkunftsdatei hält jetzt auch den Digest der Dateien, wie das Dateisystem
-  ihn direkt nach der Installation meldete (nur wo er abweicht, und nur wenn jede Datei noch die geprüfte ist), und
-  beide Prüfungen nehmen ihn an. Gecrawlte Seiten ersetzten ihre früheren Auszüge schon und werden direkt nach dem
-  Download gespeichert (unverändert).
+  Pakete prüfen** nannte es verändert. Die Herkunftsdatei hält jetzt auch den Digest des Pakets mit den Rechten, wie
+  das Dateisystem sie behält (nur wo er abweicht; die Inhalte bleiben die des Manifests, also fällt eine später
+  geänderte Datei weiter auf), und beide Prüfungen nehmen ihn an. Gecrawlte Seiten ersetzten ihre früheren Auszüge
+  schon und werden direkt nach dem Download gespeichert (unverändert).
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie
