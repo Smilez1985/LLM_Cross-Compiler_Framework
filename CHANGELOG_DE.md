@@ -2403,7 +2403,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   lokalen Laufzeit und der Community-Zoo teilen): Ein TLS-Zertifikat, das sich nicht prüfen ließ, wurde wie eine
   abgebrochene Verbindung fünfmal mit Wartezeit erneut versucht und endete mit „did not complete after 5 attempts“;
   jetzt endet es sofort mit „the TLS certificate of <host> could not be verified“ (nur der Host, nie die
-  möglicherweise signierte Download-URL; hinter einem Proxy, der TLS prüft, gehört sein CA-Zertifikat in
+  möglicherweise signierte Download-URL; nach einer Weiterleitung der Host, der scheiterte, etwa ein Release-CDN,
+  nicht der erste, Review von port-runtime; hinter einem Proxy, der TLS prüft, gehört sein CA-Zertifikat in
   `REQUESTS_CA_BUNDLE`). Jeder andere Anfragefehler (zu viele Weiterleitungen, eine ungültige URL) und eine
   `.part`-Datei, die sich nicht schreiben lässt (volle Platte, keine Berechtigung), kamen als rohe Ausnahme heraus;
   jetzt enden sie mit einer klaren Meldung, und der Teil bleibt für die Fortsetzung erhalten. Regressionstests:
