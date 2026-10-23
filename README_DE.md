@@ -309,8 +309,10 @@ und **Models** sind Platzhalter.
 Menüs: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (Assistent für ein neues Target, mit „Deep Ingest“, um Dokumentation in die Wissensbasis aufzunehmen),
 **Tools > Hugging Face Model Browser...** (Modelle suchen, sehen, ob sie zugangsbeschränkt sind und welche Lizenz sie
-haben, einzelne Dateien wie ein GGUF in den Modellordner laden; ein zugangsbeschränktes Modell fragt nach deinem
-Hugging-Face-Token), **Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
+haben, einzelne Dateien wie ein GGUF in den Ordner `hf/` des Modellordners laden, geprüft wie ein Download einer KI,
+mit einem Anhalten-Knopf; ein zugangsbeschränktes Modell fragt nach deinem Hugging-Face-Token; **Alte Downloads
+übernehmen…** kopiert, was frühere Versionen im Hugging-Face-Cache gespeichert haben, siehe
+[Funktionen](docs/Features_DE.md#mcp-server)), **Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
 MCP)...**, **Tools > Gesprochene Ansagen** (ein oder aus) und **Tools > Eingabeverlauf löschen...** (in der
 englischen Oberfläche *Open Community Hub*, *Spoken Announcements* und *Clear Input History...*)
 

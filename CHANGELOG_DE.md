@@ -1410,6 +1410,31 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Der Hugging-Face-Browser der GUI lädt in den Ordner `hf/` des Modellordners, geprüft, wie ein Download einer KI**
+  (Entscheidung A6 des Maintainers; Konsolidierungskette hf). Neuer Ort: `<Modellordner>/hf/<Owner>--<Name>/<die
+  ersten 12 Zeichen des Commits>/<Datei>`, derselbe Ordner wie bei `download_hf_file` einer KI (der Builder legt
+  ganze Modelle weiter in `cache/models/hf/` ab); bisher speicherte der Browser über huggingface_hub in dessen Cache (`<Modellordner>/models--<Owner>--
+  <Name>/`, Links auf Blobs, die nach ihrer Prüfsumme heißen). Ein Codepfad: `ModelManager.download_file` ruft jetzt
+  `orchestrator/Core/hf_hub.py` `download_for_person` auf, das zuerst den Commit nachschlägt, genau die Datei dieses
+  Commits mit dem Fetcher des Frameworks lädt (`HubFetcher`: fortsetzbare `.part`-Datei, Größe und sha256 des Hubs
+  werden geprüft, bevor die Datei ihren Namen bekommt, das Token nur an huggingface.co, nie ein stilles `HF_TOKEN`)
+  und zuerst die eine Speicherplatz-Regel anwendet (die Reserve von `Core/disk_plan` und was laufende Builds und
+  Downloads reserviert haben; eine Ablehnung in der Sprache der Person) und während des Downloads eine eigene
+  Reservierung im Ledger des Benutzerordners hält, sodass ein Build, der inzwischen startet, ihren Platz mitzählt. Es
+  gilt das Token, das die Person im Browser eingibt, sonst das im Framework gespeicherte (`hf_token`), sonst keins. Das
+  Fenster zeigt den Fortschritt und hat einen Anhalten-Knopf (der bisher geladene Teil bleibt; ein neuer Download setzt
+  ihn fort). Modelle im alten Cache bleiben für KI-Aufrufer aufgeführt und für Builds nutzbar. Der neue Knopf **Alte
+  Downloads übernehmen…** (`orchestrator/Core/hf_takeover.py`, freiwillig und einmalig) kopiert sie in den neuen
+  Ordner, jede Datei gegen die Prüfsumme geprüft, mit der sie geladen wurde (der Name des Blobs: die LFS-sha256 oder
+  die Git-Blob-ID; bei einem Cache ohne Links, was der Hub für diesen Commit führt), unter der Speicherplatz-Regel mit
+  eigener Reservierung; eine Datei, die nicht passt, oder eine andere Datei gleichen Namens im neuen Ordner bleibt, wo
+  sie ist, mit ihrem Grund. Danach bietet er das Entfernen der alten Kopien nur im Löschdialog mit der genauen Liste
+  an (der Cache-Ordner jedes Modells, dessen Dateien alle übernommen sind, und die Dateien des gemeinsamen Speichers
+  des Caches, die nur sie nutzen, mit vollem Pfad und Größe; ein Ordner mit einer Datei, die die Übernahme nicht
+  aufführen kann, wird nie angeboten; Papierkorb oder endgültig; „Nein“ ist die Vorgabe), zuerst im Audit-Log
+  vermerkt; ohne dieses
+  Ja wird nichts gelöscht. Jeder Schritt läuft in einem Worker-Thread. Die Texte stehen in
+  `orchestrator/utils/l10n_hf.py` (Englisch und Deutsch). Der Browser liest den Offline-Modus wie bisher nicht.
 - **Ein Build sind wieder die vier Stufenmodule, und `build.sh` führt sie nur aus** (Entscheidung U9 des
   Maintainers; Konsolidierungskette build4). `targets/Rockchip/modules/build.sh` ist ein Stage-Runner über
   `source_module.sh` (die Quellen der Werkzeuge, aus denen das Image gebaut wurde), `config_module.sh`
@@ -2210,6 +2235,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
+  Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
+  Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie
+  unter diesem Prüfsummen-Namen ein, sodass der Build keine `.gguf`-Datei mehr sah (`config_module.sh` erkennt eine
+  GGUF-Eingabe an ihrer Endung) und sie umzuwandeln versuchte; ein Modellordner aus dem Cache, im Builder über seinen
+  Pfad gewählt, wurde als Ganzes eingebunden, und seine Links auf die Blobs außerhalb lösten sich im Container nicht
+  auf. Ein Link auf einen Cache-Blob (eine Datei, die nach ihrer Prüfsumme heißt) behält jetzt im Build den Namen
+  seines Links (`tools/local_files.py` `mount_plan` und der lokale Pfad des Builders), und ein eigener Ordner, dessen
+  Links auf Cache-Blobs führen, wird Datei für Datei eingebunden, wie es die Referenz eines KI-Aufrufers schon wurde
+  (`file_binds`, `linked_folder_binds`). Jeder andere Link und ein Ordner mit einem anderen Link (oder einem, den
+  das Einbinden ablehnt: kaputt, auf einen Ordner, ein zweiter Name für eine Datei) werden genau wie bisher
+  eingebunden: Der eigene Name eines Links würde den Modellnamen des Builds ändern, und ein Link aus einem eigenen
+  Ordner hinaus wird nie in den Container verfolgt. Regressionstests: `tests/test_hf_gui_download.py`
+  `TestTheOldCacheIsUsableForABuild`.
 - **Ein Problem auf diesem Computer heißt nicht mehr „das Board antwortet nicht“**: Jeder Kontakt mit einem Board
   zählte einen Fehler, der keiner der vier Grundcodes war, als `device_host_down`. Eine volle oder schreibgeschützte
   Festplatte oder fehlende Rechte an den eigenen Dateien des Frameworks (sein SSH-Schlüssel, known_hosts) sagten der
@@ -2656,6 +2695,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Das Hugging-Face-Token geht nur an huggingface.co, auch wenn `HF_ENDPOINT` einen anderen Host nennt** (Review
+  der Kette hf): huggingface_hub schickt seine API-Aufrufe an den Host in der Umgebungsvariable `HF_ENDPOINT` (einen
+  Mirror). Die Commit-Abfrage des Downloads im GUI-Browser und die Hub-Liste von **Alte Downloads übernehmen…**
+  schickten das eingegebene oder gespeicherte Token dorthin, ebenso jede Suche und Abfrage eines KI-Aufrufers,
+  während der Fetcher es nur an huggingface.co schickt. Jeder Hub-API-Aufruf von `orchestrator/Core/hf_hub.py`
+  (`HubClient`) und von Download und Übernahme des Browsers (`ModelManager`) läuft jetzt über `hf_hub.hub_api`, fest
+  auf huggingface.co. Regressionstests: `tests/test_hf_gui_download.py` `TestTheTokenGoesOnlyToHuggingFace`.
 - **Kein Home-Ordner und kein Name eines anderen Kontos erreicht eine KI über eine Datei-URL oder ein Leerzeichen**
   (D0; Vorgabe vom 2026-10-17). Die Pfad-Bezeichnungen für KIs (`security.paths.label_paths`, auch in `device_text`)
   ließen den Pfad einer `file:///`-URL stehen, wenn er den Home-Ordner eines anderen Kontos nannte

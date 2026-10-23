@@ -1238,6 +1238,29 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **The GUI's Hugging Face browser downloads into the models folder's `hf/` folder, checked, like an AI's download**
+  (maintainer decision A6; consolidation chain hf). New location: `<models folder>/hf/<owner>--<name>/<first 12
+  characters of the commit>/<file>`, the same folder as an AI's `download_hf_file` (the Builder keeps staging whole
+  models in `cache/models/hf/`); before,
+  the browser saved through huggingface_hub into that library's cache (`<models folder>/models--<owner>--<name>/`,
+  links to blobs named by their checksum). One code path: `ModelManager.download_file` now calls
+  `orchestrator/Core/hf_hub.py` `download_for_person`, which looks up the commit first, fetches exactly that commit's
+  file with the framework's fetcher (`HubFetcher`: resumable `.part` file, the Hub's size and sha256 checked before the
+  file gets its name, the token only to huggingface.co, never an implicit `HF_TOKEN`) and applies the one disk rule
+  first (`Core/disk_plan` reserve plus what running builds and downloads reserved; a refusal in the person's language)
+  and holds its own reservation in the per-user ledger while it runs, so a build started meanwhile counts its space.
+  The token the person types in the browser is used, else the one stored in the framework (`hf_token`), else none.
+  The window shows the progress and has a Stop button (the part downloaded so far is kept; downloading again resumes
+  it). Models in the old cache stay listed for AI callers and usable for builds. The new button **Take over old
+  downloads...** (`orchestrator/Core/hf_takeover.py`, optional and one-time) copies them into the new folder, each
+  file checked against the checksum it was downloaded with (the blob's name: the LFS sha256 or the git blob id; for
+  a cache without links what the Hub lists for that commit), under the disk rule with its own reservation; a file
+  that does not match, or another file of the same name in the new folder, stays where it is with its reason. Then it
+  offers to remove the old copies only in the deletion dialog with the exact list (each model's cache folder whose
+  every file was taken over, and the files of the cache's shared store only they use, with full path and size; a
+  folder that holds a file the Take over cannot list is never offered; trash or for good; "No" is the default),
+  audited first; nothing is deleted without that yes. Every step runs in a worker thread. The texts are in
+  `orchestrator/utils/l10n_hf.py` (English and German). The browser does not read offline mode, as before.
 - **A build is the four stage modules again, and `build.sh` only runs them** (maintainer decision U9; consolidation
   chain build4). `targets/Rockchip/modules/build.sh` is a stage runner over `source_module.sh` (the toolchain
   sources the image was built from), `config_module.sh` (normalizes the request, refuses what the target cannot
@@ -1951,6 +1974,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
+  Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
+  blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer
+  saw a `.gguf` file (`config_module.sh` tells a GGUF input by its suffix) and tried to convert it; a cached model
+  folder chosen by its path in the Builder was mounted whole, and its links to the blobs outside it did not resolve
+  inside the container. A link to a cache blob (a file named by its checksum) now keeps its link's name in the build
+  (`tools/local_files.py` `mount_plan` and the Builder's local path), and a person's folder whose links lead to cache
+  blobs is bound file by file, as an AI caller's reference already was (`file_binds`, `linked_folder_binds`). Every
+  other link, and a folder with any other link (or one the binder refuses: broken, to a folder, a second name for
+  one file), is mounted exactly as before: a link's own name would change the build's model name, and a link out of
+  a person's folder is never followed into the container. Regression tests: `tests/test_hf_gui_download.py`
+  `TestTheOldCacheIsUsableForABuild`.
 - **A problem on this computer is no longer "the board does not answer"**: every contact with a board counted an
   error that was none of the four reason codes as `device_host_down`. A full or read-only disk, or no permission on
   the framework's own files (its SSH key, known_hosts), therefore told the person to switch the board on, the deploy
@@ -2351,6 +2386,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **The Hugging Face token goes only to huggingface.co, also when `HF_ENDPOINT` names another host** (review of
+  chain hf): huggingface_hub sends its API calls to the host in the `HF_ENDPOINT` environment variable (a mirror).
+  The commit lookup of the GUI browser's download and the Hub list of **Take over old downloads...** sent the token
+  the person typed or stored there, and so did every search and lookup of an AI caller, while the fetcher sends it
+  only to huggingface.co. Every Hub API call of `orchestrator/Core/hf_hub.py` (`HubClient`) and of the browser's
+  download and Take over (`ModelManager`) now goes through `hf_hub.hub_api`, pinned to huggingface.co. Regression
+  tests: `tests/test_hf_gui_download.py` `TestTheTokenGoesOnlyToHuggingFace`.
 - **No other account's home folder or name reaches an AI through a file URL or a space** (D0; default of
   2026-10-17). The path labels for AIs (`security.paths.label_paths`, also inside `device_text`) left the path of a
   `file:///` URL as it was when it named another account's home folder (`file:///home/<name>/...`,

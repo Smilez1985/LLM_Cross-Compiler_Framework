@@ -57,6 +57,8 @@ DELETION_SITES = {
     ("orchestrator/utils/input_history.py", "InputHistory.clear"): PERSON_LIST,
     # the old knowledge base storage after its conversion to Qdrant Edge (DECISIONS RG5): the person's list only
     ("orchestrator/rag/migration.py", "delete_old_store"): PERSON,
+    # the old Hugging Face download cache after its Take over (A6): the person's list only (tests/test_hf_takeover.py)
+    ("orchestrator/Core/hf_takeover.py", "delete_old_copies"): PERSON,
     ("orchestrator/rag/edge_store.py", "EdgeStorage.delete"): KNOWLEDGE_REPLACED,
     # (the chat: FeedStore.clear_conversation and ChatHistory.clear delete rows and messages, not files; see below)
     ("orchestrator/Core/builder.py", "BuildEngine._keep_as_last_build"): NAME_ONLY,
@@ -81,6 +83,7 @@ DELETION_SITES = {
     ("orchestrator/Core/artifact_output.py", "_copy_verified"): TEMP,      # a save's unfinished copy
     ("orchestrator/Core/hf_hub.py", "HubFetcher._download_range"): TEMP,
     ("orchestrator/Core/hf_hub.py", "HubFetcher.fetch_file"): TEMP,
+    ("orchestrator/Core/hf_takeover.py", "_copy_one"): TEMP,   # a take-over's unfinished or unchecked copy
     ("orchestrator/gui/gui_state.py", "GuiState.save"): TEMP,
     ("orchestrator/runtime/device/tested.py", "_write"): TEMP,     # the board test record's unfinished temp file
     ("orchestrator/gui/sign_in.py", "UserConfigSnapshot.restore"): TEMP,   # puts the config back as it was
@@ -324,6 +327,28 @@ def test_every_deletion_path_needs_an_accepted_deletion_plan(tmp_path):
     with pytest.raises(PlanChanged):
         migration.delete_old_store(state, accepted, audit=Audit())
     assert (state / "qdrant" / "meta.json").exists()
+
+    # The old Hugging Face download cache after its Take over (A6): only the person, in the GUI or at a terminal,
+    # only the unchanged list (tests/test_hf_takeover.py covers the take-over, the trash and the audit entry).
+    from orchestrator.Core import hf_takeover
+    models = tmp_path / "models"
+    snapshot = models / "models--acme--m" / "snapshots" / ("c" * 40)
+    snapshot.mkdir(parents=True)
+    (models / "models--acme--m" / "refs").mkdir()
+    (snapshot / "config.json").write_bytes(b"{}")
+    taken = models / "hf" / "acme--m" / ("c" * 12) / "config.json"
+    taken.parent.mkdir(parents=True)
+    taken.write_bytes(b"{}")
+    copies = hf_takeover.old_copies_plan(models)
+    with pytest.raises(PermissionError):
+        hf_takeover.delete_old_copies(models, copies, audit=Audit())
+    with pytest.raises(PermissionError):
+        hf_takeover.delete_old_copies(models, AcceptedDeletion(copies, "permanent", "framework"), audit=Audit())
+    accepted = accept(copies, "gui", "permanent")
+    (snapshot / "more.json").write_bytes(b"{}")
+    with pytest.raises(PlanChanged):
+        hf_takeover.delete_old_copies(models, accepted, audit=Audit())
+    assert (snapshot / "config.json").exists()
 
     # The chat: rows and Ditto's conversation (WP6), only the person, only the unchanged list.
     from orchestrator.Core.chat_feed import FeedStore

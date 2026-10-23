@@ -2323,6 +2323,23 @@ wurde.
   markiert, Links aus dem Ordner hinaus, mehrfach verlinkte und versteckte Dateien und unfertige Downloads
   weggelassen; 50 je Seite), jede mit Datei-ID und `<Label>:<relativer Pfad>`, die `start_build` annimmt; eine
   heruntergeladene Datei erscheint dort auch.
+- **Hugging-Face-Downloads in der GUI (unveröffentlicht, Entscheidung A6):** **Tools > Hugging Face Model
+  Browser...** lädt über denselben Fetcher wie `download_hf_file` in denselben Ordner `models/hf/<owner>--<name>/<die
+  ersten 12 Zeichen des Commits>/`: Zuerst wird der Commit nachgeschlagen, die Datei wird gegen Größe und sha256 des
+  Hubs geprüft, bevor sie ihren Namen bekommt, und ein angehaltener Download setzt an seiner `.part`-Datei fort. Die
+  Speicherplatz-Regel kommt zuerst (die Reserve bleibt neben dem frei, was laufende Builds und Downloads reserviert
+  haben; sonst liest du, wie viel fehlt und was zu tun ist, in deiner Sprache), und der Download hält während er läuft
+  eine eigene Reservierung. Das Fenster zeigt den Fortschritt und hat einen Knopf **Anhalten** (der bisher geladene
+  Teil bleibt). Es sendet das Token, das du in seiner Token-Frage eingibst, sonst das im Framework gespeicherte, nie
+  `HF_TOKEN`. Frühere Versionen speicherten die Downloads des Browsers im Cache von huggingface_hub im Modellordner
+  (`models/models--<owner>--<name>/`); diese Modelle bleiben aufgeführt und für Builds nutzbar. **Alte Downloads
+  übernehmen…** (freiwillig, einmal) kopiert sie in den neuen Ordner, jede Datei gegen die Prüfsumme geprüft, mit der
+  sie geladen wurde (bei einem Cache ohne Links gegen das, was der Hub für diesen Commit führt); eine Datei, die nicht
+  passt, oder eine andere Datei gleichen Namens im neuen Ordner bleibt, wo sie ist, mit ihrem Grund. Danach bietet er
+  das Entfernen der alten Kopien im Löschdialog mit der genauen Liste an (der Cache-Ordner jedes Modells, dessen
+  Dateien alle übernommen sind, und die Dateien des gemeinsamen Speichers des Caches, die nur sie nutzen, mit vollem
+  Pfad und Größe; Papierkorb oder endgültig; „Nein“ ist die Vorgabe); ohne dein Ja wird nichts entfernt, und eine KI
+  entfernt sie nie.
 - **Geräte und Deployment (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` zeigt die
   [vertrauten Geräte](#übertragen-auf-das-board-deployment) mit deinem Namen dafür, Adresse, Fingerabdruck des
   Host-Schlüssels, ob das Gerät nutzbar ist (gekoppelt und sein Schlüssel noch der vertraute) und dem letzten

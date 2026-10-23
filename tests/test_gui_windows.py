@@ -23,7 +23,8 @@ class FakeModels:
     def list_repo_files(self, repo_id, token=None):
         return ["config.json", "model-Q4_K_M.gguf"]
 
-    def download_file(self, repo_id, filename, token=None):
+    def download_file(self, repo_id, filename, token=None, progress=None, stop=None):
+        # since A6 the browser's worker also hands over its progress callback and stop event
         self.downloads.append((repo_id, filename, token))
         return f"/models/{filename}"
 
