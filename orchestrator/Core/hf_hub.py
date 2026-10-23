@@ -568,10 +568,13 @@ def download_for_person(models_dir: Path, repo: str, filename: str, *, api: Any,
         have = part.stat().st_size if part.is_file() else 0
     except OSError:
         done, have = False, 0
-    need = 0 if done else max(int(file.size) - have, 0)
+    if have > int(file.size):
+        have = 0  # the fetcher starts such a part again from its first byte
+    need = 0 if done else int(file.size) - have
     what = f"download {filename}"
-    problem = refusal([room(Path(models_dir), need, label="models", what=what, ledger=ledger, disk_usage=disk_usage)],
-                      "the download")
+    # Nothing to write (the file is there complete and only checked): nothing for the disk rule to refuse.
+    problem = refusal([room(Path(models_dir), need, label="models", what=what, ledger=ledger,
+                            disk_usage=disk_usage)], "the download") if need else None
     if problem is not None:
         raise problem
     reservation = reserve_space(ledger, Path(models_dir), need, owner, f"{repo}/{filename}", need_label="models",
