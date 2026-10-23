@@ -1287,7 +1287,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   RK3566 the NPU runs voice and vision models, the LLM runs on the CPU as a GGUF), and a single weights file asks
   for the model's folder. Before, such an input reached the converter and failed there with a traceback. The input's
   integrity is checked (its JSON files, every SafeTensors header against the file size as the safetensors library
-  checks it, the shards an index lists, PyTorch archives, a GGUF header), and so is every GGUF the converter wrote
+  checks it, the shards an index lists, PyTorch archives, a GGUF header; only the weights the converter reads, so
+  a staged repository's leftover `pytorch_model.bin.index.json` beside its SafeTensors is no reason to refuse it),
+  and so is every GGUF the converter wrote
   (every tensor's data inside the file, as llama.cpp's loader checks it); the 1.x warnings about a missing config,
   tokenizer or weights stay. A short functional test runs the written GGUF with `llama-completion`, the one-shot
   generator that was `llama-cli` in 1.x (`llama-cli` itself when an image has only that): 8 tokens, at most 120 s,
@@ -1297,7 +1299,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   go into the log and into `build_info.json` as `conversion` (numbers and words, no paths), which the build engine
   keeps when it completes the manifest. A file a converter replaces (the `--output` file of 1.x, an earlier result)
   is kept as `FILE.convert-backup` until the new one passed its checks; a failed or stopped stage removes what it
-  wrote and puts the backups back, and after a killed run the next start of the stage does. The modules stay
+  wrote and puts the backups back, and after a killed run the next start of the stage does (an earlier file the
+  person put back by hand stays). A second build into the same output folder finds the RKLLM or RKNN model the
+  format helper wrote over the first one's file of the same name. The modules stay
   callable on their own with their 1.x options. The characterization tests compare `build_info.json` without the new
   key, and their stub toolchains write GGUF and SafeTensors files with valid headers (`tests/model_files.py`).
 - **New targets get working stage modules, and the entrypoint modes run the stage runner.** The template's

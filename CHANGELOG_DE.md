@@ -1463,7 +1463,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   und Bildmodelle aus, das LLM läuft als GGUF auf der CPU), und eine einzelne Gewichtsdatei fragt nach dem Ordner des
   Modells. Vorher erreichte eine solche Eingabe den Konverter und scheiterte dort mit einem Traceback. Geprüft wird
   die Integrität der Eingabe (ihre JSON-Dateien, jeder SafeTensors-Header gegen die Dateigröße, wie die
-  safetensors-Bibliothek ihn prüft, die Teildateien, die ein Index nennt, PyTorch-Archive, ein GGUF-Header) und die
+  safetensors-Bibliothek ihn prüft, die Teildateien, die ein Index nennt, PyTorch-Archive, ein GGUF-Header; nur die
+  Gewichte, die der Konverter liest, also ist eine übrig gebliebene `pytorch_model.bin.index.json` neben den
+  SafeTensors eines bereitgestellten Repositorys kein Grund zur Ablehnung) und die
   jedes GGUF, das der Konverter geschrieben hat (die Daten jedes Tensors liegen in der Datei, wie der Lader von
   llama.cpp es prüft); die Warnungen von 1.x zu fehlender Konfiguration, fehlendem Tokenizer oder fehlenden Gewichten
   bleiben. Ein kurzer Funktionstest führt das geschriebene GGUF mit `llama-completion` aus, dem Einmal-Generator, der
@@ -1476,7 +1478,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Vervollständigen des Manifests behält. Eine Datei, die ein Konverter ersetzt (die `--output`-Datei von 1.x, ein
   früheres Ergebnis), bleibt als `DATEI.convert-backup` erhalten, bis die neue ihre Prüfungen bestanden hat; eine
   gescheiterte oder angehaltene Stufe entfernt, was sie geschrieben hat, und legt die Sicherungen zurück, nach einem
-  abgebrochenen Lauf tut es der nächste Start der Stufe. Die Module bleiben mit ihren Optionen von 1.x einzeln
+  abgebrochenen Lauf tut es der nächste Start der Stufe (eine frühere Datei, die du von Hand zurückgelegt hast,
+  bleibt). Ein zweiter Build in denselben Ausgabeordner findet das RKLLM- oder RKNN-Modell, das der Format-Helfer
+  über die gleichnamige Datei des ersten geschrieben hat. Die Module bleiben mit ihren Optionen von 1.x einzeln
   aufrufbar. Die Charakterisierungstests vergleichen `build_info.json` ohne den neuen Schlüssel, und ihre
   nachgebauten Werkzeugketten schreiben GGUF- und SafeTensors-Dateien mit gültigen Headern (`tests/model_files.py`).
 - **Neue Targets bekommen funktionierende Stufenmodule, und die Entrypoint-Modi führen den Stage-Runner aus.** Das
