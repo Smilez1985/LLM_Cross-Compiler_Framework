@@ -1240,7 +1240,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ### Changed
 - **The GUI's Hugging Face browser downloads into the models folder's `hf/` folder, checked, like an AI's download**
   (maintainer decision A6; consolidation chain hf). New location: `<models folder>/hf/<owner>--<name>/<first 12
-  characters of the commit>/<file>`, the same folder `download_hf_file` and the Builder's own downloads use; before,
+  characters of the commit>/<file>`, the same folder as an AI's `download_hf_file` (the Builder keeps staging whole
+  models in `cache/models/hf/`); before,
   the browser saved through huggingface_hub into that library's cache (`<models folder>/models--<owner>--<name>/`,
   links to blobs named by their checksum). One code path: `ModelManager.download_file` now calls
   `orchestrator/Core/hf_hub.py` `download_for_person`, which looks up the commit first, fetches exactly that commit's

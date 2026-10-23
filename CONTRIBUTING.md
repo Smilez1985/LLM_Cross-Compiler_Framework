@@ -630,6 +630,13 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   with `person_reason`. Never compare `shutil.disk_usage` with a margin of your own. A download takes the rule
   as `PinnedDownloader(space=download_rule(ledger=...))`; a long call that writes later holds its space with
   `hf_hub.reserve_space`. Tests read a roomy disk (the `roomy_disk_usage` fixture); a test of a check gives its own.
+- **One Hugging Face downloader.** A file from the Hub comes through `orchestrator/Core/hf_hub.py` `HubFetcher`
+  (pinned commit, resumable `.part`, the Hub's size and sha256 checked before the file gets its name, the token only
+  to huggingface.co); never call huggingface_hub's `hf_hub_download` or `snapshot_download` for a model
+  (`tests/test_hf_gui_download.py` fails on one). A single file lands at `download_path(models_dir, repo, commit,
+  name)`: an AI's `download_hf_file` and the GUI's browser (`download_for_person`, which also applies the disk rule
+  and holds a reservation while it runs) share it. Files of huggingface_hub's old cache are read through
+  `orchestrator/Core/hf_takeover.py`; its old copies go only as an accepted deletion plan (`delete_old_copies`).
 - **Every CLI action has a mouse path.** Many people never use a terminal, so a person can start every command and
   option of `llm-cli` in the GUI as well, without typing a command (typing a value into a field is fine). A new
   command or option needs its mouse path, a menu entry, a button or a field that calls the same core function as the

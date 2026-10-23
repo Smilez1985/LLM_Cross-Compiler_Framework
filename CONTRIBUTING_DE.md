@@ -664,6 +664,14 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   einem eigenen Spielraum. Ein Download bekommt die Regel als `PinnedDownloader(space=download_rule(ledger=...))`;
   ein langer Aufruf, der später schreibt, hält seinen Platz mit `hf_hub.reserve_space`. Tests lesen eine geräumige
   Festplatte (die Fixture `roomy_disk_usage`); ein Test einer Prüfung gibt seine eigene vor.
+- **Ein Hugging-Face-Downloader.** Eine Datei vom Hub kommt über `orchestrator/Core/hf_hub.py` `HubFetcher`
+  (festgelegter Commit, fortsetzbare `.part`-Datei, Größe und sha256 des Hubs geprüft, bevor die Datei ihren Namen
+  bekommt, das Token nur an huggingface.co); rufe für ein Modell nie `hf_hub_download` oder `snapshot_download` von
+  huggingface_hub auf (`tests/test_hf_gui_download.py` schlägt bei einem solchen Aufruf fehl). Eine einzelne Datei
+  landet unter `download_path(models_dir, repo, commit, name)`: `download_hf_file` einer KI und der Browser der GUI
+  (`download_for_person`, das außerdem die Speicherplatz-Regel anwendet und während des Downloads eine Reservierung
+  hält) teilen ihn. Dateien des alten Caches von huggingface_hub werden über `orchestrator/Core/hf_takeover.py`
+  gelesen; seine alten Kopien gehen nur als angenommener Löschplan (`delete_old_copies`).
 - **Jede CLI-Aktion hat einen Weg mit der Maus.** Viele Menschen nutzen nie ein Terminal, deshalb kann eine Person
   jeden Befehl und jede Option von `llm-cli` auch in der GUI starten, ohne einen Befehl zu tippen (einen Wert in ein
   Feld zu tippen ist in Ordnung). Ein neuer Befehl oder eine neue Option braucht ihren Weg mit der Maus, einen
