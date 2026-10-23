@@ -152,7 +152,12 @@ Vorlage ausgefüllt wird:
   abgelehnt. Ein vorgebautes llama.cpp-Image wird ebenfalls abgelehnt.
 - **Pakete:** gültige Debian-Paketnamen. **Flags:** einfache Compiler- oder CMake-Optionen wie `-mcpu=cortex-a76`
   oder `-DGGML_CUDA=ON`. Sie sind nur Hinweise: Das Modul vermerkt sie in seinem `runtime:`-Block, und kein Build
-  wendet sie je an.
+  wendet sie je an. Die CMake-Flags dürfen keine Option von llama.cpp einschalten, die beim Bauen etwas herunterlädt
+  (`-DLLAMA_USE_PREBUILT_UI=ON`, `-DLLAMA_CURL=ON`, `-DGGML_CUDA_CCCL_VERSION=...`,
+  `-DFETCHCONTENT_FULLY_DISCONNECTED=OFF`) oder `llama-server` Unterprozesse gibt (`-DLLAMA_SUBPROCESS=ON`): Builds
+  haben kein Netzwerk, und das Board-Paket eines von Hand übergebenen Hardware-Profils nimmt diese Flags. Sie werden
+  mit dem Grund des Build-Rezepts abgelehnt (`refused_option` in `orchestrator/runtime/build/recipe.py`, die Regel,
+  der jeder Build-Plan folgt).
 - **Shell-Code** (Einrichtungsbefehle, Quantisierungsblock): keine Downloads (`curl`, `wget`, ...), kein `sudo`,
   kein Löschen von `/`, kein `chmod 777`, kein Schreiben auf Rohgeräte, kein Docker-Socket und kein `docker run`,
   kein Ausführen erzeugten Codes; keine Steuerzeichen. Jedes erzeugte Skript muss `bash -n` bestehen.
@@ -831,6 +836,7 @@ seiner Datei und bei Skripten mit seiner Zeile gemeldet.
 | Festgelegte Images | In jeder Datei, deren Name in beliebiger Schreibweise mit `dockerfile` beginnt (`Dockerfile`, `dockerfile`, `Dockerfile.gpu`), muss jedes Image, das `FROM`, `COPY --from=` oder `RUN --mount=...,from=` verwendet, per Digest festgelegt sein (`name@sha256:` und 64 Hex-Ziffern). Ausgenommen sind offizielle Basis-Images mit Tag (Namen, die mit `debian:`, `ubuntu:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` oder `python:` beginnen), eine frühere Build-Stufe (`FROM ... AS builder`, danach `COPY --from=builder`) und eine Stufennummer (`--from=0`). Die `nvidia/cuda`-Images von NVIDIA brauchen einen Digest. Kommentarzeilen werden übersprungen. Eine Variable wie `FROM ${BASE_IMAGE}` wird abgelehnt, weil sie keine Image-Angabe ist. |
 | Kein vorgebautes llama.cpp | Das Framework teilt Rezepte, keine Binärdateien ([Abschnitt 5.1](#51-llamacpp-im-image-rezepte-keine-binärdateien)). In Dockerfiles: kein Image, dessen Name `llama.cpp`, `llama-cpp`, `llamacpp` oder `llama-server` enthält, und keines der früheren Laufzeit-Images des Frameworks (`ghcr.io/smilez1985/llm-runtime`, `ghcr.io/llm-framework/builder`, `ghcr.io/llm-framework/inference-node`), auch nicht per Digest festgelegt; kein `COPY --from=` (oder `RUN --mount=...,from=`) von llama.cpp-Programmen aus einem anderen Image, auch nicht über eine Build-Stufe, die nur dieses Image nennt (`FROM acme/tools@sha256:... AS tools`, dann `COPY --from=tools /usr/bin/llama-server ...`). Eine Stufe, deren `RUN`-Schritt mit CMake kompiliert oder die die Programme aus einer solchen Stufe kopiert hat, baut sie aus dem Quelltext. In Dockerfiles, Skripten (`.sh`, `.py`, `.ps1`, `.bat`, `.cmd` und jede Datei, deren erste Zeile mit `#!` beginnt) und YAML-Dateien: kein Download eines llama.cpp-Releases (`.../llama.cpp/releases/download/...`, Namen von Release-Archiven wie `llama-b11429-bin-...`), kein Download eines llama.cpp-Programms (`curl`, `wget`, `ADD` und Ähnliches mit `llama-server`, `llama-quantize`, `libllama` und den anderen Werkzeugnamen im selben Befehl; eine Pipeline wie `curl ... \| tar -x ... llama-server` ist ein Befehl), keine Paketquelle mit vorgebauten `llama-cpp-python`-Wheels und keine Installation eines llama.cpp-Pakets (`apt-get install llama.cpp`, `apk add`, `conda install` und andere). Kommentarzeilen werden übersprungen; der Wissens-Schnappschuss wird nicht geprüft. |
 | Shell-Sperrliste | Jede Zeile jeder `*.sh`-Datei, Kommentare eingeschlossen, außer die gleiche Zeile steht in der Datei der Vorlage mit demselben Pfad (für `modules/build.sh`: `targets/_template/modules/build.sh`). Abgelehnt werden: Downloads (`curl`, `wget`, `aria2c` und `fetch` als Wort, also auch `git fetch`), das Löschen von `/` (`rm -rf /`), `chmod 777`, `sudo`, `mkfs` und `dd if=`, der Docker-Socket oder `docker run`, `eval`, `source` oder `.` mit dem Ergebnis von `$(...)`, `sh -c "$(...)"` und Prozess-Substitution `<(...)`, außer als reine Eingabe (`done < <(grep ...)`). Downloads gehören festgelegt ins Dockerfile. |
+| Keine Download-Option von llama.cpp | Dieselben Skriptzeilen (jede Zeile, die nicht die der Vorlage ist): keine CMake-Option `-DNAME=WERT`, mit der llama.cpp beim Bauen etwas herunterladen oder `llama-server` Unterprozesse bekommen würde, nach der Regel des Build-Rezepts (`refused_option`): eine Option aus `NEVER_SET` mit beliebigem Wert, eine aus `DOWNLOAD_OPTIONS_OFF` oder `LLAMA_CURL` mit einem anderen Wert als `OFF`, `FETCHCONTENT_FULLY_DISCONNECTED` anders als `ON`, `LLAMA_SUBPROCESS` anders als `OFF`. Das deckt die CMake-Flags eines Moduls ab (`CMAKE_OPTIONS` in `modules/config_module.sh`) und jeden `cmake`-Aufruf seiner Skripte. |
 | Shell-Syntax | Jede `*.sh`-Datei besteht `bash -n` (entfällt, wo bash nicht installiert ist). |
 | Nur Text | Keine Datei enthält ein NUL-Byte: Binärdateien werden abgelehnt. Beim Export muss außerdem jede Datei UTF-8-Text sein. |
 | Platzhalter | Keine Datei außer dem Wissens-Schnappschuss `knowledge/initial_knowledge.json` (gecrawlte Seiten) und seinen Lizenzdateien `knowledge/NOTICE` und `knowledge/LICENSES/` enthält einen Platzhalter der Vorlage (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` oder `YYYY-MM-DD`), und kein Wert in `target.yml` enthält Text in eckigen Klammern wie `[Board Name 1]`. |
@@ -893,7 +899,13 @@ Funktionen aus 1.x sind geblieben:
   auf dem Board schreibt ([Abschnitt 11](#11-die-datei-der-hardware-probe)): Die Stufe config von Rockchip nimmt das
   System aus `ARCH` und die Kerne aus `CPU_MODEL` (Cortex-A55, A72 und A76 bekommen ihre CPU-Flags,
   `SUPPORTS_NEON`, `SUPPORTS_AVX2` und `SUPPORTS_AVX512` ihre GGML-Flags) und lehnt ein System ab, für das ihr Image
-  keinen Compiler hat (nur aarch64 und x86_64). Ein 32-Bit-ARM-System (`ARCH=armv7` und ähnliche) wird mit dem
+  keinen Compiler hat (nur aarch64 und x86_64). Ein x86_64-Profil bekommt `-march=native` nur, wenn es das Profil
+  dieses Build-Rechners selbst ist (dasselbe CPU-Modell und dieselben CPU-Flags wie `/proc/cpuinfo` hier); ein Profil
+  eines anderen PCs bekommt die CPU-Merkmale seiner Probe, so wie das Build-Rezept einen Build für einen anderen
+  Rechner plant (alle 14 x86-Optionen von GGML ausdrücklich, ihre Compiler-Flags wie `-mavx2` auf `-march=x86-64`,
+  ein Merkmal, das die Probe nicht bestätigt hat, weggelassen, und bei einer Probe-Datei aus 1.x die Merkmale, die ihr
+  `CPU_FLAGS_ALL` nennt), damit die Programme auf diesem PC laufen und nicht nur auf einer CPU wie der des
+  Build-Rechners. Ein 32-Bit-ARM-System (`ARCH=armv7` und ähnliche) wird mit dem
   schlichten Grund abgelehnt: Die Rockchip-Boards haben 64-Bit-CPUs, und das Image hat nur die aarch64-Cross-Compiler;
   installiere also das 64-Bit-System des Boards und lass die Probe erneut laufen. Die Build-Jobs werden auf die Kerne
   des Boards begrenzt (`CPU_CORES` oder `CPU_CORES_LOGICAL` der Probe-Datei). Ein Build des Frameworks hat kein
@@ -920,7 +932,14 @@ Funktionen aus 1.x sind geblieben:
   Fehler endet oder abstürzt, stoppt das Paket, und was nichts über das Modell sagt (eine Zeitüberschreitung, ein
   Stopp von außen, ein Werkzeug, das dieser Rechner nicht ausführen oder starten kann, ein Embedding-Modell), ist ein
   Hinweis im Manifest. Die Programme müssen ELF-Programme für das Board sein, und jede Datei muss zu `SHA256SUMS`
-  passen. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die
+  passen. Ihr Cross-Build schaltet jede Option von llama.cpp ab, die etwas herunterladen kann, und baut `llama-server`
+  ohne Unterprozesse, nach den CMake-Flags des Moduls, damit diese sie nicht wieder einschalten. Das Paket kopiert das
+  Modell neben das des Builds, deshalb kommt zuerst die Speicherplatz-Regel des Frameworks
+  (`scripts/board_package.py room`, die Reserve von `orchestrator/Core/disk_plan.py`: Die Platte von
+  `output/packages/` muss fassen, was das Paket kopiert, und 2 GiB oder 2 % von ihr frei lassen): für das Modell vor
+  dem Funktionstest und dem Cross-Build und für jede Datei direkt vor dem Kopieren; eine Platte, die es nicht fasst,
+  stoppt die Stufe mit den Worten der Regel und ohne Paket. Der Build-Container sieht die Reservierungen des
+  Benutzerordners nicht. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die
   Entrypoint-Modi `target` und `pipeline`) macht das Paket auch ohne Profil, mit den schlichten Vorgaben des Targets
   (aarch64 bei Rockchip), und das Manifest sagt es (`hardware.source: defaults`). Das eigene Deployment des
   Frameworks bleibt `llm-cli deploy` und der Tab **Deployment**, über seine SSH-Sitzung mit dem Schlüssel und den Known
