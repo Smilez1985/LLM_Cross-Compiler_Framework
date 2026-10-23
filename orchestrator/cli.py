@@ -5090,6 +5090,8 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
                                    "or myboard.local")
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
+    except Exception as e:  # noqa: BLE001 - a file of this computer that cannot be read: its reason, no traceback
+        _board_change_failed(ctx, host or found[0].host, port or found[0].port, e)
     for line in person_steps.change_lines(change):
         console.print(escape(line))
     if not click.confirm(person_steps.CHANGE_QUESTION, default=False):
@@ -5099,7 +5101,10 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
     if change.plan.key_changed:   # where the board's "tested on" records are (P6: they move with its data)
         from types import SimpleNamespace
         from orchestrator.Core.artifact_output import artifact_folders
-        config, resolve = _settings(ctx)
+        try:
+            config, resolve = _settings(ctx)
+        except Exception as e:  # noqa: BLE001 - settings that cannot be read: nothing changed yet, the reason
+            _board_change_failed(ctx, change.plan.new.host, change.plan.new.port, e, settings=True)
         try:
             output_dirs = artifact_folders(SimpleNamespace(config=config, resolve_path=resolve))
         except Exception:  # noqa: BLE001 - no output folder: there are no build records to move
@@ -5111,6 +5116,8 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
     except person_steps.BoardStepError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
+    except Exception as e:  # noqa: BLE001 - known_hosts held by another process (LockTimeout), a file of this computer
+        _board_change_failed(ctx, change.plan.new.host, change.plan.new.port, e)
     for line in person_steps.moved_lines(change):
         console.print(escape(line))
     plan = change.plan
@@ -5126,6 +5133,31 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
     if plan.key_changed and not paired:
         console.print("[yellow]The framework's SSH key does not log in there yet: pair the board once with "
                       "'llm-cli deploy run' (it asks for the password one time).[/yellow]")
+
+
+def _board_change_failed(ctx: FrameworkContext, host: str, port: int, error: BaseException, *,
+                         settings: bool = False) -> None:
+    """`deploy devices edit` stopped by something on this computer, not the board: the plain reason (_print_reason,
+    local_problem) and what failed, never a traceback; exit code 1. `settings`: the framework's settings could not be
+    read after the person said yes (nothing was changed yet). A LockTimeout is known_hosts held by another process
+    of the framework (change_board undid its data move: nothing was changed)."""
+    from orchestrator.runtime.device import reasons
+    from orchestrator.utils.file_lock import LockTimeout
+    _print_reason(ctx, reasons.LOCAL_PROBLEM, host, port)
+    if settings:
+        console.print(f"The framework's settings could not be read ({escape(str(error))}); nothing was changed. "
+                      "'llm-cli config show' shows them; fix them, then try again.")
+    elif isinstance(error, LockTimeout):
+        console.print("The framework's known_hosts is being changed by another part of the framework (the GUI, "
+                      "another llm-cli command or an MCP server); nothing was changed. Try again when it has "
+                      "finished.")
+    elif isinstance(error, OSError):
+        console.print(f"What failed on this computer: {escape(reasons.local_detail(error))}. "
+                      "'llm-cli deploy devices list' shows the board's record now.")
+    else:
+        console.print(f"The change stopped: {escape(str(error) or error.__class__.__name__)}. 'llm-cli deploy "
+                      "devices list' shows the board's record now.")
+    sys.exit(1)
 
 
 # ============================================================================
