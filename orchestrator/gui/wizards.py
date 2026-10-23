@@ -1230,8 +1230,8 @@ Setup commands:
         if ditto is not None:
             return bool(getattr(ditto, "offline_mode", False))
         try:
-            config = getattr(self.framework_manager, "config", None)
-            return bool(config.get("offline_mode", False)) if config is not None else False
+            from orchestrator.utils.locality import offline_mode   # the one offline check
+            return offline_mode(getattr(self.framework_manager, "config", None))
         except Exception:  # noqa: BLE001 - no settings: the registry is asked
             return False
 

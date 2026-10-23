@@ -48,6 +48,7 @@ from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, re
 from orchestrator.llm.providers import adapter_class
 from orchestrator.llm.types import EFFORTS, TASKS, ChatRequest, ChatResult, Message, ModelInfo
 from orchestrator.security.redaction import SecretStr, reveal
+from orchestrator.utils.locality import offline_mode
 from orchestrator.utils.logging import get_logger
 
 MAX_RETRIES = 2  # the SDKs' own retries are switched off (max_retries=0), so attempts never multiply
@@ -263,7 +264,7 @@ class LLMClient:
         primary = preset.id == primary_preset.id
         base_url = self._base_url(preset, primary)
         local = preset.is_local(base_url)
-        if self._flag("offline_mode") and not local:
+        if offline_mode(self.config) and not local:
             raise NotConfigured(f"Offline mode is on: {preset.label} is a cloud provider. Choose a local model.",
                                 provider=preset.id)
         return Target(preset=preset, model=self._model(preset, task, primary, model), base_url=base_url,

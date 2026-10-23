@@ -595,7 +595,8 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     from orchestrator.Core.ditto_manager import pin_base_image
     from orchestrator.utils.image_registry import ImageLookupError
     try:
-        definition = pin_base_image(definition, offline=bool(ctx.framework_manager.config.get("offline_mode", False)))
+        from orchestrator.utils.locality import offline_mode
+        definition = pin_base_image(definition, offline=offline_mode(ctx.framework_manager.config))
     except ImageLookupError as e:   # the base image is the AI's value, and the message may quote it
         console.print(f"[red]The base image {escape(_printable(definition.base_os))} cannot be pinned: "
                       f"{escape(_printable(e))}[/red]")

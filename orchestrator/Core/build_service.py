@@ -747,7 +747,8 @@ class BuildService:
         """The commit a Hugging Face model's default branch points to now: one short look-up without the file list
         (the GUI's identical-build check). None in offline mode, for anything but a repo id, or when Hugging Face
         cannot be asked."""
-        if bool(self._config_get("offline_mode", False)) or not HF_REPO_ID.match(str(repo or "")):
+        from orchestrator.utils.locality import offline_mode
+        if offline_mode(self.framework.config) or not HF_REPO_ID.match(str(repo or "")):
             return None
         from orchestrator.Core.hf_hub import hub_api
         token = self.hf_token()

@@ -31,6 +31,7 @@ from orchestrator.Core.framework import FrameworkManager
 from orchestrator.Core.orchestrator import OrchestrationStatus
 from orchestrator.utils import input_history
 from orchestrator.utils.announce import SETTING as AUDIO_SETTING
+from orchestrator.utils.locality import offline_mode
 from orchestrator.utils.localization import current_language
 from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.utils.localization import ui_text
@@ -639,7 +640,7 @@ class MainOrchestrator(QMainWindow):
         if dlg.exec():
             cfg = dlg.get_config()
             provider = f"{cfg.get('provider_label') or cfg.get('provider')} / {cfg.get('model')}"
-            mode = f"Offline, {provider}" if cfg.get("offline_mode") else provider
+            mode = f"Offline, {provider}" if offline_mode(cfg) else provider   # the dialog's result
             self.status.showMessage(f"AI Agent configured: {mode}", 5000)
         chat = getattr(self, "chat_window", None)
         if chat is not None:

@@ -323,7 +323,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                          next=next or "Tell the person what failed; nothing was installed.")
 
     def offline() -> bool:
-        return bool(_cfg(framework, "offline_mode", False))
+        from orchestrator.utils.locality import offline_mode   # the one offline check
+        return offline_mode(getattr(framework, "config", None))
 
     def label(cm, path: Path) -> str:
         """A folder of the installation as a label (targets/<name>, community/recipes/<name>, ...), never a path."""
