@@ -454,6 +454,8 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   Zeitlimit für die Anmeldung und Keepalive; `ssh` bekommt nie die Standardeingabe des Frameworks (über MCP-stdio ist
   das der Protokollstrom). Ein Passwort braucht dort paramiko (OpenSSH fragt nie danach): Das Ergebnis sagt, dass es
   nicht genutzt wurde. Ein Deployment, das an einen dir gezeigten Fingerabdruck gebunden ist, wird abgelehnt.
+  `deploy run` und der Deployment-Tab lesen den Host-Schlüssel des Boards vor dem Deployment mit paramiko, brauchen
+  es also weiterhin.
 
 ### Laufzeit auf dem Board (selbst gebautes llama.cpp)
 
