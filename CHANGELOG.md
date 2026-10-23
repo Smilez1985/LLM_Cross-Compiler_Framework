@@ -10,6 +10,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Hardware probe 3.1.0: L2 cache, Vulkan instance version, OpenCL platforms, the Hailo keys and the vendor
+  runtimes** (consolidation chain probe-keys; decisions round 23 item 11, O-PREP and O-HAILO, HAILO_PLAN.md section 2):
+  `scripts/hardware_probe.py` (and its package copy), `hardware_probe.sh` and `hardware_probe.ps1` write, validated by
+  `configs/hardware_probe_schema.yml`, `CPU_L2_CACHE_KB` (the largest level-2 cache), `VULKAN_INSTANCE_VERSION`
+  (vulkaninfo, else the loader's file name or `vulkan-1.dll`) and `OPENCL_PLATFORMS` (`<name>:<OpenCL version>` of
+  clinfo); the nine Hailo keys `HAILO_FAMILY`, `HAILO_ARCH`, `HAILO_DEVICES`, `HAILO_INTERFACE`, `HAILO_DRIVER`,
+  `HAILO_DRIVER_VERSION`, `HAILO_FW_VERSION`, `HAILORT_VERSION` and `HAILO_PYHAILORT_VERSION` (files first:
+  `/sys/module`, the sysfs classes, nodes, PCI and USB ids; then `hailortcli -v`, `scan` and `fw-control identify`,
+  never `--extended`, only its architecture and firmware lines read, device ids never written) with the new warning
+  code `version_mismatch`; and for the targets prepared for others (O-PREP) `JETSON_L4T_VERSION`,
+  `JETSON_JETPACK_VERSION`, `CUDA_TOOLKIT_VERSION`, `TENSORRT_VERSION`, `OPENVINO_VERSION`, `INTEL_GPU_DEVICE`,
+  `INTEL_GPU_DRIVER`, `INTEL_NPU_DEVICE` and `ROCM_GFX_TARGETS`, each read only when it is there; nothing is installed
+  or run with sudo. `HardwareProfile.hailo()` returns the Hailo facts as one typed value (`HailoFacts`); `llm-cli
+  scan` (also `--device` and `--import`) prints them in a "Hailo:" line, also next to a Rockchip NPU; target matching,
+  the board recommendation, the documentation links and deploy read the same value once the Hailo targets of
+  HAILO_PLAN section 3 exist. The `.py` and the `.sh` run on the fixture
+  machines of HAILO_PLAN 6.1 (identify and scan outputs of Hailo's documentation and of the current format strings,
+  the version mismatch on stderr, sysroot trees) with a fake `hailortcli` and agree; the Module Developer Guide
+  (section 11.6) says how a stage module and the framework use the keys.
 - **`llm-cli models take-over`: the Take over of old Hugging Face downloads at a terminal** (consolidation chain
   hf-online): headless installations had no way to take over what earlier versions of the GUI's Hugging Face browser
   saved in huggingface_hub's cache inside the models folder. The command runs the same core calls as **Take over old
@@ -1289,6 +1308,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **Hardware probe: version 3.1.0, wider Hailo detection** (consolidation chain probe-keys): `PROBE_TOOL_VERSION` is
+  3.1.0 in all three probes (new keys are a schema change; HAILO_PLAN question 5, default recorded in round 23). The
+  new keys are never required or `ON`/`OFF` keys, so a profile of probe 3.0.0 is read and stored as before (tested on
+  every schema 2 fixture). `NPU_DEVICE` also accepts the Hailo master driver's nodes `/dev/h1x-<N>` and `/dev/h1x`,
+  `NPU_MODEL` is filled for a Hailo (`hailo-8l`, `hailo-10h`), and `SUPPORTS_HAILO` is also `ON` for the USB
+  Hailo-10H, an entry of a Hailo sysfs class and a device `hailortcli scan` lists; `HAILO_FAMILY` and `HAILO_ARCH`
+  enter the performance key. A board whose probe sees a Hailo without `hailortcli` now gets `HAILO_FAMILY`,
+  `HAILO_INTERFACE`, `HAILO_DEVICES` and the warning `not_determined:HAILO_ARCH`. `hardware_probe.sh` no longer uses
+  `ls | grep` for the DRM nodes (ShellCheck clean at warning level).
 - **Knowledge always belongs to a topic or a target** (DECISIONS round 23 items 1 and 8): an installed knowledge pack
   lives in `community/knowledge/<topic or target>/<pack>/` (packs installed earlier stay where they are), and every
   excerpt it brings carries its topic or target. A knowledge pack names its topic or target in its manifest:

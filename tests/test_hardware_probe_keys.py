@@ -813,3 +813,30 @@ class TestVendorRuntimes:
         for key in ("INTEL_GPU_DEVICE", "INTEL_NPU_DEVICE"):
             with pytest.raises(Exception, match=key):
                 parse_profile(text + f"{key}={node}\n")
+
+
+@POSIX_ONLY
+def test_cli_scan_import_shows_the_hailo(tmp_path, monkeypatch):
+    """`llm-cli scan --import` (and the other scan commands) say what the probe found of a Hailo: one line from
+    HardwareProfile.hailo(), also next to a Rockchip NPU."""
+    from click.testing import CliRunner
+
+    from orchestrator import cli as cli_module
+    root = make_sysroot(tmp_path, "rk3566")
+    hailo8_files(root)
+
+    def run(cmd, timeout):
+        answers = {("hailortcli", "-v"): hailo_text("version_4.24.0.txt"),
+                   ("hailortcli", "scan"): hailo_text("scan_one_bdf_4x.txt"),
+                   ("hailortcli", "fw-control", "identify", "-s", "0000:01:00.0"):
+                       hailo_text("identify_current_hailo8l_4.24.0.txt")}
+        return (0, answers[tuple(cmd)], "") if tuple(cmd) in answers else (-1, "", "")
+
+    probe_file = tmp_path / "board.txt"
+    probe_file.write_text(probe.render_text(py_probe(root, run=run)), encoding="utf-8")
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+    result = CliRunner().invoke(cli_module.cli, ["-q", "scan", "--import", str(probe_file), "--label", "Zero 3W"])
+    assert result.exit_code == 0, result.output
+    out = " ".join(result.output.split())
+    assert "NPU: rockchip rk3566" in out
+    assert "Hailo: hailo-8l, family hailo8 (HailoRT 4.x), 1 device on pcie, HailoRT 4.24.0 installed" in out

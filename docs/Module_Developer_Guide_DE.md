@@ -983,8 +983,8 @@ die eine Probe schreiben, ein Profil lesen oder eines von einem Rechner ohne Net
 Drei Probes schreiben sie mit denselben Schlüsseln und Regeln: `scripts/hardware_probe.py` (der Hauptweg; nur
 Standardbibliothek, Python 3.8 oder neuer) und die Ersatzwege `scripts/hardware_probe.sh` (jede POSIX-Shell unter
 Linux) und `scripts/hardware_probe.ps1` (Windows). Jede trägt eine Kopie der Prüfungen und Tabellen des Schemas, und
-`tests/test_hardware_probe.py` vergleicht die Kopien mit dem Schema und führt die `.py` und die `.sh` auf denselben
-Testrechnern aus. Dateien der älteren Skripte (Schema 1) werden umgewandelt
+`tests/test_hardware_probe.py` und `tests/test_hardware_probe_keys.py` vergleichen die Kopien mit dem Schema und führen
+die `.py` und die `.sh` auf denselben Testrechnern aus. Dateien der älteren Skripte (Schema 1) werden umgewandelt
 ([Abschnitt 11.3](#113-wie-das-framework-ein-profil-prüft)).
 
 ### 11.1 Format (Schema 2)
@@ -1046,12 +1046,13 @@ PROBE_WARNINGS=needs_root:RKNPU_DRIVER_VERSION
 | Meta | `PROBE_SCHEMA`, `PROBE_TOOL` (`python`, `sh`, `ps1`), `PROBE_TOOL_VERSION`, `GENERATED_AT` (UTC), `PROBE_WARNINGS` |
 | Betriebssystem | `OS` (`linux`, `windows`, `macos`, `freebsd`, `android`), `OS_ID`, `OS_ID_LIKE`, `OS_FAMILY` (`debian`, `rhel`, `alpine`, ...), `OS_VARIANT_ID` (`dietpi`, `armbian`, ...), `OS_VERSION_ID`, `OS_VERSION_CODENAME`, `OS_PRETTY_NAME`, `KERNEL`, `KERNEL_ARCH`, `INIT_SYSTEM` (`systemd`, `openrc`, `sysvinit`, ...) |
 | Binärkompatibilität | `ARCH` (`x86_64`, `arm64`, `armv7`, ...; die Architektur des Userlands, ein 32-Bit-System auf einem 64-Bit-Kernel ist also `armv7`), `LIBC` (`glibc`, `musl`, `ucrt`, ...), `LIBC_VERSION` |
-| CPU | `CPU_MODEL`, `CPU_VENDOR`, `CPU_CORES_LOGICAL`, `CPU_CORES_PHYSICAL`, `CPU_CLUSTERS` (nur ARM: CPUs, Implementer, Part und höchste MHz je Cluster), `CPU_FLAGS_ALL`, `CPU_FLAGS_SOURCE` |
+| CPU | `CPU_MODEL`, `CPU_VENDOR`, `CPU_CORES_LOGICAL`, `CPU_CORES_PHYSICAL`, `CPU_CLUSTERS` (nur ARM: CPUs, Implementer, Part und höchste MHz je Cluster), `CPU_FLAGS_ALL`, `CPU_FLAGS_SOURCE`, `CPU_L2_CACHE_KB` |
 | x86-Merkmale | die 14 x86-Optionen von ggml: `SUPPORTS_SSE42`, `SUPPORTS_AVX`, `SUPPORTS_AVX2`, `SUPPORTS_BMI2`, `SUPPORTS_F16C`, `SUPPORTS_FMA`, `SUPPORTS_AVX512` (AVX-512 F), `SUPPORTS_AVX512_VBMI`, `SUPPORTS_AVX512_VNNI`, `SUPPORTS_AVX512_BF16`, `SUPPORTS_AVX_VNNI`, `SUPPORTS_AMX_TILE`, `SUPPORTS_AMX_INT8`, `SUPPORTS_AMX_BF16` |
 | ARM-Merkmale | `SUPPORTS_NEON`, `SUPPORTS_DOTPROD`, `SUPPORTS_FP16_ARITH`, `SUPPORTS_I8MM`, `SUPPORTS_SVE`, `SUPPORTS_SVE2`, `SUPPORTS_SME`, `SUPPORTS_BF16_ARM` |
 | Speicher, Platte | `RAM_TOTAL_MB` (nutzbarer Speicher, nie die Summe der Speicherplätze), `SWAP_TOTAL_MB`, `RAM_AVAILABLE_MB`, `DISK_FREE_MB`, `RAM_TYPE`, `RAM_SPEED_MTS` |
-| SoC, NPU | `SOC_VENDOR`, `SOC_MODEL` (`rk3566`, ...), `BOARD_MODEL`, `NPU_VENDOR`, `NPU_MODEL`, `NPU_DEVICE`, `RKNPU_DRIVER_VERSION`, `RKLLM_RUNTIME_VERSION`, `RKNN_RUNTIME_VERSION`, `USB_ROCKCHIP_PID`, `USB_ROCKCHIP_MODE` (ein per USB angeschlossenes Board), `SUPPORTS_RKNN`, `SUPPORTS_HAILO`, `SUPPORTS_METIS`, `SUPPORTS_MX3`, `SUPPORTS_CORAL`, `SUPPORTS_INTEL_NPU` |
-| GPU | `GPU_COUNT`; je GPU `_VENDOR`, `_NAME`, `_PCI_ID`, `_DISCRETE`, `_UNIFIED`, `_VRAM_MB`, `_VRAM_FREE_MB`, `_DRIVER_VERSION`, `_COMPUTE_CAP` (NVIDIA), `_GFX_TARGET` (AMD), `_SOURCE`; `NVIDIA_DRIVER_CUDA_MAX`, `SUPPORTS_CUDA`, `SUPPORTS_INTEL_XPU`, `VULKAN`, `VULKAN_DEVICES`, `HIP_RUNTIME`, `ROCM_VERSION`, `METAL` |
+| SoC, NPU | `SOC_VENDOR`, `SOC_MODEL` (`rk3566`, ...), `BOARD_MODEL`, `JETSON_L4T_VERSION`, `JETSON_JETPACK_VERSION`, `NPU_VENDOR`, `NPU_MODEL`, `NPU_DEVICE`, `RKNPU_DRIVER_VERSION`, `RKLLM_RUNTIME_VERSION`, `RKNN_RUNTIME_VERSION`, `USB_ROCKCHIP_PID`, `USB_ROCKCHIP_MODE` (ein per USB angeschlossenes Board), `SUPPORTS_RKNN`, `SUPPORTS_HAILO`, `SUPPORTS_METIS`, `SUPPORTS_MX3`, `SUPPORTS_CORAL`, `SUPPORTS_INTEL_NPU`, `INTEL_NPU_DEVICE` |
+| Hailo | `HAILO_FAMILY` (`hailo8`, `hailo1x`), `HAILO_ARCH` (`hailo8`, `hailo8l`, `hailo10h`, ...), `HAILO_DEVICES`, `HAILO_INTERFACE`, `HAILO_DRIVER`, `HAILO_DRIVER_VERSION`, `HAILO_FW_VERSION`, `HAILORT_VERSION`, `HAILO_PYHAILORT_VERSION` ([Abschnitt 11.6](#116-die-schlüssel-der-probe-310-und-wie-ein-modul-sie-nutzt)) |
+| GPU | `GPU_COUNT`; je GPU `_VENDOR`, `_NAME`, `_PCI_ID`, `_DISCRETE`, `_UNIFIED`, `_VRAM_MB`, `_VRAM_FREE_MB`, `_DRIVER_VERSION`, `_COMPUTE_CAP` (NVIDIA), `_GFX_TARGET` (AMD), `_SOURCE`; `NVIDIA_DRIVER_CUDA_MAX`, `SUPPORTS_CUDA`, `SUPPORTS_INTEL_XPU`, `VULKAN`, `VULKAN_DEVICES`, `VULKAN_INSTANCE_VERSION`, `OPENCL_PLATFORMS`, `HIP_RUNTIME`, `ROCM_VERSION`, `ROCM_GFX_TARGETS`, `CUDA_TOOLKIT_VERSION`, `TENSORRT_VERSION`, `OPENVINO_VERSION`, `INTEL_GPU_DEVICE`, `INTEL_GPU_DRIVER`, `METAL` |
 | Werkzeuge | `TOOL_CC`, `TOOL_CXX` (`gcc-12.2.0`, `clang-18.1.3`), `TOOL_CLANG`, `TOOL_MSVC`, `TOOL_CMAKE`, `TOOL_NINJA`, `TOOL_MAKE`, `TOOL_GIT`, `TOOL_CCACHE`, `TOOL_NVCC`, `TOOL_GLSLC`, `TOOL_HIPCONFIG`, `TOOL_DOCKER`, `TOOL_PYTHON`: nur Versionen, nie Pfade |
 
 Nicht in einem Profil: der Hostname, Serien- oder Teilenummern (auch nicht die RAM-Teilenummern je Steckplatz der
@@ -1070,8 +1071,10 @@ vertrauenswürdig:
   `CPU_CLUSTERS` gibt es nur auf ARM, `GPU<n>_COMPUTE_CAP` nur bei NVIDIA- und `GPU<n>_GFX_TARGET` nur bei AMD-GPUs,
   `LIBC=ucrt` nur unter Windows, `METAL=ON` nur unter macOS.
 - `NPU_DEVICE` nennt nur einen Beschleuniger-Knoten (`/dev/rknpu`, `/dev/dri/renderD<N>` oder `/dev/dri/card<N>`,
-  `/dev/accel/accel<N>`, `/dev/hailo<N>`, `/dev/apex_<N>`), nie eine Platte, den Speicher oder ein anderes Gerät,
-  weil ein Deploy-Schritt den Wert an `docker run --device` übergeben kann.
+  `/dev/accel/accel<N>`, `/dev/hailo<N>`, `/dev/h1x-<N>`, `/dev/h1x`, `/dev/apex_<N>`), nie eine Platte, den Speicher
+  oder ein anderes Gerät, weil ein Deploy-Schritt den Wert an `docker run --device` übergeben kann; aus demselben Grund
+  nennt `INTEL_GPU_DEVICE` nur `/dev/dri/renderD<N>` und `INTEL_NPU_DEVICE` nur `/dev/accel/accel<N>`.
+- Die Hailo-Treiberschlüssel gibt es nur unter Linux, die Jetson-Schlüssel nur unter Linux auf `arm64`.
 - Ein Schlüssel, den das Schema nicht kennt, wird verworfen; sein Wert wird nie behalten.
 - Freier Text (`CPU_MODEL`, GPU-Namen, `BOARD_MODEL`) dient nur der Anzeige und erreicht nie eine Befehlszeile oder
   einen Dateinamen.
@@ -1097,12 +1100,13 @@ Führe die Probe vor einem Build erneut aus.
 ### 11.4 Der Leistungsschlüssel
 
 `HardwareProfile.perf_key()` ist ein sha256 über die Werte, die Geschwindigkeit oder Programm ändern: `OS`, `ARCH`,
-`LIBC`, `CPU_VENDOR`, `CPU_MODEL`, `CPU_CLUSTERS`, jeder `SUPPORTS_*`-Schlüssel, `SOC_MODEL`, `NPU_MODEL` und je GPU
-Hersteller, PCI-ID, Compute Capability und gfx-Target. Er ist derselbe, egal welche Probe die Datei geschrieben hat und
+`LIBC`, `CPU_VENDOR`, `CPU_MODEL`, `CPU_CLUSTERS`, jeder `SUPPORTS_*`-Schlüssel, `SOC_MODEL`, `NPU_MODEL`,
+`HAILO_FAMILY`, `HAILO_ARCH` und je GPU Hersteller, PCI-ID, Compute Capability und gfx-Target. Er ist derselbe, egal welche Probe die Datei geschrieben hat und
 in welcher Reihenfolge die GPUs stehen. Er ändert sich nicht mit flüchtigen Werten (freier RAM, freier VRAM, freier
 Plattenplatz), dem Zeitpunkt der Probe, dem Kernel, Werkzeugversionen oder den Werten, die nur mit einem Benchmark
-festgehalten werden (Betriebssystemversion, Version der C-Bibliothek, gesamter RAM, VRAM-Größe, Treiberversionen);
-`recorded()` liefert diese.
+festgehalten werden (Betriebssystemversion, Version der C-Bibliothek, gesamter RAM, VRAM-Größe, Treiberversionen und
+die Versionen der Probe 3.1.0: Größe des L2-Caches, Version der Vulkan-Instanz, OpenCL-Plattformen, die Versionen von
+Hailo-Treiber, -Firmware und -Laufzeit und die Hersteller-Laufzeiten); `recorded()` liefert diese.
 
 ### 11.5 Wo Profile liegen
 
@@ -1123,3 +1127,66 @@ gespeichertes Profil über diese Probe-ID (`local` oder die Geräte-ID; Tools `g
 `probe_local_hardware`, Ressource `lcf://probes/{probe_id}`), nie über einen Pfad. Der lokale und der SSH-Scan des
 Build-Reiters der GUI schreiben die Probe-Datei weiterhin wie in [Abschnitt 3.1](#31-das-board-untersuchen)
 beschrieben.
+
+### 11.6 Die Schlüssel der Probe 3.1.0 und wie ein Modul sie nutzt
+
+Probe 3.1.0 (`PROBE_TOOL_VERSION=3.1.0`; Entscheidungen des Maintainers, Runde 23: Punkt 11, O-PREP und O-HAILO) hat
+die Schlüssel unten hinzugefügt. Jeder wird so gelesen wie die älteren Schlüssel: aus einer Datei, einem
+sysfs-Eintrag oder einem Hersteller-Werkzeug, das schon auf dem Rechner ist, mit fester Argumentliste, leerer
+Standardeingabe und Zeitlimit; nichts wird installiert, nichts läuft mit sudo. Ein Schlüssel, dessen Hardware oder
+Software fehlt, wird ohne Warnung weggelassen; ein Wert, der da ist, aber nicht gelesen werden kann, wird mit einem
+Code in `PROBE_WARNINGS` weggelassen ([Abschnitt 11.1](#111-format-schema-2)). Keiner von ihnen ist Pflicht oder ein
+`ON`/`OFF`-Schlüssel, darum wird eine Datei der Probe 3.0.0, der sie fehlen, gelesen, wie sie ist.
+
+| Schlüssel | Was sie sagen | Gelesen aus |
+|---|---|---|
+| `CPU_L2_CACHE_KB` | der größte Level-2-Cache in KiB (ein Cache, den sich mehrere Kerne teilen, zählt einmal) | `/sys/devices/system/cpu/cpu*/cache/index*`, unter Windows `GetLogicalProcessorInformation`, unter macOS `sysctl hw.*l2cachesize` |
+| `VULKAN_INSTANCE_VERSION` | die höchste Vulkan-Version, mit der eine Instanz angelegt werden kann (die des Loaders) | `vulkaninfo --summary`, sonst der Dateiname des Loaders `libvulkan.so.1.Y.Z` oder die Dateiversion von `vulkan-1.dll` |
+| `OPENCL_PLATFORMS` | `<Name>:<OpenCL-Version>` je Plattform (`nvidia-cuda:3.0,intel-opencl-graphics:3.0`) | `clinfo` |
+| `HAILO_FAMILY`, `HAILO_ARCH`, `HAILO_DEVICES`, `HAILO_INTERFACE`, `HAILO_DRIVER`, `HAILO_DRIVER_VERSION`, `HAILO_FW_VERSION`, `HAILORT_VERSION`, `HAILO_PYHAILORT_VERSION` | ein Hailo-Beschleuniger: die Familie (`hailo8` = HailoRT 4.x, `hailo1x` = HailoRT 5.x), die Architektur in der Schreibweise von `--hw-arch` des Dataflow Compilers (`hailo8`, `hailo8l`, `hailo10h`, ...), die Zahl der Geräte, die Schnittstelle (`pcie`, `usb`, `integrated`), das Kernelmodul und seine Version (Linux), die Versionen von Firmware, HailoRT (= libhailort) und pyhailort | `/sys/module/<treiber>` (nie `lsmod`), die sysfs-Klassen `hailo_chardev`, `hailo1x`, `hailo1x_integrated`, die PCI- und USB-IDs, dann `hailortcli -v`, `scan` und `fw-control identify -s <id>` (nie `--extended`; gelesen werden nur seine Zeilen zu Architektur und Firmware) |
+| `JETSON_L4T_VERSION`, `JETSON_JETPACK_VERSION` | das Release von Jetson Linux (`36.4.0`) und die JetPack-Version (`6.1`) | die erste Zeile von `/etc/nv_tegra_release`, das installierte Paket `nvidia-jetpack` |
+| `CUDA_TOOLKIT_VERSION`, `TENSORRT_VERSION` | das Release des CUDA-Toolkits (`12.6.3`; auch auf einem Jetson, wo `nvcc` nicht im PATH liegt) und die TensorRT-Laufzeit | `/usr/local/cuda/version.json` (sonst `version.txt`), der Dateiname `libnvinfer.so.X.Y.Z` |
+| `OPENVINO_VERSION`, `INTEL_GPU_DEVICE`, `INTEL_GPU_DRIVER`, `INTEL_NPU_DEVICE` | die OpenVINO-Laufzeit, der Render-Knoten der Intel-GPU und ihr Treiber (`i915`, `xe`), der Knoten der Intel-NPU | der Dateiname `libopenvino.so.YYYY.M.P`, `/sys/class/drm/renderD*`, `/sys/class/accel/accel*` (Treiber `intel_vpu`) |
+| `ROCM_GFX_TARGETS` | die gfx-Targets jedes KFD-Knotens, auch von Rechenkarten, die kein Display-Controller sind (eine AMD-Instinct-Karte hat keinen Eintrag `GPU<n>`) | `/sys/class/kfd/kfd/topology/nodes/*/properties` |
+
+Mit ihnen kamen der Warnungscode `version_mismatch` (hailortcli verweigert die Arbeit, weil libhailort eine andere
+Version hat: `HAILORT_VERSION` wird weggelassen, `scan` und `identify` laufen nicht), die Hailo-Knoten des
+master-Treibers `/dev/h1x-<N>` und `/dev/h1x` in `NPU_DEVICE` und `NPU_MODEL` für einen Hailo (`hailo-8l`,
+`hailo-10h`). `SUPPORTS_HAILO` ist jetzt auch `ON` für den USB-Hailo-10H, einen Eintrag einer Hailo-sysfs-Klasse und
+ein Gerät, das `hailortcli scan` auflistet. Die Hailo-Schlüssel werden geschrieben, gleich welche NPU `NPU_VENDOR`
+beschreibt, sodass ein Rockchip-Board mit einer Hailo-M.2-Karte beides behält. `tests/test_hardware_probe_keys.py`
+führt die `.py` und die `.sh` auf den Testrechnern aus HAILO_PLAN 6.1 aus (Ausgaben von identify und scan in
+`tests/fixtures/hardware_probe/hailo/`) und vergleicht sie.
+
+**In einem Stage-Modul.** Die config-Stage liest das Profil des Boards in `HW_CONFIG` (nur Schlüssel aus `A-Z`, `0-9`
+und `_`; [Abschnitt 6](#6-die-stufen-des-builds)). Nutze einen Schlüssel nur, wenn er da ist, und wenn das Modul ihn
+braucht, lehne mit dem Grund ab, bevor etwas Langsames läuft:
+
+```bash
+# config_module.sh eines Hailo-Targets (eine Skizze): HailoRT-Linie und Architektur kommen aus der Probe des Boards
+case "${HW_CONFIG[HAILO_FAMILY]:-}" in
+    hailo8)  HAILORT_LINE=4 ;;   # HailoRT 4.x (Branch hailo8): Hailo-8, -8L, -8R
+    hailo1x) HAILORT_LINE=5 ;;   # HailoRT 5.x (Branch master): Hailo-10H, Hailo-15
+    *) die "The board's probe names no Hailo family (SUPPORTS_HAILO=${HW_CONFIG[SUPPORTS_HAILO]:-UNKNOWN}): probe the board with its Hailo driver loaded and hailortcli installed." ;;
+esac
+HW_ARCH="${HW_CONFIG[HAILO_ARCH]:-}"   # --hw-arch des Dataflow Compilers (hailo8, hailo8l, hailo10h, ...)
+```
+
+- Ein Hailo-Target baut HailoRT genau in der Version von `HAILO_DRIVER_VERSION`; Treiber, Firmware und HailoRT eines
+  Boards müssen dasselbe Release sein. Die Probe meldet die Versionen nur; sie zu vergleichen ist Aufgabe des
+  Preflights und des Deploys.
+- Ein Target für einen NVIDIA Jetson vergleicht das L4T-Release seines Basis-Images mit `JETSON_L4T_VERSION` (ein
+  Board auf einem anderen Haupt-Release lehnt es ab) und sein CUDA mit `CUDA_TOOLKIT_VERSION`; ein CUDA-Target für den
+  Desktop liest außerdem `NVIDIA_DRIVER_CUDA_MAX` (was der Treiber ausführen kann) und `GPU<n>_COMPUTE_CAP`. Ein
+  TensorRT-Target liest `TENSORRT_VERSION`.
+- Ein OpenVINO-Target liest `OPENVINO_VERSION`; sein GPU-Plugin braucht den Knoten `INTEL_GPU_DEVICE`, sein NPU-Plugin
+  den Knoten `INTEL_NPU_DEVICE` (beide werden wie `NPU_DEVICE` darauf geprüft, nur Beschleuniger-Knoten zu nennen).
+- Ein ROCm-Target nimmt die gfx-Targets eines HIP-Builds aus `ROCM_GFX_TARGETS` (und `ROCM_VERSION`).
+- Ein OpenCL- oder Vulkan-Backend liest `OPENCL_PLATFORMS` und `VULKAN_INSTANCE_VERSION`.
+
+**Im Framework.** Python-Code liest die Schlüssel aus einem `HardwareProfile` (`profile.get("CUDA_TOOLKIT_VERSION")`).
+Die Hailo-Fakten kommen als ein typisierter Wert: `profile.hailo()` liefert ein `HailoFacts` mit `present`, `family`,
+`arch`, `devices`, `interface`, `driver`, `driver_version`, `firmware_version`, `hailort_version`,
+`pyhailort_version`, `version_mismatch` und den abgeleiteten `model` (`hailo-8l`) und `hailort_line` (`4` oder `5`);
+ein Profil ohne Hailo-Schlüssel liefert `present=False` und überall sonst `None`. `llm-cli scan` zeigt diese Fakten
+in einer Zeile „Hailo:“.
